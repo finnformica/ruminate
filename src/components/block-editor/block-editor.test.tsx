@@ -6,6 +6,7 @@ import { emptyBlock } from "../../blocks/ops"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
 import type { BlockDoc } from "../../blocks/types"
+import type { BlockRevealRequest } from "../../utils/note-outline"
 import { BlockEditor } from "./block-editor"
 
 afterEach(cleanup)
@@ -605,6 +606,91 @@ describe("zoom (focus mode)", () => {
     fireEvent.click(getByText("Note", { selector: "nav button" }))
     expect(crumb(container)).toBeNull()
     expect(queryByText("A")).not.toBeNull()
+  })
+})
+
+describe("reveal requests (outline palette)", () => {
+  // jsdom's window.scrollTo only logs "Not implemented" — stub it so the
+  // cancel path's scroll restore stays quiet.
+  window.scrollTo = vi.fn()
+
+  type Reveal = BlockRevealRequest
+
+  /** Render with a fixed doc and return a helper that re-renders with a new
+   * reveal message — mirroring how the palette writes nonced requests. */
+  function renderWithReveal(initial: string) {
+    const doc = withStarter(parse(initial))
+    const view = render(<BlockEditor doc={doc} onChange={() => {}} />)
+    const sendReveal = (request: Reveal) =>
+      view.rerender(<BlockEditor doc={doc} onChange={() => {}} revealRequest={request} />)
+    return { ...view, sendReveal }
+  }
+
+  it("preview highlights the requested block", () => {
+    const { container, sendReveal } = renderWithReveal(ZOOMABLE)
+    expect(highlightedText(container)).toBe("A")
+    sendReveal({ type: "preview", id: "blk_c", nonce: 1 })
+    expect(highlightedText(container)).toBe("C")
+  })
+
+  it("re-fires for the same block when the nonce changes (the old ?heading= bug)", () => {
+    const scrollSpy = vi.fn()
+    Element.prototype.scrollIntoView = scrollSpy
+    try {
+      const { container, sendReveal } = renderWithReveal(ZOOMABLE)
+      scrollSpy.mockClear()
+      sendReveal({ type: "commit", id: "blk_c", nonce: 1 })
+      expect(highlightedText(container)).toBe("C")
+      const callsAfterFirst = scrollSpy.mock.calls.length
+      expect(callsAfterFirst).toBeGreaterThan(0)
+      // A re-render with the SAME nonce is not a new request…
+      sendReveal({ type: "commit", id: "blk_c", nonce: 1 })
+      expect(scrollSpy.mock.calls.length).toBe(callsAfterFirst)
+      // …but a new nonce for the same block scrolls it into view again.
+      sendReveal({ type: "preview", id: "blk_c", nonce: 2 })
+      expect(scrollSpy.mock.calls.length).toBeGreaterThan(callsAfterFirst)
+      expect(highlightedText(container)).toBe("C")
+    } finally {
+      // @ts-expect-error restore jsdom's (absent) implementation
+      delete Element.prototype.scrollIntoView
+    }
+  })
+
+  it("cancel restores the selection captured at the first preview", () => {
+    const { container, sendReveal } = renderWithReveal(ZOOMABLE)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
+    expect(highlightedText(container)).toBe("B")
+    sendReveal({ type: "preview", id: "blk_d", nonce: 1 })
+    expect(highlightedText(container)).toBe("D")
+    sendReveal({ type: "preview", id: "blk_f", nonce: 2 })
+    expect(highlightedText(container)).toBe("F")
+    sendReveal({ type: "cancel", nonce: 3 })
+    // Back to what the FIRST preview captured, not the last previewed block.
+    expect(highlightedText(container)).toBe("B")
+  })
+
+  it("commit keeps the selection on the target block", async () => {
+    const { container, sendReveal } = renderWithReveal(ZOOMABLE)
+    sendReveal({ type: "preview", id: "blk_e", nonce: 1 })
+    sendReveal({ type: "commit", id: "blk_e", nonce: 2 })
+    expect(highlightedText(container)).toBe("E")
+    // A cancel after a commit has no snapshot left to restore — it's a no-op.
+    sendReveal({ type: "cancel", nonce: 3 })
+    expect(highlightedText(container)).toBe("E")
+    // After the dialog's focus juggling settles, the container is the keyboard
+    // target again so arrows work from the landing block.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(document.activeElement).toBe(editorRoot(container))
+  })
+
+  it("ignores a preview for a block that doesn't exist", () => {
+    const { container, sendReveal } = renderWithReveal(ZOOMABLE)
+    sendReveal({ type: "preview", id: "blk_nope", nonce: 1 })
+    expect(highlightedText(container)).toBe("A")
+    // No snapshot was captured, so a cancel is a no-op too.
+    sendReveal({ type: "cancel", nonce: 2 })
+    expect(highlightedText(container)).toBe("A")
   })
 })
 

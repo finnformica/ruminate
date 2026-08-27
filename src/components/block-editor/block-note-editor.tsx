@@ -1,9 +1,12 @@
+import { useAtomValue, useSetAtom } from "jotai"
 import { useEffect, useRef, useState } from "react"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
 import { emptyBlock } from "../../blocks/ops"
 import type { BlockDoc } from "../../blocks/types"
 import { useCollapseState } from "../../data/view-state"
+import { blockRevealAtom, noteOutlineAtom } from "../../global-state"
+import { buildOutline } from "../../utils/note-outline"
 import { BlockEditor } from "./block-editor"
 
 /** Ensure a parsed doc always has at least one block to edit. */
@@ -113,6 +116,29 @@ export function BlockNoteEditor({
     onChange(serialize(withBlank))
   }
 
+  // Publish the live outline (heading blocks) for the command palette's ⌘P
+  // outline mode. The git-backed note content the palette could read on its
+  // own goes stale while editing, and its column-0 heading regex misses
+  // nested (indented) headings entirely — the live doc is the only correct
+  // source. Read-only history views (which can mount several editors at once)
+  // never publish.
+  const setOutline = useSetAtom(noteOutlineAtom)
+  useEffect(() => {
+    if (readOnly || !noteId) return
+    setOutline({ noteId, items: buildOutline(doc) })
+  }, [doc, noteId, readOnly, setOutline])
+  // Clear on unmount so a stale outline never outlives its note. (React runs
+  // this cleanup before the next note's publish effect, so switching notes is
+  // safe.)
+  useEffect(() => {
+    if (readOnly || !noteId) return
+    return () => setOutline(null)
+  }, [noteId, readOnly, setOutline])
+
+  // The palette's preview/commit/cancel messages for the outline jump — the
+  // editable editor is the only consumer (read-only views ignore them).
+  const revealRequest = useAtomValue(blockRevealAtom)
+
   // Entering a zoom (mount-with-param or navigation) on a childless block adds
   // one empty child so there's something to edit under the title.
   const docRef = useRef(doc)
@@ -143,6 +169,7 @@ export function BlockNoteEditor({
       zoomRootId={zoomBlockId}
       onZoomNavigate={onZoomNavigate}
       noteTitle={noteTitle}
+      revealRequest={readOnly ? null : revealRequest}
     />
   )
 }

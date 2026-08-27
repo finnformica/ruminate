@@ -32,6 +32,7 @@ import {
   updateContent,
 } from "../../blocks/ops"
 import { copyAsMarkdown } from "../../utils/copy-markdown"
+import type { BlockRevealRequest } from "../../utils/note-outline"
 import { BlockItem, type BlockEditorApi, type FocusRequest } from "./block-item"
 import { useBlockHistory } from "./use-block-history"
 
@@ -57,6 +58,15 @@ function findHeadingBlockId(doc: BlockDoc, heading: string): string | null {
   }
   walk(doc.rootBlockIds)
   return found
+}
+
+/** What a reveal `cancel` puts back: the selection and every scroll position
+ * captured when the outline palette's first preview moved the view. */
+type RevealSnapshot = {
+  selected: string | null
+  scrolls: { el: Element; top: number; left: number }[]
+  windowX: number
+  windowY: number
 }
 
 /** The first block (in document order) present in `restored` but not in
@@ -106,6 +116,7 @@ export function BlockEditor({
   zoomRootId: zoomRootIdProp = null,
   onZoomNavigate,
   noteTitle,
+  revealRequest = null,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc) => void
@@ -142,6 +153,13 @@ export function BlockEditor({
   onZoomNavigate?: (id: string | null) => void
   /** The note's title — the breadcrumb's first crumb while zoomed. */
   noteTitle?: string
+  /**
+   * Driven by the command palette's outline mode (⌘P): preview highlights +
+   * scrolls a block live behind the dialog, commit keeps the selection there,
+   * cancel restores what the first preview captured. Messages are consumed by
+   * nonce, so a request left over from a previous mount is ignored.
+   */
+  revealRequest?: BlockRevealRequest | null
 }) {
   // ── Zoom state ────────────────────────────────────────────────────────────
   // Controlled by the caller (URL) when `onZoomNavigate` is given; otherwise
@@ -226,6 +244,103 @@ export function BlockEditor({
       setSelected(id)
     }
   }, [highlightHeading])
+
+  // ── Reveal requests (⌘P outline palette) ──────────────────────────────────
+  // The palette drives the editor through small {type, id, nonce} messages —
+  // see `BlockRevealRequest`. All capture/restore state lives here so the
+  // palette never has to know the editor's selection or scroll internals.
+  const selectedRef = useRef(selected)
+  selectedRef.current = selected
+  // Non-null exactly while a preview sequence is underway. Doubles as the
+  // "palette is driving" flag: the focus-grab effect below must not steal
+  // focus from the palette's input as previews move the selection.
+  const revealSnapshotRef = useRef<RevealSnapshot | null>(null)
+  // Consume messages by nonce so a request left over in the atom from a
+  // previous mount (or a re-render) never re-fires.
+  const lastRevealNonceRef = useRef(revealRequest?.nonce ?? 0)
+
+  // Center a block's content line, same target the select-mode auto-scroll
+  // uses. Called directly so a repeat jump to the already-selected block still
+  // scrolls (state effects wouldn't re-run — the old `?heading=` param bug).
+  const scrollBlockLineIntoView = (id: string) => {
+    const row = containerRef.current?.querySelector<HTMLElement>(`[data-block-row="${id}"]`)
+    const line = row?.querySelector<HTMLElement>("[data-block-line]") ?? row
+    if (line && typeof line.scrollIntoView === "function") line.scrollIntoView({ block: "center" })
+  }
+
+  const captureRevealSnapshot = (): RevealSnapshot => {
+    // Record every scrollable ancestor of the editor (plus the window), so the
+    // restore is exact no matter which container scrollIntoView actually moved.
+    const scrolls: RevealSnapshot["scrolls"] = []
+    let node: HTMLElement | null = containerRef.current
+    while (node) {
+      if (node.scrollHeight > node.clientHeight || node.scrollWidth > node.clientWidth) {
+        scrolls.push({ el: node, top: node.scrollTop, left: node.scrollLeft })
+      }
+      node = node.parentElement
+    }
+    return {
+      selected: selectedRef.current,
+      scrolls,
+      windowX: window.scrollX,
+      windowY: window.scrollY,
+    }
+  }
+
+  useEffect(() => {
+    const request = revealRequest
+    if (!request || request.nonce === lastRevealNonceRef.current) return
+    lastRevealNonceRef.current = request.nonce
+    if (readOnly) return
+    const current = docRef.current
+    if (request.type === "preview") {
+      if (!current.blocks[request.id]) return
+      // The first preview of a sequence captures what cancel must restore.
+      if (!revealSnapshotRef.current) revealSnapshotRef.current = captureRevealSnapshot()
+      setAnchorId(null)
+      setFocus(null)
+      setSelected(request.id)
+      scrollBlockLineIntoView(request.id)
+      return
+    }
+    const snapshot = revealSnapshotRef.current
+    revealSnapshotRef.current = null
+    if (request.type === "commit") {
+      if (current.blocks[request.id]) {
+        setAnchorId(null)
+        setFocus(null)
+        setSelected(request.id)
+        scrollBlockLineIntoView(request.id)
+      }
+      // After the dialog unmounts (and its own focus juggling settles), make
+      // the container the keyboard target so arrows work from the landing spot.
+      setTimeout(() => focusContainer())
+      return
+    }
+    // cancel — put back exactly what the first preview captured.
+    if (!snapshot) return
+    setAnchorId(null)
+    setFocus(null)
+    setSelected(
+      snapshot.selected === null
+        ? null
+        : current.blocks[snapshot.selected]
+          ? snapshot.selected
+          : firstSelectable(current),
+    )
+    // The palette's close handler refocuses its previously-active element in a
+    // timeout queued before this one, so the scroll we restore here is the one
+    // that sticks.
+    setTimeout(() => {
+      for (const { el, top, left } of snapshot.scrolls) {
+        el.scrollTop = top
+        el.scrollLeft = left
+      }
+      window.scrollTo(snapshot.windowX, snapshot.windowY)
+      focusContainer()
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealRequest, readOnly])
 
   // Blocks in the order they appear on screen (depth-first, skipping the
   // children of collapsed blocks). Used for up/down navigation.
@@ -758,6 +873,9 @@ export function BlockEditor({
   // focus call from jumping the page around on every doc change.
   useLayoutEffect(() => {
     if (readOnly || focus || !selected) return
+    // While the outline palette is previewing, focus stays in its input — the
+    // moving highlight must not steal the keyboard mid-typing.
+    if (revealSnapshotRef.current) return
     const el = containerRef.current
     if (!el) return
     if (!el.contains(document.activeElement)) el.focus({ preventScroll: true })

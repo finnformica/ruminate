@@ -2,13 +2,30 @@
 
 ## Global
 
-| Action            | Shortcut                               |
-| ----------------- | -------------------------------------- |
-| Command menu      | <kbd>⌘</kbd> <kbd>K</kbd>              |
-| New note          | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>O</kbd> |
-| Save              | <kbd>⌘</kbd> <kbd>S</kbd>              |
-| Toggle sidebar    | <kbd>⌘</kbd> <kbd>B</kbd>              |
-| Toggle help panel | <kbd>⌘</kbd> <kbd>/</kbd>              |
+| Action                            | Shortcut                               |
+| --------------------------------- | -------------------------------------- |
+| Command menu                      | <kbd>⌘</kbd> <kbd>K</kbd>              |
+| Outline palette (jump to heading) | <kbd>⌘</kbd> <kbd>P</kbd>              |
+| New note                          | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>O</kbd> |
+| Save                              | <kbd>⌘</kbd> <kbd>S</kbd>              |
+| Toggle sidebar                    | <kbd>⌘</kbd> <kbd>B</kbd>              |
+| Toggle help panel                 | <kbd>⌘</kbd> <kbd>/</kbd>              |
+
+### Outline palette
+
+<kbd>⌘</kbd> <kbd>P</kbd> opens the command palette in **outline mode**: it
+lists the open note's headings (indented by nesting), typing fuzzy-filters
+them (matching the heading and its ancestor path, shown as `Parent › Sub`),
+and <kbd>↵</kbd> jumps to the heading's block. Arrowing through the list
+**previews** — the block is highlighted and scrolled into view live behind the
+dialog — and <kbd>Esc</kbd> restores the selection and scroll position exactly
+as they were.
+
+Typing `@` as the first character of the normal <kbd>⌘</kbd> <kbd>K</kbd>
+palette also switches to outline mode (the VS Code prefix grammar);
+<kbd>⌫</kbd> on an empty query switches back. When outline mode was opened
+with <kbd>⌘</kbd> <kbd>P</kbd> directly, <kbd>⌫</kbd> on an empty query stays
+put.
 
 ## Block editor
 

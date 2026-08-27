@@ -101,6 +101,10 @@ function HelpContent({
               <Keys keys={["⌘", "K"]} />
             </HelpItem>
             <HelpItem>
+              <span>Jump to heading (or type @ in ⌘K)</span>
+              <Keys keys={["⌘", "P"]} />
+            </HelpItem>
+            <HelpItem>
               <span>Toggle sidebar</span>
               <Keys keys={["⌘", "B"]} />
             </HelpItem>
