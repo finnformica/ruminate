@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-W35
+
+### New
+
+- Zoom into any block with <kbd>F</kbd> (or <kbd>⌘.</kbd>, or a click on its bullet) and its subtree becomes the whole page, with a clickable breadcrumb trail showing how you got there. <kbd>⇧F</kbd> goes up one level, <kbd>⌘⇧.</kbd> exits fully, and zoom lives in the URL so the back button and deep links just work.
+- Jump to any heading in the current note with <kbd>⌘P</kbd> (or type `@` in <kbd>⌘K</kbd>). Unfiltered you get the note's outline as an indented tree; typing filters to matches with their parent path shown. Arrowing previews the target behind the dialog, <kbd>Enter</kbd> jumps, <kbd>Esc</kbd> puts everything back exactly as it was. Nested and unsaved headings are included, which the old search missed.
+- Press <kbd>⌘A</kbd> repeatedly to grow the selection through the outline: first the block and its visible children, then the parent and its subtree, on up to the whole page. <kbd>⌘⇧A</kbd> steps back down. Every action (indent, move, duplicate, copy, delete) works on whatever the ladder has selected.
+- Duplicate a block and its subtree with <kbd>⇧⌥↑</kbd> / <kbd>⇧⌥↓</kbd>, on a single block or a whole selection.
+- Press <kbd>?</kbd> anywhere you're not typing for a complete, searchable reference of every shortcut in the app, grouped by context and always in sync with what the keys actually do.
+- Get around without the mouse: <kbd>g</kbd> then <kbd>d</kbd>/<kbd>n</kbd>/<kbd>t</kbd>/<kbd>s</kbd> goes to today's note, notes, tags, or settings, <kbd>/</kbd> focuses search on list pages, and <kbd>⌘[</kbd> / <kbd>⌘]</kbd> walk back and forward through your history.
+
+### Improved
+
+- Paste works without entering a block first. <kbd>⌘V</kbd> on a highlighted block inserts the clipboard below it, splitting lines into blocks and preserving nesting. Rich content from Notion, Google Docs, or the web converts to markdown (headings, lists, checkboxes, links, code), and copying between Ruminate notes round-trips block structure exactly. <kbd>⌘⇧V</kbd> pastes as plain text when you don't want any of that.
+- Arrow keys now finish editing at a block's edge: <kbd>↑</kbd> from the first line or <kbd>↓</kbd> from the last drops you back to the rendered view with the neighbouring block highlighted, instead of carrying the raw-markdown editor along. <kbd>Esc</kbd> now also clears the highlight entirely, and arrows pick it back up.
+- Move a block with <kbd>⌥↑</kbd> / <kbd>⌥↓</kbd> as well as <kbd>⌘⇧↑</kbd> / <kbd>⌘⇧↓</kbd>, matching editor muscle memory. Sibling jumping moved to <kbd>⌘⌥↑</kbd> / <kbd>⌘⌥↓</kbd>. Moving and duplicating work on multi-block selections too.
+- Pasted outlines indented with tabs or four spaces keep their nesting instead of flattening.
+
+### Fixed
+
+- Checkboxes survive copy and paste. Copied todos used to re-paste as plain bullets with a literal `[ ]` in the text.
+- Pasting content that carries block ids can no longer silently overwrite existing blocks with the same id, and pasting no longer breaks references to the block you pasted into.
+- Arrow keys no longer go dead after collapsing the section your highlight was inside. They now land on the collapsed parent.
+- Cutting a mouse selection that spans several blocks now copies and removes them. It used to do nothing. It only takes over when whole blocks are selected, so a partial selection never deletes more than you chose.
+- The help panel no longer lists shortcuts that were removed with the old editor, and its links point at this project again.
+
 ## 2026-W34
 
 ### New
