@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest"
 import {
+  duplicateBlocks,
   emptyBlock,
   indentBlock,
   insertAfter,
   insertBefore,
+  insertBlocksAfter,
+  moveBlocks,
   outdentBlock,
+  remintCollidingIds,
   removeBlock,
   spliceBlocks,
   updateContent,
@@ -162,6 +166,144 @@ describe("spliceBlocks", () => {
     const doc = fixture()
     expect(spliceBlocks(doc, "nope", parse("x"))).toBeNull()
     expect(spliceBlocks(doc, "a", parse(""))).toBeNull()
+  })
+})
+
+describe("insertBlocksAfter", () => {
+  it("inserts the parsed blocks after the target, keeping the target intact", () => {
+    const doc = fixture()
+    const sub = parse("one\ntwo")
+    const result = insertBlocksAfter(doc, "b", sub)!
+    const contents = result.doc.rootBlockIds.map((id) => result.doc.blocks[id].content)
+    expect(contents).toEqual(["A", "B", "one", "two", "C"])
+    // Unlike spliceBlocks, the target block (and its id) survives.
+    expect(result.doc.blocks["b"]).toBeDefined()
+    expect(result.doc.blocks["b"].children).toEqual(["b1"])
+    expect(result.doc.blocks[result.lastId].content).toBe("two")
+  })
+
+  it("inserts as siblings inside a nested list", () => {
+    const doc = fixture()
+    const sub = parse("x")
+    const result = insertBlocksAfter(doc, "b1", sub)!
+    const childContents = result.doc.blocks["b"].children.map((id) => result.doc.blocks[id].content)
+    expect(childContents).toEqual(["B1", "x"])
+  })
+
+  it("returns null for an unknown target or empty sub-doc", () => {
+    const doc = fixture()
+    expect(insertBlocksAfter(doc, "nope", parse("x"))).toBeNull()
+    expect(insertBlocksAfter(doc, "a", parse(""))).toBeNull()
+  })
+})
+
+describe("remintCollidingIds", () => {
+  it("mints fresh ids for pasted blocks whose id already exists in the doc", () => {
+    const doc = fixture()
+    // Clipboard content carrying an id:: that matches an existing block.
+    const sub = parse("stolen\n  id:: b\n  - nested child")
+    const reminted = remintCollidingIds(sub, doc)
+    expect(reminted.blocks["b"]).toBeUndefined()
+    const rootId = reminted.rootBlockIds[0]
+    expect(rootId).not.toBe("b")
+    expect(reminted.blocks[rootId].content).toBe("stolen")
+    // Child references follow the remap.
+    const childId = reminted.blocks[rootId].children[0]
+    expect(reminted.blocks[childId].content).toBe("- nested child")
+  })
+
+  it("pasting an id-carrying fragment never clobbers the existing block", () => {
+    const doc = fixture()
+    const sub = remintCollidingIds(parse("stolen\n  id:: b"), doc)
+    const result = insertBlocksAfter(doc, "c", sub)!
+    // The original block b is untouched.
+    expect(result.doc.blocks["b"].content).toBe("B")
+    expect(result.doc.blocks["b"].children).toEqual(["b1"])
+    // The pasted copy exists under a fresh id.
+    expect(result.doc.blocks[result.lastId].content).toBe("stolen")
+  })
+
+  it("returns the sub-doc unchanged when nothing collides", () => {
+    const doc = fixture()
+    const sub = parse("fresh\n  id:: blk_zzzzzzzzzz")
+    expect(remintCollidingIds(sub, doc)).toBe(sub)
+  })
+})
+
+describe("duplicateBlocks", () => {
+  it("duplicates a subtree below with fresh ids throughout", () => {
+    const doc = fixture()
+    const result = duplicateBlocks(doc, ["b"], "below")!
+    expect(result.copies).toHaveLength(1)
+    const copy = result.copies[0]
+    expect(result.doc.rootBlockIds).toEqual(["a", "b", copy, "c"])
+    expect(result.doc.blocks[copy].content).toBe("B")
+    const childCopy = result.doc.blocks[copy].children[0]
+    expect(childCopy).not.toBe("b1")
+    expect(result.doc.blocks[childCopy].content).toBe("B1")
+    // Originals untouched.
+    expect(result.doc.blocks["b"].children).toEqual(["b1"])
+    expect(doc.rootBlockIds).toEqual(["a", "b", "c"])
+  })
+
+  it("duplicates above, inserting the copy before the original", () => {
+    const doc = fixture()
+    const result = duplicateBlocks(doc, ["c"], "above")!
+    const copy = result.copies[0]
+    expect(result.doc.rootBlockIds).toEqual(["a", "b", copy, "c"])
+  })
+
+  it("duplicates a multi-selection as one group after the last original", () => {
+    const doc = fixture()
+    const result = duplicateBlocks(doc, ["a", "b"], "below")!
+    const [copyA, copyB] = result.copies
+    expect(result.doc.rootBlockIds).toEqual(["a", "b", copyA, copyB, "c"])
+    expect(result.doc.blocks[copyA].content).toBe("A")
+    expect(result.doc.blocks[copyB].content).toBe("B")
+  })
+
+  it("duplicates a multi-selection above, before the first original", () => {
+    const doc = fixture()
+    const result = duplicateBlocks(doc, ["b", "c"], "above")!
+    const [copyB, copyC] = result.copies
+    expect(result.doc.rootBlockIds).toEqual(["a", copyB, copyC, "b", "c"])
+  })
+
+  it("returns null when nothing exists to duplicate", () => {
+    expect(duplicateBlocks(fixture(), ["nope"], "below")).toBeNull()
+    expect(duplicateBlocks(fixture(), [], "below")).toBeNull()
+  })
+})
+
+describe("moveBlocks", () => {
+  it("moves a contiguous sibling group down past one sibling", () => {
+    const doc = fixture()
+    const next = moveBlocks(doc, ["a", "b"], "down")
+    expect(next.rootBlockIds).toEqual(["c", "a", "b"])
+    // Subtrees ride along.
+    expect(next.blocks["b"].children).toEqual(["b1"])
+  })
+
+  it("moves a group up past one sibling", () => {
+    const doc = fixture()
+    const next = moveBlocks(doc, ["b", "c"], "up")
+    expect(next.rootBlockIds).toEqual(["b", "c", "a"])
+  })
+
+  it("is a no-op at the boundary", () => {
+    const doc = fixture()
+    expect(moveBlocks(doc, ["a", "b"], "up")).toBe(doc)
+    expect(moveBlocks(doc, ["b", "c"], "down")).toBe(doc)
+  })
+
+  it("is a no-op when the ids span parents", () => {
+    const doc = fixture()
+    expect(moveBlocks(doc, ["b1", "c"], "down")).toBe(doc)
+  })
+
+  it("is a no-op when the siblings are not contiguous", () => {
+    const doc = fixture()
+    expect(moveBlocks(doc, ["a", "c"], "down")).toBe(doc)
   })
 })
 

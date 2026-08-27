@@ -11,6 +11,11 @@ interface ParsedNode {
 
 const ID_RE = /^\s*id::\s+(.+)$/
 
+// A GFM task-list item (`- [ ] task`, `* [x] done`). Copy emits todos in this
+// form (see to-display-markdown.ts); parsing normalizes it back to the app's
+// bare `[ ] task` marker so the round-trip preserves the block type.
+const GFM_TODO_RE = /^[-*]\s+(?=\[[ xX]?\]\s)/
+
 /**
  * Parse markdown into a BlockDoc.
  *
@@ -60,7 +65,7 @@ export function parse(markdown: string): BlockDoc {
       continue
     }
 
-    const content = line.slice(indent)
+    const content = line.slice(indent).replace(GFM_TODO_RE, "")
     const depth = Math.floor(indent / 2)
     const node: ParsedNode = { content, children: [] }
 

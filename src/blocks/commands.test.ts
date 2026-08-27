@@ -96,17 +96,41 @@ describe("selection movement", () => {
     expect(result.exitTop).toBeUndefined()
   })
 
-  it("moves edit focus to the neighbour, caret at end going up / start going down", () => {
+  it("arrow-out of edit mode commits the edit and selects the neighbour", () => {
     const doc = fixture()
     expect(runCommand("moveEditFocusUp", input(doc, "b", { mode: "edit" })).focus).toEqual({
-      mode: "edit",
+      mode: "select",
       id: "a",
     })
     expect(runCommand("moveEditFocusDown", input(doc, "b", { mode: "edit" })).focus).toEqual({
-      mode: "edit",
+      mode: "select",
       id: "b1",
-      atStart: true,
     })
+  })
+
+  it("arrow-down on the very last block exits edit and selects it", () => {
+    const doc = fixture()
+    expect(runCommand("moveEditFocusDown", input(doc, "c", { mode: "edit" })).focus).toEqual({
+      mode: "select",
+      id: "c",
+    })
+  })
+
+  it("arrow-up on the very first block still exits to the title", () => {
+    const doc = fixture()
+    const result = runCommand("moveEditFocusUp", input(doc, "a", { mode: "edit" }))
+    expect(result.exitTop).toBe(true)
+  })
+
+  it("recovers onto the nearest visible ancestor when the block is hidden", () => {
+    // b collapsed: b1 no longer in visibleOrder but is still selected.
+    const doc = fixture()
+    const result = runCommand(
+      "moveSelectionDown",
+      input(doc, "b1", { visibleOrder: ["a", "b", "c"] }),
+    )
+    expect(result.handled).toBe(true)
+    expect(result.focus).toEqual({ mode: "select", id: "b" })
   })
 })
 
@@ -155,6 +179,43 @@ describe("moveBlock", () => {
     const result = runCommand("moveBlockUp", input(doc, "a"))
     expect(result.handled).toBe(true)
     expect(result.doc).toBeUndefined()
+  })
+})
+
+describe("duplicate", () => {
+  it("duplicateBelow copies the subtree below and selects the copy", () => {
+    const doc = fixture()
+    const result = runCommand("duplicateBelow", input(doc, "b", { mode: "select" }))
+    expect(result.doc!.rootBlockIds).toHaveLength(4)
+    const copyId = result.doc!.rootBlockIds[2]
+    expect(result.doc!.rootBlockIds).toEqual(["a", "b", copyId, "c"])
+    expect(result.doc!.blocks[copyId].content).toBe("B")
+    // The subtree came along, with a fresh id of its own.
+    const childCopy = result.doc!.blocks[copyId].children[0]
+    expect(childCopy).not.toBe("b1")
+    expect(result.doc!.blocks[childCopy].content).toBe("B1")
+    // The original is untouched.
+    expect(result.doc!.blocks.b.children).toEqual(["b1"])
+    expect(result.focus).toEqual({ mode: "select", id: copyId })
+  })
+
+  it("duplicateAbove inserts the copy before the original and selects it", () => {
+    const doc = fixture()
+    const result = runCommand("duplicateAbove", input(doc, "a", { mode: "select" }))
+    const copyId = result.doc!.rootBlockIds[0]
+    expect(result.doc!.rootBlockIds).toEqual([copyId, "a", "b", "c"])
+    expect(result.doc!.blocks[copyId].content).toBe("A")
+    expect(result.focus).toEqual({ mode: "select", id: copyId })
+  })
+
+  it("keeps editing the copy (caret preserved) in edit mode", () => {
+    const doc = fixture()
+    const result = runCommand(
+      "duplicateBelow",
+      input(doc, "a", { mode: "edit", caret: caret("A", 1) }),
+    )
+    const copyId = result.doc!.rootBlockIds[1]
+    expect(result.focus).toEqual({ mode: "edit", id: copyId, caret: 1 })
   })
 })
 
@@ -346,5 +407,11 @@ describe("mode toggles", () => {
   it.each(cases)("%s focuses %s → %s", (name, from, to) => {
     const result = runCommand(name, input(doc, "a", { mode: from }))
     expect(result.focus).toEqual({ mode: to, id: "a" })
+  })
+
+  it("deselect clears the highlight entirely", () => {
+    const result = runCommand("deselect", input(doc, "a"))
+    expect(result.handled).toBe(true)
+    expect(result.focus).toEqual({ mode: "select", id: null })
   })
 })

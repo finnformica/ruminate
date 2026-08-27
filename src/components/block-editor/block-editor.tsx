@@ -14,9 +14,14 @@ import { resolveKey, type KeyLike } from "../../blocks/keymap"
 import { parse } from "../../blocks/parse"
 import { toDisplayMarkdown } from "../../blocks/to-display-markdown"
 import {
+  duplicateBlocks,
   emptyBlock,
   indentBlock,
+  insertAfter,
+  insertBlocksAfter,
+  moveBlocks,
   outdentBlock,
+  remintCollidingIds,
   removeBlock,
   siblingsOf,
   spliceBlocks,
@@ -135,6 +140,9 @@ export function BlockEditor({
 
   // The container is the focusable keyboard target for select mode.
   const containerRef = useRef<HTMLDivElement>(null)
+  // Set by a Cmd/Ctrl+Shift+V keydown so the paste event that follows knows to
+  // paste as plain text (newlines collapsed into one block).
+  const plainPasteRef = useRef(false)
   const focusContainer = () => {
     if (!readOnly) containerRef.current?.focus({ preventScroll: true })
   }
@@ -408,7 +416,8 @@ export function BlockEditor({
       // Re-form the block's line with the pasted text spliced in at the caret,
       // then parse the whole thing so markdown prefixes and blank lines become
       // the right blocks. The current block's marker stays on the first line.
-      const sub = parse(prefix + before + pasted + after)
+      // Reminting keeps a pasted `id::` from clobbering an existing block.
+      const sub = remintCollidingIds(parse(prefix + before + pasted + after), doc)
       const result = spliceBlocks(doc, id, sub)
       if (!result) return
       history.commit(doc, result.doc, { type: "structural" })
@@ -440,31 +449,88 @@ export function BlockEditor({
       // other Cmd combos (Cmd+Enter, Cmd+Arrow, Cmd+C/X) fall through below
     }
 
+    // Nothing focused (after Escape's deselect): arrows re-select the first /
+    // last visible block, so the editor stays reachable by keyboard.
+    if (!focus && !selected && !event.defaultPrevented) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        const target =
+          event.key === "ArrowDown" ? visibleOrder[0] : visibleOrder[visibleOrder.length - 1]
+        if (target) {
+          event.preventDefault()
+          setAnchorId(null)
+          setSelected(target)
+        }
+      }
+      return
+    }
+
     // Edit mode: the textarea's own handler owns the keys; don't double-handle.
     if (focus || !selected || event.defaultPrevented) return
     const id = selected
     const mod = event.metaKey || event.ctrlKey
 
-    // Shift+Arrow grows / shrinks a multi-block selection — but NOT when Cmd/Ctrl
-    // is also held (that's the move-block shortcut, handled via the keymap).
-    if (event.shiftKey && !mod && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+    // Shift+Arrow grows / shrinks a multi-block selection — but NOT with Cmd/Ctrl
+    // (move-block) or Alt (duplicate) also held; those resolve via the keymap.
+    if (
+      event.shiftKey &&
+      !mod &&
+      !event.altKey &&
+      (event.key === "ArrowUp" || event.key === "ArrowDown")
+    ) {
       event.preventDefault()
       extendSelection(event.key === "ArrowUp" ? "up" : "down")
       return
     }
     // Copy / cut the current selection — one block or many.
-    if (mod && event.key.toLowerCase() === "c") {
+    if (mod && !event.altKey && event.key.toLowerCase() === "c") {
       event.preventDefault()
       copySelection()
       return
     }
-    if (mod && event.key.toLowerCase() === "x") {
+    if (mod && !event.altKey && event.key.toLowerCase() === "x") {
       event.preventDefault()
       cutSelection()
       return
     }
+    // Cmd/Ctrl+Shift+V pastes as plain text: flag it and let the browser's
+    // native paste event fire (the container's onPaste reads the flag). Plain
+    // Cmd/Ctrl+V needs nothing here — its paste event fires on its own.
+    if (mod && event.shiftKey && event.key.toLowerCase() === "v") {
+      plainPasteRef.current = true
+      return
+    }
     // Actions that only make sense on a multi-block selection.
     if (selectedIds.length > 1) {
+      const isArrow = event.key === "ArrowUp" || event.key === "ArrowDown"
+      const direction = event.key === "ArrowUp" ? "up" : "down"
+      // Shift+Alt+Arrow duplicates the selection roots as one group and
+      // selects the copies.
+      if (isArrow && event.altKey && event.shiftKey && !mod) {
+        event.preventDefault()
+        const result = duplicateBlocks(
+          doc,
+          selectionRoots(),
+          direction === "up" ? "above" : "below",
+        )
+        if (result) {
+          history.commit(doc, result.doc, { type: "structural" })
+          setFocus(null)
+          setAnchorId(result.copies[0])
+          setSelected(result.copies[result.copies.length - 1])
+        }
+        return
+      }
+      // Alt+Arrow / Mod+Shift+Arrow move the whole contiguous selection one
+      // position among its shared parent's children (no-op across parents).
+      if (
+        isArrow &&
+        ((event.altKey && !event.shiftKey && !mod) || (mod && event.shiftKey && !event.altKey))
+      ) {
+        event.preventDefault()
+        const next = moveBlocks(doc, selectionRoots(), direction)
+        if (next !== doc) history.commit(doc, next, { type: "structural" })
+        return
+      }
       if (event.key === "Tab") {
         event.preventDefault()
         if (event.shiftKey) outdentSelection()
@@ -529,6 +595,104 @@ export function BlockEditor({
     })
   }
 
+  // Select-mode paste: parse the clipboard into blocks and insert them after
+  // the last block of the current selection — no need to enter edit mode first.
+  // (Edit-mode paste is handled by the focused textarea and guarded out here.)
+  const handleContainerPaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    const plain = plainPasteRef.current
+    plainPasteRef.current = false
+    if (readOnly || focus || !selected) return
+    event.preventDefault()
+    const text = event.clipboardData?.getData("text/plain") ?? ""
+    const normalized = text.replace(/\r\n?/g, "\n")
+    if (normalized.trim() === "") return
+    const target = selectedIds[selectedIds.length - 1] ?? selected
+    if (plain) {
+      // Paste-as-plain: one new paragraph block, newlines collapsed to spaces
+      // (a block is a single line in the serialized format).
+      const fresh = emptyBlock(normalized.replace(/\s*\n+\s*/g, " ").trim())
+      const next = insertAfter(doc, target, fresh)
+      if (next === doc) return
+      history.commit(doc, next, { type: "structural" })
+      setAnchorId(null)
+      setFocus(null)
+      setSelected(fresh.id)
+      return
+    }
+    // Remint any pasted ids that already exist here (e.g. content copied with
+    // its `id::` lines) so the paste never clobbers an existing block.
+    const sub = remintCollidingIds(parse(normalized), doc)
+    const result = insertBlocksAfter(doc, target, sub)
+    if (!result) return
+    history.commit(doc, result.doc, { type: "structural" })
+    setAnchorId(null)
+    setFocus(null)
+    setSelected(result.lastId)
+  }
+
+  // Native cut over a DOM text selection: only when the selection fully covers
+  // every block it touches do we take over — copy them as markdown and remove
+  // them in one structural step. Partial coverage is a strict no-op, so content
+  // the user didn't fully select is never deleted.
+  const handleCut = (event: ClipboardEvent<HTMLDivElement>) => {
+    if (readOnly || focus) return
+    const selection = window.getSelection()
+    if (!selection || selection.isCollapsed) return
+
+    const picked: string[] = []
+    const pickedSet = new Set<string>()
+    let partial = false
+    const walk = (ids: string[], depth: number) => {
+      for (const bid of ids) {
+        const block = doc.blocks[bid]
+        if (!block) continue
+        const el = containerRef.current?.querySelector(`[data-block-id="${bid}"]`)
+        if (el && selection.containsNode(el, true)) {
+          if (!selection.containsNode(el, false)) partial = true
+          picked.push("  ".repeat(depth) + block.content)
+          pickedSet.add(bid)
+        }
+        walk(block.children, depth + 1)
+      }
+    }
+    walk(doc.rootBlockIds, 0)
+    if (picked.length === 0 || partial) return
+
+    // Removal happens by subtree root; every block a root drags along must
+    // itself be covered, or the cut would delete unselected content.
+    const roots = [...pickedSet].filter((bid) => {
+      let parent = siblingsOf(doc, bid)?.parentId ?? null
+      while (parent) {
+        if (pickedSet.has(parent)) return false
+        parent = siblingsOf(doc, parent)?.parentId ?? null
+      }
+      return true
+    })
+    const covered = (bid: string): boolean => {
+      if (!pickedSet.has(bid)) return false
+      return (doc.blocks[bid]?.children ?? []).every(covered)
+    }
+    if (!roots.every(covered)) return
+
+    event.clipboardData.setData("text/plain", toDisplayMarkdown(picked.join("\n")))
+    event.preventDefault()
+
+    let next = doc
+    let focusId: string | null = null
+    for (const bid of roots) {
+      if (!next.blocks[bid]) continue
+      const result = removeBlock(next, bid)
+      next = result.doc
+      focusId = result.focusId
+    }
+    if (next === doc) return
+    if (focusId && !next.blocks[focusId]) focusId = null
+    history.commit(doc, next, { type: "structural" })
+    setAnchorId(null)
+    setFocus(null)
+    setSelected(focusId ?? next.rootBlockIds[0] ?? null)
+  }
+
   const handleCopy = (event: ClipboardEvent<HTMLDivElement>) => {
     const selection = window.getSelection()
     if (!selection || selection.isCollapsed) return
@@ -569,6 +733,8 @@ export function BlockEditor({
       onKeyDown={handleKeyDown}
       onBlur={handleContainerBlur}
       onCopy={handleCopy}
+      onPaste={handleContainerPaste}
+      onCut={handleCut}
     >
       {doc.rootBlockIds.map((id) => {
         const block = doc.blocks[id]

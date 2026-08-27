@@ -7,6 +7,7 @@
 | Command menu      | <kbd>⌘</kbd> <kbd>K</kbd>              |
 | New note          | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>O</kbd> |
 | Save              | <kbd>⌘</kbd> <kbd>S</kbd>              |
+| Toggle sidebar    | <kbd>⌘</kbd> <kbd>B</kbd>              |
 | Toggle help panel | <kbd>⌘</kbd> <kbd>/</kbd>              |
 
 ## Block editor
@@ -18,41 +19,63 @@ declaratively in `src/blocks/keymap.ts` and dispatched through the command layer
 
 ### Select mode (a block is highlighted)
 
-| Action                                  | Shortcut                                              |
-| --------------------------------------- | ----------------------------------------------------- |
-| Edit the block                          | <kbd>↵</kbd>                                          |
-| New block below (and edit it)           | <kbd>⌘</kbd> <kbd>↵</kbd> / <kbd>⇧</kbd> <kbd>↵</kbd> |
-| Move highlight up / down                | <kbd>↑</kbd> / <kbd>↓</kbd>                           |
-| Jump across siblings (same level)       | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>              |
-| Jump to top / bottom of the level       | <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>              |
-| Indent / outdent                        | <kbd>⇥</kbd> / <kbd>⇧</kbd> <kbd>⇥</kbd>              |
-| Move block (with its subtree)           | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> |
-| Extend selection to more blocks         | <kbd>⇧</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>              |
-| Delete block(s)                         | <kbd>⌫</kbd> / <kbd>⌦</kbd>                           |
-| Copy / cut selection                    | <kbd>⌘</kbd> <kbd>C</kbd> / <kbd>⌘</kbd> <kbd>X</kbd> |
-| Collapse / expand (if nested)           | <kbd>Space</kbd>                                      |
-| Toggle checkbox (todo blocks)           | <kbd>x</kbd>                                          |
-| Focus the note title (from first block) | <kbd>↑</kbd>                                          |
+| Action                                  | Shortcut                                                                   |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| Edit the block                          | <kbd>↵</kbd>                                                               |
+| New block below (and edit it)           | <kbd>⌘</kbd> <kbd>↵</kbd> / <kbd>⇧</kbd> <kbd>↵</kbd>                      |
+| Move highlight up / down                | <kbd>↑</kbd> / <kbd>↓</kbd>                                                |
+| Deselect (nothing highlighted)          | <kbd>Esc</kbd>                                                             |
+| Jump across siblings (same level)       | <kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                      |
+| Jump to top / bottom of the level       | <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                   |
+| Indent / outdent                        | <kbd>⇥</kbd> / <kbd>⇧</kbd> <kbd>⇥</kbd>                                   |
+| Move block (with its subtree)           | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> (or <kbd>⌘⇧</kbd> <kbd>↑/↓</kbd>) |
+| Duplicate block above / below           | <kbd>⇧</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                      |
+| Extend selection to more blocks         | <kbd>⇧</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                   |
+| Delete block(s)                         | <kbd>⌫</kbd> / <kbd>⌦</kbd>                                                |
+| Copy / cut selection                    | <kbd>⌘</kbd> <kbd>C</kbd> / <kbd>⌘</kbd> <kbd>X</kbd>                      |
+| Paste after the selection               | <kbd>⌘</kbd> <kbd>V</kbd>                                                  |
+| Paste as one plain block                | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>                                     |
+| Collapse / expand (if nested)           | <kbd>Space</kbd>                                                           |
+| Toggle checkbox (todo blocks)           | <kbd>x</kbd>                                                               |
+| Focus the note title (from first block) | <kbd>↑</kbd>                                                               |
 
-With more than one block selected, <kbd>⇥</kbd> / <kbd>⇧⇥</kbd>, delete, and
-copy / cut act on the whole selection; <kbd>Esc</kbd> collapses back to one.
+With more than one block selected, <kbd>⇥</kbd> / <kbd>⇧⇥</kbd>, delete,
+copy / cut / paste, move (<kbd>⌥↑/↓</kbd> or <kbd>⌘⇧↑/↓</kbd> — only when the
+selected blocks share a parent), and duplicate (<kbd>⇧⌥↑/↓</kbd>) act on the
+whole selection; <kbd>Esc</kbd> collapses back to one.
+
+Pasting in select mode parses the clipboard as markdown and inserts the blocks
+after the last selected block. <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd> instead
+inserts a single paragraph block with newlines collapsed to spaces (blocks are
+one line in the serialized format). With nothing selected (after
+<kbd>Esc</kbd>), <kbd>↓</kbd> / <kbd>↑</kbd> re-select the first / last block.
 
 ### Edit mode (typing in a block)
 
-| Action                                     | Shortcut                                                 |
-| ------------------------------------------ | -------------------------------------------------------- |
-| Stop editing (back to highlight)           | <kbd>Esc</kbd>                                           |
-| New block below (bullet by default)        | <kbd>↵</kbd>                                             |
-| Split into a new block of the same type    | <kbd>⇧</kbd> <kbd>↵</kbd>                                |
-| New block below, ignoring the caret        | <kbd>⌘</kbd> <kbd>↵</kbd>                                |
-| Indent / outdent                           | <kbd>⇥</kbd> / <kbd>⇧</kbd> <kbd>⇥</kbd>                 |
-| Move block (with its subtree)              | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>    |
-| Jump across siblings / levels              | <kbd>⌥</kbd> or <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> |
-| Move to block above / below (at line edge) | <kbd>↑</kbd> / <kbd>↓</kbd>                              |
-| Strip the block's marker → merge up        | <kbd>⌫</kbd> at line start                               |
+| Action                                  | Shortcut                                                                   |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| Stop editing (back to highlight)        | <kbd>Esc</kbd>                                                             |
+| New block below (bullet by default)     | <kbd>↵</kbd>                                                               |
+| Split into a new block of the same type | <kbd>⇧</kbd> <kbd>↵</kbd>                                                  |
+| New block below, ignoring the caret     | <kbd>⌘</kbd> <kbd>↵</kbd>                                                  |
+| Indent / outdent                        | <kbd>⇥</kbd> / <kbd>⇧</kbd> <kbd>⇥</kbd>                                   |
+| Move block (with its subtree)           | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> (or <kbd>⌘⇧</kbd> <kbd>↑/↓</kbd>) |
+| Duplicate block (keep editing the copy) | <kbd>⇧</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                      |
+| Jump across siblings (same level)       | <kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                      |
+| Jump to top / bottom of the level       | <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                   |
+| Exit edit, select block above / below   | <kbd>↑</kbd> / <kbd>↓</kbd> at the first / last line                       |
+| Paste as plain text (newlines → spaces) | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>                                     |
+| Strip the block's marker → merge up     | <kbd>⌫</kbd> at line start                                                 |
 
 Enter from a heading nests the new block underneath it. Enter on an empty list
 item exits the list.
+
+An arrow leaving the edited block **commits the edit and switches to select
+mode**: <kbd>↑</kbd> on the first visual line highlights the block above
+(<kbd>↑</kbd> on the very first block focuses the note title); <kbd>↓</kbd> on
+the last visual line highlights the block below (on the very last block it
+highlights the block itself). <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd> collapses
+newlines to single spaces because a block is one line in the serialized format.
 
 ### Note title
 
@@ -79,10 +102,13 @@ change that spanned several blocks) and survive a save.
 
 - **Traverse** one block at a time: plain <kbd>↑</kbd> / <kbd>↓</kbd>.
 - **Skip across a level** (e.g. header→header, past their children):
-  <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>.
+  <kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>.
 - **Jump to the top / bottom of the current level** (walking up levels rather
   than to the page top): <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>.
-- **Reorder** a block and its subtree: <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>↑/↓</kbd>
-  (the Notion convention; Logseq/Workflowy use Alt+Shift).
+- **Reorder** a block and its subtree: <kbd>⌥</kbd> <kbd>↑/↓</kbd> or
+  <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>↑/↓</kbd> (the Notion convention).
+- **Duplicate** a block and its subtree: <kbd>⇧</kbd> <kbd>⌥</kbd>
+  <kbd>↑/↓</kbd> (the VS Code convention — down lands on the lower copy, up on
+  the upper).
 - **Change depth**: <kbd>⇥</kbd> / <kbd>⇧</kbd> <kbd>⇥</kbd>.
 - **Select a run of blocks**: <kbd>⇧</kbd> <kbd>↑/↓</kbd>, then act on them.

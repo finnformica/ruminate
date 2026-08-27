@@ -72,9 +72,14 @@ export const KEYMAP: Binding[] = [
   { mode: "select", combo: "Shift+Tab", command: "outdent" },
   { mode: "select", combo: "ArrowUp", command: "moveSelectionUp" },
   { mode: "select", combo: "ArrowDown", command: "moveSelectionDown" },
-  // Option/Alt+Arrow jumps across siblings at the same level (skipping children).
-  { mode: "select", combo: "Alt+ArrowUp", command: "prevSibling" },
-  { mode: "select", combo: "Alt+ArrowDown", command: "nextSibling" },
+  // Escape drops the highlight entirely (arrows pick it back up).
+  { mode: "select", combo: "Escape", command: "deselect" },
+  // Option/Alt+Arrow moves the block itself (alias of Mod+Shift+Arrow).
+  { mode: "select", combo: "Alt+ArrowUp", command: "moveBlockUp" },
+  { mode: "select", combo: "Alt+ArrowDown", command: "moveBlockDown" },
+  // Cmd/Ctrl+Alt+Arrow jumps across siblings at the same level (skipping children).
+  { mode: "select", combo: "Mod+Alt+ArrowUp", command: "prevSibling" },
+  { mode: "select", combo: "Mod+Alt+ArrowDown", command: "nextSibling" },
   // Cmd/Ctrl+Arrow jumps to the top / bottom of the current level (walking up
   // levels, not to the page top).
   { mode: "select", combo: "Mod+ArrowUp", command: "jumpLevelTop" },
@@ -82,6 +87,9 @@ export const KEYMAP: Binding[] = [
   // Cmd/Ctrl+Shift+Arrow reorders the block itself (Notion convention).
   { mode: "select", combo: "Mod+Shift+ArrowUp", command: "moveBlockUp" },
   { mode: "select", combo: "Mod+Shift+ArrowDown", command: "moveBlockDown" },
+  // Shift+Alt+Arrow duplicates the block above / below (VS Code convention).
+  { mode: "select", combo: "Alt+Shift+ArrowUp", command: "duplicateAbove" },
+  { mode: "select", combo: "Alt+Shift+ArrowDown", command: "duplicateBelow" },
   { mode: "select", combo: "Backspace", command: "deleteBlock" },
   { mode: "select", combo: "Delete", command: "deleteBlock" },
   { mode: "select", combo: "x", command: "toggleTodo" },
@@ -91,12 +99,16 @@ export const KEYMAP: Binding[] = [
   { mode: "edit", combo: "Escape", command: "exitEdit" },
   { mode: "edit", combo: "Tab", command: "indent" },
   { mode: "edit", combo: "Shift+Tab", command: "outdent" },
-  { mode: "edit", combo: "Alt+ArrowUp", command: "prevSibling" },
-  { mode: "edit", combo: "Alt+ArrowDown", command: "nextSibling" },
+  { mode: "edit", combo: "Alt+ArrowUp", command: "moveBlockUp" },
+  { mode: "edit", combo: "Alt+ArrowDown", command: "moveBlockDown" },
+  { mode: "edit", combo: "Mod+Alt+ArrowUp", command: "prevSibling" },
+  { mode: "edit", combo: "Mod+Alt+ArrowDown", command: "nextSibling" },
   { mode: "edit", combo: "Mod+ArrowUp", command: "jumpLevelTop" },
   { mode: "edit", combo: "Mod+ArrowDown", command: "jumpLevelBottom" },
   { mode: "edit", combo: "Mod+Shift+ArrowUp", command: "moveBlockUp" },
   { mode: "edit", combo: "Mod+Shift+ArrowDown", command: "moveBlockDown" },
+  { mode: "edit", combo: "Alt+Shift+ArrowUp", command: "duplicateAbove" },
+  { mode: "edit", combo: "Alt+Shift+ArrowDown", command: "duplicateBelow" },
   // Shift-Enter splits at the caret into a new block of the same type.
   { mode: "edit", combo: "Shift+Enter", command: "splitPlain" },
   // Cmd/Ctrl+Enter forces a same-type block below, ignoring the caret.

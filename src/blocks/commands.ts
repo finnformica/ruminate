@@ -6,6 +6,7 @@ import {
 } from "./block-type"
 import type { BlockOp } from "./history"
 import {
+  duplicateBlocks,
   emptyBlock,
   indentBlock,
   insertAfter,
@@ -133,11 +134,27 @@ function keepFocus(mode: Mode, id: string, caret?: CaretInput): FocusIntent {
   return mode === "edit" ? { mode: "edit", id, caret: caret?.start } : { mode: "select", id }
 }
 
+/** The nearest ancestor of `id` present in `visibleOrder`, or null. Used to
+ * recover when the selected block is hidden inside a newly collapsed parent. */
+function nearestVisibleAncestor(doc: BlockDoc, id: string, visibleOrder: string[]): string | null {
+  let parent = siblingsOf(doc, id)?.parentId ?? null
+  while (parent !== null && !visibleOrder.includes(parent)) {
+    parent = siblingsOf(doc, parent)?.parentId ?? null
+  }
+  return parent
+}
+
 /** Move the highlight to the previous / next visible block (select mode). */
 function moveSelection(direction: "up" | "down"): Command {
-  return ({ id, visibleOrder }) => {
+  return ({ doc, id, visibleOrder }) => {
     const i = visibleOrder.indexOf(id)
-    if (i === -1) return { handled: true }
+    if (i === -1) {
+      // The selected block is hidden inside a collapsed parent — arrows would
+      // otherwise be dead. Recover onto the nearest visible ancestor.
+      const ancestor = nearestVisibleAncestor(doc, id, visibleOrder)
+      const target = ancestor ?? visibleOrder[0] ?? null
+      return { handled: true, focus: { mode: "select", id: target } }
+    }
     const next = direction === "up" ? i - 1 : i + 1
     // Moving up past the first block hands focus to whatever's above the editor.
     if (next < 0) return { handled: true, exitTop: true }
@@ -159,18 +176,24 @@ function siblingJump(direction: "prev" | "next"): Command {
   }
 }
 
-/** Move edit focus to the adjacent block when an arrow leaves the current one. */
+/**
+ * An arrow leaving the edited block *commits* the edit: it exits edit mode and
+ * highlights the adjacent block (select mode), rather than walking into the
+ * neighbour still editing. At the very first block it hands focus upward
+ * (`exitTop`, e.g. to the note title); at the very last it exits in place,
+ * highlighting the block that was being edited.
+ */
 function moveEditFocus(direction: "up" | "down"): Command {
   return ({ id, visibleOrder }) => {
     const i = visibleOrder.indexOf(id)
     if (direction === "up") {
-      if (i > 0) return { handled: true, focus: { mode: "edit", id: visibleOrder[i - 1] } }
+      if (i > 0) return { handled: true, focus: { mode: "select", id: visibleOrder[i - 1] } }
       return { handled: true, exitTop: true }
     }
     if (i >= 0 && i < visibleOrder.length - 1) {
-      return { handled: true, focus: { mode: "edit", id: visibleOrder[i + 1], atStart: true } }
+      return { handled: true, focus: { mode: "select", id: visibleOrder[i + 1] } }
     }
-    return { handled: true }
+    return { handled: true, focus: { mode: "select", id } }
   }
 }
 
@@ -196,9 +219,26 @@ function splitAtCaret(markerFor: (type: BlockType) => string): Command {
   }
 }
 
+/** Duplicate the block's subtree; focus follows the copy (VS Code semantics:
+ * duplicate-down lands on the lower copy, duplicate-up on the upper). In edit
+ * mode the copy opens editing with the caret preserved ("duplicate line"). */
+function duplicate(direction: "above" | "below"): Command {
+  return ({ doc, id, mode, caret }) => {
+    const result = duplicateBlocks(doc, [id], direction)
+    if (!result) return { handled: true }
+    return {
+      handled: true,
+      doc: result.doc,
+      op: STRUCTURAL,
+      focus: keepFocus(mode, result.copies[0], caret),
+    }
+  }
+}
+
 export type CommandName =
   | "enterEdit"
   | "exitEdit"
+  | "deselect"
   | "indent"
   | "outdent"
   | "moveSelectionUp"
@@ -211,6 +251,8 @@ export type CommandName =
   | "jumpLevelBottom"
   | "moveBlockUp"
   | "moveBlockDown"
+  | "duplicateAbove"
+  | "duplicateBelow"
   | "deleteBlock"
   | "toggleTodo"
   | "toggleCollapse"
@@ -228,6 +270,9 @@ export const COMMANDS: Record<CommandName, Command> = {
 
   /** Edit → back to highlighting the block. */
   exitEdit: ({ id }) => ({ handled: true, focus: { mode: "select", id } }),
+
+  /** Select → nothing focused (Escape's last rung). Arrows re-select. */
+  deselect: () => ({ handled: true, focus: { mode: "select", id: null } }),
 
   /** Nest the block under its previous sibling; keeps the current mode/focus
    * (and, when editing, the caret position). */
@@ -284,6 +329,10 @@ export const COMMANDS: Record<CommandName, Command> = {
     if (next === doc) return { handled: true }
     return { handled: true, doc: next, op: STRUCTURAL, focus: keepFocus(mode, id, caret) }
   },
+
+  /** Duplicate the block (and its subtree) above / below itself. */
+  duplicateAbove: duplicate("above"),
+  duplicateBelow: duplicate("below"),
 
   /** Delete the highlighted block and its subtree (select mode). */
   deleteBlock: ({ doc, id }) => {

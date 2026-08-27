@@ -112,6 +112,9 @@ export function BlockItem({
   const isCollapsed = api.collapsed.has(block.id)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const pendingCaret = useRef<number | null>(null)
+  // Set by a Cmd/Ctrl+Shift+V keydown so the paste event that follows inserts
+  // plain text at the caret (newlines collapsed, no block splitting).
+  const plainPaste = useRef(false)
 
   const type = getBlockType(block.content)
   // The block is edited and rendered *without* its marker (the `- `, `# `,
@@ -173,6 +176,11 @@ export function BlockItem({
 
   const handleEditKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const el = event.currentTarget
+    // Cmd/Ctrl+Shift+V: flag paste-as-plain and let the native paste event fire
+    // (handlePaste reads the flag). Any other key clears a stale flag.
+    plainPaste.current =
+      (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "v"
+    if (plainPaste.current) return
     // Line geometry is only needed to decide whether an arrow leaves the block,
     // and measuring it mirrors the textarea into the DOM — so skip it for every
     // other key.
@@ -189,8 +197,22 @@ export function BlockItem({
   }
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const plain = plainPaste.current
+    plainPaste.current = false
     const text = event.clipboardData?.getData("text/plain") ?? ""
     const normalized = text.replace(/\r\n?/g, "\n")
+    if (plain) {
+      // Paste-as-plain: insert at the caret with newlines collapsed to single
+      // spaces (a block is one line in the serialized format) — no splitting.
+      event.preventDefault()
+      const el = event.currentTarget
+      const collapsed = normalized.replace(/\s*\n+\s*/g, " ")
+      const before = el.value.slice(0, el.selectionStart)
+      const after = el.value.slice(el.selectionEnd)
+      pendingCaret.current = (before + collapsed).length
+      api.onContentChange(block.id, prefix + before + collapsed + after)
+      return
+    }
     // Single-line paste is ordinary inline insertion; only multi-line paste
     // needs to be spread across blocks.
     if (!normalized.includes("\n")) return

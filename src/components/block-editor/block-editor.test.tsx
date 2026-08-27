@@ -122,3 +122,108 @@ describe("BlockEditor focus + keyboard", () => {
     expect(highlighted).toEqual(["A", "B"])
   })
 })
+
+describe("Escape ladder + keyboard recovery", () => {
+  it("Escape on a single selection deselects; arrows re-select", () => {
+    const { container } = render(<Harness initial={"A\nB\nC"} />)
+    const root = editorRoot(container)
+    expect(highlightedText(container)).toBe("A")
+    fireEvent.keyDown(root, { key: "Escape" })
+    expect(highlightedText(container)).toBeNull()
+    // ArrowDown from nothing selects the first visible block…
+    fireEvent.keyDown(root, { key: "ArrowDown" })
+    expect(highlightedText(container)).toBe("A")
+    // …and ArrowUp from nothing selects the last.
+    fireEvent.keyDown(root, { key: "Escape" })
+    fireEvent.keyDown(root, { key: "ArrowUp" })
+    expect(highlightedText(container)).toBe("C")
+  })
+
+  it("Escape on a multi-selection first collapses to one, then deselects", () => {
+    const { container } = render(<Harness initial={"A\nB\nC"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true })
+    expect(container.querySelectorAll(".bg-bg-secondary")).toHaveLength(2)
+    fireEvent.keyDown(root, { key: "Escape" })
+    expect(container.querySelectorAll(".bg-bg-secondary")).toHaveLength(1)
+    fireEvent.keyDown(root, { key: "Escape" })
+    expect(highlightedText(container)).toBeNull()
+  })
+})
+
+describe("select-mode paste", () => {
+  function paste(target: HTMLElement, text: string) {
+    fireEvent.paste(target, { clipboardData: { getData: () => text } })
+  }
+
+  it("pastes parsed blocks after the selected block without entering edit mode", () => {
+    const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
+    const root = editorRoot(container)
+    paste(root, "# New heading\r\n- new bullet")
+    const md = getByTestId("serialized").textContent!
+    const lines = md.split("\n").filter((l) => !l.includes("id::") && l.trim() !== "")
+    expect(lines).toEqual(["A", "# New heading", "- new bullet", "B"])
+    // No textarea opened; the last inserted block is highlighted.
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(highlightedText(container)).toBe("new bullet")
+  })
+
+  it("reminting keeps a pasted id:: from clobbering an existing block", () => {
+    const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
+    const root = editorRoot(container)
+    const existingId = getByTestId("serialized").textContent!.match(/id:: (\S+)/)![1]
+    paste(root, `stolen\n  id:: ${existingId}`)
+    const md = getByTestId("serialized").textContent!
+    // The original block still exists under its id, and the paste got a new one.
+    expect(md).toContain("A")
+    expect(md).toContain("stolen")
+    expect(md.match(new RegExp(`id:: ${existingId}`, "g"))).toHaveLength(1)
+  })
+
+  it("pastes multi-line GFM todos as todo blocks (round-trip)", () => {
+    const { getByTestId, container } = render(<Harness initial={"A"} />)
+    paste(editorRoot(container), "- [ ] one\n- [x] two")
+    const md = getByTestId("serialized").textContent!
+    expect(md).toContain("[ ] one")
+    expect(md).toContain("[x] two")
+    expect(md).not.toContain("- [ ]")
+  })
+})
+
+describe("duplicate + move via keyboard", () => {
+  it("Shift+Alt+ArrowDown duplicates the selected block below", () => {
+    const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true, altKey: true })
+    const md = getByTestId("serialized").textContent!
+    const lines = md.split("\n").filter((l) => !l.includes("id::") && l.trim() !== "")
+    expect(lines).toEqual(["A", "A", "B"])
+    // The copy (below) is now the highlighted block.
+    expect(highlightedText(container)).toBe("A")
+  })
+
+  it("Shift+Alt+Arrow duplicates a multi-selection as a group", () => {
+    const { container, getByTestId } = render(<Harness initial={"A\nB\nC"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true }) // select A+B
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true, altKey: true })
+    const md = getByTestId("serialized").textContent!
+    const lines = md.split("\n").filter((l) => !l.includes("id::") && l.trim() !== "")
+    expect(lines).toEqual(["A", "B", "A", "B", "C"])
+    // The copies are selected as a range.
+    const highlighted = Array.from(container.querySelectorAll(".bg-bg-secondary")).map(
+      (el) => el.textContent,
+    )
+    expect(highlighted).toEqual(["A", "B"])
+  })
+
+  it("Alt+Arrow moves a multi-selection as a group", () => {
+    const { container, getByTestId } = render(<Harness initial={"A\nB\nC"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true }) // select A+B
+    fireEvent.keyDown(root, { key: "ArrowDown", altKey: true })
+    const md = getByTestId("serialized").textContent!
+    const lines = md.split("\n").filter((l) => !l.includes("id::") && l.trim() !== "")
+    expect(lines).toEqual(["C", "A", "B"])
+  })
+})

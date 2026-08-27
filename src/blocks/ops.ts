@@ -116,6 +116,121 @@ export function spliceBlocks(
   return { doc: next, lastId }
 }
 
+/**
+ * Insert `sub`'s root blocks as siblings immediately AFTER `targetId`, merging
+ * `sub.blocks` into the doc. Unlike `spliceBlocks` the target block survives
+ * untouched (its id — and any `((blk_x))` transclusions of it — stay valid).
+ * Used by select-mode paste. Returns the new doc and the id of the last
+ * inserted root block, or `null` if `targetId` is unknown or `sub` is empty.
+ */
+export function insertBlocksAfter(
+  doc: BlockDoc,
+  targetId: string,
+  sub: BlockDoc,
+): { doc: BlockDoc; lastId: string } | null {
+  const parentId = findParentId(doc, targetId)
+  if (parentId === undefined || sub.rootBlockIds.length === 0) return null
+  const next = clone(doc)
+  for (const [bid, block] of Object.entries(sub.blocks)) next.blocks[bid] = block
+  const list = [...siblingList(next, parentId)]
+  list.splice(list.indexOf(targetId) + 1, 0, ...sub.rootBlockIds)
+  if (parentId === null) next.rootBlockIds = list
+  else next.blocks[parentId] = { ...next.blocks[parentId], children: list }
+  return { doc: next, lastId: sub.rootBlockIds[sub.rootBlockIds.length - 1] }
+}
+
+/**
+ * Remint any block ids in `sub` (a freshly parsed clipboard fragment) that
+ * already exist in `doc`, so merging the two never clobbers an existing block —
+ * pasting a block that still carries its `id::` line must create a copy, not
+ * overwrite the original. Child references are remapped along with the ids.
+ * Returns `sub` unchanged when there are no collisions.
+ */
+export function remintCollidingIds(sub: BlockDoc, doc: BlockDoc): BlockDoc {
+  const colliding = Object.keys(sub.blocks).filter((id) => id in doc.blocks)
+  if (colliding.length === 0) return sub
+  const mapping = new Map<string, string>()
+  for (const id of colliding) {
+    let fresh = blockId()
+    while (fresh in doc.blocks || fresh in sub.blocks) fresh = blockId()
+    mapping.set(id, fresh)
+  }
+  const rename = (id: string) => mapping.get(id) ?? id
+  const blocks: Record<string, Block> = {}
+  for (const block of Object.values(sub.blocks)) {
+    const id = rename(block.id)
+    blocks[id] = { id, content: block.content, children: block.children.map(rename) }
+  }
+  return { ...sub, rootBlockIds: sub.rootBlockIds.map(rename), blocks }
+}
+
+/** Deep-copy `id`'s subtree into `into` with fresh ids; returns the copy's root id. */
+function cloneSubtree(doc: BlockDoc, id: string, into: Record<string, Block>): string {
+  const block = doc.blocks[id]
+  const fresh = blockId()
+  into[fresh] = {
+    id: fresh,
+    content: block.content,
+    children: block.children.map((child) => cloneSubtree(doc, child, into)),
+  }
+  return fresh
+}
+
+/**
+ * Duplicate the subtrees of `ids` (selection roots, in document order) with
+ * fresh ids throughout, inserting the copies as one contiguous group of
+ * siblings immediately after the last original (`below`) or before the first
+ * (`above`). Returns the new doc and the copies' root ids, or `null` if
+ * nothing could be duplicated.
+ */
+export function duplicateBlocks(
+  doc: BlockDoc,
+  ids: string[],
+  direction: "above" | "below",
+): { doc: BlockDoc; copies: string[] } | null {
+  const known = ids.filter((id) => doc.blocks[id])
+  if (known.length === 0) return null
+  const anchor = direction === "below" ? known[known.length - 1] : known[0]
+  const parentId = findParentId(doc, anchor)
+  if (parentId === undefined) return null
+  const next = clone(doc)
+  const added: Record<string, Block> = {}
+  const copies = known.map((id) => cloneSubtree(doc, id, added))
+  Object.assign(next.blocks, added)
+  const list = [...siblingList(next, parentId)]
+  const i = list.indexOf(anchor)
+  list.splice(direction === "below" ? i + 1 : i, 0, ...copies)
+  if (parentId === null) next.rootBlockIds = list
+  else next.blocks[parentId] = { ...next.blocks[parentId], children: list }
+  return { doc: next, copies }
+}
+
+/**
+ * Move a contiguous group of sibling blocks one position up or down among
+ * their shared parent's children (subtrees ride along). A no-op when the ids
+ * span parents, aren't contiguous siblings, or are already at the boundary.
+ */
+export function moveBlocks(doc: BlockDoc, ids: string[], direction: "up" | "down"): BlockDoc {
+  if (ids.length === 0) return doc
+  const parentId = findParentId(doc, ids[0])
+  if (parentId === undefined) return doc
+  for (const id of ids.slice(1)) if (findParentId(doc, id) !== parentId) return doc
+  const list = siblingList(doc, parentId)
+  const indices = ids.map((id) => list.indexOf(id)).sort((a, b) => a - b)
+  if (indices[0] === -1) return doc
+  for (let k = 1; k < indices.length; k++) if (indices[k] !== indices[0] + k) return doc
+  const lo = indices[0]
+  const hi = indices[indices.length - 1]
+  if (direction === "up" ? lo === 0 : hi === list.length - 1) return doc
+  const next = clone(doc)
+  const newList = [...list]
+  const group = newList.splice(lo, indices.length)
+  newList.splice(direction === "up" ? lo - 1 : lo + 1, 0, ...group)
+  if (parentId === null) next.rootBlockIds = newList
+  else next.blocks[parentId] = { ...next.blocks[parentId], children: newList }
+  return next
+}
+
 function subtreeIds(doc: BlockDoc, id: string): string[] {
   const out: string[] = []
   const walk = (bid: string) => {

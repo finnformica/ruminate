@@ -82,14 +82,13 @@ function HelpContent({
 
         <div className="overflow-auto scroll-mask grid content-start divide-y divide-border-secondary">
           <HelpSection title="Links">
-            <HelpLink href="https://github.com/lumen-notes/lumen/issues/new">
+            <HelpLink href="https://github.com/finnformica/ruminate/issues/new">
               Send feedback
             </HelpLink>
-            <HelpLink href="https://github.com/lumen-notes/lumen/blob/main/CHANGELOG.md">
+            <HelpLink href="https://github.com/finnformica/ruminate/blob/main/CHANGELOG.md">
               Changelog
             </HelpLink>
-            <HelpLink href="https://github.com/lumen-notes/lumen">GitHub</HelpLink>
-            <HelpLink href="https://twitter.com/lumen_notes">Twitter</HelpLink>
+            <HelpLink href="https://github.com/finnformica/ruminate">GitHub</HelpLink>
           </HelpSection>
 
           <HelpSection title="Global shortcuts">
@@ -113,16 +112,8 @@ function HelpContent({
 
           <HelpSection title="Note shortcuts">
             <HelpItem>
-              <span>Toggle editing</span>
-              <Keys keys={["⌘", "E"]} />
-            </HelpItem>
-            <HelpItem>
               <span>Save note</span>
               <Keys keys={["⌘", "S"]} />
-            </HelpItem>
-            <HelpItem>
-              <span>Save and view</span>
-              <Keys keys={["⌘", "⏎"]} />
             </HelpItem>
           </HelpSection>
 
