@@ -82,7 +82,7 @@ export function NoteTitle({
   return (
     // pl-8 aligns the title with the block content column (past the block
     // editor's collapse-toggle gutter). The # hangs to its left as a marker.
-    <h1 className="relative font-content text-3xl font-bold leading-tight">
+    <h1 className="relative font-content text-3xl font-bold leading-tight tracking-[-0.02em]">
       <span
         aria-hidden
         className="pointer-events-none absolute left-0.5 top-0 select-none text-text-tertiary"
@@ -154,8 +154,9 @@ export function NoteTitle({
             }
           }}
           className={cx(
-            "cursor-text rounded-sm py-0 pl-8 pr-0 outline-none",
-            selected && "bg-bg-secondary",
+            "cursor-text rounded-sm py-0 pl-8 pr-0 outline-none transition-colors duration-100",
+            // Same selection treatment as a block (see .block-highlight).
+            selected && "bg-bg-secondary block-highlight",
           )}
         >
           {value || <span className="text-text-tertiary">Untitled</span>}

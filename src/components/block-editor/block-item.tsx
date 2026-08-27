@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef } from "react"
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from "react"
 import { cx } from "../../utils/cx"
 import type { Block, BlockDoc } from "../../blocks/types"
@@ -64,13 +64,13 @@ function headingTopMargin(type: BlockType, depth: number): string {
   if (type.kind !== "heading") return ""
   switch (depth) {
     case 0:
-      return "mt-3"
+      return "mt-5"
     case 1:
-      return "mt-2"
+      return "mt-4"
     case 2:
-      return "mt-1.5"
+      return "mt-2.5"
     default:
-      return "mt-1"
+      return "mt-1.5"
   }
 }
 
@@ -86,20 +86,25 @@ function headingTopMargin(type: BlockType, depth: number): string {
 function typographyFor(type: BlockType, depth: number): string {
   switch (type.kind) {
     case "heading":
+      // Headings tighten as they grow: large display sizes get a snugger
+      // line-height and slightly negative tracking (see the type scale in
+      // docs/design-principles.md).
       switch (depth) {
         case 0:
-          return "text-2xl font-bold"
+          return "text-2xl font-bold leading-tight tracking-[-0.015em]"
         case 1:
-          return "text-xl font-bold"
+          return "text-xl font-bold leading-tight tracking-[-0.01em]"
         case 2:
-          return "text-lg font-bold"
+          return "text-lg font-bold leading-snug"
         default:
-          return "text-base font-bold underline"
+          // Floors at body size; a soft offset underline keeps it reading as a
+          // heading without the weight of a full text-color rule.
+          return "text-base font-bold leading-relaxed underline decoration-[color:var(--neutral-a6)] decoration-2 underline-offset-4"
       }
     case "quote":
-      return "italic text-text-secondary"
+      return "text-base leading-relaxed text-text-secondary"
     default:
-      return "text-base"
+      return "text-base leading-relaxed"
   }
 }
 
@@ -128,6 +133,14 @@ export function BlockItem({
   // Set by a Cmd/Ctrl+Shift+V keydown so the paste event that follows inserts
   // plain text at the caret (newlines collapsed, no block splitting).
   const plainPaste = useRef(false)
+
+  // True only on the render where the block goes collapsed → open, so the
+  // revealed children play their brief entrance (never on initial mount).
+  const prevCollapsedRef = useRef(isCollapsed)
+  const justExpanded = prevCollapsedRef.current && !isCollapsed
+  useEffect(() => {
+    prevCollapsedRef.current = isCollapsed
+  }, [isCollapsed])
 
   const type = getBlockType(block.content)
   // The block is edited and rendered *without* its marker (the `- `, `# `,
@@ -294,7 +307,7 @@ export function BlockItem({
           disabled={readOnly}
           onClick={(event) => event.stopPropagation()}
           onChange={() => api.onContentChange(block.id, toggleTodo(block.content))}
-          className={cx("size-4 accent-text", readOnly ? "cursor-default" : "cursor-pointer")}
+          className={cx("block-checkbox", readOnly ? "cursor-default" : "cursor-pointer")}
         />
       </span>
     ) : type.kind === "bullet" && !zoomTitle ? (
@@ -305,12 +318,26 @@ export function BlockItem({
             aria-label="Zoom into block"
             tabIndex={-1}
             onClick={() => api.zoomInto(block.id)}
-            className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 hover:bg-bg-secondary"
+            className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-colors duration-150 hover:bg-bg-secondary"
           >
-            <span aria-hidden className="size-1.5 rounded-full bg-text-secondary" />
+            <span
+              aria-hidden
+              className={cx(
+                "size-1.5 rounded-full bg-text-secondary",
+                // A halo marks a bullet whose children are hidden (Logseq-style),
+                // so collapsed content is never a secret.
+                isCollapsed && hasChildren && "ring-[3px] ring-[color:var(--neutral-a4)]",
+              )}
+            />
           </button>
         ) : (
-          <span aria-hidden className="size-1.5 rounded-full bg-text-secondary" />
+          <span
+            aria-hidden
+            className={cx(
+              "size-1.5 rounded-full bg-text-secondary",
+              isCollapsed && hasChildren && "ring-[3px] ring-[color:var(--neutral-a4)]",
+            )}
+          />
         )}
       </span>
     ) : type.kind === "ordered" && !zoomTitle ? (
@@ -321,7 +348,7 @@ export function BlockItem({
             aria-label="Zoom into block"
             tabIndex={-1}
             onClick={() => api.zoomInto(block.id)}
-            className="-mx-0.5 cursor-pointer rounded-sm px-0.5 hover:bg-bg-secondary"
+            className="-mx-0.5 cursor-pointer rounded-sm px-0.5 transition-colors duration-150 hover:bg-bg-secondary"
           >
             {type.number}.
           </button>
@@ -338,7 +365,7 @@ export function BlockItem({
   return (
     <div
       data-block-row={block.id}
-      className={cx(zoomTitle ? "mb-2" : headingTopMargin(type, depth))}
+      className={cx("group/subtree", zoomTitle ? "mb-3" : headingTopMargin(type, depth))}
     >
       <div className="group relative flex items-start gap-1">
         {/* The toggle stays a fixed square; the wrapper mirrors the content
@@ -355,7 +382,7 @@ export function BlockItem({
                 disableTooltip
                 tabIndex={-1}
                 onClick={() => api.zoomInto(block.id)}
-                className="size-6 shrink-0 p-0 text-text-tertiary opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                className="size-6 shrink-0 p-0 text-text-tertiary opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover:opacity-100"
               >
                 <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
                   <circle
@@ -379,8 +406,13 @@ export function BlockItem({
               tabIndex={-1}
               onClick={() => api.toggleCollapse(block.id)}
               className={cx(
-                "size-6 shrink-0 p-0 text-text-tertiary",
-                (zoomTitle || !hasChildren) && "pointer-events-none opacity-0",
+                "size-6 shrink-0 p-0 text-text-tertiary transition-opacity duration-150",
+                zoomTitle || !hasChildren
+                  ? "pointer-events-none opacity-0"
+                  : // Quiet chrome: the toggle appears on row hover (its space is
+                    // always reserved, so nothing shifts) — except a collapsed
+                    // block, which keeps it visible so hidden content shows.
+                    !isCollapsed && "opacity-0 focus-visible:opacity-100 group-hover:opacity-100",
               )}
             >
               <svg
@@ -388,7 +420,10 @@ export function BlockItem({
                 height="8"
                 viewBox="0 0 8 8"
                 aria-hidden
-                className={cx("transition-transform", isCollapsed ? "rotate-0" : "rotate-90")}
+                className={cx(
+                  "transition-transform duration-200 ease-[var(--ease-out-strong)] motion-reduce:transition-none",
+                  isCollapsed ? "rotate-0" : "rotate-90",
+                )}
               >
                 <path d="M2 1l4 3-4 3z" fill="currentColor" />
               </svg>
@@ -404,8 +439,11 @@ export function BlockItem({
             data-block-line
             className={cx(
               "flex items-start gap-2 rounded-sm px-1",
-              selected && "bg-bg-secondary",
-              type.kind === "quote" && "border-l-2 border-border-secondary pl-2",
+              // bg-bg-secondary is the structural "selected" hook (tests query
+              // it); .block-highlight paints the accent tint over it so
+              // selection reads as selected, not hovered.
+              selected && "bg-bg-secondary block-highlight",
+              type.kind === "quote" && "border-l-2 border-border pl-3",
             )}
           >
             {marker}
@@ -435,6 +473,9 @@ export function BlockItem({
                   "min-h-[1lh] min-w-0 flex-1 outline-none",
                   !readOnly && "cursor-text",
                   typo,
+                  // Checking a todo mutes its text; the fade marks the state
+                  // change without delaying it.
+                  type.kind === "todo" && "transition-colors duration-200",
                   type.kind === "todo" && type.checked && "text-text-secondary line-through",
                 )}
                 {...(readOnly
@@ -453,7 +494,14 @@ export function BlockItem({
 
       {hasChildren && !isCollapsed && !zoomTitle ? (
         // Left margin puts the guide line under the toggle's centre (w-6 → 12px).
-        <div className="ml-3 border-l border-border-secondary pl-3">
+        // The guide brightens while the pointer is anywhere in the subtree
+        // (group/subtree is the block's outer wrapper), tracing the structure.
+        <div
+          className={cx(
+            "ml-3 border-l border-border-secondary pl-3 transition-colors duration-200 group-hover/subtree:border-[color:var(--neutral-a6)]",
+            justExpanded && "block-expand",
+          )}
+        >
           {block.children.map((childId) => {
             const child = doc.blocks[childId]
             if (!child) return null

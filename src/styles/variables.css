@@ -129,6 +129,9 @@
   --border-radius-xl: calc(var(--border-radius-base) + 8px);
   --border-radius-full: 9999px;
 
+  /* Motion */
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+
   /* Icons */
   --icon-size: 16px;
 
