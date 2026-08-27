@@ -382,6 +382,26 @@ await story("blockeditor--mixed")
   )
 }
 
+// --- Selection ladder: Cmd+A escalates by structure, Cmd+Shift+A steps back ---
+await story("blockeditor--mixed")
+{
+  const mod = process.platform === "darwin" ? "Meta" : "Control"
+  const highlighted = () =>
+    page.evaluate(() => document.querySelectorAll("[data-block-line].bg-bg-secondary").length)
+  await block("A nested bullet").click() // a leaf, one level deep
+  check("ladder: click selects one block", (await highlighted()) === 1)
+  await page.keyboard.press(`${mod}+a`)
+  await page.waitForTimeout(80)
+  check("ladder: Cmd+A selects the parent's subtree", (await highlighted()) === 2)
+  await page.keyboard.press(`${mod}+a`)
+  await page.waitForTimeout(80)
+  check("ladder: Cmd+A again selects the whole page", (await highlighted()) === 7)
+  await page.keyboard.press(`${mod}+Shift+a`)
+  await page.waitForTimeout(80)
+  check("ladder: Cmd+Shift+A shrinks back one rung", (await highlighted()) === 2)
+  await page.keyboard.press("Escape")
+}
+
 // --- Keyboard navigation highlights, doesn't edit ---
 await story("blockeditor--mixed")
 await block("Project ideas").click() // select first

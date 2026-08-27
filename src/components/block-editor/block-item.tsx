@@ -46,6 +46,11 @@ export interface BlockEditorApi {
    * was consumed (so the caller can `preventDefault`).
    */
   dispatchKey: (mode: Mode, id: string, event: KeyLike, caret?: CaretInput) => boolean
+  /**
+   * Exit edit mode and take the first selection-ladder rung on this block
+   * (Cmd/Ctrl+A pressed with the textarea's text already fully selected).
+   */
+  startSelectionLadder: (id: string) => void
 }
 
 /** Extra space above a heading, proportional to its size (i.e. its outline
@@ -181,6 +186,23 @@ export function BlockItem({
     plainPaste.current =
       (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "v"
     if (plainPaste.current) return
+    // Cmd/Ctrl+A: the first press is the native textarea select-all. A press
+    // with the text already fully selected (or an empty textarea) escalates
+    // instead — exit edit mode and start the selection ladder on this block.
+    if (
+      (event.metaKey || event.ctrlKey) &&
+      !event.altKey &&
+      !event.shiftKey &&
+      event.key.toLowerCase() === "a"
+    ) {
+      const allSelected =
+        el.value.length === 0 || (el.selectionStart === 0 && el.selectionEnd === el.value.length)
+      if (allSelected) {
+        event.preventDefault()
+        api.startSelectionLadder(block.id)
+      }
+      return
+    }
     // Line geometry is only needed to decide whether an arrow leaves the block,
     // and measuring it mirrors the textarea into the DOM — so skip it for every
     // other key.

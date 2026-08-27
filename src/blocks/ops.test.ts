@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  ancestorsOf,
   duplicateBlocks,
   emptyBlock,
   indentBlock,
@@ -11,6 +12,7 @@ import {
   remintCollidingIds,
   removeBlock,
   spliceBlocks,
+  subtreeIds,
   updateContent,
 } from "./ops"
 import { parse } from "./parse"
@@ -35,6 +37,53 @@ function fixture(): BlockDoc {
     },
   }
 }
+
+/** A deeper fixture for tree queries:
+ *   - a
+ *   - b
+ *     - b1
+ *       - b1a
+ *     - b2
+ *   - c
+ */
+function deepFixture(): BlockDoc {
+  return {
+    frontmatter: null,
+    rootBlockIds: ["a", "b", "c"],
+    blocks: {
+      a: { id: "a", content: "A", children: [] },
+      b: { id: "b", content: "B", children: ["b1", "b2"] },
+      b1: { id: "b1", content: "B1", children: ["b1a"] },
+      b1a: { id: "b1a", content: "B1a", children: [] },
+      b2: { id: "b2", content: "B2", children: [] },
+      c: { id: "c", content: "C", children: [] },
+    },
+  }
+}
+
+describe("subtreeIds", () => {
+  it("returns the block plus every descendant, depth-first", () => {
+    expect(subtreeIds(deepFixture(), "b")).toEqual(["b", "b1", "b1a", "b2"])
+  })
+
+  it("returns just the block for a leaf", () => {
+    expect(subtreeIds(deepFixture(), "b1a")).toEqual(["b1a"])
+  })
+})
+
+describe("ancestorsOf", () => {
+  it("lists ancestors nearest-first up to the root", () => {
+    expect(ancestorsOf(deepFixture(), "b1a")).toEqual(["b1", "b"])
+  })
+
+  it("is empty for a root block", () => {
+    expect(ancestorsOf(deepFixture(), "a")).toEqual([])
+  })
+
+  it("is empty for an unknown block", () => {
+    expect(ancestorsOf(deepFixture(), "nope")).toEqual([])
+  })
+})
 
 describe("emptyBlock", () => {
   it("mints a block with a fresh id and empty content by default", () => {

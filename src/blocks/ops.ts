@@ -231,13 +231,25 @@ export function moveBlocks(doc: BlockDoc, ids: string[], direction: "up" | "down
   return next
 }
 
-function subtreeIds(doc: BlockDoc, id: string): string[] {
+/** `id` plus every descendant, depth-first (just `[id]` for a leaf). */
+export function subtreeIds(doc: BlockDoc, id: string): string[] {
   const out: string[] = []
   const walk = (bid: string) => {
     out.push(bid)
     doc.blocks[bid]?.children.forEach(walk)
   }
   walk(id)
+  return out
+}
+
+/** `id`'s ancestors, nearest-first (empty for a root or unknown block). */
+export function ancestorsOf(doc: BlockDoc, id: string): string[] {
+  const out: string[] = []
+  let parent = findParentId(doc, id)
+  while (parent !== null && parent !== undefined) {
+    out.push(parent)
+    parent = findParentId(doc, parent)
+  }
   return out
 }
 

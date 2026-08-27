@@ -31,6 +31,8 @@ declaratively in `src/blocks/keymap.ts` and dispatched through the command layer
 | Move block (with its subtree)           | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> (or <kbd>⌘⇧</kbd> <kbd>↑/↓</kbd>) |
 | Duplicate block above / below           | <kbd>⇧</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                      |
 | Extend selection to more blocks         | <kbd>⇧</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                   |
+| Grow selection by structure (ladder)    | <kbd>⌘</kbd> <kbd>A</kbd>                                                  |
+| Shrink it back one rung                 | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>A</kbd>                                     |
 | Delete block(s)                         | <kbd>⌫</kbd> / <kbd>⌦</kbd>                                                |
 | Copy / cut selection                    | <kbd>⌘</kbd> <kbd>C</kbd> / <kbd>⌘</kbd> <kbd>X</kbd>                      |
 | Paste after the selection               | <kbd>⌘</kbd> <kbd>V</kbd>                                                  |
@@ -43,6 +45,31 @@ With more than one block selected, <kbd>⇥</kbd> / <kbd>⇧⇥</kbd>, delete,
 copy / cut / paste, move (<kbd>⌥↑/↓</kbd> or <kbd>⌘⇧↑/↓</kbd> — only when the
 selected blocks share a parent), and duplicate (<kbd>⇧⌥↑/↓</kbd>) act on the
 whole selection; <kbd>Esc</kbd> collapses back to one.
+
+#### Selection ladder
+
+Repeated <kbd>⌘</kbd> <kbd>A</kbd> grows the selection one structural rung at a
+time:
+
+1. **Editing a block**: the first press is the textarea's native select-all;
+   pressing again (with the text already fully selected) exits edit mode and
+   continues on the block.
+2. **A highlighted block**: the block plus all its visible descendants (a leaf
+   or fully-collapsed block skips straight to the next rung, so the press
+   always visibly does something).
+3. **Next press**: the parent's visible subtree — the parent block and
+   everything visible under it.
+4. Repeat up each ancestor, until
+5. **the whole page** (every visible block).
+
+<kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>A</kbd> steps back down one rung. Escape — or
+any other selection change (arrows, a click, a structural edit) — resets the
+ladder. Starting from a <kbd>⇧</kbd> <kbd>↑/↓</kbd> range, <kbd>⌘</kbd>
+<kbd>A</kbd> grows to the deepest subtree that contains the whole range. All
+multi-block actions (indent, delete, copy / cut, move, duplicate, paste-after)
+work on ladder selections. Like <kbd>⌘</kbd> <kbd>C</kbd> / <kbd>⌘</kbd>
+<kbd>X</kbd>, these two bindings are handled imperatively in the editor
+component rather than through the keymap table.
 
 Pasting in select mode parses the clipboard as markdown and inserts the blocks
 after the last selected block. <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd> instead
@@ -65,6 +92,7 @@ one line in the serialized format). With nothing selected (after
 | Jump to top / bottom of the level       | <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                   |
 | Exit edit, select block above / below   | <kbd>↑</kbd> / <kbd>↓</kbd> at the first / last line                       |
 | Paste as plain text (newlines → spaces) | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>                                     |
+| Select all text, then grow by structure | <kbd>⌘</kbd> <kbd>A</kbd> (repeat — see the selection ladder)              |
 | Strip the block's marker → merge up     | <kbd>⌫</kbd> at line start                                                 |
 
 Enter from a heading nests the new block underneath it. Enter on an empty list

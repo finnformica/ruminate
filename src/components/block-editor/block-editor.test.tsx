@@ -29,6 +29,28 @@ function Harness({ initial, startEditing }: { initial: string; startEditing?: bo
   )
 }
 
+/** Like `Harness`, but mirrors BlockNoteEditor's trailing-blank rule so the
+ * doc always keeps an empty block at the bottom (used to prove the editor
+ * lands in a sane state after deleting everything). */
+function BlankKeepingHarness({ initial }: { initial: string }) {
+  const [doc, setDoc] = useState<BlockDoc>(() => withStarter(parse(initial)))
+  const handleChange = (next: BlockDoc) => {
+    const lastId = next.rootBlockIds[next.rootBlockIds.length - 1]
+    const last = lastId ? next.blocks[lastId] : undefined
+    if (last && last.content === "" && last.children.length === 0) {
+      setDoc(next)
+      return
+    }
+    const block = emptyBlock()
+    setDoc({
+      ...next,
+      rootBlockIds: [...next.rootBlockIds, block.id],
+      blocks: { ...next.blocks, [block.id]: block },
+    })
+  }
+  return <BlockEditor doc={doc} onChange={handleChange} />
+}
+
 /** The editor's root (the focusable select-mode container). */
 function editorRoot(container: HTMLElement): HTMLElement {
   return container.querySelector<HTMLElement>('[tabindex="-1"]')!
@@ -37,6 +59,21 @@ function editorRoot(container: HTMLElement): HTMLElement {
 /** Text of the currently highlighted block (the row with the select background). */
 function highlightedText(container: HTMLElement): string | null {
   return container.querySelector(".bg-bg-secondary")?.textContent ?? null
+}
+
+/** Texts of every highlighted block, in document order. */
+function highlightedAll(container: HTMLElement): string[] {
+  return Array.from(container.querySelectorAll(".bg-bg-secondary")).map(
+    (el) => el.textContent ?? "",
+  )
+}
+
+/** Content lines of the serialized doc (id:: lines and blanks dropped),
+ * keeping indentation so nesting is visible. */
+function serializedLines(getByTestId: (id: string) => HTMLElement): string[] {
+  return getByTestId("serialized")
+    .textContent!.split("\n")
+    .filter((l) => !l.includes("id::") && l.trim() !== "")
 }
 
 describe("BlockEditor focus + keyboard", () => {
@@ -187,6 +224,222 @@ describe("select-mode paste", () => {
     expect(md).toContain("[ ] one")
     expect(md).toContain("[x] two")
     expect(md).not.toContain("- [ ]")
+  })
+})
+
+/** A nested fixture for the selection ladder:
+ *   A
+ *   B
+ *     C
+ *       D
+ *     E
+ *   F
+ */
+const NESTED = "A\nB\n  C\n    D\n  E\nF"
+
+/** Highlight the nth visible block by walking down from the first. */
+function selectNth(root: HTMLElement, n: number) {
+  for (let i = 0; i < n; i++) fireEvent.keyDown(root, { key: "ArrowDown" })
+}
+
+describe("selection ladder (Cmd+A escalation)", () => {
+  it("walks the ladder from a leaf: parent subtree → ancestor subtree → whole page", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 3) // D — a leaf two levels deep
+    expect(highlightedAll(container)).toEqual(["D"])
+    // A leaf's own subtree is just itself, so the first press already grows to
+    // the parent's subtree (the press always visibly does something).
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    expect(highlightedAll(container)).toEqual(["C", "D"])
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    expect(highlightedAll(container)).toEqual(["B", "C", "D", "E"])
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    expect(highlightedAll(container)).toEqual(["A", "B", "C", "D", "E", "F"])
+    // At the top there is nowhere further to grow.
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    expect(highlightedAll(container)).toEqual(["A", "B", "C", "D", "E", "F"])
+  })
+
+  it("first selects the block's own visible subtree when it has children", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 1) // B
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    expect(highlightedAll(container)).toEqual(["B", "C", "D", "E"])
+  })
+
+  it("treats a collapsed block's hidden children as absent", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 1) // B
+    fireEvent.keyDown(root, { key: " " }) // collapse B — C/D/E disappear
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    // B's visible subtree is just B, and B is a root → whole (visible) page.
+    expect(highlightedAll(container)).toEqual(["A", "B", "F"])
+  })
+
+  it("escalates an arbitrary Shift+Arrow range to the deepest containing subtree", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 3) // D
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true }) // D + E
+    expect(highlightedAll(container)).toEqual(["D", "E"])
+    // No block's subtree is exactly [D, E]; the deepest strict superset is B's.
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    expect(highlightedAll(container)).toEqual(["B", "C", "D", "E"])
+  })
+
+  it("Cmd+Shift+A shrinks back one rung at a time", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 3) // D
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    expect(highlightedAll(container)).toEqual(["B", "C", "D", "E"])
+    fireEvent.keyDown(root, { key: "a", metaKey: true, shiftKey: true })
+    expect(highlightedAll(container)).toEqual(["C", "D"])
+    fireEvent.keyDown(root, { key: "a", metaKey: true, shiftKey: true })
+    expect(highlightedAll(container)).toEqual(["D"])
+    // At the bottom of the ladder there is nothing left to pop.
+    fireEvent.keyDown(root, { key: "a", metaKey: true, shiftKey: true })
+    expect(highlightedAll(container)).toEqual(["D"])
+  })
+
+  it("any other selection change resets the ladder", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 3) // D
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    expect(highlightedAll(container)).toEqual(["C", "D"])
+    // An arrow collapses the range and moves the highlight — a non-ladder change.
+    fireEvent.keyDown(root, { key: "ArrowDown" })
+    expect(highlightedAll(container)).toEqual(["D"])
+    fireEvent.keyDown(root, { key: "a", metaKey: true, shiftKey: true })
+    expect(highlightedAll(container)).toEqual(["D"])
+  })
+
+  it("Escape on a ladder selection follows the Escape ladder (head, then nothing)", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 3) // D
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    expect(highlightedAll(container)).toEqual(["C", "D"])
+    fireEvent.keyDown(root, { key: "Escape" })
+    expect(highlightedAll(container)).toEqual(["C"])
+    fireEvent.keyDown(root, { key: "Escape" })
+    expect(highlightedAll(container)).toEqual([])
+  })
+
+  it("is a no-op on a sole root leaf, without breaking single-select commands", () => {
+    const { container } = render(<Harness initial={"A"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    expect(highlightedAll(container)).toEqual(["A"])
+    // Single-target commands still work on the unchanged selection.
+    fireEvent.keyDown(root, { key: "Enter" })
+    expect(container.querySelector("textarea")).not.toBeNull()
+  })
+})
+
+describe("selection ladder from edit mode", () => {
+  it("Cmd+A stays native until the text is fully selected, then starts the ladder", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 3) // D
+    fireEvent.keyDown(root, { key: "Enter" }) // edit D (caret at end)
+    const textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("D")
+    // Not fully selected: the press is left to the native textarea select-all.
+    fireEvent.keyDown(textarea, { key: "a", metaKey: true })
+    expect(container.querySelector("textarea")).not.toBeNull()
+    // Fully selected (as the native select-all would leave it): escalate.
+    textarea.setSelectionRange(0, textarea.value.length)
+    fireEvent.keyDown(textarea, { key: "a", metaKey: true })
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(highlightedAll(container)).toEqual(["C", "D"])
+    // The rung below the ladder start is the single block, back in select mode.
+    fireEvent.keyDown(root, { key: "a", metaKey: true, shiftKey: true })
+    expect(highlightedAll(container)).toEqual(["D"])
+  })
+
+  it("Cmd+A in an empty textarea escalates immediately", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "Enter", metaKey: true }) // new empty block after A, editing
+    const textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("")
+    fireEvent.keyDown(textarea, { key: "a", metaKey: true })
+    expect(container.querySelector("textarea")).toBeNull()
+    // The fresh block is a root leaf → straight to the whole page (7 blocks).
+    expect(highlightedAll(container)).toHaveLength(7)
+  })
+})
+
+describe("actions on ladder selections", () => {
+  it("Tab indents the subtree root once (not each child), and resets the ladder", () => {
+    const { container, getByTestId } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 3) // D
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    fireEvent.keyDown(root, { key: "a", metaKey: true }) // B's subtree
+    fireEvent.keyDown(root, { key: "Tab" })
+    expect(serializedLines(getByTestId)).toEqual(["A", "  B", "    C", "      D", "    E", "F"])
+    // The structural edit reset the ladder: shrink does nothing.
+    fireEvent.keyDown(root, { key: "a", metaKey: true, shiftKey: true })
+    expect(highlightedAll(container)).toEqual(["B", "C", "D", "E"])
+  })
+
+  it("Shift+Alt+ArrowDown duplicates a ladder selection as one group", () => {
+    const { container, getByTestId } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 3) // D
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    fireEvent.keyDown(root, { key: "a", metaKey: true }) // B's subtree
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true, altKey: true })
+    expect(serializedLines(getByTestId)).toEqual([
+      "A",
+      "B",
+      "  C",
+      "    D",
+      "  E",
+      "B",
+      "  C",
+      "    D",
+      "  E",
+      "F",
+    ])
+  })
+
+  it("Cmd+A to the whole page then Delete leaves a sane single-block state", () => {
+    const { container } = render(<BlankKeepingHarness initial={NESTED} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "a", metaKey: true }) // A is a root leaf → page
+    expect(highlightedAll(container)).toEqual(["A", "B", "C", "D", "E", "F"])
+    fireEvent.keyDown(root, { key: "Backspace" })
+    // Everything was removed; the trailing-blank rule leaves one empty block…
+    expect(container.querySelectorAll("[data-block-id]")).toHaveLength(1)
+    // …and the keyboard recovers: ArrowDown re-selects it, Enter edits it.
+    fireEvent.keyDown(root, { key: "ArrowDown" })
+    expect(container.querySelectorAll(".bg-bg-secondary")).toHaveLength(1)
+    fireEvent.keyDown(root, { key: "Enter" })
+    expect(container.querySelector("textarea")).not.toBeNull()
+  })
+
+  it("Enter on a ladder selection edits the head and clears the ladder", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 3) // D
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    expect(highlightedAll(container)).toEqual(["C", "D"])
+    fireEvent.keyDown(root, { key: "Enter" })
+    const textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("C")
+    fireEvent.keyDown(textarea, { key: "Escape" })
+    expect(highlightedAll(container)).toEqual(["C"])
+    // The single-target command cleared the ladder: shrink does nothing.
+    fireEvent.keyDown(root, { key: "a", metaKey: true, shiftKey: true })
+    expect(highlightedAll(container)).toEqual(["C"])
   })
 })
 

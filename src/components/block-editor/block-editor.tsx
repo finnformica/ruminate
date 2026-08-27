@@ -14,6 +14,7 @@ import { resolveKey, type KeyLike } from "../../blocks/keymap"
 import { parse } from "../../blocks/parse"
 import { toDisplayMarkdown } from "../../blocks/to-display-markdown"
 import {
+  ancestorsOf,
   duplicateBlocks,
   emptyBlock,
   indentBlock,
@@ -25,6 +26,7 @@ import {
   removeBlock,
   siblingsOf,
   spliceBlocks,
+  subtreeIds,
   updateContent,
 } from "../../blocks/ops"
 import { copyAsMarkdown } from "../../utils/copy-markdown"
@@ -209,6 +211,86 @@ export function BlockEditor({
     if (!anchorId) setAnchorId(selected)
     setFocus(null)
     setSelected(visibleOrder[next])
+  }
+
+  // ── Selection ladder (Cmd/Ctrl+A escalation) ──────────────────────────────
+  // Repeated Cmd/Ctrl+A grows the selection through structural units — block →
+  // its visible subtree → the parent's subtree → each ancestor → the whole
+  // page — and Cmd/Ctrl+Shift+A steps back down. The escalation itself is
+  // stateless (derived from the current selection each press); only the shrink
+  // history lives in a ref, cleared whenever the selection changes by any
+  // other means (arrows, click, Escape, structural edits). No timers.
+  const ladderRef = useRef<{ selected: string; anchorId: string | null }[]>([])
+  // Set just before a ladder move's own setState so the clear effect below can
+  // tell ladder-driven selection changes from everything else.
+  const ladderMove = useRef(false)
+  // Set by ladder moves so the centre-scroll effect can skip its jump when the
+  // selection head is already fully on screen.
+  const skipCenterScroll = useRef(false)
+  useEffect(() => {
+    if (ladderMove.current) {
+      ladderMove.current = false
+      return
+    }
+    ladderRef.current = []
+  }, [selected, anchorId, doc])
+
+  // The contiguous run of `visibleOrder` covered by `id`'s subtree: the block
+  // plus its visible descendants (just the block for a leaf or collapsed one).
+  const visibleSubtree = (id: string): string[] => {
+    const start = visibleOrder.indexOf(id)
+    if (start === -1) return []
+    const sub = new Set(subtreeIds(doc, id))
+    let end = start + 1
+    while (end < visibleOrder.length && sub.has(visibleOrder[end])) end++
+    return visibleOrder.slice(start, end)
+  }
+
+  // One rung up: grow `ids` (a contiguous run of `visibleOrder`) to the visible
+  // subtree of the deepest block strictly containing it — the head block itself
+  // when the selection is a strict subset of its own subtree, otherwise the
+  // nearest ancestor whose subtree covers it — falling back to the whole page
+  // (e.g. a selection spanning multiple roots). `snapshot` is the selection to
+  // restore when Cmd/Ctrl+Shift+A steps back down.
+  const escalateFrom = (ids: string[], snapshot: { selected: string; anchorId: string | null }) => {
+    if (ids.length === 0 || visibleOrder.length === 0) return
+    const first = ids[0]
+    const last = ids[ids.length - 1]
+    // `sub` when it strictly contains the selection (both endpoints of a
+    // contiguous range inside another contiguous range ⇒ the whole range is).
+    const strictSuperset = (rootId: string): string[] | null => {
+      const sub = visibleSubtree(rootId)
+      if (sub.length <= ids.length) return null
+      return sub.includes(first) && sub.includes(last) ? sub : null
+    }
+    let target = strictSuperset(first)
+    if (!target) {
+      for (const ancestor of ancestorsOf(doc, first)) {
+        target = strictSuperset(ancestor)
+        if (target) break
+      }
+    }
+    const range = target ?? visibleOrder
+    if (range.length <= ids.length) return // already the whole page
+    ladderRef.current.push(snapshot)
+    ladderMove.current = true
+    skipCenterScroll.current = true
+    setFocus(null)
+    setSelected(range[0])
+    setAnchorId(range[range.length - 1])
+  }
+  const escalateSelection = () => {
+    if (!selected) return
+    escalateFrom(selectedIds, { selected, anchorId })
+  }
+  const shrinkSelection = () => {
+    const prev = ladderRef.current.pop()
+    if (!prev || !doc.blocks[prev.selected]) return
+    ladderMove.current = true
+    skipCenterScroll.current = true
+    setFocus(null)
+    setSelected(prev.selected)
+    setAnchorId(prev.anchorId && doc.blocks[prev.anchorId] ? prev.anchorId : null)
   }
 
   // The top-level blocks of the selection (those with no selected ancestor), in
@@ -428,6 +510,16 @@ export function BlockEditor({
       setFocus({ id: result.lastId, caret })
     },
     dispatchKey,
+    startSelectionLadder: (id) => {
+      if (readOnly) return
+      // Called from edit mode (Cmd/Ctrl+A with the textarea already fully
+      // selected): leave edit mode and take the first ladder rung on the block.
+      setFocus(null)
+      setSelected(id)
+      setAnchorId(null)
+      focusContainer()
+      escalateFrom([id], { selected: id, anchorId: null })
+    },
   }
 
   // The container is the single keyboard target for select mode (see the focus
@@ -479,6 +571,14 @@ export function BlockEditor({
     ) {
       event.preventDefault()
       extendSelection(event.key === "ArrowUp" ? "up" : "down")
+      return
+    }
+    // Cmd/Ctrl+A grows the selection one structural rung (subtree → parent's
+    // subtree → … → page); +Shift steps back down the same ladder.
+    if (mod && !event.altKey && event.key.toLowerCase() === "a") {
+      event.preventDefault()
+      if (event.shiftKey) shrinkSelection()
+      else escalateSelection()
       return
     }
     // Copy / cut the current selection — one block or many.
@@ -578,9 +678,17 @@ export function BlockEditor({
     const row = containerRef.current?.querySelector<HTMLElement>(`[data-block-row="${selected}"]`)
     const line = row?.querySelector<HTMLElement>("[data-block-line]") ?? row
     if (!line || typeof line.scrollIntoView !== "function") return
+    // A ladder move keeps the head where the user's eyes already are — skip the
+    // centring jump when it's still fully on screen.
+    if (skipCenterScroll.current) {
+      skipCenterScroll.current = false
+      const rect = line.getBoundingClientRect()
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+      if (rect.top >= 0 && rect.bottom <= viewportHeight) return
+    }
     line.scrollIntoView({ block: "center" })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, focus, readOnly])
+  }, [selected, anchorId, focus, readOnly])
 
   // When focus falls to nothing (a click on empty page space) while a block is
   // still highlighted, keep the keyboard alive by re-grabbing focus. A click on
