@@ -37,6 +37,7 @@
     "@radix-ui/react-radio-group": "^1.2.0",
     "@radix-ui/react-slot": "^1.0.0",
     "@radix-ui/react-switch": "^1.0.3",
+    "@tanstack/react-router": "^1.112.18",
     "buffer": "^6.0.3",
     "chrono-node": "^2.7.0",
     "clsx": "^2.1.0",
