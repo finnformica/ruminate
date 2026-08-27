@@ -7,6 +7,7 @@ import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
 import type { BlockDoc } from "../../blocks/types"
 import type { BlockRevealRequest } from "../../utils/note-outline"
+import { richClipboardFormats } from "../../utils/rich-clipboard"
 import { BlockEditor } from "./block-editor"
 
 afterEach(cleanup)
@@ -203,8 +204,10 @@ describe("Escape ladder + keyboard recovery", () => {
 })
 
 describe("select-mode paste", () => {
-  function paste(target: HTMLElement, text: string) {
-    fireEvent.paste(target, { clipboardData: { getData: () => text } })
+  function paste(target: HTMLElement, text: string, html = "") {
+    fireEvent.paste(target, {
+      clipboardData: { getData: (type: string) => (type === "text/html" ? html : text) },
+    })
   }
 
   it("pastes parsed blocks after the selected block without entering edit mode", () => {
@@ -238,6 +241,45 @@ describe("select-mode paste", () => {
     expect(md).toContain("[ ] one")
     expect(md).toContain("[x] two")
     expect(md).not.toContain("- [ ]")
+  })
+
+  it("converts a text/html clipboard flavor to markdown blocks", () => {
+    const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
+    paste(
+      editorRoot(container),
+      "a b", // the flat plain flavor loses the nesting…
+      "<ul><li><b>a</b><ul><li>b</li></ul></li></ul>", // …the html keeps it
+    )
+    expect(serializedLines(getByTestId)).toEqual(["A", "- **a**", "  - b", "B"])
+  })
+
+  it("rebuilds the exact block tree from a Ruminate html payload", () => {
+    // Bare `[ ] ` todo markers + a quote child: the private payload restores
+    // them verbatim, which no plain/html conversion could guarantee.
+    const formats = richClipboardFormats("[ ] task\n  > child")
+    const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
+    paste(editorRoot(container), formats.plain, formats.html)
+    expect(serializedLines(getByTestId)).toEqual(["A", "[ ] task", "  > child", "B"])
+  })
+
+  it("Mod+Shift+V pastes the plain flavor as one block, ignoring html", () => {
+    const { container, getByTestId } = render(<Harness initial={"A"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "v", metaKey: true, shiftKey: true })
+    paste(root, "plain one\nplain two", "<ul><li>rich</li></ul>")
+    expect(serializedLines(getByTestId)).toEqual(["A", "plain one plain two"])
+  })
+
+  it("edit-mode paste converts the html flavor and splits into blocks", () => {
+    const { container, getByTestId } = render(<Harness initial={""} startEditing />)
+    const textarea = container.querySelector("textarea")!
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: (type: string) =>
+          type === "text/html" ? "<h2>Head</h2><ul><li>item</li></ul>" : "Head item",
+      },
+    })
+    expect(serializedLines(getByTestId)).toEqual(["# Head", "- item"])
   })
 })
 

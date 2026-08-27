@@ -11,6 +11,8 @@ import {
 } from "../../blocks/block-type"
 import type { CaretInput, Mode } from "../../blocks/commands"
 import type { KeyLike } from "../../blocks/keymap"
+import { htmlToMarkdown } from "../../utils/html-to-markdown"
+import { clipboardBlocksToMarkdown, extractClipboardBlocks } from "../../utils/rich-clipboard"
 import { IconButton } from "../icon-button"
 import { BlockContent } from "./block-content"
 import { caretLineFlags } from "./caret"
@@ -235,6 +237,7 @@ export function BlockItem({
     if (plain) {
       // Paste-as-plain: insert at the caret with newlines collapsed to single
       // spaces (a block is one line in the serialized format) — no splitting.
+      // Bypasses the html flavor entirely.
       event.preventDefault()
       const el = event.currentTarget
       const collapsed = normalized.replace(/\s*\n+\s*/g, " ")
@@ -244,14 +247,38 @@ export function BlockItem({
       api.onContentChange(block.id, prefix + before + collapsed + after)
       return
     }
-    // Single-line paste is ordinary inline insertion; only multi-line paste
-    // needs to be spread across blocks.
-    if (!normalized.includes("\n")) return
+    // Rich paste: prefer the html flavor — our own embedded block payload
+    // first (exact block markdown, no conversion), then foreign html converted
+    // to markdown — falling back to the plain text.
+    const html = event.clipboardData?.getData("text/html") ?? ""
+    let pasted = normalized
+    if (html.trim() !== "") {
+      const embedded = extractClipboardBlocks(html)
+      if (embedded && embedded.length > 0) {
+        pasted = clipboardBlocksToMarkdown(embedded)
+      } else {
+        const converted = htmlToMarkdown(html)
+        if (converted.trim() !== "") pasted = converted
+      }
+    }
+    if (!pasted.includes("\n")) {
+      // Single-line paste: plain text falls through to the browser's ordinary
+      // inline insertion; converted html (e.g. `**bold**`) is inserted manually.
+      if (pasted === normalized) return
+      event.preventDefault()
+      const el = event.currentTarget
+      const before = el.value.slice(0, el.selectionStart)
+      const after = el.value.slice(el.selectionEnd)
+      pendingCaret.current = (before + pasted).length
+      api.onContentChange(block.id, prefix + before + pasted + after)
+      return
+    }
+    // Multi-line paste is spread across blocks.
     event.preventDefault()
     const el = event.currentTarget
     const before = el.value.slice(0, el.selectionStart)
     const after = el.value.slice(el.selectionEnd)
-    api.onPaste(block.id, prefix, before, normalized, after)
+    api.onPaste(block.id, prefix, before, pasted, after)
   }
 
   // List markers double as zoom targets (Logseq-style: click the bullet to

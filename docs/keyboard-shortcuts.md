@@ -111,11 +111,18 @@ work on ladder selections. Like <kbd>⌘</kbd> <kbd>C</kbd> / <kbd>⌘</kbd>
 <kbd>X</kbd>, these two bindings are handled imperatively in the editor
 component rather than through the keymap table.
 
-Pasting in select mode parses the clipboard as markdown and inserts the blocks
-after the last selected block. <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd> instead
-inserts a single paragraph block with newlines collapsed to spaces (blocks are
-one line in the serialized format). With nothing selected (after
-<kbd>Esc</kbd>), <kbd>↓</kbd> / <kbd>↑</kbd> re-select the first / last block.
+Copying writes both plain markdown and a rich-text (HTML) flavor that carries
+the exact block tree, so blocks copied from Ruminate paste back into Ruminate
+(same note or another) with their structure, types, and nesting intact.
+Pasting in select mode prefers that embedded payload, then converts rich text
+from other apps (Google Docs, Notion, web pages — headings, lists, task lists,
+links, bold/italic/code) to markdown blocks, and otherwise parses the plain
+text as markdown; tab- and 4-space-indented outlines nest correctly. The
+blocks land after the last selected block. <kbd>⌘</kbd> <kbd>⇧</kbd>
+<kbd>V</kbd> instead ignores the rich flavor and inserts a single paragraph
+block with newlines collapsed to spaces (blocks are one line in the serialized
+format). With nothing selected (after <kbd>Esc</kbd>), <kbd>↓</kbd> /
+<kbd>↑</kbd> re-select the first / last block.
 
 ### Edit mode (typing in a block)
 
@@ -138,6 +145,11 @@ one line in the serialized format). With nothing selected (after
 
 Enter from a heading nests the new block underneath it. Enter on an empty list
 item exits the list.
+
+Pasting while editing follows the same rich-clipboard rules as select mode: a
+Ruminate copy splices in with its exact structure, rich text from other apps is
+converted to markdown blocks, and plain multi-line text is split into blocks
+at the caret. <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd> ignores the rich flavor.
 
 An arrow leaving the edited block **commits the edit and switches to select
 mode**: <kbd>↑</kbd> on the first visual line highlights the block above

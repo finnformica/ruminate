@@ -12,7 +12,6 @@ import {
 } from "../../blocks/commands"
 import { resolveKey, type KeyLike } from "../../blocks/keymap"
 import { parse } from "../../blocks/parse"
-import { toDisplayMarkdown } from "../../blocks/to-display-markdown"
 import {
   ancestorsOf,
   duplicateBlocks,
@@ -31,8 +30,14 @@ import {
   subtreeIds,
   updateContent,
 } from "../../blocks/ops"
-import { copyAsMarkdown } from "../../utils/copy-markdown"
+import { htmlToMarkdown } from "../../utils/html-to-markdown"
 import type { BlockRevealRequest } from "../../utils/note-outline"
+import {
+  clipboardBlocksToDoc,
+  extractClipboardBlocks,
+  richClipboardFormats,
+  writeRichClipboard,
+} from "../../utils/rich-clipboard"
 import { BlockItem, type BlockEditorApi, type FocusRequest } from "./block-item"
 import { useBlockHistory } from "./use-block-history"
 
@@ -556,8 +561,9 @@ export function BlockEditor({
     return lines.join("\n")
   }
   const copySelection = () => {
-    // Route through the shared copy path so it's clean display markdown.
-    copyAsMarkdown(selectionMarkdown())
+    // Both flavors: clean display markdown as text/plain, plus text/html with
+    // the exact block tree embedded so Ruminate→Ruminate paste round-trips.
+    writeRichClipboard(richClipboardFormats(selectionMarkdown()))
   }
   const cutSelection = () => {
     copySelection()
@@ -930,14 +936,15 @@ export function BlockEditor({
     event.preventDefault()
     const text = event.clipboardData?.getData("text/plain") ?? ""
     const normalized = text.replace(/\r\n?/g, "\n")
-    if (normalized.trim() === "") return
     const target = selectedIds[selectedIds.length - 1] ?? selected
     // Pasting "after" the zoomed title means the top of its body — a sibling
     // would land outside the view.
     const afterZoomTitle = zoomRootId !== null && target === zoomRootId
     if (plain) {
       // Paste-as-plain: one new paragraph block, newlines collapsed to spaces
-      // (a block is a single line in the serialized format).
+      // (a block is a single line in the serialized format). Bypasses the html
+      // flavor entirely.
+      if (normalized.trim() === "") return
       const fresh = emptyBlock(normalized.replace(/\s*\n+\s*/g, " ").trim())
       const next = afterZoomTitle
         ? insertFirstChild(doc, target, fresh)
@@ -949,9 +956,27 @@ export function BlockEditor({
       setSelected(fresh.id)
       return
     }
+    // Rich paste: prefer the html flavor — our own embedded block payload
+    // first (exact rebuild, no markdown parsing), then converted foreign html
+    // — and fall back to text/plain parsed as markdown, exactly as before.
+    const html = event.clipboardData?.getData("text/html") ?? ""
+    let pasted: BlockDoc | null = null
+    if (html.trim() !== "") {
+      const embedded = extractClipboardBlocks(html)
+      if (embedded && embedded.length > 0) {
+        pasted = clipboardBlocksToDoc(embedded)
+      } else {
+        const converted = htmlToMarkdown(html)
+        if (converted.trim() !== "") pasted = parse(converted)
+      }
+    }
+    if (!pasted) {
+      if (normalized.trim() === "") return
+      pasted = parse(normalized)
+    }
     // Remint any pasted ids that already exist here (e.g. content copied with
     // its `id::` lines) so the paste never clobbers an existing block.
-    const sub = remintCollidingIds(parse(normalized), doc)
+    const sub = remintCollidingIds(pasted, doc)
     const result = afterZoomTitle
       ? insertBlocksAsFirstChildren(doc, target, sub)
       : insertBlocksAfter(doc, target, sub)
@@ -1008,7 +1033,9 @@ export function BlockEditor({
     }
     if (!roots.every(covered)) return
 
-    event.clipboardData.setData("text/plain", toDisplayMarkdown(picked.join("\n")))
+    const formats = richClipboardFormats(picked.join("\n"))
+    event.clipboardData.setData("text/plain", formats.plain)
+    event.clipboardData.setData("text/html", formats.html)
     event.preventDefault()
 
     let next = doc
@@ -1050,8 +1077,11 @@ export function BlockEditor({
     if (picked.length < 2) return
     // Route through the same display-markdown path as every other copy action so
     // the result is clean markdown (blank lines between prose, GFM todos) rather
-    // than raw block lines with bare `[ ]` markers run together.
-    event.clipboardData.setData("text/plain", toDisplayMarkdown(picked.join("\n")))
+    // than raw block lines with bare `[ ]` markers run together — plus the html
+    // flavor carrying the exact block tree for a Ruminate→Ruminate round-trip.
+    const formats = richClipboardFormats(picked.join("\n"))
+    event.clipboardData.setData("text/plain", formats.plain)
+    event.clipboardData.setData("text/html", formats.html)
     event.preventDefault()
   }
 

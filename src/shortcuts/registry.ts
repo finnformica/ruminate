@@ -148,19 +148,19 @@ const CLIPBOARD_HISTORY_ENTRIES: Shortcut[] = [
   {
     combos: ["Mod+c"],
     scope: "select",
-    description: "Copy the selection as markdown",
+    description: "Copy the selection (markdown + rich text; pastes back into Ruminate exactly)",
     group: "Select mode",
   },
   {
     combos: ["Mod+x"],
     scope: "select",
-    description: "Cut the selection as markdown",
+    description: "Cut the selection (markdown + rich text)",
     group: "Select mode",
   },
   {
     combos: ["Mod+v"],
     scope: "select",
-    description: "Paste blocks after the selection",
+    description: "Paste blocks after the selection (rich text converts to markdown)",
     group: "Select mode",
   },
   {
