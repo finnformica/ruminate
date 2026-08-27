@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import tailwindcss from "@tailwindcss/vite"
 import { TanStackRouterVite } from "@tanstack/router-plugin/vite"
 import react from "@vitejs/plugin-react"
@@ -8,9 +9,16 @@ import type { PluginOption } from "vite"
 import { defineConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import { VitePWA } from "vite-plugin-pwa"
+import { defaultExclude } from "vitest/config"
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  test: {
+    // Keep vitest out of transient agent worktrees (checked out under
+    // `.claude/worktrees/` by Claude Code sessions), which otherwise get
+    // scanned as duplicate test trees without their own node_modules.
+    exclude: [...defaultExclude, "**/.claude/**"],
+  },
   plugins: [
     tailwindcss(),
     TanStackRouterVite(),

@@ -90,7 +90,7 @@ async function getUser(token: string) {
     error?: string
     id?: number
     login: string
-    name: string
+    name: string | null
   }
 
   if (error) {
@@ -125,5 +125,15 @@ async function getUser(token: string) {
     )
   }
 
-  return { id, login, name, email: primaryEmail.email }
+  return { id, login, name: resolveDisplayName(name, login), email: primaryEmail.email }
+}
+
+/**
+ * GitHub's `name` is null when the user never set a display name. Without this
+ * fallback the null would round-trip through the redirect query string as the
+ * literal string "null" and end up as the git `user.name`.
+ */
+export function resolveDisplayName(name: string | null | undefined, login: string): string {
+  const trimmed = typeof name === "string" ? name.trim() : ""
+  return trimmed && trimmed !== "null" ? trimmed : login
 }

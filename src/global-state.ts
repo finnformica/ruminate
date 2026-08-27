@@ -23,17 +23,20 @@ import {
   gitAdd,
   gitClone,
   gitCommit,
+  gitHasStagedChanges,
   gitPull,
   gitPush,
   gitRemove,
   isRepoSynced,
 } from "./utils/git"
+import { withGitLock } from "./utils/mutex"
+import { canRetrySync, isPushRejectionError } from "./utils/sync"
 import type { BlockRevealRequest, OutlineItem } from "./utils/note-outline"
 import { parseNote } from "./utils/parse-note"
 import { removeTemplateFrontmatter } from "./utils/remove-template-frontmatter"
 import { getSampleMarkdownFiles } from "./utils/sample-markdown-files"
 import { startTimer } from "./utils/timer"
-import { VIEW_STATE_PATH } from "./data/paths"
+import { LEGACY_VIEW_STATE_PATH, VIEW_STATE_DIR } from "./data/paths"
 
 // -----------------------------------------------------------------------------
 // State machine
@@ -47,6 +50,8 @@ type Context = {
   githubRepo: GitHubRepository | null
   markdownFiles: Record<string, string>
   error: Error | null
+  /** Pull→push attempts in the current sync cycle (bounded by MAX_SYNC_ATTEMPTS). */
+  syncAttempts: number
 }
 
 type Event =
@@ -94,7 +99,7 @@ function createGlobalStateMachine() {
             data: { isSynced: boolean }
           }
           writeFiles: {
-            data: void
+            data: { committed: boolean }
           }
           deleteFile: {
             data: void
@@ -108,6 +113,7 @@ function createGlobalStateMachine() {
         githubRepo: null,
         markdownFiles: {},
         error: null,
+        syncAttempts: 0,
       },
       states: {
         resolvingUser: {
@@ -191,10 +197,17 @@ function createGlobalStateMachine() {
                       entry: ["mergeMarkdownFiles", "mergeMarkdownFilesLocalStorage"],
                       invoke: {
                         src: "writeFiles",
-                        onDone: {
-                          target: "idle",
-                          actions: raise("SYNC_DEBOUNCED"),
-                        },
+                        onDone: [
+                          // Only kick off a sync when a commit actually
+                          // happened — a no-op write (e.g. unchanged content)
+                          // must not schedule a pull/push cycle.
+                          {
+                            target: "idle",
+                            cond: "didCommit",
+                            actions: raise("SYNC_DEBOUNCED"),
+                          },
+                          { target: "idle" },
+                        ],
                         onError: {
                           target: "idle",
                           actions: "setError",
@@ -221,19 +234,21 @@ function createGlobalStateMachine() {
                   initial: "pulling",
                   states: {
                     success: {
+                      entry: "resetSyncAttempts",
                       on: {
                         SYNC: "pulling",
                         SYNC_DEBOUNCED: "debouncing",
                       },
                     },
                     error: {
-                      entry: "logError",
+                      entry: ["logError", "resetSyncAttempts"],
                       on: {
                         SYNC: "pulling",
                         SYNC_DEBOUNCED: "debouncing",
                       },
                     },
                     debouncing: {
+                      entry: "resetSyncAttempts",
                       after: {
                         1000: "pulling",
                       },
@@ -264,7 +279,18 @@ function createGlobalStateMachine() {
                       invoke: {
                         src: "push",
                         onDone: "checkingStatus",
-                        onError: "error",
+                        onError: [
+                          // A rejected push (someone else pushed first) is
+                          // fixed by pulling again — bounded per sync cycle so
+                          // a persistent rejection can't loop forever. Network
+                          // and auth errors fall through to the error state.
+                          {
+                            target: "pulling",
+                            cond: "shouldRetryPush",
+                            actions: "incrementSyncAttempts",
+                          },
+                          { target: "error" },
+                        ],
                       },
                     },
                     checkingStatus: {
@@ -279,10 +305,14 @@ function createGlobalStateMachine() {
                             target: "success",
                             cond: "isSynced",
                           },
-                          // If not synced, pull again
+                          // If not synced, pull again — bounded by the same
+                          // per-cycle attempt budget as push retries.
                           {
                             target: "pulling",
+                            cond: "canRetrySync",
+                            actions: "incrementSyncAttempts",
                           },
+                          { target: "error" },
                         ],
                         onError: "error",
                       },
@@ -299,6 +329,10 @@ function createGlobalStateMachine() {
       guards: {
         isOffline: () => !navigator.onLine,
         isSynced: (_, event) => event.data.isSynced,
+        didCommit: (_, event) => event.data.committed,
+        canRetrySync: (context) => canRetrySync(context.syncAttempts),
+        shouldRetryPush: (context, event) =>
+          canRetrySync(context.syncAttempts) && isPushRejectionError(event.data),
       },
       services: {
         resolveUser: async () => {
@@ -410,71 +444,84 @@ function createGlobalStateMachine() {
         writeFiles: async (context, event) => {
           if (!context.githubUser) throw new Error("Not signed in")
 
-          const entries = Object.entries(event.markdownFiles)
-          const filesToWrite = entries.filter(([, content]) => content !== null)
-          const filesToDelete = entries.filter(([, content]) => content === null)
-          const fileList = entries.map(([filepath]) => filepath)
-          const commitMessage = event.commitMessage ?? `Update ${fileList.join(" ") || "notes"}`
+          // The whole write→stage→commit path holds the git lock so a commit
+          // can never land in the middle of a pull/push (and vice versa).
+          return withGitLock(async () => {
+            const entries = Object.entries(event.markdownFiles)
+            const filesToWrite = entries.filter(([, content]) => content !== null)
+            const filesToDelete = entries.filter(([, content]) => content === null)
+            const fileList = entries.map(([filepath]) => filepath)
+            const commitMessage = event.commitMessage ?? `Update ${fileList.join(" ") || "notes"}`
 
-          // Write files to file system
-          for (const [filepath, content] of filesToWrite) {
-            if (content === null) continue
+            // Write files to file system
+            for (const [filepath, content] of filesToWrite) {
+              if (content === null) continue
 
-            // Create directories if needed
-            const dirPath = filepath.split("/").slice(0, -1).join("/")
-            if (dirPath) {
-              let currentPath = REPO_DIR
-              const segments = dirPath.split("/")
+              // Create directories if needed
+              const dirPath = filepath.split("/").slice(0, -1).join("/")
+              if (dirPath) {
+                let currentPath = REPO_DIR
+                const segments = dirPath.split("/")
 
-              for (const segment of segments) {
-                currentPath = `${currentPath}/${segment}`
-                const stats = await fs.promises.stat(currentPath).catch(() => null)
-                const exists = stats !== null
-                if (!exists) {
-                  await fs.promises.mkdir(currentPath)
+                for (const segment of segments) {
+                  currentPath = `${currentPath}/${segment}`
+                  const stats = await fs.promises.stat(currentPath).catch(() => null)
+                  const exists = stats !== null
+                  if (!exists) {
+                    await fs.promises.mkdir(currentPath)
+                  }
                 }
+              }
+
+              // Write file
+              await fs.promises.writeFile(`${REPO_DIR}/${filepath}`, content, "utf8")
+            }
+
+            // Delete files from file system
+            for (const [filepath] of filesToDelete) {
+              await fs.promises.unlink(`${REPO_DIR}/${filepath}`).catch(() => null)
+            }
+
+            // Stage files
+            const filesToAdd = filesToWrite.map(([filepath]) => filepath)
+            if (filesToAdd.length > 0) {
+              await gitAdd(filesToAdd)
+            }
+
+            for (const [filepath] of filesToDelete) {
+              try {
+                await gitRemove(filepath)
+              } catch {
+                // Ignore if the file isn't tracked
               }
             }
 
-            // Write file
-            await fs.promises.writeFile(`${REPO_DIR}/${filepath}`, content, "utf8")
-          }
-
-          // Delete files from file system
-          for (const [filepath] of filesToDelete) {
-            await fs.promises.unlink(`${REPO_DIR}/${filepath}`).catch(() => null)
-          }
-
-          // Stage files
-          const filesToAdd = filesToWrite.map(([filepath]) => filepath)
-          if (filesToAdd.length > 0) {
-            await gitAdd(filesToAdd)
-          }
-
-          for (const [filepath] of filesToDelete) {
-            try {
-              await gitRemove(filepath)
-            } catch {
-              // Ignore if the file isn't tracked
+            // Commit files — but skip the commit entirely when nothing is
+            // actually staged (e.g. content identical to HEAD), so no-op
+            // writes never produce empty commits or sync cycles.
+            const committed = await gitHasStagedChanges(fileList)
+            if (committed) {
+              await gitCommit(commitMessage)
             }
-          }
 
-          // Commit files
-          await gitCommit(commitMessage)
+            return { committed }
+          })
         },
         deleteFile: async (context, event) => {
           if (!context.githubUser) throw new Error("Not signed in")
 
           const { filepath } = event
 
-          // Delete file from file system
-          await fs.promises.unlink(`${REPO_DIR}/${filepath}`)
+          await withGitLock(async () => {
+            // Delete file from file system
+            await fs.promises.unlink(`${REPO_DIR}/${filepath}`)
 
-          // Stage deletion
-          await gitRemove(filepath)
+            // Stage deletion
+            await gitRemove(filepath)
 
-          // Commit deletion
-          await gitCommit(`Delete ${filepath}`)
+            // Commit deletion
+            await gitCommit(`Delete ${filepath}`)
+          })
         },
       },
       actions: {
@@ -579,6 +626,12 @@ function createGlobalStateMachine() {
           // TODO: Remove `as Error`
           error: (_, event) => event.data as Error,
         }),
+        incrementSyncAttempts: assign({
+          syncAttempts: (context) => context.syncAttempts + 1,
+        }),
+        resetSyncAttempts: assign({
+          syncAttempts: 0,
+        }),
         logError: (_, event) => {
           console.error(event.data)
         },
@@ -612,8 +665,14 @@ async function getMarkdownFilesFromFs(dir: string) {
       // Ignore .git directory
       if (filepath.startsWith(".git")) return
 
-      // Keep markdown notes and the view-state sidecar; ignore everything else.
-      if (!filepath.endsWith(".md") && filepath !== VIEW_STATE_PATH) return
+      // Keep markdown notes and the view-state sidecars (per-note files plus
+      // the legacy single file, still read for migration); ignore the rest.
+      if (
+        !filepath.endsWith(".md") &&
+        filepath !== LEGACY_VIEW_STATE_PATH &&
+        !filepath.startsWith(`${VIEW_STATE_DIR}/`)
+      )
+        return
 
       // Get file content
       const content = await entry.content()
