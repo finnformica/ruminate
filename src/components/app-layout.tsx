@@ -3,6 +3,7 @@ import { useHotkeys } from "react-hotkeys-hook"
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels"
 import { useMedia } from "react-use"
 import { isHelpPanelOpenAtom, sidebarAtom } from "../global-state"
+import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { HelpDrawer, HelpSidebar } from "./help-panel"
 import { NavBar } from "./nav-bar"
@@ -25,17 +26,14 @@ export function AppLayout({ className, children }: AppLayoutProps) {
     storage: window.localStorage,
   })
 
-  // Toggle help panel with Cmd/Ctrl + /
+  // Toggle help panel with Cmd/Ctrl + / (plain ? also toggles it — see
+  // src/shortcuts/global-shortcuts.tsx)
   useHotkeys(
-    "mod+/",
+    APP_SHORTCUTS.helpPanel,
     () => {
       setHelpPanel((prev) => !prev)
     },
-    {
-      preventDefault: true,
-      enableOnFormTags: true,
-      enableOnContentEditable: true,
-    },
+    GLOBAL_HOTKEY_OPTIONS,
   )
 
   return (

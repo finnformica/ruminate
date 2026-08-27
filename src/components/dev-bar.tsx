@@ -2,6 +2,7 @@ import { useAtomValue } from "jotai"
 import React from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { globalStateMachineAtom } from "../global-state"
+import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 
 /**
  * Shows the current state of the global state machine for debugging purposes
@@ -11,11 +12,9 @@ export function DevBar() {
 
   // Toggle dev bar with ctrl+`
   const [isEnabled, setIsEnabled] = React.useState(false)
-  useHotkeys("ctrl+`", () => setIsEnabled((prev) => !prev), {
+  useHotkeys(APP_SHORTCUTS.devBar, () => setIsEnabled((prev) => !prev), {
+    ...GLOBAL_HOTKEY_OPTIONS,
     enabled: import.meta.env.DEV,
-    preventDefault: true,
-    enableOnFormTags: true,
-    enableOnContentEditable: true,
   })
 
   if (!isEnabled) return null

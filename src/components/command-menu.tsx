@@ -15,6 +15,7 @@ import {
   tagSearcherAtom,
 } from "../global-state"
 import { useNoteById, useSaveNote } from "../hooks/note"
+import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { useSearchNotes } from "../hooks/search-notes"
 import { Note } from "../schema"
@@ -178,18 +179,14 @@ export function CommandMenu() {
     [setIsOpen, navigate],
   )
 
-  useHotkeys("mod+k", toggleMenu, {
-    preventDefault: true,
-    enableOnFormTags: true,
-    enableOnContentEditable: true,
-  })
+  useHotkeys(APP_SHORTCUTS.commandMenu, toggleMenu, GLOBAL_HOTKEY_OPTIONS)
 
   // ⌘P opens the palette straight into outline mode (headings of the open
   // note). Pressed again while already in outline mode, it closes — the same
   // toggle feel as ⌘K; pressed while the commands palette is open, it switches
   // the open dialog into outline mode.
   useHotkeys(
-    "mod+p",
+    APP_SHORTCUTS.outlinePalette,
     () => {
       if (isOpen && mode === "outline") {
         closeMenu()
@@ -200,11 +197,7 @@ export function CommandMenu() {
         openMenu("outline")
       }
     },
-    {
-      preventDefault: true,
-      enableOnFormTags: true,
-      enableOnContentEditable: true,
-    },
+    GLOBAL_HOTKEY_OPTIONS,
   )
 
   // The query change handler owns the "@" prefix grammar: typed as the first

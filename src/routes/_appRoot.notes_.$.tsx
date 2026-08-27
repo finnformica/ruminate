@@ -35,6 +35,7 @@ import {
 import { useNoteById, useRenameNote, useSaveNote } from "../hooks/note"
 import { useSearchNotes } from "../hooks/search-notes"
 import { Note, NoteId, Template, Width, fontSchema, widthSchema } from "../schema"
+import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
 import { removeFrontmatterComments, updateFrontmatterValue } from "../utils/frontmatter"
@@ -294,17 +295,7 @@ function NotePage() {
   )
 
   // Save with ⌘S
-  useHotkeys(
-    "mod+s",
-    (event) => {
-      requestSave()
-      event.preventDefault()
-    },
-    {
-      enableOnFormTags: true,
-      enableOnContentEditable: true,
-    },
-  )
+  useHotkeys(APP_SHORTCUTS.save, () => requestSave(), GLOBAL_HOTKEY_OPTIONS)
 
   return (
     <PageLayout

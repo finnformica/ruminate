@@ -8,6 +8,7 @@ import { CommandMenu } from "../components/command-menu"
 import { DevBar } from "../components/dev-bar"
 import { ErrorIcon16 } from "../components/icons"
 import { globalStateMachineAtom } from "../global-state"
+import { GlobalShortcuts } from "../shortcuts/global-shortcuts"
 
 export const Route = createFileRoute("/_appRoot")({
   component: RouteComponent,
@@ -83,6 +84,7 @@ function RouteComponent() {
         <Outlet />
       </AppLayout>
       <CommandMenu />
+      <GlobalShortcuts />
       {/* <Toaster toastOptions={{ duration: 2000 }} /> */}
       <DevBar />
     </div>

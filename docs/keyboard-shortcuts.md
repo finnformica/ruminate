@@ -1,5 +1,10 @@
 # Keyboard shortcuts
 
+Every binding below is declared in the app's **shortcut registry**
+(`src/shortcuts/registry.ts`) — the same table the in-app reference renders
+from. Press <kbd>?</kbd> anywhere (outside a text field) to open that
+reference, complete with a filter box.
+
 ## Global
 
 | Action                            | Shortcut                               |
@@ -10,6 +15,21 @@
 | Save                              | <kbd>⌘</kbd> <kbd>S</kbd>              |
 | Toggle sidebar                    | <kbd>⌘</kbd> <kbd>B</kbd>              |
 | Toggle help panel                 | <kbd>⌘</kbd> <kbd>/</kbd>              |
+| Shortcut reference                | <kbd>?</kbd>                           |
+
+## Navigation
+
+`g` pressed outside any text field arms a short (~1.5s) chord window; the next
+key navigates. The chords work from the block editor's select mode too.
+
+| Action                              | Shortcut                                              |
+| ----------------------------------- | ----------------------------------------------------- |
+| Go to today's daily note            | <kbd>g</kbd> then <kbd>d</kbd>                        |
+| Go to the notes list                | <kbd>g</kbd> then <kbd>n</kbd>                        |
+| Go to tags                          | <kbd>g</kbd> then <kbd>t</kbd>                        |
+| Go to settings                      | <kbd>g</kbd> then <kbd>s</kbd>                        |
+| Focus the search (notes list, tags) | <kbd>/</kbd>                                          |
+| Back / forward (browser history)    | <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> |
 
 ### Outline palette
 
