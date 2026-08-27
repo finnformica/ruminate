@@ -3,6 +3,7 @@ import { useAtom } from "jotai"
 import { useHotkeys } from "react-hotkeys-hook"
 import { sidebarAtom } from "../global-state"
 import { useCreateNewNote } from "../hooks/create-new-note"
+import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { IconButton } from "./icon-button"
 import { ArrowLeftIcon16, ArrowRightIcon16, SidebarCollapsedIcon16 } from "./icons"
@@ -22,22 +23,14 @@ export function PageHeader({ title, icon, className, actions }: PageHeaderProps)
 
   // Toggle sidebar with Cmd/Ctrl + B
   useHotkeys(
-    "mod+b",
+    APP_SHORTCUTS.toggleSidebar,
     () => {
       setSidebar((prev) => (prev === "expanded" ? "collapsed" : "expanded"))
     },
-    {
-      preventDefault: true,
-      enableOnFormTags: true,
-      enableOnContentEditable: true,
-    },
+    GLOBAL_HOTKEY_OPTIONS,
   )
 
-  useHotkeys("mod+shift+o", createNewNote, {
-    preventDefault: true,
-    enableOnFormTags: true,
-    enableOnContentEditable: true,
-  })
+  useHotkeys(APP_SHORTCUTS.newNote, createNewNote, GLOBAL_HOTKEY_OPTIONS)
 
   return (
     <div className={cx("@container/header", className)}>

@@ -29,20 +29,23 @@ async function story(id) {
   await page.getByTestId("block-body").first().waitFor({ timeout: 10000 })
 }
 const serialized = () => page.locator('[data-testid="serialized"]').textContent()
+// A block's rendered body by its text. (The body is a plain div — an earlier
+// markup gave it role="button", which these tests used to query by.)
+const block = (name) => page.getByTestId("block-body").filter({ hasText: name })
 
 // --- Mixed: visual + block types render ---
 await story("blockeditor--mixed")
 await page.screenshot({ path: `${OUT}/01-mixed.png` })
-check("heading renders", await page.getByRole("button", { name: "Project ideas" }).isVisible())
+check("heading renders", await block("Project ideas").isVisible())
 check("checkbox renders", (await page.locator("input[type=checkbox]").count()) >= 2)
-check("bullet renders", await page.getByRole("button", { name: "A bullet point" }).isVisible())
+check("bullet renders", await block("A bullet point").isVisible())
 
 // --- Seamless view↔edit: a block must not move or resize when edited ---
 // Switching a block between its rendered view and its edit textarea must not
 // shift the text horizontally OR vertically, and must not change the block's
 // height (which would nudge every block below it — the visible "shift").
 async function measureViewVsEdit(name) {
-  const view = page.getByRole("button", { name })
+  const view = block(name)
   const viewBox = await view.boundingBox()
   await view.click()
   await page.keyboard.press("Enter") // select -> edit
@@ -54,7 +57,7 @@ async function measureViewVsEdit(name) {
 }
 
 // Screenshot the header block in both states so the pair is captured.
-await page.getByRole("button", { name: "Project ideas" }).scrollIntoViewIfNeeded()
+await block("Project ideas").scrollIntoViewIfNeeded()
 await page.screenshot({ path: `${OUT}/02a-viewing.png` })
 {
   const { viewBox, editBox, inputValue } = await measureViewVsEdit("Project ideas")
@@ -110,7 +113,7 @@ await page.screenshot({ path: `${OUT}/03-shortcuts.png` })
 // --- Typing a marker switches an existing block's type ---
 await story("blockeditor--mixed")
 {
-  const todo = page.getByRole("button", { name: "A todo" })
+  const todo = block("A todo")
   await todo.click()
   await page.keyboard.press("Enter") // edit
   await page.keyboard.press("Home")
@@ -130,22 +133,22 @@ await story("blockeditor--mixed")
   await page.screenshot({ path: `${OUT}/05-type-switch.png` })
 }
 
-// --- Shift-Enter inserts a new block *above* the current one ---
+// --- Shift-Enter splits into a new same-type block below the caret ---
 await story("blockeditor--mixed")
 {
-  const bullet = page.getByRole("button", { name: "A bullet point" })
+  const bullet = block("A bullet point")
   await bullet.click()
-  await page.keyboard.press("Enter") // edit
-  await page.keyboard.press("Shift+Enter") // insert a bullet above, now editing it
-  await page.keyboard.type("ABOVE")
+  await page.keyboard.press("Enter") // edit (caret at end)
+  await page.keyboard.press("Shift+Enter") // split: new same-type block below
+  await page.keyboard.type("BELOW")
   await page.waitForTimeout(150)
   const md = await serialized()
-  const aboveAt = md.indexOf("ABOVE")
+  const belowAt = md.indexOf("- BELOW")
   const bulletAt = md.indexOf("A bullet point")
   check(
-    "Shift-Enter inserts above",
-    aboveAt !== -1 && bulletAt !== -1 && aboveAt < bulletAt,
-    `above@${aboveAt} bullet@${bulletAt}`,
+    "Shift-Enter splits into a same-type block below",
+    belowAt !== -1 && bulletAt !== -1 && bulletAt < belowAt,
+    `below@${belowAt} bullet@${bulletAt}`,
   )
 }
 
@@ -259,21 +262,48 @@ await story("blockeditor--empty")
   await page.waitForTimeout(50)
   check("ArrowUp stays within a wrapped block", (await ta().inputValue()) === longText)
 
-  // Keep going up: eventually it leaves to the block above ("SHORT").
+  // Keep going up: leaving the block COMMITS the edit — edit mode exits and
+  // the block above is highlighted (select mode), not opened for editing.
   let left = false
   for (let i = 0; i < 8 && !left; i++) {
     await page.keyboard.press("ArrowUp")
     await page.waitForTimeout(20)
-    left = (await ta().inputValue()) === "SHORT"
+    left = (await page.locator("textarea").count()) === 0
   }
-  check("ArrowUp from the first visual line leaves the block", left)
+  check("ArrowUp from the first visual line exits edit mode", left)
+  const highlighted = await page.evaluate(
+    () => document.querySelector("[data-block-line].bg-bg-secondary")?.textContent ?? "",
+  )
+  check("the block above is highlighted, not edited", highlighted.includes("SHORT"), highlighted)
+}
+
+// --- ArrowDown on the last block exits edit mode, selecting the block itself ---
+await story("blockeditor--empty")
+{
+  await page
+    .getByTestId("block-body")
+    .first()
+    .evaluate((el) => el.focus())
+  await page.keyboard.press("Enter")
+  await page.locator("textarea").first().waitFor()
+  await page.keyboard.type("LAST")
+  await page.keyboard.press("ArrowDown")
+  await page.waitForTimeout(50)
+  check(
+    "ArrowDown at the last block exits edit mode",
+    (await page.locator("textarea").count()) === 0,
+  )
+  const highlighted = await page.evaluate(
+    () => document.querySelector("[data-block-line].bg-bg-secondary")?.textContent ?? "",
+  )
+  check("the exited block stays highlighted", highlighted.includes("LAST"), highlighted)
 }
 
 // --- Select-mode shortcuts: x toggles a todo, Space collapses a subtree ---
 await story("blockeditor--mixed")
 {
   // Select a todo and toggle its checkbox with `x`.
-  await page.getByRole("button", { name: "A todo" }).click()
+  await block("A todo").click()
   await page.keyboard.press("x")
   await page.waitForTimeout(120)
   let md = await serialized()
@@ -284,8 +314,8 @@ await story("blockeditor--mixed")
   check("x unchecks the todo", md.includes("[ ] A todo"))
 
   // Select a block with children and collapse/expand it with Space.
-  const child = page.getByRole("button", { name: "A nested bullet" })
-  await page.getByRole("button", { name: "A bullet point" }).click()
+  const child = block("A nested bullet")
+  await block("A bullet point").click()
   check("child visible before collapse", await child.isVisible())
   await page.keyboard.press("Space")
   await page.waitForTimeout(120)
@@ -311,9 +341,13 @@ await story("blockeditor--mixed")
   await page.goto(`${BASE}?id=notetitle--default&viewMode=story`, {
     waitUntil: "domcontentloaded",
   })
+  // The title starts in view mode (a focusable heading); click to edit it.
+  const title = page.getByRole("button").filter({ hasText: "Meeting notes" })
+  await title.waitFor({ timeout: 10000 })
+  check("title shows a leading #", await page.getByText("#", { exact: true }).isVisible())
+  await title.click()
   const input = page.getByRole("textbox", { name: "Note name" })
   await input.waitFor({ timeout: 10000 })
-  check("title shows a leading #", await page.getByText("#", { exact: true }).isVisible())
   check("title input holds the note name", (await input.inputValue()) === "Meeting notes")
   await input.fill("Renamed note")
   await input.press("Enter")
@@ -348,9 +382,75 @@ await story("blockeditor--mixed")
   )
 }
 
+// --- Selection ladder: Cmd+A escalates by structure, Cmd+Shift+A steps back ---
+await story("blockeditor--mixed")
+{
+  const mod = process.platform === "darwin" ? "Meta" : "Control"
+  const highlighted = () =>
+    page.evaluate(() => document.querySelectorAll("[data-block-line].bg-bg-secondary").length)
+  await block("A nested bullet").click() // a leaf, one level deep
+  check("ladder: click selects one block", (await highlighted()) === 1)
+  await page.keyboard.press(`${mod}+a`)
+  await page.waitForTimeout(80)
+  check("ladder: Cmd+A selects the parent's subtree", (await highlighted()) === 2)
+  await page.keyboard.press(`${mod}+a`)
+  await page.waitForTimeout(80)
+  check("ladder: Cmd+A again selects the whole page", (await highlighted()) === 7)
+  await page.keyboard.press(`${mod}+Shift+a`)
+  await page.waitForTimeout(80)
+  check("ladder: Cmd+Shift+A shrinks back one rung", (await highlighted()) === 2)
+  await page.keyboard.press("Escape")
+}
+
+// --- Zoom: a zoomed story shows only the subtree, with a breadcrumb ---
+await story("blockeditor--zoomed")
+{
+  await page.screenshot({ path: `${OUT}/07-zoomed.png` })
+  check("zoom: breadcrumb renders", await page.getByTestId("zoom-breadcrumb").isVisible())
+  check("zoom: blocks outside the subtree are hidden", (await block("Project ideas").count()) === 0)
+  check("zoom: the zoomed block renders as the title", await block("A bullet point").isVisible())
+  check("zoom: its child renders below", await block("A nested bullet").isVisible())
+}
+
+// --- Zoom flow: F in, edit a child, Shift+F out — content + selection intact ---
+await story("blockeditor--mixed")
+{
+  await block("A bullet point").click()
+  await page.keyboard.press("f")
+  await page.getByTestId("zoom-breadcrumb").waitFor({ timeout: 5000 })
+  check("F zooms into the selected block", (await block("A todo").count()) === 0)
+
+  // Edit the nested child while zoomed.
+  await block("A nested bullet").click()
+  await page.keyboard.press("Enter")
+  await page.locator("textarea").first().waitFor()
+  await page.keyboard.press("End")
+  await page.keyboard.type(" EDITED")
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(120)
+
+  await page.keyboard.press("Shift+F")
+  await page.waitForTimeout(120)
+  check(
+    "Shift+F zooms back out",
+    (await page.getByTestId("zoom-breadcrumb").count()) === 0 &&
+      (await block("Project ideas").isVisible()),
+  )
+  const md = await serialized()
+  check("the zoomed-in edit survived", md.includes("A nested bullet EDITED"))
+  const highlighted = await page.evaluate(
+    () => document.querySelector("[data-block-line].bg-bg-secondary")?.textContent ?? "",
+  )
+  check(
+    "zoom-out selects the block zoomed out from",
+    highlighted.includes("A bullet point"),
+    highlighted,
+  )
+}
+
 // --- Keyboard navigation highlights, doesn't edit ---
 await story("blockeditor--mixed")
-await page.getByRole("button", { name: "Project ideas" }).click() // select first
+await block("Project ideas").click() // select first
 await page.keyboard.press("ArrowDown")
 await page.keyboard.press("ArrowDown")
 await page.waitForTimeout(100)

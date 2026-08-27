@@ -17,10 +17,12 @@ input method reuses it:
    ("indent this block", "split at the caret", "delete this block", "move the
    highlight up"). A command is a pure function
    `(CommandInput) => CommandResult`: it reads the doc plus a little UI context
-   (the target block, the on-screen order, the caret) and returns _what should
-   change_ — a new doc + history op, where focus should land, whether a block's
-   collapse toggles, whether navigation ran off the top. It never touches React
-   or the DOM. The editor component applies the result.
+   (the target block, the on-screen order, the caret, the zoom root) and
+   returns _what should change_ — a new doc + history op, where focus should
+   land, whether a block's collapse toggles, whether navigation ran off the
+   top, or a zoom change (zoom itself is URL state — `?block=` — owned by the
+   note route; the editor only requests it). It never touches React or the DOM.
+   The editor component applies the result.
 
 3. **Bindings — `src/blocks/keymap.ts`.** A declarative table mapping a mode +
    key combo (and, where it matters, a caret predicate) to a command name. This

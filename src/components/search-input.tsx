@@ -1,5 +1,7 @@
 import React from "react"
+import { useHotkeys } from "react-hotkeys-hook"
 import { useValueRef } from "../hooks/value-ref"
+import { APP_SHORTCUTS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { IconButton } from "./icon-button"
 import { ClearIcon16, SearchIcon16 } from "./icons"
@@ -20,6 +22,15 @@ export function SearchInput({
   const ref = React.useRef<HTMLInputElement>(null)
   const [inputValue, setInputValue] = React.useState(value || "")
   const inputValueRef = useValueRef(inputValue)
+
+  // When the caller shows the "/" hint, "/" also focuses the input — but never
+  // while typing somewhere else (form tags stay disabled for this hotkey).
+  useHotkeys(
+    APP_SHORTCUTS.focusSearch,
+    () => ref.current?.focus(),
+    { preventDefault: true, enabled: Boolean(shortcut) },
+    [shortcut],
+  )
 
   React.useEffect(() => {
     if (value !== inputValueRef.current) {

@@ -162,6 +162,44 @@ describe("nesting", () => {
   })
 })
 
+describe("indent normalization (pasted outlines)", () => {
+  const childrenOf = (doc: ReturnType<typeof parse>, id: string) =>
+    doc.blocks[id].children.map((cid) => doc.blocks[cid].content)
+
+  it("treats each leading tab as one nesting level", () => {
+    const doc = parse("- a\n\t- b\n\t\t- c\n- d")
+    expect(doc.rootBlockIds).toHaveLength(2)
+    const [aId, dId] = doc.rootBlockIds
+    expect(doc.blocks[aId].content).toBe("- a")
+    expect(childrenOf(doc, aId)).toEqual(["- b"])
+    expect(childrenOf(doc, doc.blocks[aId].children[0])).toEqual(["- c"])
+    expect(doc.blocks[dId].content).toBe("- d")
+  })
+
+  it("infers a 4-space indent unit when every indent is a multiple of 4", () => {
+    const doc = parse("- a\n    - b\n        - c\n    - d")
+    expect(doc.rootBlockIds).toHaveLength(1)
+    const aId = doc.rootBlockIds[0]
+    expect(childrenOf(doc, aId)).toEqual(["- b", "- d"])
+    expect(childrenOf(doc, doc.blocks[aId].children[0])).toEqual(["- c"])
+  })
+
+  it("keeps 2-space content at 2-space levels (a 4-space line means depth 2)", () => {
+    const doc = parse("- a\n  - b\n    - c")
+    const aId = doc.rootBlockIds[0]
+    expect(childrenOf(doc, aId)).toEqual(["- b"])
+    expect(childrenOf(doc, doc.blocks[aId].children[0])).toEqual(["- c"])
+  })
+
+  it("keeps serialized 2-space content byte-identical through a round-trip", () => {
+    // A nested fixture whose serialized indents include multiples of 4 — the
+    // root `id::` lines at two spaces must keep the inferred unit at 2.
+    const doc = parse("- a\n  - b\n    - c\n      - d\nplain")
+    const serialized = serialize(doc)
+    expect(serialize(parse(serialized))).toBe(serialized)
+  })
+})
+
 describe("content preservation", () => {
   it("keeps markdown syntax untouched in block content", () => {
     const md = `# A heading

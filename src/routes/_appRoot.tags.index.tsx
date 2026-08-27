@@ -76,6 +76,7 @@ function RouteComponent() {
           <div className="flex gap-2">
             <SearchInput
               placeholder={`Search ${pluralize(sortedTagEntries.length, "tag")}…`}
+              shortcut={["/"]}
               value={query ?? ""}
               onChange={(value) =>
                 navigate({

@@ -1,11 +1,20 @@
 import { useAtom } from "jotai"
+import { Fragment, useMemo, useState } from "react"
 import { Drawer } from "vaul"
 import { isHelpPanelOpenAtom } from "../global-state"
+import {
+  APP_SHORTCUTS,
+  formatCombo,
+  groupedShortcuts,
+  isMacPlatform,
+  type Shortcut,
+} from "../shortcuts/registry"
 import { IconButton } from "./icon-button"
 import { CircleQuestionMarkIcon16, XIcon16 } from "./icons"
 import { Markdown } from "./markdown"
 import { Details } from "./details"
 import { HoverCard } from "./hover-card"
+import { SearchInput } from "./search-input"
 
 function HelpSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -36,6 +45,56 @@ function Keys({ keys }: { keys: string[] }) {
         >
           {key}
         </kbd>
+      ))}
+    </div>
+  )
+}
+
+/** An entry's combos: the primary one, then alternates separated by "/". */
+function ShortcutKeys({ shortcut, isMac }: { shortcut: Shortcut; isMac: boolean }) {
+  return (
+    <div className="flex items-center gap-1">
+      {shortcut.combos.map((combo, index) => (
+        <Fragment key={combo}>
+          {index > 0 ? <span className="text-text-tertiary text-sm">/</span> : null}
+          <Keys keys={formatCombo(combo, isMac)} />
+        </Fragment>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * The complete shortcut reference, rendered from the shortcut registry
+ * (`src/shortcuts/registry.ts`) — every binding in the app, grouped and
+ * filterable. Opened with `?` (or ⌘/, which toggles the whole help panel).
+ */
+function ShortcutReference() {
+  const [filter, setFilter] = useState("")
+  const isMac = isMacPlatform()
+  const groups = useMemo(() => groupedShortcuts(filter, isMac), [filter, isMac])
+  return (
+    <div className="flex min-w-0 flex-col gap-4 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-text-secondary">Keyboard shortcuts</h2>
+        <Keys keys={["?"]} />
+      </div>
+      <SearchInput placeholder="Filter shortcuts…" value={filter} onChange={setFilter} />
+      {groups.length === 0 ? (
+        <div className="text-text-secondary">No shortcuts match your filter</div>
+      ) : null}
+      {groups.map((group) => (
+        <div key={group.title} className="flex flex-col gap-1">
+          <h3 className="font-sans text-sm font-medium text-text-secondary">{group.title}</h3>
+          <ul className="flex flex-col gap-1">
+            {group.shortcuts.map((shortcut) => (
+              <HelpItem key={`${group.title}:${shortcut.description}`}>
+                <span>{shortcut.description}</span>
+                <ShortcutKeys shortcut={shortcut} isMac={isMac} />
+              </HelpItem>
+            ))}
+          </ul>
+        </div>
       ))}
     </div>
   )
@@ -75,56 +134,28 @@ function HelpContent({
             <CircleQuestionMarkIcon16 className="shrink-0 text-text-secondary" />
             <div className="truncate">Help</div>
           </div>
-          <IconButton aria-label="Close" shortcut={["⌘", "/"]} size={size} onClick={onClose}>
+          <IconButton
+            aria-label="Close"
+            shortcut={formatCombo(APP_SHORTCUTS.helpPanel)}
+            size={size}
+            onClick={onClose}
+          >
             <XIcon16 />
           </IconButton>
         </header>
 
         <div className="overflow-auto scroll-mask grid content-start divide-y divide-border-secondary">
           <HelpSection title="Links">
-            <HelpLink href="https://github.com/lumen-notes/lumen/issues/new">
+            <HelpLink href="https://github.com/finnformica/ruminate/issues/new">
               Send feedback
             </HelpLink>
-            <HelpLink href="https://github.com/lumen-notes/lumen/blob/main/CHANGELOG.md">
+            <HelpLink href="https://github.com/finnformica/ruminate/blob/main/CHANGELOG.md">
               Changelog
             </HelpLink>
-            <HelpLink href="https://github.com/lumen-notes/lumen">GitHub</HelpLink>
-            <HelpLink href="https://twitter.com/lumen_notes">Twitter</HelpLink>
+            <HelpLink href="https://github.com/finnformica/ruminate">GitHub</HelpLink>
           </HelpSection>
 
-          <HelpSection title="Global shortcuts">
-            <HelpItem>
-              <span>Create new note</span>
-              <Keys keys={["⌘", "⇧", "O"]} />
-            </HelpItem>
-            <HelpItem>
-              <span>Toggle command menu</span>
-              <Keys keys={["⌘", "K"]} />
-            </HelpItem>
-            <HelpItem>
-              <span>Toggle sidebar</span>
-              <Keys keys={["⌘", "B"]} />
-            </HelpItem>
-            <HelpItem>
-              <span>Toggle help panel</span>
-              <Keys keys={["⌘", "/"]} />
-            </HelpItem>
-          </HelpSection>
-
-          <HelpSection title="Note shortcuts">
-            <HelpItem>
-              <span>Toggle editing</span>
-              <Keys keys={["⌘", "E"]} />
-            </HelpItem>
-            <HelpItem>
-              <span>Save note</span>
-              <Keys keys={["⌘", "S"]} />
-            </HelpItem>
-            <HelpItem>
-              <span>Save and view</span>
-              <Keys keys={["⌘", "⏎"]} />
-            </HelpItem>
-          </HelpSection>
+          <ShortcutReference />
 
           <HelpSection title="Formatting">
             <MarkdownSyntaxItem syntax="# Heading 1" />

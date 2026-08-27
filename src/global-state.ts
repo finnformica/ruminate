@@ -28,6 +28,7 @@ import {
   gitRemove,
   isRepoSynced,
 } from "./utils/git"
+import type { BlockRevealRequest, OutlineItem } from "./utils/note-outline"
 import { parseNote } from "./utils/parse-note"
 import { removeTemplateFrontmatter } from "./utils/remove-template-frontmatter"
 import { getSampleMarkdownFiles } from "./utils/sample-markdown-files"
@@ -853,5 +854,21 @@ export const sidebarAtom = atomWithStorage<"expanded" | "collapsed">("sidebar", 
 export const noteListViewAtom = atomWithStorage<"grid" | "list">("note-list-view", "list")
 
 export const isHelpPanelOpenAtom = atomWithStorage<boolean>("help-panel", false)
+
+/**
+ * The live outline (heading blocks) of the note open in the block editor,
+ * published by `BlockNoteEditor` on every doc change and read by the command
+ * palette's outline mode (⌘P). Null when no editable note is mounted. The
+ * palette must check `noteId` against the current route — a stale outline
+ * never navigates a different note.
+ */
+export const noteOutlineAtom = atom<{ noteId: string; items: OutlineItem[] } | null>(null)
+
+/**
+ * The outline palette's channel to the block editor: preview (highlight +
+ * scroll behind the dialog), commit (Enter), or cancel (restore what the
+ * first preview captured). See `BlockRevealRequest` in utils/note-outline.
+ */
+export const blockRevealAtom = atom<BlockRevealRequest | null>(null)
 
 export const calendarLayoutAtom = atomWithStorage<"week" | "month">("calendar-layout", "week")

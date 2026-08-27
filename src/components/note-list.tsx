@@ -134,6 +134,7 @@ export function NoteList({ baseQuery = "", query, onQueryChange }: NoteListProps
           <div className="flex gap-2">
             <SearchInput
               placeholder={`Search ${pluralize(noteResults.length, "note")}…`}
+              shortcut={["/"]}
               value={query}
               autoCapitalize="off"
               spellCheck="false"
