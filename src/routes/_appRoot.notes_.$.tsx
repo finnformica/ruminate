@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import ejs from "ejs"
 import { useAtomValue } from "jotai"
 import { selectAtom } from "jotai/utils"
-import React, { useCallback, useEffect, useMemo, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useNetworkState } from "react-use"
 import useResizeObserver from "use-resize-observer"
@@ -32,6 +32,7 @@ import {
   isSignedOutAtom,
   weeklyTemplateAtom,
 } from "../global-state"
+import { useEditorValue } from "../hooks/editor-value"
 import { useNoteById, useRenameNote, useSaveNote } from "../hooks/note"
 import { useSearchNotes } from "../hooks/search-notes"
 import { Note, NoteId, Template, Width, fontSchema, widthSchema } from "../schema"
@@ -39,7 +40,7 @@ import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
 import { removeFrontmatterComments, updateFrontmatterValue } from "../utils/frontmatter"
-import { clearNoteDraft, getNoteDraft, setNoteDraft } from "../utils/note-draft"
+import { clearNoteDraft } from "../utils/note-draft"
 import { getInvalidNoteIdCharacters } from "../utils/note-id"
 import { parseNote } from "../utils/parse-note"
 
@@ -131,7 +132,15 @@ function NotePage() {
   }, [noteId, searchNotes])
 
   // Editor state
-  const { editorValue, setEditorValue, isDraft, discardChanges } = useEditorValue({
+  const {
+    editorValue,
+    setEditorValue,
+    isDraft,
+    discardChanges,
+    remoteNotice,
+    loadRemoteVersion,
+    dismissRemoteNotice,
+  } = useEditorValue({
     noteId: noteId ?? "",
     note,
     defaultValue: defaultContent
@@ -402,6 +411,25 @@ function NotePage() {
 
             {useBlockEditor ? (
               <div className="flex flex-col gap-3">
+                {/* Non-blocking notice: the note changed on another device
+                    while there are unsaved local edits. Editing continues
+                    uninterrupted; "Show latest" is an explicit choice to
+                    discard the unsaved edits in favor of the remote version. */}
+                {remoteNotice ? (
+                  <div className="card-1 flex flex-wrap items-center justify-between gap-2 p-2 pl-3 print:hidden">
+                    <span className="text-sm leading-4 text-text-secondary">
+                      This note was updated on another device. Your unsaved edits are shown.
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <Button size="small" onClick={loadRemoteVersion}>
+                        Show latest
+                      </Button>
+                      <Button size="small" onClick={dismissRemoteNotice}>
+                        Dismiss
+                      </Button>
+                    </span>
+                  </div>
+                ) : null}
                 {/* While zoomed, the breadcrumb (inside the editor) carries the
                     note title as its first crumb — hide the standalone title to
                     avoid doubling it. */}
@@ -467,59 +495,4 @@ function NotePage() {
       </div>
     </PageLayout>
   )
-}
-
-function useEditorValue({
-  noteId,
-  note,
-  defaultValue,
-}: {
-  noteId: NoteId
-  note: Note | undefined
-  defaultValue: string
-}) {
-  const githubRepo = useAtomValue(githubRepoAtom)
-
-  const [editorValue, _setEditorValue] = useState(() => {
-    return getNoteDraft({ githubRepo, noteId }) ?? note?.content ?? defaultValue
-  })
-
-  // Track previous note content to detect external changes
-  const [prevNoteContent, setPrevNoteContent] = useState(note?.content)
-
-  // Adjust state during render when note content changes externally (no effect needed)
-  // See: https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
-  if (note?.content !== prevNoteContent) {
-    setPrevNoteContent(note?.content)
-    // Only update editor if there's no local draft
-    const hasDraft = getNoteDraft({ githubRepo, noteId }) !== null
-    if (!hasDraft && note?.content !== undefined) {
-      _setEditorValue(note.content)
-    }
-  }
-
-  const isDraft = useMemo(() => {
-    return editorValue !== (note ? note.content : defaultValue)
-  }, [note, editorValue, defaultValue])
-
-  const setEditorValue = useCallback(
-    (value: string) => {
-      _setEditorValue(value)
-
-      if (note ? value !== note.content : value !== defaultValue) {
-        setNoteDraft({ githubRepo, noteId, value })
-      } else {
-        clearNoteDraft({ githubRepo, noteId })
-      }
-    },
-    [note, defaultValue, githubRepo, noteId],
-  )
-
-  const discardChanges = useCallback(() => {
-    // Reset editor value to the last saved state of the note
-    _setEditorValue(note?.content ?? defaultValue)
-    clearNoteDraft({ githubRepo, noteId })
-  }, [note, defaultValue, githubRepo, noteId])
-
-  return { editorValue, setEditorValue, isDraft, discardChanges }
 }

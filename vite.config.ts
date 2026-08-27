@@ -18,6 +18,8 @@ export default defineConfig({
     // `.claude/worktrees/` by Claude Code sessions), which otherwise get
     // scanned as duplicate test trees without their own node_modules.
     exclude: [...defaultExclude, "**/.claude/**"],
+    // Replaces Node's broken experimental `localStorage` global (see file).
+    setupFiles: ["./src/vitest.setup.ts"],
   },
   plugins: [
     tailwindcss(),

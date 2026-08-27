@@ -52,9 +52,15 @@ function ensureZoomChild(doc: BlockDoc, zoomId: string): BlockDoc {
 
 /**
  * Adapts the block editor to the note page's string-based value model. The
- * note's markdown is parsed into blocks once (on mount); each edit serializes
- * back to markdown and calls `onChange`, so the surrounding page keeps its
- * existing save/draft logic. Remount (via a `key`) to load a different note.
+ * note's markdown is parsed into blocks on mount; each edit serializes back to
+ * markdown and calls `onChange`, so the surrounding page keeps its existing
+ * save/draft logic. Remount (via a `key`) to load a different note.
+ *
+ * External `value` changes (a git pull updating the open note, a frontmatter
+ * edit from the actions menu) re-parse into blocks in place — see the
+ * `lastValue` tracking below — so pulled content appears without a remount or
+ * page refresh. Internal edits update `lastValue` first and are never
+ * re-parsed, so live typing can't be clobbered.
  */
 export function BlockNoteEditor({
   value,
@@ -100,12 +106,26 @@ export function BlockNoteEditor({
   /** The note's title, shown as the breadcrumb's first crumb while zoomed. */
   noteTitle?: string
 }) {
-  const [doc, setDoc] = useState<BlockDoc>(() => {
-    const parsed = withStarterBlock(parse(value))
-    // Read-only history views are shown verbatim; only editable notes get the
-    // always-present trailing blank.
+  // Read-only history views are shown verbatim; only editable notes get the
+  // always-present trailing blank.
+  const seedDoc = (markdown: string) => {
+    const parsed = withStarterBlock(parse(markdown))
     return readOnly ? parsed : ensureTrailingBlank(parsed)
-  })
+  }
+
+  const [doc, setDoc] = useState<BlockDoc>(() => seedDoc(value))
+  // The last markdown this editor produced (or was seeded from). When the
+  // incoming `value` differs, the change came from *outside* the editor — a
+  // git pull that updated the open note, or the page transforming the content
+  // (frontmatter updates) — so re-parse it into blocks. Internal edits go
+  // through `handleChange`, which updates `lastValue` before `onChange`
+  // round-trips, so live typing is never re-parsed or lost.
+  const [lastValue, setLastValue] = useState(value)
+  if (value !== lastValue) {
+    setLastValue(value)
+    setDoc(seedDoc(value))
+  }
+
   const { collapsed, toggleCollapse } = useCollapseState(noteId)
 
   const handleChange = (next: BlockDoc) => {
@@ -113,7 +133,9 @@ export function BlockNoteEditor({
     // would be invisible below the zoomed subtree) — see `ensureZoomChild`.
     const withBlank = readOnly ? next : zoomBlockId ? next : ensureTrailingBlank(next)
     setDoc(withBlank)
-    onChange(serialize(withBlank))
+    const serialized = serialize(withBlank)
+    setLastValue(serialized)
+    onChange(serialized)
   }
 
   // Publish the live outline (heading blocks) for the command palette's ⌘P
@@ -149,7 +171,9 @@ export function BlockNoteEditor({
     const ensured = ensureZoomChild(current, zoomBlockId)
     if (ensured === current) return
     setDoc(ensured)
-    onChange(serialize(ensured))
+    const serialized = serialize(ensured)
+    setLastValue(serialized)
+    onChange(serialized)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoomBlockId, readOnly])
 

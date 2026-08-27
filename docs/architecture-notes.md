@@ -65,7 +65,7 @@ Collapse state is **per-note UI state, not content**, so it lives in
 - **One file per note**, not one global file: the old single
   `.ruminate/view-state.json` was rewritten wholesale on every fold burst and
   was the main cross-device merge-conflict hot spot. Per-note files only
-  conflict when both devices fold the *same* note — and even then the pull
+  conflict when both devices fold the _same_ note — and even then the pull
   merge driver resolves sidecars ours-wins. The legacy single file is migrated
   lazily: the first view-state write splits it into per-note files and deletes
   it, all in that same commit (`buildViewStateWrite`), so the migration runs
@@ -105,6 +105,55 @@ Collapse state is **per-note UI state, not content**, so it lives in
   (scoped to the written paths) shows nothing staged, and only a real commit
   schedules a sync cycle.
 
+## Sync hardening (auth, UI propagation, error visibility, multi-tab)
+
+- **Refreshed tokens persist.** After every successful `/github-refresh`, the
+  new access token + expiries are written back into `localStorage.github_user`
+  (`persistRefreshedSession` in `src/utils/github-session.ts` — the single
+  write point besides sign-in). Page loads no longer start with a stale expiry
+  that blocks the first git op on a refresh round-trip.
+- **Proactive refresh is non-fatal.** `ensureFreshToken` swallows a failed
+  refresh while the current token is _near_ expiry but not yet expired — the
+  op proceeds with the current token and `withAuthRetry`'s 401 path handles
+  true expiry. It hard-fails only when the token is already past its expiry.
+- **Pulled content reaches the open note.** Pulls update machine context →
+  `notesAtom` → note lists/sidebar automatically, but the open note's editor
+  holds local state. `useEditorValue` (`src/hooks/editor-value.ts`) re-seeds
+  the editor value when the note changes externally and there are no unsaved
+  local edits; `BlockNoteEditor` re-parses external `value` changes in place
+  (tracking the last value it produced, so live typing is never re-parsed).
+  With unsaved edits, the local value is preserved and a non-blocking "note
+  updated on another device" notice offers "Show latest" (explicitly discards
+  the unsaved edits) or "Dismiss".
+- **Sync errors are visible and categorized.** The error entering the sync
+  error state is stored in machine context as `{ message, category }`
+  (`toSyncError`/`categorizeSyncError` in `src/utils/sync.ts`; categories:
+  auth / network / conflict / push-rejected / unknown). The sidebar shows a
+  category-specific label ("Sync failed: network"), the tooltip carries the
+  message, and clicking the status retries (the error state handles SYNC).
+- **"Reset local copy" is safe (and exists).** Settings has an explicit
+  re-clone button; both it and the change-repo path run through `cloneRepo`,
+  which now backs up unpushed work first: if local `main` differs from
+  `origin/main`, notes whose content differs from origin are stashed into
+  localStorage (bounded to 2 MB, smallest-first; skipped on quota) and, after
+  the clone, restored as conflicted-copy notes and committed
+  (`src/utils/local-backup.ts`, reusing the merge driver's copy builder). A
+  post-clone sync pushes the restored copies.
+- **Multi-tab: one sync leader.** Tabs elect a leader via a
+  `ruminate-sync-leader` Web Lock plus BroadcastChannel("ruminate-sync")
+  (`src/utils/sync-leader.ts`, started in `_appRoot.tsx`). Only the leader
+  does network pulls/pushes; follower tabs re-walk the shared worktree on
+  pull, forward pushes as `request-sync` messages, and refresh in-memory notes
+  (machine event `REFRESH_FILES` → `refreshing` state) when the leader
+  broadcasts `synced`. Fail-open: without BroadcastChannel/locks every tab
+  syncs itself, and a new tab starts as leader until it observes another
+  holder (safe — the git mutex serializes actual git work across tabs).
+- **localStorage quota degrades gracefully.** All writes of the
+  `markdown_files` cache go through `src/utils/markdown-cache.ts`: a quota
+  failure clears the cache key (so `resolveRepo` falls through to the worktree
+  walk instead of serving a stale cache) and raises a one-time warning banner
+  via `storageWarningAtom`.
+
 ## Scale limits (current file-based model)
 
 The binding constraint is the localStorage cache (~5 MB total across all files),
@@ -116,8 +165,8 @@ entirely.
 
 ## Deferred (revisit when it bites; SQLite supersedes most)
 
-- localStorage quota guard (graceful degradation instead of a thrown
-  `setItem`).
+- ~~localStorage quota guard~~ — done: quota-guarded `markdown_files` cache
+  with fs fallback (see "Sync hardening" above).
 - Incremental reparse (only reparse changed notes in `notesAtom`).
 - ~~View-state sync hardening~~ — done: per-note sidecar files + ours-wins
   merge driver (see "Sync hardening" above). Still deferred within it:

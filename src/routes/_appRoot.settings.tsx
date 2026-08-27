@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useAtomValue } from "jotai"
+import { useAtomValue, useSetAtom } from "jotai"
 import { useState } from "react"
 import { useNetworkState } from "react-use"
 import { Button } from "../components/button"
@@ -12,6 +12,7 @@ import { Signature } from "../components/signature"
 import {
   githubRepoAtom,
   githubUserAtom,
+  globalStateMachineAtom,
   isCloningRepoAtom,
   isRepoClonedAtom,
   isRepoNotClonedAtom,
@@ -72,6 +73,7 @@ function SettingsSection({ title, children }: { title: string; children: React.R
 
 function GitHubSection() {
   const navigate = useNavigate()
+  const send = useSetAtom(globalStateMachineAtom)
   const githubUser = useAtomValue(githubUserAtom)
   const githubRepo = useAtomValue(githubRepoAtom)
   const isRepoNotCloned = useAtomValue(isRepoNotClonedAtom)
@@ -141,6 +143,34 @@ function GitHubSection() {
           </div>
         ) : null}
       </div>
+      {isRepoCloned && !isEditingRepo && githubRepo ? (
+        <div className="mt-4 border-t border-border-secondary pt-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex w-0 grow flex-col gap-1">
+              <span className="text-sm leading-4 text-text-secondary">Reset local copy</span>
+              <span className="text-sm leading-5 text-text-secondary">
+                If sync is stuck, delete the notes stored in this browser and re-clone them from
+                GitHub. Unpushed changes are kept as conflicted-copy notes.
+              </span>
+            </div>
+            <Button
+              className="shrink-0"
+              disabled={!online}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `Reset the local copy of ${githubRepo.owner}/${githubRepo.name}?\n\nThis deletes the notes stored in this browser and re-clones them from GitHub. Any unpushed changes are saved as conflicted-copy notes.`,
+                  )
+                ) {
+                  send({ type: "SELECT_REPO", githubRepo })
+                }
+              }}
+            >
+              Reset
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </SettingsSection>
   )
 }

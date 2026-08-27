@@ -4,7 +4,6 @@ import { atom } from "jotai"
 import { atomWithMachine } from "jotai-xstate"
 import { atomWithStorage, selectAtom } from "jotai/utils"
 import { assign, createMachine, raise } from "xstate"
-import { z } from "zod"
 import {
   Font,
   GitHubRepository,
@@ -16,7 +15,7 @@ import {
   templateSchema,
 } from "./schema"
 import { fs, fsWipe } from "./utils/fs"
-import { clearSession, seedSession } from "./utils/github-session"
+import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
 import {
   REPO_DIR,
   getRemoteOriginUrl,
@@ -29,8 +28,15 @@ import {
   gitRemove,
   isRepoSynced,
 } from "./utils/git"
+import { backupUnpushedNotes, restoreUnpushedBackup } from "./utils/local-backup"
+import {
+  clearMarkdownFilesCache,
+  getMarkdownFilesCache,
+  setMarkdownFilesCache,
+} from "./utils/markdown-cache"
 import { withGitLock } from "./utils/mutex"
-import { canRetrySync, isPushRejectionError } from "./utils/sync"
+import { broadcastSynced, isSyncLeader, requestLeaderSync } from "./utils/sync-leader"
+import { SyncError, canRetrySync, isPushRejectionError, toSyncError } from "./utils/sync"
 import type { BlockRevealRequest, OutlineItem } from "./utils/note-outline"
 import { parseNote } from "./utils/parse-note"
 import { removeTemplateFrontmatter } from "./utils/remove-template-frontmatter"
@@ -42,9 +48,6 @@ import { LEGACY_VIEW_STATE_PATH, VIEW_STATE_DIR } from "./data/paths"
 // State machine
 // -----------------------------------------------------------------------------
 
-const GITHUB_USER_STORAGE_KEY = "github_user" as const
-const MARKDOWN_FILES_STORAGE_KEY = "markdown_files" as const
-
 type Context = {
   githubUser: GitHubUser | null
   githubRepo: GitHubRepository | null
@@ -52,6 +55,8 @@ type Context = {
   error: Error | null
   /** Pull→push attempts in the current sync cycle (bounded by MAX_SYNC_ATTEMPTS). */
   syncAttempts: number
+  /** Why the last sync cycle failed (message + coarse category), for the sidebar. */
+  syncError: SyncError | null
 }
 
 type Event =
@@ -60,6 +65,9 @@ type Event =
   | { type: "SELECT_REPO"; githubRepo: GitHubRepository }
   | { type: "SYNC" }
   | { type: "SYNC_DEBOUNCED" }
+  // Re-walk the shared worktree into memory without touching the network —
+  // sent to follower tabs when the leader broadcasts a finished sync.
+  | { type: "REFRESH_FILES" }
   | {
       type: "WRITE_FILES"
       markdownFiles: Record<string, string | null>
@@ -98,6 +106,9 @@ function createGlobalStateMachine() {
           checkStatus: {
             data: { isSynced: boolean }
           }
+          refreshFiles: {
+            data: { markdownFiles: Record<string, string> }
+          }
           writeFiles: {
             data: { committed: boolean }
           }
@@ -114,6 +125,7 @@ function createGlobalStateMachine() {
         markdownFiles: {},
         error: null,
         syncAttempts: 0,
+        syncError: null,
       },
       states: {
         resolvingUser: {
@@ -169,7 +181,14 @@ function createGlobalStateMachine() {
                 src: "cloneRepo",
                 onDone: {
                   target: "cloned.sync.success",
-                  actions: ["setMarkdownFiles", "setMarkdownFilesLocalStorage"],
+                  // Schedule a sync right after the clone so any restored
+                  // conflicted-copy notes (see `restoreUnpushedBackup`) reach
+                  // GitHub instead of sitting local-only.
+                  actions: [
+                    "setMarkdownFiles",
+                    "setMarkdownFilesLocalStorage",
+                    raise("SYNC_DEBOUNCED"),
+                  ],
                 },
                 onError: {
                   target: "notCloned",
@@ -238,13 +257,28 @@ function createGlobalStateMachine() {
                       on: {
                         SYNC: "pulling",
                         SYNC_DEBOUNCED: "debouncing",
+                        REFRESH_FILES: "refreshing",
                       },
                     },
                     error: {
-                      entry: ["logError", "resetSyncAttempts"],
+                      entry: ["setSyncError", "logError", "resetSyncAttempts"],
                       on: {
                         SYNC: "pulling",
                         SYNC_DEBOUNCED: "debouncing",
+                        REFRESH_FILES: "refreshing",
+                      },
+                    },
+                    // Follower tabs land here when the leader tab finishes a
+                    // sync: re-walk the shared worktree into memory (and the
+                    // localStorage cache) without any network work.
+                    refreshing: {
+                      invoke: {
+                        src: "refreshFiles",
+                        onDone: {
+                          target: "success",
+                          actions: ["setMarkdownFiles", "setMarkdownFilesLocalStorage"],
+                        },
+                        onError: "success",
                       },
                     },
                     debouncing: {
@@ -304,6 +338,9 @@ function createGlobalStateMachine() {
                           {
                             target: "success",
                             cond: "isSynced",
+                            // Tell follower tabs to refresh from the worktree
+                            // (no-op unless this tab is the sync leader).
+                            actions: "broadcastSynced",
                           },
                           // If not synced, pull again — bounded by the same
                           // per-cycle attempt budget as push retries.
@@ -408,8 +445,10 @@ function createGlobalStateMachine() {
 
           const githubRepo = { owner, name }
 
-          const markdownFiles =
-            getMarkdownFilesFromLocalStorage() ?? (await getMarkdownFilesFromFs(REPO_DIR))
+          // The localStorage cache is a load-time optimization only; when it
+          // is absent (never written, or cleared after a quota failure) the
+          // worktree walk is the source of truth.
+          const markdownFiles = getMarkdownFilesCache() ?? (await getMarkdownFilesFromFs(REPO_DIR))
 
           stopTimer()
 
@@ -418,7 +457,15 @@ function createGlobalStateMachine() {
         cloneRepo: async (context, event) => {
           if (!context.githubUser) throw new Error("Not signed in")
 
+          // The clone wipes the browser filesystem. Stash any unpushed work
+          // first, and restore it as conflicted-copy notes afterwards, so
+          // neither "Reset local copy" nor changing the repo can silently
+          // lose local-only changes. Both are best-effort and never block.
+          await backupUnpushedNotes()
+
           await gitClone(event.githubRepo, context.githubUser)
+
+          await restoreUnpushedBackup()
 
           return {
             markdownFiles: await getMarkdownFilesFromFs(REPO_DIR),
@@ -427,7 +474,11 @@ function createGlobalStateMachine() {
         pull: async (context) => {
           if (!context.githubUser) throw new Error("Not signed in")
 
-          await gitPull(context.githubUser)
+          // Follower tabs never touch the network: the leader tab pulls into
+          // the shared worktree; re-walking it is enough to stay current.
+          if (isSyncLeader()) {
+            await gitPull(context.githubUser)
+          }
 
           return {
             markdownFiles: await getMarkdownFilesFromFs(REPO_DIR),
@@ -436,10 +487,26 @@ function createGlobalStateMachine() {
         push: async (context) => {
           if (!context.githubUser) throw new Error("Not signed in")
 
+          // Follower tabs forward the push (their commits are already in the
+          // shared worktree) to the leader instead of racing it.
+          if (!isSyncLeader()) {
+            requestLeaderSync()
+            return
+          }
+
           await gitPush(context.githubUser)
         },
         checkStatus: async () => {
+          // Followers treat the cycle as converged — the leader does the real
+          // check (and re-pull loop) after the forwarded sync.
+          if (!isSyncLeader()) return { isSynced: true }
+
           return { isSynced: await isRepoSynced() }
+        },
+        refreshFiles: async () => {
+          return {
+            markdownFiles: await getMarkdownFilesFromFs(REPO_DIR),
+          }
         },
         writeFiles: async (context, event) => {
           if (!context.githubUser) throw new Error("Not signed in")
@@ -580,7 +647,7 @@ function createGlobalStateMachine() {
           markdownFiles: getSampleMarkdownFiles(),
         }),
         setMarkdownFilesLocalStorage: (_, event) => {
-          localStorage.setItem(MARKDOWN_FILES_STORAGE_KEY, JSON.stringify(event.data.markdownFiles))
+          setMarkdownFilesCache(event.data.markdownFiles)
         },
         mergeMarkdownFiles: assign({
           markdownFiles: (context, event) => {
@@ -604,7 +671,7 @@ function createGlobalStateMachine() {
               merged[filepath] = content
             }
           }
-          localStorage.setItem(MARKDOWN_FILES_STORAGE_KEY, JSON.stringify(merged))
+          setMarkdownFilesCache(merged)
         },
         deleteMarkdownFile: assign({
           markdownFiles: (context, event) => {
@@ -614,13 +681,13 @@ function createGlobalStateMachine() {
         }),
         deleteMarkdownFileLocalStorage: (context, event) => {
           const { [event.filepath]: _, ...markdownFiles } = context.markdownFiles
-          localStorage.setItem(MARKDOWN_FILES_STORAGE_KEY, JSON.stringify(markdownFiles))
+          setMarkdownFilesCache(markdownFiles)
         },
         clearMarkdownFiles: assign({
           markdownFiles: {},
         }),
         clearMarkdownFilesLocalStorage: () => {
-          localStorage.removeItem(MARKDOWN_FILES_STORAGE_KEY)
+          clearMarkdownFilesCache()
         },
         setError: assign({
           // TODO: Remove `as Error`
@@ -632,6 +699,12 @@ function createGlobalStateMachine() {
         resetSyncAttempts: assign({
           syncAttempts: 0,
         }),
+        setSyncError: assign({
+          syncError: (_, event) => toSyncError((event as { data?: unknown }).data),
+        }),
+        broadcastSynced: () => {
+          broadcastSynced()
+        },
         logError: (_, event) => {
           console.error(event.data)
         },
@@ -641,14 +714,6 @@ function createGlobalStateMachine() {
       },
     },
   )
-}
-
-/** Get cached markdown files from local storage */
-function getMarkdownFilesFromLocalStorage() {
-  const markdownFiles = JSON.parse(localStorage.getItem(MARKDOWN_FILES_STORAGE_KEY) ?? "null")
-  if (!markdownFiles) return null
-  const parsedMarkdownFiles = z.record(z.string(), z.string()).safeParse(markdownFiles)
-  return parsedMarkdownFiles.success ? parsedMarkdownFiles.data : null
 }
 
 /** Walk the file system and return the contents of all markdown files */
@@ -714,6 +779,10 @@ export const isRepoClonedAtom = selectAtom(globalStateMachineAtom, (state) =>
 export const isSignedOutAtom = selectAtom(globalStateMachineAtom, (state) =>
   state.matches("signedOut"),
 )
+
+/** The last sync failure (message + coarse category); only meaningful while
+ * the sync region is in its error state (see `sync-status.tsx`). */
+export const syncErrorAtom = selectAtom(globalStateMachineAtom, (state) => state.context.syncError)
 
 // -----------------------------------------------------------------------------
 // GitHub

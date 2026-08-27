@@ -138,9 +138,12 @@ export function buildConflictCopy(
   originalId: string,
   remoteContent: string,
   date: Date,
+  options: { notice?: string } = {},
 ): ConflictCopy {
   const id = `${originalId}-conflict-${formatConflictTimestamp(date)}`
-  const notice = `Remote copy of [[${originalId}]] from a sync conflict — the local version won; nothing was lost.`
+  const notice =
+    options.notice ??
+    `Remote copy of [[${originalId}]] from a sync conflict — the local version won; nothing was lost.`
 
   // Keep frontmatter (if any) at the top so it still parses.
   const frontmatterMatch = remoteContent.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)

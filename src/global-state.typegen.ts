@@ -29,6 +29,11 @@ export interface Typegen0 {
       data: unknown
       __tip: "See the XState TS docs to learn how to strongly type this."
     }
+    "done.invoke.global.signedIn.cloned.sync.refreshing:invocation[0]": {
+      type: "done.invoke.global.signedIn.cloned.sync.refreshing:invocation[0]"
+      data: unknown
+      __tip: "See the XState TS docs to learn how to strongly type this."
+    }
     "done.invoke.global.signedIn.cloningRepo:invocation[0]": {
       type: "done.invoke.global.signedIn.cloningRepo:invocation[0]"
       data: unknown
@@ -63,6 +68,10 @@ export interface Typegen0 {
       type: "error.platform.global.signedIn.cloned.sync.pushing:invocation[0]"
       data: unknown
     }
+    "error.platform.global.signedIn.cloned.sync.refreshing:invocation[0]": {
+      type: "error.platform.global.signedIn.cloned.sync.refreshing:invocation[0]"
+      data: unknown
+    }
     "error.platform.global.signedIn.cloningRepo:invocation[0]": {
       type: "error.platform.global.signedIn.cloningRepo:invocation[0]"
       data: unknown
@@ -79,6 +88,7 @@ export interface Typegen0 {
     deleteFile: "done.invoke.global.signedIn.cloned.change.deletingFile:invocation[0]"
     pull: "done.invoke.global.signedIn.cloned.sync.pulling:invocation[0]"
     push: "done.invoke.global.signedIn.cloned.sync.pushing:invocation[0]"
+    refreshFiles: "done.invoke.global.signedIn.cloned.sync.refreshing:invocation[0]"
     resolveRepo: "done.invoke.global.signedIn.resolvingRepo:invocation[0]"
     resolveUser: "done.invoke.global.resolvingUser:invocation[0]"
     writeFiles: "done.invoke.global.signedIn.cloned.change.writingFiles:invocation[0]"
@@ -99,6 +109,7 @@ export interface Typegen0 {
       | "SELECT_REPO"
       | "SIGN_OUT"
       | "error.platform.global.resolvingUser:invocation[0]"
+    broadcastSynced: "done.invoke.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
     deleteMarkdownFile: "DELETE_FILE"
     deleteMarkdownFileLocalStorage: "DELETE_FILE"
     incrementSyncAttempts:
@@ -118,10 +129,12 @@ export interface Typegen0 {
       | ""
       | "SYNC_DEBOUNCED"
       | "done.invoke.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
+      | "done.invoke.global.signedIn.cloned.sync.refreshing:invocation[0]"
       | "done.invoke.global.signedIn.cloningRepo:invocation[0]"
       | "error.platform.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
       | "error.platform.global.signedIn.cloned.sync.pulling:invocation[0]"
       | "error.platform.global.signedIn.cloned.sync.pushing:invocation[0]"
+      | "error.platform.global.signedIn.cloned.sync.refreshing:invocation[0]"
     setError:
       | "error.platform.global.signedIn.cloned.change.deletingFile:invocation[0]"
       | "error.platform.global.signedIn.cloned.change.writingFiles:invocation[0]"
@@ -131,13 +144,20 @@ export interface Typegen0 {
     setGitHubUserLocalStorage: "SIGN_IN" | "done.invoke.global.resolvingUser:invocation[0]"
     setMarkdownFiles:
       | "done.invoke.global.signedIn.cloned.sync.pulling:invocation[0]"
+      | "done.invoke.global.signedIn.cloned.sync.refreshing:invocation[0]"
       | "done.invoke.global.signedIn.cloningRepo:invocation[0]"
       | "done.invoke.global.signedIn.resolvingRepo:invocation[0]"
     setMarkdownFilesLocalStorage:
       | "done.invoke.global.signedIn.cloned.sync.pulling:invocation[0]"
+      | "done.invoke.global.signedIn.cloned.sync.refreshing:invocation[0]"
       | "done.invoke.global.signedIn.cloningRepo:invocation[0]"
       | "done.invoke.global.signedIn.resolvingRepo:invocation[0]"
     setSampleMarkdownFiles: "SIGN_OUT" | "error.platform.global.resolvingUser:invocation[0]"
+    setSyncError:
+      | "done.invoke.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
+      | "error.platform.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
+      | "error.platform.global.signedIn.cloned.sync.pulling:invocation[0]"
+      | "error.platform.global.signedIn.cloned.sync.pushing:invocation[0]"
   }
   eventsCausingDelays: {}
   eventsCausingGuards: {
@@ -159,6 +179,7 @@ export interface Typegen0 {
       | "error.platform.global.signedIn.cloned.sync.pushing:invocation[0]"
       | "xstate.after(1000)#global.signedIn.cloned.sync.debouncing"
     push: "done.invoke.global.signedIn.cloned.sync.pulling:invocation[0]"
+    refreshFiles: "REFRESH_FILES"
     resolveRepo: "SIGN_IN" | "done.invoke.global.resolvingUser:invocation[0]"
     resolveUser: "xstate.init"
     writeFiles: "WRITE_FILES"
@@ -177,6 +198,7 @@ export interface Typegen0 {
     | "signedIn.cloned.sync.error"
     | "signedIn.cloned.sync.pulling"
     | "signedIn.cloned.sync.pushing"
+    | "signedIn.cloned.sync.refreshing"
     | "signedIn.cloned.sync.success"
     | "signedIn.cloningRepo"
     | "signedIn.notCloned"
@@ -200,6 +222,7 @@ export interface Typegen0 {
                       | "error"
                       | "pulling"
                       | "pushing"
+                      | "refreshing"
                       | "success"
                   }
             }
