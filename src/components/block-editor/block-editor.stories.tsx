@@ -18,11 +18,26 @@ function withStarterBlock(doc: BlockDoc): BlockDoc {
  * Stateful harness so the block editor can be exercised in isolation (no auth,
  * no GitHub). The serialized markdown is exposed for assertions.
  */
-function Harness({ initial, startEditing }: { initial: string; startEditing?: boolean }) {
+function Harness({
+  initial,
+  startEditing,
+  zoomRootId,
+}: {
+  initial: string
+  startEditing?: boolean
+  /** Start zoomed into this block (transient local zoom — no router). */
+  zoomRootId?: string | null
+}) {
   const [doc, setDoc] = useState<BlockDoc>(() => withStarterBlock(parse(initial)))
   return (
     <div style={{ maxWidth: 640, padding: 24 }}>
-      <BlockEditor doc={doc} onChange={setDoc} startEditing={startEditing} />
+      <BlockEditor
+        doc={doc}
+        onChange={setDoc}
+        startEditing={startEditing}
+        zoomRootId={zoomRootId}
+        noteTitle="My note"
+      />
       <pre data-testid="serialized" style={{ position: "fixed", left: -9999, top: 0 }} aria-hidden>
         {serialize(doc)}
       </pre>
@@ -158,6 +173,37 @@ export const TodoShortcut: Story = {
     expect(checkbox).not.toBeChecked()
     await userEvent.click(checkbox)
     await waitFor(() => expect(serialized(canvasElement)).toContain("[x] Buy milk"))
+  },
+}
+
+/** The editor zoomed into a block: its subtree is the whole view, the block
+ * itself is the editable title, and a breadcrumb traces the path. */
+export const Zoomed: Story = {
+  args: { initial: SAMPLE, zoomRootId: "blk_b1" },
+}
+
+/** F zooms into the selected block; Shift+F zooms back out, landing on it. */
+export const ZoomKeys: Story = {
+  args: { initial: SAMPLE },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+
+    // Select the bullet (it has a nested child) and zoom in with F.
+    await userEvent.click(canvas.getByText("A bullet point"))
+    await userEvent.keyboard("f")
+    const crumb = await within(canvasElement).findByTestId("zoom-breadcrumb")
+    expect(crumb.textContent).toContain("A bullet point")
+    // Only the zoomed subtree renders; the heading is gone…
+    expect(canvas.queryByText("Project ideas")).not.toBeInTheDocument()
+    // …and the first child is selected, ready for arrows.
+    expect(canvas.getByText("A nested bullet")).toBeInTheDocument()
+
+    // Shift+F zooms back out: the whole note again, no breadcrumb.
+    await userEvent.keyboard("{Shift>}F{/Shift}")
+    await waitFor(() =>
+      expect(within(canvasElement).queryByTestId("zoom-breadcrumb")).not.toBeInTheDocument(),
+    )
+    expect(await canvas.findByText("Project ideas")).toBeInTheDocument()
   },
 }
 

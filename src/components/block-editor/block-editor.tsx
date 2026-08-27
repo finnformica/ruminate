@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent } from "react"
 import type { BlockDoc } from "../../blocks/types"
 import { getBlockType, stripMarker } from "../../blocks/block-type"
@@ -20,6 +20,8 @@ import {
   indentBlock,
   insertAfter,
   insertBlocksAfter,
+  insertBlocksAsFirstChildren,
+  insertFirstChild,
   moveBlocks,
   outdentBlock,
   remintCollidingIds,
@@ -101,6 +103,9 @@ export function BlockEditor({
   focusFirstMode = "select",
   newRootSignal,
   readOnly = false,
+  zoomRootId: zoomRootIdProp = null,
+  onZoomNavigate,
+  noteTitle,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc) => void
@@ -126,8 +131,34 @@ export function BlockEditor({
   newRootSignal?: number
   /** Display-only: renders blocks without any editing (e.g. past-day history). */
   readOnly?: boolean
+  /**
+   * Zoom ("focus mode"): the block whose subtree is the whole view. With
+   * `onZoomNavigate` the zoom is controlled by the caller (URL search param);
+   * without it, this is just the initial value of transient local zoom state
+   * (Storybook / tests).
+   */
+  zoomRootId?: string | null
+  /** Called to change the zoom level (`null` exits). Makes zoom controlled. */
+  onZoomNavigate?: (id: string | null) => void
+  /** The note's title — the breadcrumb's first crumb while zoomed. */
+  noteTitle?: string
 }) {
-  const firstBlockId = doc.rootBlockIds[0] ?? null
+  // ── Zoom state ────────────────────────────────────────────────────────────
+  // Controlled by the caller (URL) when `onZoomNavigate` is given; otherwise
+  // transient local state so the editor works standalone.
+  const [zoomInternal, setZoomInternal] = useState<string | null>(zoomRootIdProp)
+  const zoomRootId = onZoomNavigate ? zoomRootIdProp : zoomInternal
+  const navigateZoom = (id: string | null) => {
+    if (onZoomNavigate) onZoomNavigate(id)
+    else setZoomInternal(id)
+  }
+  const zoomRoot = zoomRootId ? (doc.blocks[zoomRootId] ?? null) : null
+
+  // The first selectable block: while zoomed, the zoom root's first child (the
+  // title itself is deliberately not the landing spot — avoids accidental edits).
+  const firstBlockId = zoomRoot
+    ? (zoomRoot.children[0] ?? zoomRoot.id)
+    : (doc.rootBlockIds[0] ?? null)
   const [focus, setFocus] = useState<FocusRequest | null>(() =>
     startEditing && firstBlockId ? { id: firstBlockId } : null,
   )
@@ -153,6 +184,40 @@ export function BlockEditor({
   // Reads the latest doc via a ref so this only runs on heading changes.
   const docRef = useRef(doc)
   docRef.current = doc
+
+  // Graceful zoom exit: if the zoomed block no longer exists (deleted, undo, a
+  // stale/bad link), fall back to the un-zoomed view AND clean the URL param —
+  // obsidian-zoom's "reset when boundaries violated" principle.
+  useEffect(() => {
+    if (zoomRootId && !doc.blocks[zoomRootId]) navigateZoom(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoomRootId, doc])
+
+  // Place the selection when the zoom level changes: zooming IN lands on the
+  // first child (not the title, avoiding accidental edits of the root);
+  // zooming OUT lands on the block you zoomed out FROM (it's visible in the
+  // wider view). Covers F/Shift+F, crumb clicks, and the browser back button.
+  const prevZoomRef = useRef(zoomRootId)
+  useEffect(() => {
+    const prev = prevZoomRef.current
+    if (prev === zoomRootId) return
+    prevZoomRef.current = zoomRootId
+    if (readOnly) return
+    const current = docRef.current
+    setAnchorId(null)
+    setFocus(null)
+    if (zoomRootId) {
+      const root = current.blocks[zoomRootId]
+      if (!root) return // the graceful-exit effect above cleans this up
+      const zoomedOut = prev !== null && ancestorsOf(current, prev).includes(zoomRootId)
+      if (zoomedOut && current.blocks[prev]) setSelected(prev)
+      else setSelected(root.children[0] ?? zoomRootId)
+    } else if (prev !== null && current.blocks[prev]) {
+      setSelected(prev)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoomRootId, readOnly])
+
   useEffect(() => {
     if (!highlightHeading) return
     const id = findHeadingBlockId(docRef.current, highlightHeading)
@@ -174,9 +239,17 @@ export function BlockEditor({
         if (!collapsed.has(id)) walk(block.children)
       }
     }
-    walk(doc.rootBlockIds)
+    if (zoomRoot) {
+      // The zoomed block leads the order as the view's editable title (so
+      // arrow-up from the first child selects it); its children always render
+      // — the root's own collapse state is ignored while zoomed.
+      order.push(zoomRoot.id)
+      walk(zoomRoot.children)
+    } else {
+      walk(doc.rootBlockIds)
+    }
     return order
-  }, [doc, collapsed])
+  }, [doc, collapsed, zoomRoot])
 
   // The selected block ids. Single select is just `[selected]`; a Shift+Arrow
   // range is the contiguous span of `visibleOrder` between anchor and head.
@@ -307,23 +380,38 @@ export function BlockEditor({
     })
   }
 
+  // Selection roots for *structural* ops. The zoomed title can be part of a
+  // selection (e.g. the Cmd+A "page" rung) but must never be moved, indented,
+  // outdented, or deleted from inside its own view.
+  const structuralRoots = () => selectionRoots().filter((id) => id !== zoomRootId)
+
+  // The first selectable block of a given doc, honouring the current zoom.
+  const firstSelectable = (d: BlockDoc): string | null =>
+    zoomRootId && d.blocks[zoomRootId]
+      ? (d.blocks[zoomRootId].children[0] ?? zoomRootId)
+      : (d.rootBlockIds[0] ?? null)
+
   const indentSelection = () => {
     let next = doc
     // In document order: each block's new previous sibling is the one the group
     // is nesting under, so a contiguous sibling range nests together.
-    for (const id of selectionRoots()) next = indentBlock(next, id)
+    for (const id of structuralRoots()) next = indentBlock(next, id)
     if (next !== doc) history.commit(doc, next, { type: "structural" })
   }
   const outdentSelection = () => {
     let next = doc
-    // Reverse order keeps siblings in place as each is lifted out.
-    for (const id of [...selectionRoots()].reverse()) next = outdentBlock(next, id)
+    // Reverse order keeps siblings in place as each is lifted out. At the zoom
+    // boundary, outdenting a direct child would eject it from the view — skip.
+    for (const id of [...structuralRoots()].reverse()) {
+      if (zoomRootId && siblingsOf(next, id)?.parentId === zoomRootId) continue
+      next = outdentBlock(next, id)
+    }
     if (next !== doc) history.commit(doc, next, { type: "structural" })
   }
   const removeSelection = () => {
     let next = doc
     let focusId: string | null = null
-    for (const id of selectionRoots()) {
+    for (const id of structuralRoots()) {
       if (!next.blocks[id]) continue
       const result = removeBlock(next, id)
       next = result.doc
@@ -336,7 +424,7 @@ export function BlockEditor({
     setAnchorId(null)
     setFocus(null)
     // An emptied doc regains a blank block via the editor's trailing-blank rule.
-    setSelected(focusId ?? next.rootBlockIds[0] ?? null)
+    setSelected(focusId ?? firstSelectable(next))
   }
 
   // Serialize the selected subtrees to block markdown (markers + nesting) so it
@@ -365,7 +453,7 @@ export function BlockEditor({
   // moves the highlight, like moving between blocks.
   useEffect(() => {
     if (!focusFirstSignal || readOnly) return
-    const first = docRef.current.rootBlockIds[0]
+    const first = firstSelectable(docRef.current)
     if (!first) return
     setAnchorId(null)
     setSelected(first)
@@ -381,11 +469,16 @@ export function BlockEditor({
     if (!newRootSignal || readOnly) return
     const current = docRef.current
     const fresh = emptyBlock()
-    const next: BlockDoc = {
-      ...current,
-      rootBlockIds: [fresh.id, ...current.rootBlockIds],
-      blocks: { ...current.blocks, [fresh.id]: fresh },
-    }
+    // While zoomed, "a new root" means a new first child of the zoom root —
+    // the zoomed subtree is the page.
+    const next: BlockDoc =
+      zoomRootId && current.blocks[zoomRootId]
+        ? insertFirstChild(current, zoomRootId, fresh)
+        : {
+            ...current,
+            rootBlockIds: [fresh.id, ...current.rootBlockIds],
+            blocks: { ...current.blocks, [fresh.id]: fresh },
+          }
     history.commit(current, next, { type: "structural" })
     setAnchorId(null)
     setSelected(fresh.id)
@@ -413,7 +506,7 @@ export function BlockEditor({
       return
     }
     setFocus((cur) => (cur && restored.blocks[cur.id] ? cur : null))
-    setSelected((cur) => (cur && restored.blocks[cur] ? cur : (restored.rootBlockIds[0] ?? null)))
+    setSelected((cur) => (cur && restored.blocks[cur] ? cur : firstSelectable(restored)))
   }
 
   const undo = () => {
@@ -459,6 +552,9 @@ export function BlockEditor({
     if (result.doc) history.commit(doc, result.doc, result.op ?? { type: "structural" })
     if (result.toggleCollapse) toggleCollapse(result.toggleCollapse)
     if (result.focus) applyFocus(result.focus)
+    // Zoom changes navigate (URL state); the zoom-change effect then places the
+    // selection (first child on zoom-in, the block zoomed out from on zoom-out).
+    if (result.zoom !== undefined) navigateZoom(result.zoom.id)
     if (result.exitTop) {
       // Leaving the top clears the block highlight so nothing stays selected
       // below while focus moves up to the title.
@@ -474,7 +570,7 @@ export function BlockEditor({
   // dispatch the same commands. Returns whether the gesture was consumed.
   const dispatchKey = (mode: Mode, id: string, event: KeyLike, caret?: CaretInput): boolean => {
     if (readOnly) return false
-    const input: CommandInput = { doc, id, mode, visibleOrder, caret }
+    const input: CommandInput = { doc, id, mode, visibleOrder, caret, zoomRootId }
     const name = resolveKey(mode, event, input)
     if (!name) return false
     const result = runCommand(name, input)
@@ -510,6 +606,9 @@ export function BlockEditor({
       setFocus({ id: result.lastId, caret })
     },
     dispatchKey,
+    zoomInto: (id) => {
+      if (!readOnly) navigateZoom(id)
+    },
     startSelectionLadder: (id) => {
       if (readOnly) return
       // Called from edit mode (Cmd/Ctrl+A with the textarea already fully
@@ -609,7 +708,7 @@ export function BlockEditor({
         event.preventDefault()
         const result = duplicateBlocks(
           doc,
-          selectionRoots(),
+          structuralRoots(),
           direction === "up" ? "above" : "below",
         )
         if (result) {
@@ -627,7 +726,7 @@ export function BlockEditor({
         ((event.altKey && !event.shiftKey && !mod) || (mod && event.shiftKey && !event.altKey))
       ) {
         event.preventDefault()
-        const next = moveBlocks(doc, selectionRoots(), direction)
+        const next = moveBlocks(doc, structuralRoots(), direction)
         if (next !== doc) history.commit(doc, next, { type: "structural" })
         return
       }
@@ -715,11 +814,16 @@ export function BlockEditor({
     const normalized = text.replace(/\r\n?/g, "\n")
     if (normalized.trim() === "") return
     const target = selectedIds[selectedIds.length - 1] ?? selected
+    // Pasting "after" the zoomed title means the top of its body — a sibling
+    // would land outside the view.
+    const afterZoomTitle = zoomRootId !== null && target === zoomRootId
     if (plain) {
       // Paste-as-plain: one new paragraph block, newlines collapsed to spaces
       // (a block is a single line in the serialized format).
       const fresh = emptyBlock(normalized.replace(/\s*\n+\s*/g, " ").trim())
-      const next = insertAfter(doc, target, fresh)
+      const next = afterZoomTitle
+        ? insertFirstChild(doc, target, fresh)
+        : insertAfter(doc, target, fresh)
       if (next === doc) return
       history.commit(doc, next, { type: "structural" })
       setAnchorId(null)
@@ -730,7 +834,9 @@ export function BlockEditor({
     // Remint any pasted ids that already exist here (e.g. content copied with
     // its `id::` lines) so the paste never clobbers an existing block.
     const sub = remintCollidingIds(parse(normalized), doc)
-    const result = insertBlocksAfter(doc, target, sub)
+    const result = afterZoomTitle
+      ? insertBlocksAsFirstChildren(doc, target, sub)
+      : insertBlocksAfter(doc, target, sub)
     if (!result) return
     history.commit(doc, result.doc, { type: "structural" })
     setAnchorId(null)
@@ -765,6 +871,8 @@ export function BlockEditor({
     }
     walk(doc.rootBlockIds, 0)
     if (picked.length === 0 || partial) return
+    // Never let a native cut delete the zoomed title out of its own view.
+    if (zoomRootId && pickedSet.has(zoomRootId)) return
 
     // Removal happens by subtree root; every block a root drags along must
     // itself be covered, or the cut would delete unselected content.
@@ -798,7 +906,7 @@ export function BlockEditor({
     history.commit(doc, next, { type: "structural" })
     setAnchorId(null)
     setFocus(null)
-    setSelected(focusId ?? next.rootBlockIds[0] ?? null)
+    setSelected(focusId ?? firstSelectable(next))
   }
 
   const handleCopy = (event: ClipboardEvent<HTMLDivElement>) => {
@@ -829,26 +937,77 @@ export function BlockEditor({
     event.preventDefault()
   }
 
+  // Breadcrumb path while zoomed: every ancestor of the zoom root, outermost
+  // first (levels are never dropped — long labels truncate with CSS instead).
+  const crumbIds = useMemo(
+    () => (zoomRootId && doc.blocks[zoomRootId] ? ancestorsOf(doc, zoomRootId).reverse() : []),
+    [doc, zoomRootId],
+  )
+  const crumbLabel = (id: string): string => {
+    const text = stripMarker(doc.blocks[id]?.content ?? "").trim()
+    return text === "" ? "…" : text
+  }
+  const crumbClass =
+    "min-w-0 max-w-48 cursor-pointer truncate rounded-sm px-1 hover:bg-bg-secondary hover:text-text"
+
   return (
-    // The container holds keyboard focus for select mode (tabIndex -1 = focusable
-    // only programmatically), so arrows/shortcuts work no matter which block is
-    // highlighted. outline-none hides the focus ring on the wrapper itself.
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
-    <div
-      className="space-y-0.5 outline-none"
-      ref={containerRef}
-      tabIndex={-1}
-      onKeyDown={handleKeyDown}
-      onBlur={handleContainerBlur}
-      onCopy={handleCopy}
-      onPaste={handleContainerPaste}
-      onCut={handleCut}
-    >
-      {doc.rootBlockIds.map((id) => {
-        const block = doc.blocks[id]
-        if (!block) return null
-        return <BlockItem key={id} doc={doc} block={block} depth={0} api={api} />
-      })}
-    </div>
+    <>
+      {zoomRoot ? (
+        <nav
+          aria-label="Zoom path"
+          data-testid="zoom-breadcrumb"
+          className="mb-2 flex min-w-0 items-center gap-0.5 font-content text-sm text-text-secondary"
+        >
+          <button type="button" className={crumbClass} onClick={() => navigateZoom(null)}>
+            {noteTitle?.trim() || "Note"}
+          </button>
+          {crumbIds.map((id) => (
+            <Fragment key={id}>
+              <span aria-hidden>›</span>
+              <button type="button" className={crumbClass} onClick={() => navigateZoom(id)}>
+                {crumbLabel(id)}
+              </button>
+            </Fragment>
+          ))}
+          <span aria-hidden>›</span>
+          <span aria-current="page" className="min-w-0 max-w-48 truncate px-1 text-text">
+            {crumbLabel(zoomRoot.id)}
+          </span>
+        </nav>
+      ) : null}
+      {/* The container holds keyboard focus for select mode (tabIndex -1 =
+          focusable only programmatically), so arrows/shortcuts work no matter
+          which block is highlighted. outline-none hides the focus ring. */}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+      <div
+        className="space-y-0.5 outline-none"
+        ref={containerRef}
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        onBlur={handleContainerBlur}
+        onCopy={handleCopy}
+        onPaste={handleContainerPaste}
+        onCut={handleCut}
+      >
+        {zoomRoot ? (
+          <>
+            {/* The zoomed block is the view's editable title; its children are
+                the page, starting again at depth 0. */}
+            <BlockItem key={zoomRoot.id} doc={doc} block={zoomRoot} depth={0} api={api} zoomTitle />
+            {zoomRoot.children.map((id) => {
+              const block = doc.blocks[id]
+              if (!block) return null
+              return <BlockItem key={id} doc={doc} block={block} depth={0} api={api} />
+            })}
+          </>
+        ) : (
+          doc.rootBlockIds.map((id) => {
+            const block = doc.blocks[id]
+            if (!block) return null
+            return <BlockItem key={id} doc={doc} block={block} depth={0} api={api} />
+          })
+        )}
+      </div>
+    </>
   )
 }

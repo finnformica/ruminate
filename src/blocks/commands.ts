@@ -10,6 +10,7 @@ import {
   emptyBlock,
   indentBlock,
   insertAfter,
+  insertFirstChild,
   moveBlock,
   outdentBlock,
   removeBlock,
@@ -56,6 +57,10 @@ export interface CommandInput {
   visibleOrder: string[]
   /** Present in edit mode; absent in select mode. */
   caret?: CaretInput
+  /** The block the editor is zoomed into ("focus mode"), or null/absent. While
+   * zoomed, the visible world is this block (rendered as a title) plus its
+   * subtree — commands must not move, delete, or navigate past that boundary. */
+  zoomRootId?: string | null
 }
 
 /** Where selection / edit focus should land after a command runs. */
@@ -77,6 +82,9 @@ export interface CommandResult {
   /** Navigation tried to move above the first block — the caller may hand focus
    * to whatever sits above the editor (e.g. the note title). */
   exitTop?: boolean
+  /** Requested zoom change: `{ id: null }` exits zoom, `{ id }` zooms into a
+   * block. Absent = no change. The editor navigates (URL state) accordingly. */
+  zoom?: { id: string | null }
 }
 
 type Command = (input: CommandInput) => CommandResult
@@ -146,7 +154,7 @@ function nearestVisibleAncestor(doc: BlockDoc, id: string, visibleOrder: string[
 
 /** Move the highlight to the previous / next visible block (select mode). */
 function moveSelection(direction: "up" | "down"): Command {
-  return ({ doc, id, visibleOrder }) => {
+  return ({ doc, id, visibleOrder, zoomRootId }) => {
     const i = visibleOrder.indexOf(id)
     if (i === -1) {
       // The selected block is hidden inside a collapsed parent — arrows would
@@ -156,8 +164,9 @@ function moveSelection(direction: "up" | "down"): Command {
       return { handled: true, focus: { mode: "select", id: target } }
     }
     const next = direction === "up" ? i - 1 : i + 1
-    // Moving up past the first block hands focus to whatever's above the editor.
-    if (next < 0) return { handled: true, exitTop: true }
+    // Moving up past the first block hands focus to whatever's above the editor
+    // — except while zoomed, where the note title isn't the context: swallow.
+    if (next < 0) return zoomRootId ? { handled: true } : { handled: true, exitTop: true }
     // Consume the key at the bottom too, so the page never scrolls instead.
     if (next >= visibleOrder.length) return { handled: true }
     return { handled: true, focus: { mode: "select", id: visibleOrder[next] } }
@@ -167,7 +176,9 @@ function moveSelection(direction: "up" | "down"): Command {
 /** Move the highlight (or edit focus) to the previous / next sibling, skipping
  * whatever is nested between them. */
 function siblingJump(direction: "prev" | "next"): Command {
-  return ({ doc, id, mode }) => {
+  return ({ doc, id, mode, zoomRootId }) => {
+    // The zoom root's siblings live outside the zoomed view — don't jump there.
+    if (zoomRootId && id === zoomRootId) return { handled: true }
     const info = siblingsOf(doc, id)
     if (!info) return { handled: true }
     const target = direction === "prev" ? info.index - 1 : info.index + 1
@@ -184,10 +195,13 @@ function siblingJump(direction: "prev" | "next"): Command {
  * highlighting the block that was being edited.
  */
 function moveEditFocus(direction: "up" | "down"): Command {
-  return ({ id, visibleOrder }) => {
+  return ({ id, visibleOrder, zoomRootId }) => {
     const i = visibleOrder.indexOf(id)
     if (direction === "up") {
       if (i > 0) return { handled: true, focus: { mode: "select", id: visibleOrder[i - 1] } }
+      // At the very top: hand focus to the note title — unless zoomed, where
+      // the title isn't the context; just commit the edit and stay put.
+      if (zoomRootId) return { handled: true, focus: { mode: "select", id } }
       return { handled: true, exitTop: true }
     }
     if (i >= 0 && i < visibleOrder.length - 1) {
@@ -200,7 +214,7 @@ function moveEditFocus(direction: "up" | "down"): Command {
 /** Split the block at the caret; `markerFor` decides the new block's marker —
  * a list continuation for Enter, the same type for Shift-Enter. */
 function splitAtCaret(markerFor: (type: BlockType) => string): Command {
-  return ({ doc, id, caret }) => {
+  return ({ doc, id, caret, zoomRootId }) => {
     if (!caret) return IGNORED
     const content = doc.blocks[id]?.content ?? ""
     const type = getBlockType(content)
@@ -209,7 +223,12 @@ function splitAtCaret(markerFor: (type: BlockType) => string): Command {
     const after = caret.value.slice(caret.end)
     const updated = updateContent(doc, id, prefix + before)
     const fresh = emptyBlock(markerFor(type) + after)
-    const next = insertAfter(updated, id, fresh)
+    // Splitting the zoomed title makes the tail its FIRST child (title + body
+    // metaphor) — a sibling would fall outside the zoomed view.
+    const next =
+      zoomRootId && id === zoomRootId
+        ? insertFirstChild(updated, id, fresh)
+        : insertAfter(updated, id, fresh)
     return {
       handled: true,
       doc: next,
@@ -223,7 +242,10 @@ function splitAtCaret(markerFor: (type: BlockType) => string): Command {
  * duplicate-down lands on the lower copy, duplicate-up on the upper). In edit
  * mode the copy opens editing with the caret preserved ("duplicate line"). */
 function duplicate(direction: "above" | "below"): Command {
-  return ({ doc, id, mode, caret }) => {
+  return ({ doc, id, mode, caret, zoomRootId }) => {
+    // Can't duplicate the zoom root while inside it — the copy would be an
+    // invisible sibling outside the view (Dynalist's rule).
+    if (zoomRootId && id === zoomRootId) return { handled: true }
     const result = duplicateBlocks(doc, [id], direction)
     if (!result) return { handled: true }
     return {
@@ -263,6 +285,9 @@ export type CommandName =
   | "exitList"
   | "stripMarker"
   | "backspaceEmpty"
+  | "zoomIn"
+  | "zoomOut"
+  | "zoomExit"
 
 export const COMMANDS: Record<CommandName, Command> = {
   /** Select → edit the highlighted block. */
@@ -276,7 +301,9 @@ export const COMMANDS: Record<CommandName, Command> = {
 
   /** Nest the block under its previous sibling; keeps the current mode/focus
    * (and, when editing, the caret position). */
-  indent: ({ doc, id, mode, caret }) => {
+  indent: ({ doc, id, mode, caret, zoomRootId }) => {
+    // The zoom root would nest under an invisible sibling — refuse.
+    if (zoomRootId && id === zoomRootId) return { handled: true, focus: keepFocus(mode, id, caret) }
     const next = indentBlock(doc, id)
     // Consume the key even when it can't indent (no previous sibling), so Tab
     // never escapes the editor.
@@ -285,7 +312,12 @@ export const COMMANDS: Record<CommandName, Command> = {
   },
 
   /** Lift the block out to become a sibling of its parent. */
-  outdent: ({ doc, id, mode, caret }) => {
+  outdent: ({ doc, id, mode, caret, zoomRootId }) => {
+    // Zoom boundary: outdenting the zoom root itself, or a direct child (which
+    // would become the root's sibling and leave the view), is a no-op.
+    if (zoomRootId && (id === zoomRootId || siblingsOf(doc, id)?.parentId === zoomRootId)) {
+      return { handled: true, focus: keepFocus(mode, id, caret) }
+    }
     const next = outdentBlock(doc, id)
     if (next === doc) return { handled: true, focus: keepFocus(mode, id, caret) }
     return { handled: true, doc: next, op: STRUCTURAL, focus: keepFocus(mode, id, caret) }
@@ -303,7 +335,9 @@ export const COMMANDS: Record<CommandName, Command> = {
 
   /** Jump to the top of the current level (its first sibling); if already there,
    * step up to the parent. Walks up levels rather than to the page top. */
-  jumpLevelTop: ({ doc, id, mode }) => {
+  jumpLevelTop: ({ doc, id, mode, zoomRootId }) => {
+    // The zoom root's own level lives outside the zoomed view — clamp there.
+    if (zoomRootId && id === zoomRootId) return { handled: true }
     const info = siblingsOf(doc, id)
     if (!info) return { handled: true }
     if (info.index > 0) return { handled: true, focus: keepFocus(mode, info.siblings[0]) }
@@ -311,7 +345,8 @@ export const COMMANDS: Record<CommandName, Command> = {
     return { handled: true }
   },
   /** Jump to the bottom of the current level (its last sibling). */
-  jumpLevelBottom: ({ doc, id, mode }) => {
+  jumpLevelBottom: ({ doc, id, mode, zoomRootId }) => {
+    if (zoomRootId && id === zoomRootId) return { handled: true }
     const info = siblingsOf(doc, id)
     if (!info || info.index >= info.siblings.length - 1) return { handled: true }
     return { handled: true, focus: keepFocus(mode, info.siblings[info.siblings.length - 1]) }
@@ -319,12 +354,15 @@ export const COMMANDS: Record<CommandName, Command> = {
 
   /** Reorder the block among its siblings (subtree comes along). Preserves the
    * caret when editing so the cursor rides along with the moved block. */
-  moveBlockUp: ({ doc, id, mode, caret }) => {
+  moveBlockUp: ({ doc, id, mode, caret, zoomRootId }) => {
+    // Can't move the zoom root among its (invisible) siblings from inside it.
+    if (zoomRootId && id === zoomRootId) return { handled: true }
     const next = moveBlock(doc, id, "up")
     if (next === doc) return { handled: true }
     return { handled: true, doc: next, op: STRUCTURAL, focus: keepFocus(mode, id, caret) }
   },
-  moveBlockDown: ({ doc, id, mode, caret }) => {
+  moveBlockDown: ({ doc, id, mode, caret, zoomRootId }) => {
+    if (zoomRootId && id === zoomRootId) return { handled: true }
     const next = moveBlock(doc, id, "down")
     if (next === doc) return { handled: true }
     return { handled: true, doc: next, op: STRUCTURAL, focus: keepFocus(mode, id, caret) }
@@ -335,7 +373,10 @@ export const COMMANDS: Record<CommandName, Command> = {
   duplicateBelow: duplicate("below"),
 
   /** Delete the highlighted block and its subtree (select mode). */
-  deleteBlock: ({ doc, id }) => {
+  deleteBlock: ({ doc, id, zoomRootId }) => {
+    // Never delete the block being zoomed into — the view must keep its title.
+    // (Deleting the last child inside a zoom is fine: the title remains.)
+    if (zoomRootId && id === zoomRootId) return { handled: true }
     const onlyBlock =
       doc.rootBlockIds.length === 1 &&
       doc.rootBlockIds[0] === id &&
@@ -364,7 +405,10 @@ export const COMMANDS: Record<CommandName, Command> = {
 
   /** Collapse / expand a block with children; consumes Space regardless (so the
    * page never scrolls) but only toggles when there's something to fold. */
-  toggleCollapse: ({ doc, id }) => {
+  toggleCollapse: ({ doc, id, zoomRootId }) => {
+    // The zoomed title's children are the whole view — collapsing it would
+    // blank the page, so it's pinned open while zoomed.
+    if (zoomRootId && id === zoomRootId) return { handled: true }
     const hasChildren = (doc.blocks[id]?.children.length ?? 0) > 0
     if (!hasChildren) return { handled: true }
     return { handled: true, toggleCollapse: id }
@@ -372,10 +416,16 @@ export const COMMANDS: Record<CommandName, Command> = {
 
   /** Enter at end of line: a fresh continuation block below. Enter from a
    * heading nests the new block under it, like an outline section. */
-  insertBelow: ({ doc, id }) => {
+  insertBelow: ({ doc, id, zoomRootId }) => {
     const content = doc.blocks[id]?.content ?? ""
     const type = getBlockType(content)
     const fresh = emptyBlock(continuationMarker(type))
+    // On the zoomed title, "below" means the top of its body — the first child
+    // (a sibling would land outside the view).
+    if (zoomRootId && id === zoomRootId) {
+      const next = insertFirstChild(doc, id, fresh)
+      return { handled: true, doc: next, op: STRUCTURAL, focus: { mode: "edit", id: fresh.id } }
+    }
     let next = insertAfter(doc, id, fresh)
     if (type.kind === "heading") next = indentBlock(next, fresh.id)
     return { handled: true, doc: next, op: STRUCTURAL, focus: { mode: "edit", id: fresh.id } }
@@ -383,10 +433,14 @@ export const COMMANDS: Record<CommandName, Command> = {
 
   /** New sibling block below, of the *same* type (Cmd/Shift+Enter). Unlike
    * `insertBelow` a heading stays a heading and doesn't nest. */
-  insertSiblingBelow: ({ doc, id }) => {
+  insertSiblingBelow: ({ doc, id, zoomRootId }) => {
     const content = doc.blocks[id]?.content ?? ""
     const fresh = emptyBlock(sameTypeMarker(getBlockType(content)))
-    const next = insertAfter(doc, id, fresh)
+    // On the zoomed title a "sibling" would leave the view — first child instead.
+    const next =
+      zoomRootId && id === zoomRootId
+        ? insertFirstChild(doc, id, fresh)
+        : insertAfter(doc, id, fresh)
     return { handled: true, doc: next, op: STRUCTURAL, focus: { mode: "edit", id: fresh.id } }
   },
 
@@ -414,7 +468,9 @@ export const COMMANDS: Record<CommandName, Command> = {
   },
 
   /** Backspace at the start of an empty block removes it, merging upward. */
-  backspaceEmpty: ({ doc, id }) => {
+  backspaceEmpty: ({ doc, id, zoomRootId }) => {
+    // The zoomed title can't delete itself out of its own view.
+    if (zoomRootId && id === zoomRootId) return { handled: true }
     if (doc.rootBlockIds.length === 1 && doc.rootBlockIds[0] === id) return { handled: true }
     const { doc: next, focusId } = removeBlock(doc, id)
     return {
@@ -426,6 +482,25 @@ export const COMMANDS: Record<CommandName, Command> = {
         : { mode: "select", id: next.rootBlockIds[0] ?? null },
     }
   },
+
+  // ── Zoom ("focus mode") ──────────────────────────────────────────────────
+  // Commands only *request* the zoom change; the editor navigates (the zoom
+  // lives in the URL) and then places the selection — first child on zoom-in,
+  // the block zoomed out from on zoom-out.
+
+  /** Zoom into the current block: its subtree becomes the whole view. */
+  zoomIn: ({ id, zoomRootId }) =>
+    id === zoomRootId ? { handled: true } : { handled: true, zoom: { id } },
+
+  /** Zoom out one level — to the zoom root's parent, or fully at the top. */
+  zoomOut: ({ doc, zoomRootId }) => {
+    if (!zoomRootId) return IGNORED
+    const parentId = siblingsOf(doc, zoomRootId)?.parentId ?? null
+    return { handled: true, zoom: { id: parentId } }
+  },
+
+  /** Exit zoom entirely, back to the whole note. */
+  zoomExit: ({ zoomRootId }) => (zoomRootId ? { handled: true, zoom: { id: null } } : IGNORED),
 }
 
 /** Run a named command. Unknown names are a no-op (defensive). */

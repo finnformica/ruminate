@@ -39,6 +39,9 @@ declaratively in `src/blocks/keymap.ts` and dispatched through the command layer
 | Paste as one plain block                | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>                                     |
 | Collapse / expand (if nested)           | <kbd>Space</kbd>                                                           |
 | Toggle checkbox (todo blocks)           | <kbd>x</kbd>                                                               |
+| Zoom into the block (see Zoom below)    | <kbd>F</kbd> (or <kbd>⌘</kbd> <kbd>.</kbd>)                                |
+| Zoom out one level                      | <kbd>⇧</kbd> <kbd>F</kbd>                                                  |
+| Exit zoom entirely                      | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>                                     |
 | Focus the note title (from first block) | <kbd>↑</kbd>                                                               |
 
 With more than one block selected, <kbd>⇥</kbd> / <kbd>⇧⇥</kbd>, delete,
@@ -93,6 +96,7 @@ one line in the serialized format). With nothing selected (after
 | Exit edit, select block above / below   | <kbd>↑</kbd> / <kbd>↓</kbd> at the first / last line                       |
 | Paste as plain text (newlines → spaces) | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>                                     |
 | Select all text, then grow by structure | <kbd>⌘</kbd> <kbd>A</kbd> (repeat — see the selection ladder)              |
+| Zoom into the block / exit zoom         | <kbd>⌘</kbd> <kbd>.</kbd> / <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>         |
 | Strip the block's marker → merge up     | <kbd>⌫</kbd> at line start                                                 |
 
 Enter from a heading nests the new block underneath it. Enter on an empty list
@@ -104,6 +108,38 @@ mode**: <kbd>↑</kbd> on the first visual line highlights the block above
 the last visual line highlights the block below (on the very last block it
 highlights the block itself). <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd> collapses
 newlines to single spaces because a block is one line in the serialized format.
+
+### Zoom (focus mode)
+
+Zoom makes one block's subtree the whole editor view — the block renders as an
+editable title at the top, its children below it, with a breadcrumb tracing the
+full path (`Note title › ancestor › … › zoomed block`; every crumb is
+clickable, the note-title crumb exits fully). The zoom lives in the URL
+(`?block=…`), so the browser back button undoes it.
+
+| Action                        | Trigger                                             |
+| ----------------------------- | --------------------------------------------------- |
+| Zoom into the selected block  | <kbd>F</kbd> (select mode)                          |
+| Zoom out one level            | <kbd>⇧</kbd> <kbd>F</kbd> (select mode)             |
+| Zoom into the current block   | <kbd>⌘</kbd> <kbd>.</kbd> (both modes)              |
+| Exit zoom entirely            | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd> (both modes) |
+| Zoom into a list item         | click its bullet / number                           |
+| Zoom into any other block     | hover the gutter, click the magnifier               |
+| Navigate to a shallower level | click its breadcrumb crumb                          |
+
+Rules while zoomed:
+
+- Zooming **in** selects the first child (not the title); zooming **out** lands
+  on the block you zoomed out from.
+- <kbd>↵</kbd> / <kbd>⌘</kbd> <kbd>↵</kbd> on the title create its **first
+  child** (title + body), never a sibling outside the view.
+- The title can't be deleted, moved, duplicated, indented, outdented, or
+  collapsed from inside its own view; outdenting a top-level block of the view
+  (which would eject it) is a no-op, and <kbd>↑</kbd> at the title stays put
+  rather than exiting to the note title.
+- The <kbd>⌘</kbd> <kbd>A</kbd> ladder's "page" rung is the zoomed subtree.
+- If the zoomed block disappears (an undo, a stale link), the editor exits the
+  zoom gracefully and cleans the URL.
 
 ### Note title
 

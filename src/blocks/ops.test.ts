@@ -7,6 +7,8 @@ import {
   insertAfter,
   insertBefore,
   insertBlocksAfter,
+  insertBlocksAsFirstChildren,
+  insertFirstChild,
   moveBlocks,
   outdentBlock,
   remintCollidingIds,
@@ -243,6 +245,39 @@ describe("insertBlocksAfter", () => {
     const doc = fixture()
     expect(insertBlocksAfter(doc, "nope", parse("x"))).toBeNull()
     expect(insertBlocksAfter(doc, "a", parse(""))).toBeNull()
+  })
+})
+
+describe("insertFirstChild", () => {
+  it("inserts the block at the head of the parent's children", () => {
+    const doc = fixture()
+    const fresh = emptyBlock("new")
+    const next = insertFirstChild(doc, "b", fresh)
+    expect(next.blocks["b"].children).toEqual([fresh.id, "b1"])
+    expect(next.blocks[fresh.id].content).toBe("new")
+    // Immutable: the original doc is untouched.
+    expect(doc.blocks["b"].children).toEqual(["b1"])
+  })
+
+  it("is a no-op for an unknown parent", () => {
+    const doc = fixture()
+    expect(insertFirstChild(doc, "nope", emptyBlock("x"))).toBe(doc)
+  })
+})
+
+describe("insertBlocksAsFirstChildren", () => {
+  it("inserts the parsed blocks as the parent's leading children", () => {
+    const doc = fixture()
+    const result = insertBlocksAsFirstChildren(doc, "b", parse("one\ntwo"))!
+    const childContents = result.doc.blocks["b"].children.map((id) => result.doc.blocks[id].content)
+    expect(childContents).toEqual(["one", "two", "B1"])
+    expect(result.doc.blocks[result.lastId].content).toBe("two")
+  })
+
+  it("returns null for an unknown parent or empty sub-doc", () => {
+    const doc = fixture()
+    expect(insertBlocksAsFirstChildren(doc, "nope", parse("x"))).toBeNull()
+    expect(insertBlocksAsFirstChildren(doc, "b", parse(""))).toBeNull()
   })
 })
 

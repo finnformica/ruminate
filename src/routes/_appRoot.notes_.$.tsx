@@ -47,6 +47,8 @@ type RouteSearch = {
   content?: string
   /** Heading text to highlight in the block editor on landing (from Cmd-K). */
   heading?: string
+  /** Block id the editor is zoomed into ("focus mode"); absent = un-zoomed. */
+  block?: string
 }
 
 export const Route = createFileRoute("/_appRoot/notes_/$")({
@@ -55,6 +57,7 @@ export const Route = createFileRoute("/_appRoot/notes_/$")({
       query: typeof search.query === "string" ? search.query : undefined,
       content: typeof search.content === "string" ? search.content : undefined,
       heading: typeof search.heading === "string" ? search.heading : undefined,
+      block: typeof search.block === "string" ? search.block : undefined,
     }
   },
   component: RouteComponent,
@@ -90,7 +93,12 @@ function renderTemplate(template: Template, args: Record<string, unknown> = {}) 
 function NotePage() {
   // Router
   const { _splat: noteId } = Route.useParams()
-  const { query, content: defaultContent, heading: highlightHeading } = Route.useSearch()
+  const {
+    query,
+    content: defaultContent,
+    heading: highlightHeading,
+    block: zoomBlockId,
+  } = Route.useSearch()
   const navigate = Route.useNavigate()
 
   // Global state
@@ -403,7 +411,10 @@ function NotePage() {
 
             {useBlockEditor ? (
               <div className="flex flex-col gap-3">
-                {!isDailyNote && !isWeeklyNote ? (
+                {/* While zoomed, the breadcrumb (inside the editor) carries the
+                    note title as its first crumb — hide the standalone title to
+                    avoid doubling it. */}
+                {!isDailyNote && !isWeeklyNote && !zoomBlockId ? (
                   <NoteTitle
                     noteId={noteId ?? ""}
                     onRename={renameTo}
@@ -426,6 +437,12 @@ function NotePage() {
                   focusFirstSignal={focusFirstSignal}
                   focusFirstMode={focusFirstMode}
                   newRootSignal={newRootSignal}
+                  zoomBlockId={zoomBlockId ?? null}
+                  onZoomNavigate={(id) =>
+                    // A plain push, so the back button undoes zoom naturally.
+                    navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
+                  }
+                  noteTitle={noteId ?? ""}
                 />
               </div>
             ) : (

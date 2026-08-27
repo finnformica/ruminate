@@ -402,6 +402,52 @@ await story("blockeditor--mixed")
   await page.keyboard.press("Escape")
 }
 
+// --- Zoom: a zoomed story shows only the subtree, with a breadcrumb ---
+await story("blockeditor--zoomed")
+{
+  await page.screenshot({ path: `${OUT}/07-zoomed.png` })
+  check("zoom: breadcrumb renders", await page.getByTestId("zoom-breadcrumb").isVisible())
+  check("zoom: blocks outside the subtree are hidden", (await block("Project ideas").count()) === 0)
+  check("zoom: the zoomed block renders as the title", await block("A bullet point").isVisible())
+  check("zoom: its child renders below", await block("A nested bullet").isVisible())
+}
+
+// --- Zoom flow: F in, edit a child, Shift+F out — content + selection intact ---
+await story("blockeditor--mixed")
+{
+  await block("A bullet point").click()
+  await page.keyboard.press("f")
+  await page.getByTestId("zoom-breadcrumb").waitFor({ timeout: 5000 })
+  check("F zooms into the selected block", (await block("A todo").count()) === 0)
+
+  // Edit the nested child while zoomed.
+  await block("A nested bullet").click()
+  await page.keyboard.press("Enter")
+  await page.locator("textarea").first().waitFor()
+  await page.keyboard.press("End")
+  await page.keyboard.type(" EDITED")
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(120)
+
+  await page.keyboard.press("Shift+F")
+  await page.waitForTimeout(120)
+  check(
+    "Shift+F zooms back out",
+    (await page.getByTestId("zoom-breadcrumb").count()) === 0 &&
+      (await block("Project ideas").isVisible()),
+  )
+  const md = await serialized()
+  check("the zoomed-in edit survived", md.includes("A nested bullet EDITED"))
+  const highlighted = await page.evaluate(
+    () => document.querySelector("[data-block-line].bg-bg-secondary")?.textContent ?? "",
+  )
+  check(
+    "zoom-out selects the block zoomed out from",
+    highlighted.includes("A bullet point"),
+    highlighted,
+  )
+}
+
 // --- Keyboard navigation highlights, doesn't edit ---
 await story("blockeditor--mixed")
 await block("Project ideas").click() // select first

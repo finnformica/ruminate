@@ -46,6 +46,8 @@ export interface BlockEditorApi {
    * was consumed (so the caller can `preventDefault`).
    */
   dispatchKey: (mode: Mode, id: string, event: KeyLike, caret?: CaretInput) => boolean
+  /** Zoom into a block: its subtree becomes the whole editor view. */
+  zoomInto: (id: string) => void
   /**
    * Exit edit mode and take the first selection-ladder rung on this block
    * (Cmd/Ctrl+A pressed with the textarea's text already fully selected).
@@ -104,11 +106,15 @@ export function BlockItem({
   block,
   depth,
   api,
+  zoomTitle = false,
 }: {
   doc: BlockDoc
   block: Block
   depth: number
   api: BlockEditorApi
+  /** Render as the zoomed view's title: promoted typography, no marker or
+   * chevron, and no children (the editor renders those itself at depth 0). */
+  zoomTitle?: boolean
 }) {
   const readOnly = api.readOnly ?? false
   const editing = !readOnly && api.focus?.id === block.id
@@ -127,7 +133,10 @@ export function BlockItem({
   // keeps the view and the editor pixel-identical — nothing shifts on click.
   const body = stripMarker(block.content)
   const prefix = block.content.slice(0, block.content.length - body.length)
-  const typo = typographyFor(type, depth)
+  // The zoomed title is visually promoted to the top of the heading scale.
+  const typo = zoomTitle
+    ? typographyFor({ kind: "heading", level: 1 }, 0)
+    : typographyFor(type, depth)
 
   // Focus and place the caret when editing starts.
   useLayoutEffect(() => {
@@ -245,6 +254,10 @@ export function BlockItem({
     api.onPaste(block.id, prefix, before, normalized, after)
   }
 
+  // List markers double as zoom targets (Logseq-style: click the bullet to
+  // make this block the page). The negative-margin padding enlarges the hit
+  // area without shifting the marker's layout size.
+  const zoomable = !readOnly && !zoomTitle
   const marker =
     type.kind === "todo" ? (
       <span className="flex h-[1lh] shrink-0 items-center">
@@ -257,26 +270,80 @@ export function BlockItem({
           className={cx("size-4 accent-text", readOnly ? "cursor-default" : "cursor-pointer")}
         />
       </span>
-    ) : type.kind === "bullet" ? (
+    ) : type.kind === "bullet" && !zoomTitle ? (
       <span className="flex h-[1lh] shrink-0 items-center">
-        <span aria-hidden className="size-1.5 rounded-full bg-text-secondary" />
+        {zoomable ? (
+          <button
+            type="button"
+            aria-label="Zoom into block"
+            tabIndex={-1}
+            onClick={() => api.zoomInto(block.id)}
+            className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 hover:bg-bg-secondary"
+          >
+            <span aria-hidden className="size-1.5 rounded-full bg-text-secondary" />
+          </button>
+        ) : (
+          <span aria-hidden className="size-1.5 rounded-full bg-text-secondary" />
+        )}
       </span>
-    ) : type.kind === "ordered" ? (
-      <span
-        aria-hidden
-        className="flex h-[1lh] shrink-0 items-center tabular-nums text-text-secondary"
-      >
-        {type.number}.
+    ) : type.kind === "ordered" && !zoomTitle ? (
+      <span className="flex h-[1lh] shrink-0 items-center tabular-nums text-text-secondary">
+        {zoomable ? (
+          <button
+            type="button"
+            aria-label="Zoom into block"
+            tabIndex={-1}
+            onClick={() => api.zoomInto(block.id)}
+            className="-mx-0.5 cursor-pointer rounded-sm px-0.5 hover:bg-bg-secondary"
+          >
+            {type.number}.
+          </button>
+        ) : (
+          <span aria-hidden>{type.number}.</span>
+        )}
       </span>
     ) : null
 
+  // Blocks without a clickable list marker get a subtle hover affordance in
+  // the gutter, floated left of the collapse chevron so nothing shifts.
+  const showZoomButton = zoomable && type.kind !== "bullet" && type.kind !== "ordered"
+
   return (
-    <div data-block-row={block.id} className={cx(headingTopMargin(type, depth))}>
+    <div
+      data-block-row={block.id}
+      className={cx(zoomTitle ? "mb-2" : headingTopMargin(type, depth))}
+    >
       <div className="group relative flex items-start gap-1">
         {/* The toggle stays a fixed square; the wrapper mirrors the content
             cell's padding + line-height (via `typo`) and centres the square on
             the block's first line, so it aligns whatever the heading size. */}
-        <div className={cx("flex shrink-0 py-0.5 font-content leading-relaxed", typo)}>
+        <div className={cx("relative flex shrink-0 py-0.5 font-content leading-relaxed", typo)}>
+          {showZoomButton ? (
+            // Floated left of the chevron (outside the flow) so the gutter
+            // keeps its width and nothing shifts; appears on row hover.
+            <span className="absolute right-full top-0.5 flex h-[1lh] items-center">
+              <IconButton
+                aria-label="Zoom into block"
+                size="small"
+                disableTooltip
+                tabIndex={-1}
+                onClick={() => api.zoomInto(block.id)}
+                className="size-6 shrink-0 p-0 text-text-tertiary opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+                  <circle
+                    cx="4"
+                    cy="4"
+                    r="2.75"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                  />
+                  <path d="M6.2 6.2l2.6 2.6" stroke="currentColor" strokeWidth="1.5" />
+                </svg>
+              </IconButton>
+            </span>
+          ) : null}
           <span className="flex h-[1lh] items-center">
             <IconButton
               aria-label={isCollapsed ? "Expand" : "Collapse"}
@@ -286,7 +353,7 @@ export function BlockItem({
               onClick={() => api.toggleCollapse(block.id)}
               className={cx(
                 "size-6 shrink-0 p-0 text-text-tertiary",
-                !hasChildren && "pointer-events-none opacity-0",
+                (zoomTitle || !hasChildren) && "pointer-events-none opacity-0",
               )}
             >
               <svg
@@ -357,7 +424,7 @@ export function BlockItem({
         </div>
       </div>
 
-      {hasChildren && !isCollapsed ? (
+      {hasChildren && !isCollapsed && !zoomTitle ? (
         // Left margin puts the guide line under the toggle's centre (w-6 → 12px).
         <div className="ml-3 border-l border-border-secondary pl-3">
           {block.children.map((childId) => {

@@ -63,6 +63,12 @@ describe("select mode", () => {
     [{ key: "Delete" }, "deleteBlock"],
     [{ key: "x" }, "toggleTodo"],
     [{ key: " " }, "toggleCollapse"],
+    [{ key: "f" }, "zoomIn"],
+    [{ key: "F", shiftKey: true }, "zoomOut"],
+    [{ key: ".", metaKey: true }, "zoomIn"],
+    [{ key: ".", metaKey: true, shiftKey: true }, "zoomExit"],
+    // With Shift held, some layouts report the shifted character.
+    [{ key: ">", metaKey: true, shiftKey: true }, "zoomExit"],
   ]
   it.each(cases)("%o → %s", (evt, command) => {
     expect(resolveKey("select", key(evt), input("A", "select"))).toBe(command)
@@ -83,9 +89,17 @@ describe("edit mode modifier arrows", () => {
     [{ key: "ArrowDown", metaKey: true, shiftKey: true }, "moveBlockDown"],
     [{ key: "ArrowUp", altKey: true, shiftKey: true }, "duplicateAbove"],
     [{ key: "ArrowDown", altKey: true, shiftKey: true }, "duplicateBelow"],
+    // The zoom family aliases work while typing (single-key f stays typeable).
+    [{ key: ".", metaKey: true }, "zoomIn"],
+    [{ key: ".", metaKey: true, shiftKey: true }, "zoomExit"],
+    [{ key: ">", metaKey: true, shiftKey: true }, "zoomExit"],
   ]
   it.each(cases)("%o → %s", (evt, command) => {
     expect(resolveKey("edit", key(evt), input("A", "edit", caret("A", 0)))).toBe(command)
+  })
+
+  it("leaves plain f alone in edit mode (it's just typing)", () => {
+    expect(resolveKey("edit", key({ key: "f" }), input("A", "edit", caret("A", 0)))).toBeNull()
   })
 })
 

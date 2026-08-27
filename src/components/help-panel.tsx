@@ -115,6 +115,14 @@ function HelpContent({
               <span>Save note</span>
               <Keys keys={["⌘", "S"]} />
             </HelpItem>
+            <HelpItem>
+              <span>Zoom into block</span>
+              <Keys keys={["⌘", "."]} />
+            </HelpItem>
+            <HelpItem>
+              <span>Exit zoom</span>
+              <Keys keys={["⌘", "⇧", "."]} />
+            </HelpItem>
           </HelpSection>
 
           <HelpSection title="Formatting">

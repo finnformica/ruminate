@@ -94,6 +94,14 @@ export const KEYMAP: Binding[] = [
   { mode: "select", combo: "Delete", command: "deleteBlock" },
   { mode: "select", combo: "x", command: "toggleTodo" },
   { mode: "select", combo: " ", command: "toggleCollapse" },
+  // Zoom ("focus mode"): f dives into the block, Shift+F surfaces one level.
+  { mode: "select", combo: "f", command: "zoomIn" },
+  { mode: "select", combo: "Shift+F", command: "zoomOut" },
+  // Mod+. / Mod+Shift+. are the both-modes aliases (family convention). With
+  // Shift held, some layouts report the key as ">" — bind both spellings.
+  { mode: "select", combo: "Mod+.", command: "zoomIn" },
+  { mode: "select", combo: "Mod+Shift+.", command: "zoomExit" },
+  { mode: "select", combo: "Mod+Shift+>", command: "zoomExit" },
 
   // ── Edit mode ──────────────────────────────────────────────────────────
   { mode: "edit", combo: "Escape", command: "exitEdit" },
@@ -124,6 +132,10 @@ export const KEYMAP: Binding[] = [
   // Arrows leave the block only from its first / last visual line.
   { mode: "edit", combo: "ArrowUp", when: atFirstLine, command: "moveEditFocusUp" },
   { mode: "edit", combo: "ArrowDown", when: atLastLine, command: "moveEditFocusDown" },
+  // Zoom aliases work while typing too.
+  { mode: "edit", combo: "Mod+.", command: "zoomIn" },
+  { mode: "edit", combo: "Mod+Shift+.", command: "zoomExit" },
+  { mode: "edit", combo: "Mod+Shift+>", command: "zoomExit" },
 ]
 
 /** Minimal shape of a keyboard event needed to build a combo. */

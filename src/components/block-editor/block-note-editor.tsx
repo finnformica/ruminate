@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
 import { emptyBlock } from "../../blocks/ops"
@@ -31,6 +31,23 @@ function ensureTrailingBlank(doc: BlockDoc): BlockDoc {
 }
 
 /**
+ * The zoomed-view stand-in for `ensureTrailingBlank`: while zoomed we don't
+ * append root-level blanks (they'd be invisible below the zoomed subtree);
+ * instead we only make sure the zoom root has at least one child to edit when
+ * the zoom *starts* (e.g. zooming into a leaf). Deleting the last child later
+ * is allowed — the title alone is a valid view (Enter on it creates a child).
+ */
+function ensureZoomChild(doc: BlockDoc, zoomId: string): BlockDoc {
+  const root = doc.blocks[zoomId]
+  if (!root || root.children.length > 0) return doc
+  const block = emptyBlock()
+  return {
+    ...doc,
+    blocks: { ...doc.blocks, [block.id]: block, [zoomId]: { ...root, children: [block.id] } },
+  }
+}
+
+/**
  * Adapts the block editor to the note page's string-based value model. The
  * note's markdown is parsed into blocks once (on mount); each edit serializes
  * back to markdown and calls `onChange`, so the surrounding page keeps its
@@ -47,6 +64,9 @@ export function BlockNoteEditor({
   focusFirstMode,
   newRootSignal,
   readOnly = false,
+  zoomBlockId = null,
+  onZoomNavigate,
+  noteTitle,
 }: {
   value: string
   onChange: (value: string) => void
@@ -70,6 +90,12 @@ export function BlockNoteEditor({
   newRootSignal?: number
   /** Display-only: render the note as read-only blocks (e.g. past-day history). */
   readOnly?: boolean
+  /** Block id the editor is zoomed into (`?block=` search param), or null. */
+  zoomBlockId?: string | null
+  /** Zoom navigation (crumbs, F/Shift+F, bullet clicks) — updates the URL. */
+  onZoomNavigate?: (id: string | null) => void
+  /** The note's title, shown as the breadcrumb's first crumb while zoomed. */
+  noteTitle?: string
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => {
     const parsed = withStarterBlock(parse(value))
@@ -80,10 +106,26 @@ export function BlockNoteEditor({
   const { collapsed, toggleCollapse } = useCollapseState(noteId)
 
   const handleChange = (next: BlockDoc) => {
-    const withBlank = readOnly ? next : ensureTrailingBlank(next)
+    // While zoomed, the trailing-blank rule is suspended (a root-level blank
+    // would be invisible below the zoomed subtree) — see `ensureZoomChild`.
+    const withBlank = readOnly ? next : zoomBlockId ? next : ensureTrailingBlank(next)
     setDoc(withBlank)
     onChange(serialize(withBlank))
   }
+
+  // Entering a zoom (mount-with-param or navigation) on a childless block adds
+  // one empty child so there's something to edit under the title.
+  const docRef = useRef(doc)
+  docRef.current = doc
+  useEffect(() => {
+    if (readOnly || !zoomBlockId) return
+    const current = docRef.current
+    const ensured = ensureZoomChild(current, zoomBlockId)
+    if (ensured === current) return
+    setDoc(ensured)
+    onChange(serialize(ensured))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoomBlockId, readOnly])
 
   return (
     <BlockEditor
@@ -98,6 +140,9 @@ export function BlockNoteEditor({
       focusFirstMode={focusFirstMode}
       newRootSignal={newRootSignal}
       readOnly={readOnly}
+      zoomRootId={zoomBlockId}
+      onZoomNavigate={onZoomNavigate}
+      noteTitle={noteTitle}
     />
   )
 }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render } from "@testing-library/react"
 import { useState } from "react"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { emptyBlock } from "../../blocks/ops"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
@@ -19,11 +19,24 @@ function withStarter(doc: BlockDoc): BlockDoc {
 
 /** A controlled host, like the real note page: it owns the doc and re-renders
  * on change, while the editor keeps its own selection/focus state. */
-function Harness({ initial, startEditing }: { initial: string; startEditing?: boolean }) {
+function Harness({
+  initial,
+  startEditing,
+  zoomRootId,
+}: {
+  initial: string
+  startEditing?: boolean
+  zoomRootId?: string | null
+}) {
   const [doc, setDoc] = useState<BlockDoc>(() => withStarter(parse(initial)))
   return (
     <>
-      <BlockEditor doc={doc} onChange={setDoc} startEditing={startEditing} />
+      <BlockEditor
+        doc={doc}
+        onChange={setDoc}
+        startEditing={startEditing}
+        zoomRootId={zoomRootId}
+      />
       <pre data-testid="serialized">{serialize(doc)}</pre>
     </>
   )
@@ -440,6 +453,158 @@ describe("actions on ladder selections", () => {
     // The single-target command cleared the ladder: shrink does nothing.
     fireEvent.keyDown(root, { key: "a", metaKey: true, shiftKey: true })
     expect(highlightedAll(container)).toEqual(["C"])
+  })
+})
+
+/** The NESTED shape with fixed ids, so tests can zoom via prop:
+ *   A · B(→C(→D)·E) · F
+ */
+const ZOOMABLE = [
+  "A",
+  "  id:: blk_a",
+  "B",
+  "  id:: blk_b",
+  "  C",
+  "    id:: blk_c",
+  "    D",
+  "      id:: blk_d",
+  "  E",
+  "    id:: blk_e",
+  "F",
+  "  id:: blk_f",
+].join("\n")
+
+describe("zoom (focus mode)", () => {
+  const crumb = (container: HTMLElement) =>
+    container.querySelector('[data-testid="zoom-breadcrumb"]')
+
+  it("renders only the zoomed subtree, with the block promoted to a title", () => {
+    const { container } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
+    const bodies = Array.from(container.querySelectorAll('[data-testid="block-body"]'))
+    expect(bodies.map((el) => el.textContent)).toEqual(["B", "C", "D", "E"])
+    // The title is visually promoted to the top of the heading scale.
+    expect(bodies[0].closest(".text-2xl")).not.toBeNull()
+    // The breadcrumb shows the full path, never dropping levels.
+    expect(crumb(container)?.textContent).toContain("Note")
+    expect(crumb(container)?.textContent).toContain("B")
+    // Zoom-in lands on the first child, not the title.
+    expect(highlightedText(container)).toBe("C")
+  })
+
+  it("F zooms into the selected block; Shift+F zooms back out to it", () => {
+    const { container, queryByText } = render(<Harness initial={ZOOMABLE} />)
+    const root = editorRoot(container)
+    selectNth(root, 1) // B
+    fireEvent.keyDown(root, { key: "f" })
+    expect(queryByText("A")).toBeNull()
+    expect(crumb(container)).not.toBeNull()
+    expect(highlightedText(container)).toBe("C") // first child selected
+    fireEvent.keyDown(root, { key: "F", shiftKey: true })
+    // Fully out (B was root-level): whole page again, selection lands on the
+    // block we zoomed out FROM.
+    expect(queryByText("A")).not.toBeNull()
+    expect(crumb(container)).toBeNull()
+    expect(highlightedText(container)).toBe("B")
+  })
+
+  it("Shift+F from a nested zoom surfaces one level, selecting the old root", () => {
+    const { container, queryByText } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_c" />)
+    const root = editorRoot(container)
+    expect(queryByText("E")).toBeNull() // C's view: title C + child D
+    fireEvent.keyDown(root, { key: "F", shiftKey: true })
+    // Now zoomed into B: E is visible again, and the selection is on C.
+    expect(queryByText("E")).not.toBeNull()
+    expect(queryByText("A")).toBeNull()
+    expect(highlightedText(container)).toBe("C")
+  })
+
+  it("Mod+Enter on the zoomed title creates its FIRST child", () => {
+    const { container, getByTestId } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowUp" }) // C → title B
+    expect(highlightedText(container)).toBe("B")
+    fireEvent.keyDown(root, { key: "Enter", metaKey: true })
+    const textarea = container.querySelector("textarea")!
+    expect(textarea).not.toBeNull()
+    fireEvent.change(textarea, { target: { value: "hello" } })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "  hello", "  C", "    D", "  E", "F"])
+  })
+
+  it("swallows arrow-up at the top of the zoomed view (no note-title exit)", () => {
+    const onExitTop = vi.fn()
+    const { container } = render(
+      <BlockEditor
+        doc={withStarter(parse(ZOOMABLE))}
+        onChange={() => {}}
+        zoomRootId="blk_b"
+        onExitTop={onExitTop}
+      />,
+    )
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowUp" }) // C → title B
+    fireEvent.keyDown(root, { key: "ArrowUp" }) // swallowed
+    expect(highlightedText(container)).toBe("B")
+    expect(onExitTop).not.toHaveBeenCalled()
+  })
+
+  it("clamps the Cmd+A ladder at the zoomed subtree", () => {
+    const { container } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // C → D
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    expect(highlightedAll(container)).toEqual(["C", "D"])
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    // The "page" rung is the zoomed view (title + subtree), nothing beyond.
+    expect(highlightedAll(container)).toEqual(["B", "C", "D", "E"])
+    fireEvent.keyDown(root, { key: "a", metaKey: true })
+    expect(highlightedAll(container)).toEqual(["B", "C", "D", "E"])
+    // Delete on the page rung spares the title (its children are removed).
+    fireEvent.keyDown(root, { key: "Backspace" })
+    expect(highlightedText(container)).toBe("B")
+  })
+
+  it("keeps the title when the last child is deleted, and refuses to delete it", () => {
+    const { container, getByTestId } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_c" />)
+    const root = editorRoot(container)
+    expect(highlightedText(container)).toBe("D")
+    fireEvent.keyDown(root, { key: "Backspace" })
+    // The title alone remains, selected.
+    expect(highlightedText(container)).toBe("C")
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "  C", "  E", "F"])
+    // Deleting the title itself is refused.
+    fireEvent.keyDown(root, { key: "Backspace" })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "  C", "  E", "F"])
+  })
+
+  it("exits gracefully when the zoom root vanishes via undo", () => {
+    const { container, queryByText } = render(<Harness initial={"A\nB"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true, altKey: true }) // duplicate A
+    expect(highlightedText(container)).toBe("A") // the copy
+    fireEvent.keyDown(root, { key: "f" }) // zoom into the copy
+    expect(crumb(container)).not.toBeNull()
+    expect(queryByText("B")).toBeNull()
+    fireEvent.keyDown(root, { key: "z", metaKey: true }) // undo removes the copy
+    // The zoomed block no longer exists → back to the whole, un-zoomed note.
+    expect(crumb(container)).toBeNull()
+    expect(queryByText("B")).not.toBeNull()
+  })
+
+  it("breadcrumb crumbs navigate: an ancestor crumb re-zooms, the note crumb exits", () => {
+    const { container, getByText, queryByText } = render(
+      <Harness initial={ZOOMABLE} zoomRootId="blk_d" />,
+    )
+    // Deep zoom: Note › B › C › D.
+    const nav = crumb(container)!
+    expect(nav.textContent!.replace(/\s+/g, "")).toContain("Note›B›C›D")
+    fireEvent.click(getByText("B", { selector: "nav button" }))
+    // Zoomed out to B: E visible, selection landed on the block we came from.
+    expect(queryByText("E")).not.toBeNull()
+    expect(queryByText("A")).toBeNull()
+    expect(highlightedText(container)).toBe("D")
+    fireEvent.click(getByText("Note", { selector: "nav button" }))
+    expect(crumb(container)).toBeNull()
+    expect(queryByText("A")).not.toBeNull()
   })
 })
 

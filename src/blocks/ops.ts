@@ -65,6 +65,17 @@ export function insertBefore(doc: BlockDoc, refId: string, block: Block): BlockD
   return insertRelative(doc, refId, block, 0)
 }
 
+/** Insert `block` as the FIRST child of `parentId` (used by the zoom view,
+ * where "below the title" means the top of the zoomed subtree). */
+export function insertFirstChild(doc: BlockDoc, parentId: string, block: Block): BlockDoc {
+  const parent = doc.blocks[parentId]
+  if (!parent) return doc
+  const next = clone(doc)
+  next.blocks[block.id] = block
+  next.blocks[parentId] = { ...parent, children: [block.id, ...parent.children] }
+  return next
+}
+
 /** Splice `block` into `refId`'s sibling list at `refIndex + offset`. */
 function insertRelative(doc: BlockDoc, refId: string, block: Block, offset: 0 | 1): BlockDoc {
   const parentId = findParentId(doc, refId)
@@ -136,6 +147,25 @@ export function insertBlocksAfter(
   list.splice(list.indexOf(targetId) + 1, 0, ...sub.rootBlockIds)
   if (parentId === null) next.rootBlockIds = list
   else next.blocks[parentId] = { ...next.blocks[parentId], children: list }
+  return { doc: next, lastId: sub.rootBlockIds[sub.rootBlockIds.length - 1] }
+}
+
+/**
+ * Insert `sub`'s root blocks as the leading children of `parentId`, merging
+ * `sub.blocks` into the doc. The zoomed-view sibling of `insertBlocksAfter`:
+ * pasting "after the title" means the top of its body. Returns the new doc and
+ * the last inserted root id, or `null` if `parentId` is unknown or `sub` empty.
+ */
+export function insertBlocksAsFirstChildren(
+  doc: BlockDoc,
+  parentId: string,
+  sub: BlockDoc,
+): { doc: BlockDoc; lastId: string } | null {
+  const parent = doc.blocks[parentId]
+  if (!parent || sub.rootBlockIds.length === 0) return null
+  const next = clone(doc)
+  for (const [bid, block] of Object.entries(sub.blocks)) next.blocks[bid] = block
+  next.blocks[parentId] = { ...parent, children: [...sub.rootBlockIds, ...parent.children] }
   return { doc: next, lastId: sub.rootBlockIds[sub.rootBlockIds.length - 1] }
 }
 
