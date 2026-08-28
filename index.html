@@ -8,6 +8,15 @@
     />
     <link rel="apple-touch-icon" href="/apple-touch-icon-512.png" />
     <meta name="theme-color" content="" />
+    <script>
+      // Apply the persisted accent color before first paint (see accentAtom).
+      try {
+        var accent = JSON.parse(localStorage.getItem("accent"))
+        if (accent && accent !== "cyan") document.documentElement.dataset.accent = accent
+      } catch (e) {
+        // Ignore malformed storage — the default accent applies.
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

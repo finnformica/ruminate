@@ -41,7 +41,7 @@ function Keys({ keys }: { keys: string[] }) {
       {keys.map((key) => (
         <kbd
           key={key}
-          className="min-w-[22px] font-[inherit] rounded-sm bg-bg-secondary p-1 text-center font-body leading-none text-text-secondary shadow-[inset_0_-1px_0_var(--color-border-secondary)] dark:shadow-[inset_0_1px_0_var(--color-border-secondary),0_1px_2px_-1px_var(--color-bg)] epaper:shadow-none"
+          className="min-w-[22px] font-[inherit] rounded-sm bg-bg-secondary p-1 text-center font-body leading-none text-text-secondary shadow-[inset_0_-1px_0_var(--color-border-secondary)] dark:shadow-[inset_0_1px_0_var(--color-border-secondary),0_1px_2px_-1px_var(--color-bg)]"
         >
           {key}
         </kbd>
@@ -197,8 +197,8 @@ export function HelpDrawer() {
   return (
     <Drawer.Root open={isOpen} onOpenChange={setIsOpen} shouldScaleBackground={false}>
       <Drawer.Portal>
-        <Drawer.Overlay className="fixed inset-0 bg-linear-to-t from-[#000000] to-[#00000000] epaper:bg-none" />
-        <Drawer.Content className="fixed bottom-0 left-0 right-0 flex h-[80%] flex-col bg-bg-overlay epaper:ring-2 epaper:ring-border rounded-t-xl outline-none">
+        <Drawer.Overlay className="fixed inset-0 bg-linear-to-t from-[#000000] to-[#00000000]" />
+        <Drawer.Content className="fixed bottom-0 left-0 right-0 flex h-[80%] flex-col bg-bg-overlay rounded-t-xl outline-none">
           <Drawer.Title className="sr-only">Help</Drawer.Title>
           <div className="flex-1 overflow-hidden">
             <HelpContent onClose={() => setIsOpen(false)} size="medium" />

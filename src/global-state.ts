@@ -5,7 +5,6 @@ import { atomWithMachine } from "jotai-xstate"
 import { atomWithStorage, selectAtom } from "jotai/utils"
 import { assign, createMachine, raise } from "xstate"
 import {
-  Font,
   GitHubRepository,
   GitHubUser,
   Note,
@@ -974,7 +973,14 @@ export const weeklyTemplateAtom = selectAtom(templatesAtom, (templates) =>
 // UI state
 // -----------------------------------------------------------------------------
 
-export const defaultFontAtom = atomWithStorage<Font>("font", "sans")
+/**
+ * The user-selectable accent color. Each value maps to a Radix ramp remapped
+ * onto the `--accent-*` token family via `[data-accent]` blocks in
+ * src/styles/variables.css. "cyan" is the default and needs no attribute.
+ */
+export type AccentColor = "cyan" | "neutral" | "green" | "violet" | "amber"
+
+export const accentAtom = atomWithStorage<AccentColor>("accent", "cyan")
 
 export const sidebarAtom = atomWithStorage<"expanded" | "collapsed">("sidebar", "expanded")
 

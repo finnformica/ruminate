@@ -143,7 +143,6 @@ module.exports = {
       addVariant("coarse", "@media (pointer: coarse)")
       addVariant("fine", "@media (pointer: fine)")
       addVariant("print", "@media print")
-      addVariant("epaper", "[data-epaper] &")
     }),
   ],
 }

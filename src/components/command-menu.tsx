@@ -655,9 +655,7 @@ function CommandItem({
         <div className="grid h-4 w-4 place-items-center text-text-secondary">{icon}</div>
         <div className="grow truncate">{children}</div>
         {description ? <span className="shrink-0 text-text-secondary">{description}</span> : null}
-        <span className="hidden leading-none text-text-secondary in-aria-selected:inline epaper:in-aria-selected:text-bg">
-          ⏎
-        </span>
+        <span className="hidden leading-none text-text-secondary in-aria-selected:inline">⏎</span>
       </div>
     </Command.Item>
   )

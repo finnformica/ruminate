@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useAtomValue, useSetAtom } from "jotai"
+import { useAtom, useAtomValue, useSetAtom } from "jotai"
 import { useState } from "react"
 import { useNetworkState } from "react-use"
 import { Button } from "../components/button"
@@ -10,6 +10,8 @@ import { PageLayout } from "../components/page-layout"
 import { RepoForm } from "../components/repo-form"
 import { Signature } from "../components/signature"
 import {
+  AccentColor,
+  accentAtom,
   githubRepoAtom,
   githubUserAtom,
   globalStateMachineAtom,
@@ -17,6 +19,7 @@ import {
   isRepoClonedAtom,
   isRepoNotClonedAtom,
 } from "../global-state"
+import { cx } from "../utils/cx"
 
 export const Route = createFileRoute("/_appRoot/settings")({
   component: RouteComponent,
@@ -30,6 +33,7 @@ function RouteComponent() {
     <PageLayout title="Settings" icon={<SettingsIcon16 />} disableGuard>
       <div className="p-4 pb-6">
         <div className="mx-auto flex max-w-xl flex-col gap-6">
+          <AppearanceSection />
           <GitHubSection />
           <div className="p-5 text-text-tertiary self-center flex flex-col gap-3 items-center">
             <span className="text-sm">
@@ -68,6 +72,59 @@ function SettingsSection({ title, children }: { title: string; children: React.R
       <h3 className="font-bold leading-4">{title}</h3>
       <div className="card-1 p-4">{children}</div>
     </div>
+  )
+}
+
+/** Each option's swatch shows its ramp's solid step 9 (the checked-checkbox
+ * color). The ramps themselves adapt to light/dark via radix-colors.css. */
+const ACCENT_OPTIONS: Array<{ value: AccentColor; label: string; swatchColor: string }> = [
+  { value: "neutral", label: "Neutral", swatchColor: "var(--sand-9)" },
+  { value: "cyan", label: "Cyan", swatchColor: "var(--cyan-9)" },
+  { value: "green", label: "Green", swatchColor: "var(--green-9)" },
+  { value: "violet", label: "Violet", swatchColor: "var(--violet-9)" },
+  { value: "amber", label: "Amber", swatchColor: "var(--amber-9)" },
+]
+
+function AppearanceSection() {
+  const [accent, setAccent] = useAtom(accentAtom)
+
+  return (
+    <SettingsSection title="Appearance">
+      <div className="flex flex-col gap-2">
+        <span id="accent-color-label" className="text-sm leading-4 text-text-secondary">
+          Accent color
+        </span>
+        <div role="group" aria-labelledby="accent-color-label" className="flex flex-wrap gap-1">
+          {ACCENT_OPTIONS.map((option) => {
+            const isSelected = accent === option.value
+            return (
+              <button
+                key={option.value}
+                type="button"
+                aria-label={option.label}
+                aria-pressed={isSelected}
+                title={option.label}
+                onClick={() => setAccent(option.value)}
+                className="focus-ring flex h-8 w-8 items-center justify-center rounded hover:bg-bg-hover active:bg-bg-active coarse:h-10 coarse:w-10"
+              >
+                <span
+                  aria-hidden="true"
+                  className={cx(
+                    "h-4 w-4 rounded-full",
+                    isSelected &&
+                      "ring-2 ring-[var(--color-text)] ring-offset-2 ring-offset-bg-card",
+                  )}
+                  style={{ backgroundColor: option.swatchColor }}
+                />
+              </button>
+            )
+          })}
+        </div>
+        <span className="text-sm leading-5 text-text-secondary">
+          {ACCENT_OPTIONS.find((option) => option.value === accent)?.label}
+        </span>
+      </div>
+    </SettingsSection>
   )
 }
 
