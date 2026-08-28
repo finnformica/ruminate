@@ -18,6 +18,11 @@
 - Get around without the mouse: <kbd>g</kbd> then <kbd>d</kbd>/<kbd>n</kbd>/<kbd>t</kbd>/<kbd>s</kbd> goes to today's note, notes, tags, or settings, <kbd>/</kbd> focuses search on list pages, and <kbd>⌘[</kbd> / <kbd>⌘]</kbd> walk back and forward through your history.
 - Navigate the outline spatially with <kbd>w</kbd>/<kbd>a</kbd>/<kbd>s</kbd>/<kbd>d</kbd> on a highlighted block: <kbd>w</kbd>/<kbd>s</kbd> hop between siblings and step out a level when they run out, <kbd>a</kbd> goes to the parent, <kbd>d</kbd> dives into the first child (expanding it if collapsed). The keys move the way the outline looks — left is out, right is in, up and down stay on a level.
 - Change a block's type without editing it: with a block (or several) highlighted, press <kbd>#</kbd> for heading, <kbd>-</kbd> for bullet, <kbd>[</kbd> for todo, <kbd>></kbd> for quote, or <kbd>1</kbd> for a numbered item. Press the same key again to turn it back into plain text. Content is never touched, and on an empty block you drop straight into typing with that style.
+- Pick your accent color in the new Appearance section of Settings: Neutral (the original gray), Cyan, Green, Violet, or Amber. It recolors selection, links, checkboxes, and highlights across the whole app in both light and dark, and your choice is remembered.
+
+### Removed
+
+- The unused e-paper theme has been removed. It was never reachable from the app and was quietly accumulating visual bugs.
 
 ### Improved
 
