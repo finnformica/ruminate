@@ -16,6 +16,7 @@ import {
 import { fs, fsWipe } from "./utils/fs"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
 import {
+  MergeNotice,
   REPO_DIR,
   getRemoteOriginUrl,
   gitAdd,
@@ -56,6 +57,12 @@ type Context = {
   syncAttempts: number
   /** Why the last sync cycle failed (message + coarse category), for the sidebar. */
   syncError: SyncError | null
+  /**
+   * Conflicted-copy notes produced by pulls, accumulated (deduped by copy id)
+   * so a follow-up pull can't clear a notice the user hasn't seen. Dismissal
+   * is per-tab UI state (`dismissedMergeNoticeIdsAtom`), not machine state.
+   */
+  mergeNotices: MergeNotice[]
 }
 
 type Event =
@@ -97,7 +104,7 @@ function createGlobalStateMachine() {
             data: { markdownFiles: Record<string, string> }
           }
           pull: {
-            data: { markdownFiles: Record<string, string> }
+            data: { markdownFiles: Record<string, string>; mergeNotices: MergeNotice[] }
           }
           push: {
             data: void
@@ -125,6 +132,7 @@ function createGlobalStateMachine() {
         error: null,
         syncAttempts: 0,
         syncError: null,
+        mergeNotices: [],
       },
       states: {
         resolvingUser: {
@@ -299,7 +307,11 @@ function createGlobalStateMachine() {
                         src: "pull",
                         onDone: {
                           target: "pushing",
-                          actions: ["setMarkdownFiles", "setMarkdownFilesLocalStorage"],
+                          actions: [
+                            "setMarkdownFiles",
+                            "setMarkdownFilesLocalStorage",
+                            "setMergeNotices",
+                          ],
                         },
                         onError: "error",
                       },
@@ -475,12 +487,14 @@ function createGlobalStateMachine() {
 
           // Follower tabs never touch the network: the leader tab pulls into
           // the shared worktree; re-walking it is enough to stay current.
+          let mergeNotices: MergeNotice[] = []
           if (isSyncLeader()) {
-            await gitPull(context.githubUser)
+            mergeNotices = await gitPull(context.githubUser)
           }
 
           return {
             markdownFiles: await getMarkdownFilesFromFs(REPO_DIR),
+            mergeNotices,
           }
         },
         push: async (context) => {
@@ -701,6 +715,20 @@ function createGlobalStateMachine() {
         setSyncError: assign({
           syncError: (_, event) => toSyncError((event as { data?: unknown }).data),
         }),
+        setMergeNotices: assign({
+          // Accumulate rather than replace: pulls run constantly, and a later
+          // conflict-free pull must not clear a notice the user hasn't seen.
+          // Deduped by copy id so a notice can never be raised twice.
+          mergeNotices: (context, event) => {
+            const incoming = event.data.mergeNotices
+            if (incoming.length === 0) return context.mergeNotices
+            const known = new Set(context.mergeNotices.map((notice) => notice.copyId))
+            return [
+              ...context.mergeNotices,
+              ...incoming.filter((notice) => !known.has(notice.copyId)),
+            ]
+          },
+        }),
         broadcastSynced: () => {
           broadcastSynced()
         },
@@ -782,6 +810,19 @@ export const isSignedOutAtom = selectAtom(globalStateMachineAtom, (state) =>
 /** The last sync failure (message + coarse category); only meaningful while
  * the sync region is in its error state (see `sync-status.tsx`). */
 export const syncErrorAtom = selectAtom(globalStateMachineAtom, (state) => state.context.syncError)
+
+/** Conflicted-copy notes produced by pulls (see `Context.mergeNotices`). */
+export const mergeNoticesAtom = selectAtom(
+  globalStateMachineAtom,
+  (state) => state.context.mergeNotices,
+)
+
+/**
+ * Copy ids of merge notices the user has dismissed (per-tab, not persisted).
+ * The banner shows `mergeNoticesAtom` minus these; because the machine dedupes
+ * notices by copy id, a dismissed notice can never be re-raised.
+ */
+export const dismissedMergeNoticeIdsAtom = atom<string[]>([])
 
 // -----------------------------------------------------------------------------
 // GitHub

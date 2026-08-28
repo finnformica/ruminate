@@ -136,6 +136,7 @@ function NotePage() {
     isDraft,
     discardChanges,
     remoteNotice,
+    canSaveSilently,
     loadRemoteVersion,
     dismissRemoteNotice,
   } = useEditorValue({
@@ -226,12 +227,43 @@ function NotePage() {
     }
   }, [isSyncing])
 
+  // A plain save is blocked while the remote notice is up (the editor value is
+  // known to be based on an older version of the note — committing it would
+  // silently overwrite the newer one). ⌘S/Save then flashes the notice
+  // instead; "Save mine anyway" there is the explicit override.
+  const [noticeFlash, setNoticeFlash] = useState(0)
+  const noticeRef = React.useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (noticeFlash === 0) return
+    const notice = noticeRef.current
+    if (!notice) return
+    notice.scrollIntoView({ block: "nearest" })
+    notice.classList.add("ring-2", "ring-border-focus")
+    const timeout = window.setTimeout(
+      () => notice.classList.remove("ring-2", "ring-border-focus"),
+      1000,
+    )
+    return () => window.clearTimeout(timeout)
+  }, [noticeFlash])
+
   const requestSave = React.useCallback(() => {
     if (isSignedOut || !isDraft) return
+    if (!canSaveSilently) {
+      setNoticeFlash((n) => n + 1)
+      return
+    }
     setPendingSave(true)
     handleSave(editorValue)
     window.setTimeout(() => setPendingSave(false), 4000)
-  }, [isSignedOut, isDraft, handleSave, editorValue])
+  }, [isSignedOut, isDraft, canSaveSilently, handleSave, editorValue])
+
+  /** Explicit override: commit the editor value even though the note is newer. */
+  const saveMineAnyway = React.useCallback(() => {
+    setPendingSave(true)
+    handleSave(editorValue)
+    dismissRemoteNotice()
+    window.setTimeout(() => setPendingSave(false), 4000)
+  }, [handleSave, editorValue, dismissRemoteNotice])
 
   const isSaving = pendingSave || isSyncing
 
@@ -417,17 +449,27 @@ function NotePage() {
             {useBlockEditor ? (
               <div className="flex flex-col gap-3">
                 {/* Non-blocking notice: the note changed on another device
-                    while there are unsaved local edits. Editing continues
-                    uninterrupted; "Show latest" is an explicit choice to
-                    discard the unsaved edits in favor of the remote version. */}
+                    while there are unsaved local edits (detected live, or at
+                    mount via the draft's recorded provenance). Editing
+                    continues uninterrupted, but plain saves are blocked while
+                    the notice is up (⌘S flashes it instead — see requestSave).
+                    "Show latest" discards the unsaved edits in favor of the
+                    remote version; "Save mine anyway" is the explicit choice
+                    to overwrite the newer note with the edits shown. */}
                 {remoteNotice ? (
-                  <div className="card-1 flex flex-wrap items-center justify-between gap-2 p-2 pl-3 print:hidden">
+                  <div
+                    ref={noticeRef}
+                    className="card-1 flex flex-wrap items-center justify-between gap-2 p-2 pl-3 print:hidden"
+                  >
                     <span className="text-sm leading-4 text-text-secondary">
                       This note was updated on another device. Your unsaved edits are shown.
                     </span>
                     <span className="flex items-center gap-2">
                       <Button size="small" onClick={loadRemoteVersion}>
                         Show latest
+                      </Button>
+                      <Button size="small" onClick={saveMineAnyway}>
+                        Save mine anyway
                       </Button>
                       <Button size="small" onClick={dismissRemoteNotice}>
                         Dismiss

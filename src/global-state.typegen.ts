@@ -147,6 +147,7 @@ export interface Typegen0 {
       | "done.invoke.global.signedIn.cloned.sync.refreshing:invocation[0]"
       | "done.invoke.global.signedIn.cloningRepo:invocation[0]"
       | "done.invoke.global.signedIn.resolvingRepo:invocation[0]"
+    setMergeNotices: "done.invoke.global.signedIn.cloned.sync.pulling:invocation[0]"
     setMarkdownFilesLocalStorage:
       | "done.invoke.global.signedIn.cloned.sync.pulling:invocation[0]"
       | "done.invoke.global.signedIn.cloned.sync.refreshing:invocation[0]"

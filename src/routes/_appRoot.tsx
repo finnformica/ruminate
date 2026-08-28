@@ -7,6 +7,7 @@ import { AppLayout } from "../components/app-layout"
 import { CommandMenu } from "../components/command-menu"
 import { DevBar } from "../components/dev-bar"
 import { ErrorIcon16 } from "../components/icons"
+import { MergeNoticeBanner } from "../components/merge-notice-banner"
 import { globalStateMachineAtom } from "../global-state"
 import { GlobalShortcuts } from "../shortcuts/global-shortcuts"
 import { storageWarningAtom } from "../utils/markdown-cache"
@@ -102,6 +103,7 @@ function RouteComponent() {
           <span className="pt-0.5 leading-5">{storageWarning}</span>
         </div>
       ) : null}
+      <MergeNoticeBanner />
       <AppLayout>
         <Outlet />
       </AppLayout>
