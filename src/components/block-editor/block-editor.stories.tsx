@@ -82,6 +82,40 @@ export const NestedTodo: Story = {
   args: { initial: "[ ] Parent todo\n  id:: blk_pt\n  - child bullet\n    id:: blk_pc\n" },
 }
 
+/** Every block type in one document — used to audit the selected-state
+ * highlight across types (select all via the Cmd+A ladder and screenshot). */
+const SWEEP_SAMPLE = `# Alpha heading
+  id:: blk_s1
+Paragraph with \`inline code\` and a ((blk_sq)) transclusion
+  id:: blk_s2
+- Bullet parent
+  id:: blk_s3
+  # Nested heading
+    id:: blk_s4
+  - Deep bullet
+    id:: blk_s5
+- Collapsed sibling
+  id:: blk_s6
+  - Hidden child
+    id:: blk_s7
+1. First step
+  id:: blk_s8
+2. Second step
+  id:: blk_s9
+[ ] Open todo
+  id:: blk_s10
+[x] Done todo
+  id:: blk_s11
+> The quoted line, which is also transcluded above
+  id:: blk_sq
+A long wrapping paragraph to check tall highlights: the quick brown fox jumps over the lazy dog again and again until the line wraps onto a second and third visual line inside a single block.
+  id:: blk_s12
+`
+
+export const SelectionSweep: Story = {
+  args: { initial: SWEEP_SAMPLE },
+}
+
 /** A brand-new note opens with the first block already in edit mode. */
 export const AutoFocus: Story = {
   args: { initial: "", startEditing: true },

@@ -76,11 +76,7 @@ export function BlockContent({
       segments.push(
         // Transcluded content is still content — full ink on a faint accent
         // tint (the "live" color role), not muted like chrome.
-        <span
-          key={key++}
-          className="rounded-sm bg-[color:var(--accent-a2)] box-decoration-clone px-1 shadow-[inset_0_-1px_0_var(--accent-a5)]"
-          title={`Transcluded from ${refId}`}
-        >
+        <span key={key++} className="block-transclusion" title={`Transcluded from ${refId}`}>
           <BlockContent content={target.content} doc={doc} visited={nextSeen} />
         </span>,
       )

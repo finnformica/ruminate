@@ -31,6 +31,10 @@ asks for it.
    square centered on the first line; the indent unit is 24px with the guide
    line under the gutter's center. Affordances float out of the flow
    (absolute/negative margin) so hover never moves text.
+7. **One marker slot.** Every list marker — bullet dot, checkbox, ordered
+   number — occupies the same 15px slot (the checkbox's width): dots center in
+   it, numbers right-align to its edge. Body text therefore starts at one
+   column across all marked block types.
 
 ## Type scale
 
@@ -82,16 +86,16 @@ the whole family with it.
 
 ## Color roles
 
-| Role         | Light / dark token         | Used for                                  |
-| ------------ | -------------------------- | ----------------------------------------- |
-| Ink          | `--color-text` (sand-12)   | body, headings, checked-off text ink      |
-| Muted        | `--color-text-secondary`   | quotes, done todos, list markers, crumbs  |
-| Faint        | `--color-text-tertiary`    | chevron, magnifier, placeholders, `#`     |
-| Guide        | `--color-border-secondary` | indent guide lines (rest state)           |
-| Structure    | `--color-border` (a7)      | quote bar, unchecked checkbox border      |
-| Selection    | `--accent-a3` tint         | selected block(s), matches `::selection`  |
-| Accent solid | `--accent-9`               | checked checkbox fill                     |
-| Transclusion | `--accent-a2` tint         | `((ref))` embeds — quietly "live" content |
+| Role         | Light / dark token         | Used for                                           |
+| ------------ | -------------------------- | -------------------------------------------------- |
+| Ink          | `--color-text` (sand-12)   | body, headings, checked-off text ink               |
+| Muted        | `--color-text-secondary`   | quotes, done todos, ordered numbers, crumbs        |
+| Faint        | `--color-text-tertiary`    | bullet dots, chevron, magnifier, placeholders, `#` |
+| Guide        | `--color-border-secondary` | indent guide lines (rest state)                    |
+| Structure    | `--color-border` (a7)      | quote bar, unchecked checkbox border               |
+| Selection    | `--accent-a3` tint         | selected block(s), matches `::selection`           |
+| Accent solid | `--accent-9`               | checked checkbox fill                              |
+| Transclusion | `--accent-a2` tint         | `((ref))` embeds — quietly "live" content          |
 
 All roles are Radix alpha/step tokens, so both themes (and e-paper / print,
 which remap the semantic tokens) resolve automatically. Never hardcode a hex.
@@ -100,14 +104,20 @@ which remap the semantic tokens) resolve automatically. Never hardcode a hex.
 
 Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`):
 
-| What                                   | How                                   |
-| -------------------------------------- | ------------------------------------- |
-| Hover affordances (chevron, magnifier) | opacity 150ms ease-out                |
-| Hover surfaces (crumbs, marker zoom)   | background/color 150ms ease           |
-| Selection highlight                    | background-color 100ms ease           |
-| Chevron rotation                       | transform 200ms strong ease-out       |
-| Expand (collapsed → open)              | children fade/rise in, 160ms ease-out |
-| Todo check → text mutes                | color 200ms ease                      |
+| What                                    | How                                    |
+| --------------------------------------- | -------------------------------------- |
+| Hover affordances (chevron, magnifier)  | opacity 150ms ease-out                 |
+| Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease            |
+| Selection highlight                     | background-color 100ms ease            |
+| Chevron rotation                        | transform 200ms strong ease-out        |
+| Expand (collapsed → open)               | children fade/rise in, 160ms ease-out  |
+| Todo check → text mutes                 | color 200ms ease                       |
+| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms |
+
+Press feedback lives on the **control**, never the content: collapsing a
+subtree gives the chevron a pressed scale and hover surface, but the content
+itself unmounts instantly (see below). Pressed scale is removed under
+`prefers-reduced-motion`.
 
 **What never animates:**
 

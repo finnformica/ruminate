@@ -26,6 +26,24 @@
   box-shadow: inset 0 0 0 1px var(--color-text);
 }
 
+/* ── Transclusion ────────────────────────────────────────────────────────────
+ * `((ref))` embeds are still content — full ink on a faint accent tint with a
+ * hairline accent underline (the "live" color role). E-paper drops the tint
+ * and keeps only an ink underline. */
+.block-transclusion {
+  border-radius: var(--border-radius-sm);
+  background-color: var(--accent-a2);
+  box-shadow: inset 0 -1px 0 var(--accent-a5);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  padding-inline: 4px;
+}
+
+[data-epaper] .block-transclusion {
+  background-color: transparent;
+  box-shadow: inset 0 -1px 0 var(--color-text);
+}
+
 /* ── Todo checkbox ───────────────────────────────────────────────────────────
  * A styled native <input type="checkbox">: same element, same events, same
  * accessibility — only the paint changes. Unchecked is quiet structure

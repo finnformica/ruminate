@@ -298,9 +298,12 @@ export function BlockItem({
   // make this block the page). The negative-margin padding enlarges the hit
   // area without shifting the marker's layout size.
   const zoomable = !readOnly && !zoomTitle
+  // Every marker occupies the same 15px slot (the checkbox's width), so body
+  // text starts at one column across bullet / todo / numbered blocks and the
+  // markers read as one chrome family.
   const marker =
     type.kind === "todo" ? (
-      <span className="flex h-[1lh] shrink-0 items-center">
+      <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
         <input
           type="checkbox"
           checked={type.checked}
@@ -311,19 +314,20 @@ export function BlockItem({
         />
       </span>
     ) : type.kind === "bullet" && !zoomTitle ? (
-      <span className="flex h-[1lh] shrink-0 items-center">
+      <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
         {zoomable ? (
           <button
             type="button"
             aria-label="Zoom into block"
             tabIndex={-1}
             onClick={() => api.zoomInto(block.id)}
-            className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-colors duration-150 hover:bg-bg-secondary"
+            className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-90 motion-reduce:active:scale-100"
           >
             <span
               aria-hidden
               className={cx(
-                "size-1.5 rounded-full bg-text-secondary",
+                // Faint, like the chevron/magnifier — pure chrome; content leads.
+                "size-1.5 rounded-full bg-text-tertiary",
                 // A halo marks a bullet whose children are hidden (Logseq-style),
                 // so collapsed content is never a secret.
                 isCollapsed && hasChildren && "ring-[3px] ring-[color:var(--neutral-a4)]",
@@ -334,21 +338,23 @@ export function BlockItem({
           <span
             aria-hidden
             className={cx(
-              "size-1.5 rounded-full bg-text-secondary",
+              "size-1.5 rounded-full bg-text-tertiary",
               isCollapsed && hasChildren && "ring-[3px] ring-[color:var(--neutral-a4)]",
             )}
           />
         )}
       </span>
     ) : type.kind === "ordered" && !zoomTitle ? (
-      <span className="flex h-[1lh] shrink-0 items-center tabular-nums text-text-secondary">
+      // Numbers are read (they carry order), so they sit one step up the ramp
+      // from the dot — muted, not faint — and right-align to the slot edge.
+      <span className="flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary">
         {zoomable ? (
           <button
             type="button"
             aria-label="Zoom into block"
             tabIndex={-1}
             onClick={() => api.zoomInto(block.id)}
-            className="-mx-0.5 cursor-pointer rounded-sm px-0.5 transition-colors duration-150 hover:bg-bg-secondary"
+            className="-mx-0.5 cursor-pointer rounded-sm px-0.5 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-95 motion-reduce:active:scale-100"
           >
             {type.number}.
           </button>
@@ -382,7 +388,7 @@ export function BlockItem({
                 disableTooltip
                 tabIndex={-1}
                 onClick={() => api.zoomInto(block.id)}
-                className="size-6 shrink-0 p-0 text-text-tertiary opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover:opacity-100"
+                className="size-6 shrink-0 p-0 text-text-tertiary opacity-0 transition-[opacity,transform] duration-150 focus-visible:opacity-100 active:scale-[0.92] group-hover:opacity-100 motion-reduce:active:scale-100"
               >
                 <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
                   <circle
@@ -406,7 +412,9 @@ export function BlockItem({
               tabIndex={-1}
               onClick={() => api.toggleCollapse(block.id)}
               className={cx(
-                "size-6 shrink-0 p-0 text-text-tertiary transition-opacity duration-150",
+                // Press feedback on the control (IconButton supplies the hover
+                // surface); the content itself never animates on collapse.
+                "size-6 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150 active:scale-[0.92] motion-reduce:active:scale-100",
                 zoomTitle || !hasChildren
                   ? "pointer-events-none opacity-0"
                   : // Quiet chrome: the toggle appears on row hover (its space is
