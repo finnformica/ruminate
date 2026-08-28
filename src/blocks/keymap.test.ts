@@ -113,13 +113,11 @@ describe("select mode", () => {
   it("accepts Alt-modified marker symbols (non-US Macs type them with Option)", () => {
     // UK Mac: # is Alt+3, so the event carries altKey with key "#".
     const inp = input("A", "select")
-    expect(resolveKey("select", key({ key: "#", altKey: true }), inp)?.command).toBe(
+    expect(resolveKey("select", key({ key: "#", altKey: true }), inp)).toBe("turnIntoHeading")
+    expect(resolveKey("select", key({ key: "#", altKey: true, shiftKey: true }), inp)).toBe(
       "turnIntoHeading",
     )
-    expect(resolveKey("select", key({ key: "#", altKey: true, shiftKey: true }), inp)?.command).toBe(
-      "turnIntoHeading",
-    )
-    expect(resolveKey("select", key({ key: "[", altKey: true }), inp)?.command).toBe("turnIntoTodo")
+    expect(resolveKey("select", key({ key: "[", altKey: true }), inp)).toBe("turnIntoTodo")
   })
 })
 
