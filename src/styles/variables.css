@@ -122,10 +122,11 @@
   --font-weight-normal: 400;
   --font-weight-bold: 600;
 
-  /* Border radii */
+  /* Border radii — three tiers, all derived from the base (chips 4 / line
+     surfaces & controls 8 / panels 12), so a theme that flattens the base
+     flattens the whole family. */
   --border-radius-base: 8px;
   --border-radius-sm: calc(var(--border-radius-base) - 4px);
-  --border-radius-md: calc(var(--border-radius-base) - 2px);
   --border-radius-lg: calc(var(--border-radius-base) + 4px);
   --border-radius-xl: calc(var(--border-radius-base) + 8px);
   --border-radius-full: 9999px;

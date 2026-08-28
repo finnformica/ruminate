@@ -16,11 +16,16 @@ asks for it.
    they appear **without any layout shift** — always reserving their space, only
    fading opacity. Exception: a _collapsed_ block keeps its chevron visible, so
    hidden content is never a secret.
-3. **Selection has its own color.** Hover is neutral (`--neutral-a3`); selection
-   is accent (`--accent-a3`), matching `::selection`. A highlighted block must
-   read as "selected", not "hovered". The structural class `bg-bg-secondary`
-   stays on the line (tests and tooling select on it); `.block-highlight`
-   layers the accent tint on top.
+3. **Selection has its own color.** Hover is neutral; selection is accent. A
+   block line hovers at a whisper (`--neutral-a2`, editable editors only —
+   never read-only views, the row being edited, or a selected row) and selects
+   in **solid** accent (`--accent-3` light / `--accent-4` dark). A highlighted
+   block must read as "selected", not "hovered", and selection always wins
+   visually. The surface is solid rather than an alpha tint: alpha over the
+   warm sand background muddies the hue (worst in dark mode), and solid paint
+   lets adjacent selected lines merge seamlessly. The structural class
+   `bg-bg-secondary` stays on the line (tests and tooling select on it);
+   `.block-highlight` paints the accent surface on top.
 4. **View and edit are pixel-identical.** Every typographic property (size,
    weight, line-height, tracking) lives in `typographyFor` and is applied to both
    the rendered body _and_ the textarea. Nothing may style one branch only.
@@ -73,25 +78,34 @@ _is_ the page — keeping a full step between it and its depth-0 children.
   below.
 - **Indent unit:** 24px per level (`ml-3` + `pl-3`), guide line at 12px.
 - **Highlight inset:** highlighted line surfaces give the text 8px of horizontal
-  breathing room, achieved with a negative-margin + padding pair (`-mx-1 px-2`;
-  the note title uses `-mx-1 pl-9 pr-1`) so the **text never moves** — only the
-  background extends outward, into the 4px gutter gap. The text column is sacred;
-  surfaces flex around it.
+  and 4px of vertical breathing room, achieved with negative-margin + padding
+  pairs (`-my-1 py-1` plus the horizontal pair; the note title uses
+  `-mx-1 pl-9 pr-1`) so the **text never moves** — only the background extends
+  outward, into the 4px gutter gap and the inter-row space. Block rhythm is
+  untouched: the surface borrows the space between rows, it never adds any.
+  The text column is sacred; surfaces flex around it.
+- **Multi-select reads as one surface.** The vertical growth makes consecutive
+  selected lines touch, so a Shift+Arrow run merges into a single continuous
+  solid surface: corners where two selected surfaces meet go straight
+  (`selectionRunEdges` in `block-editor.tsx`), rounded only at the run's top
+  and bottom. A heading's top margin (or the zoom title's bottom margin) keeps
+  a real gap, so those boundaries stay rounded.
 
 ## Radius family
 
 One token family, sized by surface, never per-element drift:
 
-| Token                  | Value | Used for                                       |
-| ---------------------- | ----- | ---------------------------------------------- |
-| `--border-radius-sm`   | 4px   | inline chips: inline code, transclusions, keys |
-| `--border-radius-md`   | 6px   | line surfaces: block/title selection highlight |
-| `--border-radius-base` | 8px   | controls, menu items                           |
-| `--border-radius-lg`   | 12px  | block panels: code blocks, cards               |
+| Token                  | Value | Used for                                         |
+| ---------------------- | ----- | ------------------------------------------------ |
+| `--border-radius-sm`   | 4px   | inline chips: inline code, transclusions, keys   |
+| `--border-radius-base` | 8px   | line surfaces (block/title highlight) & controls |
+| `--border-radius-lg`   | 12px  | block panels: code blocks, cards                 |
 
 The rule: the bigger the surface, the bigger the radius. All values derive from
 `--border-radius-base`, so a theme that changes the base changes the whole
-family with it.
+family with it. (There is no intermediate 6px step any more — line surfaces
+share the control radius; the old `--border-radius-md` read as too sharp on a
+full-width highlight.)
 
 ## Color roles
 
@@ -102,7 +116,8 @@ family with it.
 | Faint        | `--color-text-tertiary`    | bullet dots, chevron, placeholders, `#`     |
 | Guide        | `--color-border-secondary` | indent guide lines (rest state)             |
 | Structure    | `--color-border` (a7)      | quote bar, unchecked checkbox border        |
-| Selection    | `--accent-a3` tint         | selected block(s), matches `::selection`    |
+| Hover        | `--neutral-a2` tint        | non-selected block lines under the pointer  |
+| Selection    | `--accent-3` / `-4` solid  | selected block(s) — light step 3, dark 4    |
 | Accent solid | `--accent-9`               | checked checkbox fill                       |
 | Transclusion | `--accent-a2` tint         | `((ref))` embeds — quietly "live" content   |
 
@@ -120,8 +135,11 @@ is the default and needs no attribute. Rules for a new accent:
   `prefers-color-scheme` in `radix-colors.css`.
 - Selection must stay distinct from hover. The neutral (grayscale) accent —
   the app's original pre-accent gray — would collide with the neutral hover
-  surfaces, so its alpha steps are biased one step darker (selection lands on
-  `sand-a4`, hover stays `sand-a3`).
+  surfaces, so its alpha steps are biased one step darker, and the solid
+  block-selection surface follows the same bias (`.block-highlight` lands on
+  `--accent-4` = `sand-4` for neutral, in both schemes — see
+  `block-editor.css`), keeping a clear step above the `--neutral-a2` line
+  hover.
 - A light step 9 needs a dark checkmark: amber overrides the checked-checkbox
   glyph and sets `--accent-contrast` to its dark ink.
 
@@ -133,6 +151,7 @@ Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`):
 | --------------------------------------- | -------------------------------------- |
 | Hover affordances                       | opacity 150ms ease-out                 |
 | Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease            |
+| Block line hover (neutral)              | background-color 100ms ease            |
 | Selection highlight                     | background-color 100ms ease            |
 | Chevron rotation                        | transform 200ms strong ease-out        |
 | Expand (collapsed → open)               | children fade/rise in, 160ms ease-out  |
