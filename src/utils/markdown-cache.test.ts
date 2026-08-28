@@ -40,7 +40,9 @@ describe("markdown files cache", () => {
     setMarkdownFilesCache({ "a.md": "old cached value" })
     expect(getMarkdownFilesCache()).not.toBeNull()
 
-    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+    // Spy on the prototype: assigning a property directly to a real (jsdom)
+    // Storage object stores it as an item instead of installing the spy.
+    vi.spyOn(Object.getPrototypeOf(window.localStorage), "setItem").mockImplementation(() => {
       throw new DOMException("quota", "QuotaExceededError")
     })
 

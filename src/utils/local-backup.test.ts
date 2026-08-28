@@ -73,7 +73,9 @@ describe("stashUnpushedBackup / peekUnpushedBackup", () => {
   })
 
   it("degrades to no backup when localStorage is full (never throws)", () => {
-    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+    // Spy on the prototype: assigning a property directly to a real (jsdom)
+    // Storage object stores it as an item instead of installing the spy.
+    vi.spyOn(Object.getPrototypeOf(window.localStorage), "setItem").mockImplementation(() => {
       throw new DOMException("quota", "QuotaExceededError")
     })
     expect(stashUnpushedBackup({ "a.md": "content" })).toBe(false)
