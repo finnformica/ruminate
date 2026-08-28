@@ -38,6 +38,9 @@ const STORIES = [
   { id: "blockeditor--mixed", waitFor: '[data-testid="block-body"]' },
   { id: "blockeditor--nested-todo", waitFor: '[data-testid="block-body"]' },
   { id: "blockeditor--zoomed", waitFor: '[data-testid="zoom-breadcrumb"]' },
+  // A HEADING zoom (the plain zoomed story zooms a paragraph): covers the
+  // hanging # and the depth re-derivation of the title's child headings.
+  { id: "blockeditor--deep-headings-zoomed", waitFor: '[data-testid="zoom-title-hash"]' },
   { id: "blockeditor--selection-sweep", waitFor: '[data-testid="block-body"]' },
   { id: "blockeditor--empty", waitFor: '[data-testid="block-body"]' },
   { id: "notetitle--default", waitFor: "text=Meeting notes" },
