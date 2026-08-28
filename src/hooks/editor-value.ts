@@ -2,7 +2,21 @@ import { useAtomValue } from "jotai"
 import { useCallback, useMemo, useState } from "react"
 import { githubRepoAtom } from "../global-state"
 import { Note, NoteId } from "../schema"
+import { parseFrontmatter } from "../utils/frontmatter"
 import { clearNoteDraft, getNoteDraft, setNoteDraft } from "../utils/note-draft"
+
+/** True when two note strings differ only in the `updated_at` frontmatter —
+ * i.e. one is the other after a save stamped its timestamp (useSaveNote). */
+function sameExceptTimestamp(a: string, b: string): boolean {
+  const split = (markdown: string) => {
+    const { frontmatter, content } = parseFrontmatter(markdown)
+    const { updated_at: _ignored, ...rest } = frontmatter
+    return { rest, body: content.trim() }
+  }
+  const pa = split(a)
+  const pb = split(b)
+  return pa.body === pb.body && JSON.stringify(pa.rest) === JSON.stringify(pb.rest)
+}
 
 /**
  * The note page's editor state: a local markdown string seeded from the note
@@ -57,6 +71,14 @@ export function useEditorValue({
         setRemoteNotice(false)
       } else if (note.content === editorValue) {
         // The external change caught up with the local value (a save landing).
+        setRemoteNotice(false)
+      } else if (sameExceptTimestamp(note.content, editorValue)) {
+        // The user's own save landing: useSaveNote stamps `updated_at` into
+        // the frontmatter, so the saved note is byte-different from the editor
+        // value by an invisible timestamp. Adopt it silently — raising the
+        // remote notice here made every ⌘S cry "updated on another device".
+        _setEditorValue(note.content)
+        clearNoteDraft({ githubRepo, noteId })
         setRemoteNotice(false)
       } else {
         // Unsaved local edits — keep them, surface the notice.

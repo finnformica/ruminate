@@ -82,4 +82,32 @@ describe("useEditorValue (pull → editor propagation)", () => {
     expect(result.current.remoteNotice).toBe(false)
     expect(result.current.isDraft).toBe(false)
   })
+
+  it("adopts a save that only stamped updated_at, without raising the notice", () => {
+    // useSaveNote writes the note with a fresh `updated_at` frontmatter, so
+    // the round-tripped content is byte-different from the editor value by an
+    // invisible timestamp. That must read as the user's own save, not as a
+    // remote edit ("This note was updated on another device" on every ⌘S).
+    const { result, rerender } = renderEditorValue(note("original content"))
+    act(() => result.current.setEditorValue("edited content"))
+
+    const stamped = "---\nupdated_at: 2026-08-28T09:00:00.000Z\n---\n\nedited content"
+    rerender({ note: note(stamped) })
+
+    expect(result.current.remoteNotice).toBe(false)
+    expect(result.current.editorValue).toBe(stamped)
+    expect(result.current.isDraft).toBe(false)
+  })
+
+  it("still raises the notice for a real remote edit that also differs in updated_at", () => {
+    const { result, rerender } = renderEditorValue(note("original content"))
+    act(() => result.current.setEditorValue("my local edit"))
+
+    rerender({
+      note: note("---\nupdated_at: 2026-08-28T09:00:00.000Z\n---\n\nsomeone else's edit"),
+    })
+
+    expect(result.current.remoteNotice).toBe(true)
+    expect(result.current.editorValue).toBe("my local edit")
+  })
 })
