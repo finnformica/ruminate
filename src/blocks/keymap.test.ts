@@ -63,6 +63,21 @@ describe("select mode", () => {
     [{ key: "Delete" }, "deleteBlock"],
     [{ key: "x" }, "toggleTodo"],
     [{ key: " " }, "toggleCollapse"],
+    // WASD tree navigation: w/s traverse siblings (breaking out at the ends),
+    // a/d walk up/down the tree.
+    [{ key: "w" }, "treePrev"],
+    [{ key: "s" }, "treeNext"],
+    [{ key: "a" }, "selectParent"],
+    [{ key: "d" }, "selectFirstChild"],
+    // "Turn into": marker keys toggle the block's type. # and > need Shift on
+    // many layouts, so the shifted spellings resolve too.
+    [{ key: "#" }, "turnIntoHeading"],
+    [{ key: "#", shiftKey: true }, "turnIntoHeading"],
+    [{ key: "-" }, "turnIntoBullet"],
+    [{ key: "[" }, "turnIntoTodo"],
+    [{ key: ">" }, "turnIntoQuote"],
+    [{ key: ">", shiftKey: true }, "turnIntoQuote"],
+    [{ key: "1" }, "turnIntoOrdered"],
     [{ key: "f" }, "zoomIn"],
     [{ key: "F", shiftKey: true }, "zoomOut"],
     [{ key: ".", metaKey: true }, "zoomIn"],
@@ -76,6 +91,24 @@ describe("select mode", () => {
 
   it("leaves unmapped keys alone", () => {
     expect(resolveKey("select", key({ key: "q" }), input("A", "select"))).toBeNull()
+  })
+
+  it("never swallows modified w/a/s/d (⌘W must stay the browser's close-tab)", () => {
+    const inp = input("A", "select")
+    expect(resolveKey("select", key({ key: "w", metaKey: true }), inp)).toBeNull()
+    expect(resolveKey("select", key({ key: "w", ctrlKey: true }), inp)).toBeNull()
+    expect(resolveKey("select", key({ key: "d", altKey: true }), inp)).toBeNull()
+    expect(resolveKey("select", key({ key: "s", metaKey: true }), inp)).toBeNull()
+    // Mod+a is the (imperative) selection ladder, never the keymap's bare `a`.
+    expect(resolveKey("select", key({ key: "a", metaKey: true }), inp)).toBeNull()
+  })
+
+  it("never swallows modified marker keys (⌘- stays the browser's zoom-out)", () => {
+    const inp = input("A", "select")
+    expect(resolveKey("select", key({ key: "-", metaKey: true }), inp)).toBeNull()
+    expect(resolveKey("select", key({ key: "1", metaKey: true }), inp)).toBeNull()
+    expect(resolveKey("select", key({ key: "[", metaKey: true }), inp)).toBeNull()
+    expect(resolveKey("select", key({ key: "#", altKey: true, shiftKey: true }), inp)).toBeNull()
   })
 })
 
@@ -100,6 +133,12 @@ describe("edit mode modifier arrows", () => {
 
   it("leaves plain f alone in edit mode (it's just typing)", () => {
     expect(resolveKey("edit", key({ key: "f" }), input("A", "edit", caret("A", 0)))).toBeNull()
+  })
+
+  it("leaves plain w/a/s/d and marker keys alone in edit mode (they're just typing)", () => {
+    for (const letter of ["w", "a", "s", "d", "#", "-", "[", ">", "1"]) {
+      expect(resolveKey("edit", key({ key: letter }), input("A", "edit", caret("A", 0)))).toBeNull()
+    }
   })
 })
 

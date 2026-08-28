@@ -123,6 +123,57 @@ describe("g chords", () => {
     fireEvent.keyDown(textarea, { key: "d" })
     expect(mocks.navigate).not.toHaveBeenCalled()
   })
+
+  // The block editor binds bare w/a/s/d in select mode (tree navigation) and
+  // preventDefaults them. The armed chord's capture-phase interception must
+  // win over that handler, and a bare `d` must never reach the chord actions.
+  describe("coexistence with the editor's select-mode w/a/s/d bindings", () => {
+    /** Attach a stand-in for the editor's handler: consumes bare `d`. */
+    function bindEditorLikeD(container: HTMLElement) {
+      const seen = vi.fn()
+      container.addEventListener("keydown", (e) => {
+        if (e.key === "d" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          seen()
+          e.preventDefault()
+        }
+      })
+      return seen
+    }
+
+    it("g then d still navigates: the armed chord intercepts before the editor", () => {
+      const { getByTestId } = renderShortcuts()
+      const container = getByTestId("select-container")
+      const editorSawD = bindEditorLikeD(container)
+      container.focus()
+      fireEvent.keyDown(container, { key: "g" })
+      fireEvent.keyDown(container, { key: "d" })
+      expect(mocks.navigate).toHaveBeenCalledTimes(1)
+      // …and the editor never also acted on the chord's second key.
+      expect(editorSawD).not.toHaveBeenCalled()
+    })
+
+    it("a bare d (no chord armed) stays the editor's: no navigation fires", () => {
+      const { getByTestId } = renderShortcuts()
+      const container = getByTestId("select-container")
+      const editorSawD = bindEditorLikeD(container)
+      container.focus()
+      fireEvent.keyDown(container, { key: "d" })
+      expect(editorSawD).toHaveBeenCalledTimes(1)
+      expect(mocks.navigate).not.toHaveBeenCalled()
+    })
+
+    it("an armed chord's second key with no action falls through to the editor", () => {
+      const { getByTestId } = renderShortcuts()
+      const container = getByTestId("select-container")
+      const editorSawD = bindEditorLikeD(container)
+      container.focus()
+      fireEvent.keyDown(container, { key: "g" })
+      fireEvent.keyDown(container, { key: "w" }) // no `g w` chord: disarms only
+      fireEvent.keyDown(container, { key: "d" }) // no longer armed → editor's
+      expect(mocks.navigate).not.toHaveBeenCalled()
+      expect(editorSawD).toHaveBeenCalledTimes(1)
+    })
+  })
 })
 
 describe("⌘[ / ⌘] history", () => {

@@ -82,6 +82,15 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   moveEditFocusDown: "Exit edit downward (at the last line)",
   prevSibling: "Jump to the previous sibling (skipping children)",
   nextSibling: "Jump to the next sibling (skipping children)",
+  treePrev: "Previous sibling (or the parent at the top of a level)",
+  treeNext: "Next sibling (or the next block one level out at the end)",
+  selectParent: "Select the parent block (on the zoomed title: zoom out)",
+  selectFirstChild: "Select the first child (auto-expands a collapsed block)",
+  turnIntoHeading: "Turn into a heading (again: back to a paragraph)",
+  turnIntoBullet: "Turn into a bullet (again: back to a paragraph)",
+  turnIntoTodo: "Turn into a todo (again: back to a paragraph)",
+  turnIntoQuote: "Turn into a quote (again: back to a paragraph)",
+  turnIntoOrdered: "Turn into a numbered item (again: back to a paragraph)",
   jumpLevelTop: "Jump to the top of the current level",
   jumpLevelBottom: "Jump to the bottom of the current level",
   moveBlockUp: "Move the block up (with its subtree)",
@@ -107,10 +116,11 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
 const ZOOM_COMMANDS = new Set<CommandName>(["zoomIn", "zoomOut", "zoomExit"])
 
 /**
- * Combos that exist only as alternate spellings of another binding (some
- * layouts report Shift+. as ">") — bound in the keymap, hidden from display.
+ * Combos that exist only as alternate spellings of another binding (layouts
+ * differ in whether #, > and Shift+. report the shifted character) — bound in
+ * the keymap, hidden from display.
  */
-const HIDDEN_COMBOS = new Set(["Mod+Shift+>"])
+const HIDDEN_COMBOS = new Set(["Mod+Shift+>", "Shift+#", "Shift+>"])
 
 /** One entry per (scope, command): combos bound to the same command merge. */
 function editorEntries(): Shortcut[] {
@@ -227,6 +237,12 @@ const MULTI_SELECT_ENTRIES: Shortcut[] = [
     combos: ["Backspace", "Delete"],
     scope: "select",
     description: "Delete the selected blocks",
+    group: "Multi-select",
+  },
+  {
+    combos: ["#", "-", "[", ">", "1"],
+    scope: "select",
+    description: "Turn the selected blocks into that type (toggle)",
     group: "Multi-select",
   },
   {

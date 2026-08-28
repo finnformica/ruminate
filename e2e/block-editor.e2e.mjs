@@ -325,6 +325,55 @@ await story("blockeditor--mixed")
   check("Space expands the block again", await child.isVisible())
 }
 
+// --- WASD tree navigation: a/d walk depth, w/s walk siblings ---
+await story("blockeditor--mixed")
+{
+  const highlighted = () =>
+    page.evaluate(
+      () => document.querySelector("[data-block-line].bg-bg-secondary")?.textContent ?? "",
+    )
+  await block("A bullet point").click()
+  await page.keyboard.press("d") // first child
+  check("d selects the first child", (await highlighted()).includes("A nested bullet"))
+  await page.keyboard.press("a") // back up to the parent
+  check("a selects the parent", (await highlighted()).includes("A bullet point"))
+  await page.keyboard.press("s") // next sibling, skipping the nested child
+  check("s jumps to the next sibling (skipping children)", (await highlighted()).includes("A todo"))
+  await page.keyboard.press("w") // and back
+  check("w jumps to the previous sibling", (await highlighted()).includes("A bullet point"))
+
+  // d on a collapsed block auto-expands it and selects the first child.
+  await page.keyboard.press("Space") // collapse "A bullet point"
+  await page.waitForTimeout(120)
+  check("collapsed before d", (await block("A nested bullet").count()) === 0)
+  await page.keyboard.press("d")
+  await page.waitForTimeout(120)
+  check(
+    "d auto-expands a collapsed block and selects its first child",
+    (await block("A nested bullet").isVisible()) &&
+      (await highlighted()).includes("A nested bullet"),
+  )
+
+  // s at the last sibling of a level breaks out: the nested bullet has no next
+  // sibling, so the traversal continues at its parent's next sibling.
+  await page.keyboard.press("s")
+  check("s at the end of a level continues one level out", (await highlighted()).includes("A todo"))
+}
+
+// --- Turn into: marker keys toggle the selected block's type ---
+await story("blockeditor--mixed")
+{
+  await block("Some intro text").click()
+  await page.keyboard.press("#")
+  await page.waitForTimeout(120)
+  let md = await serialized()
+  check("# turns the block into a heading", md.includes("# Some intro text"))
+  await page.keyboard.press("#")
+  await page.waitForTimeout(120)
+  md = await serialized()
+  check("# again strips back to a paragraph", !md.includes("# Some intro text"))
+}
+
 // --- A new note opens with the first block already in edit mode ---
 {
   await page.goto(`${BASE}?id=blockeditor--auto-focus&viewMode=story`, {

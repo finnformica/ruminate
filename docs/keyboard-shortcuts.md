@@ -56,35 +56,63 @@ declaratively in `src/blocks/keymap.ts` and dispatched through the command layer
 
 ### Select mode (a block is highlighted)
 
-| Action                                  | Shortcut                                                                   |
-| --------------------------------------- | -------------------------------------------------------------------------- |
-| Edit the block                          | <kbd>↵</kbd>                                                               |
-| New block below (and edit it)           | <kbd>⌘</kbd> <kbd>↵</kbd> / <kbd>⇧</kbd> <kbd>↵</kbd>                      |
-| Move highlight up / down                | <kbd>↑</kbd> / <kbd>↓</kbd>                                                |
-| Deselect (nothing highlighted)          | <kbd>Esc</kbd>                                                             |
-| Jump across siblings (same level)       | <kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                      |
-| Jump to top / bottom of the level       | <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                   |
-| Indent / outdent                        | <kbd>⇥</kbd> / <kbd>⇧</kbd> <kbd>⇥</kbd>                                   |
-| Move block (with its subtree)           | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> (or <kbd>⌘⇧</kbd> <kbd>↑/↓</kbd>) |
-| Duplicate block above / below           | <kbd>⇧</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                      |
-| Extend selection to more blocks         | <kbd>⇧</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                   |
-| Grow selection by structure (ladder)    | <kbd>⌘</kbd> <kbd>A</kbd>                                                  |
-| Shrink it back one rung                 | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>A</kbd>                                     |
-| Delete block(s)                         | <kbd>⌫</kbd> / <kbd>⌦</kbd>                                                |
-| Copy / cut selection                    | <kbd>⌘</kbd> <kbd>C</kbd> / <kbd>⌘</kbd> <kbd>X</kbd>                      |
-| Paste after the selection               | <kbd>⌘</kbd> <kbd>V</kbd>                                                  |
-| Paste as one plain block                | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>                                     |
-| Collapse / expand (if nested)           | <kbd>Space</kbd>                                                           |
-| Toggle checkbox (todo blocks)           | <kbd>x</kbd>                                                               |
-| Zoom into the block (see Zoom below)    | <kbd>F</kbd> (or <kbd>⌘</kbd> <kbd>.</kbd>)                                |
-| Zoom out one level                      | <kbd>⇧</kbd> <kbd>F</kbd>                                                  |
-| Exit zoom entirely                      | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>                                     |
-| Focus the note title (from first block) | <kbd>↑</kbd>                                                               |
+| Action                                   | Shortcut                                                                   |
+| ---------------------------------------- | -------------------------------------------------------------------------- |
+| Edit the block                           | <kbd>↵</kbd>                                                               |
+| New block below (and edit it)            | <kbd>⌘</kbd> <kbd>↵</kbd> / <kbd>⇧</kbd> <kbd>↵</kbd>                      |
+| Move highlight up / down                 | <kbd>↑</kbd> / <kbd>↓</kbd>                                                |
+| Deselect (nothing highlighted)           | <kbd>Esc</kbd>                                                             |
+| Jump across siblings (same level)        | <kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                      |
+| Jump to top / bottom of the level        | <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                   |
+| Tree navigation: previous / next sibling | <kbd>w</kbd> / <kbd>s</kbd>                                                |
+| Tree navigation: parent / first child    | <kbd>a</kbd> / <kbd>d</kbd>                                                |
+| Indent / outdent                         | <kbd>⇥</kbd> / <kbd>⇧</kbd> <kbd>⇥</kbd>                                   |
+| Move block (with its subtree)            | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> (or <kbd>⌘⇧</kbd> <kbd>↑/↓</kbd>) |
+| Duplicate block above / below            | <kbd>⇧</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                      |
+| Extend selection to more blocks          | <kbd>⇧</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                   |
+| Grow selection by structure (ladder)     | <kbd>⌘</kbd> <kbd>A</kbd>                                                  |
+| Shrink it back one rung                  | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>A</kbd>                                     |
+| Delete block(s)                          | <kbd>⌫</kbd> / <kbd>⌦</kbd>                                                |
+| Copy / cut selection                     | <kbd>⌘</kbd> <kbd>C</kbd> / <kbd>⌘</kbd> <kbd>X</kbd>                      |
+| Paste after the selection                | <kbd>⌘</kbd> <kbd>V</kbd>                                                  |
+| Paste as one plain block                 | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>                                     |
+| Collapse / expand (if nested)            | <kbd>Space</kbd>                                                           |
+| Toggle checkbox (todo blocks)            | <kbd>x</kbd>                                                               |
+| Turn into: heading / bullet / todo       | <kbd>#</kbd> / <kbd>-</kbd> / <kbd>[</kbd>                                 |
+| Turn into: quote / numbered item         | <kbd>></kbd> / <kbd>1</kbd>                                                |
+| Zoom into the block (see Zoom below)     | <kbd>F</kbd> (or <kbd>⌘</kbd> <kbd>.</kbd>)                                |
+| Zoom out one level                       | <kbd>⇧</kbd> <kbd>F</kbd>                                                  |
+| Exit zoom entirely                       | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>                                     |
+| Focus the note title (from first block)  | <kbd>↑</kbd>                                                               |
+
+**Tree navigation** maps the tree spatially onto <kbd>w</kbd> <kbd>a</kbd>
+<kbd>s</kbd> <kbd>d</kbd>: <kbd>a</kbd> / <kbd>d</kbd> change depth (parent /
+first child), <kbd>w</kbd> / <kbd>s</kbd> walk siblings at the same level
+(skipping descendants) and **break out of the level at its ends**:
+<kbd>w</kbd> at the first sibling steps out to the parent, and <kbd>s</kbd> at
+the last sibling continues at the next block one level out (climbing until an
+ancestor has a next sibling). Only the true start / end of the tree no-ops.
+<kbd>d</kbd> on a collapsed block expands it and selects its first child in
+one press; while zoomed the traversal never leaves the zoomed subtree, and
+<kbd>a</kbd> on the title zooms out one level ("up the tree" keeps holding
+across the zoom boundary — <kbd>w</kbd> on the title stays put). (`g` chords
+still work: an armed chord's second key wins over these bindings.)
+
+**Turn into**: select mode never types text, so the markdown marker keys are
+structural — each _toggles_ the highlighted block's type: <kbd>#</kbd>
+heading, <kbd>-</kbd> bullet, <kbd>[</kbd> todo, <kbd>></kbd> quote,
+<kbd>1</kbd> numbered item. A block already of that type strips back to a
+paragraph; anything else swaps just the leading marker — content and children
+are never touched, and each press is one undo step. On an _empty_ block the
+marker applies and editing opens, so you start typing that type immediately.
+(<kbd>x</kbd> still toggles a todo's checkbox; <kbd>[</kbd> changes what the
+block _is_.)
 
 With more than one block selected, <kbd>⇥</kbd> / <kbd>⇧⇥</kbd>, delete,
 copy / cut / paste, move (<kbd>⌥↑/↓</kbd> or <kbd>⌘⇧↑/↓</kbd> — only when the
-selected blocks share a parent), and duplicate (<kbd>⇧⌥↑/↓</kbd>) act on the
-whole selection; <kbd>Esc</kbd> collapses back to one.
+selected blocks share a parent), duplicate (<kbd>⇧⌥↑/↓</kbd>), and the
+turn-into marker keys act on the whole selection; <kbd>Esc</kbd> collapses
+back to one.
 
 #### Selection ladder
 
@@ -215,7 +243,11 @@ change that spanned several blocks) and survive a save.
 
 - **Traverse** one block at a time: plain <kbd>↑</kbd> / <kbd>↓</kbd>.
 - **Skip across a level** (e.g. header→header, past their children):
-  <kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>.
+  <kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> (stops at the level's
+  ends) — or single-key <kbd>w</kbd> / <kbd>s</kbd> in select mode, which
+  break out of the level at its ends and continue one level out.
+- **Walk depth** (parent / first child): <kbd>a</kbd> / <kbd>d</kbd> in select
+  mode (the wasd spatial mapping: a/d = depth, w/s = siblings).
 - **Jump to the top / bottom of the current level** (walking up levels rather
   than to the page top): <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>.
 - **Reorder** a block and its subtree: <kbd>⌥</kbd> <kbd>↑/↓</kbd> or

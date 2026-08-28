@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent } from "react"
 import type { BlockDoc } from "../../blocks/types"
-import { getBlockType, stripMarker } from "../../blocks/block-type"
+import { getBlockType, MARKER_KEYS, stripMarker, toggleMarker } from "../../blocks/block-type"
 import {
   runCommand,
   type CaretInput,
@@ -672,6 +672,9 @@ export function BlockEditor({
   const applyResult = (result: CommandResult) => {
     if (result.doc) history.commit(doc, result.doc, result.op ?? { type: "structural" })
     if (result.toggleCollapse) toggleCollapse(result.toggleCollapse)
+    // `expand` is a demand ("this block must be open"), not a toggle: only act
+    // when the block is actually collapsed (commands can't see collapse state).
+    if (result.expand && collapsed.has(result.expand)) toggleCollapse(result.expand)
     if (result.focus) applyFocus(result.focus)
     // Zoom changes navigate (URL state); the zoom-change effect then places the
     // selection (first child on zoom-in, the block zoomed out from on zoom-out).
@@ -865,6 +868,21 @@ export function BlockEditor({
       if (event.key === "Escape") {
         event.preventDefault()
         select(id)
+        return
+      }
+      // Marker keys "turn into" across the whole selection: toggle each root
+      // to the kind (marker swap only — content and children untouched). One
+      // structural commit = one undo step. Shift is fine (# and > need it on
+      // many layouts); Mod/Alt combos stay the browser's / other bindings'.
+      const kind = MARKER_KEYS[event.key]
+      if (kind && !mod && !event.altKey) {
+        event.preventDefault()
+        let next = doc
+        for (const rootId of selectionRoots()) {
+          const block = next.blocks[rootId]
+          if (block) next = updateContent(next, rootId, toggleMarker(block.content, kind))
+        }
+        if (next !== doc) history.commit(doc, next, { type: "structural" })
         return
       }
     }
