@@ -303,6 +303,98 @@ describe("wasd depth navigation (selectParent / selectFirstChild)", () => {
   })
 })
 
+describe("arrow-key folding (expandOrFirstChild / collapseOrParent)", () => {
+  // Commands can't see collapse state; a block with children reads as
+  // collapsed exactly when its first child is absent from visibleOrder.
+  const collapsedB = ["a", "b", "c"] // b's child b1 is hidden
+
+  it("→ expands a collapsed block, staying on it (an expand demand, no focus move)", () => {
+    const doc = fixture()
+    const result = runCommand("expandOrFirstChild", input(doc, "b", { visibleOrder: collapsedB }))
+    expect(result.handled).toBe(true)
+    expect(result.expand).toBe("b")
+    expect(result.focus).toBeUndefined()
+  })
+
+  it("→ on an expanded block steps into the first child (no expand demand)", () => {
+    const doc = fixture()
+    const result = runCommand("expandOrFirstChild", input(doc, "b"))
+    expect(result.focus).toEqual({ mode: "select", id: "b1" })
+    expect(result.expand).toBeUndefined()
+  })
+
+  it("→ consumes the key but does nothing on a leaf", () => {
+    const doc = fixture()
+    const result = runCommand("expandOrFirstChild", input(doc, "b1"))
+    expect(result.handled).toBe(true)
+    expect(result.focus).toBeUndefined()
+    expect(result.expand).toBeUndefined()
+  })
+
+  it("← collapses an expanded block, staying on it (a collapse demand, no focus move)", () => {
+    const doc = fixture()
+    const result = runCommand("collapseOrParent", input(doc, "b"))
+    expect(result.handled).toBe(true)
+    expect(result.collapse).toBe("b")
+    expect(result.focus).toBeUndefined()
+    // A demand, not a toggle — never the unconditional toggleCollapse channel.
+    expect(result.toggleCollapse).toBeUndefined()
+  })
+
+  it("← on a leaf steps out to the parent", () => {
+    const doc = fixture()
+    const result = runCommand("collapseOrParent", input(doc, "b1"))
+    expect(result.focus).toEqual({ mode: "select", id: "b" })
+    expect(result.collapse).toBeUndefined()
+  })
+
+  it("← on a collapsed (non-root) block steps out to the parent", () => {
+    // b1 gains a child of its own and is collapsed (b1a hidden from the order).
+    const doc = fixture()
+    doc.blocks.b1 = { id: "b1", content: "B1", children: ["b1a"] }
+    doc.blocks.b1a = { id: "b1a", content: "B1a", children: [] }
+    const result = runCommand("collapseOrParent", input(doc, "b1"))
+    expect(result.focus).toEqual({ mode: "select", id: "b" })
+    expect(result.collapse).toBeUndefined()
+  })
+
+  it("← no-ops on a root-level leaf or collapsed block", () => {
+    const doc = fixture()
+    for (const result of [
+      runCommand("collapseOrParent", input(doc, "a")),
+      runCommand("collapseOrParent", input(doc, "b", { visibleOrder: collapsedB })),
+    ]) {
+      expect(result.handled).toBe(true)
+      expect(result.focus).toBeUndefined()
+      expect(result.collapse).toBeUndefined()
+    }
+  })
+
+  it("while zoomed, ← is a no-op on the title and selects the title from a direct child", () => {
+    const doc = fixture()
+    const zoomed = (id: string) => input(doc, id, { visibleOrder: ["b", "b1"], zoomRootId: "b" })
+    // The title is pinned open and zoom-out stays `a`'s job — never collapse,
+    // never zoom, never escape the subtree.
+    const onTitle = runCommand("collapseOrParent", zoomed("b"))
+    expect(onTitle.handled).toBe(true)
+    expect(onTitle.collapse).toBeUndefined()
+    expect(onTitle.focus).toBeUndefined()
+    expect(onTitle.zoom).toBeUndefined()
+    // A direct child's "parent" is the zoom root — its title, still in view.
+    expect(runCommand("collapseOrParent", zoomed("b1")).focus).toEqual({ mode: "select", id: "b" })
+  })
+
+  it("while zoomed, → on the title steps into its first child (children always render)", () => {
+    const doc = fixture()
+    const result = runCommand(
+      "expandOrFirstChild",
+      input(doc, "b", { visibleOrder: ["b", "b1"], zoomRootId: "b" }),
+    )
+    expect(result.focus).toEqual({ mode: "select", id: "b1" })
+    expect(result.expand).toBeUndefined()
+  })
+})
+
 describe("moveBlock", () => {
   it("reorders a block among its siblings, keeping focus on it", () => {
     const doc = fixture()

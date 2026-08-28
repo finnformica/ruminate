@@ -752,6 +752,9 @@ export function BlockEditor({
     // `expand` is a demand ("this block must be open"), not a toggle: only act
     // when the block is actually collapsed (commands can't see collapse state).
     if (result.expand && collapsed.has(result.expand)) toggleCollapse(result.expand)
+    // `collapse` is the symmetric demand ("this block must be closed"): only
+    // act when the block is actually open.
+    if (result.collapse && !collapsed.has(result.collapse)) toggleCollapse(result.collapse)
     if (result.focus) applyFocus(result.focus)
     // Zoom changes navigate (URL state); the zoom-change effect then places the
     // selection (first child on zoom-in, the block zoomed out from on zoom-out).

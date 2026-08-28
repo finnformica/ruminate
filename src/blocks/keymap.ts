@@ -72,6 +72,11 @@ export const KEYMAP: Binding[] = [
   { mode: "select", combo: "Shift+Tab", command: "outdent" },
   { mode: "select", combo: "ArrowUp", command: "moveSelectionUp" },
   { mode: "select", combo: "ArrowDown", command: "moveSelectionDown" },
+  // ←/→ fold like a tree view: → expands a collapsed block, then steps into
+  // the first child; ← collapses an expanded block, then steps out to the
+  // parent. Select mode only — in edit mode the arrows stay native caret keys.
+  { mode: "select", combo: "ArrowRight", command: "expandOrFirstChild" },
+  { mode: "select", combo: "ArrowLeft", command: "collapseOrParent" },
   // Escape drops the highlight entirely (arrows pick it back up).
   { mode: "select", combo: "Escape", command: "deselect" },
   // Option/Alt+Arrow moves the block itself (alias of Mod+Shift+Arrow).

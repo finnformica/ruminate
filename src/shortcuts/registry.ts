@@ -87,6 +87,8 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   treeNext: "Next sibling (or the next block one level out at the end)",
   selectParent: "Select the parent block (on the zoomed title: zoom out)",
   selectFirstChild: "Select the first child (auto-expands a collapsed block)",
+  expandOrFirstChild: "Expand the block (already open: select its first child)",
+  collapseOrParent: "Collapse the block (already closed, or a leaf: select the parent)",
   turnIntoHeading: "Turn into a heading (again: back to a paragraph)",
   turnIntoBullet: "Turn into a bullet (again: back to a paragraph)",
   turnIntoTodo: "Turn into a todo (again: back to a paragraph)",

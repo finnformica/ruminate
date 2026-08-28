@@ -440,15 +440,16 @@ export function BlockItem({
               // Negative margin + padding pairs grow the highlight surface
               // while the text (and every marker) stays exactly where it was —
               // the background extends outward instead of pushing content.
-              // Horizontally: 8px of breathing room into the 4px gutter gap,
-              // asymmetric on the left (only 2px) so the highlight keeps
-              // daylight from the chevron's hover circle (-2+6 = -4+8).
+              // Horizontally: symmetric — the surface extends 4px each side
+              // (-mx-1) and gives the text 8px of inner breathing room
+              // (pl-2 pr-2), so the left edge nets to the same text column as
+              // before (-4+8 = +4).
               // Vertically: 4px above and below (-my-1 py-1), reaching into
               // the inter-row space so the surface breathes without adding a
               // pixel to the block rhythm. Vertically adjacent selected
               // surfaces meet (and slightly overlap), which is what lets a
               // multi-select run read as one continuous solid surface.
-              "relative -my-1 -ml-0.5 -mr-1 flex items-start gap-2 rounded py-1 pl-1.5 pr-2",
+              "relative -my-1 -ml-1 -mr-1 flex items-start gap-2 rounded py-1 pl-2 pr-2",
               // bg-bg-secondary is the structural "selected" hook (tests query
               // it); .block-highlight paints the solid accent surface over it
               // so selection reads as selected, not hovered.
@@ -470,8 +471,11 @@ export function BlockItem({
               selected && api.selectionRunEdges.get(block.id)?.top && "rounded-t-none",
               selected && api.selectionRunEdges.get(block.id)?.bottom && "rounded-b-none",
               // Square left corners so the quote bar stays a straight rule
-              // instead of curving with the highlight radius.
-              type.kind === "quote" && "rounded-l-none border-l-2 border-border pl-3",
+              // instead of curving with the highlight radius. The wider pl
+              // holds the quote text at its usual column: the bar rides the
+              // surface's left edge (-4), so border (2) + pl (14) nets +12.
+              // (14px is arbitrary-valued — the spacing scale has no 3.5 step.)
+              type.kind === "quote" && "rounded-l-none border-l-2 border-border pl-[14px]",
             )}
           >
             {zoomTitle && type.kind === "heading" ? (
@@ -486,9 +490,11 @@ export function BlockItem({
                 // the same baseline instead of shrinking to body scale.
                 // top-1 re-aligns with the text after the line's 4px vertical
                 // highlight padding (absolute offsets are from the padding box).
+                // pr-1 keeps the glyph itself where it was when the surface
+                // edge moved 2px left (right-full tracks the edge: -4-4 = -2-6).
                 className={cx(
                   typo,
-                  "pointer-events-none absolute right-full top-1 select-none pr-1.5 text-text-tertiary",
+                  "pointer-events-none absolute right-full top-1 select-none pr-1 text-text-tertiary",
                 )}
               >
                 #

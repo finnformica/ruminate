@@ -918,6 +918,70 @@ describe("wasd tree navigation (select mode)", () => {
   })
 })
 
+describe("arrow-key folding (select mode)", () => {
+  // NESTED: A, B (> C (> D), E), F
+
+  const renderedBlocks = (container: HTMLElement): string[] =>
+    Array.from(container.querySelectorAll('[data-testid="block-body"]')).map(
+      (el) => el.textContent ?? "",
+    )
+
+  it("← collapses (children unmount), → expands, → again steps into the first child", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 1) // B
+    fireEvent.keyDown(root, { key: "ArrowLeft" }) // collapse B
+    expect(renderedBlocks(container)).not.toContain("C")
+    expect(highlightedText(container)).toBe("B") // stayed put
+    fireEvent.keyDown(root, { key: "ArrowRight" }) // expand B
+    expect(renderedBlocks(container)).toContain("C")
+    expect(highlightedText(container)).toBe("B") // still put
+    fireEvent.keyDown(root, { key: "ArrowRight" }) // step into the first child
+    expect(highlightedText(container)).toBe("C")
+    // The collapse/expand were real state changes: Space still round-trips.
+    fireEvent.keyDown(root, { key: "a" })
+    fireEvent.keyDown(root, { key: " " })
+    expect(renderedBlocks(container)).not.toContain("C")
+  })
+
+  it("← on a leaf steps out to the parent; root-level leaf no-ops", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 3) // D — a leaf two levels deep
+    fireEvent.keyDown(root, { key: "ArrowLeft" }) // leaf → parent
+    expect(highlightedText(container)).toBe("C")
+    fireEvent.keyDown(root, { key: "ArrowLeft" }) // expanded → collapse
+    expect(renderedBlocks(container)).not.toContain("D")
+    expect(highlightedText(container)).toBe("C")
+    fireEvent.keyDown(root, { key: "ArrowLeft" }) // collapsed → parent
+    expect(highlightedText(container)).toBe("B")
+    selectNth(root, 0) // still B; walk up to A
+    fireEvent.keyDown(root, { key: "ArrowUp" })
+    expect(highlightedText(container)).toBe("A")
+    fireEvent.keyDown(root, { key: "ArrowLeft" }) // root-level leaf: no-op
+    expect(highlightedText(container)).toBe("A")
+    fireEvent.keyDown(root, { key: "ArrowRight" }) // leaf: no-op
+    expect(highlightedText(container)).toBe("A")
+  })
+
+  it("Shift+Arrow multi-select and modified ←/→ are untouched", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 0) // A
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true }) // extend A+B
+    expect(highlightedAll(container)).toEqual(["A", "B"])
+    // Shift+ArrowLeft has no binding: not consumed, selection intact.
+    const event = new KeyboardEvent("keydown", {
+      key: "ArrowLeft",
+      shiftKey: true,
+      cancelable: true,
+    })
+    root.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(false)
+    expect(highlightedAll(container)).toEqual(["A", "B"])
+  })
+})
+
 describe("turn into (select-mode marker keys)", () => {
   it("# turns a block into a heading, again strips back, and undo restores it", () => {
     const { container, getByTestId } = render(<Harness initial={"A\nB"} />)

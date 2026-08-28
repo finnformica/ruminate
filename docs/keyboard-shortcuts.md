@@ -84,6 +84,8 @@ declaratively in `src/blocks/keymap.ts` and dispatched through the command layer
 | Jump to top / bottom of the level        | <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                   |
 | Tree navigation: previous / next sibling | <kbd>w</kbd> / <kbd>s</kbd>                                                |
 | Tree navigation: parent / first child    | <kbd>a</kbd> / <kbd>d</kbd>                                                |
+| Fold: expand, then step into first child | <kbd>→</kbd>                                                               |
+| Fold: collapse, else step out to parent  | <kbd>←</kbd>                                                               |
 | Indent / outdent                         | <kbd>⇥</kbd> / <kbd>⇧</kbd> <kbd>⇥</kbd>                                   |
 | Move block (with its subtree)            | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> (or <kbd>⌘⇧</kbd> <kbd>↑/↓</kbd>) |
 | Duplicate block above / below            | <kbd>⇧</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                      |
@@ -115,6 +117,15 @@ one press; while zoomed the traversal never leaves the zoomed subtree, and
 <kbd>a</kbd> on the title zooms out one level ("up the tree" keeps holding
 across the zoom boundary — <kbd>w</kbd> on the title stays put). (`g` chords
 still work: an armed chord's second key wins over these bindings.)
+
+<kbd>←</kbd> / <kbd>→</kbd> **fold** the way file trees do: <kbd>→</kbd> on a
+collapsed block expands it (staying put), and pressed again steps into the
+first child; <kbd>←</kbd> on an expanded block collapses it (staying put), and
+on a collapsed block or a leaf steps out to the parent. A root-level collapsed
+block or leaf no-ops. While zoomed, <kbd>←</kbd> on a direct child selects the
+title, and on the title itself it's a no-op — zooming out stays <kbd>a</kbd>'s
+job, and the fold walk never leaves the zoomed subtree. In edit mode
+<kbd>←</kbd> / <kbd>→</kbd> stay ordinary caret keys.
 
 **Turn into**: select mode never types text, so the markdown marker keys are
 structural — each _toggles_ the highlighted block's type: <kbd>#</kbd>

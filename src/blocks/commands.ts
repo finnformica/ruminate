@@ -85,6 +85,9 @@ export interface CommandResult {
    * set). Commands can't see collapse state — it lives in the component — so
    * this is a demand, not a toggle: expanding an already-open block is a no-op. */
   expand?: string
+  /** Id that must end up collapsed — the symmetric demand to `expand`: the
+   * editor sets the block collapsed only if it is currently open. */
+  collapse?: string
   /** Navigation tried to move above the first block — the caller may hand focus
    * to whatever sits above the editor (e.g. the note title). */
   exitTop?: boolean
@@ -301,6 +304,8 @@ export type CommandName =
   | "treeNext"
   | "selectParent"
   | "selectFirstChild"
+  | "expandOrFirstChild"
+  | "collapseOrParent"
   | "jumpLevelTop"
   | "jumpLevelBottom"
   | "moveBlockUp"
@@ -428,6 +433,36 @@ export const COMMANDS: Record<CommandName, Command> = {
     const first = doc.blocks[id]?.children[0]
     if (!first) return { handled: true }
     return { handled: true, expand: id, focus: keepFocus(mode, first) }
+  },
+
+  // ── Arrow-key folding (the tree-view convention: ←/→ fold before they
+  // move). Commands can't see collapse state, but `visibleOrder` betrays it:
+  // a block with children is collapsed exactly when its first child was
+  // skipped from the on-screen order. ────────────────────────────────────────
+
+  /** →: expand a collapsed block (staying on it); already expanded → step into
+   * the first child (like `d`, minus the auto-expand). Leaf: no-op. */
+  expandOrFirstChild: ({ doc, id, mode, visibleOrder }) => {
+    const first = doc.blocks[id]?.children[0]
+    if (!first) return { handled: true }
+    // Collapsed: open it and stay put — the second press steps in. (The zoomed
+    // title is always open on screen, so it steps straight into its children.)
+    if (!visibleOrder.includes(first)) return { handled: true, expand: id }
+    return { handled: true, focus: keepFocus(mode, first) }
+  },
+
+  /** ←: collapse an expanded block (staying on it); collapsed or leaf → step
+   * out to the parent. Root-level collapsed/leaf: no-op. On the zoomed title
+   * it's a no-op — the title is pinned open and zoom-out stays `a`'s job — and
+   * a direct child's "parent" is the title itself, so the fold walk never
+   * escapes the zoomed subtree. */
+  collapseOrParent: ({ doc, id, mode, visibleOrder, zoomRootId }) => {
+    if (zoomRootId && id === zoomRootId) return { handled: true }
+    const first = doc.blocks[id]?.children[0]
+    if (first && visibleOrder.includes(first)) return { handled: true, collapse: id }
+    const parentId = siblingsOf(doc, id)?.parentId ?? null
+    if (!parentId) return { handled: true }
+    return { handled: true, focus: keepFocus(mode, parentId) }
   },
 
   /** Jump to the top of the current level (its first sibling); if already there,

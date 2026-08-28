@@ -93,12 +93,14 @@ _is_ the page — keeping a full step between it and its depth-0 children.
   below.
 - **Indent unit:** 24px per level (`ml-3` + `pl-3`), guide line at 12px.
 - **Highlight inset:** highlighted line surfaces give the text 8px of horizontal
-  and 4px of vertical breathing room, achieved with negative-margin + padding
-  pairs (`-my-1 py-1` plus the horizontal pair; the note title uses
-  `-mx-1 pl-9 pr-1`) so the **text never moves** — only the background extends
-  outward, into the 4px gutter gap and the inter-row space. Block rhythm is
-  untouched: the surface borrows the space between rows, it never adds any.
-  The text column is sacred; surfaces flex around it.
+  (symmetric — 8px inner padding each side, the surface extending 4px past the
+  text column on both) and 4px of vertical breathing room, achieved with
+  negative-margin + padding pairs (`-my-1 py-1` plus `-mx-1 px-2`; the note
+  title's `-mx-1 pl-9 pr-1` extends the same 4px left) so the **text never
+  moves** — only the background extends outward, into the gutter gap and the
+  inter-row space. Block rhythm is untouched: the surface borrows the space
+  between rows, it never adds any. The text column is sacred; surfaces flex
+  around it.
 - **Multi-select reads as one surface.** The vertical growth makes consecutive
   selected lines touch, so a Shift+Arrow run merges into a single continuous
   solid surface: corners where two selected surfaces meet go straight

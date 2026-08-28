@@ -48,6 +48,9 @@ describe("select mode", () => {
     [{ key: "Tab", shiftKey: true }, "outdent"],
     [{ key: "ArrowUp" }, "moveSelectionUp"],
     [{ key: "ArrowDown" }, "moveSelectionDown"],
+    // ←/→ fold like a tree view (expand/step-in, collapse/step-out).
+    [{ key: "ArrowRight" }, "expandOrFirstChild"],
+    [{ key: "ArrowLeft" }, "collapseOrParent"],
     [{ key: "Escape" }, "deselect"],
     [{ key: "ArrowUp", altKey: true }, "moveBlockUp"],
     [{ key: "ArrowDown", altKey: true }, "moveBlockDown"],
@@ -103,6 +106,16 @@ describe("select mode", () => {
     expect(resolveKey("select", key({ key: "a", metaKey: true }), inp)).toBeNull()
   })
 
+  it("never swallows modified ←/→ (Shift/Mod/Alt arrows keep their own meanings)", () => {
+    const inp = input("A", "select")
+    for (const arrow of ["ArrowLeft", "ArrowRight"]) {
+      expect(resolveKey("select", key({ key: arrow, shiftKey: true }), inp)).toBeNull()
+      expect(resolveKey("select", key({ key: arrow, metaKey: true }), inp)).toBeNull()
+      expect(resolveKey("select", key({ key: arrow, ctrlKey: true }), inp)).toBeNull()
+      expect(resolveKey("select", key({ key: arrow, altKey: true }), inp)).toBeNull()
+    }
+  })
+
   it("never swallows Mod-modified marker keys (⌘- stays the browser's zoom-out)", () => {
     const inp = input("A", "select")
     expect(resolveKey("select", key({ key: "-", metaKey: true }), inp)).toBeNull()
@@ -147,6 +160,15 @@ describe("edit mode modifier arrows", () => {
   it("leaves plain w/a/s/d and marker keys alone in edit mode (they're just typing)", () => {
     for (const letter of ["w", "a", "s", "d", "#", "-", "[", ">", "1"]) {
       expect(resolveKey("edit", key({ key: letter }), input("A", "edit", caret("A", 0)))).toBeNull()
+    }
+  })
+
+  it("leaves ←/→ alone in edit mode (they stay native caret keys)", () => {
+    for (const arrow of ["ArrowLeft", "ArrowRight"]) {
+      expect(resolveKey("edit", key({ key: arrow }), input("A", "edit", caret("A", 0)))).toBeNull()
+      expect(
+        resolveKey("edit", key({ key: arrow, shiftKey: true }), input("A", "edit", caret("A", 0))),
+      ).toBeNull()
     }
   })
 })
