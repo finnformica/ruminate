@@ -11,7 +11,16 @@ import {
 } from "./registry"
 
 /** Combos bound in the keymap purely as alternate spellings (hidden from display). */
-const HIDDEN_COMBOS = new Set(["Mod+Shift+>", "Shift+#", "Shift+>", "Alt+#", "Alt+Shift+#", "Alt+[", "Alt+>", "Alt+Shift+>"])
+const HIDDEN_COMBOS = new Set([
+  "Mod+Shift+>",
+  "Shift+#",
+  "Shift+>",
+  "Alt+#",
+  "Alt+Shift+#",
+  "Alt+[",
+  "Alt+>",
+  "Alt+Shift+>",
+])
 
 const MODIFIERS = new Set(["mod", "ctrl", "alt", "shift"])
 const NAMED_KEYS = new Set([

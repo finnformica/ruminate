@@ -29,7 +29,7 @@ key navigates. The chords work from the block editor's select mode too.
 | Go to tags                          | <kbd>g</kbd> then <kbd>t</kbd>                        |
 | Go to settings                      | <kbd>g</kbd> then <kbd>s</kbd>                        |
 | Focus the search (notes list, tags) | <kbd>/</kbd>                                          |
-| `i` | Focus the editor, restoring the last selected block |
+| `i`                                 | Focus the editor, restoring the last selected block   |
 | Back / forward (browser history)    | <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> |
 
 ### Outline palette
