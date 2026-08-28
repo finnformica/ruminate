@@ -32,6 +32,7 @@
 
 ### Improved
 
+- Selection got the treatment it deserved: a light, luminous accent wash (tuned live against Notion side-by-side) with a subtle tint on the selected text, instead of the old solid color band — clearer in dark mode, calmer everywhere, and hover, inactive, and selected states now sit on a clean visual ladder that can never overlap. Empty blocks show a quiet "Ruminate…" prompt.
 - It's now obvious when the editor is actually listening: the selection dims to a quiet gray whenever keyboard focus is elsewhere (and lights back up in your accent color when it returns), the sidebar tints the note you're currently in, and an empty block's placeholder teaches the type-change keys. Selection is also a solid color now (clearer in dark mode), blocks got softer corners and a roomier highlight without extra spacing, hovering a block shows a subtle gray, and selecting several blocks reads as one continuous surface. App notices (sync merges, storage warnings, remote edits) now share one consistent look.
 - Headings now carry a small grey <kbd>#</kbd> in the marker column (click it to zoom in), so section text finally lines up with bullets, todos, and numbered items. The selection highlight has symmetric padding with clear space from the collapse toggle.
 - Deleting a block now selects the block that takes its place (the one below), instead of jumping upward.

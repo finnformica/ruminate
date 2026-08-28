@@ -222,7 +222,7 @@ export function BlockItem({
     const el = textareaRef.current
     if (!el) return
     el.style.height = "auto"
-    // An empty textarea would size to its teaching placeholder (which can wrap
+    // An empty textarea would size to its ghost placeholder (which could wrap
     // on narrow screens); the empty row is exactly one line (matching the view
     // branch's min-h-[1lh]) — the ghost must never move layout.
     el.style.height = el.value === "" ? "1lh" : `${el.scrollHeight}px`
@@ -574,12 +574,13 @@ export function BlockItem({
                 value={body}
                 rows={1}
                 spellCheck
-                // Teach the turn-into keys the first time someone sits in an
-                // empty block: a ghost at placeholder rank (tertiary — chrome,
-                // not ink) that the browser shows only while the textarea is
-                // empty, so it never appears in view mode or over content.
+                // A quiet brand prompt in an empty block: a ghost at
+                // placeholder rank (tertiary — chrome, not ink) that the
+                // browser shows only while the textarea is empty, so it never
+                // appears in view mode or over content. The turn-into keys
+                // live in the `?` reference, not here.
                 // The zoom title is a page title, not a block — no ghost.
-                placeholder={zoomTitle ? undefined : "Type, or press # heading · - list · [ todo"}
+                placeholder={zoomTitle ? undefined : "Ruminate…"}
                 onChange={handleTextareaChange}
                 onKeyDown={handleEditKeyDown}
                 onPaste={handlePaste}

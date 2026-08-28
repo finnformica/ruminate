@@ -19,24 +19,45 @@ asks for it.
 3. **Selection has its own color.** Hover is neutral; selection is accent. A
    block line hovers at a whisper (`--neutral-a2`, editable editors only —
    never read-only views, the row being edited, or a selected row) and selects
-   in **solid** accent (`--accent-3` light / `--accent-4` dark). A highlighted
-   block must read as "selected", not "hovered", and selection always wins
-   visually. The surface is solid rather than an alpha tint: alpha over the
-   warm sand background muddies the hue (worst in dark mode), and solid paint
-   lets adjacent selected lines merge seamlessly. The structural class
-   `bg-bg-secondary` stays on the line (tests and tooling select on it);
-   `.block-highlight` paints the accent surface on top.
+   in a **luminous wash**: a modest accent contribution color-mixed over the
+   app background — light, luminous, slightly tinted — rather than a solid
+   accent step that reads as a color band. Light scheme:
+   `color-mix(in srgb, var(--accent-9) 10%, var(--color-bg))`. Dark scheme:
+   the same wash over a **white-lifted** base —
+   `color-mix(in srgb, var(--accent-9) 9%, color-mix(in srgb, white 11%, var(--color-bg)))`
+   — so the lift does the "selected" work (a lightened row is unmistakable on
+   a dark page, and guaranteed lighter than any dark hover wash) and the
+   accent only names the color. A white lift is invisible on a light page, so
+   light gets none; its 10% wash is judged by eye to match the dark version's
+   weight. A highlighted block must read as "selected", not "hovered", and
+   selection always wins visually.
+   `color-mix` of opaque inputs is **computed-solid**, keeping the two virtues
+   of the old solid step: no alpha muddying over the warm sand background, and
+   adjacent selected lines merge seamlessly where their surfaces overlap.
+   **The row's ink leans toward the accent** (the Notion-overlay effect): the
+   selected line sets an inherited
+   `color: color-mix(in srgb, var(--accent-9) 9%, var(--color-text))` (same
+   formula in both schemes), so body text — and anything else that inherits —
+   reads slightly lit by the selection, while elements with explicit colors
+   (quote/done-todo secondary ink, tertiary markers, code, links) keep theirs.
+   The structural class `bg-bg-secondary` stays on the line (tests and tooling
+   select on it); `.block-highlight` paints the wash on top.
    **Selection follows the keyboard.** The accent surface is a promise that
    arrows work here, so it only shows while the editor actually owns the
    keyboard (focus inside its container). Whenever focus is elsewhere — the
    sidebar, a dialog, the `?` reference, the ⌘P palette mid-preview — the
-   selection demotes to a quiet solid neutral (`--neutral-3`, the additive
-   `.block-highlight-inactive` class), Finder/VS Code-style: still visibly the
-   selection, no longer claiming the keys. Accent-independent, so all five
-   accents and both schemes share one inactive surface; for the Neutral accent
-   it sits one step above the `--neutral-a2` hover and one below its sand-4
-   active selection. Restoration rides the same 100ms background fade —
-   perceptually instant.
+   selection demotes to the same wash language with the accent removed (the
+   additive `.block-highlight-inactive` class), Finder/VS Code-style: still
+   visibly the selection, no longer claiming the keys. Light: a 10%
+   `--neutral-9` wash (≈ the old `--neutral-3` surface) — grayer than the
+   accent wash, a clear step above the hover whisper; dark: a 9% white lift
+   only — active's lift language minus the accent and two points of light,
+   landing between the hover wash and the active surface. The text tint
+   resets to plain inherited ink, so
+   demotion also drains the color from the text. Accent-independent, so all
+   five accents share one inactive surface per scheme, keeping the weight
+   order active > inactive > hover everywhere. Restoration rides the same
+   100ms fade — perceptually instant.
    The same accent family marks "current" outside the editor: the sidebar's
    active nav row / open note (`--accent-a3` tint, accent-12 ink) and the
    notes/tags list keyboard highlight (`.list-highlight`, the selection
@@ -119,13 +140,14 @@ _is_ the page — keeping a full step between it and its depth-0 children.
   edge-to-edge, never overlap. A side that sits **mid-run** in a multi-select
   (this row and the adjacent visible row are both selected and their surfaces
   touch) gets the full 4px (`-mt-1 pt-1` / `-mb-1 pb-1`), deliberately
-  overlapping the neighbour's identical solid accent. Every pair keeps
+  overlapping the neighbour's identical computed-solid wash (`color-mix` of
+  opaque inputs is opaque, so the overlap can't double up). Every pair keeps
   negative margin equal to padding, on both the view and edit branches, so
   baselines are identical in every state (the pixel-parity e2e enforces it).
 - **Multi-select reads as one surface.** The full 4px growth on run sides
   makes consecutive selected lines overlap (4+4 into a 4px nested gap, or a
-  6px root gap), so a Shift+Arrow run merges into a single continuous solid
-  surface: corners where two selected surfaces meet go straight (the same
+  6px root gap), so a Shift+Arrow run merges into a single continuous
+  surface (the wash is computed-solid, so the overlap is seamless): corners where two selected surfaces meet go straight (the same
   `selectionRunEdges` map in `block-editor.tsx` drives both the extension and
   the squared corners), rounded only at the run's top and bottom. A heading's
   top margin (or the zoom title's bottom margin) keeps a real gap, so those
@@ -149,19 +171,19 @@ full-width highlight.)
 
 ## Color roles
 
-| Role         | Light / dark token         | Used for                                    |
-| ------------ | -------------------------- | ------------------------------------------- |
-| Ink          | `--color-text` (sand-12)   | body, headings, checked-off text ink        |
-| Muted        | `--color-text-secondary`   | quotes, done todos, ordered numbers, crumbs |
-| Faint        | `--color-text-tertiary`    | bullet dots, chevron, placeholders, `#`     |
-| Guide        | `--color-border-secondary` | indent guide lines (rest state)             |
-| Structure    | `--color-border` (a7)      | quote bar, unchecked checkbox border        |
-| Hover        | `--neutral-a2` tint        | non-selected block lines under the pointer  |
-| Selection    | `--accent-3` / `-4` solid  | selected block(s) — light step 3, dark 4    |
-| Inactive sel | `--neutral-3` solid        | the selection while the editor lacks focus  |
-| Current      | `--accent-a3` tint         | sidebar active route / open note row        |
-| Accent solid | `--accent-9`               | checked checkbox fill                       |
-| Transclusion | `--accent-a2` tint         | `((ref))` embeds — quietly "live" content   |
+| Role         | Light / dark token         | Used for                                                                              |
+| ------------ | -------------------------- | ------------------------------------------------------------------------------------- |
+| Ink          | `--color-text` (sand-12)   | body, headings, checked-off text ink                                                  |
+| Muted        | `--color-text-secondary`   | quotes, done todos, ordered numbers, crumbs                                           |
+| Faint        | `--color-text-tertiary`    | bullet dots, chevron, placeholders, `#`                                               |
+| Guide        | `--color-border-secondary` | indent guide lines (rest state)                                                       |
+| Structure    | `--color-border` (a7)      | quote bar, unchecked checkbox border                                                  |
+| Hover        | `--neutral-a2` tint        | non-selected block lines under the pointer                                            |
+| Selection    | accent-9 wash (see §3)     | selected block(s) — 10% light; dark 9% over an 11% white lift, ink +9% accent         |
+| Inactive sel | neutral wash (see §3)      | the selection while the editor lacks focus — 10% neutral-9 light / 9% white lift dark |
+| Current      | `--accent-a3` tint         | sidebar active route / open note row                                                  |
+| Accent solid | `--accent-9`               | checked checkbox fill                                                                 |
+| Transclusion | `--accent-a2` tint         | `((ref))` embeds — quietly "live" content                                             |
 
 All roles are Radix alpha/step tokens, so both color schemes (and print, which
 remaps the semantic tokens) resolve automatically. Never hardcode a hex.
@@ -177,11 +199,12 @@ is the default and needs no attribute. Rules for a new accent:
   `prefers-color-scheme` in `radix-colors.css`.
 - Selection must stay distinct from hover. The neutral (grayscale) accent —
   the app's original pre-accent gray — would collide with the neutral hover
-  surfaces, so its alpha steps are biased one step darker, and the solid
-  block-selection surface follows the same bias (`.block-highlight` lands on
-  `--accent-4` = `sand-4` for neutral, in both schemes — see
+  surfaces, so its alpha steps are biased one step darker, and the selection
+  wash follows the same bias in the light scheme: neutral's `.block-highlight`
+  deepens from the 10% to a 15% `--accent-9` (= `sand-9`) wash (see
   `block-editor.css`), keeping a clear step above the `--neutral-a2` line
-  hover.
+  hover. Dark needs no bias — the white lift already guarantees selection
+  sits clear of the (darkening) hover wash.
 - A light step 9 needs a dark checkmark: amber overrides the checked-checkbox
   glyph and sets `--accent-contrast` to its dark ink.
 
@@ -207,13 +230,13 @@ Placement conventions:
 - Notices never float, overlay, or animate in — they are part of the page,
   and they leave by re-render (dismiss), not by transition.
 
-## Empty-block teaching
+## Empty-block placeholder
 
-An empty block **being edited** carries a ghost placeholder —
-“Type, or press `#` heading · `-` list · `[` todo” — at placeholder rank
-(`--color-text-tertiary`), as the textarea's native `placeholder`. It teaches
-the turn-into keys exactly where they apply, and only there: never in view
-mode, never in read-only views, never on the zoomed title (a page title, not a
+An empty block **being edited** carries a ghost placeholder — “Ruminate…” —
+at placeholder rank (`--color-text-tertiary`), as the textarea's native
+`placeholder`. It is a quiet brand prompt, not teaching — the turn-into keys
+live in the `?` reference — and it appears only there: never in view mode,
+never in read-only views, never on the zoomed title (a page title, not a
 block). It must not move layout — the empty row is clamped to one line
 (`1lh`), so a placeholder that would wrap on a narrow screen clips instead of
 growing the row.
@@ -227,7 +250,7 @@ Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`):
 | Hover affordances                       | opacity 150ms ease-out                 |
 | Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease            |
 | Block line hover (neutral)              | background-color 100ms ease            |
-| Selection highlight                     | background-color 100ms ease            |
+| Selection highlight                     | background-color + color 100ms ease    |
 | Chevron rotation                        | transform 200ms strong ease-out        |
 | Expand (collapsed → open)               | children fade/rise in, 160ms ease-out  |
 | Todo check → text mutes                 | color 200ms ease                       |

@@ -1212,10 +1212,10 @@ describe("keyboard ownership (inactive-selection dimming)", () => {
   })
 })
 
-describe("teaching placeholder (empty block being edited)", () => {
-  const PLACEHOLDER = "Type, or press # heading · - list · [ todo"
+describe("brand placeholder (empty block being edited)", () => {
+  const PLACEHOLDER = "Ruminate…"
 
-  it("shows the turn-into ghost on an empty editing textarea", () => {
+  it("shows the ghost prompt on an empty editing textarea", () => {
     const { container } = render(<Harness initial="" startEditing />)
     const textarea = container.querySelector("textarea")!
     expect(textarea.value).toBe("")

@@ -11,55 +11,92 @@
  * color fade lives on the line itself so it plays in both directions; at 100ms
  * it is perceptually instant on keyboard repeat.
  *
- * The surface is a SOLID accent step, not an alpha tint: alpha over the warm
- * sand background muddies the hue (worst in dark mode), and adjacent selected
- * lines inside a multi-select run overlap by a few pixels (the run-edge sides
- * carry a full -mt-1/pt-1-style 4px extension; see the runEdges pairs in
- * block-item.tsx) — solid paint keeps the run seamless where a tint would
- * double up. Every other side extends only 2px, so differently-painted
- * neighbours (a hover beside a selection) can never overlap.
- * Light uses step 3 (Radix "selected" surface, ≈ the old a3 tint over the app
- * bg); dark steps up to 4 for a cleaner, unmistakably-accent surface. */
+ * The surface is a LUMINOUS WASH, not a solid accent step: a modest accent
+ * contribution color-mixed over the app background — and, in dark mode, over a
+ * white-LIFTED background — so selection reads airy and lit-from-within rather
+ * than as a color band. `color-mix(in srgb, …)` of opaque inputs is itself
+ * computed-solid (opaque), so it keeps the two properties the old solid step
+ * had: no alpha muddying over the warm sand background, and seamless
+ * multi-select runs where adjacent selected surfaces deliberately overlap (the
+ * run-edge sides carry a full -mt-1/pt-1-style 4px extension; see the runEdges
+ * pairs in block-item.tsx). Every other side extends only 2px, so
+ * differently-painted neighbours (a hover beside a selection) can never
+ * overlap.
+ *
+ * Light: 10% accent-9 straight over the app bg (a white lift is invisible on a
+ * light page). Dark: 9% accent-9 over an 11%-white lift of the app bg — the
+ * lift does the "selected" work (guaranteed lighter than any dark hover wash),
+ * the accent only names the color. */
 [data-block-line] {
-  transition: background-color 100ms ease;
+  transition:
+    background-color 100ms ease,
+    color 100ms ease;
 }
 
 /* `.list-highlight` is the same selected-row surface outside the editor: the
  * notes/tags list keyboard highlight shares the selection tokens exactly (see
- * "Selection has its own color" in docs/design-principles.md). */
+ * "Selection has its own color" in docs/design-principles.md).
+ *
+ * The `color` is the Notion-overlay text tint: the selected row's inherited
+ * ink leans 9% toward the accent, so the whole line — body text and anything
+ * else that inherits — reads slightly "lit" by the selection. Elements that
+ * set an explicit color (quote/done-todo secondary ink, tertiary markers,
+ * code, links) naturally keep theirs. */
 .block-highlight,
 .list-highlight {
-  background-color: var(--accent-3);
+  background-color: color-mix(in srgb, var(--accent-9) 10%, var(--color-bg));
+  color: color-mix(in srgb, var(--accent-9) 9%, var(--color-text));
 }
 
-/* The neutral (sand) accent stays biased one step darker, matching its alpha
- * ramp bias in variables.css: sand-3 would sit within a step of the neutral
- * hover surfaces, so selection lands on sand-4 (via accent-4). */
-[data-accent="neutral"] :is(.block-highlight, .list-highlight) {
-  background-color: var(--accent-4);
+/* The neutral (sand) accent keeps its historical one-step-darker bias, wash
+ * style: 10% sand-9 over the light bg lands within a step of the neutral
+ * hover surfaces, so neutral's wash deepens to 15%. Light-only — in dark the
+ * white lift already guarantees selection sits clear of the (darker) hover
+ * wash, and this (0,2,0) selector would otherwise outrank the dark rule
+ * below. */
+@media (prefers-color-scheme: light) {
+  [data-accent="neutral"] :is(.block-highlight, .list-highlight) {
+    background-color: color-mix(in srgb, var(--accent-9) 15%, var(--color-bg));
+  }
 }
 
 @media (prefers-color-scheme: dark) {
   .block-highlight,
   .list-highlight {
-    background-color: var(--accent-4);
+    background-color: color-mix(
+      in srgb,
+      var(--accent-9) 9%,
+      color-mix(in srgb, white 11%, var(--color-bg))
+    );
   }
 }
 
 /* ── Inactive selection ──────────────────────────────────────────────────────
  * When the editor doesn't own the keyboard (focus is in the sidebar, a dialog,
  * the page — including the ⌘P palette's live previews), the selection demotes
- * from the accent surface to a quiet neutral, Finder/VS Code-style: still
- * clearly a selection, but no longer claiming "arrows go here". The class is
- * additive on top of `.block-highlight` (the structural `bg-bg-secondary` hook
- * is untouched) and the compound selector outranks every accent/dark override
- * above. Solid (not alpha) so multi-select runs keep merging seamlessly where
- * adjacent surfaces overlap. One accent-independent token covers all five
- * accents and both schemes; for the Neutral accent it stays a step above the
- * `--neutral-a2` hover and a step below its sand-4 active selection. Restore
- * rides the 100ms background fade on [data-block-line] — perceptually instant. */
+ * to the same wash language with the accent removed, Finder/VS Code-style:
+ * still clearly a selection, but no longer claiming "arrows go here". The
+ * class is additive on top of `.block-highlight` (the structural
+ * `bg-bg-secondary` hook is untouched) and the compound selector outranks
+ * every accent/dark override above. Light: a 10% neutral-9 wash (≈ the old
+ * neutral-3 surface) — grayer than the accent wash and a clear step above the
+ * `--neutral-a2` hover. Dark: a 9% white lift only — active's lift language
+ * minus the accent and two points of light, landing between the hover wash
+ * (~3.5% lift) and the active surface. The text tint resets to plain
+ * inherited ink (`color: inherit`), so demotion also drains the color from
+ * the text. Computed-solid, so multi-select runs keep merging seamlessly.
+ * One accent-independent pair covers all five accents; for the Neutral
+ * accent light it sits at two-thirds the strength of its 15% active wash.
+ * Restore rides the 100ms fade on [data-block-line] — perceptually instant. */
 .block-highlight.block-highlight-inactive {
-  background-color: var(--neutral-3);
+  background-color: color-mix(in srgb, var(--neutral-9) 10%, var(--color-bg));
+  color: inherit;
+}
+
+@media (prefers-color-scheme: dark) {
+  .block-highlight.block-highlight-inactive {
+    background-color: color-mix(in srgb, white 9%, var(--color-bg));
+  }
 }
 
 /* ── Neutral hover ───────────────────────────────────────────────────────────
