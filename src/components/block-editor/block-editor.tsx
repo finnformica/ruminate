@@ -1114,7 +1114,7 @@ export function BlockEditor({
     return text === "" ? "…" : text
   }
   const crumbClass =
-    "min-w-0 max-w-48 cursor-pointer truncate rounded-sm px-1 hover:bg-bg-secondary hover:text-text"
+    "min-w-0 max-w-48 cursor-pointer truncate rounded-sm px-1 transition-colors duration-150 hover:bg-bg-secondary hover:text-text"
 
   return (
     <>
@@ -1122,20 +1122,24 @@ export function BlockEditor({
         <nav
           aria-label="Zoom path"
           data-testid="zoom-breadcrumb"
-          className="mb-2 flex min-w-0 items-center gap-0.5 font-content text-sm text-text-secondary"
+          className="mb-3 flex min-w-0 items-center gap-0.5 font-content text-sm text-text-secondary"
         >
           <button type="button" className={crumbClass} onClick={() => navigateZoom(null)}>
             {noteTitle?.trim() || "Note"}
           </button>
           {crumbIds.map((id) => (
             <Fragment key={id}>
-              <span aria-hidden>›</span>
+              <span aria-hidden className="text-text-tertiary">
+                ›
+              </span>
               <button type="button" className={crumbClass} onClick={() => navigateZoom(id)}>
                 {crumbLabel(id)}
               </button>
             </Fragment>
           ))}
-          <span aria-hidden>›</span>
+          <span aria-hidden className="text-text-tertiary">
+            ›
+          </span>
           <span aria-current="page" className="min-w-0 max-w-48 truncate px-1 text-text">
             {crumbLabel(zoomRoot.id)}
           </span>

@@ -30,7 +30,9 @@ function InlineMarkdown({ content }: { content: string }) {
           </a>
         ),
         code: ({ children }) => (
-          <code className="rounded bg-bg-secondary px-1 py-0.5 font-mono text-[0.9em]">
+          // py is a hairline so the chip never inflates the line box (which
+          // would break the pixel-identical view/edit swap).
+          <code className="rounded-sm bg-bg-secondary box-decoration-clone px-1 py-px font-mono text-[0.9em]">
             {children}
           </code>
         ),
@@ -72,11 +74,9 @@ export function BlockContent({
       const nextSeen = new Set(seen)
       nextSeen.add(refId)
       segments.push(
-        <span
-          key={key++}
-          className="rounded bg-bg-secondary px-1 text-text-secondary"
-          title={`Transcluded from ${refId}`}
-        >
+        // Transcluded content is still content — full ink on a faint accent
+        // tint (the "live" color role), not muted like chrome.
+        <span key={key++} className="block-transclusion" title={`Transcluded from ${refId}`}>
           <BlockContent content={target.content} doc={doc} visited={nextSeen} />
         </span>,
       )

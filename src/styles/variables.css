@@ -125,9 +125,13 @@
   /* Border radii */
   --border-radius-base: 8px;
   --border-radius-sm: calc(var(--border-radius-base) - 4px);
+  --border-radius-md: calc(var(--border-radius-base) - 2px);
   --border-radius-lg: calc(var(--border-radius-base) + 4px);
   --border-radius-xl: calc(var(--border-radius-base) + 8px);
   --border-radius-full: 9999px;
+
+  /* Motion */
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
 
   /* Icons */
   --icon-size: 16px;

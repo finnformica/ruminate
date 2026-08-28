@@ -25,8 +25,9 @@
   @apply border-t border-border-secondary p-2;
 }
 
+/* Group labels are chrome, not content — faint, like the editor's gutter. */
 [cmdk-dialog] [cmdk-group-heading] {
-  @apply flex h-8 items-center px-3 text-sm text-text-secondary;
+  @apply flex h-8 items-center px-3 text-sm text-text-tertiary;
 }
 
 [cmdk-dialog] [cmdk-group]:not(:first-child) {
@@ -34,7 +35,7 @@
 }
 
 [cmdk-dialog] [cmdk-item] {
-  @apply cursor-default rounded px-3 py-3 leading-4;
+  @apply cursor-default rounded px-3 py-2.5 leading-4;
 }
 
 [cmdk-dialog] [cmdk-item][aria-selected] {

@@ -71,6 +71,7 @@ module.exports = {
     borderRadius: {
       none: "0",
       sm: "var(--border-radius-sm)",
+      md: "var(--border-radius-md)",
       DEFAULT: "var(--border-radius-base)",
       lg: "var(--border-radius-lg)",
       xl: "var(--border-radius-xl)",
@@ -115,6 +116,12 @@ module.exports = {
     },
     lineHeight: {
       none: "1",
+      // Unitless values for the block editor's typography scale. These existed
+      // as class names (leading-relaxed etc.) before but silently generated no
+      // CSS — this custom lineHeight scale replaces Tailwind's defaults.
+      tight: "1.25",
+      snug: "1.4",
+      relaxed: "1.65",
       3: "12px",
       4: "16px",
       5: "20px",

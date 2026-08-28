@@ -3,6 +3,7 @@
 @import "./fonts.css";
 @import "./variables.css";
 @import "./markdown.css";
+@import "./block-editor.css";
 @import "./command-menu.css";
 @import "./prism.css";
 
