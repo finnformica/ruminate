@@ -95,16 +95,16 @@ family with it.
 
 ## Color roles
 
-| Role         | Light / dark token         | Used for                                           |
-| ------------ | -------------------------- | -------------------------------------------------- |
-| Ink          | `--color-text` (sand-12)   | body, headings, checked-off text ink               |
-| Muted        | `--color-text-secondary`   | quotes, done todos, ordered numbers, crumbs        |
-| Faint        | `--color-text-tertiary`    | bullet dots, chevron, placeholders, `#` |
-| Guide        | `--color-border-secondary` | indent guide lines (rest state)                    |
-| Structure    | `--color-border` (a7)      | quote bar, unchecked checkbox border               |
-| Selection    | `--accent-a3` tint         | selected block(s), matches `::selection`           |
-| Accent solid | `--accent-9`               | checked checkbox fill                              |
-| Transclusion | `--accent-a2` tint         | `((ref))` embeds — quietly "live" content          |
+| Role         | Light / dark token         | Used for                                    |
+| ------------ | -------------------------- | ------------------------------------------- |
+| Ink          | `--color-text` (sand-12)   | body, headings, checked-off text ink        |
+| Muted        | `--color-text-secondary`   | quotes, done todos, ordered numbers, crumbs |
+| Faint        | `--color-text-tertiary`    | bullet dots, chevron, placeholders, `#`     |
+| Guide        | `--color-border-secondary` | indent guide lines (rest state)             |
+| Structure    | `--color-border` (a7)      | quote bar, unchecked checkbox border        |
+| Selection    | `--accent-a3` tint         | selected block(s), matches `::selection`    |
+| Accent solid | `--accent-9`               | checked checkbox fill                       |
+| Transclusion | `--accent-a2` tint         | `((ref))` embeds — quietly "live" content   |
 
 All roles are Radix alpha/step tokens, so both color schemes (and print, which
 remaps the semantic tokens) resolve automatically. Never hardcode a hex.

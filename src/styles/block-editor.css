@@ -107,3 +107,10 @@
     animation: block-expand-fade 120ms ease;
   }
 }
+
+/* Keyboard travel keeps a few lines of context (scrolloff): `nearest` reveals
+   land this far from the viewport edge instead of flush against it. */
+[data-block-line] {
+  scroll-margin-top: 72px;
+  scroll-margin-bottom: 72px;
+}

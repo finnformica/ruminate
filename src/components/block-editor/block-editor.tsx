@@ -919,15 +919,20 @@ export function BlockEditor({
     const row = containerRef.current?.querySelector<HTMLElement>(`[data-block-row="${selected}"]`)
     const line = row?.querySelector<HTMLElement>("[data-block-line]") ?? row
     if (!line || typeof line.scrollIntoView !== "function") return
-    // A ladder move keeps the head where the user's eyes already are — skip the
-    // centring jump when it's still fully on screen.
-    if (skipCenterScroll.current) {
-      skipCenterScroll.current = false
-      const rect = line.getBoundingClientRect()
-      const viewportHeight = window.innerHeight || document.documentElement.clientHeight
-      if (rect.top >= 0 && rect.bottom <= viewportHeight) return
-    }
-    line.scrollIntoView({ block: "center" })
+    skipCenterScroll.current = false
+    // Reveal, don't position (the VS Code model): a target already on screen
+    // with a comfortable margin never scrolls — so clicks (the block is under
+    // the pointer) and ladder moves hold still. A near target (arrowing past
+    // the edge) scrolls minimally — `nearest` plus the scroll-margin band on
+    // [data-block-line] gives keyboard travel a few lines of context, like
+    // scrolloff. Only a far jump (palette, zoom, search — more than a viewport
+    // away) recentres for orientation.
+    const rect = line.getBoundingClientRect()
+    const vh = window.innerHeight || document.documentElement.clientHeight
+    const margin = 72
+    if (rect.top >= margin && rect.bottom <= vh - margin) return
+    const far = rect.bottom < -vh || rect.top > 2 * vh
+    line.scrollIntoView({ block: far ? "center" : "nearest" })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, anchorId, focus, readOnly])
 
