@@ -7,15 +7,49 @@
 /* ── Selection highlight ─────────────────────────────────────────────────────
  * The structural class `bg-bg-secondary` stays on the selected line (tests and
  * tooling select on it); `.block-highlight` layers the visual on top so
- * selection reads as *selected* (accent, matching ::selection) rather than
- * *hovered* (neutral). The color fade lives on the line itself so it plays in
- * both directions; at 100ms it is perceptually instant on keyboard repeat. */
+ * selection reads as *selected* (accent) rather than *hovered* (neutral). The
+ * color fade lives on the line itself so it plays in both directions; at 100ms
+ * it is perceptually instant on keyboard repeat.
+ *
+ * The surface is a SOLID accent step, not an alpha tint: alpha over the warm
+ * sand background muddies the hue (worst in dark mode), and adjacent selected
+ * lines overlap by a few pixels (see the -my-1/py-1 pair in block-item.tsx) —
+ * solid paint keeps a multi-select run seamless where a tint would double up.
+ * Light uses step 3 (Radix "selected" surface, ≈ the old a3 tint over the app
+ * bg); dark steps up to 4 for a cleaner, unmistakably-accent surface. */
 [data-block-line] {
   transition: background-color 100ms ease;
 }
 
 .block-highlight {
-  background-color: var(--accent-a3);
+  background-color: var(--accent-3);
+}
+
+/* The neutral (sand) accent stays biased one step darker, matching its alpha
+ * ramp bias in variables.css: sand-3 would sit within a step of the neutral
+ * hover surfaces, so selection lands on sand-4 (via accent-4). */
+[data-accent="neutral"] .block-highlight {
+  background-color: var(--accent-4);
+}
+
+@media (prefers-color-scheme: dark) {
+  .block-highlight {
+    background-color: var(--accent-4);
+  }
+}
+
+/* ── Neutral hover ───────────────────────────────────────────────────────────
+ * Non-selected lines in an editable editor get a whisper of neutral on hover —
+ * enough to say "this row is interactive", one clear step below selection.
+ * The class is only applied to rows that can take it (never read-only
+ * editors, the row being edited, or a selected row — selection always wins),
+ * and the pointer gate keeps touch taps from leaving a stuck hover. The fade
+ * rides the 100ms background transition on [data-block-line]; no layout
+ * shifts, only paint. */
+@media (hover: hover) and (pointer: fine) {
+  .block-hoverable:hover {
+    background-color: var(--neutral-a2);
+  }
 }
 
 /* ── Transclusion ────────────────────────────────────────────────────────────

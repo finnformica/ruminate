@@ -392,6 +392,29 @@ export function BlockEditor({
   }, [selected, anchorId, visibleOrder])
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
 
+  // Where two selected rows' highlight surfaces touch on screen, the corners
+  // between them go straight so the run reads as ONE continuous surface,
+  // rounded only at its ends. Surfaces grow 4px into the inter-row space (see
+  // block-item.tsx) so consecutive rows always meet — except across a
+  // heading's top margin (or the zoom title's bottom margin), which keeps a
+  // visible gap; those boundaries stay rounded.
+  const selectionRunEdges = useMemo(() => {
+    const edges = new Map<string, { top: boolean; bottom: boolean }>()
+    if (selectedSet.size < 2) return edges
+    const isHeading = (id: string) => getBlockType(doc.blocks[id]?.content ?? "").kind === "heading"
+    for (let i = 0; i < visibleOrder.length; i++) {
+      const id = visibleOrder[i]
+      if (!selectedSet.has(id)) continue
+      const prev = i > 0 ? visibleOrder[i - 1] : null
+      const next = i + 1 < visibleOrder.length ? visibleOrder[i + 1] : null
+      const top = prev !== null && selectedSet.has(prev) && !isHeading(id) && prev !== zoomRoot?.id
+      const bottom =
+        next !== null && selectedSet.has(next) && !isHeading(next) && id !== zoomRoot?.id
+      if (top || bottom) edges.set(id, { top, bottom })
+    }
+    return edges
+  }, [selectedSet, visibleOrder, doc, zoomRoot])
+
   const select = (id: string) => {
     setFocus(null)
     setAnchorId(null)
@@ -729,6 +752,7 @@ export function BlockEditor({
     focus,
     selected,
     selectedSet,
+    selectionRunEdges,
     collapsed,
     readOnly,
     select,

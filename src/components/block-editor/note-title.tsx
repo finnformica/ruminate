@@ -157,7 +157,7 @@ export function NoteTitle({
             // -mx-1 + pl-9/pr-1 keep the text at the block content column
             // (pl-8) while the highlight surface gains the same breathing room
             // as a selected block line.
-            "-mx-1 cursor-text rounded-md py-0 pl-9 pr-1 outline-none transition-colors duration-100",
+            "-mx-1 cursor-text rounded py-0 pl-9 pr-1 outline-none transition-colors duration-100",
             // Same selection treatment as a block (see .block-highlight).
             selected && "bg-bg-secondary block-highlight",
           )}

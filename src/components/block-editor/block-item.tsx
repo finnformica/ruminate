@@ -30,6 +30,12 @@ export interface BlockEditorApi {
   selected: string | null
   /** All highlighted block ids (a Shift+Arrow range, or just the head). */
   selectedSet: Set<string>
+  /**
+   * For each block in a multi-selection whose highlight surface touches a
+   * selected neighbour, which of its corners (top/bottom) should go straight
+   * so the run reads as one continuous surface. Empty for single selections.
+   */
+  selectionRunEdges: Map<string, { top: boolean; bottom: boolean }>
   collapsed: Set<string>
   /** Display-only: no editing, selection, or mutation (collapse still works). */
   readOnly?: boolean
@@ -420,18 +426,33 @@ export function BlockItem({
             // distort where the highlight lands.
             data-block-line
             className={cx(
-              // The negative margin + padding pair widens the highlight surface
-              // to 8px of horizontal breathing room while the text (and every
-              // marker) stays exactly where it was — the background extends
-              // into the 4px gutter gap instead of pushing content.
-              // Asymmetric inset: the left edge extends only 2px so the
-              // highlight keeps daylight from the chevron's hover circle in
-              // the gutter; the text column itself doesn't move (-2+6 = -4+8).
-              "relative -ml-0.5 -mr-1 flex items-start gap-2 rounded-md pl-1.5 pr-2",
+              // Negative margin + padding pairs grow the highlight surface
+              // while the text (and every marker) stays exactly where it was —
+              // the background extends outward instead of pushing content.
+              // Horizontally: 8px of breathing room into the 4px gutter gap,
+              // asymmetric on the left (only 2px) so the highlight keeps
+              // daylight from the chevron's hover circle (-2+6 = -4+8).
+              // Vertically: 4px above and below (-my-1 py-1), reaching into
+              // the inter-row space so the surface breathes without adding a
+              // pixel to the block rhythm. Vertically adjacent selected
+              // surfaces meet (and slightly overlap), which is what lets a
+              // multi-select run read as one continuous solid surface.
+              "relative -my-1 -ml-0.5 -mr-1 flex items-start gap-2 rounded py-1 pl-1.5 pr-2",
               // bg-bg-secondary is the structural "selected" hook (tests query
-              // it); .block-highlight paints the accent tint over it so
-              // selection reads as selected, not hovered.
+              // it); .block-highlight paints the solid accent surface over it
+              // so selection reads as selected, not hovered.
               selected && "bg-bg-secondary block-highlight",
+              // A quiet neutral hover marks the row as interactive (see
+              // .block-hoverable); never while read-only or already editing,
+              // and selection (accent) always wins because the class is
+              // simply absent on selected rows.
+              !readOnly && !editing && !selected && "block-hoverable",
+              // Inside a multi-select run the corners where two selected
+              // surfaces meet go straight, so the run reads as ONE surface
+              // rounded only at its top and bottom (the editor computes which
+              // neighbours actually touch — heading top margins break a run).
+              selected && api.selectionRunEdges.get(block.id)?.top && "rounded-t-none",
+              selected && api.selectionRunEdges.get(block.id)?.bottom && "rounded-b-none",
               // Square left corners so the quote bar stays a straight rule
               // instead of curving with the highlight radius.
               type.kind === "quote" && "rounded-l-none border-l-2 border-border pl-3",
@@ -447,9 +468,11 @@ export function BlockItem({
                 // Shares the title's own typography (like the note title's
                 // hanging #, which inherits from its h1) so it sits large on
                 // the same baseline instead of shrinking to body scale.
+                // top-1 re-aligns with the text after the line's 4px vertical
+                // highlight padding (absolute offsets are from the padding box).
                 className={cx(
                   typo,
-                  "pointer-events-none absolute right-full top-0 select-none pr-1.5 text-text-tertiary",
+                  "pointer-events-none absolute right-full top-1 select-none pr-1.5 text-text-tertiary",
                 )}
               >
                 #
