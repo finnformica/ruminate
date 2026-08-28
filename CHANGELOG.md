@@ -8,6 +8,11 @@
 - Sync between devices no longer gets permanently stuck. Conflicting edits now merge automatically, the newest version wins for the conflicting lines, and the losing version stays a click away in the note's version history — no extra "conflict" notes cluttering your list, and nothing is ever lost. Signing out and back in is no longer the fix, and folding blocks no longer causes cross-device conflicts at all.
 - Changes pulled from another device now appear in the open note immediately, no page refresh needed. If you have unsaved edits, a small notice offers "Show latest" instead of overwriting your typing.
 - When sync does fail, the sidebar now says why (network, sign-in, conflict) and clicking retries. Settings gains a "Reset local copy" that backs up any unpushed notes as conflict copies before re-cloning, so recovery can't destroy work. Page loads also stop stalling on a GitHub token refresh.
+- Checkboxes survive copy and paste. Copied todos used to re-paste as plain bullets with a literal `[ ]` in the text.
+- Pasting content that carries block ids can no longer silently overwrite existing blocks with the same id, and pasting no longer breaks references to the block you pasted into.
+- Arrow keys no longer go dead after collapsing the section your highlight was inside. They now land on the collapsed parent.
+- Cutting a mouse selection that spans several blocks now copies and removes them. It used to do nothing. It only takes over when whole blocks are selected, so a partial selection never deletes more than you chose.
+- The help panel no longer lists shortcuts that were removed with the old editor, and its links point at this project again.
 
 ### New
 
@@ -21,26 +26,20 @@
 - Navigate the outline spatially with <kbd>w</kbd>/<kbd>a</kbd>/<kbd>s</kbd>/<kbd>d</kbd> on a highlighted block: <kbd>w</kbd>/<kbd>s</kbd> hop between siblings and step out a level when they run out, <kbd>a</kbd> goes to the parent, <kbd>d</kbd> dives into the first child (expanding it if collapsed). The keys move the way the outline looks — left is out, right is in, up and down stay on a level.
 - Change a block's type without editing it: with a block (or several) highlighted, press <kbd>#</kbd> for heading, <kbd>-</kbd> for bullet, <kbd>[</kbd> for todo, <kbd>></kbd> for quote, or <kbd>1</kbd> for a numbered item. Press the same key again to turn it back into plain text. Content is never touched, and on an empty block you drop straight into typing with that style.
 - Pick your accent color in the new Appearance section of Settings: Neutral (the original gray), Cyan, Green, Violet, or Amber. It recolors selection, links, checkboxes, and highlights across the whole app in both light and dark, and your choice is remembered.
-
-### Removed
-
-- The unused e-paper theme has been removed. It was never reachable from the app and was quietly accumulating visual bugs.
+- Move around the notes and tags lists without the mouse: <kbd>↑</kbd>/<kbd>↓</kbd> highlight a row, <kbd>Enter</kbd> opens it, <kbd>↓</kbd> from the search box drops into the results, and <kbd>Esc</kbd> jumps back to search.
 
 ### Improved
 
+- It's now obvious when the editor is actually listening: the selection dims to a quiet gray whenever keyboard focus is elsewhere (and lights back up in your accent color when it returns), the sidebar tints the note you're currently in, and an empty block's placeholder teaches the type-change keys. Selection is also a solid color now (clearer in dark mode), blocks got softer corners and a roomier highlight without extra spacing, hovering a block shows a subtle gray, and selecting several blocks reads as one continuous surface. App notices (sync merges, storage warnings, remote edits) now share one consistent look.
 - The editor got a visual polish pass: corrected line-heights (a bug meant the intended ones never applied), a clear accent-tinted selection with softer corners and breathing room around the text, every marker aligned to one column so text starts at the same place across bullets, todos, and numbered items, custom checkboxes, quieter quote and code styling, and subtle hover and press feedback on the outline controls. Motion respects your reduced-motion setting, and the rules are written down in a design principles doc.
 - Paste works without entering a block first. <kbd>⌘V</kbd> on a highlighted block inserts the clipboard below it, splitting lines into blocks and preserving nesting. Rich content from Notion, Google Docs, or the web converts to markdown (headings, lists, checkboxes, links, code), and copying between Ruminate notes round-trips block structure exactly. <kbd>⌘⇧V</kbd> pastes as plain text when you don't want any of that.
 - Arrow keys now finish editing at a block's edge: <kbd>↑</kbd> from the first line or <kbd>↓</kbd> from the last drops you back to the rendered view with the neighbouring block highlighted, instead of carrying the raw-markdown editor along. <kbd>Esc</kbd> now also clears the highlight entirely, and arrows pick it back up.
 - Move a block with <kbd>⌥↑</kbd> / <kbd>⌥↓</kbd> as well as <kbd>⌘⇧↑</kbd> / <kbd>⌘⇧↓</kbd>, matching editor muscle memory. Sibling jumping moved to <kbd>⌘⌥↑</kbd> / <kbd>⌘⌥↓</kbd>. Moving and duplicating work on multi-block selections too.
 - Pasted outlines indented with tabs or four spaces keep their nesting instead of flattening.
 
-### Fixed
+### Removed
 
-- Checkboxes survive copy and paste. Copied todos used to re-paste as plain bullets with a literal `[ ]` in the text.
-- Pasting content that carries block ids can no longer silently overwrite existing blocks with the same id, and pasting no longer breaks references to the block you pasted into.
-- Arrow keys no longer go dead after collapsing the section your highlight was inside. They now land on the collapsed parent.
-- Cutting a mouse selection that spans several blocks now copies and removes them. It used to do nothing. It only takes over when whole blocks are selected, so a partial selection never deletes more than you chose.
-- The help panel no longer lists shortcuts that were removed with the old editor, and its links point at this project again.
+- The unused e-paper theme has been removed. It was never reachable from the app and was quietly accumulating visual bugs.
 
 ## 2026-W34
 
