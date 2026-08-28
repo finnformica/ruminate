@@ -160,6 +160,11 @@ export function BlockItem({
   const readOnly = api.readOnly ?? false
   const editing = !readOnly && api.focus?.id === block.id
   const selected = api.selectedSet.has(block.id) && !editing
+  // Which sides of this row sit MID-RUN in a multi-select (the adjacent
+  // visible row is also selected and the surfaces touch) — those sides keep
+  // the full 4px vertical extension so the run merges seamlessly; every other
+  // side extends only 2px (see the data-block-line classes below).
+  const runEdges = selected ? api.selectionRunEdges.get(block.id) : undefined
   const hasChildren = block.children.length > 0
   const isCollapsed = api.collapsed.has(block.id)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -500,12 +505,25 @@ export function BlockItem({
               // (-mx-1) and gives the text 8px of inner breathing room
               // (pl-2 pr-2), so the left edge nets to the same text column as
               // before (-4+8 = +4).
-              // Vertically: 4px above and below (-my-1 py-1), reaching into
-              // the inter-row space so the surface breathes without adding a
-              // pixel to the block rhythm. Vertically adjacent selected
-              // surfaces meet (and slightly overlap), which is what lets a
-              // multi-select run read as one continuous solid surface.
-              "relative -my-1 -ml-1 -mr-1 flex items-start gap-2 rounded py-1 pl-2 pr-2",
+              // Vertically the extension is CONDITIONAL, per side (see the
+              // runEdges pairs below): 2px by default — the midpoint of the
+              // nested 4px inter-row gap, so two adjacent surfaces painted in
+              // DIFFERENT colors (a hover next to a selection) can at most
+              // abut edge-to-edge, never overlap — and the full 4px only on a
+              // side that sits mid-run in a multi-select, where the neighbour
+              // is the same solid accent and the overlap is what merges the
+              // run into one continuous surface. Either way the negative
+              // margin equals the padding, so the text never moves a pixel
+              // and the block rhythm gains nothing.
+              "relative -ml-1 -mr-1 flex items-start gap-2 rounded pl-2 pr-2",
+              // Per-side vertical pairs. Mid-run sides also square their
+              // corners so the run reads as ONE surface rounded only at its
+              // ends (the editor computes which neighbours actually touch —
+              // heading top margins break a run). Nested rows sit 4px apart:
+              // 4+4 overlaps seamlessly (same solid); root rows sit 6px
+              // apart: 4+4 still overlaps 2px, so runs merge at every level.
+              runEdges?.top ? "-mt-1 pt-1 rounded-t-none" : "-mt-0.5 pt-0.5",
+              runEdges?.bottom ? "-mb-1 pb-1 rounded-b-none" : "-mb-0.5 pb-0.5",
               // bg-bg-secondary is the structural "selected" hook (tests query
               // it); .block-highlight paints the solid accent surface over it
               // so selection reads as selected, not hovered.
@@ -520,12 +538,6 @@ export function BlockItem({
               // and selection (accent) always wins because the class is
               // simply absent on selected rows.
               !readOnly && !editing && !selected && "block-hoverable",
-              // Inside a multi-select run the corners where two selected
-              // surfaces meet go straight, so the run reads as ONE surface
-              // rounded only at its top and bottom (the editor computes which
-              // neighbours actually touch — heading top margins break a run).
-              selected && api.selectionRunEdges.get(block.id)?.top && "rounded-t-none",
-              selected && api.selectionRunEdges.get(block.id)?.bottom && "rounded-b-none",
               // Square left corners so the quote bar stays a straight rule
               // instead of curving with the highlight radius. The wider pl
               // holds the quote text at its usual column: the bar rides the
@@ -544,11 +556,13 @@ export function BlockItem({
                 // the `Hash` inside inherits it — like the note title's
                 // hanging #, which inherits from its h1 — sitting large on
                 // the same baseline instead of shrinking to body scale.
-                // top-1 re-aligns with the text after the line's 4px vertical
-                // highlight padding (absolute offsets are from the padding box).
+                // top-0.5 re-aligns with the text after the line's 2px default
+                // vertical highlight padding (absolute offsets are from the
+                // padding box; the zoom title is first and never mid-run, so it
+                // always carries the 2px variant).
                 // pr-1 keeps the glyph itself where it was when the surface
                 // edge moved 2px left (right-full tracks the edge: -4-4 = -2-6).
-                className={cx(typo, "pointer-events-none absolute right-full top-1 pr-1")}
+                className={cx(typo, "pointer-events-none absolute right-full top-0.5 pr-1")}
               >
                 <Hash />
               </span>

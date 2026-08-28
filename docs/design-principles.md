@@ -101,22 +101,35 @@ _is_ the page — keeping a full step between it and its depth-0 children.
   6px by depth. Space belongs _above_ a heading (it opens a section), never
   below.
 - **Indent unit:** 24px per level (`ml-3` + `pl-3`), guide line at 12px.
-- **Highlight inset:** highlighted line surfaces give the text 8px of horizontal
-  (symmetric — 8px inner padding each side, the surface extending 4px past the
-  text column on both) and 4px of vertical breathing room, achieved with
-  negative-margin + padding pairs (`-my-1 py-1` plus `-mx-1 px-2`; the note
-  title's `-mx-1 pl-[38px] pr-1` extends the same 4px left) so the **text never
-  moves** — only the background extends outward, into the gutter gap and the
-  inter-row space. The gutter gap is 6px so the surface's 4px reach still
-  leaves 2px of daylight to the chevron's hover square. Block rhythm is untouched: the surface borrows the space
-  between rows, it never adds any. The text column is sacred; surfaces flex
-  around it.
-- **Multi-select reads as one surface.** The vertical growth makes consecutive
-  selected lines touch, so a Shift+Arrow run merges into a single continuous
-  solid surface: corners where two selected surfaces meet go straight
-  (`selectionRunEdges` in `block-editor.tsx`), rounded only at the run's top
-  and bottom. A heading's top margin (or the zoom title's bottom margin) keeps
-  a real gap, so those boundaries stay rounded.
+- **Highlight inset:** highlighted line surfaces give the text 8px of
+  horizontal breathing room (symmetric — 8px inner padding each side, the
+  surface extending 4px past the text column on both, via `-mx-1 px-2`; the
+  note title's `-mx-1 pl-[38px] pr-1` extends the same 4px left) so the
+  **text never moves** — only the background extends outward, into the gutter
+  gap and the inter-row space. The gutter gap is 6px so the surface's 4px
+  reach still leaves 2px of daylight to the chevron's hover square. Block
+  rhythm is untouched: the surface borrows the space between rows, it never
+  adds any. The text column is sacred; surfaces flex around it.
+- **Vertical extension is conditional, per side.** The inter-row gap is 4px
+  between nested rows and 6px between roots, so surfaces may only grow as far
+  as their neighbour's paint allows. By default each side extends 2px
+  (`-mt-0.5 pt-0.5` / `-mb-0.5 pb-0.5`) — exactly the midpoint of the nested
+  gap — so two adjacent surfaces painted in **different** colors (a hovered
+  row beside a selected one, the reported collision) can at most abut
+  edge-to-edge, never overlap. A side that sits **mid-run** in a multi-select
+  (this row and the adjacent visible row are both selected and their surfaces
+  touch) gets the full 4px (`-mt-1 pt-1` / `-mb-1 pb-1`), deliberately
+  overlapping the neighbour's identical solid accent. Every pair keeps
+  negative margin equal to padding, on both the view and edit branches, so
+  baselines are identical in every state (the pixel-parity e2e enforces it).
+- **Multi-select reads as one surface.** The full 4px growth on run sides
+  makes consecutive selected lines overlap (4+4 into a 4px nested gap, or a
+  6px root gap), so a Shift+Arrow run merges into a single continuous solid
+  surface: corners where two selected surfaces meet go straight (the same
+  `selectionRunEdges` map in `block-editor.tsx` drives both the extension and
+  the squared corners), rounded only at the run's top and bottom. A heading's
+  top margin (or the zoom title's bottom margin) keeps a real gap, so those
+  boundaries stay rounded — and those sides fall back to the 2px extension.
 
 ## Radius family
 

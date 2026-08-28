@@ -423,12 +423,16 @@ export function BlockEditor({
   }, [selected, anchorId, visibleOrder])
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
 
-  // Where two selected rows' highlight surfaces touch on screen, the corners
-  // between them go straight so the run reads as ONE continuous surface,
-  // rounded only at its ends. Surfaces grow 4px into the inter-row space (see
-  // block-item.tsx) so consecutive rows always meet — except across a
-  // heading's top margin (or the zoom title's bottom margin), which keeps a
-  // visible gap; those boundaries stay rounded.
+  // Where two selected rows' highlight surfaces touch on screen, the sides
+  // between them get the FULL 4px vertical extension and straight corners so
+  // the run reads as ONE continuous surface, rounded only at its ends (every
+  // other side extends just 2px — to the midpoint of the nested 4px inter-row
+  // gap — so differently-painted neighbours, e.g. a hover beside a selection,
+  // never overlap; see the runEdges pairs in block-item.tsx). With 4px per
+  // touching side, consecutive selected rows always meet (nested 4px gaps
+  // overlap 4px, root 6px gaps overlap 2px) — except across a heading's top
+  // margin (or the zoom title's bottom margin), which keeps a visible gap;
+  // those boundaries stay rounded.
   const selectionRunEdges = useMemo(() => {
     const edges = new Map<string, { top: boolean; bottom: boolean }>()
     if (selectedSet.size < 2) return edges
