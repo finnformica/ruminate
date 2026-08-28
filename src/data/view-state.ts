@@ -1,20 +1,23 @@
-import { atom, useAtomValue } from "jotai"
+import { useAtomValue } from "jotai"
 import { selectAtom, useAtomCallback } from "jotai/utils"
 import React from "react"
 import { markdownFilesAtom } from "../global-state"
-import { VIEW_STATE_PATH } from "./paths"
 import { useWriteFiles } from "./store"
-import { parseViewState } from "./view-state-parse"
+import { buildViewStateWrite, readNoteViewState } from "./view-state-parse"
 
 /**
- * Per-note view state, derived from the tracked `.ruminate/view-state.json`
- * sidecar. The sidecar rides the same git sync as notes, so this persists
- * across reloads and devices, but it is kept out of note content so folding a
- * block never rewrites a note file.
+ * Per-note view state, stored one file per note under
+ * `.ruminate/view-state/<noteId>.json`. The sidecar files ride the same git
+ * sync as notes, so this persists across reloads and devices, but it is kept
+ * out of note content so folding a block never rewrites a note file. Per-note
+ * files mean folding on two devices only conflicts when both fold the *same*
+ * note — the old single global sidecar conflicted on every pair of folds.
  */
-const viewStateAtom = atom((get) => parseViewState(get(markdownFilesAtom)[VIEW_STATE_PATH]))
 
 const EMPTY: string[] = []
+
+const sameIds = (a: string[], b: string[]) =>
+  a === b || (a.length === b.length && a.every((id, i) => id === b[i]))
 
 /**
  * Collapse state for one note: the set of collapsed block ids plus a toggle.
@@ -23,11 +26,18 @@ const EMPTY: string[] = []
  * fresh seed happens on every navigation). Toggles update local state
  * immediately for a snappy UI, and are persisted debounced (1s) — a burst of
  * folds collapses into a single commit. A pending write is flushed on unmount
- * so navigating away never drops the last fold.
+ * so navigating away never drops the last fold. Writes that would not change
+ * the serialized content (e.g. fold-then-unfold) are skipped entirely, so no
+ * empty commits are produced.
  */
 export function useCollapseState(noteId: string | undefined) {
   const persistedAtom = React.useMemo(
-    () => selectAtom(viewStateAtom, (vs) => (noteId ? (vs[noteId] ?? EMPTY) : EMPTY)),
+    () =>
+      selectAtom(
+        markdownFilesAtom,
+        (files) => (noteId ? readNoteViewState(files, noteId) : EMPTY),
+        sameIds,
+      ),
     [noteId],
   )
   const persisted = useAtomValue(persistedAtom)
@@ -35,7 +45,7 @@ export function useCollapseState(noteId: string | undefined) {
   const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set(persisted))
 
   const writeFiles = useWriteFiles()
-  const getViewState = useAtomCallback(React.useCallback((get) => get(viewStateAtom), []))
+  const getMarkdownFiles = useAtomCallback(React.useCallback((get) => get(markdownFilesAtom), []))
 
   // Keep the latest set in a ref so the debounced flush reads current state.
   const latest = React.useRef(collapsed)
@@ -45,13 +55,13 @@ export function useCollapseState(noteId: string | undefined) {
   const flush = React.useCallback(() => {
     timer.current = null
     if (!noteId) return
-    const all = getViewState()
-    const ids = [...latest.current]
-    const next = { ...all }
-    if (ids.length > 0) next[noteId] = ids
-    else delete next[noteId]
-    writeFiles({ [VIEW_STATE_PATH]: JSON.stringify(next, null, 2) }, "Update view state")
-  }, [noteId, getViewState, writeFiles])
+    // `buildViewStateWrite` also performs the one-time migration of the legacy
+    // single-file sidecar (split into per-note files + delete) as part of this
+    // same commit, and returns null when nothing changed so unchanged state
+    // never produces a commit.
+    const updates = buildViewStateWrite(getMarkdownFiles(), noteId, [...latest.current])
+    if (updates) writeFiles(updates, "Update view state")
+  }, [noteId, getMarkdownFiles, writeFiles])
 
   const toggleCollapse = React.useCallback(
     (id: string) => {

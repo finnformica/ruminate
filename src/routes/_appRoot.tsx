@@ -9,6 +9,8 @@ import { DevBar } from "../components/dev-bar"
 import { ErrorIcon16 } from "../components/icons"
 import { globalStateMachineAtom } from "../global-state"
 import { GlobalShortcuts } from "../shortcuts/global-shortcuts"
+import { storageWarningAtom } from "../utils/markdown-cache"
+import { startSyncLeaderElection } from "../utils/sync-leader"
 
 export const Route = createFileRoute("/_appRoot")({
   component: RouteComponent,
@@ -26,6 +28,7 @@ const errorAtom = selectAtom(globalStateMachineAtom, (state) => state.context.er
 
 function RouteComponent() {
   const error = useAtomValue(errorAtom)
+  const storageWarning = useAtomValue(storageWarningAtom)
   const send = useSetAtom(globalStateMachineAtom)
   const { online } = useNetworkState()
   const rootRef = React.useRef<HTMLDivElement>(null)
@@ -40,6 +43,17 @@ function RouteComponent() {
   useEvent("online", () => {
     send("SYNC")
   })
+
+  // Multi-tab coordination: one tab (the leader) does the sync network work.
+  // Followers forward their sync requests to it and re-walk the shared
+  // worktree when it broadcasts a finished sync. Fails open (each tab syncs
+  // itself) when BroadcastChannel/Web Locks are unavailable.
+  React.useEffect(() => {
+    return startSyncLeaderElection({
+      onSyncRequested: () => send("SYNC"),
+      onLeaderSynced: () => send("REFRESH_FILES"),
+    })
+  }, [send])
 
   // Apply overflow classes to parent elements
   React.useEffect(() => {
@@ -78,6 +92,14 @@ function RouteComponent() {
             <ErrorIcon16 />
           </div>
           <pre className="whitespace-pre-wrap pt-0.5 font-mono">{error.message}</pre>
+        </div>
+      ) : null}
+      {storageWarning ? (
+        <div className="flex shrink-0 items-start gap-2 border-b border-border-secondary px-4 py-2 text-text-pending">
+          <div className="grid h-6 shrink-0 place-items-center">
+            <ErrorIcon16 />
+          </div>
+          <span className="pt-0.5 leading-5">{storageWarning}</span>
         </div>
       ) : null}
       <AppLayout>

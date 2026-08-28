@@ -1,7 +1,9 @@
+// @vitest-environment jsdom
 import { getDefaultStore } from "jotai"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { GitHubUser } from "../schema"
 import {
+  GITHUB_USER_STORAGE_KEY,
   clearSession,
   ensureFreshToken,
   getAccessToken,
@@ -29,7 +31,10 @@ function mockRefresh(result: { status: number; body?: unknown }) {
   )
 }
 
-beforeEach(() => clearSession())
+beforeEach(() => {
+  clearSession()
+  window.localStorage.clear()
+})
 afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
@@ -102,6 +107,59 @@ describe("github session", () => {
       }),
     ).rejects.toThrow("merge conflict")
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("persists a refreshed token back to localStorage (github_user)", async () => {
+    const stored = user({ token: "gho_old", accessTokenExpiresAt: Date.now() + 60_000 })
+    window.localStorage.setItem(GITHUB_USER_STORAGE_KEY, JSON.stringify(stored))
+    const accessTokenExpiresAt = Date.now() + 8 * 60 * 60 * 1000
+    const refreshTokenExpiresAt = Date.now() + 180 * 24 * 60 * 60 * 1000
+    mockRefresh({
+      status: 200,
+      body: { token: "gho_new", accessTokenExpiresAt, refreshTokenExpiresAt },
+    })
+    seedSession(stored)
+
+    await ensureFreshToken()
+
+    const persisted = JSON.parse(
+      window.localStorage.getItem(GITHUB_USER_STORAGE_KEY)!,
+    ) as GitHubUser
+    expect(persisted.token).toBe("gho_new")
+    expect(persisted.accessTokenExpiresAt).toBe(accessTokenExpiresAt)
+    expect(persisted.refreshTokenExpiresAt).toBe(refreshTokenExpiresAt)
+    // The rest of the stored user survives untouched (schema stays valid).
+    expect(persisted.login).toBe("finn")
+    expect(persisted.name).toBe("Finn")
+    expect(persisted.email).toBe("f@x.com")
+  })
+
+  it("does not touch localStorage when there is no stored user", async () => {
+    mockRefresh({
+      status: 200,
+      body: { token: "gho_new", accessTokenExpiresAt: 1, refreshTokenExpiresAt: 2 },
+    })
+    seedSession(user({ accessTokenExpiresAt: Date.now() + 60_000 }))
+    await ensureFreshToken()
+    expect(window.localStorage.getItem(GITHUB_USER_STORAGE_KEY)).toBeNull()
+  })
+
+  it("ensureFreshToken proceeds on a transient refresh failure while the token is still valid", async () => {
+    // Within the refresh lead window, but not yet expired.
+    mockRefresh({ status: 500 })
+    seedSession(user({ token: "gho_current", accessTokenExpiresAt: Date.now() + 60_000 }))
+
+    await expect(ensureFreshToken()).resolves.toBeUndefined()
+    // The current token is kept; withAuthRetry's 401 path covers true expiry.
+    expect(getAccessToken()).toBe("gho_current")
+    expect(store.get(sessionStatusAtom)).toBe("active")
+  })
+
+  it("ensureFreshToken fails when the token is already expired and the refresh fails", async () => {
+    mockRefresh({ status: 500 })
+    seedSession(user({ token: "gho_dead", accessTokenExpiresAt: Date.now() - 1000 }))
+
+    await expect(ensureFreshToken()).rejects.toThrow()
   })
 
   it("ensureFreshToken refreshes only when near expiry", async () => {

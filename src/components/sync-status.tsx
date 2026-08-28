@@ -1,9 +1,10 @@
 import { useAtomValue } from "jotai"
 import { selectAtom } from "jotai/utils"
 import { useNetworkState } from "react-use"
-import { globalStateMachineAtom, isRepoClonedAtom } from "../global-state"
+import { globalStateMachineAtom, isRepoClonedAtom, syncErrorAtom } from "../global-state"
 import { cx } from "../utils/cx"
 import { sessionStatusAtom } from "../utils/github-session"
+import { syncErrorLabel } from "../utils/sync"
 import { CheckFillIcon16, ErrorFillIcon16, LoadingFillIcon16 } from "./icons"
 
 export const isSyncingAtom = selectAtom(
@@ -27,6 +28,7 @@ const isSyncErrorAtom = selectAtom(globalStateMachineAtom, (state) =>
 export function useSyncStatusText() {
   const isSyncing = useAtomValue(isSyncingAtom)
   const isSyncError = useAtomValue(isSyncErrorAtom)
+  const syncError = useAtomValue(syncErrorAtom)
   const isRepoCloned = useAtomValue(isRepoClonedAtom)
   const session = useAtomValue(sessionStatusAtom)
   const { online } = useNetworkState()
@@ -36,7 +38,13 @@ export function useSyncStatusText() {
   if (session === "expired") return <span className="text-text-danger">Signed out</span>
   if (isSyncing) return "Syncing…"
   if (session === "expiring") return <span className="text-text-pending">Sign in soon</span>
-  if (isSyncError) return <span className="text-text-danger">Sync failed</span>
+  if (isSyncError) {
+    return (
+      <span className="text-text-danger">
+        {syncError ? syncErrorLabel(syncError.category) : "Sync failed"}
+      </span>
+    )
+  }
 
   return "Synced"
 }
@@ -61,14 +69,20 @@ export function SyncStatusIcon({ className }: { className?: string }) {
 }
 
 /** Tooltip + click intent for the status button: an expired/expiring session
- * re-authenticates; otherwise the button triggers a sync. */
+ * re-authenticates; a sync error shows its detail (click retries — the button
+ * already sends SYNC); otherwise the button triggers a sync. */
 export function useSyncStatusMeta(): { tooltip?: string; needsReauth: boolean } {
   const session = useAtomValue(sessionStatusAtom)
+  const isSyncError = useAtomValue(isSyncErrorAtom)
+  const syncError = useAtomValue(syncErrorAtom)
   if (session === "expired") {
     return { tooltip: "GitHub session expired — click to sign in", needsReauth: true }
   }
   if (session === "expiring") {
     return { tooltip: "GitHub sign-in expiring — click to re-authenticate", needsReauth: true }
+  }
+  if (isSyncError && syncError) {
+    return { tooltip: `${syncError.message} — click to retry`, needsReauth: false }
   }
   return { tooltip: undefined, needsReauth: false }
 }

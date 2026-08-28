@@ -39,3 +39,4 @@ e2e/__screenshots__
 
 # Environment variables
 .env
+.claude/worktrees/
