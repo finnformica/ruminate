@@ -717,9 +717,20 @@ export function BlockEditor({
     onPaste: (id, prefix, before, pasted, after) => {
       // Re-form the block's line with the pasted text spliced in at the caret,
       // then parse the whole thing so markdown prefixes and blank lines become
-      // the right blocks. The current block's marker stays on the first line.
+      // the right blocks. The current block's marker stays on the first line —
+      // unless the caret sits at the start and the pasted content opens with
+      // its own marker, in which case the paste defines the block type (so
+      // pasting "# Title" into a heading doesn't become "# # Title", leaving
+      // a literal "#" in the text).
+      const pastedFirstLine = pasted.slice(
+        0,
+        pasted.includes("\n") ? pasted.indexOf("\n") : undefined,
+      )
+      const pastedHasMarker = stripMarker(pastedFirstLine) !== pastedFirstLine
+      const line =
+        before === "" && pastedHasMarker ? pasted + after : prefix + before + pasted + after
       // Reminting keeps a pasted `id::` from clobbering an existing block.
-      const sub = remintCollidingIds(parse(prefix + before + pasted + after), doc)
+      const sub = remintCollidingIds(parse(line), doc)
       const result = spliceBlocks(doc, id, sub)
       if (!result) return
       history.commit(doc, result.doc, { type: "structural" })

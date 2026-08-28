@@ -270,6 +270,17 @@ describe("select-mode paste", () => {
     expect(serializedLines(getByTestId)).toEqual(["A", "plain one plain two"])
   })
 
+  it("pasted content with its own marker defines the block type (no doubled #)", () => {
+    // Cut → paste round trip of "# Header + bullets" into an empty heading
+    // block must not become "# # Header" (a literal # left in the text).
+    const { container, getByTestId } = render(<Harness initial={"# "} startEditing />)
+    const textarea = container.querySelector("textarea")!
+    fireEvent.paste(textarea, {
+      clipboardData: { getData: (type: string) => (type === "text/plain" ? "# Header\n- a" : "") },
+    })
+    expect(serializedLines(getByTestId)).toEqual(["# Header", "- a"])
+  })
+
   it("edit-mode paste converts the html flavor and splits into blocks", () => {
     const { container, getByTestId } = render(<Harness initial={""} startEditing />)
     const textarea = container.querySelector("textarea")!
