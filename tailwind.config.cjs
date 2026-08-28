@@ -71,6 +71,7 @@ module.exports = {
     borderRadius: {
       none: "0",
       sm: "var(--border-radius-sm)",
+      md: "var(--border-radius-md)",
       DEFAULT: "var(--border-radius-base)",
       lg: "var(--border-radius-lg)",
       xl: "var(--border-radius-xl)",

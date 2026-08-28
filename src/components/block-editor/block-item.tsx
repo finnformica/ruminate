@@ -438,12 +438,18 @@ export function BlockItem({
             // distort where the highlight lands.
             data-block-line
             className={cx(
-              "flex items-start gap-2 rounded-sm px-1",
+              // The negative margin + padding pair widens the highlight surface
+              // to 8px of horizontal breathing room while the text (and every
+              // marker) stays exactly where it was — the background extends
+              // into the 4px gutter gap instead of pushing content.
+              "-mx-1 flex items-start gap-2 rounded-md px-2",
               // bg-bg-secondary is the structural "selected" hook (tests query
               // it); .block-highlight paints the accent tint over it so
               // selection reads as selected, not hovered.
               selected && "bg-bg-secondary block-highlight",
-              type.kind === "quote" && "border-l-2 border-border pl-3",
+              // Square left corners so the quote bar stays a straight rule
+              // instead of curving with the highlight radius.
+              type.kind === "quote" && "rounded-l-none border-l-2 border-border pl-3",
             )}
           >
             {marker}

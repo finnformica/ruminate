@@ -59,8 +59,26 @@ still reads as a heading at body size without shouting.
   6px by depth. Space belongs _above_ a heading (it opens a section), never
   below.
 - **Indent unit:** 24px per level (`ml-3` + `pl-3`), guide line at 12px.
-- **Highlight inset:** the selection/hover pill hugs the line with 4px horizontal
-  padding and a 4px radius — soft, but clearly a rectangle of text, not a chip.
+- **Highlight inset:** highlighted line surfaces give the text 8px of horizontal
+  breathing room, achieved with a negative-margin + padding pair (`-mx-1 px-2`;
+  the note title uses `-mx-1 pl-9 pr-1`) so the **text never moves** — only the
+  background extends outward, into the 4px gutter gap. The text column is sacred;
+  surfaces flex around it.
+
+## Radius family
+
+One token family, sized by surface, never per-element drift:
+
+| Token                  | Value | Used for                                       |
+| ---------------------- | ----- | ---------------------------------------------- |
+| `--border-radius-sm`   | 4px   | inline chips: inline code, transclusions, keys |
+| `--border-radius-md`   | 6px   | line surfaces: block/title selection highlight |
+| `--border-radius-base` | 8px   | controls, menu items                           |
+| `--border-radius-lg`   | 12px  | block panels: code blocks, cards               |
+
+The rule: the bigger the surface, the bigger the radius. All values derive from
+`--border-radius-base`, so themes that flatten it (e-paper sets it to 0) flatten
+the whole family with it.
 
 ## Color roles
 
