@@ -363,6 +363,41 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   },
 ]
 
+// Linear-style keys on the filterable list pages — the notes index and the
+// tags page (see src/hooks/list-keyboard-nav.ts).
+const LIST_ENTRIES: Shortcut[] = [
+  {
+    combos: ["ArrowUp", "ArrowDown"],
+    scope: "global",
+    description: "Move the list highlight (notes list, tags)",
+    group: "Lists",
+  },
+  {
+    combos: ["ArrowDown"],
+    scope: "global",
+    description: "In the search input: highlight the first result",
+    group: "Lists",
+  },
+  {
+    combos: ["Enter"],
+    scope: "global",
+    description: "Open the highlighted note or tag",
+    group: "Lists",
+  },
+  {
+    combos: ["Escape"],
+    scope: "global",
+    description: "Clear the highlight, back to the search input",
+    group: "Lists",
+  },
+  {
+    combos: ["Home", "End"],
+    scope: "global",
+    description: "Jump to the first / last item",
+    group: "Lists",
+  },
+]
+
 // Bindings inside the open command palette (see src/components/command-menu.tsx).
 const PALETTE_ENTRIES: Shortcut[] = [
   {
@@ -436,6 +471,7 @@ const TITLE_ENTRIES: Shortcut[] = [
 export const GROUP_ORDER = [
   "Global",
   "Navigation",
+  "Lists",
   "Select mode",
   "Edit mode",
   "Multi-select",
@@ -450,6 +486,7 @@ export const GROUP_ORDER = [
 export const SHORTCUTS: Shortcut[] = [
   ...GLOBAL_ENTRIES,
   ...NAVIGATION_ENTRIES,
+  ...LIST_ENTRIES,
   ...editorEntries(),
   ...CLIPBOARD_HISTORY_ENTRIES,
   ...MULTI_SELECT_ENTRIES,

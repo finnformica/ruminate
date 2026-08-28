@@ -200,6 +200,37 @@ export function BlockEditor({
 
   // The container is the focusable keyboard target for select mode.
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // ── Keyboard ownership ────────────────────────────────────────────────────
+  // Whether the editor owns the keyboard: focus (container or a textarea) is
+  // inside the container. While it doesn't — focus moved to the sidebar, a
+  // dialog, the ⌘P palette mid-preview — the selection highlight demotes to a
+  // quiet neutral (`.block-highlight-inactive`), Finder-style, so "arrows work
+  // here" is never claimed falsely. Tracked via the container's focus/blur
+  // (they bubble, i.e. focusin/focusout); the blur side settles on a rAF so
+  // internal focus moves (container ↔ textarea, the blur-regrab below) never
+  // flicker — both the check and any re-grab run before the next paint.
+  const [keyboardActive, setKeyboardActive] = useState(false)
+  const keyboardIdleRaf = useRef<number | null>(null)
+  const cancelKeyboardIdleCheck = () => {
+    if (keyboardIdleRaf.current !== null) {
+      cancelAnimationFrame(keyboardIdleRaf.current)
+      keyboardIdleRaf.current = null
+    }
+  }
+  const handleContainerFocus = () => {
+    cancelKeyboardIdleCheck()
+    setKeyboardActive(true)
+  }
+  const scheduleKeyboardIdleCheck = () => {
+    cancelKeyboardIdleCheck()
+    keyboardIdleRaf.current = requestAnimationFrame(() => {
+      keyboardIdleRaf.current = null
+      const el = containerRef.current
+      if (!el || !el.contains(document.activeElement)) setKeyboardActive(false)
+    })
+  }
+  useEffect(() => cancelKeyboardIdleCheck, [])
   // Set by a Cmd/Ctrl+Shift+V keydown so the paste event that follows knows to
   // paste as plain text (newlines collapsed into one block).
   const plainPasteRef = useRef(false)
@@ -755,6 +786,9 @@ export function BlockEditor({
     selectionRunEdges,
     collapsed,
     readOnly,
+    // Read-only views never take keyboard focus, but their highlights are
+    // plain display state — never demote them to "inactive".
+    keyboardActive: readOnly || keyboardActive,
     select,
     edit,
     toggleCollapse,
@@ -999,6 +1033,10 @@ export function BlockEditor({
   // still highlighted, keep the keyboard alive by re-grabbing focus. A click on
   // a real control elsewhere (relatedTarget set) is left to take focus.
   const handleContainerBlur = (event: FocusEvent<HTMLDivElement>) => {
+    // Focus is leaving the container (for real controls, or possibly for
+    // nothing): settle keyboard ownership on the next frame. If the re-grab
+    // below (or anything else) puts focus back first, the check is a no-op.
+    scheduleKeyboardIdleCheck()
     if (readOnly || focus || !selected || event.relatedTarget) return
     const el = containerRef.current
     requestAnimationFrame(() => {
@@ -1218,6 +1256,7 @@ export function BlockEditor({
         ref={containerRef}
         tabIndex={-1}
         onKeyDown={handleKeyDown}
+        onFocus={handleContainerFocus}
         onBlur={handleContainerBlur}
         onCopy={handleCopy}
         onPaste={handleContainerPaste}

@@ -21,21 +21,42 @@
   transition: background-color 100ms ease;
 }
 
-.block-highlight {
+/* `.list-highlight` is the same selected-row surface outside the editor: the
+ * notes/tags list keyboard highlight shares the selection tokens exactly (see
+ * "Selection has its own color" in docs/design-principles.md). */
+.block-highlight,
+.list-highlight {
   background-color: var(--accent-3);
 }
 
 /* The neutral (sand) accent stays biased one step darker, matching its alpha
  * ramp bias in variables.css: sand-3 would sit within a step of the neutral
  * hover surfaces, so selection lands on sand-4 (via accent-4). */
-[data-accent="neutral"] .block-highlight {
+[data-accent="neutral"] :is(.block-highlight, .list-highlight) {
   background-color: var(--accent-4);
 }
 
 @media (prefers-color-scheme: dark) {
-  .block-highlight {
+  .block-highlight,
+  .list-highlight {
     background-color: var(--accent-4);
   }
+}
+
+/* ── Inactive selection ──────────────────────────────────────────────────────
+ * When the editor doesn't own the keyboard (focus is in the sidebar, a dialog,
+ * the page — including the ⌘P palette's live previews), the selection demotes
+ * from the accent surface to a quiet neutral, Finder/VS Code-style: still
+ * clearly a selection, but no longer claiming "arrows go here". The class is
+ * additive on top of `.block-highlight` (the structural `bg-bg-secondary` hook
+ * is untouched) and the compound selector outranks every accent/dark override
+ * above. Solid (not alpha) so multi-select runs keep merging seamlessly where
+ * adjacent surfaces overlap. One accent-independent token covers all five
+ * accents and both schemes; for the Neutral accent it stays a step above the
+ * `--neutral-a2` hover and a step below its sand-4 active selection. Restore
+ * rides the 100ms background fade on [data-block-line] — perceptually instant. */
+.block-highlight.block-highlight-inactive {
+  background-color: var(--neutral-3);
 }
 
 /* ── Neutral hover ───────────────────────────────────────────────────────────

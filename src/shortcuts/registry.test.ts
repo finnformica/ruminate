@@ -33,6 +33,8 @@ const NAMED_KEYS = new Set([
   "arrowdown",
   "arrowleft",
   "arrowright",
+  "home",
+  "end",
 ])
 
 function isValidCombo(combo: string): boolean {
@@ -115,6 +117,14 @@ describe("shortcut registry entries", () => {
       APP_SHORTCUTS.helpPanel,
     ]) {
       expect(combos.has(expected), `registry is missing "${expected}"`).toBe(true)
+    }
+  })
+
+  it("documents the list-page keys (notes list / tags keyboard navigation)", () => {
+    const lists = SHORTCUTS.filter((shortcut) => shortcut.group === "Lists")
+    const combos = new Set(lists.flatMap((shortcut) => shortcut.combos))
+    for (const expected of ["ArrowUp", "ArrowDown", "Enter", "Escape", "Home", "End"]) {
+      expect(combos.has(expected), `Lists group is missing "${expected}"`).toBe(true)
     }
   })
 

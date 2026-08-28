@@ -48,6 +48,23 @@ palette also switches to outline mode (the VS Code prefix grammar);
 with <kbd>⌘</kbd> <kbd>P</kbd> directly, <kbd>⌫</kbd> on an empty query stays
 put.
 
+## Lists (notes list, tags)
+
+Linear-style keys on the filterable list pages — the notes index (`/`) and the
+tags page. A roving highlight (drawn in the same selection accent as the block
+editor) follows the arrows; it tracks filtering, resetting to the first result
+when the query changes. <kbd>↓</kbd> pressed inside the search input hands the
+keyboard to the list; everything else stays quiet while any text field has
+focus.
+
+| Action                                | Shortcut                         |
+| ------------------------------------- | -------------------------------- |
+| Move the list highlight               | <kbd>↑</kbd> / <kbd>↓</kbd>      |
+| In the search: highlight first result | <kbd>↓</kbd>                     |
+| Open the highlighted note / tag       | <kbd>↵</kbd>                     |
+| Clear the highlight, back to search   | <kbd>Esc</kbd>                   |
+| Jump to the first / last item         | <kbd>Home</kbd> / <kbd>End</kbd> |
+
 ## Block editor
 
 The editor has two modes, like Notion: **select** (a block is highlighted) and

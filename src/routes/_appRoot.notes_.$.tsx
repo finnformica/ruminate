@@ -22,6 +22,7 @@ import { DayActivity } from "../components/day-activity"
 import { LinkHighlightProvider } from "../components/link-highlight-provider"
 import { NoteFavicon } from "../components/note-favicon"
 import { NoteList } from "../components/note-list"
+import { Notice } from "../components/notice"
 import { PageLayout } from "../components/page-layout"
 import { ShareDialog } from "../components/share-dialog"
 import { isSyncingAtom } from "../components/sync-status"
@@ -466,25 +467,26 @@ function NotePage() {
                     remote version; "Save mine anyway" is the explicit choice
                     to overwrite the newer note with the edits shown. */}
                 {remoteNotice ? (
-                  <div
+                  <Notice
                     ref={noticeRef}
-                    className="card-1 flex flex-wrap items-center justify-between gap-2 p-2 pl-3 print:hidden"
+                    tone="info"
+                    className="print:hidden"
+                    actions={
+                      <>
+                        <Button size="small" onClick={loadRemoteVersion}>
+                          Show latest
+                        </Button>
+                        <Button size="small" onClick={saveMineAnyway}>
+                          Save mine anyway
+                        </Button>
+                      </>
+                    }
+                    onDismiss={dismissRemoteNotice}
                   >
-                    <span className="text-sm leading-4 text-text-secondary">
+                    <span className="text-sm text-text-secondary">
                       This note was updated on another device. Your unsaved edits are shown.
                     </span>
-                    <span className="flex items-center gap-2">
-                      <Button size="small" onClick={loadRemoteVersion}>
-                        Show latest
-                      </Button>
-                      <Button size="small" onClick={saveMineAnyway}>
-                        Save mine anyway
-                      </Button>
-                      <Button size="small" onClick={dismissRemoteNotice}>
-                        Dismiss
-                      </Button>
-                    </span>
-                  </div>
+                  </Notice>
                 ) : null}
                 {/* While zoomed, the breadcrumb (inside the editor) carries the
                     note title as its first crumb — hide the standalone title to

@@ -26,6 +26,21 @@ asks for it.
    lets adjacent selected lines merge seamlessly. The structural class
    `bg-bg-secondary` stays on the line (tests and tooling select on it);
    `.block-highlight` paints the accent surface on top.
+   **Selection follows the keyboard.** The accent surface is a promise that
+   arrows work here, so it only shows while the editor actually owns the
+   keyboard (focus inside its container). Whenever focus is elsewhere — the
+   sidebar, a dialog, the `?` reference, the ⌘P palette mid-preview — the
+   selection demotes to a quiet solid neutral (`--neutral-3`, the additive
+   `.block-highlight-inactive` class), Finder/VS Code-style: still visibly the
+   selection, no longer claiming the keys. Accent-independent, so all five
+   accents and both schemes share one inactive surface; for the Neutral accent
+   it sits one step above the `--neutral-a2` hover and one below its sand-4
+   active selection. Restoration rides the same 100ms background fade —
+   perceptually instant.
+   The same accent family marks "current" outside the editor: the sidebar's
+   active nav row / open note (`--accent-a3` tint, accent-12 ink) and the
+   notes/tags list keyboard highlight (`.list-highlight`, the selection
+   surface verbatim) — one color always means "you are here / keys act here".
 4. **View and edit are pixel-identical.** Every typographic property (size,
    weight, line-height, tracking) lives in `typographyFor` and is applied to both
    the rendered body _and_ the textarea. Nothing may style one branch only.
@@ -118,6 +133,8 @@ full-width highlight.)
 | Structure    | `--color-border` (a7)      | quote bar, unchecked checkbox border        |
 | Hover        | `--neutral-a2` tint        | non-selected block lines under the pointer  |
 | Selection    | `--accent-3` / `-4` solid  | selected block(s) — light step 3, dark 4    |
+| Inactive sel | `--neutral-3` solid        | the selection while the editor lacks focus  |
+| Current      | `--accent-a3` tint         | sidebar active route / open note row        |
 | Accent solid | `--accent-9`               | checked checkbox fill                       |
 | Transclusion | `--accent-a2` tint         | `((ref))` embeds — quietly "live" content   |
 
@@ -142,6 +159,39 @@ is the default and needs no attribute. Rules for a new accent:
   hover.
 - A light step 9 needs a dark checkmark: amber overrides the checked-checkbox
   glyph and sets `--accent-contrast` to its dark ink.
+
+## Notices
+
+Every non-blocking "something needs your attention" message renders through
+**one component** — `Notice` (`src/components/notice.tsx`): a `--border-radius-base`
+surface with a subtle border (`--color-border-secondary`) on the card
+background, an icon slot on the left, the message in the middle, actions and
+an optional standard **Dismiss** on the right. Two tones color the icon rank,
+never the prose: `info` (tertiary — the remote-edit notice on a note) and
+`warning` (`--color-text-pending` — storage quota, merge notices). Wording
+stays terse and factual; the strongest action is never a primary button — a
+notice informs, it doesn't nag.
+
+Placement conventions:
+
+- **App-scope** notices (storage quota, merge notices) sit in a full-width
+  strip above the layout: a `p-2` container with a `--color-border-secondary`
+  bottom border, the Notice card inside.
+- **Page-scope** notices (the remote-edit notice) sit inline, directly above
+  the content they concern, sharing the page column's width.
+- Notices never float, overlay, or animate in — they are part of the page,
+  and they leave by re-render (dismiss), not by transition.
+
+## Empty-block teaching
+
+An empty block **being edited** carries a ghost placeholder —
+“Type, or press `#` heading · `-` list · `[` todo” — at placeholder rank
+(`--color-text-tertiary`), as the textarea's native `placeholder`. It teaches
+the turn-into keys exactly where they apply, and only there: never in view
+mode, never in read-only views, never on the zoomed title (a page title, not a
+block). It must not move layout — the empty row is clamped to one line
+(`1lh`), so a placeholder that would wrap on a narrow screen clips instead of
+growing the row.
 
 ## Motion
 
