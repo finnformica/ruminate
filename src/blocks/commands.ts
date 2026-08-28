@@ -1,8 +1,10 @@
 import {
   getBlockType,
   stripMarker,
+  toggleMarker,
   toggleTodo as toggleTodoContent,
   type BlockType,
+  type MarkerKind,
 } from "./block-type"
 import type { BlockOp } from "./history"
 import {
@@ -79,6 +81,10 @@ export interface CommandResult {
   focus?: FocusIntent
   /** Id whose collapse state should toggle. */
   toggleCollapse?: string
+  /** Id that must end up expanded (the editor clears its collapsed state if
+   * set). Commands can't see collapse state — it lives in the component — so
+   * this is a demand, not a toggle: expanding an already-open block is a no-op. */
+  expand?: string
   /** Navigation tried to move above the first block — the caller may hand focus
    * to whatever sits above the editor (e.g. the note title). */
   exitTop?: boolean
@@ -257,6 +263,28 @@ function duplicate(direction: "above" | "below"): Command {
   }
 }
 
+/**
+ * Select-mode "turn into": toggle the block to the given marker kind. Content
+ * and children are never touched — this is a marker swap only, one structural
+ * undo step. An *empty* block additionally opens editing (caret at the end) so
+ * the marker key starts you typing that block type immediately. Allowed on the
+ * zoomed title too (a content-type change never escapes the view).
+ */
+function turnInto(kind: MarkerKind): Command {
+  return ({ doc, id, mode }) => {
+    const block = doc.blocks[id]
+    if (!block) return IGNORED
+    const content = toggleMarker(block.content, kind)
+    const result: CommandResult = {
+      handled: true,
+      doc: updateContent(doc, id, content),
+      op: STRUCTURAL,
+    }
+    if (stripMarker(content).trim() === "") return { ...result, focus: { mode: "edit", id } }
+    return { ...result, focus: keepFocus(mode, id) }
+  }
+}
+
 export type CommandName =
   | "enterEdit"
   | "exitEdit"
@@ -269,6 +297,10 @@ export type CommandName =
   | "moveEditFocusDown"
   | "prevSibling"
   | "nextSibling"
+  | "treePrev"
+  | "treeNext"
+  | "selectParent"
+  | "selectFirstChild"
   | "jumpLevelTop"
   | "jumpLevelBottom"
   | "moveBlockUp"
@@ -277,6 +309,11 @@ export type CommandName =
   | "duplicateBelow"
   | "deleteBlock"
   | "toggleTodo"
+  | "turnIntoHeading"
+  | "turnIntoBullet"
+  | "turnIntoTodo"
+  | "turnIntoQuote"
+  | "turnIntoOrdered"
   | "toggleCollapse"
   | "insertBelow"
   | "insertSiblingBelow"
@@ -332,6 +369,66 @@ export const COMMANDS: Record<CommandName, Command> = {
    * descendants in between (e.g. jump header→header across their children). */
   prevSibling: siblingJump("prev"),
   nextSibling: siblingJump("next"),
+
+  // ── WASD tree navigation (a/d walk depth; w/s traverse siblings, breaking
+  // out of the level at its ends — unlike the stop-at-ends Mod+Alt+Arrow
+  // sibling jumps, which keep their own commands above) ─────────────────────
+
+  /** w: previous sibling — or, at the FIRST sibling of a level, break out
+   * upward to the parent. On the first root block (nothing above) it no-ops;
+   * on the zoomed title it no-ops too (zooming out stays `a`'s job). */
+  treePrev: ({ doc, id, mode, zoomRootId }) => {
+    if (zoomRootId && id === zoomRootId) return { handled: true }
+    const info = siblingsOf(doc, id)
+    if (!info) return { handled: true }
+    if (info.index > 0)
+      return { handled: true, focus: keepFocus(mode, info.siblings[info.index - 1]) }
+    // Top of the level: continue the traversal one level out, upward. A direct
+    // child of the zoom root lands on the title (its parent) — still in view.
+    if (!info.parentId) return { handled: true }
+    return { handled: true, focus: keepFocus(mode, info.parentId) }
+  },
+
+  /** s: next sibling — or, at the LAST sibling of a level, walk up the
+   * ancestor chain until an ancestor has a next sibling and select it
+   * (continue the traversal one level out, downward). At the end of the
+   * document — or of the zoomed subtree, which the walk never escapes — no-op. */
+  treeNext: ({ doc, id, mode, zoomRootId }) => {
+    // The title's own siblings live outside the zoomed view.
+    if (zoomRootId && id === zoomRootId) return { handled: true }
+    let cur: string = id
+    for (;;) {
+      const info = siblingsOf(doc, cur)
+      if (!info) return { handled: true }
+      if (info.index < info.siblings.length - 1) {
+        return { handled: true, focus: keepFocus(mode, info.siblings[info.index + 1]) }
+      }
+      // Last sibling: climb — but never past the zoom root or the document.
+      if (!info.parentId) return { handled: true }
+      if (zoomRootId && info.parentId === zoomRootId) return { handled: true }
+      cur = info.parentId
+    }
+  },
+
+  /** Step up the tree: select the parent (no-op on a root-level block). While
+   * zoomed the title *is* the local root, so "up" from it crosses the zoom
+   * boundary — reuse `zoomOut` so "a always goes up the tree" keeps holding. */
+  selectParent: (input) => {
+    const { doc, id, mode, zoomRootId } = input
+    if (zoomRootId && id === zoomRootId) return COMMANDS.zoomOut(input)
+    const parentId = siblingsOf(doc, id)?.parentId ?? null
+    if (!parentId) return { handled: true }
+    return { handled: true, focus: keepFocus(mode, parentId) }
+  },
+
+  /** Step down the tree: select the first child (no-op on a leaf). A collapsed
+   * block auto-expands in the same keypress — the `expand` demand tells the
+   * editor to clear its collapsed state so the child is actually visible. */
+  selectFirstChild: ({ doc, id, mode }) => {
+    const first = doc.blocks[id]?.children[0]
+    if (!first) return { handled: true }
+    return { handled: true, expand: id, focus: keepFocus(mode, first) }
+  },
 
   /** Jump to the top of the current level (its first sibling); if already there,
    * step up to the parent. Walks up levels rather than to the page top. */
@@ -402,6 +499,13 @@ export const COMMANDS: Record<CommandName, Command> = {
       focus: keepFocus(mode, id),
     }
   },
+
+  /** Select-mode marker keys: toggle the block's type (see `turnInto`). */
+  turnIntoHeading: turnInto("heading"),
+  turnIntoBullet: turnInto("bullet"),
+  turnIntoTodo: turnInto("todo"),
+  turnIntoQuote: turnInto("quote"),
+  turnIntoOrdered: turnInto("ordered"),
 
   /** Collapse / expand a block with children; consumes Space regardless (so the
    * page never scrolls) but only toggles when there's something to fold. */

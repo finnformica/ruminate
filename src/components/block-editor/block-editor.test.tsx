@@ -773,3 +773,167 @@ describe("duplicate + move via keyboard", () => {
     expect(lines).toEqual(["C", "A", "B"])
   })
 })
+
+describe("wasd tree navigation (select mode)", () => {
+  // NESTED: A, B (> C (> D), E), F
+
+  /** Texts of the blocks actually rendered (collapsed children are unmounted).
+   * Scoped to block bodies so the harness's serialized <pre> doesn't match. */
+  const renderedBlocks = (container: HTMLElement): string[] =>
+    Array.from(container.querySelectorAll('[data-testid="block-body"]')).map(
+      (el) => el.textContent ?? "",
+    )
+  it("w/s traverse siblings, skipping descendants, no-oping only at the tree's ends", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 1) // B
+    fireEvent.keyDown(root, { key: "s" })
+    expect(highlightedText(container)).toBe("F") // skipped C/D/E
+    fireEvent.keyDown(root, { key: "s" }) // end of the document: no-op
+    expect(highlightedText(container)).toBe("F")
+    fireEvent.keyDown(root, { key: "w" })
+    expect(highlightedText(container)).toBe("B")
+    fireEvent.keyDown(root, { key: "w" })
+    expect(highlightedText(container)).toBe("A")
+    fireEvent.keyDown(root, { key: "w" }) // start of the document: no-op
+    expect(highlightedText(container)).toBe("A")
+  })
+
+  it("w/s break out of a level at its ends and continue the traversal", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 3) // D — sole child of C, two levels deep
+    // s at the last sibling: up the ancestor chain to the next block out.
+    fireEvent.keyDown(root, { key: "s" })
+    expect(highlightedText(container)).toBe("E") // C's next sibling
+    fireEvent.keyDown(root, { key: "s" })
+    expect(highlightedText(container)).toBe("F") // B's next sibling, one more out
+    // w at the first sibling: out to the parent.
+    selectNth(root, 0) // still F; walk back down to D
+    fireEvent.keyDown(root, { key: "ArrowUp" }) // E
+    fireEvent.keyDown(root, { key: "ArrowUp" }) // D
+    expect(highlightedText(container)).toBe("D")
+    fireEvent.keyDown(root, { key: "w" })
+    expect(highlightedText(container)).toBe("C") // first sibling → parent
+    fireEvent.keyDown(root, { key: "w" })
+    expect(highlightedText(container)).toBe("B") // C is B's first child → parent
+  })
+
+  it("a walks up to the parent and no-ops at the root", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 3) // D — two levels deep
+    fireEvent.keyDown(root, { key: "a" })
+    expect(highlightedText(container)).toBe("C")
+    fireEvent.keyDown(root, { key: "a" })
+    expect(highlightedText(container)).toBe("B")
+    fireEvent.keyDown(root, { key: "a" }) // B is root-level: no-op
+    expect(highlightedText(container)).toBe("B")
+  })
+
+  it("d steps into the first child, and no-ops on a leaf", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 1) // B
+    fireEvent.keyDown(root, { key: "d" })
+    expect(highlightedText(container)).toBe("C")
+    fireEvent.keyDown(root, { key: "d" })
+    expect(highlightedText(container)).toBe("D")
+    fireEvent.keyDown(root, { key: "d" }) // D is a leaf: no-op
+    expect(highlightedText(container)).toBe("D")
+  })
+
+  it("d auto-expands a collapsed block and selects its first child in one press", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 1) // B
+    fireEvent.keyDown(root, { key: " " }) // collapse B — C/D/E leave the DOM
+    expect(renderedBlocks(container)).not.toContain("C")
+    fireEvent.keyDown(root, { key: "d" })
+    // The subtree is rendered again (collapse state cleared)…
+    expect(renderedBlocks(container)).toContain("C")
+    expect(renderedBlocks(container)).toContain("D")
+    // …and the first child is the highlighted block.
+    expect(highlightedText(container)).toBe("C")
+    // The expansion was a real state change, not a transient: collapsing again
+    // still works from the parent (round-trip through `a`).
+    fireEvent.keyDown(root, { key: "a" })
+    fireEvent.keyDown(root, { key: " " })
+    expect(renderedBlocks(container)).not.toContain("C")
+  })
+
+  it("leaves modified w/a/s/d to the browser (e.g. ⌘W)", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const root = editorRoot(container)
+    selectNth(root, 1) // B
+    const event = new KeyboardEvent("keydown", { key: "w", metaKey: true, cancelable: true })
+    root.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(false)
+    expect(highlightedText(container)).toBe("B")
+  })
+})
+
+describe("turn into (select-mode marker keys)", () => {
+  it("# turns a block into a heading, again strips back, and undo restores it", () => {
+    const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
+    const root = editorRoot(container)
+    expect(highlightedText(container)).toBe("A")
+    fireEvent.keyDown(root, { key: "#", shiftKey: true }) // shifted spelling
+    expect(serializedLines(getByTestId)).toEqual(["# A", "B"])
+    // No textarea opened — the block had content, so we stay selected.
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(highlightedText(container)).toBe("A")
+    fireEvent.keyDown(root, { key: "#" }) // toggle off
+    expect(serializedLines(getByTestId)).toEqual(["A", "B"])
+    // One undo step per press: undo restores the heading, then the paragraph.
+    fireEvent.keyDown(root, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["# A", "B"])
+    fireEvent.keyDown(root, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B"])
+  })
+
+  it("swaps between types without touching content or children", () => {
+    const { container, getByTestId } = render(<Harness initial={"- P\n  - child"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: ">" })
+    expect(serializedLines(getByTestId)).toEqual(["> P", "  - child"])
+    fireEvent.keyDown(root, { key: "1" })
+    expect(serializedLines(getByTestId)).toEqual(["1. P", "  - child"])
+  })
+
+  it("[ makes a todo; x still toggles its checkbox; [ strips even when checked", () => {
+    const { container, getByTestId } = render(<Harness initial={"task"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "[" })
+    expect(serializedLines(getByTestId)).toEqual(["[ ] task"])
+    fireEvent.keyDown(root, { key: "x" })
+    expect(serializedLines(getByTestId)).toEqual(["[x] task"])
+    fireEvent.keyDown(root, { key: "[" })
+    expect(serializedLines(getByTestId)).toEqual(["task"])
+  })
+
+  it("on an empty block the marker applies AND editing opens", () => {
+    const { container, getByTestId } = render(<Harness initial={""} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "-" })
+    expect(getByTestId("serialized").textContent).toContain("- ")
+    const textarea = container.querySelector("textarea")
+    expect(textarea).not.toBeNull()
+    expect(textarea!.value).toBe("") // the marker is styling, not body text
+  })
+
+  it("turns a multi-selection into the type, one undo step for the group", () => {
+    const { container, getByTestId } = render(<Harness initial={"A\nB\nC"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true }) // A+B
+    fireEvent.keyDown(root, { key: "#" })
+    expect(serializedLines(getByTestId)).toEqual(["# A", "# B", "C"])
+    // The selection survives, so pressing again toggles the group back.
+    fireEvent.keyDown(root, { key: "#" })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "C"])
+    fireEvent.keyDown(root, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["# A", "# B", "C"])
+    fireEvent.keyDown(root, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "C"])
+  })
+})

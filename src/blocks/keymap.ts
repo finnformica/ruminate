@@ -94,6 +94,25 @@ export const KEYMAP: Binding[] = [
   { mode: "select", combo: "Delete", command: "deleteBlock" },
   { mode: "select", combo: "x", command: "toggleTodo" },
   { mode: "select", combo: " ", command: "toggleCollapse" },
+  // WASD tree navigation: w/s traverse siblings, breaking out of the level at
+  // its ends (w: first sibling → parent; s: last sibling → the nearest
+  // ancestor's next sibling) — unlike Mod+Alt+Arrow, which stops at the ends.
+  // a/d walk depth — parent / first child (d auto-expands a collapsed block).
+  { mode: "select", combo: "w", command: "treePrev" },
+  { mode: "select", combo: "s", command: "treeNext" },
+  { mode: "select", combo: "a", command: "selectParent" },
+  { mode: "select", combo: "d", command: "selectFirstChild" },
+  // "Turn into": marker keys are STRUCTURAL in select mode (select mode never
+  // types text) — they toggle the block's type: same type strips back to a
+  // paragraph, anything else swaps the leading marker. `#` and `>` need Shift
+  // on many layouts, so both spellings are bound (like Mod+Shift+> above).
+  { mode: "select", combo: "#", command: "turnIntoHeading" },
+  { mode: "select", combo: "Shift+#", command: "turnIntoHeading" },
+  { mode: "select", combo: "-", command: "turnIntoBullet" },
+  { mode: "select", combo: "[", command: "turnIntoTodo" },
+  { mode: "select", combo: ">", command: "turnIntoQuote" },
+  { mode: "select", combo: "Shift+>", command: "turnIntoQuote" },
+  { mode: "select", combo: "1", command: "turnIntoOrdered" },
   // Zoom ("focus mode"): f dives into the block, Shift+F surfaces one level.
   { mode: "select", combo: "f", command: "zoomIn" },
   { mode: "select", combo: "Shift+F", command: "zoomOut" },

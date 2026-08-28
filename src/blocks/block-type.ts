@@ -73,3 +73,40 @@ export function toggleTodo(content: string): string {
   if (type.kind !== "todo") return content
   return type.checked ? content.replace(/^\[[xX]\]/, "[ ]") : content.replace(/^\[[ ]?\]/, "[x]")
 }
+
+/** A block kind that carries a leading marker (everything but a paragraph). */
+export type MarkerKind = Exclude<BlockType["kind"], "paragraph">
+
+/** The canonical marker each kind starts with. Ordered items always get `1. `
+ * — the renderer/serializer renumbers the list. */
+const MARKER_OF: Record<MarkerKind, string> = {
+  heading: "# ",
+  todo: "[ ] ",
+  quote: "> ",
+  bullet: "- ",
+  ordered: "1. ",
+}
+
+/**
+ * Select-mode "turn into" keys: the marker character → the kind it toggles.
+ * In select mode marker keys are *structural*, never typed text — the keymap
+ * binds them to the `turnInto*` commands, and the multi-select handler applies
+ * the same toggle across a selection.
+ */
+export const MARKER_KEYS: Record<string, MarkerKind> = {
+  "#": "heading",
+  "-": "bullet",
+  "[": "todo",
+  ">": "quote",
+  "1": "ordered",
+}
+
+/**
+ * Toggle `content` to the given kind: already that kind → strip back to a
+ * paragraph; anything else → swap the leading marker. The body text is never
+ * touched. (A checked todo counts as "already a todo" — `x` toggles the check.)
+ */
+export function toggleMarker(content: string, kind: MarkerKind): string {
+  const body = stripMarker(content)
+  return getBlockType(content).kind === kind ? body : MARKER_OF[kind] + body
+}

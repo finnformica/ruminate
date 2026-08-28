@@ -166,6 +166,143 @@ describe("sibling & level navigation", () => {
   })
 })
 
+describe("wasd sibling traversal (treePrev / treeNext break out of the level)", () => {
+  /** A deeper fixture:
+   *   - a  "A"
+   *   - b  "B"
+   *     - b1 "B1"
+   *       - b2 "B2"
+   *   - c  "C"
+   */
+  function deep(): BlockDoc {
+    return {
+      frontmatter: null,
+      rootBlockIds: ["a", "b", "c"],
+      blocks: {
+        a: { id: "a", content: "A", children: [] },
+        b: { id: "b", content: "B", children: ["b1"] },
+        b1: { id: "b1", content: "B1", children: ["b2"] },
+        b2: { id: "b2", content: "B2", children: [] },
+        c: { id: "c", content: "C", children: [] },
+      },
+    }
+  }
+
+  it("moves across siblings mid-level, skipping descendants", () => {
+    const doc = fixture()
+    expect(runCommand("treeNext", input(doc, "b")).focus).toEqual({ mode: "select", id: "c" })
+    expect(runCommand("treePrev", input(doc, "c")).focus).toEqual({ mode: "select", id: "b" })
+  })
+
+  it("treePrev at the first sibling of a level breaks out to the parent", () => {
+    const doc = fixture()
+    expect(runCommand("treePrev", input(doc, "b1")).focus).toEqual({ mode: "select", id: "b" })
+  })
+
+  it("treePrev on the first root block no-ops (nothing above)", () => {
+    const doc = fixture()
+    const result = runCommand("treePrev", input(doc, "a"))
+    expect(result.handled).toBe(true)
+    expect(result.focus).toBeUndefined()
+  })
+
+  it("treeNext at the last sibling continues at the ancestor's next sibling", () => {
+    const doc = fixture()
+    expect(runCommand("treeNext", input(doc, "b1")).focus).toEqual({ mode: "select", id: "c" })
+  })
+
+  it("treeNext walks multiple levels up to find the next block", () => {
+    const doc = deep()
+    // b2 → b1 (last) → b (has next sibling c): two levels up.
+    expect(runCommand("treeNext", input(doc, "b2")).focus).toEqual({ mode: "select", id: "c" })
+  })
+
+  it("treeNext no-ops at the true end of the document", () => {
+    const doc = fixture()
+    expect(runCommand("treeNext", input(doc, "c")).focus).toBeUndefined()
+    // Deep last block with no ancestor-next anywhere: also a no-op.
+    const noTail = deep()
+    noTail.rootBlockIds = ["a", "b"]
+    expect(runCommand("treeNext", input(noTail, "b2")).focus).toBeUndefined()
+  })
+
+  it("clamps at the zoom boundary (never escapes the zoomed subtree)", () => {
+    const doc = deep()
+    const zoomed = (id: string): Parameters<typeof runCommand>[1] =>
+      input(doc, id, { visibleOrder: ["b", "b1", "b2"], zoomRootId: "b" })
+    // The title's own siblings are outside the view: both no-op on the title
+    // (w does NOT zoom out — that stays `a`'s job).
+    for (const name of ["treePrev", "treeNext"] as const) {
+      const result = runCommand(name, zoomed("b"))
+      expect(result.handled).toBe(true)
+      expect(result.focus).toBeUndefined()
+      expect(result.zoom).toBeUndefined()
+    }
+    // w on a direct child of the zoom root breaks out to the title (in view).
+    expect(runCommand("treePrev", zoomed("b1")).focus).toEqual({ mode: "select", id: "b" })
+    // s at the end of the zoomed subtree would have to climb past the title
+    // to reach c — clamp instead.
+    expect(runCommand("treeNext", zoomed("b2")).focus).toBeUndefined()
+    expect(runCommand("treeNext", zoomed("b1")).focus).toBeUndefined()
+  })
+})
+
+describe("wasd depth navigation (selectParent / selectFirstChild)", () => {
+  it("selectParent steps from a nested block to its parent", () => {
+    const doc = fixture()
+    expect(runCommand("selectParent", input(doc, "b1")).focus).toEqual({ mode: "select", id: "b" })
+  })
+
+  it("selectParent consumes the key but stays put on a root-level block", () => {
+    const doc = fixture()
+    const result = runCommand("selectParent", input(doc, "a"))
+    expect(result.handled).toBe(true)
+    expect(result.focus).toBeUndefined()
+    expect(result.zoom).toBeUndefined()
+  })
+
+  it("selectFirstChild steps into the first child, demanding it be expanded", () => {
+    const doc = fixture()
+    const result = runCommand("selectFirstChild", input(doc, "b"))
+    expect(result.focus).toEqual({ mode: "select", id: "b1" })
+    // A collapsed parent must open in the same keypress: the command can't see
+    // collapse state, so it always demands the block be expanded.
+    expect(result.expand).toBe("b")
+  })
+
+  it("selectFirstChild consumes the key but does nothing on a leaf", () => {
+    const doc = fixture()
+    const result = runCommand("selectFirstChild", input(doc, "b1"))
+    expect(result.handled).toBe(true)
+    expect(result.focus).toBeUndefined()
+    expect(result.expand).toBeUndefined()
+  })
+
+  it("while zoomed, selectParent on a direct child selects the title, and on the title zooms out", () => {
+    const doc = fixture()
+    const zoomed = (id: string): Parameters<typeof runCommand>[1] =>
+      input(doc, id, { visibleOrder: ["b", "b1"], zoomRootId: "b" })
+    // Direct child of the zoom root → the zoom-root title (falls out of the
+    // ordinary parent walk, since the title is the child's parent).
+    expect(runCommand("selectParent", zoomed("b1")).focus).toEqual({ mode: "select", id: "b" })
+    // The title itself → zoom out one level ("a always goes up the tree").
+    // b is root-level, so one level out is a full exit — same as zoomOut.
+    expect(runCommand("selectParent", zoomed("b")).zoom).toEqual({ id: null })
+    // A nested zoom root steps out to its parent instead of exiting fully.
+    const nested = input(doc, "b1", { visibleOrder: ["b1"], zoomRootId: "b1" })
+    expect(runCommand("selectParent", nested).zoom).toEqual({ id: "b" })
+  })
+
+  it("while zoomed, selectFirstChild on the title selects its first child", () => {
+    const doc = fixture()
+    const result = runCommand(
+      "selectFirstChild",
+      input(doc, "b", { visibleOrder: ["b", "b1"], zoomRootId: "b" }),
+    )
+    expect(result.focus).toEqual({ mode: "select", id: "b1" })
+  })
+})
+
 describe("moveBlock", () => {
   it("reorders a block among its siblings, keeping focus on it", () => {
     const doc = fixture()
@@ -268,6 +405,80 @@ describe("toggleCollapse", () => {
     const result = runCommand("toggleCollapse", input(doc, "a"))
     expect(result.handled).toBe(true)
     expect(result.toggleCollapse).toBeUndefined()
+  })
+})
+
+describe("turn into (select-mode marker keys)", () => {
+  function docOf(content: string): BlockDoc {
+    return {
+      frontmatter: null,
+      rootBlockIds: ["x"],
+      blocks: { x: { id: "x", content, children: [] } },
+    }
+  }
+  const turn = (name: Parameters<typeof runCommand>[0], content: string) =>
+    runCommand(name, input(docOf(content), "x", { visibleOrder: ["x"] }))
+
+  it("toggles each type on from a paragraph, and back off to a paragraph", () => {
+    const cases: [Parameters<typeof runCommand>[0], string][] = [
+      ["turnIntoHeading", "# A"],
+      ["turnIntoBullet", "- A"],
+      ["turnIntoTodo", "[ ] A"],
+      ["turnIntoQuote", "> A"],
+      ["turnIntoOrdered", "1. A"],
+    ]
+    for (const [name, marked] of cases) {
+      expect(turn(name, "A").doc!.blocks.x.content).toBe(marked)
+      expect(turn(name, marked).doc!.blocks.x.content).toBe("A")
+    }
+  })
+
+  it("swaps the marker when the block is another type, body byte-exact", () => {
+    expect(turn("turnIntoHeading", "- hello  world").doc!.blocks.x.content).toBe("# hello  world")
+    expect(turn("turnIntoTodo", "# hello  world").doc!.blocks.x.content).toBe("[ ] hello  world")
+    expect(turn("turnIntoBullet", "3) counted").doc!.blocks.x.content).toBe("- counted")
+  })
+
+  it("a checked todo is still a todo: [ strips it, x keeps toggling the check", () => {
+    expect(turn("turnIntoTodo", "[x] done").doc!.blocks.x.content).toBe("done")
+    expect(turn("toggleTodo", "[x] done").doc!.blocks.x.content).toBe("[ ] done")
+  })
+
+  it("ordered toggles off from any number", () => {
+    expect(turn("turnIntoOrdered", "7. seventh").doc!.blocks.x.content).toBe("seventh")
+  })
+
+  it("stays selected on a block with content, as one structural undo step", () => {
+    const result = turn("turnIntoHeading", "A")
+    expect(result.focus).toEqual({ mode: "select", id: "x" })
+    expect(result.op).toEqual({ type: "structural" })
+  })
+
+  it("an empty block applies the marker AND opens editing", () => {
+    const result = turn("turnIntoBullet", "")
+    expect(result.doc!.blocks.x.content).toBe("- ")
+    expect(result.focus).toEqual({ mode: "edit", id: "x" })
+    // Swapping one empty marker for another stays in edit too.
+    const swapped = turn("turnIntoTodo", "- ")
+    expect(swapped.doc!.blocks.x.content).toBe("[ ] ")
+    expect(swapped.focus).toEqual({ mode: "edit", id: "x" })
+  })
+
+  it("never touches children (marker swap only)", () => {
+    const doc = fixture() // b "B" has child b1
+    const result = runCommand("turnIntoQuote", input(doc, "b"))
+    expect(result.doc!.blocks.b.content).toBe("> B")
+    expect(result.doc!.blocks.b.children).toEqual(["b1"])
+    expect(result.doc!.blocks.b1.content).toBe("B1")
+  })
+
+  it("works on the zoomed title (a content-type change stays in view)", () => {
+    const doc = fixture()
+    const result = runCommand(
+      "turnIntoHeading",
+      input(doc, "b", { visibleOrder: ["b", "b1"], zoomRootId: "b" }),
+    )
+    expect(result.doc!.blocks.b.content).toBe("# B")
   })
 })
 
