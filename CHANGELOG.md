@@ -2,6 +2,12 @@
 
 ## 2026-W35
 
+### Fixed
+
+- Sync between devices no longer gets permanently stuck. Conflicting edits now merge automatically, your version wins for the conflicting lines, and the other device's version is saved as a visible "conflict" note so nothing is ever lost. Signing out and back in is no longer the fix, and folding blocks no longer causes cross-device conflicts at all.
+- Changes pulled from another device now appear in the open note immediately, no page refresh needed. If you have unsaved edits, a small notice offers "Show latest" instead of overwriting your typing.
+- When sync does fail, the sidebar now says why (network, sign-in, conflict) and clicking retries. Settings gains a "Reset local copy" that backs up any unpushed notes as conflict copies before re-cloning, so recovery can't destroy work. Page loads also stop stalling on a GitHub token refresh.
+
 ### New
 
 - Zoom into any block with <kbd>F</kbd> (or <kbd>⌘.</kbd>, or a click on its bullet) and its subtree becomes the whole page, with a clickable breadcrumb trail showing how you got there. <kbd>⇧F</kbd> goes up one level, <kbd>⌘⇧.</kbd> exits fully, and zoom lives in the URL so the back button and deep links just work.
