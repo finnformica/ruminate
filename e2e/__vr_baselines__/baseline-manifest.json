@@ -1,16 +1,18 @@
 {
   "platform": "linux-x64",
-  "generatedAt": "2026-08-28T08:04:37.235Z",
+  "generatedAt": "2026-08-28T08:24:56.120Z",
   "names": [
     "blockeditor--mixed--light",
     "blockeditor--nested-todo--light",
     "blockeditor--zoomed--light",
+    "blockeditor--deep-headings-zoomed--light",
     "blockeditor--selection-sweep--light",
     "blockeditor--empty--light",
     "notetitle--default--light",
     "blockeditor--mixed--dark",
     "blockeditor--nested-todo--dark",
     "blockeditor--zoomed--dark",
+    "blockeditor--deep-headings-zoomed--dark",
     "blockeditor--selection-sweep--dark",
     "blockeditor--empty--dark",
     "notetitle--default--dark"
