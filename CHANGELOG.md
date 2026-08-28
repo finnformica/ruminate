@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- A stale device can no longer quietly revert your newer edits. When two devices' changes collide, the newest edit now wins (the older version is kept as a clearly labeled copy), a banner tells you a merge happened with a link to the other version, and saving is blocked with an explicit "Save mine anyway" choice whenever the note has moved on since your editor loaded — so the silent-overwrite path that reverted a restructured note is closed from every direction. Leftover drafts that contain no real edits are cleaned up instead of triggering false "updated on another device" warnings.
 - Sync between devices no longer gets permanently stuck. Conflicting edits now merge automatically, your version wins for the conflicting lines, and the other device's version is saved as a visible "conflict" note so nothing is ever lost. Signing out and back in is no longer the fix, and folding blocks no longer causes cross-device conflicts at all.
 - Changes pulled from another device now appear in the open note immediately, no page refresh needed. If you have unsaved edits, a small notice offers "Show latest" instead of overwriting your typing.
 - When sync does fail, the sidebar now says why (network, sign-in, conflict) and clicking retries. Settings gains a "Reset local copy" that backs up any unpushed notes as conflict copies before re-cloning, so recovery can't destroy work. Page loads also stop stalling on a GitHub token refresh.

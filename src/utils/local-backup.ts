@@ -118,9 +118,12 @@ export function buildBackupRestoreWrites(
   const writes: Record<string, string> = {}
   for (const [filepath, content] of Object.entries(files)) {
     const originalId = filepath.replace(/\.md$/, "")
-    const copy = buildConflictCopy(originalId, content, date, {
-      notice: `Local copy of [[${originalId}]] saved before this browser's notes were reset — nothing was lost.`,
-    })
+    const copy = buildConflictCopy(
+      originalId,
+      content,
+      date,
+      `Local copy of [[${originalId}]] saved before this browser's notes were reset — nothing was lost.`,
+    )
     writes[`${copy.id}.md`] = copy.content
   }
   return writes
