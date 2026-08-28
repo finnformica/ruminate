@@ -190,6 +190,7 @@ function NotePage() {
   const [focusFirstMode, setFocusFirstMode] = useState<"edit" | "select">("select")
   const [titleFocusSignal, setTitleFocusSignal] = useState(0)
   const [newRootSignal, setNewRootSignal] = useState(0)
+  const [refocusSignal, setRefocusSignal] = useState(0)
 
   // Actions
   const renameNote = useRenameNote()
@@ -303,6 +304,12 @@ function NotePage() {
 
   // Save with ⌘S
   useHotkeys(APP_SHORTCUTS.save, () => requestSave(), GLOBAL_HOTKEY_OPTIONS)
+
+  // Focus the editor from anywhere on the page (never while typing): restores
+  // the last selected block so `i` means "put me back where I was".
+  useHotkeys(APP_SHORTCUTS.focusEditor, () => setRefocusSignal((n) => n + 1), {
+    preventDefault: true,
+  })
 
   return (
     <PageLayout
@@ -454,6 +461,7 @@ function NotePage() {
                   focusFirstSignal={focusFirstSignal}
                   focusFirstMode={focusFirstMode}
                   newRootSignal={newRootSignal}
+                  refocusSignal={refocusSignal}
                   zoomBlockId={zoomBlockId ?? null}
                   onZoomNavigate={(id) =>
                     // A plain push, so the back button undoes zoom naturally.

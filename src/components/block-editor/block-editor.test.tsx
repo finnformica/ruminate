@@ -25,10 +25,12 @@ function Harness({
   initial,
   startEditing,
   zoomRootId,
+  refocusSignal,
 }: {
   initial: string
   startEditing?: boolean
   zoomRootId?: string | null
+  refocusSignal?: number
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => withStarter(parse(initial)))
   return (
@@ -38,6 +40,7 @@ function Harness({
         onChange={setDoc}
         startEditing={startEditing}
         zoomRootId={zoomRootId}
+        refocusSignal={refocusSignal}
       />
       <pre data-testid="serialized">{serialize(doc)}</pre>
     </>
@@ -176,6 +179,18 @@ describe("BlockEditor focus + keyboard", () => {
 })
 
 describe("Escape ladder + keyboard recovery", () => {
+  it("refocusSignal restores the last selected block and container focus", () => {
+    const { container, rerender } = render(<Harness initial={"A\nB\nC"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
+    fireEvent.keyDown(root, { key: "Escape" }) // deselect
+    root.blur()
+    expect(highlightedText(container)).toBeNull()
+    rerender(<Harness initial={"A\nB\nC"} refocusSignal={1} />)
+    expect(highlightedText(container)).toBe("B")
+    expect(document.activeElement).toBe(root)
+  })
+
   it("Escape on a single selection deselects; arrows re-select", () => {
     const { container } = render(<Harness initial={"A\nB\nC"} />)
     const root = editorRoot(container)

@@ -72,6 +72,7 @@ export function BlockNoteEditor({
   focusFirstSignal,
   focusFirstMode,
   newRootSignal,
+  refocusSignal,
   readOnly = false,
   zoomBlockId = null,
   onZoomNavigate,
@@ -97,6 +98,7 @@ export function BlockNoteEditor({
   focusFirstMode?: "edit" | "select"
   /** Bump to add a new root block (e.g. Cmd+Enter from the title). */
   newRootSignal?: number
+  refocusSignal?: number
   /** Display-only: render the note as read-only blocks (e.g. past-day history). */
   readOnly?: boolean
   /** Block id the editor is zoomed into (`?block=` search param), or null. */
@@ -189,6 +191,7 @@ export function BlockNoteEditor({
       focusFirstSignal={focusFirstSignal}
       focusFirstMode={focusFirstMode}
       newRootSignal={newRootSignal}
+      refocusSignal={refocusSignal}
       readOnly={readOnly}
       zoomRootId={zoomBlockId}
       onZoomNavigate={onZoomNavigate}

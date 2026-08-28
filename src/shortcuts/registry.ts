@@ -47,6 +47,7 @@ export const APP_SHORTCUTS = {
   outlinePalette: "mod+p",
   newNote: "mod+shift+o",
   save: "mod+s",
+  focusEditor: "i",
   toggleSidebar: "mod+b",
   helpPanel: "mod+/",
   focusSearch: "/",
@@ -331,6 +332,12 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
     combos: [APP_SHORTCUTS.focusSearch],
     scope: "global",
     description: "Focus the search input (notes list, tags)",
+    group: "Navigation",
+  },
+  {
+    combos: [APP_SHORTCUTS.focusEditor],
+    scope: "global",
+    description: "Focus the editor, restoring the last selected block",
     group: "Navigation",
   },
   {

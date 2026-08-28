@@ -117,6 +117,7 @@ export function BlockEditor({
   focusFirstSignal,
   focusFirstMode = "select",
   newRootSignal,
+  refocusSignal,
   readOnly = false,
   zoomRootId: zoomRootIdProp = null,
   onZoomNavigate,
@@ -145,6 +146,9 @@ export function BlockEditor({
   focusFirstMode?: "edit" | "select"
   /** Bump this (e.g. Cmd+Enter on the note title) to add a new root block. */
   newRootSignal?: number
+  /** Bump this (the global `i` shortcut) to refocus the editor, restoring the
+   * last selected block (or the first). */
+  refocusSignal?: number
   /** Display-only: renders blocks without any editing (e.g. past-day history). */
   readOnly?: boolean
   /**
@@ -256,6 +260,10 @@ export function BlockEditor({
   // palette never has to know the editor's selection or scroll internals.
   const selectedRef = useRef(selected)
   selectedRef.current = selected
+  // Survives deselection (Escape, focus loss): the block `refocusSignal`
+  // returns the user to.
+  const lastSelectedRef = useRef(selected)
+  if (selected) lastSelectedRef.current = selected
   // Non-null exactly while a preview sequence is underway. Doubles as the
   // "palette is driving" flag: the focus-grab effect below must not steal
   // focus from the palette's input as previews move the selection.
@@ -583,6 +591,21 @@ export function BlockEditor({
     setFocus(focusFirstMode === "edit" ? { id: first, atStart: true } : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusFirstSignal])
+
+  // When the caller bumps `refocusSignal` (the global `i` shortcut), give the
+  // editor keyboard focus back and restore the LAST selected block — "put me
+  // back where I was" — falling back to the first selectable block.
+  useEffect(() => {
+    if (!refocusSignal || readOnly) return
+    const last = lastSelectedRef.current
+    const target = last && docRef.current.blocks[last] ? last : firstSelectable(docRef.current)
+    if (!target) return
+    setAnchorId(null)
+    setSelected(target)
+    setFocus(null)
+    containerRef.current?.focus({ preventScroll: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refocusSignal])
 
   // When the caller bumps `newRootSignal` (e.g. Cmd+Enter on the note title),
   // add a fresh root block at the top and edit it.
