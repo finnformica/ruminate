@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { cx } from "../../utils/cx"
+import { Hash } from "./hash"
 
 /**
  * The note's name shown as an editable `# ` heading at the top of the page —
@@ -85,12 +86,8 @@ export function NoteTitle({
     // net 4px). The # hangs to its left as a marker. (34px is arbitrary-valued
     // — the spacing scale has no 8.5 step.)
     <h1 className="relative font-content text-3xl font-bold leading-tight tracking-[-0.02em]">
-      <span
-        aria-hidden
-        className="pointer-events-none absolute left-1 top-0 select-none text-text-tertiary"
-      >
-        #
-      </span>
+      {/* The hanging # inherits the h1's full typography — same size as the title. */}
+      <Hash className="pointer-events-none absolute left-1 top-0" />
       {editing ? (
         <input
           ref={inputRef}

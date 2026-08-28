@@ -16,6 +16,7 @@ import { clipboardBlocksToMarkdown, extractClipboardBlocks } from "../../utils/r
 import { IconButton } from "../icon-button"
 import { BlockContent } from "./block-content"
 import { caretLineFlags } from "./caret"
+import { Hash } from "./hash"
 
 export interface FocusRequest {
   id: string
@@ -388,16 +389,20 @@ export function BlockItem({
         )}
       </span>
     ) : type.kind === "heading" && !zoomTitle ? (
-      // Headings carry the same grey `#` the note / zoom titles hang — but as
-      // a MARKER, not display typography: a fixed modest size in the shared
-      // 15px slot, pushing heading text to the same column as every other
-      // marked block. The slot itself takes the heading's scale (no underline
-      // — that lives in `typo`) so its `h-[1lh]` centres the glyph on the
-      // heading's first line at every depth. Click-to-zoom, like bullets.
+      // Headings hang the same grey `#` as the note / zoom titles — the shared
+      // `Hash`, at the heading's own scale: the slot carries the heading's
+      // size + weight (headingScale + bold, no underline — that lives in
+      // `typo`) and the glyph inherits it, so the hash always matches the text
+      // beside it, at every depth. The slot stays the shared 15px column
+      // (heading text aligns with every other marked block); the hash
+      // right-aligns in it and, when a large scale outgrows the slot,
+      // overflows LEFT toward the gutter — the text column never moves. The
+      // slot's `h-[1lh]` (resolved at the heading's scale) centres the glyph
+      // on the heading's first line. Click-to-zoom, like bullets.
       <span
         data-testid="heading-hash"
         className={cx(
-          "flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
+          "flex h-[1lh] w-[15px] shrink-0 items-center justify-end font-bold",
           headingScale(depth),
         )}
       >
@@ -407,17 +412,12 @@ export function BlockItem({
             aria-label="Zoom into block"
             tabIndex={-1}
             onClick={() => api.zoomInto(block.id)}
-            className="-m-1 flex cursor-pointer select-none items-center justify-center rounded-sm p-1 text-base font-semibold leading-none text-text-tertiary transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-90 motion-reduce:active:scale-100"
+            className="-m-1 flex cursor-pointer items-center justify-center rounded-sm p-1 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-90 motion-reduce:active:scale-100"
           >
-            #
+            <Hash />
           </button>
         ) : (
-          <span
-            aria-hidden
-            className="select-none text-base font-semibold leading-none text-text-tertiary"
-          >
-            #
-          </span>
+          <Hash />
         )}
       </span>
     ) : type.kind === "ordered" && !zoomTitle ? (
@@ -539,21 +539,18 @@ export function BlockItem({
               // their title (matching note-title.tsx). It sits in the gutter,
               // where the chevron is hidden for the title anyway.
               <span
-                aria-hidden
                 data-testid="zoom-title-hash"
-                // Shares the title's own typography (like the note title's
-                // hanging #, which inherits from its h1) so it sits large on
+                // The wrapper carries the title's own typography (`typo`) so
+                // the `Hash` inside inherits it — like the note title's
+                // hanging #, which inherits from its h1 — sitting large on
                 // the same baseline instead of shrinking to body scale.
                 // top-1 re-aligns with the text after the line's 4px vertical
                 // highlight padding (absolute offsets are from the padding box).
                 // pr-1 keeps the glyph itself where it was when the surface
                 // edge moved 2px left (right-full tracks the edge: -4-4 = -2-6).
-                className={cx(
-                  typo,
-                  "pointer-events-none absolute right-full top-1 select-none pr-1 text-text-tertiary",
-                )}
+                className={cx(typo, "pointer-events-none absolute right-full top-1 pr-1")}
               >
-                #
+                <Hash />
               </span>
             ) : null}
             {marker}

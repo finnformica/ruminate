@@ -659,7 +659,14 @@ describe("zoom (focus mode)", () => {
   it("a zoomed heading hangs a # like the note title; other types keep their style", () => {
     const heading = ["# Section", "  id:: blk_h", "  - child", "    id:: blk_hc"].join("\n")
     const zoomHeading = render(<Harness initial={heading} zoomRootId="blk_h" />)
-    expect(zoomHeading.queryByTestId("zoom-title-hash")).not.toBeNull()
+    const hash = zoomHeading.queryByTestId("zoom-title-hash")
+    expect(hash).not.toBeNull()
+    // The wrapper carries the title's typography; the glyph inherits it
+    // (no size of its own — same size as the title beside it).
+    expect(hash!.className).toContain("text-3xl")
+    const glyph = hash!.querySelector("span")!
+    expect(glyph.textContent).toBe("#")
+    expect(glyph.className).not.toMatch(/(^|\s)text-(xs|sm|base|lg|xl|2xl|3xl)(\s|$)/)
     zoomHeading.unmount()
 
     // A zoomed quote keeps its secondary ink (and no hash) — promotion changes
@@ -761,6 +768,50 @@ describe("zoom (focus mode)", () => {
     fireEvent.click(getByText("Note", { selector: "nav button" }))
     expect(crumb(container)).toBeNull()
     expect(queryByText("A")).not.toBeNull()
+  })
+})
+
+describe("heading hash marker", () => {
+  // A font-size utility of the element's OWN (text-base, text-2xl, …) —
+  // text-text-tertiary must not match: the hash inherits its size entirely.
+  const OWN_SIZE = /(^|\s)text-(xs|sm|base|lg|xl|2xl|3xl)(\s|$)/
+
+  const NESTED = ["# Top", "  id:: blk_h", "  # Nested", "    id:: blk_n"].join("\n")
+
+  it("inherits the heading's scale from the slot instead of sizing itself", () => {
+    const { container } = render(<Harness initial={NESTED} />)
+    const slots = Array.from(container.querySelectorAll('[data-testid="heading-hash"]'))
+    expect(slots).toHaveLength(2)
+    // The slot carries the depth scale + weight; the glyph inherits it.
+    expect(slots[0].className).toContain("text-2xl") // depth 0
+    expect(slots[1].className).toContain("text-xl") // depth 1
+    for (const slot of slots) {
+      expect(slot.className).toContain("font-bold")
+      // Right-aligned in the shared 15px slot so a wide hash overflows left
+      // toward the gutter instead of pushing the text column.
+      expect(slot.className).toContain("justify-end")
+      expect(slot.className).toContain("w-[15px]")
+      const glyph = slot.querySelector("span:not([data-testid])")!
+      expect(glyph.textContent).toBe("#")
+      expect(glyph.className).toContain("text-text-tertiary")
+      expect(glyph.className).not.toMatch(OWN_SIZE)
+    }
+  })
+
+  it("is a click-to-zoom target when editable, a plain span when read-only", () => {
+    const { container, getAllByLabelText, queryByTestId } = render(<Harness initial={NESTED} />)
+    expect(queryByTestId("zoom-breadcrumb")).toBeNull()
+    fireEvent.click(getAllByLabelText("Zoom into block")[0])
+    expect(queryByTestId("zoom-breadcrumb")).not.toBeNull()
+    // Zoomed into Top: the nested heading (now depth 0) keeps its hash marker.
+    expect(container.querySelectorAll('[data-testid="heading-hash"]')).toHaveLength(1)
+  })
+
+  it("read-only views render the hash without the zoom button", () => {
+    const { container } = render(<BlockEditor doc={parse(NESTED)} onChange={() => {}} readOnly />)
+    const slot = container.querySelector('[data-testid="heading-hash"]')!
+    expect(slot.querySelector("button")).toBeNull()
+    expect(slot.textContent).toBe("#")
   })
 })
 

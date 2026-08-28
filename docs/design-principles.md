@@ -55,12 +55,15 @@ asks for it.
    float out of the flow (absolute/negative margin) so hover never moves text.
 7. **One marker slot.** Every block marker — bullet dot, checkbox, ordered
    number, heading `#` — occupies the same 15px slot (the checkbox's width):
-   dots and the `#` center in it, numbers right-align to its edge. Body text
-   therefore starts at one column across all marked block types. The heading's
-   `#` is chrome, not display typography: a fixed modest size (base,
-   semibold, tertiary) at every heading depth, centered on the heading's
-   first line — the same grey `#` vernacular as the note and zoom titles,
-   and, like the bullet and number, a click-to-zoom target.
+   dots center in it; numbers and the heading `#` right-align to its edge.
+   Body text therefore starts at one column across all marked block types.
+   The grey `#` is one component (`Hash`) everywhere it appears — note title,
+   zoom title, section headings — with no typography of its own: it inherits
+   its parent's scale (the titles' 3xl, each heading's depth size and bold),
+   so the hash is always the same size as the text beside it, only recolored
+   to tertiary. A large heading's hash outgrows the slot and overflows left
+   toward the gutter — the text column never moves — and, like the bullet
+   and number, it is a click-to-zoom target.
 
 ## Type scale
 
