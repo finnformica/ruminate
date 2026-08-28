@@ -148,9 +148,11 @@ export function BlockItem({
   // keeps the view and the editor pixel-identical — nothing shifts on click.
   const body = stripMarker(block.content)
   const prefix = block.content.slice(0, block.content.length - body.length)
-  // The zoomed title is visually promoted to the top of the heading scale.
+  // The zoomed block *is* the page, so its title uses the note-title scale
+  // (matching note-title.tsx) — a full step above the depth-0 headings of its
+  // children, which re-derive their sizes from the zoom root.
   const typo = zoomTitle
-    ? typographyFor({ kind: "heading", level: 1 }, 0)
+    ? "text-3xl font-bold leading-tight tracking-[-0.02em]"
     : typographyFor(type, depth)
 
   // Focus and place the caret when editing starts.

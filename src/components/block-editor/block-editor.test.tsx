@@ -525,8 +525,9 @@ describe("zoom (focus mode)", () => {
     const { container } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
     const bodies = Array.from(container.querySelectorAll('[data-testid="block-body"]'))
     expect(bodies.map((el) => el.textContent)).toEqual(["B", "C", "D", "E"])
-    // The title is visually promoted to the top of the heading scale.
-    expect(bodies[0].closest(".text-2xl")).not.toBeNull()
+    // The title is visually promoted to the note-title scale (the zoomed
+    // block is the page), a full step above its depth-0 child headings.
+    expect(bodies[0].closest(".text-3xl")).not.toBeNull()
     // The breadcrumb shows the full path, never dropping levels.
     expect(crumb(container)?.textContent).toContain("Note")
     expect(crumb(container)?.textContent).toContain("B")
