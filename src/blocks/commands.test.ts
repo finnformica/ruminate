@@ -449,12 +449,29 @@ describe("duplicate", () => {
 })
 
 describe("deleteBlock", () => {
-  it("removes a block and highlights the previous sibling", () => {
+  it("highlights the block below — the one that slides into the deleted block's place", () => {
+    const doc = fixture()
+    const result = runCommand("deleteBlock", input(doc, "a"))
+    expect(result.doc!.blocks.a).toBeUndefined()
+    expect(result.doc!.rootBlockIds).toEqual(["b", "c"])
+    expect(result.focus).toEqual({ mode: "select", id: "b" })
+  })
+
+  it("skips the deleted block's own subtree when looking below", () => {
+    const doc = fixture()
+    const result = runCommand("deleteBlock", input(doc, "b"))
+    // b's subtree (b, b1) is gone; the first visible survivor below is c.
+    expect(result.doc!.blocks.b).toBeUndefined()
+    expect(result.doc!.blocks.b1).toBeUndefined()
+    expect(result.focus).toEqual({ mode: "select", id: "c" })
+  })
+
+  it("falls back to the visible block above when the deleted block was last", () => {
     const doc = fixture()
     const result = runCommand("deleteBlock", input(doc, "c"))
     expect(result.doc!.blocks.c).toBeUndefined()
     expect(result.doc!.rootBlockIds).toEqual(["a", "b"])
-    expect(result.focus).toEqual({ mode: "select", id: "b" })
+    expect(result.focus).toEqual({ mode: "select", id: "b1" })
   })
 
   it("refuses to delete the only block", () => {

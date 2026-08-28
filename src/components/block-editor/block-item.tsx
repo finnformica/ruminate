@@ -88,6 +88,22 @@ function headingTopMargin(type: BlockType, depth: number): string {
   }
 }
 
+/** A heading's font size + line-height by outline depth. Shared by the full
+ * typography (`typographyFor`) and the heading's `#` marker slot, whose
+ * `h-[1lh]` must resolve against the same first-line height to centre on it. */
+function headingScale(depth: number): string {
+  switch (depth) {
+    case 0:
+      return "text-2xl leading-tight"
+    case 1:
+      return "text-xl leading-tight"
+    case 2:
+      return "text-lg leading-snug"
+    default:
+      return "text-base leading-relaxed"
+  }
+}
+
 /**
  * Typography shared by a block's rendered view and its edit textarea, so
  * switching between them never changes the text's size or weight.
@@ -105,15 +121,18 @@ function typographyFor(type: BlockType, depth: number): string {
       // docs/design-principles.md).
       switch (depth) {
         case 0:
-          return "text-2xl font-bold leading-tight tracking-[-0.015em]"
+          return cx(headingScale(0), "font-bold tracking-[-0.015em]")
         case 1:
-          return "text-xl font-bold leading-tight tracking-[-0.01em]"
+          return cx(headingScale(1), "font-bold tracking-[-0.01em]")
         case 2:
-          return "text-lg font-bold leading-snug"
+          return cx(headingScale(2), "font-bold")
         default:
           // Floors at body size; a soft offset underline keeps it reading as a
           // heading without the weight of a full text-color rule.
-          return "text-base font-bold leading-relaxed underline decoration-[color:var(--neutral-a6)] decoration-2 underline-offset-4"
+          return cx(
+            headingScale(depth),
+            "font-bold underline decoration-[color:var(--neutral-a6)] decoration-2 underline-offset-4",
+          )
       }
     case "quote":
       return "text-base leading-relaxed text-text-secondary"
@@ -368,6 +387,39 @@ export function BlockItem({
           />
         )}
       </span>
+    ) : type.kind === "heading" && !zoomTitle ? (
+      // Headings carry the same grey `#` the note / zoom titles hang — but as
+      // a MARKER, not display typography: a fixed modest size in the shared
+      // 15px slot, pushing heading text to the same column as every other
+      // marked block. The slot itself takes the heading's scale (no underline
+      // — that lives in `typo`) so its `h-[1lh]` centres the glyph on the
+      // heading's first line at every depth. Click-to-zoom, like bullets.
+      <span
+        data-testid="heading-hash"
+        className={cx(
+          "flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
+          headingScale(depth),
+        )}
+      >
+        {zoomable ? (
+          <button
+            type="button"
+            aria-label="Zoom into block"
+            tabIndex={-1}
+            onClick={() => api.zoomInto(block.id)}
+            className="-m-1 flex cursor-pointer select-none items-center justify-center rounded-sm p-1 text-base font-semibold leading-none text-text-tertiary transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-90 motion-reduce:active:scale-100"
+          >
+            #
+          </button>
+        ) : (
+          <span
+            aria-hidden
+            className="select-none text-base font-semibold leading-none text-text-tertiary"
+          >
+            #
+          </span>
+        )}
+      </span>
     ) : type.kind === "ordered" && !zoomTitle ? (
       // Numbers are read (they carry order), so they sit one step up the ramp
       // from the dot — muted, not faint — and right-align to the slot edge.
@@ -393,7 +445,11 @@ export function BlockItem({
       data-block-row={block.id}
       className={cx("group/subtree", zoomTitle ? "mb-3" : headingTopMargin(type, depth))}
     >
-      <div className="group relative flex items-start gap-1">
+      {/* gap-1.5 (6px) between the collapse gutter and the content column: the
+          highlight surface reaches 4px left of the text column, so the wider
+          gap keeps 2px of daylight between the surface and the chevron's
+          hover square. */}
+      <div className="group relative flex items-start gap-1.5">
         {/* The toggle stays a fixed square; the wrapper mirrors the content
             cell's padding + line-height (via `typo`) and centres the square on
             the block's first line, so it aligns whatever the heading size. */}

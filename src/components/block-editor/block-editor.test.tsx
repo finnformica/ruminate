@@ -74,16 +74,21 @@ function editorRoot(container: HTMLElement): HTMLElement {
   return container.querySelector<HTMLElement>('[tabindex="-1"]')!
 }
 
+/** The body text of a highlighted line, marker chrome (a heading's `#`, an
+ * ordered number) excluded. */
+function lineBody(line: Element): string {
+  return line.querySelector('[data-testid="block-body"]')?.textContent ?? line.textContent ?? ""
+}
+
 /** Text of the currently highlighted block (the row with the select background). */
 function highlightedText(container: HTMLElement): string | null {
-  return container.querySelector(".bg-bg-secondary")?.textContent ?? null
+  const line = container.querySelector(".bg-bg-secondary")
+  return line ? lineBody(line) : null
 }
 
 /** Texts of every highlighted block, in document order. */
 function highlightedAll(container: HTMLElement): string[] {
-  return Array.from(container.querySelectorAll(".bg-bg-secondary")).map(
-    (el) => el.textContent ?? "",
-  )
+  return Array.from(container.querySelectorAll(".bg-bg-secondary")).map(lineBody)
 }
 
 /** Content lines of the serialized doc (id:: lines and blanks dropped),
@@ -137,6 +142,69 @@ describe("BlockEditor focus + keyboard", () => {
     fireEvent.keyDown(root, { key: "Backspace" }) // delete B
     expect(highlightedText(container)).not.toBe("B")
     fireEvent.keyDown(root, { key: "z", metaKey: true }) // undo
+    expect(highlightedText(container)).toBe("B")
+  })
+
+  it("deleting a block selects the one below (above only when it was last)", () => {
+    const { container } = render(<Harness initial={"A\nB\nC"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
+    fireEvent.keyDown(root, { key: "Backspace" }) // delete B
+    // C slid into B's place and takes the highlight.
+    expect(highlightedText(container)).toBe("C")
+    fireEvent.keyDown(root, { key: "Backspace" }) // delete C — now the last block
+    expect(highlightedText(container)).toBe("A")
+  })
+
+  it("deleting a multi-selection selects the block below the removed range", () => {
+    const { container } = render(<Harness initial={"A\nB\nC\nD"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true }) // extend to C
+    expect(highlightedAll(container)).toEqual(["B", "C"])
+    fireEvent.keyDown(root, { key: "Backspace" })
+    expect(highlightedText(container)).toBe("D")
+    // A bottom-anchored range falls back to the block above it.
+    fireEvent.keyDown(root, { key: "ArrowUp", shiftKey: true }) // extend D up to A
+    expect(highlightedAll(container)).toEqual(["A", "D"])
+    fireEvent.keyDown(root, { key: "Backspace" })
+    expect(container.querySelectorAll("[data-block-id]")).toHaveLength(0)
+  })
+
+  it("deleting a bottom-anchored multi-selection selects the block above it", () => {
+    const { container } = render(<Harness initial={"A\nB\nC"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true }) // extend to C
+    fireEvent.keyDown(root, { key: "Backspace" })
+    expect(highlightedText(container)).toBe("A")
+  })
+
+  it("undo after creating a block with Enter lands back on the originating block", () => {
+    const { container } = render(<Harness initial={"A\nB\nC"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
+    fireEvent.keyDown(root, { key: "Enter" }) // edit B (caret at end)
+    const textarea = container.querySelector("textarea")!
+    fireEvent.keyDown(textarea, { key: "Enter" }) // create a block below B
+    expect(container.querySelector("textarea")!.value).toBe("")
+    fireEvent.keyDown(container.querySelector("textarea")!, { key: "z", metaKey: true }) // undo
+    // Not the first block in the file — the block Enter was pressed on.
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(highlightedText(container)).toBe("B")
+    // Redo brings the created block back and re-highlights it.
+    fireEvent.keyDown(root, { key: "z", metaKey: true, shiftKey: true })
+    expect(highlightedAll(container)).toHaveLength(1)
+    expect(highlightedText(container)).not.toBe("B")
+  })
+
+  it("undo after Cmd+Enter-inserting a block lands back on the originating block", () => {
+    const { container } = render(<Harness initial={"A\nB\nC"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
+    fireEvent.keyDown(root, { key: "Enter", metaKey: true }) // insert below B, editing
+    const textarea = container.querySelector("textarea")!
+    fireEvent.keyDown(textarea, { key: "z", metaKey: true }) // undo the insert
     expect(highlightedText(container)).toBe("B")
   })
 

@@ -80,12 +80,14 @@ export function NoteTitle({
   }
 
   return (
-    // pl-8 aligns the title with the block content column (past the block
-    // editor's collapse-toggle gutter). The # hangs to its left as a marker.
+    // pl-[34px] aligns the title with the block content column (past the block
+    // editor's 24px collapse-toggle gutter + 6px gap + the highlight surface's
+    // net 4px). The # hangs to its left as a marker. (34px is arbitrary-valued
+    // — the spacing scale has no 8.5 step.)
     <h1 className="relative font-content text-3xl font-bold leading-tight tracking-[-0.02em]">
       <span
         aria-hidden
-        className="pointer-events-none absolute left-0.5 top-0 select-none text-text-tertiary"
+        className="pointer-events-none absolute left-1 top-0 select-none text-text-tertiary"
       >
         #
       </span>
@@ -124,7 +126,7 @@ export function NoteTitle({
           spellCheck={false}
           aria-label="Note name"
           placeholder="Untitled"
-          className="w-full border-none bg-transparent py-0 pl-8 pr-0 text-text outline-none placeholder:text-text-tertiary"
+          className="w-full border-none bg-transparent py-0 pl-[34px] pr-0 text-text outline-none placeholder:text-text-tertiary"
         />
       ) : (
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
@@ -154,10 +156,10 @@ export function NoteTitle({
             }
           }}
           className={cx(
-            // -mx-1 + pl-9/pr-1 keep the text at the block content column
-            // (pl-8) while the highlight surface gains the same breathing room
-            // as a selected block line.
-            "-mx-1 cursor-text rounded py-0 pl-9 pr-1 outline-none transition-colors duration-100",
+            // -mx-1 + pl-[38px]/pr-1 keep the text at the block content column
+            // (pl-[34px]) while the highlight surface gains the same breathing
+            // room as a selected block line.
+            "-mx-1 cursor-text rounded py-0 pl-[38px] pr-1 outline-none transition-colors duration-100",
             // Same selection treatment as a block (see .block-highlight).
             selected && "bg-bg-secondary block-highlight",
           )}

@@ -592,16 +592,26 @@ export function BlockEditor({
   }
   const removeSelection = () => {
     let next = doc
-    let focusId: string | null = null
     for (const id of structuralRoots()) {
       if (!next.blocks[id]) continue
-      const result = removeBlock(next, id)
-      next = result.doc
-      focusId = result.focusId
+      next = removeBlock(next, id).doc
     }
     if (next === doc) return
-    // The focus target may itself have been part of the selection.
-    if (focusId && !next.blocks[focusId]) focusId = null
+    // Select the block that visually takes the removed range's place: the
+    // first surviving block below the range, falling back to the first above
+    // (mirroring the single-block deleteBlock command).
+    const indices = selectedIds
+      .map((id) => visibleOrder.indexOf(id))
+      .filter((index) => index !== -1)
+    const lo = indices.length > 0 ? Math.min(...indices) : 0
+    const hi = indices.length > 0 ? Math.max(...indices) : -1
+    let focusId: string | null = null
+    for (let i = hi + 1; i < visibleOrder.length && !focusId; i++) {
+      if (next.blocks[visibleOrder[i]]) focusId = visibleOrder[i]
+    }
+    for (let i = lo - 1; i >= 0 && !focusId; i--) {
+      if (next.blocks[visibleOrder[i]]) focusId = visibleOrder[i]
+    }
     history.commit(doc, next, { type: "structural" })
     setAnchorId(null)
     setFocus(null)
@@ -703,8 +713,27 @@ export function BlockEditor({
       setSelected(reappeared)
       return
     }
+    // The selected block vanished (e.g. undoing its creation): land on its
+    // nearest surviving neighbour in the CURRENT visible order — above first
+    // (for an undone create that's the block Enter was pressed on), then below
+    // — never jumping to the top of the file unless nothing survives.
+    const nearestSurvivor = (vanished: string): string | null => {
+      const at = visibleOrder.indexOf(vanished)
+      if (at === -1) return null
+      for (let i = at - 1; i >= 0; i--) {
+        if (restored.blocks[visibleOrder[i]]) return visibleOrder[i]
+      }
+      for (let i = at + 1; i < visibleOrder.length; i++) {
+        if (restored.blocks[visibleOrder[i]]) return visibleOrder[i]
+      }
+      return null
+    }
     setFocus((cur) => (cur && restored.blocks[cur.id] ? cur : null))
-    setSelected((cur) => (cur && restored.blocks[cur] ? cur : firstSelectable(restored)))
+    setSelected((cur) => {
+      if (cur && restored.blocks[cur]) return cur
+      const survivor = cur ? nearestSurvivor(cur) : null
+      return survivor ?? firstSelectable(restored)
+    })
   }
 
   const undo = () => {

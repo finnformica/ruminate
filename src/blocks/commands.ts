@@ -504,8 +504,11 @@ export const COMMANDS: Record<CommandName, Command> = {
   duplicateAbove: duplicate("above"),
   duplicateBelow: duplicate("below"),
 
-  /** Delete the highlighted block and its subtree (select mode). */
-  deleteBlock: ({ doc, id, zoomRootId }) => {
+  /** Delete the highlighted block and its subtree (select mode). The selection
+   * lands on the visible block that takes the deleted block's place — the one
+   * that slides up from below — falling back to the block above when the
+   * deleted block was last. */
+  deleteBlock: ({ doc, id, visibleOrder, zoomRootId }) => {
     // Never delete the block being zoomed into — the view must keep its title.
     // (Deleting the last child inside a zoom is fine: the title remains.)
     if (zoomRootId && id === zoomRootId) return { handled: true }
@@ -514,7 +517,18 @@ export const COMMANDS: Record<CommandName, Command> = {
       doc.rootBlockIds[0] === id &&
       (doc.blocks[id]?.children.length ?? 0) === 0
     if (onlyBlock) return { handled: true }
-    const { doc: next, focusId } = removeBlock(doc, id)
+    const { doc: next } = removeBlock(doc, id)
+    // Walk the pre-delete visible order outward from the deleted block: first
+    // below (skipping its own removed subtree via the survives-in-next check),
+    // then above.
+    const at = visibleOrder.indexOf(id)
+    let focusId: string | null = null
+    for (let i = at + 1; i < visibleOrder.length && !focusId; i++) {
+      if (next.blocks[visibleOrder[i]]) focusId = visibleOrder[i]
+    }
+    for (let i = at - 1; i >= 0 && !focusId; i--) {
+      if (next.blocks[visibleOrder[i]]) focusId = visibleOrder[i]
+    }
     return {
       handled: true,
       doc: next,

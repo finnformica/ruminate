@@ -49,12 +49,18 @@ asks for it.
    Headings tighten as they grow (1.25 at the top of the scale).
 6. **Markers align to a fixed gutter.** The collapse gutter is a fixed 24px
    square centered on the first line; the indent unit is 24px with the guide
-   line under the gutter's center. Affordances float out of the flow
-   (absolute/negative margin) so hover never moves text.
-7. **One marker slot.** Every list marker — bullet dot, checkbox, ordered
-   number — occupies the same 15px slot (the checkbox's width): dots center in
-   it, numbers right-align to its edge. Body text therefore starts at one
-   column across all marked block types.
+   line under the gutter's center. A 6px gap separates the gutter from the
+   content column, so the highlight surface (which reaches 4px left of the
+   text) keeps 2px of daylight to the chevron's hover square. Affordances
+   float out of the flow (absolute/negative margin) so hover never moves text.
+7. **One marker slot.** Every block marker — bullet dot, checkbox, ordered
+   number, heading `#` — occupies the same 15px slot (the checkbox's width):
+   dots and the `#` center in it, numbers right-align to its edge. Body text
+   therefore starts at one column across all marked block types. The heading's
+   `#` is chrome, not display typography: a fixed modest size (base,
+   semibold, tertiary) at every heading depth, centered on the heading's
+   first line — the same grey `#` vernacular as the note and zoom titles,
+   and, like the bullet and number, a click-to-zoom target.
 
 ## Type scale
 
@@ -96,9 +102,10 @@ _is_ the page — keeping a full step between it and its depth-0 children.
   (symmetric — 8px inner padding each side, the surface extending 4px past the
   text column on both) and 4px of vertical breathing room, achieved with
   negative-margin + padding pairs (`-my-1 py-1` plus `-mx-1 px-2`; the note
-  title's `-mx-1 pl-9 pr-1` extends the same 4px left) so the **text never
+  title's `-mx-1 pl-[38px] pr-1` extends the same 4px left) so the **text never
   moves** — only the background extends outward, into the gutter gap and the
-  inter-row space. Block rhythm is untouched: the surface borrows the space
+  inter-row space. The gutter gap is 6px so the surface's 4px reach still
+  leaves 2px of daylight to the chevron's hover square. Block rhythm is untouched: the surface borrows the space
   between rows, it never adds any. The text column is sacred; surfaces flex
   around it.
 - **Multi-select reads as one surface.** The vertical growth makes consecutive
