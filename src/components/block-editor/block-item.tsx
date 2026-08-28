@@ -328,7 +328,7 @@ export function BlockItem({
             <span
               aria-hidden
               className={cx(
-                // Faint, like the chevron/magnifier — pure chrome; content leads.
+                // Faint, like the chevron — pure chrome; content leads.
                 "size-1.5 rounded-full bg-text-tertiary",
                 // A halo marks a bullet whose children are hidden (Logseq-style),
                 // so collapsed content is never a secret.
@@ -366,10 +366,6 @@ export function BlockItem({
       </span>
     ) : null
 
-  // Blocks without a clickable list marker get a subtle hover affordance in
-  // the gutter, floated left of the collapse chevron so nothing shifts.
-  const showZoomButton = zoomable && type.kind !== "bullet" && type.kind !== "ordered"
-
   return (
     <div
       data-block-row={block.id}
@@ -380,32 +376,6 @@ export function BlockItem({
             cell's padding + line-height (via `typo`) and centres the square on
             the block's first line, so it aligns whatever the heading size. */}
         <div className={cx("relative flex shrink-0 py-0.5 font-content leading-relaxed", typo)}>
-          {showZoomButton ? (
-            // Floated left of the chevron (outside the flow) so the gutter
-            // keeps its width and nothing shifts; appears on row hover.
-            <span className="absolute right-full top-0.5 flex h-[1lh] items-center">
-              <IconButton
-                aria-label="Zoom into block"
-                size="small"
-                disableTooltip
-                tabIndex={-1}
-                onClick={() => api.zoomInto(block.id)}
-                className="size-6 shrink-0 p-0 text-text-tertiary opacity-0 transition-[opacity,transform] duration-150 focus-visible:opacity-100 active:scale-[0.92] group-hover:opacity-100 motion-reduce:active:scale-100"
-              >
-                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-                  <circle
-                    cx="4"
-                    cy="4"
-                    r="2.75"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                  />
-                  <path d="M6.2 6.2l2.6 2.6" stroke="currentColor" strokeWidth="1.5" />
-                </svg>
-              </IconButton>
-            </span>
-          ) : null}
           <span className="flex h-[1lh] items-center">
             <IconButton
               aria-label={isCollapsed ? "Expand" : "Collapse"}
@@ -417,12 +387,9 @@ export function BlockItem({
                 // Press feedback on the control (IconButton supplies the hover
                 // surface); the content itself never animates on collapse.
                 "size-6 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150 active:scale-[0.92] motion-reduce:active:scale-100",
-                zoomTitle || !hasChildren
-                  ? "pointer-events-none opacity-0"
-                  : // Quiet chrome: the toggle appears on row hover (its space is
-                    // always reserved, so nothing shifts) — except a collapsed
-                    // block, which keeps it visible so hidden content shows.
-                    !isCollapsed && "opacity-0 focus-visible:opacity-100 group-hover:opacity-100",
+                // Always visible for blocks with children — expanded sections
+                // keep their toggle (hover-reveal read as it disappearing).
+                (zoomTitle || !hasChildren) && "pointer-events-none opacity-0",
               )}
             >
               <svg

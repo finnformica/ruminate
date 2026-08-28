@@ -12,7 +12,7 @@ asks for it.
    two or three steps down the gray ramp (`secondary` → `tertiary` → `border`).
    Never promote chrome to ink.
 2. **Quiet chrome, hover affordances.** Structural controls (collapse chevron,
-   zoom magnifier) are invisible until the row is hovered or they hold focus, and
+   hover surfaces) are invisible until the row is hovered or they hold focus, and
    they appear **without any layout shift** — always reserving their space, only
    fading opacity. Exception: a _collapsed_ block keeps its chevron visible, so
    hidden content is never a secret.
@@ -99,7 +99,7 @@ family with it.
 | ------------ | -------------------------- | -------------------------------------------------- |
 | Ink          | `--color-text` (sand-12)   | body, headings, checked-off text ink               |
 | Muted        | `--color-text-secondary`   | quotes, done todos, ordered numbers, crumbs        |
-| Faint        | `--color-text-tertiary`    | bullet dots, chevron, magnifier, placeholders, `#` |
+| Faint        | `--color-text-tertiary`    | bullet dots, chevron, placeholders, `#` |
 | Guide        | `--color-border-secondary` | indent guide lines (rest state)                    |
 | Structure    | `--color-border` (a7)      | quote bar, unchecked checkbox border               |
 | Selection    | `--accent-a3` tint         | selected block(s), matches `::selection`           |
@@ -131,7 +131,7 @@ Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`):
 
 | What                                    | How                                    |
 | --------------------------------------- | -------------------------------------- |
-| Hover affordances (chevron, magnifier)  | opacity 150ms ease-out                 |
+| Hover affordances                       | opacity 150ms ease-out                 |
 | Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease            |
 | Selection highlight                     | background-color 100ms ease            |
 | Chevron rotation                        | transform 200ms strong ease-out        |

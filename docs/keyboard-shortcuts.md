@@ -201,7 +201,7 @@ clickable, the note-title crumb exits fully). The zoom lives in the URL
 | Zoom into the current block   | <kbd>⌘</kbd> <kbd>.</kbd> (both modes)              |
 | Exit zoom entirely            | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd> (both modes) |
 | Zoom into a list item         | click its bullet / number                           |
-| Zoom into any other block     | hover the gutter, click the magnifier               |
+| Zoom into any other block     | press F or Cmd+. with the block selected            |
 | Navigate to a shallower level | click its breadcrumb crumb                          |
 
 Rules while zoomed:
