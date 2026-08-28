@@ -70,11 +70,11 @@ jobs:
       # against e2e/__vr_baselines__. Skips cleanly if the baselines were
       # rendered on a different platform — see docs/visual-regression.md.
       - run: npm run test:vr
-      - name: Upload diff images
-        if: failure()
+      - name: Upload screenshots (diffs on failure + always the refreshed set)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: vr-diffs
+          name: vr-output
           path: e2e/__vr_artifacts__/
           if-no-files-found: ignore
   build:

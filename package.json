@@ -24,7 +24,8 @@
     "test:vr": "concurrently -k -s first -n \"storybook,vr\" -c \"magenta,blue\" \"npm run build:storybook --quiet && npx http-server storybook-static --port 6011 --silent\" \"npx wait-on tcp:127.0.0.1:6011 && node e2e/visual-regression.mjs --check\"",
     "test:vr:update": "concurrently -k -s first -n \"storybook,vr\" -c \"magenta,blue\" \"npm run build:storybook --quiet && npx http-server storybook-static --port 6011 --silent\" \"npx wait-on tcp:127.0.0.1:6011 && node e2e/visual-regression.mjs --update\"",
     "benchmark": "vite-node scripts/benchmark.ts",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "test:vr:accept": "node e2e/vr-accept.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.2.0",

@@ -55,20 +55,25 @@ if (!mode) {
 }
 
 // --- Platform guard (check mode only) ---------------------------------------
+// On CI a missing/foreign-platform baseline set doesn't fail or silently skip:
+// we still capture and publish a "refreshed" set as a workflow artifact, so
+// `npm run test:vr:accept` can turn any CI run's screenshots into baselines.
+// Locally (dev machines render fonts differently) we skip outright.
+let seedReason = null
 if (mode === "check") {
   if (!existsSync(MANIFEST)) {
-    console.log(
-      `VR SKIP: no baselines yet (${MANIFEST} missing).\n` +
-        "Dispatch the 'Update VR baselines' workflow once to seed them from CI.",
-    )
-    process.exit(0)
+    seedReason = `no baselines yet (${MANIFEST} missing)`
+  } else {
+    const manifest = JSON.parse(readFileSync(MANIFEST, "utf8"))
+    if (manifest.platform !== PLATFORM_KEY) {
+      seedReason = `baselines are '${manifest.platform}' but this is '${PLATFORM_KEY}'`
+    }
   }
-  const manifest = JSON.parse(readFileSync(MANIFEST, "utf8"))
-  if (manifest.platform !== PLATFORM_KEY) {
+  if (seedReason && !process.env.CI) {
     console.log(
-      `VR SKIP: baselines were rendered on '${manifest.platform}' but this is '${PLATFORM_KEY}'.\n` +
-        "Font rendering differs across platforms, so comparing would produce false\n" +
-        "failures. CI (the baseline platform) is authoritative for these checks.",
+      `VR SKIP: ${seedReason}.\n` +
+        "CI (the baseline platform) is authoritative for these checks; accept a CI\n" +
+        "run's screenshots with `npm run test:vr:accept`.",
     )
     process.exit(0)
   }
@@ -160,6 +165,33 @@ if (mode === "update") {
 
 // --- Check ------------------------------------------------------------------
 rmSync(ARTIFACT_DIR, { recursive: true, force: true })
+
+// On CI, always publish the full captured set as a ready-to-accept baseline
+// refresh (seeding a new platform, or accepting an intentional visual change).
+if (process.env.CI) {
+  const refreshedDir = path.join(ARTIFACT_DIR, "refreshed")
+  mkdirSync(refreshedDir, { recursive: true })
+  for (const [name, { png }] of shots) {
+    writeFileSync(path.join(refreshedDir, `${name}.png`), png)
+  }
+  writeFileSync(
+    path.join(refreshedDir, "baseline-manifest.json"),
+    JSON.stringify(
+      { platform: PLATFORM_KEY, generatedAt: new Date().toISOString(), names },
+      null,
+      2,
+    ) + "\n",
+  )
+}
+
+if (seedReason) {
+  console.log(
+    `VR SEED: ${seedReason}.\n` +
+      "Captured screenshots were published in the run artifacts; run\n" +
+      "`npm run test:vr:accept` locally to commit them as baselines.",
+  )
+  process.exit(0)
+}
 let failures = 0
 const saveArtifacts = (name, actual, expected, diff) => {
   mkdirSync(ARTIFACT_DIR, { recursive: true })
