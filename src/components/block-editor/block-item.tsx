@@ -39,6 +39,14 @@ export interface BlockEditorApi {
   collapsed: Set<string>
   /** Display-only: no editing, selection, or mutation (collapse still works). */
   readOnly?: boolean
+  /**
+   * Whether the editor owns the keyboard (focus is inside its container).
+   * While false, selected rows demote to the quiet inactive-selection surface
+   * (`.block-highlight-inactive`) so the highlight never claims a keyboard it
+   * doesn't have. Always true in read-only views (their highlight is display
+   * state, not a keyboard cursor).
+   */
+  keyboardActive: boolean
   /** Highlight a block (leaves edit mode, collapses any multi-selection). */
   select: (id: string) => void
   /** Enter edit mode for a block. */
@@ -189,7 +197,10 @@ export function BlockItem({
     const el = textareaRef.current
     if (!el) return
     el.style.height = "auto"
-    el.style.height = `${el.scrollHeight}px`
+    // An empty textarea would size to its teaching placeholder (which can wrap
+    // on narrow screens); the empty row is exactly one line (matching the view
+    // branch's min-h-[1lh]) — the ghost must never move layout.
+    el.style.height = el.value === "" ? "1lh" : `${el.scrollHeight}px`
     if (pendingCaret.current !== null) {
       const pos = pendingCaret.current
       pendingCaret.current = null
@@ -442,6 +453,11 @@ export function BlockItem({
               // it); .block-highlight paints the solid accent surface over it
               // so selection reads as selected, not hovered.
               selected && "bg-bg-secondary block-highlight",
+              // When the editor doesn't own the keyboard (focus is in the
+              // sidebar, a dialog, the ⌘P palette mid-preview), the selection
+              // demotes to a quiet neutral — additive class only, so the
+              // structural hooks above are untouched.
+              selected && !api.keyboardActive && "block-highlight-inactive",
               // A quiet neutral hover marks the row as interactive (see
               // .block-hoverable); never while read-only or already editing,
               // and selection (accent) always wins because the class is
@@ -485,12 +501,18 @@ export function BlockItem({
                 value={body}
                 rows={1}
                 spellCheck
+                // Teach the turn-into keys the first time someone sits in an
+                // empty block: a ghost at placeholder rank (tertiary — chrome,
+                // not ink) that the browser shows only while the textarea is
+                // empty, so it never appears in view mode or over content.
+                // The zoom title is a page title, not a block — no ghost.
+                placeholder={zoomTitle ? undefined : "Type, or press # heading · - list · [ todo"}
                 onChange={handleTextareaChange}
                 onKeyDown={handleEditKeyDown}
                 onPaste={handlePaste}
                 onBlur={() => api.setFocus(null)}
                 className={cx(
-                  "min-w-0 flex-1 resize-none border-none bg-transparent p-0 font-content leading-relaxed text-text outline-none",
+                  "min-w-0 flex-1 resize-none overflow-hidden border-none bg-transparent p-0 font-content leading-relaxed text-text outline-none placeholder:text-text-tertiary",
                   typo,
                 )}
               />

@@ -2,8 +2,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
 import { dismissedMergeNoticeIdsAtom, mergeNoticesAtom } from "../global-state"
 import { mergeNoticeKey } from "../utils/git"
-import { Button } from "./button"
-import { ErrorIcon16 } from "./icons"
+import { Notice } from "./notice"
 import { openNoteHistoryDialogAtom } from "./note-history-dialog-state"
 
 /**
@@ -11,8 +10,9 @@ import { openNoteHistoryDialogAtom } from "./note-history-dialog-state"
  * conflicting edits: the newest version won in place, and the losing version
  * stays reachable in the note's history. "View previous version" opens the
  * note with its History panel preselected on the losing version, where the
- * user can view it and restore it if wanted. Follows the storage-warning
- * banner's pattern in `_appRoot.tsx`. Dismissal is per-tab (see
+ * user can view it and restore it if wanted. Renders through the shared
+ * `Notice` surface, in the same app-strip placement as the storage-warning
+ * notice in `_appRoot.tsx`. Dismissal is per-tab (see
  * `dismissedMergeNoticeIdsAtom`); the machine dedupes notices by the same key,
  * so a dismissed notice can never be re-raised.
  */
@@ -28,46 +28,41 @@ export function MergeNoticeBanner() {
   if (visibleNotices.length === 0) return null
 
   return (
-    <div className="flex shrink-0 items-start gap-2 border-b border-border-secondary px-4 py-2 text-text-pending">
-      <div className="grid h-6 shrink-0 place-items-center">
-        <ErrorIcon16 />
-      </div>
-      <div className="flex grow flex-col gap-1 pt-0.5 leading-5">
-        {visibleNotices.map((notice) => (
-          <span key={mergeNoticeKey(notice)}>
-            Sync merged conflicting edits on <span className="font-bold">{notice.noteId}</span> —
-            kept the newest version.{" "}
-            <button
-              type="button"
-              className="underline underline-offset-2"
-              onClick={() => {
-                // The dialog is mounted by the note page, so navigate there
-                // first; the open-at-version atoms survive the route change.
-                navigate({
-                  to: "/notes/$",
-                  params: { _splat: notice.noteId },
-                  search: { query: undefined },
-                })
-                openNoteHistoryDialog({
-                  sha: notice.losingSha,
-                  oid: notice.losingOid ?? undefined,
-                })
-              }}
-            >
-              View previous version
-            </button>
-          </span>
-        ))}
-      </div>
-      <Button
-        size="small"
-        className="shrink-0"
-        onClick={() =>
+    <div className="shrink-0 border-b border-border-secondary p-2">
+      <Notice
+        tone="warning"
+        onDismiss={() =>
           setDismissedIds((previous) => [...previous, ...visibleNotices.map(mergeNoticeKey)])
         }
       >
-        Dismiss
-      </Button>
+        <span className="flex flex-col gap-1">
+          {visibleNotices.map((notice) => (
+            <span key={mergeNoticeKey(notice)}>
+              Sync merged conflicting edits on <span className="font-bold">{notice.noteId}</span> —
+              kept the newest version.{" "}
+              <button
+                type="button"
+                className="underline underline-offset-2"
+                onClick={() => {
+                  // The dialog is mounted by the note page, so navigate there
+                  // first; the open-at-version atoms survive the route change.
+                  navigate({
+                    to: "/notes/$",
+                    params: { _splat: notice.noteId },
+                    search: { query: undefined },
+                  })
+                  openNoteHistoryDialog({
+                    sha: notice.losingSha,
+                    oid: notice.losingOid ?? undefined,
+                  })
+                }}
+              >
+                View previous version
+              </button>
+            </span>
+          ))}
+        </span>
+      </Notice>
     </div>
   )
 }

@@ -8,6 +8,7 @@ import { CommandMenu } from "../components/command-menu"
 import { DevBar } from "../components/dev-bar"
 import { ErrorIcon16 } from "../components/icons"
 import { MergeNoticeBanner } from "../components/merge-notice-banner"
+import { Notice } from "../components/notice"
 import { globalStateMachineAtom } from "../global-state"
 import { GlobalShortcuts } from "../shortcuts/global-shortcuts"
 import { storageWarningAtom } from "../utils/markdown-cache"
@@ -96,11 +97,8 @@ function RouteComponent() {
         </div>
       ) : null}
       {storageWarning ? (
-        <div className="flex shrink-0 items-start gap-2 border-b border-border-secondary px-4 py-2 text-text-pending">
-          <div className="grid h-6 shrink-0 place-items-center">
-            <ErrorIcon16 />
-          </div>
-          <span className="pt-0.5 leading-5">{storageWarning}</span>
+        <div className="shrink-0 border-b border-border-secondary p-2">
+          <Notice tone="warning">{storageWarning}</Notice>
         </div>
       ) : null}
       <MergeNoticeBanner />

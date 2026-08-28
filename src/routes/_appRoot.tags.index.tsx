@@ -15,6 +15,7 @@ import { PageLayout } from "../components/page-layout"
 import { PillButton } from "../components/pill-button"
 import { SearchInput } from "../components/search-input"
 import { noteListViewAtom, sortedTagEntriesAtom, tagSearcherAtom } from "../global-state"
+import { useListKeyboardNav } from "../hooks/list-keyboard-nav"
 import { cx } from "../utils/cx"
 import { pluralize } from "../utils/pluralize"
 
@@ -69,9 +70,40 @@ function RouteComponent() {
 
   const tagTree = useMemo(() => buildTagTree(searchResults, sort), [searchResults, sort])
 
+  // The keyboard highlight roves over tags in the order the current view
+  // renders them: the flat results in grid view, a DFS of the tree in list
+  // view (collapse state is per-row local, so hidden rows are still counted —
+  // an accepted edge; Enter on one still opens the tag).
+  const treeOrder = useMemo(() => {
+    const order: string[] = []
+    const walk = (nodes: TagTreeNode[], path: string[]) => {
+      for (const node of nodes) {
+        const fullPath = [...path, node.name]
+        order.push(fullPath.join("/"))
+        walk(node.children, fullPath)
+      }
+    }
+    walk(tagTree, [])
+    return order
+  }, [tagTree])
+  const navOrder = view === "grid" ? searchResults.map(([tag]) => tag) : treeOrder
+  const { activeIndex, containerRef } = useListKeyboardNav({
+    count: navOrder.length,
+    resetKey: deferredQuery ?? "",
+    onActivate: (index) => {
+      const tag = navOrder[index]
+      if (tag) navigate({ to: "/", search: { query: `tag:${tag}` } })
+    },
+  })
+  const activeTag = activeIndex !== null ? (navOrder[activeIndex] ?? null) : null
+  const treeIndexByTag = useMemo(
+    () => new Map(treeOrder.map((tag, index) => [tag, index])),
+    [treeOrder],
+  )
+
   return (
     <PageLayout title="Tags" icon={<TagIcon16 />}>
-      <div className="flex flex-col gap-4 px-4 pt-0 pb-[50vh]">
+      <div ref={containerRef} className="flex flex-col gap-4 px-4 pt-0 pb-[50vh]">
         <div className="flex flex-col gap-3">
           <div className="flex gap-2">
             <SearchInput
@@ -168,8 +200,18 @@ function RouteComponent() {
         </div>
         {view === "grid" ? (
           <ul className="flex flex-wrap gap-y-3 gap-x-2">
-            {searchResults.map(([tag, noteIds]) => (
-              <li key={tag}>
+            {searchResults.map(([tag, noteIds], index) => (
+              <li
+                key={tag}
+                data-list-index={index}
+                className={cx(
+                  "rounded-full",
+                  // The keyboard highlight on a pill is an accent ring (the
+                  // pill keeps its own surface) — same accent as the editor's
+                  // selection family.
+                  activeTag === tag && "ring-2 ring-[color:var(--color-border-focus)]",
+                )}
+              >
                 <PillButton asChild>
                   <Link to="/" search={{ query: `tag:${tag}` }}>
                     {tag}
@@ -180,7 +222,7 @@ function RouteComponent() {
             ))}
           </ul>
         ) : (
-          <TagTree tree={tagTree} />
+          <TagTree tree={tagTree} activeTag={activeTag} indexByTag={treeIndexByTag} />
         )}
       </div>
     </PageLayout>
@@ -239,10 +281,14 @@ type TagTreeProps = {
   tree: TagTreeNode[]
   path?: string[]
   depth?: number
+  /** The tag path the keyboard highlight is on (see useListKeyboardNav). */
+  activeTag?: string | null
+  /** Each tag path's index in the DFS order, for the highlight's scroll hook. */
+  indexByTag?: Map<string, number>
 }
 
 // TODO: Improve accessibility of the tree
-function TagTree({ tree, path = [], depth = 0 }: TagTreeProps) {
+function TagTree({ tree, path = [], depth = 0, activeTag = null, indexByTag }: TagTreeProps) {
   if (tree.length === 0) {
     return null
   }
@@ -250,7 +296,16 @@ function TagTree({ tree, path = [], depth = 0 }: TagTreeProps) {
   return (
     <ul className="flex flex-col gap-3">
       {tree.map((node) => {
-        return <TagTreeItem key={node.name} node={node} path={path} depth={depth} />
+        return (
+          <TagTreeItem
+            key={node.name}
+            node={node}
+            path={path}
+            depth={depth}
+            activeTag={activeTag}
+            indexByTag={indexByTag}
+          />
+        )
       })}
     </ul>
   )
@@ -260,20 +315,38 @@ type TagTreeItemProps = {
   node: TagTreeNode
   path?: string[]
   depth?: number
+  activeTag?: string | null
+  indexByTag?: Map<string, number>
 }
 
-function TagTreeItem({ node, path = [], depth = 0 }: TagTreeItemProps) {
+function TagTreeItem({
+  node,
+  path = [],
+  depth = 0,
+  activeTag = null,
+  indexByTag,
+}: TagTreeItemProps) {
   const [expanded, setExpanded] = useState(true)
+  const fullPath = [...path, node.name].join("/")
 
   return (
     <li className="flex flex-col gap-3">
       <div className="flex items-center gap-0.5" style={{ paddingLeft: `calc(${depth} * 1.5rem)` }}>
-        <PillButton asChild>
-          <Link to="/" search={{ query: `tag:${[...path, node.name].join("/")}` }}>
-            {node.name}
-            <span className="text-text-secondary">{node.count}</span>
-          </Link>
-        </PillButton>
+        <span
+          data-list-index={indexByTag?.get(fullPath)}
+          className={cx(
+            "rounded-full",
+            // The keyboard highlight — an accent ring around the row's pill.
+            activeTag === fullPath && "ring-2 ring-[color:var(--color-border-focus)]",
+          )}
+        >
+          <PillButton asChild>
+            <Link to="/" search={{ query: `tag:${fullPath}` }}>
+              {node.name}
+              <span className="text-text-secondary">{node.count}</span>
+            </Link>
+          </PillButton>
+        </span>
         {node.children.length ? (
           <IconButton
             aria-label={expanded ? "Collapse" : "Expand"}
@@ -292,6 +365,8 @@ function TagTreeItem({ node, path = [], depth = 0 }: TagTreeItemProps) {
           tree={node.children}
           path={[...path, node.name]}
           depth={depth + 1}
+          activeTag={activeTag}
+          indexByTag={indexByTag}
         />
       </div>
     </li>

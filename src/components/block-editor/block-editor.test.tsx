@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render } from "@testing-library/react"
+import { act, cleanup, fireEvent, render } from "@testing-library/react"
 import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { emptyBlock } from "../../blocks/ops"
@@ -980,5 +980,75 @@ describe("turn into (select-mode marker keys)", () => {
     expect(serializedLines(getByTestId)).toEqual(["# A", "# B", "C"])
     fireEvent.keyDown(root, { key: "z", metaKey: true })
     expect(serializedLines(getByTestId)).toEqual(["A", "B", "C"])
+  })
+})
+
+describe("keyboard ownership (inactive-selection dimming)", () => {
+  /** Flush the rAF the editor uses to settle keyboard ownership after blur. */
+  const settleFocus = () =>
+    act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+
+  it("demotes the selection while focus is outside the editor, restores on return", async () => {
+    const { container } = render(
+      <>
+        <Harness initial={"A\nB"} />
+        <input data-testid="outside" />
+      </>,
+    )
+    const root = editorRoot(container)
+    // The editor grabbed focus on mount — the highlight is active (accent).
+    expect(document.activeElement).toBe(root)
+    expect(container.querySelector(".block-highlight")).not.toBeNull()
+    expect(container.querySelector(".block-highlight-inactive")).toBeNull()
+
+    // Focus a real control elsewhere (relatedTarget set, so the editor's
+    // blur-regrab leaves it alone): the highlight demotes…
+    act(() => container.querySelector<HTMLInputElement>('[data-testid="outside"]')!.focus())
+    await settleFocus()
+    expect(container.querySelector(".block-highlight-inactive")).not.toBeNull()
+    // …but the structural hooks stay: still selected, still .block-highlight.
+    expect(container.querySelector(".bg-bg-secondary")).not.toBeNull()
+    expect(container.querySelector(".block-highlight")).not.toBeNull()
+
+    // Focus returning restores the active surface instantly (no rAF needed).
+    act(() => root.focus())
+    expect(container.querySelector(".block-highlight-inactive")).toBeNull()
+  })
+
+  it("stays active across internal focus moves (select → edit → select)", async () => {
+    const { container } = render(<Harness initial={"A\nB"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "Enter" }) // edit A — focus moves to the textarea
+    expect(container.querySelector("textarea")).not.toBeNull()
+    await settleFocus()
+    expect(container.querySelector(".block-highlight-inactive")).toBeNull()
+    fireEvent.keyDown(container.querySelector("textarea")!, { key: "Escape" }) // back to select
+    await settleFocus()
+    expect(container.querySelector(".block-highlight")).not.toBeNull()
+    expect(container.querySelector(".block-highlight-inactive")).toBeNull()
+  })
+})
+
+describe("teaching placeholder (empty block being edited)", () => {
+  const PLACEHOLDER = "Type, or press # heading · - list · [ todo"
+
+  it("shows the turn-into ghost on an empty editing textarea", () => {
+    const { container } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("")
+    expect(textarea.placeholder).toBe(PLACEHOLDER)
+  })
+
+  it("never puts the ghost on the zoomed title", () => {
+    const { container } = render(
+      <Harness initial={"Parent\n  id:: blk_p\n  child"} zoomRootId="blk_p" />,
+    )
+    const root = editorRoot(container)
+    // Zoom lands on the first child; ArrowUp selects the title, Enter edits it.
+    fireEvent.keyDown(root, { key: "ArrowUp" })
+    fireEvent.keyDown(root, { key: "Enter" })
+    const textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("Parent")
+    expect(textarea.placeholder).toBe("")
   })
 })

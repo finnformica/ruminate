@@ -4,7 +4,9 @@ import React, { useMemo, useState } from "react"
 import { useInView } from "react-intersection-observer"
 import { useDebounce } from "use-debounce"
 import { noteListViewAtom } from "../global-state"
+import { useListKeyboardNav } from "../hooks/list-keyboard-nav"
 import { useSearchNotes } from "../hooks/search-notes"
+import { cx } from "../utils/cx"
 import { parseQuery } from "../utils/search"
 import { formatNumber, pluralize } from "../utils/pluralize"
 import { Button } from "./button"
@@ -38,11 +40,22 @@ type NoteListProps = {
   baseQuery?: string
   query: string
   onQueryChange: (query: string) => void
+  /**
+   * Linear-style list keys (↑/↓ highlight, Enter opens, ↓ from search hands
+   * off, Escape returns to search). Only the notes *index* page turns this on
+   * — embedded lists (a note's backlinks) must not grab document-level keys.
+   */
+  enableKeyboardNav?: boolean
 }
 
 const initialVisibleItems = 10
 
-export function NoteList({ baseQuery = "", query, onQueryChange }: NoteListProps) {
+export function NoteList({
+  baseQuery = "",
+  query,
+  onQueryChange,
+  enableKeyboardNav = false,
+}: NoteListProps) {
   const searchNotes = useSearchNotes()
   const navigate = useNavigate()
   // Grid/list layout is a local preference, persisted outside the URL.
@@ -55,6 +68,20 @@ export function NoteList({ baseQuery = "", query, onQueryChange }: NoteListProps
   }, [searchNotes, baseQuery, deferredQuery])
 
   const [numVisibleItems, setNumVisibleItems] = useState(initialVisibleItems)
+
+  // The rows the keyboard highlight roves over (both views render this slice).
+  const visibleResults = noteResults.slice(0, numVisibleItems)
+  const { activeIndex, containerRef } = useListKeyboardNav({
+    enabled: enableKeyboardNav,
+    count: visibleResults.length,
+    resetKey: deferredQuery,
+    onActivate: (index) => {
+      const note = noteResults[index]
+      if (note) {
+        navigate({ to: "/notes/$", params: { _splat: note.id }, search: { query: undefined } })
+      }
+    },
+  })
 
   const [bottomRef, bottomInView] = useInView()
 
@@ -129,7 +156,7 @@ export function NoteList({ baseQuery = "", query, onQueryChange }: NoteListProps
 
   return (
     <LinkHighlightProvider href={highlightPaths}>
-      <div>
+      <div ref={containerRef}>
         <div className="flex flex-col gap-4">
           <div className="flex gap-2">
             <SearchInput
@@ -282,23 +309,39 @@ export function NoteList({ baseQuery = "", query, onQueryChange }: NoteListProps
           ) : null}
           {view === "grid" ? (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-4">
-              {noteResults.slice(0, numVisibleItems).map(({ id }) => (
-                <NotePreviewCard key={id} id={id} />
+              {visibleResults.map(({ id }, index) => (
+                <div
+                  key={id}
+                  data-list-index={index}
+                  className={cx(
+                    // The keyboard highlight on a card is a ring in the same
+                    // accent (the card's own surface must stay readable).
+                    activeIndex === index &&
+                      "rounded-[calc(var(--border-radius-base)+6px)] ring-2 ring-[color:var(--color-border-focus)]",
+                  )}
+                >
+                  <NotePreviewCard id={id} />
+                </div>
               ))}
             </div>
           ) : null}
           {view === "list" ? (
             <ul className="flex flex-col gap-0.5">
-              {noteResults.slice(0, numVisibleItems).map((note) => {
+              {visibleResults.map((note, index) => {
                 return (
-                  <li key={note.id}>
+                  <li key={note.id} data-list-index={index}>
                     <Link
                       to="/notes/$"
                       params={{ _splat: note.id }}
                       search={{
                         query: undefined,
                       }}
-                      className="focus-ring flex h-10 items-center rounded-lg px-3 hover:bg-bg-hover coarse:h-12 coarse:p-4"
+                      className={cx(
+                        "focus-ring flex h-10 items-center rounded-lg px-3 hover:bg-bg-hover coarse:h-12 coarse:p-4",
+                        // The roving keyboard highlight — the editor's
+                        // selection surface (same tokens, see block-editor.css).
+                        activeIndex === index && "list-highlight",
+                      )}
                     >
                       <NoteFavicon note={note} className="mr-3 coarse:mr-4" />
                       {note.pinned ? (

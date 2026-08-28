@@ -28,6 +28,7 @@ function RouteComponent() {
           onQueryChange={(query) =>
             navigate({ search: (prev) => ({ ...prev, query }), replace: true })
           }
+          enableKeyboardNav
         />
       </div>
     </PageLayout>
