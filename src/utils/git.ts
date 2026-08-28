@@ -49,16 +49,24 @@ export async function gitClone(repo: GitHubRepository, user: GitHubUser) {
   }
 
   return withGitLock(async () => {
-    // Wipe file system
+    // Clone repo. The wipe lives INSIDE the retried unit: a clone that fails
+    // mid-way (e.g. a 401 before the token refresh) leaves a half-written
+    // .git behind, and re-cloning onto it can end with remote.origin.url
+    // missing from config — every later pull then dies with
+    // MissingParameterError. Each attempt starts from a clean slate.
     // TODO: Only remove the repo directory instead of wiping the entire file system
     // Blocked by https://github.com/isomorphic-git/lightning-fs/issues/71
-    fsWipe()
-
-    // Clone repo
     await ensureFreshToken()
     let stopTimer = startTimer(`git clone ${options.url} ${options.dir}`)
-    await withAuthRetry(() => git.clone(options))
+    await withAuthRetry(() => {
+      fsWipe()
+      return git.clone(options)
+    })
     stopTimer()
+
+    // Invariant: the remote must exist in config after a clone, whatever
+    // isomorphic-git's internal failure cleanup did on a retried attempt.
+    await git.addRemote({ fs, dir: REPO_DIR, remote: "origin", url: options.url!, force: true })
 
     // Set user in git config
     const userName = gitUserName(user)
@@ -110,12 +118,37 @@ export function mergeNoticeKey(notice: MergeNotice): string {
  * Returns one `MergeNotice` per conflicted note, pointing at the losing
  * version in history, so the UI can tell the user and offer to open it.
  */
-export async function gitPull(user: GitHubUser): Promise<MergeNotice[]> {
+/** Self-heal a repo whose config lost its remote (seen after a 401-retried
+ * clone): re-add origin from the persisted repo and let the caller retry. */
+async function repairMissingRemote(repo: GitHubRepository | null): Promise<boolean> {
+  if (!repo) return false
+  await git.addRemote({
+    fs,
+    dir: REPO_DIR,
+    remote: "origin",
+    url: `https://github.com/${repo.owner}/${repo.name}`,
+    force: true,
+  })
+  return true
+}
+
+export async function gitPull(
+  user: GitHubUser,
+  repo: GitHubRepository | null = null,
+): Promise<MergeNotice[]> {
   return withGitLock(async () => {
     await ensureFreshToken()
     const stopTimer = startTimer("git pull")
     try {
-      const fetchResult = await withAuthRetry(() => git.fetch(fetchOptions(user)))
+      const fetchResult = await withAuthRetry(() => git.fetch(fetchOptions(user))).catch(
+        async (error) => {
+          // A repo without remote.origin.url (half-cloned then retried) throws
+          // MissingParameterError("remote OR url") — repair and retry once.
+          if (!(error instanceof git.Errors.MissingParameterError)) throw error
+          if (!(await repairMissingRemote(repo))) throw error
+          return withAuthRetry(() => git.fetch(fetchOptions(user)))
+        },
+      )
       const theirs = fetchResult.fetchHead ?? `refs/remotes/origin/${DEFAULT_BRANCH}`
       // Newest-wins: compare the two branch tips' commit timestamps to decide
       // which side wins conflicting hunks. Branch-tip committer time is an

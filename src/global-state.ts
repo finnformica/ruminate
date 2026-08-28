@@ -491,7 +491,7 @@ function createGlobalStateMachine() {
           // the shared worktree; re-walking it is enough to stay current.
           let mergeNotices: MergeNotice[] = []
           if (isSyncLeader()) {
-            mergeNotices = await gitPull(context.githubUser)
+            mergeNotices = await gitPull(context.githubUser, context.githubRepo)
           }
 
           return {

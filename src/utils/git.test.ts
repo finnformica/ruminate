@@ -106,3 +106,60 @@ describe("resolveMergeNotices", () => {
     ])
   })
 })
+
+// ── Clone resilience (the 401-retried clone that lost its remote) ───────────
+// isomorphic-git and the auth layer are mocked so gitClone's orchestration is
+// testable: each retried attempt must start from a wiped fs, and the remote
+// must exist in config afterwards no matter what a failed attempt left behind.
+describe("gitClone resilience", () => {
+  it("re-wipes on a retried clone and enforces the origin remote", async () => {
+    vi.resetModules()
+    const fsWipe = vi.fn()
+    const clone = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("auth"), { data: { statusCode: 401 } }))
+      .mockResolvedValueOnce(undefined)
+    const addRemote = vi.fn().mockResolvedValue(undefined)
+    const setConfig = vi.fn().mockResolvedValue(undefined)
+    vi.doMock("./fs", () => ({ fs: {}, fsWipe }))
+    vi.doMock("isomorphic-git", () => ({
+      default: { clone, addRemote, setConfig, Errors: { MissingParameterError: class {} } },
+      WORKDIR: Symbol("WORKDIR"),
+    }))
+    vi.doMock("./github-session", () => ({
+      ensureFreshToken: vi.fn().mockResolvedValue(undefined),
+      withAuthRetry: async <T>(op: () => Promise<T>): Promise<T> => {
+        try {
+          return await op()
+        } catch {
+          return await op()
+        }
+      },
+    }))
+    const { gitClone } = await import("./git")
+    await gitClone(
+      { owner: "finnformica", name: "notes" } as never,
+      {
+        login: "finnformica",
+        name: "Finn",
+        email: "f@x.com",
+      } as never,
+    )
+
+    expect(clone).toHaveBeenCalledTimes(2)
+    // A wipe per attempt: the retry never clones onto a half-written .git.
+    expect(fsWipe).toHaveBeenCalledTimes(2)
+    // Post-clone invariant: origin exists regardless of failure cleanup.
+    expect(addRemote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        remote: "origin",
+        url: "https://github.com/finnformica/notes",
+        force: true,
+      }),
+    )
+    vi.doUnmock("isomorphic-git")
+    vi.doUnmock("./github-session")
+    vi.doUnmock("./fs")
+    vi.resetModules()
+  })
+})
