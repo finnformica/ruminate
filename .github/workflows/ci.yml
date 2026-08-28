@@ -56,6 +56,27 @@ jobs:
   #     - run: npm ci
   #     - run: npx playwright install --with-deps chromium
   #     - run: npm run test:storybook:ci
+  visual-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22.x
+          cache: "npm"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # Builds its own storybook (no other job produces one) and compares
+      # against e2e/__vr_baselines__. Skips cleanly if the baselines were
+      # rendered on a different platform — see docs/visual-regression.md.
+      - run: npm run test:vr
+      - name: Upload diff images
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vr-diffs
+          path: e2e/__vr_artifacts__/
+          if-no-files-found: ignore
   build:
     runs-on: ubuntu-latest
     steps:

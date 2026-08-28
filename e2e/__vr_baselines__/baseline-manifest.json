@@ -1,0 +1,18 @@
+{
+  "platform": "darwin-arm64",
+  "generatedAt": "2026-08-28T06:35:04.592Z",
+  "names": [
+    "blockeditor--mixed--light",
+    "blockeditor--nested-todo--light",
+    "blockeditor--zoomed--light",
+    "blockeditor--selection-sweep--light",
+    "blockeditor--empty--light",
+    "notetitle--default--light",
+    "blockeditor--mixed--dark",
+    "blockeditor--nested-todo--dark",
+    "blockeditor--zoomed--dark",
+    "blockeditor--selection-sweep--dark",
+    "blockeditor--empty--dark",
+    "notetitle--default--dark"
+  ]
+}

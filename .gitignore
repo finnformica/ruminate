@@ -19,6 +19,9 @@ stats.html
 # Playwright e2e screenshots (generated each run, not pixel baselines)
 e2e/__screenshots__
 
+# Visual-regression diff output (baselines in e2e/__vr_baselines__ ARE committed)
+e2e/__vr_artifacts__
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

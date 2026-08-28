@@ -21,6 +21,8 @@
     "test:storybook:watch": "test-storybook --watch",
     "test:storybook:ci": "concurrently -k -s first -n \"storybook,test\" -c \"magenta,blue\" \"npm run build:storybook --quiet && npx http-server storybook-static --port 6006 --silent\" \"npx wait-on tcp:127.0.0.1:6006 && npm run test:storybook\"",
     "test:e2e": "concurrently -k -s first -n \"storybook,e2e\" -c \"magenta,blue\" \"npm run build:storybook --quiet && npx http-server storybook-static --port 6010 --silent\" \"npx wait-on tcp:127.0.0.1:6010 && node e2e/block-editor.e2e.mjs e2e/__screenshots__\"",
+    "test:vr": "concurrently -k -s first -n \"storybook,vr\" -c \"magenta,blue\" \"npm run build:storybook --quiet && npx http-server storybook-static --port 6011 --silent\" \"npx wait-on tcp:127.0.0.1:6011 && node e2e/visual-regression.mjs --check\"",
+    "test:vr:update": "concurrently -k -s first -n \"storybook,vr\" -c \"magenta,blue\" \"npm run build:storybook --quiet && npx http-server storybook-static --port 6011 --silent\" \"npx wait-on tcp:127.0.0.1:6011 && node e2e/visual-regression.mjs --update\"",
     "benchmark": "vite-node scripts/benchmark.ts",
     "postinstall": "patch-package"
   },
@@ -124,7 +126,9 @@
     "jsdom": "^30.0.1",
     "knip": "^6.32.2",
     "patch-package": "^6.4.7",
+    "pixelmatch": "^7.2.0",
     "playwright": "^1.62.1",
+    "pngjs": "^7.0.0",
     "prettier": "^3.4.2",
     "rollup-plugin-visualizer": "^5.12.0",
     "storybook": "^8.4.7",
