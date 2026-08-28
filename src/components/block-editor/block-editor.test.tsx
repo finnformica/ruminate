@@ -573,6 +573,24 @@ describe("zoom (focus mode)", () => {
     expect(highlightedText(container)).toBe("C")
   })
 
+  it("a zoomed heading hangs a # like the note title; other types keep their style", () => {
+    const heading = ["# Section", "  id:: blk_h", "  - child", "    id:: blk_hc"].join("\n")
+    const zoomHeading = render(<Harness initial={heading} zoomRootId="blk_h" />)
+    expect(zoomHeading.queryByTestId("zoom-title-hash")).not.toBeNull()
+    zoomHeading.unmount()
+
+    // A zoomed quote keeps its secondary ink (and no hash) — promotion changes
+    // scale, not type.
+    const quote = ["> Wise words", "  id:: blk_q", "  - child", "    id:: blk_qc"].join("\n")
+    const zoomQuote = render(<Harness initial={quote} zoomRootId="blk_q" />)
+    expect(zoomQuote.queryByTestId("zoom-title-hash")).toBeNull()
+    const title = zoomQuote
+      .getAllByTestId("block-body")
+      .find((el) => el.textContent === "Wise words")!
+    expect(title.className).toContain("text-text-secondary")
+    expect(title.className).toContain("text-3xl")
+  })
+
   it("Mod+Enter on the zoomed title creates its FIRST child", () => {
     const { container, getByTestId } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
     const root = editorRoot(container)

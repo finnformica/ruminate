@@ -150,9 +150,14 @@ export function BlockItem({
   const prefix = block.content.slice(0, block.content.length - body.length)
   // The zoomed block *is* the page, so its title uses the note-title scale
   // (matching note-title.tsx) — a full step above the depth-0 headings of its
-  // children, which re-derive their sizes from the zoom root.
+  // children, which re-derive their sizes from the zoom root. The promotion
+  // changes scale, not type: a quote keeps its bar and secondary ink, a todo
+  // its checkbox (both render on the line independently of the typography).
   const typo = zoomTitle
-    ? "text-3xl font-bold leading-tight tracking-[-0.02em]"
+    ? cx(
+        "text-3xl font-bold leading-tight tracking-[-0.02em]",
+        type.kind === "quote" && "text-text-secondary",
+      )
     : typographyFor(type, depth)
 
   // Focus and place the caret when editing starts.
@@ -422,7 +427,7 @@ export function BlockItem({
               // Asymmetric inset: the left edge extends only 2px so the
               // highlight keeps daylight from the chevron's hover circle in
               // the gutter; the text column itself doesn't move (-2+6 = -4+8).
-              "-ml-0.5 -mr-1 flex items-start gap-2 rounded-md pl-1.5 pr-2",
+              "relative -ml-0.5 -mr-1 flex items-start gap-2 rounded-md pl-1.5 pr-2",
               // bg-bg-secondary is the structural "selected" hook (tests query
               // it); .block-highlight paints the accent tint over it so
               // selection reads as selected, not hovered.
@@ -432,6 +437,18 @@ export function BlockItem({
               type.kind === "quote" && "rounded-l-none border-l-2 border-border pl-3",
             )}
           >
+            {zoomTitle && type.kind === "heading" ? (
+              // A zoomed section is a page, and pages hang a # to the left of
+              // their title (matching note-title.tsx). It sits in the gutter,
+              // where the chevron is hidden for the title anyway.
+              <span
+                aria-hidden
+                data-testid="zoom-title-hash"
+                className="pointer-events-none absolute right-full top-0 select-none pr-1.5 text-text-tertiary"
+              >
+                #
+              </span>
+            ) : null}
             {marker}
             {editing ? (
               <textarea
