@@ -29,7 +29,7 @@ function Content({
         <Menu.Popup
           className={cx(
             "card-2 z-20 grid place-items-stretch overflow-hidden rounded-lg print:hidden outline-hidden",
-            "origin-(--transform-origin) transition-[transform,scale,opacity] epaper:transition-none data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0",
+            "origin-(--transform-origin) transition-[transform,scale,opacity] data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0",
             className,
           )}
           style={{ width }}
@@ -82,15 +82,12 @@ const Item = React.forwardRef<HTMLDivElement, ItemProps>(
         <div
           className={cx(
             "flex w-0 grow items-center gap-3",
-            variant === "danger" && "text-text-danger epaper:group-focus:text-bg",
+            variant === "danger" && "text-text-danger",
           )}
         >
           {icon ? (
             <div
-              className={cx(
-                "flex text-text-secondary epaper:group-focus:text-bg",
-                variant === "danger" && "text-text-danger",
-              )}
+              className={cx("flex text-text-secondary", variant === "danger" && "text-text-danger")}
             >
               {icon}
             </div>
@@ -112,7 +109,6 @@ const Item = React.forwardRef<HTMLDivElement, ItemProps>(
         ref={ref}
         className={cx(
           "group flex h-8 cursor-pointer select-none items-center gap-3 rounded px-3 outline-hidden focus:bg-bg-hover focus:outline-hidden active:bg-bg-active coarse:h-10",
-          "epaper:focus:bg-text epaper:focus:text-bg",
           "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:focus:bg-transparent data-[disabled]:active:bg-transparent",
           className,
         )}

@@ -74,11 +74,9 @@ const _NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProps) {
           "[&:not(:focus-visible)]:group-hover:outline-2",
           "[&:not(:focus-visible)]:group-hover:outline",
           "[&:not(:focus-visible)]:group-hover:outline-[var(--neutral-7)]",
-          "epaper:group-hover:outline-border!",
           "[&:not(:focus-visible)]:group-focus-within:outline-2",
           "[&:not(:focus-visible)]:group-focus-within:outline",
           "[&:not(:focus-visible)]:group-focus-within:outline-[var(--neutral-7)]",
-          "epaper:group-focus-within:outline-border!",
         )}
       >
         <NotePreview note={note} className="coarse:pr-[52px]" />

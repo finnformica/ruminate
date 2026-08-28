@@ -292,7 +292,7 @@ function NoteNavItem({
       }}
     >
       <span className="flex shrink-0 text-text-secondary">
-        <NoteFavicon note={note} className="epaper:[[aria-current=page]_&]:text-bg" />
+        <NoteFavicon note={note} />
       </span>
       <span className="flex min-w-0 items-center gap-1.5">
         {note.pinned ? <PinFillIcon12 className="shrink-0 text-text-pinned" /> : null}

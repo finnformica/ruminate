@@ -69,7 +69,6 @@
   padding-inline: var(--font-size-base);
   padding-block: calc(var(--font-size-base) * 0.75);
   min-height: 48px;
-  @apply epaper:border epaper:border-border;
 }
 
 .markdown code {

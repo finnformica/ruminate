@@ -90,8 +90,8 @@ One token family, sized by surface, never per-element drift:
 | `--border-radius-lg`   | 12px  | block panels: code blocks, cards               |
 
 The rule: the bigger the surface, the bigger the radius. All values derive from
-`--border-radius-base`, so themes that flatten it (e-paper sets it to 0) flatten
-the whole family with it.
+`--border-radius-base`, so a theme that changes the base changes the whole
+family with it.
 
 ## Color roles
 
@@ -106,8 +106,24 @@ the whole family with it.
 | Accent solid | `--accent-9`               | checked checkbox fill                              |
 | Transclusion | `--accent-a2` tint         | `((ref))` embeds — quietly "live" content          |
 
-All roles are Radix alpha/step tokens, so both themes (and e-paper / print,
-which remap the semantic tokens) resolve automatically. Never hardcode a hex.
+All roles are Radix alpha/step tokens, so both color schemes (and print, which
+remaps the semantic tokens) resolve automatically. Never hardcode a hex.
+
+**User-selectable accent.** The `--accent-*` family is themable: a
+`data-accent` attribute on `<html>` (persisted via `accentAtom`, picked in
+Settings → Appearance) remaps the whole family onto another Radix ramp —
+neutral (sand), green, violet, or amber — in `src/styles/variables.css`. Cyan
+is the default and needs no attribute. Rules for a new accent:
+
+- Remap **only** the accent tokens; every accent role above then follows.
+- Both color schemes come free: the ramps themselves flip under
+  `prefers-color-scheme` in `radix-colors.css`.
+- Selection must stay distinct from hover. The neutral (grayscale) accent —
+  the app's original pre-accent gray — would collide with the neutral hover
+  surfaces, so its alpha steps are biased one step darker (selection lands on
+  `sand-a4`, hover stays `sand-a3`).
+- A light step 9 needs a dark checkmark: amber overrides the checked-checkbox
+  glyph and sets `--accent-contrast` to its dark ink.
 
 ## Motion
 

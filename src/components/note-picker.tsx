@@ -190,7 +190,6 @@ function CommandItem({
       onSelect={onSelect}
       className={cx(
         "flex items-center gap-3 cursor-pointer select-none rounded aria-selected:bg-bg-hover",
-        "epaper:aria-selected:bg-text epaper:aria-selected:text-bg epaper:aria-selected:[&_svg]:text-bg",
         size === "small" && "h-8 px-3",
         size === "large" && "h-10 px-3",
       )}
@@ -229,7 +228,7 @@ export function NotePickerPopover({
           <Popover.Popup
             className={cx(
               "card-2 z-20 w-sm grid place-items-stretch rounded-lg print:hidden outline-hidden",
-              "origin-(--transform-origin) transition-[transform,scale,opacity] epaper:transition-none",
+              "origin-(--transform-origin) transition-[transform,scale,opacity]",
               "data-ending-style:scale-95 data-ending-style:opacity-0",
               "data-starting-style:scale-95 data-starting-style:opacity-0",
             )}

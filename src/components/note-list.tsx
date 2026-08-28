@@ -158,7 +158,7 @@ export function NoteList({ baseQuery = "", query, onQueryChange }: NoteListProps
                 render={
                   <IconButton
                     aria-label="View"
-                    className="h-10 w-10 shrink-0 rounded-lg bg-bg-secondary hover:bg-bg-secondary-hover! data-[popup-open]:bg-bg-secondary-hover! active:bg-bg-secondary-active! epaper:ring-1 epaper:ring-inset epaper:ring-border epaper:focus-visible:ring-2 coarse:h-12 coarse:w-12"
+                    className="h-10 w-10 shrink-0 rounded-lg bg-bg-secondary hover:bg-bg-secondary-hover! data-[popup-open]:bg-bg-secondary-hover! active:bg-bg-secondary-active! coarse:h-12 coarse:w-12"
                   >
                     {viewIcons[view]}
                   </IconButton>
@@ -257,9 +257,7 @@ export function NoteList({ baseQuery = "", query, onQueryChange }: NoteListProps
                               key={tag}
                               icon={<TagIcon16 />}
                               trailingVisual={
-                                <span className="text-text-secondary epaper:text-current">
-                                  {frequency}
-                                </span>
+                                <span className="text-text-secondary">{frequency}</span>
                               }
                               onClick={(event) => {
                                 const qualifier = `${event.shiftKey ? "-" : ""}tag:${tag}`
@@ -338,7 +336,7 @@ function DiceButton({ disabled = false, onClick }: { disabled?: boolean; onClick
     <IconButton
       disabled={disabled}
       aria-label="Roll the dice"
-      className="group/dice h-10 w-10 shrink-0 rounded-lg bg-bg-secondary hover:bg-bg-secondary-hover! active:bg-bg-secondary-active! epaper:ring-1 epaper:ring-inset epaper:ring-border epaper:focus-visible:ring-2 coarse:h-12 coarse:w-12"
+      className="group/dice h-10 w-10 shrink-0 rounded-lg bg-bg-secondary hover:bg-bg-secondary-hover! active:bg-bg-secondary-active! coarse:h-12 coarse:w-12"
       onClick={() => {
         setNumber(Math.floor(Math.random() * 6) + 1)
         onClick?.()

@@ -331,11 +331,11 @@ function CalendarItem({
       aria-label={ariaLabel}
       className={cx(
         "focus-ring relative flex w-full cursor-pointer justify-center rounded p-4 leading-4 text-text @container hover:bg-bg-hover active:bg-bg-active",
-        isActive && "font-bold bg-bg-secondary text-text epaper:bg-text epaper:text-bg",
+        isActive && "font-bold bg-bg-secondary text-text",
         // Show a dot if the date has notes
         hasNotes &&
           "after:pointer-events-none after:absolute after:bottom-1 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:content-['']",
-        hasNotes && isActive && "after:bg-text-secondary epaper:after:bg-bg",
+        hasNotes && isActive && "after:bg-text-secondary",
         hasNotes && !isActive && "after:bg-border",
       )}
     />
@@ -350,7 +350,7 @@ function CalendarItem({
         className={cx(
           isToday && "-mx-1 -my-[0.125rem] rounded-sm px-1 py-[0.125rem] leading-[1.2]",
           isToday && !isActive && "shadow-[inset_0_0_0_1px_var(--color-text-secondary)]",
-          isToday && isActive && "bg-text text-bg epaper:bg-bg epaper:text-text",
+          isToday && isActive && "bg-text text-bg",
         )}
       >
         {number}
@@ -394,7 +394,7 @@ function MonthGrid({
     <div className="@container">
       <div className="grid grid-cols-8 @[448px]:grid-cols-[48px_repeat(7,1fr)]">
         {/* Day labels header */}
-        <div className="col-span-8 grid grid-cols-subgrid border-b border-[var(--neutral-a3)] epaper:border-border">
+        <div className="col-span-8 grid grid-cols-subgrid border-b border-[var(--neutral-a3)]">
           <div className="flex h-8 items-center justify-center text-text-secondary">W</div>
           {SHORT_DAY_LABELS.map((day) => (
             <div key={day} className="flex h-8 items-center justify-center text-text-secondary">
@@ -479,10 +479,10 @@ function MonthWeekRow({
       className={cx(
         "focus-ring relative flex h-12 items-center justify-center text-text-secondary -m-px",
         !isWeekActive && "hover:bg-[var(--neutral-a2)] active:bg-[var(--neutral-a3)]",
-        isWeekActive && "font-bold bg-[var(--neutral-a3)] text-text epaper:bg-text epaper:text-bg",
+        isWeekActive && "font-bold bg-[var(--neutral-a3)] text-text",
         hasWeekNotes &&
           "after:pointer-events-none after:absolute after:bottom-2 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:content-['']",
-        hasWeekNotes && isWeekActive && "after:bg-text-secondary epaper:after:bg-bg",
+        hasWeekNotes && isWeekActive && "after:bg-text-secondary",
         hasWeekNotes && !isWeekActive && "after:bg-border",
       )}
     />
@@ -508,8 +508,8 @@ function MonthWeekRow({
   return (
     <div
       className={cx(
-        "col-span-8 grid grid-cols-subgrid divide-x divide-[var(--neutral-a3)] epaper:divide-border",
-        !isLastRow && "border-b border-[var(--neutral-a3)] epaper:border-border",
+        "col-span-8 grid grid-cols-subgrid divide-x divide-[var(--neutral-a3)]",
+        !isLastRow && "border-b border-[var(--neutral-a3)]",
       )}
     >
       {/* Week number link */}
@@ -582,12 +582,12 @@ function MonthDateCell({
         "focus-ring relative flex h-12 items-center justify-center -m-px",
         isOutsideMonth && !isActive ? "text-text-tertiary" : "text-text",
         !isActive && "hover:bg-[var(--neutral-a2)] active:bg-[var(--neutral-a3)]",
-        isActive && "font-bold bg-[var(--neutral-a3)] epaper:bg-text epaper:text-bg",
+        isActive && "font-bold bg-[var(--neutral-a3)]",
         hasNotes &&
           "after:pointer-events-none after:absolute after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:content-['']",
         hasNotes && isToday && "after:bottom-[6px]",
         hasNotes && !isToday && "after:bottom-2",
-        hasNotes && isActive && "after:bg-text-secondary epaper:after:bg-bg",
+        hasNotes && isActive && "after:bg-text-secondary",
         hasNotes && !isActive && "after:bg-border",
       )}
     />
@@ -598,7 +598,7 @@ function MonthDateCell({
       className={cx(
         isToday && "-mx-1 -my-[0.125rem] rounded-sm px-1 py-[0.125rem] leading-[1.2]",
         isToday && !isActive && "shadow-[inset_0_0_0_1px_var(--color-text-secondary)]",
-        isToday && isActive && "bg-text text-bg epaper:bg-bg epaper:text-text",
+        isToday && isActive && "bg-text text-bg",
       )}
     >
       {day}

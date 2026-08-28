@@ -1,7 +1,7 @@
 import { useMatch } from "@tanstack/react-router"
 import { useAtomValue } from "jotai"
 import { useMemo } from "react"
-import { defaultFontAtom, githubRepoAtom } from "../global-state"
+import { githubRepoAtom } from "../global-state"
 import { Note, fontSchema } from "../schema"
 import { cx } from "../utils/cx"
 import {
@@ -29,7 +29,6 @@ type NotePreviewProps = {
 
 export function NotePreview({ note, className, hideProperties }: NotePreviewProps) {
   const highlightedHrefs = useLinkHighlight()
-  const defaultFont = useAtomValue(defaultFontAtom)
   const githubRepo = useAtomValue(githubRepoAtom)
 
   // Prefer a local draft if it exists (unsaved changes)
@@ -51,13 +50,12 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
   // block metadata.
   const displayContent = useMemo(() => toDisplayMarkdown(resolvedContent), [resolvedContent])
 
-  // Resolve note font (frontmatter font or default)
+  // Resolve note font (frontmatter font or the sans default)
   const resolvedFont = useMemo(() => {
     const frontmatterFont = resolvedFrontmatter?.font as unknown
     const parseResult = fontSchema.safeParse(frontmatterFont)
-    const parsedFont = parseResult.success ? parseResult.data : null
-    return parsedFont || defaultFont
-  }, [resolvedFrontmatter?.font, defaultFont])
+    return parseResult.success ? parseResult.data : "sans"
+  }, [resolvedFrontmatter?.font])
 
   const frontmatterTags = useMemo(() => {
     return Array.isArray(resolvedFrontmatter?.tags) &&
@@ -152,7 +150,7 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
           </span>
         </div>
       ) : null}
-      <div className="grow overflow-hidden [mask-image:linear-gradient(to_bottom,black_0%,black_75%,transparent_100%)] epaper:[mask-image:none] [&_*::-webkit-scrollbar]:hidden">
+      <div className="grow overflow-hidden [mask-image:linear-gradient(to_bottom,black_0%,black_75%,transparent_100%)] [&_*::-webkit-scrollbar]:hidden">
         <div className="w-[152%] origin-top-left scale-[66%]">
           <Markdown hideFrontmatter emptyText="Empty note">
             {displayContent}

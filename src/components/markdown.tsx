@@ -704,15 +704,7 @@ function ListItem({ node, children, ordered, className, ...props }: LiProps) {
   }, [hasNodePosition, markdownBody, nodeStart, nodeEnd, onChange])
 
   return (
-    <li
-      {...props}
-      className={cx(
-        "rounded-lg",
-        isMenuOpen &&
-          "bg-bg-selection epaper:bg-transparent epaper:ring-1 epaper:ring-border epaper:ring-inset",
-        className,
-      )}
-    >
+    <li {...props} className={cx("rounded-lg", isMenuOpen && "bg-bg-selection", className)}>
       <div
         className={cx("flex p-1.5 gap-1.5 rounded-lg", {
           "relative pr-10 sm:fine:pr-[74px] coarse:pr-12 group/task": isTask && onChange,

@@ -26,7 +26,6 @@ import { ShareDialog } from "../components/share-dialog"
 import { isSyncingAtom } from "../components/sync-status"
 import {
   dailyTemplateAtom,
-  defaultFontAtom,
   githubRepoAtom,
   globalStateMachineAtom,
   isSignedOutAtom,
@@ -109,7 +108,6 @@ function NotePage() {
   const isSyncing = useAtomValue(isSyncingAtom)
   const dailyTemplate = useAtomValue(dailyTemplateAtom)
   const weeklyTemplate = useAtomValue(weeklyTemplateAtom)
-  const defaultFont = useAtomValue(defaultFontAtom)
   const { online } = useNetworkState()
 
   // Note data
@@ -160,7 +158,7 @@ function NotePage() {
   const frontmatterFont = parsedNote?.frontmatter?.font
   const parseResult = fontSchema.safeParse(frontmatterFont)
   const parsedFont = parseResult.success ? parseResult.data : null
-  const resolvedFont = parsedFont || defaultFont
+  const resolvedFont = parsedFont || "sans"
 
   // Resolve width (frontmatter width or default)
   const frontmatterWidth = parsedNote?.frontmatter?.width
