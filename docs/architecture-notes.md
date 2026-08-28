@@ -154,6 +154,49 @@ Collapse state is **per-note UI state, not content**, so it lives in
   walk instead of serving a stale cache) and raises a one-time warning banner
   via `storageWarningAtom`.
 
+## Note version history (read-only over git; restore is forward-only)
+
+Per-note history is reconstructed on demand from the local repo — no extra
+storage or network. `src/utils/note-history.ts` walks commits newest-first
+from HEAD toward the root across ALL parents, comparing the note file's blob
+oid against its first parent's in each commit and keeping only the commits
+where they differ (created, deleted, and modified transitions). Commits that
+touched other files — view-state sidecars, other notes — are dropped without
+inflating any blobs.
+
+The walk is merge-aware because it has to be: sync resolves cross-device
+conflicts newest-wins via real merge commits, so the losing device's version
+of a note exists only on a merge's second-parent chain. Versions reachable
+only through a second parent are included and flagged `mergeSide` (rendered
+"Merged from another device"), which is exactly the version a user needs to
+recover after a merge replaced their edit. The first-parent chain (the local
+timeline, the "spine") stays unlabeled, and the "Current" marker follows the
+newest spine version even when a merge-side entry sorts above it.
+
+Pages are cursor-based — `nextCursor` serializes the walk frontier (commits
+seen but not yet examined, with their spine flags), so long histories load
+incrementally and diamond-shaped history resumes without gaps or duplicates.
+Pages are cached keyed by filepath + HEAD, so a sync invalidates the cache
+naturally. The isomorphic-git wiring lives in `src/data/note-history.ts` and,
+like the other git read paths, doesn't take the git lock — reads are safe
+against the object store, and a concurrent sync just moves HEAD.
+
+The dialog can be opened programmatically at a specific version: pass
+`initialSha` to `NoteHistoryDialog`, or from anywhere set
+`openNoteHistoryDialogAtom` (`note-history-dialog-state.ts`) with `{ sha }` —
+the dialog fetches up to 10 pages looking for it, preselects and scrolls to it,
+and falls back to the newest version with a "version not found" note. This is
+the hook for routing sync-conflict banners into history instead of creating
+conflicted-copy notes.
+
+History is strictly read-only: nothing in the feature ever rewrites commits.
+"Restore this version" in `note-history-dialog.tsx` is a normal forward save
+through `useSaveNote` (new `updated_at`, new commit, synced like any edit), so
+the restored content becomes the newest version and every prior version stays
+reachable. The +N/−M summaries are exact line-level LCS counts for normal note
+sizes, falling back to an order-insensitive multiset count (flagged `≈`) only
+for enormous diffs.
+
 ## Scale limits (current file-based model)
 
 The binding constraint is the localStorage cache (~5 MB total across all files),

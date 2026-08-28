@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
-import { useAtomValue } from "jotai"
+import { useAtomValue, useSetAtom } from "jotai"
 import { githubRepoAtom, isSignedOutAtom } from "../global-state"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { useDeleteNote, useRenameNote, useSaveNote } from "../hooks/note"
@@ -12,10 +12,12 @@ import { getInvalidNoteIdCharacters } from "../utils/note-id"
 import { pluralize } from "../utils/pluralize"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
+import { openNoteHistoryDialogAtom } from "./note-history-dialog-state"
 import {
   CopyIcon16,
   EditIcon16,
   ExternalLinkIcon16,
+  HistoryIcon16,
   MoreIcon16,
   PinFillIcon16,
   PinIcon16,
@@ -78,6 +80,7 @@ export function NoteActionsMenu({
   const saveNote = useSaveNote()
   const renameNote = useRenameNote()
   const deleteNote = useDeleteNote()
+  const openNoteHistoryDialog = useSetAtom(openNoteHistoryDialogAtom)
 
   // Compare the decoded path segment, not the raw pathname: a note id with a
   // space or other special character is percent-encoded in the URL, so a raw
@@ -209,6 +212,17 @@ export function NoteActionsMenu({
         <DropdownMenu.Item icon={<EditIcon16 />} disabled={isSignedOut} onClick={rename}>
           Rename file
         </DropdownMenu.Item>
+        {/* The history dialog is mounted by the note page and works off the
+            open note, so the item only appears on the open note's menu. */}
+        {isViewing ? (
+          <DropdownMenu.Item
+            icon={<HistoryIcon16 />}
+            disabled={isSignedOut}
+            onClick={() => openNoteHistoryDialog()}
+          >
+            History
+          </DropdownMenu.Item>
+        ) : null}
         <DropdownMenu.Separator />
         {editor?.onShare ? (
           <DropdownMenu.Item
