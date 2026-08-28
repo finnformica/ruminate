@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest"
 import {
   buildConflictCopy,
   commitTimestamp,
-  conflictCopyNotice,
   createConflictRecordingMergeDriver,
   formatConflictTimestamp,
   matchConflictPath,
@@ -234,42 +233,25 @@ describe("formatConflictTimestamp", () => {
   })
 })
 
-describe("conflictCopyNotice", () => {
-  it("says the copy holds this device's version when ours lost", () => {
-    const notice = conflictCopyNotice("foo", "ours")
-    expect(notice).toContain("[[foo]]")
-    expect(notice).toContain("this device's copy")
-    expect(notice).toContain("nothing was lost")
-  })
-
-  it("says the copy holds the other device's version when theirs lost", () => {
-    const notice = conflictCopyNotice("foo", "theirs")
-    expect(notice).toContain("[[foo]]")
-    expect(notice).toContain("other device's copy")
-    expect(notice).toContain("nothing was lost")
-  })
-})
-
 describe("buildConflictCopy", () => {
   const date = new Date(2026, 7, 27, 14, 5)
-  const notice = conflictCopyNotice("foo", "theirs")
+  const notice = "Older version of [[foo]] saved before a reset — nothing was lost."
 
   it("builds a valid, readable note id", () => {
     const copy = buildConflictCopy(
       "work/projects",
       "remote content\n",
       date,
-      conflictCopyNotice("work/projects", "theirs"),
+      "Older version of [[work/projects]] saved before a reset — nothing was lost.",
     )
     expect(copy.id).toBe("work/projects-conflict-20260827-1405")
     expect(isValidNoteId(copy.id)).toBe(true)
   })
 
-  it("prefixes the notice line and preserves the full losing content", () => {
+  it("prefixes the notice line and preserves the full preserved content", () => {
     const copy = buildConflictCopy("foo", "remote line 1\nremote line 2\n", date, notice)
     const [firstLine] = copy.content.split("\n")
     expect(firstLine).toContain("Older version of [[foo]]")
-    expect(firstLine).toContain("sync merge")
     expect(copy.content).toContain("remote line 1\nremote line 2\n")
   })
 

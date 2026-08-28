@@ -27,6 +27,7 @@ import {
   gitPush,
   gitRemove,
   isRepoSynced,
+  mergeNoticeKey,
 } from "./utils/git"
 import { backupUnpushedNotes, restoreUnpushedBackup } from "./utils/local-backup"
 import {
@@ -58,9 +59,10 @@ type Context = {
   /** Why the last sync cycle failed (message + coarse category), for the sidebar. */
   syncError: SyncError | null
   /**
-   * Conflicted-copy notes produced by pulls, accumulated (deduped by copy id)
-   * so a follow-up pull can't clear a notice the user hasn't seen. Dismissal
-   * is per-tab UI state (`dismissedMergeNoticeIdsAtom`), not machine state.
+   * Conflicting merges resolved by pulls (each pointing at the losing version
+   * in git history), accumulated (deduped by note + losing commit) so a
+   * follow-up pull can't clear a notice the user hasn't seen. Dismissal is
+   * per-tab UI state (`dismissedMergeNoticeIdsAtom`), not machine state.
    */
   mergeNotices: MergeNotice[]
 }
@@ -718,14 +720,15 @@ function createGlobalStateMachine() {
         setMergeNotices: assign({
           // Accumulate rather than replace: pulls run constantly, and a later
           // conflict-free pull must not clear a notice the user hasn't seen.
-          // Deduped by copy id so a notice can never be raised twice.
+          // Deduped by note + losing commit (`mergeNoticeKey`) so a notice can
+          // never be raised twice.
           mergeNotices: (context, event) => {
             const incoming = event.data.mergeNotices
             if (incoming.length === 0) return context.mergeNotices
-            const known = new Set(context.mergeNotices.map((notice) => notice.copyId))
+            const known = new Set(context.mergeNotices.map(mergeNoticeKey))
             return [
               ...context.mergeNotices,
-              ...incoming.filter((notice) => !known.has(notice.copyId)),
+              ...incoming.filter((notice) => !known.has(mergeNoticeKey(notice))),
             ]
           },
         }),
@@ -811,16 +814,17 @@ export const isSignedOutAtom = selectAtom(globalStateMachineAtom, (state) =>
  * the sync region is in its error state (see `sync-status.tsx`). */
 export const syncErrorAtom = selectAtom(globalStateMachineAtom, (state) => state.context.syncError)
 
-/** Conflicted-copy notes produced by pulls (see `Context.mergeNotices`). */
+/** Conflicting merges resolved by pulls (see `Context.mergeNotices`). */
 export const mergeNoticesAtom = selectAtom(
   globalStateMachineAtom,
   (state) => state.context.mergeNotices,
 )
 
 /**
- * Copy ids of merge notices the user has dismissed (per-tab, not persisted).
- * The banner shows `mergeNoticesAtom` minus these; because the machine dedupes
- * notices by copy id, a dismissed notice can never be re-raised.
+ * Keys (`mergeNoticeKey`) of merge notices the user has dismissed (per-tab,
+ * not persisted). The banner shows `mergeNoticesAtom` minus these; because the
+ * machine dedupes notices by the same key, a dismissed notice can never be
+ * re-raised.
  */
 export const dismissedMergeNoticeIdsAtom = atom<string[]>([])
 

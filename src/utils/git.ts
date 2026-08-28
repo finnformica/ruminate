@@ -6,9 +6,7 @@ import { ensureFreshToken, getAccessToken, withAuthRetry } from "./github-sessio
 import {
   PreferredSide,
   RecordedConflict,
-  buildConflictCopy,
   commitTimestamp,
-  conflictCopyNotice,
   createConflictRecordingMergeDriver,
   matchConflictPath,
   newerSide,
@@ -75,12 +73,27 @@ export async function gitClone(repo: GitHubRepository, user: GitHubUser) {
   })
 }
 
-/** A conflicted-copy note a pull just committed, for the in-app notice. */
+/**
+ * A genuinely conflicting merge a pull just resolved (newest side won in
+ * place), identifying the LOSING version in git history so the UI can open the
+ * note's History panel on it. No conflicted-copy note is created anymore — the
+ * merge commit keeps both parents, so the losing version stays reachable.
+ */
 export type MergeNotice = {
   /** Id of the note whose conflicting edits were merged. */
   noteId: string
-  /** Id of the conflicted-copy note holding the losing (older) version. */
-  copyId: string
+  /** Head commit sha of the LOSING side of the merge (the branch tip whose
+   * conflicting hunks were replaced). */
+  losingSha: string
+  /** Blob oid of the note's file in the losing commit's tree — pins the exact
+   * losing version even when `losingSha` itself isn't the commit that last
+   * edited the note. Null when it couldn't be resolved. */
+  losingOid: string | null
+}
+
+/** Stable identity of a merge notice, for dedup and dismissal. */
+export function mergeNoticeKey(notice: MergeNotice): string {
+  return `${notice.noteId}@${notice.losingSha}`
 }
 
 /**
@@ -91,10 +104,11 @@ export type MergeNotice = {
  * re-cloned, losing unpushed work). Our driver merges every content conflict
  * cleanly — the NEWER branch tip wins per conflicting hunk (so a stale device
  * pulling later can never silently revert a fresher edit), sidecars ours-wins
- * wholesale — and the full losing version of each genuinely conflicted note is
- * preserved as a conflicted-copy note committed right after the merge.
+ * wholesale. The full losing version of each genuinely conflicted note stays
+ * reachable through the merge commit's second parent.
  *
- * Returns one `MergeNotice` per conflicted copy so the UI can tell the user.
+ * Returns one `MergeNotice` per conflicted note, pointing at the losing
+ * version in history, so the UI can tell the user and offer to open it.
  */
 export async function gitPull(user: GitHubUser): Promise<MergeNotice[]> {
   return withGitLock(async () => {
@@ -107,15 +121,15 @@ export async function gitPull(user: GitHubUser): Promise<MergeNotice[]> {
       // which side wins conflicting hunks. Branch-tip committer time is an
       // approximation (device clocks can skew, and per-hunk recency is not
       // available from a merge driver) — good enough for a personal app, and
-      // the losing side is always preserved as a conflicted copy.
-      const [oursTimestamp, theirsTimestamp] = await Promise.all([
-        branchTipTimestamp(DEFAULT_BRANCH),
-        branchTipTimestamp(theirs),
-      ])
-      const preferSide = newerSide(oursTimestamp, theirsTimestamp)
-      const mergeNotices = await mergeRemote(user, theirs, preferSide)
+      // the losing side stays recoverable from the note's version history.
+      const [oursTip, theirsTip] = await Promise.all([branchTip(DEFAULT_BRANCH), branchTip(theirs)])
+      const preferSide = newerSide(oursTip?.timestamp ?? 0, theirsTip?.timestamp ?? 0)
+      const conflicts = await mergeRemote(user, theirs, preferSide)
       await git.checkout({ fs, dir: REPO_DIR, ref: DEFAULT_BRANCH })
-      return mergeNotices
+      // Resolved after checkout so the merged content is on disk (used to
+      // disambiguate duplicate basenames when mapping conflicts to paths).
+      const losingTip = preferSide === "ours" ? theirsTip : oursTip
+      return resolveMergeNotices(conflicts, losingTip?.sha ?? null, workdirMergeNoticeDeps)
     } finally {
       stopTimer()
     }
@@ -123,15 +137,17 @@ export async function gitPull(user: GitHubUser): Promise<MergeNotice[]> {
 }
 
 /**
- * The commit timestamp (seconds) of a branch tip: committer time, falling back
- * to author time, 0 when the ref cannot be read (falls back to ours-wins).
+ * A branch tip's commit sha and timestamp (committer time, falling back to
+ * author time), or null when the ref cannot be read (falls back to ours-wins
+ * with no recoverable losing version to point at).
  */
-async function branchTipTimestamp(ref: string): Promise<number> {
+async function branchTip(ref: string): Promise<{ sha: string; timestamp: number } | null> {
   try {
     const [entry] = await git.log({ fs, dir: REPO_DIR, ref, depth: 1 })
-    return commitTimestamp(entry)
+    if (!entry) return null
+    return { sha: entry.oid, timestamp: commitTimestamp(entry) }
   } catch {
-    return 0
+    return null
   }
 }
 
@@ -154,7 +170,7 @@ async function mergeRemote(
   user: GitHubUser,
   theirs: string,
   preferSide: PreferredSide,
-): Promise<MergeNotice[]> {
+): Promise<RecordedConflict[]> {
   const { mergeDriver, conflicts } = createConflictRecordingMergeDriver(preferSide)
   const identity = { name: gitUserName(user), email: user.email }
   const mergeOptions: Parameters<typeof git.merge>[0] = {
@@ -179,21 +195,44 @@ async function mergeRemote(
     await git.merge(mergeOptions)
   }
 
-  return writeConflictCopies(conflicts)
+  return conflicts
+}
+
+/** The git/filesystem reads `resolveMergeNotices` needs, injectable for tests. */
+export type MergeNoticeDeps = {
+  /** Repo-relative paths of every note (`.md`) in the workdir. */
+  listNotePaths: () => Promise<string[]>
+  /** UTF-8 content of a workdir file (repo-relative path). */
+  readNote: (path: string) => Promise<string>
+  /** Blob oid of `filepath` in the tree of commit `sha`, or null when absent. */
+  fileOidAt: (sha: string, filepath: string) => Promise<string | null>
+}
+
+const workdirMergeNoticeDeps: MergeNoticeDeps = {
+  listNotePaths: () => listWorkdirFiles((filepath) => filepath.endsWith(".md")),
+  readNote: async (path) => {
+    const content = await fs.promises.readFile(`${REPO_DIR}/${path}`, "utf8")
+    return typeof content === "string" ? content : new TextDecoder().decode(content)
+  },
+  fileOidAt: fileOidAtCommit,
 }
 
 /**
- * For every note that had a real conflicting hunk during the merge, write a
- * conflicted-copy note preserving the full losing version and commit the
- * copies immediately after the merge commit. Nothing is ever silently lost.
- * Returns one `MergeNotice` per committed copy.
+ * For every note that had a real conflicting hunk during the merge, resolve
+ * the LOSING version's identity in git history: the losing branch tip's commit
+ * sha plus the note file's blob oid in that commit's tree. Nothing is written
+ * or committed — the losing version already exists on the merge commit's
+ * second-parent chain; these notices just let the UI open the note's History
+ * panel preselected on it.
  */
-async function writeConflictCopies(conflicts: RecordedConflict[]): Promise<MergeNotice[]> {
-  if (conflicts.length === 0) return []
+export async function resolveMergeNotices(
+  conflicts: RecordedConflict[],
+  losingSha: string | null,
+  deps: MergeNoticeDeps,
+): Promise<MergeNotice[]> {
+  if (conflicts.length === 0 || losingSha === null) return []
 
-  const notePaths = await listWorkdirFiles((filepath) => filepath.endsWith(".md"))
-  const now = new Date()
-  const copyPaths: string[] = []
+  const notePaths = await deps.listNotePaths()
   const notices: MergeNotice[] = []
 
   for (const conflict of conflicts) {
@@ -201,35 +240,46 @@ async function writeConflictCopies(conflicts: RecordedConflict[]): Promise<Merge
     // disambiguating duplicate basenames by the merged content on disk.
     const candidates = notePaths.filter((p) => p.split("/").pop() === conflict.basename)
     const contentByPath = new Map<string, string>()
-    for (const candidate of candidates) {
-      const content = await fs.promises.readFile(`${REPO_DIR}/${candidate}`, "utf8")
-      contentByPath.set(
-        candidate,
-        typeof content === "string" ? content : new TextDecoder().decode(content),
-      )
+    if (candidates.length > 1) {
+      for (const candidate of candidates) {
+        contentByPath.set(candidate, await deps.readNote(candidate))
+      }
     }
     const fullPath = matchConflictPath(conflict, notePaths, (p) => contentByPath.get(p))
     if (!fullPath) continue
 
-    const originalId = fullPath.replace(/\.md$/, "")
-    const copy = buildConflictCopy(
-      originalId,
-      conflict.preserved,
-      now,
-      conflictCopyNotice(originalId, conflict.preservedSide),
-    )
-    const copyPath = `${copy.id}.md`
-    await fs.promises.writeFile(`${REPO_DIR}/${copyPath}`, copy.content, "utf8")
-    copyPaths.push(copyPath)
-    notices.push({ noteId: originalId, copyId: copy.id })
-  }
-
-  if (copyPaths.length > 0) {
-    await gitAdd(copyPaths)
-    await gitCommit(`Preserve conflicting versions from sync merge: ${copyPaths.join(" ")}`)
+    notices.push({
+      noteId: fullPath.replace(/\.md$/, ""),
+      losingSha,
+      losingOid: await deps.fileOidAt(losingSha, fullPath),
+    })
   }
 
   return notices
+}
+
+/**
+ * Blob oid of `filepath` in the tree of commit `sha`, or null when the path
+ * (or a parent directory) doesn't exist in that commit. Mirrors
+ * `resolveFileOid` in `src/data/note-history.ts` (which can't be imported here
+ * without a module cycle).
+ */
+async function fileOidAtCommit(sha: string, filepath: string): Promise<string | null> {
+  const segments = filepath.split("/")
+  const basename = segments.pop()
+  const dirPath = segments.join("/")
+  try {
+    const { tree } = await git.readTree({
+      fs,
+      dir: REPO_DIR,
+      oid: sha,
+      filepath: dirPath || undefined,
+    })
+    const entry = tree.find((e) => e.path === basename && e.type === "blob")
+    return entry?.oid ?? null
+  } catch {
+    return null
+  }
 }
 
 /** List workdir file paths (repo-relative) matching `filter`, ignoring `.git`. */

@@ -1,22 +1,30 @@
-import { Link } from "@tanstack/react-router"
-import { useAtom, useAtomValue } from "jotai"
+import { useNavigate } from "@tanstack/react-router"
+import { useAtom, useAtomValue, useSetAtom } from "jotai"
 import { dismissedMergeNoticeIdsAtom, mergeNoticesAtom } from "../global-state"
+import { mergeNoticeKey } from "../utils/git"
 import { Button } from "./button"
 import { ErrorIcon16 } from "./icons"
+import { openNoteHistoryDialogAtom } from "./note-history-dialog-state"
 
 /**
  * Non-blocking, dismissible banner shown when a pull merged genuinely
  * conflicting edits: the newest version won in place, and the losing version
- * was preserved as a linked conflicted-copy note. Follows the storage-warning
+ * stays reachable in the note's history. "View previous version" opens the
+ * note with its History panel preselected on the losing version, where the
+ * user can view it and restore it if wanted. Follows the storage-warning
  * banner's pattern in `_appRoot.tsx`. Dismissal is per-tab (see
- * `dismissedMergeNoticeIdsAtom`); the machine dedupes notices by copy id, so a
- * dismissed notice can never be re-raised.
+ * `dismissedMergeNoticeIdsAtom`); the machine dedupes notices by the same key,
+ * so a dismissed notice can never be re-raised.
  */
 export function MergeNoticeBanner() {
   const mergeNotices = useAtomValue(mergeNoticesAtom)
   const [dismissedIds, setDismissedIds] = useAtom(dismissedMergeNoticeIdsAtom)
+  const openNoteHistoryDialog = useSetAtom(openNoteHistoryDialogAtom)
+  const navigate = useNavigate()
 
-  const visibleNotices = mergeNotices.filter((notice) => !dismissedIds.includes(notice.copyId))
+  const visibleNotices = mergeNotices.filter(
+    (notice) => !dismissedIds.includes(mergeNoticeKey(notice)),
+  )
   if (visibleNotices.length === 0) return null
 
   return (
@@ -26,18 +34,28 @@ export function MergeNoticeBanner() {
       </div>
       <div className="flex grow flex-col gap-1 pt-0.5 leading-5">
         {visibleNotices.map((notice) => (
-          <span key={notice.copyId}>
+          <span key={mergeNoticeKey(notice)}>
             Sync merged conflicting edits on <span className="font-bold">{notice.noteId}</span> —
-            kept the newest version; the other copy is in{" "}
-            <Link
-              to="/notes/$"
-              params={{ _splat: notice.copyId }}
-              search={{ query: undefined }}
+            kept the newest version.{" "}
+            <button
+              type="button"
               className="underline underline-offset-2"
+              onClick={() => {
+                // The dialog is mounted by the note page, so navigate there
+                // first; the open-at-version atoms survive the route change.
+                navigate({
+                  to: "/notes/$",
+                  params: { _splat: notice.noteId },
+                  search: { query: undefined },
+                })
+                openNoteHistoryDialog({
+                  sha: notice.losingSha,
+                  oid: notice.losingOid ?? undefined,
+                })
+              }}
             >
-              {notice.copyId}
-            </Link>
-            .
+              View previous version
+            </button>
           </span>
         ))}
       </div>
@@ -45,10 +63,7 @@ export function MergeNoticeBanner() {
         size="small"
         className="shrink-0"
         onClick={() =>
-          setDismissedIds((previous) => [
-            ...previous,
-            ...visibleNotices.map((notice) => notice.copyId),
-          ])
+          setDismissedIds((previous) => [...previous, ...visibleNotices.map(mergeNoticeKey)])
         }
       >
         Dismiss

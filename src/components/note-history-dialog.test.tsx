@@ -220,7 +220,7 @@ describe("NoteHistoryDialog", () => {
     expect(onRestore).toHaveBeenCalledWith("other device content")
   })
 
-  it("preselects and previews an initialSha, fetching extra pages to find it", async () => {
+  it("preselects and previews an initial version by sha, fetching extra pages to find it", async () => {
     mocks.listNoteVersions.mockImplementation(({ cursor }: { cursor?: string }) =>
       Promise.resolve(
         cursor === "cur1"
@@ -231,7 +231,7 @@ describe("NoteHistoryDialog", () => {
     mocks.readNoteVersion.mockImplementation(({ oid }: { oid: string }) =>
       Promise.resolve(CONTENT[oid] ?? ""),
     )
-    renderDialog({ initialSha: "c1" })
+    renderDialog({ initialVersion: { sha: "c1" } })
 
     // The target is on page 2 — the dialog walks until it finds it.
     await waitFor(() => {
@@ -245,9 +245,30 @@ describe("NoteHistoryDialog", () => {
     expect(screen.queryByText(/Version not found/)).toBeNull()
   })
 
-  it("falls back to the newest version, with a note, when initialSha is not found", async () => {
+  it("preselects by blob oid when the target sha is not a version entry", async () => {
+    // A merge notice carries the LOSING branch tip's sha — that commit may not
+    // itself have edited the note, so no version entry matches it. The blob
+    // oid still identifies the merge-side entry that carries the content.
+    mocks.listNoteVersions.mockResolvedValue({
+      versions: [V_MERGE_SIDE, V_NEWEST, V_OLDER],
+      nextCursor: null,
+    })
+    mocks.readNoteVersion.mockImplementation(({ oid }: { oid: string }) =>
+      Promise.resolve(CONTENT[oid] ?? ""),
+    )
+    renderDialog({ initialVersion: { sha: "losing-tip-sha", oid: "blob-other-device" } })
+
+    const options = await screen.findAllByRole("option")
+    expect(options[0].getAttribute("aria-selected")).toBe("true")
+    await waitFor(() => {
+      expect(screen.getByTestId("preview").textContent).toBe("other device content")
+    })
+    expect(screen.queryByText(/Version not found/)).toBeNull()
+  })
+
+  it("falls back to the newest version, with a note, when the initial version is not found", async () => {
     setupHistory()
-    renderDialog({ initialSha: "no-such-sha" })
+    renderDialog({ initialVersion: { sha: "no-such-sha" } })
 
     await waitFor(() => {
       expect(screen.getAllByRole("option")).toHaveLength(2)
@@ -260,7 +281,7 @@ describe("NoteHistoryDialog", () => {
     })
   })
 
-  it("bounds the initialSha search to 10 pages", async () => {
+  it("bounds the initial-version search to 10 pages", async () => {
     let pageCount = 0
     mocks.listNoteVersions.mockImplementation(() => {
       pageCount++
@@ -270,7 +291,7 @@ describe("NoteHistoryDialog", () => {
       })
     })
     mocks.readNoteVersion.mockResolvedValue("content")
-    renderDialog({ initialSha: "unreachable" })
+    renderDialog({ initialVersion: { sha: "unreachable" } })
 
     await screen.findByText(/Version not found in recent history/)
     expect(mocks.listNoteVersions).toHaveBeenCalledTimes(10)

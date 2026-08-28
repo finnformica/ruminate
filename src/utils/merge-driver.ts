@@ -1,16 +1,17 @@
 /**
- * Custom merge driver for `git pull` and the conflicted-copy policy built on
- * top of it. Pure (no filesystem) so it can be unit-tested directly.
+ * Custom merge driver for `git pull` and the conflict policy built on top of
+ * it. Pure (no filesystem) so it can be unit-tested directly.
  *
  * Policy:
  * - Non-note files (anything not ending in `.md` — the `.ruminate/` view-state
  *   sidecars, plus any binary/unknown files) merge ours-wins, always clean, so
- *   sync can never dead-end on them (view state is low-stakes; no copies).
+ *   sync can never dead-end on them (view state is low-stakes; no notices).
  * - Notes get a real diff3 merge: non-overlapping edits from both sides both
  *   survive; each genuinely CONFLICTING hunk takes the PREFERRED side (see
  *   `PreferredSide` — newest branch tip wins), and the conflict is recorded so
- *   the caller can preserve the full LOSING version as a conflicted-copy note.
- *   Nothing is ever silently lost.
+ *   the caller can point the user at the full LOSING version in the note's git
+ *   history (the merge commit keeps both parents, so the losing version stays
+ *   reachable). Nothing is ever silently lost.
  *
  * Note: isomorphic-git invokes the driver with the file's *basename*, not its
  * full repo path (see `mergeTree` in isomorphic-git — `path: basename(filepath)`),
@@ -53,8 +54,8 @@ export function commitTimestamp(
  * hunks; ties go to ours. Branch-tip committer time is an approximation —
  * device clocks can skew and a tip timestamp says nothing about individual
  * hunks — but it is good enough for a personal app (per-hunk recency is not
- * available from a merge driver), and the losing side is always preserved as a
- * conflicted-copy note anyway.
+ * available from a merge driver), and the losing side always stays reachable
+ * in the note's version history anyway.
  */
 export function newerSide(oursTimestamp: number, theirsTimestamp: number): PreferredSide {
   return theirsTimestamp > oursTimestamp ? "theirs" : "ours"
@@ -119,8 +120,8 @@ export type ConflictRecordingMergeDriver = {
  * Build the merge driver passed to `git.merge`. It never reports an unclean
  * merge, so `abortOnConflict` can never fire for the cases the driver handles
  * (both sides modified a file's content). `prefer` decides which side wins
- * conflicting hunks in notes; the losing side's full content is recorded so
- * the caller can preserve it as a conflicted-copy note.
+ * conflicting hunks in notes; each conflict is recorded so the caller can
+ * surface the losing version (via the note's git history) to the user.
  */
 export function createConflictRecordingMergeDriver(
   prefer: PreferredSide = "ours",
@@ -167,7 +168,7 @@ export function matchConflictPath(
   return candidates.find((p) => readContent(p) === conflict.merged) ?? candidates[0]
 }
 
-/** Format a date as `yyyymmdd-hhmm` for conflicted-copy note ids. */
+/** Format a date as `yyyymmdd-hhmm` for conflicted-copy note ids (local-backup restores). */
 export function formatConflictTimestamp(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0")
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(
@@ -183,23 +184,13 @@ export type ConflictCopy = {
 }
 
 /**
- * The notice line for a conflicted copy produced by a sync merge, worded so
- * the user can tell WHICH device's text they are reading: `preservedSide`
- * "ours" means the copy holds this device's (older, losing) version;
- * "theirs" means it holds the other device's version.
- */
-export function conflictCopyNotice(originalId: string, preservedSide: PreferredSide): string {
-  return preservedSide === "ours"
-    ? `Older version of [[${originalId}]] from a sync merge (this device's copy) — the other device's newer edits won; nothing was lost.`
-    : `Older version of [[${originalId}]] from a sync merge (other device's copy) — this device's newer edits won; nothing was lost.`
-}
-
-/**
- * Build the conflicted-copy note preserving the full losing version of a note
- * that had a real conflicting hunk. The id `<originalId>-conflict-<yyyymmdd-hhmm>`
- * only uses characters already valid in the original id plus `-` and digits,
- * so it always satisfies the app's note-id rules. The notice line is inserted
- * after any frontmatter so the copy's metadata still parses.
+ * Build a conflicted-copy note preserving the full content of another version
+ * of a note (used by the local-backup restore path — sync merges no longer
+ * create copy notes; their losing versions live in the note's git history).
+ * The id `<originalId>-conflict-<yyyymmdd-hhmm>` only uses characters already
+ * valid in the original id plus `-` and digits, so it always satisfies the
+ * app's note-id rules. The notice line is inserted after any frontmatter so
+ * the copy's metadata still parses.
  */
 export function buildConflictCopy(
   originalId: string,

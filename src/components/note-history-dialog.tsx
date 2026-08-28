@@ -10,12 +10,16 @@ import { BlockNoteEditor } from "./block-editor/block-note-editor"
 import { Button } from "./button"
 import { Dialog } from "./dialog"
 import { CheckIcon16, CopyIcon16, LoadingIcon16 } from "./icons"
-import { isNoteHistoryDialogOpenAtom, noteHistoryInitialShaAtom } from "./note-history-dialog-state"
+import {
+  NoteHistoryTarget,
+  isNoteHistoryDialogOpenAtom,
+  noteHistoryInitialVersionAtom,
+} from "./note-history-dialog-state"
 
 const PAGE_SIZE = 20
 
-/** How many pages to fetch at most while searching for an `initialSha`. */
-const MAX_INITIAL_SHA_PAGES = 10
+/** How many pages to fetch at most while searching for an `initialVersion`. */
+const MAX_INITIAL_VERSION_PAGES = 10
 
 /** onChange is never called in read-only mode; provided to satisfy the prop. */
 const noop = () => {}
@@ -38,7 +42,7 @@ export function NoteHistoryDialog({
   noteId,
   currentContent,
   onRestore,
-  initialSha,
+  initialVersion,
 }: {
   noteId: string
   /** The live editor value, used to disable restoring a version identical to it. */
@@ -50,22 +54,27 @@ export function NoteHistoryDialog({
   onRestore?: (content: string) => void
   /**
    * Preselect (and scroll to) this version when the dialog opens, fetching
-   * extra pages to find it if needed. Also settable without props via
+   * extra pages to find it if needed. Matched by blob oid first, then by
+   * commit sha (see `NoteHistoryTarget`). Also settable without props via
    * `openNoteHistoryDialogAtom` — the prop takes precedence.
    */
-  initialSha?: string | null
+  initialVersion?: NoteHistoryTarget | null
 }) {
   const [open, setOpen] = useAtom(isNoteHistoryDialogOpenAtom)
-  const initialShaFromAtom = useAtomValue(noteHistoryInitialShaAtom)
-  const setInitialShaAtom = useSetAtom(noteHistoryInitialShaAtom)
+  const initialVersionFromAtom = useAtomValue(noteHistoryInitialVersionAtom)
+  const setInitialVersionAtom = useSetAtom(noteHistoryInitialVersionAtom)
   const saveNote = useSaveNote()
 
-  const targetSha = initialSha ?? initialShaFromAtom
+  // Primitive sha/oid (not the object) so the load effect's deps stay stable
+  // across re-renders that pass a fresh object literal.
+  const target = initialVersion ?? initialVersionFromAtom
+  const targetSha = target?.sha
+  const targetOid = target?.oid
 
   const [state, setState] = React.useState<HistoryState>({ status: "loading" })
   const [isLoadingMore, setIsLoadingMore] = React.useState(false)
   const [selectedSha, setSelectedSha] = React.useState<string | null>(null)
-  const [initialShaMissing, setInitialShaMissing] = React.useState(false)
+  const [initialVersionMissing, setInitialVersionMissing] = React.useState(false)
   const [preview, setPreview] = React.useState<{ sha: string; content: string | null } | null>(null)
   const [isConfirmingRestore, setIsConfirmingRestore] = React.useState(false)
   const [copied, setCopied] = React.useState(false)
@@ -78,9 +87,9 @@ export function NoteHistoryDialog({
       setOpen(nextOpen)
       // A stale target must not re-apply the next time the dialog opens from
       // the menu or the palette.
-      if (!nextOpen) setInitialShaAtom(null)
+      if (!nextOpen) setInitialVersionAtom(null)
     },
-    [setOpen, setInitialShaAtom],
+    [setOpen, setInitialVersionAtom],
   )
 
   // Load the first page (walking deeper if an initial version is requested)
@@ -95,7 +104,15 @@ export function NoteHistoryDialog({
     setSelectedSha(null)
     setPreview(null)
     setIsConfirmingRestore(false)
-    setInitialShaMissing(false)
+    setInitialVersionMissing(false)
+
+    // Oid match preferred: a merge-notice's losing commit sha may not itself
+    // be a version entry (the losing tip may not have touched this note), but
+    // the blob oid matches the merge-side entry that carries the content.
+    const matchesTarget = (v: NoteVersion) =>
+      (targetOid !== undefined && v.oid === targetOid) ||
+      (targetSha !== undefined && v.sha === targetSha)
+    const hasTarget = targetSha !== undefined || targetOid !== undefined
 
     async function load() {
       let page = await listNoteVersions({ filepath, limit: PAGE_SIZE })
@@ -103,12 +120,12 @@ export function NoteHistoryDialog({
       let nextCursor = page.nextCursor
 
       // Walk extra pages (bounded) until the requested version is on the list.
-      if (targetSha) {
+      if (hasTarget) {
         let pagesFetched = 1
         while (
-          !versions.some((v) => v.sha === targetSha) &&
+          !versions.some(matchesTarget) &&
           nextCursor &&
-          pagesFetched < MAX_INITIAL_SHA_PAGES
+          pagesFetched < MAX_INITIAL_VERSION_PAGES
         ) {
           page = await listNoteVersions({ filepath, cursor: nextCursor, limit: PAGE_SIZE })
           versions = [...versions, ...page.versions]
@@ -118,10 +135,13 @@ export function NoteHistoryDialog({
       }
 
       if (cancelled) return
-      const found = targetSha ? versions.some((v) => v.sha === targetSha) : false
+      const found = hasTarget
+        ? (versions.find((v) => targetOid !== undefined && v.oid === targetOid) ??
+          versions.find((v) => targetSha !== undefined && v.sha === targetSha))
+        : undefined
       setState({ status: "ready", versions, nextCursor })
-      setSelectedSha(found ? targetSha : (versions[0]?.sha ?? null))
-      setInitialShaMissing(Boolean(targetSha) && !found)
+      setSelectedSha(found ? found.sha : (versions[0]?.sha ?? null))
+      setInitialVersionMissing(hasTarget && !found)
     }
 
     load().catch((error) => {
@@ -135,7 +155,7 @@ export function NoteHistoryDialog({
     return () => {
       cancelled = true
     }
-  }, [open, noteId, filepath, targetSha])
+  }, [open, noteId, filepath, targetSha, targetOid])
 
   // Load the selected version's content for the preview.
   React.useEffect(() => {
@@ -235,7 +255,7 @@ export function NoteHistoryDialog({
           </p>
         ) : (
           <div className="flex flex-col gap-3">
-            {initialShaMissing ? (
+            {initialVersionMissing ? (
               <p className="text-sm leading-4 text-text-secondary">
                 Version not found in recent history — showing the latest versions.
               </p>
@@ -355,8 +375,8 @@ function VersionListItem({
 }) {
   const ref = React.useRef<HTMLButtonElement>(null)
 
-  // Keep the selected version visible — matters when an `initialSha` deep in
-  // the list is preselected on open.
+  // Keep the selected version visible — matters when an `initialVersion` deep
+  // in the list is preselected on open.
   React.useEffect(() => {
     if (isSelected) {
       ref.current?.scrollIntoView?.({ block: "nearest" })

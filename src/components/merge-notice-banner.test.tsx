@@ -2,35 +2,50 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { Provider, createStore } from "jotai"
 import type { PrimitiveAtom } from "jotai"
-import * as React from "react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-// The banner reads two global-state atoms and links via the app router — both
-// far too heavy for jsdom. The atoms are mocked as plain writable Jotai atoms
-// (all the banner needs) and the router Link as a plain anchor.
+type MergeNotice = { noteId: string; losingSha: string; losingOid: string | null }
+
+const mocks = vi.hoisted(() => ({ navigate: vi.fn() }))
+
+// The banner reads two global-state atoms, navigates via the app router, and
+// keys notices via the git layer — all far too heavy for jsdom. The atoms are
+// mocked as plain writable Jotai atoms (all the banner needs), the router's
+// useNavigate as a spy, and the git layer as just the pure key helper. The
+// history-dialog atoms are real (plain Jotai atoms).
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children?: React.ReactNode }) => <a href="#note">{children}</a>,
+  useNavigate: () => mocks.navigate,
 }))
 
 vi.mock("../global-state", async () => {
   const { atom } = await import("jotai")
   return {
-    mergeNoticesAtom: atom<{ noteId: string; copyId: string }[]>([]),
+    mergeNoticesAtom: atom<MergeNotice[]>([]),
     dismissedMergeNoticeIdsAtom: atom<string[]>([]),
   }
 })
 
+vi.mock("../utils/git", () => ({
+  mergeNoticeKey: (notice: { noteId: string; losingSha: string }) =>
+    `${notice.noteId}@${notice.losingSha}`,
+}))
+
 import { dismissedMergeNoticeIdsAtom, mergeNoticesAtom } from "../global-state"
 import { MergeNoticeBanner } from "./merge-notice-banner"
+import {
+  isNoteHistoryDialogOpenAtom,
+  noteHistoryInitialVersionAtom,
+} from "./note-history-dialog-state"
 
 // The mocked atom is writable (see above), unlike the real read-only selectAtom.
-const writableMergeNoticesAtom = mergeNoticesAtom as unknown as PrimitiveAtom<
-  { noteId: string; copyId: string }[]
->
+const writableMergeNoticesAtom = mergeNoticesAtom as unknown as PrimitiveAtom<MergeNotice[]>
 
 afterEach(cleanup)
+beforeEach(() => {
+  mocks.navigate.mockClear()
+})
 
-function renderBanner(notices: { noteId: string; copyId: string }[]) {
+function renderBanner(notices: MergeNotice[]) {
   const store = createStore()
   store.set(writableMergeNoticesAtom, notices)
   render(
@@ -47,34 +62,62 @@ describe("MergeNoticeBanner", () => {
     expect(screen.queryByText(/Sync merged conflicting edits/)).toBeNull()
   })
 
-  it("shows one line per notice, with the copy id as a link", () => {
+  it("shows one line per notice, each with a view-previous-version action", () => {
     renderBanner([
-      { noteId: "foo", copyId: "foo-conflict-20260828-0900" },
-      { noteId: "bar", copyId: "bar-conflict-20260828-0901" },
+      { noteId: "foo", losingSha: "sha-foo", losingOid: "oid-foo" },
+      { noteId: "bar", losingSha: "sha-bar", losingOid: "oid-bar" },
     ])
 
     expect(screen.getAllByText(/Sync merged conflicting edits/)).toHaveLength(2)
     expect(screen.getByText("foo")).toBeDefined()
-    const copyLink = screen.getByText("foo-conflict-20260828-0900")
-    expect(copyLink.closest("a")).not.toBeNull()
+    expect(screen.getByText("bar")).toBeDefined()
+    expect(screen.getAllByRole("button", { name: "View previous version" })).toHaveLength(2)
   })
 
-  it("dismiss hides the banner and never re-raises the same copy id", () => {
-    const store = renderBanner([{ noteId: "foo", copyId: "foo-conflict-20260828-0900" }])
+  it("opens the note's history preselected on the losing version", () => {
+    const store = renderBanner([
+      { noteId: "foo", losingSha: "sha-losing", losingOid: "oid-losing" },
+    ])
+
+    fireEvent.click(screen.getByRole("button", { name: "View previous version" }))
+
+    // Navigates to the note (where the dialog is mounted)…
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/notes/$",
+      params: { _splat: "foo" },
+      search: { query: undefined },
+    })
+    // …and opens the history dialog targeting the losing version.
+    expect(store.get(isNoteHistoryDialogOpenAtom)).toBe(true)
+    expect(store.get(noteHistoryInitialVersionAtom)).toEqual({
+      sha: "sha-losing",
+      oid: "oid-losing",
+    })
+  })
+
+  it("omits the oid from the target when it could not be resolved", () => {
+    const store = renderBanner([{ noteId: "foo", losingSha: "sha-losing", losingOid: null }])
+
+    fireEvent.click(screen.getByRole("button", { name: "View previous version" }))
+    expect(store.get(noteHistoryInitialVersionAtom)).toEqual({ sha: "sha-losing", oid: undefined })
+  })
+
+  it("dismiss hides the banner and never re-raises the same notice", () => {
+    const store = renderBanner([{ noteId: "foo", losingSha: "sha-1", losingOid: "oid-1" }])
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
     expect(screen.queryByText(/Sync merged conflicting edits/)).toBeNull()
-    expect(store.get(dismissedMergeNoticeIdsAtom)).toEqual(["foo-conflict-20260828-0900"])
+    expect(store.get(dismissedMergeNoticeIdsAtom)).toEqual(["foo@sha-1"])
 
     // A later pull re-delivering the same accumulated notice stays hidden; a
-    // genuinely new copy shows up.
+    // genuinely new conflict shows up.
     act(() =>
       store.set(writableMergeNoticesAtom, [
-        { noteId: "foo", copyId: "foo-conflict-20260828-0900" },
-        { noteId: "baz", copyId: "baz-conflict-20260828-0902" },
+        { noteId: "foo", losingSha: "sha-1", losingOid: "oid-1" },
+        { noteId: "baz", losingSha: "sha-2", losingOid: "oid-2" },
       ]),
     )
-    expect(screen.queryByText("foo-conflict-20260828-0900")).toBeNull()
-    expect(screen.getByText("baz-conflict-20260828-0902")).toBeDefined()
+    expect(screen.queryByText("foo")).toBeNull()
+    expect(screen.getByText("baz")).toBeDefined()
   })
 })
