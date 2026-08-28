@@ -17,6 +17,7 @@ import { CheckIcon16, LoadingIcon16, NoteIcon16 } from "../components/icons"
 import { BlockNoteEditor } from "../components/block-editor/block-note-editor"
 import { NoteTitle } from "../components/block-editor/note-title"
 import { NoteActionsMenu } from "../components/note-actions-menu"
+import { NoteHistoryDialog } from "../components/note-history-dialog"
 import { DayActivity } from "../components/day-activity"
 import { LinkHighlightProvider } from "../components/link-highlight-provider"
 import { NoteFavicon } from "../components/note-favicon"
@@ -411,6 +412,14 @@ function NotePage() {
               }}
               open={isShareDialogOpen}
               onOpenChange={setIsShareDialogOpen}
+            />
+            <NoteHistoryDialog
+              noteId={noteId ?? ""}
+              currentContent={editorValue}
+              onRestore={(next) => {
+                setEditorValue(next)
+                handleSave(next)
+              }}
             />
           </div>
         </div>

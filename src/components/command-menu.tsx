@@ -29,6 +29,7 @@ import {
   CopyIcon16,
   ExternalLinkIcon16,
   GlobeIcon16,
+  HistoryIcon16,
   NoteIcon16,
   PinFillIcon12,
   PlusIcon16,
@@ -38,6 +39,7 @@ import {
   TagIcon16,
 } from "./icons"
 import { NoteFavicon } from "./note-favicon"
+import { openNoteHistoryDialogAtom } from "./note-history-dialog-state"
 
 export const isCommandMenuOpenAtom = atom(false)
 
@@ -275,9 +277,18 @@ export function CommandMenu() {
     })
   }, [navItems, deferredQuery])
 
+  const openNoteHistoryDialog = useSetAtom(openNoteHistoryDialogAtom)
+
   const noteActions = useMemo(() => {
     if (!note) return []
     return [
+      {
+        label: "View note history",
+        icon: <HistoryIcon16 />,
+        onSelect: () => {
+          openNoteHistoryDialog()
+        },
+      },
       {
         label: "Copy note markdown",
         icon: <CopyIcon16 />,
@@ -309,7 +320,7 @@ export function CommandMenu() {
         },
       },
     ]
-  }, [note, githubRepo])
+  }, [note, githubRepo, openNoteHistoryDialog])
 
   const filteredNoteActions = useMemo(() => {
     return noteActions.filter((item) => {
