@@ -116,6 +116,37 @@ export const SelectionSweep: Story = {
   args: { initial: SWEEP_SAMPLE },
 }
 
+/** Headings nested seven levels deep — each with a paragraph + bullet child —
+ * plus a heading reached through non-heading ancestors (bullet > bullet >
+ * heading). The fixture for auditing how the depth-based heading scale
+ * degrades at the bottom of the outline. */
+const DEEP_HEADINGS = (() => {
+  const lines: string[] = []
+  const push = (depth: number, content: string, id: string) =>
+    lines.push("  ".repeat(depth) + content, "  ".repeat(depth) + `  id:: ${id}`)
+  for (let d = 0; d <= 6; d++) {
+    push(d, `# Level ${d} heading`, `blk_dh${d}`)
+    push(d + 1, `Paragraph under level ${d}`, `blk_dp${d}`)
+    push(d + 1, `- Bullet under level ${d}`, `blk_db${d}`)
+  }
+  push(0, "- Outer bullet", "blk_ob")
+  push(1, "- Inner bullet", "blk_ib")
+  push(2, "# Heading under bullets", "blk_hub")
+  push(3, "Paragraph under the bullet-heading", "blk_hubp")
+  return lines.join("\n") + "\n"
+})()
+
+export const DeepHeadings: Story = {
+  args: { initial: DEEP_HEADINGS },
+}
+
+/** Zoomed into a deep heading: its children's heading sizes re-derive from the
+ * zoom root (depth restarts at 0), so a level-4 heading reads like a top-level
+ * section inside the zoomed view. */
+export const DeepHeadingsZoomed: Story = {
+  args: { initial: DEEP_HEADINGS, zoomRootId: "blk_dh3" },
+}
+
 /** A brand-new note opens with the first block already in edit mode. */
 export const AutoFocus: Story = {
   args: { initial: "", startEditing: true },

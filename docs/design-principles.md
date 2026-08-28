@@ -53,7 +53,16 @@ outline depth, not by `#` count:
 | Breadcrumb         | sm (12px)       | normal | —           | —        |
 
 The deepest heading keeps a soft underline (`--neutral-a6`, offset 4px) so it
-still reads as a heading at body size without shouting.
+still reads as a heading at body size without shouting. The floor is
+deliberately **uniform**: every heading at depth 3+ renders identically, and
+the 24px indent (plus breadcrumbs when zoomed) carries the hierarchy from
+there — piling on case/color/weight steps at the bottom of the outline would
+promote chrome over content.
+
+Zooming re-derives depth: the zoomed block's children start again at depth 0,
+so a level-4 heading reads as a top-level section inside its own zoomed view.
+The zoom title itself uses the **note-title scale** (3xl) — the zoomed block
+_is_ the page — keeping a full step between it and its depth-0 children.
 
 ## Spacing
 
