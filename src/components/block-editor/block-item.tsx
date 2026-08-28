@@ -419,7 +419,10 @@ export function BlockItem({
               // to 8px of horizontal breathing room while the text (and every
               // marker) stays exactly where it was — the background extends
               // into the 4px gutter gap instead of pushing content.
-              "-mx-1 flex items-start gap-2 rounded-md px-2",
+              // Asymmetric inset: the left edge extends only 2px so the
+              // highlight keeps daylight from the chevron's hover circle in
+              // the gutter; the text column itself doesn't move (-2+6 = -4+8).
+              "-ml-0.5 -mr-1 flex items-start gap-2 rounded-md pl-1.5 pr-2",
               // bg-bg-secondary is the structural "selected" hook (tests query
               // it); .block-highlight paints the accent tint over it so
               // selection reads as selected, not hovered.
