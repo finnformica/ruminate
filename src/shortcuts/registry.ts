@@ -121,7 +121,7 @@ const ZOOM_COMMANDS = new Set<CommandName>(["zoomIn", "zoomOut", "zoomExit"])
  * differ in whether #, > and Shift+. report the shifted character) — bound in
  * the keymap, hidden from display.
  */
-const HIDDEN_COMBOS = new Set(["Mod+Shift+>", "Shift+#", "Shift+>"])
+const HIDDEN_COMBOS = new Set(["Mod+Shift+>", "Shift+#", "Shift+>", "Alt+#", "Alt+Shift+#", "Alt+[", "Alt+>", "Alt+Shift+>"])
 
 /** One entry per (scope, command): combos bound to the same command merge. */
 function editorEntries(): Shortcut[] {

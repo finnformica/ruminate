@@ -103,12 +103,23 @@ describe("select mode", () => {
     expect(resolveKey("select", key({ key: "a", metaKey: true }), inp)).toBeNull()
   })
 
-  it("never swallows modified marker keys (⌘- stays the browser's zoom-out)", () => {
+  it("never swallows Mod-modified marker keys (⌘- stays the browser's zoom-out)", () => {
     const inp = input("A", "select")
     expect(resolveKey("select", key({ key: "-", metaKey: true }), inp)).toBeNull()
     expect(resolveKey("select", key({ key: "1", metaKey: true }), inp)).toBeNull()
     expect(resolveKey("select", key({ key: "[", metaKey: true }), inp)).toBeNull()
-    expect(resolveKey("select", key({ key: "#", altKey: true, shiftKey: true }), inp)).toBeNull()
+  })
+
+  it("accepts Alt-modified marker symbols (non-US Macs type them with Option)", () => {
+    // UK Mac: # is Alt+3, so the event carries altKey with key "#".
+    const inp = input("A", "select")
+    expect(resolveKey("select", key({ key: "#", altKey: true }), inp)?.command).toBe(
+      "turnIntoHeading",
+    )
+    expect(resolveKey("select", key({ key: "#", altKey: true, shiftKey: true }), inp)?.command).toBe(
+      "turnIntoHeading",
+    )
+    expect(resolveKey("select", key({ key: "[", altKey: true }), inp)?.command).toBe("turnIntoTodo")
   })
 })
 

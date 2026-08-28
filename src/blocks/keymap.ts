@@ -108,10 +108,17 @@ export const KEYMAP: Binding[] = [
   // on many layouts, so both spellings are bound (like Mod+Shift+> above).
   { mode: "select", combo: "#", command: "turnIntoHeading" },
   { mode: "select", combo: "Shift+#", command: "turnIntoHeading" },
+  // Alt spellings: on many non-US Mac layouts the symbol itself requires
+  // Option (UK: # is Alt+3), so the event carries altKey with the same key.
+  { mode: "select", combo: "Alt+#", command: "turnIntoHeading" },
+  { mode: "select", combo: "Alt+Shift+#", command: "turnIntoHeading" },
   { mode: "select", combo: "-", command: "turnIntoBullet" },
   { mode: "select", combo: "[", command: "turnIntoTodo" },
+  { mode: "select", combo: "Alt+[", command: "turnIntoTodo" },
   { mode: "select", combo: ">", command: "turnIntoQuote" },
   { mode: "select", combo: "Shift+>", command: "turnIntoQuote" },
+  { mode: "select", combo: "Alt+>", command: "turnIntoQuote" },
+  { mode: "select", combo: "Alt+Shift+>", command: "turnIntoQuote" },
   { mode: "select", combo: "1", command: "turnIntoOrdered" },
   // Zoom ("focus mode"): f dives into the block, Shift+F surfaces one level.
   { mode: "select", combo: "f", command: "zoomIn" },

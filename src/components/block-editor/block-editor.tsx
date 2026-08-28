@@ -906,10 +906,11 @@ export function BlockEditor({
       }
       // Marker keys "turn into" across the whole selection: toggle each root
       // to the kind (marker swap only — content and children untouched). One
-      // structural commit = one undo step. Shift is fine (# and > need it on
-      // many layouts); Mod/Alt combos stay the browser's / other bindings'.
+      // structural commit = one undo step. Shift AND Alt are fine — # and >
+      // need Shift on many layouts, and non-US Macs type symbols with Option
+      // (UK # is Alt+3). Only Mod combos stay the browser's.
       const kind = MARKER_KEYS[event.key]
-      if (kind && !mod && !event.altKey) {
+      if (kind && !mod) {
         event.preventDefault()
         let next = doc
         for (const rootId of selectionRoots()) {
