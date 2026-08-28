@@ -444,7 +444,13 @@ export function BlockItem({
               <span
                 aria-hidden
                 data-testid="zoom-title-hash"
-                className="pointer-events-none absolute right-full top-0 select-none pr-1.5 text-text-tertiary"
+                // Shares the title's own typography (like the note title's
+                // hanging #, which inherits from its h1) so it sits large on
+                // the same baseline instead of shrinking to body scale.
+                className={cx(
+                  typo,
+                  "pointer-events-none absolute right-full top-0 select-none pr-1.5 text-text-tertiary",
+                )}
               >
                 #
               </span>
