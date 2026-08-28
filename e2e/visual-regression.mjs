@@ -26,10 +26,11 @@ const MANIFEST = path.join(BASELINE_DIR, "baseline-manifest.json")
 const PLATFORM_KEY = `${os.platform()}-${os.arch()}`
 
 // Differing-pixel budget as a fraction of the image. Same-platform Chromium
-// renders measured byte-identical across runs, so keep this tight (a 1px
-// layout shift on a sparse story is ~400 px); bump per story only with a
-// documented reason (e.g. an animated affordance that can't be frozen).
-const DEFAULT_MAX_DIFF_RATIO = 0.0002 // 0.02% ≈ 144 px at 800x900
+// renders measured byte-identical across runs, so ANY differing pixel is a
+// real change — a 0.02% budget let a genuinely visible change (an ~8px icon
+// appearing) pass silently. Loosen per story only with a documented reason
+// (e.g. an animated affordance that can't be frozen).
+const DEFAULT_MAX_DIFF_RATIO = 0
 
 // The stories under regression. `waitFor` is a selector that must be visible
 // before the story counts as rendered.
