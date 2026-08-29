@@ -2,6 +2,11 @@
 
 ## 2026-W35
 
+### Changed
+
+- Your notes now live in a database instead of a GitHub repository. Sign in and they're just there — no repository to choose, no cloning, no commit/push cycles. Everything is stored in a local database on your device (so the app works fully offline) and syncs to the cloud automatically: every save is pushed in the background within seconds, and opening the app — or returning to its tab, or coming back online — pulls what you wrote on other devices. When the same note is edited on two devices, the most recent save wins, and the editor still warns you before a stale screen can overwrite newer content ("Show latest" / "Save mine anyway"). GitHub remains only your sign-in.
+- Settings → Storage now shows the live state of your data: local database status, pending cloud pushes, remote row counts, and a "Push full copy to D1 now" button for peace of mind. The sidebar sync indicator reflects the same thing — "Syncing…" until your last save has reached the cloud.
+
 ### Fixed
 
 - A stale device can no longer quietly revert your newer edits. When two devices' changes collide, the newest edit now wins, a banner tells you a merge happened with a "View previous version" action that opens the note's history on the exact version that lost, and saving is blocked with an explicit "Save mine anyway" choice whenever the note has moved on since your editor loaded — so the silent-overwrite path that reverted a restructured note is closed from every direction. Leftover drafts that contain no real edits are cleaned up instead of triggering false "updated on another device" warnings.
@@ -44,6 +49,9 @@
 
 ### Removed
 
+- Everything git: the repository-selection screen, git sync, "Reset local copy", "Open in GitHub", merge-conflict banners and conflicted-copy notes are gone along with the repository itself.
+- Note version history and the calendar's past-day roll-ups. Both were reconstructed from git commits, which no longer exist; past days now show a simple placeholder. A database-backed history layer is planned to bring these back.
+- File attachments (the git-era `/uploads` folder). Legacy attachment references in notes render as an inert placeholder.
 - The unused e-paper theme has been removed. It was never reachable from the app and was quietly accumulating visual bugs.
 
 ## 2026-W34

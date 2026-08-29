@@ -3,44 +3,8 @@
 export interface Typegen0 {
   "@@xstate/typegen": true
   internalEvents: {
-    "": { type: "" }
     "done.invoke.global.resolvingUser:invocation[0]": {
       type: "done.invoke.global.resolvingUser:invocation[0]"
-      data: unknown
-      __tip: "See the XState TS docs to learn how to strongly type this."
-    }
-    "done.invoke.global.signedIn.cloned.change.writingFiles:invocation[0]": {
-      type: "done.invoke.global.signedIn.cloned.change.writingFiles:invocation[0]"
-      data: unknown
-      __tip: "See the XState TS docs to learn how to strongly type this."
-    }
-    "done.invoke.global.signedIn.cloned.sync.checkingStatus:invocation[0]": {
-      type: "done.invoke.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
-      data: unknown
-      __tip: "See the XState TS docs to learn how to strongly type this."
-    }
-    "done.invoke.global.signedIn.cloned.sync.pulling:invocation[0]": {
-      type: "done.invoke.global.signedIn.cloned.sync.pulling:invocation[0]"
-      data: unknown
-      __tip: "See the XState TS docs to learn how to strongly type this."
-    }
-    "done.invoke.global.signedIn.cloned.sync.pushing:invocation[0]": {
-      type: "done.invoke.global.signedIn.cloned.sync.pushing:invocation[0]"
-      data: unknown
-      __tip: "See the XState TS docs to learn how to strongly type this."
-    }
-    "done.invoke.global.signedIn.cloned.sync.refreshing:invocation[0]": {
-      type: "done.invoke.global.signedIn.cloned.sync.refreshing:invocation[0]"
-      data: unknown
-      __tip: "See the XState TS docs to learn how to strongly type this."
-    }
-    "done.invoke.global.signedIn.cloningRepo:invocation[0]": {
-      type: "done.invoke.global.signedIn.cloningRepo:invocation[0]"
-      data: unknown
-      __tip: "See the XState TS docs to learn how to strongly type this."
-    }
-    "done.invoke.global.signedIn.resolvingRepo:invocation[0]": {
-      type: "done.invoke.global.signedIn.resolvingRepo:invocation[0]"
       data: unknown
       __tip: "See the XState TS docs to learn how to strongly type this."
     }
@@ -48,50 +12,11 @@ export interface Typegen0 {
       type: "error.platform.global.resolvingUser:invocation[0]"
       data: unknown
     }
-    "error.platform.global.signedIn.cloned.change.deletingFile:invocation[0]": {
-      type: "error.platform.global.signedIn.cloned.change.deletingFile:invocation[0]"
-      data: unknown
-    }
-    "error.platform.global.signedIn.cloned.change.writingFiles:invocation[0]": {
-      type: "error.platform.global.signedIn.cloned.change.writingFiles:invocation[0]"
-      data: unknown
-    }
-    "error.platform.global.signedIn.cloned.sync.checkingStatus:invocation[0]": {
-      type: "error.platform.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
-      data: unknown
-    }
-    "error.platform.global.signedIn.cloned.sync.pulling:invocation[0]": {
-      type: "error.platform.global.signedIn.cloned.sync.pulling:invocation[0]"
-      data: unknown
-    }
-    "error.platform.global.signedIn.cloned.sync.pushing:invocation[0]": {
-      type: "error.platform.global.signedIn.cloned.sync.pushing:invocation[0]"
-      data: unknown
-    }
-    "error.platform.global.signedIn.cloned.sync.refreshing:invocation[0]": {
-      type: "error.platform.global.signedIn.cloned.sync.refreshing:invocation[0]"
-      data: unknown
-    }
-    "error.platform.global.signedIn.cloningRepo:invocation[0]": {
-      type: "error.platform.global.signedIn.cloningRepo:invocation[0]"
-      data: unknown
-    }
-    "xstate.after(1000)#global.signedIn.cloned.sync.debouncing": {
-      type: "xstate.after(1000)#global.signedIn.cloned.sync.debouncing"
-    }
     "xstate.init": { type: "xstate.init" }
     "xstate.stop": { type: "xstate.stop" }
   }
   invokeSrcNameMap: {
-    checkStatus: "done.invoke.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
-    cloneRepo: "done.invoke.global.signedIn.cloningRepo:invocation[0]"
-    deleteFile: "done.invoke.global.signedIn.cloned.change.deletingFile:invocation[0]"
-    pull: "done.invoke.global.signedIn.cloned.sync.pulling:invocation[0]"
-    push: "done.invoke.global.signedIn.cloned.sync.pushing:invocation[0]"
-    refreshFiles: "done.invoke.global.signedIn.cloned.sync.refreshing:invocation[0]"
-    resolveRepo: "done.invoke.global.signedIn.resolvingRepo:invocation[0]"
     resolveUser: "done.invoke.global.resolvingUser:invocation[0]"
-    writeFiles: "done.invoke.global.signedIn.cloned.change.writingFiles:invocation[0]"
   }
   missingImplementations: {
     actions: never
@@ -100,133 +25,18 @@ export interface Typegen0 {
     services: never
   }
   eventsCausingActions: {
-    clearFileSystem: "SIGN_OUT" | "error.platform.global.resolvingUser:invocation[0]"
-    clearGitHubRepo: "error.platform.global.signedIn.cloningRepo:invocation[0]"
     clearGitHubUser: "SIGN_OUT" | "error.platform.global.resolvingUser:invocation[0]"
     clearGitHubUserLocalStorage: "SIGN_OUT" | "error.platform.global.resolvingUser:invocation[0]"
-    clearMarkdownFiles: "SELECT_REPO" | "SIGN_IN" | "xstate.stop"
-    clearMarkdownFilesLocalStorage:
-      | "SELECT_REPO"
-      | "SIGN_OUT"
-      | "error.platform.global.resolvingUser:invocation[0]"
-    broadcastSynced: "done.invoke.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
-    deleteMarkdownFile: "DELETE_FILE"
-    deleteMarkdownFileLocalStorage: "DELETE_FILE"
-    incrementSyncAttempts:
-      | "done.invoke.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
-      | "error.platform.global.signedIn.cloned.sync.pushing:invocation[0]"
-    logError:
-      | "done.invoke.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
-      | "error.platform.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
-      | "error.platform.global.signedIn.cloned.sync.pulling:invocation[0]"
-      | "error.platform.global.signedIn.cloned.sync.pushing:invocation[0]"
-    logUser:
-      | "done.invoke.global.signedIn.cloningRepo:invocation[0]"
-      | "done.invoke.global.signedIn.resolvingRepo:invocation[0]"
-    mergeMarkdownFiles: "WRITE_FILES"
-    mergeMarkdownFilesLocalStorage: "WRITE_FILES"
-    resetSyncAttempts:
-      | ""
-      | "SYNC_DEBOUNCED"
-      | "done.invoke.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
-      | "done.invoke.global.signedIn.cloned.sync.refreshing:invocation[0]"
-      | "done.invoke.global.signedIn.cloningRepo:invocation[0]"
-      | "error.platform.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
-      | "error.platform.global.signedIn.cloned.sync.pulling:invocation[0]"
-      | "error.platform.global.signedIn.cloned.sync.pushing:invocation[0]"
-      | "error.platform.global.signedIn.cloned.sync.refreshing:invocation[0]"
-    setError:
-      | "error.platform.global.signedIn.cloned.change.deletingFile:invocation[0]"
-      | "error.platform.global.signedIn.cloned.change.writingFiles:invocation[0]"
-      | "error.platform.global.signedIn.cloningRepo:invocation[0]"
-    setGitHubRepo: "SELECT_REPO" | "done.invoke.global.signedIn.resolvingRepo:invocation[0]"
+    clearMarkdownFiles: "SIGN_IN" | "xstate.stop"
     setGitHubUser: "SIGN_IN" | "done.invoke.global.resolvingUser:invocation[0]"
     setGitHubUserLocalStorage: "SIGN_IN" | "done.invoke.global.resolvingUser:invocation[0]"
-    setMarkdownFiles:
-      | "done.invoke.global.signedIn.cloned.sync.pulling:invocation[0]"
-      | "done.invoke.global.signedIn.cloned.sync.refreshing:invocation[0]"
-      | "done.invoke.global.signedIn.cloningRepo:invocation[0]"
-      | "done.invoke.global.signedIn.resolvingRepo:invocation[0]"
-    setMergeNotices: "done.invoke.global.signedIn.cloned.sync.pulling:invocation[0]"
-    setMarkdownFilesLocalStorage:
-      | "done.invoke.global.signedIn.cloned.sync.pulling:invocation[0]"
-      | "done.invoke.global.signedIn.cloned.sync.refreshing:invocation[0]"
-      | "done.invoke.global.signedIn.cloningRepo:invocation[0]"
-      | "done.invoke.global.signedIn.resolvingRepo:invocation[0]"
     setSampleMarkdownFiles: "SIGN_OUT" | "error.platform.global.resolvingUser:invocation[0]"
-    setSyncError:
-      | "done.invoke.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
-      | "error.platform.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
-      | "error.platform.global.signedIn.cloned.sync.pulling:invocation[0]"
-      | "error.platform.global.signedIn.cloned.sync.pushing:invocation[0]"
   }
   eventsCausingDelays: {}
-  eventsCausingGuards: {
-    canRetrySync: "done.invoke.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
-    didCommit: "done.invoke.global.signedIn.cloned.change.writingFiles:invocation[0]"
-    isOffline: ""
-    isSynced: "done.invoke.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
-    shouldRetryPush: "error.platform.global.signedIn.cloned.sync.pushing:invocation[0]"
-  }
+  eventsCausingGuards: {}
   eventsCausingServices: {
-    checkStatus: "done.invoke.global.signedIn.cloned.sync.pushing:invocation[0]"
-    cloneRepo: "SELECT_REPO"
-    deleteFile: "DELETE_FILE"
-    pull:
-      | "SYNC"
-      | "done.invoke.global.signedIn.cloned.sync.checkingStatus:invocation[0]"
-      | "done.invoke.global.signedIn.cloningRepo:invocation[0]"
-      | "done.invoke.global.signedIn.resolvingRepo:invocation[0]"
-      | "error.platform.global.signedIn.cloned.sync.pushing:invocation[0]"
-      | "xstate.after(1000)#global.signedIn.cloned.sync.debouncing"
-    push: "done.invoke.global.signedIn.cloned.sync.pulling:invocation[0]"
-    refreshFiles: "REFRESH_FILES"
-    resolveRepo: "SIGN_IN" | "done.invoke.global.resolvingUser:invocation[0]"
     resolveUser: "xstate.init"
-    writeFiles: "WRITE_FILES"
   }
-  matchesStates:
-    | "resolvingUser"
-    | "signedIn"
-    | "signedIn.cloned"
-    | "signedIn.cloned.change"
-    | "signedIn.cloned.change.deletingFile"
-    | "signedIn.cloned.change.idle"
-    | "signedIn.cloned.change.writingFiles"
-    | "signedIn.cloned.sync"
-    | "signedIn.cloned.sync.checkingStatus"
-    | "signedIn.cloned.sync.debouncing"
-    | "signedIn.cloned.sync.error"
-    | "signedIn.cloned.sync.pulling"
-    | "signedIn.cloned.sync.pushing"
-    | "signedIn.cloned.sync.refreshing"
-    | "signedIn.cloned.sync.success"
-    | "signedIn.cloningRepo"
-    | "signedIn.notCloned"
-    | "signedIn.resolvingRepo"
-    | "signedOut"
-    | {
-        signedIn?:
-          | "cloned"
-          | "cloningRepo"
-          | "notCloned"
-          | "resolvingRepo"
-          | {
-              cloned?:
-                | "change"
-                | "sync"
-                | {
-                    change?: "deletingFile" | "idle" | "writingFiles"
-                    sync?:
-                      | "checkingStatus"
-                      | "debouncing"
-                      | "error"
-                      | "pulling"
-                      | "pushing"
-                      | "refreshing"
-                      | "success"
-                  }
-            }
-      }
+  matchesStates: "resolvingUser" | "signedIn" | "signedOut"
   tags: never
 }

@@ -16,8 +16,6 @@ import { CheckIcon16, LoadingIcon16, NoteIcon16 } from "../components/icons"
 import { BlockNoteEditor } from "../components/block-editor/block-note-editor"
 import { NoteTitle } from "../components/block-editor/note-title"
 import { NoteActionsMenu } from "../components/note-actions-menu"
-import { NoteHistoryDialog } from "../components/note-history-dialog"
-import { DayActivity } from "../components/day-activity"
 import { LinkHighlightProvider } from "../components/link-highlight-provider"
 import { NoteFavicon } from "../components/note-favicon"
 import { NoteList } from "../components/note-list"
@@ -27,10 +25,8 @@ import { ShareDialog } from "../components/share-dialog"
 import { isSyncingAtom } from "../components/sync-status"
 import {
   dailyTemplateAtom,
-  githubRepoAtom,
   isDatabaseModeAtom,
   isSignedOutAtom,
-  notesReadyAtom,
   weeklyTemplateAtom,
 } from "../global-state"
 import { useEditorValue } from "../hooks/editor-value"
@@ -69,10 +65,11 @@ export const Route = createFileRoute("/_appRoot/notes_/$")({
 function RouteComponent() {
   const { _splat: noteId } = Route.useParams()
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  // Git mode: the repo must be cloned. Database mode: immediately ready.
-  const notesReady = useAtomValue(notesReadyAtom)
+  // Signed in, the store serves notes immediately; signed out, the sample
+  // notes render. Only the brief auth resolution at boot is gated.
+  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
 
-  if (isSignedOut || notesReady) {
+  if (isSignedOut || isDatabaseMode) {
     return <NotePage key={noteId} />
   }
 
@@ -102,9 +99,7 @@ function NotePage() {
   const navigate = Route.useNavigate()
 
   // Global state
-  const githubRepo = useAtomValue(githubRepoAtom)
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const isSyncing = useAtomValue(isSyncingAtom)
   const dailyTemplate = useAtomValue(dailyTemplateAtom)
   const weeklyTemplate = useAtomValue(weeklyTemplateAtom)
@@ -114,13 +109,11 @@ function NotePage() {
   const note = useNoteById(noteId)
   const isDailyNote = isValidDateString(noteId ?? "")
   const isWeeklyNote = isValidWeekString(noteId ?? "")
-  // A daily note is editable only for the current day. Past/future days show a
-  // read-only, git-reconstructed view of what was written that day (the
-  // calendar time machine). "Today" is resolved in the current timezone, to
-  // match the floating YYYY-MM-DD note naming.
+  // A daily note is editable only for the current day; the database stores
+  // current state only (no history to reconstruct — docs/graph-storage.md),
+  // so past/future days show a placeholder. "Today" is resolved in the
+  // current timezone, to match the floating YYYY-MM-DD note naming.
   const isReadOnlyDailyNote = isDailyNote && noteId !== toDateString(new Date())
-  // Every editable note uses the block editor; only past/future daily notes are
-  // the exception, rendering read-only git history (see DayActivity below).
   const useBlockEditor = !isReadOnlyDailyNote
   const searchNotes = useSearchNotes()
   const saveNote = useSaveNote()
@@ -208,9 +201,9 @@ function NotePage() {
         saveNote({ id: noteId, content: value })
       }
 
-      clearNoteDraft({ githubRepo, noteId })
+      clearNoteDraft(noteId)
     },
-    [isSignedOut, noteId, note, saveNote, githubRepo],
+    [isSignedOut, noteId, note, saveNote],
   )
 
   // Show "Saving…" the instant a save is requested, rather than waiting for the
@@ -320,8 +313,8 @@ function NotePage() {
         return false
       }
 
-      clearNoteDraft({ githubRepo, noteId: oldNoteId })
-      clearNoteDraft({ githubRepo, noteId: newNoteId })
+      clearNoteDraft(oldNoteId)
+      clearNoteDraft(newNoteId)
 
       navigate({
         to: "/notes/$",
@@ -331,7 +324,7 @@ function NotePage() {
       })
       return true
     },
-    [noteId, renameNote, editorValue, githubRepo, navigate],
+    [noteId, renameNote, editorValue, navigate],
   )
 
   // Save with ⌘S
@@ -412,19 +405,6 @@ function NotePage() {
               open={isShareDialogOpen}
               onOpenChange={setIsShareDialogOpen}
             />
-            {/* Note history reconstructs versions from git commits, which
-                don't exist in database mode (see docs/graph-storage.md) —
-                the dialog and its entry points are hidden there. */}
-            {!isDatabaseMode ? (
-              <NoteHistoryDialog
-                noteId={noteId ?? ""}
-                currentContent={editorValue}
-                onRestore={(next) => {
-                  setEditorValue(next)
-                  handleSave(next)
-                }}
-              />
-            ) : null}
           </div>
         </div>
       }
@@ -527,7 +507,9 @@ function NotePage() {
                 />
               </div>
             ) : (
-              <DayActivity date={noteId ?? ""} />
+              // The database stores current state only, so there is no
+              // per-day history to reconstruct for past days.
+              <p className="text-text-secondary">History for past days isn’t available.</p>
             )}
             {isWeeklyNote ? (
               <Details className="print:hidden">

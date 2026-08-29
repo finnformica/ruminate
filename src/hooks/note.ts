@@ -1,12 +1,11 @@
 import { useAtomValue } from "jotai"
 import { selectAtom, useAtomCallback } from "jotai/utils"
 import React from "react"
-import { backlinksIndexAtom, githubRepoAtom, githubUserAtom, notesAtom } from "../global-state"
+import { backlinksIndexAtom, githubUserAtom, notesAtom } from "../global-state"
 import { useDeleteNoteFile, useGetNoteContents, useWriteNotes } from "../data/store"
 import { Note, NoteId } from "../schema"
-import { parseFrontmatter, updateFrontmatterValue } from "../utils/frontmatter"
-import { deleteGist, updateGist } from "../utils/gist"
-import { parseNote } from "../utils/parse-note"
+import { updateFrontmatterValue } from "../utils/frontmatter"
+import { deleteGist } from "../utils/gist"
 import { updateWikilinks } from "../utils/update-wikilinks"
 import { isValidNoteId } from "../utils/note-id"
 
@@ -46,33 +45,19 @@ export function useBacklinksForId(id: NoteId | undefined) {
 
 export function useSaveNote() {
   const writeNotes = useWriteNotes()
-  const githubUser = useAtomValue(githubUserAtom)
-  const githubRepo = useAtomValue(githubRepoAtom)
-  const getNotes = useAtomCallback(React.useCallback((get) => get(notesAtom), []))
 
   const saveNote = React.useCallback(
-    async ({ id, content }: Pick<Note, "id" | "content">) => {
-      // Add updated_at timestamp to frontmatter
+    ({ id, content }: Pick<Note, "id" | "content">) => {
+      // Add updated_at timestamp to frontmatter — this is also what makes the
+      // replica's incremental pulls work (docs/graph-storage.md).
       const contentWithTimestamp = updateFrontmatterValue({
         content,
         properties: { updated_at: new Date() },
       })
 
       writeNotes({ [id]: contentWithTimestamp })
-
-      // If the note has a gist ID, update the gist
-      const { frontmatter } = parseFrontmatter(contentWithTimestamp)
-      if (typeof frontmatter.gist_id === "string" && githubUser && githubRepo) {
-        await updateGist({
-          gistId: frontmatter.gist_id,
-          note: parseNote(id ?? "", contentWithTimestamp),
-          githubUser,
-          githubRepo,
-          notes: getNotes(),
-        })
-      }
     },
-    [writeNotes, githubUser, githubRepo, getNotes],
+    [writeNotes],
   )
 
   return saveNote
@@ -134,7 +119,7 @@ export function useRenameNote() {
       }
 
       if (Object.keys(updates).length > 0) {
-        writeNotes(updates, `Rename note ${oldName} to ${newName}`)
+        writeNotes(updates)
       }
 
       return { success: true }

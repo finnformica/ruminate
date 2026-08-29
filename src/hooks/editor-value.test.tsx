@@ -3,13 +3,6 @@ import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Note } from "../schema"
 
-// The hook only reads `githubRepoAtom` (to key drafts); the real atom drags in
-// the whole global state machine, far too heavy for jsdom.
-vi.mock("../global-state", async () => {
-  const { atom } = await import("jotai")
-  return { githubRepoAtom: atom(null) }
-})
-
 import { hashNoteContent } from "../utils/note-draft"
 import { useEditorValue } from "./editor-value"
 

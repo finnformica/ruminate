@@ -1,33 +1,20 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useAtom, useAtomValue, useSetAtom } from "jotai"
-import { useEffect, useState } from "react"
+import { useAtom, useAtomValue } from "jotai"
+import { useEffect } from "react"
 import { useNetworkState } from "react-use"
 import { Button } from "../components/button"
 import { useSignOut } from "../components/github-auth"
 import { GitHubAvatar } from "../components/github-avatar"
-import { LoadingIcon16, SettingsIcon16 } from "../components/icons"
+import { SettingsIcon16 } from "../components/icons"
 import { PageLayout } from "../components/page-layout"
-import { RepoForm } from "../components/repo-form"
 import { Signature } from "../components/signature"
-import { Switch } from "../components/switch"
 import { refreshDatabaseReplicaStatus, requestDatabaseFullPush } from "../data/database-mode"
 import {
   storageDiagnosticsAtom,
-  storageEngineAtom,
   type ReplicaDiagnostics,
   type StorageDiagnostics,
-} from "../data/storage-mirror"
-import {
-  AccentColor,
-  accentAtom,
-  githubRepoAtom,
-  githubUserAtom,
-  globalStateMachineAtom,
-  isCloningRepoAtom,
-  isDatabaseModeAtom,
-  isRepoClonedAtom,
-  isRepoNotClonedAtom,
-} from "../global-state"
+} from "../data/storage-diagnostics"
+import { AccentColor, accentAtom, githubUserAtom } from "../global-state"
 import { cx } from "../utils/cx"
 
 export const Route = createFileRoute("/_appRoot/settings")({
@@ -139,64 +126,32 @@ function AppearanceSection() {
 }
 
 function StorageSection() {
-  const [engine, setEngine] = useAtom(storageEngineAtom)
+  const githubUser = useAtomValue(githubUserAtom)
   const diagnostics = useAtomValue(storageDiagnosticsAtom)
-  const enabled = engine === "database"
 
   return (
     <SettingsSection title="Storage">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex w-0 grow flex-col gap-1">
-          <label htmlFor="database-store-toggle" className="leading-4">
-            {enabled ? "Database (default)" : "Git classic"}
-          </label>
-          <span className="text-sm leading-5 text-text-secondary">
-            {enabled
-              ? "Notes live in a local database and sync to the cloud automatically. " +
-                "Turn off to switch back to the classic git experience (GitHub repository, " +
-                "commits, note history)."
-              : "Notes are markdown files in a GitHub repository, synced with git. " +
-                "Turn on to switch to the database storage (the default)."}
-          </span>
-        </div>
-        <Switch
-          id="database-store-toggle"
-          checked={enabled}
-          onCheckedChange={(checked) => {
-            setEngine(checked ? "database" : "git")
-            // The storage engine decides how the whole app boots (which store
-            // feeds the atoms, whether the machine resolves a repo). A clean
-            // reload is the reliable way to switch worlds.
-            window.location.reload()
-          }}
-        />
+      <div className="flex flex-col gap-1">
+        <span className="leading-4">Database</span>
+        <span className="text-sm leading-5 text-text-secondary">
+          Notes live in a local database on this device and sync to the cloud automatically, so
+          they’re available offline and on every device you sign in from.
+        </span>
       </div>
-      {enabled ? <StorageDiagnosticsPanel diagnostics={diagnostics} /> : null}
+      {githubUser ? <StorageDiagnosticsPanel diagnostics={diagnostics} /> : null}
     </SettingsSection>
   )
 }
 
 const STORAGE_STATUS_LABELS: Record<StorageDiagnostics["status"], string> = {
   off: "Off",
-  starting: "Starting…",
+  opening: "Starting…",
   ready: "Ready",
   error: "Error",
 }
 
 function StorageDiagnosticsPanel({ diagnostics }: { diagnostics: StorageDiagnostics }) {
-  const {
-    status,
-    persistence,
-    ingestedNotes,
-    lastIngestMs,
-    reconciledFromSync,
-    rekeys,
-    divergences,
-    writeErrors,
-    rekeyCount,
-    divergenceCount,
-    writeErrorCount,
-  } = diagnostics
+  const { status, persistence, notes, writeErrors, writeErrorCount } = diagnostics
 
   return (
     <div className="mt-4 flex flex-col gap-2 border-t border-border-secondary pt-4 text-sm leading-5">
@@ -206,40 +161,12 @@ function StorageDiagnosticsPanel({ diagnostics }: { diagnostics: StorageDiagnost
           {STORAGE_STATUS_LABELS[status]}
           {status === "ready" && persistence === "memory" ? " (in-memory — OPFS unavailable)" : ""}
         </dd>
-        <dt>Notes ingested</dt>
-        <dd>
-          {ingestedNotes}
-          {lastIngestMs !== null ? ` (${lastIngestMs}ms)` : ""}
-        </dd>
-        <dt>Reconciled from sync</dt>
-        <dd>{reconciledFromSync}</dd>
-        <dt>Block ids re-keyed</dt>
-        <dd>{rekeyCount}</dd>
-        <dt>Divergences</dt>
-        <dd className={divergenceCount > 0 ? "!text-text-danger" : ""}>{divergenceCount}</dd>
+        <dt>Notes</dt>
+        <dd>{notes}</dd>
         <dt>Write errors</dt>
         <dd className={writeErrorCount > 0 ? "!text-text-danger" : ""}>{writeErrorCount}</dd>
       </dl>
       {diagnostics.replica ? <ReplicaDiagnosticsPanel replica={diagnostics.replica} /> : null}
-      {rekeys.length > 0 ? (
-        <DiagnosticList label={`Last re-keys (${rekeys.length})`}>
-          {rekeys.map((rekey, i) => (
-            <li key={i}>
-              {formatDiagnosticTime(rekey.at)} · {rekey.noteId}: {rekey.oldId} → {rekey.newId} (kept
-              by {rekey.keeperNoteId})
-            </li>
-          ))}
-        </DiagnosticList>
-      ) : null}
-      {divergences.length > 0 ? (
-        <DiagnosticList label={`Last divergences (${divergences.length})`}>
-          {divergences.map((divergence, i) => (
-            <li key={i}>
-              {formatDiagnosticTime(divergence.at)} · {divergence.noteId}: {divergence.kind}
-            </li>
-          ))}
-        </DiagnosticList>
-      ) : null}
       {writeErrors.length > 0 ? (
         <DiagnosticList label={`Last write errors (${writeErrors.length})`}>
           {writeErrors.map((writeError, i) => (
@@ -253,8 +180,8 @@ function StorageDiagnosticsPanel({ diagnostics }: { diagnostics: StorageDiagnost
   )
 }
 
-/** Read-only D1 replication status (graph storage, phase 3): last push,
- * pending queue, remote row counts — plus the one action, a manual full push. */
+/** Read-only D1 replication status: last push, pending queue, remote row
+ * counts — plus the one action, a manual full push. */
 function ReplicaDiagnosticsPanel({ replica }: { replica: ReplicaDiagnostics }) {
   // Refresh the remote counts when the panel opens.
   useEffect(() => {
@@ -272,9 +199,7 @@ function ReplicaDiagnosticsPanel({ replica }: { replica: ReplicaDiagnostics }) {
 
   return (
     <div className="flex flex-col gap-2 border-t border-border-secondary pt-2">
-      <span className="text-text-secondary">
-        D1 replica{replica.leader ? "" : " (follower tab — the leader tab pushes)"}
-      </span>
+      <span className="text-text-secondary">Cloud sync (D1)</span>
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-text-secondary [&>dd]:text-right [&>dd]:text-text">
         <dt>Last push</dt>
         <dd>
@@ -331,16 +256,9 @@ function formatDiagnosticTime(at: number) {
 
 function GitHubSection() {
   const navigate = useNavigate()
-  const send = useSetAtom(globalStateMachineAtom)
   const githubUser = useAtomValue(githubUserAtom)
-  const githubRepo = useAtomValue(githubRepoAtom)
-  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
-  const isRepoNotCloned = useAtomValue(isRepoNotClonedAtom)
-  const isCloningRepo = useAtomValue(isCloningRepoAtom)
-  const isRepoCloned = useAtomValue(isRepoClonedAtom)
   const signOut = useSignOut()
   const { online } = useNetworkState()
-  const [isEditingRepo, setIsEditingRepo] = useState(false)
 
   if (!githubUser) {
     return (
@@ -350,36 +268,7 @@ function GitHubSection() {
     )
   }
 
-  // In database mode GitHub is identity only — no repository backs the notes,
-  // so the repo subsections below are git-mode-only. Account + sign out stay.
-  if (isDatabaseMode) {
-    return (
-      <SettingsSection title="GitHub">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex w-0 grow flex-col gap-1">
-            <span className="text-sm leading-4 text-text-secondary">Account</span>
-            <span className="flex items-center gap-2 leading-4">
-              {online ? <GitHubAvatar login={githubUser.login} size={16} /> : null}
-              <span className="truncate">{githubUser.login}</span>
-            </span>
-            <span className="text-sm leading-5 text-text-secondary">
-              Used to sign in — your notes are stored in the database, not a repository.
-            </span>
-          </div>
-          <Button
-            className="shrink-0"
-            onClick={() => {
-              signOut()
-              navigate({ to: "/", search: { query: undefined } })
-            }}
-          >
-            Sign out
-          </Button>
-        </div>
-      </SettingsSection>
-    )
-  }
-
+  // GitHub is identity only — no repository backs the notes.
   return (
     <SettingsSection title="GitHub">
       <div className="flex items-center justify-between gap-4">
@@ -388,6 +277,9 @@ function GitHubSection() {
           <span className="flex items-center gap-2 leading-4">
             {online ? <GitHubAvatar login={githubUser.login} size={16} /> : null}
             <span className="truncate">{githubUser.login}</span>
+          </span>
+          <span className="text-sm leading-5 text-text-secondary">
+            Used to sign in — your notes are stored in the database, not a repository.
           </span>
         </div>
         <Button
@@ -400,66 +292,6 @@ function GitHubSection() {
           Sign out
         </Button>
       </div>
-      <div className="mt-4 border-t border-border-secondary pt-4 empty:hidden">
-        {isRepoNotCloned || isEditingRepo ? (
-          <RepoForm
-            onSubmit={() => setIsEditingRepo(false)}
-            onCancel={!isRepoNotCloned ? () => setIsEditingRepo(false) : undefined}
-          />
-        ) : null}
-        {isCloningRepo && githubRepo ? (
-          <div className="flex items-center gap-2 leading-4 text-text-secondary">
-            <LoadingIcon16 />
-            Cloning {githubRepo.owner}/{githubRepo.name}…
-          </div>
-        ) : null}
-        {isRepoCloned && !isEditingRepo && githubRepo ? (
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex w-0 grow flex-col items-start gap-1">
-              <span className="text-sm leading-4 text-text-secondary">Repository</span>
-              <a
-                href={`https://github.com/${githubRepo.owner}/${githubRepo.name}`}
-                className="link leading-5"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {githubRepo.owner}/{githubRepo.name}
-              </a>
-            </div>
-            <Button className="shrink-0" onClick={() => setIsEditingRepo(true)}>
-              Change
-            </Button>
-          </div>
-        ) : null}
-      </div>
-      {isRepoCloned && !isEditingRepo && githubRepo ? (
-        <div className="mt-4 border-t border-border-secondary pt-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex w-0 grow flex-col gap-1">
-              <span className="text-sm leading-4 text-text-secondary">Reset local copy</span>
-              <span className="text-sm leading-5 text-text-secondary">
-                If sync is stuck, delete the notes stored in this browser and re-clone them from
-                GitHub. Unpushed changes are kept as conflicted-copy notes.
-              </span>
-            </div>
-            <Button
-              className="shrink-0"
-              disabled={!online}
-              onClick={() => {
-                if (
-                  window.confirm(
-                    `Reset the local copy of ${githubRepo.owner}/${githubRepo.name}?\n\nThis deletes the notes stored in this browser and re-clones them from GitHub. Any unpushed changes are saved as conflicted-copy notes.`,
-                  )
-                ) {
-                  send({ type: "SELECT_REPO", githubRepo })
-                }
-              }}
-            >
-              Reset
-            </Button>
-          </div>
-        </div>
-      ) : null}
     </SettingsSection>
   )
 }

@@ -7,7 +7,7 @@ import {
   startReplicaSync,
   type ReplicaSyncHandle,
 } from "./replica-sync"
-import { storageDiagnosticsAtom } from "./storage-mirror"
+import { storageDiagnosticsAtom } from "./storage-diagnostics"
 
 /**
  * Unit tests for the D1 replication queue. The fake Worker below remembers
@@ -117,11 +117,9 @@ function createTestSync(
   const server = createTestServer()
   const auth = createTestAuth()
   let files = { ...initialFiles }
-  let leader = true
   const handle = startReplicaSync({
     getFiles: () => ({ ...files }),
     fetchImpl: server.fetchImpl,
-    isLeader: () => leader,
     auth,
     ...overrides,
   })
@@ -132,9 +130,6 @@ function createTestSync(
     auth,
     setFiles: (next: Record<string, string>) => {
       files = { ...next }
-    },
-    setLeader: (next: boolean) => {
-      leader = next
     },
   }
 }
@@ -247,21 +242,6 @@ describe("replica sync queue", () => {
     expect(puts[1].authorization).toBe("Bearer tok-2")
     expect(replicaDiagnostics().errorCount).toBe(0)
     expect(server.remoteNotes.has("a")).toBe(true)
-  })
-
-  it("only the leader tab pushes; a promoted follower pushes its backlog", async () => {
-    const { handle, server, setLeader } = createTestSync({ "a.md": "A\n" })
-    setLeader(false)
-    handle.notifyNotesChanged(["a"])
-    await advance(handle, DEBOUNCE)
-
-    expect(server.requests).toHaveLength(0)
-    expect(replicaDiagnostics()).toMatchObject({ leader: false, pendingNotes: 1 })
-
-    setLeader(true)
-    await advance(handle, 30_000) // follower re-check interval
-    expect(server.puts()).toHaveLength(1)
-    expect(replicaDiagnostics()).toMatchObject({ leader: true, pendingNotes: 0 })
   })
 
   it("keeps failed pushes pending and retries with exponential backoff", async () => {

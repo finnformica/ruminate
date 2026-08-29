@@ -6,12 +6,11 @@ import { useWriteFiles } from "./store"
 import { buildViewStateWrite, readNoteViewState } from "./view-state-parse"
 
 /**
- * Per-note view state, stored one file per note under
- * `.ruminate/view-state/<noteId>.json`. The sidecar files ride the same git
- * sync as notes, so this persists across reloads and devices, but it is kept
- * out of note content so folding a block never rewrites a note file. Per-note
- * files mean folding on two devices only conflicts when both fold the *same*
- * note — the old single global sidecar conflicted on every pair of folds.
+ * Per-note view state, stored one entry per note under
+ * `.ruminate/view-state/<noteId>.json` (backed by the store's `view_state`
+ * table and replicated to D1 alongside the owning note), so it persists
+ * across reloads and devices — but it is kept out of note content so folding
+ * a block never rewrites a note.
  */
 
 const EMPTY: string[] = []
@@ -25,10 +24,9 @@ const sameIds = (a: string[], b: string[]) =>
  * Seeds from the synced sidecar on mount (the note page remounts per note, so a
  * fresh seed happens on every navigation). Toggles update local state
  * immediately for a snappy UI, and are persisted debounced (1s) — a burst of
- * folds collapses into a single commit. A pending write is flushed on unmount
+ * folds collapses into a single write. A pending write is flushed on unmount
  * so navigating away never drops the last fold. Writes that would not change
- * the serialized content (e.g. fold-then-unfold) are skipped entirely, so no
- * empty commits are produced.
+ * the serialized content (e.g. fold-then-unfold) are skipped entirely.
  */
 export function useCollapseState(noteId: string | undefined) {
   const persistedAtom = React.useMemo(
@@ -55,12 +53,10 @@ export function useCollapseState(noteId: string | undefined) {
   const flush = React.useCallback(() => {
     timer.current = null
     if (!noteId) return
-    // `buildViewStateWrite` also performs the one-time migration of the legacy
-    // single-file sidecar (split into per-note files + delete) as part of this
-    // same commit, and returns null when nothing changed so unchanged state
-    // never produces a commit.
+    // `buildViewStateWrite` returns null when nothing changed, so unchanged
+    // state never produces a write.
     const updates = buildViewStateWrite(getMarkdownFiles(), noteId, [...latest.current])
-    if (updates) writeFiles(updates, "Update view state")
+    if (updates) writeFiles(updates)
   }, [noteId, getMarkdownFiles, writeFiles])
 
   const toggleCollapse = React.useCallback(

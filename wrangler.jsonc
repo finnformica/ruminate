@@ -10,11 +10,9 @@
     // Only these routes invoke the Worker; everything else is served straight
     // from static assets (with index.html as the SPA fallback).
     "run_worker_first": [
-      "/cors-proxy/*",
       "/github-auth",
       "/github-refresh",
       "/file-proxy",
-      "/git-lfs-file",
       "/share/*",
       "/api/replica/*",
     ],

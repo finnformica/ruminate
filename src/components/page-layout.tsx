@@ -1,15 +1,6 @@
 import { useAtomValue } from "jotai"
-import { LoadingIcon16 } from "../components/icons"
-import { RepoForm } from "../components/repo-form"
 import { databaseModeStatusAtom } from "../data/database-mode"
-import {
-  githubRepoAtom,
-  isCloningRepoAtom,
-  isDatabaseModeAtom,
-  isRepoNotClonedAtom,
-  isSignedOutAtom,
-  notesReadyAtom,
-} from "../global-state"
+import { isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
 import { cx } from "../utils/cx"
 import { PageHeader, PageHeaderProps } from "./page-header"
 import { HoverCard } from "./hover-card"
@@ -32,17 +23,12 @@ export function PageLayout({
 }: PageLayoutProps) {
   const isSignedOut = useAtomValue(isSignedOutAtom)
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
-  const isRepoNotCloned = useAtomValue(isRepoNotClonedAtom)
-  const isCloningRepo = useAtomValue(isCloningRepoAtom)
-  const notesReady = useAtomValue(notesReadyAtom)
-  const githubRepo = useAtomValue(githubRepoAtom)
   const databaseStatus = useAtomValue(databaseModeStatusAtom)
 
-  // The repo screen is a git-mode concept: in database mode the machine parks
-  // in `notCloned` (its repo flow is refused), notes are served from the
-  // database, and post-auth routing goes straight to them.
-  const showRepoForm = isRepoNotCloned && !isDatabaseMode && !disableGuard
-  const showContent = notesReady || isSignedOut || disableGuard
+  // Signed in, the store serves notes immediately (isDatabaseMode); signed out,
+  // the sample notes render. The only gated moment is the brief auth
+  // resolution at boot.
+  const showContent = isDatabaseMode || isSignedOut || disableGuard
 
   return (
     <HoverCard.Provider>
@@ -54,30 +40,7 @@ export function PageLayout({
         />
         <div className="relative grid overflow-hidden">
           <main className="relative isolate overflow-auto [scrollbar-gutter:stable] scroll-mask">
-            {showRepoForm ? (
-              <div className="flex h-full flex-col items-center">
-                <div className="mx-auto w-full max-w-lg p-4 pb-8 md:pb-14">
-                  <div className="card-1 flex flex-col gap-6 p-4">
-                    <div className="flex flex-col gap-2">
-                      <h1 className="text-lg font-bold [text-box-trim:trim-start]">
-                        Choose a repository
-                      </h1>
-                      <p className="text-pretty text-text-secondary">
-                        Store your notes as markdown files in a GitHub repository of your choice.
-                      </p>
-                    </div>
-                    <RepoForm />
-                  </div>
-                </div>
-              </div>
-            ) : null}
-            {isCloningRepo && !isDatabaseMode && githubRepo && !disableGuard ? (
-              <div className="flex items-center gap-2 p-4 leading-4 text-text-secondary">
-                <LoadingIcon16 />
-                Cloning {githubRepo.owner}/{githubRepo.name}…
-              </div>
-            ) : null}
-            {isDatabaseMode && databaseStatus.emptyOffline && !disableGuard ? (
+            {databaseStatus.emptyOffline && !disableGuard ? (
               <div className="p-4">
                 <Notice tone="info">
                   No notes yet — this device hasn’t been able to reach the notes database. They’ll

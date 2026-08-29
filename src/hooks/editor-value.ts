@@ -1,7 +1,5 @@
-import { useAtomValue } from "jotai"
 import { useCallback, useMemo, useState } from "react"
-import { githubRepoAtom } from "../global-state"
-import { GitHubRepository, Note, NoteId } from "../schema"
+import { Note, NoteId } from "../schema"
 import { parseFrontmatter } from "../utils/frontmatter"
 import {
   clearNoteDraft,
@@ -41,17 +39,15 @@ type EditorSeed = {
  * lazy state initializer (which StrictMode may run twice).
  */
 function seedEditorState({
-  githubRepo,
   noteId,
   note,
   defaultValue,
 }: {
-  githubRepo: GitHubRepository | null
   noteId: NoteId
   note: Note | undefined
   defaultValue: string
 }): EditorSeed {
-  const entry = getNoteDraftEntry({ githubRepo, noteId })
+  const entry = getNoteDraftEntry(noteId)
   const noteContent = note?.content
 
   if (entry === null) {
@@ -89,13 +85,13 @@ function seedEditorState({
     // The draft is an unmodified copy of the old version — no real edits.
     // This is the silent-revert incident: seeding from it would show (and
     // later save) stale content. Drop it and show the newer note.
-    clearNoteDraft({ githubRepo, noteId })
+    clearNoteDraft(noteId)
     return { value: noteContent, baseHash: noteHash, remoteNotice: false }
   }
 
   if (sameExceptTimestamp(noteContent, entry.value)) {
     // The user's own save landing (only `updated_at` differs): adopt silently.
-    clearNoteDraft({ githubRepo, noteId })
+    clearNoteDraft(noteId)
     return { value: noteContent, baseHash: noteHash, remoteNotice: false }
   }
 
@@ -110,8 +106,8 @@ function seedEditorState({
  * The note page's editor state: a local markdown string seeded from the note
  * (or a draft / template), kept in sync with external note changes.
  *
- * When the note's content changes underneath us (a git pull bringing another
- * device's edits, a save round-tripping through the state machine):
+ * When the note's content changes underneath us (a D1 pull bringing another
+ * device's edits, a save round-tripping through the store):
  * - with no unsaved local edits, the editor value is re-seeded to the new
  *   content, so pulled changes appear immediately (no page refresh);
  * - with unsaved local edits, the local value is preserved and `remoteNotice`
@@ -140,10 +136,8 @@ export function useEditorValue({
   note: Note | undefined
   defaultValue: string
 }) {
-  const githubRepo = useAtomValue(githubRepoAtom)
-
   // Computed once at mount (lazy initializer); see `seedEditorState`.
-  const [seed] = useState(() => seedEditorState({ githubRepo, noteId, note, defaultValue }))
+  const [seed] = useState(() => seedEditorState({ noteId, note, defaultValue }))
 
   const [editorValue, _setEditorValue] = useState(seed.value)
 
@@ -163,7 +157,7 @@ export function useEditorValue({
   // Adjust state during render when note content changes externally (no effect needed)
   // See: https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
   if (note?.content !== prevNoteContent) {
-    const draft = getNoteDraftEntry({ githubRepo, noteId })?.value ?? null
+    const draft = getNoteDraftEntry(noteId)?.value ?? null
     // A stale no-op draft — byte-identical to the pre-change note content —
     // carries no real edits (e.g. a draft written and never cleaned up before
     // the note round-tripped). It must not count as local work: without this,
@@ -176,7 +170,7 @@ export function useEditorValue({
       if (!hasLocalEdits) {
         // No unsaved work — show the new (pulled) content immediately, and
         // clear the stale no-op draft (if any) so it can't linger.
-        if (draftIsStaleNoop) clearNoteDraft({ githubRepo, noteId })
+        if (draftIsStaleNoop) clearNoteDraft(noteId)
         _setEditorValue(note.content)
         setEditorBaseHash(hashNoteContent(note.content))
         setRemoteNotice(false)
@@ -191,7 +185,7 @@ export function useEditorValue({
         // remote notice here made every ⌘S cry "updated on another device".
         _setEditorValue(note.content)
         setEditorBaseHash(hashNoteContent(note.content))
-        clearNoteDraft({ githubRepo, noteId })
+        clearNoteDraft(noteId)
         setRemoteNotice(false)
       } else {
         // Unsaved local edits — keep them, surface the notice. The base hash
@@ -212,23 +206,23 @@ export function useEditorValue({
 
       if (note ? value !== note.content : value !== defaultValue) {
         // Persist with provenance so a reloaded draft knows what it was based on.
-        setNoteDraft({ githubRepo, noteId, value, baseHash: editorBaseHash })
+        setNoteDraft({ noteId, value, baseHash: editorBaseHash })
       } else {
-        clearNoteDraft({ githubRepo, noteId })
+        clearNoteDraft(noteId)
         // Back in sync with the saved note — that's the new base.
         if (note) setEditorBaseHash(hashNoteContent(note.content))
       }
     },
-    [note, defaultValue, githubRepo, noteId, editorBaseHash],
+    [note, defaultValue, noteId, editorBaseHash],
   )
 
   const discardChanges = useCallback(() => {
     // Reset editor value to the last saved state of the note
     _setEditorValue(note?.content ?? defaultValue)
     setEditorBaseHash(note ? hashNoteContent(note.content) : null)
-    clearNoteDraft({ githubRepo, noteId })
+    clearNoteDraft(noteId)
     setRemoteNotice(false)
-  }, [note, defaultValue, githubRepo, noteId])
+  }, [note, defaultValue, noteId])
 
   /** Discard the unsaved local edits and load the remote version. */
   const loadRemoteVersion = discardChanges

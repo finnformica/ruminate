@@ -4,16 +4,19 @@ import { createD1NoteSource, planPullApplication, type D1NoteSource } from "./d1
 import { VIEW_STATE_DIR, viewStatePath } from "./paths"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import type { SqlNoteStore } from "./sql-note-store"
-import { storageDiagnosticsAtom, type StorageDiagnostics } from "./storage-mirror"
+import {
+  OFF_STORAGE_DIAGNOSTICS,
+  storageDiagnosticsAtom,
+  type StorageDiagnostics,
+} from "./storage-diagnostics"
 import { parseNoteViewState, readNoteViewState, serializeNoteViewState } from "./view-state-parse"
 
 /**
- * Database-authoritative mode (docs/graph-storage.md): the runtime behind the
- * app when the storage flag is "database" (the default on this branch).
+ * The database storage runtime (docs/graph-storage.md) — the app's one and
+ * only store, mounted whenever a user is signed in.
  *
- * After GitHub sign-in there is no repo screen and no git anywhere in the data
- * path. The local SQL store (wa-sqlite over OPFS) is the runtime store; D1
- * behind the Worker is the authoritative cross-device copy:
+ * The local SQL store (wa-sqlite over OPFS) is the runtime store; D1 behind
+ * the Worker is the authoritative cross-device copy:
  *
  *   boot   open SQL store → serve local contents immediately → pull from D1
  *          (full on first boot, since-cursor after) → apply into the store
@@ -21,16 +24,14 @@ import { parseNoteViewState, readNoteViewState, serializeNoteViewState } from ".
  *          (replica-sync.ts — write-behind, coalesced, backoff)
  *   sync   visibility/online triggers re-run the since-cursor pull
  *
- * **How the UI is fed (the boot-flow surgery).** Everything above `src/data`
- * reads `markdownFilesAtom` (notes, tags, templates, view-state sidecars, the
- * editor's external-change path). Rather than re-plumb those consumers, this
- * module synthesizes the same repo-file-shaped map from the store —
- * `<id>.md` entries plus `.ruminate/view-state/<id>.json` sidecar entries —
- * into `databaseFilesAtom`, and `markdownFilesAtom` serves it whenever
- * database mode is active (see global-state.ts). Every consumer, including
- * the replica push payload builder, works unchanged; the git machine still
- * runs for auth but its repo states are never entered (its `resolveRepo`
- * service refuses in database mode).
+ * **How the UI is fed.** Everything above `src/data` reads
+ * `markdownFilesAtom` (notes, tags, templates, view-state sidecars, the
+ * editor's external-change path). This module synthesizes the
+ * repo-file-shaped map those consumers expect from the store — `<id>.md`
+ * entries plus `.ruminate/view-state/<id>.json` sidecar entries — into
+ * `databaseFilesAtom`, and `markdownFilesAtom` serves it whenever a user is
+ * signed in (see global-state.ts). Every consumer, including the replica push
+ * payload builder, reads that one shape.
  *
  * **Conflicts are last-writer-wins**, decided by push order at the replica.
  * Pulls never touch notes with queued/in-flight local pushes
@@ -129,8 +130,8 @@ function recordWriteError(error: unknown) {
   })
 }
 
-/** Is the database-authoritative runtime up (or starting)? The write seam in
- * `store.ts` routes through it exactly when this is true. */
+/** Is the database runtime up (or starting)? Writes through the `store.ts`
+ * seam are no-ops (sample-notes mode) when this is false. */
 export function isDatabaseModeActive(): boolean {
   return runtime !== null
 }
@@ -200,13 +201,12 @@ async function defaultOpenStore() {
 
 async function defaultOpenReplicaSync(getFiles: () => Record<string, string>) {
   const { startReplicaSync } = await import("./replica-sync")
-  // Not leader-gated: in database mode there is no shared git worktree
-  // carrying follower edits to a leader tab, so every tab must push its own
-  // writes. Concurrent tabs converge by last-writer-wins at the replica.
-  return startReplicaSync({ getFiles, isLeader: () => true })
+  // Every tab pushes its own writes; concurrent tabs converge by
+  // last-writer-wins at the replica.
+  return startReplicaSync({ getFiles })
 }
 
-/** Start database-authoritative mode. Idempotent per activation. */
+/** Start the database runtime. Idempotent per activation. */
 export function startDatabaseMode(options: DatabaseModeOptions = {}) {
   if (runtime) return
   generation += 1
@@ -221,7 +221,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
   }
   runtime = activation
   jotai().set(databaseModeStatusAtom, { ...OFF_STATUS, status: "opening" })
-  patchDiagnostics({ engine: "database", status: "starting" })
+  patchDiagnostics({ status: "opening" })
 
   enqueue(async () => {
     try {
@@ -239,7 +239,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
       if (runtime !== activation) return
       jotai().set(databaseFilesAtom, synthesizeFiles(notes, viewStates))
       patchStatus({ status: "ready" })
-      patchDiagnostics({ status: "ready", ingestedNotes: Object.keys(notes).length })
+      patchDiagnostics({ status: "ready", notes: Object.keys(notes).length })
 
       // Start the push loop before the first pull, so the pull can consult
       // `pendingNoteIds` (edits made while the pull is in flight are safe).
@@ -283,6 +283,7 @@ export function stopDatabaseMode() {
   const store = jotai()
   store.set(databaseModeStatusAtom, OFF_STATUS)
   store.set(databaseFilesAtom, {})
+  store.set(storageDiagnosticsAtom, OFF_STORAGE_DIAGNOSTICS)
 }
 
 // -----------------------------------------------------------------------------
@@ -295,7 +296,7 @@ const viewStateFileRe = new RegExp(`^${VIEW_STATE_DIR}/(.+)\\.json$`)
  * Persist a batch of repo-file-shaped writes (`null` deletes): note files and
  * view-state sidecars, exactly the shapes `useWriteFiles` already produces.
  * The files atom updates synchronously (the UI never waits); the SQL write is
- * queued; on success the replica queue is marked dirty. No git anywhere.
+ * queued; on success the replica queue is marked dirty.
  */
 export function databaseWriteFiles(files: Record<string, string | null>) {
   const activation = runtime
@@ -310,15 +311,14 @@ export function databaseWriteFiles(files: Record<string, string | null>) {
     }
     const match = viewStateFileRe.exec(filepath)
     if (match) viewStateUpdates[match[1]] = content === null ? [] : parseNoteViewState(content)
-    // Anything else (e.g. the legacy view-state sidecar, which can only exist
-    // in a git worktree) has no meaning in the database store and is dropped.
+    // Anything else has no meaning in the database store and is dropped.
   }
   if (Object.keys(noteUpdates).length === 0 && Object.keys(viewStateUpdates).length === 0) return
 
   applyToFilesAtom(noteUpdates, viewStateUpdates)
   patchStatus({ emptyOffline: false })
   patchDiagnostics({
-    ingestedNotes: Object.keys(notesFromFiles(jotai().get(databaseFilesAtom))).length,
+    notes: Object.keys(notesFromFiles(jotai().get(databaseFilesAtom))).length,
   })
 
   enqueue(async () => {
@@ -447,7 +447,7 @@ function runPull(activation: DatabaseModeRuntime) {
         emptyOffline: false,
       })
       patchDiagnostics({
-        ingestedNotes: Object.keys(notesFromFiles(jotai().get(databaseFilesAtom))).length,
+        notes: Object.keys(notesFromFiles(jotai().get(databaseFilesAtom))).length,
       })
     } catch (error) {
       if (runtime !== activation) return

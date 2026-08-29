@@ -13,7 +13,9 @@ export function beginGitHubSignIn() {
   const authUrl = urlcat("https://github.com/login/oauth/authorize", {
     client_id: import.meta.env.VITE_GITHUB_CLIENT_ID,
     state: window.location.href,
-    scope: "repo,gist,user:email",
+    // Identity + gist publishing only — notes live in the database, not a
+    // repository, so no repo scope is requested.
+    scope: "gist,user:email",
   })
 
   // Open in new tab if in iframe (GitHub doesn't load inside iframes)

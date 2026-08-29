@@ -1,4 +1,4 @@
-import { GitHubRepository, NoteId } from "../schema"
+import { NoteId } from "../schema"
 
 const DRAFT_PREFIX = "draft" as const
 const DRAFT_DEBOUNCE_MS = 500
@@ -55,31 +55,16 @@ function parseDraft(raw: string): NoteDraftEntry {
 // coalesce rapid updates and cancel when clearing a draft
 const draftWriteTimers = new Map<string, number>()
 
-function getNoteStorageKey({
-  githubRepo,
-  noteId,
-}: {
-  githubRepo: GitHubRepository | null
-  noteId: NoteId
-}) {
-  if (!githubRepo) return `${DRAFT_PREFIX}::${noteId}`
-  const owner = githubRepo.owner.trim().toLowerCase()
-  const name = githubRepo.name.trim().toLowerCase()
-  return `${DRAFT_PREFIX}:${owner}/${name}::${noteId}`
+function getNoteStorageKey(noteId: NoteId) {
+  return `${DRAFT_PREFIX}::${noteId}`
 }
 
 /** The draft's value plus its provenance, or null when no draft exists. */
-export function getNoteDraftEntry({
-  githubRepo,
-  noteId,
-}: {
-  githubRepo: GitHubRepository | null
-  noteId: NoteId
-}): NoteDraftEntry | null {
+export function getNoteDraftEntry(noteId: NoteId): NoteDraftEntry | null {
   if (typeof window === "undefined" || !window.localStorage) return null
 
   try {
-    const key = getNoteStorageKey({ githubRepo, noteId })
+    const key = getNoteStorageKey(noteId)
     const raw = window.localStorage.getItem(key)
     return raw === null ? null : parseDraft(raw)
   } catch {
@@ -89,24 +74,16 @@ export function getNoteDraftEntry({
 }
 
 /** The draft's markdown value, or null when no draft exists. */
-export function getNoteDraft({
-  githubRepo,
-  noteId,
-}: {
-  githubRepo: GitHubRepository | null
-  noteId: NoteId
-}): string | null {
-  return getNoteDraftEntry({ githubRepo, noteId })?.value ?? null
+export function getNoteDraft(noteId: NoteId): string | null {
+  return getNoteDraftEntry(noteId)?.value ?? null
 }
 
 export function setNoteDraft({
-  githubRepo,
   noteId,
   value,
   baseHash,
   immediate = false,
 }: {
-  githubRepo: GitHubRepository | null
   noteId: NoteId
   value: string
   /**
@@ -121,11 +98,9 @@ export function setNoteDraft({
   if (typeof window === "undefined" || !window.localStorage) return
 
   try {
-    const key = getNoteStorageKey({ githubRepo, noteId })
+    const key = getNoteStorageKey(noteId)
     const resolvedBaseHash =
-      baseHash !== undefined
-        ? baseHash
-        : (getNoteDraftEntry({ githubRepo, noteId })?.baseHash ?? null)
+      baseHash !== undefined ? baseHash : (getNoteDraftEntry(noteId)?.baseHash ?? null)
     const payload = JSON.stringify({ v: 1, value, baseHash: resolvedBaseHash })
 
     // Cancel any pending debounced write
@@ -156,17 +131,11 @@ export function setNoteDraft({
   }
 }
 
-export function clearNoteDraft({
-  githubRepo,
-  noteId,
-}: {
-  githubRepo: GitHubRepository | null
-  noteId: NoteId
-}) {
+export function clearNoteDraft(noteId: NoteId) {
   if (typeof window === "undefined" || !window.localStorage) return
 
   try {
-    const key = getNoteStorageKey({ githubRepo, noteId })
+    const key = getNoteStorageKey(noteId)
     // Cancel any pending debounced write for this key to avoid
     // re-creating the draft after it's been cleared (e.g., after save)
     const existingTimerId = draftWriteTimers.get(key)

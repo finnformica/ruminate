@@ -1,15 +1,10 @@
 import { Link, LinkComponentProps, useLocation } from "@tanstack/react-router"
-import { useAtom, useAtomValue, useSetAtom } from "jotai"
+import { useAtom, useAtomValue } from "jotai"
 import { createContext, useContext } from "react"
 import { useNetworkState } from "react-use"
 import { useRegisterSW } from "virtual:pwa-register/react"
 import { requestDatabasePull } from "../data/database-mode"
-import {
-  globalStateMachineAtom,
-  isDatabaseModeAtom,
-  isHelpPanelOpenAtom,
-  sortedNotesAtom,
-} from "../global-state"
+import { isHelpPanelOpenAtom, sortedNotesAtom } from "../global-state"
 import type { Note } from "../schema"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
@@ -44,8 +39,6 @@ export function NavItems({
   const notes = useAtomValue(sortedNotesAtom)
   const syncText = useSyncStatusText()
   const syncMeta = useSyncStatusMeta()
-  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
-  const send = useSetAtom(globalStateMachineAtom)
   const { online } = useNetworkState()
   const { pathname } = useLocation()
 
@@ -179,13 +172,9 @@ export function NavItems({
               data-size={size}
               title={syncMeta.tooltip}
               onClick={() =>
-                syncMeta.needsReauth
-                  ? beginGitHubSignIn()
-                  : isDatabaseMode
-                    ? // Database mode syncs by pulling from D1 (pushes are
-                      // automatic, write-behind); SYNC is a git-machine event.
-                      requestDatabasePull()
-                    : send({ type: "SYNC" })
+                // Pushes are automatic (write-behind); the button pulls the
+                // latest from D1 — or re-authenticates when the session died.
+                syncMeta.needsReauth ? beginGitHubSignIn() : requestDatabasePull()
               }
             >
               <SyncStatusIcon />

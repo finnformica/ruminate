@@ -1,26 +1,20 @@
 import migrationSql from "../../migrations/0001_init.sql?raw"
-import { blockId } from "../blocks/id"
 import { parse } from "../blocks/parse"
-import { serialize } from "../blocks/serialize"
-import type { BlockDoc } from "../blocks/types"
 import type { NoteId } from "../schema"
-import { docToRows, findCrossNoteIdCollisions, frontmatterUpdatedAt } from "./doc-to-rows"
+import { docToRows, frontmatterUpdatedAt } from "./doc-to-rows"
 import type { NoteStore } from "./note-store"
 import type { SqlDriver, SqlStatement } from "./sql-driver"
 
 /**
- * The SQL implementation of `NoteStore` (graph storage, phase 2).
+ * The SQL implementation of `NoteStore` — the store the app runs on
+ * (docs/graph-storage.md).
  *
  * Backed by any `SqlDriver` (wa-sqlite/OPFS in the browser, `node:sqlite` in
  * tests) and the exact schema in `migrations/0001_init.sql` — the same file
  * that initializes the D1 replica. Notes decompose through `docToRows` into
  * `blocks` + `links` rows in the same transaction as the note row; reads
  * reassemble nothing — `notes.content` stays the authoritative verbatim
- * markdown and the graph tables are a derived index (the simplest shape that
- * can be verified byte-for-byte against git during the trial).
- *
- * Git/markdown remains the source of truth: this store is a derived runtime
- * replica, rebuildable at any time via `ingestWorktree`.
+ * markdown and the graph tables are a derived index.
  */
 export interface SqlNoteStore extends NoteStore {
   /** Wipe every table and repopulate from a full corpus, in one transaction. */
@@ -40,7 +34,7 @@ export interface SqlNoteStore extends NoteStore {
 const SCHEMA_VERSION = "1"
 
 /** Drop everything the migration creates, so an incompatible schema can be
- * rebuilt from scratch — safe because the store is derived from git. */
+ * rebuilt from scratch — safe because the store can be re-pulled from D1. */
 const RESET_SQL = `
 DROP TABLE IF EXISTS links;
 DROP TABLE IF EXISTS blocks;
@@ -52,8 +46,8 @@ DROP TABLE IF EXISTS meta;
 /**
  * Open a `NoteStore` on `driver`, applying `migrations/0001_init.sql` when the
  * database is empty. A database reporting a different `meta.schema_version` is
- * reset and re-migrated (it is a derived replica — re-ingest, never migrate in
- * place during the trial).
+ * reset and re-migrated (the contents re-pull from D1 — never migrated in
+ * place).
  */
 export async function openSqlNoteStore(driver: SqlDriver): Promise<SqlNoteStore> {
   const tables = await driver.exec(
@@ -243,93 +237,4 @@ function planNoteDelete(id: NoteId): SqlStatement[] {
     { sql: "DELETE FROM view_state WHERE note_id = ?", params: [id] },
     { sql: "DELETE FROM notes WHERE id = ?", params: [id] },
   ]
-}
-
-// -----------------------------------------------------------------------------
-// Ingest (initial population + cross-note block-id dedup)
-// -----------------------------------------------------------------------------
-
-/** One re-keyed block: `noteId`'s block `oldId` became `newId`; the first note
- * in sorted id order (`keeperNoteId`) kept the original id. */
-export interface RekeyRecord {
-  noteId: NoteId
-  keeperNoteId: NoteId
-  oldId: string
-  newId: string
-}
-
-export interface IngestResult {
-  /** Notes ingested (after rewrites). */
-  ingestedNotes: number
-  /** Collision re-keys performed (empty when the corpus was clean). */
-  rekeys: RekeyRecord[]
-  /**
-   * Rewritten note contents (`id::` lines re-keyed), keyed by note id. Git is
-   * canonical, so the caller MUST persist these through the normal note save
-   * path — the ingest only wrote them to the SQL store.
-   */
-  rewrittenNotes: Record<NoteId, string>
-}
-
-/**
- * Full rebuild of the SQL store from the current worktree: wipe + insert every
- * note (and its view state) in one transaction.
- *
- * Runs `findCrossNoteIdCollisions` first and re-keys collisions per the design
- * in docs/graph-storage.md: the first note in sorted id order keeps the id;
- * every later note gets a fresh `blk_` id minted and its `id::` line rewritten
- * (parse → rename → serialize, the same transform a normal editor save
- * performs). The rewritten contents are ingested here and returned in
- * `rewrittenNotes` for the caller to persist through the git save path.
- */
-export async function ingestWorktree(
-  store: SqlNoteStore,
-  notes: Record<NoteId, string>,
-  viewStates?: Record<NoteId, string[]>,
-): Promise<IngestResult> {
-  const rekeys: RekeyRecord[] = []
-  const rewrittenNotes: Record<NoteId, string> = {}
-
-  const collisions = findCrossNoteIdCollisions(notes)
-  if (collisions.length > 0) {
-    // Group by losing note so each note is parsed and serialized exactly once,
-    // no matter how many of its blocks collide.
-    const byLoser = new Map<NoteId, { oldId: string; keeperNoteId: NoteId }[]>()
-    for (const { blockId: oldId, noteIds } of collisions) {
-      for (const loser of noteIds.slice(1)) {
-        const entry = byLoser.get(loser) ?? []
-        entry.push({ oldId, keeperNoteId: noteIds[0] })
-        byLoser.set(loser, entry)
-      }
-    }
-    for (const [noteId, colliding] of byLoser) {
-      const doc = parse(notes[noteId])
-      for (const { oldId, keeperNoteId } of colliding) {
-        // `parse` may already have re-keyed an intra-document duplicate.
-        if (!doc.blocks[oldId]) continue
-        let newId = blockId()
-        while (doc.blocks[newId]) newId = blockId()
-        renameBlock(doc, oldId, newId)
-        rekeys.push({ noteId, keeperNoteId, oldId, newId })
-      }
-      rewrittenNotes[noteId] = serialize(doc)
-    }
-  }
-
-  const finalNotes = { ...notes, ...rewrittenNotes }
-  await store.replaceAll(finalNotes, viewStates)
-
-  return { ingestedNotes: Object.keys(finalNotes).length, rekeys, rewrittenNotes }
-}
-
-function renameBlock(doc: BlockDoc, oldId: string, newId: string) {
-  const block = doc.blocks[oldId]
-  delete doc.blocks[oldId]
-  doc.blocks[newId] = { ...block, id: newId }
-  doc.rootBlockIds = doc.rootBlockIds.map((id) => (id === oldId ? newId : id))
-  for (const b of Object.values(doc.blocks)) {
-    if (b.children.includes(oldId)) {
-      b.children = b.children.map((id) => (id === oldId ? newId : id))
-    }
-  }
 }

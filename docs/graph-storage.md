@@ -1,20 +1,17 @@
 # Graph storage
 
-The database-backed storage architecture for Ruminate's notes, and what each
-phase shipped. This document extends
-[architecture-notes.md](./architecture-notes.md); the principles there (stable
-`blk_` ids, multi-homing by reference, the `src/data` seam, view state as UI
-state) are load-bearing here and are not restated in full.
+The database-backed storage architecture Ruminate runs on. This document
+extends [architecture-notes.md](./architecture-notes.md); the principles there
+(stable `blk_` ids, multi-homing by reference, the `src/data` seam, view state
+as UI state) are load-bearing here and are not restated in full.
 
-## The architecture (this branch: database-authoritative)
+## The architecture: database-authoritative
 
-**On this branch, database mode is THE app experience.** The storage flag
-(`ruminate_storage`) defaults to `"database"`: after GitHub sign-in there is no
-repo screen and no git pulling — data loads from D1 (seeded with the user's
-notes), the local SQL store is the runtime store, and saves write locally and
-push to D1 through the replica queue. GitHub OAuth remains purely
-identity/auth for the Worker API. Setting the flag to `"git"` restores the
-classic experience (repo selection, git sync, note history) unchanged.
+**Database storage is THE app.** After GitHub sign-in — which is purely
+identity/auth for the Worker API — data loads from D1 (the authoritative
+cross-device copy), the local SQL store is the runtime store, and saves write
+locally and push to D1 through the replica queue. Signed out, the sample notes
+render. There is no git anywhere in the data path.
 
 ```
 local SQLite runtime store (wa-sqlite / OPFS)   ← the store the app runs on
@@ -24,29 +21,24 @@ local SQLite runtime store (wa-sqlite / OPFS)   ← the store the app runs on
 D1 behind the Worker                            ← the authoritative cross-device copy
 ```
 
-### How the app is fed (the cutover surgery)
+### How the app is fed
 
-Everything above `src/data` reads one atom: `markdownFilesAtom`, a repo-file
-shaped map (`<id>.md` note entries plus `.ruminate/view-state/<id>.json`
-sidecar entries). The cutover swaps what feeds that atom and nothing else:
+Everything above `src/data` reads one atom: `markdownFilesAtom`, a
+repo-file-shaped map (`<id>.md` note entries plus
+`.ruminate/view-state/<id>.json` sidecar entries). `src/data/database-mode.ts`
+synthesizes that map from the SQL store's contents (`databaseFilesAtom`), and
+`markdownFilesAtom` serves it whenever a user is signed in. `notesAtom`, tags,
+templates, search, the collapse-state hook, the editor's external-change path
+(`useEditorValue`), and the replica push payload builder all read the same
+shape.
 
-- **Database mode** (`src/data/database-mode.ts`): the SQL store's contents
-  are synthesized into the same file-shaped map (`databaseFilesAtom`), and
-  `markdownFilesAtom` serves it whenever database mode is active. `notesAtom`,
-  tags, templates, search, the collapse-state hook, and the editor's
-  external-change path (`useEditorValue`) all work unchanged — including the
-  replica push payload builder, which reads the same map.
-- **Git mode**: `markdownFilesAtom` serves the machine's worktree walk, as
-  always.
+A small XState machine (`src/global-state.ts`) handles the rest: auth
+resolution at boot (`resolvingUser` → `signedIn` / `signedOut`),
+sign-in/sign-out, and the signed-out sample notes. The write seam
+(`src/data/store.ts`) routes all writes to `databaseWriteFiles`; signed out
+(sample notes) the runtime is not mounted and writes are no-ops.
 
-The XState machine is not deleted — it still resolves auth, handles
-sign-in/sign-out, and provides the signed-out sample notes. In database mode
-its `resolveRepo` service refuses immediately, parking the machine in
-`signedIn.notCloned` (a state with no service invocations), so no clone, pull,
-push, or commit can ever run. The write seam (`src/data/store.ts`) routes
-writes to `databaseWriteFiles` instead of the machine's `WRITE_FILES` event.
-
-### Boot, saves, and sync in database mode
+### Boot, saves, and sync
 
 - **Boot:** open the SQL store (OPFS; per-tab fallback to memory) → serve
   local contents into the atoms immediately → pull from D1 (full corpus on
@@ -55,16 +47,13 @@ writes to `databaseWriteFiles` instead of the machine's `WRITE_FILES` event.
   can never outlive the data it describes.
 - **Saves:** files-shaped writes land in the files atom synchronously (the UI
   never waits), then the SQL store, then mark the note dirty in the replica
-  push queue — the same write-behind, coalesced, backoff-retried
-  `replica-sync.ts` loop from phase 3. No git anywhere in the path. In
-  database mode the push loop is **not** leader-gated: there is no shared git
-  worktree to carry a follower tab's edits to a leader, so every tab pushes
-  its own writes.
-- **Cross-device sync:** the same triggers the git machine synced on
-  (visibility change, coming back online, plus a retry timer after a failed
-  pull) re-run the since-cursor pull. Applied changes flow through the store
-  into the atoms; the open editor picks them up through `useEditorValue`'s
-  existing external-change path.
+  push queue — write-behind, coalesced, backoff-retried (`replica-sync.ts`).
+  The push loop is not leader-gated: every tab pushes its own writes, and
+  last-writer-wins at the replica makes concurrent tab pushes safe.
+- **Cross-device sync:** visibility change and coming back online (plus a
+  retry timer after a failed pull) re-run the since-cursor pull. Applied
+  changes flow through the store into the atoms; the open editor picks them up
+  through `useEditorValue`'s existing external-change path.
 - **Offline:** the OPFS store serves everything; pushes queue with backoff and
   pulls retry on the `online` event. A first-ever boot while offline shows an
   explanatory empty state; anything written then is kept locally and synced
@@ -73,7 +62,7 @@ writes to `databaseWriteFiles` instead of the machine's `WRITE_FILES` event.
 ### Conflict semantics: last-writer-wins
 
 The D1 model is last-writer-wins, decided by **push order at the replica** —
-there is no merge machinery (that was git mode's job):
+there is no merge machinery:
 
 - A pull never touches a note with a queued or in-flight local push
   (`ReplicaSyncHandle.pendingNoteIds`), so pull timing cannot revert an edit
@@ -85,7 +74,7 @@ there is no merge machinery (that was git mode's job):
   user picks a side ("Show latest" / "Save mine anyway").
 - Two devices editing the same note and both pushing: the later push wins
   wholesale. Accepted for a single-user app; the losing content is not
-  recoverable from D1 (no history — see "dormant features" below).
+  recoverable from D1 (no history — see "no event sourcing" below).
 
 ### Since-pull fidelity (accepted limits)
 
@@ -104,42 +93,21 @@ accepted and mitigated:
   full remote id list, and the client deletes local notes absent from it
   (pending-push notes excepted).
 
-### Features dormant in database mode (and why)
+### What the database deliberately does not do
 
-Git-derived features have nothing to derive from — D1 stores current state
-only — so they are hidden rather than disabled-with-a-tooltip (less clutter):
+D1 stores current state only, so history-derived features have no source and
+do not exist in the app:
 
-- **Note history** (dialog, note-menu item, palette entry): reconstructs
-  versions from commits; hidden. Available in git mode.
-- **Day-activity past-day reconstruction**: calendar past days show a simple
-  "history isn't available in database mode" placeholder instead of the
-  git-reconstructed roll-up.
-- **Merge-notice banner / conflicted-copy paths**: pull-merge concepts;
-  structurally unreachable (the machine never pulls) and explicitly gated.
-- **Open in GitHub**: hidden whenever no repo backs the notes.
-- **Sync-status sidebar**: not dormant but re-pointed — it reflects replica
-  state (pull in flight / pending pushes / push or pull errors from the
-  replica diagnostics) instead of the machine's git sync states.
-- **Settings**: the GitHub repo section (choose/change/reset repo) is
-  git-mode-only; account + sign out remain. The Storage section toggles
-  "Database (default)" / "Git classic" and reloads the app on change (the
-  engine decides how the whole app boots).
+- **Note version history**: no per-edit log; a save replaces the row.
+- **Past-day reconstruction**: calendar past days show a simple "history isn't
+  available" placeholder instead of a reconstructed roll-up.
+- **File attachments**: uploads were a git-repo feature; legacy `/uploads`
+  references in note content render as inert placeholders.
 
 **No event sourcing — reserved.** The store remains state-based (current rows
-only, no per-edit event log). Git already provided audit/time-travel in
-classic mode; an event/history layer over the database is deliberately
-reserved for later rather than half-built here.
-
-### Git classic (the `"git"` flag value)
-
-The pre-cutover experience, retained as the rollback path: repo screen, git
-sync, note history, merge notices. The phase-2 dual-write/shadow-read mirror
-(`storage-mirror.ts`) is **off** in git mode — it was the trial that validated
-the SQL store while git was canonical, and it is retained (with its tests and
-its diagnostics atom, which database mode reuses) but no longer mounted.
-Switching modes is "flip the flag" (Settings → Storage); the two stores don't
-migrate into each other — git mode re-clones from GitHub, database mode pulls
-from D1.
+only, no per-edit event log). An event/history layer over the database — which
+would bring back version history and day roll-ups — is deliberately reserved
+for later rather than half-built here.
 
 ## The contract: `NoteStore` + conformance suite
 
@@ -147,10 +115,9 @@ from D1.
 `describeNoteStoreConformance(name, makeStore)` — an executable specification
 covering write/read/delete round-trips, id-keyed semantics, batch writes,
 non-note-namespace isolation, and view-state round-trips (canonical
-sorted/deduped sets, empty-clears). Both implementations pass it unchanged:
-the git adapter (`src/data/note-store.test.ts`) and the SQL store
-(`src/data/sql-note-store.test.ts`). Anything the suite doesn't pin down is an
-implementation detail a store may choose freely.
+sorted/deduped sets, empty-clears). The SQL store
+(`src/data/sql-note-store.test.ts`) passes it; anything the suite doesn't pin
+down is an implementation detail a store may choose freely.
 
 ## Schema (`migrations/0001_init.sql`)
 
@@ -220,11 +187,11 @@ extensions `parseNote` uses) by `docToRows` in `src/data/doc-to-rows.ts`.
 
 ### `view_state` (note_id PK, collapsed JSON)
 
-The `.ruminate/view-state/<id>.json` sidecars folded into a table, one row per
-note, exactly as architecture-notes.md anticipated ("folds cleanly into a
-future SQLite `view_state` table"). `collapsed` holds the same canonical
-(sorted, de-duplicated) JSON array the sidecar file holds; an empty set is the
-absence of a row, mirroring "empty deletes the sidecar file".
+Per-note view state (collapsed block ids), one row per note, exactly as
+architecture-notes.md anticipated ("folds cleanly into a future SQLite
+`view_state` table"). `collapsed` holds a canonical (sorted, de-duplicated)
+JSON array; an empty set is the absence of a row. Above `src/data` it still
+travels as `.ruminate/view-state/<id>.json` entries in the files map.
 
 ### `meta` (key/value)
 
@@ -232,36 +199,16 @@ absence of a row, mirroring "empty deletes the sidecar file".
 client confirmed — see "Replication" below), and, in the **local** store only,
 `d1_pull_cursor` (the last replica cursor this device pulled through).
 
-## Cross-file block-id dedup (designed here, at the migration)
+## Cross-file block-id dedup
 
-architecture-notes.md defers cross-file id dedup to "the eventual DB
-migration" — which is this one. `parse.ts` already regenerates duplicate ids
-_within_ one document, but two different notes can legitimately carry the same
-persisted `id::` line (a whole note duplicated in an external editor, a
-conflicted-copy note created by sync). Files tolerate that; a database keyed
-on `blocks.id` cannot.
-
-**Design:**
-
-1. **Detect on ingest.** Before rows are written, run
-   `findCrossNoteIdCollisions(notes)` (`src/data/doc-to-rows.ts`) over the
-   corpus. It parses each note with the real `parse` — so it sees exactly the
-   ids ingest would insert — and reports every block id declared by more than
-   one note, deterministically ordered (collisions by block id, notes by note
-   id).
-2. **First note keeps the id; later ones re-key.** For each collision, the
-   first note in order is the keeper. Every other note gets the colliding
-   block re-keyed: mint a fresh id (`blockId()`), rewrite that block's `id::`
-   line, and persist through the **normal save path**, so the markdown and DB
-   can never disagree about an id. Conflicted-copy notes (`<id>-conflict-…`)
-   sort after their originals, so the original naturally keeps its ids.
-3. **Consequences accepted:** a `((blk_x))` reference or collapsed-state entry
-   pointing at a re-keyed block keeps pointing at the keeper's block — the
-   right resolution, since before the re-key the reference was ambiguous and
-   the keeper is the canonical home.
-4. This runs in the git-worktree ingest path (`ingestWorktree`), i.e. when a
-   git corpus is (re-)ingested into the SQL store. Content arriving via D1
-   pulls was pushed from an ingested corpus, so it is already collision-free.
+architecture-notes.md deferred cross-file id dedup to "the eventual DB
+migration". `parse.ts` regenerates duplicate ids _within_ one document; across
+notes, `findCrossNoteIdCollisions` (`src/data/doc-to-rows.ts`) detects
+collisions deterministically (collisions by block id, notes by note id, first
+note is the keeper). The seed script (`scripts/seed-d1.ts`) reports collisions
+when a corpus is seeded; content flowing through the app (saves, D1 pulls) is
+collision-free because `parse` mints fresh ids for duplicates it sees within a
+document and every note pushed to D1 came from a seeded-then-edited corpus.
 
 ## Worker replica API (`/api/replica/*`)
 
@@ -289,25 +236,23 @@ cursor }` — `changed` is `updated_at > since`, `ids` is always the full id
     `replica-payload.ts` and are unit-tested alongside the PUT planners.
 - `GET /api/replica/status` — row counts per table, `schema_version`,
   `replica_cursor`.
-- **Auth:** every route is guarded by `requireSession`, which reuses the two
-  session mechanisms the Worker already has: the `gh_refresh` HttpOnly cookie
-  (set by `/github-auth`, rotated by `/github-refresh`; its presence proves
-  the browser holds a session this Worker created, and SameSite=Lax blocks
-  cross-site sends) and the GitHub access token as `Authorization: Bearer`,
-  verified against `GET https://api.github.com/user` — the same check
-  `/github-auth` performs when minting a session. Ruminate is a single-user
-  app and the database only ever holds that user's notes, so _any_ valid
-  GitHub session suffices; there is deliberately no per-user scoping. If the
+- **Auth:** every route is guarded by `requireSession`: the `gh_refresh`
+  HttpOnly cookie (set by `/github-auth`, rotated by `/github-refresh`; its
+  presence proves the browser holds a session this Worker created, and
+  SameSite=Lax blocks cross-site sends) plus the GitHub access token as
+  `Authorization: Bearer`, verified against `GET https://api.github.com/user`
+  — and the verified GitHub id must match `ALLOWED_GITHUB_ID`
+  (wrangler.jsonc): the app is single-user and the database only ever holds
+  the owner's notes, so any other valid GitHub account gets a 403. If the
   per-request GitHub round-trip ever matters, cache verification results in
   `caches.default` keyed by a token hash.
 
 ## Replication to D1 (`src/data/replica-sync.ts`)
 
-The push half, shared by both modes (in git-classic it replicated the
-worktree; in database mode it replicates the store-fed files map).
-**Write-behind, always:** the local write happens first and never waits on the
-network; the push is queued afterwards and a push failure can only ever
-produce a diagnostic and a retry, never a blocked or lost local write.
+The push half. **Write-behind, always:** the local write happens first and
+never waits on the network; the push is queued afterwards and a push failure
+can only ever produce a diagnostic and a retry, never a blocked or lost local
+write.
 
 - **Coalescing + chunking.** Dirty note ids accumulate in a set; a push runs
   ~2s after the first dirty mark, so rapid saves coalesce into one request.
@@ -316,15 +261,13 @@ produce a diagnostic and a retry, never a blocked or lost local write.
   `docToRows`-based builder the local store ingests through, and the payload
   types are imported from `worker/handlers/replica-payload.ts` — the exact
   module the Worker validates with — so the two sides cannot drift.
-- **Leadership.** Git mode: leader-tab-only (followers' edits reach the
-  leader's worktree via git sync). Database mode: every tab pushes its own
-  edits (`isLeader: () => true`) — there is no shared worktree, and
-  last-writer-wins at the replica makes concurrent tab pushes safe.
+- **Every tab pushes its own edits.** There is no shared local store carrying
+  one tab's edits to another, and last-writer-wins at the replica makes
+  concurrent tab pushes safe.
 - **Auth.** Same-origin fetch (the `gh_refresh` cookie rides along) plus the
-  current GitHub access token as a Bearer header, obtained exactly like the
-  git layer's (`ensureFreshToken` proactively, `withAuthRetry` refreshing
-  once and retrying on a 401). The pull side (`d1-note-source.ts`) uses the
-  identical pattern.
+  current GitHub access token as a Bearer header (`ensureFreshToken`
+  proactively, `withAuthRetry` refreshing once and retrying on a 401). The
+  pull side (`d1-note-source.ts`) uses the identical pattern.
 - **Resilience.** A failed push returns its notes to the dirty set and
   retries with exponential backoff (2s doubling to a 60s cap); the browser's
   `online` event short-circuits the wait. Failures are recorded in the
@@ -338,29 +281,22 @@ produce a diagnostic and a retry, never a blocked or lost local write.
   also has a manual "Push full copy to D1 now" action.
 - **Known gap, accepted:** pending deletes live only in memory, so a note
   deleted while the replica was unreachable can linger remotely if the tab
-  closes before the retry lands. In database mode the next since-pull would
-  then resurrect it locally (it is still in `ids`) — visible, correctable by
-  deleting again, and bounded by the push backoff window. A durable pending
-  queue closes this properly if it ever bites.
+  closes before the retry lands. The next since-pull would then resurrect it
+  locally (it is still in `ids`) — visible, correctable by deleting again, and
+  bounded by the push backoff window. A durable pending queue closes this
+  properly if it ever bites.
 
-## What each phase shipped
+## History: the git era
 
-- **Phase 1:** the `NoteStore` contract + git adapter + conformance suite; the
-  shared schema and migration; the pure `docToRows` / `extractBlockLinks` /
-  `findCrossNoteIdCollisions` transforms; the authed D1 replica API skeleton
-  and binding.
-- **Phase 2:** the local SQLite (wa-sqlite) `NoteStore` passing the
-  conformance suite unchanged; ingest through `docToRows` with collision
-  re-keying; the `ruminate_storage` flag; the dual-write + shadow-read mirror
-  that validated the store against git.
-- **Phase 3:** the client-side replica push (`src/data/replica-sync.ts` —
-  write-behind, coalesced, chunked, monotonic cursor) feeding
-  `PUT /api/replica/notes`; the shared wire-format module
-  (`worker/handlers/replica-payload.ts`); replica status + full-push action in
-  the Settings Storage panel; the live D1 end-to-end script
-  (`scripts/replica-e2e.ts`).
-- **Cutover (this branch):** database-authoritative mode as the default —
-  `GET /api/replica/notes` (full + since-cursor pulls), `database-mode.ts` +
-  `d1-note-source.ts` on the client, the repo screen and git sync retired to
-  the `"git"` flag value, git-derived features dormant in database mode,
-  last-writer-wins as the documented conflict model.
+Until this architecture landed, Ruminate was a git app: notes were markdown
+files in a GitHub repository cloned into the browser (isomorphic-git +
+lightning-fs), synced by a pull/commit/push state machine, with version
+history, merge drivers, conflicted-copy notes, and a repo-selection screen.
+That architecture is recorded in [architecture-notes.md](./architecture-notes.md)
+and in git history (`main` holds the git app until this branch merges). The
+database architecture was built alongside it in phases — the `NoteStore`
+contract + conformance suite and shared schema first, then the local
+wa-sqlite store validated by a dual-write/shadow-read mirror while git stayed
+canonical, then write-behind D1 replication, then the cutover — and the git
+path, the storage flag, and the mirror were deleted once the database became
+the app.

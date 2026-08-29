@@ -1,6 +1,4 @@
-import { useAtomValue } from "jotai"
 import React from "react"
-import { githubRepoAtom } from "../global-state"
 import { useGetNoteContents, useWriteNotes } from "../data/store"
 import { updateFrontmatterValue } from "../utils/frontmatter"
 import { getNoteDraft, setNoteDraft } from "../utils/note-draft"
@@ -41,7 +39,6 @@ function addUpdatedTimestamp(content: string): string {
 
 export function useMoveTask() {
   const getNoteContents = useGetNoteContents()
-  const githubRepo = useAtomValue(githubRepoAtom)
   const writeNotes = useWriteNotes()
 
   return React.useCallback(
@@ -62,8 +59,8 @@ export function useMoveTask() {
       const newSourceContent = sourceMarkdown.slice(0, start) + sourceMarkdown.slice(endWithNewline)
 
       // Check for drafts
-      const sourceDraft = getNoteDraft({ githubRepo, noteId: sourceNoteId })
-      const targetDraft = getNoteDraft({ githubRepo, noteId: targetNoteId })
+      const sourceDraft = getNoteDraft(sourceNoteId)
+      const targetDraft = getNoteDraft(targetNoteId)
       const sourceHasDraft = sourceDraft !== null
       const targetHasDraft = targetDraft !== null
 
@@ -74,10 +71,10 @@ export function useMoveTask() {
 
       // Update drafts for dirty files (immediate write since we navigate after)
       if (sourceHasDraft) {
-        setNoteDraft({ githubRepo, noteId: sourceNoteId, value: newSourceContent, immediate: true })
+        setNoteDraft({ noteId: sourceNoteId, value: newSourceContent, immediate: true })
       }
       if (targetHasDraft) {
-        setNoteDraft({ githubRepo, noteId: targetNoteId, value: newTargetContent, immediate: true })
+        setNoteDraft({ noteId: targetNoteId, value: newTargetContent, immediate: true })
       }
 
       // Save clean notes only
@@ -90,9 +87,9 @@ export function useMoveTask() {
       }
 
       if (Object.keys(notesToSave).length > 0) {
-        writeNotes(notesToSave, `Move task from ${sourceNoteId}.md to ${targetNoteId}.md`)
+        writeNotes(notesToSave)
       }
     },
-    [getNoteContents, githubRepo, writeNotes],
+    [getNoteContents, writeNotes],
   )
 }

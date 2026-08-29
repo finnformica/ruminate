@@ -1,7 +1,5 @@
 import { useMatch } from "@tanstack/react-router"
-import { useAtomValue } from "jotai"
 import { useMemo } from "react"
-import { githubRepoAtom } from "../global-state"
 import { Note, fontSchema } from "../schema"
 import { cx } from "../utils/cx"
 import {
@@ -29,16 +27,15 @@ type NotePreviewProps = {
 
 export function NotePreview({ note, className, hideProperties }: NotePreviewProps) {
   const highlightedHrefs = useLinkHighlight()
-  const githubRepo = useAtomValue(githubRepoAtom)
 
   // Prefer a local draft if it exists (unsaved changes)
   const { resolvedContent, isDraft } = useMemo(() => {
-    const draft = getNoteDraft({ githubRepo, noteId: note.id })
+    const draft = getNoteDraft(note.id)
     if (draft !== null && draft !== note.content) {
       return { resolvedContent: draft, isDraft: true }
     }
     return { resolvedContent: note.content, isDraft: false }
-  }, [githubRepo, note.id, note.content])
+  }, [note.id, note.content])
 
   // Parse frontmatter from the resolved content so frontmatter-derived values reflect drafts
   const resolvedFrontmatter = useMemo(() => {

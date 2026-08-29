@@ -4,11 +4,10 @@ import type { NoteStore } from "./note-store"
 /**
  * The `NoteStore` contract, as an executable specification.
  *
- * Every implementation — the current git/markdown adapter and Phase 2's
- * SQLite-backed store — must pass this suite unchanged. Run it from a spec
+ * Every implementation must pass this suite unchanged. Run it from a spec
  * file with a factory that returns a fresh, empty store per test:
  *
- *   describeNoteStoreConformance("git-backed store", () => makeStore())
+ *   describeNoteStoreConformance("sql-backed store", () => makeStore())
  */
 export function describeNoteStoreConformance(
   name: string,

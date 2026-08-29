@@ -8,8 +8,6 @@ import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
 import {
   blockRevealAtom,
-  githubRepoAtom,
-  isDatabaseModeAtom,
   noteOutlineAtom,
   notesAtom,
   pinnedNotesAtom,
@@ -28,9 +26,7 @@ import { pluralize } from "../utils/pluralize"
 import {
   CalendarDateIcon16,
   CopyIcon16,
-  ExternalLinkIcon16,
   GlobeIcon16,
-  HistoryIcon16,
   NoteIcon16,
   PinFillIcon12,
   PlusIcon16,
@@ -40,7 +36,6 @@ import {
   TagIcon16,
 } from "./icons"
 import { NoteFavicon } from "./note-favicon"
-import { openNoteHistoryDialogAtom } from "./note-history-dialog-state"
 
 export const isCommandMenuOpenAtom = atom(false)
 
@@ -53,8 +48,6 @@ type PaletteMode = "commands" | "outline"
 
 export function CommandMenu() {
   const navigate = useNavigate()
-  const githubRepo = useAtomValue(githubRepoAtom)
-  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const searchNotes = useSearchNotes()
   const tagSearcher = useAtomValue(tagSearcherAtom)
   const saveNote = useSaveNote()
@@ -279,23 +272,9 @@ export function CommandMenu() {
     })
   }, [navItems, deferredQuery])
 
-  const openNoteHistoryDialog = useSetAtom(openNoteHistoryDialogAtom)
-
   const noteActions = useMemo(() => {
     if (!note) return []
     return [
-      // Note history is git history — unavailable (and hidden) in database mode.
-      ...(!isDatabaseMode
-        ? [
-            {
-              label: "View note history",
-              icon: <HistoryIcon16 />,
-              onSelect: () => {
-                openNoteHistoryDialog()
-              },
-            },
-          ]
-        : []),
       {
         label: "Copy note markdown",
         icon: <CopyIcon16 />,
@@ -310,19 +289,6 @@ export function CommandMenu() {
           copy(note.id)
         },
       },
-      // Only meaningful when a GitHub repo backs the notes (git mode).
-      ...(githubRepo
-        ? [
-            {
-              label: "Open in GitHub",
-              icon: <ExternalLinkIcon16 />,
-              onSelect: () => {
-                const url = `https://github.com/${githubRepo.owner}/${githubRepo.name}/blob/main/${note.id}.md`
-                window.open(url, "_blank")
-              },
-            },
-          ]
-        : []),
       {
         label: "Print note",
         icon: <PrinterIcon16 />,
@@ -331,7 +297,7 @@ export function CommandMenu() {
         },
       },
     ]
-  }, [note, githubRepo, isDatabaseMode, openNoteHistoryDialog])
+  }, [note])
 
   const filteredNoteActions = useMemo(() => {
     return noteActions.filter((item) => {

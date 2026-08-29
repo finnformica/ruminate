@@ -8,7 +8,7 @@ import {
   setNoteDraft,
 } from "./note-draft"
 
-const key = { githubRepo: null, noteId: "test-note" }
+const noteId = "test-note"
 
 beforeEach(() => window.localStorage.clear())
 afterEach(() => window.localStorage.clear())
@@ -24,51 +24,51 @@ describe("hashNoteContent", () => {
 describe("draft provenance storage", () => {
   it("round-trips value and baseHash through the JSON envelope", () => {
     setNoteDraft({
-      ...key,
+      noteId,
       value: "draft body",
       baseHash: hashNoteContent("base"),
       immediate: true,
     })
 
-    expect(getNoteDraftEntry(key)).toEqual({
+    expect(getNoteDraftEntry(noteId)).toEqual({
       value: "draft body",
       baseHash: hashNoteContent("base"),
     })
-    expect(getNoteDraft(key)).toBe("draft body")
+    expect(getNoteDraft(noteId)).toBe("draft body")
   })
 
   it("loads legacy bare-string drafts with unknown base", () => {
     window.localStorage.setItem("draft::test-note", "legacy draft body")
 
-    expect(getNoteDraftEntry(key)).toEqual({ value: "legacy draft body", baseHash: null })
-    expect(getNoteDraft(key)).toBe("legacy draft body")
+    expect(getNoteDraftEntry(noteId)).toEqual({ value: "legacy draft body", baseHash: null })
+    expect(getNoteDraft(noteId)).toBe("legacy draft body")
   })
 
   it("treats note content that happens to be JSON (but not the envelope) as a legacy draft", () => {
     window.localStorage.setItem("draft::test-note", `{"v": 2, "note": "not a draft envelope"}`)
 
-    expect(getNoteDraftEntry(key)).toEqual({
+    expect(getNoteDraftEntry(noteId)).toEqual({
       value: `{"v": 2, "note": "not a draft envelope"}`,
       baseHash: null,
     })
   })
 
   it("preserves the existing provenance when baseHash is omitted (in-place draft edits)", () => {
-    setNoteDraft({ ...key, value: "draft v1", baseHash: hashNoteContent("base"), immediate: true })
+    setNoteDraft({ noteId, value: "draft v1", baseHash: hashNoteContent("base"), immediate: true })
     // task.ts-style modification: rewrite the draft without knowing its base.
-    setNoteDraft({ ...key, value: "draft v2", immediate: true })
+    setNoteDraft({ noteId, value: "draft v2", immediate: true })
 
-    expect(getNoteDraftEntry(key)).toEqual({
+    expect(getNoteDraftEntry(noteId)).toEqual({
       value: "draft v2",
       baseHash: hashNoteContent("base"),
     })
   })
 
   it("stores null provenance when explicitly unknown and clears cleanly", () => {
-    setNoteDraft({ ...key, value: "draft body", baseHash: null, immediate: true })
-    expect(getNoteDraftEntry(key)).toEqual({ value: "draft body", baseHash: null })
+    setNoteDraft({ noteId, value: "draft body", baseHash: null, immediate: true })
+    expect(getNoteDraftEntry(noteId)).toEqual({ value: "draft body", baseHash: null })
 
-    clearNoteDraft(key)
-    expect(getNoteDraftEntry(key)).toBeNull()
+    clearNoteDraft(noteId)
+    expect(getNoteDraftEntry(noteId)).toBeNull()
   })
 })
