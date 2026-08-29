@@ -9,6 +9,12 @@ import { LoadingIcon16, SettingsIcon16 } from "../components/icons"
 import { PageLayout } from "../components/page-layout"
 import { RepoForm } from "../components/repo-form"
 import { Signature } from "../components/signature"
+import { Switch } from "../components/switch"
+import {
+  storageDiagnosticsAtom,
+  storageEngineAtom,
+  type StorageDiagnostics,
+} from "../data/storage-mirror"
 import {
   AccentColor,
   accentAtom,
@@ -34,6 +40,7 @@ function RouteComponent() {
       <div className="p-4 pb-6">
         <div className="mx-auto flex max-w-xl flex-col gap-6">
           <AppearanceSection />
+          <StorageSection />
           <GitHubSection />
           <div className="p-5 text-text-tertiary self-center flex flex-col gap-3 items-center">
             <span className="text-sm">
@@ -126,6 +133,125 @@ function AppearanceSection() {
       </div>
     </SettingsSection>
   )
+}
+
+function StorageSection() {
+  const [engine, setEngine] = useAtom(storageEngineAtom)
+  const diagnostics = useAtomValue(storageDiagnosticsAtom)
+  const enabled = engine === "database"
+
+  return (
+    <SettingsSection title="Storage">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex w-0 grow flex-col gap-1">
+          <label htmlFor="database-store-toggle" className="leading-4">
+            Experimental: database store
+          </label>
+          <span className="text-sm leading-5 text-text-secondary">
+            Runs a local database alongside git and reports any divergence — git remains the source
+            of truth.
+          </span>
+        </div>
+        <Switch
+          id="database-store-toggle"
+          checked={enabled}
+          onCheckedChange={(checked) => setEngine(checked ? "database" : "git")}
+        />
+      </div>
+      {enabled ? <StorageDiagnosticsPanel diagnostics={diagnostics} /> : null}
+    </SettingsSection>
+  )
+}
+
+const STORAGE_STATUS_LABELS: Record<StorageDiagnostics["status"], string> = {
+  off: "Off",
+  starting: "Starting…",
+  ready: "Ready",
+  error: "Error",
+}
+
+function StorageDiagnosticsPanel({ diagnostics }: { diagnostics: StorageDiagnostics }) {
+  const {
+    status,
+    persistence,
+    ingestedNotes,
+    lastIngestMs,
+    reconciledFromSync,
+    rekeys,
+    divergences,
+    writeErrors,
+    rekeyCount,
+    divergenceCount,
+    writeErrorCount,
+  } = diagnostics
+
+  return (
+    <div className="mt-4 flex flex-col gap-2 border-t border-border-secondary pt-4 text-sm leading-5">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-text-secondary [&>dd]:text-right [&>dd]:text-text">
+        <dt>Status</dt>
+        <dd>
+          {STORAGE_STATUS_LABELS[status]}
+          {status === "ready" && persistence === "memory" ? " (in-memory — OPFS unavailable)" : ""}
+        </dd>
+        <dt>Notes ingested</dt>
+        <dd>
+          {ingestedNotes}
+          {lastIngestMs !== null ? ` (${lastIngestMs}ms)` : ""}
+        </dd>
+        <dt>Reconciled from sync</dt>
+        <dd>{reconciledFromSync}</dd>
+        <dt>Block ids re-keyed</dt>
+        <dd>{rekeyCount}</dd>
+        <dt>Divergences</dt>
+        <dd className={divergenceCount > 0 ? "!text-text-danger" : ""}>{divergenceCount}</dd>
+        <dt>Write errors</dt>
+        <dd className={writeErrorCount > 0 ? "!text-text-danger" : ""}>{writeErrorCount}</dd>
+      </dl>
+      {rekeys.length > 0 ? (
+        <DiagnosticList label={`Last re-keys (${rekeys.length})`}>
+          {rekeys.map((rekey, i) => (
+            <li key={i}>
+              {formatDiagnosticTime(rekey.at)} · {rekey.noteId}: {rekey.oldId} → {rekey.newId} (kept
+              by {rekey.keeperNoteId})
+            </li>
+          ))}
+        </DiagnosticList>
+      ) : null}
+      {divergences.length > 0 ? (
+        <DiagnosticList label={`Last divergences (${divergences.length})`}>
+          {divergences.map((divergence, i) => (
+            <li key={i}>
+              {formatDiagnosticTime(divergence.at)} · {divergence.noteId}: {divergence.kind}
+            </li>
+          ))}
+        </DiagnosticList>
+      ) : null}
+      {writeErrors.length > 0 ? (
+        <DiagnosticList label={`Last write errors (${writeErrors.length})`}>
+          {writeErrors.map((writeError, i) => (
+            <li key={i}>
+              {formatDiagnosticTime(writeError.at)} · {writeError.message}
+            </li>
+          ))}
+        </DiagnosticList>
+      ) : null}
+    </div>
+  )
+}
+
+function DiagnosticList({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <details className="text-text-secondary">
+      <summary className="cursor-pointer select-none">{label}</summary>
+      <ul className="mt-1 flex list-none flex-col gap-1 break-all pl-4 font-mono text-xs leading-4">
+        {children}
+      </ul>
+    </details>
+  )
+}
+
+function formatDiagnosticTime(at: number) {
+  return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 }
 
 function GitHubSection() {

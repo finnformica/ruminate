@@ -9,6 +9,7 @@ import { DevBar } from "../components/dev-bar"
 import { ErrorIcon16 } from "../components/icons"
 import { MergeNoticeBanner } from "../components/merge-notice-banner"
 import { Notice } from "../components/notice"
+import { useStorageMirror } from "../data/use-storage-mirror"
 import { globalStateMachineAtom } from "../global-state"
 import { GlobalShortcuts } from "../shortcuts/global-shortcuts"
 import { storageWarningAtom } from "../utils/markdown-cache"
@@ -34,6 +35,10 @@ function RouteComponent() {
   const send = useSetAtom(globalStateMachineAtom)
   const { online } = useNetworkState()
   const rootRef = React.useRef<HTMLDivElement>(null)
+
+  // Experimental database store (Settings → Storage): dual-write + shadow-read
+  // mirror. Inert unless the storage flag is on.
+  useStorageMirror()
 
   // Sync when the app becomes visible again
   useEvent("visibilitychange", () => {

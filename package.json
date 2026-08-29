@@ -40,6 +40,7 @@
     "@radix-ui/react-radio-group": "^1.2.0",
     "@radix-ui/react-slot": "^1.0.0",
     "@radix-ui/react-switch": "^1.0.3",
+    "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "@tanstack/react-router": "^1.112.18",
     "buffer": "^6.0.3",
     "chrono-node": "^2.7.0",

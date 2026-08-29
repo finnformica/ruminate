@@ -3,6 +3,7 @@ import { useAtomCallback } from "jotai/utils"
 import React from "react"
 import { globalStateMachineAtom, markdownFilesAtom } from "../global-state"
 import type { NoteId } from "../schema"
+import { mirrorDeleteFile, mirrorFileWrites } from "./storage-mirror"
 
 /**
  * The storage seam.
@@ -43,6 +44,10 @@ export function useWriteFiles() {
   return React.useCallback(
     (files: Record<string, string | null>, commitMessage?: string) => {
       send({ type: "WRITE_FILES", markdownFiles: files, commitMessage })
+      // Dual-write (experimental database store): git first — the machine event
+      // above is the canonical write — then mirror into the SQL store. A no-op
+      // unless the storage flag is on; never throws, never blocks the git path.
+      mirrorFileWrites(files)
     },
     [send],
   )
@@ -73,6 +78,8 @@ export function useDeleteNoteFile() {
   return React.useCallback(
     (id: NoteId) => {
       send({ type: "DELETE_FILE", filepath: noteIdToPath(id) })
+      // Dual-write (see `useWriteFiles`): mirror the delete into the SQL store.
+      mirrorDeleteFile(noteIdToPath(id))
     },
     [send],
   )
