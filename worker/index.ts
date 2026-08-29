@@ -12,6 +12,7 @@ import { githubAuth } from "./handlers/github-auth"
 import { githubRefresh } from "./handlers/github-refresh"
 import { fileProxy } from "./handlers/file-proxy"
 import { gitLfsFile } from "./handlers/git-lfs-file"
+import { replica } from "./handlers/replica"
 import { share } from "./handlers/share"
 
 export default {
@@ -24,6 +25,7 @@ export default {
     if (pathname === "/file-proxy") return fileProxy(request)
     if (pathname === "/git-lfs-file") return gitLfsFile(request)
     if (pathname.startsWith("/share/")) return share(request, env)
+    if (pathname.startsWith("/api/replica/")) return replica(request, env)
 
     // Everything else: static assets (index.html fallback for SPA routes).
     return env.ASSETS.fetch(request)

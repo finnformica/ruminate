@@ -16,8 +16,21 @@
       "/file-proxy",
       "/git-lfs-file",
       "/share/*",
+      "/api/replica/*",
     ],
   },
+  // The note-graph replica (graph storage phase 3 — docs/graph-storage.md).
+  // Migrations live in ./migrations and are applied with
+  //   npx wrangler d1 migrations apply ruminate --local   (dev)
+  //   npx wrangler d1 migrations apply ruminate --remote  (production)
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ruminate",
+      "database_id": "7bf20efd-53cd-4605-b0b6-8805a9faab9e",
+      "migrations_dir": "./migrations",
+    },
+  ],
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": true },
