@@ -3,6 +3,7 @@ import { atomWithStorage } from "jotai/utils"
 import type { NoteId } from "../schema"
 import { LEGACY_VIEW_STATE_PATH, VIEW_STATE_DIR } from "./paths"
 import { parseNoteViewState, readNoteViewState } from "./view-state-parse"
+import type { ReplicaSyncHandle } from "./replica-sync"
 import type { RekeyRecord, SqlNoteStore } from "./sql-note-store"
 
 /**
@@ -25,6 +26,12 @@ import type { RekeyRecord, SqlNoteStore } from "./sql-note-store"
  *   that dual-write should have prevented is recorded as a divergence (and
  *   then healed — git wins). Reads continue to come from the git pipeline;
  *   this phase only proves parity.
+ *
+ * - replication (phase 3): while the mirror runs, `replica-sync.ts` pushes the
+ *   same notes to the D1 replica behind the Worker (write-behind, leader-tab
+ *   only, coalesced) — see that module for the design. The mirror only feeds
+ *   it: changed/deleted note ids after each successful dual-write and verify
+ *   pass, plus a full-corpus push after every ingest.
  *
  * All SQL work runs on one promise queue, so writes and verifies never
  * interleave. Nothing here ever writes to git except the collision re-keys,
@@ -54,6 +61,37 @@ interface StorageRekey extends RekeyRecord {
   at: number
 }
 
+/** The D1 replica's row counts + cursor, from `GET /api/replica/status`. */
+interface ReplicaRemoteStatus {
+  notes: number
+  blocks: number
+  links: number
+  viewState: number
+  cursor: string | null
+  fetchedAt: number
+}
+
+/** Write-behind replication to the D1 database (graph storage, phase 3),
+ * maintained by `replica-sync.ts` while the mirror is running. */
+export interface ReplicaDiagnostics {
+  /** Only the sync-leader tab pushes; followers accumulate pending work. */
+  leader: boolean
+  lastPushAt: number | null
+  /** Notes included in the last successful push. */
+  lastPushNotes: number
+  pendingNotes: number
+  pendingDeletes: number
+  /** A full-corpus push is queued or being retried. */
+  fullPushPending: boolean
+  /** Cursor sent with the last successful push; confirmed once the status
+   * endpoint echoes it back. */
+  cursor: string | null
+  cursorConfirmed: boolean
+  lastError: { message: string; at: number } | null
+  errorCount: number
+  remote: ReplicaRemoteStatus | null
+}
+
 export interface StorageDiagnostics {
   engine: StorageEngine
   status: "off" | "starting" | "ready" | "error"
@@ -72,6 +110,8 @@ export interface StorageDiagnostics {
   divergenceCount: number
   writeErrorCount: number
   rekeyCount: number
+  /** D1 replication state; null until the replica sync has started. */
+  replica: ReplicaDiagnostics | null
 }
 
 const OFF_DIAGNOSTICS: StorageDiagnostics = {
@@ -87,6 +127,7 @@ const OFF_DIAGNOSTICS: StorageDiagnostics = {
   divergenceCount: 0,
   writeErrorCount: 0,
   rekeyCount: 0,
+  replica: null,
 }
 
 /** Read-only diagnostics for the Settings panel — what the trial is watched by. */
@@ -108,11 +149,17 @@ export interface StorageMirrorOptions {
   writeNotes: (updates: Record<NoteId, string>, commitMessage?: string) => void
   /** Injectable for tests; defaults to the wasm worker driver. */
   openStore?: () => Promise<{ store: SqlNoteStore; persistence: "opfs" | "memory" }>
+  /** Injectable for tests; defaults to the real D1 replica sync
+   * (`replica-sync.ts`, dynamically imported so it stays in the flag-on
+   * chunk). Return null to run without replication. */
+  openReplicaSync?: (getFiles: () => Record<string, string>) => Promise<ReplicaSyncHandle | null>
 }
 
 interface MirrorRuntime {
   options: StorageMirrorOptions
   store: SqlNoteStore | null
+  /** Write-behind D1 replication (leader tab only pushes); null until started. */
+  replica: ReplicaSyncHandle | null
   /** Note ids this mirror wrote to SQL and git has not yet confirmed matching. */
   pendingWrites: Set<NoteId>
   /** Note ids this mirror deleted from SQL. */
@@ -207,6 +254,12 @@ function hashContent(str: string): string {
   return (h2 >>> 0).toString(16) + "-" + (h1 >>> 0).toString(16)
 }
 
+async function defaultOpenReplicaSync(getFiles: () => Record<string, string>) {
+  // Dynamic import: replication code loads only while the flag is on.
+  const { startReplicaSync } = await import("./replica-sync")
+  return startReplicaSync({ getFiles })
+}
+
 async function defaultOpenStore() {
   // Dynamic imports keep the SQL store (and the sqlite wasm worker behind it)
   // out of the main bundle entirely while the flag is off.
@@ -229,6 +282,7 @@ export function startStorageMirror(options: StorageMirrorOptions) {
   const activation: MirrorRuntime = {
     options,
     store: null,
+    replica: null,
     pendingWrites: new Set(),
     pendingDeletes: new Set(),
     lastGitHashes: new Map(),
@@ -254,6 +308,24 @@ export function startStorageMirror(options: StorageMirrorOptions) {
       updateDiagnostics({ persistence })
       await runIngest(activation)
       if (runtime === activation) updateDiagnostics({ status: "ready" })
+      // Start the write-behind D1 replication after the local store is ready.
+      // A replication failure never affects the mirror — record and continue.
+      if (runtime === activation) {
+        try {
+          const replica = await (options.openReplicaSync ?? defaultOpenReplicaSync)(
+            options.getFiles,
+          )
+          if (runtime !== activation) {
+            replica?.stop()
+            return
+          }
+          activation.replica = replica
+          // Seed the replica with the full ingested corpus.
+          replica?.requestFullPush()
+        } catch (error) {
+          recordWriteError(error)
+        }
+      }
     } catch (error) {
       if (runtime === activation) {
         updateDiagnostics({ status: "error" })
@@ -299,6 +371,9 @@ async function runIngest(activation: MirrorRuntime) {
   }
 
   updateDiagnostics({ ingestedNotes: result.ingestedNotes, lastIngestMs })
+  // A (re-)ingest rebuilt the local store wholesale — replicate the whole
+  // corpus (no-op before the replica sync has started; the start path pushes).
+  activation.replica?.requestFullPush()
   console.log(
     `[storage-mirror] ingested ${result.ingestedNotes} notes in ${lastIngestMs}ms` +
       (result.rekeys.length > 0 ? ` (${result.rekeys.length} block ids re-keyed)` : ""),
@@ -312,10 +387,24 @@ export function stopStorageMirror() {
   if (!stopped) return
   runtime = null
   generation += 1
+  stopped.replica?.stop()
+  stopped.replica = null
   enqueue(async () => {
     await stopped.store?.close().catch(() => {})
   })
   jotai().set(storageDiagnosticsAtom, OFF_DIAGNOSTICS)
+}
+
+/** Settings action: replicate the full corpus to D1 now. No-op unless the
+ * mirror (and its replica sync) is running. */
+export function requestReplicaFullPush() {
+  runtime?.replica?.requestFullPush()
+}
+
+/** Refresh the remote D1 counts shown in the Settings panel. No-op unless the
+ * mirror (and its replica sync) is running. */
+export function refreshReplicaStatus() {
+  runtime?.replica?.refreshRemoteStatus()
 }
 
 /** After a SQL-side failure, schedule one repair re-ingest (cooldown-guarded). */
@@ -366,6 +455,15 @@ export function mirrorFileWrites(files: Record<string, string | null>) {
       for (const [noteId, collapsedIds] of viewStateUpdates) {
         await activation.store.setViewState(noteId, collapsedIds)
       }
+      // Mirror write succeeded — queue the same notes for D1 replication
+      // (view-state changes ride the owning note's replica entry).
+      const changed = Object.keys(noteUpdates).filter((id) => noteUpdates[id] !== null)
+      const deleted = Object.keys(noteUpdates).filter((id) => noteUpdates[id] === null)
+      activation.replica?.notifyNotesChanged([
+        ...changed,
+        ...viewStateUpdates.map(([noteId]) => noteId).filter((id) => !deleted.includes(id)),
+      ])
+      activation.replica?.notifyNotesDeleted(deleted)
     } catch (error) {
       // The git write already went through — SQL must never block it. Record
       // and repair via re-ingest (e.g. a cross-note block-id collision that
@@ -451,6 +549,11 @@ export function verifyStorageMirror(files: Record<string, string>) {
         recordWriteError(error)
         scheduleRepairIngest(activation)
       }
+      // Whatever differed from the previous snapshot (external pulls, healed
+      // divergences) must reach D1 too — git is what gets replicated, so this
+      // is safe regardless of how the SQL-side heal fared.
+      activation.replica?.notifyNotesChanged(Object.keys(heal).filter((id) => heal[id] !== null))
+      activation.replica?.notifyNotesDeleted(Object.keys(heal).filter((id) => heal[id] === null))
     }
 
     recordDivergences(divergences)

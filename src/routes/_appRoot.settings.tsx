@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useNetworkState } from "react-use"
 import { Button } from "../components/button"
 import { useSignOut } from "../components/github-auth"
@@ -11,8 +11,11 @@ import { RepoForm } from "../components/repo-form"
 import { Signature } from "../components/signature"
 import { Switch } from "../components/switch"
 import {
+  refreshReplicaStatus,
+  requestReplicaFullPush,
   storageDiagnosticsAtom,
   storageEngineAtom,
+  type ReplicaDiagnostics,
   type StorageDiagnostics,
 } from "../data/storage-mirror"
 import {
@@ -207,6 +210,7 @@ function StorageDiagnosticsPanel({ diagnostics }: { diagnostics: StorageDiagnost
         <dt>Write errors</dt>
         <dd className={writeErrorCount > 0 ? "!text-text-danger" : ""}>{writeErrorCount}</dd>
       </dl>
+      {diagnostics.replica ? <ReplicaDiagnosticsPanel replica={diagnostics.replica} /> : null}
       {rekeys.length > 0 ? (
         <DiagnosticList label={`Last re-keys (${rekeys.length})`}>
           {rekeys.map((rekey, i) => (
@@ -235,6 +239,67 @@ function StorageDiagnosticsPanel({ diagnostics }: { diagnostics: StorageDiagnost
           ))}
         </DiagnosticList>
       ) : null}
+    </div>
+  )
+}
+
+/** Read-only D1 replication status (graph storage, phase 3): last push,
+ * pending queue, remote row counts — plus the one action, a manual full push. */
+function ReplicaDiagnosticsPanel({ replica }: { replica: ReplicaDiagnostics }) {
+  // Refresh the remote counts when the panel opens.
+  useEffect(() => {
+    refreshReplicaStatus()
+  }, [])
+
+  const pending =
+    [
+      replica.pendingNotes > 0 ? `${replica.pendingNotes} notes` : null,
+      replica.pendingDeletes > 0 ? `${replica.pendingDeletes} deletes` : null,
+      replica.fullPushPending ? "full push" : null,
+    ]
+      .filter(Boolean)
+      .join(", ") || "None"
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-border-secondary pt-2">
+      <span className="text-text-secondary">
+        D1 replica{replica.leader ? "" : " (follower tab — the leader tab pushes)"}
+      </span>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-text-secondary [&>dd]:text-right [&>dd]:text-text">
+        <dt>Last push</dt>
+        <dd>
+          {replica.lastPushAt !== null
+            ? `${formatDiagnosticTime(replica.lastPushAt)} (${replica.lastPushNotes} notes)`
+            : "Never"}
+        </dd>
+        <dt>Pending</dt>
+        <dd>{pending}</dd>
+        <dt>Remote rows</dt>
+        <dd>
+          {replica.remote
+            ? `${replica.remote.notes} notes · ${replica.remote.blocks} blocks · ` +
+              `${replica.remote.links} links (${formatDiagnosticTime(replica.remote.fetchedAt)})`
+            : "—"}
+        </dd>
+        <dt>Cursor</dt>
+        <dd>
+          {replica.cursor === null
+            ? "—"
+            : replica.cursorConfirmed
+              ? `${replica.cursor} (confirmed)`
+              : replica.cursor}
+        </dd>
+        <dt>Push errors</dt>
+        <dd className={replica.errorCount > 0 ? "!text-text-danger" : ""}>{replica.errorCount}</dd>
+      </dl>
+      {replica.lastError ? (
+        <span className="break-all font-mono text-xs leading-4 text-text-danger">
+          {formatDiagnosticTime(replica.lastError.at)} · {replica.lastError.message}
+        </span>
+      ) : null}
+      <Button className="self-start" onClick={() => requestReplicaFullPush()}>
+        Push full copy to D1 now
+      </Button>
     </div>
   )
 }

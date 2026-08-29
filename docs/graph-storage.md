@@ -134,9 +134,10 @@ absence of a row, mirroring "empty deletes the sidecar file".
 ### `meta` (key/value)
 
 `schema_version` (currently `1`) and `replica_cursor` — an opaque,
-client-supplied marker of the last replicated repo state (in practice the git
-HEAD sha at push time), letting the client and the status endpoint agree on
-how fresh the replica is without diffing content.
+client-supplied marker of the last replicated repo state (in practice a
+monotonic ms-timestamp minted at push time — see "Replication to D1" below),
+letting the client and the status endpoint agree on how fresh the replica is
+without diffing content.
 
 ## Cross-file block-id dedup (designed here, at the migration)
 
@@ -200,6 +201,91 @@ view_state}` entries (plus optional `deletes` and `cursor`), executed as a
   per-request GitHub round-trip ever matters, cache verification results in
   `caches.default` keyed by a token hash.
 
+## Replication to D1 (phase 3, `src/data/replica-sync.ts`)
+
+While the storage flag is on, the local mirror also replicates to the D1
+database through the routes above. **Write-behind, always:** git commits and
+the local SQL dual-write happen first and never wait on the network; the
+replica push is queued afterwards and a push failure can only ever produce a
+diagnostic and a retry, never a blocked or lost local write.
+
+- **Sources.** The storage mirror feeds the queue: changed/deleted note ids
+  after each successful dual-write, everything the shadow-read verify pass
+  reconciled or healed (which is how pulls and follower-tab edits arrive), and
+  a full-corpus push after every ingest (initial start and repair re-ingests
+  alike). What gets pushed is always re-read from the git worktree at push
+  time — git is what is being replicated.
+- **Coalescing + chunking.** Dirty note ids accumulate in a set; a push runs
+  ~2s after the first dirty mark, so rapid saves coalesce into one request.
+  Full pushes are chunked (~50 notes per `PUT`) to stay under the Worker body
+  cap and D1 batch limits; each note entry is built by the same
+  `docToRows`-based builder the local store ingests through, and the payload
+  types are imported from `worker/handlers/replica-payload.ts` — the exact
+  module the Worker validates with — so the two sides cannot drift.
+- **Leader-only.** Only the sync-leader tab (`src/utils/sync-leader.ts`)
+  pushes; followers accumulate pending ids and re-check every 30s in case
+  they are promoted. Follower edits normally reach D1 via the leader: git
+  sync lands them in the leader's worktree, its verify pass marks them dirty.
+- **Auth.** Same-origin fetch (the `gh_refresh` cookie rides along) plus the
+  current GitHub access token as a Bearer header, obtained exactly like the
+  git layer's (`ensureFreshToken` proactively, `withAuthRetry` refreshing
+  once and retrying on a 401).
+- **Resilience.** A failed push returns its notes to the dirty set and
+  retries with exponential backoff (2s doubling to a 60s cap); the browser's
+  `online` event short-circuits the wait. Failures are recorded in the
+  Settings diagnostics, never thrown.
+- **Cursor.** Each push carries a monotonic ms-timestamp cursor (sent only
+  with the final chunk, so it means "the replica reflects local state as of
+  this push"). `GET /api/replica/status` echoes it back — the Settings panel
+  shows it as confirmed — and supplies remote row counts. If the counts show
+  the replica drastically behind (empty, or missing >10% of the corpus), a
+  full push is scheduled automatically (cooldown-guarded); the Settings panel
+  also has a manual "Push full copy to D1 now" action.
+- **Known gap, accepted for the trial:** pending deletes live only in memory,
+  so a note deleted while the replica was unreachable can linger remotely if
+  the tab closes before the retry lands. The drastically-behind check only
+  catches missing notes, not stale extras; a manual full push + the D1 row
+  counts make the state visible, and cutover would require a reconciliation
+  pass (or replica-side note listing) to close this hole properly.
+
+### Weekend evaluation checklist
+
+Run with the flag on, work normally, and watch Settings → Storage:
+
+1. **Divergences and write errors stay at 0** (local mirror health, phase 2).
+2. **Last push** updates within a few seconds of every save; **Pending**
+   drains back to "None".
+3. **Remote rows** track the local note count (notes match `Notes ingested`;
+   blocks/links grow with edits), and the **cursor shows confirmed** after
+   pushes.
+4. **Push errors** stay near 0 — transient network errors that retry away are
+   fine; a growing count or a stuck `lastError` is not.
+5. Multi-device/tab: edit from another device, let the leader tab pull, and
+   confirm the pulled notes reach D1 (remote counts follow).
+6. Offline: work offline for a stretch, come back online, confirm pending
+   drains without a manual full push.
+7. Spot-check D1 directly (`wrangler d1 execute ruminate --remote --command
+"SELECT COUNT(*) FROM notes"`, or a backlink query against `links`) and
+   compare with the app.
+
+### Cutover criteria (what green looks like)
+
+D1 (or the local SQL store) may only be considered for _authoritative_ duty
+after, at minimum:
+
+- a multi-week shadow period with **zero unexplained divergences** and zero
+  unexplained replica push errors;
+- remote counts that **continuously match** local counts through normal use,
+  including pulls, deletes, renames, conflicted copies, and offline stretches;
+- graph queries against the replica (backlinks, tags, block transclusions)
+  verified equal to the in-memory parse on the full corpus;
+- the delete-while-offline gap above closed by a real reconciliation
+  mechanism, not by luck;
+- a rehearsed rebuild: wipe D1, full-push from a device, verify counts and
+  spot-checks — proving the replica is rebuildable end-to-end.
+
+Until all of that holds, git stays canonical and the replica stays derived.
+
 ## What each phase ships
 
 - **Phase 1 (this change):** the `NoteStore` contract + git adapter +
@@ -211,7 +297,10 @@ view_state}` entries (plus optional `deletes` and `cursor`), executed as a
   conformance suite unchanged; ingest of the repo through `docToRows` with
   collision re-keying; the `ruminate_storage` flag wiring in `src/data`;
   graph queries (backlinks, tags, block transclusions) served from SQL.
-- **Phase 3:** the client-side replica push (debounced after sync, cursor =
-  HEAD sha) feeding `/api/replica/notes`; the status endpoint surfacing
-  replica freshness in settings.
+- **Phase 3:** the client-side replica push (`src/data/replica-sync.ts` —
+  write-behind, leader-only, coalesced, chunked, monotonic cursor) feeding
+  `/api/replica/notes`; the shared wire-format module
+  (`worker/handlers/replica-payload.ts`); replica status + full-push action in
+  the Settings Storage panel; the live D1 end-to-end script
+  (`scripts/replica-e2e.ts`).
 - **Post-trial:** the cutover decision, per the criteria above.

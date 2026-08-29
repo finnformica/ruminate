@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
-import {
-  parseReplicaPayload,
-  planReplicaPut,
-  requireSession,
-  type ReplicaPutPayload,
-} from "./replica"
+import { parseReplicaPayload, planReplicaPut, type ReplicaPutPayload } from "./replica-payload"
+import { requireSession } from "./replica"
 
 const entry = {
   note: { id: "note-a", content: "- Hi [[note-b]]\n  id:: blk_aaaaaaaaaa\n", updated_at: 123 },

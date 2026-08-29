@@ -1,23 +1,53 @@
 import { getDefaultStore } from "jotai"
 import { afterEach, describe, expect, it } from "vitest"
 import type { NoteId } from "../schema"
+import type { ReplicaSyncHandle } from "./replica-sync"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { openSqlNoteStore, type SqlNoteStore } from "./sql-note-store"
 import {
   flushStorageMirror,
   mirrorDeleteFile,
   mirrorFileWrites,
+  refreshReplicaStatus,
+  requestReplicaFullPush,
   startStorageMirror,
   stopStorageMirror,
   storageDiagnosticsAtom,
   verifyStorageMirror,
 } from "./storage-mirror"
 
+/** A recording stand-in for the D1 replica sync (no network, no timers). */
+function createStubReplica() {
+  const replicaCalls = {
+    changed: [] as NoteId[],
+    deleted: [] as NoteId[],
+    fullPushes: 0,
+    statusRefreshes: 0,
+    stopped: false,
+  }
+  const handle: ReplicaSyncHandle = {
+    notifyNotesChanged: (ids) => replicaCalls.changed.push(...ids),
+    notifyNotesDeleted: (ids) => replicaCalls.deleted.push(...ids),
+    requestFullPush: () => {
+      replicaCalls.fullPushes += 1
+    },
+    refreshRemoteStatus: () => {
+      replicaCalls.statusRefreshes += 1
+    },
+    stop: () => {
+      replicaCalls.stopped = true
+    },
+    flush: async () => {},
+  }
+  return { handle, replicaCalls }
+}
+
 /** Start the mirror against an in-memory SQL store and a mutable file map. */
 async function startTestMirror(initialFiles: Record<string, string> = {}) {
   let files = { ...initialFiles }
   const gitWrites: Record<NoteId, string>[] = []
   let sqlStore: SqlNoteStore | null = null
+  const { handle, replicaCalls } = createStubReplica()
 
   startStorageMirror({
     getFiles: () => ({ ...files }),
@@ -29,6 +59,7 @@ async function startTestMirror(initialFiles: Record<string, string> = {}) {
       sqlStore = await openSqlNoteStore(createNodeSqlDriver())
       return { store: sqlStore, persistence: "memory" as const }
     },
+    openReplicaSync: async () => handle,
   })
   await flushStorageMirror()
 
@@ -37,6 +68,7 @@ async function startTestMirror(initialFiles: Record<string, string> = {}) {
       return sqlStore!
     },
     gitWrites,
+    replicaCalls,
     setFiles: (next: Record<string, string>) => {
       files = { ...next }
     },
@@ -176,6 +208,61 @@ describe("storage mirror", () => {
     expect(diagnostics().writeErrorCount).toBeGreaterThan(0)
     // The repair re-keyed the collision and both notes made it into SQL.
     expect(Object.keys(await mirror.store.getAllNotes()).sort()).toEqual(["a", "b"])
+  })
+
+  it("replication: full push after ingest, changed/deleted notes after dual-writes", async () => {
+    const mirror = await startTestMirror({ "a.md": "A\n" })
+    expect(mirror.replicaCalls.fullPushes).toBe(1)
+
+    mirrorFileWrites({
+      "a.md": "A edited\n",
+      "b.md": null,
+      ".ruminate/view-state/c.json": '["blk_cccccccccc"]',
+    })
+    await flushStorageMirror()
+
+    expect(mirror.replicaCalls.changed).toEqual(["a", "c"])
+    expect(mirror.replicaCalls.deleted).toEqual(["b"])
+  })
+
+  it("replication: verify-pass reconciles and heals are queued for the replica", async () => {
+    const mirror = await startTestMirror({ "a.md": "A\n", "b.md": "B\n" })
+
+    // A pull rewrote one note, added one, deleted one — all external.
+    mirror.setFiles({ "a.md": "A from other device\n", "c.md": "C\n" })
+    verifyStorageMirror(mirror.getFiles())
+    await flushStorageMirror()
+
+    expect([...mirror.replicaCalls.changed].sort()).toEqual(["a", "c"])
+    expect(mirror.replicaCalls.deleted).toEqual(["b"])
+  })
+
+  it("replication: a repair re-ingest requests another full push", async () => {
+    const mirror = await startTestMirror({ "a.md": "A\n  id:: blk_aaaaaaaaaa\n" })
+
+    // Cross-note id collision fails the SQL write → repair re-ingest → full push.
+    mirror.setFiles({ ...mirror.getFiles(), "b.md": "B\n  id:: blk_aaaaaaaaaa\n" })
+    mirrorFileWrites({ "b.md": "B\n  id:: blk_aaaaaaaaaa\n" })
+    await flushStorageMirror()
+    await flushStorageMirror()
+
+    expect(mirror.replicaCalls.fullPushes).toBe(2)
+  })
+
+  it("replication: settings actions forward to the running replica sync", async () => {
+    const mirror = await startTestMirror({ "a.md": "A\n" })
+
+    requestReplicaFullPush()
+    refreshReplicaStatus()
+    expect(mirror.replicaCalls.fullPushes).toBe(2) // ingest + manual
+    expect(mirror.replicaCalls.statusRefreshes).toBe(1)
+
+    stopStorageMirror()
+    expect(mirror.replicaCalls.stopped).toBe(true)
+    requestReplicaFullPush()
+    refreshReplicaStatus()
+    expect(mirror.replicaCalls.fullPushes).toBe(2) // no-ops once stopped
+    expect(mirror.replicaCalls.statusRefreshes).toBe(1)
   })
 
   it("is inert while stopped", async () => {

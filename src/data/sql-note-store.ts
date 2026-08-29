@@ -4,8 +4,7 @@ import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
 import type { NoteId } from "../schema"
-import { parseFrontmatter } from "../utils/frontmatter"
-import { docToRows, findCrossNoteIdCollisions } from "./doc-to-rows"
+import { docToRows, findCrossNoteIdCollisions, frontmatterUpdatedAt } from "./doc-to-rows"
 import type { NoteStore } from "./note-store"
 import type { SqlDriver, SqlStatement } from "./sql-driver"
 
@@ -158,17 +157,6 @@ function parseCollapsed(raw: string): string[] {
   } catch {
     return []
   }
-}
-
-/** The frontmatter `updated_at` as ms epoch — same tolerance as `parseNote`. */
-function frontmatterUpdatedAt(content: string): number | null {
-  const value = parseFrontmatter(content).frontmatter["updated_at"]
-  if (value instanceof Date) return value.getTime()
-  if (typeof value === "string") {
-    const parsed = Date.parse(value)
-    if (!Number.isNaN(parsed)) return parsed
-  }
-  return null
 }
 
 /** Insert one note's row + graph rows (no cleanup — for freshly wiped tables). */
