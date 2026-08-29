@@ -29,10 +29,13 @@ export interface SqlWorkerResponse {
   ok: boolean
   rows?: Record<string, SqlValue>[]
   persistence?: "opfs" | "memory"
+  /** Why the OPFS VFS could not be acquired (memory fallback only). */
+  openError?: string
   error?: string
 }
 
 let db: Database | null = null
+let openError: string | undefined
 
 async function open(): Promise<"opfs" | "memory"> {
   const sqlite3: Sqlite3Static = await sqlite3InitModule()
@@ -41,7 +44,11 @@ async function open(): Promise<"opfs" | "memory"> {
     db = new pool.OpfsSAHPoolDb("/ruminate.sqlite3")
     return "opfs"
   } catch (error) {
+    // Typically: OPFS missing (private window), or the pool's access handles
+    // are held by another Ruminate tab. Surface the reason so the driver can
+    // tell the user instead of silently serving an empty in-memory corpus.
     console.warn("[ruminate-sql] OPFS unavailable, using in-memory database", error)
+    openError = error instanceof Error ? error.message : String(error)
     db = new sqlite3.oo1.DB(":memory:")
     return "memory"
   }
@@ -79,7 +86,7 @@ self.onmessage = async (event: MessageEvent<SqlWorkerRequest>) => {
     let response: SqlWorkerResponse = { id, ok: true }
     switch (op) {
       case "open":
-        response = { id, ok: true, persistence: await open() }
+        response = { id, ok: true, persistence: await open(), openError }
         break
       case "exec":
         response = { id, ok: true, rows: exec(sql ?? "", params) }

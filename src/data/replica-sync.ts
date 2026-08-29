@@ -1,58 +1,65 @@
 import { getDefaultStore } from "jotai"
-import type {
-  ReplicaNoteEntry,
-  ReplicaPutPayload,
-  ReplicaStatusBody,
+import {
+  isEmptyGraphDiff,
+  linkKeyOf,
+  type GraphDiff,
+  type LinkKey,
+  type LinkRow,
+  type NodeRow,
+  type ReplicaPutPayload,
+  type ReplicaStatusBody,
 } from "../../worker/handlers/replica-payload"
-import { parse } from "../blocks/parse"
 import type { NoteId } from "../schema"
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
-import { docToRows, frontmatterUpdatedAt } from "./doc-to-rows"
 import {
   storageDiagnosticsAtom,
   type ReplicaDiagnostics,
   type StorageDiagnostics,
 } from "./storage-diagnostics"
-import { readNoteViewState } from "./view-state-parse"
 
 /**
- * Write-behind replication of the note graph into the D1 database behind the
- * Worker (`PUT /api/replica/notes`). Started by the database runtime
+ * Write-behind replication of the node/link graph into the D1 database behind
+ * the Worker (`PUT /api/replica/notes`). Started by the database runtime
  * (`database-mode.ts`); the local store never waits on it — a push failure
  * can only ever produce a diagnostic and a retry, never a blocked or lost
  * local write.
  *
  * Design:
- * - **Dirty-set + debounce.** Saves mark note ids dirty; a push is scheduled
- *   ~2s out and everything dirty by then coalesces into one push. Work
- *   arriving mid-push is picked up by the next tick.
- * - **Chunking.** Full-corpus pushes are split into chunks of ~50 notes so a
- *   single request stays well under the Worker's body cap and D1's batch
- *   limits. The cursor rides only the final chunk — it means "the replica
- *   reflects local state as of this push", which is only true once every chunk
- *   has landed.
- * - **Every tab pushes its own writes.** There is no shared local store to
- *   carry one tab's edits to another, and last-writer-wins at the replica
- *   makes concurrent tab pushes safe.
+ * - **Row diffs, coalesced + debounced.** Saves hand over the exact row diff
+ *   the local store produced (changed nodes + changed links + deletes, never
+ *   a whole-note replace); diffs accumulate keyed by row, a push is scheduled
+ *   ~2s out, and everything dirty by then coalesces into one request. The
+ *   Worker applies rows with per-row last-writer-wins on `updated_at`.
+ * - **Flush on hide.** `visibilitychange → hidden` / `pagehide` push
+ *   immediately with `fetch keepalive`, so closing or backgrounding the tab
+ *   inside the debounce window doesn't strand the last save.
+ * - **Chunking.** Full-corpus pushes send all node rows before any link rows
+ *   (links reference nodes) in chunks, staying under the Worker body cap and
+ *   D1 batch limits. The cursor rides only the final chunk — it means "the
+ *   replica reflects local state as of this push".
+ * - **Every tab pushes its own writes.** Last-writer-wins per row at the
+ *   replica makes concurrent tab pushes safe.
  * - **Auth.** Same-origin fetch so the `gh_refresh` cookie rides along, plus
  *   the current GitHub access token as a Bearer header (`ensureFreshToken` /
- *   `withAuthRetry` from `utils/github-session.ts`; a 401 refreshes once and
- *   retries).
- * - **Resilience.** A failed push puts its notes back in the dirty set and
- *   retries with exponential backoff (2s → 60s); the browser's `online` event
- *   short-circuits the wait. Failures are recorded in the storage diagnostics.
+ *   `withAuthRetry`; a 401 refreshes once and retries).
+ * - **Resilience.** A failed push merges its rows back into the pending diff
+ *   (newer queued rows win) and retries with exponential backoff (2s → 60s);
+ *   the browser's `online` event short-circuits the wait.
  * - **Cursor.** A monotonic ms-timestamp cursor is sent with each push and
  *   confirmed via `GET /api/replica/status`, which also supplies the remote
- *   row counts for the Settings panel — and triggers an automatic full push
- *   when the replica is drastically behind.
+ *   row counts — and triggers an automatic full push when the replica is
+ *   drastically behind.
  */
 
 const DEBOUNCE_MS = 2_000
-const CHUNK_SIZE = 50
+const CHUNK_ROWS = 500
 const BACKOFF_START_MS = 2_000
 const BACKOFF_MAX_MS = 60_000
 /** Minimum gap between automatic drastically-behind full pushes. */
 const AUTO_FULL_PUSH_COOLDOWN_MS = 5 * 60_000
+/** `fetch keepalive` bodies are capped around 64 KB; larger flushes go out as
+ * ordinary requests and take their chances with the unload. */
+const KEEPALIVE_BODY_LIMIT = 60_000
 
 const INITIAL_REPLICA_DIAGNOSTICS: ReplicaDiagnostics = {
   lastPushAt: null,
@@ -74,23 +81,24 @@ interface ReplicaAuth {
 }
 
 export interface ReplicaSyncOptions {
-  /** The current files map (path → content) — what gets replicated. */
+  /** The current files map (path → content) — local corpus size for the
+   * drastically-behind check. */
   getFiles: () => Record<string, string>
+  /** Every current row of both tables — the full-push source (the store). */
+  getAllRows: () => Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
   /** Injectable for tests; default global fetch (same-origin URLs). */
   fetchImpl?: typeof fetch
   /** Injectable for tests; default the real github-session helpers. */
   auth?: ReplicaAuth
   debounceMs?: number
-  chunkSize?: number
+  chunkRows?: number
   backoffStartMs?: number
   backoffMaxMs?: number
 }
 
 export interface ReplicaSyncHandle {
-  /** Queue notes for replication (content read from the files map at push time). */
-  notifyNotesChanged(ids: NoteId[]): void
-  /** Queue note deletions for replication. */
-  notifyNotesDeleted(ids: NoteId[]): void
+  /** Queue one save's row diff (with the note ids it touched) for replication. */
+  notifyGraphChange(noteIds: NoteId[], diff: GraphDiff): void
   /**
    * Note ids with local changes/deletes not yet confirmed pushed (queued or
    * in flight). The pull side consults this before applying a pull, so a
@@ -100,7 +108,7 @@ export interface ReplicaSyncHandle {
    * implementation always provides it.)
    */
   pendingNoteIds?(): Set<NoteId>
-  /** Queue a full-corpus push (after ingest, or from the Settings action). */
+  /** Queue a full-corpus push (after a repair, or from the Settings action). */
   requestFullPush(): void
   /** Fetch `GET /api/replica/status` into the diagnostics (any tab). */
   refreshRemoteStatus(): void
@@ -109,44 +117,80 @@ export interface ReplicaSyncHandle {
   flush(): Promise<void>
 }
 
-/**
- * Build one note's replica entry from the files map — the client half of
- * the wire format `parseReplicaPayload` accepts on the Worker. Rows come from
- * the same `docToRows` transform the local SQL store ingests through, so the
- * replica and the local store can never derive different graphs. Returns null
- * when the note does not exist (it belongs in `deletes` instead).
- */
-export function buildReplicaNoteEntry(
-  files: Record<string, string>,
-  id: NoteId,
-): ReplicaNoteEntry | null {
-  const content = files[`${id}.md`]
-  if (content === undefined) return null
-  const { blocks, links } = docToRows(id, parse(content))
-  return {
-    note: { id, content, updated_at: frontmatterUpdatedAt(content) },
-    blocks,
-    links,
-    view_state: readNoteViewState(files, id),
-  }
-}
-
-/** Is the replica missing enough notes that only a full push can be trusted to
+/** Is the replica missing enough pages that only a full push can be trusted to
  * catch it up? (Empty while notes exist locally, or missing more than ~10% of
  * the corpus — lost pushes rather than ordinary write-behind lag.) */
-export function isReplicaDrasticallyBehind(localNotes: number, remoteNotes: number): boolean {
+export function isReplicaDrasticallyBehind(localNotes: number, remotePages: number): boolean {
   if (localNotes === 0) return false
-  if (remoteNotes <= 0) return true
-  return localNotes - remoteNotes > Math.max(3, Math.ceil(localNotes * 0.1))
+  if (remotePages <= 0) return true
+  return localNotes - remotePages > Math.max(3, Math.ceil(localNotes * 0.1))
 }
 
-/** All note ids present in the files map. */
-function noteIdsFromFiles(files: Record<string, string>): NoteId[] {
-  const ids: NoteId[] = []
-  for (const filepath in files) {
-    if (filepath.endsWith(".md")) ids.push(filepath.replace(/\.md$/, ""))
+const countLocalNotes = (files: Record<string, string>): number => {
+  let count = 0
+  for (const filepath in files) if (filepath.endsWith(".md")) count += 1
+  return count
+}
+
+const linkKeyString = (key: LinkKey) => key.join("\x1f")
+
+/** The pending row-diff accumulator: latest row state per key; upserts and
+ * deletes cancel each other. */
+interface PendingDiff {
+  nodes: Map<string, NodeRow>
+  links: Map<string, LinkRow>
+  deleteNodes: Set<string>
+  deleteLinks: Map<string, LinkKey>
+}
+
+const emptyPending = (): PendingDiff => ({
+  nodes: new Map(),
+  links: new Map(),
+  deleteNodes: new Set(),
+  deleteLinks: new Map(),
+})
+
+const pendingIsEmpty = (pending: PendingDiff) =>
+  pending.nodes.size === 0 &&
+  pending.links.size === 0 &&
+  pending.deleteNodes.size === 0 &&
+  pending.deleteLinks.size === 0
+
+function mergeDiffInto(pending: PendingDiff, diff: GraphDiff) {
+  for (const node of diff.nodes) {
+    pending.deleteNodes.delete(node.id)
+    pending.nodes.set(node.id, node)
   }
-  return ids
+  for (const link of diff.links) {
+    const key = linkKeyString(linkKeyOf(link))
+    pending.deleteLinks.delete(key)
+    pending.links.set(key, link)
+  }
+  for (const id of diff.deleteNodes) {
+    pending.nodes.delete(id)
+    pending.deleteNodes.add(id)
+  }
+  for (const key of diff.deleteLinks) {
+    const keyString = linkKeyString(key)
+    pending.links.delete(keyString)
+    pending.deleteLinks.set(keyString, key)
+  }
+}
+
+/** Merge a failed push's snapshot back, without clobbering rows queued since. */
+function restoreSnapshot(pending: PendingDiff, snapshot: PendingDiff) {
+  for (const [id, node] of snapshot.nodes) {
+    if (!pending.nodes.has(id) && !pending.deleteNodes.has(id)) pending.nodes.set(id, node)
+  }
+  for (const [key, link] of snapshot.links) {
+    if (!pending.links.has(key) && !pending.deleteLinks.has(key)) pending.links.set(key, link)
+  }
+  for (const id of snapshot.deleteNodes) {
+    if (!pending.nodes.has(id)) pending.deleteNodes.add(id)
+  }
+  for (const [key, linkKey] of snapshot.deleteLinks) {
+    if (!pending.links.has(key)) pending.deleteLinks.set(key, linkKey)
+  }
 }
 
 /** Start the replication loop. Returns a handle the database runtime drives. */
@@ -154,19 +198,21 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   const fetchImpl = options.fetchImpl ?? fetch
   const auth: ReplicaAuth = options.auth ?? { ensureFreshToken, getAccessToken, withAuthRetry }
   const debounceMs = options.debounceMs ?? DEBOUNCE_MS
-  const chunkSize = options.chunkSize ?? CHUNK_SIZE
+  const chunkRows = options.chunkRows ?? CHUNK_ROWS
   const backoffStartMs = options.backoffStartMs ?? BACKOFF_START_MS
   const backoffMaxMs = options.backoffMaxMs ?? BACKOFF_MAX_MS
 
-  const dirtyNotes = new Set<NoteId>()
-  const dirtyDeletes = new Set<NoteId>()
+  let pending = emptyPending()
+  const dirtyNoteIds = new Set<NoteId>()
   /** Ids snapshotted into a push that has not finished yet (see `pendingNoteIds`). */
-  let inFlight = new Set<NoteId>()
+  let inFlightNoteIds = new Set<NoteId>()
   let fullPushRequested = false
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | null = null
   /** Current retry delay after a failure; null while healthy. */
   let backoffMs: number | null = null
+  /** The next push should use `fetch keepalive` (tab going away). */
+  let useKeepalive = false
   let lastCursorMs = 0
   let lastSentCursor: string | null = null
   let lastAutoFullPushAt = 0
@@ -184,8 +230,8 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
 
   function reportPending() {
     patchDiagnostics({
-      pendingNotes: dirtyNotes.size,
-      pendingDeletes: dirtyDeletes.size,
+      pendingNotes: dirtyNoteIds.size,
+      pendingDeletes: pending.deleteNodes.size,
       fullPushPending: fullPushRequested,
     })
   }
@@ -202,7 +248,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     })
   }
 
-  const hasWork = () => fullPushRequested || dirtyNotes.size > 0 || dirtyDeletes.size > 0
+  const hasWork = () => fullPushRequested || !pendingIsEmpty(pending)
 
   /** Schedule the next queue tick. Schedule-once: events arriving while a tick
    * is already pending coalesce into it (never postponing it — a steady stream
@@ -215,7 +261,18 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     }, delayMs)
   }
 
-  /** A fetch that authenticates the way the git layer does: proactive refresh,
+  /** Cancel the debounce and push right now (hide/pagehide flush). */
+  function flushNow() {
+    if (stopped || !hasWork()) return
+    useKeepalive = true
+    if (timer !== null) {
+      clearTimeout(timer)
+      timer = null
+    }
+    schedule(0)
+  }
+
+  /** A fetch that authenticates the way the git layer did: proactive refresh,
    * Bearer token + same-origin cookie, refresh-and-retry-once on 401. */
   async function authorizedFetch(doFetch: (token: string) => Promise<Response>): Promise<Response> {
     await auth.ensureFreshToken()
@@ -234,13 +291,15 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     return response
   }
 
-  async function putPayload(payload: ReplicaPutPayload): Promise<void> {
+  async function putPayload(payload: ReplicaPutPayload, keepalive: boolean): Promise<void> {
+    const body = JSON.stringify(payload)
     const response = await authorizedFetch((token) =>
       fetchImpl("/api/replica/notes", {
         method: "PUT",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload),
+        body,
+        ...(keepalive && body.length <= KEEPALIVE_BODY_LIMIT ? { keepalive: true } : {}),
       }),
     )
     // Drain the (tiny) body so the connection can be reused.
@@ -258,10 +317,9 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     const body = (await response.json()) as ReplicaStatusBody
     patchDiagnostics({
       remote: {
-        notes: body.counts.notes,
-        blocks: body.counts.blocks,
+        pages: body.counts.pages,
+        nodes: body.counts.nodes,
         links: body.counts.links,
-        viewState: body.counts.view_state,
         cursor: body.replica_cursor,
         fetchedAt: Date.now(),
       },
@@ -270,10 +328,10 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
 
     // Counts drastically behind → the replica missed pushes (another device,
     // an old bug, a wiped database): schedule a self-healing full push.
-    const localNotes = noteIdsFromFiles(options.getFiles()).length
+    const localNotes = countLocalNotes(options.getFiles())
     const now = Date.now()
     if (
-      isReplicaDrasticallyBehind(localNotes, body.counts.notes) &&
+      isReplicaDrasticallyBehind(localNotes, body.counts.pages) &&
       now - lastAutoFullPushAt > AUTO_FULL_PUSH_COOLDOWN_MS
     ) {
       lastAutoFullPushAt = now
@@ -289,50 +347,72 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     return String(lastCursorMs)
   }
 
+  /** Split rows into payload chunks: every node row precedes every link row
+   * (links reference nodes), deletes ride the first chunk, cursor the last. */
+  function buildPayloads(
+    nodes: NodeRow[],
+    links: LinkRow[],
+    deleteNodes: string[],
+    deleteLinks: LinkKey[],
+    cursor: string,
+  ): ReplicaPutPayload[] {
+    const payloads: ReplicaPutPayload[] = []
+    let nodeIndex = 0
+    let linkIndex = 0
+    do {
+      const chunkNodes = nodes.slice(nodeIndex, nodeIndex + chunkRows)
+      nodeIndex += chunkNodes.length
+      const room = chunkRows - chunkNodes.length
+      const chunkLinks = nodeIndex >= nodes.length ? links.slice(linkIndex, linkIndex + room) : []
+      linkIndex += chunkLinks.length
+      payloads.push({ nodes: chunkNodes, links: chunkLinks })
+    } while (nodeIndex < nodes.length || linkIndex < links.length)
+
+    if (deleteNodes.length > 0) payloads[0].deleteNodes = deleteNodes
+    if (deleteLinks.length > 0) payloads[0].deleteLinks = deleteLinks
+    payloads[payloads.length - 1].cursor = cursor
+    return payloads
+  }
+
   async function runPush(): Promise<void> {
     if (stopped || !hasWork()) return
 
-    // Snapshot and clear the dirty state; a failure puts it back.
-    const files = options.getFiles()
+    // Snapshot and clear the pending state; a failure merges it back.
     const wasFullPush = fullPushRequested
     fullPushRequested = false
-    const snapshotNotes = wasFullPush ? noteIdsFromFiles(files) : [...dirtyNotes]
-    const snapshotDeletes = new Set(dirtyDeletes)
-    // A dirty note no longer in the files map was deleted before we pushed.
-    for (const id of snapshotNotes) {
-      if (files[`${id}.md`] === undefined) snapshotDeletes.add(id)
-    }
-    dirtyNotes.clear()
-    dirtyDeletes.clear()
-    inFlight = new Set([...snapshotNotes, ...snapshotDeletes])
+    const snapshot = pending
+    pending = emptyPending()
+    const snapshotNoteIds = new Set(dirtyNoteIds)
+    dirtyNoteIds.clear()
+    inFlightNoteIds = snapshotNoteIds
+    const keepalive = useKeepalive
+    useKeepalive = false
     reportPending()
 
     try {
-      const entries: ReplicaNoteEntry[] = []
-      for (const id of snapshotNotes) {
-        const entry = buildReplicaNoteEntry(files, id)
-        if (entry) entries.push(entry)
+      let nodes = [...snapshot.nodes.values()]
+      let links = [...snapshot.links.values()]
+      if (wasFullPush) {
+        const all = await options.getAllRows()
+        nodes = all.nodes
+        links = all.links
       }
-      const chunks: ReplicaNoteEntry[][] = []
-      for (let i = 0; i < entries.length; i += chunkSize) {
-        chunks.push(entries.slice(i, i + chunkSize))
-      }
-      if (chunks.length === 0) chunks.push([]) // deletes/cursor-only push
-
       const cursor = nextCursor()
-      for (let i = 0; i < chunks.length; i++) {
-        const payload: ReplicaPutPayload = { notes: chunks[i] }
-        if (i === 0 && snapshotDeletes.size > 0) payload.deletes = [...snapshotDeletes]
-        if (i === chunks.length - 1) payload.cursor = cursor
-        await putPayload(payload)
-      }
+      const payloads = buildPayloads(
+        nodes,
+        links,
+        [...snapshot.deleteNodes],
+        [...snapshot.deleteLinks.values()],
+        cursor,
+      )
+      for (const payload of payloads) await putPayload(payload, keepalive)
 
-      inFlight = new Set()
+      inFlightNoteIds = new Set()
       lastSentCursor = cursor
       backoffMs = null
       patchDiagnostics({
         lastPushAt: Date.now(),
-        lastPushNotes: entries.length,
+        lastPushNotes: snapshotNoteIds.size,
         cursor,
         cursorConfirmed: false,
         lastError: null,
@@ -340,11 +420,12 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       // Confirm the cursor + refresh the remote counts (best-effort).
       await fetchRemoteStatus().catch(recordError)
     } catch (error) {
-      // Put the snapshot back and retry with backoff. Never touches the local store.
-      inFlight = new Set()
+      // Merge the snapshot back and retry with backoff. Never touches the
+      // local store.
+      inFlightNoteIds = new Set()
       if (wasFullPush) fullPushRequested = true
-      else for (const id of snapshotNotes) dirtyNotes.add(id)
-      for (const id of snapshotDeletes) dirtyDeletes.add(id)
+      restoreSnapshot(pending, snapshot)
+      for (const id of snapshotNoteIds) dirtyNoteIds.add(id)
       reportPending()
       recordError(error)
       backoffMs = backoffMs === null ? backoffStartMs : Math.min(backoffMs * 2, backoffMaxMs)
@@ -366,26 +447,23 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     }
     schedule(0)
   }
-  if (typeof window !== "undefined") window.addEventListener("online", onOnline)
+  const onHidden = () => {
+    if (document.visibilityState === "hidden") flushNow()
+  }
+  const onPageHide = () => flushNow()
+  if (typeof window !== "undefined") {
+    window.addEventListener("online", onOnline)
+    window.addEventListener("pagehide", onPageHide)
+    document.addEventListener("visibilitychange", onHidden)
+  }
 
   patchDiagnostics({ ...INITIAL_REPLICA_DIAGNOSTICS })
 
   return {
-    notifyNotesChanged(ids) {
-      if (stopped || ids.length === 0) return
-      for (const id of ids) {
-        dirtyNotes.add(id)
-        dirtyDeletes.delete(id)
-      }
-      reportPending()
-      schedule(debounceMs)
-    },
-    notifyNotesDeleted(ids) {
-      if (stopped || ids.length === 0) return
-      for (const id of ids) {
-        dirtyDeletes.add(id)
-        dirtyNotes.delete(id)
-      }
+    notifyGraphChange(noteIds, diff) {
+      if (stopped || isEmptyGraphDiff(diff)) return
+      mergeDiffInto(pending, diff)
+      for (const id of noteIds) dirtyNoteIds.add(id)
       reportPending()
       schedule(debounceMs)
     },
@@ -396,7 +474,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       schedule(debounceMs)
     },
     pendingNoteIds() {
-      return new Set([...dirtyNotes, ...dirtyDeletes, ...inFlight])
+      return new Set([...dirtyNoteIds, ...inFlightNoteIds])
     },
     refreshRemoteStatus() {
       if (stopped) return
@@ -406,7 +484,11 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       stopped = true
       if (timer !== null) clearTimeout(timer)
       timer = null
-      if (typeof window !== "undefined") window.removeEventListener("online", onOnline)
+      if (typeof window !== "undefined") {
+        window.removeEventListener("online", onOnline)
+        window.removeEventListener("pagehide", onPageHide)
+        document.removeEventListener("visibilitychange", onHidden)
+      }
     },
     flush() {
       return queue

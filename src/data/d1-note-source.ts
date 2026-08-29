@@ -1,16 +1,22 @@
-import type {
-  ReplicaChangesBody,
-  ReplicaCorpusBody,
-  ReplicaPullNote,
+import {
+  emptyGraphDiff,
+  linkKeyOf,
+  type GraphDiff,
+  type LinkKey,
+  type LinkRow,
+  type NodeRow,
+  type ReplicaChangesBody,
+  type ReplicaCorpusBody,
 } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
+import { CHILD_KIND } from "./graph"
 
 /**
  * The client half of the corpus pull API (`GET /api/replica/notes`) — the
  * boot + cross-device sync source of database-authoritative mode
- * (docs/graph-storage.md). Pulls the D1 corpus behind the Worker, either in
- * full or incrementally via a `since` cursor, using the exact same
+ * (docs/graph-storage.md). Pulls the D1 node + link rows behind the Worker,
+ * either in full or incrementally via a `since` cursor, using the exact same
  * authenticated-fetch pattern as the push side (`replica-sync.ts`): the
  * same-origin `gh_refresh` cookie rides along, the GitHub access token goes in
  * a Bearer header (`ensureFreshToken` proactively, `withAuthRetry` refreshing
@@ -21,9 +27,9 @@ import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github
  */
 
 /** How far the since-pull reaches back behind the stored cursor. The server
- * compares `notes.updated_at` (a client-stamped save time) against the cursor
+ * compares row `updated_at` (a client-stamped write time) against the cursor
  * (minted on a possibly different device), so a slack window absorbs modest
- * clock skew; re-applying an unchanged note is idempotent, so overlap is
+ * clock skew; re-applying an unchanged row is idempotent, so overlap is
  * cheap. Changes missed beyond this window are caught by a full pull. */
 export const SINCE_OVERLAP_MS = 10 * 60_000
 
@@ -41,11 +47,11 @@ export interface D1NoteSourceOptions {
 }
 
 export interface D1NoteSource {
-  /** The full corpus: every note row + view state, plus the replica cursor. */
+  /** The full corpus: every node + link row, plus the replica cursor. */
   pullFull(): Promise<ReplicaCorpusBody>
   /**
-   * Changes since `cursor` (minus the overlap window), plus the full remote
-   * id list for deletion detection and the new cursor.
+   * Rows changed since `cursor` (minus the overlap window), plus the full
+   * remote key lists for deletion detection and the new cursor.
    */
   pullSince(cursor: string): Promise<ReplicaChangesBody>
 }
@@ -91,62 +97,107 @@ export function createD1NoteSource(options: D1NoteSourceOptions = {}): D1NoteSou
   }
 }
 
-/** The store writes one pull application boils down to. */
-export interface PullApplication {
-  /** Note contents to write (`null` deletes) — remote wins, minus `pending`. */
-  notes: Record<NoteId, string | null>
-  /** Per-note collapsed sets to persist for the written notes. */
-  viewStates: Record<NoteId, string[]>
+const linkKeyString = (key: LinkKey) => key.join("\x1f")
+
+/**
+ * The node ids "owned" by a set of notes with unpushed local changes: each
+ * pending page id plus everything reachable from it over local child links. A
+ * pull must not touch these rows in either direction — last-writer-wins is
+ * decided by push order at the replica, not by pull timing.
+ */
+export function expandPendingNodeIds(
+  pendingNoteIds: Set<NoteId>,
+  localLinks: LinkRow[],
+): Set<string> {
+  const childrenBySource = new Map<string, string[]>()
+  for (const link of localLinks) {
+    if (link.kind !== CHILD_KIND) continue
+    const list = childrenBySource.get(link.source_id)
+    if (list) list.push(link.destination_id)
+    else childrenBySource.set(link.source_id, [link.destination_id])
+  }
+  const pending = new Set<string>()
+  const queue = [...pendingNoteIds]
+  while (queue.length > 0) {
+    const id = queue.pop() as string
+    if (pending.has(id)) continue
+    pending.add(id)
+    queue.push(...(childrenBySource.get(id) ?? []))
+  }
+  return pending
 }
 
 /**
  * Plan how a pull lands in the local store — pure, unit-tested, shared by the
- * full and since pulls (a full pull is just "everything changed" with
- * `ids` = the pulled set).
+ * full and since pulls (a full pull is just "everything changed" with the key
+ * lists derived from the pulled rows themselves). Per-row last-writer-wins:
  *
- * - A pulled note whose content matches the local copy is skipped entirely
- *   (its view state too — pulls should not churn the store or the UI).
- * - A local note absent from `ids` was deleted remotely → delete it locally.
- * - `pending` ids (queued or in-flight local pushes) are NEVER touched, in
- *   either direction: a queued local edit outruns the pull that would revert
- *   it, and a locally created note that hasn't pushed yet must not be
- *   "deleted" for being unknown remotely. Last-writer-wins is decided by push
- *   order at the replica, not by pull timing.
+ * - A remote row lands only when it is strictly newer than the local copy (or
+ *   the local copy is missing) — re-applying identical rows is a no-op, so
+ *   the overlap window churns nothing.
+ * - A local row absent from the remote key list was deleted remotely →
+ *   delete it locally.
+ * - Rows owned by pending notes (see `expandPendingNodeIds`) are NEVER
+ *   touched: a queued local edit outruns the pull that would revert it, and a
+ *   locally created note that hasn't pushed yet must not be "deleted" for
+ *   being unknown remotely. Links are owned by their source node.
  */
 export function planPullApplication(params: {
-  local: Record<NoteId, string>
-  localViewStates: Record<NoteId, string[]>
-  pulled: ReplicaPullNote[]
-  /** Every remote note id (full pulls: the pulled ids themselves). */
-  remoteIds: string[]
-  /** Note ids with unpushed local changes (see `ReplicaSyncHandle.pendingNoteIds`). */
-  pending: Set<NoteId>
-}): PullApplication {
-  const { local, localViewStates, pulled, remoteIds, pending } = params
-  const notes: Record<NoteId, string | null> = {}
-  const viewStates: Record<NoteId, string[]> = {}
+  localNodes: NodeRow[]
+  localLinks: LinkRow[]
+  remoteNodes: NodeRow[]
+  remoteLinks: LinkRow[]
+  /** Every remote node id (full pulls: the pulled ids themselves). */
+  remoteNodeIds: string[]
+  /** Every remote link key (full pulls: the pulled keys themselves). */
+  remoteLinkKeys: LinkKey[]
+  /** Node ids with unpushed local changes (pages + their subtrees). */
+  pendingNodeIds: Set<string>
+}): GraphDiff {
+  const {
+    localNodes,
+    localLinks,
+    remoteNodes,
+    remoteLinks,
+    remoteNodeIds,
+    remoteLinkKeys,
+    pendingNodeIds,
+  } = params
+  const plan = emptyGraphDiff()
 
-  for (const entry of pulled) {
-    const id = entry.note.id
-    if (pending.has(id)) continue
-    const sameContent = local[id] === entry.note.content
-    const sameViewState = sameIdSet(localViewStates[id] ?? [], entry.view_state)
-    if (sameContent && sameViewState) continue
-    if (!sameContent) notes[id] = entry.note.content
-    if (!sameViewState) viewStates[id] = entry.view_state
+  const localNodeById = new Map(localNodes.map((node) => [node.id, node]))
+  const localLinkByKey = new Map(localLinks.map((link) => [linkKeyString(linkKeyOf(link)), link]))
+
+  for (const node of remoteNodes) {
+    if (pendingNodeIds.has(node.id)) continue
+    const local = localNodeById.get(node.id)
+    if (local && local.updated_at >= node.updated_at) continue
+    plan.nodes.push(node)
   }
 
-  const remote = new Set(remoteIds)
-  for (const id of Object.keys(local)) {
-    if (remote.has(id) || pending.has(id)) continue
-    notes[id] = null
+  for (const link of remoteLinks) {
+    if (pendingNodeIds.has(link.source_id)) continue
+    const local = localLinkByKey.get(linkKeyString(linkKeyOf(link)))
+    if (local && local.updated_at >= link.updated_at) continue
+    plan.links.push(link)
   }
 
-  return { notes, viewStates }
-}
+  const remoteNodeIdSet = new Set(remoteNodeIds)
+  for (const node of localNodes) {
+    if (remoteNodeIdSet.has(node.id) || pendingNodeIds.has(node.id)) continue
+    plan.deleteNodes.push(node.id)
+  }
 
-const sameIdSet = (a: string[], b: string[]) => {
-  if (a.length !== b.length) return false
-  const setA = new Set(a)
-  return b.every((id) => setA.has(id))
+  const remoteLinkKeySet = new Set(remoteLinkKeys.map(linkKeyString))
+  for (const link of localLinks) {
+    const key = linkKeyOf(link)
+    if (remoteLinkKeySet.has(linkKeyString(key))) continue
+    if (pendingNodeIds.has(link.source_id)) continue
+    // A link whose source node is itself being deleted goes with it (the
+    // store's node delete cleans its links) — skip the redundant row.
+    if (!remoteNodeIdSet.has(link.source_id)) continue
+    plan.deleteLinks.push(key)
+  }
+
+  return plan
 }

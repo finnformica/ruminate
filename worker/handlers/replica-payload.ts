@@ -1,71 +1,83 @@
 // The replica wire format, shared between the Worker and the client.
 //
 // This module is deliberately pure — no Cloudflare types, no cookie handling,
-// nothing but the payload shapes, their validation, and the SQL planning for
-// `PUT /api/replica/notes`. The Worker (`replica.ts`) imports it to validate
-// and plan real requests; the client (`src/data/replica-sync.ts`) imports the
-// *types* so the payload it builds is the payload the Worker parses, and the
-// client's unit tests import `parseReplicaPayload` itself to prove the built
-// payloads round-trip — same repo, same file, no drift.
+// nothing but the row shapes of schema v2 (docs/graph-schema-v2.md), their
+// validation, and the SQL planning for `PUT /api/replica/notes`. The Worker
+// (`replica.ts`) imports it to validate and plan real requests; the client
+// (`src/data/graph.ts`, `src/data/replica-sync.ts`) imports the *types* so the
+// rows it builds are the rows the Worker parses — same repo, same file, no
+// drift.
 
-const LINK_KINDS = ["wikilink", "transclusion", "tag"] as const
-
-export interface NoteRow {
+/** One row of the `nodes` table. */
+export interface NodeRow {
   id: string
-  content: string
-  updated_at: number | null
+  /** Type registry in docs/graph-schema-v2.md (`page`, `text`, `h1`…). */
+  type: string
+  /** Marker-free content; for pages, the title. */
+  text: string
+  /** JSON or null. Pages carry `{frontmatter}` verbatim; code carries `{language}`. */
+  props: string | null
+  /** ms epoch — per-row LWW + since-cursor pulls. */
+  updated_at: number
 }
 
-interface BlockRow {
-  id: string
-  note_id: string
-  parent_id: string | null
-  position: number
-  content: string
+/** One row of the `link` table — containment (`kind: "child"`) today. */
+export interface LinkRow {
+  source_id: string
+  destination_id: string
+  kind: string
+  /** Fractional index; sibling order under a source. */
+  sort_key: string
+  updated_at: number
 }
 
-interface LinkRow {
-  from_block: string
-  to_note: string | null
-  to_block: string | null
-  kind: (typeof LINK_KINDS)[number]
-}
+/** The `link` table's primary key: [source_id, destination_id, kind]. */
+export type LinkKey = [string, string, string]
 
-/** One note's full replica record, as produced by `src/data/doc-to-rows.ts`. */
-export interface ReplicaNoteEntry {
-  note: NoteRow
-  blocks: BlockRow[]
+export const linkKeyOf = (link: LinkRow): LinkKey => [
+  link.source_id,
+  link.destination_id,
+  link.kind,
+]
+
+/**
+ * A batch of row-level changes — what one save boils down to, and the unit the
+ * push queue accumulates. Upserts and deletes are disjoint by key.
+ */
+export interface GraphDiff {
+  nodes: NodeRow[]
   links: LinkRow[]
-  /** Collapsed block ids (canonical view state); empty clears the row. */
-  view_state: string[]
+  deleteNodes: string[]
+  deleteLinks: LinkKey[]
 }
 
+export const emptyGraphDiff = (): GraphDiff => ({
+  nodes: [],
+  links: [],
+  deleteNodes: [],
+  deleteLinks: [],
+})
+
+export const isEmptyGraphDiff = (diff: GraphDiff): boolean =>
+  diff.nodes.length === 0 &&
+  diff.links.length === 0 &&
+  diff.deleteNodes.length === 0 &&
+  diff.deleteLinks.length === 0
+
+/** Body of `PUT /api/replica/notes`: row upserts (per-row LWW) + deletes. */
 export interface ReplicaPutPayload {
-  notes: ReplicaNoteEntry[]
-  /** Note ids to remove from the replica (deleted or renamed away). */
-  deletes?: string[]
-  /** Opaque client marker of the replicated repo state (monotonic per client). */
+  nodes: NodeRow[]
+  links: LinkRow[]
+  deleteNodes?: string[]
+  deleteLinks?: LinkKey[]
+  /** Opaque client marker of the replicated state (monotonic per client). */
   cursor?: string
 }
 
-/**
- * One note as served by `GET /api/replica/notes` (the pull direction).
- *
- * Deliberately the note row + view state only — no blocks or links. The client
- * re-derives those from `note.content` with the same `docToRows` transform
- * that produced them in the first place, so shipping them would multiply the
- * payload for zero information. `view_state` is NOT derivable from content,
- * so it rides along.
- */
-export interface ReplicaPullNote {
-  note: NoteRow
-  /** Collapsed block ids (canonical view state); empty when none recorded. */
-  view_state: string[]
-}
-
-/** Body of a full pull: `GET /api/replica/notes`. */
+/** Body of a full pull: `GET /api/replica/notes` — every row of both tables. */
 export interface ReplicaCorpusBody {
-  notes: ReplicaPullNote[]
+  nodes: NodeRow[]
+  links: LinkRow[]
   /** The replica cursor at pull time (meta `replica_cursor`); the client
    * stores it and sends it back as `?since=` on the next incremental pull. */
   cursor: string | null
@@ -73,20 +85,23 @@ export interface ReplicaCorpusBody {
 
 /** Body of an incremental pull: `GET /api/replica/notes?since=<cursor>`. */
 export interface ReplicaChangesBody {
-  /** Notes whose `updated_at` is newer than the `since` timestamp. */
-  changed: ReplicaPullNote[]
+  /** Rows whose `updated_at` is newer than the `since` timestamp. */
+  nodes: NodeRow[]
+  links: LinkRow[]
   /**
-   * EVERY note id currently in the replica, changed or not. The replica keeps
-   * no tombstones, so deletions are detectable only by absence: the client
-   * removes local notes (that it is not about to push) missing from this list.
+   * EVERY row key currently in the replica, changed or not, per table. The
+   * replica keeps no tombstones, so deletions are detectable only by absence:
+   * the client removes local rows (that it is not about to push) missing from
+   * these lists.
    */
-  ids: string[]
+  nodeIds: string[]
+  linkKeys: LinkKey[]
   cursor: string | null
 }
 
 /** The body of `GET /api/replica/status`. */
 export interface ReplicaStatusBody {
-  counts: { notes: number; blocks: number; links: number; view_state: number }
+  counts: { nodes: number; links: number; pages: number }
   schema_version: string | null
   replica_cursor: string | null
 }
@@ -98,69 +113,52 @@ export interface SqlStatement {
 }
 
 const isString = (x: unknown): x is string => typeof x === "string"
-const isStringOrNull = (x: unknown): x is string | null => x === null || typeof x === "string"
 
-function parseNoteEntry(x: unknown): ReplicaNoteEntry | null {
+function parseNodeRow(x: unknown): NodeRow | null {
   if (typeof x !== "object" || x === null) return null
-  const entry = x as Record<string, unknown>
-  const note = entry.note as Record<string, unknown> | null | undefined
+  const row = x as Record<string, unknown>
   if (
-    typeof note !== "object" ||
-    note === null ||
-    !isString(note.id) ||
-    note.id.length === 0 ||
-    !isString(note.content) ||
-    !(note.updated_at === null || typeof note.updated_at === "number")
+    !isString(row.id) ||
+    row.id.length === 0 ||
+    !isString(row.type) ||
+    !isString(row.text) ||
+    !(row.props === null || isString(row.props)) ||
+    typeof row.updated_at !== "number"
   ) {
     return null
   }
-  if (!Array.isArray(entry.blocks) || !Array.isArray(entry.links)) return null
-  for (const b of entry.blocks as Record<string, unknown>[]) {
-    if (
-      typeof b !== "object" ||
-      b === null ||
-      !isString(b.id) ||
-      b.note_id !== note.id ||
-      !isStringOrNull(b.parent_id) ||
-      typeof b.position !== "number" ||
-      !isString(b.content)
-    ) {
-      return null
-    }
+  return {
+    id: row.id,
+    type: row.type,
+    text: row.text,
+    props: row.props as string | null,
+    updated_at: row.updated_at,
   }
-  for (const l of entry.links as Record<string, unknown>[]) {
-    if (
-      typeof l !== "object" ||
-      l === null ||
-      !isString(l.from_block) ||
-      !isStringOrNull(l.to_note) ||
-      !isStringOrNull(l.to_block) ||
-      !LINK_KINDS.includes(l.kind as LinkRow["kind"])
-    ) {
-      return null
-    }
-  }
-  if (!Array.isArray(entry.view_state) || !(entry.view_state as unknown[]).every(isString)) {
+}
+
+function parseLinkRow(x: unknown): LinkRow | null {
+  if (typeof x !== "object" || x === null) return null
+  const row = x as Record<string, unknown>
+  if (
+    !isString(row.source_id) ||
+    !isString(row.destination_id) ||
+    !isString(row.kind) ||
+    !isString(row.sort_key) ||
+    typeof row.updated_at !== "number"
+  ) {
     return null
   }
   return {
-    note: { id: note.id, content: note.content, updated_at: note.updated_at as number | null },
-    blocks: (entry.blocks as BlockRow[]).map((b) => ({
-      id: b.id,
-      note_id: b.note_id,
-      parent_id: b.parent_id,
-      position: b.position,
-      content: b.content,
-    })),
-    links: (entry.links as LinkRow[]).map((l) => ({
-      from_block: l.from_block,
-      to_note: l.to_note,
-      to_block: l.to_block,
-      kind: l.kind,
-    })),
-    view_state: entry.view_state as string[],
+    source_id: row.source_id,
+    destination_id: row.destination_id,
+    kind: row.kind,
+    sort_key: row.sort_key,
+    updated_at: row.updated_at,
   }
 }
+
+const isLinkKey = (x: unknown): x is LinkKey =>
+  Array.isArray(x) && x.length === 3 && x.every(isString)
 
 /**
  * Validate an untrusted request body into a `ReplicaPutPayload`, or null.
@@ -169,76 +167,93 @@ function parseNoteEntry(x: unknown): ReplicaNoteEntry | null {
 export function parseReplicaPayload(body: unknown): ReplicaPutPayload | null {
   if (typeof body !== "object" || body === null) return null
   const raw = body as Record<string, unknown>
-  if (!Array.isArray(raw.notes)) return null
-  const notes: ReplicaNoteEntry[] = []
-  for (const entry of raw.notes) {
-    const parsed = parseNoteEntry(entry)
+  if (!Array.isArray(raw.nodes) || !Array.isArray(raw.links)) return null
+
+  const nodes: NodeRow[] = []
+  for (const entry of raw.nodes) {
+    const parsed = parseNodeRow(entry)
     if (!parsed) return null
-    notes.push(parsed)
+    nodes.push(parsed)
   }
-  if (raw.deletes !== undefined && !(Array.isArray(raw.deletes) && raw.deletes.every(isString))) {
+  const links: LinkRow[] = []
+  for (const entry of raw.links) {
+    const parsed = parseLinkRow(entry)
+    if (!parsed) return null
+    links.push(parsed)
+  }
+
+  if (
+    raw.deleteNodes !== undefined &&
+    !(Array.isArray(raw.deleteNodes) && raw.deleteNodes.every(isString))
+  ) {
+    return null
+  }
+  if (
+    raw.deleteLinks !== undefined &&
+    !(Array.isArray(raw.deleteLinks) && raw.deleteLinks.every(isLinkKey))
+  ) {
     return null
   }
   if (raw.cursor !== undefined && !isString(raw.cursor)) return null
-  return { notes, deletes: raw.deletes as string[] | undefined, cursor: raw.cursor as string }
+
+  return {
+    nodes,
+    links,
+    deleteNodes: raw.deleteNodes as string[] | undefined,
+    deleteLinks: (raw.deleteLinks as LinkKey[] | undefined)?.map((key) => [...key] as LinkKey),
+    cursor: raw.cursor as string | undefined,
+  }
 }
 
 /**
  * Plan the SQL for one replica push. Pure: returns statements + bind params;
  * the Worker turns them into a single `db.batch()` (one transaction).
  *
- * Per note the write is a replace: upsert the note row first (blocks FK on
- * it), drop its old links (via its old blocks) and blocks, then insert the
- * new rows. Link inserts use OR IGNORE so the unique edge index makes replays
- * idempotent. View state mirrors the sidecar: a row when anything is
- * collapsed, no row otherwise.
+ * Per-row last-writer-wins: an upsert only lands when the incoming
+ * `updated_at` is not older than the stored row, so replays are idempotent and
+ * a stale push cannot clobber a newer row. Deletes are unconditional (no
+ * tombstones — a resurrected row simply arrives with the next push). Node
+ * deletes clean their link rows explicitly so the plan does not depend on the
+ * engine enforcing `ON DELETE CASCADE`. Statement order: deletes first, then
+ * node upserts before link upserts (links reference nodes).
  */
 export function planReplicaPut(payload: ReplicaPutPayload): SqlStatement[] {
   const statements: SqlStatement[] = []
-  const dropNoteGraph = (noteId: string) => {
+
+  for (const [source, destination, kind] of payload.deleteLinks ?? []) {
     statements.push({
-      sql: "DELETE FROM links WHERE from_block IN (SELECT id FROM blocks WHERE note_id = ?1)",
-      params: [noteId],
+      sql: "DELETE FROM link WHERE source_id = ?1 AND destination_id = ?2 AND kind = ?3",
+      params: [source, destination, kind],
     })
-    statements.push({ sql: "DELETE FROM blocks WHERE note_id = ?1", params: [noteId] })
+  }
+  for (const id of payload.deleteNodes ?? []) {
+    statements.push({
+      sql: "DELETE FROM link WHERE source_id = ?1 OR destination_id = ?1",
+      params: [id],
+    })
+    statements.push({ sql: "DELETE FROM nodes WHERE id = ?1", params: [id] })
   }
 
-  for (const { note, blocks, links, view_state } of payload.notes) {
+  for (const node of payload.nodes) {
     statements.push({
       sql:
-        "INSERT INTO notes (id, content, updated_at) VALUES (?1, ?2, ?3) " +
-        "ON CONFLICT (id) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at",
-      params: [note.id, note.content, note.updated_at],
+        "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?1, ?2, ?3, ?4, ?5) " +
+        "ON CONFLICT (id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
+        "props = excluded.props, updated_at = excluded.updated_at " +
+        "WHERE excluded.updated_at >= nodes.updated_at",
+      params: [node.id, node.type, node.text, node.props, node.updated_at],
     })
-    dropNoteGraph(note.id)
-    for (const b of blocks) {
-      statements.push({
-        sql: "INSERT INTO blocks (id, note_id, parent_id, position, content) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params: [b.id, b.note_id, b.parent_id, b.position, b.content],
-      })
-    }
-    for (const l of links) {
-      statements.push({
-        sql: "INSERT OR IGNORE INTO links (from_block, to_note, to_block, kind) VALUES (?1, ?2, ?3, ?4)",
-        params: [l.from_block, l.to_note, l.to_block, l.kind],
-      })
-    }
-    if (view_state.length > 0) {
-      statements.push({
-        sql:
-          "INSERT INTO view_state (note_id, collapsed) VALUES (?1, ?2) " +
-          "ON CONFLICT (note_id) DO UPDATE SET collapsed = excluded.collapsed",
-        params: [note.id, JSON.stringify([...new Set(view_state)].sort())],
-      })
-    } else {
-      statements.push({ sql: "DELETE FROM view_state WHERE note_id = ?1", params: [note.id] })
-    }
   }
-
-  for (const noteId of payload.deletes ?? []) {
-    dropNoteGraph(noteId)
-    statements.push({ sql: "DELETE FROM notes WHERE id = ?1", params: [noteId] })
-    statements.push({ sql: "DELETE FROM view_state WHERE note_id = ?1", params: [noteId] })
+  for (const link of payload.links) {
+    statements.push({
+      sql:
+        "INSERT INTO link (source_id, destination_id, kind, sort_key, updated_at) " +
+        "VALUES (?1, ?2, ?3, ?4, ?5) " +
+        "ON CONFLICT (source_id, destination_id, kind) DO UPDATE SET " +
+        "sort_key = excluded.sort_key, updated_at = excluded.updated_at " +
+        "WHERE excluded.updated_at >= link.updated_at",
+      params: [link.source_id, link.destination_id, link.kind, link.sort_key, link.updated_at],
+    })
   }
 
   if (payload.cursor !== undefined) {
@@ -251,10 +266,6 @@ export function planReplicaPut(payload: ReplicaPutPayload): SqlStatement[] {
   return statements
 }
 
-// -----------------------------------------------------------------------------
-// Pull (GET /api/replica/notes) — pure helpers
-// -----------------------------------------------------------------------------
-
 /**
  * Parse the `since` query param: the cursor is a ms-timestamp string (minted
  * by the client at push time, echoed back by pulls). Returns the numeric
@@ -262,39 +273,4 @@ export function planReplicaPut(payload: ReplicaPutPayload): SqlStatement[] {
  */
 export function parseSinceCursor(raw: string): number | null {
   return /^\d{1,15}$/.test(raw) ? Number(raw) : null
-}
-
-/** A raw `view_state` table row. */
-export interface ViewStateRow {
-  note_id: string
-  collapsed: string
-}
-
-/**
- * Assemble pull entries from raw table rows — pure, shared by the full and
- * since pulls. `collapsed` is the stored JSON array; anything malformed
- * degrades to an empty set (same tolerance as the client's sidecar parsing).
- */
-export function buildPullNotes(
-  noteRows: NoteRow[],
-  viewStateRows: ViewStateRow[],
-): ReplicaPullNote[] {
-  const collapsedByNote = new Map<string, string[]>()
-  for (const row of viewStateRows) {
-    collapsedByNote.set(row.note_id, parseCollapsedJson(row.collapsed))
-  }
-  return noteRows.map((note) => ({
-    note: { id: note.id, content: note.content, updated_at: note.updated_at },
-    view_state: collapsedByNote.get(note.id) ?? [],
-  }))
-}
-
-function parseCollapsedJson(raw: string): string[] {
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((x): x is string => typeof x === "string")
-  } catch {
-    return []
-  }
 }

@@ -81,9 +81,9 @@ export function BlockNoteEditor({
   value: string
   onChange: (value: string) => void
   /**
-   * The note's id. When provided, collapse state is persisted across reloads
-   * and devices via the view-state sidecar; without it, collapse is transient
-   * local state (e.g. Storybook / standalone usage).
+   * The note's id. When provided, collapse state follows the default-expansion
+   * policy with per-device overrides persisted in localStorage; without it,
+   * collapse is transient local state (e.g. Storybook / standalone usage).
    */
   noteId?: string
   /** Start with the first block in edit mode (e.g. a brand-new note). */
@@ -128,7 +128,7 @@ export function BlockNoteEditor({
     setDoc(seedDoc(value))
   }
 
-  const { collapsed, toggleCollapse } = useCollapseState(noteId)
+  const { collapsed, toggleCollapse } = useCollapseState(noteId, doc)
 
   const handleChange = (next: BlockDoc) => {
     // While zoomed, the trailing-blank rule is suspended (a root-level blank

@@ -159,7 +159,11 @@ function StorageDiagnosticsPanel({ diagnostics }: { diagnostics: StorageDiagnost
         <dt>Status</dt>
         <dd>
           {STORAGE_STATUS_LABELS[status]}
-          {status === "ready" && persistence === "memory" ? " (in-memory — OPFS unavailable)" : ""}
+          {status === "ready" && persistence === "memory"
+            ? diagnostics.persistenceReason === "another-tab"
+              ? " (in-memory — Ruminate is open in another tab)"
+              : " (in-memory — OPFS unavailable)"
+            : ""}
         </dd>
         <dt>Notes</dt>
         <dd>{notes}</dd>
@@ -212,7 +216,7 @@ function ReplicaDiagnosticsPanel({ replica }: { replica: ReplicaDiagnostics }) {
         <dt>Remote rows</dt>
         <dd>
           {replica.remote
-            ? `${replica.remote.notes} notes · ${replica.remote.blocks} blocks · ` +
+            ? `${replica.remote.pages} pages · ${replica.remote.nodes} nodes · ` +
               `${replica.remote.links} links (${formatDiagnosticTime(replica.remote.fetchedAt)})`
             : "—"}
         </dd>

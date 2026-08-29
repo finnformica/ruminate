@@ -1,6 +1,10 @@
 import { getDefaultStore } from "jotai"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { ReplicaChangesBody, ReplicaCorpusBody } from "../../worker/handlers/replica-payload"
+import type {
+  GraphDiff,
+  ReplicaChangesBody,
+  ReplicaCorpusBody,
+} from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import {
   databaseFilesAtom,
@@ -14,22 +18,21 @@ import {
   stopDatabaseMode,
 } from "./database-mode"
 import type { D1NoteSource } from "./d1-note-source"
-import { viewStatePath } from "./paths"
+import { docToGraph } from "./graph"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { openSqlNoteStore, type SqlNoteStore } from "./sql-note-store"
 
 /**
  * Boot-flow tests for database-authoritative mode, at the highest level the
- * node harness allows: a REAL SqlNoteStore (node:sqlite, same migration as
+ * node harness allows: a REAL SqlNoteStore (node:sqlite, same migrations as
  * production), with only the network (D1 source) and the push loop stubbed.
  */
 
 function stubReplica(pending: NoteId[] = []) {
-  const calls = { changed: [] as NoteId[], deleted: [] as NoteId[], stopped: false }
+  const calls = { changes: [] as { noteIds: NoteId[]; diff: GraphDiff }[], stopped: false }
   const handle: ReplicaSyncHandle = {
-    notifyNotesChanged: (ids) => calls.changed.push(...ids),
-    notifyNotesDeleted: (ids) => calls.deleted.push(...ids),
+    notifyGraphChange: (noteIds, diff) => calls.changes.push({ noteIds, diff }),
     requestFullPush: () => {},
     refreshRemoteStatus: () => {},
     pendingNoteIds: () => new Set(pending),
@@ -51,7 +54,7 @@ function stubSource(responses: {
     pullFull: async () => {
       calls.full += 1
       if (responses.fail) throw new Error("offline")
-      const full = responses.full ?? { notes: [], cursor: null }
+      const full = responses.full ?? { nodes: [], links: [], cursor: null }
       return typeof full === "function" ? full() : full
     },
     pullSince: async (cursor) => {
@@ -64,10 +67,34 @@ function stubSource(responses: {
   return { source, calls }
 }
 
-const pullNote = (id: string, content: string, view_state: string[] = []) => ({
-  note: { id, content, updated_at: null },
-  view_state,
-})
+/** Remote row corpus built from note markdown — what a real replica holds. */
+function remoteCorpus(notes: Record<string, string>, updatedAt = 1, cursor: string | null = null) {
+  const body: ReplicaCorpusBody = { nodes: [], links: [], cursor }
+  for (const [id, markdown] of Object.entries(notes)) {
+    const { nodes, links } = docToGraph(id, markdown, updatedAt)
+    body.nodes.push(...nodes)
+    body.links.push(...links)
+  }
+  return body
+}
+
+/** The since-pull shape for a remote corpus: changed rows + full key lists. */
+function remoteChanges(
+  changed: Record<string, string>,
+  all: Record<string, string>,
+  updatedAt: number,
+  cursor: string,
+): ReplicaChangesBody {
+  const changedRows = remoteCorpus(changed, updatedAt)
+  const allRows = remoteCorpus(all, updatedAt)
+  return {
+    nodes: changedRows.nodes,
+    links: changedRows.links,
+    nodeIds: allRows.nodes.map((node) => node.id),
+    linkKeys: allRows.links.map((link) => [link.source_id, link.destination_id, link.kind]),
+    cursor,
+  }
+}
 
 async function boot(options: {
   store?: SqlNoteStore
@@ -95,47 +122,47 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
+const NOTE_A = "- A\n  id:: blk_a000000000\n"
+const NOTE_B = "- B\n  id:: blk_b000000000\n"
+
 describe("database mode boot", () => {
   it("first boot: full pull populates the store, the files atom, and the cursor", async () => {
     const { source, calls } = stubSource({
-      full: {
-        notes: [pullNote("note-a", "- A\n", ["blk_1"]), pullNote("note-b", "- B\n")],
-        cursor: "1000",
-      },
+      full: remoteCorpus({ "note-a": NOTE_A, "note-b": NOTE_B }, 1, "1000"),
     })
     const store = await boot({ source })
 
     expect(calls.full).toBe(1)
-    expect(await store.getAllNotes()).toEqual({ "note-a": "- A\n", "note-b": "- B\n" })
-    expect(await store.getViewState("note-a")).toEqual(["blk_1"])
+    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A, "note-b": NOTE_B })
     expect(await store.getMeta("d1_pull_cursor")).toBe("1000")
     // The files atom carries the repo-file-shaped map every consumer reads.
-    expect(files()).toEqual({
-      "note-a.md": "- A\n",
-      "note-b.md": "- B\n",
-      [viewStatePath("note-a")]: '[\n  "blk_1"\n]',
-    })
+    expect(files()).toEqual({ "note-a.md": NOTE_A, "note-b.md": NOTE_B })
     expect(status()).toMatchObject({ status: "ready", pull: "idle", emptyOffline: false })
     expect(isDatabaseModeActive()).toBe(true)
   })
 
   it("later boots serve local contents and pull with the stored cursor", async () => {
     const seeded = await openSqlNoteStore(createNodeSqlDriver())
-    await seeded.writeNotes({ "note-a": "- local A\n" })
+    await seeded.writeNotes({ "note-a": "- local A\n  id:: blk_a000000000\n" })
     await seeded.setMeta("d1_pull_cursor", "500")
 
     const { source, calls } = stubSource({
-      since: () => ({
-        changed: [pullNote("note-b", "- B\n")],
-        ids: ["note-a", "note-b"],
-        cursor: "600",
-      }),
+      since: () =>
+        remoteChanges(
+          { "note-b": NOTE_B },
+          { "note-a": "- local A\n  id:: blk_a000000000\n", "note-b": NOTE_B },
+          600,
+          "600",
+        ),
     })
     const store = await boot({ store: seeded, source })
 
     expect(calls.full).toBe(0)
     expect(calls.since).toEqual(["500"])
-    expect(await store.getAllNotes()).toEqual({ "note-a": "- local A\n", "note-b": "- B\n" })
+    expect(await store.getAllNotes()).toEqual({
+      "note-a": "- local A\n  id:: blk_a000000000\n",
+      "note-b": NOTE_B,
+    })
     expect(await store.getMeta("d1_pull_cursor")).toBe("600")
   })
 
@@ -154,37 +181,26 @@ describe("database mode boot", () => {
 })
 
 describe("database mode saves", () => {
-  it("a save writes the SQL store, updates the atom, and marks the push queue", async () => {
-    const { source } = stubSource({ full: { notes: [], cursor: null } })
+  it("a save writes the SQL store, updates the atom, and hands its diff to the push queue", async () => {
+    const { source } = stubSource({})
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
 
-    databaseWriteFiles({ "note-a.md": "- hello\n" })
-    expect(files()["note-a.md"]).toBe("- hello\n") // optimistic, pre-flush
+    databaseWriteFiles({ "note-a.md": "- hello\n  id:: blk_a000000000\n" })
+    expect(files()["note-a.md"]).toBe("- hello\n  id:: blk_a000000000\n") // optimistic, pre-flush
     await flushDatabaseMode()
 
-    expect(await store.getNote("note-a")).toBe("- hello\n")
-    expect(calls.changed).toEqual(["note-a"])
-    expect(calls.deleted).toEqual([])
+    expect(await store.getNote("note-a")).toBe("- hello\n  id:: blk_a000000000\n")
+    expect(calls.changes).toHaveLength(1)
+    expect(calls.changes[0].noteIds).toEqual(["note-a"])
+    const diff = calls.changes[0].diff
+    expect(diff.nodes.map((node) => node.id).sort()).toEqual(["blk_a000000000", "note-a"])
+    expect(diff.links).toHaveLength(1)
+    expect(diff.deleteNodes).toEqual([])
   })
 
-  it("view-state sidecar writes persist collapse state and ride the note's push", async () => {
-    const { source } = stubSource({ full: { notes: [pullNote("note-a", "- A\n")], cursor: null } })
-    const { handle, calls } = stubReplica()
-    const store = await boot({ source, replica: handle })
-
-    databaseWriteFiles({ [viewStatePath("note-a")]: '["blk_2","blk_1"]' })
-    await flushDatabaseMode()
-
-    expect(await store.getViewState("note-a")).toEqual(["blk_1", "blk_2"])
-    expect(files()[viewStatePath("note-a")]).toBe('[\n  "blk_1",\n  "blk_2"\n]')
-    expect(calls.changed).toEqual(["note-a"])
-  })
-
-  it("a delete removes the note (and its view state) and marks the delete queue", async () => {
-    const { source } = stubSource({
-      full: { notes: [pullNote("note-a", "- A\n", ["blk_1"])], cursor: null },
-    })
+  it("a delete removes the note's rows and reports the delete diff", async () => {
+    const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
 
@@ -192,61 +208,71 @@ describe("database mode saves", () => {
     await flushDatabaseMode()
 
     expect(await store.getNote("note-a")).toBeNull()
-    expect(await store.getViewState("note-a")).toEqual([])
     expect(files()).toEqual({})
-    expect(calls.deleted).toEqual(["note-a"])
+    const diff = calls.changes[0].diff
+    expect(diff.deleteNodes.sort()).toEqual(["blk_a000000000", "note-a"])
+  })
+
+  it("non-note file writes are dropped (nothing else lives in the graph)", async () => {
+    const { source } = stubSource({})
+    const { handle, calls } = stubReplica()
+    await boot({ source, replica: handle })
+
+    databaseWriteFiles({ ".ruminate/view-state/x.json": "[]" })
+    await flushDatabaseMode()
+    expect(files()).toEqual({})
+    expect(calls.changes).toEqual([])
   })
 })
 
 describe("database mode since-pulls", () => {
-  it("applies remote changes and detects deletions via the ids list", async () => {
+  it("applies remote row changes and detects deletions via the key lists", async () => {
+    const KEEP_V2 = "- keep v2\n  id:: blk_keep000000\n"
     const { source } = stubSource({
-      full: {
-        notes: [pullNote("keep", "- keep\n"), pullNote("gone", "- gone\n")],
-        cursor: "100",
-      },
-      since: () => ({
-        changed: [pullNote("keep", "- keep v2\n")],
-        ids: ["keep"], // "gone" was deleted on another device
-        cursor: "200",
-      }),
+      full: remoteCorpus(
+        { keep: "- keep\n  id:: blk_keep000000\n", gone: "- gone\n  id:: blk_gone000000\n" },
+        1,
+        "100",
+      ),
+      since: () => remoteChanges({ keep: KEEP_V2 }, { keep: KEEP_V2 }, 200, "200"),
     })
     const store = await boot({ source })
 
     requestDatabasePull()
     await flushDatabaseMode()
 
-    expect(await store.getAllNotes()).toEqual({ keep: "- keep v2\n" })
-    expect(files()).toEqual({ "keep.md": "- keep v2\n" })
+    expect(await store.getAllNotes()).toEqual({ keep: KEEP_V2 })
+    expect(files()).toEqual({ "keep.md": KEEP_V2 })
     expect(await store.getMeta("d1_pull_cursor")).toBe("200")
   })
 
   it("never clobbers notes with queued local pushes (last-writer-wins by push)", async () => {
+    const LOCAL_EDIT = "- local edit\n  id:: blk_a000000000\n"
+    const CREATED = "- brand new\n  id:: blk_new0000000\n"
+    const REMOTE_EDIT = "- remote edit\n  id:: blk_a000000000\n"
     const { source } = stubSource({
-      full: { notes: [pullNote("note-a", "- original\n")], cursor: "100" },
-      since: () => ({
-        changed: [pullNote("note-a", "- remote edit\n")],
-        ids: ["note-a"], // the locally created note is unknown remotely
-        cursor: "200",
-      }),
+      full: remoteCorpus({ "note-a": "- original\n  id:: blk_a000000000\n" }, 1, "100"),
+      since: () =>
+        // The locally created note is unknown remotely.
+        remoteChanges({ "note-a": REMOTE_EDIT }, { "note-a": REMOTE_EDIT }, 9999, "200"),
     })
     const { handle } = stubReplica(["note-a", "created"])
     const store = await boot({ source, replica: handle })
 
-    databaseWriteFiles({ "note-a.md": "- local edit\n", "created.md": "- brand new\n" })
+    databaseWriteFiles({ "note-a.md": LOCAL_EDIT, "created.md": CREATED })
     await flushDatabaseMode()
     requestDatabasePull()
     await flushDatabaseMode()
 
     // The pull neither reverted the local edit nor deleted the unpushed note.
-    expect(await store.getNote("note-a")).toBe("- local edit\n")
-    expect(await store.getNote("created")).toBe("- brand new\n")
+    expect(await store.getNote("note-a")).toBe(LOCAL_EDIT)
+    expect(await store.getNote("created")).toBe(CREATED)
   })
 })
 
 describe("database mode lifecycle", () => {
   it("stop closes the store, stops the push loop, and resets the atoms", async () => {
-    const { source } = stubSource({ full: { notes: [pullNote("a", "- A\n")], cursor: null } })
+    const { source } = stubSource({ full: remoteCorpus({ a: NOTE_A }) })
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
     const close = vi.spyOn(store, "close")

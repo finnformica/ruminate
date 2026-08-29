@@ -37,7 +37,7 @@ const noteContentsAtom = atom((get) => {
  * delete). Used within the data layer only — code outside `src/data` should use
  * the note-oriented API so it never depends on the file-path convention.
  */
-export function useWriteFiles() {
+function useWriteFiles() {
   return React.useCallback((files: Record<string, string | null>) => {
     databaseWriteFiles(files)
   }, [])

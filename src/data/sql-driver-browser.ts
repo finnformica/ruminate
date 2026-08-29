@@ -10,6 +10,28 @@ import type { SqlWorkerRequest, SqlWorkerResponse } from "./sql-worker"
 export interface BrowserSqlDriver extends SqlDriver {
   /** "opfs" when the database persists across reloads, "memory" otherwise. */
   persistence: "opfs" | "memory"
+  /** Why persistence degraded to memory: "another-tab" when a second Ruminate
+   * tab holds the OPFS database, "unavailable" when OPFS itself is missing.
+   * Null while persistence is "opfs". */
+  persistenceReason: "another-tab" | "unavailable" | null
+}
+
+/** Held (never released) while this tab owns the OPFS database, so other tabs
+ * can tell "another Ruminate tab has it" apart from "OPFS is unavailable". */
+const OPFS_LOCK_NAME = "ruminate-sql-opfs"
+
+function acquireOpfsLock() {
+  // The lock lives until the tab dies; the promise deliberately never resolves.
+  navigator.locks?.request(OPFS_LOCK_NAME, () => new Promise(() => {})).catch(() => {})
+}
+
+async function isOpfsLockHeldElsewhere(): Promise<boolean> {
+  try {
+    const state = await navigator.locks?.query()
+    return (state?.held ?? []).some((lock) => lock.name === OPFS_LOCK_NAME)
+  } catch {
+    return false
+  }
 }
 
 export async function createBrowserSqlDriver(): Promise<BrowserSqlDriver> {
@@ -49,8 +71,20 @@ export async function createBrowserSqlDriver(): Promise<BrowserSqlDriver> {
 
   const opened = await call({ op: "open" })
 
+  const persistence = opened.persistence ?? "memory"
+  let persistenceReason: BrowserSqlDriver["persistenceReason"] = null
+  if (persistence === "opfs") {
+    acquireOpfsLock()
+  } else {
+    // The sahpool acquisition failed. If another tab holds our lock, this tab
+    // is the second one — the honest story is "open in another tab", not a
+    // silent empty in-memory corpus.
+    persistenceReason = (await isOpfsLockHeldElsewhere()) ? "another-tab" : "unavailable"
+  }
+
   return {
-    persistence: opened.persistence ?? "memory",
+    persistence,
+    persistenceReason,
     exec: async (sql: string, params?: SqlValue[]) =>
       (await call({ op: "exec", sql, params })).rows ?? [],
     batch: async (statements: SqlStatement[]) => {

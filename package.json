@@ -51,6 +51,7 @@
     "emoji-regex": "^10.4.0",
     "fast-fuzzy": "^1.11.2",
     "fast-memoize": "^2.5.2",
+    "fractional-indexing": "^4.0.0",
     "jotai": "^2.0.3",
     "jotai-xstate": "^0.3.0",
     "mdast-util-from-markdown": "^1.2.0",

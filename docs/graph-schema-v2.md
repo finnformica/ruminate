@@ -1,10 +1,9 @@
 # Graph schema v2: blocks-first storage
 
-Status: **design agreed, not yet implemented.** Decided in discussion on
-2026-08-29; supersedes the v1 schema in `migrations/0001_init.sql` (documented
-in `graph-storage.md`). To be built on `claude/graph-storage` before PR #11
-merges, while the zero-migration window is open (single user, D1 re-seedable
-from the notes repo in minutes).
+Status: **implemented** (2026-08-29, on `claude/graph-storage` — migration
+`migrations/0002_nodes.sql`, ingest/rollup in `src/data/graph.ts`, store in
+`src/data/sql-note-store.ts`). Supersedes the v1 schema from
+`migrations/0001_init.sql`; `graph-storage.md` describes the running system.
 
 ## The inversion
 

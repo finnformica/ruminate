@@ -26,7 +26,7 @@ import type { Block, BlockDoc } from "./types"
  * visual level comes from outline depth, not the marker — so the marker is
  * normalised here on the way out. `## Foo` → `# Foo`; non-headings untouched.
  */
-function normalizeHeadingMarker(content: string): string {
+export function normalizeHeadingMarker(content: string): string {
   return content.replace(/^#{2,6}(\s)/, "#$1")
 }
 

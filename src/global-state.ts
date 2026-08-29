@@ -207,10 +207,11 @@ const machineGithubUserAtom = selectAtom(
 export const isDatabaseModeAtom = atom((get) => get(machineGithubUserAtom) !== null)
 
 /**
- * The note corpus, in repo-file shape (path → content, notes plus view-state
- * sidecars). Signed in it is synthesized from the local SQL store by
- * `src/data/database-mode.ts`; signed out it is the machine's sample notes.
- * Every consumer above `src/data` reads this atom.
+ * The note corpus, in repo-file shape (path → content, `<id>.md` per note).
+ * Signed in it is synthesized from the local SQL store by
+ * `src/data/database-mode.ts` (each entry the rollup of its page node);
+ * signed out it is the machine's sample notes. Every consumer above
+ * `src/data` reads this atom.
  */
 export const markdownFilesAtom = atom((get) =>
   get(isDatabaseModeAtom) ? get(databaseFilesAtom) : get(machineMarkdownFilesAtom),
@@ -234,8 +235,7 @@ export const notesAtom = atom((get) => {
   const markdownFiles = get(markdownFilesAtom)
   const notes: Map<NoteId, Note> = new Map()
 
-  // Parse notes. Non-`.md` tracked files (e.g. the view-state sidecar) are not
-  // notes and are skipped here.
+  // Parse notes. Non-`.md` entries are not notes and are skipped here.
   for (const filepath in markdownFiles) {
     if (!filepath.endsWith(".md")) continue
     const id = filepath.replace(/\.md$/, "")

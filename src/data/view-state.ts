@@ -1,90 +1,112 @@
-import { useAtomValue } from "jotai"
-import { selectAtom, useAtomCallback } from "jotai/utils"
 import React from "react"
-import { markdownFilesAtom } from "../global-state"
-import { useWriteFiles } from "./store"
-import { buildViewStateWrite, readNoteViewState } from "./view-state-parse"
+import { defaultCollapsedIds } from "../blocks/default-collapsed"
+import type { BlockDoc } from "../blocks/types"
 
 /**
- * Per-note view state, stored one entry per note under
- * `.ruminate/view-state/<noteId>.json` (backed by the store's `view_state`
- * table and replicated to D1 alongside the owning note), so it persists
- * across reloads and devices — but it is kept out of note content so folding
- * a block never rewrites a note.
+ * Collapse state for one note: per-device ephemera, not synced data
+ * (docs/graph-schema-v2.md dropped the view_state table). The resting state
+ * comes from the default-expansion policy (`defaultCollapsedIds`: headings
+ * always expanded, two levels below, deeper collapsed); the user's toggles
+ * are stored in localStorage as per-note OVERRIDES on top of that default,
+ * keyed by block id — so a device losing its localStorage merely falls back
+ * to sensible defaults.
  */
 
-const EMPTY: string[] = []
+export interface CollapseOverrides {
+  /** Ids expanded although the default collapses them. */
+  expanded: string[]
+  /** Ids collapsed although the default expands them. */
+  collapsed: string[]
+}
 
-const sameIds = (a: string[], b: string[]) =>
-  a === b || (a.length === b.length && a.every((id, i) => id === b[i]))
+const EMPTY_OVERRIDES: CollapseOverrides = { expanded: [], collapsed: [] }
+
+const storageKey = (noteId: string) => `collapse:${noteId}`
+
+/** Tolerant read — malformed or missing storage degrades to no overrides. */
+export function readCollapseOverrides(noteId: string | undefined): CollapseOverrides {
+  if (!noteId || typeof localStorage === "undefined") return EMPTY_OVERRIDES
+  try {
+    const raw = localStorage.getItem(storageKey(noteId))
+    if (!raw) return EMPTY_OVERRIDES
+    const parsed: unknown = JSON.parse(raw)
+    const asIds = (x: unknown): string[] =>
+      Array.isArray(x) ? x.filter((id): id is string => typeof id === "string") : []
+    const record = parsed as { expanded?: unknown; collapsed?: unknown } | null
+    return { expanded: asIds(record?.expanded), collapsed: asIds(record?.collapsed) }
+  } catch {
+    return EMPTY_OVERRIDES
+  }
+}
+
+function writeCollapseOverrides(noteId: string, overrides: CollapseOverrides) {
+  if (typeof localStorage === "undefined") return
+  try {
+    if (overrides.expanded.length === 0 && overrides.collapsed.length === 0) {
+      localStorage.removeItem(storageKey(noteId))
+    } else {
+      localStorage.setItem(storageKey(noteId), JSON.stringify(overrides))
+    }
+  } catch {
+    // Storage full/unavailable — collapse state is ephemeral by design.
+  }
+}
+
+/** The effective collapsed set: defaults, minus expansions, plus collapses. */
+export function applyCollapseOverrides(
+  defaults: ReadonlySet<string>,
+  overrides: CollapseOverrides,
+): Set<string> {
+  const collapsed = new Set(defaults)
+  for (const id of overrides.expanded) collapsed.delete(id)
+  for (const id of overrides.collapsed) collapsed.add(id)
+  return collapsed
+}
+
+/** Flip one block's state, expressed relative to the defaults. */
+export function toggleCollapseOverride(
+  defaults: ReadonlySet<string>,
+  overrides: CollapseOverrides,
+  id: string,
+): CollapseOverrides {
+  const isCollapsed = applyCollapseOverrides(defaults, overrides).has(id)
+  if (isCollapsed) {
+    return defaults.has(id)
+      ? { ...overrides, expanded: [...overrides.expanded, id] }
+      : { ...overrides, collapsed: overrides.collapsed.filter((x) => x !== id) }
+  }
+  return defaults.has(id)
+    ? { ...overrides, expanded: overrides.expanded.filter((x) => x !== id) }
+    : { ...overrides, collapsed: [...overrides.collapsed, id] }
+}
 
 /**
  * Collapse state for one note: the set of collapsed block ids plus a toggle.
  *
- * Seeds from the synced sidecar on mount (the note page remounts per note, so a
- * fresh seed happens on every navigation). Toggles update local state
- * immediately for a snappy UI, and are persisted debounced (1s) — a burst of
- * folds collapses into a single write. A pending write is flushed on unmount
- * so navigating away never drops the last fold. Writes that would not change
- * the serialized content (e.g. fold-then-unfold) are skipped entirely.
+ * Defaults are computed once per mount from the initial document (the note
+ * page remounts per note), so blocks created or nested while editing never
+ * snap shut under the user; overrides persist to localStorage immediately.
  */
-export function useCollapseState(noteId: string | undefined) {
-  const persistedAtom = React.useMemo(
-    () =>
-      selectAtom(
-        markdownFilesAtom,
-        (files) => (noteId ? readNoteViewState(files, noteId) : EMPTY),
-        sameIds,
-      ),
-    [noteId],
+export function useCollapseState(noteId: string | undefined, doc: BlockDoc) {
+  const [defaults] = React.useState<ReadonlySet<string>>(() => new Set(defaultCollapsedIds(doc)))
+  const [overrides, setOverrides] = React.useState<CollapseOverrides>(() =>
+    readCollapseOverrides(noteId),
   )
-  const persisted = useAtomValue(persistedAtom)
 
-  const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set(persisted))
-
-  const writeFiles = useWriteFiles()
-  const getMarkdownFiles = useAtomCallback(React.useCallback((get) => get(markdownFilesAtom), []))
-
-  // Keep the latest set in a ref so the debounced flush reads current state.
-  const latest = React.useRef(collapsed)
-  latest.current = collapsed
-  const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const flush = React.useCallback(() => {
-    timer.current = null
-    if (!noteId) return
-    // `buildViewStateWrite` returns null when nothing changed, so unchanged
-    // state never produces a write.
-    const updates = buildViewStateWrite(getMarkdownFiles(), noteId, [...latest.current])
-    if (updates) writeFiles(updates)
-  }, [noteId, getMarkdownFiles, writeFiles])
+  const collapsed = React.useMemo(
+    () => applyCollapseOverrides(defaults, overrides),
+    [defaults, overrides],
+  )
 
   const toggleCollapse = React.useCallback(
     (id: string) => {
-      setCollapsed((prev) => {
-        const next = new Set(prev)
-        if (next.has(id)) next.delete(id)
-        else next.add(id)
+      setOverrides((prev) => {
+        const next = toggleCollapseOverride(defaults, prev, id)
+        if (noteId) writeCollapseOverrides(noteId, next)
         return next
       })
-      if (timer.current) clearTimeout(timer.current)
-      timer.current = setTimeout(flush, 1000)
     },
-    [flush],
-  )
-
-  // Flush any pending write when the note unmounts (navigation) so the last
-  // toggle within the debounce window is not lost.
-  const flushRef = React.useRef(flush)
-  flushRef.current = flush
-  React.useEffect(
-    () => () => {
-      if (timer.current) {
-        clearTimeout(timer.current)
-        flushRef.current()
-      }
-    },
-    [],
+    [defaults, noteId],
   )
 
   return { collapsed, toggleCollapse }

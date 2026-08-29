@@ -1,7 +1,13 @@
 import { atom, getDefaultStore } from "jotai"
+import { linkKeyOf, type ReplicaChangesBody } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
-import { createD1NoteSource, planPullApplication, type D1NoteSource } from "./d1-note-source"
-import { VIEW_STATE_DIR, viewStatePath } from "./paths"
+import { SessionExpiredError } from "../utils/github-token"
+import {
+  createD1NoteSource,
+  expandPendingNodeIds,
+  planPullApplication,
+  type D1NoteSource,
+} from "./d1-note-source"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import type { SqlNoteStore } from "./sql-note-store"
 import {
@@ -9,32 +15,32 @@ import {
   storageDiagnosticsAtom,
   type StorageDiagnostics,
 } from "./storage-diagnostics"
-import { parseNoteViewState, readNoteViewState, serializeNoteViewState } from "./view-state-parse"
 
 /**
  * The database storage runtime (docs/graph-storage.md) — the app's one and
  * only store, mounted whenever a user is signed in.
  *
- * The local SQL store (wa-sqlite over OPFS) is the runtime store; D1 behind
- * the Worker is the authoritative cross-device copy:
+ * The local SQL store (sqlite-wasm over OPFS) is the runtime store; D1 behind
+ * the Worker is the authoritative cross-device copy. Both hold the schema v2
+ * graph (docs/graph-schema-v2.md): `nodes` + `link` rows are truth, markdown
+ * is the rollup.
  *
  *   boot   open SQL store → serve local contents immediately → pull from D1
- *          (full on first boot, since-cursor after) → apply into the store
- *   saves  write the SQL store + mark dirty in the replica push queue
- *          (replica-sync.ts — write-behind, coalesced, backoff)
- *   sync   visibility/online triggers re-run the since-cursor pull
+ *          (full on first boot, since-cursor after) → apply rows into the store
+ *   saves  ingest into the SQL store as a row diff + hand that diff to the
+ *          replica push queue (replica-sync.ts — write-behind, coalesced)
+ *   sync   visibility/focus/online triggers re-run the since-cursor pull;
+ *          hiding the tab flushes the push queue immediately
  *
  * **How the UI is fed.** Everything above `src/data` reads
- * `markdownFilesAtom` (notes, tags, templates, view-state sidecars, the
- * editor's external-change path). This module synthesizes the
- * repo-file-shaped map those consumers expect from the store — `<id>.md`
- * entries plus `.ruminate/view-state/<id>.json` sidecar entries — into
+ * `markdownFilesAtom` (notes, tags, templates, the editor's external-change
+ * path). This module synthesizes the repo-file-shaped map those consumers
+ * expect — `<id>.md` entries, each the rollup of its page node — into
  * `databaseFilesAtom`, and `markdownFilesAtom` serves it whenever a user is
- * signed in (see global-state.ts). Every consumer, including the replica push
- * payload builder, reads that one shape.
+ * signed in (see global-state.ts).
  *
- * **Conflicts are last-writer-wins**, decided by push order at the replica.
- * Pulls never touch notes with queued/in-flight local pushes
+ * **Conflicts are last-writer-wins per row**, decided by push order at the
+ * replica. Pulls never touch rows of notes with queued/in-flight local pushes
  * (`ReplicaSyncHandle.pendingNoteIds`), and the editor's own remote-change
  * notice still protects unsaved (uncommitted) edits when a pulled change
  * lands under them.
@@ -49,8 +55,8 @@ const PULL_RETRY_MS = 60_000
 const REPAIR_COOLDOWN_MS = 30_000
 
 /**
- * The synthesized repo-file-shaped map (notes + view-state sidecars) served
- * as `markdownFilesAtom` while database mode is active. Written only by this
+ * The synthesized repo-file-shaped map (note rollups) served as
+ * `markdownFilesAtom` while database mode is active. Written only by this
  * module.
  */
 export const databaseFilesAtom = atom<Record<string, string>>({})
@@ -77,10 +83,18 @@ export const databaseModeStatusAtom = atom<DatabaseModeStatus>(OFF_STATUS)
 
 export interface DatabaseModeOptions {
   /** Injectable for tests; defaults to the wasm worker driver. */
-  openStore?: () => Promise<{ store: SqlNoteStore; persistence: "opfs" | "memory" }>
+  openStore?: () => Promise<{
+    store: SqlNoteStore
+    persistence: "opfs" | "memory"
+    /** Why persistence degraded to memory (e.g. another tab holds OPFS). */
+    persistenceReason?: "another-tab" | "unavailable" | null
+  }>
   /** Injectable for tests; defaults to the real replica push loop. Return
    * null to run without pushing. */
-  openReplicaSync?: (getFiles: () => Record<string, string>) => Promise<ReplicaSyncHandle | null>
+  openReplicaSync?: (
+    getFiles: () => Record<string, string>,
+    getAllRows: SqlNoteStore["getAllRows"],
+  ) => Promise<ReplicaSyncHandle | null>
   /** Injectable for tests; defaults to the real authed fetch source. */
   source?: D1NoteSource
   pullRetryMs?: number
@@ -140,16 +154,10 @@ export function isDatabaseModeActive(): boolean {
 // Files-map synthesis
 // -----------------------------------------------------------------------------
 
-/** Build the repo-file-shaped map from store contents. */
-function synthesizeFiles(
-  notes: Record<NoteId, string>,
-  viewStates: Record<NoteId, string[]>,
-): Record<string, string> {
+/** Build the repo-file-shaped map from store contents (note rollups). */
+function synthesizeFiles(notes: Record<NoteId, string>): Record<string, string> {
   const files: Record<string, string> = {}
   for (const [id, content] of Object.entries(notes)) files[`${id}.md`] = content
-  for (const [id, collapsed] of Object.entries(viewStates)) {
-    if (collapsed.length > 0) files[viewStatePath(id)] = serializeNoteViewState(collapsed)
-  }
   return files
 }
 
@@ -162,24 +170,13 @@ function notesFromFiles(files: Record<string, string>): Record<NoteId, string> {
   return notes
 }
 
-/** Apply note/view-state updates (`null` deletes) to the files atom. */
-function applyToFilesAtom(
-  noteUpdates: Record<NoteId, string | null>,
-  viewStateUpdates: Record<NoteId, string[]>,
-) {
+/** Apply note updates (`null` deletes) to the files atom. */
+function applyToFilesAtom(noteUpdates: Record<NoteId, string | null>) {
   const store = jotai()
   const files = { ...store.get(databaseFilesAtom) }
   for (const [id, content] of Object.entries(noteUpdates)) {
-    if (content === null) {
-      delete files[`${id}.md`]
-      delete files[viewStatePath(id)]
-    } else {
-      files[`${id}.md`] = content
-    }
-  }
-  for (const [id, collapsed] of Object.entries(viewStateUpdates)) {
-    if (collapsed.length === 0 || noteUpdates[id] === null) delete files[viewStatePath(id)]
-    else files[viewStatePath(id)] = serializeNoteViewState(collapsed)
+    if (content === null) delete files[`${id}.md`]
+    else files[`${id}.md`] = content
   }
   store.set(databaseFilesAtom, files)
 }
@@ -196,14 +193,17 @@ async function defaultOpenStore() {
   ])
   const driver = await createBrowserSqlDriver()
   const store = await openSqlNoteStore(driver)
-  return { store, persistence: driver.persistence }
+  return { store, persistence: driver.persistence, persistenceReason: driver.persistenceReason }
 }
 
-async function defaultOpenReplicaSync(getFiles: () => Record<string, string>) {
+async function defaultOpenReplicaSync(
+  getFiles: () => Record<string, string>,
+  getAllRows: SqlNoteStore["getAllRows"],
+) {
   const { startReplicaSync } = await import("./replica-sync")
-  // Every tab pushes its own writes; concurrent tabs converge by
+  // Every tab pushes its own writes; concurrent tabs converge by per-row
   // last-writer-wins at the replica.
-  return startReplicaSync({ getFiles })
+  return startReplicaSync({ getFiles, getAllRows })
 }
 
 /** Start the database runtime. Idempotent per activation. */
@@ -225,27 +225,35 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
 
   enqueue(async () => {
     try {
-      const { store, persistence } = await (options.openStore ?? defaultOpenStore)()
+      const opened = await (options.openStore ?? defaultOpenStore)()
       if (runtime !== activation) {
-        await store.close().catch(() => {})
+        await opened.store.close().catch(() => {})
         return
       }
-      activation.store = store
-      patchDiagnostics({ persistence })
+      activation.store = opened.store
+      patchDiagnostics({
+        persistence: opened.persistence,
+        persistenceReason: opened.persistenceReason ?? null,
+      })
 
       // Serve local contents immediately — offline boots (after the first)
       // show every note before any network work.
-      const [notes, viewStates] = await Promise.all([store.getAllNotes(), store.getAllViewStates()])
+      const notes = await opened.store.getAllNotes()
       if (runtime !== activation) return
-      jotai().set(databaseFilesAtom, synthesizeFiles(notes, viewStates))
+      jotai().set(databaseFilesAtom, synthesizeFiles(notes))
       patchStatus({ status: "ready" })
       patchDiagnostics({ status: "ready", notes: Object.keys(notes).length })
 
       // Start the push loop before the first pull, so the pull can consult
       // `pendingNoteIds` (edits made while the pull is in flight are safe).
       try {
-        const replica = await (options.openReplicaSync ?? defaultOpenReplicaSync)(() =>
-          jotai().get(databaseFilesAtom),
+        const replica = await (options.openReplicaSync ?? defaultOpenReplicaSync)(
+          () => jotai().get(databaseFilesAtom),
+          () => {
+            const store = activation.store
+            if (!store) return Promise.resolve({ nodes: [], links: [] })
+            return store.getAllRows()
+          },
         )
         if (runtime !== activation) {
           replica?.stop()
@@ -290,32 +298,24 @@ export function stopDatabaseMode() {
 // Writes (the `store.ts` seam routes here in database mode)
 // -----------------------------------------------------------------------------
 
-const viewStateFileRe = new RegExp(`^${VIEW_STATE_DIR}/(.+)\\.json$`)
-
 /**
- * Persist a batch of repo-file-shaped writes (`null` deletes): note files and
- * view-state sidecars, exactly the shapes `useWriteFiles` already produces.
- * The files atom updates synchronously (the UI never waits); the SQL write is
- * queued; on success the replica queue is marked dirty.
+ * Persist a batch of repo-file-shaped note writes (`null` deletes) — the
+ * shapes the `store.ts` seam already produces. The files atom updates
+ * synchronously (the UI never waits); the SQL ingest is queued; the row diff
+ * it returns is handed to the replica queue.
  */
 export function databaseWriteFiles(files: Record<string, string | null>) {
   const activation = runtime
   if (!activation) return
 
   const noteUpdates: Record<NoteId, string | null> = {}
-  const viewStateUpdates: Record<NoteId, string[]> = {}
   for (const [filepath, content] of Object.entries(files)) {
-    if (filepath.endsWith(".md")) {
-      noteUpdates[filepath.replace(/\.md$/, "")] = content
-      continue
-    }
-    const match = viewStateFileRe.exec(filepath)
-    if (match) viewStateUpdates[match[1]] = content === null ? [] : parseNoteViewState(content)
-    // Anything else has no meaning in the database store and is dropped.
+    // Only notes live in the graph; anything else has no meaning here.
+    if (filepath.endsWith(".md")) noteUpdates[filepath.replace(/\.md$/, "")] = content
   }
-  if (Object.keys(noteUpdates).length === 0 && Object.keys(viewStateUpdates).length === 0) return
+  if (Object.keys(noteUpdates).length === 0) return
 
-  applyToFilesAtom(noteUpdates, viewStateUpdates)
+  applyToFilesAtom(noteUpdates)
   patchStatus({ emptyOffline: false })
   patchDiagnostics({
     notes: Object.keys(notesFromFiles(jotai().get(databaseFilesAtom))).length,
@@ -324,27 +324,14 @@ export function databaseWriteFiles(files: Record<string, string | null>) {
   enqueue(async () => {
     if (runtime !== activation || !activation.store) return
     try {
-      if (Object.keys(noteUpdates).length > 0) await activation.store.writeNotes(noteUpdates)
-      for (const [noteId, collapsedIds] of Object.entries(viewStateUpdates)) {
-        if (noteUpdates[noteId] === null) continue // delete already cleared it
-        await activation.store.setViewState(noteId, collapsedIds)
-      }
+      const diff = await activation.store.writeNotes(noteUpdates)
+      activation.replica?.notifyGraphChange(Object.keys(noteUpdates), diff)
     } catch (error) {
-      // The files atom (and thus the push queue) already has the content, so
-      // D1 still receives it; repair the local store from the atom so a
-      // reload cannot lose it.
+      // The files atom still carries the content; repair the local store from
+      // it (and follow with a full push) so neither copy can lose the write.
       recordWriteError(error)
       scheduleRepair(activation)
     }
-    // Mark dirty regardless: the push payload is built from the files atom,
-    // which is correct even when the SQL write failed.
-    const changed = Object.keys(noteUpdates).filter((id) => noteUpdates[id] !== null)
-    const deleted = Object.keys(noteUpdates).filter((id) => noteUpdates[id] === null)
-    activation.replica?.notifyNotesChanged([
-      ...changed,
-      ...Object.keys(viewStateUpdates).filter((id) => !(id in noteUpdates)),
-    ])
-    activation.replica?.notifyNotesDeleted(deleted)
   })
 }
 
@@ -365,7 +352,8 @@ export function refreshDatabaseReplicaStatus() {
 }
 
 /** After a SQL-side failure, rebuild the store from the files atom (the
- * authoritative in-memory copy), cooldown-guarded. */
+ * authoritative in-memory copy), cooldown-guarded, then push the full corpus
+ * so the replica converges on the repaired rows. */
 function scheduleRepair(activation: DatabaseModeRuntime) {
   const now = Date.now()
   if (now - activation.lastRepairAt < REPAIR_COOLDOWN_MS) return
@@ -373,18 +361,13 @@ function scheduleRepair(activation: DatabaseModeRuntime) {
   enqueue(async () => {
     if (runtime !== activation || !activation.store) return
     const files = jotai().get(databaseFilesAtom)
-    const notes = notesFromFiles(files)
-    const viewStates: Record<NoteId, string[]> = {}
-    for (const id of Object.keys(notes)) {
-      const collapsed = readNoteViewState(files, id)
-      if (collapsed.length > 0) viewStates[id] = collapsed
-    }
-    await activation.store.replaceAll(notes, viewStates)
+    await activation.store.replaceAll(notesFromFiles(files))
+    activation.replica?.requestFullPush()
   })
 }
 
 // -----------------------------------------------------------------------------
-// Pulls (boot + the SYNC triggers: visibility, online)
+// Pulls (boot + the SYNC triggers: visibility, focus, online)
 // -----------------------------------------------------------------------------
 
 /** Queue a pull: since-cursor when a cursor is stored, else the full corpus. */
@@ -407,36 +390,40 @@ function runPull(activation: DatabaseModeRuntime) {
       const cursor = await store.getMeta(PULL_CURSOR_KEY)
       // An unusable cursor (never pulled, or not the ms-timestamp shape the
       // server compares against) degrades to a full pull — always correct,
-      // just bigger.
-      const body =
-        cursor !== null && /^\d+$/.test(cursor)
-          ? await activation.source.pullSince(cursor)
-          : await activation.source.pullFull()
+      // just bigger. A full pull is "everything changed" with the key lists
+      // derived from the pulled rows themselves.
+      const useSince = cursor !== null && /^\d+$/.test(cursor)
+      const body = useSince
+        ? await activation.source.pullSince(cursor)
+        : await activation.source.pullFull()
       if (runtime !== activation) return
+      const changes: ReplicaChangesBody = useSince
+        ? (body as ReplicaChangesBody)
+        : {
+            ...body,
+            nodeIds: body.nodes.map((node) => node.id),
+            linkKeys: body.links.map(linkKeyOf),
+          }
 
-      const pulled = "changed" in body ? body.changed : body.notes
-      const remoteIds = "changed" in body ? body.ids : body.notes.map((entry) => entry.note.id)
-      const files = jotai().get(databaseFilesAtom)
-      const local = notesFromFiles(files)
-      const localViewStates: Record<NoteId, string[]> = {}
-      for (const entry of pulled) {
-        localViewStates[entry.note.id] = readNoteViewState(files, entry.note.id)
-      }
-
+      const local = await store.getAllRows()
+      const pendingNoteIds = activation.replica?.pendingNoteIds?.() ?? new Set<string>()
       const plan = planPullApplication({
-        local,
-        localViewStates,
-        pulled,
-        remoteIds,
-        pending: activation.replica?.pendingNoteIds?.() ?? new Set(),
+        localNodes: local.nodes,
+        localLinks: local.links,
+        remoteNodes: changes.nodes,
+        remoteLinks: changes.links,
+        remoteNodeIds: changes.nodeIds,
+        remoteLinkKeys: changes.linkKeys,
+        pendingNodeIds: expandPendingNodeIds(pendingNoteIds, local.links),
       })
 
-      if (Object.keys(plan.notes).length > 0) await store.writeNotes(plan.notes)
-      for (const [noteId, collapsedIds] of Object.entries(plan.viewStates)) {
-        await store.setViewState(noteId, collapsedIds)
-      }
-      if (Object.keys(plan.notes).length > 0 || Object.keys(plan.viewStates).length > 0) {
-        applyToFilesAtom(plan.notes, plan.viewStates)
+      const planSize =
+        plan.nodes.length + plan.links.length + plan.deleteNodes.length + plan.deleteLinks.length
+      if (planSize > 0) {
+        await store.applyPull(plan)
+        // Re-synthesize the whole files map — rollups are cheap at this scale
+        // and identical contents keep their string equality for consumers.
+        jotai().set(databaseFilesAtom, synthesizeFiles(await store.getAllNotes()))
       }
       if (body.cursor !== null) await store.setMeta(PULL_CURSOR_KEY, body.cursor)
 
@@ -457,8 +444,10 @@ function runPull(activation: DatabaseModeRuntime) {
         pull: "error",
         lastPullError: message,
         // First-ever boot with an unreachable replica: nothing to show, and
-        // that deserves an explanation rather than a silent empty list.
-        emptyOffline: localCount === 0,
+        // that deserves an explanation rather than a silent empty list. An
+        // expired session is NOT that state — it signs the machine out and
+        // gets its own honest message (see use-database-mode.ts).
+        emptyOffline: localCount === 0 && !(error instanceof SessionExpiredError),
       })
       const retryMs = activation.options.pullRetryMs ?? PULL_RETRY_MS
       activation.pullRetryTimer = setTimeout(() => {

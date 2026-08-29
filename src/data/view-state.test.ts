@@ -1,88 +1,69 @@
 import { describe, expect, it } from "vitest"
-import { viewStatePath } from "./paths"
 import {
-  buildViewStateWrite,
-  parseNoteViewState,
-  readNoteViewState,
-  serializeNoteViewState,
-} from "./view-state-parse"
+  applyCollapseOverrides,
+  readCollapseOverrides,
+  toggleCollapseOverride,
+  type CollapseOverrides,
+} from "./view-state"
 
-describe("parseNoteViewState (per-note file)", () => {
-  it("returns empty for missing content", () => {
-    expect(parseNoteViewState(undefined)).toEqual([])
-    expect(parseNoteViewState("")).toEqual([])
+const defaults = new Set(["blk_deep1", "blk_deep2"])
+const none: CollapseOverrides = { expanded: [], collapsed: [] }
+
+describe("applyCollapseOverrides", () => {
+  it("with no overrides, the defaults are the collapsed set", () => {
+    expect(applyCollapseOverrides(defaults, none)).toEqual(defaults)
   })
 
-  it("parses a well-formed file", () => {
-    expect(parseNoteViewState(JSON.stringify(["blk_a", "blk_b"]))).toEqual(["blk_a", "blk_b"])
-  })
-
-  it("degrades to empty on malformed JSON", () => {
-    expect(parseNoteViewState("[ not json")).toEqual([])
-  })
-
-  it("ignores non-array top levels and non-string entries", () => {
-    expect(parseNoteViewState(JSON.stringify({ a: 1 }))).toEqual([])
-    expect(parseNoteViewState("42")).toEqual([])
-    expect(parseNoteViewState(JSON.stringify(["blk_a", 5, null, "blk_b"]))).toEqual([
-      "blk_a",
-      "blk_b",
-    ])
+  it("expansions remove default-collapsed ids; collapses add expanded ids", () => {
+    expect(
+      applyCollapseOverrides(defaults, { expanded: ["blk_deep1"], collapsed: ["blk_top"] }),
+    ).toEqual(new Set(["blk_deep2", "blk_top"]))
   })
 })
 
-describe("serializeNoteViewState", () => {
-  it("sorts and de-duplicates so the same set always produces the same bytes", () => {
-    expect(serializeNoteViewState(["blk_b", "blk_a", "blk_b"])).toEqual(
-      serializeNoteViewState(["blk_a", "blk_b"]),
+describe("toggleCollapseOverride", () => {
+  it("collapsing a default-expanded block records a collapse override", () => {
+    const next = toggleCollapseOverride(defaults, none, "blk_top")
+    expect(next).toEqual({ expanded: [], collapsed: ["blk_top"] })
+    expect(applyCollapseOverrides(defaults, next).has("blk_top")).toBe(true)
+  })
+
+  it("expanding a default-collapsed block records an expand override", () => {
+    const next = toggleCollapseOverride(defaults, none, "blk_deep1")
+    expect(next).toEqual({ expanded: ["blk_deep1"], collapsed: [] })
+    expect(applyCollapseOverrides(defaults, next).has("blk_deep1")).toBe(false)
+  })
+
+  it("toggling twice returns to no overrides (fold-then-unfold is clean)", () => {
+    let overrides = none
+    overrides = toggleCollapseOverride(defaults, overrides, "blk_top")
+    overrides = toggleCollapseOverride(defaults, overrides, "blk_top")
+    expect(overrides).toEqual(none)
+
+    overrides = toggleCollapseOverride(defaults, overrides, "blk_deep1")
+    overrides = toggleCollapseOverride(defaults, overrides, "blk_deep1")
+    expect(overrides).toEqual(none)
+  })
+})
+
+describe("readCollapseOverrides", () => {
+  it("degrades to no overrides without a note id or storage entry", () => {
+    expect(readCollapseOverrides(undefined)).toEqual(none)
+    expect(readCollapseOverrides("nothing-stored")).toEqual(none)
+  })
+
+  it("tolerates malformed storage", () => {
+    localStorage.setItem("collapse:bad", "[not json")
+    expect(readCollapseOverrides("bad")).toEqual(none)
+    localStorage.setItem("collapse:wrong-shape", JSON.stringify({ expanded: "x", collapsed: [1] }))
+    expect(readCollapseOverrides("wrong-shape")).toEqual(none)
+  })
+
+  it("reads back a stored override record", () => {
+    localStorage.setItem(
+      "collapse:note-a",
+      JSON.stringify({ expanded: ["blk_a"], collapsed: ["blk_b"] }),
     )
-  })
-
-  it("round-trips through parseNoteViewState", () => {
-    expect(parseNoteViewState(serializeNoteViewState(["blk_b", "blk_a"]))).toEqual([
-      "blk_a",
-      "blk_b",
-    ])
-  })
-})
-
-describe("readNoteViewState", () => {
-  it("reads the per-note file", () => {
-    const files = { [viewStatePath("foo")]: JSON.stringify(["blk_a"]) }
-    expect(readNoteViewState(files, "foo")).toEqual(["blk_a"])
-  })
-
-  it("returns empty for no note id or no files", () => {
-    expect(readNoteViewState({}, "foo")).toEqual([])
-    expect(readNoteViewState({}, undefined)).toEqual([])
-  })
-})
-
-describe("buildViewStateWrite", () => {
-  it("writes only the current note's file", () => {
-    const updates = buildViewStateWrite({}, "foo", ["blk_a"])
-    expect(updates).toEqual({ [viewStatePath("foo")]: serializeNoteViewState(["blk_a"]) })
-  })
-
-  it("supports note ids with directories", () => {
-    const updates = buildViewStateWrite({}, "work/projects", ["blk_a"])
-    expect(updates).toEqual({
-      ".ruminate/view-state/work/projects.json": serializeNoteViewState(["blk_a"]),
-    })
-  })
-
-  it("skips the write entirely when the serialized content is unchanged", () => {
-    const files = { [viewStatePath("foo")]: serializeNoteViewState(["blk_a", "blk_b"]) }
-    // Same set in a different order (fold-then-unfold) is still unchanged.
-    expect(buildViewStateWrite(files, "foo", ["blk_b", "blk_a"])).toBeNull()
-  })
-
-  it("skips the write when the set is empty and no file exists", () => {
-    expect(buildViewStateWrite({}, "foo", [])).toBeNull()
-  })
-
-  it("deletes the per-note file when the set becomes empty", () => {
-    const files = { [viewStatePath("foo")]: serializeNoteViewState(["blk_a"]) }
-    expect(buildViewStateWrite(files, "foo", [])).toEqual({ [viewStatePath("foo")]: null })
+    expect(readCollapseOverrides("note-a")).toEqual({ expanded: ["blk_a"], collapsed: ["blk_b"] })
   })
 })

@@ -31,6 +31,12 @@ export const GITHUB_USER_STORAGE_KEY = "github_user"
  * refresh token nearing its hard limit (rare — only after long inactivity). */
 export const sessionStatusAtom = atom<SessionStatus>("active")
 
+/** Sticky "the session died" flag for the signed-out UI: unlike
+ * `sessionStatusAtom` it survives the sign-out (which resets the status), so
+ * the sample-notes screen can say "session expired — sign in again" instead
+ * of pretending this is a first visit. Cleared by the next sign-in. */
+export const sessionExpiredAtom = atom(false)
+
 const store = getDefaultStore()
 
 type Session = {
@@ -56,6 +62,7 @@ export function seedSession(user: GitHubUser) {
     accessTokenExpiresAt: user.accessTokenExpiresAt,
     refreshTokenExpiresAt: user.refreshTokenExpiresAt,
   }
+  store.set(sessionExpiredAtom, false)
   recomputeStatus()
 }
 
@@ -116,7 +123,10 @@ function doRefresh(): Promise<void> {
     } catch (error) {
       // A dead refresh token is terminal — surface "Signed out". Transient
       // (network) failures leave the status alone so a later sync can recover.
-      if (error instanceof SessionExpiredError) store.set(sessionStatusAtom, "expired")
+      if (error instanceof SessionExpiredError) {
+        store.set(sessionStatusAtom, "expired")
+        store.set(sessionExpiredAtom, true)
+      }
       throw error
     } finally {
       refreshing = null

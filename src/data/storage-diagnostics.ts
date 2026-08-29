@@ -8,10 +8,9 @@ import { atom } from "jotai"
 
 /** The D1 replica's row counts + cursor, from `GET /api/replica/status`. */
 interface ReplicaRemoteStatus {
-  notes: number
-  blocks: number
+  pages: number
+  nodes: number
   links: number
-  viewState: number
   cursor: string | null
   fetchedAt: number
 }
@@ -38,6 +37,10 @@ export interface StorageDiagnostics {
   status: "off" | "opening" | "ready" | "error"
   /** "opfs" = persisted; "memory" = this session only (OPFS unavailable). */
   persistence: "opfs" | "memory" | null
+  /** Why persistence degraded to memory: "another-tab" = a second Ruminate
+   * tab holds the OPFS database (the banner offers a reload); "unavailable" =
+   * OPFS itself is missing (private window, old browser). */
+  persistenceReason: "another-tab" | "unavailable" | null
   /** Notes currently served by the local store. */
   notes: number
   /** SQL-side write failures (the files atom and the push queue still carried
@@ -51,6 +54,7 @@ export interface StorageDiagnostics {
 export const OFF_STORAGE_DIAGNOSTICS: StorageDiagnostics = {
   status: "off",
   persistence: null,
+  persistenceReason: null,
   notes: 0,
   writeErrors: [],
   writeErrorCount: 0,
