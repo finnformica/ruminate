@@ -11,7 +11,7 @@ vi.mock("../../data/view-state", () => ({
 }))
 vi.mock("../../global-state", async () => {
   const { atom } = await import("jotai")
-  return { noteOutlineAtom: atom(null), blockRevealAtom: atom(null) }
+  return { noteOutlineAtom: atom(null), blockRevealAtom: atom(null), markdownFilesAtom: atom({}) }
 })
 
 import { BlockNoteEditor } from "./block-note-editor"

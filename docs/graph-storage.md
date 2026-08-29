@@ -290,6 +290,43 @@ write.
   visible, correctable by editing again, and bounded by the push backoff
   window. A durable pending queue closes this properly if it ever bites.
 
+## Mirroring (paste as link)
+
+Within Ruminate, **paste means "put this block here"**. Copy embeds the
+selected blocks' ids in the private clipboard payload (`rich-clipboard.ts` —
+the visible `text/plain`/`text/html` flavors are unchanged), and a select-mode
+paste of ids the corpus knows LINKS those nodes downstream of the target
+instead of duplicating content: the target note's markdown gains the subtree
+under its original `id::` lines, so the next save turns it into a second
+inbound link on the same node. The node then genuinely lives in both places —
+an edit in either reflects in both, which is just per-row LWW through the
+store. Cut+paste is thereby a true move (the same ids travel).
+
+The rules, per pasted root (`embeddedPasteFragment` in `block-editor.tsx`):
+
+- **Link** (ids unknown in this doc, i.e. cross-note): insert with original
+  ids, using the node's LIVE content resolved from the corpus
+  (`resolve-blocks.ts`, wired by `BlockNoteEditor`; the open note's own file
+  is excluded — it lags the editor by the autosave debounce). A node that no
+  longer exists anywhere falls back to the clipboard-embedded content, still
+  under its original ids — that fallback is what makes cut+paste a robust
+  move regardless of autosave timing.
+- **Same-doc** (an id already lives in this doc): duplicate with fresh ids —
+  same-note mirroring is deliberately out of scope until the `((blk_x))`
+  occurrence form (the markdown bridge re-mints a duplicate `id::` and would
+  fork it).
+- **Twin** (the id is already a direct child of the insertion parent): skip
+  that block — no duplicate, no error, it's already there. The DB's
+  `(source, destination, kind)` primary key backstops the invariant.
+- **Cycle** (the live subtree contains the paste target or an ancestor):
+  fall back to duplicating that block; the store's save-time cycle-drop
+  remains the backstop.
+
+Edit-mode (textarea) paste is unchanged — a caret splice is textual. On the
+store side, `planNoteWrite` already had the required property (pinned in the
+conformance suite): a save whose diff drops a node that is still linked from
+another note only unlinks it — node rows and the other note's links survive.
+
 ## History: the git era, and schema v1
 
 Until this architecture landed, Ruminate was a git app: notes were markdown

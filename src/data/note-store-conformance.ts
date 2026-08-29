@@ -339,6 +339,58 @@ export function describeNoteStoreConformance(
       expect(parse(stored as string).blocks["b"]).toBeUndefined()
     })
 
+    // Mirroring ("paste as link", docs/graph-storage.md): a pasted block keeps
+    // its original id in the target note's markdown, so an ordinary save turns
+    // it into a second inbound link on the same node. The per-save diff path
+    // must treat such nodes exactly like the note-delete path does: unlink,
+    // never destroy.
+
+    const MIRRORED_B = [
+      "- b's own",
+      "  id:: blk_bown000000",
+      "- shared",
+      "  id:: blk_shared0000",
+      "  - inner",
+      "    id:: blk_inner00000",
+      "",
+    ].join("\n")
+
+    it("save-diff: dropping a mirrored block from one note unlinks it there but leaves the mirror whole", async () => {
+      const store = await makeStore()
+      await store.writeNotes({
+        a: "- shared\n  id:: blk_shared0000\n  - inner\n    id:: blk_inner00000\n",
+      })
+      // Paste-as-link: note b's save carries the same subtree, ids intact.
+      await store.writeNotes({ b: MIRRORED_B })
+      expect(await store.upstream("blk_shared0000")).toEqual(["a", "b"])
+
+      // Save a WITHOUT the shared block: a's link goes; the node (and its
+      // subtree) must survive untouched for b.
+      await store.writeNotes({ a: "- a alone\n  id:: blk_aalone0000\n" })
+      expect(await store.upstream("blk_shared0000")).toEqual(["b"])
+      expect(await store.getNote("a")).toBe("- a alone\n  id:: blk_aalone0000\n")
+      expect(await store.getNote("b")).toBe(MIRRORED_B)
+    })
+
+    it("save-diff: editing a mirrored block's text in either note updates the other's rollup", async () => {
+      const store = await makeStore()
+      await store.writeNotes({ a: "- draft\n  id:: blk_shared0000\n" })
+      await store.writeNotes({
+        b: "- b's own\n  id:: blk_bown000000\n- draft\n  id:: blk_shared0000\n",
+      })
+
+      // Edit via a's save…
+      await store.writeNotes({ a: "- edited in a\n  id:: blk_shared0000\n" })
+      expect(await store.getNote("b")).toBe(
+        "- b's own\n  id:: blk_bown000000\n- edited in a\n  id:: blk_shared0000\n",
+      )
+      // …and back via b's save.
+      await store.writeNotes({
+        b: "- b's own\n  id:: blk_bown000000\n- edited in b\n  id:: blk_shared0000\n",
+      })
+      expect(await store.getNote("a")).toBe("- edited in b\n  id:: blk_shared0000\n")
+    })
+
     it("deleting a note removes its exclusive nodes but spares multi-homed ones", async () => {
       const store = await makeStore()
       await store.writeNotes({

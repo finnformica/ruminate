@@ -34,9 +34,11 @@ import { htmlToMarkdown } from "../../utils/html-to-markdown"
 import type { BlockRevealRequest } from "../../utils/note-outline"
 import {
   clipboardBlocksToDoc,
+  clipboardBlocksToDocWithIds,
   extractClipboardBlocks,
   richClipboardFormats,
   writeRichClipboard,
+  type ClipboardBlock,
 } from "../../utils/rich-clipboard"
 import { BlockItem, type BlockEditorApi, type FocusRequest } from "./block-item"
 import { useBlockHistory } from "./use-block-history"
@@ -94,6 +96,93 @@ function findReappeared(current: BlockDoc, restored: BlockDoc): string | null {
 }
 
 /**
+ * Build the insertion fragment for a Ruminate-payload paste — "paste as link"
+ * (docs/graph-storage.md): within the app, paste means "put this block here",
+ * so ids the corpus knows are LINKED (the same node then lives in both
+ * places), not duplicated. Per copied root, in order:
+ *
+ * - **Twin**: its id is already a direct child of the insertion parent — skip
+ *   it (no duplicate, no error; it's already there). The DB's
+ *   `(source, destination, kind)` primary key backstops this.
+ * - **Same-doc**: any of its payload ids exists elsewhere in this doc —
+ *   duplicate with fresh ids, exactly the pre-link behavior. Same-note
+ *   mirroring is deliberately out of scope until the `((blk_x))` occurrence
+ *   form: the markdown bridge re-mints a duplicate `id::` and would fork it.
+ * - **Link**: ids unknown here — insert the node itself, original ids
+ *   preserved, using its LIVE content from the corpus (`resolveBlocks`), never
+ *   the clipboard bytes (a stale clipboard must not clobber the live node on
+ *   save). A node that no longer exists anywhere (deleted since copy — the cut
+ *   side of cut+paste) falls back to the clipboard content, still under its
+ *   original ids, which is what makes cut+paste a true move. If the live
+ *   subtree contains the paste target or any of its ancestors, linking would
+ *   close a cycle — that block falls back to duplicating (the store's
+ *   save-time cycle-drop remains the backstop); any other id the live subtree
+ *   shares with this doc is reminted so the doc never holds one id twice.
+ *
+ * Returns null when every root was a twin (nothing to insert).
+ */
+function embeddedPasteFragment(
+  embedded: ClipboardBlock[],
+  doc: BlockDoc,
+  target: string,
+  asFirstChildren: boolean,
+  resolveBlocks?: (ids: string[]) => Record<string, string | null>,
+): BlockDoc | null {
+  // Direct children of the insertion parent (the twin check's scope).
+  const parentChildren = asFirstChildren
+    ? (doc.blocks[target]?.children ?? [])
+    : (siblingsOf(doc, target)?.siblings ?? [])
+  const forbidden = new Set([target, ...ancestorsOf(doc, target)])
+
+  const payloadIds = (block: ClipboardBlock): string[] => {
+    const ids: string[] = []
+    const walk = (b: ClipboardBlock) => {
+      if (b.id !== undefined) ids.push(b.id)
+      b.children.forEach(walk)
+    }
+    walk(block)
+    return ids
+  }
+
+  const roots = embedded.filter(
+    (block) => !(block.id !== undefined && parentChildren.includes(block.id)),
+  )
+  if (roots.length === 0) return null
+
+  const linkable = (block: ClipboardBlock) =>
+    block.id !== undefined && !payloadIds(block).some((id) => id in doc.blocks)
+  const linkableIds = roots.filter(linkable).map((block) => block.id as string)
+  const resolved =
+    resolveBlocks && linkableIds.length > 0 ? resolveBlocks(linkableIds) : ({} as const)
+
+  let out: BlockDoc = { frontmatter: null, rootBlockIds: [], blocks: {} }
+  for (const block of roots) {
+    let sub: BlockDoc
+    if (!linkable(block)) {
+      sub = clipboardBlocksToDoc([block])
+    } else {
+      const live = (resolved as Record<string, string | null>)[block.id as string] ?? null
+      sub = live !== null ? parse(live) : clipboardBlocksToDocWithIds([block])
+      if (Object.keys(sub.blocks).some((id) => forbidden.has(id))) {
+        // Cycle fallback: every id of `sub` collides with itself, so this is
+        // a full remint — a plain duplicate of the live fragment's content.
+        sub = remintCollidingIds(sub, sub)
+      }
+      sub = remintCollidingIds(sub, doc)
+    }
+    // A descendant shared across two pasted roots (multi-parent in the live
+    // graph) would put one id in this doc twice; remint the later occurrence.
+    sub = remintCollidingIds(sub, out)
+    out = {
+      frontmatter: null,
+      rootBlockIds: [...out.rootBlockIds, ...sub.rootBlockIds],
+      blocks: { ...out.blocks, ...sub.blocks },
+    }
+  }
+  return out
+}
+
+/**
  * A controlled block outliner. `doc` is owned by the caller (which serializes
  * and saves it); this component manages only transient UI state and emits new
  * docs via `onChange`.
@@ -123,6 +212,7 @@ export function BlockEditor({
   onZoomNavigate,
   noteTitle,
   revealRequest = null,
+  resolveBlocks,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc) => void
@@ -169,6 +259,13 @@ export function BlockEditor({
    * nonce, so a request left over from a previous mount is ignored.
    */
   revealRequest?: BlockRevealRequest | null
+  /**
+   * Live subtree markdown per block id from the note corpus — the "paste as
+   * link" lookup (see `embeddedPasteFragment`). Optional: without it
+   * (Storybook, standalone usage) unknown-id pastes fall back to the
+   * clipboard-embedded content, ids intact.
+   */
+  resolveBlocks?: (ids: string[]) => Record<string, string | null>
 }) {
   // ── Zoom state ────────────────────────────────────────────────────────────
   // Controlled by the caller (URL) when `onZoomNavigate` is given; otherwise
@@ -644,14 +741,18 @@ export function BlockEditor({
     setSelected(focusId ?? firstSelectable(next))
   }
 
-  // Serialize the selected subtrees to block markdown (markers + nesting) so it
-  // round-trips through paste.
+  // Serialize the selected subtrees to block markdown (markers + nesting +
+  // `id::` lines) so it round-trips through paste. The ids ride only in the
+  // embedded clipboard payload — where they make paste-as-link (and cut+paste
+  // as a true move) possible; both visible flavors drop them.
   const selectionMarkdown = (): string => {
     const lines: string[] = []
     const walk = (id: string, depth: number) => {
       const block = doc.blocks[id]
       if (!block) return
-      lines.push("  ".repeat(depth) + block.content)
+      const indent = "  ".repeat(depth)
+      lines.push(indent + block.content)
+      lines.push(`${indent}  id:: ${block.id}`)
       for (const childId of block.children) walk(childId, depth + 1)
     }
     for (const id of selectionRoots()) walk(id, 0)
@@ -1141,11 +1242,23 @@ export function BlockEditor({
     if (html.trim() !== "") {
       const embedded = extractClipboardBlocks(html)
       if (embedded && embedded.length > 0) {
-        pasted = clipboardBlocksToDoc(embedded)
-      } else {
-        const converted = htmlToMarkdown(html)
-        if (converted.trim() !== "") pasted = parse(converted)
+        // A Ruminate payload: link, duplicate, or skip per block — the
+        // fragment arrives with its ids already settled, so it bypasses the
+        // remint below (reminting would undo the link).
+        const fragment = embeddedPasteFragment(embedded, doc, target, afterZoomTitle, resolveBlocks)
+        if (!fragment) return // every pasted block is already a child here
+        const linked = afterZoomTitle
+          ? insertBlocksAsFirstChildren(doc, target, fragment)
+          : insertBlocksAfter(doc, target, fragment)
+        if (!linked) return
+        history.commit(doc, linked.doc, { type: "structural" })
+        setAnchorId(null)
+        setFocus(null)
+        setSelected(linked.lastId)
+        return
       }
+      const converted = htmlToMarkdown(html)
+      if (converted.trim() !== "") pasted = parse(converted)
     }
     if (!pasted) {
       if (normalized.trim() === "") return
@@ -1183,7 +1296,10 @@ export function BlockEditor({
         const el = containerRef.current?.querySelector(`[data-block-id="${bid}"]`)
         if (el && selection.containsNode(el, true)) {
           if (!selection.containsNode(el, false)) partial = true
-          picked.push("  ".repeat(depth) + block.content)
+          // One entry per block (content + id line) so `picked.length` still
+          // counts blocks; the id rides to the embedded payload only.
+          const indent = "  ".repeat(depth)
+          picked.push(`${indent}${block.content}\n${indent}  id:: ${bid}`)
           pickedSet.add(bid)
         }
         walk(block.children, depth + 1)
@@ -1242,7 +1358,9 @@ export function BlockEditor({
         if (!block) continue
         const el = containerRef.current?.querySelector(`[data-block-id="${id}"]`)
         if (el && selection.containsNode(el, true)) {
-          picked.push("  ".repeat(depth) + block.content)
+          // Content + id line as one entry — see the cut handler's note.
+          const indent = "  ".repeat(depth)
+          picked.push(`${indent}${block.content}\n${indent}  id:: ${id}`)
         }
         walk(block.children, depth + 1)
       }
