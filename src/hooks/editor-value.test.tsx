@@ -160,7 +160,7 @@ describe("useEditorValue (draft provenance)", () => {
 
   it("raises the notice at mount when the note advanced beneath a draft with real edits", () => {
     // Device B's scenario: a draft with real edits based on version 1 sleeps
-    // in localStorage; the repo has since pulled version 2. The draft stays
+    // in localStorage; a replica pull has since brought version 2. The draft stays
     // visible, but the notice is up immediately — no further pull needed —
     // and a plain save is blocked.
     writeDraft("version 1 plus my edits", hashNoteContent("version 1"))

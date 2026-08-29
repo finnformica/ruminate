@@ -189,7 +189,7 @@ describe("BlockEditor focus + keyboard", () => {
     fireEvent.keyDown(textarea, { key: "Enter" }) // create a block below B
     expect(container.querySelector("textarea")!.value).toBe("")
     fireEvent.keyDown(container.querySelector("textarea")!, { key: "z", metaKey: true }) // undo
-    // Not the first block in the file — the block Enter was pressed on.
+    // Not the first block in the note — the block Enter was pressed on.
     expect(container.querySelector("textarea")).toBeNull()
     expect(highlightedText(container)).toBe("B")
     // Redo brings the created block back and re-highlights it.

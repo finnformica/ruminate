@@ -214,6 +214,131 @@ export function describeNoteStoreConformance(
       )
     })
 
+    it("delete-rescue: a rescued child keeps its own subtree (multi-level chains)", async () => {
+      const store = await makeStore()
+      await store.writeNotes({
+        a: [
+          "- top",
+          "  id:: blk_top0000000",
+          "  - mid",
+          "    id:: blk_mid0000000",
+          "    - leaf",
+          "      id:: blk_leaf000000",
+          "",
+        ].join("\n"),
+      })
+      await store.removeLink("a", "blk_top0000000")
+
+      // top's last occurrence is gone; mid surfaces at the page root with its
+      // subtree intact — leaf stays a child of mid, not a second rescue.
+      expect(await store.upstream("blk_mid0000000")).toEqual(["a"])
+      expect(await store.upstream("blk_leaf000000")).toEqual(["blk_mid0000000"])
+      expect(await store.getNote("a")).toBe(
+        ["- mid", "  id:: blk_mid0000000", "  - leaf", "    id:: blk_leaf000000", ""].join("\n"),
+      )
+    })
+
+    it("delete-rescue: multiple rescued children keep their sibling order", async () => {
+      const store = await makeStore()
+      await store.writeNotes({
+        a: [
+          "- keep",
+          "  id:: blk_keep000000",
+          "- gone",
+          "  id:: blk_gone000000",
+          "  - one",
+          "    id:: blk_one0000000",
+          "    - one deep",
+          "      id:: blk_onedeep000",
+          "  - two",
+          "    id:: blk_two0000000",
+          "    - two deep",
+          "      id:: blk_twodeep000",
+          "",
+        ].join("\n"),
+      })
+      await store.removeLink("a", "blk_gone000000")
+
+      // Both children — parents themselves — append at the page end, in the
+      // order they had under the deleted node, subtrees intact.
+      expect(await store.downstream("a")).toEqual([
+        "blk_keep000000",
+        "blk_one0000000",
+        "blk_two0000000",
+      ])
+      expect(await store.downstream("blk_one0000000")).toEqual(["blk_onedeep000"])
+      expect(await store.downstream("blk_two0000000")).toEqual(["blk_twodeep000"])
+    })
+
+    it("keeps sibling order through many inserts at the same spot (key growth stays sane)", async () => {
+      const store = await makeStore()
+      const INSERTS = 16
+      const looseIds = Array.from(
+        { length: INSERTS },
+        (_, i) => `blk_ins${String(i).padStart(7, "0")}`,
+      )
+      await store.writeNotes({
+        a: OUTLINE,
+        b: looseIds.map((id, i) => `- loose ${i}\n  id:: ${id}`).join("\n") + "\n",
+      })
+      // Every insert lands directly after `first` — the worst case for
+      // fractional keys (each key is generated inside the previous gap).
+      for (const id of looseIds) {
+        await store.addLink("blk_root000000", id, { after: "blk_first00000" })
+      }
+      expect(await store.downstream("blk_root000000")).toEqual([
+        "blk_first00000",
+        ...[...looseIds].reverse(),
+        "blk_second0000",
+      ])
+    })
+
+    it("a reorder-only save changes link rows, never node rows", async () => {
+      const store = await makeStore()
+      await store.writeNotes({
+        a: "- one\n  id:: blk_one0000000\n- two\n  id:: blk_two0000000\n- three\n  id:: blk_three00000\n",
+      })
+      const diff = await store.writeNotes({
+        a: "- three\n  id:: blk_three00000\n- two\n  id:: blk_two0000000\n- one\n  id:: blk_one0000000\n",
+      })
+
+      expect(diff.nodes).toEqual([])
+      expect(diff.deleteNodes).toEqual([])
+      expect(diff.deleteLinks).toEqual([])
+      expect(diff.links.length).toBeGreaterThan(0)
+      expect(diff.links.every((link) => link.source_id === "a")).toBe(true)
+      expect(await store.downstream("a")).toEqual([
+        "blk_three00000",
+        "blk_two0000000",
+        "blk_one0000000",
+      ])
+    })
+
+    it("re-mints a block id that claims the note's own id (the page survives)", async () => {
+      const store = await makeStore()
+      // Block ids and page ids share the nodes table — an `id:: a` line inside
+      // note a must not clobber a's page node.
+      await store.writeNotes({ a: "- hello\n  id:: a\n" })
+      const stored = await store.getNote("a")
+      expect(stored).not.toBeNull()
+      expect(stored).toContain("- hello")
+      expect(parse(stored as string).blocks["a"]).toBeUndefined()
+      expect(await store.getAllNotes()).toHaveProperty("a")
+    })
+
+    it("re-mints a block id that claims ANOTHER note's id (that page survives)", async () => {
+      const store = await makeStore()
+      await store.writeNotes({ b: "- b's content\n  id:: blk_bcontent00\n" })
+      await store.writeNotes({ a: "- stray claim\n  id:: b\n" })
+
+      // Note b is untouched; note a keeps its content under a fresh id.
+      expect(await store.getNote("b")).toBe("- b's content\n  id:: blk_bcontent00\n")
+      expect(await store.upstream("b")).toEqual([])
+      const stored = await store.getNote("a")
+      expect(stored).toContain("- stray claim")
+      expect(parse(stored as string).blocks["b"]).toBeUndefined()
+    })
+
     it("deleting a note removes its exclusive nodes but spares multi-homed ones", async () => {
       const store = await makeStore()
       await store.writeNotes({

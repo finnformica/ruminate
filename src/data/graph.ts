@@ -1,5 +1,6 @@
 import { generateKeyBetween, generateNKeysBetween } from "fractional-indexing"
 import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
+import { blockId } from "../blocks/id"
 import { parse } from "../blocks/parse"
 import { normalizeHeadingMarker } from "../blocks/serialize"
 import type { NoteId } from "../schema"
@@ -84,9 +85,32 @@ interface GraphParts {
  * Parse a note and produce its node rows + desired child orders (no sort keys
  * yet — `docToGraph` assigns fresh evenly-spaced ones; the store reconciles
  * against existing keys instead so unchanged siblings keep their rows).
+ *
+ * `reservedIds` are ids a block row must never take (the store passes every
+ * other page's id): block ids and page ids share the `nodes` table, so a block
+ * declaring `id:: <noteId>` — or the id of another existing page — would
+ * clobber that page's node row and the page would stop rolling up entirely.
+ * Such ids are re-minted here: content survives (never-lose-work), and the
+ * fresh id persists on the next save.
  */
-export function docToGraphParts(noteId: NoteId, markdown: string, updatedAt: number): GraphParts {
+export function docToGraphParts(
+  noteId: NoteId,
+  markdown: string,
+  updatedAt: number,
+  reservedIds?: ReadonlySet<string>,
+): GraphParts {
   const doc = parse(markdown)
+
+  const rename = new Map<string, string>()
+  for (const id of Object.keys(doc.blocks)) {
+    if (id !== noteId && !reservedIds?.has(id)) continue
+    let fresh = blockId()
+    while (doc.blocks[fresh] !== undefined || fresh === noteId || reservedIds?.has(fresh)) {
+      fresh = blockId()
+    }
+    rename.set(id, fresh)
+  }
+  const safeId = (id: string) => rename.get(id) ?? id
 
   // Pass 1 — code-fence state per block, over the exact line order the
   // serializer emits (depth-first). A line inside an open fence must never be
@@ -118,7 +142,7 @@ export function docToGraphParts(noteId: NoteId, markdown: string, updatedAt: num
   // Pass 2 — type each block. The ordered-run position is tracked per parent
   // over its (consecutive) children, mirroring the rollup's renumbering.
   const walk = (parentId: string, ids: string[]) => {
-    childrenOf.set(parentId, [...ids])
+    childrenOf.set(parentId, ids.map(safeId))
     let olRun = 0
     for (const id of ids) {
       const block = doc.blocks[id]
@@ -128,8 +152,8 @@ export function docToGraphParts(noteId: NoteId, markdown: string, updatedAt: num
       const line = normalizeHeadingMarker(block.content)
       const { type, text } = classifyLine(line, olRun + 1, inFence.get(id) ?? false)
       olRun = type === "ol" ? olRun + 1 : 0
-      nodes.push({ id, type, text, props: null, updated_at: updatedAt })
-      walk(id, block.children)
+      nodes.push({ id: safeId(id), type, text, props: null, updated_at: updatedAt })
+      walk(safeId(id), block.children)
     }
   }
   walk(noteId, doc.rootBlockIds)

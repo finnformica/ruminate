@@ -119,6 +119,117 @@ describe("planReplicaPut", () => {
   })
 })
 
+/**
+ * The planned SQL, executed for real: `node:sqlite` runs the exact statements
+ * D1 would, so the per-row last-writer-wins semantics are pinned by an engine,
+ * not by string inspection. The module is loaded via `getBuiltinModule` with a
+ * hand-typed minimal surface because `check:worker` compiles this file against
+ * workers-types (no node types).
+ */
+interface SqliteStatement {
+  run(...params: (string | number | null)[]): unknown
+  all(...params: (string | number | null)[]): Record<string, unknown>[]
+}
+interface SqliteDatabase {
+  prepare(sql: string): SqliteStatement
+  exec(sql: string): void
+}
+const proc = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } }).process
+const sqlite = proc?.getBuiltinModule?.("node:sqlite") as
+  | { DatabaseSync: new (path: string) => SqliteDatabase }
+  | undefined
+
+describe("planReplicaPut against a real SQLite engine (per-row LWW)", () => {
+  // The two replicated tables, mirroring migrations/0002_nodes.sql (the LWW
+  // rule under test lives in planReplicaPut's upserts, not in this DDL).
+  const DDL = `
+CREATE TABLE nodes (id TEXT PRIMARY KEY, type TEXT NOT NULL, text TEXT NOT NULL,
+  props TEXT, updated_at INTEGER NOT NULL);
+CREATE TABLE link (source_id TEXT NOT NULL, destination_id TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'child', sort_key TEXT NOT NULL, updated_at INTEGER NOT NULL,
+  PRIMARY KEY (source_id, destination_id, kind));
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+`
+
+  const openDb = (): SqliteDatabase => {
+    if (!sqlite) throw new Error("node:sqlite is unavailable — tests require Node >= 22.5")
+    const db = new sqlite.DatabaseSync(":memory:")
+    db.exec(DDL)
+    return db
+  }
+  const push = (db: SqliteDatabase, payload: Parameters<typeof planReplicaPut>[0]) => {
+    for (const statement of planReplicaPut(payload)) {
+      db.prepare(statement.sql).run(...statement.params)
+    }
+  }
+  const nodeText = (db: SqliteDatabase, id: string) =>
+    db.prepare("SELECT text, updated_at FROM nodes WHERE id = ?1").all(id)[0]
+  const at = (row: NodeRow, updated_at: number, text: string): NodeRow => ({
+    ...row,
+    updated_at,
+    text,
+  })
+
+  it("an updated_at tie goes to the later push, in either arrival order", () => {
+    const first = openDb()
+    push(first, { nodes: [at(node, 100, "from-a")], links: [] })
+    push(first, { nodes: [at(node, 100, "from-b")], links: [] })
+    expect(nodeText(first, node.id)).toEqual({ text: "from-b", updated_at: 100 })
+
+    const reversed = openDb()
+    push(reversed, { nodes: [at(node, 100, "from-b")], links: [] })
+    push(reversed, { nodes: [at(node, 100, "from-a")], links: [] })
+    expect(nodeText(reversed, node.id)).toEqual({ text: "from-a", updated_at: 100 })
+  })
+
+  it("a stale push is rejected per row, not per batch", () => {
+    const db = openDb()
+    // Device A's state: one row newer than B's push, one older.
+    push(db, {
+      nodes: [at(node, 300, "newer"), { ...node, id: "blk_bbbbbbbbbb", updated_at: 100 }],
+      links: [{ ...link, updated_at: 300, sort_key: "a5" }],
+    })
+    // Device B pushes one batch, all rows stamped 200: only the rows that are
+    // actually newer than the replica's land.
+    push(db, {
+      nodes: [
+        at(node, 200, "stale — must lose"),
+        { ...node, id: "blk_bbbbbbbbbb", text: "fresh — must win", updated_at: 200 },
+      ],
+      links: [{ ...link, updated_at: 200, sort_key: "a0" }],
+    })
+
+    expect(nodeText(db, node.id)).toEqual({ text: "newer", updated_at: 300 })
+    expect(nodeText(db, "blk_bbbbbbbbbb")).toEqual({ text: "fresh — must win", updated_at: 200 })
+    expect(db.prepare("SELECT sort_key, updated_at FROM link").all()).toEqual([
+      { sort_key: "a5", updated_at: 300 },
+    ])
+  })
+
+  it("replaying the same push is idempotent (rows and deletes)", () => {
+    const db = openDb()
+    const payload = {
+      nodes: [at(node, 100, "hello")],
+      links: [link],
+      deleteNodes: ["blk_gone000000"],
+      cursor: "c1",
+    }
+    push(db, payload)
+    push(db, payload)
+    expect(db.prepare("SELECT COUNT(*) AS n FROM nodes").all()).toEqual([{ n: 1 }])
+    expect(db.prepare("SELECT COUNT(*) AS n FROM link").all()).toEqual([{ n: 1 }])
+    expect(nodeText(db, node.id)).toEqual({ text: "hello", updated_at: 100 })
+  })
+
+  it("a node delete removes the node's link rows in the same plan", () => {
+    const db = openDb()
+    push(db, { nodes: [{ ...node, id: "note-a", type: "page" }, node], links: [link] })
+    push(db, { nodes: [], links: [], deleteNodes: [node.id] })
+    expect(db.prepare("SELECT COUNT(*) AS n FROM nodes").all()).toEqual([{ n: 1 }])
+    expect(db.prepare("SELECT COUNT(*) AS n FROM link").all()).toEqual([{ n: 0 }])
+  })
+})
+
 describe("parseSinceCursor", () => {
   it("accepts a ms-timestamp cursor string", () => {
     expect(parseSinceCursor("1756400000000")).toBe(1756400000000)

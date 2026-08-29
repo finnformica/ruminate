@@ -487,7 +487,14 @@ function emitWrite(writer: GraphWriter): { statements: SqlStatement[]; diff: Gra
  */
 function planNoteWrite(writer: GraphWriter, noteId: NoteId, content: string) {
   const { mem, now } = writer
-  const { nodes, childrenOf } = docToGraphParts(noteId, content, now)
+  // Every OTHER page's id is reserved: a block row claiming one (a stray
+  // `id::` line from an external edit) must be re-minted, never allowed to
+  // clobber that page's node row. Ingest also guards `noteId` itself.
+  const reserved = new Set<string>()
+  for (const node of mem.nodes.values()) {
+    if (node.type === PAGE_TYPE && node.id !== noteId) reserved.add(node.id)
+  }
+  const { nodes, childrenOf } = docToGraphParts(noteId, content, now, reserved)
 
   // Cycle guard (belt-and-braces — reachable only through cross-note id
   // collisions): drop any desired edge that would close a loop, preferring
