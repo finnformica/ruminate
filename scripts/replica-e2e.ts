@@ -28,7 +28,8 @@ import type { Env } from "../worker/types"
 const realFetch = globalThis.fetch
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (String(input) === "https://api.github.com/user") {
-    return new Response("{}", { status: 200 })
+    // The owner identity, matching wrangler.jsonc's ALLOWED_GITHUB_ID.
+    return new Response(JSON.stringify({ id: 42536816 }), { status: 200 })
   }
   return realFetch(input, init)
 }) as typeof fetch

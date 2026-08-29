@@ -49,6 +49,7 @@ const MAX_BODY_BYTES = 16 * 1024 * 1024
  */
 export async function requireSession(
   request: Request,
+  allowedGithubId: string | undefined,
   fetchImpl: typeof fetch = fetch,
 ): Promise<Response | null> {
   if (!readRefreshCookie(request)) return jsonResponse({ error: "unauthenticated" }, 401)
@@ -59,16 +60,25 @@ export async function requireSession(
   const response = await fetchImpl("https://api.github.com/user", {
     headers: { Authorization: `Bearer ${match[1]}`, "User-Agent": "ruminate" },
   })
-  // Drain the body so the connection can be reused; the content is irrelevant.
-  await response.body?.cancel()
-  if (!response.ok) return jsonResponse({ error: "invalid_token" }, 401)
+  if (!response.ok) {
+    await response.body?.cancel()
+    return jsonResponse({ error: "invalid_token" }, 401)
+  }
+
+  // The token must belong to THE owner, not merely any valid GitHub account —
+  // the replica holds the owner's notes. Fail closed when unconfigured.
+  if (!allowedGithubId) return jsonResponse({ error: "owner_not_configured" }, 403)
+  const user = (await response.json().catch(() => null)) as { id?: number } | null
+  if (!user || String(user.id) !== allowedGithubId) {
+    return jsonResponse({ error: "forbidden" }, 403)
+  }
 
   return null
 }
 
 /** Route /api/replica/* requests. Every route is session-guarded. */
 export async function replica(request: Request, env: Env): Promise<Response> {
-  const unauthorized = await requireSession(request)
+  const unauthorized = await requireSession(request, env.ALLOWED_GITHUB_ID)
   if (unauthorized) return unauthorized
 
   const { pathname } = new URL(request.url)

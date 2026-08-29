@@ -279,13 +279,15 @@ describe("requireSession", () => {
   const request = (headers: Record<string, string>) =>
     new Request("https://example.com/api/replica/status", { headers })
 
+  const OWNER = "42536816"
+
   it("rejects a request without the session cookie", async () => {
-    const response = await requireSession(request({ Authorization: "Bearer tok" }))
+    const response = await requireSession(request({ Authorization: "Bearer tok" }), OWNER)
     expect(response?.status).toBe(401)
   })
 
   it("rejects a request without a bearer token", async () => {
-    const response = await requireSession(request({ Cookie: "gh_refresh=abc" }))
+    const response = await requireSession(request({ Cookie: "gh_refresh=abc" }), OWNER)
     expect(response?.status).toBe(401)
   })
 
@@ -293,15 +295,41 @@ describe("requireSession", () => {
     const fetchImpl = vi.fn(async () => new Response("{}", { status: 401 }))
     const response = await requireSession(
       request({ Cookie: "gh_refresh=abc", Authorization: "Bearer bad" }),
+      OWNER,
       fetchImpl as unknown as typeof fetch,
     )
     expect(response?.status).toBe(401)
   })
 
-  it("passes a request with a session cookie and a GitHub-validated token", async () => {
-    const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 }))
+  it("rejects a VALID GitHub token belonging to someone else (403)", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ id: 999 }), { status: 200 }))
+    const response = await requireSession(
+      request({ Cookie: "gh_refresh=abc", Authorization: "Bearer other" }),
+      OWNER,
+      fetchImpl as unknown as typeof fetch,
+    )
+    expect(response?.status).toBe(403)
+  })
+
+  it("fails closed when no owner id is configured (403)", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify({ id: 42536816 }), { status: 200 }),
+    )
     const response = await requireSession(
       request({ Cookie: "gh_refresh=abc", Authorization: "Bearer good" }),
+      undefined,
+      fetchImpl as unknown as typeof fetch,
+    )
+    expect(response?.status).toBe(403)
+  })
+
+  it("passes the owner's session (cookie + owner-validated token)", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify({ id: 42536816 }), { status: 200 }),
+    )
+    const response = await requireSession(
+      request({ Cookie: "gh_refresh=abc", Authorization: "Bearer good" }),
+      OWNER,
       fetchImpl as unknown as typeof fetch,
     )
     expect(response).toBeNull()

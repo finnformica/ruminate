@@ -13,5 +13,7 @@ export interface Env {
   ASSETS: Fetcher
   DB: D1Database
   VITE_GITHUB_CLIENT_ID: string
+  /** GitHub numeric user id allowed to use the replica API (fail-closed). */
+  ALLOWED_GITHUB_ID: string
   GITHUB_CLIENT_SECRET: string
 }

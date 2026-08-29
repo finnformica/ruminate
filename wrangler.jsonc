@@ -40,5 +40,8 @@
   // and put both in .dev.vars (git-ignored) for local `wrangler dev`.
   "vars": {
     "VITE_GITHUB_CLIENT_ID": "Ov23lidqIncQ8ul67fUo",
+    // The only GitHub identity the replica API serves (the app is single-user;
+    // any other valid GitHub account gets 403).
+    "ALLOWED_GITHUB_ID": "42536816",
   },
 }
