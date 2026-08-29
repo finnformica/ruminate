@@ -27,6 +27,13 @@ export interface SqlNoteStore extends NoteStore {
   replaceAll(notes: Record<NoteId, string>, viewStates?: Record<NoteId, string[]>): Promise<void>
   /** Row counts, for the diagnostics panel. */
   counts(): Promise<{ notes: number; blocks: number; links: number }>
+  /** Every note's collapsed block ids in one read (notes without any omitted). */
+  getAllViewStates(): Promise<Record<NoteId, string[]>>
+  /** Read a `meta` key (e.g. the D1 pull cursor), or null when unset. */
+  getMeta(key: string): Promise<string | null>
+  /** Write a `meta` key. Kept in the same database as the rows it describes,
+   * so wiping the store can never leave a stale cursor behind. */
+  setMeta(key: string, value: string): Promise<void>
   close(): Promise<void>
 }
 
@@ -128,6 +135,32 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<SqlNoteStore>
         })
       }
       await driver.batch(statements)
+    },
+
+    getAllViewStates: async () => {
+      const rows = await driver.exec("SELECT note_id, collapsed FROM view_state")
+      const viewStates: Record<NoteId, string[]> = {}
+      for (const row of rows) {
+        const collapsed = parseCollapsed(String(row.collapsed))
+        if (collapsed.length > 0) viewStates[String(row.note_id)] = collapsed
+      }
+      return viewStates
+    },
+
+    getMeta: async (key) => {
+      const rows = await driver.exec("SELECT value FROM meta WHERE key = ?", [key])
+      return rows.length > 0 && rows[0].value != null ? String(rows[0].value) : null
+    },
+
+    setMeta: async (key, value) => {
+      await driver.batch([
+        {
+          sql:
+            "INSERT INTO meta (key, value) VALUES (?, ?) " +
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+          params: [key, value],
+        },
+      ])
     },
 
     counts: async () => {

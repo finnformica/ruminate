@@ -3,6 +3,7 @@ import { useAtomCallback } from "jotai/utils"
 import React from "react"
 import { globalStateMachineAtom, markdownFilesAtom } from "../global-state"
 import type { NoteId } from "../schema"
+import { databaseDeleteFile, databaseWriteFiles, isDatabaseModeActive } from "./database-mode"
 import { mirrorDeleteFile, mirrorFileWrites } from "./storage-mirror"
 
 /**
@@ -43,10 +44,16 @@ export function useWriteFiles() {
   const send = useSetAtom(globalStateMachineAtom)
   return React.useCallback(
     (files: Record<string, string | null>, commitMessage?: string) => {
+      // Database-authoritative mode: the write is a local SQL write plus a
+      // D1 replica push — no machine event, no git anywhere in the path.
+      if (isDatabaseModeActive()) {
+        databaseWriteFiles(files)
+        return
+      }
       send({ type: "WRITE_FILES", markdownFiles: files, commitMessage })
-      // Dual-write (experimental database store): git first — the machine event
-      // above is the canonical write — then mirror into the SQL store. A no-op
-      // unless the storage flag is on; never throws, never blocks the git path.
+      // Dual-write mirror hook (dormant git-classic trial machinery — see
+      // storage-mirror.ts): a no-op unless the mirror was started; never
+      // throws, never blocks the git path.
       mirrorFileWrites(files)
     },
     [send],
@@ -77,8 +84,12 @@ export function useDeleteNoteFile() {
   const send = useSetAtom(globalStateMachineAtom)
   return React.useCallback(
     (id: NoteId) => {
+      if (isDatabaseModeActive()) {
+        databaseDeleteFile(noteIdToPath(id))
+        return
+      }
       send({ type: "DELETE_FILE", filepath: noteIdToPath(id) })
-      // Dual-write (see `useWriteFiles`): mirror the delete into the SQL store.
+      // Dual-write mirror hook (dormant — see `useWriteFiles`).
       mirrorDeleteFile(noteIdToPath(id))
     },
     [send],

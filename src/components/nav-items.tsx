@@ -3,7 +3,13 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai"
 import { createContext, useContext } from "react"
 import { useNetworkState } from "react-use"
 import { useRegisterSW } from "virtual:pwa-register/react"
-import { globalStateMachineAtom, isHelpPanelOpenAtom, sortedNotesAtom } from "../global-state"
+import { requestDatabasePull } from "../data/database-mode"
+import {
+  globalStateMachineAtom,
+  isDatabaseModeAtom,
+  isHelpPanelOpenAtom,
+  sortedNotesAtom,
+} from "../global-state"
 import type { Note } from "../schema"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
@@ -38,6 +44,7 @@ export function NavItems({
   const notes = useAtomValue(sortedNotesAtom)
   const syncText = useSyncStatusText()
   const syncMeta = useSyncStatusMeta()
+  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const send = useSetAtom(globalStateMachineAtom)
   const { online } = useNetworkState()
   const { pathname } = useLocation()
@@ -171,7 +178,15 @@ export function NavItems({
               className="nav-item text-text-secondary"
               data-size={size}
               title={syncMeta.tooltip}
-              onClick={() => (syncMeta.needsReauth ? beginGitHubSignIn() : send({ type: "SYNC" }))}
+              onClick={() =>
+                syncMeta.needsReauth
+                  ? beginGitHubSignIn()
+                  : isDatabaseMode
+                    ? // Database mode syncs by pulling from D1 (pushes are
+                      // automatic, write-behind); SYNC is a git-machine event.
+                      requestDatabasePull()
+                    : send({ type: "SYNC" })
+              }
             >
               <SyncStatusIcon />
               {syncText}

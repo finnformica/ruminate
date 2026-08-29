@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from "vitest"
-import { parseReplicaPayload, planReplicaPut, type ReplicaPutPayload } from "./replica-payload"
-import { requireSession } from "./replica"
+import {
+  buildPullNotes,
+  parseReplicaPayload,
+  parseSinceCursor,
+  planReplicaPut,
+  type NoteRow,
+  type ReplicaPutPayload,
+  type ViewStateRow,
+} from "./replica-payload"
+import { replica, replicaPull, requireSession } from "./replica"
+import type { Env } from "../types"
 
 const entry = {
   note: { id: "note-a", content: "- Hi [[note-b]]\n  id:: blk_aaaaaaaaaa\n", updated_at: 123 },
@@ -111,6 +120,158 @@ describe("planReplicaPut", () => {
     expect(statements).toEqual([
       { sql: "UPDATE meta SET value = ?1 WHERE key = 'replica_cursor'", params: ["sha-1234"] },
     ])
+  })
+})
+
+describe("parseSinceCursor", () => {
+  it("accepts a ms-timestamp cursor string", () => {
+    expect(parseSinceCursor("1756400000000")).toBe(1756400000000)
+    expect(parseSinceCursor("0")).toBe(0)
+  })
+
+  it("rejects anything that is not a plain number string", () => {
+    expect(parseSinceCursor("")).toBeNull()
+    expect(parseSinceCursor("-5")).toBeNull()
+    expect(parseSinceCursor("12.5")).toBeNull()
+    expect(parseSinceCursor("abc")).toBeNull()
+    expect(parseSinceCursor("1".repeat(16))).toBeNull()
+  })
+})
+
+describe("buildPullNotes", () => {
+  const noteRows: NoteRow[] = [
+    { id: "note-a", content: "- Hi\n", updated_at: 123 },
+    { id: "note-b", content: "- Yo\n", updated_at: null },
+  ]
+
+  it("joins view state onto note rows, defaulting to empty", () => {
+    const viewRows: ViewStateRow[] = [{ note_id: "note-a", collapsed: '["blk_a","blk_b"]' }]
+    expect(buildPullNotes(noteRows, viewRows)).toEqual([
+      { note: noteRows[0], view_state: ["blk_a", "blk_b"] },
+      { note: noteRows[1], view_state: [] },
+    ])
+  })
+
+  it("degrades malformed collapsed JSON to an empty set", () => {
+    const viewRows: ViewStateRow[] = [
+      { note_id: "note-a", collapsed: "not json" },
+      { note_id: "note-b", collapsed: '{"nope":1}' },
+    ]
+    expect(buildPullNotes(noteRows, viewRows).map((entry) => entry.view_state)).toEqual([[], []])
+  })
+})
+
+/**
+ * Minimal fake D1 for `replicaPull`: dispatches on the handful of fixed SQL
+ * strings the handler issues. Anything unexpected throws, so a new query
+ * cannot silently return empty results in tests.
+ */
+function fakePullDb(data: {
+  notes: NoteRow[]
+  viewState?: ViewStateRow[]
+  cursor?: string | null
+}): D1Database {
+  const prepare = (sql: string) => {
+    let bound: unknown[] = []
+    const statement = {
+      bind: (...params: unknown[]) => {
+        bound = params
+        return statement
+      },
+      first: async () => {
+        if (sql.includes("FROM meta")) return { value: data.cursor ?? null }
+        throw new Error(`Unexpected first(): ${sql}`)
+      },
+      all: async () => {
+        if (sql.includes("FROM view_state")) return { results: data.viewState ?? [] }
+        if (sql.includes("updated_at > ?1")) {
+          const since = Number(bound[0])
+          return {
+            results: data.notes.filter(
+              (note) => note.updated_at !== null && note.updated_at > since,
+            ),
+          }
+        }
+        if (sql.startsWith("SELECT id, content, updated_at FROM notes")) {
+          return { results: data.notes }
+        }
+        if (sql === "SELECT id FROM notes") {
+          return { results: data.notes.map((note) => ({ id: note.id })) }
+        }
+        throw new Error(`Unexpected all(): ${sql}`)
+      },
+    }
+    return statement
+  }
+  return { prepare } as unknown as D1Database
+}
+
+describe("replicaPull", () => {
+  const notes: NoteRow[] = [
+    { id: "note-a", content: "- A\n", updated_at: 100 },
+    { id: "note-b", content: "- B\n", updated_at: 300 },
+    { id: "note-c", content: "- C\n", updated_at: null },
+  ]
+  const viewState: ViewStateRow[] = [{ note_id: "note-b", collapsed: '["blk_x"]' }]
+  const pull = (path: string, db: D1Database) =>
+    replicaPull(new Request(`https://example.com${path}`), db)
+
+  it("returns the full corpus (note rows + view state + cursor) without ?since", async () => {
+    const response = await pull(
+      "/api/replica/notes",
+      fakePullDb({ notes, viewState, cursor: "42" }),
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      notes: [
+        { note: notes[0], view_state: [] },
+        { note: notes[1], view_state: ["blk_x"] },
+        { note: notes[2], view_state: [] },
+      ],
+      cursor: "42",
+    })
+  })
+
+  it("returns only newer-than-since notes, plus ALL ids for deletion detection", async () => {
+    const response = await pull(
+      "/api/replica/notes?since=200",
+      fakePullDb({ notes, viewState, cursor: "301" }),
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      changed: [{ note: notes[1], view_state: ["blk_x"] }],
+      // note-a (older) and note-c (null updated_at) still appear here — a
+      // client deletes local notes absent from this list.
+      ids: ["note-a", "note-b", "note-c"],
+      cursor: "301",
+    })
+  })
+
+  it("since equal to the newest updated_at returns no changes (strict >)", async () => {
+    const response = await pull("/api/replica/notes?since=300", fakePullDb({ notes }))
+    const body = (await response.json()) as { changed: unknown[]; ids: string[] }
+    expect(body.changed).toEqual([])
+    expect(body.ids).toHaveLength(3)
+  })
+
+  it("rejects a malformed since cursor with 400", async () => {
+    const response = await pull("/api/replica/notes?since=abc", fakePullDb({ notes }))
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "invalid_since" })
+  })
+
+  it("null cursor (never pushed) comes back as null", async () => {
+    const response = await pull("/api/replica/notes", fakePullDb({ notes: [] }))
+    expect(await response.json()).toEqual({ notes: [], cursor: null })
+  })
+
+  it("is session-guarded through the router (401 before touching D1)", async () => {
+    const response = await replica(
+      new Request("https://example.com/api/replica/notes"),
+      // DB deliberately absent: the guard must reject before any D1 access.
+      { DB: undefined } as unknown as Env,
+    )
+    expect(response.status).toBe(401)
   })
 })
 

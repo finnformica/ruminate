@@ -100,6 +100,15 @@ export interface ReplicaSyncHandle {
   notifyNotesChanged(ids: NoteId[]): void
   /** Queue note deletions for replication. */
   notifyNotesDeleted(ids: NoteId[]): void
+  /**
+   * Note ids with local changes/deletes not yet confirmed pushed (queued or
+   * in flight). Database-authoritative mode consults this before applying a
+   * pull, so a remote pull can never clobber a local edit that is still on
+   * its way out (last-writer-wins is decided by push order, not pull timing).
+   * (Optional so pre-existing stub handles remain assignable; the real
+   * implementation always provides it.)
+   */
+  pendingNoteIds?(): Set<NoteId>
   /** Queue a full-corpus push (after ingest, or from the Settings action). */
   requestFullPush(): void
   /** Fetch `GET /api/replica/status` into the diagnostics (any tab). */
@@ -161,6 +170,8 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
 
   const dirtyNotes = new Set<NoteId>()
   const dirtyDeletes = new Set<NoteId>()
+  /** Ids snapshotted into a push that has not finished yet (see `pendingNoteIds`). */
+  let inFlight = new Set<NoteId>()
   let fullPushRequested = false
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -314,6 +325,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     }
     dirtyNotes.clear()
     dirtyDeletes.clear()
+    inFlight = new Set([...snapshotNotes, ...snapshotDeletes])
     reportPending()
 
     try {
@@ -336,6 +348,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
         await putPayload(payload)
       }
 
+      inFlight = new Set()
       lastSentCursor = cursor
       backoffMs = null
       patchDiagnostics({
@@ -349,6 +362,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       await fetchRemoteStatus().catch(recordError)
     } catch (error) {
       // Put the snapshot back and retry with backoff. Never touches git.
+      inFlight = new Set()
       if (wasFullPush) fullPushRequested = true
       else for (const id of snapshotNotes) dirtyNotes.add(id)
       for (const id of snapshotDeletes) dirtyDeletes.add(id)
@@ -401,6 +415,9 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       fullPushRequested = true
       reportPending()
       schedule(debounceMs)
+    },
+    pendingNoteIds() {
+      return new Set([...dirtyNotes, ...dirtyDeletes, ...inFlight])
     },
     refreshRemoteStatus() {
       if (stopped) return

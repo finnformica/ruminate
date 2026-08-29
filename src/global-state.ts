@@ -1,6 +1,6 @@
 import { Searcher } from "fast-fuzzy"
 import git, { WORKDIR } from "isomorphic-git"
-import { atom } from "jotai"
+import { atom, getDefaultStore } from "jotai"
 import { atomWithMachine } from "jotai-xstate"
 import { atomWithStorage, selectAtom } from "jotai/utils"
 import { assign, createMachine, raise } from "xstate"
@@ -43,7 +43,9 @@ import { parseNote } from "./utils/parse-note"
 import { removeTemplateFrontmatter } from "./utils/remove-template-frontmatter"
 import { getSampleMarkdownFiles } from "./utils/sample-markdown-files"
 import { startTimer } from "./utils/timer"
+import { databaseFilesAtom } from "./data/database-mode"
 import { LEGACY_VIEW_STATE_PATH, VIEW_STATE_DIR } from "./data/paths"
+import { storageEngineAtom } from "./data/storage-mirror"
 
 // -----------------------------------------------------------------------------
 // State machine
@@ -443,6 +445,17 @@ function createGlobalStateMachine() {
           return { githubUser: githubUserSchema.parse(githubUser) }
         },
         resolveRepo: async () => {
+          // Database-authoritative mode (docs/graph-storage.md): notes come
+          // from the local SQL store + D1, never from a git clone. Refusing
+          // here parks the machine in `signedIn.notCloned` — a state with no
+          // service invocations — so no git pulling (or repo screen; the UI
+          // is gated on `isDatabaseModeAtom`) can ever happen. The machine
+          // keeps doing what database mode still needs: auth resolution,
+          // sign-in/sign-out, and the signed-out sample notes.
+          if (getDefaultStore().get(storageEngineAtom) === "database") {
+            throw new Error("Repo resolution skipped (database storage mode)")
+          }
+
           const stopTimer = startTimer("resolveRepo()")
 
           const remoteOriginUrl = await getRemoteOriginUrl()
@@ -789,9 +802,35 @@ async function getMarkdownFilesFromFs(dir: string) {
 
 export const globalStateMachineAtom = atomWithMachine(createGlobalStateMachine)
 
-export const markdownFilesAtom = selectAtom(
+const machineMarkdownFilesAtom = selectAtom(
   globalStateMachineAtom,
   (state) => state.context.markdownFiles,
+)
+
+/**
+ * Database-authoritative mode is on: the storage flag says "database" (the
+ * default on this branch) and the user is signed in. Signed out, the machine's
+ * sample notes render regardless of the flag; with the flag on "git" the
+ * classic repo-screen + git-sync experience runs unchanged.
+ */
+const machineGithubUserAtom = selectAtom(
+  globalStateMachineAtom,
+  (state) => state.context.githubUser,
+)
+
+export const isDatabaseModeAtom = atom(
+  (get) => get(storageEngineAtom) === "database" && get(machineGithubUserAtom) !== null,
+)
+
+/**
+ * The note corpus, in repo-file shape (path → content, notes plus view-state
+ * sidecars). In database mode it is synthesized from the local SQL store by
+ * `src/data/database-mode.ts`; in git mode it is the machine's worktree walk.
+ * Every consumer above `src/data` reads this atom, which is exactly why the
+ * cutover swaps it here and nowhere else.
+ */
+export const markdownFilesAtom = atom((get) =>
+  get(isDatabaseModeAtom) ? get(databaseFilesAtom) : get(machineMarkdownFilesAtom),
 )
 
 export const isRepoNotClonedAtom = selectAtom(globalStateMachineAtom, (state) =>
@@ -805,6 +844,14 @@ export const isCloningRepoAtom = selectAtom(globalStateMachineAtom, (state) =>
 export const isRepoClonedAtom = selectAtom(globalStateMachineAtom, (state) =>
   state.matches("signedIn.cloned"),
 )
+
+/**
+ * "The signed-in note corpus is being served" — the gate the page shell and
+ * note routes render behind. In git mode that means the repo is cloned; in
+ * database mode it is immediately true (the store serves local contents while
+ * the D1 pull runs — there is no repo screen to wait behind).
+ */
+export const notesReadyAtom = atom((get) => get(isDatabaseModeAtom) || get(isRepoClonedAtom))
 
 export const isSignedOutAtom = selectAtom(globalStateMachineAtom, (state) =>
   state.matches("signedOut"),
@@ -832,10 +879,7 @@ export const dismissedMergeNoticeIdsAtom = atom<string[]>([])
 // GitHub
 // -----------------------------------------------------------------------------
 
-export const githubUserAtom = selectAtom(
-  globalStateMachineAtom,
-  (state) => state.context.githubUser,
-)
+export const githubUserAtom = machineGithubUserAtom
 
 export const githubRepoAtom = selectAtom(
   globalStateMachineAtom,

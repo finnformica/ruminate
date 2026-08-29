@@ -8,6 +8,7 @@
 //
 // Routes (wired in worker/index.ts under /api/replica/*):
 //   PUT /api/replica/notes  — batch upsert, one atomic D1 batch
+//   GET /api/replica/notes  — corpus pull (full, or ?since=<cursor> incremental)
 //   GET /api/replica/status — row counts + schema_version + replica_cursor
 //
 // The wire format, validation, and SQL planning live in `replica-payload.ts`,
@@ -26,7 +27,17 @@
 
 import { readRefreshCookie } from "../github-cookie"
 import type { Env } from "../types"
-import { parseReplicaPayload, planReplicaPut, type ReplicaStatusBody } from "./replica-payload"
+import {
+  buildPullNotes,
+  parseReplicaPayload,
+  parseSinceCursor,
+  planReplicaPut,
+  type NoteRow,
+  type ReplicaChangesBody,
+  type ReplicaCorpusBody,
+  type ReplicaStatusBody,
+  type ViewStateRow,
+} from "./replica-payload"
 
 /** Reject bodies larger than this (the whole note corpus is ~4 MB today). */
 const MAX_BODY_BYTES = 16 * 1024 * 1024
@@ -64,10 +75,66 @@ export async function replica(request: Request, env: Env): Promise<Response> {
   if (pathname === "/api/replica/notes" && request.method === "PUT") {
     return replicaPut(request, env.DB)
   }
+  if (pathname === "/api/replica/notes" && request.method === "GET") {
+    return replicaPull(request, env.DB)
+  }
   if (pathname === "/api/replica/status" && request.method === "GET") {
     return replicaStatus(env.DB)
   }
   return jsonResponse({ error: "not_found" }, 404)
+}
+
+/**
+ * Corpus pull — the read half of the replica API (database-authoritative
+ * mode's boot + sync source).
+ *
+ * - `GET /api/replica/notes` → `{ notes: [{note, view_state}], cursor }`,
+ *   the full corpus. Note rows + view state only: blocks/links are derivable
+ *   client-side from `notes.content` (see `ReplicaPullNote`).
+ * - `GET /api/replica/notes?since=<cursor>` → `{ changed, ids, cursor }`.
+ *   The replica tracks no per-note change time beyond `notes.updated_at`
+ *   (the frontmatter save timestamp), so "changed" is
+ *   `updated_at > since-timestamp`. Because that comparison can miss edits
+ *   (null `updated_at`, clock skew) the client pulls with an overlap window,
+ *   and because there are no tombstones the response ALWAYS carries `ids` —
+ *   every note id in the replica — so the client can delete local notes
+ *   absent from it.
+ */
+export async function replicaPull(request: Request, db: D1Database): Promise<Response> {
+  const sinceRaw = new URL(request.url).searchParams.get("since")
+  const since = sinceRaw === null ? null : parseSinceCursor(sinceRaw)
+  if (sinceRaw !== null && since === null) return jsonResponse({ error: "invalid_since" }, 400)
+
+  const cursorRow = await db
+    .prepare("SELECT value FROM meta WHERE key = 'replica_cursor'")
+    .first<{ value: string | null }>()
+  const cursor = cursorRow?.value ?? null
+  const viewRows = (
+    await db.prepare("SELECT note_id, collapsed FROM view_state").all<ViewStateRow>()
+  ).results
+
+  if (since === null) {
+    const noteRows = (await db.prepare("SELECT id, content, updated_at FROM notes").all<NoteRow>())
+      .results
+    const body: ReplicaCorpusBody = { notes: buildPullNotes(noteRows, viewRows), cursor }
+    return jsonResponse(body)
+  }
+
+  const changedRows = (
+    await db
+      .prepare(
+        "SELECT id, content, updated_at FROM notes WHERE updated_at IS NOT NULL AND updated_at > ?1",
+      )
+      .bind(since)
+      .all<NoteRow>()
+  ).results
+  const idRows = (await db.prepare("SELECT id FROM notes").all<{ id: string }>()).results
+  const body: ReplicaChangesBody = {
+    changed: buildPullNotes(changedRows, viewRows),
+    ids: idRows.map((row) => row.id),
+    cursor,
+  }
+  return jsonResponse(body)
 }
 
 async function replicaPut(request: Request, db: D1Database): Promise<Response> {

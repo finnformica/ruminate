@@ -22,6 +22,8 @@ vi.mock("../global-state", async () => {
   return {
     mergeNoticesAtom: atom<MergeNotice[]>([]),
     dismissedMergeNoticeIdsAtom: atom<string[]>([]),
+    // Merge notices are a git-mode surface; these tests exercise it there.
+    isDatabaseModeAtom: atom(false),
   }
 })
 

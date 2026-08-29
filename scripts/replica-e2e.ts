@@ -16,7 +16,11 @@ import { strict as assert } from "node:assert"
 import { getPlatformProxy } from "wrangler"
 import { buildReplicaNoteEntry } from "../src/data/replica-sync"
 import { replica } from "../worker/handlers/replica"
-import type { ReplicaStatusBody } from "../worker/handlers/replica-payload"
+import type {
+  ReplicaChangesBody,
+  ReplicaCorpusBody,
+  ReplicaStatusBody,
+} from "../worker/handlers/replica-payload"
 import type { Env } from "../worker/types"
 
 // requireSession verifies the bearer token against api.github.com; stub that
@@ -147,6 +151,56 @@ async function main() {
   assert.equal(after.schema_version, "1")
   console.log("status after:", JSON.stringify(after))
   console.log("status counts + cursor confirmed ✓")
+
+  // --- GET pull (database-authoritative boot + sync source)
+  const noAuthPull = await replica(request("/api/replica/notes"), env)
+  assert.equal(noAuthPull.status, 401)
+
+  const fullPull = await replica(request("/api/replica/notes", { headers: AUTH_HEADERS }), env)
+  assert.equal(fullPull.status, 200)
+  const corpus = (await fullPull.json()) as ReplicaCorpusBody
+  const pulledA = corpus.notes.find((entry) => entry.note.id === "e2e-note-a")
+  const pulledB = corpus.notes.find((entry) => entry.note.id === "e2e-note-b")
+  assert.ok(pulledA && pulledB, "full pull returns both seeded notes")
+  assert.equal(pulledA.note.content, files["e2e-note-a.md"])
+  assert.equal(pulledA.note.updated_at, Date.parse("2026-08-29T12:00:00.000Z"))
+  assert.deepEqual(pulledA.view_state, ["blk_e2ea000001"])
+  assert.deepEqual(pulledB.view_state, [])
+  assert.equal(corpus.cursor, cursor)
+  // Payload economy: note rows + view_state only — no blocks/links shipped.
+  assert.ok(!("blocks" in pulledA) && !("links" in pulledA))
+  console.log(`GET full: ${corpus.notes.length} notes, cursor echoed ✓`)
+
+  const sinceBefore = Date.parse("2026-08-29T12:00:00.000Z") - 1000
+  const sincePull = await replica(
+    request(`/api/replica/notes?since=${sinceBefore}`, { headers: AUTH_HEADERS }),
+    env,
+  )
+  assert.equal(sincePull.status, 200)
+  const changes = (await sincePull.json()) as ReplicaChangesBody
+  // note-a (newer updated_at) is in `changed`; note-b (null updated_at) is not
+  // — but BOTH appear in `ids`, which is how deletions stay detectable.
+  assert.deepEqual(
+    changes.changed.filter((e) => e.note.id.startsWith("e2e-")).map((e) => e.note.id),
+    ["e2e-note-a"],
+  )
+  assert.ok(changes.ids.includes("e2e-note-a") && changes.ids.includes("e2e-note-b"))
+  assert.equal(changes.cursor, cursor)
+
+  const sinceAfter = await replica(
+    request(`/api/replica/notes?since=${Date.now() + 60_000}`, { headers: AUTH_HEADERS }),
+    env,
+  )
+  const noChanges = (await sinceAfter.json()) as ReplicaChangesBody
+  assert.equal(noChanges.changed.filter((e) => e.note.id.startsWith("e2e-")).length, 0)
+  assert.ok(noChanges.ids.includes("e2e-note-b"))
+
+  const badSince = await replica(
+    request("/api/replica/notes?since=nope", { headers: AUTH_HEADERS }),
+    env,
+  )
+  assert.equal(badSince.status, 400)
+  console.log("GET since: changed + full ids + cursor, 400 on malformed since ✓")
 
   // --- replays are idempotent (per-note replace, OR IGNORE links)
   const replay = await replica(

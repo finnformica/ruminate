@@ -1,6 +1,8 @@
+import { useAtomValue } from "jotai"
 import React from "react"
 import { useDayActivity } from "../data/history"
 import type { ChangedNote } from "../data/history-parse"
+import { isDatabaseModeAtom } from "../global-state"
 import { BlockNoteEditor } from "./block-editor/block-note-editor"
 import { LoadingIcon16 } from "./icons"
 import { NoteLink } from "./note-link"
@@ -15,7 +17,14 @@ const noop = () => {}
  * today.
  */
 export function DayActivity({ date }: { date: string }) {
+  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const state = useDayActivity(date)
+
+  // Past-day reconstruction works off git commit history, which database mode
+  // doesn't have (D1 stores current state only — see docs/graph-storage.md).
+  if (isDatabaseMode) {
+    return <Message>History for past days isn’t available in database mode.</Message>
+  }
 
   if (state.status === "loading") {
     return (

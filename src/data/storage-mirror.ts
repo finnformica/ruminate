@@ -40,11 +40,21 @@ import type { RekeyRecord, SqlNoteStore } from "./sql-note-store"
 
 export type StorageEngine = "git" | "database"
 
-/** The experimental storage flag (docs/graph-storage.md: `ruminate_storage`).
+/**
+ * The storage flag (docs/graph-storage.md: `ruminate_storage`).
+ *
+ * On this branch "database" is the default and means database-AUTHORITATIVE
+ * mode (src/data/database-mode.ts): the local SQL store is the runtime store,
+ * D1 is the cross-device copy, and git is not involved at all. "git" is the
+ * classic experience — repo screen, git sync — with this mirror OFF. The
+ * dual-write/shadow-read mirror below was the trial that validated the SQL
+ * store while git was still canonical; it is retained (with its tests) for
+ * the git-classic rollback path but is no longer mounted by the app.
+ *
  * (jotai 2.0.3's `atomWithStorage` seeds from localStorage synchronously on
- * mount, so a saved "database" value starts the mirror on the first commit of
- * the app root — no `getOnInit` needed or available at this version.) */
-export const storageEngineAtom = atomWithStorage<StorageEngine>("ruminate_storage", "git")
+ * mount — no `getOnInit` needed or available at this version.)
+ */
+export const storageEngineAtom = atomWithStorage<StorageEngine>("ruminate_storage", "database")
 
 export interface StorageDivergence {
   noteId: NoteId

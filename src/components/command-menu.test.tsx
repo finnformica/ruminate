@@ -40,6 +40,7 @@ vi.mock("../global-state", async () => {
     ),
     noteOutlineAtom: atom(null),
     blockRevealAtom: atom(null),
+    isDatabaseModeAtom: atom(false),
   }
 })
 

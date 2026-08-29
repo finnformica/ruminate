@@ -10,9 +10,8 @@ import { PageLayout } from "../components/page-layout"
 import { RepoForm } from "../components/repo-form"
 import { Signature } from "../components/signature"
 import { Switch } from "../components/switch"
+import { refreshDatabaseReplicaStatus, requestDatabaseFullPush } from "../data/database-mode"
 import {
-  refreshReplicaStatus,
-  requestReplicaFullPush,
   storageDiagnosticsAtom,
   storageEngineAtom,
   type ReplicaDiagnostics,
@@ -25,6 +24,7 @@ import {
   githubUserAtom,
   globalStateMachineAtom,
   isCloningRepoAtom,
+  isDatabaseModeAtom,
   isRepoClonedAtom,
   isRepoNotClonedAtom,
 } from "../global-state"
@@ -148,17 +148,27 @@ function StorageSection() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex w-0 grow flex-col gap-1">
           <label htmlFor="database-store-toggle" className="leading-4">
-            Experimental: database store
+            {enabled ? "Database (default)" : "Git classic"}
           </label>
           <span className="text-sm leading-5 text-text-secondary">
-            Runs a local database alongside git and reports any divergence — git remains the source
-            of truth.
+            {enabled
+              ? "Notes live in a local database and sync to the cloud automatically. " +
+                "Turn off to switch back to the classic git experience (GitHub repository, " +
+                "commits, note history)."
+              : "Notes are markdown files in a GitHub repository, synced with git. " +
+                "Turn on to switch to the database storage (the default)."}
           </span>
         </div>
         <Switch
           id="database-store-toggle"
           checked={enabled}
-          onCheckedChange={(checked) => setEngine(checked ? "database" : "git")}
+          onCheckedChange={(checked) => {
+            setEngine(checked ? "database" : "git")
+            // The storage engine decides how the whole app boots (which store
+            // feeds the atoms, whether the machine resolves a repo). A clean
+            // reload is the reliable way to switch worlds.
+            window.location.reload()
+          }}
         />
       </div>
       {enabled ? <StorageDiagnosticsPanel diagnostics={diagnostics} /> : null}
@@ -248,7 +258,7 @@ function StorageDiagnosticsPanel({ diagnostics }: { diagnostics: StorageDiagnost
 function ReplicaDiagnosticsPanel({ replica }: { replica: ReplicaDiagnostics }) {
   // Refresh the remote counts when the panel opens.
   useEffect(() => {
-    refreshReplicaStatus()
+    refreshDatabaseReplicaStatus()
   }, [])
 
   const pending =
@@ -297,7 +307,7 @@ function ReplicaDiagnosticsPanel({ replica }: { replica: ReplicaDiagnostics }) {
           {formatDiagnosticTime(replica.lastError.at)} · {replica.lastError.message}
         </span>
       ) : null}
-      <Button className="self-start" onClick={() => requestReplicaFullPush()}>
+      <Button className="self-start" onClick={() => requestDatabaseFullPush()}>
         Push full copy to D1 now
       </Button>
     </div>
@@ -324,6 +334,7 @@ function GitHubSection() {
   const send = useSetAtom(globalStateMachineAtom)
   const githubUser = useAtomValue(githubUserAtom)
   const githubRepo = useAtomValue(githubRepoAtom)
+  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const isRepoNotCloned = useAtomValue(isRepoNotClonedAtom)
   const isCloningRepo = useAtomValue(isCloningRepoAtom)
   const isRepoCloned = useAtomValue(isRepoClonedAtom)
@@ -335,6 +346,36 @@ function GitHubSection() {
     return (
       <SettingsSection title="GitHub">
         <div className="text-text-secondary">You're not signed in</div>
+      </SettingsSection>
+    )
+  }
+
+  // In database mode GitHub is identity only — no repository backs the notes,
+  // so the repo subsections below are git-mode-only. Account + sign out stay.
+  if (isDatabaseMode) {
+    return (
+      <SettingsSection title="GitHub">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex w-0 grow flex-col gap-1">
+            <span className="text-sm leading-4 text-text-secondary">Account</span>
+            <span className="flex items-center gap-2 leading-4">
+              {online ? <GitHubAvatar login={githubUser.login} size={16} /> : null}
+              <span className="truncate">{githubUser.login}</span>
+            </span>
+            <span className="text-sm leading-5 text-text-secondary">
+              Used to sign in — your notes are stored in the database, not a repository.
+            </span>
+          </div>
+          <Button
+            className="shrink-0"
+            onClick={() => {
+              signOut()
+              navigate({ to: "/", search: { query: undefined } })
+            }}
+          >
+            Sign out
+          </Button>
+        </div>
       </SettingsSection>
     )
   }

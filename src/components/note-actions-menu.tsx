@@ -1,7 +1,7 @@
 import { useLocation, useNavigate } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
 import { useAtomValue, useSetAtom } from "jotai"
-import { githubRepoAtom, isSignedOutAtom } from "../global-state"
+import { githubRepoAtom, isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { useDeleteNote, useRenameNote, useSaveNote } from "../hooks/note"
 import type { Width } from "../schema"
@@ -76,6 +76,7 @@ export function NoteActionsMenu({
   const navigate = useNavigate()
   const location = useLocation()
   const githubRepo = useAtomValue(githubRepoAtom)
+  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const isSignedOut = useAtomValue(isSignedOutAtom)
   const saveNote = useSaveNote()
   const renameNote = useRenameNote()
@@ -213,8 +214,9 @@ export function NoteActionsMenu({
           Rename file
         </DropdownMenu.Item>
         {/* The history dialog is mounted by the note page and works off the
-            open note, so the item only appears on the open note's menu. */}
-        {isViewing ? (
+            open note, so the item only appears on the open note's menu. It is
+            git history, so it is hidden entirely in database mode. */}
+        {isViewing && !isDatabaseMode ? (
           <DropdownMenu.Item
             icon={<HistoryIcon16 />}
             disabled={isSignedOut}
@@ -233,15 +235,18 @@ export function NoteActionsMenu({
             Share
           </DropdownMenu.Item>
         ) : null}
-        <DropdownMenu.Item
-          icon={<ExternalLinkIcon16 />}
-          href={`https://github.com/${githubRepo?.owner}/${githubRepo?.name}/blob/main/${noteId}.md`}
-          target="_blank"
-          rel="noopener noreferrer"
-          disabled={isSignedOut}
-        >
-          Open in GitHub
-        </DropdownMenu.Item>
+        {/* Only meaningful when a GitHub repo backs the notes (git mode). */}
+        {githubRepo ? (
+          <DropdownMenu.Item
+            icon={<ExternalLinkIcon16 />}
+            href={`https://github.com/${githubRepo.owner}/${githubRepo.name}/blob/main/${noteId}.md`}
+            target="_blank"
+            rel="noopener noreferrer"
+            disabled={isSignedOut}
+          >
+            Open in GitHub
+          </DropdownMenu.Item>
+        ) : null}
         <DropdownMenu.Item icon={<PrinterIcon16 />} onClick={() => window.print()}>
           Print
         </DropdownMenu.Item>

@@ -10,7 +10,7 @@
 
 const LINK_KINDS = ["wikilink", "transclusion", "tag"] as const
 
-interface NoteRow {
+export interface NoteRow {
   id: string
   content: string
   updated_at: number | null
@@ -46,6 +46,42 @@ export interface ReplicaPutPayload {
   deletes?: string[]
   /** Opaque client marker of the replicated repo state (monotonic per client). */
   cursor?: string
+}
+
+/**
+ * One note as served by `GET /api/replica/notes` (the pull direction).
+ *
+ * Deliberately the note row + view state only — no blocks or links. The client
+ * re-derives those from `note.content` with the same `docToRows` transform
+ * that produced them in the first place, so shipping them would multiply the
+ * payload for zero information. `view_state` is NOT derivable from content,
+ * so it rides along.
+ */
+export interface ReplicaPullNote {
+  note: NoteRow
+  /** Collapsed block ids (canonical view state); empty when none recorded. */
+  view_state: string[]
+}
+
+/** Body of a full pull: `GET /api/replica/notes`. */
+export interface ReplicaCorpusBody {
+  notes: ReplicaPullNote[]
+  /** The replica cursor at pull time (meta `replica_cursor`); the client
+   * stores it and sends it back as `?since=` on the next incremental pull. */
+  cursor: string | null
+}
+
+/** Body of an incremental pull: `GET /api/replica/notes?since=<cursor>`. */
+export interface ReplicaChangesBody {
+  /** Notes whose `updated_at` is newer than the `since` timestamp. */
+  changed: ReplicaPullNote[]
+  /**
+   * EVERY note id currently in the replica, changed or not. The replica keeps
+   * no tombstones, so deletions are detectable only by absence: the client
+   * removes local notes (that it is not about to push) missing from this list.
+   */
+  ids: string[]
+  cursor: string | null
 }
 
 /** The body of `GET /api/replica/status`. */
@@ -213,4 +249,52 @@ export function planReplicaPut(payload: ReplicaPutPayload): SqlStatement[] {
   }
 
   return statements
+}
+
+// -----------------------------------------------------------------------------
+// Pull (GET /api/replica/notes) — pure helpers
+// -----------------------------------------------------------------------------
+
+/**
+ * Parse the `since` query param: the cursor is a ms-timestamp string (minted
+ * by the client at push time, echoed back by pulls). Returns the numeric
+ * timestamp, or null when malformed — the caller answers 400.
+ */
+export function parseSinceCursor(raw: string): number | null {
+  return /^\d{1,15}$/.test(raw) ? Number(raw) : null
+}
+
+/** A raw `view_state` table row. */
+export interface ViewStateRow {
+  note_id: string
+  collapsed: string
+}
+
+/**
+ * Assemble pull entries from raw table rows — pure, shared by the full and
+ * since pulls. `collapsed` is the stored JSON array; anything malformed
+ * degrades to an empty set (same tolerance as the client's sidecar parsing).
+ */
+export function buildPullNotes(
+  noteRows: NoteRow[],
+  viewStateRows: ViewStateRow[],
+): ReplicaPullNote[] {
+  const collapsedByNote = new Map<string, string[]>()
+  for (const row of viewStateRows) {
+    collapsedByNote.set(row.note_id, parseCollapsedJson(row.collapsed))
+  }
+  return noteRows.map((note) => ({
+    note: { id: note.id, content: note.content, updated_at: note.updated_at },
+    view_state: collapsedByNote.get(note.id) ?? [],
+  }))
+}
+
+function parseCollapsedJson(raw: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((x): x is string => typeof x === "string")
+  } catch {
+    return []
+  }
 }

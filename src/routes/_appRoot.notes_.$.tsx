@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import ejs from "ejs"
 import { useAtomValue } from "jotai"
-import { selectAtom } from "jotai/utils"
 import React, { useEffect, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useNetworkState } from "react-use"
@@ -29,8 +28,9 @@ import { isSyncingAtom } from "../components/sync-status"
 import {
   dailyTemplateAtom,
   githubRepoAtom,
-  globalStateMachineAtom,
+  isDatabaseModeAtom,
   isSignedOutAtom,
+  notesReadyAtom,
   weeklyTemplateAtom,
 } from "../global-state"
 import { useEditorValue } from "../hooks/editor-value"
@@ -66,16 +66,13 @@ export const Route = createFileRoute("/_appRoot/notes_/$")({
   component: RouteComponent,
 })
 
-const isRepoClonedAtom = selectAtom(globalStateMachineAtom, (state) =>
-  state.matches("signedIn.cloned"),
-)
-
 function RouteComponent() {
   const { _splat: noteId } = Route.useParams()
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  const isRepoCloned = useAtomValue(isRepoClonedAtom)
+  // Git mode: the repo must be cloned. Database mode: immediately ready.
+  const notesReady = useAtomValue(notesReadyAtom)
 
-  if (isSignedOut || isRepoCloned) {
+  if (isSignedOut || notesReady) {
     return <NotePage key={noteId} />
   }
 
@@ -107,6 +104,7 @@ function NotePage() {
   // Global state
   const githubRepo = useAtomValue(githubRepoAtom)
   const isSignedOut = useAtomValue(isSignedOutAtom)
+  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const isSyncing = useAtomValue(isSyncingAtom)
   const dailyTemplate = useAtomValue(dailyTemplateAtom)
   const weeklyTemplate = useAtomValue(weeklyTemplateAtom)
@@ -414,14 +412,19 @@ function NotePage() {
               open={isShareDialogOpen}
               onOpenChange={setIsShareDialogOpen}
             />
-            <NoteHistoryDialog
-              noteId={noteId ?? ""}
-              currentContent={editorValue}
-              onRestore={(next) => {
-                setEditorValue(next)
-                handleSave(next)
-              }}
-            />
+            {/* Note history reconstructs versions from git commits, which
+                don't exist in database mode (see docs/graph-storage.md) —
+                the dialog and its entry points are hidden there. */}
+            {!isDatabaseMode ? (
+              <NoteHistoryDialog
+                noteId={noteId ?? ""}
+                currentContent={editorValue}
+                onRestore={(next) => {
+                  setEditorValue(next)
+                  handleSave(next)
+                }}
+              />
+            ) : null}
           </div>
         </div>
       }

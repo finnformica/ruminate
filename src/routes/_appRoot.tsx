@@ -9,7 +9,7 @@ import { DevBar } from "../components/dev-bar"
 import { ErrorIcon16 } from "../components/icons"
 import { MergeNoticeBanner } from "../components/merge-notice-banner"
 import { Notice } from "../components/notice"
-import { useStorageMirror } from "../data/use-storage-mirror"
+import { useDatabaseMode } from "../data/use-database-mode"
 import { globalStateMachineAtom } from "../global-state"
 import { GlobalShortcuts } from "../shortcuts/global-shortcuts"
 import { storageWarningAtom } from "../utils/markdown-cache"
@@ -36,11 +36,14 @@ function RouteComponent() {
   const { online } = useNetworkState()
   const rootRef = React.useRef<HTMLDivElement>(null)
 
-  // Experimental database store (Settings → Storage): dual-write + shadow-read
-  // mirror. Inert unless the storage flag is on.
-  useStorageMirror()
+  // Database-authoritative mode (the default; see src/data/database-mode.ts):
+  // opens the local SQL store, pulls from D1, and re-pulls on the same
+  // visibility/online triggers the git machine syncs on. Inert in git mode.
+  useDatabaseMode()
 
-  // Sync when the app becomes visible again
+  // Sync when the app becomes visible again. (In database mode the machine
+  // never reaches its cloned/sync states, so these SYNC events are ignored —
+  // the equivalent database pulls are wired inside useDatabaseMode.)
   useEvent("visibilitychange", () => {
     if (document.visibilityState === "visible" && online) {
       send("SYNC")

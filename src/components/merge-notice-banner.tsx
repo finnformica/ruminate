@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
-import { dismissedMergeNoticeIdsAtom, mergeNoticesAtom } from "../global-state"
+import { dismissedMergeNoticeIdsAtom, isDatabaseModeAtom, mergeNoticesAtom } from "../global-state"
 import { mergeNoticeKey } from "../utils/git"
 import { Notice } from "./notice"
 import { openNoteHistoryDialogAtom } from "./note-history-dialog-state"
@@ -17,10 +17,17 @@ import { openNoteHistoryDialogAtom } from "./note-history-dialog-state"
  * so a dismissed notice can never be re-raised.
  */
 export function MergeNoticeBanner() {
+  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const mergeNotices = useAtomValue(mergeNoticesAtom)
   const [dismissedIds, setDismissedIds] = useAtom(dismissedMergeNoticeIdsAtom)
   const openNoteHistoryDialog = useSetAtom(openNoteHistoryDialogAtom)
   const navigate = useNavigate()
+
+  // Merge notices come from git pulls, and their "view previous version"
+  // action opens git history — both git-mode concepts. Database mode is
+  // last-writer-wins and never raises them (the machine never pulls), so the
+  // banner is structurally git-mode-only; this guard makes that explicit.
+  if (isDatabaseMode) return null
 
   const visibleNotices = mergeNotices.filter(
     (notice) => !dismissedIds.includes(mergeNoticeKey(notice)),
