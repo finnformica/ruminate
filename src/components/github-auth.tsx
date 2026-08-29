@@ -13,6 +13,10 @@ export function beginGitHubSignIn() {
   const authUrl = urlcat("https://github.com/login/oauth/authorize", {
     client_id: import.meta.env.VITE_GITHUB_CLIENT_ID,
     state: window.location.href,
+    // The OAuth app registers multiple callback URLs (production + preview
+    // hosts); without an explicit redirect_uri GitHub falls back to the FIRST
+    // registered one, which would bounce preview sign-ins to production.
+    redirect_uri: `${window.location.origin}/github-auth`,
     // Identity + gist publishing only — notes live in the database, not a
     // repository, so no repo scope is requested.
     scope: "gist,user:email",

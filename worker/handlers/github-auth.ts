@@ -22,6 +22,9 @@ export async function githubAuth(request: Request, env: Env): Promise<Response> 
         client_id: env.VITE_GITHUB_CLIENT_ID,
         client_secret: env.GITHUB_CLIENT_SECRET,
         code,
+        // Must match the redirect_uri sent in the authorize request, which the
+        // sign-in button derives the same way from its own origin.
+        redirect_uri: `${url.origin}/github-auth`,
       }),
     })
 
