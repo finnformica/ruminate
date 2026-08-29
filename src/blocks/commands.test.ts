@@ -288,8 +288,9 @@ describe("wasd depth navigation (selectParent / selectFirstChild)", () => {
     // The title itself → zoom out one level ("a always goes up the tree").
     // b is root-level, so one level out is a full exit — same as zoomOut.
     expect(runCommand("selectParent", zoomed("b")).zoom).toEqual({ id: null })
-    // A nested zoom root steps out to its parent instead of exiting fully.
-    const nested = input(doc, "b1", { visibleOrder: ["b1"], zoomRootId: "b1" })
+    // With a navigation stack below, the title pops back along the path taken
+    // (zoomBackId) instead of exiting fully.
+    const nested = input(doc, "b1", { visibleOrder: ["b1"], zoomRootId: "b1", zoomBackId: "b" })
     expect(runCommand("selectParent", nested).zoom).toEqual({ id: "b" })
   })
 
@@ -736,13 +737,17 @@ describe("zoom", () => {
     expect(result.zoom).toBeUndefined()
   })
 
-  it("zoomOut steps to the parent, and to null from a root-level zoom", () => {
+  it("zoomOut pops the navigation stack, and exits when nothing is below", () => {
     const doc = fixture()
-    // Zoomed into b1 (a nested block): out lands on its parent b.
+    // The stack (zoomBackId) says where "one level out" goes — the path the
+    // user took, not the tree ancestry.
     expect(
-      runCommand("zoomOut", input(doc, "b1", { visibleOrder: ["b1"], zoomRootId: "b1" })).zoom,
+      runCommand(
+        "zoomOut",
+        input(doc, "b1", { visibleOrder: ["b1"], zoomRootId: "b1", zoomBackId: "b" }),
+      ).zoom,
     ).toEqual({ id: "b" })
-    // Zoomed into b (a root block): out exits fully.
+    // No stack below (deep link): out exits fully.
     expect(runCommand("zoomOut", zoomed(doc, "b1")).zoom).toEqual({ id: null })
   })
 

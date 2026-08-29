@@ -615,18 +615,40 @@ describe("zoom (focus mode)", () => {
   const crumb = (container: HTMLElement) =>
     container.querySelector('[data-testid="zoom-breadcrumb"]')
 
-  it("renders only the zoomed subtree, with the block promoted to a title", () => {
+  it("renders only the zoomed subtree, with the block styled as itself", () => {
     const { container } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
     const bodies = Array.from(container.querySelectorAll('[data-testid="block-body"]'))
     expect(bodies.map((el) => el.textContent)).toEqual(["B", "C", "D", "E"])
-    // The title is visually promoted to the note-title scale (the zoomed
-    // block is the page), a full step above its depth-0 child headings.
-    expect(bodies[0].closest(".text-3xl")).not.toBeNull()
-    // The breadcrumb shows the full path, never dropping levels.
+    // Focus mode changes what is visible, never what a block looks like: no
+    // note-title promotion — the zoomed bullet keeps its normal typography.
+    expect(bodies[0].closest(".text-3xl")).toBeNull()
+    // The breadcrumb is the navigation stack: a direct (deep-link) zoom knows
+    // only the note and the block itself.
     expect(crumb(container)?.textContent).toContain("Note")
     expect(crumb(container)?.textContent).toContain("B")
     // Zoom-in lands on the first child, not the title.
     expect(highlightedText(container)).toBe("C")
+  })
+
+  it("the breadcrumb follows the path taken; Shift+F pops back along it", () => {
+    const { container, queryByText } = render(<Harness initial={ZOOMABLE} />)
+    const root = editorRoot(container)
+    selectNth(root, 1) // B
+    fireEvent.keyDown(root, { key: "f" }) // zoom B — selection lands on C
+    fireEvent.keyDown(root, { key: "f" }) // zoom C
+    expect(queryByText("E")).toBeNull()
+    // Crumbs are the hops taken: Note › B, with C current.
+    expect(crumb(container)?.textContent).toBe("Note›B›C")
+    // Pop follows the path back up: first to B…
+    fireEvent.keyDown(root, { key: "F", shiftKey: true })
+    expect(queryByText("E")).not.toBeNull()
+    expect(queryByText("A")).toBeNull()
+    expect(highlightedText(container)).toBe("C")
+    expect(crumb(container)?.textContent).toBe("Note›B")
+    // …then out entirely.
+    fireEvent.keyDown(root, { key: "F", shiftKey: true })
+    expect(queryByText("A")).not.toBeNull()
+    expect(crumb(container)).toBeNull()
   })
 
   it("F zooms into the selected block; Shift+F zooms back out to it", () => {
@@ -645,40 +667,38 @@ describe("zoom (focus mode)", () => {
     expect(highlightedText(container)).toBe("B")
   })
 
-  it("Shift+F from a nested zoom surfaces one level, selecting the old root", () => {
+  it("Shift+F from a deep-linked zoom exits fully (the path back is unknown)", () => {
     const { container, queryByText } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_c" />)
     const root = editorRoot(container)
     expect(queryByText("E")).toBeNull() // C's view: title C + child D
     fireEvent.keyDown(root, { key: "F", shiftKey: true })
-    // Now zoomed into B: E is visible again, and the selection is on C.
-    expect(queryByText("E")).not.toBeNull()
-    expect(queryByText("A")).toBeNull()
+    // No stack below the deep link — pop leaves zoom entirely.
+    expect(queryByText("A")).not.toBeNull()
+    expect(crumb(container)).toBeNull()
     expect(highlightedText(container)).toBe("C")
   })
 
-  it("a zoomed heading hangs a # like the note title; other types keep their style", () => {
+  it("a zoomed block keeps its own marker and style — heading hash, quote ink", () => {
     const heading = ["# Section", "  id:: blk_h", "  - child", "    id:: blk_hc"].join("\n")
     const zoomHeading = render(<Harness initial={heading} zoomRootId="blk_h" />)
-    const hash = zoomHeading.queryByTestId("zoom-title-hash")
-    expect(hash).not.toBeNull()
-    // The wrapper carries the title's typography; the glyph inherits it
-    // (no size of its own — same size as the title beside it).
-    expect(hash!.className).toContain("text-3xl")
-    const glyph = hash!.querySelector("span")!
-    expect(glyph.textContent).toBe("#")
-    expect(glyph.className).not.toMatch(/(^|\s)text-(xs|sm|base|lg|xl|2xl|3xl)(\s|$)/)
+    // The regular heading hash renders, exactly as un-zoomed — no promoted
+    // note-title variant exists any more.
+    expect(zoomHeading.queryByTestId("zoom-title-hash")).toBeNull()
+    expect(zoomHeading.queryAllByTestId("heading-hash").length).toBeGreaterThan(0)
+    const headingBody = zoomHeading
+      .getAllByTestId("block-body")
+      .find((el) => el.textContent === "Section")!
+    expect(headingBody.closest(".text-3xl")).toBeNull()
     zoomHeading.unmount()
 
-    // A zoomed quote keeps its secondary ink (and no hash) — promotion changes
-    // scale, not type.
+    // A zoomed quote keeps its secondary ink at its normal scale.
     const quote = ["> Wise words", "  id:: blk_q", "  - child", "    id:: blk_qc"].join("\n")
     const zoomQuote = render(<Harness initial={quote} zoomRootId="blk_q" />)
-    expect(zoomQuote.queryByTestId("zoom-title-hash")).toBeNull()
     const title = zoomQuote
       .getAllByTestId("block-body")
       .find((el) => el.textContent === "Wise words")!
     expect(title.className).toContain("text-text-secondary")
-    expect(title.className).toContain("text-3xl")
+    expect(title.className).not.toContain("text-3xl")
   })
 
   it("Mod+Enter on the zoomed title creates its FIRST child", () => {
@@ -753,18 +773,22 @@ describe("zoom (focus mode)", () => {
     expect(queryByText("B")).not.toBeNull()
   })
 
-  it("breadcrumb crumbs navigate: an ancestor crumb re-zooms, the note crumb exits", () => {
-    const { container, getByText, queryByText } = render(
-      <Harness initial={ZOOMABLE} zoomRootId="blk_d" />,
-    )
-    // Deep zoom: Note › B › C › D.
-    const nav = crumb(container)!
-    expect(nav.textContent!.replace(/\s+/g, "")).toContain("Note›B›C›D")
+  it("breadcrumb crumbs navigate: an earlier hop re-zooms there, the note crumb exits", () => {
+    const { container, getByText, queryByText } = render(<Harness initial={ZOOMABLE} />)
+    const root = editorRoot(container)
+    // Walk the path by keyboard: B → C → D, so the stack is Note › B › C › D.
+    selectNth(root, 1) // B
+    fireEvent.keyDown(root, { key: "f" }) // zoom B, selection on C
+    fireEvent.keyDown(root, { key: "f" }) // zoom C, selection on D
+    fireEvent.keyDown(root, { key: "f" }) // zoom D
+    expect(crumb(container)!.textContent!.replace(/\s+/g, "")).toBe("Note›B›C›D")
     fireEvent.click(getByText("B", { selector: "nav button" }))
-    // Zoomed out to B: E visible, selection landed on the block we came from.
+    // Truncated back to the B hop: E visible, selection on the block we came
+    // from, and the later hops are gone from the trail.
     expect(queryByText("E")).not.toBeNull()
     expect(queryByText("A")).toBeNull()
     expect(highlightedText(container)).toBe("D")
+    expect(crumb(container)!.textContent!.replace(/\s+/g, "")).toBe("Note›B")
     fireEvent.click(getByText("Note", { selector: "nav button" }))
     expect(crumb(container)).toBeNull()
     expect(queryByText("A")).not.toBeNull()

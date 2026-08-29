@@ -175,6 +175,27 @@ export function BlockEditor({
   // transient local state so the editor works standalone.
   const [zoomInternal, setZoomInternal] = useState<string | null>(zoomRootIdProp)
   const zoomRootId = onZoomNavigate ? zoomRootIdProp : zoomInternal
+
+  // The zoom NAVIGATION stack: the ids zoomed into, in the order the user took
+  // — the breadcrumb and Shift+F follow this path, not the tree ancestry
+  // (under the graph model a block can live in several places, so "the path
+  // you took" is the only honest trail). Reconciled from zoomRootId so every
+  // way of changing zoom (keyboard, bullet click, crumb click, browser back,
+  // deep link) keeps it consistent: navigating to an id already on the stack
+  // truncates back to it; anything else is a new hop and pushes.
+  const [zoomStack, setZoomStack] = useState<string[]>(() => (zoomRootId ? [zoomRootId] : []))
+  useEffect(() => {
+    setZoomStack((stack) => {
+      if (!zoomRootId) return stack.length === 0 ? stack : []
+      const at = stack.indexOf(zoomRootId)
+      if (at === stack.length - 1 && at !== -1) return stack
+      if (at !== -1) return stack.slice(0, at + 1)
+      return [...stack, zoomRootId]
+    })
+  }, [zoomRootId])
+  // Where Shift+F returns to: one step back along the path (null exits zoom).
+  const zoomBackId = zoomStack.length > 1 ? zoomStack[zoomStack.length - 2] : null
+
   const navigateZoom = (id: string | null) => {
     if (onZoomNavigate) onZoomNavigate(id)
     else setZoomInternal(id)
@@ -807,7 +828,7 @@ export function BlockEditor({
   // dispatch the same commands. Returns whether the gesture was consumed.
   const dispatchKey = (mode: Mode, id: string, event: KeyLike, caret?: CaretInput): boolean => {
     if (readOnly) return false
-    const input: CommandInput = { doc, id, mode, visibleOrder, caret, zoomRootId }
+    const input: CommandInput = { doc, id, mode, visibleOrder, caret, zoomRootId, zoomBackId }
     const name = resolveKey(mode, event, input)
     if (!name) return false
     const result = runCommand(name, input)
@@ -1241,11 +1262,13 @@ export function BlockEditor({
     event.preventDefault()
   }
 
-  // Breadcrumb path while zoomed: every ancestor of the zoom root, outermost
-  // first (levels are never dropped — long labels truncate with CSS instead).
+  // Breadcrumb while zoomed: the navigation stack minus the current root —
+  // the hops the user actually took, in order (levels are never dropped —
+  // long labels truncate with CSS instead). Clicking a crumb truncates the
+  // stack back to it via the reconciliation effect.
   const crumbIds = useMemo(
-    () => (zoomRootId && doc.blocks[zoomRootId] ? ancestorsOf(doc, zoomRootId).reverse() : []),
-    [doc, zoomRootId],
+    () => (zoomRootId ? zoomStack.slice(0, -1).filter((id) => doc.blocks[id]) : []),
+    [doc, zoomRootId, zoomStack],
   )
   const crumbLabel = (id: string): string => {
     const text = stripMarker(doc.blocks[id]?.content ?? "").trim()
