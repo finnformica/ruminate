@@ -7,7 +7,6 @@ import { useDeleteNote, useRenameNote, useSaveNote } from "../hooks/note"
 import type { Width } from "../schema"
 import { cx } from "../utils/cx"
 import { updateFrontmatterValue } from "../utils/frontmatter"
-import { clearNoteDraft } from "../utils/note-draft"
 import { getInvalidNoteIdCharacters } from "../utils/note-id"
 import { pluralize } from "../utils/pluralize"
 import { DropdownMenu } from "./dropdown-menu"
@@ -21,15 +20,12 @@ import {
   PrinterIcon16,
   ShareIcon16,
   TrashIcon16,
-  UndoIcon16,
   WidthFixedIcon16,
   WidthFullIcon16,
 } from "./icons"
 
 /** Editor-context actions, shown only when the note is open in the editor. */
 interface EditorActions {
-  isDraft?: boolean
-  onDiscard?: () => void
   showWidth?: boolean
   width?: Width
   onWidth?: (width: Width) => void
@@ -115,8 +111,6 @@ export function NoteActionsMenu({
       return
     }
 
-    clearNoteDraft(noteId)
-    clearNoteDraft(newNoteId)
     if (isViewing) {
       navigate({
         to: "/notes/$",
@@ -136,7 +130,6 @@ export function NoteActionsMenu({
     ) {
       return
     }
-    clearNoteDraft(noteId)
     deleteNote(noteId)
     // The header menu passes onDeleted (it's always the open note); the sidebar
     // menu falls back to the path check so deleting the note you're viewing from
@@ -162,14 +155,6 @@ export function NoteActionsMenu({
         }
       />
       <DropdownMenu.Content align={align}>
-        {editor?.isDraft && editor.onDiscard ? (
-          <>
-            <DropdownMenu.Item icon={<UndoIcon16 />} onClick={editor.onDiscard}>
-              Discard changes
-            </DropdownMenu.Item>
-            <DropdownMenu.Separator />
-          </>
-        ) : null}
         {editor?.showWidth && editor.onWidth ? (
           <>
             <DropdownMenu.Group>

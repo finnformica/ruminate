@@ -54,7 +54,7 @@ function ensureZoomChild(doc: BlockDoc, zoomId: string): BlockDoc {
  * Adapts the block editor to the note page's string-based value model. The
  * note's markdown is parsed into blocks on mount; each edit serializes back to
  * markdown and calls `onChange`, so the surrounding page keeps its existing
- * save/draft logic. Remount (via a `key`) to load a different note.
+ * save logic. Remount (via a `key`) to load a different note.
  *
  * External `value` changes (a git pull updating the open note, a frontmatter
  * edit from the actions menu) re-parse into blocks in place — see the

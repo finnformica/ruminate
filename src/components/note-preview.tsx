@@ -10,8 +10,7 @@ import {
 } from "../utils/date"
 import { toDisplayMarkdown } from "../blocks/to-display-markdown"
 import { parseFrontmatter } from "../utils/frontmatter"
-import { getNoteDraft } from "../utils/note-draft"
-import { DotIcon8, GlobeIcon12, LinkIcon12, TagIcon12 } from "./icons"
+import { GlobeIcon12, LinkIcon12, TagIcon12 } from "./icons"
 import { Label } from "./label"
 import { useLinkHighlight } from "./link-highlight-provider"
 import { Markdown } from "./markdown"
@@ -28,16 +27,8 @@ type NotePreviewProps = {
 export function NotePreview({ note, className, hideProperties }: NotePreviewProps) {
   const highlightedHrefs = useLinkHighlight()
 
-  // Prefer a local draft if it exists (unsaved changes)
-  const { resolvedContent, isDraft } = useMemo(() => {
-    const draft = getNoteDraft(note.id)
-    if (draft !== null && draft !== note.content) {
-      return { resolvedContent: draft, isDraft: true }
-    }
-    return { resolvedContent: note.content, isDraft: false }
-  }, [note.id, note.content])
+  const resolvedContent = note.content
 
-  // Parse frontmatter from the resolved content so frontmatter-derived values reflect drafts
   const resolvedFrontmatter = useMemo(() => {
     return parseFrontmatter(resolvedContent).frontmatter
   }, [resolvedContent])
@@ -156,9 +147,6 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
       </div>
       {!hideProperties ? (
         <div className="flex flex-wrap gap-x-1.5 gap-y-2 pr-10 font-content empty:hidden coarse:pr-12">
-          {isDraft ? (
-            <Label icon={<DotIcon8 className="text-text-pending" />}>Unsaved</Label>
-          ) : null}
           {resolvedFrontmatter?.gist_id ? (
             <Label icon={<GlobeIcon12 className="text-border-focus" />}>Published</Label>
           ) : null}

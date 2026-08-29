@@ -3,247 +3,241 @@ import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Note } from "../schema"
 
-import { hashNoteContent } from "../utils/note-draft"
-import { useEditorValue } from "./editor-value"
+import { AUTOSAVE_DEBOUNCE_MS, useEditorValue } from "./editor-value"
 
 const note = (content: string) => ({ content }) as Note
 
-/** Write a provenance-carrying draft the way `setNoteDraft` persists it. */
-const writeDraft = (value: string, baseHash: string | null) =>
-  window.localStorage.setItem("draft::test-note", JSON.stringify({ v: 1, value, baseHash }))
-
-function renderEditorValue(initialNote: Note | undefined) {
-  return renderHook(
-    ({ note }: { note: Note | undefined }) =>
-      useEditorValue({ noteId: "test-note", note, defaultValue: "" }),
+function renderEditorValue(
+  initialNote: Note | undefined,
+  { defaultValue = "" }: { defaultValue?: string } = {},
+) {
+  const onSave = vi.fn()
+  const hook = renderHook(
+    ({ note }: { note: Note | undefined }) => useEditorValue({ note, defaultValue, onSave }),
     { initialProps: { note: initialNote } },
   )
+  return { ...hook, onSave }
 }
 
-beforeEach(() => window.localStorage.clear())
+/** Simulate the user's own save landing: `useSaveNote` stamps `updated_at`. */
+const stamp = (content: string) => `---\nupdated_at: 2026-08-28T09:00:00.000Z\n---\n${content}`
+
+/** Fire `visibilitychange` with `document.visibilityState === "hidden"`. */
+function hidePage() {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => "hidden",
+  })
+  try {
+    document.dispatchEvent(new Event("visibilitychange"))
+  } finally {
+    delete (document as { visibilityState?: unknown }).visibilityState
+  }
+}
+
+beforeEach(() => vi.useFakeTimers())
 afterEach(() => {
   cleanup()
-  window.localStorage.clear()
+  vi.useRealTimers()
 })
 
-describe("useEditorValue (pull → editor propagation)", () => {
-  it("re-seeds the editor when the note changes externally and there are no unsaved edits", () => {
-    const { result, rerender } = renderEditorValue(note("original content"))
+describe("useEditorValue (seeding)", () => {
+  it("seeds from the note content", () => {
+    const { result } = renderEditorValue(note("original content"))
     expect(result.current.editorValue).toBe("original content")
+  })
+
+  it("seeds a new note from the default value (template)", () => {
+    const { result } = renderEditorValue(undefined, { defaultValue: "# Template\n" })
+    expect(result.current.editorValue).toBe("# Template\n")
+  })
+})
+
+describe("useEditorValue (autosave)", () => {
+  it("saves a change after the debounce, not immediately", () => {
+    const { result, onSave } = renderEditorValue(note("original content"))
+
+    act(() => result.current.setEditorValue("edited content"))
+    expect(onSave).not.toHaveBeenCalled()
+
+    act(() => vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS))
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledWith("edited content")
+  })
+
+  it("coalesces rapid edits into one save of the latest value", () => {
+    const { result, onSave } = renderEditorValue(note("original content"))
+
+    act(() => result.current.setEditorValue("edit 1"))
+    act(() => vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS - 100))
+    act(() => result.current.setEditorValue("edit 2"))
+    act(() => vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS - 100))
+    expect(onSave).not.toHaveBeenCalled()
+
+    act(() => vi.advanceTimersByTime(100))
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledWith("edit 2")
+  })
+
+  it("flushNow saves immediately (⌘S) and a second flush is a no-op", () => {
+    const { result, onSave } = renderEditorValue(note("original content"))
+
+    act(() => result.current.setEditorValue("edited content"))
+    act(() => result.current.flushNow())
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledWith("edited content")
+
+    // Nothing left pending: neither a repeat flush nor the old timer saves again.
+    act(() => result.current.flushNow())
+    act(() => vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS))
+    expect(onSave).toHaveBeenCalledTimes(1)
+  })
+
+  it("flushes when the page hides (visibilitychange → hidden)", () => {
+    const { result, onSave } = renderEditorValue(note("original content"))
+    act(() => result.current.setEditorValue("edited content"))
+
+    act(() => hidePage())
+
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledWith("edited content")
+  })
+
+  it("flushes on pagehide", () => {
+    const { result, onSave } = renderEditorValue(note("original content"))
+    act(() => result.current.setEditorValue("edited content"))
+
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"))
+    })
+
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledWith("edited content")
+  })
+
+  it("flushes on unmount (note switch, navigation)", () => {
+    const { result, unmount, onSave } = renderEditorValue(note("original content"))
+    act(() => result.current.setEditorValue("edited content"))
+
+    unmount()
+
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledWith("edited content")
+  })
+
+  it("never saves when nothing was edited", () => {
+    const { unmount, onSave } = renderEditorValue(note("original content"))
+
+    act(() => hidePage())
+    act(() => vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS * 5))
+    unmount()
+
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it("does not save an unedited template (visiting a daily note creates nothing)", () => {
+    const { unmount, onSave } = renderEditorValue(undefined, { defaultValue: "# Template\n" })
+
+    act(() => vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS * 5))
+    unmount()
+
+    expect(onSave).not.toHaveBeenCalled()
+  })
+})
+
+describe("useEditorValue (external changes)", () => {
+  it("re-seeds the editor when the note changes externally and the editor is idle", () => {
+    const { result, rerender } = renderEditorValue(note("original content"))
 
     // A pull updates the open note's content.
     rerender({ note: note("pulled content") })
 
     expect(result.current.editorValue).toBe("pulled content")
-    expect(result.current.remoteNotice).toBe(false)
-    expect(result.current.isDraft).toBe(false)
   })
 
-  it("preserves unsaved edits and raises the remote notice instead", () => {
-    const { result, rerender } = renderEditorValue(note("original content"))
+  it("keeps the local value when an external change lands mid-edit, and the next flush settles it", () => {
+    const { result, rerender, onSave } = renderEditorValue(note("original content"))
 
-    // The user types (a draft — even before the debounced draft write lands).
-    act(() => result.current.setEditorValue("local unsaved edits"))
-    expect(result.current.isDraft).toBe(true)
-
-    // A pull updates the note underneath the editor.
+    act(() => result.current.setEditorValue("local unflushed edits"))
     rerender({ note: note("pulled content") })
 
-    expect(result.current.editorValue).toBe("local unsaved edits")
-    expect(result.current.remoteNotice).toBe(true)
+    // Local typing wins over the pull (per-row last-writer-wins)...
+    expect(result.current.editorValue).toBe("local unflushed edits")
 
-    // "Show latest" is the explicit choice to load the remote version.
-    act(() => result.current.loadRemoteVersion())
-    expect(result.current.editorValue).toBe("pulled content")
-    expect(result.current.remoteNotice).toBe(false)
+    // ...and the pending autosave commits it.
+    act(() => vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS))
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledWith("local unflushed edits")
   })
 
-  it("lets the user dismiss the notice and keep editing", () => {
-    const { result, rerender } = renderEditorValue(note("original content"))
-    act(() => result.current.setEditorValue("local unsaved edits"))
-    rerender({ note: note("pulled content") })
-    expect(result.current.remoteNotice).toBe(true)
+  it("adopts the save round-trip (stamped updated_at) without saving again", () => {
+    const { result, rerender, onSave } = renderEditorValue(note("original content"))
 
-    act(() => result.current.dismissRemoteNotice())
-    expect(result.current.remoteNotice).toBe(false)
-    expect(result.current.editorValue).toBe("local unsaved edits")
-  })
-
-  it("does not raise the notice when the external change is the user's own save landing", () => {
-    const { result, rerender } = renderEditorValue(note("original content"))
-    act(() => result.current.setEditorValue("saved content"))
-
-    // The save round-trips through the machine: note.content catches up.
-    rerender({ note: note("saved content") })
-
-    expect(result.current.editorValue).toBe("saved content")
-    expect(result.current.remoteNotice).toBe(false)
-    expect(result.current.isDraft).toBe(false)
-  })
-
-  it("adopts a save that only stamped updated_at, without raising the notice", () => {
-    // useSaveNote writes the note with a fresh `updated_at` frontmatter, so
-    // the round-tripped content is byte-different from the editor value by an
-    // invisible timestamp. That must read as the user's own save, not as a
-    // remote edit ("This note was updated on another device" on every ⌘S).
-    const { result, rerender } = renderEditorValue(note("original content"))
     act(() => result.current.setEditorValue("edited content"))
+    act(() => vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS))
+    expect(onSave).toHaveBeenCalledTimes(1)
 
-    const stamped = "---\nupdated_at: 2026-08-28T09:00:00.000Z\n---\n\nedited content"
-    rerender({ note: note(stamped) })
+    // The save lands in the store with a stamped timestamp; the editor adopts
+    // the canonical bytes (no local edits are newer than the flush).
+    rerender({ note: note(stamp("edited content")) })
+    expect(result.current.editorValue).toBe(stamp("edited content"))
 
-    expect(result.current.remoteNotice).toBe(false)
-    expect(result.current.editorValue).toBe(stamped)
-    expect(result.current.isDraft).toBe(false)
+    // Adoption must not trigger another save — no autosave feedback loop.
+    act(() => vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS * 5))
+    expect(onSave).toHaveBeenCalledTimes(1)
   })
 
-  it("clears a stale no-op draft and re-seeds on pull instead of raising a phantom notice", () => {
-    // A leftover localStorage draft that is byte-identical to the note carries
-    // no real edits (nothing was ever changed) — a pull must adopt the new
-    // content silently, not cry "updated on another device".
-    window.localStorage.setItem("draft::test-note", "original content")
-    const { result, rerender } = renderEditorValue(note("original content"))
-    expect(result.current.editorValue).toBe("original content")
+  it("keeps edits typed after a flush when that flush's round-trip lands", () => {
+    const { result, rerender, onSave } = renderEditorValue(note("original content"))
 
+    act(() => result.current.setEditorValue("edited content"))
+    act(() => vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS))
+    expect(onSave).toHaveBeenCalledTimes(1)
+
+    // The user keeps typing before the stamped round-trip lands.
+    act(() => result.current.setEditorValue("edited content plus more"))
+    rerender({ note: note(stamp("edited content")) })
+
+    expect(result.current.editorValue).toBe("edited content plus more")
+    act(() => vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS))
+    expect(onSave).toHaveBeenCalledTimes(2)
+    expect(onSave).toHaveBeenLastCalledWith("edited content plus more")
+  })
+
+  it("does not commit a stale pending value over a re-seed (typed and reverted)", () => {
+    const { result, rerender, onSave } = renderEditorValue(note("original content"))
+
+    // A no-op edit: typed and reverted to the exact original bytes.
+    act(() => result.current.setEditorValue("original contentX"))
+    act(() => result.current.setEditorValue("original content"))
+
+    // A pull lands inside the debounce window; the editor (idle in substance)
+    // re-seeds to the pulled content.
     rerender({ note: note("pulled content") })
-
     expect(result.current.editorValue).toBe("pulled content")
-    expect(result.current.remoteNotice).toBe(false)
-    expect(window.localStorage.getItem("draft::test-note")).toBeNull()
-  })
 
-  it("still raises the notice for a draft with real edits, even when the editor value is clean", () => {
-    const { result, rerender } = renderEditorValue(note("original content"))
-    // A draft with REAL edits exists (e.g. written by this note's editor in
-    // another tab) while this editor's value still matches the note.
-    window.localStorage.setItem("draft::test-note", "real draft edits")
-
-    rerender({ note: note("pulled content") })
-
-    expect(result.current.remoteNotice).toBe(true)
-    expect(result.current.editorValue).toBe("original content")
-    expect(window.localStorage.getItem("draft::test-note")).toBe("real draft edits")
-  })
-
-  it("still raises the notice for a real remote edit that also differs in updated_at", () => {
-    const { result, rerender } = renderEditorValue(note("original content"))
-    act(() => result.current.setEditorValue("my local edit"))
-
-    rerender({
-      note: note("---\nupdated_at: 2026-08-28T09:00:00.000Z\n---\n\nsomeone else's edit"),
-    })
-
-    expect(result.current.remoteNotice).toBe(true)
-    expect(result.current.editorValue).toBe("my local edit")
+    // The stale pending value must not overwrite what the editor now shows.
+    act(() => vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS))
+    expect(onSave).not.toHaveBeenCalled()
   })
 })
 
-describe("useEditorValue (draft provenance)", () => {
-  it("records the note content a draft was based on when persisting it", () => {
-    vi.useFakeTimers()
-    try {
-      const { result } = renderEditorValue(note("original content"))
-      act(() => result.current.setEditorValue("edited content"))
-      act(() => vi.advanceTimersByTime(600)) // flush the debounced draft write
-
-      const raw = window.localStorage.getItem("draft::test-note")
-      expect(raw).not.toBeNull()
-      expect(JSON.parse(raw as string)).toEqual({
-        v: 1,
-        value: "edited content",
-        baseHash: hashNoteContent("original content"),
-      })
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it("raises the notice at mount when the note advanced beneath a draft with real edits", () => {
-    // Device B's scenario: a draft with real edits based on version 1 sleeps
-    // in localStorage; a replica pull has since brought version 2. The draft stays
-    // visible, but the notice is up immediately — no further pull needed —
-    // and a plain save is blocked.
-    writeDraft("version 1 plus my edits", hashNoteContent("version 1"))
-
-    const { result } = renderEditorValue(note("version 2"))
-
-    expect(result.current.editorValue).toBe("version 1 plus my edits")
-    expect(result.current.remoteNotice).toBe(true)
-    expect(result.current.canSaveSilently).toBe(false)
-    expect(window.localStorage.getItem("draft::test-note")).not.toBeNull()
-  })
-
-  it("silently drops a provenly no-op draft of an older version and shows the newer note", () => {
-    // The silent-revert incident: the draft is an unmodified copy of version 1
-    // (no real edits) and the note has advanced to version 2. Seeding from it
-    // would show — and on save, commit — stale content.
-    writeDraft("version 1", hashNoteContent("version 1"))
-
-    const { result } = renderEditorValue(note("version 2"))
-
-    expect(result.current.editorValue).toBe("version 2")
-    expect(result.current.remoteNotice).toBe(false)
-    expect(result.current.canSaveSilently).toBe(true)
-    expect(window.localStorage.getItem("draft::test-note")).toBeNull()
-  })
-
-  it("stays silent at mount for an ordinary draft whose base matches the current note", () => {
-    writeDraft("original content plus edits", hashNoteContent("original content"))
-
-    const { result } = renderEditorValue(note("original content"))
-
-    expect(result.current.editorValue).toBe("original content plus edits")
-    expect(result.current.remoteNotice).toBe(false)
-    expect(result.current.canSaveSilently).toBe(true)
-  })
-
-  it("loads a legacy bare-string draft silently (unknown base)", () => {
-    window.localStorage.setItem("draft::test-note", "legacy draft edits")
-
-    const { result } = renderEditorValue(note("newer content"))
-
-    expect(result.current.editorValue).toBe("legacy draft edits")
-    expect(result.current.remoteNotice).toBe(false)
-  })
-})
-
-describe("useEditorValue (save guard contract)", () => {
-  it("allows silent saves normally and blocks them while the notice is up", () => {
-    const { result, rerender } = renderEditorValue(note("original content"))
-    expect(result.current.canSaveSilently).toBe(true)
-
-    act(() => result.current.setEditorValue("my local edit"))
-    expect(result.current.canSaveSilently).toBe(true)
-
-    // A pull lands a newer version beneath the edits.
-    rerender({ note: note("pulled content") })
-    expect(result.current.remoteNotice).toBe(true)
-    expect(result.current.canSaveSilently).toBe(false)
-  })
-
-  it("re-enables saves after the user explicitly dismisses the notice", () => {
-    const { result, rerender } = renderEditorValue(note("original content"))
-    act(() => result.current.setEditorValue("my local edit"))
-    rerender({ note: note("pulled content") })
-    expect(result.current.canSaveSilently).toBe(false)
-
-    act(() => result.current.dismissRemoteNotice())
-    expect(result.current.canSaveSilently).toBe(true)
-    expect(result.current.editorValue).toBe("my local edit")
-  })
-
-  it("re-enables saves when the override's save lands (timestamp-only difference)", () => {
-    writeDraft("version 1 plus my edits", hashNoteContent("version 1"))
-    const { result, rerender } = renderEditorValue(note("version 2"))
-    expect(result.current.canSaveSilently).toBe(false)
-
-    // "Save mine anyway" commits the editor value; useSaveNote stamps
-    // updated_at and the note round-trips.
-    rerender({
-      note: note("---\nupdated_at: 2026-08-28T09:00:00.000Z\n---\n\nversion 1 plus my edits"),
+describe("useEditorValue (new-note flow)", () => {
+  it("saves the first edit of a new note and adopts its stamped round-trip", () => {
+    const { result, rerender, onSave } = renderEditorValue(undefined, {
+      defaultValue: "# Template\n",
     })
 
-    expect(result.current.remoteNotice).toBe(false)
-    expect(result.current.canSaveSilently).toBe(true)
+    act(() => result.current.setEditorValue("# Template\nfirst line\n"))
+    act(() => vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS))
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledWith("# Template\nfirst line\n")
+
+    // The note now exists; the stamped store copy is adopted.
+    rerender({ note: note(stamp("# Template\nfirst line\n")) })
+    expect(result.current.editorValue).toBe(stamp("# Template\nfirst line\n"))
+
+    act(() => vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS * 5))
+    expect(onSave).toHaveBeenCalledTimes(1)
   })
 })

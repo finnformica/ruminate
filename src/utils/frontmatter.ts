@@ -202,7 +202,10 @@ export function updateFrontmatterValue({
       })
       .trimStart()
   } else {
-    // If there's no frontmatter, add it with the properties
+    // If there's no frontmatter, add it with the properties. No blank line
+    // after the closing fence — the canonical serialized form (the
+    // serialize(parse(x)) fixpoint the rollup reproduces) has none, and saved
+    // bytes must stay canonical so a pull doesn't rewrite them.
     const frontmatterLines = Object.entries(properties)
       .filter(([_, value]) => value !== null)
       .map(([key, value]) => {
@@ -210,7 +213,7 @@ export function updateFrontmatterValue({
       })
       .join("\n")
 
-    return `---\n${frontmatterLines}\n---\n\n${content}`
+    return `---\n${frontmatterLines}\n---\n${content}`
   }
 }
 

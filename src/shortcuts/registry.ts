@@ -289,7 +289,7 @@ const GLOBAL_ENTRIES: Shortcut[] = [
   {
     combos: [APP_SHORTCUTS.save],
     scope: "global",
-    description: "Save the note",
+    description: "Save the note now (changes autosave)",
     group: "Global",
   },
   {

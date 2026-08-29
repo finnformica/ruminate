@@ -32,7 +32,8 @@ export function useCreateNewNote() {
     // Add tags to the note
     let content = ""
     if (tags.length > 0) {
-      content = `---\ntags: [${tags.join(", ")}]\n---\n\n`
+      // No blank line after the fence — matches the canonical serialized form.
+      content = `---\ntags: [${tags.join(", ")}]\n---\n`
     }
 
     navigate({
