@@ -798,20 +798,18 @@ describe("heading hash marker", () => {
     }
   })
 
-  it("is a click-to-zoom target when editable, a plain span when read-only", () => {
-    const { container, getAllByLabelText, queryByTestId } = render(<Harness initial={NESTED} />)
-    expect(queryByTestId("zoom-breadcrumb")).toBeNull()
-    fireEvent.click(getAllByLabelText("Zoom into block")[0])
-    expect(queryByTestId("zoom-breadcrumb")).not.toBeNull()
-    // Zoomed into Top: the nested heading (now depth 0) keeps its hash marker.
-    expect(container.querySelectorAll('[data-testid="heading-hash"]')).toHaveLength(1)
-  })
-
-  it("read-only views render the hash without the zoom button", () => {
-    const { container } = render(<BlockEditor doc={parse(NESTED)} onChange={() => {}} readOnly />)
-    const slot = container.querySelector('[data-testid="heading-hash"]')!
-    expect(slot.querySelector("button")).toBeNull()
-    expect(slot.textContent).toBe("#")
+  it("is a static glyph, never a zoom button, in every view", () => {
+    // The hash reads as typography (like the note title's), not a control —
+    // zoom stays on F / Cmd+. and the bullet/number click targets.
+    for (const readOnly of [false, true]) {
+      const { container, unmount } = render(
+        <BlockEditor doc={parse(NESTED)} onChange={() => {}} readOnly={readOnly} />,
+      )
+      const slot = container.querySelector('[data-testid="heading-hash"]')!
+      expect(slot.querySelector("button")).toBeNull()
+      expect(slot.textContent).toBe("#")
+      unmount()
+    }
   })
 })
 

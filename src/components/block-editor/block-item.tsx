@@ -403,7 +403,8 @@ export function BlockItem({
       // right-aligns in it and, when a large scale outgrows the slot,
       // overflows LEFT toward the gutter — the text column never moves. The
       // slot's `h-[1lh]` (resolved at the heading's scale) centres the glyph
-      // on the heading's first line. Click-to-zoom, like bullets.
+      // on the heading's first line. A static glyph, like the note title's —
+      // no zoom button (zoom stays on F / Cmd+. and bullet/number clicks).
       <span
         data-testid="heading-hash"
         className={cx(
@@ -411,19 +412,7 @@ export function BlockItem({
           headingScale(depth),
         )}
       >
-        {zoomable ? (
-          <button
-            type="button"
-            aria-label="Zoom into block"
-            tabIndex={-1}
-            onClick={() => api.zoomInto(block.id)}
-            className="-m-1 flex cursor-pointer items-center justify-center rounded-sm p-1 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-90 motion-reduce:active:scale-100"
-          >
-            <Hash />
-          </button>
-        ) : (
-          <Hash />
-        )}
+        <Hash />
       </span>
     ) : type.kind === "ordered" && !zoomTitle ? (
       // Numbers are read (they carry order), so they sit one step up the ramp

@@ -84,7 +84,8 @@ asks for it.
    so the hash is always the same size as the text beside it, only recolored
    to tertiary. A large heading's hash outgrows the slot and overflows left
    toward the gutter — the text column never moves — and, like the bullet
-   and number, it is a click-to-zoom target.
+   and number. Unlike them it is NOT a click target — the hash reads as
+   typography, and zoom stays on F / Cmd+. and the bullet/number clicks.
 
 ## Type scale
 
