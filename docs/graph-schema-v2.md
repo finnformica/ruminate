@@ -131,7 +131,8 @@ Design notes, and why:
   column still reserves the slot: if reference edges are ever worth
   materializing, they land here as another kind — a cache, never truth.
 - **No view_state table.** Collapse state is per-device ephemera →
-  localStorage, as overrides on top of the default expansion policy (below).
+  localStorage, one set of collapsed node ids per note, seeded on first open
+  from the default expansion policy (below).
 
 ## Type registry
 
@@ -196,9 +197,13 @@ is still the right rule now that a delete is recoverable is a separate,
 deliberately unmade decision.
 
 **Default expansion.** Headers (`h1`–`h3`) always expanded; below any header,
-expand **n=2** levels by default. Per-device overrides in localStorage keyed
-by node id. The depth cap from the cycle policy doubles as the guard against
-pathologically deep transclusion chains.
+expand **n=2** levels by default. That policy is a **seed, not a layer**: the
+first time a note is opened on a device it fills in that note's collapsed set
+in localStorage (one set of node ids — collapsed means folded, everything else
+is open), and it is never consulted again. Afterwards a toggle simply adds or
+removes an id, nodes added later start expanded, and a device that loses its
+localStorage re-seeds. The depth cap from the cycle policy doubles as the
+guard against pathologically deep transclusion chains.
 
 ## Rollup test plan
 
@@ -265,7 +270,7 @@ before PR #11 merges:
    untouched on day one.
 4. Write path: saves land as row diffs (changed nodes + changed links only)
    instead of a whole-note replace; replica PUT/GET reshaped accordingly.
-5. View-state table dropped; collapse overrides move to localStorage
+5. View-state table dropped; the collapsed set moves to localStorage
    (existing per-device state is disposable by design).
 
 Rollback at any step before the D1 re-seed: revert the code, v1 data is
