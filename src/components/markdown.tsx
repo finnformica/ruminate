@@ -1,7 +1,6 @@
 import { Link } from "@tanstack/react-router"
 import React from "react"
-import ReactMarkdown from "react-markdown"
-import { CodeProps, LiProps } from "react-markdown/lib/ast-to-react"
+import ReactMarkdown, { type ExtraProps } from "react-markdown"
 import { useNetworkState } from "react-use"
 import rehypeKatex from "rehype-katex"
 import rehypeRaw from "rehype-raw"
@@ -280,71 +279,124 @@ function isObjectEmpty(obj: Record<string, unknown>) {
   return Object.keys(obj).length === 0
 }
 
+/**
+ * Tracks whether the nearest list ancestor is ordered. react-markdown 9
+ * removed the `ordered` prop from `li` components, so we provide it
+ * through context from custom `ol`/`ul` components instead.
+ */
+const OrderedListContext = React.createContext(false)
+
+type RemarkRehypeHandlers = NonNullable<
+  NonNullable<React.ComponentProps<typeof ReactMarkdown>["remarkRehypeOptions"]>["handlers"]
+>
+type RemarkRehypeHandler = NonNullable<RemarkRehypeHandlers[keyof RemarkRehypeHandlers]>
+
+/**
+ * mdast -> hast handlers for our custom node types. `Handlers` is keyed by the
+ * built-in mdast node types, so we widen to a string-keyed record to register
+ * custom ones.
+ */
+// TODO: Improve type-safety of `node`
+const customHandlers: Record<string, RemarkRehypeHandler> = {
+  wikilink(state, node) {
+    const element = {
+      type: "element" as const,
+      tagName: "wikilink",
+      properties: { id: node.data.id, text: node.data.text },
+      children: [],
+    }
+    state.patch(node, element)
+    return state.applyData(node, element)
+  },
+  embed(state, node) {
+    const element = {
+      type: "element" as const,
+      tagName: "embed",
+      properties: { id: node.data.id, text: node.data.text },
+      children: [],
+    }
+    state.patch(node, element)
+    return state.applyData(node, element)
+  },
+  tag(state, node) {
+    const element = {
+      type: "element" as const,
+      tagName: "tag",
+      properties: { name: node.data.name },
+      children: [],
+    }
+    state.patch(node, element)
+    return state.applyData(node, element)
+  },
+  priority(state, node) {
+    const element = {
+      type: "element" as const,
+      tagName: "priority",
+      properties: { level: node.data.level },
+      children: [],
+    }
+    state.patch(node, element)
+    return state.applyData(node, element)
+  },
+}
+
 export function MarkdownContent({ children, className }: { children: string; className?: string }) {
   return (
-    <ReactMarkdown
-      className={cx("markdown", className)}
-      remarkPlugins={[
-        remarkGfm,
-        // remarkEmoji,
-        remarkWikilink,
-        remarkEmbed,
-        remarkTag,
-        remarkPriority,
-        [remarkMath, { singleDollarTextMath: false }],
-      ]}
-      rehypePlugins={[rehypeKatex, rehypeRaw]}
-      remarkRehypeOptions={{
-        handlers: {
-          // TODO: Improve type-safety of `node`
-          rehypeKatex(h, node) {
-            return h(node, "math", {
-              output: "mathml",
-            })
-          },
-          wikilink(h, node) {
-            return h(node, "wikilink", {
-              id: node.data.id,
-              text: node.data.text,
-            })
-          },
-          embed(h, node) {
-            return h(node, "embed", {
-              id: node.data.id,
-              text: node.data.text,
-            })
-          },
-          tag(h, node) {
-            return h(node, "tag", {
-              name: node.data.name,
-            })
-          },
-          priority(h, node) {
-            return h(node, "priority", {
-              level: node.data.level,
-            })
-          },
-        },
-      }}
-      components={{
-        a: Anchor,
-        img: Image,
-        li: ListItem,
-        // Delegate rendering of the <pre> element to the Code component
-        pre: ({ children }) => <>{children}</>,
-        code: Code,
-        // @ts-ignore I don't know how to extend the list of accepted component keys
-        wikilink: NoteLink,
-        // @ts-ignore
-        embed: NoteEmbed,
-        // @ts-ignore
-        tag: TagLink,
-        // @ts-ignore
-        priority: PriorityIndicator,
-      }}
-    >
-      {children}
-    </ReactMarkdown>
+    // react-markdown 10 removed the `className` prop (and its wrapping <div>),
+    // so we render the wrapper ourselves to keep the DOM identical.
+    <div className={cx("markdown", className)}>
+      <ReactMarkdown
+        remarkPlugins={[
+          remarkGfm,
+          // remarkEmoji,
+          remarkWikilink,
+          remarkEmbed,
+          remarkTag,
+          remarkPriority,
+          [remarkMath, { singleDollarTextMath: false }],
+        ]}
+        rehypePlugins={[rehypeKatex, rehypeRaw]}
+        remarkRehypeOptions={{ handlers: customHandlers }}
+        components={{
+          a: Anchor,
+          img: Image,
+          li: ListItem,
+          ol: ({ node, ...props }) => (
+            <OrderedListContext.Provider value={true}>
+              <ol {...props} />
+            </OrderedListContext.Provider>
+          ),
+          ul: ({ node, ...props }) => (
+            <OrderedListContext.Provider value={false}>
+              <ul {...props} />
+            </OrderedListContext.Provider>
+          ),
+          // Delegate rendering of the <pre> element to the Code component,
+          // marking its code children as block-level (react-markdown 9
+          // removed the `inline` prop from `code` components)
+          pre: ({ children }) => (
+            <>
+              {React.Children.map(children, (child) =>
+                React.isValidElement(child) && child.type === Code
+                  ? React.cloneElement(child as React.ReactElement<CodeProps>, { inline: false })
+                  : child,
+              )}
+            </>
+          ),
+          code: Code,
+          // @ts-ignore I don't know how to extend the list of accepted component keys
+          wikilink: NoteLink,
+          // @ts-ignore
+          embed: NoteEmbed,
+          // @ts-ignore
+          tag: TagLink,
+          // @ts-ignore
+          priority: PriorityIndicator,
+        }}
+      >
+        {children}
+      </ReactMarkdown>
+    </div>
   )
 }
 
@@ -493,7 +545,16 @@ function Image(props: React.ComponentPropsWithoutRef<"img">) {
   return <img {...props} />
 }
 
-function Code({ className, inline, children, ...props }: CodeProps) {
+type CodeProps = React.ComponentPropsWithoutRef<"code"> &
+  ExtraProps & {
+    /**
+     * Set to `false` by the custom `pre` component. react-markdown 9 removed
+     * the `inline` prop, so code is inline unless a `pre` parent marks it.
+     */
+    inline?: boolean
+  }
+
+function Code({ className, inline = true, children }: CodeProps) {
   if (className?.includes("language-math")) {
     return <div>{children}</div>
   }
@@ -508,7 +569,7 @@ function Code({ className, inline, children, ...props }: CodeProps) {
     <div className="pre-container relative">
       <pre className="pe-12! print:whitespace-pre-wrap">
         <div className="absolute end-2 top-2 rounded coarse:end-1 coarse:top-1 print:hidden">
-          <CopyButton text={children.toString()} />
+          <CopyButton text={String(children ?? "")} />
         </div>
         <SyntaxHighlighter language={language}>{children}</SyntaxHighlighter>
       </pre>
@@ -564,9 +625,12 @@ function extractListItemElements(children: React.ReactNode): {
   return { checkbox, content, nestedLists }
 }
 
-function ListItem({ node, children, ordered, className, ...props }: LiProps) {
+type ListItemProps = React.ComponentPropsWithoutRef<"li"> & ExtraProps
+
+function ListItem({ node, children, className, ...props }: ListItemProps) {
   const { markdownBody, markdown, markdownBodyStartOffset, onChange, noteId } =
     React.useContext(MarkdownContext)
+  const ordered = React.useContext(OrderedListContext)
   const isTask = className?.includes("task-list-item")
   const [isMoveMenuOpen, setIsMoveMenuOpen] = React.useState(false)
   const [isMoreMenuOpen, setIsMoreMenuOpen] = React.useState(false)
@@ -582,7 +646,7 @@ function ListItem({ node, children, ordered, className, ...props }: LiProps) {
 
   const handleMoveTo = React.useCallback(
     (targetNoteId: string) => {
-      if (!node.position || !noteId) return
+      if (!node?.position || !noteId) return
 
       moveTask({
         sourceNoteId: noteId,
@@ -592,22 +656,22 @@ function ListItem({ node, children, ordered, className, ...props }: LiProps) {
         nodeEnd: markdownBodyStartOffset + (node.position.end.offset ?? 0),
       })
     },
-    [markdownBodyStartOffset, markdown, moveTask, node.position, noteId],
+    [markdownBodyStartOffset, markdown, moveTask, node?.position, noteId],
   )
 
   // Get the task line text for copy/cut operations
   const getTaskLine = React.useCallback(() => {
-    if (!node.position) return ""
+    if (!node?.position) return ""
     let start = node.position.start.offset ?? 0
     while (start > 0 && markdownBody[start - 1] !== "\n") {
       start--
     }
     const end = node.position.end.offset ?? 0
     return markdownBody.slice(start, end).trim()
-  }, [markdownBody, node.position])
+  }, [markdownBody, node?.position])
 
   const deleteTask = React.useCallback(() => {
-    if (!node.position) return
+    if (!node?.position) return
     let start = node.position.start.offset ?? 0
     while (start > 0 && markdownBody[start - 1] !== "\n") {
       start--
@@ -615,7 +679,7 @@ function ListItem({ node, children, ordered, className, ...props }: LiProps) {
     const end = node.position.end.offset ?? 0
     const endWithNewline = markdownBody[end] === "\n" ? end + 1 : end
     onChange?.(markdownBody.slice(0, start) + markdownBody.slice(endWithNewline))
-  }, [markdownBody, node.position, onChange])
+  }, [markdownBody, node?.position, onChange])
 
   const handleCreateNote = React.useCallback(
     async (title: string) => {
@@ -631,8 +695,8 @@ function ListItem({ node, children, ordered, className, ...props }: LiProps) {
     [getTaskLine, saveNote, deleteTask],
   )
 
-  const nodeStart = node.position?.start.offset
-  const nodeEnd = node.position?.end.offset
+  const nodeStart = node?.position?.start.offset
+  const nodeEnd = node?.position?.end.offset
   const hasNodePosition = nodeStart != null && nodeEnd != null
 
   const canMoveUp = React.useMemo(
@@ -708,7 +772,7 @@ function ListItem({ node, children, ordered, className, ...props }: LiProps) {
                 }
               }}
               onCheckedChange={(newChecked) => {
-                if (!node.position) return
+                if (!node?.position) return
 
                 // Update the corresponding checkbox in the markdownBody string
                 const newValue =
