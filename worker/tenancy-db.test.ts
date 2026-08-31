@@ -2,6 +2,7 @@
 // guard, or a raw read used to prove one tenant's write stayed put.
 import { describe, expect, it } from "vitest"
 import { CURRENT_DATA_VERSION, DATA_VERSION_KEY, ensureDataVersion } from "../src/data/data-version"
+import { derivePageId } from "../src/data/page-identity"
 import type { SqlDriver } from "../src/data/sql-driver"
 import { createTenantTestDriver } from "./handlers/sqlite-test-driver"
 import type { VerifiedIdentity } from "./handlers/tenancy"
@@ -234,6 +235,52 @@ describe("tenantCorpus — the data-version transform, per tenant", () => {
       ])
     expect(await versionFor(alice)).toEqual([{ value: String(CURRENT_DATA_VERSION) }])
     expect(await versionFor(bob)).toEqual([])
+  })
+
+  it("re-keys pages inside one tenant only, links included", async () => {
+    const { alice, bob } = await openTenants()
+    for (const tenant of [alice, bob]) {
+      await tenant.batch([
+        {
+          sql:
+            "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at) " +
+            "VALUES (:tenant, 'Shared Name', 'page', 'Shared Name', NULL, 100, NULL)",
+          params: [],
+        },
+        {
+          sql:
+            "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at) " +
+            "VALUES (:tenant, 'blk_a', 'text', 'body', NULL, 100, NULL)",
+          params: [],
+        },
+        {
+          sql:
+            "INSERT INTO link (user_id, source_id, destination_id, kind, sort_key, " +
+            "updated_at, deleted_at) VALUES (:tenant, 'Shared Name', 'blk_a', 'child', 'a0', " +
+            "100, NULL)",
+          params: [],
+        },
+      ])
+    }
+
+    await ensureDataVersion(tenantCorpus(alice))
+
+    const livePages = async (tenant: TenantDb) =>
+      tenant.exec(
+        "SELECT id FROM nodes WHERE user_id = :tenant AND type = 'page' AND deleted_at IS NULL",
+      )
+    const liveLinks = async (tenant: TenantDb) =>
+      tenant.exec(
+        "SELECT source_id FROM link WHERE user_id = :tenant AND deleted_at IS NULL " +
+          "ORDER BY source_id",
+      )
+
+    expect(await livePages(alice)).toEqual([{ id: derivePageId("Shared Name") }])
+    expect(await liveLinks(alice)).toEqual([{ source_id: derivePageId("Shared Name") }])
+    // Bob shares the id and is untouched — the re-key names its tenant on
+    // every statement, node rows and link rows alike.
+    expect(await livePages(bob)).toEqual([{ id: "Shared Name" }])
+    expect(await liveLinks(bob)).toEqual([{ source_id: "Shared Name" }])
   })
 
   it("does not stamp an empty partition, so rows arriving later still transform", async () => {

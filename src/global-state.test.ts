@@ -57,9 +57,12 @@ describe("block search atoms", () => {
     const { store, unsubscribe } = await signedInStore(FILES)
 
     const hits = store.get(searchBlocksAtom)("type:todo")
-    expect(hits.map((hit) => hit.blockId)).toEqual(["blk_milk", "blk_plants"])
+    // Grouped by note in `sortedNotesAtom` order; with no `updated_at` on
+    // either note that is alphabetical by name — "misc" before "Today"
+    // (`tasks.md`'s h1). Ids are opaque now, so they no longer order anything.
+    expect(hits.map((hit) => hit.blockId)).toEqual(["blk_plants", "blk_milk"])
 
-    const milk = hits[0]
+    const milk = hits.find((hit) => hit.blockId === "blk_milk") as (typeof hits)[number]
     // Everything a results row needs, without re-deriving: text, breadcrumb
     // ancestry, and the note-route + ?block= navigation target.
     expect(milk.text).toBe("buy milk #work")

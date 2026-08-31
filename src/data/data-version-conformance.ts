@@ -11,6 +11,7 @@ import {
   ensureDataVersion,
   singleTenantCorpus,
 } from "./data-version"
+import { derivePageId } from "./page-identity"
 import type { SqlDriver } from "./sql-driver"
 
 /**
@@ -65,21 +66,37 @@ export function describeDataVersionConformance(name: string, makeDriver: () => S
       const before = Date.now()
       await ensureDataVersion(singleTenantCorpus(driver))
 
+      const minted = derivePageId("p")
       const rows = await driver.exec(
-        "SELECT id, type, text, props, updated_at FROM nodes ORDER BY id",
+        "SELECT id, type, text, props, updated_at, deleted_at FROM nodes ORDER BY id " +
+          "/* includes-deleted: the re-key leaves the old page row as a tombstone */",
       )
-      expect(rows.map((row) => `${row.id}|${row.type}|${row.text}`)).toEqual([
-        "blk_a|todo|buy milk",
-        "blk_b|text|plain",
-        "p|page|p",
-      ])
-      expect(rows.find((row) => row.id === "p")?.props).toBe(JSON.stringify({ pinned: true }))
+      const live = rows.filter((row) => row.deleted_at === null)
+      expect(live.map((row) => `${row.id}|${row.type}|${row.text}`).sort()).toEqual(
+        [`${minted}|page|p`, "blk_a|todo|buy milk", "blk_b|text|plain"].sort(),
+      )
+      // Version 1 upgraded the props; version 2 carried them onto the minted
+      // row and appended the old id as an alias.
+      expect(live.find((row) => row.id === minted)?.props).toBe(
+        JSON.stringify({ pinned: true, aliases: ["p"] }),
+      )
+      // The page's old id survives only as a tombstone, so the re-key travels.
+      expect(rows.find((row) => row.id === "p")?.deleted_at).toEqual(expect.any(Number))
       // Rewritten rows get a fresh updated_at so they replicate; untouched
       // rows keep theirs.
       expect(Number(rows.find((row) => row.id === "blk_a")?.updated_at)).toBeGreaterThanOrEqual(
         before,
       )
       expect(Number(rows.find((row) => row.id === "blk_b")?.updated_at)).toBe(100)
+
+      // Every child link followed the page to its new id.
+      const links = await driver.exec(
+        "SELECT source_id, destination_id FROM link WHERE deleted_at IS NULL ORDER BY sort_key",
+      )
+      expect(links).toEqual([
+        { source_id: minted, destination_id: "blk_a" },
+        { source_id: minted, destination_id: "blk_b" },
+      ])
 
       const meta = await driver.exec("SELECT value FROM meta WHERE key = ?", [DATA_VERSION_KEY])
       expect(meta).toEqual([{ value: String(CURRENT_DATA_VERSION) }])
@@ -141,6 +158,65 @@ export function describeDataVersionConformance(name: string, makeDriver: () => S
       expect(
         await driver.exec("SELECT type, text, updated_at FROM nodes WHERE id = 'blk_a'"),
       ).toEqual([{ type: "text", text: "[] buy milk", updated_at: 100 }])
+    })
+
+    it("mints the same page id on every engine (independent runs must converge)", async () => {
+      // The two corpora transform themselves independently, so a random mint
+      // would give one page two ids and the next sync would merge them into
+      // two pages. Deriving the id makes separate runs agree.
+      const first = await seededDriver()
+      const second = await seededDriver()
+      await ensureDataVersion(singleTenantCorpus(first))
+      await ensureDataVersion(singleTenantCorpus(second))
+
+      const pageIds = async (driver: SqlDriver) =>
+        driver.exec("SELECT id FROM nodes WHERE type = 'page' AND deleted_at IS NULL ORDER BY id")
+      expect(await pageIds(first)).toEqual(await pageIds(second))
+      expect(await pageIds(first)).toEqual([{ id: derivePageId("p") }])
+    })
+
+    it("leaves date and week pages on their natural keys", async () => {
+      const driver = makeDriver()
+      await ensureCorpusSchema(driver, migrations)
+      await driver.batch([
+        {
+          sql: "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?, ?, ?, ?, ?)",
+          params: ["2026-08-31", "page", "2026-08-31", null, 100],
+        },
+        {
+          sql: "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?, ?, ?, ?, ?)",
+          params: ["2026-W35", "page", "2026-W35", null, 100],
+        },
+      ])
+      await ensureDataVersion(singleTenantCorpus(driver))
+
+      // Untouched, updated_at included: the date IS the identity, so there is
+      // nothing to migrate and nothing to replicate.
+      expect(
+        await driver.exec(
+          "SELECT id, text, updated_at FROM nodes WHERE deleted_at IS NULL ORDER BY id",
+        ),
+      ).toEqual([
+        { id: "2026-08-31", text: "2026-08-31", updated_at: 100 },
+        { id: "2026-W35", text: "2026-W35", updated_at: 100 },
+      ])
+    })
+
+    it("re-keys a page exactly once across repeated opens (no id churn)", async () => {
+      const driver = await seededDriver()
+      await ensureCorpusSchema(driver, migrations)
+      const after = await driver.exec(
+        "SELECT id, type, text, props, updated_at, deleted_at FROM nodes ORDER BY id " +
+          "/* includes-deleted: proving the second pass adds no new tombstone */",
+      )
+      await ensureCorpusSchema(driver, migrations)
+      await ensureCorpusSchema(driver, migrations)
+      expect(
+        await driver.exec(
+          "SELECT id, type, text, props, updated_at, deleted_at FROM nodes ORDER BY id " +
+            "/* includes-deleted: as above */",
+        ),
+      ).toEqual(after)
     })
 
     it("is transactional: a failed batch leaves rows and version untouched", async () => {

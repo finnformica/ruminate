@@ -295,13 +295,12 @@ export const sortedNotesAtom = atom((get) => {
       return 1 // b has timestamp, a doesn't -> b first
     }
 
-    // Fallback: favor numeric IDs (like timestamps) over non-numeric
-    const aNumeric = /^\d+$/.test(a.id)
-    const bNumeric = /^\d+$/.test(b.id)
-    if (aNumeric && !bNumeric) return -1
-    if (!aNumeric && bNumeric) return 1
-
-    return b.id.localeCompare(a.id)
+    // Last resort, for notes with no timestamp at all: order by name, which is
+    // at least meaningful to a human. (Ids used to carry a hint — a numeric id
+    // was a creation timestamp — but minted ids are opaque, so ordering by
+    // them would be arbitrary as well as unstable across a rename.)
+    const byName = a.displayName.localeCompare(b.displayName)
+    return byName !== 0 ? byName : a.id.localeCompare(b.id)
   })
 })
 
@@ -313,7 +312,11 @@ export const pinnedNotesAtom = atom((get) => {
 export const noteSearcherAtom = atom((get) => {
   const sortedNotes = get(sortedNotesAtom)
   return new Searcher(sortedNotes, {
-    keySelector: (note) => [note.title, note.displayName, note.content, note.id, note.alias || ""],
+    // `note.id` is deliberately NOT a fuzzy key: minted ids are opaque
+    // (docs/page-identity-design.md), so matching them would only add noise —
+    // every note would half-match a query containing "blk". The `id:` filter
+    // still matches ids exactly (src/utils/search-notes.ts).
+    keySelector: (note) => [note.title, note.displayName, note.content, note.alias || ""],
     threshold: 0.8,
   })
 })

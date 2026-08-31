@@ -11,7 +11,7 @@ function Harness({ initial }: { initial: string }) {
   return (
     <div style={{ maxWidth: 640, padding: 24 }}>
       <NoteTitle
-        noteId={name}
+        title={name}
         onRename={(next) => {
           setName(next)
           return true
@@ -48,7 +48,7 @@ function PageHarness() {
     <div style={{ maxWidth: 700, padding: 24 }}>
       <div className="flex flex-col gap-3">
         <NoteTitle
-          noteId={name}
+          title={name}
           onRename={(next) => {
             setName(next)
             return true

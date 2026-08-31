@@ -53,8 +53,8 @@ const NOTE_A =
 const NOTE_B = "- Plain note\n  id:: blk_e2eb000001\n"
 
 const T0 = Date.parse("2026-08-29T12:00:00.000Z")
-const graphA = docToGraph("e2e-note-a", NOTE_A, T0)
-const graphB = docToGraph("e2e-note-b", NOTE_B, T0)
+const graphA = docToGraph("blk_e2enotea00", NOTE_A, T0)
+const graphB = docToGraph("blk_e2enoteb00", NOTE_B, T0)
 
 const authHeaders = (token: string) => ({
   Cookie: "gh_refresh=e2e-session",
@@ -118,6 +118,13 @@ async function main() {
     db.batch([
       db.prepare("DELETE FROM link WHERE source_id LIKE '%e2e%' OR destination_id LIKE '%e2e%'"),
       db.prepare("DELETE FROM nodes WHERE id LIKE '%e2e%'"),
+      // The guest partition goes wholesale, not by id pattern: the
+      // data-version transform can re-key a page (docs/page-identity-design.md)
+      // and an id-matched cleanup would leave the renamed row behind to
+      // poison the next run's isolation check.
+      db.prepare("DELETE FROM link WHERE user_id = ?1").bind(GUEST_ID),
+      db.prepare("DELETE FROM nodes WHERE user_id = ?1").bind(GUEST_ID),
+      db.prepare("DELETE FROM meta WHERE user_id = ?1").bind(GUEST_ID),
       db.prepare("DELETE FROM allowlist WHERE github_id = ?1").bind(GUEST_ID),
       db.prepare("DELETE FROM users WHERE github_id = ?1").bind(GUEST_ID),
     ])
@@ -180,8 +187,8 @@ async function main() {
     assert.equal(e2eLinks(corpus.links).length, 3)
     // The pulled rows roll up to the exact canonical markdown that was ingested.
     const snapshot = buildGraphSnapshot(corpus.nodes, corpus.links)
-    assert.equal(rollup("e2e-note-a", snapshot), serialize(parse(NOTE_A)))
-    assert.equal(rollup("e2e-note-b", snapshot), NOTE_B)
+    assert.equal(rollup("blk_e2enotea00", snapshot), serialize(parse(NOTE_A)))
+    assert.equal(rollup("blk_e2enoteb00", snapshot), NOTE_B)
     console.log("GET full: rollup reproduces the ingested markdown ✓")
 
     // --- since pull: changed rows + full key lists
@@ -191,8 +198,10 @@ async function main() {
       })
     ).json()) as ReplicaChangesBody
     assert.equal(e2eNodes(changes.nodes).length, 5)
-    assert.ok(changes.nodeIds.includes("e2e-note-a") && changes.nodeIds.includes("blk_e2eb000001"))
-    assert.ok(changes.linkKeys.some(([s, d]) => s === "e2e-note-b" && d === "blk_e2eb000001"))
+    assert.ok(
+      changes.nodeIds.includes("blk_e2enotea00") && changes.nodeIds.includes("blk_e2eb000001"),
+    )
+    assert.ok(changes.linkKeys.some(([s, d]) => s === "blk_e2enoteb00" && d === "blk_e2eb000001"))
 
     const noChanges = (await (
       await api(`/api/replica/notes?since=${Date.now() + 60_000}`, {
@@ -200,7 +209,7 @@ async function main() {
       })
     ).json()) as ReplicaChangesBody
     assert.equal(e2eNodes(noChanges.nodes).length, 0)
-    assert.ok(noChanges.nodeIds.includes("e2e-note-b"))
+    assert.ok(noChanges.nodeIds.includes("blk_e2enoteb00"))
 
     assert.equal(
       (await api("/api/replica/notes?since=nope", { headers: authHeaders("e2e-owner-token") }))
@@ -284,9 +293,9 @@ async function main() {
           {
             nodes: [
               {
-                id: "e2e-guest-note",
+                id: "blk_e2eguest00",
                 type: "page",
-                text: "e2e-guest-note",
+                text: "blk_e2eguest00",
                 props: null,
                 updated_at: T0,
               },
@@ -302,10 +311,10 @@ async function main() {
       await api("/api/replica/notes?since=0", { headers: authHeaders("e2e-guest-token") })
     ).json()) as ReplicaChangesBody
     // The destructive channel: the guest's key list must be theirs alone.
-    assert.deepEqual(guestSince.nodeIds, ["e2e-guest-note"])
+    assert.deepEqual(guestSince.nodeIds, ["blk_e2eguest00"])
 
     const ownerAfterGuest = await pull()
-    assert.ok(!ownerAfterGuest.nodes.some((row) => row.id === "e2e-guest-note"))
+    assert.ok(!ownerAfterGuest.nodes.some((row) => row.id === "blk_e2eguest00"))
     assert.deepEqual((await status("e2e-guest-token")).counts, { nodes: 1, links: 0, pages: 1 })
     assert.deepEqual(
       [...new Set((await ownedRows()).map((row) => row.user_id))].sort(),
@@ -319,8 +328,8 @@ async function main() {
       nodes: [],
       links: [],
       deleteNodes: [
-        "e2e-note-a",
-        "e2e-note-b",
+        "blk_e2enotea00",
+        "blk_e2enoteb00",
         "blk_e2ea000001",
         "blk_e2ea000002",
         "blk_e2eb000001",

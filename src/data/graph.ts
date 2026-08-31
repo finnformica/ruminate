@@ -6,6 +6,11 @@ import { normalizeHeadingMarker } from "../blocks/serialize"
 import type { NoteId } from "../schema"
 import { frontmatterTextFromProps, pagePropsFromFrontmatter } from "./frontmatter-props"
 import { normalizeBlockText } from "./normalize-block-text"
+import {
+  emittedPageTitle,
+  injectTitleIntoFrontmatter,
+  liftTitleFromFrontmatter,
+} from "./page-identity"
 
 /**
  * Schema v2's two most load-bearing transforms (docs/graph-schema-v2.md):
@@ -138,12 +143,19 @@ export function docToGraphParts(
   }
   scanFences(doc.rootBlockIds)
 
+  // The title is data, and it rides the `<id>.md` seam as a projection-owned
+  // `title:` frontmatter key (`page-identity.ts`): lift it into the page node's
+  // `text` and keep it OUT of `props`, so it is never stored twice and the
+  // rollup can re-emit it from the one place that owns it.
+  const { title, rest } = liftTitleFromFrontmatter(doc.frontmatter)
   const nodes: NodeRow[] = [
     {
       id: noteId,
       type: PAGE_TYPE,
-      text: noteId,
-      props: doc.frontmatter !== null ? pagePropsFromFrontmatter(doc.frontmatter) : null,
+      // No title key means an untitled page (or a date page, whose id IS its
+      // name) — `text` stays the id, exactly as it was before minting.
+      text: title ?? noteId,
+      props: rest !== null ? pagePropsFromFrontmatter(rest) : null,
       updated_at: updatedAt,
     },
   ]
@@ -345,7 +357,12 @@ export function rollup(pageId: string, graph: GraphSnapshot): string | null {
   if (!page || page.type !== PAGE_TYPE) return null
 
   const lines: string[] = []
-  const frontmatter = pageFrontmatter(page)
+  // Re-emit the projection-owned `title:` key from the page node's `text` (see
+  // `page-identity.ts`). A page whose only frontmatter is its title still gets
+  // a block; an untitled or date page emits exactly what it emitted before.
+  const stored = pageFrontmatter(page)
+  const title = emittedPageTitle(page.id, page.text)
+  const frontmatter = title !== null ? injectTitleIntoFrontmatter(stored, title) : stored
   if (frontmatter !== null) {
     lines.push("---", frontmatter, "---")
   }

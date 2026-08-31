@@ -1,24 +1,14 @@
 import { Note, NoteId } from "../schema"
-import { parseFrontmatter, updateFrontmatterValue } from "./frontmatter"
-
-/**
- * Record a note's former id in its `aliases` frontmatter. Called on rename so
- * the old note URL keeps working: the route resolver (`resolveNoteId`) sees
- * the dead id in `aliases` and redirects to the live note. Renames chain —
- * each rename appends the newly dead id, so every former id stays resolvable.
- */
-export function recordRenameAlias({ content, oldId }: { content: string; oldId: NoteId }): string {
-  const { frontmatter } = parseFrontmatter(content)
-  const aliases = Array.isArray(frontmatter.aliases) ? frontmatter.aliases.map(String) : []
-  if (aliases.includes(oldId)) return content
-  return updateFrontmatterValue({
-    content,
-    properties: { aliases: [...aliases, oldId] },
-  })
-}
 
 /**
  * Resolve a note URL's id to the note the route should show.
+ *
+ * This is what keeps every pre-minting bookmark alive. Notes used to be keyed
+ * by their titles, so `/notes/Flow Engineering` was a real URL; the page
+ * identity migration recorded each page's former id in its `aliases` (see
+ * `pagePropsWithAlias`, src/data/page-identity.ts), and this resolver turns
+ * such a URL into the minted id the route redirects to. No bookmark 404s, and
+ * none of them mints a duplicate note.
  *
  * - The id of a live note resolves to itself — a live note always wins, even
  *   over another note claiming the same id as an alias.

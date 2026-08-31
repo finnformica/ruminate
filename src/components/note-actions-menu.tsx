@@ -6,8 +6,7 @@ import { copyAsMarkdown } from "../utils/copy-markdown"
 import { useDeleteNote, useRenameNote, useSaveNote } from "../hooks/note"
 import type { Width } from "../schema"
 import { cx } from "../utils/cx"
-import { updateFrontmatterValue } from "../utils/frontmatter"
-import { getInvalidNoteIdCharacters } from "../utils/note-id"
+import { parseFrontmatter, updateFrontmatterValue } from "../utils/frontmatter"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
 import {
@@ -86,35 +85,15 @@ export function NoteActionsMenu({
     applyContent(updateFrontmatterValue({ content, properties: { pinned: pinned ? null : true } }))
   }
 
+  // Renaming sets the note's title (docs/page-identity-design.md). The id and
+  // the URL are untouched, so there is nothing to navigate to afterwards and
+  // no name to reject: any text is a valid title.
   const rename = () => {
-    const raw = window.prompt("Rename file", noteId)
+    const { frontmatter } = parseFrontmatter(content)
+    const current = typeof frontmatter.title === "string" ? frontmatter.title : ""
+    const raw = window.prompt("Rename note", current)
     if (raw == null) return
-    const newNoteId = raw.trim().replace(/\.md$/i, "").trim()
-    if (!newNoteId || newNoteId === noteId) return
-
-    const result = renameNote({ oldName: noteId, newName: newNoteId, content })
-    if (!result.success) {
-      if (result.reason === "invalid") {
-        const invalid = Array.from(new Set(getInvalidNoteIdCharacters(newNoteId)))
-          .map((char) => `"${char}"`)
-          .join(", ")
-        window.alert(
-          `"${newNoteId}.md" contains invalid characters${invalid ? `: ${invalid}` : ""}`,
-        )
-      } else if (result.reason === "duplicate") {
-        window.alert(`"${newNoteId}.md" already exists.`)
-      }
-      return
-    }
-
-    if (isViewing) {
-      navigate({
-        to: "/notes/$",
-        params: { _splat: newNoteId },
-        search: { query: undefined },
-        replace: true,
-      })
-    }
+    renameNote({ noteId, newTitle: raw, content })
   }
 
   const remove = () => {
@@ -178,7 +157,7 @@ export function NoteActionsMenu({
           Copy ID
         </DropdownMenu.Item>
         <DropdownMenu.Item icon={<EditIcon16 />} disabled={isSignedOut} onClick={rename}>
-          Rename file
+          Rename
         </DropdownMenu.Item>
         <DropdownMenu.Separator />
         {editor?.onShare ? (

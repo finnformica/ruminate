@@ -1,7 +1,9 @@
 import yaml from "yamljs"
 
-/** Reserved frontmatter keys that are not displayed to users */
-const RESERVED_FRONTMATTER_KEYS = ["pinned", "gist_id", "font", "width", "updated_at"]
+/** Reserved frontmatter keys that are not displayed to users. `title` is
+ * projection-owned (src/data/page-identity.ts): it carries the page's name
+ * through the `<id>.md` seam and is shown AS the title, never as a property. */
+const RESERVED_FRONTMATTER_KEYS = ["pinned", "gist_id", "font", "width", "updated_at", "title"]
 
 /** Checks if a frontmatter entry is visible to users */
 function isVisibleFrontmatterEntry([key, value]: [string, unknown]): boolean {

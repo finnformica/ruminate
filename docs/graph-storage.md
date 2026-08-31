@@ -213,8 +213,13 @@ node survives as the position a restore would put it back into.
 
 ### `nodes` (id TEXT, type, text, props, updated_at, deleted_at)
 
-One row per node. `id` is the app's existing TEXT id (`blk_…` for blocks, the
-note id for page nodes). `type` is stored, not derived — the registry in the
+One row per node. `id` is a minted TEXT id — `blk_…` for blocks **and** pages
+alike, since a page is just a node whose `type` is `page`
+(docs/page-identity-design.md); daily and weekly pages are the one exception
+and keep their date key (`2026-08-31`, `2026-W35`), where the date is the
+identity. A page's _name_ is not its id but its `text`: the title, which the
+rollup carries through the `<id>.md` seam as a projection-owned `title:`
+frontmatter key. `type` is stored, not derived — the registry in the
 schema doc (`page`, `text`, `h1`–`h3`, `todo`, `done`, `ul`, `ol`, `quote`,
 `code`); checked state is a type (`todo` ↔ `done`), so a checkbox toggle is a
 generic type transition. `text` is marker-free. `props` is JSON: a page node
@@ -272,6 +277,13 @@ byte-for-byte):
   originally saved text (flow-style lists, canonical quoting) — accepted; the
   canonical form is a strict fixpoint, and each save's `updated_at` stamp
   round-trips byte-identically.
+- **The projection-owned `title:` key.** A page's title lives in its node
+  `text` (docs/page-identity-design.md); the rollup injects it as the FIRST
+  frontmatter key and ingest lifts it back out, so a hand-written `title:`
+  further down the block moves to the top on the first pass. Like the two
+  above, that is a convergence: the moved form is a strict fixpoint. No key is
+  emitted when a page's `text` equals its id (an untitled note, or a date
+  page), which is what leaves daily/weekly notes byte-identical.
 
 **Existing rows** are rewritten once by the versioned data transform
 (`src/data/data-version.ts`): when the `data_version` meta key is below the
@@ -285,7 +297,19 @@ four-method `CorpusAccess` port, because the two schema shapes need different
 statements and stitching SQL fragments together is exactly the leak the query
 guard exists to prevent. Every device and the server therefore run the
 identical deterministic transform, so whichever timestamp wins, the winning
-content is the same and the corpus converges. An empty corpus does not stamp
+content is the same and the corpus converges.
+
+The ladder currently has two rungs, and they compose in one pass and one
+write: **version 1** normalizes near-miss markers and upgrades legacy raw
+frontmatter props; **version 2** mints page ids
+(docs/page-identity-design.md) — re-keying every page still named by its
+title, moving that name into `text`, recording it in `props.aliases` so its
+old URL still resolves, and re-pointing every link row that named it. Version
+2 is why the determinism above is load-bearing rather than merely tidy: it
+mints from a hash of the old id, so the browser store and the D1 partition
+independently arrive at the same new id instead of forking one page into two.
+Its re-key is upserts plus tombstones — nothing is hard-deleted — so it
+replicates like any other edit. An empty corpus does not stamp
 the version, so rows arriving after first open (the DO import, a first pull)
 are transformed next time. Tombstoned rows are skipped — a deleted row has
 nothing to normalize.

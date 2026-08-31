@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest"
 import { Note, NoteId } from "../schema"
-import { recordRenameAlias, resolveNoteId } from "./note-alias"
-import { parseFrontmatter } from "./frontmatter"
+import { resolveNoteId } from "./note-alias"
 import { parseNote } from "./parse-note"
 
 function notesFrom(entries: Record<NoteId, string>): Map<NoteId, Note> {
@@ -12,75 +11,40 @@ function notesFrom(entries: Record<NoteId, string>): Map<NoteId, Note> {
   return notes
 }
 
-describe("recordRenameAlias", () => {
-  test("records the old id in aliases frontmatter", () => {
-    const content = recordRenameAlias({ content: "# Title\n\nBody", oldId: "old-name" })
-    const { frontmatter } = parseFrontmatter(content)
-    expect(frontmatter.aliases).toEqual(["old-name"])
-    expect(content).toContain("# Title")
-  })
-
-  test("renaming twice chains — aliases accumulate", () => {
-    let content = "# Title"
-    content = recordRenameAlias({ content, oldId: "first-name" })
-    content = recordRenameAlias({ content, oldId: "second-name" })
-    const { frontmatter } = parseFrontmatter(content)
-    expect(frontmatter.aliases).toEqual(["first-name", "second-name"])
-  })
-
-  test("does not duplicate an already-recorded alias", () => {
-    let content = recordRenameAlias({ content: "# Title", oldId: "old-name" })
-    content = recordRenameAlias({ content, oldId: "old-name" })
-    const { frontmatter } = parseFrontmatter(content)
-    expect(frontmatter.aliases).toEqual(["old-name"])
-  })
-
-  test("preserves existing frontmatter", () => {
-    const content = recordRenameAlias({
-      content: "---\npinned: true\n---\n# Title",
-      oldId: "old-name",
-    })
-    const { frontmatter } = parseFrontmatter(content)
-    expect(frontmatter.pinned).toBe(true)
-    expect(frontmatter.aliases).toEqual(["old-name"])
-  })
-})
+/** A note as the page-identity migration leaves it: minted id, former title as
+ * both the title and an alias (see `pagePropsWithAlias`). */
+const migrated = (title: string, ...aliases: string[]) =>
+  `---\ntitle: ${title}\naliases: [${aliases.join(", ")}]\n---\nbody\n`
 
 describe("resolveNoteId", () => {
   test("a live note resolves to itself", () => {
-    const notes = notesFrom({ "my-note": "# My note" })
-    expect(resolveNoteId(notes, "my-note")).toBe("my-note")
+    const notes = notesFrom({ blk_aaaaaaaaaa: "# My note" })
+    expect(resolveNoteId(notes, "blk_aaaaaaaaaa")).toBe("blk_aaaaaaaaaa")
   })
 
-  test("rename: the old id resolves to the renamed note (redirect path)", () => {
-    // Simulate a rename of "old-name" → "new-name"
-    const renamed = recordRenameAlias({ content: "# Title", oldId: "old-name" })
-    const notes = notesFrom({ "new-name": renamed })
-
-    expect(resolveNoteId(notes, "old-name")).toBe("new-name")
+  test("a pre-minting title URL resolves to the note it became", () => {
+    // The whole point: /notes/Flow Engineering was a real URL before ids were
+    // minted, and it must still open the same note.
+    const notes = notesFrom({ blk_flow000000: migrated("Flow Engineering", "Flow Engineering") })
+    expect(resolveNoteId(notes, "Flow Engineering")).toBe("blk_flow000000")
   })
 
   test("an unknown id resolves to null (new-note editor path)", () => {
-    const notes = notesFrom({ "some-note": "# Some note" })
+    const notes = notesFrom({ blk_aaaaaaaaaa: "# Some note" })
     expect(resolveNoteId(notes, "brand-new-idea")).toBe(null)
   })
 
-  test("a rename chain keeps every former id resolvable", () => {
-    let content = "# Title"
-    content = recordRenameAlias({ content, oldId: "first-name" })
-    content = recordRenameAlias({ content, oldId: "second-name" })
-    const notes = notesFrom({ "third-name": content })
+  test("every former id stays resolvable when a note carries several aliases", () => {
+    const notes = notesFrom({ blk_aaaaaaaaaa: migrated("Third", "first-name", "second-name") })
 
-    expect(resolveNoteId(notes, "first-name")).toBe("third-name")
-    expect(resolveNoteId(notes, "second-name")).toBe("third-name")
-    expect(resolveNoteId(notes, "third-name")).toBe("third-name")
+    expect(resolveNoteId(notes, "first-name")).toBe("blk_aaaaaaaaaa")
+    expect(resolveNoteId(notes, "second-name")).toBe("blk_aaaaaaaaaa")
+    expect(resolveNoteId(notes, "blk_aaaaaaaaaa")).toBe("blk_aaaaaaaaaa")
   })
 
   test("a live note wins over another note's alias claim", () => {
-    // "taken" is an alias of "renamed", but a real note now exists at "taken"
-    const renamed = recordRenameAlias({ content: "# Renamed", oldId: "taken" })
     const notes = notesFrom({
-      renamed,
+      blk_aaaaaaaaaa: migrated("Renamed", "taken"),
       taken: "# The real note at this id",
     })
 

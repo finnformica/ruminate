@@ -6,13 +6,7 @@ import { atom, useAtom, useAtomValue, useSetAtom } from "jotai"
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
-import {
-  blockRevealAtom,
-  noteOutlineAtom,
-  notesAtom,
-  pinnedNotesAtom,
-  tagSearcherAtom,
-} from "../global-state"
+import { blockRevealAtom, noteOutlineAtom, pinnedNotesAtom, tagSearcherAtom } from "../global-state"
 import { useBlockResultTree, type ResultRow } from "../hooks/block-result-tree"
 import { useNoteById, useSaveNote } from "../hooks/note"
 import { useBlockSearchSource, useSearchResults } from "../hooks/search-results"
@@ -21,8 +15,9 @@ import { copyAsMarkdown } from "../utils/copy-markdown"
 import { useSearchNotes } from "../hooks/search-notes"
 import { Note } from "../schema"
 import { formatDate, formatDateDistance, toDateString } from "../utils/date"
+import { updateFrontmatterValue } from "../utils/frontmatter"
 import { getHeadings } from "../utils/headings"
-import { generateNoteId, toNoteId } from "../utils/note-id"
+import { generateNoteId } from "../utils/note-id"
 import { filterOutline } from "../utils/note-outline"
 import { pluralize } from "../utils/pluralize"
 import {
@@ -57,7 +52,6 @@ export function CommandMenu() {
   const searchNotes = useSearchNotes()
   const tagSearcher = useAtomValue(tagSearcherAtom)
   const saveNote = useSaveNote()
-  const notes = useAtomValue(notesAtom)
   const pinnedNotes = useAtomValue(pinnedNotesAtom)
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
 
@@ -688,16 +682,19 @@ export function CommandMenu() {
                     key={`Create new note "${deferredQuery}"`}
                     icon={<PlusIcon16 />}
                     onSelect={handleSelect(() => {
-                      // The typed text becomes the note's name (its filename), not
-                      // the first line of content. Fall back to a generated id if
-                      // the text has no filename-safe characters.
-                      const id = toNoteId(deferredQuery) || generateNoteId()
-
-                      // If a note with that name already exists, open it rather
-                      // than overwriting it with an empty note.
-                      if (!notes.has(id)) {
-                        saveNote({ id, content: "" })
-                      }
+                      // The typed text becomes the note's TITLE; the id is
+                      // minted and opaque (docs/page-identity-design.md). Any
+                      // text works — there is no filename charset to sanitize
+                      // against and no name collision to avoid, so a fresh
+                      // note is always a fresh note.
+                      const id = generateNoteId()
+                      saveNote({
+                        id,
+                        content: updateFrontmatterValue({
+                          content: "",
+                          properties: { title: deferredQuery.trim() || null },
+                        }),
+                      })
 
                       navigate({
                         to: "/notes/$",
@@ -765,13 +762,16 @@ function NoteItem({
   hidePinIcon?: boolean
   onOpen: (heading?: string) => void
 }) {
-  // Show the note by its filename, with its headings listed (tabbed over) as
+  // Show the note by its name, with its headings listed (tabbed over) as
   // children so you can find a note by a heading it contains. Selecting the
   // note opens it; selecting a heading opens it and highlights that heading.
   const headings = getHeadings(note.content).slice(0, NUM_VISIBLE_HEADINGS)
+  // cmdk matches on `value`, so it carries the name (what the user typed
+  // against) plus the id (still unique, and how duplicates stay distinct).
+  const itemValue = `${note.displayName} ${note.id}`
   return (
     <>
-      <CommandItem value={note.id} icon={<NoteFavicon note={note} />} onSelect={() => onOpen()}>
+      <CommandItem value={itemValue} icon={<NoteFavicon note={note} />} onSelect={() => onOpen()}>
         <span className="flex items-center gap-2 truncate">
           {!hidePinIcon && note.pinned ? (
             <PinFillIcon12 className="shrink-0 text-text-pinned" />
@@ -779,13 +779,13 @@ function NoteItem({
           {note?.frontmatter?.gist_id ? (
             <GlobeIcon16 className="shrink-0 text-border-focus" />
           ) : null}
-          <span className="truncate">{note.id}</span>
+          <span className="truncate">{note.displayName}</span>
         </span>
       </CommandItem>
       {headings.map((heading, index) => (
         <CommandItem
           key={`${note.id}::${index}`}
-          value={`${note.id} › ${heading.text}`}
+          value={`${itemValue} › ${heading.text}`}
           className="pl-9!"
           icon={<span className="text-text-tertiary">#</span>}
           onSelect={() => onOpen(heading.text)}

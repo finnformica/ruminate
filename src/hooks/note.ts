@@ -2,12 +2,11 @@ import { useAtomValue } from "jotai"
 import { selectAtom, useAtomCallback } from "jotai/utils"
 import React from "react"
 import { dateMentionsAtom, githubUserAtom, notesAtom } from "../global-state"
-import { useDeleteNoteFile, useGetNoteContents, useWriteNotes } from "../data/store"
+import { useDeleteNoteFile, useWriteNotes } from "../data/store"
 import { Note, NoteId } from "../schema"
-import { updateFrontmatterValue } from "../utils/frontmatter"
+import { parseFrontmatter, updateFrontmatterValue } from "../utils/frontmatter"
 import { deleteGist } from "../utils/gist"
-import { recordRenameAlias, resolveNoteId } from "../utils/note-alias"
-import { isValidNoteId } from "../utils/note-id"
+import { resolveNoteId } from "../utils/note-alias"
 
 const EMPTY_MENTIONS: NoteId[] = []
 
@@ -78,50 +77,44 @@ export function useSaveNote() {
   return saveNote
 }
 
-type RenameNoteResult =
-  { success: true } | { success: false; reason: "duplicate" | "invalid" | "no-op" }
-
+/**
+ * Rename a note — which, since ids are minted and opaque
+ * (docs/page-identity-design.md), is simply **setting its title**.
+ *
+ * The title travels as the projection-owned `title:` frontmatter key, so this
+ * writes one property and ingest lifts it onto the page node's `text`. Nothing
+ * else moves: the id, the URL, every deep link and every block row are
+ * untouched, and exactly one row changes, so a rename cannot clobber a
+ * concurrent edit under per-row LWW.
+ *
+ * The old world's failure modes are gone with the old world: there is no
+ * filename charset to violate and no uniqueness to collide with, because the
+ * title is no longer an identifier.
+ */
 export function useRenameNote() {
-  const getNoteContents = useGetNoteContents()
   const writeNotes = useWriteNotes()
 
   return React.useCallback(
-    (params: { oldName: string; newName: string; content: string }): RenameNoteResult => {
-      const { oldName, newName, content } = params
+    (params: { noteId: NoteId; newTitle: string; content: string }): boolean => {
+      const { noteId, newTitle, content } = params
+      if (!noteId) return false
 
-      const noteContents = getNoteContents()
+      const title = newTitle.trim()
+      const { frontmatter } = parseFrontmatter(content)
+      const current = typeof frontmatter.title === "string" ? frontmatter.title : ""
+      if (title === current) return false
 
-      // Guard against no-op renames
-      if (!oldName || !newName || oldName === newName) {
-        return { success: false, reason: "no-op" }
-      }
-
-      if (!isValidNoteId(newName)) {
-        return { success: false, reason: "invalid" }
-      }
-
-      // Prevent overwriting an existing note
-      if (noteContents[newName]) {
-        return { success: false, reason: "duplicate" }
-      }
-
-      const oldNoteExists = Object.prototype.hasOwnProperty.call(noteContents, oldName)
-
-      const updates: Record<string, string | null> = {}
-
-      // Write the renamed note and mark the old id for deletion. The old id is
-      // recorded as an alias so its URL redirects to the renamed note
-      // (src/utils/note-alias.ts) instead of opening an empty duplicate.
-      updates[newName] = oldNoteExists ? recordRenameAlias({ content, oldId: oldName }) : content
-      if (oldNoteExists) {
-        updates[oldName] = null
-      }
-
-      writeNotes(updates)
-
-      return { success: true }
+      writeNotes({
+        // An emptied title clears the key rather than storing "", so the note
+        // falls back to its content preview like any untitled note.
+        [noteId]: updateFrontmatterValue({
+          content,
+          properties: { title: title || null },
+        }),
+      })
+      return true
     },
-    [getNoteContents, writeNotes],
+    [writeNotes],
   )
 }
 

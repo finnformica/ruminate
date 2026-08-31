@@ -14,7 +14,13 @@ export type Task = {
 }
 
 export type Note = {
-  /** The markdown file path without the extension (e.g. `foo/bar.md` → `foo/bar`) */
+  /**
+   * The note's stable, opaque identity — a minted `blk_` id
+   * (docs/page-identity-design.md). It never changes, so links and URLs to a
+   * note survive every rename. Daily and weekly notes are the exception and
+   * keep their date ids (`2026-08-31`, `2026-W35`), where the date IS the
+   * identity. Not a name: use `displayName` to show a note to a human.
+   */
   id: NoteId
   /** The content of the markdown file */
   content: string
@@ -27,7 +33,11 @@ export type Note = {
   displayName: string
   /** The frontmatter of the markdown file */
   frontmatter: Record<string, unknown>
-  /** If the markdown file contains an h1 (e.g. `# title`), we use that as the title */
+  /**
+   * The note's title: the projection-owned `title:` frontmatter key (which
+   * carries the page node's `text` through the `<id>.md` seam), falling back
+   * to an h1 in the content (e.g. `# title`).
+   */
   title: string
   /** If the title contains a link (e.g. `# [title](url)`), we use that as the url */
   url: string | null

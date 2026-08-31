@@ -43,7 +43,7 @@ The **D1 shape** (`0004`), where `user_id` leads every key and index:
 ```sql
 CREATE TABLE nodes (
   user_id INTEGER NOT NULL,  -- the tenant: the server-verified GitHub id
-  id TEXT NOT NULL,          -- blk_ ids as-is; page nodes use the note id
+  id TEXT NOT NULL,          -- minted blk_ ids; date pages keep their date key
   type TEXT NOT NULL,        -- see the type registry below
   text TEXT NOT NULL,        -- marker-free content; for pages, the title
   props TEXT,                -- JSON or NULL; pages: parsed frontmatter entries; code: language

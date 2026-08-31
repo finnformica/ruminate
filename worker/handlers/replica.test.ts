@@ -20,7 +20,7 @@ import { asFakeD1, createTenantTestDriver, createTestSqlDriver } from "./sqlite-
 
 const node: NodeRow = { id: "blk_aaaaaaaaaa", type: "ul", text: "Hi", props: null, updated_at: 123 }
 const link: LinkRow = {
-  source_id: "note-a",
+  source_id: "blk_noteaaaaaa",
   destination_id: "blk_aaaaaaaaaa",
   kind: "child",
   sort_key: "a0",
@@ -35,14 +35,14 @@ describe("parseReplicaPayload", () => {
       nodes: [node],
       links: [link],
       deleteNodes: ["blk_old0000000"],
-      deleteLinks: [["note-a", "blk_old0000000", "child"]],
+      deleteLinks: [["blk_noteaaaaaa", "blk_old0000000", "child"]],
       cursor: "abc123",
     })
     expect(payload).toEqual({
       nodes: [node],
       links: [link],
       deleteNodes: ["blk_old0000000"],
-      deleteLinks: [["note-a", "blk_old0000000", "child"]],
+      deleteLinks: [["blk_noteaaaaaa", "blk_old0000000", "child"]],
       cursor: "abc123",
     })
   })
@@ -110,7 +110,7 @@ describe("planReplicaPut", () => {
         nodes: [node],
         links: [link],
         deleteNodes: ["blk_gone000000"],
-        deleteLinks: [["note-a", "blk_gone000000", "child"]],
+        deleteLinks: [["blk_noteaaaaaa", "blk_gone000000", "child"]],
         cursor: "c1",
       },
       NOW,
@@ -123,7 +123,14 @@ describe("planReplicaPut", () => {
       "INSERT INTO meta",
     ])
     expect(statements[2].params).toEqual(["blk_aaaaaaaaaa", "ul", "Hi", null, 123, null])
-    expect(statements[3].params).toEqual(["note-a", "blk_aaaaaaaaaa", "child", "a0", 123, null])
+    expect(statements[3].params).toEqual([
+      "blk_noteaaaaaa",
+      "blk_aaaaaaaaaa",
+      "child",
+      "a0",
+      123,
+      null,
+    ])
   })
 
   it("every statement names its tenant with the :tenant token, never a parameter", () => {
@@ -200,12 +207,12 @@ async function openTenant(id: number, existing?: SqlDriver): Promise<TenantDb> {
 
 describe("corpus operations over the real D1 schema", () => {
   const nodes: NodeRow[] = [
-    { id: "note-a", type: "page", text: "note-a", props: null, updated_at: 100 },
+    { id: "blk_noteaaaaaa", type: "page", text: "blk_noteaaaaaa", props: null, updated_at: 100 },
     { id: "blk_a000000000", type: "text", text: "A", props: null, updated_at: 300 },
   ]
   const links: LinkRow[] = [
     {
-      source_id: "note-a",
+      source_id: "blk_noteaaaaaa",
       destination_id: "blk_a000000000",
       kind: "child",
       sort_key: "a0",
@@ -225,8 +232,8 @@ describe("corpus operations over the real D1 schema", () => {
     const body = await corpusPullSince(tenant, 200)
     expect(body.nodes).toEqual([nodes[1]])
     expect(body.links).toEqual([])
-    expect([...body.nodeIds].sort()).toEqual(["blk_a000000000", "note-a"])
-    expect(body.linkKeys).toEqual([["note-a", "blk_a000000000", "child"]])
+    expect([...body.nodeIds].sort()).toEqual(["blk_a000000000", "blk_noteaaaaaa"])
+    expect(body.linkKeys).toEqual([["blk_noteaaaaaa", "blk_a000000000", "child"]])
     expect(body.cursor).toBe("301")
   })
 
@@ -324,12 +331,12 @@ describe("corpus operations over the real D1 schema", () => {
 describe("soft deletes at the replica", () => {
   const rows = {
     nodes: [
-      { id: "note-a", type: "page", text: "note-a", props: null, updated_at: 100 },
+      { id: "blk_noteaaaaaa", type: "page", text: "blk_noteaaaaaa", props: null, updated_at: 100 },
       { id: "blk_a000000000", type: "text", text: "A", props: null, updated_at: 100 },
     ],
     links: [
       {
-        source_id: "note-a",
+        source_id: "blk_noteaaaaaa",
         destination_id: "blk_a000000000",
         kind: "child",
         sort_key: "a0",
@@ -352,7 +359,7 @@ describe("soft deletes at the replica", () => {
     // The row still EXISTS, so it stays in the key lists — no purge is implied.
     const since = await corpusPullSince(tenant, 150)
     expect(since.nodes.map((row) => row.id)).toEqual(["blk_a000000000"])
-    expect([...since.nodeIds].sort()).toEqual(["blk_a000000000", "note-a"])
+    expect([...since.nodeIds].sort()).toEqual(["blk_a000000000", "blk_noteaaaaaa"])
     // …and the link to it is retained, untouched — though a link into a
     // tombstoned node is not part of the graph anyone can see, so it stops
     // counting alongside the node.
@@ -504,12 +511,12 @@ describe("tenant scoping — the adversarial suite", () => {
   })
   const aliceRows = {
     nodes: [
-      { id: "note-a", type: "page", text: "alice's note", props: null, updated_at: 100 },
+      { id: "blk_noteaaaaaa", type: "page", text: "alice's note", props: null, updated_at: 100 },
       { id: "blk_secret0001", type: "text", text: "alice's secret", props: null, updated_at: 100 },
     ],
     links: [
       {
-        source_id: "note-a",
+        source_id: "blk_noteaaaaaa",
         destination_id: "blk_secret0001",
         kind: "child",
         sort_key: "a0",
@@ -586,7 +593,13 @@ describe("tenant scoping — the adversarial suite", () => {
     const { env, driver } = await seededEnv()
     await push(env, "bob-token", {
       nodes: [
-        { id: "note-a", type: "page", text: "bob's overwrite", props: null, updated_at: 999999 },
+        {
+          id: "blk_noteaaaaaa",
+          type: "page",
+          text: "bob's overwrite",
+          props: null,
+          updated_at: 999999,
+        },
         { id: "blk_secret0001", type: "text", text: "bob's", props: null, updated_at: 999999 },
       ],
       links: [],
@@ -597,7 +610,7 @@ describe("tenant scoping — the adversarial suite", () => {
     expect(alice.nodes).toEqual(aliceRows.nodes)
     // Both tenants now hold the same id — proof the composite key is per-tenant.
     const rows = await driver.exec(
-      "SELECT user_id, text FROM nodes WHERE id = 'note-a' ORDER BY user_id",
+      "SELECT user_id, text FROM nodes WHERE id = 'blk_noteaaaaaa' ORDER BY user_id",
     )
     expect(rows).toEqual([
       { user_id: 111, text: "alice's note" },
@@ -614,7 +627,7 @@ describe("tenant scoping — the adversarial suite", () => {
     await push(env, "bob-token", {
       nodes: [],
       links: [],
-      deleteNodes: ["note-a", "blk_secret0001"],
+      deleteNodes: ["blk_noteaaaaaa", "blk_secret0001"],
     })
     const alive = await driver.exec(
       "SELECT user_id, COUNT(*) AS n FROM nodes WHERE deleted_at IS NULL GROUP BY user_id",

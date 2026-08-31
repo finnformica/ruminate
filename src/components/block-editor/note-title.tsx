@@ -13,17 +13,22 @@ import { Hash } from "./hash"
  * - Enter (or a click) edits it; Escape / Enter / blur commit or revert.
  * - Arrow-down returns focus to the editor (`onArrowDown`).
  *
- * `onRename` returns whether the rename succeeded so the field can revert on
- * failure (invalid name, duplicate).
+ * The field edits the note's **title** — data on the page node, not its id
+ * (docs/page-identity-design.md) — so committing one changes a single property
+ * and can neither break a link nor collide with another note.
+ *
+ * `onRename` returns whether the title actually changed, so the field can
+ * revert when it did not.
  */
 export function NoteTitle({
-  noteId,
+  title,
   onRename,
   onArrowDown,
   onCreateBelow,
   focusSignal,
 }: {
-  noteId: string
+  /** The note's current title; empty means untitled. */
+  title: string
   onRename: (name: string) => boolean
   /**
    * Down-arrow returns focus to the editor below. The mode mirrors the title's
@@ -37,17 +42,19 @@ export function NoteTitle({
   /** Bump to select the title from the keyboard (arrow-up past the first block). */
   focusSignal?: number
 }) {
-  const [value, setValue] = useState(noteId)
+  const [value, setValue] = useState(title)
   const [editing, setEditing] = useState(false)
   const [selected, setSelected] = useState(false)
   const headingRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Reset the field when navigating to a different note (no effect needed).
-  const [prevId, setPrevId] = useState(noteId)
-  if (noteId !== prevId) {
-    setPrevId(noteId)
-    setValue(noteId)
+  // Reset the field when the note's title changes underneath it — navigating
+  // to another note, or a retitle arriving from another device (no effect
+  // needed).
+  const [prevTitle, setPrevTitle] = useState(title)
+  if (title !== prevTitle) {
+    setPrevTitle(title)
+    setValue(title)
     setEditing(false)
     setSelected(false)
   }
@@ -73,11 +80,13 @@ export function NoteTitle({
 
   const commit = () => {
     const next = value.trim()
-    if (!next || next === noteId) {
-      setValue(noteId)
+    if (next === title) {
+      setValue(title)
       return
     }
-    if (!onRename(next)) setValue(noteId)
+    // An emptied title is a real edit (the note becomes untitled), unlike the
+    // old world where a note had to be called something to have a filename.
+    if (!onRename(next)) setValue(title)
   }
 
   return (
@@ -106,7 +115,7 @@ export function NoteTitle({
               setSelected(true)
             } else if (event.key === "Escape") {
               event.preventDefault()
-              setValue(noteId)
+              setValue(title)
               setEditing(false)
               setSelected(true)
             } else if (event.key === "ArrowDown") {

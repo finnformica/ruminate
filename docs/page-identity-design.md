@@ -1,10 +1,32 @@
 # Page identity: minted ids vs title-keyed pages
 
-Status: **design only** (2026-08-31). Extends
+Status: **implemented** (2026-08-31) as option (a), under the Amendments at the
+end of this document — ordinary `blk_` ids, no wikilink machinery. Extends
 [graph-schema-v2.md](./graph-schema-v2.md) and
 [graph-storage.md](./graph-storage.md); mirrors the migration discipline of
-[multi-tenant-design.md](./multi-tenant-design.md) §6. Nothing here is
-implemented.
+[multi-tenant-design.md](./multi-tenant-design.md) §6.
+
+Sections §3 (wikilink semantics) and the parts of §4–§5 that depend on it are
+kept for the record but describe machinery that was **never built**: wikilinks
+were removed before this landed, so there are no name-keyed references to
+resolve. What shipped is §2(a) plus the date carve-out, the alias-based URL
+compatibility of §5.5, and the migration of §5.3 — with one deliberate
+divergence, noted there.
+
+## File map (as built)
+
+| Concern                                | Where                                                                                                                       |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Minting, date carve-out, title seam    | `src/data/page-identity.ts` (+ `page-identity.test.ts`)                                                                     |
+| Ingest lifts / rollup injects `title:` | `src/data/graph.ts` (`docToGraphParts`, `rollup`)                                                                           |
+| The migration (`data_version` 2)       | `src/data/data-version.ts` (`planDataVersion2`, `ensureDataVersion`); shared spec in `data-version-conformance.ts`          |
+| Tenant-scoped half of the write        | `worker/tenancy-db.ts` (`tenantCorpus`)                                                                                     |
+| New notes mint `blk_` ids              | `src/utils/note-id.ts` (`generateNoteId`)                                                                                   |
+| Rename = set the title                 | `src/hooks/note.ts` (`useRenameNote`), `src/components/block-editor/note-title.tsx`, `src/components/note-actions-menu.tsx` |
+| Old-URL resolution                     | `src/utils/note-alias.ts` (`resolveNoteId`), route redirect in `src/routes/_appRoot.notes_.$.tsx`                           |
+| Title in the display ladder            | `src/utils/parse-note.ts`; `title` reserved in `src/utils/frontmatter.ts`                                                   |
+| Name (not id) shown to the user        | `nav-items.tsx`, `note-list.tsx`, `command-menu.tsx`, `search-results.tsx`, the note route header                           |
+| Gist filenames                         | `src/utils/gist.ts`                                                                                                         |
 
 The finding, verbatim: _"the pages do not have their own id and just use the
 text of the page name."_
@@ -211,24 +233,40 @@ that ladder.
 2. **Projection title key (additive).** Rollup emits `title:`; ingest lifts
    it; `parseNote` prefers it. For existing pages the emitted title equals the
    id, so rollup-equivalence holds trivially. _Revert: stop emitting._
-3. **The transform (data_version 2), DO-first.** Minting is random, so the two
-   stores cannot independently agree on ids — **the DO is the only minter.**
-   In one transaction per tenant: for each `type='page'` node whose id is not
-   a date/week literal and not already `pg_`-prefixed — mint `pg_<fresh>`;
-   insert the new node row with `text` = the old id (the name becomes the
-   title) and `props` carried over; repoint every `link` row
-   (`source_id`/`destination_id`); delete the old row; stamp fresh
-   `updated_at` on every touched row; set `data_version = 2`. Wikilink texts
-   are **not** touched — they are names, and names resolve (§3).
-4. **Client adoption by version fence.** The status/pull responses carry
-   `data_version`; pushes carry the client's. A mismatched push is refused
-   (409) — the client then full-pulls (the existing
-   `isReplicaDrasticallyBehind`-style repair posture), re-keys any unsent
-   note-level edits through name→id resolution, and re-pushes. The window is
-   the push debounce plus offline time, already bounded by the keepalive
-   flush (docs/graph-storage.md, replication section). A local store that
-   boots on `data_version 1` never transforms itself: it wipes and
-   full-pulls.
+3. **The transform (data_version 2).** In one transaction per corpus: for each
+   live `type='page'` node whose id is not a date/week literal and not already
+   minted — mint a fresh `blk_` id; insert the new node row with `text` = the
+   old id (the name becomes the title) and `props` carried over plus the old
+   id appended to `aliases`; repoint every `link` row
+   (`source_id`/`destination_id`); tombstone the old rows; stamp fresh
+   `updated_at` on every touched row; set `data_version = 2`.
+
+   **Divergence from the plan above: the mint is derived, not random, and
+   every engine runs it.** The original design made the DO the only minter
+   precisely because random ids cannot be agreed on independently — but that
+   needed a version fence, a 409 push-refusal path and a client re-key, none
+   of which the shared `ensureCorpusSchema` ladder has. Deriving the id from
+   the old one (`derivePageId`, a 32-bit-only hash so browsers, workerd and
+   node agree bit-for-bit) removes the problem instead of coordinating around
+   it: the browser store and the D1 partition each transform themselves and
+   compute the _identical_ id, which is exactly the convergence property
+   version 1 already documents — whichever row wins the per-row LWW race, the
+   winning content is the same.
+
+   Because the re-key is expressed as upserts plus tombstones (nothing is
+   hard-deleted), it replicates like any other edit, and a partial failure is
+   impossible: the whole plan is one atomic batch, so a corpus is either fully
+   migrated or untouched.
+
+4. **The residual window, honestly.** A client still running pre-migration
+   code can push an edit to a page under its old id after another device has
+   migrated it, which resurrects that page as a duplicate. Two things bound
+   it: an _unedited_ old row loses LWW to the newer tombstone, so only an
+   actual edit resurrects anything; and the app is one SPA, so that client
+   migrates itself (to the same ids) on its next load. In a single-tenant
+   corpus with a re-seedable replica this was judged acceptable against the
+   cost of the fence. It is the one place this migration is weaker than the
+   original design.
 5. **URL backward compatibility, permanent.** Name-shaped `/notes/<name>`
    URLs resolve through the index forever (titles first, aliases second) —
    old bookmarks, old gists' back-references, and browser history keep
