@@ -47,6 +47,10 @@ function InlineMarkdown({ content }: { content: string }) {
  * Renders a block's content, resolving `((block-ref))` transclusions live from
  * the doc — so editing the source block updates every reference. A cycle guard
  * (`visited`) prevents infinite recursion.
+ *
+ * `doc` is optional: outside the editor (search results, previews) there is no
+ * parsed document to resolve against, so references render as their literal
+ * token in chrome ink — unresolved, but not flagged as broken.
  */
 export function BlockContent({
   content,
@@ -54,7 +58,7 @@ export function BlockContent({
   visited,
 }: {
   content: string
-  doc: BlockDoc
+  doc?: BlockDoc
   visited?: Set<string>
 }) {
   const seen = visited ?? new Set<string>()
@@ -69,7 +73,7 @@ export function BlockContent({
       segments.push(<InlineMarkdown key={key++} content={content.slice(cursor, match.index)} />)
     }
     const refId = match[1]
-    const target = doc.blocks[refId]
+    const target = doc?.blocks[refId]
     if (target && !seen.has(refId)) {
       const nextSeen = new Set(seen)
       nextSeen.add(refId)
@@ -81,9 +85,10 @@ export function BlockContent({
         </span>,
       )
     } else {
-      // Broken or cyclic reference — show it literally, flagged.
+      // Broken or cyclic reference — show it literally, flagged. With no doc
+      // to resolve against, nothing is broken: the token is just unresolved.
       segments.push(
-        <span key={key++} className="text-text-danger">
+        <span key={key++} className={doc ? "text-text-danger" : "text-text-tertiary"}>
           (({refId}))
         </span>,
       )

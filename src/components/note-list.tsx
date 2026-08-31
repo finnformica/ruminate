@@ -1,11 +1,12 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useAtom } from "jotai"
-import React, { useMemo, useState } from "react"
+import React, { useState } from "react"
 import { useInView } from "react-intersection-observer"
 import { useDebounce } from "use-debounce"
 import { noteListViewAtom } from "../global-state"
+import { useBlockResultTree } from "../hooks/block-result-tree"
 import { useListKeyboardNav } from "../hooks/list-keyboard-nav"
-import { useSearchNotes } from "../hooks/search-notes"
+import { useBlockSearchSource, useSearchResults } from "../hooks/search-results"
 import { cx } from "../utils/cx"
 import { parseQuery } from "../utils/search"
 import { formatNumber, pluralize } from "../utils/pluralize"
@@ -28,6 +29,7 @@ import { NoteFavicon } from "./note-favicon"
 import { NotePreviewCard } from "./note-preview-card"
 import { PillButton } from "./pill-button"
 import { SearchInput } from "./search-input"
+import { SearchResults, blockHitNavigation } from "./search-results"
 
 type View = "grid" | "list"
 
@@ -56,38 +58,76 @@ export function NoteList({
   onQueryChange,
   enableKeyboardNav = false,
 }: NoteListProps) {
-  const searchNotes = useSearchNotes()
   const navigate = useNavigate()
   // Grid/list layout is a local preference, persisted outside the URL.
   const [view, setView] = useAtom(noteListViewAtom)
 
   const [deferredQuery] = useDebounce(query, 150)
 
-  const noteResults = useMemo(() => {
-    return searchNotes(`${baseQuery} ${deferredQuery}`)
-  }, [searchNotes, baseQuery, deferredQuery])
+  // A query with text (or a block-scoped `type:`) resolves to BLOCKS: the
+  // results are the matching blocks themselves, at any depth. A query that
+  // only names notes (`tag:`, a date, nothing at all) keeps the note listing —
+  // see `resolvesToBlocks`.
+  const source = useBlockSearchSource()
+  const { mode, hits, notes: noteResults } = useSearchResults(`${baseQuery} ${deferredQuery}`)
+  const showBlocks = mode === "blocks"
 
   const [numVisibleItems, setNumVisibleItems] = useState(initialVisibleItems)
 
-  // The rows the keyboard highlight roves over (both views render this slice).
+  // Block results are a tree: `rows` is the visible flattening, expanded rows
+  // resolving their children lazily (and once) through the data source.
+  const { rows, expand, collapse, toggle } = useBlockResultTree({
+    hits,
+    source,
+    limit: numVisibleItems,
+    resetKey: deferredQuery,
+  })
+
+  // The rows the keyboard highlight roves over.
   const visibleResults = noteResults.slice(0, numVisibleItems)
-  const { activeIndex, containerRef } = useListKeyboardNav({
+  const totalResults = showBlocks ? hits.length : noteResults.length
+  const { activeIndex, setActiveIndex, containerRef } = useListKeyboardNav({
     enabled: enableKeyboardNav,
-    count: visibleResults.length,
+    count: showBlocks ? rows.length : visibleResults.length,
     resetKey: deferredQuery,
     onActivate: (index) => {
+      if (showBlocks) {
+        const row = rows[index]
+        if (row) navigate(blockHitNavigation(row.hit))
+        return
+      }
       const note = noteResults[index]
       if (note) {
         navigate({ to: "/notes/$", params: { _splat: note.id }, search: { query: undefined } })
       }
     },
+    // `→` opens a result in place; `←` closes it, or — on a row that is
+    // already closed — steps out to the parent it was revealed under.
+    onExpand: showBlocks
+      ? (index) => {
+          const row = rows[index]
+          if (row) expand(row)
+        }
+      : undefined,
+    onCollapse: showBlocks
+      ? (index) => {
+          const row = rows[index]
+          if (!row) return
+          if (row.expanded) {
+            collapse(row)
+            return
+          }
+          const parentIndex = rows.findIndex((other) => other.key === row.parentKey)
+          if (parentIndex !== -1) setActiveIndex(parentIndex)
+        }
+      : undefined,
   })
 
   const [bottomRef, bottomInView] = useInView()
 
   const loadMore = React.useCallback(() => {
-    setNumVisibleItems((num) => Math.min(num + 10, noteResults.length))
-  }, [noteResults.length])
+    setNumVisibleItems((num) => Math.min(num + 10, totalResults))
+  }, [totalResults])
 
   React.useEffect(() => {
     if (bottomInView) {
@@ -180,37 +220,41 @@ export function NoteList({
                 navigate({ to: `/notes/${noteResults[randomIndex].id}` })
               }}
             />
-            <DropdownMenu>
-              <DropdownMenu.Trigger
-                render={
-                  <IconButton
-                    aria-label="View"
-                    className="h-10 w-10 shrink-0 rounded-lg bg-bg-secondary hover:bg-bg-secondary-hover! data-[popup-open]:bg-bg-secondary-hover! active:bg-bg-secondary-active! coarse:h-12 coarse:w-12"
-                  >
-                    {viewIcons[view]}
-                  </IconButton>
-                }
-              />
-              <DropdownMenu.Content align="end" width={160}>
-                <DropdownMenu.Group>
-                  <DropdownMenu.GroupLabel>View as</DropdownMenu.GroupLabel>
-                  <DropdownMenu.Item
-                    icon={<GridIcon16 />}
-                    onClick={() => setView("grid")}
-                    selected={view === "grid"}
-                  >
-                    Grid
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item
-                    icon={<ListIcon16 />}
-                    onClick={() => setView("list")}
-                    selected={view === "list"}
-                  >
-                    List
-                  </DropdownMenu.Item>
-                </DropdownMenu.Group>
-              </DropdownMenu.Content>
-            </DropdownMenu>
+            {/* Grid/list is how the note LISTING is laid out; block results
+                have their own shape, so the control retires while they show. */}
+            {showBlocks ? null : (
+              <DropdownMenu>
+                <DropdownMenu.Trigger
+                  render={
+                    <IconButton
+                      aria-label="View"
+                      className="h-10 w-10 shrink-0 rounded-lg bg-bg-secondary hover:bg-bg-secondary-hover! data-[popup-open]:bg-bg-secondary-hover! active:bg-bg-secondary-active! coarse:h-12 coarse:w-12"
+                    >
+                      {viewIcons[view]}
+                    </IconButton>
+                  }
+                />
+                <DropdownMenu.Content align="end" width={160}>
+                  <DropdownMenu.Group>
+                    <DropdownMenu.GroupLabel>View as</DropdownMenu.GroupLabel>
+                    <DropdownMenu.Item
+                      icon={<GridIcon16 />}
+                      onClick={() => setView("grid")}
+                      selected={view === "grid"}
+                    >
+                      Grid
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                      icon={<ListIcon16 />}
+                      onClick={() => setView("list")}
+                      selected={view === "list"}
+                    >
+                      List
+                    </DropdownMenu.Item>
+                  </DropdownMenu.Group>
+                </DropdownMenu.Content>
+              </DropdownMenu>
+            )}
           </div>
           {sortedTagFrequencies.length > 0 || tagFilters.length > 0 || deferredQuery ? (
             <div className="flex flex-col gap-3">
@@ -301,13 +345,27 @@ export function NoteList({
                 ) : null}
               </div>
               {deferredQuery ? (
-                <div className="text-sm text-text-secondary leading-4">
-                  {pluralize(noteResults.length, "result")}
+                <div data-testid="result-count" className="text-sm text-text-secondary leading-4">
+                  {/* Counts the MATCHED blocks. Children revealed by expanding
+                      a result are context, not matches, so they never inflate
+                      it — which is what makes the number checkable. */}
+                  {showBlocks
+                    ? `${pluralize(totalResults, "matching block")} in ${pluralize(noteResults.length, "note")}`
+                    : pluralize(totalResults, "result")}
                 </div>
               ) : null}
             </div>
           ) : null}
-          {view === "grid" ? (
+          {showBlocks ? (
+            <SearchResults
+              variant="page"
+              rows={rows}
+              activeIndex={activeIndex}
+              onActivate={(hit) => navigate(blockHitNavigation(hit))}
+              onToggle={toggle}
+            />
+          ) : null}
+          {!showBlocks && view === "grid" ? (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-4">
               {visibleResults.map(({ id }, index) => (
                 <div
@@ -325,7 +383,7 @@ export function NoteList({
               ))}
             </div>
           ) : null}
-          {view === "list" ? (
+          {!showBlocks && view === "list" ? (
             <ul className="flex flex-col gap-0.5">
               {visibleResults.map((note, index) => {
                 return (
@@ -363,7 +421,7 @@ export function NoteList({
           ) : null}
         </div>
 
-        {noteResults.length > numVisibleItems ? (
+        {totalResults > numVisibleItems ? (
           <Button ref={bottomRef} className="mt-4 w-full" onClick={loadMore}>
             Load more
           </Button>

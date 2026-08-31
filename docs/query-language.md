@@ -27,9 +27,20 @@ Search your notes with Ruminate's [GitHub-style](https://docs.github.com/en/sear
 
 Unrecognized qualifier keys are assumed to be [frontmatter](/docs/metadata.md) keys. For example, `read:true` matches notes with `read: true` in their frontmatter.
 
+## Results are blocks
+
+Any query with text in it — or a block-scoped `type:` (below) — resolves at _block_ granularity: the results are the individual blocks that match, at any depth, each shown with the note and ancestor path it came from. Searching `nvidia` returns the heading three levels down that says "nvidia", not just the file it lives in.
+
+- **Expand a result in place** with the chevron or <kbd>→</kbd> to see the blocks inside it; <kbd>←</kbd> closes it again (and, from a revealed child, jumps to the block it sits under). Only the level you open is fetched, and it's remembered.
+- <kbd>↵</kbd> **on a highlighted result** opens its note, zoomed to that block.
+- <kbd>↵</kbd> **on the query itself** in <kbd>⌘</kbd> <kbd>K</kbd> (the "see all …" row) opens the full results view. That view is just a URL — `/?query=type:todo+tag:work` — so any filter is bookmarkable and back/forward behave.
+- The result count is the number of **matched blocks**, alongside how many notes they live in. Blocks revealed by expanding are context, not matches, so they never change the count.
+
+A query that names only notes — `tag:recipe` on its own, a date, a bare frontmatter qualifier, or an empty query — still lists notes: every block of every tagged note isn't a search result, it's your corpus.
+
 ## Block types
 
-`type:` with a block-type value resolves the query at _block_ granularity: results are the individual blocks that match, and the notes list shows the notes containing them. For example, `type:todo` finds every unchecked checkbox in your notes.
+`type:` with a block-type value resolves the query at _block_ granularity. For example, `type:todo` finds every unchecked checkbox in your notes.
 
 | Value           | Matches                                   |
 | :-------------- | :---------------------------------------- |
