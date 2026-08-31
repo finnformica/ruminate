@@ -1,8 +1,16 @@
+// tenant-guard: exempt — a spec that seeds and inspects raw storage on
+// purpose, tombstones included; the discipline it verifies lives in the code
+// under test, not in its fixtures.
 import { describe, expect, it } from "vitest"
 import migration0001 from "../../migrations/0001_init.sql?raw"
 import migration0002 from "../../migrations/0002_nodes.sql?raw"
 import { ensureCorpusSchema } from "./corpus-schema"
-import { CURRENT_DATA_VERSION, DATA_VERSION_KEY, ensureDataVersion } from "./data-version"
+import {
+  CURRENT_DATA_VERSION,
+  DATA_VERSION_KEY,
+  ensureDataVersion,
+  singleTenantCorpus,
+} from "./data-version"
 import type { SqlDriver } from "./sql-driver"
 
 /**
@@ -10,10 +18,11 @@ import type { SqlDriver } from "./sql-driver"
  * real SQL engine behind the `SqlDriver` seam — the same
  * conformance-suite pattern as `note-store-conformance.ts`. Two spec files
  * drive it: `data-version.test.ts` on the app store's `node:sqlite` driver,
- * and `worker/handlers/data-version.test.ts` on the worker-side test driver
- * that stands in for the corpus Durable Object's engine — so the transform
- * every engine's open runs (`ensureCorpusSchema → ensureDataVersion`) is
- * pinned on both sides of the sync.
+ * and `worker/handlers/data-version.test.ts` on the worker-side test driver —
+ * so the transform is pinned on both sides of the sync. The tenant-scoped
+ * `CorpusAccess` the Worker uses over the column-tenanted D1 shape has its own
+ * suite in `worker/tenancy-db.test.ts`, where what matters is that the
+ * transform stays inside one tenant.
  */
 export function describeDataVersionConformance(name: string, makeDriver: () => SqlDriver) {
   const migrations = { init: migration0001, nodes: migration0002 }
@@ -54,7 +63,7 @@ export function describeDataVersionConformance(name: string, makeDriver: () => S
     it("rewrites legacy rows once, stamps data_version, and refreshes updated_at (LWW-safe)", async () => {
       const driver = await seededDriver()
       const before = Date.now()
-      await ensureDataVersion(driver)
+      await ensureDataVersion(singleTenantCorpus(driver))
 
       const rows = await driver.exec(
         "SELECT id, type, text, props, updated_at FROM nodes ORDER BY id",
@@ -78,9 +87,9 @@ export function describeDataVersionConformance(name: string, makeDriver: () => S
 
     it("is idempotent: a second run changes nothing", async () => {
       const driver = await seededDriver()
-      await ensureDataVersion(driver)
+      await ensureDataVersion(singleTenantCorpus(driver))
       const first = await driver.exec("SELECT * FROM nodes ORDER BY id")
-      await ensureDataVersion(driver)
+      await ensureDataVersion(singleTenantCorpus(driver))
       expect(await driver.exec("SELECT * FROM nodes ORDER BY id")).toEqual(first)
     })
 
@@ -123,13 +132,24 @@ export function describeDataVersionConformance(name: string, makeDriver: () => S
       )
     })
 
+    it("leaves tombstoned rows alone (a deleted row has nothing to normalize)", async () => {
+      const driver = await seededDriver()
+      await driver.batch([
+        { sql: "UPDATE nodes SET deleted_at = 500 WHERE id = 'blk_a'", params: [] },
+      ])
+      await ensureDataVersion(singleTenantCorpus(driver))
+      expect(
+        await driver.exec("SELECT type, text, updated_at FROM nodes WHERE id = 'blk_a'"),
+      ).toEqual([{ type: "text", text: "[] buy milk", updated_at: 100 }])
+    })
+
     it("is transactional: a failed batch leaves rows and version untouched", async () => {
       const driver = await seededDriver()
       const failing: SqlDriver = {
         ...driver,
         batch: () => Promise.reject(new Error("boom")),
       }
-      await expect(ensureDataVersion(failing)).rejects.toThrow("boom")
+      await expect(ensureDataVersion(singleTenantCorpus(failing))).rejects.toThrow("boom")
       expect(await driver.exec("SELECT type FROM nodes WHERE id = 'blk_a'")).toEqual([
         { type: "text" },
       ])
@@ -137,7 +157,7 @@ export function describeDataVersionConformance(name: string, makeDriver: () => S
         [],
       )
       // The real (atomic) batch then completes the transform in one piece.
-      await ensureDataVersion(driver)
+      await ensureDataVersion(singleTenantCorpus(driver))
       expect(await driver.exec("SELECT type FROM nodes WHERE id = 'blk_a'")).toEqual([
         { type: "todo" },
       ])

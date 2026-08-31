@@ -1,5 +1,5 @@
 // Test-only engine for the worker suites: a `SqlDriver` over `node:sqlite`,
-// plus a D1-shaped facade over it.
+// plus a D1-shaped facade over it and the real corpus schema on top.
 //
 // This deliberately duplicates the *loading* trick of
 // `src/data/sql-node-test-driver.ts` instead of importing it: that module has
@@ -8,6 +8,10 @@
 // the minimal surface is hand-typed here, the same pattern `replica.test.ts`
 // has always used.
 
+import migration0001 from "../../migrations/0001_init.sql?raw"
+import migration0002 from "../../migrations/0002_nodes.sql?raw"
+import migration0004 from "../../migrations/0004_tenant_columns.sql?raw"
+import { ensureCorpusSchema } from "../../src/data/corpus-schema"
 import type { SqlDriver, SqlValue } from "../../src/data/sql-driver"
 
 interface SqliteStatement {
@@ -58,10 +62,26 @@ export function createTestSqlDriver(): SqlDriver {
 }
 
 /**
+ * A database in the **exact shape production D1 is in**: the real 0001 + 0002
+ * + 0004 files, applied by the shared ladder in its `"columns"` mode. Nothing
+ * in the worker suites hand-writes corpus DDL, so a schema change that would
+ * break the deployed database breaks the tests first.
+ */
+export async function createTenantTestDriver(): Promise<SqlDriver> {
+  const driver = createTestSqlDriver()
+  await ensureCorpusSchema(
+    driver,
+    { init: migration0001, nodes: migration0002, tenantColumns: migration0004 },
+    "columns",
+  )
+  return driver
+}
+
+/**
  * Wrap a `SqlDriver` in just enough of the `D1Database` surface for
  * `createD1SqlDriver` (worker/d1-sql-driver.ts) to run against it — so tests
  * drive the exact production code path (`requireSession` → `resolveTenancy`,
- * the migration export) with a real SQL engine behind the fake binding.
+ * the tenant data path) with a real SQL engine behind the fake binding.
  */
 export function asFakeD1(driver: SqlDriver): D1Database {
   interface FakeStatement {

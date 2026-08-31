@@ -201,7 +201,7 @@ describe("database mode saves", () => {
     expect(diff.deleteNodes).toEqual([])
   })
 
-  it("a delete removes the note's rows and reports the delete diff", async () => {
+  it("a delete tombstones the note's rows and pushes the tombstones", async () => {
     const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
@@ -211,8 +211,13 @@ describe("database mode saves", () => {
 
     expect(await store.getNote("note-a")).toBeNull()
     expect(files()).toEqual({})
+    // Deleted rows travel as ordinary rows carrying `deleted_at` — that is how
+    // the delete reaches another device — and they all share one stamp.
     const diff = calls.changes[0].diff
-    expect(diff.deleteNodes.sort()).toEqual(["blk_a000000000", "note-a"])
+    expect(diff.deleteNodes).toEqual([])
+    const tombstoned = diff.nodes.filter((node) => node.deleted_at !== undefined)
+    expect(tombstoned.map((node) => node.id).sort()).toEqual(["blk_a000000000", "note-a"])
+    expect(new Set(tombstoned.map((node) => node.deleted_at)).size).toBe(1)
   })
 
   it("non-note file writes are dropped (nothing else lives in the graph)", async () => {

@@ -18,9 +18,12 @@
       "/api/admin/*",
     ],
   },
-  // The control-plane database: users + allowlist (docs/multi-tenant-design.md
-  // §3), plus the legacy pre-multi-tenant corpus rows until the tenant-#1
-  // migration has soaked. Migrations live in ./migrations and are applied with
+  // The one database: the control plane (users + allowlist,
+  // docs/multi-tenant-design.md §3) AND every user's corpus, scoped by the
+  // `user_id` column (migrations/0004_tenant_columns.sql). Only
+  // worker/tenancy-db.ts may touch this binding — `npm run check:queries`
+  // fails the build otherwise. Migrations live in ./migrations and are applied
+  // with
   //   npx wrangler d1 migrations apply ruminate --local   (dev)
   //   npx wrangler d1 migrations apply ruminate --remote  (production)
   "d1_databases": [
@@ -31,18 +34,17 @@
       "migrations_dir": "./migrations",
     },
   ],
-  // One SQLite-backed Durable Object per user holds that user's corpus
-  // (docs/multi-tenant-design.md §4; worker/corpus-do.ts). Wrangler has no SQL
-  // migration runner for DOs — the class applies the same ./migrations ladder
-  // itself in its constructor (src/data/corpus-schema.ts).
+  // The RETIRING per-user corpus Durable Object (worker/corpus-do.ts), kept in
+  // this release only so the rows inside each live object can be imported back
+  // into D1 — a `deleted_classes` migration tag deletes an object's storage
+  // along with its class, so the class must outlive the import. Deploy-day
+  // order and the follow-up that adds
+  //   { "tag": "v2", "deleted_classes": ["UserCorpus"] }
+  // (and deletes the class) are in docs/multi-tenant-design.md.
   "durable_objects": {
     "bindings": [{ "name": "CORPUS", "class_name": "UserCorpus" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserCorpus"] }],
-  // Lets the DO import the ./migrations/*.sql files as strings — the worker
-  // bundle's equivalent of the Vite `?raw` import the local store uses on the
-  // very same files.
-  "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": true },

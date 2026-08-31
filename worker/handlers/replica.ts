@@ -1,12 +1,11 @@
-// Replica API — schema v2 rows, one corpus per user (docs/graph-schema-v2.md,
+// Replica API — schema v3 rows, one corpus per user (docs/graph-schema-v2.md,
 // docs/graph-storage.md, docs/multi-tenant-design.md).
 //
 // The client pushes row-level diffs of its node/link graph (produced by the
 // local store's ingest in `src/data/sql-note-store.ts`, batched by
 // `src/data/replica-sync.ts`) and pulls rows back out (full or since-cursor),
-// with per-row last-writer-wins on `updated_at`. Each user's corpus lives in
-// the private SQLite database of their `UserCorpus` Durable Object
-// (`worker/corpus-do.ts`); this handler is auth + dispatch.
+// with per-row last-writer-wins on `updated_at`. Every user's corpus lives in
+// one D1 database, in the rows whose `user_id` is theirs.
 //
 // Routes (wired in worker/index.ts under /api/replica/*):
 //   PUT /api/replica/notes  — batch row upserts + deletes, one atomic batch
@@ -14,8 +13,8 @@
 //   GET /api/replica/status — row counts + schema_version + replica_cursor
 //
 // The wire format, validation, and SQL planning live in `replica-payload.ts`
-// (shared with the client); the queries themselves run inside the DO via the
-// engine-agnostic `replica-corpus.ts`.
+// (shared with the client); the queries run through `replica-corpus.ts`
+// against a `TenantDb`.
 //
 // AUTH & TENANCY: `requireSession` verifies identity exactly as it always has
 // — the `gh_refresh` HttpOnly cookie set by /github-auth (SameSite=Lax blocks
@@ -25,18 +24,29 @@
 // allowlist tables per SIGNUP_MODE, with ALLOWED_GITHUB_ID as the fail-closed
 // bootstrap), and names the tenant.
 //
-// TENANT-ADDRESSING INVARIANT: the corpus Durable Object is addressed ONLY by
-// the server-verified GitHub id — `env.CORPUS.getByName(String(verified.id))`
-// below is the single place a tenant address is minted, and its input comes
-// exclusively from GitHub's response to OUR token check. No path segment,
-// query param, header, or body field ever reaches it, so a client cannot name
-// a tenant; it can only *be* one. (Pinned by tests in replica.test.ts.)
+// TENANT-SCOPING INVARIANT: the only handle this file hands to corpus code is
+// `forTenant(corpusDriver(env), session)` — minted from the identity GitHub
+// returned for OUR token check, and from nothing else. No path segment, query
+// param, header, or body field reaches it, so a client cannot name a tenant;
+// it can only *be* one. Under column-scoped tenancy that mint is backed by a
+// runtime guard: `TenantDb` refuses any statement that does not carry
+// `user_id` + `:tenant` (worker/tenancy-db.ts). Both halves are pinned by the
+// adversarial tests in replica.test.ts.
 
+import { ensureDataVersion } from "../../src/data/data-version"
 import type { UserCorpus } from "../corpus-do"
-import { createD1SqlDriver } from "../d1-sql-driver"
 import { readRefreshCookie } from "../github-cookie"
+import {
+  controlPlaneDriver,
+  corpusDriver,
+  ensureTenantMeta,
+  forTenant,
+  tenantCorpus,
+  type TenantDb,
+} from "../tenancy-db"
 import type { Env } from "../types"
-import { migrateCorpusFromD1 } from "./corpus-migration"
+import { importDoCorpus, type DoCorpusSource } from "./corpus-migration"
+import { corpusPullFull, corpusPullSince, corpusPut, corpusStatus } from "./replica-corpus"
 import { parseReplicaPayload, parseSinceCursor } from "./replica-payload"
 import { resolveTenancy, type VerifiedIdentity } from "./tenancy"
 
@@ -81,7 +91,7 @@ export async function requireSession(
     name: typeof user.name === "string" ? user.name : null,
   }
 
-  const decision = await resolveTenancy(createD1SqlDriver(env.DB), identity, {
+  const decision = await resolveTenancy(controlPlaneDriver(env), identity, {
     signupMode: env.SIGNUP_MODE,
     bootstrapGithubId: env.ALLOWED_GITHUB_ID,
   })
@@ -90,29 +100,46 @@ export async function requireSession(
   return identity
 }
 
-type CorpusStub = DurableObjectStub<UserCorpus>
+/**
+ * The retiring DO for one user, or null once the binding is gone. Structural
+ * (`DoCorpusSource`), so nothing downstream depends on the Cloudflare type.
+ */
+export function doCorpusSource(env: Env, userId: number): DoCorpusSource | null {
+  const namespace = env.CORPUS as DurableObjectNamespace<UserCorpus> | undefined
+  if (!namespace) return null
+  return namespace.getByName(String(userId)) as unknown as DoCorpusSource
+}
 
-/** One tenant-#1 lazy-migration check per isolate (see `ensureOwnerCorpus`). */
-let ownerCorpusChecked = false
+/** The meta keys that, once all present, mean this tenant needs no further
+ * preparation — the whole warm-path check, in one indexed read. */
+const READY_KEYS = ["schema_version", "do_import_at", "data_version"]
 
 /**
- * Lazy half of the tenant-#1 migration (docs/multi-tenant-design.md §6): if
- * the signed-in user is the bootstrap owner and their DO corpus is empty
- * while the legacy D1 corpus is not, import it before serving — otherwise the
- * owner's first post-deploy since-pull would report every note absent and the
- * client would delete them locally. One status check per isolate; the
- * explicit `POST /api/admin/migrate-corpus` endpoint remains the deliberate,
- * observable way to run the same import.
+ * Per-tenant preparation, in the order that matters:
+ *
+ * 1. seed this tenant's `meta` rows (0004 only stamped the owner's);
+ * 2. import their DO corpus if it has not been imported yet — in `merge` mode,
+ *    because the owner's partition holds the stale *pre-DO* rows that 0004
+ *    preserved. Skipping this would let a first since-pull answer with stale
+ *    key lists and make the client delete its DO-era notes. That is the
+ *    destructive failure this closes;
+ * 3. run the data-version transform over whatever is now there.
+ *
+ * The readiness marker lives in the tenant's own `meta` rows rather than in
+ * isolate memory, so a second isolate (or a second Worker instance) reaches
+ * the same conclusion, and the warm path costs one SELECT. Each step is
+ * separately idempotent, so a half-finished preparation simply resumes.
  */
-async function ensureOwnerCorpus(
-  identity: VerifiedIdentity,
-  env: Env,
-  corpus: CorpusStub,
-): Promise<void> {
-  if (ownerCorpusChecked) return
-  if (!env.ALLOWED_GITHUB_ID || String(identity.id) !== env.ALLOWED_GITHUB_ID) return
-  await migrateCorpusFromD1(createD1SqlDriver(env.DB), corpus)
-  ownerCorpusChecked = true
+async function readyTenant(env: Env, identity: VerifiedIdentity, tenant: TenantDb): Promise<void> {
+  const rows = await tenant.exec(
+    "SELECT key FROM meta WHERE user_id = :tenant " +
+      "AND key IN ('schema_version', 'do_import_at', 'data_version')",
+  )
+  if (rows.length === READY_KEYS.length) return
+
+  await ensureTenantMeta(tenant)
+  await importDoCorpus(doCorpusSource(env, identity.id), tenant, { merge: true })
+  await ensureDataVersion(tenantCorpus(tenant))
 }
 
 /** Route /api/replica/* requests. Every route is session-guarded. */
@@ -124,22 +151,21 @@ export async function replica(
   const session = await requireSession(request, env, fetchImpl)
   if (session instanceof Response) return session
 
-  // THE tenant-addressing invariant (see the header comment): the only input
-  // to the corpus address is the server-verified GitHub id.
-  const corpus = env.CORPUS.getByName(String(session.id))
-  await ensureOwnerCorpus(session, env, corpus)
-
   const { pathname } = new URL(request.url)
-  if (pathname === "/api/replica/notes" && request.method === "PUT") {
-    return replicaPut(request, corpus)
-  }
-  if (pathname === "/api/replica/notes" && request.method === "GET") {
-    return replicaPull(request, corpus)
-  }
-  if (pathname === "/api/replica/status" && request.method === "GET") {
-    return jsonResponse(await corpus.status())
-  }
-  return jsonResponse({ error: "not_found" }, 404)
+  const method = request.method
+  const known =
+    (pathname === "/api/replica/notes" && (method === "PUT" || method === "GET")) ||
+    (pathname === "/api/replica/status" && method === "GET")
+  if (!known) return jsonResponse({ error: "not_found" }, 404)
+
+  // THE tenant-scoping invariant (see the header comment): the only input to
+  // the tenant handle is the server-verified GitHub id.
+  const tenant = forTenant(corpusDriver(env), session)
+  await readyTenant(env, session, tenant)
+
+  if (pathname === "/api/replica/notes" && method === "PUT") return replicaPut(request, tenant)
+  if (pathname === "/api/replica/notes") return replicaPull(request, tenant)
+  return jsonResponse(await corpusStatus(tenant))
 }
 
 /**
@@ -147,23 +173,24 @@ export async function replica(
  * boot + sync source).
  *
  * - `GET /api/replica/notes` → `{ nodes, links, cursor }`, every row of both
- *   tables.
+ *   tables, tombstones included.
  * - `GET /api/replica/notes?since=<cursor>` → `{ nodes, links, nodeIds,
  *   linkKeys, cursor }`. Changed rows are `updated_at > since`; because the
- *   comparison can miss (clock skew) the client pulls with an overlap window,
- *   and because there are no tombstones the response ALWAYS carries the full
- *   key list of each table, so the client can delete local rows absent from
- *   them.
+ *   comparison can miss (clock skew) the client pulls with an overlap window.
+ *   A delete now travels as an ordinary changed row carrying `deleted_at`; the
+ *   full key lists are kept as belt-and-braces (see `replica-corpus.ts`).
  */
-async function replicaPull(request: Request, corpus: CorpusStub): Promise<Response> {
+async function replicaPull(request: Request, tenant: TenantDb): Promise<Response> {
   const sinceRaw = new URL(request.url).searchParams.get("since")
   const since = sinceRaw === null ? null : parseSinceCursor(sinceRaw)
   if (sinceRaw !== null && since === null) return jsonResponse({ error: "invalid_since" }, 400)
 
-  return jsonResponse(since === null ? await corpus.pullFull() : await corpus.pullSince(since))
+  return jsonResponse(
+    since === null ? await corpusPullFull(tenant) : await corpusPullSince(tenant, since),
+  )
 }
 
-async function replicaPut(request: Request, corpus: CorpusStub): Promise<Response> {
+async function replicaPut(request: Request, tenant: TenantDb): Promise<Response> {
   const contentLength = Number(request.headers.get("Content-Length") ?? "0")
   if (contentLength > MAX_BODY_BYTES) {
     return jsonResponse({ error: "payload_too_large" }, 413)
@@ -179,7 +206,7 @@ async function replicaPut(request: Request, corpus: CorpusStub): Promise<Respons
   const payload = parseReplicaPayload(body)
   if (!payload) return jsonResponse({ error: "invalid_payload" }, 400)
 
-  return jsonResponse(await corpus.put(payload))
+  return jsonResponse(await corpusPut(tenant, payload))
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

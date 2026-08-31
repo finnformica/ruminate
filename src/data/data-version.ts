@@ -5,15 +5,25 @@ import type { SqlDriver, SqlStatement } from "./sql-driver"
 
 /**
  * Versioned data transforms — one-time rewrites of existing rows, run by
- * every engine that opens a corpus (the browser sqlite-wasm store, the
- * `node:sqlite` test driver, and the per-user corpus Durable Object) through
- * the shared schema path (`ensureCorpusSchema` → `ensureDataVersion`).
+ * every engine that holds a corpus: the browser sqlite-wasm store and the
+ * `node:sqlite` test driver (through `ensureCorpusSchema → ensureDataVersion`
+ * on open), and the Worker's D1 partition for a verified user (through
+ * `ensureTenantDataVersion`, once per isolate per tenant).
  *
  * Where `schema_version` guards DDL, the `data_version` meta key guards data
  * shape: when it is below the current version, the transform rewrites the
  * affected rows and stamps the key — idempotent (a rerun finds nothing left
- * to rewrite) and transactional (one `driver.batch`: every rewrite and the
- * version stamp land together or not at all).
+ * to rewrite) and transactional (one write: every rewrite and the version
+ * stamp land together or not at all).
+ *
+ * **The `CorpusAccess` port.** The transform's *planning* is pure and shared
+ * (`planDataVersion1`); its *reads and writes* differ by shape, because the
+ * D1 corpus is column-tenanted (`user_id` on every statement) and the browser
+ * corpus is not. Rather than build SQL by string concatenation — the exact
+ * leak-by-omission the tenancy guard exists to prevent — each shape supplies
+ * its own four fully-written statements behind this port:
+ * `singleTenantCorpus(driver)` below, and the tenant-scoped one in
+ * `worker/tenancy-db.ts`.
  *
  * Version 1 (the data-quality bundle):
  * - Text nodes whose text is a near-miss marker spelling (`[] x`, `[X] x`,
@@ -27,18 +37,23 @@ import type { SqlDriver, SqlStatement } from "./sql-driver"
  *   (`frontmatter-props.ts`); degenerate YAML keeps the raw blob.
  *
  * **LWW / cross-device story.** Rewritten rows get a fresh `updated_at`, so
- * they replicate like any edit. Every device (and the server DO) runs the
+ * they replicate like any edit. Every device (and the server) runs the
  * identical deterministic transform, so whichever timestamp wins the per-row
  * LWW race, the winning content is the same — the corpus converges. A
  * not-yet-updated client can still push a raw-spelled row afterwards (its
  * ingest preserves near-misses verbatim); that row simply stays text until
  * the note is next saved by an updated client, whose ingest normalizes it.
  *
+ * **Tombstones are skipped.** The transform reads live rows only: rewriting a
+ * deleted row would bump its `updated_at` for no visible gain, and a revived
+ * row is normalized by the ingest that revives it.
+ *
  * **The empty-corpus rule.** An empty corpus does not stamp `data_version`:
- * rows can arrive *after* first open (the tenant-#1 D1 import lands rows in a
- * DO whose constructor already ran, and a fresh device pulls its corpus after
- * opening an empty store). Leaving the key unset until data exists means the
- * next open transforms whatever arrived; the re-check costs one SELECT.
+ * rows can arrive *after* first open (a fresh device pulls its corpus after
+ * opening an empty store; the DO→D1 import lands rows in a partition the
+ * Worker has already looked at). Leaving the key unset until data exists
+ * means the next open transforms whatever arrived; the re-check costs one
+ * SELECT.
  */
 
 export const DATA_VERSION_KEY = "data_version"
@@ -49,6 +64,25 @@ export const CURRENT_DATA_VERSION = 1
 const MAX_WALK_DEPTH = 64
 
 const CHILD_KIND = "child"
+
+/**
+ * The corpus a data-version transform reads and rewrites, abstracted over the
+ * two schema shapes (see the module header). Every implementation writes its
+ * own SQL in full — no fragment stitching.
+ */
+export interface CorpusAccess {
+  /** The stored `data_version`, or null when unset. */
+  readVersion(): Promise<string | null>
+  /** Every LIVE node row. */
+  readNodes(): Promise<NodeRow[]>
+  /** Every LIVE link row. */
+  readLinks(): Promise<LinkRow[]>
+  /**
+   * Apply the rewritten node rows and — when `stampVersion` — the
+   * `data_version` stamp, in ONE atomic write.
+   */
+  write(nodes: NodeRow[], stampVersion: boolean): Promise<void>
+}
 
 /**
  * The node rows version 1 rewrites, given the full graph — pure and
@@ -114,52 +148,91 @@ export function planDataVersion1(nodes: NodeRow[], links: LinkRow[], now: number
   return changed
 }
 
-const upsertNodeStatement = (node: NodeRow): SqlStatement => ({
-  sql:
-    "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?, ?, ?, ?, ?) " +
-    "ON CONFLICT (id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
-    "props = excluded.props, updated_at = excluded.updated_at",
-  params: [node.id, node.type, node.text, node.props, node.updated_at],
-})
-
-/**
- * Bring the corpus behind `driver` to the current data version — see the
- * module header. Called from `ensureCorpusSchema`, so every engine runs it on
- * open, after the DDL ladder.
- */
-export async function ensureDataVersion(driver: SqlDriver): Promise<void> {
-  const versionRows = await driver.exec("SELECT value FROM meta WHERE key = ?", [DATA_VERSION_KEY])
-  if (Number(versionRows[0]?.value ?? 0) >= CURRENT_DATA_VERSION) return
-
-  const nodeRows = await driver.exec("SELECT id, type, text, props, updated_at FROM nodes")
-  const linkRows = await driver.exec(
-    "SELECT source_id, destination_id, kind, sort_key, updated_at FROM link",
-  )
-  const nodes: NodeRow[] = nodeRows.map((row) => ({
+/** Read one node row out of a driver result, keeping `deleted_at` present
+ * only when the row is actually tombstoned (see `replica-payload.ts`). */
+export function toNodeRow(row: Record<string, unknown>): NodeRow {
+  const node: NodeRow = {
     id: String(row.id),
     type: String(row.type),
     text: String(row.text),
-    props: row.props === null ? null : String(row.props),
+    props: row.props === null || row.props === undefined ? null : String(row.props),
     updated_at: Number(row.updated_at),
-  }))
-  const links: LinkRow[] = linkRows.map((row) => ({
+  }
+  if (row.deleted_at !== null && row.deleted_at !== undefined) {
+    node.deleted_at = Number(row.deleted_at)
+  }
+  return node
+}
+
+/** Read one link row out of a driver result (see `toNodeRow`). */
+export function toLinkRow(row: Record<string, unknown>): LinkRow {
+  const link: LinkRow = {
     source_id: String(row.source_id),
     destination_id: String(row.destination_id),
     kind: String(row.kind),
     sort_key: String(row.sort_key),
     updated_at: Number(row.updated_at),
-  }))
+  }
+  if (row.deleted_at !== null && row.deleted_at !== undefined) {
+    link.deleted_at = Number(row.deleted_at)
+  }
+  return link
+}
 
-  const statements = planDataVersion1(nodes, links, Date.now()).map(upsertNodeStatement)
+/** The `CorpusAccess` for a single-tenant corpus (browser store, test engine). */
+export function singleTenantCorpus(driver: SqlDriver): CorpusAccess {
+  return {
+    readVersion: async () => {
+      const rows = await driver.exec("SELECT value FROM meta WHERE key = ?", [DATA_VERSION_KEY])
+      return rows[0]?.value == null ? null : String(rows[0].value)
+    },
+    readNodes: async () =>
+      (
+        await driver.exec(
+          "SELECT id, type, text, props, updated_at FROM nodes WHERE deleted_at IS NULL",
+        )
+      ).map(toNodeRow),
+    readLinks: async () =>
+      (
+        await driver.exec(
+          "SELECT source_id, destination_id, kind, sort_key, updated_at FROM link " +
+            "WHERE deleted_at IS NULL",
+        )
+      ).map(toLinkRow),
+    write: async (nodes, stampVersion) => {
+      const statements: SqlStatement[] = nodes.map((node) => ({
+        sql:
+          "INSERT INTO nodes (id, type, text, props, updated_at, deleted_at) " +
+          "VALUES (?, ?, ?, ?, ?, NULL) " +
+          "ON CONFLICT (id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
+          "props = excluded.props, updated_at = excluded.updated_at, " +
+          "deleted_at = excluded.deleted_at",
+        params: [node.id, node.type, node.text, node.props, node.updated_at],
+      }))
+      if (stampVersion) {
+        statements.push({
+          sql:
+            "INSERT INTO meta (key, value) VALUES (?, ?) " +
+            "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+          params: [DATA_VERSION_KEY, String(CURRENT_DATA_VERSION)],
+        })
+      }
+      if (statements.length > 0) await driver.batch(statements)
+    },
+  }
+}
+
+/**
+ * Bring one corpus to the current data version — see the module header.
+ * Called from `ensureCorpusSchema` for single-tenant engines, and from the
+ * Worker's per-tenant check for the D1 partition.
+ */
+export async function ensureDataVersion(corpus: CorpusAccess): Promise<void> {
+  if (Number((await corpus.readVersion()) ?? 0) >= CURRENT_DATA_VERSION) return
+
+  const [nodes, links] = await Promise.all([corpus.readNodes(), corpus.readLinks()])
+  const changed = planDataVersion1(nodes, links, Date.now())
   // The empty-corpus rule (module header): only stamp the version once there
   // is data the transform actually saw.
-  if (nodes.length > 0) {
-    statements.push({
-      sql:
-        "INSERT INTO meta (key, value) VALUES (?, ?) " +
-        "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-      params: [DATA_VERSION_KEY, String(CURRENT_DATA_VERSION)],
-    })
-  }
-  if (statements.length > 0) await driver.batch(statements)
+  await corpus.write(changed, nodes.length > 0)
 }

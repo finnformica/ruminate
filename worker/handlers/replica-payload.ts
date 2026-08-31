@@ -1,12 +1,17 @@
 // The replica wire format, shared between the Worker and the client.
 //
 // This module is deliberately pure — no Cloudflare types, no cookie handling,
-// nothing but the row shapes of schema v2 (docs/graph-schema-v2.md), their
+// nothing but the row shapes of schema v3 (docs/graph-schema-v2.md), their
 // validation, and the SQL planning for `PUT /api/replica/notes`. The Worker
 // (`replica.ts`) imports it to validate and plan real requests; the client
 // (`src/data/graph.ts`, `src/data/replica-sync.ts`) imports the *types* so the
 // rows it builds are the rows the Worker parses — same repo, same file, no
 // drift.
+//
+// The planned statements are written for the **column-tenanted** D1 shape:
+// every one carries `user_id` and the `:tenant` token that `TenantDb`
+// (worker/tenancy-db.ts) binds to the verified GitHub id. No caller can supply
+// a tenant; the planner cannot even express one.
 
 /** One row of the `nodes` table. */
 export interface NodeRow {
@@ -19,6 +24,14 @@ export interface NodeRow {
   props: string | null
   /** ms epoch — per-row LWW + since-cursor pulls. */
   updated_at: number
+  /**
+   * Soft-delete stamp (ms epoch), **present only on a tombstoned row** — a
+   * live row omits the key entirely, which keeps the wire compact and keeps
+   * every pre-tombstone client and fixture valid. All rows a single delete
+   * touches share one stamp, so a future restore is "revive the rows stamped
+   * at T".
+   */
+  deleted_at?: number
 }
 
 /** One row of the `link` table — containment (`kind: "child"`) today. */
@@ -29,9 +42,12 @@ export interface LinkRow {
   /** Fractional index; sibling order under a source. */
   sort_key: string
   updated_at: number
+  /** Soft-delete stamp; see `NodeRow.deleted_at`. A link to a tombstoned node
+   * is NOT itself tombstoned — it is retained, just never traversed. */
+  deleted_at?: number
 }
 
-/** The `link` table's primary key: [source_id, destination_id, kind]. */
+/** The `link` table's primary key (within one tenant): [source, dest, kind]. */
 export type LinkKey = [string, string, string]
 
 export const linkKeyOf = (link: LinkRow): LinkKey => [
@@ -40,9 +56,16 @@ export const linkKeyOf = (link: LinkRow): LinkKey => [
   link.kind,
 ]
 
+/** Is this row a tombstone? (The one place the convention is spelled out.) */
+export const isTombstoned = (row: { deleted_at?: number }): boolean =>
+  row.deleted_at !== undefined && row.deleted_at !== null
+
 /**
  * A batch of row-level changes — what one save boils down to, and the unit the
- * push queue accumulates. Upserts and deletes are disjoint by key.
+ * push queue accumulates. Since soft deletes, a delete is an ordinary row
+ * carrying `deleted_at`, so it rides in `nodes`/`links`; `deleteNodes` /
+ * `deleteLinks` remain for the one case that is still a real removal — a pull
+ * discovering a row absent from the replica's key lists entirely.
  */
 export interface GraphDiff {
   nodes: NodeRow[]
@@ -68,6 +91,9 @@ export const isEmptyGraphDiff = (diff: GraphDiff): boolean =>
 export interface ReplicaPutPayload {
   nodes: NodeRow[]
   links: LinkRow[]
+  /** Legacy delete channel, kept for older clients: the Worker turns these
+   * into tombstone stamps rather than removals. Current clients push
+   * tombstoned rows in `nodes`/`links` instead. */
   deleteNodes?: string[]
   deleteLinks?: LinkKey[]
   /** Opaque client marker of the replicated state (monotonic per client). */
@@ -85,14 +111,17 @@ export interface ReplicaCorpusBody {
 
 /** Body of an incremental pull: `GET /api/replica/notes?since=<cursor>`. */
 export interface ReplicaChangesBody {
-  /** Rows whose `updated_at` is newer than the `since` timestamp. */
+  /** Rows whose `updated_at` is newer than the `since` timestamp — tombstoned
+   * rows included, which is how a deletion now travels. */
   nodes: NodeRow[]
   links: LinkRow[]
   /**
-   * EVERY row key currently in the replica, changed or not, per table. The
-   * replica keeps no tombstones, so deletions are detectable only by absence:
-   * the client removes local rows (that it is not about to push) missing from
-   * these lists.
+   * EVERY row key currently in the replica, changed or not, tombstoned or
+   * not, per table. Tombstones made these lists redundant for ordinary
+   * deletes; they are kept as belt-and-braces while tombstone propagation
+   * proves itself, and because they are still the only way a client learns
+   * that a row was purged outright. Dropping them is a deliberate follow-up
+   * (docs/graph-storage.md).
    */
   nodeIds: string[]
   linkKeys: LinkKey[]
@@ -101,6 +130,7 @@ export interface ReplicaChangesBody {
 
 /** The body of `GET /api/replica/status`. */
 export interface ReplicaStatusBody {
+  /** LIVE rows only — tombstones are not part of "how big is my corpus". */
   counts: { nodes: number; links: number; pages: number }
   schema_version: string | null
   replica_cursor: string | null
@@ -114,47 +144,62 @@ export interface SqlStatement {
 
 const isString = (x: unknown): x is string => typeof x === "string"
 
+/** `deleted_at`: absent, null, or a number. Returns the value to store on the
+ * row (undefined = live), or `false` when the field is malformed. */
+function parseDeletedAt(value: unknown): number | undefined | false {
+  if (value === undefined || value === null) return undefined
+  return typeof value === "number" && Number.isFinite(value) ? value : false
+}
+
 function parseNodeRow(x: unknown): NodeRow | null {
   if (typeof x !== "object" || x === null) return null
   const row = x as Record<string, unknown>
+  const deletedAt = parseDeletedAt(row.deleted_at)
   if (
     !isString(row.id) ||
     row.id.length === 0 ||
     !isString(row.type) ||
     !isString(row.text) ||
     !(row.props === null || isString(row.props)) ||
-    typeof row.updated_at !== "number"
+    typeof row.updated_at !== "number" ||
+    deletedAt === false
   ) {
     return null
   }
-  return {
+  const node: NodeRow = {
     id: row.id,
     type: row.type,
     text: row.text,
     props: row.props as string | null,
     updated_at: row.updated_at,
   }
+  if (deletedAt !== undefined) node.deleted_at = deletedAt
+  return node
 }
 
 function parseLinkRow(x: unknown): LinkRow | null {
   if (typeof x !== "object" || x === null) return null
   const row = x as Record<string, unknown>
+  const deletedAt = parseDeletedAt(row.deleted_at)
   if (
     !isString(row.source_id) ||
     !isString(row.destination_id) ||
     !isString(row.kind) ||
     !isString(row.sort_key) ||
-    typeof row.updated_at !== "number"
+    typeof row.updated_at !== "number" ||
+    deletedAt === false
   ) {
     return null
   }
-  return {
+  const link: LinkRow = {
     source_id: row.source_id,
     destination_id: row.destination_id,
     kind: row.kind,
     sort_key: row.sort_key,
     updated_at: row.updated_at,
   }
+  if (deletedAt !== undefined) link.deleted_at = deletedAt
+  return link
 }
 
 const isLinkKey = (x: unknown): x is LinkKey =>
@@ -207,58 +252,80 @@ export function parseReplicaPayload(body: unknown): ReplicaPutPayload | null {
 
 /**
  * Plan the SQL for one replica push. Pure: returns statements + bind params;
- * the Worker turns them into a single `db.batch()` (one transaction).
+ * `TenantDb` binds `:tenant` and runs them as a single batch (one
+ * transaction).
  *
  * Per-row last-writer-wins: an upsert only lands when the incoming
  * `updated_at` is not older than the stored row, so replays are idempotent and
- * a stale push cannot clobber a newer row. Deletes are unconditional (no
- * tombstones — a resurrected row simply arrives with the next push). Node
- * deletes clean their link rows explicitly so the plan does not depend on the
- * engine enforcing `ON DELETE CASCADE`. Statement order: deletes first, then
- * node upserts before link upserts (links reference nodes).
+ * a stale push cannot clobber a newer row. `deleted_at` rides along as an
+ * ordinary column, so a tombstone replicates — and a revive clears — under the
+ * same rule.
+ *
+ * The legacy `deleteNodes`/`deleteLinks` channel becomes a tombstone stamp:
+ * nothing is hard-deleted, every row a single push retires shares the one
+ * `now` stamp, and a node's link rows are deliberately NOT touched (a link to
+ * a tombstoned node is retained so a restore can put the node back in place;
+ * the walk skips it at read time).
+ *
+ * Statement order: tombstones first, then node upserts before link upserts.
  */
-export function planReplicaPut(payload: ReplicaPutPayload): SqlStatement[] {
+export function planReplicaPut(payload: ReplicaPutPayload, now: number): SqlStatement[] {
   const statements: SqlStatement[] = []
 
   for (const [source, destination, kind] of payload.deleteLinks ?? []) {
     statements.push({
-      sql: "DELETE FROM link WHERE source_id = ?1 AND destination_id = ?2 AND kind = ?3",
-      params: [source, destination, kind],
+      sql:
+        "UPDATE link SET deleted_at = ?4, updated_at = ?4 WHERE user_id = :tenant " +
+        "AND source_id = ?1 AND destination_id = ?2 AND kind = ?3 AND deleted_at IS NULL",
+      params: [source, destination, kind, now],
     })
   }
   for (const id of payload.deleteNodes ?? []) {
     statements.push({
-      sql: "DELETE FROM link WHERE source_id = ?1 OR destination_id = ?1",
-      params: [id],
+      sql:
+        "UPDATE nodes SET deleted_at = ?2, updated_at = ?2 " +
+        "WHERE user_id = :tenant AND id = ?1 AND deleted_at IS NULL",
+      params: [id, now],
     })
-    statements.push({ sql: "DELETE FROM nodes WHERE id = ?1", params: [id] })
   }
 
   for (const node of payload.nodes) {
     statements.push({
       sql:
-        "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?1, ?2, ?3, ?4, ?5) " +
-        "ON CONFLICT (id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
-        "props = excluded.props, updated_at = excluded.updated_at " +
+        "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at) " +
+        "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6) " +
+        "ON CONFLICT (user_id, id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
+        "props = excluded.props, updated_at = excluded.updated_at, " +
+        "deleted_at = excluded.deleted_at " +
         "WHERE excluded.updated_at >= nodes.updated_at",
-      params: [node.id, node.type, node.text, node.props, node.updated_at],
+      params: [node.id, node.type, node.text, node.props, node.updated_at, node.deleted_at ?? null],
     })
   }
   for (const link of payload.links) {
     statements.push({
       sql:
-        "INSERT INTO link (source_id, destination_id, kind, sort_key, updated_at) " +
-        "VALUES (?1, ?2, ?3, ?4, ?5) " +
-        "ON CONFLICT (source_id, destination_id, kind) DO UPDATE SET " +
-        "sort_key = excluded.sort_key, updated_at = excluded.updated_at " +
+        "INSERT INTO link (user_id, source_id, destination_id, kind, sort_key, updated_at, deleted_at) " +
+        "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6) " +
+        "ON CONFLICT (user_id, source_id, destination_id, kind) DO UPDATE SET " +
+        "sort_key = excluded.sort_key, updated_at = excluded.updated_at, " +
+        "deleted_at = excluded.deleted_at " +
         "WHERE excluded.updated_at >= link.updated_at",
-      params: [link.source_id, link.destination_id, link.kind, link.sort_key, link.updated_at],
+      params: [
+        link.source_id,
+        link.destination_id,
+        link.kind,
+        link.sort_key,
+        link.updated_at,
+        link.deleted_at ?? null,
+      ],
     })
   }
 
   if (payload.cursor !== undefined) {
     statements.push({
-      sql: "UPDATE meta SET value = ?1 WHERE key = 'replica_cursor'",
+      sql:
+        "INSERT INTO meta (user_id, key, value) VALUES (:tenant, 'replica_cursor', ?1) " +
+        "ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value",
       params: [payload.cursor],
     })
   }

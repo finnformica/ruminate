@@ -17,6 +17,21 @@ local SQL store is the runtime store, and saves write locally and push to the
 replica through the replica queue. Signed out, the sample notes render. There
 is no git anywhere in the data path.
 
+**One database, scoped by column.** Every user's corpus lives in the same D1
+database, in the rows whose `user_id` is theirs. That was a deliberate
+reversal of the Durable-Object-per-user design, made for data visibility — the
+D1 console lets the owner inspect and diagnose a real corpus, which a DO's
+private SQLite has no way to offer — and paid for with structural mitigations
+rather than hope: handlers receive a `TenantDb` minted only from a verified
+identity, it binds `user_id` itself, it refuses unscoped statements at
+runtime, and `npm run check:queries` fails CI on one. The full decision record,
+including what is given up, is docs/multi-tenant-design.md §0.
+
+**Nothing is hard-deleted.** Since schema v3, deleting a block or a note
+stamps `deleted_at` (and bumps `updated_at`, so the tombstone replicates like
+any edit). Reads discard tombstones at read time, so the app looks exactly as
+it did; the rows survive, which is what makes a restore possible later.
+
 **The graph is truth; markdown is a projection.** Since schema v2, both
 databases hold typed `nodes` + containment `link` rows, not markdown. A note's
 markdown is the _rollup_ — `rollup(pageId)` walks the page node's child links
@@ -34,9 +49,10 @@ local SQLite runtime store (sqlite-wasm / OPFS)   ← the store the app runs on
     │  PUT /api/replica/notes   (row-diff push, src/data/replica-sync.ts)
     │  GET /api/replica/notes   (boot + since-cursor row pulls, src/data/d1-note-source.ts)
     ▼
-per-user UserCorpus Durable Object behind the Worker  ← the authoritative cross-device copy
-    (addressed by the server-verified GitHub id; D1 is the control plane —
-     docs/multi-tenant-design.md)
+one D1 database behind the Worker                 ← the authoritative cross-device copy
+    every corpus row carries `user_id`; a handler only ever holds a `TenantDb`
+    bound to the server-verified GitHub id (worker/tenancy-db.ts —
+    docs/multi-tenant-design.md §0)
 ```
 
 ### How the app is fed
@@ -114,9 +130,16 @@ table. Consequences, accepted and mitigated:
 - Clock skew between devices could miss a change → the client pulls with a
   10-minute overlap window (`SINCE_OVERLAP_MS`); re-applying identical rows is
   a no-op under LWW.
-- Deletions have no tombstones → every since-pull response carries the full
-  key list of both tables (`nodeIds`, `linkKeys`), and the client deletes
-  local rows absent from them (rows of pending-push notes excepted).
+- Deletions travel as ordinary rows carrying `deleted_at`, so a delete is just
+  another change the since-pull returns and the client applies.
+- The response nevertheless still carries the full key list of both tables
+  (`nodeIds`, `linkKeys`), and the client deletes local rows absent from them
+  (rows of pending-push notes excepted). Tombstones made that channel
+  redundant, but it stays as belt-and-braces until tombstone propagation has
+  proven itself in production; dropping it is a deliberate follow-up
+  (docs/multi-tenant-design.md §0). Note that a tombstoned row is still a row,
+  so it appears in the key lists — absence from them now means _purged_, not
+  deleted.
 
 ### What the database deliberately does not do
 
@@ -149,16 +172,46 @@ orphaned children to the page root). The SQL store
 (`src/data/sql-note-store.test.ts`) passes it; anything the suite doesn't pin
 down is an implementation detail a store may choose freely.
 
-## Schema (`migrations/0001_init.sql` + `migrations/0002_nodes.sql`)
+## Schema (`migrations/0001` → `0002` → `0004`)
 
-Wrangler d1 migration files, written in strictly shared SQLite dialect so the
-identical files initialize both the D1 database
-(`wrangler d1 migrations apply ruminate`) and the local sqlite-wasm store.
+Wrangler d1 migration files, written in strictly shared SQLite dialect.
 `0001` created the v1 markdown-as-truth tables; `0002` creates the v2 graph
-and drops them. Full DDL and rationale in
+and drops them; `0004` is v3 — soft deletes on both engines, plus the tenant
+column on D1. Full DDL and rationale in
 [graph-schema-v2.md](./graph-schema-v2.md); in brief:
 
-### `nodes` (id TEXT PK, type, text, props, updated_at)
+### One dialect, two shapes
+
+The identical files no longer produce identical tables, and that divergence is
+deliberate and documented in one place (`src/data/corpus-schema.ts`):
+
+- **D1** applies `0004_tenant_columns.sql`: `user_id INTEGER NOT NULL` on
+  `nodes`, `link`, and `meta`, leading every primary key and index
+  (`(user_id, id)`, `(user_id, source_id, destination_id, kind)`,
+  `(user_id, key)`). SQLite cannot ALTER a primary key, so `0004` rebuilds
+  each table and copies the existing single-tenant rows in, stamped with the
+  owner's id. The `link → nodes` foreign keys are dropped: nothing is
+  hard-deleted, so `ON DELETE CASCADE` can never fire, and retaining links to
+  tombstoned nodes is the point.
+- **The browser store** gets `deleted_at` and nothing else — one user per
+  browser profile, so a `user_id` column there would be a constant. Its v3
+  step is two `ALTER TABLE … ADD COLUMN` statements, no rebuild.
+
+`ensureCorpusSchema(driver, migrations, tenancy)` selects the step; the
+`"columns"` mode exists so the worker test suites build the exact D1 shape
+from the exact file D1 runs, which is what keeps the seam honest rather than
+merely described.
+
+### `deleted_at` (both tables, both shapes)
+
+`NULL` = live. A delete stamps it — never a `DELETE` statement — and all rows
+one delete operation retires share one timestamp, so a future restore is
+"revive the rows stamped at T". Reads discard at read time
+(`buildGraphSnapshot` drops tombstoned nodes and any link whose endpoint is
+tombstoned), so deletes never cascade at write time and a link into a deleted
+node survives as the position a restore would put it back into.
+
+### `nodes` (id TEXT, type, text, props, updated_at, deleted_at)
 
 One row per node. `id` is the app's existing TEXT id (`blk_…` for blocks, the
 note id for page nodes). `type` is stored, not derived — the registry in the
@@ -176,10 +229,10 @@ which the rollup accepts forever for rows from older app versions. A code
 node carries `{"language": "…"}`. `updated_at` (ms epoch) drives per-row LWW
 and since-cursor pulls.
 
-### `link` (source_id, destination_id, kind, sort_key, updated_at)
+### `link` (source_id, destination_id, kind, sort_key, updated_at, deleted_at)
 
 Containment as rows: `kind = 'child'`, primary key
-`(source_id, destination_id, kind)`, `ON DELETE CASCADE` both ends. Sibling
+`(source_id, destination_id, kind)` — `(user_id, …)` on D1. Sibling
 order is a fractional `sort_key` (the `fractional-indexing` package): inserts
 touch one row, nothing renumbers, and ingest assigns fresh evenly-spaced keys
 per note — which doubles as the rebalancing mechanism. The store's diffing
@@ -192,10 +245,15 @@ removed as a feature; `[[...]]` in text is plain text.)
 
 ### `meta` (key/value)
 
-`schema_version` (`2`), `data_version` (see "Data quality" below),
+`schema_version` (`3`), `data_version` (see "Data quality" below),
 `replica_cursor` (the last push a client confirmed), and, in the **local**
 store only, `d1_pull_cursor` (the last replica cursor this device pulled
-through).
+through). On D1 the table is per-tenant (`PRIMARY KEY (user_id, key)`), so
+each user has their own cursor and their own versions; a new tenant's rows are
+seeded on first request (`ensureTenantMeta`), because migration `0004` only
+stamped the owner's. The Worker also writes `do_import_at` there — the marker
+that this tenant's Durable-Object corpus has been imported
+(docs/multi-tenant-design.md §0).
 
 ## Data quality: normalization + versioned data transforms
 
@@ -216,16 +274,21 @@ byte-for-byte):
   round-trips byte-identically.
 
 **Existing rows** are rewritten once by the versioned data transform
-(`src/data/data-version.ts`): every engine's open runs
-`ensureCorpusSchema → ensureDataVersion`, and when the `data_version` meta
-key is below the current version the transform rewrites matching rows —
-fence-aware, idempotent, and transactional (one batch carries the rewrites
-and the version stamp) — with a fresh `updated_at` so rewritten rows
-replicate under per-row LWW. Every device and the server DO run the identical
-deterministic transform, so whichever timestamp wins, the winning content is
-the same and the corpus converges. An empty corpus does not stamp the
-version, so rows arriving after first open (the tenant-#1 import, a first
-pull) are transformed on the next open.
+(`src/data/data-version.ts`): when the `data_version` meta key is below the
+current version, the transform rewrites matching rows — fence-aware,
+idempotent, and transactional (one write carries the rewrites and the version
+stamp) — with a fresh `updated_at` so rewritten rows replicate under per-row
+LWW. The browser store runs it on open (`ensureCorpusSchema →
+ensureDataVersion`); the Worker runs it per verified tenant, before serving
+that tenant's first request. Both go through the same pure planner behind a
+four-method `CorpusAccess` port, because the two schema shapes need different
+statements and stitching SQL fragments together is exactly the leak the query
+guard exists to prevent. Every device and the server therefore run the
+identical deterministic transform, so whichever timestamp wins, the winning
+content is the same and the corpus converges. An empty corpus does not stamp
+the version, so rows arriving after first open (the DO import, a first pull)
+are transformed next time. Tombstoned rows are skipped — a deleted row has
+nothing to normalize.
 
 ### No view_state table
 
@@ -237,16 +300,35 @@ overrides on top of that default (`src/data/view-state.ts`); losing them
 merely falls back to the defaults. The rollup's hard depth cap doubles as the
 render guard against corrupted (cyclic) graphs.
 
-## Delete = unlink + rescue
+## Delete = unlink + rescue (and, underneath, a tombstone)
 
-Deleting node X in the context of parent P removes the link row P→X; if X has
-another inbound child link it lives on there; otherwise X's row is deleted and
+Deleting node X in the context of parent P retires the link row P→X; if X has
+another inbound child link it lives on there; otherwise X's row is retired and
 each of X's children left with no inbound link is re-parented to the **page
 root** with trailing sort keys. No orphan state exists — deleting a container
 visibly demotes its contents instead of vanishing them. Whole-note saves
 apply the same rule: a node that fell out of the note and has no other parent
-is deleted; children it strands are rescued. Deleting a _note_ removes the
+is retired; children it strands are rescued. Deleting a _note_ retires the
 page and cascades everything not multi-homed elsewhere.
+
+**"Retired" means tombstoned, not removed** — that is the only thing schema v3
+changed here, and it is invisible from outside:
+
+- A delete is `UPDATE … SET deleted_at = ?, updated_at = ?`. There is no
+  `DELETE` statement in the app's write path at all, on either engine, and the
+  query guard refuses one.
+- **One timestamp per delete operation.** Every row a single delete touches
+  shares its `deleted_at`, so a restore is "revive the rows stamped at T".
+- **Read-time discard, never write-time cascade.** The rollup skips a link if
+  either endpoint is tombstoned, and a tombstoned node never renders — so
+  links to deleted nodes are _retained_, holding the position a restore would
+  put the node back into, rather than being cascaded away.
+- A tombstone replicates like any edit (fresh `updated_at`), which is how the
+  delete reaches another device; re-creating the same id clears the stamp and
+  revives the row.
+- The user-visible rule above is deliberately unchanged by this: whether
+  unlink-plus-rescue is still right once deletes are recoverable is a separate
+  decision, and there is no restore UI yet — only data that supports one.
 
 ## Cross-file block-id dedup
 
@@ -256,41 +338,45 @@ external editor), and under v2 such a collision becomes a multi-parent node.
 The store's ingest guards the important case — a block id colliding with a
 page id is re-minted so it can never clobber the page row. (The seed-era
 collision report, `findCrossNoteIdCollisions` + `scripts/seed-d1.ts`, was
-retired with the D1 corpus seeding path in the DO world.)
+retired along with the D1 corpus seeding path.)
 
 ## Worker replica API (`/api/replica/*`)
 
 `worker/handlers/replica.ts`, routed like every other API route via
-`run_worker_first` in wrangler.jsonc. Since the multi-tenant cutover
-(docs/multi-tenant-design.md) the handler is auth + dispatch: each user's
-corpus lives in the private SQLite database of their `UserCorpus` Durable
-Object (`worker/corpus-do.ts`), and the queries run there through the shared
-`SqlDriver` seam (`worker/do-sql-driver.ts` + the engine-agnostic
-`worker/handlers/replica-corpus.ts`). The D1 database is the control plane
-(users + allowlist, migration `0003_control_plane.sql`) — plus tenant #1's
-legacy corpus rows until §6's cleanup step.
+`run_worker_first` in wrangler.jsonc. The handler is auth + dispatch: it
+verifies the session, resolves the verified id against the control plane
+(users + allowlist, migration `0003_control_plane.sql`), mints a `TenantDb`
+from that id, and hands it to the engine-agnostic corpus code
+(`worker/handlers/replica-corpus.ts`), which runs every query through the
+shared `SqlDriver` seam.
 
 - `PUT /api/replica/notes` — batch of row upserts + deletes
   (`{nodes, links, deleteNodes?, deleteLinks?, cursor?}`), executed as a
-  single atomic transaction (`transactionSync` inside the DO). Upserts are
-  per-row last-writer-wins (`WHERE excluded.updated_at >= …`), so replays are
-  idempotent and a stale push cannot clobber a newer row; node deletes clean
-  their link rows explicitly. Payloads are validated (`parseReplicaPayload`)
-  and planned (`planReplicaPut`) by pure, unit-tested functions; the DO
-  wiring is a thin adapter typed against `@cloudflare/workers-types`.
+  single `db.batch` (one transaction). Upserts are per-row
+  last-writer-wins (`WHERE excluded.updated_at >= …`), so replays are
+  idempotent and a stale push cannot clobber a newer row; `deleted_at` rides
+  along as an ordinary column, so a tombstone replicates — and a revive clears
+  — under the same rule. Current clients push tombstoned rows in
+  `nodes`/`links`; the older `deleteNodes`/`deleteLinks` channel is kept and
+  turned into tombstone stamps (one timestamp for the whole push), never
+  removals. Payloads are validated (`parseReplicaPayload`) and planned
+  (`planReplicaPut`) by pure, unit-tested functions.
 - `GET /api/replica/notes` — row pull, the read half:
-  - Full: `{ nodes, links, cursor }` — every row of both tables.
+  - Full: `{ nodes, links, cursor }` — every row of both tables, tombstones
+    included.
   - `?since=<cursor>`: `{ nodes, links, nodeIds, linkKeys, cursor }` — the
-    changed rows (`updated_at > since`) plus the **full key list of each
-    table** for deletion-by-absence. A malformed `since` is a 400.
-- `GET /api/replica/status` — row counts (`nodes`, `links`, `pages`),
-  `schema_version`, `replica_cursor`.
-- `POST /api/admin/migrate-corpus` (`worker/handlers/admin.ts`, owner-only) —
-  the tenant-#1 migration: copies the legacy D1 corpus into the owner's DO if
-  the DO is empty; idempotent, read-only on D1. The same import also runs
-  lazily before an owner request would touch an empty DO while D1 still holds
-  rows (`ensureOwnerCorpus`), so a post-deploy pull can never report the
-  corpus absent and trigger client-side deletion.
+    changed rows (`updated_at > since`, a tombstone being an ordinary change)
+    plus the **full key list of each table**. A malformed `since` is a 400.
+- `GET /api/replica/status` — LIVE row counts (`nodes`, `links`, `pages` —
+  tombstones and links into tombstoned nodes excluded, so these agree with the
+  client's own counts), `schema_version`, `replica_cursor`.
+- `POST /api/admin/import-do-corpus` (`worker/handlers/admin.ts`, owner-only)
+  — the DO→D1 import for the owner and every id in `users`; `?merge=1` to
+  LWW-merge into a non-empty partition, `?force=1` to re-run a marked tenant.
+  Read-only on the DOs and idempotent. The same import also runs lazily,
+  before a user's first post-deploy request is served, so a since-pull can
+  never answer from the stale pre-DO snapshot and trigger client-side
+  deletion. Full runbook: docs/multi-tenant-design.md §0.
 - **Auth & tenancy:** every route is guarded by `requireSession`: the
   `gh_refresh` HttpOnly cookie (set by `/github-auth`, rotated by
   `/github-refresh`; its presence proves the browser holds a session this
@@ -302,10 +388,24 @@ legacy corpus rows until §6's cleanup step.
   `SIGNUP_MODE` (`allowlist`: the allowlist table or the `ALLOWED_GITHUB_ID`
   bootstrap; `open`: auto-provision; absent: bootstrap owner only —
   fail-closed, and also the fallback if the control-plane migration hasn't
-  run). The corpus DO is addressed by `getByName(String(verifiedId))` and by
-  nothing else — no client-supplied value can name a tenant. If the
-  per-request GitHub round-trip ever matters, cache verification results in
-  `caches.default` keyed by a token hash.
+  run). If the per-request GitHub round-trip ever matters, cache verification
+  results in `caches.default` keyed by a token hash.
+- **Tenant scoping (`worker/tenancy-db.ts`):** `forTenant(corpusDriver(env),
+session)` is the only mint on the request path, and it takes the
+  `VerifiedIdentity` only `requireSession` produces — no path segment, query
+  param, header, or body field reaches it, so a client cannot name a tenant;
+  it can only be one. The handle then binds `user_id` itself: statements name
+  their tenant with a `:tenant` token that `TenantDb` rewrites to a positional
+  placeholder and fills, so there is no parameter a caller could put a user id
+  into. Any statement touching `nodes`/`link`/`meta` without `user_id` +
+  `:tenant` throws before reaching the database, as does a read of
+  `nodes`/`link` that says nothing about tombstones and any `DELETE` from
+  them. The narrow, greppable opt-outs are `includingDeleted()` (replication,
+  trash, audit), `-- tenant-exempt: <reason>`, and `controlPlaneDriver` for
+  `users`/`allowlist`, which are not tenant data (the resolver has to look up
+  an id that is not yet a tenant). `npm run check:queries` enforces the same
+  rules over every SQL literal in `worker/**` and `src/data/**` in CI, and
+  bans `env.DB` outside that module.
 
 ## Replication to D1 (`src/data/replica-sync.ts`)
 
