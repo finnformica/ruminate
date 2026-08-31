@@ -12,6 +12,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   match: { params: { _splat: "note-1" } } as { params: { _splat: string } } | undefined,
+  // The block-search data source, injected at its single seam
+  // (`useBlockSearchSource`) — see src/utils/block-search-source.ts.
+  results: { mode: "notes", hits: [], notes: [] } as {
+    mode: "blocks" | "notes"
+    hits: unknown[]
+    notes: unknown[]
+  },
+  children: new Map<string, unknown[]>(),
+  childCalls: [] as string[],
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -26,6 +35,17 @@ vi.mock("../hooks/note", () => ({
 
 vi.mock("../hooks/search-notes", () => ({
   useSearchNotes: () => () => [],
+}))
+
+vi.mock("../hooks/search-results", () => ({
+  useSearchResults: () => mocks.results,
+  useBlockSearchSource: () => ({
+    search: () => mocks.results.hits,
+    children: (hit: { blockId: string }) => {
+      mocks.childCalls.push(hit.blockId)
+      return mocks.children.get(hit.blockId) ?? []
+    },
+  }),
 }))
 
 vi.mock("../global-state", async () => {
@@ -58,6 +78,10 @@ globalThis.ResizeObserver = class {
 afterEach(cleanup)
 beforeEach(() => {
   mocks.match = { params: { _splat: "note-1" } }
+  mocks.navigate.mockClear()
+  mocks.results = { mode: "notes", hits: [], notes: [] }
+  mocks.children = new Map()
+  mocks.childCalls = []
 })
 
 const OUTLINE = {
@@ -201,5 +225,175 @@ describe("outline palette (⌘P)", () => {
     pressCmdP()
     fireEvent.keyDown(outlineInput(), { key: "Escape" })
     expect(store.get(blockRevealAtom)).toBeNull()
+  })
+})
+
+// ── Block results ───────────────────────────────────────────────────────────
+// The palette's primary results are the matching BLOCKS, at any depth — the
+// two cases the owner reported (a `type:todo` filter, and a nested heading)
+// are the literal fixtures below.
+
+function makeNote(id: string) {
+  return {
+    id,
+    content: "",
+    type: "note",
+    displayName: id,
+    frontmatter: {},
+    title: id,
+    url: null,
+    alias: null,
+    aliases: [],
+    pinned: false,
+    updatedAt: null,
+    dates: [],
+    tags: [],
+    tasks: [],
+  }
+}
+
+const RESEARCH = makeNote("research")
+
+function hit(
+  blockId: string,
+  text: string,
+  type: string,
+  ancestors: { id: string; text: string }[] = [],
+  childCount = 0,
+) {
+  return { blockId, noteId: RESEARCH.id, text, type, ancestors, childCount, note: RESEARCH }
+}
+
+/** A heading nested under two other blocks — invisible to the old note-only
+ * results, a first-class row now. */
+const NVIDIA = hit(
+  "blk_nvidia",
+  "nvidia",
+  "h3",
+  [
+    { id: "blk_semis", text: "Semiconductors" },
+    { id: "blk_gpus", text: "GPUs" },
+  ],
+  2,
+)
+const TODO_MILK = hit("blk_milk", "buy milk", "todo")
+const TODO_SHIP = hit("blk_ship", "ship it", "todo")
+
+async function openWithBlocks(hits: unknown[], notes: unknown[] = [RESEARCH]) {
+  mocks.results = { mode: "blocks", hits, notes }
+  const rendered = renderMenu({ open: true })
+  const input = commandsInput()
+  fireEvent.change(input, { target: { value: "nvidia" } })
+  // Typing leaves the caret at the end of the query — which is where the
+  // arrows hand over to the results tree (jsdom won't place it for us).
+  input.setSelectionRange(input.value.length, input.value.length)
+  // The query is debounced (150ms) before the palette re-derives its groups.
+  await waitFor(() => {
+    expect(screen.queryByText("Settings")).toBeNull()
+  })
+  return rendered
+}
+
+const rowFor = (text: string) => screen.getByText(text).closest("[cmdk-item]") as HTMLElement | null
+
+describe("block results", () => {
+  it("lists a nested heading as its own row, with its breadcrumb", async () => {
+    await openWithBlocks([NVIDIA])
+    const row = rowFor("nvidia")
+    expect(row).toBeTruthy()
+    // Where it lives: note, then ancestry.
+    expect(row?.textContent).toContain("research")
+    expect(row?.textContent).toContain("Semiconductors")
+    expect(row?.textContent).toContain("GPUs")
+  })
+
+  it("lists matching todo blocks as rows (the type:todo case)", async () => {
+    await openWithBlocks([TODO_MILK, TODO_SHIP])
+    expect(rowFor("buy milk")).toBeTruthy()
+    expect(rowFor("ship it")).toBeTruthy()
+  })
+
+  it("shows the count of matched blocks, and the notes they live in", async () => {
+    await openWithBlocks([NVIDIA, TODO_MILK, TODO_SHIP])
+    expect(screen.getByText("See all 3 matching blocks in 1 note")).toBeTruthy()
+  })
+
+  it("says so plainly when nothing matches", async () => {
+    await openWithBlocks([], [])
+    expect(screen.getByText("No matching blocks")).toBeTruthy()
+  })
+
+  it("Enter on the query opens the full results view at ?query=", async () => {
+    await openWithBlocks([NVIDIA])
+    // Nothing arrowed: cmdk highlights the first row, which is "see all".
+    fireEvent.keyDown(commandsInput(), { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", search: { query: "nvidia" } })
+  })
+
+  it("Enter on a highlighted hit opens its note, zoomed to the block", async () => {
+    await openWithBlocks([NVIDIA])
+    fireEvent.keyDown(commandsInput(), { key: "ArrowDown" })
+    fireEvent.keyDown(commandsInput(), { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/notes/$",
+      params: { _splat: "research" },
+      search: { query: undefined, block: "blk_nvidia" },
+    })
+  })
+
+  it("→ expands a hit in place, resolving its children once; ← collapses", async () => {
+    mocks.children.set("blk_nvidia", [
+      hit("blk_h100", "H100 supply", "bullet"),
+      hit("blk_rev", "datacenter revenue", "bullet"),
+    ])
+    await openWithBlocks([NVIDIA])
+
+    fireEvent.keyDown(commandsInput(), { key: "ArrowDown" })
+    expect(screen.queryByText("H100 supply")).toBeNull()
+
+    fireEvent.keyDown(commandsInput(), { key: "ArrowRight" })
+    expect(screen.getByText("H100 supply")).toBeTruthy()
+    expect(screen.getByText("datacenter revenue")).toBeTruthy()
+    expect(mocks.childCalls).toEqual(["blk_nvidia"])
+
+    fireEvent.keyDown(commandsInput(), { key: "ArrowLeft" })
+    expect(screen.queryByText("H100 supply")).toBeNull()
+
+    // Re-expanding is served from the tree's own cache — no second fetch.
+    fireEvent.keyDown(commandsInput(), { key: "ArrowRight" })
+    expect(screen.getByText("H100 supply")).toBeTruthy()
+    expect(mocks.childCalls).toEqual(["blk_nvidia", "blk_nvidia"])
+  })
+
+  it("clicking the chevron expands and collapses the same way", async () => {
+    mocks.children.set("blk_nvidia", [hit("blk_h100", "H100 supply", "bullet")])
+    await openWithBlocks([NVIDIA])
+
+    const toggle = screen.getByLabelText("Expand")
+    fireEvent.click(toggle)
+    expect(screen.getByText("H100 supply")).toBeTruthy()
+    // The click expanded rather than opening the result.
+    expect(mocks.navigate).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByLabelText("Collapse"))
+    expect(screen.queryByText("H100 supply")).toBeNull()
+  })
+
+  it("a leaf hit draws no expand affordance", async () => {
+    await openWithBlocks([TODO_MILK])
+    const toggle = screen.getByLabelText("Expand")
+    expect(toggle.className).toContain("opacity-0")
+  })
+
+  it("leaves the arrows to the query input while the caret is inside the text", async () => {
+    mocks.children.set("blk_nvidia", [hit("blk_h100", "H100 supply", "bullet")])
+    await openWithBlocks([NVIDIA])
+    fireEvent.keyDown(commandsInput(), { key: "ArrowDown" })
+
+    const input = commandsInput()
+    input.setSelectionRange(2, 2)
+    fireEvent.keyDown(input, { key: "ArrowRight" })
+    expect(screen.queryByText("H100 supply")).toBeNull()
+    expect(mocks.childCalls).toEqual([])
   })
 })

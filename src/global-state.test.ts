@@ -67,11 +67,15 @@ describe("block search atoms", () => {
     expect(milk.ancestors).toEqual([{ id: "blk_head", text: "Today" }])
     expect(milk.note.tags).toEqual(["work"])
 
-    // Searching for a section surfaces its children as inline context.
+    // A matched section carries only its has-downstream count; the children
+    // themselves are resolved (and cached) on expand.
     const [head] = store.get(searchBlocksAtom)("type:heading")
     expect(head.blockId).toBe("blk_head")
-    expect(head.children.map((child) => child.id)).toEqual(["blk_milk", "blk_ship"])
+    expect(head).not.toHaveProperty("children")
     expect(head.childCount).toBe(2)
+    const getChildren = store.get(blockIndexAtom).getChildren
+    expect(getChildren(head).map((child) => child.blockId)).toEqual(["blk_milk", "blk_ship"])
+    expect(getChildren(head)).toBe(getChildren(head))
 
     unsubscribe()
   })

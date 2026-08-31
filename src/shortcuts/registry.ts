@@ -400,6 +400,41 @@ const LIST_ENTRIES: Shortcut[] = [
   },
 ]
 
+// Block search results — the rows in ⌘K and on the results view (`/?query=`).
+// See src/components/search-results.tsx and src/hooks/block-result-tree.ts.
+const SEARCH_RESULT_ENTRIES: Shortcut[] = [
+  {
+    combos: ["ArrowUp", "ArrowDown"],
+    scope: "global",
+    description: "Move between result rows (including blocks revealed by expanding)",
+    group: "Search results",
+  },
+  {
+    combos: ["ArrowRight"],
+    scope: "global",
+    description: "Expand the highlighted result — show the blocks inside it",
+    group: "Search results",
+  },
+  {
+    combos: ["ArrowLeft"],
+    scope: "global",
+    description: "Collapse it (already closed: jump to the block it sits under)",
+    group: "Search results",
+  },
+  {
+    combos: ["Enter"],
+    scope: "global",
+    description: "Open the highlighted block (its note, zoomed to that block)",
+    group: "Search results",
+  },
+  {
+    combos: ["Enter"],
+    scope: "palette",
+    description: "On the query itself: see all results (a bookmarkable ?query= view)",
+    group: "Search results",
+  },
+]
+
 // Bindings inside the open command palette (see src/components/command-menu.tsx).
 const PALETTE_ENTRIES: Shortcut[] = [
   {
@@ -474,6 +509,7 @@ export const GROUP_ORDER = [
   "Global",
   "Navigation",
   "Lists",
+  "Search results",
   "Select mode",
   "Edit mode",
   "Multi-select",
@@ -489,6 +525,7 @@ export const SHORTCUTS: Shortcut[] = [
   ...GLOBAL_ENTRIES,
   ...NAVIGATION_ENTRIES,
   ...LIST_ENTRIES,
+  ...SEARCH_RESULT_ENTRIES,
   ...editorEntries(),
   ...CLIPBOARD_HISTORY_ENTRIES,
   ...MULTI_SELECT_ENTRIES,

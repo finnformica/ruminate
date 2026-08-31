@@ -20,6 +20,9 @@ function isTypingTarget(target: EventTarget | null): boolean {
  *   the input blurs and the first result highlights (the query stays applied).
  * - `Enter` activates the highlighted item; `Escape` clears the highlight and
  *   returns focus to the search input.
+ * - `→`/`←` are optional (`onExpand`/`onCollapse`): a tree-shaped list — the
+ *   block search results — uses them to open and close a row. Lists that pass
+ *   neither leave the arrows alone.
  * - The highlight follows filtering: when `resetKey` (the query) changes, an
  *   existing highlight resets to the first result; it also clamps when the
  *   list shrinks.
@@ -36,6 +39,8 @@ export function useListKeyboardNav({
   count,
   resetKey,
   onActivate,
+  onExpand,
+  onCollapse,
   enabled = true,
 }: {
   /** How many items are currently listed (the highlight stays within). */
@@ -44,6 +49,10 @@ export function useListKeyboardNav({
   resetKey: string
   /** Open the item at this index (Enter). */
   onActivate: (index: number) => void
+  /** `→` on the highlighted item (tree lists only). */
+  onExpand?: (index: number) => void
+  /** `←` on the highlighted item (tree lists only). */
+  onCollapse?: (index: number) => void
   /** Mount the document listener at all (false for embedded lists). */
   enabled?: boolean
 }) {
@@ -57,6 +66,10 @@ export function useListKeyboardNav({
   activeIndexRef.current = activeIndex
   const onActivateRef = useRef(onActivate)
   onActivateRef.current = onActivate
+  const onExpandRef = useRef(onExpand)
+  onExpandRef.current = onExpand
+  const onCollapseRef = useRef(onCollapse)
+  onCollapseRef.current = onCollapse
 
   useEffect(() => {
     if (!enabled) return
@@ -101,6 +114,16 @@ export function useListKeyboardNav({
           event.preventDefault()
           setActiveIndex(count - 1)
           return
+        case "ArrowRight":
+          if (active === null || !onExpandRef.current) return
+          event.preventDefault()
+          onExpandRef.current(active)
+          return
+        case "ArrowLeft":
+          if (active === null || !onCollapseRef.current) return
+          event.preventDefault()
+          onCollapseRef.current(active)
+          return
         case "Enter":
           if (active === null) return
           event.preventDefault()
@@ -144,5 +167,7 @@ export function useListKeyboardNav({
     if (row && typeof row.scrollIntoView === "function") row.scrollIntoView({ block: "nearest" })
   }, [activeIndex])
 
-  return { activeIndex, containerRef }
+  // `setActiveIndex` is exposed for tree lists, where `←` on an already-closed
+  // child moves the highlight to its parent row.
+  return { activeIndex, setActiveIndex, containerRef }
 }

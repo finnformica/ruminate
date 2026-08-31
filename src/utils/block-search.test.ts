@@ -1,15 +1,15 @@
 import { describe, expect, test } from "vitest"
 import type { Note } from "../schema"
 import {
+  blockKey,
   createBlockIndexer,
+  createChildResolver,
   hasBlockTypeFilter,
   indexNoteBlocks,
   isBlockTypeFilter,
   notesFromBlockHits,
-  MAX_HIT_CHILDREN,
   searchBlocks,
   type BlockAncestor,
-  type BlockChild,
   type BlockHit,
   type BlockSearchType,
 } from "./block-search"
@@ -84,7 +84,7 @@ const ids = (hits: BlockHit[]) => hits.map((hit) => hit.blockId)
 
 describe("type mapping", () => {
   const types = (content: string): [string, BlockSearchType][] =>
-    indexNoteBlocks(makeNote({ content })).map((hit) => [hit.text, hit.type])
+    indexNoteBlocks(makeNote({ content })).hits.map((hit) => [hit.text, hit.type])
 
   test("maps every marker to its canonical block type", () => {
     expect(types(md("# one", "## two", "### three", "###### six"))).toEqual([
@@ -144,7 +144,7 @@ describe("block hits", () => {
         "      id:: blk_auth",
       ),
     })
-    const hits = indexNoteBlocks(note)
+    const { hits } = indexNoteBlocks(note)
     const auth = hits.find((hit) => hit.blockId === "blk_auth")
     const expected: BlockAncestor[] = [
       { id: "blk_setup", text: "Setup" },
@@ -156,36 +156,116 @@ describe("block hits", () => {
     expect(hits.find((hit) => hit.blockId === "blk_setup")?.ancestors).toEqual([])
   })
 
-  test("a matched section carries its direct children in order, as context", () => {
+  test("never embed their children — only the has-downstream count", () => {
     const [head] = run("type:h1")
-    const expected: BlockChild[] = [
-      { id: "blk_milk", text: "buy milk", type: "todo" },
-      { id: "blk_ship", text: "ship it", type: "done" },
-    ]
-    expect(head.children).toEqual(expected)
     expect(head.childCount).toBe(2)
+    expect(head).not.toHaveProperty("children")
     // Children are context, not matches: the heading is the only hit.
     expect(ids(run("type:h1"))).toEqual(["blk_head"])
   })
 
-  test("children are capped at MAX_HIT_CHILDREN with the true childCount", () => {
-    const lines = ["# Big", "  id:: blk_big"]
-    for (let i = 0; i < MAX_HIT_CHILDREN + 5; i++) {
-      lines.push(`  - child ${i}`, `    id:: blk_c${i}`)
-    }
-    const [big] = indexNoteBlocks(makeNote({ content: md(...lines) }))
-    expect(big.blockId).toBe("blk_big")
-    expect(big.children).toHaveLength(MAX_HIT_CHILDREN)
-    expect(big.children[0]).toEqual({ id: "blk_c0", text: "child 0", type: "bullet" })
-    expect(big.children[MAX_HIT_CHILDREN - 1].id).toBe(`blk_c${MAX_HIT_CHILDREN - 1}`)
-    expect(big.childCount).toBe(MAX_HIT_CHILDREN + 5)
-  })
-
-  test("a leaf block has no children", () => {
+  test("a leaf block reports no downstream", () => {
     const [milk] = run("type:todo")
     expect(milk.blockId).toBe("blk_milk")
-    expect(milk.children).toEqual([])
     expect(milk.childCount).toBe(0)
+  })
+
+  test("childCount is the block's true child count, however many", () => {
+    const lines = ["# Big", "  id:: blk_big"]
+    for (let i = 0; i < 25; i++) lines.push(`  - child ${i}`, `    id:: blk_c${i}`)
+    const [big] = indexNoteBlocks(makeNote({ content: md(...lines) })).hits
+    expect(big.blockId).toBe("blk_big")
+    expect(big.childCount).toBe(25)
+  })
+})
+
+describe("lazy child resolution", () => {
+  test("resolves a hit's direct children, in document order", () => {
+    const index = buildIndex([TASKS_NOTE, MISC_NOTE])
+    const [head] = searchBlocks(parseQuery("type:h1"), index)
+    expect(ids(index.getChildren(head))).toEqual(["blk_milk", "blk_ship"])
+    expect(index.getChildren(head).map((hit) => [hit.text, hit.type])).toEqual([
+      ["buy milk", "todo"],
+      ["ship it", "done"],
+    ])
+  })
+
+  test("a leaf resolves to nothing", () => {
+    const index = buildIndex([TASKS_NOTE])
+    const [milk] = searchBlocks(parseQuery("type:todo"), index)
+    expect(index.getChildren(milk)).toEqual([])
+  })
+
+  test("expanding a child resolves the next level the same way", () => {
+    const note = makeNote({
+      id: "n",
+      content: md(
+        "# Setup",
+        "  id:: blk_setup",
+        "  - api",
+        "    id:: blk_api",
+        "    [ ] add auth",
+        "      id:: blk_auth",
+      ),
+    })
+    const index = buildIndex([note])
+    const [setup] = searchBlocks(parseQuery("type:h1"), index)
+    const [api] = index.getChildren(setup)
+    expect(api.blockId).toBe("blk_api")
+    expect(api.childCount).toBe(1)
+    expect(ids(index.getChildren(api))).toEqual(["blk_auth"])
+  })
+
+  test("resolution is memoized — a second expand does no work", () => {
+    let calls = 0
+    const resolve = createChildResolver((hit) => {
+      calls++
+      return [{ ...hit, blockId: `${hit.blockId}_child` }]
+    })
+    const index = buildIndex([TASKS_NOTE])
+    const [head] = searchBlocks(parseQuery("type:h1"), index)
+    const first = resolve(head)
+    expect(calls).toBe(1)
+    // Same block again: cached, down to the array identity.
+    expect(resolve(head)).toBe(first)
+    expect(calls).toBe(1)
+    // A different block still resolves.
+    resolve(index.hits[1])
+    expect(calls).toBe(2)
+  })
+
+  test("the index's own resolver caches too", () => {
+    const index = buildIndex([TASKS_NOTE])
+    const [head] = searchBlocks(parseQuery("type:h1"), index)
+    expect(index.getChildren(head)).toBe(index.getChildren(head))
+  })
+
+  test("resolution is note-scoped: a pinned id reused in two notes stays distinct", () => {
+    // `id::` lines are authored, so the same id can legitimately appear in two
+    // notes — each hit must resolve its OWN children.
+    const a = makeNote({
+      id: "a",
+      content: md("# Shared", "  id:: blk_dup", "  - only in a", "    id:: blk_a1"),
+    })
+    const b = makeNote({
+      id: "b",
+      content: md(
+        "# Shared",
+        "  id:: blk_dup",
+        "  - first in b",
+        "    id:: blk_b1",
+        "  - second in b",
+        "    id:: blk_b2",
+      ),
+    })
+    const index = buildIndex([a, b])
+    const [fromA, fromB] = searchBlocks(parseQuery("type:h1"), index)
+    expect(blockKey(fromA)).toBe("a::blk_dup")
+    expect(blockKey(fromB)).toBe("b::blk_dup")
+    expect(fromA.childCount).toBe(1)
+    expect(fromB.childCount).toBe(2)
+    expect(ids(index.getChildren(fromA))).toEqual(["blk_a1"])
+    expect(ids(index.getChildren(fromB))).toEqual(["blk_b1", "blk_b2"])
   })
 })
 

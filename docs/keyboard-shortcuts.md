@@ -65,6 +65,32 @@ focus.
 | Clear the highlight, back to search   | <kbd>Esc</kbd>                   |
 | Jump to the first / last item         | <kbd>Home</kbd> / <kbd>End</kbd> |
 
+## Search results
+
+Search results are the matching **blocks**, at any depth — a nested heading or
+a single todo is a row of its own, shown with the note and ancestry it came
+from. The same rows appear in <kbd>⌘</kbd> <kbd>K</kbd> and on the full results
+view (`/?query=…`), so the keys are the same in both.
+
+| Action                                     | Shortcut                    |
+| ------------------------------------------ | --------------------------- |
+| Move between result rows                   | <kbd>↑</kbd> / <kbd>↓</kbd> |
+| Expand the highlighted result              | <kbd>→</kbd>                |
+| Collapse it (already closed: go to parent) | <kbd>←</kbd>                |
+| Open the highlighted block (note + zoom)   | <kbd>↵</kbd>                |
+| See all results for the query (⌘K)         | <kbd>↵</kbd>                |
+
+Expanding fetches only that block's children, and remembers them — reopening
+is instant, and a child expands the next level the same way.
+
+In <kbd>⌘</kbd> <kbd>K</kbd> the query input owns <kbd>←</kbd>/<kbd>→</kbd>
+while there is text to move through; with the caret parked at the **end** of
+the query (where typing leaves it) they expand and collapse the highlighted
+result instead. Move the caret back into the text and the arrows are the
+input's again. <kbd>↵</kbd> with nothing arrowed lands on the "see all …" row
+and opens the full results view, whose `?query=` URL is bookmarkable and
+works with back/forward.
+
 ## Block editor
 
 The editor has two modes, like Notion: **select** (a block is highlighted) and

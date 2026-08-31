@@ -8,10 +8,16 @@ import { compareNotes, testNoteFilters } from "./search-notes"
 /**
  * Block-granular search: resolve a query to individual BLOCKS instead of
  * notes. This is the data-layer engine behind the `type:` qualifier
- * (`type:todo` = every unchecked checkbox in the corpus) and the future
- * block-results UI. Everything runs client-side over the parsed docs derived
- * from the files atom — see `blockIndexAtom` / `searchBlocksAtom` in
- * global-state.ts for the derived-atom wiring.
+ * (`type:todo` = every unchecked checkbox in the corpus) and the block-results
+ * UI (`src/components/search-results.tsx`). Everything runs client-side over
+ * the parsed docs derived from the files atom — see `blockIndexAtom` /
+ * `searchBlocksAtom` in global-state.ts for the derived-atom wiring.
+ *
+ * A hit is a ROW, not a subtree: it carries its own text, its breadcrumb
+ * ancestry and a `childCount` presence flag, and nothing below it. Children
+ * are resolved on expand through `BlockIndex.getChildren`, and cached — see
+ * `createChildResolver`, which is also the seam an async (server-side) source
+ * would slot into.
  *
  * Query semantics (all composable with the existing `parseQuery` vocabulary):
  * - `type:` filters with block-type values (the table below) match the block
@@ -107,25 +113,16 @@ export interface BlockAncestor {
   text: string
 }
 
-/** One direct child block carried on a hit for downstream context. */
-export interface BlockChild {
-  id: string
-  /** Marker-free display text (verbatim for code lines, like a hit's own). */
-  text: string
-  type: BlockSearchType
-}
-
-/** How many direct children a hit carries at most. A matched section with
- * more still reports the full `childCount`, so a UI can say "…and N more". */
-export const MAX_HIT_CHILDREN = 20
-
 /**
- * One block-level search result. Carries everything a results row needs to
- * render and navigate without re-deriving: the target is the note route with
- * the `?block=` zoom param (`/notes/$noteId?block=$blockId`), the breadcrumb
- * is `ancestors`, `children` is the downstream context (searching for a
- * section shows what's inside it), and `note` is the containing note's full
- * metadata.
+ * One block-level search result. Carries exactly what a results ROW needs to
+ * render and navigate, and nothing downstream: the target is the note route
+ * with the `?block=` zoom param (`/notes/$noteId?block=$blockId`), the
+ * breadcrumb is `ancestors`, and `note` is the containing note's metadata.
+ *
+ * Children are deliberately NOT embedded — `childCount` is the presence flag
+ * the UI draws its expand chevron from, and the children themselves are
+ * resolved on expand through `BlockIndex.getChildren` (memoized). See the
+ * "Lazy children" note below.
  */
 export interface BlockHit {
   blockId: string
@@ -136,16 +133,62 @@ export interface BlockHit {
   /** Ancestor blocks, outermost first (ids + display texts, for breadcrumbs). */
   ancestors: BlockAncestor[]
   /**
-   * The block's direct children in order, one level deep, capped at
-   * `MAX_HIT_CHILDREN` (see `childCount` for the true total). Context only —
-   * the hit is the matching block, and result lists must not count children
-   * as matches of their own.
+   * How many direct children the block has — the has-downstream flag. `> 0`
+   * means the row draws an expand affordance; the children themselves are
+   * fetched only when it's used.
    */
-  children: BlockChild[]
-  /** The block's true number of direct children (may exceed `children`). */
   childCount: number
   /** The containing note — metadata for note-level qualifiers and rendering. */
   note: Note
+}
+
+/**
+ * A block's identity across the whole corpus. Block ids are minted per note
+ * and can be *pinned* by an `id::` line, so the same id can legitimately
+ * appear in two notes — every corpus-wide lookup is note-scoped.
+ */
+export function blockKey(hit: Pick<BlockHit, "noteId" | "blockId">): string {
+  return `${hit.noteId}::${hit.blockId}`
+}
+
+// ── Lazy children ───────────────────────────────────────────────────────────
+
+/**
+ * Resolves a hit's direct children, in document order. Empty for a leaf.
+ *
+ * This engine is in-memory and therefore synchronous. The *seam* an async
+ * (server-backed) implementation drops into is `BlockSearchSource` in
+ * `block-search-source.ts`, whose `children` is await-tolerant; this type is
+ * just what the in-memory index supplies to it.
+ */
+type BlockChildResolver = (hit: BlockHit) => BlockHit[]
+
+/**
+ * Memoize a child resolver, per block (note-scoped id — see `blockKey`).
+ * Expanding a block twice does the work once; expanding one of its children
+ * resolves the next level the same way, through the same cache.
+ *
+ * Generic in the resolved value on purpose: an async source memoizes its
+ * *promises* through this same function, so a second expand of the same block
+ * never re-queries and the cache key stays identical across both worlds.
+ */
+export function createChildResolver<T>(source: (hit: BlockHit) => T): (hit: BlockHit) => T {
+  const cache = new Map<string, T>()
+  return (hit) => {
+    const key = blockKey(hit)
+    if (cache.has(key)) return cache.get(key) as T
+    const children = source(hit)
+    cache.set(key, children)
+    return children
+  }
+}
+
+/** One note's parsed blocks: its hits in document order, plus the parent →
+ * child-ids edges the lazy resolver walks (ids only — no block payload). */
+export interface NoteBlockIndex {
+  hits: BlockHit[]
+  /** Child ids by parent block id, for blocks that have any. */
+  childIds: Map<string, string[]>
 }
 
 /** Classify a block, given the document's fence state where it sits. */
@@ -170,13 +213,14 @@ function blockSearchType(content: string, inFence: boolean): BlockSearchType {
 
 /**
  * Parse one note into its block hits, in document order (the depth-first walk
- * the serializer emits — which is also how the fence state must be tracked).
- * This is the expensive per-note step the indexer memoizes.
+ * the serializer emits — which is also how the fence state must be tracked),
+ * plus the parent → child-ids edges. This is the expensive per-note step the
+ * indexer memoizes.
  */
-export function indexNoteBlocks(note: Note): BlockHit[] {
+export function indexNoteBlocks(note: Note): NoteBlockIndex {
   const doc = parse(note.content)
   const hits: BlockHit[] = []
-  const hitById = new Map<string, BlockHit>()
+  const childIds = new Map<string, string[]>()
   let fenceOpen = false
 
   const walk = (ids: string[], ancestors: BlockAncestor[]) => {
@@ -188,43 +232,35 @@ export function indexNoteBlocks(note: Note): BlockHit[] {
       const type = blockSearchType(block.content, inFence)
       // Inside a fence the marker is code, not markup — keep the line verbatim.
       const text = type === "code" ? block.content : stripMarker(block.content)
-      const hit: BlockHit = {
+      hits.push({
         blockId: id,
         noteId: note.id,
         text,
         type,
         ancestors,
-        children: [],
-        childCount: 0,
+        childCount: block.children.length,
         note,
-      }
-      hits.push(hit)
-      hitById.set(id, hit)
+      })
+      if (block.children.length > 0) childIds.set(id, block.children)
       walk(block.children, [...ancestors, { id, text }])
     }
   }
   walk(doc.rootBlockIds, [])
 
-  // Second pass — downstream context. Children are visited after their parent
-  // in the walk, so their text/type only exist once the walk is done.
-  for (const hit of hits) {
-    const childIds = doc.blocks[hit.blockId]?.children ?? []
-    hit.childCount = childIds.length
-    for (const childId of childIds.slice(0, MAX_HIT_CHILDREN)) {
-      const child = hitById.get(childId)
-      if (child) hit.children.push({ id: childId, text: child.text, type: child.type })
-    }
-  }
-
-  return hits
+  return { hits, childIds }
 }
 
-/** The corpus-wide block index. `searcher` is built lazily on first access so
- * corpus changes never pay for fuzzy indexing that no query needs. */
+/**
+ * The corpus-wide block index. Both the fuzzy `searcher` and the lookup tables
+ * `getChildren` walks are built lazily on first access, so a corpus change
+ * never pays for indexing that no query — and no expand — asked for.
+ */
 export interface BlockIndex {
   /** Every block hit, in document order grouped by note (input note order). */
   hits: BlockHit[]
   readonly searcher: Searcher<BlockHit, FullOptions<BlockHit>>
+  /** A hit's direct children in document order, memoized per block. */
+  getChildren: BlockChildResolver
 }
 
 /**
@@ -235,28 +271,34 @@ export interface BlockIndex {
  * the fresh `note` reference stitched in, so note-level qualifiers (tags,
  * dates) never go stale. Notes that disappear are evicted.
  */
-export function createBlockIndexer(indexNote: (note: Note) => BlockHit[] = indexNoteBlocks) {
-  const cache = new Map<NoteId, { content: string; note: Note; hits: BlockHit[] }>()
+export function createBlockIndexer(indexNote: (note: Note) => NoteBlockIndex = indexNoteBlocks) {
+  const cache = new Map<NoteId, { content: string; note: Note; blocks: NoteBlockIndex }>()
 
   return function buildIndex(notes: Note[]): BlockIndex {
     const seen = new Set<NoteId>()
     const all: BlockHit[] = []
+    // Per-note edge tables, referenced (never copied) from the memo.
+    const edges = new Map<NoteId, Map<string, string[]>>()
 
     for (const note of notes) {
       seen.add(note.id)
       let cached = cache.get(note.id)
       if (!cached || cached.content !== note.content) {
-        cached = { content: note.content, note, hits: indexNote(note) }
+        cached = { content: note.content, note, blocks: indexNote(note) }
         cache.set(note.id, cached)
       } else if (cached.note !== note) {
         cached = {
           content: cached.content,
           note,
-          hits: cached.hits.map((hit) => ({ ...hit, note })),
+          blocks: {
+            hits: cached.blocks.hits.map((hit) => ({ ...hit, note })),
+            childIds: cached.blocks.childIds,
+          },
         }
         cache.set(note.id, cached)
       }
-      for (const hit of cached.hits) all.push(hit)
+      for (const hit of cached.blocks.hits) all.push(hit)
+      edges.set(note.id, cached.blocks.childIds)
     }
 
     for (const id of cache.keys()) {
@@ -264,12 +306,23 @@ export function createBlockIndexer(indexNote: (note: Note) => BlockHit[] = index
     }
 
     let searcher: Searcher<BlockHit, FullOptions<BlockHit>> | null = null
+    let byKey: Map<string, BlockHit> | null = null
+    const lookup = () => (byKey ??= new Map(all.map((hit) => [blockKey(hit), hit])))
+
     return {
       hits: all,
       get searcher() {
         searcher ??= new Searcher(all, { keySelector: (hit) => hit.text, threshold: 0.8 })
         return searcher
       },
+      getChildren: createChildResolver((hit) => {
+        const ids = edges.get(hit.noteId)?.get(hit.blockId)
+        if (!ids || ids.length === 0) return []
+        const blocks = lookup()
+        return ids
+          .map((id) => blocks.get(blockKey({ noteId: hit.noteId, blockId: id })))
+          .filter((child): child is BlockHit => child !== undefined)
+      }),
     }
   }
 }
