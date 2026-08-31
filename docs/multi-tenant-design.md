@@ -339,13 +339,27 @@ each table" — conflates two things this design keeps apart:
 
 ## 8. Explicitly out of scope
 
-**Collaboration/sharing.** Not designed here. The architecture leaves room:
-a share is a _grant in the control plane_ (who may reach which corpus, at
-what rights) plus a second address the data plane may derive — cross-DO
-reads via RPC, or a shared-corpus DO whose members' verified ids all map to
-it. Because addressing is already "verified id → DO id", generalizing to
-"verified id → set of permitted DO ids" is a lookup, not a rearchitecture.
-Per-row attribution (§7) and the op log arrive in the same season.
+**Collaboration/sharing.** Not designed here, but the shape is decided
+(discussed 2026-08-31): **the shareable unit is a space, not a row.** A
+shared space is simply another corpus — another SQLite DO (`space:<uuid>`),
+same schema, same replica protocol — with a membership table in the control
+plane (`space_id, user_id, role`) consulted between `requireSession` and
+routing. The client already syncs a corpus; syncing your own plus your
+spaces is the same loop with more URLs, and per-row LWW is writer-agnostic
+(two people converge exactly like two devices). "Share this block" =
+promote the subtree into a space (the existing link/rescue machinery,
+pointed across a boundary); cross-space references are pointer links
+resolved at read, allowed to dangle without access — consistent with how
+links already behave. This is the granularity shipping products converge on
+(Notion shares pages, Figma shares files): live row-level sharing out of
+personal silos is the hard version in every architecture — and in the
+tenant-column design it is worse, since deletion-by-absence sync would need
+per-viewer id lists (§2's destruction risk, made combinatorial). Two things
+arrive for free: per-row attribution (§7) belongs in space rows, and a DO
+per space is the multiplayer primitive (single-threaded sequencer +
+WebSockets) the op log and any future live collaboration want. Because
+addressing is already "verified id → DO id", generalizing to "verified id →
+set of permitted DO ids" is a lookup, not a rearchitecture.
 
 **Billing.** Not designed here. The `users` row is where a plan/quota flag
 goes; per-tenant metering is already measurable (`databaseSize`, rows
