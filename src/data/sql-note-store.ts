@@ -18,6 +18,7 @@ import {
   rollup,
   sortKeyBetween,
 } from "./graph"
+import { ensureCorpusSchema } from "./corpus-schema"
 import type { NoteStore } from "./note-store"
 import type { SqlDriver, SqlStatement } from "./sql-driver"
 
@@ -50,42 +51,15 @@ export interface SqlNoteStore extends NoteStore {
   close(): Promise<void>
 }
 
-const SCHEMA_VERSION = "2"
-
-/** Drop everything either migration creates, so an incompatible schema can be
- * rebuilt from scratch — safe because the store can be re-pulled from D1. */
-const RESET_SQL = `
-DROP TABLE IF EXISTS link;
-DROP TABLE IF EXISTS nodes;
-DROP TABLE IF EXISTS links;
-DROP TABLE IF EXISTS blocks;
-DROP TABLE IF EXISTS view_state;
-DROP TABLE IF EXISTS notes;
-DROP TABLE IF EXISTS meta;
-`
-
-const MIGRATIONS = migration0001 + "\n" + migration0002
-
 /**
  * Open a `NoteStore` on `driver`, applying the migrations when the database is
  * empty. A v1 database is migrated in place by `0002` (which drops the v1
- * tables — contents re-pull from D1); anything else unrecognized is reset.
+ * tables — contents re-pull from the replica); anything else unrecognized is
+ * reset. The ladder itself lives in `corpus-schema.ts`, shared with the
+ * per-user corpus Durable Object (`worker/corpus-do.ts`).
  */
 export async function openSqlNoteStore(driver: SqlDriver): Promise<SqlNoteStore> {
-  const tables = await driver.exec(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'meta'",
-  )
-  if (tables.length === 0) {
-    await driver.execScript(MIGRATIONS)
-  } else {
-    const rows = await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")
-    const version = rows[0]?.value
-    if (version === "1") {
-      await driver.execScript(migration0002)
-    } else if (version !== SCHEMA_VERSION) {
-      await driver.execScript(RESET_SQL + MIGRATIONS)
-    }
-  }
+  await ensureCorpusSchema(driver, { init: migration0001, nodes: migration0002 })
 
   const loadGraph = () => loadMemGraph(driver)
 

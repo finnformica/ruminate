@@ -1,57 +1,58 @@
-// D1 replica API — schema v2 (docs/graph-schema-v2.md, docs/graph-storage.md).
+// Replica API — schema v2 rows, one corpus per user (docs/graph-schema-v2.md,
+// docs/graph-storage.md, docs/multi-tenant-design.md).
 //
 // The client pushes row-level diffs of its node/link graph (produced by the
 // local store's ingest in `src/data/sql-note-store.ts`, batched by
-// `src/data/replica-sync.ts`) into the D1 database behind this Worker, and
-// pulls rows back out (full or since-cursor). Rows are applied with per-row
-// last-writer-wins on `updated_at`.
+// `src/data/replica-sync.ts`) and pulls rows back out (full or since-cursor),
+// with per-row last-writer-wins on `updated_at`. Each user's corpus lives in
+// the private SQLite database of their `UserCorpus` Durable Object
+// (`worker/corpus-do.ts`); this handler is auth + dispatch.
 //
 // Routes (wired in worker/index.ts under /api/replica/*):
-//   PUT /api/replica/notes  — batch row upserts + deletes, one atomic D1 batch
+//   PUT /api/replica/notes  — batch row upserts + deletes, one atomic batch
 //   GET /api/replica/notes  — row pull (full, or ?since=<cursor> incremental)
 //   GET /api/replica/status — row counts + schema_version + replica_cursor
 //
-// The wire format, validation, and SQL planning live in `replica-payload.ts`,
-// shared with the client so the two sides cannot drift.
+// The wire format, validation, and SQL planning live in `replica-payload.ts`
+// (shared with the client); the queries themselves run inside the DO via the
+// engine-agnostic `replica-corpus.ts`.
 //
-// AUTH: Ruminate is a single-user app, so "any valid GitHub session" suffices
-// (the database only ever holds that one user's notes). We reuse the two
-// session mechanisms the Worker already has:
-//   1. the `gh_refresh` HttpOnly cookie set by /github-auth and rotated by
-//      /github-refresh (its presence proves the browser holds a session this
-//      Worker created; SameSite=Lax blocks cross-site sends), and
-//   2. the GitHub access token the client keeps, sent here as
-//      `Authorization: Bearer <token>` and verified against the GitHub API —
-//      the same `GET /user` check /github-auth performs when minting a session.
-// Requests failing either check are rejected with 401.
+// AUTH & TENANCY: `requireSession` verifies identity exactly as it always has
+// — the `gh_refresh` HttpOnly cookie set by /github-auth (SameSite=Lax blocks
+// cross-site sends) plus the GitHub access token as `Authorization: Bearer`,
+// verified against `GET https://api.github.com/user`. The *verified* numeric
+// id is then resolved against the control plane (`tenancy.ts`: users /
+// allowlist tables per SIGNUP_MODE, with ALLOWED_GITHUB_ID as the fail-closed
+// bootstrap), and names the tenant.
+//
+// TENANT-ADDRESSING INVARIANT: the corpus Durable Object is addressed ONLY by
+// the server-verified GitHub id — `env.CORPUS.getByName(String(verified.id))`
+// below is the single place a tenant address is minted, and its input comes
+// exclusively from GitHub's response to OUR token check. No path segment,
+// query param, header, or body field ever reaches it, so a client cannot name
+// a tenant; it can only *be* one. (Pinned by tests in replica.test.ts.)
 
+import type { UserCorpus } from "../corpus-do"
+import { createD1SqlDriver } from "../d1-sql-driver"
 import { readRefreshCookie } from "../github-cookie"
 import type { Env } from "../types"
-import {
-  parseReplicaPayload,
-  parseSinceCursor,
-  planReplicaPut,
-  type LinkKey,
-  type LinkRow,
-  type NodeRow,
-  type ReplicaChangesBody,
-  type ReplicaCorpusBody,
-  type ReplicaStatusBody,
-} from "./replica-payload"
+import { migrateCorpusFromD1 } from "./corpus-migration"
+import { parseReplicaPayload, parseSinceCursor } from "./replica-payload"
+import { resolveTenancy, type VerifiedIdentity } from "./tenancy"
 
 /** Reject bodies larger than this (the whole row corpus is a few MB today). */
 const MAX_BODY_BYTES = 16 * 1024 * 1024
 
 /**
- * Session guard (see the AUTH note at the top of this file). Returns null when
- * the request is authenticated, or the 401 response to send. `fetchImpl` is
+ * Session guard (see the AUTH note at the top of this file). Returns the
+ * verified identity, or the 401/403 response to send. `fetchImpl` is
  * injectable for tests; production uses global fetch.
  */
 export async function requireSession(
   request: Request,
-  allowedGithubId: string | undefined,
+  env: Env,
   fetchImpl: typeof fetch = fetch,
-): Promise<Response | null> {
+): Promise<VerifiedIdentity | Response> {
   if (!readRefreshCookie(request)) return jsonResponse({ error: "unauthenticated" }, 401)
 
   const match = /^Bearer (.+)$/.exec(request.headers.get("Authorization") ?? "")
@@ -65,31 +66,78 @@ export async function requireSession(
     return jsonResponse({ error: "invalid_token" }, 401)
   }
 
-  // The token must belong to THE owner, not merely any valid GitHub account —
-  // the replica holds the owner's notes. Fail closed when unconfigured.
-  if (!allowedGithubId) return jsonResponse({ error: "owner_not_configured" }, 403)
-  const user = (await response.json().catch(() => null)) as { id?: number } | null
-  if (!user || String(user.id) !== allowedGithubId) {
-    return jsonResponse({ error: "forbidden" }, 403)
+  const user = (await response.json().catch(() => null)) as {
+    id?: number
+    login?: string
+    name?: string | null
+  } | null
+  if (!user || typeof user.id !== "number" || !Number.isFinite(user.id)) {
+    return jsonResponse({ error: "invalid_token" }, 401)
   }
 
-  return null
+  const identity: VerifiedIdentity = {
+    id: user.id,
+    login: typeof user.login === "string" && user.login.length > 0 ? user.login : String(user.id),
+    name: typeof user.name === "string" ? user.name : null,
+  }
+
+  const decision = await resolveTenancy(createD1SqlDriver(env.DB), identity, {
+    signupMode: env.SIGNUP_MODE,
+    bootstrapGithubId: env.ALLOWED_GITHUB_ID,
+  })
+  if (!decision.allowed) return jsonResponse({ error: decision.error }, decision.status)
+
+  return identity
+}
+
+type CorpusStub = DurableObjectStub<UserCorpus>
+
+/** One tenant-#1 lazy-migration check per isolate (see `ensureOwnerCorpus`). */
+let ownerCorpusChecked = false
+
+/**
+ * Lazy half of the tenant-#1 migration (docs/multi-tenant-design.md §6): if
+ * the signed-in user is the bootstrap owner and their DO corpus is empty
+ * while the legacy D1 corpus is not, import it before serving — otherwise the
+ * owner's first post-deploy since-pull would report every note absent and the
+ * client would delete them locally. One status check per isolate; the
+ * explicit `POST /api/admin/migrate-corpus` endpoint remains the deliberate,
+ * observable way to run the same import.
+ */
+async function ensureOwnerCorpus(
+  identity: VerifiedIdentity,
+  env: Env,
+  corpus: CorpusStub,
+): Promise<void> {
+  if (ownerCorpusChecked) return
+  if (!env.ALLOWED_GITHUB_ID || String(identity.id) !== env.ALLOWED_GITHUB_ID) return
+  await migrateCorpusFromD1(createD1SqlDriver(env.DB), corpus)
+  ownerCorpusChecked = true
 }
 
 /** Route /api/replica/* requests. Every route is session-guarded. */
-export async function replica(request: Request, env: Env): Promise<Response> {
-  const unauthorized = await requireSession(request, env.ALLOWED_GITHUB_ID)
-  if (unauthorized) return unauthorized
+export async function replica(
+  request: Request,
+  env: Env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
+  const session = await requireSession(request, env, fetchImpl)
+  if (session instanceof Response) return session
+
+  // THE tenant-addressing invariant (see the header comment): the only input
+  // to the corpus address is the server-verified GitHub id.
+  const corpus = env.CORPUS.getByName(String(session.id))
+  await ensureOwnerCorpus(session, env, corpus)
 
   const { pathname } = new URL(request.url)
   if (pathname === "/api/replica/notes" && request.method === "PUT") {
-    return replicaPut(request, env.DB)
+    return replicaPut(request, corpus)
   }
   if (pathname === "/api/replica/notes" && request.method === "GET") {
-    return replicaPull(request, env.DB)
+    return replicaPull(request, corpus)
   }
   if (pathname === "/api/replica/status" && request.method === "GET") {
-    return replicaStatus(env.DB)
+    return jsonResponse(await corpus.status())
   }
   return jsonResponse({ error: "not_found" }, 404)
 }
@@ -107,60 +155,15 @@ export async function replica(request: Request, env: Env): Promise<Response> {
  *   key list of each table, so the client can delete local rows absent from
  *   them.
  */
-export async function replicaPull(request: Request, db: D1Database): Promise<Response> {
+async function replicaPull(request: Request, corpus: CorpusStub): Promise<Response> {
   const sinceRaw = new URL(request.url).searchParams.get("since")
   const since = sinceRaw === null ? null : parseSinceCursor(sinceRaw)
   if (sinceRaw !== null && since === null) return jsonResponse({ error: "invalid_since" }, 400)
 
-  const cursorRow = await db
-    .prepare("SELECT value FROM meta WHERE key = 'replica_cursor'")
-    .first<{ value: string | null }>()
-  const cursor = cursorRow?.value ?? null
-
-  if (since === null) {
-    const nodes = (
-      await db.prepare("SELECT id, type, text, props, updated_at FROM nodes").all<NodeRow>()
-    ).results
-    const links = (
-      await db
-        .prepare("SELECT source_id, destination_id, kind, sort_key, updated_at FROM link")
-        .all<LinkRow>()
-    ).results
-    const body: ReplicaCorpusBody = { nodes, links, cursor }
-    return jsonResponse(body)
-  }
-
-  const nodes = (
-    await db
-      .prepare("SELECT id, type, text, props, updated_at FROM nodes WHERE updated_at > ?1")
-      .bind(since)
-      .all<NodeRow>()
-  ).results
-  const links = (
-    await db
-      .prepare(
-        "SELECT source_id, destination_id, kind, sort_key, updated_at FROM link WHERE updated_at > ?1",
-      )
-      .bind(since)
-      .all<LinkRow>()
-  ).results
-  const nodeIds = (await db.prepare("SELECT id FROM nodes").all<{ id: string }>()).results
-  const linkKeyRows = (
-    await db
-      .prepare("SELECT source_id, destination_id, kind FROM link")
-      .all<{ source_id: string; destination_id: string; kind: string }>()
-  ).results
-  const body: ReplicaChangesBody = {
-    nodes,
-    links,
-    nodeIds: nodeIds.map((row) => row.id),
-    linkKeys: linkKeyRows.map((row): LinkKey => [row.source_id, row.destination_id, row.kind]),
-    cursor,
-  }
-  return jsonResponse(body)
+  return jsonResponse(since === null ? await corpus.pullFull() : await corpus.pullSince(since))
 }
 
-async function replicaPut(request: Request, db: D1Database): Promise<Response> {
+async function replicaPut(request: Request, corpus: CorpusStub): Promise<Response> {
   const contentLength = Number(request.headers.get("Content-Length") ?? "0")
   if (contentLength > MAX_BODY_BYTES) {
     return jsonResponse({ error: "payload_too_large" }, 413)
@@ -176,48 +179,7 @@ async function replicaPut(request: Request, db: D1Database): Promise<Response> {
   const payload = parseReplicaPayload(body)
   if (!payload) return jsonResponse({ error: "invalid_payload" }, 400)
 
-  const statements = planReplicaPut(payload)
-  if (statements.length > 0) {
-    // D1 runs a batch as a single implicit transaction: all or nothing.
-    await db.batch(statements.map((s) => db.prepare(s.sql).bind(...s.params)))
-  }
-
-  return jsonResponse({
-    ok: true,
-    nodes: payload.nodes.length,
-    links: payload.links.length,
-    deletes: (payload.deleteNodes?.length ?? 0) + (payload.deleteLinks?.length ?? 0),
-  })
-}
-
-async function replicaStatus(db: D1Database): Promise<Response> {
-  const row = await db
-    .prepare(
-      "SELECT " +
-        "(SELECT COUNT(*) FROM nodes) AS nodes, " +
-        "(SELECT COUNT(*) FROM link) AS links, " +
-        "(SELECT COUNT(*) FROM nodes WHERE type = 'page') AS pages, " +
-        "(SELECT value FROM meta WHERE key = 'schema_version') AS schema_version, " +
-        "(SELECT value FROM meta WHERE key = 'replica_cursor') AS replica_cursor",
-    )
-    .first<{
-      nodes: number
-      links: number
-      pages: number
-      schema_version: string | null
-      replica_cursor: string | null
-    }>()
-
-  const body: ReplicaStatusBody = {
-    counts: {
-      nodes: row?.nodes ?? 0,
-      links: row?.links ?? 0,
-      pages: row?.pages ?? 0,
-    },
-    schema_version: row?.schema_version ?? null,
-    replica_cursor: row?.replica_cursor ?? null,
-  }
-  return jsonResponse(body)
+  return jsonResponse(await corpus.put(payload))
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

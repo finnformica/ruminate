@@ -1,9 +1,16 @@
 # Multi-tenant design
 
-Status: **design only** — nothing here is built. This document designs the
-path from today's single-owner instance (one D1, one permitted GitHub id,
-fail-closed) to a product where each signed-up user has their own private
-corpus. It extends [graph-storage.md](./graph-storage.md) and
+Status: **implemented on branch (pending review)** — the recommended design
+below (§3–§4, §6, §10) is built: `UserCorpus` DO (`worker/corpus-do.ts`, a
+thin `SqlDriver` adapter in `worker/do-sql-driver.ts` over the shared corpus
+code in `worker/handlers/replica-corpus.ts`), the control plane
+(`migrations/0003_control_plane.sql` + `worker/handlers/tenancy.ts`,
+`SIGNUP_MODE=allowlist`), routing by the verified id in
+`worker/handlers/replica.ts`, and the tenant-#1 migration
+(`POST /api/admin/migrate-corpus` + a lazy owner fallback). This document
+designed the path from the single-owner instance (one D1, one permitted
+GitHub id, fail-closed) to a product where each signed-up user has their own
+private corpus. It extends [graph-storage.md](./graph-storage.md) and
 [graph-schema-v2.md](./graph-schema-v2.md), and coordinates with
 [event-sourcing-design.md](https://github.com/finnformica/ruminate/blob/claude/event-sourcing-design/docs/event-sourcing-design.md)
 (branch `claude/event-sourcing-design`) without building any of it.

@@ -10,11 +10,12 @@ app runs on it.
 
 ## The architecture: database-authoritative, blocks-first
 
-**Database storage is THE app.** After GitHub sign-in — which is purely
-identity/auth for the Worker API — data loads from D1 (the authoritative
-cross-device copy), the local SQL store is the runtime store, and saves write
-locally and push to D1 through the replica queue. Signed out, the sample notes
-render. There is no git anywhere in the data path.
+**Database storage is THE app.** After GitHub sign-in — which is identity for
+the Worker API and, since the multi-tenant cutover, names the tenant — data
+loads from the user's server corpus (the authoritative cross-device copy), the
+local SQL store is the runtime store, and saves write locally and push to the
+replica through the replica queue. Signed out, the sample notes render. There
+is no git anywhere in the data path.
 
 **The graph is truth; markdown is a projection.** Since schema v2, both
 databases hold typed `nodes` + containment `link` rows, not markdown. A note's
@@ -31,7 +32,9 @@ local SQLite runtime store (sqlite-wasm / OPFS)   ← the store the app runs on
     │  PUT /api/replica/notes   (row-diff push, src/data/replica-sync.ts)
     │  GET /api/replica/notes   (boot + since-cursor row pulls, src/data/d1-note-source.ts)
     ▼
-D1 behind the Worker                              ← the authoritative cross-device copy
+per-user UserCorpus Durable Object behind the Worker  ← the authoritative cross-device copy
+    (addressed by the server-verified GitHub id; D1 is the control plane —
+     docs/multi-tenant-design.md)
 ```
 
 ### How the app is fed
@@ -217,16 +220,23 @@ multi-parent node, so the report matters.
 ## Worker replica API (`/api/replica/*`)
 
 `worker/handlers/replica.ts`, routed like every other API route via
-`run_worker_first` in wrangler.jsonc.
+`run_worker_first` in wrangler.jsonc. Since the multi-tenant cutover
+(docs/multi-tenant-design.md) the handler is auth + dispatch: each user's
+corpus lives in the private SQLite database of their `UserCorpus` Durable
+Object (`worker/corpus-do.ts`), and the queries run there through the shared
+`SqlDriver` seam (`worker/do-sql-driver.ts` + the engine-agnostic
+`worker/handlers/replica-corpus.ts`). The D1 database is the control plane
+(users + allowlist, migration `0003_control_plane.sql`) — plus tenant #1's
+legacy corpus rows until §6's cleanup step.
 
 - `PUT /api/replica/notes` — batch of row upserts + deletes
   (`{nodes, links, deleteNodes?, deleteLinks?, cursor?}`), executed as a
-  single `db.batch()` — one atomic D1 transaction. Upserts are per-row
-  last-writer-wins (`WHERE excluded.updated_at >= …`), so replays are
+  single atomic transaction (`transactionSync` inside the DO). Upserts are
+  per-row last-writer-wins (`WHERE excluded.updated_at >= …`), so replays are
   idempotent and a stale push cannot clobber a newer row; node deletes clean
   their link rows explicitly. Payloads are validated (`parseReplicaPayload`)
-  and planned (`planReplicaPut`) by pure, unit-tested functions; the D1
-  wiring is a thin shell typed against `@cloudflare/workers-types`.
+  and planned (`planReplicaPut`) by pure, unit-tested functions; the DO
+  wiring is a thin adapter typed against `@cloudflare/workers-types`.
 - `GET /api/replica/notes` — row pull, the read half:
   - Full: `{ nodes, links, cursor }` — every row of both tables.
   - `?since=<cursor>`: `{ nodes, links, nodeIds, linkKeys, cursor }` — the
@@ -234,14 +244,25 @@ multi-parent node, so the report matters.
     table** for deletion-by-absence. A malformed `since` is a 400.
 - `GET /api/replica/status` — row counts (`nodes`, `links`, `pages`),
   `schema_version`, `replica_cursor`.
-- **Auth:** every route is guarded by `requireSession`: the `gh_refresh`
-  HttpOnly cookie (set by `/github-auth`, rotated by `/github-refresh`; its
-  presence proves the browser holds a session this Worker created, and
-  SameSite=Lax blocks cross-site sends) plus the GitHub access token as
-  `Authorization: Bearer`, verified against `GET https://api.github.com/user`
-  — and the verified GitHub id must match `ALLOWED_GITHUB_ID`
-  (wrangler.jsonc): the app is single-user and the database only ever holds
-  the owner's notes, so any other valid GitHub account gets a 403. If the
+- `POST /api/admin/migrate-corpus` (`worker/handlers/admin.ts`, owner-only) —
+  the tenant-#1 migration: copies the legacy D1 corpus into the owner's DO if
+  the DO is empty; idempotent, read-only on D1. The same import also runs
+  lazily before an owner request would touch an empty DO while D1 still holds
+  rows (`ensureOwnerCorpus`), so a post-deploy pull can never report the
+  corpus absent and trigger client-side deletion.
+- **Auth & tenancy:** every route is guarded by `requireSession`: the
+  `gh_refresh` HttpOnly cookie (set by `/github-auth`, rotated by
+  `/github-refresh`; its presence proves the browser holds a session this
+  Worker created, and SameSite=Lax blocks cross-site sends) plus the GitHub
+  access token as `Authorization: Bearer`, verified against
+  `GET https://api.github.com/user`. The **verified** id is then resolved
+  against the control plane (`worker/handlers/tenancy.ts`): a `users` row
+  admits (unless `blocked`), and a missing row is a signup decision per
+  `SIGNUP_MODE` (`allowlist`: the allowlist table or the `ALLOWED_GITHUB_ID`
+  bootstrap; `open`: auto-provision; absent: bootstrap owner only —
+  fail-closed, and also the fallback if the control-plane migration hasn't
+  run). The corpus DO is addressed by `getByName(String(verifiedId))` and by
+  nothing else — no client-supplied value can name a tenant. If the
   per-request GitHub round-trip ever matters, cache verification results in
   `caches.default` keyed by a token hash.
 

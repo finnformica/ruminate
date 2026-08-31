@@ -15,10 +15,12 @@
       "/file-proxy",
       "/share/*",
       "/api/replica/*",
+      "/api/admin/*",
     ],
   },
-  // The note-graph replica (graph storage phase 3 — docs/graph-storage.md).
-  // Migrations live in ./migrations and are applied with
+  // The control-plane database: users + allowlist (docs/multi-tenant-design.md
+  // §3), plus the legacy pre-multi-tenant corpus rows until the tenant-#1
+  // migration has soaked. Migrations live in ./migrations and are applied with
   //   npx wrangler d1 migrations apply ruminate --local   (dev)
   //   npx wrangler d1 migrations apply ruminate --remote  (production)
   "d1_databases": [
@@ -29,6 +31,18 @@
       "migrations_dir": "./migrations",
     },
   ],
+  // One SQLite-backed Durable Object per user holds that user's corpus
+  // (docs/multi-tenant-design.md §4; worker/corpus-do.ts). Wrangler has no SQL
+  // migration runner for DOs — the class applies the same ./migrations ladder
+  // itself in its constructor (src/data/corpus-schema.ts).
+  "durable_objects": {
+    "bindings": [{ "name": "CORPUS", "class_name": "UserCorpus" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserCorpus"] }],
+  // Lets the DO import the ./migrations/*.sql files as strings — the worker
+  // bundle's equivalent of the Vite `?raw` import the local store uses on the
+  // very same files.
+  "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": true },
@@ -38,8 +52,12 @@
   // and put both in .dev.vars (git-ignored) for local `wrangler dev`.
   "vars": {
     "VITE_GITHUB_CLIENT_ID": "Ov23lidqIncQ8ul67fUo",
-    // The only GitHub identity the replica API serves (the app is single-user;
-    // any other valid GitHub account gets 403).
+    // Bootstrap owner id: implicit allowlist entry, /api/admin/* gate, and the
+    // fail-closed fallback if the control-plane migration hasn't run.
     "ALLOWED_GITHUB_ID": "42536816",
+    // Signup gate (worker/handlers/tenancy.ts): "allowlist" admits only ids in
+    // the control plane's allowlist table (plus the bootstrap owner); "open"
+    // auto-provisions any verified GitHub id; absent = bootstrap owner only.
+    "SIGNUP_MODE": "allowlist",
   },
 }

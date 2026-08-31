@@ -1,13 +1,22 @@
 import { describe, expect, it, vi } from "vitest"
+import migration0001 from "../../migrations/0001_init.sql?raw"
+import migration0002 from "../../migrations/0002_nodes.sql?raw"
+import migration0003 from "../../migrations/0003_control_plane.sql?raw"
+import { ensureCorpusSchema } from "../../src/data/corpus-schema"
+import type { SqlDriver } from "../../src/data/sql-driver"
+import type { Env } from "../types"
+import { corpusPullFull, corpusPullSince, corpusPut, corpusStatus } from "./replica-corpus"
 import {
   parseReplicaPayload,
   parseSinceCursor,
   planReplicaPut,
   type LinkRow,
   type NodeRow,
+  type ReplicaChangesBody,
+  type ReplicaCorpusBody,
 } from "./replica-payload"
-import { replica, replicaPull, requireSession } from "./replica"
-import type { Env } from "../types"
+import { replica, requireSession } from "./replica"
+import { asFakeD1, createTestSqlDriver } from "./sqlite-test-driver"
 
 const node: NodeRow = { id: "blk_aaaaaaaaaa", type: "ul", text: "Hi", props: null, updated_at: 123 }
 const link: LinkRow = {
@@ -244,64 +253,15 @@ describe("parseSinceCursor", () => {
   })
 })
 
-/**
- * Minimal fake D1 for `replicaPull`: dispatches on the handful of fixed SQL
- * strings the handler issues. Anything unexpected throws, so a new query
- * cannot silently return empty results in tests.
- */
-function fakePullDb(data: {
-  nodes: NodeRow[]
-  links?: LinkRow[]
-  cursor?: string | null
-}): D1Database {
-  const links = data.links ?? []
-  const prepare = (sql: string) => {
-    let bound: unknown[] = []
-    const statement = {
-      bind: (...params: unknown[]) => {
-        bound = params
-        return statement
-      },
-      first: async () => {
-        if (sql.includes("FROM meta")) return { value: data.cursor ?? null }
-        throw new Error(`Unexpected first(): ${sql}`)
-      },
-      all: async () => {
-        if (sql.startsWith("SELECT id, type, text, props, updated_at FROM nodes")) {
-          if (sql.includes("updated_at > ?1")) {
-            const since = Number(bound[0])
-            return { results: data.nodes.filter((row) => row.updated_at > since) }
-          }
-          return { results: data.nodes }
-        }
-        if (sql === "SELECT id FROM nodes") {
-          return { results: data.nodes.map((row) => ({ id: row.id })) }
-        }
-        if (sql.startsWith("SELECT source_id, destination_id, kind, sort_key, updated_at")) {
-          if (sql.includes("updated_at > ?1")) {
-            const since = Number(bound[0])
-            return { results: links.filter((row) => row.updated_at > since) }
-          }
-          return { results: links }
-        }
-        if (sql === "SELECT source_id, destination_id, kind FROM link") {
-          return {
-            results: links.map((row) => ({
-              source_id: row.source_id,
-              destination_id: row.destination_id,
-              kind: row.kind,
-            })),
-          }
-        }
-        throw new Error(`Unexpected all(): ${sql}`)
-      },
-    }
-    return statement
-  }
-  return { prepare } as unknown as D1Database
+/** A corpus on the real test engine, built by the real migration ladder —
+ * exactly what the `UserCorpus` DO holds, minus the platform. */
+async function openCorpus(): Promise<SqlDriver> {
+  const driver = createTestSqlDriver()
+  await ensureCorpusSchema(driver, { init: migration0001, nodes: migration0002 })
+  return driver
 }
 
-describe("replicaPull", () => {
+describe("corpus pulls over a real engine (the DO's read path)", () => {
   const nodes: NodeRow[] = [
     { id: "note-a", type: "page", text: "note-a", props: null, updated_at: 100 },
     { id: "blk_a000000000", type: "text", text: "A", props: null, updated_at: 300 },
@@ -315,128 +275,293 @@ describe("replicaPull", () => {
       updated_at: 100,
     },
   ]
-  const pull = (path: string, db: D1Database) =>
-    replicaPull(new Request(`https://example.com${path}`), db)
 
-  it("returns every row of both tables (plus cursor) without ?since", async () => {
-    const response = await pull("/api/replica/notes", fakePullDb({ nodes, links, cursor: "42" }))
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ nodes, links, cursor: "42" })
+  it("full pull returns every row of both tables plus the cursor", async () => {
+    const driver = await openCorpus()
+    await corpusPut(driver, { nodes, links, cursor: "42" })
+    expect(await corpusPullFull(driver)).toEqual({ nodes, links, cursor: "42" })
   })
 
-  it("returns only newer-than-since rows, plus ALL keys for deletion detection", async () => {
-    const response = await pull(
-      "/api/replica/notes?since=200",
-      fakePullDb({ nodes, links, cursor: "301" }),
-    )
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({
-      nodes: [nodes[1]],
-      links: [],
-      // Unchanged rows still appear in the key lists — a client deletes local
-      // rows absent from these.
-      nodeIds: ["note-a", "blk_a000000000"],
-      linkKeys: [["note-a", "blk_a000000000", "child"]],
-      cursor: "301",
-    })
+  it("since pull returns only newer rows, plus ALL keys for deletion detection", async () => {
+    const driver = await openCorpus()
+    await corpusPut(driver, { nodes, links, cursor: "301" })
+    const body = await corpusPullSince(driver, 200)
+    expect(body.nodes).toEqual([nodes[1]])
+    expect(body.links).toEqual([])
+    // Unchanged rows still appear in the key lists — a client deletes local
+    // rows absent from these. (The lists are sets; order is not part of the
+    // contract.)
+    expect([...body.nodeIds].sort()).toEqual(["blk_a000000000", "note-a"])
+    expect(body.linkKeys).toEqual([["note-a", "blk_a000000000", "child"]])
+    expect(body.cursor).toBe("301")
   })
 
   it("since equal to the newest updated_at returns no changes (strict >)", async () => {
-    const response = await pull("/api/replica/notes?since=300", fakePullDb({ nodes, links }))
-    const body = (await response.json()) as {
-      nodes: unknown[]
-      links: unknown[]
-      nodeIds: string[]
-    }
+    const driver = await openCorpus()
+    await corpusPut(driver, { nodes, links })
+    const body = await corpusPullSince(driver, 300)
     expect(body.nodes).toEqual([])
     expect(body.links).toEqual([])
     expect(body.nodeIds).toHaveLength(2)
   })
 
-  it("rejects a malformed since cursor with 400", async () => {
-    const response = await pull("/api/replica/notes?since=abc", fakePullDb({ nodes }))
-    expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ error: "invalid_since" })
+  it("a fresh corpus pulls empty with the seeded empty-string cursor", async () => {
+    // 0001 seeds replica_cursor as '' — the D1 replica has always answered ''
+    // until the first cursor-carrying push, so the DO must too.
+    const driver = await openCorpus()
+    expect(await corpusPullFull(driver)).toEqual({ nodes: [], links: [], cursor: "" })
   })
 
-  it("null cursor (never pushed) comes back as null", async () => {
-    const response = await pull("/api/replica/notes", fakePullDb({ nodes: [] }))
-    expect(await response.json()).toEqual({ nodes: [], links: [], cursor: null })
+  it("status reports counts, schema version, and cursor", async () => {
+    const driver = await openCorpus()
+    await corpusPut(driver, { nodes, links, cursor: "7" })
+    expect(await corpusStatus(driver)).toEqual({
+      counts: { nodes: 2, links: 1, pages: 1 },
+      schema_version: "2",
+      replica_cursor: "7",
+    })
   })
+})
 
-  it("is session-guarded through the router (401 before touching D1)", async () => {
-    const response = await replica(
-      new Request("https://example.com/api/replica/notes"),
-      // DB deliberately absent: the guard must reject before any D1 access.
-      { DB: undefined } as unknown as Env,
-    )
-    expect(response.status).toBe(401)
-  })
+/**
+ * A fake CORPUS namespace: real corpora (test engine + real migrations + the
+ * real `replica-corpus.ts` operations) behind stubs, with every `getByName`
+ * address recorded — the observable half of the tenant-addressing invariant.
+ */
+function fakeCorpusNamespace() {
+  const corpora = new Map<string, Promise<SqlDriver>>()
+  const addressed: string[] = []
+  const driverFor = (name: string): Promise<SqlDriver> => {
+    let driver = corpora.get(name)
+    if (!driver) {
+      driver = openCorpus()
+      corpora.set(name, driver)
+    }
+    return driver
+  }
+  const namespace = {
+    getByName: (name: string) => {
+      addressed.push(name)
+      return {
+        pullFull: async () => corpusPullFull(await driverFor(name)),
+        pullSince: async (since: number) => corpusPullSince(await driverFor(name), since),
+        put: async (payload: Parameters<typeof corpusPut>[1]) =>
+          corpusPut(await driverFor(name), payload),
+        status: async () => corpusStatus(await driverFor(name)),
+      }
+    },
+  }
+  return { namespace: namespace as unknown as Env["CORPUS"], corpora, addressed }
+}
+
+/** GitHub `/user` stub: token → identity. Unknown tokens get GitHub's 401. */
+function githubStub(users: Record<string, { id: number; login?: string }>): typeof fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) !== "https://api.github.com/user") {
+      throw new Error(`Unexpected outbound fetch: ${String(input)}`)
+    }
+    const auth = (init?.headers as Record<string, string> | undefined)?.["Authorization"] ?? ""
+    const token = /^Bearer (.+)$/.exec(auth)?.[1] ?? ""
+    const user = users[token]
+    if (!user) return new Response("{}", { status: 401 })
+    return new Response(JSON.stringify({ id: user.id, login: user.login ?? `u${user.id}` }), {
+      status: 200,
+    })
+  }) as typeof fetch
+}
+
+async function testEnv(
+  overrides: Partial<Env> = {},
+): Promise<{ env: Env } & ReturnType<typeof fakeCorpusNamespace>> {
+  const control = createTestSqlDriver()
+  await control.execScript(migration0003)
+  const corpus = fakeCorpusNamespace()
+  const env = {
+    DB: asFakeD1(control),
+    CORPUS: corpus.namespace,
+    SIGNUP_MODE: "open",
+    ALLOWED_GITHUB_ID: undefined,
+    ...overrides,
+  } as unknown as Env
+  return { env, ...corpus }
+}
+
+const authHeaders = (token: string) => ({
+  Cookie: "gh_refresh=session",
+  Authorization: `Bearer ${token}`,
 })
 
 describe("requireSession", () => {
   const request = (headers: Record<string, string>) =>
     new Request("https://example.com/api/replica/status", { headers })
-
-  const OWNER = "42536816"
+  const github = githubStub({ good: { id: 42536816, login: "finn" }, other: { id: 999 } })
 
   it("rejects a request without the session cookie", async () => {
-    const response = await requireSession(request({ Authorization: "Bearer tok" }), OWNER)
-    expect(response?.status).toBe(401)
+    const { env } = await testEnv()
+    const result = await requireSession(request({ Authorization: "Bearer good" }), env, github)
+    expect(result).toBeInstanceOf(Response)
+    expect((result as Response).status).toBe(401)
   })
 
   it("rejects a request without a bearer token", async () => {
-    const response = await requireSession(request({ Cookie: "gh_refresh=abc" }), OWNER)
-    expect(response?.status).toBe(401)
+    const { env } = await testEnv()
+    const result = await requireSession(request({ Cookie: "gh_refresh=abc" }), env, github)
+    expect((result as Response).status).toBe(401)
   })
 
   it("rejects a token GitHub does not accept", async () => {
-    const fetchImpl = vi.fn(async () => new Response("{}", { status: 401 }))
-    const response = await requireSession(
-      request({ Cookie: "gh_refresh=abc", Authorization: "Bearer bad" }),
-      OWNER,
-      fetchImpl as unknown as typeof fetch,
-    )
-    expect(response?.status).toBe(401)
+    const { env } = await testEnv()
+    const result = await requireSession(request(authHeaders("bad")), env, github)
+    expect((result as Response).status).toBe(401)
   })
 
-  it("rejects a VALID GitHub token belonging to someone else (403)", async () => {
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ id: 999 }), { status: 200 }))
-    const response = await requireSession(
-      request({ Cookie: "gh_refresh=abc", Authorization: "Bearer other" }),
-      OWNER,
-      fetchImpl as unknown as typeof fetch,
-    )
-    expect(response?.status).toBe(403)
+  it("rejects a VALID GitHub identity the control plane does not admit (403)", async () => {
+    const { env } = await testEnv({ SIGNUP_MODE: "allowlist" })
+    const result = await requireSession(request(authHeaders("other")), env, github)
+    expect((result as Response).status).toBe(403)
+    expect(await (result as Response).json()).toEqual({ error: "signup_closed" })
   })
 
-  it("fails closed when no owner id is configured (403)", async () => {
-    const fetchImpl = vi.fn(
-      async () => new Response(JSON.stringify({ id: 42536816 }), { status: 200 }),
-    )
-    const response = await requireSession(
-      request({ Cookie: "gh_refresh=abc", Authorization: "Bearer good" }),
-      undefined,
-      fetchImpl as unknown as typeof fetch,
-    )
-    expect(response?.status).toBe(403)
+  it("fails closed when no signup mode and no owner id are configured (403)", async () => {
+    const { env } = await testEnv({ SIGNUP_MODE: undefined })
+    const result = await requireSession(request(authHeaders("good")), env, github)
+    expect((result as Response).status).toBe(403)
+    expect(await (result as Response).json()).toEqual({ error: "owner_not_configured" })
   })
 
-  it("passes the owner's session (cookie + owner-validated token)", async () => {
-    const fetchImpl = vi.fn(
-      async () => new Response(JSON.stringify({ id: 42536816 }), { status: 200 }),
+  it("returns the VERIFIED identity — GitHub's id for the token, nothing client-sent", async () => {
+    const { env } = await testEnv({ SIGNUP_MODE: undefined, ALLOWED_GITHUB_ID: "42536816" })
+    const result = await requireSession(
+      request({ ...authHeaders("good"), "X-GitHub-Id": "999" }),
+      env,
+      github,
     )
-    const response = await requireSession(
-      request({ Cookie: "gh_refresh=abc", Authorization: "Bearer good" }),
-      OWNER,
-      fetchImpl as unknown as typeof fetch,
-    )
-    expect(response).toBeNull()
-    expect(fetchImpl).toHaveBeenCalledWith(
-      "https://api.github.com/user",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer good", "User-Agent": "ruminate" },
+    expect(result).toEqual({ id: 42536816, login: "finn", name: null })
+  })
+})
+
+describe("tenant routing — the addressing invariant", () => {
+  const github = githubStub({
+    "alice-token": { id: 111, login: "alice" },
+    "bob-token": { id: 222, login: "bob" },
+  })
+  const aliceRows = {
+    nodes: [{ id: "note-a", type: "page", text: "note-a", props: null, updated_at: 100 }],
+    links: [],
+  }
+
+  it("a push lands in the VERIFIED identity's corpus, whatever tenant the request claims", async () => {
+    const { env, addressed, corpora } = await testEnv()
+    // The request claims tenant 222 everywhere a client could put it: query
+    // params, headers, and body fields. None of it may reach the address.
+    const response = await replica(
+      new Request("https://example.com/api/replica/notes?github_id=222&tenant=222&user=222", {
+        method: "PUT",
+        headers: { ...authHeaders("alice-token"), "X-GitHub-Id": "222", "X-Tenant": "222" },
+        body: JSON.stringify({ ...aliceRows, tenant: 222, github_id: 222, cursor: "c1" }),
       }),
+      env,
+      github,
     )
+    expect(response.status).toBe(200)
+    expect(addressed).toEqual(["111"]) // the verified id — and nothing else
+    expect([...corpora.keys()]).toEqual(["111"]) // tenant 222 was never even created
+    const stored = await corpusPullFull(await corpora.get("111")!)
+    expect(stored.nodes).toEqual(aliceRows.nodes)
+  })
+
+  it("another verified identity gets its own (empty) corpus, never the first one's rows", async () => {
+    const { env, corpora } = await testEnv()
+    await replica(
+      new Request("https://example.com/api/replica/notes", {
+        method: "PUT",
+        headers: authHeaders("alice-token"),
+        body: JSON.stringify(aliceRows),
+      }),
+      env,
+      github,
+    )
+    const bobPull = await replica(
+      new Request("https://example.com/api/replica/notes", { headers: authHeaders("bob-token") }),
+      env,
+      github,
+    )
+    expect(bobPull.status).toBe(200)
+    expect((await bobPull.json()) as ReplicaCorpusBody).toEqual({
+      nodes: [],
+      links: [],
+      cursor: "",
+    })
+    // Bob's since-pull key lists are HIS corpus's, so deletion-by-absence can
+    // never be poisoned by (or leak) another tenant's keys.
+    const bobSince = await replica(
+      new Request("https://example.com/api/replica/notes?since=0", {
+        headers: authHeaders("bob-token"),
+      }),
+      env,
+      github,
+    )
+    expect(((await bobSince.json()) as ReplicaChangesBody).nodeIds).toEqual([])
+    // And Alice's corpus still holds her rows.
+    const aliceCorpus = await corpusPullFull(await corpora.get("111")!)
+    expect(aliceCorpus.nodes).toEqual(aliceRows.nodes)
+  })
+
+  it("rejects with 401 before any corpus is addressed", async () => {
+    const { env, addressed } = await testEnv()
+    const response = await replica(
+      new Request("https://example.com/api/replica/notes"),
+      env,
+      github,
+    )
+    expect(response.status).toBe(401)
+    expect(addressed).toEqual([])
+  })
+
+  it("a control-plane rejection (blocked user) also stops before addressing", async () => {
+    const { env, addressed } = await testEnv()
+    const db = env.DB
+    await db
+      .prepare(
+        "INSERT INTO users (github_id, login, status, created_at) VALUES (?1, 'b', 'blocked', 1)",
+      )
+      .bind(222)
+      .run()
+    const response = await replica(
+      new Request("https://example.com/api/replica/status", { headers: authHeaders("bob-token") }),
+      env,
+      github,
+    )
+    expect(response.status).toBe(403)
+    expect(addressed).toEqual([])
+  })
+
+  it("rejects a malformed since cursor with 400", async () => {
+    const { env } = await testEnv()
+    const response = await replica(
+      new Request("https://example.com/api/replica/notes?since=abc", {
+        headers: authHeaders("alice-token"),
+      }),
+      env,
+      github,
+    )
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "invalid_since" })
+  })
+
+  it("rejects an invalid payload with 400 before writing", async () => {
+    const { env, corpora } = await testEnv()
+    const response = await replica(
+      new Request("https://example.com/api/replica/notes", {
+        method: "PUT",
+        headers: authHeaders("alice-token"),
+        body: JSON.stringify({ nodes: [{ nope: true }], links: [] }),
+      }),
+      env,
+      github,
+    )
+    expect(response.status).toBe(400)
+    // No corpus method ever ran — the (lazily created) corpus doesn't exist.
+    expect(corpora.size).toBe(0)
   })
 })
