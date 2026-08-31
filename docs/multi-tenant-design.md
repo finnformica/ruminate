@@ -1,22 +1,24 @@
 # Multi-tenant design
 
-Status: **implemented on branch (pending review)** — the recommended design
-below (§3–§4, §6, §10) is built: `UserCorpus` DO (`worker/corpus-do.ts`, a
-thin `SqlDriver` adapter in `worker/do-sql-driver.ts` over the shared corpus
-code in `worker/handlers/replica-corpus.ts`), the control plane
-(`migrations/0003_control_plane.sql` + `worker/handlers/tenancy.ts`,
-`SIGNUP_MODE=allowlist`), routing by the verified id in
-`worker/handlers/replica.ts`, and the tenant-#1 migration
-(`POST /api/admin/migrate-corpus` + a lazy owner fallback). This document
-designed the path from the single-owner instance (one D1, one permitted
-GitHub id, fail-closed) to a product where each signed-up user has their own
-private corpus. It extends [graph-storage.md](./graph-storage.md) and
-[graph-schema-v2.md](./graph-schema-v2.md), and coordinates with
+Status: **superseded in part — see "Decision reversal" below.** The Durable
+Object design this document recommends was built (PR #15) and then reversed
+in favour of option (a), shared D1 with a tenant column. The analysis in §2
+and §9 is left exactly as written: it is the reasoning that was weighed, and
+the reversal is only intelligible next to it. What still stands unchanged is
+§3's control plane, §5's "the client learns nothing", §7's attribution
+argument, §8's scope, and §10's portability requirement.
+
+This document designed the path from the single-owner instance (one D1, one
+permitted GitHub id, fail-closed) to a product where each signed-up user has
+their own private corpus. It extends [graph-storage.md](./graph-storage.md)
+and [graph-schema-v2.md](./graph-schema-v2.md), and coordinates with
 [event-sourcing-design.md](https://github.com/finnformica/ruminate/blob/claude/event-sourcing-design/docs/event-sourcing-design.md)
 (branch `claude/event-sourcing-design`) without building any of it.
 
-**Recommendation, up front: one SQLite-backed Durable Object per user for the
-corpus, plus a small control-plane D1 for identity.** The DO is addressed by
+**Recommendation, up front** (made 2026-08-31, reversed 2026-W36 — read §0
+first; this paragraph is kept as written)**: one SQLite-backed Durable Object
+per user for the corpus, plus a small control-plane D1 for identity.** The DO
+is addressed by
 the _verified_ GitHub id, so tenant isolation is placement, not filtering —
 there is no query that could return another user's rows. The corpus schema
 (`migrations/0002_nodes.sql`) and the replica wire format
@@ -28,6 +30,147 @@ don't exist). D1/SQLite has no RLS to reach for — SQLite omits `GRANT`/
 ([sqlite.org/omitted.html](https://www.sqlite.org/omitted.html)) — so "RLS or
 a tenant column" is really "app-enforced filtering or structural isolation",
 and structural wins.
+
+## 0. Decision reversal (2026-W36): D1 with tenant columns
+
+**Decision: the corpus moves back into D1, scoped by a `user_id` column —
+option (a) — and the Durable Objects are retired.** Migration
+`0004_tenant_columns.sql` rebuilds `nodes`, `link`, and `meta` with `user_id`
+leading every primary key and index; `worker/tenancy-db.ts` is the only module
+that touches the binding.
+
+**The reason is data visibility, and it is a good one.** The D1 dashboard has
+a console: the owner can open his corpus, run a query, and see what is
+actually stored — which is how you diagnose a sync bug, confirm a migration
+did what it claimed, or answer "where did that block go?". A Durable Object's
+SQLite database has no such browser. Nothing in §2 measured that, because §2
+was reasoning about isolation, throughput and cost, and this is a property of
+the _operator's_ experience rather than the system's. For a single-developer
+product where the developer is also the on-call engineer and the first user,
+being able to look at the data is not a nice-to-have; it is the difference
+between debugging and guessing. The DO design made the data correct and
+unobservable. That trade was wrong for this product at this size.
+
+**What is being given up, stated plainly.** §2(a) is right that column-scoped
+tenancy is _filtered_, not structural: the wrong-tenant query stops being
+unrepresentable and becomes merely forbidden. §2 also names the specific
+danger, and it is not disclosure — it is destruction. The since-pull returns
+the full key list of both tables, and the client deletes local rows absent
+from it (`planPullApplication`), so a missing `WHERE` on that one read would
+tell every user's client to delete every note it holds. That risk is real, it
+is now ours, and this section exists so nobody later mistakes it for an
+oversight.
+
+**The price paid for the trade — four structural mitigations, all shipped.**
+§4's parenthetical listed exactly what option (a) would owe; this is that
+bill, paid:
+
+1. **A tenant-scoped repository, minted once from the verified id.**
+   `forTenant(driver, identity)` in `worker/tenancy-db.ts` is the only mint on
+   the request path, and it takes `VerifiedIdentity` — the type only
+   `requireSession` produces. Handlers and planners receive a `TenantDb`; the
+   raw `D1Database` handle is never exported past that module.
+2. **The tenant id is bound, not passed.** Statements name their tenant with
+   the token `:tenant`, which `TenantDb` rewrites to a positional placeholder
+   and fills with the verified id. There is no parameter a caller could put a
+   user id into, so "forgot to pass the right tenant" is not a mistake the API
+   can express.
+3. **A runtime guard that refuses unscoped statements.** Any statement
+   touching `nodes`/`link`/`meta` without `user_id` + `:tenant` throws before
+   it reaches the database; so does a read of `nodes`/`link` that says nothing
+   about tombstones, and any `DELETE` from them. The opt-outs are narrow and
+   greppable: `includingDeleted()` for replication/trash/audit reads,
+   `-- tenant-exempt: <reason>` for the rare statement with no tenant to name,
+   and `controlPlaneDriver` for `users`/`allowlist`, which are deliberately
+   not tenant data (the tenancy resolver has to look up an id that is not yet
+   a tenant).
+4. **A CI gate with the same rules.** `npm run check:queries`
+   (`scripts/check-queries.ts`) scans every SQL string literal in `worker/**`
+   and `src/data/**` and fails the build on a violation, and bans `env.DB`
+   outside the tenancy module. Runtime and CI share one implementation
+   (`src/data/sql-tenancy-guard.ts`) so they cannot drift, and that module has
+   its own unit tests fed both violating and compliant samples.
+
+Plus the standing adversarial suite §4 asked for: `replica.test.ts` drives
+every endpoint with tenant A's session against seeded tenant-B rows and
+asserts zero visibility — the full pull, the since-pull, the status counts,
+and **the key lists**, which get their own test because that is the
+destructive channel.
+
+**What survives untouched.** The control plane (§3) is unchanged — `users`,
+`allowlist`, `SIGNUP_MODE`, the `ALLOWED_GITHUB_ID` fail-closed bootstrap, and
+`requireSession`'s verification. The client (§5) still learns nothing: same
+URLs, same payloads, tenancy inferred server-side from credentials. §10's
+portability requirement holds and is arguably better served — the corpus
+queries still run through the `SqlDriver` seam, the planners are still pure,
+and there is now no Cloudflare-proprietary runtime primitive in the data path
+at all.
+
+**What §2's scorecard would say now.** Its throughput and blast-radius
+objections to (a) are unchanged and unanswered: one D1 database is
+single-threaded, the 10 GB cap is shared, and the key-list scans are
+O(all-tenants) per since-pull. At today's scale (one user, a handful of
+friends) none of that binds, which is precisely what §9's honest counter-case
+argued. The rework §9 warned of — tenant-scoped primary keys, widened indexes
+— is exactly what `0004` does, and it was a day's work, not a rewrite. If the
+throughput wall is ever reached, §2(c) is still on the shelf and the
+`SqlDriver` seam is still the thing that makes moving cheap.
+
+### Deploy-day runbook (DO → D1)
+
+Live corpora exist inside the DOs, so the class must outlive the import: a
+`deleted_classes` wrangler migration deletes an object's _storage_ along with
+its class ([DO class migrations](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/)),
+which would destroy the data being rescued.
+
+1. `npx wrangler d1 migrations apply ruminate --remote` — `0004` rebuilds the
+   corpus tables with `user_id` + `deleted_at` and stamps the owner's existing
+   (pre-DO) rows with `ALLOWED_GITHUB_ID`. Reversible only by restore, so take
+   the D1 backup first.
+2. Deploy **with both bindings** — `DB` and the (now read-only) `CORPUS`.
+3. The import runs itself: the first request each signed-in user makes copies
+   their DO rows into their D1 partition, in `merge` mode, before anything is
+   served (`readyTenant` → `importDoCorpus`). Merging is LWW through the same
+   planner a push uses, so it can only replace a row with a not-older one and
+   never deletes. Each tenant is marked done in their own `meta`
+   (`do_import_at`), so it happens once.
+   - The lazy import is what stops the owner's first since-pull answering from
+     the stale pre-DO snapshot and telling their client to delete every note
+     written during the DO era. It is the reason this step is automatic rather
+     than a button.
+4. `POST /api/admin/import-do-corpus?merge=1` (owner-only) runs the same
+   import across the owner plus every id in `users`, and reports per-user
+   results — the deliberate, observable way to sweep up anyone who has not
+   signed in since the deploy. Add `?force=1` to re-run a marked tenant.
+5. Verify: `GET /api/replica/status` per user, plus a D1 console query —
+   `SELECT user_id, COUNT(*) FROM nodes WHERE deleted_at IS NULL GROUP BY 1`.
+   This is the step the whole reversal was for.
+6. **Follow-up PR (not this one):** delete `worker/corpus-do.ts`,
+   `worker/handlers/corpus-migration.ts` and `forAdminImport`, drop the
+   `CORPUS` binding, and add
+   `{ "tag": "v2", "deleted_classes": ["UserCorpus"] }` to wrangler.jsonc's
+   `migrations`, which tears the class down and reclaims its storage.
+
+### Follow-ups this reversal defers
+
+- **Purge / GC of tombstoned rows.** Out of scope by decision: there is not
+  enough data for it to matter yet. Tombstones accumulate, and a full pull
+  currently ships them to a fresh device. When it does matter, purge is a
+  scheduled `DELETE` past a retention window plus the key lists (below) doing
+  their job.
+- **Dropping the since-pull key lists.** Tombstones make deletion-by-absence
+  redundant, but the lists stay as belt-and-braces until tombstone propagation
+  has proven itself in production. Removing them shrinks the widest read in
+  the system and closes §2's destructive channel by construction — worth
+  doing, deliberately, once.
+- **Restore UI.** The data supports it (every row a single delete retires
+  shares one `deleted_at`, so a restore is "revive the rows stamped at T", and
+  links to deleted nodes are retained so the revived node comes back where it
+  was). Nothing surfaces it yet.
+- **Retiring the delete-as-unlink-plus-rescue rule.** Untouched here on
+  purpose: soft deletes change what happens to the rows, not what the user
+  sees. Whether rescue is still the right behavior once deletes are
+  recoverable is a separate decision.
 
 ## 1. Where tenancy lives today
 
@@ -297,7 +440,12 @@ credentials, so no client code learns about tenancy.
   signup-gate copy ("Ruminate is invite-only right now"). That is the whole
   UI diff.
 
-## 6. Migration path (today's D1 → tenant #1)
+## 6. Migration path (today's D1 → tenant #1) — historic
+
+_This sequence ran in PR #15 and has been undone; §0's runbook is the live
+one. Kept because steps 1 and 5 (the control plane, the signup gate) survived
+the reversal untouched, and because the "every step reverses alone" property
+is what made reversing possible at all._
 
 Every step deploys alone and reverses alone; the client is untouched
 throughout, so the in-flight features — write-through autosave, mirroring /

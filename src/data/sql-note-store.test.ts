@@ -1,4 +1,8 @@
+// tenant-guard: exempt — these tests read and seed raw storage on purpose
+// (that is how they pin what the store wrote, tombstones included).
 import { describe, expect, it } from "vitest"
+import migration0001 from "../../migrations/0001_init.sql?raw"
+import migration0002 from "../../migrations/0002_nodes.sql?raw"
 import { describeNoteStoreConformance } from "./note-store-conformance"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { openSqlNoteStore } from "./sql-note-store"
@@ -73,25 +77,44 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
     expect(diff).toEqual({ nodes: [], links: [], deleteNodes: [], deleteLinks: [] })
   })
 
-  it("removing a block from a note deletes its node and link rows (diffed)", async () => {
+  it("removing a block from a note tombstones its node and link rows (diffed)", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await store.writeNotes({
       a: "- keep\n  id:: blk_aaaaaaaaaa\n- drop\n  id:: blk_bbbbbbbbbb\n",
     })
     const diff = await store.writeNotes({ a: "- keep\n  id:: blk_aaaaaaaaaa\n" })
-    expect(diff.deleteNodes).toEqual(["blk_bbbbbbbbbb"])
-    expect(diff.deleteLinks).toEqual([["a", "blk_bbbbbbbbbb", "child"]])
-    expect(await driver.exec("SELECT id FROM nodes WHERE id = 'blk_bbbbbbbbbb'")).toEqual([])
+    // Nothing is removed: the diff carries the tombstoned rows, so the delete
+    // replicates like any other change.
+    expect(diff.deleteNodes).toEqual([])
+    expect(diff.deleteLinks).toEqual([])
+    expect(diff.nodes.map((node) => node.id)).toEqual(["blk_bbbbbbbbbb"])
+    expect(diff.nodes[0].deleted_at).toEqual(expect.any(Number))
+    expect(diff.links).toEqual([
+      expect.objectContaining({ destination_id: "blk_bbbbbbbbbb", deleted_at: expect.any(Number) }),
+    ])
+    expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = 'blk_bbbbbbbbbb'")).toEqual([
+      { deleted_at: expect.any(Number) },
+    ])
+    expect(await store.getNote("a")).toBe("- keep\n  id:: blk_aaaaaaaaaa\n")
   })
 
-  it("removes a note's rows on delete and reports the diff", async () => {
+  it("tombstones a note's rows on delete and reports the diff", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await store.writeNotes({ a: "# A note\n  id:: blk_aaaaaaaaaa\n" })
     const diff = await store.deleteNote("a")
 
-    expect(diff.deleteNodes.sort()).toEqual(["a", "blk_aaaaaaaaaa"])
-    expect(await driver.exec("SELECT * FROM nodes")).toEqual([])
-    expect(await driver.exec("SELECT * FROM link")).toEqual([])
+    expect(diff.deleteNodes).toEqual([])
+    expect(diff.nodes.map((node) => node.id).sort()).toEqual(["a", "blk_aaaaaaaaaa"])
+    // ONE stamp for the whole delete: a future restore is "revive the rows
+    // stamped at T".
+    expect(new Set(diff.nodes.map((node) => node.deleted_at)).size).toBe(1)
+    expect(await store.getNote("a")).toBeNull()
+    expect(await store.getAllNotes()).toEqual({})
+    expect(await store.counts()).toEqual({ pages: 0, nodes: 0, links: 0 })
+    // The rows — and the link that positions the block under the page — are
+    // still there, which is what makes a restore possible at all.
+    expect(await driver.exec("SELECT COUNT(*) AS n FROM nodes")).toEqual([{ n: 2 }])
+    expect(await driver.exec("SELECT COUNT(*) AS n FROM link")).toEqual([{ n: 1 }])
   })
 
   it("stores frontmatter as parsed entries in the page props", async () => {
@@ -171,11 +194,33 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
     const store = await openSqlNoteStore(driver)
     expect(await store.getAllNotes()).toEqual({})
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "2" },
+      { value: "3" },
     ])
     expect(
       await driver.exec("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"),
     ).toEqual([{ name: "link" }, { name: "meta" }, { name: "nodes" }])
+  })
+
+  it("adds the soft-delete columns to a v2 database in place, keeping its rows", async () => {
+    const driver = createNodeSqlDriver()
+    // A v2 store: the real ladder, stopped one step short.
+    await driver.execScript(migration0001 + "\n" + migration0002)
+    await driver.batch([
+      {
+        sql: "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?, ?, ?, ?, ?)",
+        params: ["a", "page", "a", null, 100],
+      },
+    ])
+
+    const store = await openSqlNoteStore(driver)
+    expect(await store.getNote("a")).toBe("\n")
+    expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
+      { value: "3" },
+    ])
+    // Existing rows are live: a nullable column means NULL = never deleted.
+    expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = 'a'")).toEqual([
+      { deleted_at: null },
+    ])
   })
 
   it("resets and re-migrates a database with an unknown schema_version", async () => {
@@ -186,7 +231,7 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
     const reopened = await openSqlNoteStore(driver)
     expect(await reopened.getAllNotes()).toEqual({})
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "2" },
+      { value: "3" },
     ])
   })
 
@@ -243,6 +288,16 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
     })
   })
 
+  it("getAllRows carries tombstones — a delete only replicates if it travels", async () => {
+    const { store } = await makeStoreWithDriver()
+    await store.writeNotes({ a: "- x\n  id:: blk_aaaaaaaaaa\n" })
+    await store.writeNotes({ a: "\n" })
+    const { nodes } = await store.getAllRows()
+    expect(nodes.find((node) => node.id === "blk_aaaaaaaaaa")?.deleted_at).toEqual(
+      expect.any(Number),
+    )
+  })
+
   it("round-trips meta keys", async () => {
     const { store } = await makeStoreWithDriver()
     expect(await store.getMeta("d1_pull_cursor")).toBeNull()
@@ -250,5 +305,107 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
     expect(await store.getMeta("d1_pull_cursor")).toBe("123")
     await store.setMeta("d1_pull_cursor", "456")
     expect(await store.getMeta("d1_pull_cursor")).toBe("456")
+  })
+})
+
+/**
+ * Soft deletes, end to end in the store: what a delete writes, what reads do
+ * with it afterwards, and what comes back when the same id returns.
+ * User-visible delete behavior — unlink plus rescue — is unchanged and stays
+ * pinned by the conformance suite; what changes is only that the rows survive.
+ */
+describe("soft deletes", () => {
+  const OUTLINE = "- parent\n  id:: blk_parent0000\n  - child\n    id:: blk_child00000\n"
+
+  it("stamps every row one delete retires with ONE timestamp", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    await store.writeNotes({ a: OUTLINE })
+    await store.deleteNote("a")
+
+    const stamps = await driver.exec(
+      "SELECT deleted_at FROM nodes UNION ALL SELECT deleted_at FROM link",
+    )
+    expect(stamps).toHaveLength(5) // page + 2 blocks + 2 retained links
+    const tombstones = stamps.map((row) => row.deleted_at).filter((value) => value !== null)
+    expect(tombstones).toHaveLength(3) // the three nodes; links are retained
+    expect(new Set(tombstones).size).toBe(1)
+  })
+
+  it("a tombstoned node never renders, and neither does a link into it", async () => {
+    const { store } = await makeStoreWithDriver()
+    await store.writeNotes({ a: OUTLINE })
+    await store.writeNotes({ a: "- parent\n  id:: blk_parent0000\n" })
+
+    // The child was unlinked and had no other parent: gone from every read…
+    expect(await store.getNote("a")).toBe("- parent\n  id:: blk_parent0000\n")
+    expect(await store.downstream("blk_parent0000")).toEqual([])
+    expect(await store.upstream("blk_child00000")).toEqual([])
+    // …and out of the counts, though its row is still on disk.
+    expect(await store.counts()).toEqual({ pages: 1, nodes: 2, links: 1 })
+  })
+
+  it("keeps the link to a deleted node — the position a restore would use", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    await store.writeNotes({ a: OUTLINE })
+    // Delete the page: the whole subtree is retired, but EVERY containment row
+    // that describes its shape is retained, not cascaded — including the
+    // page's own link to the block that was directly under it.
+    await store.deleteNote("a")
+
+    expect(
+      await driver.exec(
+        "SELECT source_id, destination_id, deleted_at FROM link ORDER BY source_id",
+      ),
+    ).toEqual([
+      { source_id: "a", destination_id: "blk_parent0000", deleted_at: null },
+      { source_id: "blk_parent0000", destination_id: "blk_child00000", deleted_at: null },
+    ])
+  })
+
+  it("re-creating a deleted id revives it cleanly (no stale tombstone)", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    await store.writeNotes({ a: OUTLINE })
+    await store.writeNotes({ a: "- parent\n  id:: blk_parent0000\n" })
+    await store.writeNotes({ a: OUTLINE })
+
+    expect(await store.getNote("a")).toBe(OUTLINE)
+    expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = 'blk_child00000'")).toEqual([
+      { deleted_at: null },
+    ])
+    // And the revived row goes out live, not as a tombstone.
+    const { nodes } = await store.getAllRows()
+    expect(nodes.find((node) => node.id === "blk_child00000")?.deleted_at).toBeUndefined()
+  })
+
+  it("a pulled tombstone lands and hides the row, without removing it", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    await store.writeNotes({ a: OUTLINE })
+    const later = Date.now() + 1000
+    await store.applyPull({
+      nodes: [
+        {
+          id: "blk_child00000",
+          type: "text",
+          text: "child",
+          props: null,
+          updated_at: later,
+          deleted_at: later,
+        },
+      ],
+      links: [],
+      deleteNodes: [],
+      deleteLinks: [],
+    })
+    expect(await store.getNote("a")).toBe("- parent\n  id:: blk_parent0000\n")
+    expect(await driver.exec("SELECT COUNT(*) AS n FROM nodes")).toEqual([{ n: 3 }])
+  })
+
+  it("delete-rescue is unchanged: tombstoning a container promotes its child", async () => {
+    const { store } = await makeStoreWithDriver()
+    await store.writeNotes({ a: OUTLINE })
+    await store.removeLink("a", "blk_parent0000")
+
+    expect(await store.getNote("a")).toBe("- child\n  id:: blk_child00000\n")
+    expect(await store.upstream("blk_child00000")).toEqual(["a"])
   })
 })

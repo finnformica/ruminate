@@ -1,6 +1,7 @@
 import { getDefaultStore } from "jotai"
 import {
   isEmptyGraphDiff,
+  isTombstoned,
   linkKeyOf,
   type GraphDiff,
   type LinkKey,
@@ -230,9 +231,13 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   }
 
   function reportPending() {
+    // Since soft deletes, a queued delete is a queued node row carrying
+    // `deleted_at` — `deleteNodes` is now only the purge channel a pull uses.
+    let pendingDeletes = pending.deleteNodes.size
+    for (const node of pending.nodes.values()) if (isTombstoned(node)) pendingDeletes += 1
     patchDiagnostics({
       pendingNotes: dirtyNoteIds.size,
-      pendingDeletes: pending.deleteNodes.size,
+      pendingDeletes,
       fullPushPending: fullPushRequested,
     })
   }

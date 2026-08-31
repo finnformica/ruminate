@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy",
     "check:worker": "tsc -p worker/tsconfig.json",
+    "check:queries": "vite-node scripts/check-queries.ts",
     "knip": "knip --no-config-hints",
     "format": "prettier --write .",
     "lint": "eslint --ext .js,.ts,.tsx src",

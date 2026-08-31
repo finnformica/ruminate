@@ -2,7 +2,10 @@
 
 Status: **implemented** (2026-08-29, on `claude/graph-storage` — migration
 `migrations/0002_nodes.sql`, ingest/rollup in `src/data/graph.ts`, store in
-`src/data/sql-note-store.ts`). Supersedes the v1 schema from
+`src/data/sql-note-store.ts`), and extended to **v3** in 2026-W36
+(`migrations/0004_tenant_columns.sql`): tenant columns on D1 and soft deletes
+on both engines. The inversion this document argues for is unchanged; the
+schema below is the current one. Supersedes the v1 schema from
 `migrations/0001_init.sql`; `graph-storage.md` describes the running system.
 
 ## The inversion
@@ -28,44 +31,82 @@ therefore the most load-bearing function in the app — see the test plan below.
 
 ## Schema
 
-Three tables. One dialect, two engines (D1 + local sqlite-wasm), same as v1.
-The shape deliberately mirrors a production-proven cousin (the typed-entity
-graph Finn works with professionally: entity + link with `kind` and a
-fractional `sort_key`).
+Three tables, in **two shapes** (v3, `migrations/0004_tenant_columns.sql`):
+the D1 database holds every user's corpus, scoped by a `user_id` column, while
+the browser store is one user per browser profile and has no such column. Both
+have soft deletes. The shape deliberately mirrors a production-proven cousin
+(the typed-entity graph Finn works with professionally: entity + link with
+`kind` and a fractional `sort_key`).
+
+The **D1 shape** (`0004`), where `user_id` leads every key and index:
 
 ```sql
 CREATE TABLE nodes (
-  id TEXT PRIMARY KEY,       -- blk_ ids as-is; page nodes use the note id
+  user_id INTEGER NOT NULL,  -- the tenant: the server-verified GitHub id
+  id TEXT NOT NULL,          -- blk_ ids as-is; page nodes use the note id
   type TEXT NOT NULL,        -- see the type registry below
   text TEXT NOT NULL,        -- marker-free content; for pages, the title
   props TEXT,                -- JSON or NULL; pages: parsed frontmatter entries; code: language
-  updated_at INTEGER NOT NULL  -- ms epoch, drives LWW + since-cursor pulls
+  updated_at INTEGER NOT NULL, -- ms epoch, drives LWW + since-cursor pulls
+  deleted_at INTEGER,        -- NULL = live; a tombstoned node never renders
+  PRIMARY KEY (user_id, id)
 );
 
-CREATE INDEX nodes_type ON nodes (type);        -- "all pages", "all todos"
-CREATE INDEX nodes_updated ON nodes (updated_at);  -- since-cursor pulls
+CREATE INDEX nodes_tenant_type ON nodes (user_id, type);        -- "my pages", "my todos"
+CREATE INDEX nodes_tenant_updated ON nodes (user_id, updated_at); -- since-cursor pulls
 
 CREATE TABLE link (
-  source_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  destination_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL,
+  source_id TEXT NOT NULL,
+  destination_id TEXT NOT NULL,
   kind TEXT NOT NULL DEFAULT 'child',  -- 'child' = containment; room for more
   sort_key TEXT NOT NULL,    -- fractional index; sibling order under a source
   updated_at INTEGER NOT NULL,
-  PRIMARY KEY (source_id, destination_id, kind)
+  deleted_at INTEGER,        -- NULL = live; a tombstoned link is retained, not traversed
+  PRIMARY KEY (user_id, source_id, destination_id, kind)
 );
 
 -- Downstream: a node's children in order.
-CREATE INDEX link_source ON link (source_id, kind, sort_key);
+CREATE INDEX link_tenant_source ON link (user_id, source_id, kind, sort_key);
 -- Upstream: who contains this node (multi-parent lookup, delete-rescue).
-CREATE INDEX link_destination ON link (destination_id);
+CREATE INDEX link_tenant_destination ON link (user_id, destination_id);
+-- Since-cursor pulls read changed link rows the same way as changed nodes.
+CREATE INDEX link_tenant_updated ON link (user_id, updated_at);
 
 CREATE TABLE meta (
-  key TEXT PRIMARY KEY,      -- schema_version = '2', replica_cursor
-  value TEXT NOT NULL
+  user_id INTEGER NOT NULL,  -- per-tenant: each has its own cursor and versions
+  key TEXT NOT NULL,         -- schema_version = '3', replica_cursor, data_version
+  value TEXT NOT NULL,
+  PRIMARY KEY (user_id, key)
 );
 ```
 
+The **browser shape** is the same DDL minus `user_id` (and with the original
+un-prefixed keys and indexes). `src/data/corpus-schema.ts` is the one place
+the divergence lives: its `tenancy` flag selects `0004` or an ALTER-only step
+that adds just `deleted_at`, and the worker test suites build the D1 shape
+from `0004` itself so the seam is pinned rather than described.
+
 Design notes, and why:
+
+- **Tenancy is a column, and the discipline is mechanical.** Filtering, not
+  placement — chosen for data visibility (the D1 console) over structural
+  isolation, with a tenant-scoped handle, a runtime guard, and a CI gate as the
+  price. The decision record, including what is given up, is
+  [multi-tenant-design.md §0](./multi-tenant-design.md). `nodes.id` is a
+  client-minted `blk_` id, so two users can legitimately mint the same one —
+  which is exactly why the primary key had to become `(user_id, id)`.
+- **`deleted_at`: nothing is hard-deleted.** A delete stamps the column; all
+  rows one delete operation retires share one stamp, so a restore is "revive
+  the rows stamped at T". Reads discard tombstones at read time
+  (`buildGraphSnapshot`), so deletes never cascade at write time — and a link
+  pointing at a deleted node is _retained_, holding the position a restore
+  would put it back into. See "Delete = unlink + rescue" in graph-storage.md.
+- **No foreign keys.** v2 had `ON DELETE CASCADE` on both link endpoints; v3
+  drops it. Nothing is hard-deleted, so it could never fire; retaining links
+  to tombstoned nodes is the design; the write path already cleans link rows
+  explicitly; and a composite FK across the tenant key would buy nothing but
+  rebuild pain.
 
 - **Containment is link rows, not a children array on the parent.** Each edge
   is an independently replicable unit: two devices concurrently inserting
@@ -133,18 +174,26 @@ walk.
 **Delete = unlink + rescue, never destroy content.**
 Deleting node X in the context of parent P:
 
-1. Delete the link row P→X.
-2. If X still has another inbound `child` link, stop — X lives on there.
-3. Otherwise X's row is deleted (its remaining link rows cascade), and each of
-   X's children left with no inbound link gets a new link from the **page
-   root**, appended at the end (fresh trailing sort keys). The page node _is_
-   the dedicated root entity — no extra machinery. Children that also live
-   elsewhere in the graph are left where they are.
+1. Tombstone the link row P→X (`deleted_at`).
+2. If X still has another live inbound `child` link, stop — X lives on there.
+3. Otherwise X's row is tombstoned, and each of X's children left with no live
+   inbound link gets a new link from the **page root**, appended at the end
+   (fresh trailing sort keys). The page node _is_ the dedicated root entity —
+   no extra machinery. Children that also live elsewhere in the graph are left
+   where they are.
 
 Consequence: no orphan state exists. Nothing is ever unreachable, so no orphan
 view, no garbage collection, no materialized orphan cache. Deleting a
 container visibly demotes its contents to the page root instead of vanishing
 them — never-lose-work, structurally.
+
+Since v3 that "never destroy content" is literal: step 3 stamps a column
+rather than issuing a `DELETE`, and X's own outbound links are left alone —
+retained, not cascaded, because they describe the shape a restore would put
+back. Everything above is what a _reader_ sees, and it is unchanged; the walk
+simply skips tombstoned nodes and links into them. Whether unlink-plus-rescue
+is still the right rule now that a delete is recoverable is a separate,
+deliberately unmade decision.
 
 **Default expansion.** Headers (`h1`–`h3`) always expanded; below any header,
 expand **n=2** levels by default. Per-device overrides in localStorage keyed
@@ -180,10 +229,16 @@ tested harder than anything else:
 ## Sync
 
 Per-row LWW on `updated_at` for both tables, since-cursor pulls of changed
-rows, deletion handled replica-side by id-absence with the existing
-`isReplicaDrasticallyBehind` guard. Link rows are the payoff of this shape:
-concurrent sibling inserts on two devices are two distinct rows that merge
-cleanly — no ordering conflict to resolve.
+rows, with the existing `isReplicaDrasticallyBehind` guard. Link rows are the
+payoff of this shape: concurrent sibling inserts on two devices are two
+distinct rows that merge cleanly — no ordering conflict to resolve.
+
+Since v3, **a deletion is just a change**: the tombstoned row carries
+`deleted_at` and a fresh `updated_at`, so it arrives in an ordinary since-pull
+and the client applies it like any edit. The old deletion-by-absence channel
+(the full key lists) is kept as belt-and-braces until tombstone propagation
+has proven itself — note that a tombstoned row is still a row and still
+appears in those lists, so absence from them now means _purged_.
 
 **Known sharp edge — the cross-parent move.** A move is delete-link +
 insert-link (two rows), so it is not atomic under plain LWW: a badly timed

@@ -1,5 +1,5 @@
 import { generateKeyBetween, generateNKeysBetween } from "fractional-indexing"
-import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
+import { isTombstoned, type LinkRow, type NodeRow } from "../../worker/handlers/replica-payload"
 import { blockId } from "../blocks/id"
 import { parse } from "../blocks/parse"
 import { normalizeHeadingMarker } from "../blocks/serialize"
@@ -268,12 +268,32 @@ export interface GraphSnapshot {
   childLinks: Map<string, LinkRow[]>
 }
 
-/** Index rows for walking. Only `child` links participate in containment. */
+/**
+ * Index rows for walking. Only `child` links participate in containment.
+ *
+ * **Read-time discard is enforced here**, once, for every reader: a tombstoned
+ * node is not in the snapshot at all, and a link is dropped if it is itself
+ * tombstoned or if either endpoint is. Deletes therefore never cascade at
+ * write time — a link to a deleted node is kept in storage (it is the position
+ * a restore would put the node back into) and simply not traversed.
+ *
+ * A link to a node that is *absent* rather than tombstoned is a different
+ * thing — a dangling edge from a bad sync — and keeps its long-standing
+ * behavior: it stays in the index and the walk skips over it, which is what
+ * makes an ordered run break where the missing sibling was.
+ */
 export function buildGraphSnapshot(nodes: NodeRow[], links: LinkRow[]): GraphSnapshot {
-  const nodeMap = new Map(nodes.map((node) => [node.id, node]))
+  const nodeMap = new Map<string, NodeRow>()
+  const tombstoned = new Set<string>()
+  for (const node of nodes) {
+    if (isTombstoned(node)) tombstoned.add(node.id)
+    else nodeMap.set(node.id, node)
+  }
   const childLinks = new Map<string, LinkRow[]>()
   for (const link of links) {
     if (link.kind !== CHILD_KIND) continue
+    if (isTombstoned(link)) continue
+    if (tombstoned.has(link.source_id) || tombstoned.has(link.destination_id)) continue
     const list = childLinks.get(link.source_id)
     if (list) list.push(link)
     else childLinks.set(link.source_id, [link])
