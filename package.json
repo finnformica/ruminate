@@ -95,7 +95,7 @@
     "@storybook/react-vite": "^8.4.7",
     "@storybook/test": "^8.4.7",
     "@storybook/test-runner": "^0.20.1",
-    "@tailwindcss/container-queries": "^0.1.0",
+    "@tailwindcss/container-queries": "^0.1.1",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/router-plugin": "^1.113.0",
     "@testing-library/react": "^16.3.2",
