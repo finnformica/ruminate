@@ -1,31 +1,11 @@
 import { request } from "@octokit/request"
-import { GitHubUser, Note, NoteId } from "../schema"
-import { inlineNoteEmbeds } from "./inline-note-embeds"
-import { stripWikilinks } from "./strip-wikilinks"
+import { GitHubUser, Note } from "../schema"
 
-/**
- * Prepares note content for publishing as a gist:
- * 1. Inlines note embeds as blockquotes
- * 2. Strips wikilinks to plain text
- */
-export function prepareNoteForGist(content: string, notes: Map<NoteId, Note>): string {
-  const contentWithInlineEmbeds = inlineNoteEmbeds(content, notes)
-  return stripWikilinks(contentWithInlineEmbeds)
-}
-
-export async function createGist({
-  note,
-  githubUser,
-  notes,
-}: {
-  note: Note
-  githubUser: GitHubUser
-  notes: Map<NoteId, Note>
-}) {
+export async function createGist({ note, githubUser }: { note: Note; githubUser: GitHubUser }) {
   const filename = `${note.id}.md`
 
   try {
-    const content = prepareNoteForGist(note.content, notes)
+    const content = note.content
 
     const response = await request("POST /gists", {
       headers: {

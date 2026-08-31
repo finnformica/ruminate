@@ -43,7 +43,7 @@ type NoteListProps = {
   /**
    * Linear-style list keys (↑/↓ highlight, Enter opens, ↓ from search hands
    * off, Escape returns to search). Only the notes *index* page turns this on
-   * — embedded lists (a note's backlinks) must not grab document-level keys.
+   * — embedded lists must not grab document-level keys.
    */
   enableKeyboardNav?: boolean
 }

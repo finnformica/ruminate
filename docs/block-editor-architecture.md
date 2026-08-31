@@ -94,20 +94,8 @@ that they're captured here rather than rushed:
 
 ### Natural-language dates (`[[today]]` → a date link)
 
-Goal: typing a wikilink whose target is a natural-language date
-(`[[today]]`, `[[next friday]]`) auto-fills the actual date so it links to the
-daily note. `chrono-node` is already a dependency (used by search and the
-command menu), so parsing is solved.
-
-Open questions / why deferred:
-
-- **Trigger & caret.** The rewrite should fire when the `]]` is completed, and
-  must re-place the caret correctly — it hooks into the same content-change path
-  that already does live marker detection, which is the editor's most
-  correctness-sensitive code. Wants its own careful, well-tested change.
-- **Format.** Daily notes are keyed `YYYY-MM-DD`, so a resolved link must be
-  `[[YYYY-MM-DD]]` to actually resolve — not a display format like `dd-mm-yyyy`.
-  A separate display format could come later via the existing link renderer.
+Obsolete: this was a wikilink feature, and wikilinks were removed. `[[...]]`
+in a note is plain text now.
 
 ### Title-derived slugs for note URLs
 
@@ -118,12 +106,12 @@ avoid collisions.
 Open questions / why deferred (a genuine data-model fork, needs a decision):
 
 - **Does the slug replace the filename/id, or sit beside it?** Today the note id
-  _is_ the filename _is_ the URL, and wikilinks (`[[id]]`) resolve by that id.
-  Slugging the filename means renaming files as titles change (and rewriting
-  wikilinks — the rename flow already does this) and re-slugging on collisions.
+  _is_ the filename _is_ the URL. Slugging the filename means renaming files as
+  titles change and re-slugging on collisions (the rename flow records the old
+  id in `aliases` frontmatter so old URLs keep redirecting).
 - **Alternatively**, keep the stable id as the filename and add a slug purely for
-  the URL (a slug→id lookup), leaving wikilinks and sync untouched. This is less
-  disruptive but adds an indirection layer.
+  the URL (a slug→id lookup), leaving sync untouched. This is less disruptive
+  but adds an indirection layer.
 
-Both are viable; the choice changes routing, wikilink resolution, and sync, so it
-should be settled deliberately before implementing.
+Both are viable; the choice changes routing and sync, so it should be settled
+deliberately before implementing.

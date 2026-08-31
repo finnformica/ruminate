@@ -233,7 +233,7 @@ export interface BlockIndex {
  * content is unchanged but whose Note object was recreated (every corpus
  * change re-derives all Note objects) keeps its parsed blocks and just gets
  * the fresh `note` reference stitched in, so note-level qualifiers (tags,
- * backlinks) never go stale. Notes that disappear are evicted.
+ * dates) never go stale. Notes that disappear are evicted.
  */
 export function createBlockIndexer(indexNote: (note: Note) => BlockHit[] = indexNoteBlocks) {
   const cache = new Map<NoteId, { content: string; note: Note; hits: BlockHit[] }>()

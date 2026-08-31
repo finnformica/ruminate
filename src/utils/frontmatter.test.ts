@@ -320,3 +320,21 @@ Hello`,
     },
   ])
 })
+
+describe("updateFrontmatterValue with array values", () => {
+  test("serializes arrays flow-style on a single line", () => {
+    const result = updateFrontmatterValue({
+      content: "Hello",
+      properties: { aliases: ["old-name", "2024-01-01"] },
+    })
+    expect(result).toBe('---\naliases: [old-name, "2024-01-01"]\n---\nHello')
+  })
+
+  test("updates an existing array value in place", () => {
+    const result = updateFrontmatterValue({
+      content: "---\naliases: [a]\n---\nHello",
+      properties: { aliases: ["a", "b"] },
+    })
+    expect(result).toBe("---\naliases: [a, b]\n---\nHello")
+  })
+})

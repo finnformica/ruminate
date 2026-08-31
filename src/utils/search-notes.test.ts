@@ -17,19 +17,18 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     title: "",
     url: null,
     alias: null,
+    aliases: [],
     pinned: false,
     updatedAt: null,
-    links: [],
     dates: [],
     tags: [],
     tasks: [],
-    backlinks: [],
     ...overrides,
   }
 }
 
 describe("filtering", () => {
-  test("matches by tag, title, type, link and backlink, frontmatter, counts, dates, has and no filters", () => {
+  test("matches by tag, title, type, frontmatter, counts, dates, has and no filters", () => {
     const note = makeNote({
       type: "daily",
       title: "Title 1",
@@ -38,8 +37,6 @@ describe("filtering", () => {
         {
           completed: false,
           text: "do it",
-          links: [],
-          date: null,
           tags: [],
           priority: null,
           startOffset: 0,
@@ -47,8 +44,6 @@ describe("filtering", () => {
         {
           completed: true,
           text: "done",
-          links: [],
-          date: null,
           tags: [],
           priority: null,
           startOffset: 10,
@@ -56,8 +51,6 @@ describe("filtering", () => {
       ],
       tags: ["a", "b"],
       dates: ["2021-01-01", "2021-01-03"],
-      links: ["x"],
-      backlinks: ["y"],
     })
 
     expect(testNoteFilters([{ key: "id", values: [note.id], exclude: false }], note)).toBe(true)
@@ -66,15 +59,11 @@ describe("filtering", () => {
     )
     expect(testNoteFilters([{ key: "type", values: ["daily"], exclude: false }], note)).toBe(true)
     expect(testNoteFilters([{ key: "tag", values: ["a"], exclude: false }], note)).toBe(true)
-    expect(testNoteFilters([{ key: "link", values: ["x"], exclude: false }], note)).toBe(true)
-    expect(testNoteFilters([{ key: "backlink", values: ["y"], exclude: false }], note)).toBe(true)
     expect(testNoteFilters([{ key: "priority", values: ["high"], exclude: false }], note)).toBe(
       true,
     )
 
     expect(testNoteFilters([{ key: "tags", values: [">=2"], exclude: false }], note)).toBe(true)
-    expect(testNoteFilters([{ key: "links", values: ["<2"], exclude: false }], note)).toBe(true)
-    expect(testNoteFilters([{ key: "backlinks", values: ["1"], exclude: false }], note)).toBe(true)
     expect(testNoteFilters([{ key: "dates", values: ["2"], exclude: false }], note)).toBe(true)
     expect(testNoteFilters([{ key: "tasks", values: [">=1"], exclude: false }], note)).toBe(true)
 
@@ -82,9 +71,7 @@ describe("filtering", () => {
       true,
     )
 
-    expect(testNoteFilters([{ key: "has", values: ["backlinks"], exclude: false }], note)).toBe(
-      true,
-    )
+    expect(testNoteFilters([{ key: "has", values: ["dates"], exclude: false }], note)).toBe(true)
     expect(testNoteFilters([{ key: "no", values: ["tags"], exclude: false }], note)).toBe(false)
 
     expect(testNoteFilters([{ key: "tag", values: ["a"], exclude: true }], note)).toBe(false)
@@ -146,8 +133,6 @@ describe("filtering", () => {
         {
           completed: false,
           text: "x",
-          links: [],
-          date: null,
           tags: [],
           priority: null,
           startOffset: 0,
@@ -219,15 +204,15 @@ describe("integration: parse + filter + sort", () => {
     expect(sorted.map((n) => n.id)).toEqual(["2", "1"]) // A before B
   })
 
-  test("default sort direction for links count is desc", () => {
+  test("default sort direction for tags count is desc", () => {
     const notes = [
-      makeNote({ id: "1", links: [] }),
-      makeNote({ id: "2", links: ["x"] }),
-      makeNote({ id: "3", links: ["x", "y"] }),
+      makeNote({ id: "1", tags: [] }),
+      makeNote({ id: "2", tags: ["x"] }),
+      makeNote({ id: "3", tags: ["x", "y"] }),
     ]
-    const { sorts } = parseQuery("sort:links")
+    const { sorts } = parseQuery("sort:tags")
     const sorted = sortNotes(notes, sorts)
-    expect(sorted.map((n) => n.id)).toEqual(["3", "2", "1"]) // desc by links count
+    expect(sorted.map((n) => n.id)).toEqual(["3", "2", "1"]) // desc by tags count
   })
 
   test("exclusion filter excludes notes with matching tags", () => {

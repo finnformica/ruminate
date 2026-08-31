@@ -245,37 +245,28 @@ export const notesAtom = atom((get) => {
     notes.set(id, parseNote(id, content))
   }
 
-  // Derive backlinks
-  for (const { id: sourceId, links } of notes.values()) {
-    for (const targetId of links) {
-      const backlinks = notes.get(targetId)?.backlinks
-      // Skip if the source note is already a backlink
-      if (backlinks?.includes(sourceId)) continue
-
-      // Skip if the source note is linking to itself
-      if (targetId === sourceId) continue
-
-      backlinks?.push(sourceId)
-    }
-  }
-
   return notes
 })
 
-export const backlinksIndexAtom = atom((get) => {
+/**
+ * Date (or week) id → the notes that reference it via frontmatter date
+ * properties (e.g. a birthday or due date). Powers the calendar dots and the
+ * date/week hover cards.
+ */
+export const dateMentionsAtom = atom((get) => {
   const notes = get(notesAtom)
   const index: Map<NoteId, NoteId[]> = new Map()
 
   for (const note of notes.values()) {
-    if (note.links.length === 0) continue
-    const uniqueTargets = new Set(note.links)
-    for (const targetId of uniqueTargets) {
-      if (targetId === note.id) continue
-      const backlinks = index.get(targetId)
-      if (backlinks) {
-        backlinks.push(note.id)
+    if (note.dates.length === 0) continue
+    const uniqueDates = new Set(note.dates)
+    for (const date of uniqueDates) {
+      if (date === note.id) continue
+      const mentions = index.get(date)
+      if (mentions) {
+        mentions.push(note.id)
       } else {
-        index.set(targetId, [note.id])
+        index.set(date, [note.id])
       }
     }
   }

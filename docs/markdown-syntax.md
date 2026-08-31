@@ -2,44 +2,9 @@
 
 Ruminate supports [GitHub Flavored Markdown](https://github.github.com/gfm/) with the following syntax extensions:
 
-## Wikilinks
-
-Link to another note using its ID.
-
-```
-[[<note-id>|<link-text>]]
-```
-
-| Example                           | Rendered HTML                               |
-| :-------------------------------- | :------------------------------------------ |
-| `[[1652342106359\|Randie Bemis]]` | `<a href="/1652342106359">Randie Bemis</a>` |
-
-### Dates
-
-You can also use wikilink syntax to reference a date.
-
-```
-[[YYYY-MM-DD]]
-```
-
-| Example          | Rendered HTML                                 |
-| :--------------- | :-------------------------------------------- |
-| `[[2021-07-11]]` | `<a href="/2021-07-11">Sun, Jul 11, 2021</a>` |
-
-> [!TIP]
-> Ruminate uses [Chrono](https://github.com/wanasit/chrono) to convert natural language dates into ISO format (YYYY-MM-DD). Try typing `[[yesterday]]` or `[[next monday]]` in a note editor to see it in action.
-
-## Embeds
-
-Embed the contents of another note using its ID.
-
-```
-![[<note-id>]]
-```
-
-| Example              | Rendered HTML                  |
-| :------------------- | :----------------------------- |
-| `![[1652342106359]]` | Contents of note 1652342106359 |
+> [!NOTE]
+> Wikilink (`[[id]]`) and note-embed (`![[id]]`) syntax was removed. Existing
+> notes containing `[[...]]` render it as plain text — the bytes are untouched.
 
 ## Tags
 

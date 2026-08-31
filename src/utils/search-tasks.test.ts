@@ -13,13 +13,12 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     title: "",
     url: null,
     alias: null,
+    aliases: [],
     pinned: false,
     updatedAt: null,
-    links: [],
     dates: [],
     tags: [],
     tasks: [],
-    backlinks: [],
     ...overrides,
   }
 }
@@ -28,9 +27,7 @@ function makeTask(overrides: Partial<TaskWithNote> = {}): TaskWithNote {
   return {
     completed: false,
     text: "do something",
-    links: [],
     tags: [],
-    date: null,
     priority: null,
     startOffset: 0,
     note: makeNote(),
@@ -104,48 +101,6 @@ describe("filtering", () => {
     expect(testTaskFilter({ key: "tags", values: [">=2"], exclude: false }, noTags)).toBe(false)
   })
 
-  test("filters by date", () => {
-    const dated = makeTask({ date: "2024-01-15" })
-    const noDate = makeTask({ date: null })
-
-    expect(testTaskFilter({ key: "date", values: ["2024-01-15"], exclude: false }, dated)).toBe(
-      true,
-    )
-    expect(testTaskFilter({ key: "date", values: ["2024-01-15"], exclude: false }, noDate)).toBe(
-      false,
-    )
-  })
-
-  test("filters by date with range operators", () => {
-    const jan15 = makeTask({ date: "2024-01-15" })
-    const jan20 = makeTask({ date: "2024-01-20" })
-
-    expect(testTaskFilter({ key: "date", values: [">=2024-01-15"], exclude: false }, jan15)).toBe(
-      true,
-    )
-    expect(testTaskFilter({ key: "date", values: ["<2024-01-15"], exclude: false }, jan15)).toBe(
-      false,
-    )
-    expect(testTaskFilter({ key: "date", values: ["<=2024-01-15"], exclude: false }, jan20)).toBe(
-      false,
-    )
-  })
-
-  test("filters by link", () => {
-    const task = makeTask({ links: ["note-a", "note-b"] })
-
-    expect(testTaskFilter({ key: "link", values: ["note-a"], exclude: false }, task)).toBe(true)
-    expect(testTaskFilter({ key: "link", values: ["note-c"], exclude: false }, task)).toBe(false)
-  })
-
-  test("filters by links count", () => {
-    const noLinks = makeTask({ links: [] })
-    const hasLinks = makeTask({ links: ["a", "b"] })
-
-    expect(testTaskFilter({ key: "links", values: [">=1"], exclude: false }, hasLinks)).toBe(true)
-    expect(testTaskFilter({ key: "links", values: [">=1"], exclude: false }, noLinks)).toBe(false)
-  })
-
   test("filters by note id", () => {
     const task = makeTask({ note: makeNote({ id: "daily-2024-01-15" }) })
 
@@ -166,35 +121,29 @@ describe("filtering", () => {
   })
 
   test("has filter checks property presence", () => {
-    const withDate = makeTask({ date: "2024-01-15" })
     const withPriority = makeTask({ priority: 1 })
     const withTags = makeTask({ tags: ["work"] })
-    const withLinks = makeTask({ links: ["note-a"] })
     const empty = makeTask()
 
-    expect(testTaskFilter({ key: "has", values: ["date"], exclude: false }, withDate)).toBe(true)
-    expect(testTaskFilter({ key: "has", values: ["date"], exclude: false }, empty)).toBe(false)
     expect(testTaskFilter({ key: "has", values: ["priority"], exclude: false }, withPriority)).toBe(
       true,
     )
     expect(testTaskFilter({ key: "has", values: ["priority"], exclude: false }, empty)).toBe(false)
     expect(testTaskFilter({ key: "has", values: ["tags"], exclude: false }, withTags)).toBe(true)
     expect(testTaskFilter({ key: "has", values: ["tags"], exclude: false }, empty)).toBe(false)
-    expect(testTaskFilter({ key: "has", values: ["links"], exclude: false }, withLinks)).toBe(true)
-    expect(testTaskFilter({ key: "has", values: ["links"], exclude: false }, empty)).toBe(false)
   })
 
   test("no filter checks property absence", () => {
-    const withDate = makeTask({ date: "2024-01-15" })
     const withPriority = makeTask({ priority: 1 })
+    const withTags = makeTask({ tags: ["work"] })
     const empty = makeTask()
 
-    expect(testTaskFilter({ key: "no", values: ["date"], exclude: false }, empty)).toBe(true)
-    expect(testTaskFilter({ key: "no", values: ["date"], exclude: false }, withDate)).toBe(false)
     expect(testTaskFilter({ key: "no", values: ["priority"], exclude: false }, empty)).toBe(true)
     expect(testTaskFilter({ key: "no", values: ["priority"], exclude: false }, withPriority)).toBe(
       false,
     )
+    expect(testTaskFilter({ key: "no", values: ["tags"], exclude: false }, empty)).toBe(true)
+    expect(testTaskFilter({ key: "no", values: ["tags"], exclude: false }, withTags)).toBe(false)
   })
 
   test("exclusion filter negates result", () => {
@@ -272,28 +221,6 @@ describe("sorting", () => {
     expect(sorted.map((t) => t.text)).toEqual(["b", "a"])
   })
 
-  test("sorts by date with nulls last", () => {
-    const tasks = [
-      makeTask({ text: "no-date", date: null }),
-      makeTask({ text: "jan-20", date: "2024-01-20" }),
-      makeTask({ text: "jan-15", date: "2024-01-15" }),
-    ]
-
-    const sorted = sortTasks(tasks, [{ key: "date", direction: "asc" }])
-    expect(sorted.map((t) => t.text)).toEqual(["jan-15", "jan-20", "no-date"])
-  })
-
-  test("sorts by date desc with nulls last", () => {
-    const tasks = [
-      makeTask({ text: "no-date", date: null }),
-      makeTask({ text: "jan-15", date: "2024-01-15" }),
-      makeTask({ text: "jan-20", date: "2024-01-20" }),
-    ]
-
-    const sorted = sortTasks(tasks, [{ key: "date", direction: "desc" }])
-    expect(sorted.map((t) => t.text)).toEqual(["jan-20", "jan-15", "no-date"])
-  })
-
   test("sorts by priority with nulls last", () => {
     const tasks = [
       makeTask({ text: "no-priority", priority: null }),
@@ -340,16 +267,16 @@ describe("sorting", () => {
 
   test("multi-key sorting applies keys in order", () => {
     const tasks = [
-      makeTask({ text: "a", priority: 2, date: "2024-01-20" }),
-      makeTask({ text: "b", priority: 1, date: "2024-01-15" }),
-      makeTask({ text: "c", priority: 1, date: "2024-01-20" }),
+      makeTask({ text: "b", priority: 2 }),
+      makeTask({ text: "c", priority: 1 }),
+      makeTask({ text: "a", priority: 1 }),
     ]
 
     const sorted = sortTasks(tasks, [
       { key: "priority", direction: "asc" },
-      { key: "date", direction: "asc" },
+      { key: "text", direction: "asc" },
     ])
-    expect(sorted.map((t) => t.text)).toEqual(["b", "c", "a"])
+    expect(sorted.map((t) => t.text)).toEqual(["a", "c", "b"])
   })
 
   test("unknown sort key is ignored", () => {
@@ -378,14 +305,14 @@ describe("integration: parse + filter + sort", () => {
     expect(result[0].text).toBe("urgent")
   })
 
-  test("filters and sorts by priority then date", () => {
+  test("filters and sorts by priority then text", () => {
     const tasks = [
-      makeTask({ text: "c", priority: 2, date: "2024-01-20" }),
-      makeTask({ text: "a", priority: 1, date: "2024-01-15" }),
-      makeTask({ text: "b", priority: 1, date: "2024-01-20" }),
+      makeTask({ text: "c", priority: 2 }),
+      makeTask({ text: "a", priority: 1 }),
+      makeTask({ text: "b", priority: 1 }),
     ]
 
-    const { filters, sorts } = parseQuery("has:priority sort:priority,date")
+    const { filters, sorts } = parseQuery("has:priority sort:priority,text")
     const filtered = filterTasks(tasks, filters)
     const sorted = sortTasks(filtered, sorts)
 
@@ -406,14 +333,14 @@ describe("integration: parse + filter + sort", () => {
     expect(result[0].text).toBe("a")
   })
 
-  test("filters work tasks without dates", () => {
+  test("filters work tasks without priority", () => {
     const tasks = [
-      makeTask({ text: "a", tags: ["work"], date: null }),
-      makeTask({ text: "b", tags: ["work"], date: "2024-01-15" }),
-      makeTask({ text: "c", tags: ["home"], date: null }),
+      makeTask({ text: "a", tags: ["work"], priority: null }),
+      makeTask({ text: "b", tags: ["work"], priority: 1 }),
+      makeTask({ text: "c", tags: ["home"], priority: null }),
     ]
 
-    const { filters } = parseQuery("tag:work no:date")
+    const { filters } = parseQuery("tag:work no:priority")
     const result = filterTasks(tasks, filters)
 
     expect(result).toHaveLength(1)

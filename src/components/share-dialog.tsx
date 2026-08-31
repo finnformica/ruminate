@@ -2,9 +2,9 @@ import copy from "copy-to-clipboard"
 import { useAtomValue } from "jotai"
 import React from "react"
 import { useNetworkState } from "react-use"
-import { githubUserAtom, notesAtom } from "../global-state"
+import { githubUserAtom } from "../global-state"
 import { Note } from "../schema"
-import { createGist, deleteGist, prepareNoteForGist } from "../utils/gist"
+import { createGist, deleteGist } from "../utils/gist"
 import { Button } from "./button"
 import { Dialog } from "./dialog"
 import { FormControl } from "./form-control"
@@ -35,7 +35,6 @@ export function ShareDialog({
   onOpenChange,
 }: ShareDialogProps) {
   const githubUser = useAtomValue(githubUserAtom)
-  const notes = useAtomValue(notesAtom)
   const { online } = useNetworkState()
   const gistId = note.frontmatter.gist_id as string | undefined
   const shareLink = gistId ? `${window.location.origin}/share/${gistId}` : ""
@@ -44,23 +43,18 @@ export function ShareDialog({
   const [linkCopied, setLinkCopied] = React.useState(false)
   const timeoutRef = React.useRef<number | null>(null)
 
-  const processedNote = React.useMemo(() => {
-    // Process note content so the preview matches the published note
-    return { ...note, content: prepareNoteForGist(note.content, notes) }
-  }, [note, notes])
-
   const handlePublish = React.useCallback(async () => {
     if (!githubUser) return
 
     setIsPublishing(true)
-    const gist = await createGist({ note, githubUser, notes })
+    const gist = await createGist({ note, githubUser })
     setIsPublishing(false)
 
     // TODO: Handle error
     if (!gist?.id) return
 
     onPublish(gist.id)
-  }, [githubUser, note, notes, onPublish])
+  }, [githubUser, note, onPublish])
 
   const handleUnpublish = React.useCallback(async () => {
     if (!githubUser?.token || !gistId) return
@@ -86,7 +80,7 @@ export function ShareDialog({
             className="card-1 bg-bg-overlay!"
             style={{ "--font-family-content": "var(--font-family-serif)" } as React.CSSProperties}
           >
-            <NotePreview note={processedNote} hideProperties />
+            <NotePreview note={note} hideProperties />
           </div>
           {gistId ? (
             <>

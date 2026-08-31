@@ -2,6 +2,14 @@
 
 ## 2026-W36
 
+### Fixed
+
+- Renaming a note no longer leaves its old link dead: the old address now redirects to the renamed note (renames chain, so even older names keep working). Previously the old link opened an empty editor that could quietly mint a duplicate note under the dead name.
+
+### Removed
+
+- Wikilinks are gone. The `[[id]]` link syntax, `![[id]]` note embeds, backlinks (the backlink count on previews, the backlinks section on notes, and the delete-confirmation prompt), and the `link:`/`backlink:` search qualifiers have all been removed. Existing notes are untouched — any `[[...]]` in your text simply reads as plain text. Tags, block references, and everything else are unaffected.
+
 ### Changed
 
 - Old checkbox and list spellings now behave as real checkboxes and lists. Blocks written as `[] buy milk`, `[X] done`, `* item`, or `2) item` used to stay plain text — invisible to `type:todo` search and unstyled — and are now recognized and tidied to their canonical form (`[ ]`, `[x]`, `-`, numbered), both for new typing and, one time, for everything already in your notes. Genuinely ambiguous lines (a `#word` tag, `[link] text`, a year like `1990.` starting a sentence) are left exactly as written.

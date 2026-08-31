@@ -30,19 +30,6 @@ export function testTaskFilter(filter: Filter, task: TaskWithNote): boolean {
     case "tags":
       value = filter.values.some((v) => isInRange(task.tags.length, v))
       break
-    case "date":
-      if (!task.date) {
-        value = false
-      } else {
-        value = filter.values.some((v) => isInRange(task.date!, v))
-      }
-      break
-    case "link":
-      value = task.links.some((l) => filter.values.includes(l))
-      break
-    case "links":
-      value = filter.values.some((v) => isInRange(task.links.length, v))
-      break
     case "note":
       value = filter.values.includes(task.note.id)
       break
@@ -52,16 +39,11 @@ export function testTaskFilter(filter: Filter, task: TaskWithNote): boolean {
     case "has":
       value = filter.values.some((v) => {
         switch (v) {
-          case "date":
-            return task.date !== null
           case "priority":
             return task.priority !== null
           case "tag":
           case "tags":
             return task.tags.length > 0
-          case "link":
-          case "links":
-            return task.links.length > 0
           default:
             return false
         }
@@ -70,16 +52,11 @@ export function testTaskFilter(filter: Filter, task: TaskWithNote): boolean {
     case "no":
       value = filter.values.some((v) => {
         switch (v) {
-          case "date":
-            return task.date === null
           case "priority":
             return task.priority === null
           case "tag":
           case "tags":
             return task.tags.length === 0
-          case "link":
-          case "links":
-            return task.links.length === 0
           default:
             return false
         }
@@ -110,15 +87,6 @@ function compareTasks(a: TaskWithNote, b: TaskWithNote, sorts: Sort[]): number {
       case "completed":
         // false (incomplete) before true (complete)
         result = Number(a.completed) - Number(b.completed)
-        break
-      case "date":
-        // null dates always sort last (regardless of direction)
-        if (a.date === null && b.date === null) result = 0
-        else if (a.date === null)
-          return 1 // a (null) goes after b
-        else if (b.date === null)
-          return -1 // b (null) goes after a
-        else result = a.date.localeCompare(b.date)
         break
       case "priority":
         // null priority always sorts last (regardless of direction)

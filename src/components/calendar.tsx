@@ -15,7 +15,7 @@ import { useAtom } from "jotai"
 import React from "react"
 import { Link } from "@tanstack/react-router"
 import { calendarLayoutAtom } from "../global-state"
-import { useBacklinksForId, useNoteById } from "../hooks/note"
+import { useDateMentions, useNoteById } from "../hooks/note"
 import { Note } from "../schema"
 import { cx } from "../utils/cx"
 import {
@@ -200,8 +200,8 @@ function CalendarWeek({
   const weekNumber = getISOWeek(startOfWeek)
   const label = formatWeek(weekString)
   const existingNote = useNoteById(weekString)
-  const backlinks = useBacklinksForId(weekString)
-  const hasNotes = Boolean(existingNote) || backlinks.length > 0
+  const mentions = useDateMentions(weekString)
+  const hasNotes = Boolean(existingNote) || mentions.length > 0
   const anchorRef = React.useContext(CalendarContainerContext)
 
   // Create note object for hover card (fallback if note doesn't exist)
@@ -216,15 +216,14 @@ function CalendarWeek({
       title: "",
       url: null,
       alias: null,
+      aliases: [],
       pinned: false,
       updatedAt: null,
-      links: [],
       dates: [],
       tags: [],
       tasks: [],
-      backlinks,
     }
-  }, [existingNote, weekString, backlinks])
+  }, [existingNote, weekString])
 
   return (
     <CalendarItem
@@ -246,8 +245,8 @@ function CalendarWeek({
 function CalendarDate({ date, isActive = false }: { date: Date; isActive?: boolean }) {
   const dateString = toDateString(date)
   const existingNote = useNoteById(dateString)
-  const backlinks = useBacklinksForId(dateString)
-  const hasNotes = Boolean(existingNote) || backlinks.length > 0
+  const mentions = useDateMentions(dateString)
+  const hasNotes = Boolean(existingNote) || mentions.length > 0
   const dayName = DAY_NAMES[date.getDay()]
   const monthName = MONTH_NAMES[date.getMonth()]
   const day = date.getDate()
@@ -267,15 +266,14 @@ function CalendarDate({ date, isActive = false }: { date: Date; isActive?: boole
       title: "",
       url: null,
       alias: null,
+      aliases: [],
       pinned: false,
       updatedAt: null,
-      links: [],
       dates: [],
       tags: [],
       tasks: [],
-      backlinks,
     }
-  }, [existingNote, dateString, backlinks])
+  }, [existingNote, dateString])
 
   return (
     <CalendarItem
@@ -435,8 +433,8 @@ function MonthWeekRow({
   const label = formatWeek(weekString)
 
   const existingNote = useNoteById(weekString)
-  const backlinks = useBacklinksForId(weekString)
-  const hasWeekNotes = Boolean(existingNote) || backlinks.length > 0
+  const mentions = useDateMentions(weekString)
+  const hasWeekNotes = Boolean(existingNote) || mentions.length > 0
 
   const daysOfWeek = React.useMemo(() => {
     const endOfWeek = addDays(mondayOfWeek, 6)
@@ -458,15 +456,14 @@ function MonthWeekRow({
       title: "",
       url: null,
       alias: null,
+      aliases: [],
       pinned: false,
       updatedAt: null,
-      links: [],
       dates: [],
       tags: [],
       tasks: [],
-      backlinks,
     }
-  }, [existingNote, weekString, backlinks])
+  }, [existingNote, weekString])
 
   const weekLink = (
     <Link
@@ -538,8 +535,8 @@ function MonthDateCell({
 }) {
   const dateString = toDateString(date)
   const existingNote = useNoteById(dateString)
-  const backlinks = useBacklinksForId(dateString)
-  const hasNotes = Boolean(existingNote) || backlinks.length > 0
+  const mentions = useDateMentions(dateString)
+  const hasNotes = Boolean(existingNote) || mentions.length > 0
   const dayName = DAY_NAMES[date.getDay()]
   const monthName = MONTH_NAMES[date.getMonth()]
   const day = date.getDate()
@@ -560,15 +557,14 @@ function MonthDateCell({
       title: "",
       url: null,
       alias: null,
+      aliases: [],
       pinned: false,
       updatedAt: null,
-      links: [],
       dates: [],
       tags: [],
       tasks: [],
-      backlinks,
     }
-  }, [existingNote, dateString, backlinks])
+  }, [existingNote, dateString])
 
   const link = (
     <Link

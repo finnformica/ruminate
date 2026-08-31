@@ -8,7 +8,6 @@ import type { Width } from "../schema"
 import { cx } from "../utils/cx"
 import { updateFrontmatterValue } from "../utils/frontmatter"
 import { getInvalidNoteIdCharacters } from "../utils/note-id"
-import { pluralize } from "../utils/pluralize"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
 import {
@@ -45,7 +44,6 @@ export function NoteActionsMenu({
   noteId,
   content,
   pinned = false,
-  backlinks = [],
   className,
   align = "start",
   onContentChange,
@@ -55,8 +53,6 @@ export function NoteActionsMenu({
   /** Current note content (the live editor value when open, else the saved file). */
   content: string
   pinned?: boolean
-  /** For the delete confirmation prompt. */
-  backlinks?: string[]
   className?: string
   align?: "start" | "end"
   /**
@@ -122,14 +118,6 @@ export function NoteActionsMenu({
   }
 
   const remove = () => {
-    if (
-      backlinks.length > 0 &&
-      !window.confirm(
-        `${noteId}.md has ${pluralize(backlinks.length, "backlink")}. Are you sure you want to delete it?`,
-      )
-    ) {
-      return
-    }
     deleteNote(noteId)
     // The header menu passes onDeleted (it's always the open note); the sidebar
     // menu falls back to the path check so deleting the note you're viewing from

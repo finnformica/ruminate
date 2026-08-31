@@ -186,8 +186,9 @@ per note — which doubles as the rebalancing mechanism. The store's diffing
 write path (`reconcileSortKeys`) keeps existing keys wherever the relative
 order allows, so an unchanged sibling produces no row change. Multi-parent is
 just two link rows pointing at one node; the same-parent duplicate is
-unrepresentable by the primary key. Wikilinks and tags stay derived from
-`text` in memory (`parseNote`), not materialized — `kind` reserves the slot.
+unrepresentable by the primary key. Tags stay derived from `text` in memory
+(`parseNote`), not materialized — `kind` reserves the slot. (Wikilinks were
+removed as a feature; `[[...]]` in text is plain text.)
 
 ### `meta` (key/value)
 

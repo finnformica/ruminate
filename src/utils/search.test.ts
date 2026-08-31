@@ -3,7 +3,7 @@ import { isInRange, parseQuery, resolveRelativeDate } from "./search"
 
 describe("parseQuery", () => {
   test("parses quoted values, comma lists, exclusions, and multiple sorts", () => {
-    const q = parseQuery('foo tag:a,b title:"hello, world" -tag:c sort:title,id:desc,links')
+    const q = parseQuery('foo tag:a,b title:"hello, world" -tag:c sort:title,id:desc,tags')
     expect(q.fuzzy).toBe("foo")
     expect(q.filters).toEqual([
       { key: "tag", values: ["a", "b"], exclude: false },
@@ -13,7 +13,7 @@ describe("parseQuery", () => {
     expect(q.sorts).toEqual([
       { key: "title", direction: "asc" },
       { key: "id", direction: "desc" },
-      { key: "links", direction: "desc" },
+      { key: "tags", direction: "desc" },
     ])
   })
 
@@ -69,11 +69,11 @@ describe("parseQuery", () => {
   })
 
   test("applies default sort directions when omitted per key", () => {
-    const q = parseQuery("sort:tags:asc,links,backlinks:desc")
+    const q = parseQuery("sort:tags,title,updated:asc")
     expect(q.sorts).toEqual([
-      { key: "tags", direction: "asc" },
-      { key: "links", direction: "desc" },
-      { key: "backlinks", direction: "desc" },
+      { key: "tags", direction: "desc" },
+      { key: "title", direction: "asc" },
+      { key: "updated", direction: "asc" },
     ])
   })
 })

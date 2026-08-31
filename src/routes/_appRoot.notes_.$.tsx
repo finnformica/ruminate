@@ -13,9 +13,7 @@ import { LoadingIcon16, NoteIcon16 } from "../components/icons"
 import { BlockNoteEditor } from "../components/block-editor/block-note-editor"
 import { NoteTitle } from "../components/block-editor/note-title"
 import { NoteActionsMenu } from "../components/note-actions-menu"
-import { LinkHighlightProvider } from "../components/link-highlight-provider"
 import { NoteFavicon } from "../components/note-favicon"
-import { NoteList } from "../components/note-list"
 import { PageLayout } from "../components/page-layout"
 import { ShareDialog } from "../components/share-dialog"
 import { isSyncingAtom } from "../components/sync-status"
@@ -27,9 +25,8 @@ import {
   weeklyTemplateAtom,
 } from "../global-state"
 import { useEditorValue } from "../hooks/editor-value"
-import { useNoteById, useRenameNote, useSaveNote } from "../hooks/note"
-import { useSearchNotes } from "../hooks/search-notes"
-import { Note, NoteId, Template, Width, fontSchema, widthSchema } from "../schema"
+import { useNoteById, useRenameNote, useResolvedNoteId, useSaveNote } from "../hooks/note"
+import { Template, Width, fontSchema, widthSchema } from "../schema"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
@@ -87,7 +84,6 @@ function NotePage() {
   // Router
   const { _splat: noteId } = Route.useParams()
   const {
-    query,
     content: defaultContent,
     heading: highlightHeading,
     block: zoomBlockId,
@@ -111,13 +107,24 @@ function NotePage() {
   // current timezone, to match the floating YYYY-MM-DD note naming.
   const isReadOnlyDailyNote = isDailyNote && noteId !== toDateString(new Date())
   const useBlockEditor = !isReadOnlyDailyNote
-  const searchNotes = useSearchNotes()
   const saveNote = useSaveNote()
   const getNoteContents = useGetNoteContents()
-  const backlinks = React.useMemo(() => {
-    const notes = searchNotes(`link:"${noteId}" -id:"${noteId}"`)
-    return new Map<NoteId, Note>(notes.map((note) => [note.id, note]))
-  }, [noteId, searchNotes])
+
+  // A dead id left behind by a rename redirects to the live note (recorded in
+  // its `aliases` frontmatter) instead of opening an empty duplicate. Only a
+  // genuinely new id falls through to the new-note editor below.
+  const resolvedNoteId = useResolvedNoteId(noteId)
+  const redirectNoteId =
+    !note && resolvedNoteId && resolvedNoteId !== noteId ? resolvedNoteId : null
+  React.useEffect(() => {
+    if (!redirectNoteId) return
+    navigate({
+      to: "/notes/$",
+      params: { _splat: redirectNoteId },
+      search: (prev) => ({ ...prev }),
+      replace: true,
+    })
+  }, [redirectNoteId, navigate])
 
   // Show "Saving…" the instant a save is dispatched, rather than waiting for
   // the debounced sync to actually start. Cleared when the sync finishes (or a
@@ -299,6 +306,9 @@ function NotePage() {
     preventDefault: true,
   })
 
+  // Redirecting to the live note (see above) — render nothing in the interim.
+  if (redirectNoteId) return null
+
   return (
     <PageLayout
       title={<span className="truncate">{noteId}.md</span>}
@@ -319,7 +329,6 @@ function NotePage() {
               noteId={noteId ?? ""}
               content={editorValue}
               pinned={parsedNote?.pinned ?? false}
-              backlinks={note?.backlinks ?? []}
               align="end"
               onContentChange={applyAndSave}
               editor={{
@@ -418,23 +427,6 @@ function NotePage() {
               <Details className="print:hidden">
                 <Details.Summary>Days</Details.Summary>
                 <DaysOfWeek week={noteId ?? ""} />
-              </Details>
-            ) : null}
-            {backlinks.size > 0 ? (
-              <Details className="print:hidden">
-                <Details.Summary>Backlinks</Details.Summary>
-                <LinkHighlightProvider href={`/notes/${noteId}`}>
-                  <NoteList
-                    baseQuery={`link:"${noteId}" -id:"${noteId}"`}
-                    query={query ?? ""}
-                    onQueryChange={(query) =>
-                      navigate({
-                        search: (prev) => ({ ...prev, query }),
-                        replace: true,
-                      })
-                    }
-                  />
-                </LinkHighlightProvider>
               </Details>
             ) : null}
           </div>
