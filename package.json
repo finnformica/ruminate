@@ -118,7 +118,7 @@
     "eslint-plugin-jsx-a11y": "^6.6.1",
     "eslint-plugin-react": "^7.34.1",
     "eslint-plugin-react-hooks": "^4.6.0",
-    "eslint-plugin-storybook": "^0.8.0",
+    "eslint-plugin-storybook": "^10.5.10",
     "http-server": "^14.1.1",
     "jsdom": "^30.0.1",
     "knip": "^6.32.2",
