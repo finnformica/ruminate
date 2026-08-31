@@ -42,6 +42,32 @@ describe("parseQuery", () => {
     expect(q.fuzzy).toBe("hello   world")
   })
 
+  test("parses type qualifiers like any other filter", () => {
+    expect(parseQuery("type:todo").filters).toEqual([
+      { key: "type", values: ["todo"], exclude: false },
+    ])
+    expect(parseQuery("type:todo,done").filters).toEqual([
+      { key: "type", values: ["todo", "done"], exclude: false },
+    ])
+    expect(parseQuery("-type:done").filters).toEqual([
+      { key: "type", values: ["done"], exclude: true },
+    ])
+    expect(parseQuery('type:"todo"').filters).toEqual([
+      { key: "type", values: ["todo"], exclude: false },
+    ])
+    const q = parseQuery("milk type:todo tag:work")
+    expect(q.fuzzy).toBe("milk")
+    expect(q.filters).toEqual([
+      { key: "type", values: ["todo"], exclude: false },
+      { key: "tag", values: ["work"], exclude: false },
+    ])
+  })
+
+  test("sort:updated and sort:updated_at default to descending", () => {
+    expect(parseQuery("sort:updated").sorts).toEqual([{ key: "updated", direction: "desc" }])
+    expect(parseQuery("sort:updated_at").sorts).toEqual([{ key: "updated_at", direction: "desc" }])
+  })
+
   test("applies default sort directions when omitted per key", () => {
     const q = parseQuery("sort:tags:asc,links,backlinks:desc")
     expect(q.sorts).toEqual([

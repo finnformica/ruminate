@@ -6,8 +6,10 @@ import { assign, createMachine } from "xstate"
 import { GitHubUser, Note, NoteId, Template, githubUserSchema, templateSchema } from "./schema"
 import { databaseFilesAtom } from "./data/database-mode"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
+import { createBlockIndexer, searchBlocks } from "./utils/block-search"
 import type { BlockRevealRequest, OutlineItem } from "./utils/note-outline"
 import { parseNote } from "./utils/parse-note"
+import { parseQuery, type Query } from "./utils/search"
 import { removeTemplateFrontmatter } from "./utils/remove-template-frontmatter"
 import { getSampleMarkdownFiles } from "./utils/sample-markdown-files"
 
@@ -323,6 +325,35 @@ export const noteSearcherAtom = atom((get) => {
     keySelector: (note) => [note.title, note.displayName, note.content, note.id, note.alias || ""],
     threshold: 0.8,
   })
+})
+
+// -----------------------------------------------------------------------------
+// Blocks
+// -----------------------------------------------------------------------------
+
+// The indexer's per-note memo lives in the module closure: on each corpus
+// change only notes whose content changed are re-parsed (unchanged notes reuse
+// their block entries), which keeps the derived atom cheap at corpus scale.
+const buildBlockIndex = createBlockIndexer()
+
+/**
+ * Every block in the corpus as a search hit (id, marker-free text, type,
+ * ancestry, containing note), in document order grouped by note (notes in
+ * `sortedNotesAtom` order). The index's fuzzy searcher is built lazily on
+ * first block-text search, so pure `type:` queries never pay for it.
+ */
+export const blockIndexAtom = atom((get) => buildBlockIndex(get(sortedNotesAtom)))
+
+/**
+ * Block-granular search (`src/utils/block-search.ts`): resolves a query to
+ * block hits — `type:todo` is every unchecked checkbox in the corpus,
+ * composable with the whole `parseQuery` vocabulary (note-level qualifiers
+ * filter by the containing note, fuzzy text matches the block's own text).
+ */
+export const searchBlocksAtom = atom((get) => {
+  const index = get(blockIndexAtom)
+  return (query: string | Query) =>
+    searchBlocks(typeof query === "string" ? parseQuery(query) : query, index)
 })
 
 // -----------------------------------------------------------------------------
