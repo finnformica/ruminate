@@ -64,8 +64,7 @@ export function useSaveNote() {
 }
 
 type RenameNoteResult =
-  | { success: true }
-  | { success: false; reason: "duplicate" | "invalid" | "no-op" }
+  { success: true } | { success: false; reason: "duplicate" | "invalid" | "no-op" }
 
 export function useRenameNote() {
   const getNoteContents = useGetNoteContents()
