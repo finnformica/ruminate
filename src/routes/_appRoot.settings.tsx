@@ -184,7 +184,7 @@ function StorageDiagnosticsPanel({ diagnostics }: { diagnostics: StorageDiagnost
   )
 }
 
-/** Read-only D1 replication status: last push, pending queue, remote row
+/** Read-only cloud replication status: last push, pending queue, remote row
  * counts — plus the one action, a manual full push. */
 function ReplicaDiagnosticsPanel({ replica }: { replica: ReplicaDiagnostics }) {
   // Refresh the remote counts when the panel opens.
@@ -203,7 +203,7 @@ function ReplicaDiagnosticsPanel({ replica }: { replica: ReplicaDiagnostics }) {
 
   return (
     <div className="flex flex-col gap-2 border-t border-border-secondary pt-2">
-      <span className="text-text-secondary">Cloud sync (D1)</span>
+      <span className="text-text-secondary">Cloud sync</span>
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-text-secondary [&>dd]:text-right [&>dd]:text-text">
         <dt>Last push</dt>
         <dd>
@@ -237,7 +237,7 @@ function ReplicaDiagnosticsPanel({ replica }: { replica: ReplicaDiagnostics }) {
         </span>
       ) : null}
       <Button className="self-start" onClick={() => requestDatabaseFullPush()}>
-        Push full copy to D1 now
+        Push full copy to the cloud now
       </Button>
     </div>
   )

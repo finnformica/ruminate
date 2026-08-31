@@ -11,6 +11,7 @@ import {
 } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
+import { trackReplicaAccess } from "./replica-access"
 import {
   storageDiagnosticsAtom,
   type ReplicaDiagnostics,
@@ -287,6 +288,9 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       }
       return res
     })
+    // Surface tenancy refusals (signup_closed/blocked/forbidden) honestly —
+    // sticky status the page layout renders (replica-access.ts).
+    await trackReplicaAccess(response)
     if (!response.ok) throw new Error(`Replica request failed (${response.status})`)
     return response
   }

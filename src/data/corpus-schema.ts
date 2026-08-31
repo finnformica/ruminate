@@ -1,3 +1,4 @@
+import { ensureDataVersion } from "./data-version"
 import type { SqlDriver } from "./sql-driver"
 
 /**
@@ -40,7 +41,10 @@ DROP TABLE IF EXISTS meta;
 /**
  * Bring `driver`'s database to the current corpus schema: apply the full
  * migration ladder when empty, migrate a v1 database in place via `0002`, and
- * reset-and-rebuild anything unrecognized.
+ * reset-and-rebuild anything unrecognized. After the DDL ladder, the shared
+ * data-version transform (`data-version.ts`) rewrites any rows whose *shape*
+ * predates the current data version — the one code path every engine's open
+ * goes through.
  */
 export async function ensureCorpusSchema(
   driver: SqlDriver,
@@ -52,6 +56,7 @@ export async function ensureCorpusSchema(
   )
   if (tables.length === 0) {
     await driver.execScript(full)
+    await ensureDataVersion(driver)
     return
   }
   const rows = await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")
@@ -61,4 +66,5 @@ export async function ensureCorpusSchema(
   } else if (version !== CORPUS_SCHEMA_VERSION) {
     await driver.execScript(RESET_SQL + full)
   }
+  await ensureDataVersion(driver)
 }

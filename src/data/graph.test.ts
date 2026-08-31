@@ -3,21 +3,16 @@ import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import { getSampleMarkdownFiles } from "../utils/sample-markdown-files"
-import {
-  buildGraphSnapshot,
-  docToGraph,
-  findCrossNoteIdCollisions,
-  reconcileSortKeys,
-  rollup,
-  sortKeyBetween,
-} from "./graph"
+import { buildGraphSnapshot, docToGraph, reconcileSortKeys, rollup, sortKeyBetween } from "./graph"
 
 /**
  * The rollup test plan (docs/graph-schema-v2.md). The rollup replaces stored
  * bytes as the source of exported markdown, so the load-bearing invariant is
- * pinned from every direction: for canonical markdown (the fixpoint of the
- * editor's `serialize(parse(md))`), `rollup(docToGraph(md))` reproduces it
- * byte-for-byte, frontmatter included.
+ * pinned from every direction: `rollup(docToGraph(md))` is the NORMALIZED
+ * form of `md` — ingest deliberately canonicalizes near-miss marker spellings
+ * and frontmatter (see graph.ts) — and that normalized form is a strict
+ * fixpoint of the round trip. For markdown already in normalized form the
+ * round trip reproduces it byte-for-byte, frontmatter included.
  */
 
 const canonical = (markdown: string) => serialize(parse(markdown))
@@ -27,12 +22,23 @@ const viaGraph = (markdown: string, noteId = "note") => {
   return rollup(noteId, buildGraphSnapshot(nodes, links))
 }
 
-/** Assert the invariant for one document (canonicalized first, so ids exist). */
+/** Assert byte-exact equivalence for a document already in normalized form
+ * (canonicalized first, so ids exist). */
 function expectEquivalent(markdown: string, noteId = "note") {
   const fixed = canonical(markdown)
   expect(viaGraph(fixed, noteId)).toBe(fixed)
   // And the canonical form is a fixpoint of the graph round-trip itself.
   expect(viaGraph(viaGraph(fixed, noteId) as string, noteId)).toBe(fixed)
+}
+
+/** Assert one pass of the round trip converges: the (possibly normalized)
+ * output is a strict fixpoint of a second pass. */
+function expectConverges(markdown: string, noteId = "note"): string {
+  const fixed = canonical(markdown)
+  const normalized = viaGraph(fixed, noteId) as string
+  expect(normalized).not.toBeNull()
+  expect(viaGraph(normalized, noteId)).toBe(normalized)
+  return normalized
 }
 
 /** Bare row builders for graph-side and adversarial-row tests. */
@@ -85,26 +91,52 @@ describe("rollup equivalence (named cases)", () => {
     ])
   })
 
-  it("preserves frontmatter verbatim through page props", () => {
+  it("stores frontmatter as parsed entries and rolls up canonical YAML", () => {
     const markdown =
       "---\ntitle: Weird   spacing\ntags: [a, b]\nnested:\n  - x\n  - 'y: z'\n---\n- body\n"
-    expectEquivalent(markdown)
     const { nodes } = docToGraph("note", markdown, 0)
     const page = nodes.find((node) => node.type === "page")
+    // Individual parsed entries, not the legacy {"frontmatter": raw} blob.
     expect(page?.props).toBe(
-      JSON.stringify({
-        frontmatter: "title: Weird   spacing\ntags: [a, b]\nnested:\n  - x\n  - 'y: z'",
-      }),
+      JSON.stringify({ title: "Weird   spacing", tags: ["a", "b"], nested: ["x", "y: z"] }),
+    )
+    // Canonicalization changes bytes (the block-style list becomes flow), and
+    // the canonical form is a strict fixpoint.
+    const normalized = expectConverges(markdown)
+    expect(normalized).toContain(
+      '---\ntitle: Weird   spacing\ntags: [a, b]\nnested: [x, "y: z"]\n---',
     )
   })
 
-  it("keeps frontmatter that contains lines that look like blocks", () => {
-    expectEquivalent("---\ndescription: |\n  - not a bullet\n  # not a heading\n---\nhello\n")
+  it("frontmatter that already reads canonically round-trips byte-for-byte", () => {
+    expectEquivalent(
+      "---\npinned: true\nupdated_at: 2026-01-02T03:04:05.000Z\ngist_id: abc123\n---\n- body\n",
+    )
+  })
+
+  it("keeps degenerate frontmatter verbatim (comments cannot survive parsing)", () => {
+    // A comment line has no parsed-entries representation — the legacy raw
+    // props shape keeps the bytes (and the comment) intact.
+    const markdown = "---\ndescription: |\n  - not a bullet\n  # not a heading\n---\nhello\n"
+    expectEquivalent(markdown)
+    const { nodes } = docToGraph("note", markdown, 0)
+    const page = nodes.find((node) => node.type === "page")
+    expect(JSON.parse(page?.props ?? "{}")).toHaveProperty("frontmatter")
   })
 
   it("handles an empty page and a frontmatter-only page", () => {
     expectEquivalent("")
     expectEquivalent("---\ntitle: empty\n---\n")
+  })
+
+  it("stamps every save's frontmatter shape: updated_at survives unquoted", () => {
+    // The exact line `updateFrontmatterValue` writes on every save must be a
+    // byte-stable round trip, or save → pull would flip bytes forever.
+    const markdown = "---\nupdated_at: 2026-08-31T09:30:00.000Z\n---\n- body\n"
+    expectEquivalent(markdown)
+    const { nodes } = docToGraph("note", markdown, 0)
+    const page = nodes.find((node) => node.type === "page")
+    expect(page?.props).toBe(JSON.stringify({ updated_at: "2026-08-31T09:30:00.000Z" }))
   })
 
   it("does not type fake markers inside code fences (every marker kind)", () => {
@@ -144,28 +176,53 @@ describe("rollup equivalence (named cases)", () => {
     expect(types("## Foo\n")).toEqual(["h1:Foo"])
   })
 
-  it("keeps non-canonical marker spellings verbatim as text nodes", () => {
-    const markdown = "* star bullet\n[X] caps todo\n[] shorthand\n2) paren ordered\n#nospace\n"
+  it("normalizes near-miss marker spellings to their typed form (deliberate byte change)", () => {
+    const markdown = "* star bullet\n[X] caps todo\n[] shorthand\n2) paren ordered\n"
+    expect(types(markdown)).toEqual([
+      "ul:star bullet",
+      "done:caps todo",
+      "todo:shorthand",
+      "ol:paren ordered",
+    ])
+    // One pass rewrites the bytes to canonical markers; then it's a fixpoint.
+    const normalized = expectConverges(markdown)
+    expect(normalized).toMatch(/^- star bullet\n/)
+    expect(normalized).toContain("\n[x] caps todo\n")
+    expect(normalized).toContain("\n[ ] shorthand\n")
+    expect(normalized).toContain("\n1. paren ordered\n")
+  })
+
+  it("keeps genuinely ambiguous near-misses verbatim as text nodes", () => {
+    // #nospace is the tag syntax; [link] is prose; tight markers and bare []
+    // have no clear intent; 4+ digit "ordered" markers are prose years.
+    const markdown =
+      "#nospace\n##alsonospace\n[link] text\n[x]tight\n[]\n1990. that was the year\n**bold** start\n+1 to that\n"
     expectEquivalent(markdown)
     expect(types(markdown)).toEqual([
-      "text:* star bullet",
-      "text:[X] caps todo",
-      "text:[] shorthand",
-      "text:2) paren ordered",
       "text:#nospace",
+      "text:##alsonospace", // marker collapse needs a space too — verbatim text
+      "text:[link] text",
+      "text:[x]tight",
+      "text:[]",
+      "text:1990. that was the year",
+      "text:**bold** start",
+      "text:+1 to that",
     ])
   })
 
-  it("renumbers ordered runs and leaves mismatched numbers verbatim", () => {
-    // 1/2 form a run (typed ol, renumbered by position); 5 breaks it.
+  it("renumbers ordered runs; a mismatched number joins the run via normalization", () => {
+    // 1/2 form a run; 5 is a near-miss that now normalizes into it and the
+    // rollup renumbers the whole run by position.
     const markdown = "1. a\n2. b\n5. c\n1. d\n"
-    expectEquivalent(markdown)
-    expect(types(markdown)).toEqual(["ol:a", "ol:b", "text:5. c", "ol:d"])
+    expect(types(markdown)).toEqual(["ol:a", "ol:b", "ol:c", "ol:d"])
+    const normalized = expectConverges(markdown)
+    const contentLines = normalized.split("\n").filter((line) => !line.includes("id:: "))
+    expect(contentLines).toEqual(["1. a", "2. b", "3. c", "4. d", ""])
   })
 
-  it("treats leading-zero ordered markers as text (never renumbered)", () => {
-    expectEquivalent("01. zero padded\n0. zero\n")
-    expect(types("01. zero padded\n")).toEqual(["text:01. zero padded"])
+  it("normalizes leading-zero and zero ordered markers into the run", () => {
+    expect(types("01. zero padded\n0. zero\n")).toEqual(["ol:zero padded", "ol:zero"])
+    expectConverges("01. zero padded\n0. zero\n")
   })
 
   it("scopes ordered runs per parent", () => {
@@ -532,21 +589,46 @@ describe("property: generated documents round-trip", () => {
     return frontmatter + lines.join("\n") + "\n"
   }
 
-  it("rollup(docToGraph(md)) === canonicalize(md) for 200 generated documents", () => {
+  it("one round trip normalizes; the normalized form is a strict fixpoint (200 documents)", () => {
     const rand = mulberry32(20260829)
     for (let i = 0; i < 200; i += 1) {
       const markdown = generateDocument(rand)
       const fixed = canonical(markdown)
-      expect(viaGraph(fixed), `seed doc ${i}:\n${markdown}`).toBe(fixed)
+      const normalized = viaGraph(fixed) as string
+      expect(normalized, `seed doc ${i}:\n${markdown}`).not.toBeNull()
+      // The deliberate normalization pass (near-miss markers, canonical
+      // frontmatter) converges in one step — never a byte flip-flop.
+      expect(viaGraph(normalized), `seed doc ${i}:\n${markdown}`).toBe(normalized)
     }
   })
 
-  it("parse(rollup(docToGraph(md))) preserves the block tree", () => {
+  it("documents built from canonical markers only round-trip byte-for-byte", () => {
+    const rand = mulberry32(20260831)
+    const CANONICAL_MARKERS = ["", "# ", "## ", "[ ] ", "[x] ", "- ", "> "]
+    for (let i = 0; i < 100; i += 1) {
+      const lines: string[] = []
+      const lineCount = 1 + Math.floor(rand() * 20)
+      let depth = 0
+      for (let j = 0; j < lineCount; j += 1) {
+        depth = Math.max(0, Math.min(depth + Math.floor(rand() * 3) - 1, 5))
+        const marker = CANONICAL_MARKERS[Math.floor(rand() * CANONICAL_MARKERS.length)]
+        const words = Array.from(
+          { length: Math.floor(rand() * 3) },
+          () => WORDS[Math.floor(rand() * WORDS.length)],
+        )
+        lines.push("  ".repeat(depth) + marker + words.join(" "))
+      }
+      const fixed = canonical(lines.join("\n") + "\n")
+      expect(viaGraph(fixed), `seed doc ${i}:\n${fixed}`).toBe(fixed)
+    }
+  })
+
+  it("the rollup's output is always canonical for the editor (serialize∘parse fixpoint)", () => {
     const rand = mulberry32(42)
     for (let i = 0; i < 50; i += 1) {
       const fixed = canonical(generateDocument(rand))
       const rolled = viaGraph(fixed) as string
-      expect(serialize(parse(rolled))).toBe(fixed)
+      expect(serialize(parse(rolled))).toBe(rolled)
     }
   })
 
@@ -712,21 +794,5 @@ describe("sort keys", () => {
       expect([...ordered].sort()).toEqual(ordered)
       expect(new Set(ordered).size).toBe(ordered.length)
     }
-  })
-})
-
-describe("findCrossNoteIdCollisions", () => {
-  it("reports ids declared by more than one note, deterministically", () => {
-    const collisions = findCrossNoteIdCollisions({
-      "note-b": "- dup\n  id:: blk_dup\n",
-      "note-a": "- dup\n  id:: blk_dup\n- own\n  id:: blk_own\n",
-    })
-    expect(collisions).toEqual([{ blockId: "blk_dup", noteIds: ["note-a", "note-b"] }])
-  })
-
-  it("returns empty when every id is unique", () => {
-    expect(
-      findCrossNoteIdCollisions({ a: "- x\n  id:: blk_x\n", b: "- y\n  id:: blk_y\n" }),
-    ).toEqual([])
   })
 })

@@ -118,6 +118,58 @@ function formatYamlValue(value: unknown): string {
   return String(value)
 }
 
+/** The exact ISO form `Date#toISOString` (and JSON date serialization)
+ * produces. Emitted unquoted so it round-trips: yamljs parses it back to a
+ * `Date` whose JSON form is the identical string — and so the canonical
+ * serializer agrees byte-for-byte with the `updated_at` stamp
+ * `updateFrontmatterValue` writes on every save. Any other date-*like* string
+ * (e.g. a bare `2026-01-02`) stays quoted, because unquoted yamljs would turn
+ * it into a `Date` and change the value. */
+const ISO_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+
+/**
+ * One value of the canonical frontmatter serialization. Nested containers are
+ * emitted flow-style (`[a, b]`, `{k: v}`) — single-line, so the line-based
+ * editing in `updateFrontmatterValue`/`updateFrontmatterKey` keeps working on
+ * canonical output. Inside a flow context, strings additionally quote the
+ * flow separators (`,` `[` `]` `{` `}`).
+ */
+function formatCanonicalYamlValue(value: unknown, inFlow: boolean): string {
+  if (value === null || value === undefined) return "null"
+  if (value instanceof Date) return value.toISOString()
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => formatCanonicalYamlValue(item, true)).join(", ")}]`
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+    return `{${entries
+      .map(([key, item]) => `${serializeYamlKey(key)}: ${formatCanonicalYamlValue(item, true)}`)
+      .join(", ")}}`
+  }
+  if (typeof value === "string") {
+    if (ISO_DATETIME_RE.test(value)) return value
+    const needsFlowQuoting = inFlow && /[,[\]{}]/.test(value)
+    return needsYamlQuoting(value) || needsFlowQuoting ? JSON.stringify(value) : value
+  }
+  // Numbers and booleans.
+  return String(value)
+}
+
+/**
+ * The canonical YAML text for a set of frontmatter entries — the single
+ * serialization the rollup emits for page props (docs/graph-storage.md). Key
+ * order is the entries' own iteration order (which ingest derives from the
+ * original document, so typical frontmatter keeps its familiar shape); every
+ * value is one `key: value` line. `parse(serialize(entries))` is a fixpoint —
+ * pinned by property tests, and enforced per-document by the round-trip guard
+ * in `src/data/frontmatter-props.ts`.
+ */
+export function canonicalFrontmatterYaml(entries: Record<string, unknown>): string {
+  return Object.entries(entries)
+    .map(([key, value]) => `${serializeYamlKey(key)}: ${formatCanonicalYamlValue(value, false)}`)
+    .join("\n")
+}
+
 /** Extracts the key from a YAML key/value line. Returns null if not a key/value line */
 function extractKeyFromLine(line: string): string | null {
   const match = line.match(/^\s*(?:"([^"]*)"|'([^']*)'|([^:\s][^:]*?))\s*:/)

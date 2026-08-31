@@ -94,15 +94,67 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
     expect(await driver.exec("SELECT * FROM link")).toEqual([])
   })
 
-  it("stores frontmatter verbatim in the page props", async () => {
+  it("stores frontmatter as parsed entries in the page props", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await store.writeNotes({
       a: "---\nupdated_at: 2026-01-02T03:04:05.000Z\n---\nHello\n  id:: blk_aaaaaaaaaa\n",
     })
     const rows = await driver.exec("SELECT props FROM nodes WHERE id = 'a'")
+    expect(rows).toEqual([{ props: JSON.stringify({ updated_at: "2026-01-02T03:04:05.000Z" }) }])
+    // And the rollup reproduces the exact saved bytes (canonical fixpoint).
+    expect(await store.getNote("a")).toBe(
+      "---\nupdated_at: 2026-01-02T03:04:05.000Z\n---\nHello\n  id:: blk_aaaaaaaaaa\n",
+    )
+  })
+
+  it("normalizes near-miss marker spellings at ingest (typed rows, canonical rollup)", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    await store.writeNotes({
+      a: "[] buy milk\n  id:: blk_aaaaaaaaaa\n* item\n  id:: blk_bbbbbbbbbb\n",
+    })
+    const rows = await driver.exec(
+      "SELECT id, type, text FROM nodes WHERE id LIKE 'blk_%' ORDER BY id",
+    )
     expect(rows).toEqual([
-      { props: JSON.stringify({ frontmatter: "updated_at: 2026-01-02T03:04:05.000Z" }) },
+      { id: "blk_aaaaaaaaaa", type: "todo", text: "buy milk" },
+      { id: "blk_bbbbbbbbbb", type: "ul", text: "item" },
     ])
+    expect(await store.getNote("a")).toBe(
+      "[ ] buy milk\n  id:: blk_aaaaaaaaaa\n- item\n  id:: blk_bbbbbbbbbb\n",
+    )
+  })
+
+  it("transforms legacy rows on open (data_version 1) so old data gains types", async () => {
+    const driver = createNodeSqlDriver()
+    await openSqlNoteStore(driver)
+    // Simulate a pre-transform corpus: raw near-miss text rows and legacy
+    // frontmatter props, landed after the (empty) open — like a first pull.
+    await driver.batch([
+      {
+        sql: "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?, ?, ?, ?, ?)",
+        params: ["a", "page", "a", JSON.stringify({ frontmatter: "pinned: true" }), 100],
+      },
+      {
+        sql: "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?, ?, ?, ?, ?)",
+        params: ["blk_aaaaaaaaaa", "text", "[] buy milk", null, 100],
+      },
+      {
+        sql:
+          "INSERT INTO link (source_id, destination_id, kind, sort_key, updated_at) " +
+          "VALUES (?, ?, 'child', 'a0', ?)",
+        params: ["a", "blk_aaaaaaaaaa", 100],
+      },
+    ])
+
+    const store = await openSqlNoteStore(driver)
+    expect(await store.getNote("a")).toBe(
+      "---\npinned: true\n---\n[ ] buy milk\n  id:: blk_aaaaaaaaaa\n",
+    )
+    const rows = await driver.exec("SELECT type, updated_at FROM nodes WHERE id = 'blk_aaaaaaaaaa'")
+    expect(rows[0].type).toBe("todo")
+    // Fresh updated_at → the rewritten row wins LWW and replicates.
+    expect(Number(rows[0].updated_at)).toBeGreaterThan(100)
+    expect(await store.getMeta("data_version")).toBe("1")
   })
 
   it("migrates a v1 database in place via 0002 (v1 tables dropped)", async () => {

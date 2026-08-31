@@ -1,5 +1,6 @@
 import { useAtomValue } from "jotai"
 import { databaseModeStatusAtom } from "../data/database-mode"
+import { replicaAccessDeniedAtom } from "../data/replica-access"
 import { storageDiagnosticsAtom } from "../data/storage-diagnostics"
 import { isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
 import { cx } from "../utils/cx"
@@ -27,6 +28,11 @@ export function PageLayout({
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const databaseStatus = useAtomValue(databaseModeStatusAtom)
   const diagnostics = useAtomValue(storageDiagnosticsAtom)
+  // The replica refused this account (signup gate / blocked): say so plainly
+  // instead of letting a working-looking app fail its pushes silently.
+  // Editing stays allowed — local-first, and the push queue retries after
+  // admission (src/data/replica-access.ts).
+  const accessDenied = useAtomValue(replicaAccessDeniedAtom)
   // A second Ruminate tab holds the persistent local database — this tab fell
   // back to a temporary in-memory copy and must say so (defect: it used to
   // silently show an empty corpus).
@@ -56,6 +62,15 @@ export function PageLayout({
                 >
                   Ruminate is open in another tab — this tab is using a temporary in-memory copy.
                   Close the other tab and reload to work here.
+                </Notice>
+              </div>
+            ) : null}
+            {accessDenied !== null && !isSignedOut && !disableGuard ? (
+              <div className="p-4">
+                <Notice tone="warning">
+                  {accessDenied === "blocked"
+                    ? "This account has been blocked from syncing. Notes you write stay on this device only."
+                    : "Ruminate is invite-only — your sign-in isn't enabled yet. Notes you write stay on this device and will sync automatically if you're admitted."}
                 </Notice>
               </div>
             ) : null}

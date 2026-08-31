@@ -8,6 +8,7 @@ import {
   planPullApplication,
   type D1NoteSource,
 } from "./d1-note-source"
+import { resetReplicaAccess } from "./replica-access"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import type { SqlNoteStore } from "./sql-note-store"
 import {
@@ -318,6 +319,9 @@ export function stopDatabaseMode() {
   store.set(databaseModeStatusAtom, OFF_STATUS)
   store.set(databaseFilesAtom, {})
   store.set(storageDiagnosticsAtom, OFF_STORAGE_DIAGNOSTICS)
+  // A denial belongs to the account that was refused; the signed-out screen
+  // (and any next sign-in) starts clean.
+  resetReplicaAccess()
 }
 
 // -----------------------------------------------------------------------------
