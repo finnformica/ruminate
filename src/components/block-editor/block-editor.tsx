@@ -887,8 +887,8 @@ export function BlockEditor({
   }
 
   /** Drive collapse to an explicit state (paste lands its subtrees folded).
-   * `toggleCollapse` is the only setter the controlled caller exposes, so a
-   * block already in the wanted state is left alone rather than flipped. */
+   * `toggleCollapse` is the only setter either owner of the state exposes, so
+   * a block already in the wanted state is left alone rather than flipped. */
   const setCollapsedState = (id: string, shouldCollapse: boolean) => {
     if (collapsed.has(id) !== shouldCollapse) toggleCollapse(id)
   }

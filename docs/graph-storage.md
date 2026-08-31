@@ -292,13 +292,18 @@ nothing to normalize.
 
 ### No view_state table
 
-Collapse state is per-device ephemera. The default-expansion policy is pure
-(`defaultCollapsedIds`, `src/blocks/default-collapsed.ts`): headings always
-expanded, two levels expanded below any heading (or the page root), deeper
-starts collapsed. The user's toggles are stored in localStorage as per-note
-overrides on top of that default (`src/data/view-state.ts`); losing them
-merely falls back to the defaults. The rollup's hard depth cap doubles as the
-render guard against corrupted (cyclic) graphs.
+Collapse state is per-device ephemera. localStorage holds one set of collapsed
+block ids per note (`collapse:<noteId>`, `src/data/view-state.ts`): collapsed
+means folded, everything else is open, so a block can never hold two opinions
+at once. The default-expansion policy is pure (`defaultCollapsedIds`,
+`src/blocks/default-collapsed.ts`): headings always expanded, two levels
+expanded below any heading (or the page root), deeper starts collapsed — and
+it **seeds** that set the first time a note is opened on a device rather than
+sitting underneath it as a layer. After that the reader's toggles are the only
+thing that moves the set (blocks added later start expanded), ids the document
+has lost are pruned on write, and losing localStorage simply re-seeds from the
+policy. The rollup's hard depth cap doubles as the render guard against
+corrupted (cyclic) graphs.
 
 ## Delete = unlink + rescue (and, underneath, a tombstone)
 

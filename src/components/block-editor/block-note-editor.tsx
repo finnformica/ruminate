@@ -82,9 +82,10 @@ export function BlockNoteEditor({
   value: string
   onChange: (value: string) => void
   /**
-   * The note's id. When provided, collapse state follows the default-expansion
-   * policy with per-device overrides persisted in localStorage; without it,
-   * collapse is transient local state (e.g. Storybook / standalone usage).
+   * The note's id. When provided, the note's folds persist per-device in
+   * localStorage (seeded on first open from the default-expansion policy);
+   * without it, collapse is transient local state (e.g. Storybook /
+   * standalone usage).
    */
   noteId?: string
   /** Start with the first block in edit mode (e.g. a brand-new note). */

@@ -4,110 +4,140 @@ import type { BlockDoc } from "../blocks/types"
 
 /**
  * Collapse state for one note: per-device ephemera, not synced data
- * (docs/graph-schema-v2.md dropped the view_state table). The resting state
- * comes from the default-expansion policy (`defaultCollapsedIds`: headings
- * always expanded, two levels below, deeper collapsed); the user's toggles
- * are stored in localStorage as per-note OVERRIDES on top of that default,
- * keyed by block id — so a device losing its localStorage merely falls back
- * to sensible defaults.
+ * (docs/graph-schema-v2.md dropped the view_state table). Storage is a single
+ * set of collapsed block ids per note in localStorage — collapsed means
+ * folded, everything else is open — so a block can never hold two opinions at
+ * once.
+ *
+ * The default-expansion policy (`defaultCollapsedIds`: headings always
+ * expanded, two levels below, deeper collapsed) SEEDS that set the first time
+ * a note is opened here and is never consulted again. After that, folding
+ * belongs to the reader: blocks added later start expanded, and nothing
+ * rearranges behind you as a note grows. A device that loses its localStorage
+ * simply re-seeds on the next open.
  */
 
-export interface CollapseOverrides {
-  /** Ids expanded although the default collapses them. */
-  expanded: string[]
-  /** Ids collapsed although the default expands them. */
-  collapsed: string[]
-}
-
-const EMPTY_OVERRIDES: CollapseOverrides = { expanded: [], collapsed: [] }
+/** Never mutated — every update builds a fresh set. */
+const NOTHING_COLLAPSED: Set<string> = new Set()
 
 const storageKey = (noteId: string) => `collapse:${noteId}`
 
-/** Tolerant read — malformed or missing storage degrades to no overrides. */
-export function readCollapseOverrides(noteId: string | undefined): CollapseOverrides {
-  if (!noteId || typeof localStorage === "undefined") return EMPTY_OVERRIDES
+const asIds = (x: unknown): string[] =>
+  Array.isArray(x) ? x.filter((id): id is string => typeof id === "string") : []
+
+/**
+ * Tolerant read — the stored collapsed set for a note, or null when there is
+ * nothing usable stored (a note never opened on this device, cleared storage,
+ * malformed JSON) and the caller should seed from the policy instead.
+ *
+ * Entries left by the old two-layer model (`{ expanded, collapsed }` overrides
+ * layered on the policy) are resolved into the new shape against the document
+ * — `(policy − expanded) ∪ collapsed` — rather than dropped, so upgrading
+ * keeps the folds people already had.
+ */
+export function readCollapsedIds(noteId: string | undefined, doc: BlockDoc): Set<string> | null {
+  if (!noteId || typeof localStorage === "undefined") return null
   try {
     const raw = localStorage.getItem(storageKey(noteId))
-    if (!raw) return EMPTY_OVERRIDES
+    if (!raw) return null
     const parsed: unknown = JSON.parse(raw)
-    const asIds = (x: unknown): string[] =>
-      Array.isArray(x) ? x.filter((id): id is string => typeof id === "string") : []
-    const record = parsed as { expanded?: unknown; collapsed?: unknown } | null
-    return { expanded: asIds(record?.expanded), collapsed: asIds(record?.collapsed) }
+    if (Array.isArray(parsed)) return new Set(asIds(parsed))
+    if (parsed && typeof parsed === "object") {
+      const legacy = parsed as { expanded?: unknown; collapsed?: unknown }
+      const collapsed = new Set(defaultCollapsedIds(doc))
+      for (const id of asIds(legacy.expanded)) collapsed.delete(id)
+      for (const id of asIds(legacy.collapsed)) collapsed.add(id)
+      return collapsed
+    }
+    return null
   } catch {
-    return EMPTY_OVERRIDES
+    return null
   }
 }
 
-function writeCollapseOverrides(noteId: string, overrides: CollapseOverrides) {
+/**
+ * Persist a note's collapsed set, dropping ids the document no longer has so
+ * dead ids don't accumulate. An empty set is still written: the entry existing
+ * is what records "this note has been seeded here", so unfolding everything
+ * survives a reload instead of inviting a re-seed.
+ */
+export function writeCollapsedIds(noteId: string, collapsed: ReadonlySet<string>, doc: BlockDoc) {
   if (typeof localStorage === "undefined") return
   try {
-    if (overrides.expanded.length === 0 && overrides.collapsed.length === 0) {
-      localStorage.removeItem(storageKey(noteId))
-    } else {
-      localStorage.setItem(storageKey(noteId), JSON.stringify(overrides))
-    }
+    localStorage.setItem(
+      storageKey(noteId),
+      JSON.stringify([...collapsed].filter((id) => doc.blocks[id])),
+    )
   } catch {
     // Storage full/unavailable — collapse state is ephemeral by design.
   }
 }
 
-/** The effective collapsed set: defaults, minus expansions, plus collapses. */
-export function applyCollapseOverrides(
-  defaults: ReadonlySet<string>,
-  overrides: CollapseOverrides,
-): Set<string> {
-  const collapsed = new Set(defaults)
-  for (const id of overrides.expanded) collapsed.delete(id)
-  for (const id of overrides.collapsed) collapsed.add(id)
-  return collapsed
+/**
+ * Is there anything worth seeding from yet? The note store opens
+ * asynchronously, so a note is briefly nothing but the editor's starter blank
+ * on a cold load; seeding from that would persist an empty set for a note
+ * whose content is one tick away, and the real content would then never get
+ * its first impression.
+ */
+function hasContent(doc: BlockDoc): boolean {
+  return Object.values(doc.blocks).some((b) => b.content !== "" || b.children.length > 0)
 }
 
-/** Flip one block's state, expressed relative to the defaults. */
-export function toggleCollapseOverride(
-  defaults: ReadonlySet<string>,
-  overrides: CollapseOverrides,
-  id: string,
-): CollapseOverrides {
-  const isCollapsed = applyCollapseOverrides(defaults, overrides).has(id)
-  if (isCollapsed) {
-    return defaults.has(id)
-      ? { ...overrides, expanded: [...overrides.expanded, id] }
-      : { ...overrides, collapsed: overrides.collapsed.filter((x) => x !== id) }
-  }
-  return defaults.has(id)
-    ? { ...overrides, expanded: overrides.expanded.filter((x) => x !== id) }
-    : { ...overrides, collapsed: [...overrides.collapsed, id] }
+interface CollapseState {
+  /** The note this set belongs to — switching notes re-resolves. */
+  noteId: string | undefined
+  /** Whether storage has been read (or the policy seeded) for that note. */
+  seeded: boolean
+  collapsed: Set<string>
+}
+
+/** Read the stored set for a note, or seed it from the policy once there is a
+ * document to seed from. Pure apart from the storage read; the write is the
+ * hook's effect below. */
+function resolve(noteId: string | undefined, doc: BlockDoc): CollapseState {
+  const stored = readCollapsedIds(noteId, doc)
+  if (stored) return { noteId, seeded: true, collapsed: stored }
+  if (!hasContent(doc)) return { noteId, seeded: false, collapsed: NOTHING_COLLAPSED }
+  return { noteId, seeded: true, collapsed: new Set(defaultCollapsedIds(doc)) }
 }
 
 /**
  * Collapse state for one note: the set of collapsed block ids plus a toggle.
  *
- * Defaults are computed once per mount from the initial document (the note
- * page remounts per note), so blocks created or nested while editing never
- * snap shut under the user; overrides persist to localStorage immediately.
+ * The set is resolved once — from localStorage, else seeded from the policy —
+ * and after that only the user's toggles move it, so blocks created or nested
+ * while editing never snap shut under the user. Every change is persisted.
  */
 export function useCollapseState(noteId: string | undefined, doc: BlockDoc) {
-  const [defaults] = React.useState<ReadonlySet<string>>(() => new Set(defaultCollapsedIds(doc)))
-  const [overrides, setOverrides] = React.useState<CollapseOverrides>(() =>
-    readCollapseOverrides(noteId),
-  )
+  const [state, setState] = React.useState<CollapseState>(() => resolve(noteId, doc))
 
-  const collapsed = React.useMemo(
-    () => applyCollapseOverrides(defaults, overrides),
-    [defaults, overrides],
-  )
+  // Resolve during render, not in an effect, so a seeded note never paints
+  // fully unfolded first. Two triggers: a different note, and the arrival of
+  // content for a note that was still empty when it mounted (see
+  // `hasContent`). Both settle in one extra render — the resolved state fails
+  // the condition it just satisfied.
+  if (state.noteId !== noteId || (!state.seeded && hasContent(doc))) {
+    setState(resolve(noteId, doc))
+  }
 
-  const toggleCollapse = React.useCallback(
-    (id: string) => {
-      setOverrides((prev) => {
-        const next = toggleCollapseOverride(defaults, prev, id)
-        if (noteId) writeCollapseOverrides(noteId, next)
-        return next
-      })
-    },
-    [defaults, noteId],
-  )
+  // Pruning needs the live document, but the write must not fire on every
+  // keystroke — it is keyed on the state object, which only a resolve or a
+  // toggle replaces.
+  const docRef = React.useRef(doc)
+  docRef.current = doc
+  React.useEffect(() => {
+    if (state.seeded && state.noteId)
+      writeCollapsedIds(state.noteId, state.collapsed, docRef.current)
+  }, [state])
 
-  return { collapsed, toggleCollapse }
+  const toggleCollapse = React.useCallback((id: string) => {
+    setState((prev) => {
+      const collapsed = new Set(prev.collapsed)
+      if (!collapsed.delete(id)) collapsed.add(id)
+      return { ...prev, seeded: true, collapsed }
+    })
+  }, [])
+
+  return { collapsed: state.collapsed, toggleCollapse }
 }

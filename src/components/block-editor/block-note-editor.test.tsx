@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react"
 import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-// `useCollapseState` persists per-device collapse overrides to localStorage
+// `useCollapseState` persists a per-device collapsed set to localStorage
 // (src/data/view-state.ts) — these tests only exercise value propagation, and
 // no noteId is passed, so transient collapse state is all that's needed.
 vi.mock("../../data/view-state", () => ({
