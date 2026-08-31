@@ -11,6 +11,7 @@ import {
 import type { NoteId } from "../schema"
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
 import { CHILD_KIND } from "./graph"
+import { trackReplicaAccess } from "./replica-access"
 
 /**
  * The client half of the corpus pull API (`GET /api/replica/notes`) — the
@@ -79,6 +80,9 @@ export function createD1NoteSource(options: D1NoteSourceOptions = {}): D1NoteSou
       }
       return res
     })
+    // Surface tenancy refusals (signup_closed/blocked/forbidden) honestly —
+    // sticky status the page layout renders (replica-access.ts).
+    await trackReplicaAccess(response)
     if (!response.ok) throw new Error(`Replica pull failed (${response.status})`)
     return response
   }

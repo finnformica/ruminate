@@ -4,6 +4,8 @@ import { blockId } from "../blocks/id"
 import { parse } from "../blocks/parse"
 import { normalizeHeadingMarker } from "../blocks/serialize"
 import type { NoteId } from "../schema"
+import { frontmatterTextFromProps, pagePropsFromFrontmatter } from "./frontmatter-props"
+import { normalizeBlockText } from "./normalize-block-text"
 
 /**
  * Schema v2's two most load-bearing transforms (docs/graph-schema-v2.md):
@@ -15,11 +17,19 @@ import type { NoteId } from "../schema"
  *   and serialize each node by type back to markdown.
  *
  * The invariant everything rests on: for canonical markdown (the fixpoint of
- * the editor's `serialize(parse(md))`), `rollup(docToGraph(md)) === md`
- * byte-for-byte, frontmatter included. Ingest therefore only strips a marker
- * when re-adding it reproduces the original line exactly; anything
- * non-canonical (`[X]`, `2)`, `* `, mismatched ordered numbers) stays verbatim
- * in a `text` node.
+ * the editor's `serialize(parse(md))`), `rollup(docToGraph(md))` is itself a
+ * fixpoint of the round trip — and for markdown already in normalized form it
+ * reproduces the input byte-for-byte, frontmatter included.
+ *
+ * Two deliberate normalizations happen at ingest (so the round trip is a
+ * *convergence*, not always an identity — docs/graph-storage.md):
+ *
+ * - Near-miss marker spellings (`[] x`, `[X] x`, `* x`, `2) x` — see
+ *   `normalize-block-text.ts`) are typed and canonicalized instead of staying
+ *   verbatim `text` nodes. Anything ambiguous still stays text.
+ * - Frontmatter is stored as parsed entries in the page props and re-emitted
+ *   by the canonical YAML serializer (`frontmatter-props.ts`), with the
+ *   legacy raw-blob shape as a value-fidelity fallback.
  */
 
 export const CHILD_KIND = "child"
@@ -133,7 +143,7 @@ export function docToGraphParts(
       id: noteId,
       type: PAGE_TYPE,
       text: noteId,
-      props: doc.frontmatter !== null ? JSON.stringify({ frontmatter: doc.frontmatter }) : null,
+      props: doc.frontmatter !== null ? pagePropsFromFrontmatter(doc.frontmatter) : null,
       updated_at: updatedAt,
     },
   ]
@@ -150,7 +160,14 @@ export function docToGraphParts(
       // Canonical content first: the serializer collapses `##`+ heading
       // markers to `#` on the way out, so ingest sees what serialize emits.
       const line = normalizeHeadingMarker(block.content)
-      const { type, text } = classifyLine(line, olRun + 1, inFence.get(id) ?? false)
+      const fenced = inFence.get(id) ?? false
+      let { type, text } = classifyLine(line, olRun + 1, fenced)
+      if (type === "text" && !fenced) {
+        // Near-miss marker spellings normalize to their typed form (the
+        // deliberate byte change — see the module header).
+        const normalized = normalizeBlockText(line)
+        if (normalized) ({ type, text } = normalized)
+      }
       olRun = type === "ol" ? olRun + 1 : 0
       nodes.push({ id: safeId(id), type, text, props: null, updated_at: updatedAt })
       walk(safeId(id), block.children)
@@ -282,17 +299,10 @@ function childIdsOf(graph: GraphSnapshot, id: string): string[] {
   return (graph.childLinks.get(id) ?? []).map((link) => link.destination_id)
 }
 
-/** The page node's raw frontmatter text, or null. Tolerant of malformed props. */
-function pageFrontmatter(page: NodeRow): string | null {
-  if (page.props === null) return null
-  try {
-    const props: unknown = JSON.parse(page.props)
-    const frontmatter = (props as { frontmatter?: unknown } | null)?.frontmatter
-    return typeof frontmatter === "string" ? frontmatter : null
-  } catch {
-    return null
-  }
-}
+/** The page node's frontmatter text, or null. Handles both props shapes —
+ * parsed entries (canonical YAML) and the legacy raw blob (verbatim) — and is
+ * tolerant of malformed props (`frontmatter-props.ts`). */
+const pageFrontmatter = (page: NodeRow): string | null => frontmatterTextFromProps(page.props)
 
 const codeLanguage = (node: NodeRow): string => {
   if (node.props === null) return ""
@@ -352,39 +362,4 @@ export function rollup(pageId: string, graph: GraphSnapshot): string | null {
 
   emitChildren(pageId, 0)
   return lines.join("\n") + "\n"
-}
-
-// -----------------------------------------------------------------------------
-// Cross-file block-id dedup (unchanged from v1 — ids key the nodes table)
-// -----------------------------------------------------------------------------
-
-/** One cross-note block-id collision: the id and every note that declares it. */
-export interface CrossNoteIdCollision {
-  blockId: string
-  /** The colliding notes, in lexicographic note-id order; by convention the
-   * first entry keeps the id. */
-  noteIds: NoteId[]
-}
-
-/**
- * Detect block ids declared by more than one note. `parse` regenerates
- * duplicate ids *within* one document; across documents the same persisted
- * `id::` can legitimately appear twice (e.g. a whole note duplicated in an
- * external editor). The seed script reports these — an accidental cross-note
- * share would otherwise silently become a multi-parent node.
- */
-export function findCrossNoteIdCollisions(notes: Record<NoteId, string>): CrossNoteIdCollision[] {
-  const owners = new Map<string, NoteId[]>()
-  for (const noteId of Object.keys(notes).sort()) {
-    const doc = parse(notes[noteId])
-    for (const blockId of Object.keys(doc.blocks)) {
-      const existing = owners.get(blockId)
-      if (existing) existing.push(noteId)
-      else owners.set(blockId, [noteId])
-    }
-  }
-  return [...owners.entries()]
-    .filter(([, noteIds]) => noteIds.length > 1)
-    .map(([blockId, noteIds]) => ({ blockId, noteIds }))
-    .sort((a, b) => (a.blockId < b.blockId ? -1 : a.blockId > b.blockId ? 1 : 0))
 }

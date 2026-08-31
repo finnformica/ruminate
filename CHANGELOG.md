@@ -4,7 +4,14 @@
 
 ### Changed
 
+- Old checkbox and list spellings now behave as real checkboxes and lists. Blocks written as `[] buy milk`, `[X] done`, `* item`, or `2) item` used to stay plain text — invisible to `type:todo` search and unstyled — and are now recognized and tidied to their canonical form (`[ ]`, `[x]`, `-`, numbered), both for new typing and, one time, for everything already in your notes. Genuinely ambiguous lines (a `#word` tag, `[link] text`, a year like `1990.` starting a sentence) are left exactly as written.
+- A note's properties (the frontmatter block) are now stored as individual values instead of one opaque text blob, so they sync and query cleanly. Typical frontmatter looks exactly the same; unusual formatting may be tidied once to a canonical form (lists on one line, consistent quoting), and frontmatter with comments is kept byte-for-byte untouched.
 - Signups are open: anyone can now sign in with GitHub and get their own private notes database. The invite allowlist is switched off (it remains available if access ever needs gating again).
+- Settings → Storage now says "cloud" instead of naming the internal database, and the manual action reads "Push full copy to the cloud now".
+
+### Fixed
+
+- If your sign-in isn't enabled (invite-only refusal or a blocked account), the app now says so plainly instead of looking like it works while silently failing to sync: a notice explains that notes you write stay on this device and will sync automatically if you're admitted. Writing locally remains fully available.
 
 ### New
 

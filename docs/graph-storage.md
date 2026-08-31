@@ -22,10 +22,12 @@ databases hold typed `nodes` + containment `link` rows, not markdown. A note's
 markdown is the _rollup_ — `rollup(pageId)` walks the page node's child links
 in sort-key order and serializes each node by type — and every save is parsed
 back into row diffs by `docToGraph`/`docToGraphParts`
-(`src/data/graph.ts`). For canonical markdown (the editor's own
-`serialize(parse(md))` fixpoint) the round trip is byte-identical — the most
-heavily tested invariant in the app (`src/data/graph.test.ts`, plus
-`scripts/rollup-equivalence.ts` for checking a real corpus directory).
+(`src/data/graph.ts`). The round trip is a **one-step convergence**: a single
+ingest+rollup pass may deliberately normalize the bytes (see "Data quality"
+below), and its output is a strict byte-for-byte fixpoint of any further pass
+— the most heavily tested invariant in the app (`src/data/graph.test.ts`,
+plus `scripts/rollup-equivalence.ts` for checking a real corpus directory).
+Markdown already in normalized form round-trips byte-identically.
 
 ```
 local SQLite runtime store (sqlite-wasm / OPFS)   ← the store the app runs on
@@ -163,10 +165,16 @@ note id for page nodes). `type` is stored, not derived — the registry in the
 schema doc (`page`, `text`, `h1`–`h3`, `todo`, `done`, `ul`, `ol`, `quote`,
 `code`); checked state is a type (`todo` ↔ `done`), so a checkbox toggle is a
 generic type transition. `text` is marker-free. `props` is JSON: a page node
-carries its raw frontmatter verbatim (`{"frontmatter": "…"}` — never
-re-serialized, so block editing can never corrupt YAML it didn't author); a
-code node carries `{"language": "…"}`. `updated_at` (ms epoch) drives per-row
-LWW and since-cursor pulls.
+carries its frontmatter as **individual parsed entries** (e.g.
+`{"updated_at": "…", "tags": […]}`); the rollup re-serializes them with the
+canonical YAML serializer (`canonicalFrontmatterYaml`,
+`src/utils/frontmatter.ts` + `src/data/frontmatter-props.ts`), which is a
+`parse(serialize(x))` fixpoint. Frontmatter that parsing cannot represent
+faithfully — comments, non-map YAML, anything failing the round-trip guard —
+stays in the legacy raw-blob shape (`{"frontmatter": "…"}`, emitted verbatim),
+which the rollup accepts forever for rows from older app versions. A code
+node carries `{"language": "…"}`. `updated_at` (ms epoch) drives per-row LWW
+and since-cursor pulls.
 
 ### `link` (source_id, destination_id, kind, sort_key, updated_at)
 
@@ -183,9 +191,40 @@ unrepresentable by the primary key. Wikilinks and tags stay derived from
 
 ### `meta` (key/value)
 
-`schema_version` (`2`), `replica_cursor` (D1: the last push a client
-confirmed), and, in the **local** store only, `d1_pull_cursor` (the last
-replica cursor this device pulled through).
+`schema_version` (`2`), `data_version` (see "Data quality" below),
+`replica_cursor` (the last push a client confirmed), and, in the **local**
+store only, `d1_pull_cursor` (the last replica cursor this device pulled
+through).
+
+## Data quality: normalization + versioned data transforms
+
+Two deliberate departures from byte preservation (2026-W36 — before this,
+ingest kept every near-miss marker spelling and the raw frontmatter text
+byte-for-byte):
+
+- **Near-miss marker normalization.** Ingest types and canonicalizes the
+  conservative near-miss set in `src/data/normalize-block-text.ts` (`[] x` →
+  todo, `[X] x` → done, `* x`/`+ x` → ul, `2) x`/`01. x` → ol) instead of
+  leaving them untyped `text` nodes invisible to `type:todo` search.
+  Ambiguous spellings (`#word` — the tag syntax; tight markers; 4+ digit
+  "ordered" numbers) stay verbatim text.
+- **Canonical frontmatter.** Page props hold parsed entries and the rollup
+  emits canonical YAML (above), so re-serialization can change bytes vs the
+  originally saved text (flow-style lists, canonical quoting) — accepted; the
+  canonical form is a strict fixpoint, and each save's `updated_at` stamp
+  round-trips byte-identically.
+
+**Existing rows** are rewritten once by the versioned data transform
+(`src/data/data-version.ts`): every engine's open runs
+`ensureCorpusSchema → ensureDataVersion`, and when the `data_version` meta
+key is below the current version the transform rewrites matching rows —
+fence-aware, idempotent, and transactional (one batch carries the rewrites
+and the version stamp) — with a fresh `updated_at` so rewritten rows
+replicate under per-row LWW. Every device and the server DO run the identical
+deterministic transform, so whichever timestamp wins, the winning content is
+the same and the corpus converges. An empty corpus does not stamp the
+version, so rows arriving after first open (the tenant-#1 import, a first
+pull) are transformed on the next open.
 
 ### No view_state table
 
@@ -210,12 +249,13 @@ page and cascades everything not multi-homed elsewhere.
 
 ## Cross-file block-id dedup
 
-`parse.ts` regenerates duplicate ids _within_ one document; across notes,
-`findCrossNoteIdCollisions` (`src/data/graph.ts`) detects collisions
-deterministically (collisions by block id, notes by note id, first note is
-the keeper). The seed script (`scripts/seed-d1.ts`) reports collisions when a
-corpus is seeded — under v2 an unfixed collision silently becomes a
-multi-parent node, so the report matters.
+`parse.ts` regenerates duplicate ids _within_ one document; across notes, a
+persisted `id::` can legitimately appear twice (a note duplicated in an
+external editor), and under v2 such a collision becomes a multi-parent node.
+The store's ingest guards the important case — a block id colliding with a
+page id is re-minted so it can never clobber the page row. (The seed-era
+collision report, `findCrossNoteIdCollisions` + `scripts/seed-d1.ts`, was
+retired with the D1 corpus seeding path in the DO world.)
 
 ## Worker replica API (`/api/replica/*`)
 
@@ -303,7 +343,7 @@ write.
   shows it as confirmed — and supplies remote row counts. If the counts show
   the replica drastically behind (empty, or missing >10% of the pages), a
   full push is scheduled automatically (cooldown-guarded); the Settings panel
-  also has a manual "Push full copy to D1 now" action.
+  also has a manual "Push full copy to the cloud now" action.
 - **Known gap, accepted:** pending rows live only in memory, so a change made
   while the replica was unreachable can be lost remotely if the tab closes
   before the retry lands (the keepalive flush narrows this to actual network

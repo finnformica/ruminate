@@ -38,7 +38,7 @@ CREATE TABLE nodes (
   id TEXT PRIMARY KEY,       -- blk_ ids as-is; page nodes use the note id
   type TEXT NOT NULL,        -- see the type registry below
   text TEXT NOT NULL,        -- marker-free content; for pages, the title
-  props TEXT,                -- JSON or NULL; pages: frontmatter; code: language
+  props TEXT,                -- JSON or NULL; pages: parsed frontmatter entries; code: language
   updated_at INTEGER NOT NULL  -- ms epoch, drives LWW + since-cursor pulls
 );
 
@@ -156,9 +156,11 @@ pathologically deep transclusion chains.
 The rollup replaces stored bytes as the source of exported markdown, so it is
 tested harder than anything else:
 
-1. **Real-corpus equivalence.** Ingest every note in the live corpus both
-   ways and assert `rollup(ingest(md)) === canonicalize(md)` byte-for-byte
-   (`canonicalize` = the existing `serialize(parse(md))`, already a fixpoint).
+1. **Real-corpus equivalence.** Ingest every note in the live corpus and
+   assert one ingest+rollup pass converges: the output may normalize the
+   bytes (near-miss markers, canonical frontmatter — the data-quality pass,
+   see graph-storage.md), and must be a strict byte-for-byte fixpoint of a
+   second pass. Already-normalized notes round-trip byte-identically.
 2. **Property tests.** `parse → rows → rollup → parse` is a fixpoint for
    generated documents covering every type, nesting depth, and marker; plus
    sort-key properties (insert-between always yields a key strictly between
@@ -216,8 +218,11 @@ untouched on main's seed.
 
 ## Open items
 
-- `props` schema for pages (frontmatter keys carried as-is vs typed fields) —
-  decide during implementation.
+- ~~`props` schema for pages~~ — **decided (2026-W36, the data-quality
+  bundle):** individual parsed entries (`{"updated_at": …, "tags": […]}`),
+  re-serialized by the canonical YAML serializer; the raw-blob
+  `{"frontmatter": "…"}` shape survives as a value-fidelity fallback for
+  degenerate YAML and rows from older versions. See graph-storage.md.
 - Whether `((blk_x))` syntax survives in `text` as an authoring gesture that
   the editor converts into a child link, or disappears entirely.
 - Materialized backlink/reference edges (as new link `kind`s) — explicitly
