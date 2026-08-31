@@ -374,6 +374,41 @@ roughly a week, and nothing in the current branch has to be undone: the
 schema, the wire format, the client, and the owner-bound local cache all
 carry forward as-is.
 
+## 10. Portability: what leaving Cloudflare would cost
+
+Lock-in is real but thin, and it is a design REQUIREMENT of this plan that it
+stays thin. The split:
+
+**Cloudflare-proprietary:** the `DurableObject` runtime primitive
+(`ctx.storage.sql`, `idFromName` addressing) and the operational features
+(placement, hibernation, per-object point-in-time recovery). Hosting
+features, not application code.
+
+**Platform-neutral (most of the system):** the corpus schema is plain SQLite
+DDL that already runs on three engines (browser sqlite-wasm, `node:sqlite`
+in tests, D1); the replica planners (`worker/handlers/replica-payload.ts`)
+are pure functions; the wire format is HTTP+JSON; the client knows only
+URLs; per-user export is `getAllRows()` behind an endpoint.
+
+**The requirement that keeps exit cheap:** the DO class must be a thin shell
+over the existing `SqlDriver` seam — the same interface that lets
+`sql-note-store.ts` run unchanged on two engines today. The DO becomes the
+third driver (~50–100 lines); every query and planner stays
+platform-neutral. Total Cloudflare-specific surface: one adapter class, one
+routing line, one wrangler stanza — roughly 150–200 lines. Leaving means
+writing driver #4.
+
+**Landing zones if we ever leave:** the one-SQLite-database-per-user,
+single-writer-per-user architecture is not a Cloudflare idea. It maps
+directly onto Turso/libSQL (database-per-tenant is their core product), any
+VPS or Fly.io with per-user SQLite files + Litestream for durability, or a
+consolidation into Postgres with real RLS (per-user rows import
+mechanically; there the filtered model finally has the database enforcing
+it). For fairness: the shared-D1 column design consolidates into a single
+Postgres marginally more conventionally — but it buys that hypothetical
+convenience by carrying §2's leak-by-omission (here: data-destruction) risk
+for the entire time we are on it.
+
 ## Sources
 
 - [DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/) ·
