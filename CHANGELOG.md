@@ -2,6 +2,10 @@
 
 ## 2026-W36
 
+### Changed
+
+- Signups are open: anyone can now sign in with GitHub and get their own private notes database. The invite allowlist is switched off (it remains available if access ever needs gating again).
+
 ### New
 
 - Search can now filter by block type, so you can pull up every unchecked checkbox in your notes with `type:todo`. It works anywhere you search and combines with everything else: `type:todo tag:work` finds open todos in work notes, `type:todo milk` narrows them by text, and values like `done`, `task`, `heading`, `list`, `quote`, and `code` filter for other kinds of blocks. See the query language docs for the full list.

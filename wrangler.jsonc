@@ -58,6 +58,6 @@
     // Signup gate (worker/handlers/tenancy.ts): "allowlist" admits only ids in
     // the control plane's allowlist table (plus the bootstrap owner); "open"
     // auto-provisions any verified GitHub id; absent = bootstrap owner only.
-    "SIGNUP_MODE": "allowlist",
+    "SIGNUP_MODE": "open",
   },
 }
