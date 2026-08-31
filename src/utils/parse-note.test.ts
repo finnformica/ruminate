@@ -20,15 +20,13 @@ describe("parseNote", () => {
     expect(note.url).toBe("https://frontmatter.com")
   })
 
-  test("stores task markdown, links, and tags", () => {
-    const tasks = parseNote("1234", "- [ ] Review [[project-alpha]] plan #ops").tasks
+  test("stores task markdown and tags", () => {
+    const tasks = parseNote("1234", "- [ ] Review the plan #ops").tasks
 
     expect(tasks).toEqual([
       {
         completed: false,
-        text: "Review [[project-alpha]] plan #ops",
-        links: ["project-alpha"],
-        date: null,
+        text: "Review the plan #ops",
         tags: ["ops"],
         priority: null,
         startOffset: 0,
@@ -36,35 +34,62 @@ describe("parseNote", () => {
     ])
   })
 
-  test("emits nested subtasks and assigns dates based on position", () => {
+  test("emits nested subtasks", () => {
     const tasks = parseNote(
       "1234",
       `
-- [ ] [[2025-01-02]] Parent review #parent [[2024-12-31]]
-  - [ ] Child follow up [[2023-04-04]] with [[note-b]] before due #child [[2023-05-05]]
+- [ ] Parent review #parent
+  - [ ] Child follow up #child
 `,
     ).tasks
 
     expect(tasks).toEqual([
       {
         completed: false,
-        text: "[[2025-01-02]] Parent review #parent [[2024-12-31]]",
-        links: ["2025-01-02", "2024-12-31"],
-        date: "2025-01-02",
+        text: "Parent review #parent",
         tags: ["parent"],
         priority: null,
         startOffset: 1, // After the leading newline
       },
       {
         completed: false,
-        text: "Child follow up [[2023-04-04]] with [[note-b]] before due #child [[2023-05-05]]",
-        links: ["2023-04-04", "note-b", "2023-05-05"],
-        date: "2023-05-05",
+        text: "Child follow up #child",
         tags: ["child"],
         priority: null,
-        startOffset: 61, // After parent task + newline + 2 spaces for nesting
+        startOffset: 31, // After parent task + newline + 2 spaces for nesting
       },
     ])
+  })
+
+  test("treats [[wikilink]] syntax as literal text", () => {
+    const note = parseNote("1234", "Some [[foo]] text and ![[bar]] too")
+
+    // Untitled numeric-id notes preview their first words — brackets included,
+    // because [[...]] is no longer syntax, just text.
+    expect(note.displayName).toBe("Some [[foo]] text and ![[bar]] too")
+    expect(note.tasks).toEqual([])
+  })
+
+  test("task text keeps [[...]] verbatim", () => {
+    const tasks = parseNote("1234", "- [ ] Review [[project-alpha]] plan").tasks
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0].text).toBe("Review [[project-alpha]] plan")
+  })
+
+  test("parses aliases from frontmatter", () => {
+    const note = parseNote("new-name", "---\naliases: [old-name, older-name]\n---\n# Title")
+    expect(note.aliases).toEqual(["old-name", "older-name"])
+
+    const noAliases = parseNote("1234", "# Title")
+    expect(noAliases.aliases).toEqual([])
+
+    const badAliases = parseNote("1234", "---\naliases: nope\n---\n# Title")
+    expect(badAliases.aliases).toEqual([])
+  })
+
+  test("collects dates from frontmatter date properties", () => {
+    const note = parseNote("1234", "---\ndue: 2026-01-05\n---\n# Title")
+    expect(note.dates).toContain("2026-01-05")
   })
 })
 

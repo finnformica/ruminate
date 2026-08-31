@@ -7,7 +7,7 @@ import rehypeRaw from "rehype-raw"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import { z } from "zod"
-import { useNoteById, useSaveNote } from "../hooks/note"
+import { useSaveNote } from "../hooks/note"
 import { useMoveTask } from "../hooks/task"
 import { generateNoteId } from "../utils/note-id"
 import {
@@ -20,10 +20,8 @@ import {
   moveListItemToTop,
   moveListItemToBottom,
 } from "../utils/reorder-list-item"
-import { remarkEmbed } from "../remark-plugins/embed"
 import { remarkPriority } from "../remark-plugins/priority"
 import { remarkTag } from "../remark-plugins/tag"
-import { remarkWikilink } from "../remark-plugins/wikilink"
 import { templateSchema } from "../schema"
 import { cx } from "../utils/cx"
 import { getLeadingEmoji } from "../utils/emoji"
@@ -49,12 +47,10 @@ import {
   ArrowUpToLineIcon16,
   CopyIcon16,
   CutIcon16,
-  ErrorIcon16,
   MoreIcon16,
   TrashIcon16,
 } from "./icons"
 import { FootnoteRefLink } from "./footnote-ref-link"
-import { NoteLink } from "./note-link"
 import { NotePickerPopover, NotePickerDialog } from "./note-picker"
 import { PillButton } from "./pill-button"
 import { PriorityIndicator } from "./priority-indicator"
@@ -298,26 +294,6 @@ type RemarkRehypeHandler = NonNullable<RemarkRehypeHandlers[keyof RemarkRehypeHa
  */
 // TODO: Improve type-safety of `node`
 const customHandlers: Record<string, RemarkRehypeHandler> = {
-  wikilink(state, node) {
-    const element = {
-      type: "element" as const,
-      tagName: "wikilink",
-      properties: { id: node.data.id, text: node.data.text },
-      children: [],
-    }
-    state.patch(node, element)
-    return state.applyData(node, element)
-  },
-  embed(state, node) {
-    const element = {
-      type: "element" as const,
-      tagName: "embed",
-      properties: { id: node.data.id, text: node.data.text },
-      children: [],
-    }
-    state.patch(node, element)
-    return state.applyData(node, element)
-  },
   tag(state, node) {
     const element = {
       type: "element" as const,
@@ -349,8 +325,6 @@ export function MarkdownContent({ children, className }: { children: string; cla
         remarkPlugins={[
           remarkGfm,
           // remarkEmoji,
-          remarkWikilink,
-          remarkEmbed,
           remarkTag,
           remarkPriority,
           [remarkMath, { singleDollarTextMath: false }],
@@ -385,10 +359,6 @@ export function MarkdownContent({ children, className }: { children: string; cla
           ),
           code: Code,
           // @ts-ignore I don't know how to extend the list of accepted component keys
-          wikilink: NoteLink,
-          // @ts-ignore
-          embed: NoteEmbed,
-          // @ts-ignore
           tag: TagLink,
           // @ts-ignore
           priority: PriorityIndicator,
@@ -934,39 +904,5 @@ function ListItem({ node, children, className, ...props }: ListItemProps) {
         </div>
       )}
     </li>
-  )
-}
-
-type NoteEmbedProps = {
-  id: string
-}
-
-function NoteEmbed({ id }: NoteEmbedProps) {
-  const note = useNoteById(id)
-
-  return (
-    <div className="relative pl-[calc(var(--font-size-base)*1.25)] before:absolute before:bottom-0 before:left-0 before:top-0 before:w-[3px] before:rounded-full before:bg-border before:content-['']">
-      {note ? (
-        <Markdown hideFrontmatter emptyText="Empty note">
-          {note.content}
-        </Markdown>
-      ) : (
-        <span className="flex items-center gap-2 text-text-danger">
-          <ErrorIcon16 />
-          File not found
-        </span>
-      )}
-      <div className="mt-2 text-sm text-text-secondary">
-        <Link
-          to="/notes/$"
-          params={{ _splat: id }}
-          search={{
-            query: undefined,
-          }}
-        >
-          Source
-        </Link>
-      </div>
-    </div>
   )
 }

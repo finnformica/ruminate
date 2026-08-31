@@ -9,7 +9,6 @@ import { NoteId } from "../schema"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { cx } from "../utils/cx"
 import { updateFrontmatterValue } from "../utils/frontmatter"
-import { pluralize } from "../utils/pluralize"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
 import { CopyIcon16, MoreIcon16, PinFillIcon16, PinIcon16, ShareIcon16, TrashIcon16 } from "./icons"
@@ -117,22 +116,7 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
                 variant="danger"
                 icon={<TrashIcon16 />}
                 disabled={isSignedOut}
-                onClick={() => {
-                  // Ask the user to confirm before deleting a note with backlinks
-                  if (
-                    note.backlinks.length > 0 &&
-                    !window.confirm(
-                      `${id}.md has ${pluralize(
-                        note.backlinks.length,
-                        "backlink",
-                      )}. Are you sure you want to delete it?`,
-                    )
-                  ) {
-                    return
-                  }
-
-                  deleteNote(id)
-                }}
+                onClick={() => deleteNote(id)}
               >
                 Delete
               </DropdownMenu.Item>

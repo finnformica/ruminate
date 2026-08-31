@@ -172,9 +172,6 @@ function HelpContent({
             <MarkdownSyntaxItem syntax="> Blockquote" />
             <MarkdownSyntaxItem syntax="$$LaTeX^{math}$$" />
             <MarkdownSyntaxItem syntax="---" />
-            <MarkdownSyntaxItem syntax="[[id|Note link]]" />
-            <MarkdownSyntaxItem syntax="[[2024-07-11]]" />
-            <MarkdownSyntaxItem syntax="[[2024-W28]]" />
             <MarkdownSyntaxItem syntax="#tag" />
           </HelpSection>
         </div>

@@ -7,9 +7,7 @@ export type NoteType = "note" | "daily" | "weekly" | "template"
 export type Task = {
   completed: boolean
   text: string
-  links: NoteId[]
   tags: string[]
-  date: string | null
   priority: 1 | 2 | 3 | null
   /** The character offset where the task starts in the content (for position-based updates) */
   startOffset: number
@@ -35,21 +33,20 @@ export type Note = {
   url: string | null
   /** The alias to use when linking to this note, from alias frontmatter */
   alias: string | null
+  /**
+   * Former ids of this note, from `aliases` frontmatter. Recorded on rename so
+   * old note URLs redirect to the live note instead of opening an empty editor.
+   */
+  aliases: NoteId[]
   /** If the note is pinned */
   pinned: boolean
   /** When the note was last updated (from `updated_at` frontmatter), null if not set */
   updatedAt: number | null
-  /** The ids of all notes that are linked to from this note */
-  links: NoteId[]
+  /** The dates this note references (frontmatter date properties, e.g. a birthday) */
   dates: string[]
   tags: string[]
   /** The tasks in the note (e.g. `- [ ] Do laundry` → `{ completed: false, text: "Do laundry" }`) */
   tasks: Task[]
-
-  // ↓ Derived from links
-
-  /** The ids of all notes that link to this note */
-  backlinks: NoteId[]
 }
 
 export const githubUserSchema = z.object({

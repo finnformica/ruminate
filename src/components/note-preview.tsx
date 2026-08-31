@@ -10,7 +10,7 @@ import {
 } from "../utils/date"
 import { toDisplayMarkdown } from "../blocks/to-display-markdown"
 import { parseFrontmatter } from "../utils/frontmatter"
-import { GlobeIcon12, LinkIcon12, TagIcon12 } from "./icons"
+import { GlobeIcon12, TagIcon12 } from "./icons"
 import { Label } from "./label"
 import { useLinkHighlight } from "./link-highlight-provider"
 import { Markdown } from "./markdown"
@@ -168,9 +168,6 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
               {note.tasks.filter((t) => t.completed).length}/{note.tasks.length}
             </Label>
           ) : null}*/}
-          {note.backlinks.length > 0 ? (
-            <Label icon={<LinkIcon12 />}>{note.backlinks.length}</Label>
-          ) : null}
           {frontmatterTags.slice(0, NUM_VISIBLE_TAGS).map((tag) => (
             <Label
               key={tag}

@@ -1,8 +1,7 @@
 import type { ListItem, Node } from "mdast-util-from-markdown/lib"
 import { toString } from "mdast-util-to-string"
 import { visit } from "unist-util-visit"
-import { isValidDateString } from "./date"
-import type { NoteId, Task } from "../schema"
+import type { Task } from "../schema"
 
 export function getTaskContent(node: ListItem, value: string) {
   const firstContentChild = node.children?.find((child) => child.type !== "list") ?? node
@@ -21,22 +20,6 @@ export function getTaskContent(node: ListItem, value: string) {
     text: trimmedText,
     node: firstContentChild,
   }
-}
-
-export function getTaskLinks(node: Node): NoteId[] {
-  const noteIds = new Set<NoteId>()
-
-  visit(node, (child) => {
-    if (
-      (child.type === "wikilink" || child.type === "embed") &&
-      child.data &&
-      typeof child.data.id === "string"
-    ) {
-      noteIds.add(child.data.id)
-    }
-  })
-
-  return Array.from(noteIds)
 }
 
 export function getTaskTags(node: Node): string[] {
@@ -76,37 +59,6 @@ export function getTaskPriority(node: Node): 1 | 2 | 3 | null {
   })
 
   return priority
-}
-
-export function getTaskDate(links: NoteId[], text: string): string | null {
-  const dateLinks = links.filter((link) => isValidDateString(link))
-  if (dateLinks.length === 0) {
-    return null
-  }
-
-  // Check if task starts with a date
-  const startsWithDate = /^\s*\[\[\d{4}-\d{2}-\d{2}\]\]/.test(text)
-
-  if (startsWithDate) {
-    // Use the first date link
-    return dateLinks[0]
-  }
-
-  // Otherwise, use the last date link
-  return dateLinks[dateLinks.length - 1]
-}
-
-export function removeDateFromTaskText(text: string, taskDate: string | null = null): string {
-  if (!taskDate) {
-    return text
-  }
-
-  // Escape the date for use in regex (dates don't have special chars, but be safe)
-  const escapedDate = taskDate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  // Remove the specific date wikilink when at word boundaries (start, end, or surrounded by whitespace)
-  const pattern = new RegExp(`(^|\\s)\\[\\[${escapedDate}\\]\\](\\s|$)`, "g")
-
-  return text.replace(pattern, " ").replace(/\s+/g, " ").trim()
 }
 
 export function removePriorityFromTaskText(text: string, priority: 1 | 2 | 3): string {
@@ -156,58 +108,6 @@ export function updateTaskText({
   return (
     content.slice(0, task.startOffset) + checkbox + textWithSpace + content.slice(originalTextEnd)
   )
-}
-
-export function scheduleTask({
-  content,
-  task,
-  date,
-}: {
-  content: string
-  task: Task
-  date: string | null
-}): string {
-  // No-op if date unchanged
-  if (date === task.date) {
-    return content
-  }
-
-  let newText: string
-
-  if (task.date) {
-    // Task has existing date - find and replace/remove it
-    const startsWithDate = /^\s*\[\[\d{4}-\d{2}-\d{2}\]\]/.test(task.text)
-    const datePattern = `[[${task.date}]]`
-
-    if (startsWithDate) {
-      // Use first occurrence
-      const index = task.text.indexOf(datePattern)
-      if (date) {
-        // Replace in place
-        newText =
-          task.text.slice(0, index) + `[[${date}]]` + task.text.slice(index + datePattern.length)
-      } else {
-        // Remove date
-        newText = removeDateFromTaskText(task.text, task.date)
-      }
-    } else {
-      // Use last occurrence
-      const index = task.text.lastIndexOf(datePattern)
-      if (date) {
-        // Replace in place
-        newText =
-          task.text.slice(0, index) + `[[${date}]]` + task.text.slice(index + datePattern.length)
-      } else {
-        // Remove date
-        newText = removeDateFromTaskText(task.text, task.date)
-      }
-    }
-  } else {
-    // No existing date - append new date
-    newText = date ? `${task.text} [[${date}]]` : task.text
-  }
-
-  return updateTaskText({ content, task, text: newText })
 }
 
 export function prioritizeTask({

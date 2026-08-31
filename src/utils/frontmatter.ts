@@ -114,6 +114,12 @@ function formatYamlValue(value: unknown): string {
     return needsYamlQuoting(value) ? JSON.stringify(value) : value
   }
 
+  // Arrays are emitted flow-style (`[a, b]`) so they stay on one line — the
+  // line-based editing below depends on one `key: value` pair per line.
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => formatYamlValue(item)).join(", ")}]`
+  }
+
   // Numbers, booleans, etc.
   return String(value)
 }

@@ -6,10 +6,8 @@ import { toString } from "mdast-util-to-string"
 import { gfmTaskListItem } from "micromark-extension-gfm-task-list-item"
 import { visit } from "unist-util-visit"
 import { z } from "zod"
-import { embed, embedFromMarkdown } from "../remark-plugins/embed"
 import { priority, priorityFromMarkdown } from "../remark-plugins/priority"
 import { tag, tagFromMarkdown } from "../remark-plugins/tag"
-import { wikilink, wikilinkFromMarkdown } from "../remark-plugins/wikilink"
 import { Note, NoteId, NoteType, Task, Template, templateSchema } from "../schema"
 import {
   formatDate,
@@ -21,7 +19,7 @@ import {
 } from "./date"
 import { removeLeadingEmoji } from "./emoji"
 import { hasVisibleFrontmatter, parseFrontmatter } from "./frontmatter"
-import { getTaskContent, getTaskDate, getTaskLinks, getTaskPriority, getTaskTags } from "./task"
+import { getTaskContent, getTaskPriority, getTaskTags } from "./task"
 
 /** Extracts metadata from markdown content to construct a Note object. */
 export const parseNote =
@@ -36,7 +34,6 @@ function _parseNote(id: NoteId, content: string): Note {
   let url: string | null = null
   const tags = new Set<string>()
   const dates = new Set<string>()
-  const links = new Set<NoteId>()
   const tasks: Task[] = []
 
   const { frontmatter, content: contentWithoutFrontmatter } = parseFrontmatter(content)
@@ -60,16 +57,6 @@ function _parseNote(id: NoteId, content: string): Note {
           break
         }
 
-        case "embed":
-        case "wikilink": {
-          links.add(node.data.id)
-
-          if (isValidDateString(node.data.id)) {
-            dates.add(node.data.id)
-          }
-          break
-        }
-
         case "tag": {
           // Add all parent tags (e.g. "foo/bar/baz" => "foo", "foo/bar", "foo/bar/baz")
           node.data.name.split("/").forEach((_, index) => {
@@ -86,17 +73,13 @@ function _parseNote(id: NoteId, content: string): Note {
         case "listItem": {
           if (typeof node.checked === "boolean") {
             const taskContent = getTaskContent(node, value)
-            const taskLinks = getTaskLinks(taskContent.node)
             const taskTags = getTaskTags(taskContent.node)
-            const taskDate = getTaskDate(taskLinks, taskContent.text)
             const taskPriority = getTaskPriority(taskContent.node)
 
             tasks.push({
               completed: node.checked === true,
               text: taskContent.text,
-              links: taskLinks,
               tags: taskTags,
-              date: taskDate,
               priority: taskPriority,
               startOffset: baseOffset + (node.position?.start?.offset ?? 0),
             })
@@ -107,17 +90,8 @@ function _parseNote(id: NoteId, content: string): Note {
     }
   }
 
-  // It's important that embed is included after wikilink.
-  // embed is a subset of wikilink. In other words, all embeds are also wikilinks.
-  // If embed is included before wikilink, all embeds are parsed as wikilinks.
-  const extensions = [gfmTaskListItem(), wikilink(), embed(), tag(), priority()]
-  const mdastExtensions = [
-    gfmTaskListItemFromMarkdown(),
-    wikilinkFromMarkdown(),
-    embedFromMarkdown(),
-    tagFromMarkdown(),
-    priorityFromMarkdown(),
-  ]
+  const extensions = [gfmTaskListItem(), tag(), priority()]
+  const mdastExtensions = [gfmTaskListItemFromMarkdown(), tagFromMarkdown(), priorityFromMarkdown()]
 
   let contentMdast: Root | null = null
 
@@ -133,7 +107,7 @@ function _parseNote(id: NoteId, content: string): Note {
     console.error("Error parsing note content", id, error)
   }
 
-  // Parse frontmatter as markdown to find things like wikilinks and tags
+  // Parse frontmatter as markdown to find things like tags
   const frontmatterString = content.slice(0, content.length - contentWithoutFrontmatter.length)
 
   try {
@@ -152,9 +126,7 @@ function _parseNote(id: NoteId, content: string): Note {
   for (const [key, value] of Object.entries(frontmatter)) {
     if (key === "updated_at") continue
     if (value instanceof Date) {
-      const date = toDateStringUtc(value)
-      dates.add(date)
-      links.add(date)
+      dates.add(toDateStringUtc(value))
     }
   }
 
@@ -169,7 +141,6 @@ function _parseNote(id: NoteId, content: string): Note {
         : new Date(`0000-${frontmatter.birthday}`)
     const nextBirthday = toDateStringUtc(getNextBirthday(date))
     dates.add(nextBirthday)
-    links.add(nextBirthday)
   }
 
   // Add tags from frontmatter
@@ -261,13 +232,12 @@ function _parseNote(id: NoteId, content: string): Note {
     title,
     url,
     alias: typeof frontmatter.alias === "string" ? frontmatter.alias : null,
+    aliases: Array.isArray(frontmatter.aliases) ? frontmatter.aliases.map(String) : [],
     pinned: frontmatter.pinned === true,
     updatedAt,
     dates: Array.from(dates),
-    links: Array.from(links),
     tags: Array.from(tags),
     tasks,
-    backlinks: [],
   }
 }
 

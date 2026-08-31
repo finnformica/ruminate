@@ -84,11 +84,11 @@ Design notes, and why:
   reverse edge — maintained atomically by the engine, zero drift risk. The
   store exposes `upstream(id)` / `downstream(id)` as first-class methods so
   callers never care that one direction is an index scan.
-- **`kind` is `'child'` only, for now.** Wikilinks and tags stay derived from
-  `text` at load (the v1 links table was a derived index; v2 computes the
-  reference graph in memory). The `kind` column reserves the slot: if
-  reference edges are ever worth materializing, they land here as another
-  kind — a cache, never truth.
+- **`kind` is `'child'` only, for now.** Tags stay derived from `text` at
+  load (the v1 links table was a derived index). Wikilinks were removed as a
+  feature — `[[...]]` in text is plain text and produces no edges. The `kind`
+  column still reserves the slot: if reference edges are ever worth
+  materializing, they land here as another kind — a cache, never truth.
 - **No view_state table.** Collapse state is per-device ephemera →
   localStorage, as overrides on top of the default expansion policy (below).
 
@@ -220,8 +220,8 @@ untouched on main's seed.
   decide during implementation.
 - Whether `((blk_x))` syntax survives in `text` as an authoring gesture that
   the editor converts into a child link, or disappears entirely.
-- Materialized backlink/reference edges (as new link `kind`s) — explicitly
-  deferred until in-memory derivation measurably hurts.
+- Materialized reference edges (as new link `kind`s) — explicitly deferred;
+  with wikilinks removed there is currently nothing to materialize.
 - **Future: semantic types.** The cousin schema's `category`/`field` layer
   (user-defined types with typed, ordered fields — Notion-database/Tana-style)
   is the natural next chapter: a `#book` tag carrying `author`/`status`

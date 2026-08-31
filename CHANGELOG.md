@@ -2,6 +2,14 @@
 
 ## 2026-W36
 
+### Fixed
+
+- Renaming a note no longer leaves its old link dead: the old address now redirects to the renamed note (renames chain, so even older names keep working). Previously the old link opened an empty editor that could quietly mint a duplicate note under the dead name.
+
+### Removed
+
+- Wikilinks are gone. The `[[id]]` link syntax, `![[id]]` note embeds, backlinks (the backlink count on previews, the backlinks section on notes, and the delete-confirmation prompt), and the `link:`/`backlink:` search qualifiers have all been removed. Existing notes are untouched — any `[[...]]` in your text simply reads as plain text. Tags, block references, and everything else are unaffected.
+
 ### Changed
 
 - Signups are open: anyone can now sign in with GitHub and get their own private notes database. The invite allowlist is switched off (it remains available if access ever needs gating again).

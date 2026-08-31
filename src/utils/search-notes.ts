@@ -39,20 +39,6 @@ function testNoteFilter(filter: Filter, note: Note) {
     case "dates":
       value = filter.values.some((range) => isInRange(note.dates.length, range))
       break
-    case "link":
-      value = note.links.some((link) => filter.values.includes(link))
-      break
-    case "links":
-      value = filter.values.some((range) => isInRange(note.links.length, range))
-      break
-    case "backlink":
-      if (!("backlinks" in note)) return false
-      value = note.backlinks.some((backlink) => filter.values.includes(backlink))
-      break
-    case "backlinks":
-      if (!("backlinks" in note)) return false
-      value = filter.values.some((value) => isInRange(note.backlinks.length, value))
-      break
     case "tasks":
       value = filter.values.some((value) =>
         isInRange(note.tasks.filter((task) => !task.completed).length, value),
@@ -61,18 +47,12 @@ function testNoteFilter(filter: Filter, note: Note) {
     case "no":
       value = filter.values.some((value) => {
         switch (value) {
-          case "backlink":
-          case "backlinks":
-            return !("backlinks" in note) || note.backlinks.length === 0
           case "tag":
           case "tags":
             return note.tags.length === 0
           case "date":
           case "dates":
             return note.dates.length === 0
-          case "link":
-          case "links":
-            return note.links.length === 0
           case "task":
           case "tasks":
             return note.tasks.filter((task) => !task.completed).length === 0
@@ -86,18 +66,12 @@ function testNoteFilter(filter: Filter, note: Note) {
     case "has":
       value = filter.values.some((value) => {
         switch (value) {
-          case "backlink":
-          case "backlinks":
-            return "backlinks" in note && note.backlinks.length > 0
           case "tag":
           case "tags":
             return note.tags.length > 0
           case "date":
           case "dates":
             return note.dates.length > 0
-          case "link":
-          case "links":
-            return note.links.length > 0
           case "task":
           case "tasks":
             return note.tasks.filter((task) => !task.completed).length > 0
@@ -148,18 +122,6 @@ export function compareNotes(a: Note, b: Note, sorts: Sort[]) {
         const aTagCount = a.tags.length
         const bTagCount = b.tags.length
         compareResult = aTagCount - bTagCount
-        break
-      }
-      case "links": {
-        const aLinkCount = a.links.length
-        const bLinkCount = b.links.length
-        compareResult = aLinkCount - bLinkCount
-        break
-      }
-      case "backlinks": {
-        const aBacklinkCount = "backlinks" in a ? a.backlinks.length : 0
-        const bBacklinkCount = "backlinks" in b ? b.backlinks.length : 0
-        compareResult = aBacklinkCount - bBacklinkCount
         break
       }
       case "updated_at": {

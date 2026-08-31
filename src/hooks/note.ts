@@ -1,17 +1,17 @@
 import { useAtomValue } from "jotai"
 import { selectAtom, useAtomCallback } from "jotai/utils"
 import React from "react"
-import { backlinksIndexAtom, githubUserAtom, notesAtom } from "../global-state"
+import { dateMentionsAtom, githubUserAtom, notesAtom } from "../global-state"
 import { useDeleteNoteFile, useGetNoteContents, useWriteNotes } from "../data/store"
 import { Note, NoteId } from "../schema"
 import { updateFrontmatterValue } from "../utils/frontmatter"
 import { deleteGist } from "../utils/gist"
-import { updateWikilinks } from "../utils/update-wikilinks"
+import { recordRenameAlias, resolveNoteId } from "../utils/note-alias"
 import { isValidNoteId } from "../utils/note-id"
 
-const EMPTY_BACKLINKS: NoteId[] = []
+const EMPTY_MENTIONS: NoteId[] = []
 
-const shallowEqualBacklinks = (a: NoteId[], b: NoteId[]) => {
+const shallowEqualIds = (a: NoteId[], b: NoteId[]) => {
   if (a === b) return true
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i += 1) {
@@ -29,18 +29,33 @@ export function useNoteById(id: NoteId | undefined) {
   return note
 }
 
-/** Get backlinks for any note ID, even if the note doesn't exist */
-export function useBacklinksForId(id: NoteId | undefined) {
-  const backlinksAtom = React.useMemo(
+/**
+ * Resolve a note URL's id: itself when a live note exists, the live note's id
+ * when the id is a former id recorded in `aliases` (the route redirects
+ * there), or null when the id is brand new (the route shows the new-note
+ * editor). See `resolveNoteId` in src/utils/note-alias.ts.
+ */
+export function useResolvedNoteId(id: NoteId | undefined) {
+  const resolvedAtom = React.useMemo(
+    () => selectAtom(notesAtom, (notes) => (id ? resolveNoteId(notes, id) : null)),
+    [id],
+  )
+  return useAtomValue(resolvedAtom)
+}
+
+/** Get the notes referencing a date/week id (via frontmatter date properties),
+ * even if no note exists for that id */
+export function useDateMentions(id: NoteId | undefined) {
+  const mentionsAtom = React.useMemo(
     () =>
       selectAtom(
-        backlinksIndexAtom,
-        (index) => (id ? (index.get(id) ?? EMPTY_BACKLINKS) : EMPTY_BACKLINKS),
-        shallowEqualBacklinks,
+        dateMentionsAtom,
+        (index) => (id ? (index.get(id) ?? EMPTY_MENTIONS) : EMPTY_MENTIONS),
+        shallowEqualIds,
       ),
     [id],
   )
-  return useAtomValue(backlinksAtom)
+  return useAtomValue(mentionsAtom)
 }
 
 export function useSaveNote() {
@@ -94,32 +109,15 @@ export function useRenameNote() {
 
       const updates: Record<string, string | null> = {}
 
-      // Update wikilinks in all other notes
-      for (const [id, noteContent] of Object.entries(noteContents)) {
-        if (id === oldName) continue
-        const newContent = updateWikilinks({
-          fileContent: noteContent,
-          oldId: oldName,
-          newId: newName,
-        })
-        if (newContent !== noteContent) {
-          updates[id] = newContent
-        }
-      }
-
-      // Write the renamed note and mark the old id for deletion
-      updates[newName] = updateWikilinks({
-        fileContent: content,
-        oldId: oldName,
-        newId: newName,
-      })
+      // Write the renamed note and mark the old id for deletion. The old id is
+      // recorded as an alias so its URL redirects to the renamed note
+      // (src/utils/note-alias.ts) instead of opening an empty duplicate.
+      updates[newName] = oldNoteExists ? recordRenameAlias({ content, oldId: oldName }) : content
       if (oldNoteExists) {
         updates[oldName] = null
       }
 
-      if (Object.keys(updates).length > 0) {
-        writeNotes(updates)
-      }
+      writeNotes(updates)
 
       return { success: true }
     },

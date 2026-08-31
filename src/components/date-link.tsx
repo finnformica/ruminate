@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router"
 import { useMemo } from "react"
-import { useBacklinksForId, useNoteById } from "../hooks/note"
+import { useNoteById } from "../hooks/note"
 import { Note } from "../schema"
 import { cx } from "../utils/cx"
 import { formatDate } from "../utils/date"
@@ -14,7 +14,6 @@ type DateLinkProps = {
 
 export function DateLink({ date, text, className }: DateLinkProps) {
   const existingNote = useNoteById(date)
-  const backlinks = useBacklinksForId(date)
 
   // Create a minimal note object if no note exists
   const note: Note = useMemo(() => {
@@ -28,15 +27,14 @@ export function DateLink({ date, text, className }: DateLinkProps) {
       title: "",
       url: null,
       alias: null,
+      aliases: [],
       pinned: false,
       updatedAt: null,
-      links: [],
       dates: [],
       tags: [],
       tasks: [],
-      backlinks,
     }
-  }, [existingNote, date, backlinks])
+  }, [existingNote, date])
 
   const linkText = text || formatDate(date)
 

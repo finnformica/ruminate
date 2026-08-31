@@ -1,6 +1,5 @@
 import Benchmark from "benchmark"
 import { fromMarkdown } from "mdast-util-from-markdown"
-import { wikilink, wikilinkFromMarkdown } from "../src/remark-plugins/wikilink"
 import { tag, tagFromMarkdown } from "../src/remark-plugins/tag"
 
 const markdown = `
@@ -37,10 +36,6 @@ const foo = "bar"
 | ----- | ------ |
 | Cell  | Cell   |
 
-[[123456789|Note link]]
-
-[[1998-7-11]]
-
 #tag
 `
 
@@ -54,20 +49,6 @@ suite.add("With tag syntax", () => {
   fromMarkdown(markdown, {
     extensions: [tag()],
     mdastExtensions: [tagFromMarkdown()],
-  })
-})
-
-suite.add("With wikilink syntax", () => {
-  fromMarkdown(markdown, {
-    extensions: [wikilink()],
-    mdastExtensions: [wikilinkFromMarkdown()],
-  })
-})
-
-suite.add("With all syntax extensions", () => {
-  fromMarkdown(markdown, {
-    extensions: [wikilink(), tag()],
-    mdastExtensions: [wikilinkFromMarkdown(), tagFromMarkdown()],
   })
 })
 

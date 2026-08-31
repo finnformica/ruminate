@@ -3,7 +3,7 @@ import { parse } from "./parse"
 
 /**
  * Convert a note's on-disk block format into plain display markdown for
- * rendering (previews, backlinks, embeds).
+ * rendering (previews).
  *
  * The stored format annotates every block with an `id:: blk_…` line and writes
  * todos as a bare `[ ] task` marker — neither of which is valid markdown, so a

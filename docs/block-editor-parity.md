@@ -9,12 +9,12 @@ the removed `src/codemirror-extensions/` for the original implementations).
 
 ## Missing in the block editor (candidates to rebuild)
 
-- **Autocomplete as you type** (`@codemirror/autocomplete` + `wikilink` extension,
-  `tagsAtom`, `templatesAtom`, `useStableSearchNotes`):
-  - `[[` → wikilink suggestions from existing notes
+- **Autocomplete as you type** (`@codemirror/autocomplete`, `tagsAtom`,
+  `templatesAtom`, `useStableSearchNotes`):
   - `#` → tag suggestions
   - template insertion by name
-  - This is the biggest gap — fast linking is core to note-taking.
+  - (Wikilink autocomplete is gone for good — wikilinks were removed as a
+    feature.)
 - **In-editor natural-language dates** (`chrono-node`): resolving shorthand like
   "next monday" into a date while typing. (`chrono-node` stays in the repo — it's
   also used by the command menu, note picker, and search — but the _in-editor_

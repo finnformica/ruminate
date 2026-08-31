@@ -128,12 +128,7 @@ export function NavItems({
                       dropdown is open. */}
                   <NoteNavItem note={note} size={size} onNavigate={onNavigate} />
                   <div className="hidden shrink-0 pl-0.5 group-hover/note:flex has-data-[popup-open]:flex">
-                    <NoteActionsMenu
-                      noteId={note.id}
-                      content={note.content}
-                      pinned={note.pinned}
-                      backlinks={note.backlinks}
-                    />
+                    <NoteActionsMenu noteId={note.id} content={note.content} pinned={note.pinned} />
                   </div>
                 </li>
               ))}
