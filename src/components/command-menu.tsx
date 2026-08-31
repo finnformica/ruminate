@@ -90,9 +90,7 @@ export function CommandMenu() {
   const sendReveal = useCallback(
     (
       message:
-        | { type: "preview"; id: string }
-        | { type: "commit"; id: string }
-        | { type: "cancel" },
+        { type: "preview"; id: string } | { type: "commit"; id: string } | { type: "cancel" },
     ) => {
       setBlockReveal({ ...message, nonce: ++revealNonceRef.current })
     },

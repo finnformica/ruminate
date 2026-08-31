@@ -136,8 +136,7 @@ interface SqliteDatabase {
 }
 const proc = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } }).process
 const sqlite = proc?.getBuiltinModule?.("node:sqlite") as
-  | { DatabaseSync: new (path: string) => SqliteDatabase }
-  | undefined
+  { DatabaseSync: new (path: string) => SqliteDatabase } | undefined
 
 describe("planReplicaPut against a real SQLite engine (per-row LWW)", () => {
   // The two replicated tables, mirroring migrations/0002_nodes.sql (the LWW
