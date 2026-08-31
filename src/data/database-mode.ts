@@ -50,6 +50,11 @@ import {
  */
 
 const PULL_CURSOR_KEY = "d1_pull_cursor"
+/** The identity (GitHub id, or login for pre-id sessions) whose notes the
+ * local database holds. The server is owner-locked, but the OPFS cache
+ * follows the browser profile — on a shared machine a different signed-in
+ * account must never be shown another owner's locally cached notes. */
+const OWNER_KEY = "store_owner"
 const PULL_RETRY_MS = 60_000
 /** Minimum gap between automatic repair rebuilds after a SQL write failure. */
 const REPAIR_COOLDOWN_MS = 30_000
@@ -82,6 +87,10 @@ const OFF_STATUS: DatabaseModeStatus = {
 export const databaseModeStatusAtom = atom<DatabaseModeStatus>(OFF_STATUS)
 
 export interface DatabaseModeOptions {
+  /** The signed-in identity the store belongs to. When it differs from the
+   * identity recorded in the local database, the local contents are wiped
+   * before anything renders (see OWNER_KEY). Omit to skip the check (tests). */
+  owner?: string
   /** Injectable for tests; defaults to the wasm worker driver. */
   openStore?: () => Promise<{
     store: SqlNoteStore
@@ -238,6 +247,23 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
 
       // Serve local contents immediately — offline boots (after the first)
       // show every note before any network work.
+
+      // Owner binding: a store populated under a different identity is wiped
+      // (cursor included, so the next pull is a full one) before any local
+      // read can surface it. The rightful owner on a fresh device just
+      // re-pulls; anyone else gets an empty store and 403s from the replica.
+      if (options.owner !== undefined) {
+        const previous = await opened.store.getMeta(OWNER_KEY)
+        if (previous !== options.owner) {
+          if (previous !== null) {
+            await opened.store.replaceAll({})
+            await opened.store.setMeta(PULL_CURSOR_KEY, "")
+          }
+          await opened.store.setMeta(OWNER_KEY, options.owner)
+        }
+        if (runtime !== activation) return
+      }
+
       const notes = await opened.store.getAllNotes()
       if (runtime !== activation) return
       jotai().set(databaseFilesAtom, synthesizeFiles(notes))

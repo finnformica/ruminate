@@ -100,9 +100,11 @@ async function boot(options: {
   store?: SqlNoteStore
   source: D1NoteSource
   replica?: ReplicaSyncHandle | null
+  owner?: string
 }) {
   const store = options.store ?? (await openSqlNoteStore(createNodeSqlDriver()))
   startDatabaseMode({
+    owner: options.owner,
     openStore: async () => ({ store, persistence: "memory" }),
     openReplicaSync: async () => options.replica ?? null,
     source: options.source,
@@ -285,5 +287,61 @@ describe("database mode lifecycle", () => {
     expect(files()).toEqual({})
     expect(status().status).toBe("off")
     expect(isDatabaseModeActive()).toBe(false)
+  })
+})
+
+describe("owner binding", () => {
+  it("records the owner on first boot", async () => {
+    const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }, 1, "1000") })
+    const store = await boot({ source, owner: "42" })
+    expect(await store.getMeta("store_owner")).toBe("42")
+    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
+  })
+
+  it("the same owner keeps the local cache and cursor (since-pull, no wipe)", async () => {
+    const seeded = await openSqlNoteStore(createNodeSqlDriver())
+    await seeded.writeNotes({ "note-a": NOTE_A })
+    await seeded.setMeta("d1_pull_cursor", "500")
+    await seeded.setMeta("store_owner", "42")
+
+    const { source, calls } = stubSource({
+      since: (cursor) => remoteChanges({}, { "note-a": NOTE_A }, 2, cursor),
+    })
+    const store = await boot({ store: seeded, source, owner: "42" })
+    expect(calls.since).toEqual(["500"])
+    expect(calls.full).toBe(0)
+    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
+  })
+
+  it("a different signed-in identity wipes the local cache before anything renders", async () => {
+    const seeded = await openSqlNoteStore(createNodeSqlDriver())
+    await seeded.writeNotes({ "note-a": NOTE_A })
+    await seeded.setMeta("d1_pull_cursor", "500")
+    await seeded.setMeta("store_owner", "42")
+
+    // A different account signs in on this browser: the previous owner's
+    // rows and cursor are gone, the pull starts from scratch (and for a
+    // non-owner the replica would 403 — an empty corpus, never leaked notes).
+    const { source, calls } = stubSource({ full: { nodes: [], links: [], cursor: null } })
+    const store = await boot({ store: seeded, source, owner: "7" })
+    expect(await store.getMeta("store_owner")).toBe("7")
+    expect(calls.full).toBe(1)
+    expect(calls.since).toEqual([])
+    expect(await store.getAllNotes()).toEqual({})
+    expect(files()).toEqual({})
+  })
+
+  it("an ownerless boot leaves an owned store untouched", async () => {
+    const seeded = await openSqlNoteStore(createNodeSqlDriver())
+    await seeded.writeNotes({ "note-a": NOTE_A })
+    await seeded.setMeta("d1_pull_cursor", "500")
+    await seeded.setMeta("store_owner", "42")
+
+    const { source } = stubSource({
+      since: (cursor) => remoteChanges({}, { "note-a": NOTE_A }, 2, cursor),
+    })
+    const store = await boot({ store: seeded, source })
+    expect(await store.getMeta("store_owner")).toBe("42")
+    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
   })
 })

@@ -28,11 +28,21 @@ export function useDatabaseMode() {
   const session = useAtomValue(sessionStatusAtom)
   const send = useSetAtom(globalStateMachineAtom)
 
+  // The store is bound to the signed-in identity (stable GitHub id when the
+  // session carries one; login otherwise) so a different account signing in
+  // on this browser can never read the previous owner's local cache.
+  const owner =
+    githubUser === null
+      ? null
+      : githubUser.id !== undefined
+        ? String(githubUser.id)
+        : githubUser.login
+
   React.useEffect(() => {
-    if (!active) return
-    startDatabaseMode()
+    if (!active || owner === null) return
+    startDatabaseMode({ owner })
     return () => stopDatabaseMode()
-  }, [active])
+  }, [active, owner])
 
   React.useEffect(() => {
     if (session === "expired" && active) send({ type: "SIGN_OUT" })
