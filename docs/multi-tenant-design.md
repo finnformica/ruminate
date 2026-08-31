@@ -361,6 +361,28 @@ WebSockets) the op log and any future live collaboration want. Because
 addressing is already "verified id → DO id", generalizing to "verified id →
 set of permitted DO ids" is a lookup, not a rearchitecture.
 
+Sharing needs a **second primitive** beside spaces (discussed 2026-08-31):
+the **scoped grant** — a control-plane row `(grantee, owner, root_node_id,
+rights, expiry)` where the grantee is a user or a revocable capability
+token (the agent case: "a slice of the graph an agent can access without
+full access"). A space is a residence change; a grant is a _view_: the data
+never moves. The slice is the reachability closure downstream of the
+granted root, computed **inside the owner's DO on every request** — so it
+is live by construction (new blocks under the section join the slice
+automatically), least-privilege by construction (ids outside the closure
+are never serialized; the grantee cannot even name them), and the sync
+protocol generalizes for free (a slice pull returns the closure's id list
+for deletion-by-absence — same wire format, smaller universe). Phase
+read-only slices first; writes need a boundary rule (every containment
+path of a written node stays inside the closure — the same walk the cycle
+guard already does). One semantic to surface in UI: a multi-parent block
+reachable under the shared section is in the slice even if it also lives
+somewhere private — correct by the model, but the owner should see "this
+share includes N blocks also used elsewhere" when granting. This feature
+entrenches the DO choice: it needs a consistent reachability walk colocated
+with live data; on shared D1 it becomes recursive CTEs with per-grantee
+authz and per-viewer deletion-by-absence lists — §2's risk, compounded.
+
 **Billing.** Not designed here. The `users` row is where a plan/quota flag
 goes; per-tenant metering is already measurable (`databaseSize`, rows
 read/written per object), so enforcement is a check in `requireSession`'s
