@@ -279,3 +279,20 @@ resolution code is step 1 of (a) anyway.
 - Whether `props.aliases` folds into the user-visible `alias` frontmatter
   (one alias concept, not two) — leaning yes: rename appends to the same
   list the user can already edit.
+
+## Amendments (2026-08-31, decided with Finn)
+
+1. **No `pg_` prefix — pages mint ordinary `blk_` ids.** A page is a node
+   whose `type` is `page`; the type column already carries the distinction,
+   so a second id scheme encodes nothing. One minting path, one id space.
+2. **Wikilinks are removed as a feature** (legacy from Lumen; explicitly
+   disowned). This deletes this document's hardest sections by fiat: no
+   name-keyed references exist, so rename needs no link resolution, no
+   alias-for-links machinery, and no rewrite-vs-resolve decision — rename
+   becomes "update the title property". Tags and structural block
+   mirroring are unaffected. Backlinks (wikilink-derived) go with them.
+   Existing `[[...]]` text renders as the literal characters it is.
+3. **The rename dead-URL bug is being fixed independently** (ahead of full
+   page identity) via the option-(c) partial this document described:
+   `props.aliases` recorded on rename + route-level redirect — which
+   remains step 1 of the full design.
