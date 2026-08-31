@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-W36
+
+### New
+
+- Search can now filter by block type, so you can pull up every unchecked checkbox in your notes with `type:todo`. It works anywhere you search and combines with everything else: `type:todo tag:work` finds open todos in work notes, `type:todo milk` narrows them by text, and values like `done`, `task`, `heading`, `list`, `quote`, and `code` filter for other kinds of blocks. See the query language docs for the full list.
+
 ## 2026-W35
 
 ### Changed

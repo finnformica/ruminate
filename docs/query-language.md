@@ -26,6 +26,27 @@ Search your notes with Ruminate's [GitHub-style](https://docs.github.com/en/sear
 | `tasks`     | `tasks:>0` matches notes with at least one open task.                                                                                                                                                                                                                         |
 | `no`        | `no:tags` matches notes without a tag. `no` can be used with any filter qualifier key or frontmatter key.                                                                                                                                                                     |
 | `has`       | `has:tags` matches notes with one or more tag. `has` can be used with any filter qualifier key or frontmatter key.                                                                                                                                                            |
+| `type`      | `type:daily` matches daily notes (`note`, `daily`, `weekly`, `template`). With a block-type value it matches _blocks_ instead — see below.                                                                                                                                    |
 | `sort`      | `sort:title`, `sort:id:desc`, `sort:tags,links:desc`. Supports `id`, `title`, `tags`, `links`, `backlinks`. Use `:asc` or `:desc`. Default is `asc` for `id` and `title`. `tags`, `links`, `backlinks` default to `desc`. Multiple comma-separated sorts apply left-to-right. |
 
 Unrecognized qualifier keys are assumed to be [frontmatter](/docs/metadata.md) keys. For example, `read:true` matches notes with `read: true` in their frontmatter.
+
+## Block types
+
+`type:` with a block-type value resolves the query at _block_ granularity: results are the individual blocks that match, and the notes list shows the notes containing them. For example, `type:todo` finds every unchecked checkbox in your notes.
+
+| Value           | Matches                                   |
+| :-------------- | :---------------------------------------- |
+| `todo`          | unchecked checkbox                        |
+| `done`          | checked checkbox                          |
+| `task`          | any checkbox, checked or not              |
+| `heading`       | any heading                               |
+| `h1`…`h6`       | a specific heading level                  |
+| `list`          | bullet or ordered list item               |
+| `bullet` / `ul` | bullet list item                          |
+| `ordered`/ `ol` | ordered list item                         |
+| `quote`         | quote                                     |
+| `code`          | code-fence delimiter or a line inside one |
+| `text`          | plain paragraph                           |
+
+Block queries compose with everything else: note-level qualifiers filter by the containing note (`type:todo tag:work` = open todos in notes tagged `work`), fuzzy text matches the block's own text (`type:todo milk`), `-type:done` excludes, and `sort:updated` orders blocks by their note's last update, most recent first.

@@ -131,7 +131,7 @@ const collator = new Intl.Collator(undefined, {
   ignorePunctuation: true,
 })
 
-function compareNotes(a: Note, b: Note, sorts: Sort[]) {
+export function compareNotes(a: Note, b: Note, sorts: Sort[]) {
   for (const sort of sorts) {
     let compareResult = 0
 
