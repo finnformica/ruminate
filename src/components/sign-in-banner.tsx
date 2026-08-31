@@ -2,9 +2,11 @@ import { useAtomValue } from "jotai"
 import { SignInButton } from "./github-auth"
 import { isSignedOutAtom } from "../global-state"
 import { cx } from "../utils/cx"
+import { sessionExpiredAtom } from "../utils/github-session"
 
 export function SignInBanner({ className }: { className?: string }) {
   const isSignedOut = useAtomValue(isSignedOutAtom)
+  const sessionExpired = useAtomValue(sessionExpiredAtom)
 
   if (!isSignedOut) {
     return null
@@ -18,7 +20,9 @@ export function SignInBanner({ className }: { className?: string }) {
       )}
     >
       <span className="px-2 text-text-secondary text-balance text-center sm:text-left">
-        These are demo notes. Sign in to write your own.
+        {sessionExpired
+          ? "Your session expired — sign in again to load your notes."
+          : "These are demo notes. Sign in to write your own."}
       </span>
       <SignInButton className="w-full sm:w-auto" />
     </div>

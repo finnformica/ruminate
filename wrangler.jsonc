@@ -10,14 +10,25 @@
     // Only these routes invoke the Worker; everything else is served straight
     // from static assets (with index.html as the SPA fallback).
     "run_worker_first": [
-      "/cors-proxy/*",
       "/github-auth",
       "/github-refresh",
       "/file-proxy",
-      "/git-lfs-file",
       "/share/*",
+      "/api/replica/*",
     ],
   },
+  // The note-graph replica (graph storage phase 3 — docs/graph-storage.md).
+  // Migrations live in ./migrations and are applied with
+  //   npx wrangler d1 migrations apply ruminate --local   (dev)
+  //   npx wrangler d1 migrations apply ruminate --remote  (production)
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ruminate",
+      "database_id": "7bf20efd-53cd-4605-b0b6-8805a9faab9e",
+      "migrations_dir": "./migrations",
+    },
+  ],
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": true },
@@ -27,5 +38,8 @@
   // and put both in .dev.vars (git-ignored) for local `wrangler dev`.
   "vars": {
     "VITE_GITHUB_CLIENT_ID": "Ov23lidqIncQ8ul67fUo",
+    // The only GitHub identity the replica API serves (the app is single-user;
+    // any other valid GitHub account gets 403).
+    "ALLOWED_GITHUB_ID": "42536816",
   },
 }

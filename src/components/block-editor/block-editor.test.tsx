@@ -26,11 +26,13 @@ function Harness({
   startEditing,
   zoomRootId,
   refocusSignal,
+  resolveBlocks,
 }: {
   initial: string
   startEditing?: boolean
   zoomRootId?: string | null
   refocusSignal?: number
+  resolveBlocks?: (ids: string[]) => Record<string, string | null>
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => withStarter(parse(initial)))
   return (
@@ -41,6 +43,7 @@ function Harness({
         startEditing={startEditing}
         zoomRootId={zoomRootId}
         refocusSignal={refocusSignal}
+        resolveBlocks={resolveBlocks}
       />
       <pre data-testid="serialized">{serialize(doc)}</pre>
     </>
@@ -189,7 +192,7 @@ describe("BlockEditor focus + keyboard", () => {
     fireEvent.keyDown(textarea, { key: "Enter" }) // create a block below B
     expect(container.querySelector("textarea")!.value).toBe("")
     fireEvent.keyDown(container.querySelector("textarea")!, { key: "z", metaKey: true }) // undo
-    // Not the first block in the file — the block Enter was pressed on.
+    // Not the first block in the note — the block Enter was pressed on.
     expect(container.querySelector("textarea")).toBeNull()
     expect(highlightedText(container)).toBe("B")
     // Redo brings the created block back and re-highlights it.
@@ -374,6 +377,156 @@ describe("select-mode paste", () => {
       },
     })
     expect(serializedLines(getByTestId)).toEqual(["# Head", "- item"])
+  })
+})
+
+describe("paste as link (Ruminate payload with ids)", () => {
+  function paste(target: HTMLElement, text: string, html = "") {
+    fireEvent.paste(target, {
+      clipboardData: { getData: (type: string) => (type === "text/html" ? html : text) },
+    })
+  }
+
+  /** Every id declared in the serialized doc, in document order. */
+  function docIds(getByTestId: (id: string) => HTMLElement): string[] {
+    return [...getByTestId("serialized").textContent!.matchAll(/id:: (\S+)/g)].map((m) => m[1])
+  }
+
+  it("links unknown ids using their LIVE content from the resolver, ids preserved", () => {
+    const formats = richClipboardFormats("- clipboard stale\n  id:: blk_xlink00000")
+    const resolver = vi.fn(() => ({
+      blk_xlink00000:
+        "- live from store\n  id:: blk_xlink00000\n  - live child\n    id:: blk_xchild0000\n",
+    }))
+    const { container, getByTestId } = render(<Harness initial={"A\nB"} resolveBlocks={resolver} />)
+    paste(editorRoot(container), formats.plain, formats.html)
+
+    // The node arrives as itself (original ids) with the store's current
+    // content — never the clipboard bytes.
+    expect(serializedLines(getByTestId)).toEqual(["A", "- live from store", "  - live child", "B"])
+    expect(docIds(getByTestId)).toContain("blk_xlink00000")
+    expect(docIds(getByTestId)).toContain("blk_xchild0000")
+    expect(getByTestId("serialized").textContent).not.toContain("clipboard stale")
+    expect(resolver).toHaveBeenCalledWith(["blk_xlink00000"])
+  })
+
+  it("falls back to the clipboard content, ids intact, when the node exists nowhere", () => {
+    // The cut side of cut+paste: the source save already deleted the node.
+    const formats = richClipboardFormats("- carried along\n  id:: blk_xgone00000")
+    const resolver = vi.fn(() => ({ blk_xgone00000: null }))
+    const { container, getByTestId } = render(<Harness initial={"A\nB"} resolveBlocks={resolver} />)
+    paste(editorRoot(container), formats.plain, formats.html)
+
+    expect(serializedLines(getByTestId)).toEqual(["A", "- carried along", "B"])
+    expect(docIds(getByTestId)).toContain("blk_xgone00000")
+  })
+
+  it("duplicates with fresh ids when the pasted id already lives in this doc", () => {
+    const { container, getByTestId } = render(<Harness initial={"A\n  B\nC"} />)
+    const idB = getByTestId("serialized").textContent!.match(/B\n\s*id:: (\S+)/)![1]
+    const formats = richClipboardFormats(`B\n  id:: ${idB}`)
+    const root = editorRoot(container)
+    // Select C (a different parent than B's) and paste.
+    fireEvent.keyDown(root, { key: "ArrowDown" })
+    fireEvent.keyDown(root, { key: "ArrowDown" })
+    paste(root, formats.plain, formats.html)
+
+    // Same-note paste stays a duplicate: the original keeps its id; the copy
+    // is a fresh block (same-note mirroring is phase 2's occurrence form).
+    expect(serializedLines(getByTestId)).toEqual(["A", "  B", "C", "B"])
+    expect(docIds(getByTestId).filter((id) => id === idB)).toHaveLength(1)
+  })
+
+  it("skips a block already a direct child of the insertion parent (twin), keeping its siblings", () => {
+    const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
+    const before = getByTestId("serialized").textContent!
+    const idA = before.match(/A\n\s*id:: (\S+)/)![1]
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // select B; parent = the root list
+
+    // A alone: the whole paste is a no-op — it's already there.
+    const twinOnly = richClipboardFormats(`A\n  id:: ${idA}`)
+    paste(root, twinOnly.plain, twinOnly.html)
+    expect(getByTestId("serialized").textContent).toBe(before)
+
+    // A + an unknown sibling: A is skipped, the sibling still lands.
+    const mixed = richClipboardFormats(`A\n  id:: ${idA}\nZ new\n  id:: blk_znew000000`)
+    paste(root, mixed.plain, mixed.html)
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "Z new"])
+    expect(docIds(getByTestId)).toContain("blk_znew000000")
+    expect(docIds(getByTestId).filter((id) => id === idA)).toHaveLength(1)
+  })
+
+  it("falls back to duplicating when the live subtree contains the paste target's ancestry (cycle)", () => {
+    const CycleHarness = () => {
+      const [doc, setDoc] = useState<BlockDoc>(() => withStarter(parse("P\n  T")))
+      const idP = doc.rootBlockIds[0]
+      const resolver = (ids: string[]) =>
+        Object.fromEntries(
+          ids.map((id) => [
+            id,
+            // The live view of the pasted node contains P — linking it under
+            // P would close a loop.
+            `- X live\n  id:: ${id}\n  - P again\n    id:: ${idP}\n`,
+          ]),
+        )
+      return (
+        <>
+          <BlockEditor doc={doc} onChange={setDoc} resolveBlocks={resolver} />
+          <pre data-testid="serialized">{serialize(doc)}</pre>
+        </>
+      )
+    }
+    const { container, getByTestId } = render(<CycleHarness />)
+    const idP = docIds(getByTestId)[0]
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // select T (a child of P)
+    const formats = richClipboardFormats("- X\n  id:: blk_xcycle0000")
+    paste(root, formats.plain, formats.html)
+
+    // The content lands as a plain duplicate: fresh ids throughout, P's id
+    // appears exactly once, and the original id was not linked in.
+    expect(serializedLines(getByTestId)).toEqual(["P", "  T", "  - X live", "    - P again"])
+    const ids = docIds(getByTestId)
+    expect(ids).not.toContain("blk_xcycle0000")
+    expect(ids.filter((id) => id === idP)).toHaveLength(1)
+  })
+
+  it("keeps the same ids through a cut + paste (a true move)", () => {
+    const docAny = document as unknown as { execCommand?: (command: string) => boolean }
+    const captured: Record<string, string> = {}
+    docAny.execCommand = vi.fn(() => {
+      const event = new Event("copy", { bubbles: true, cancelable: true })
+      Object.assign(event, {
+        clipboardData: {
+          setData: (type: string, value: string) => {
+            captured[type] = value
+          },
+        },
+      })
+      document.dispatchEvent(event)
+      return true
+    })
+    try {
+      const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
+      const idA = getByTestId("serialized").textContent!.match(/A\n\s*id:: (\S+)/)![1]
+      const root = editorRoot(container)
+
+      fireEvent.keyDown(root, { key: "x", metaKey: true }) // cut A
+      expect(serializedLines(getByTestId)).toEqual(["B"])
+      // The visible flavor stays clean markdown (a prose block ends with its
+      // separating blank line, as before); ids ride only in the payload.
+      expect(captured["text/plain"]).toBe("A\n")
+      expect(captured["text/html"]).toContain("x-ruminate-blocks")
+
+      // Paste after B: no resolver (the node is gone everywhere) — the
+      // clipboard content returns under the ORIGINAL id.
+      paste(root, captured["text/plain"], captured["text/html"])
+      expect(serializedLines(getByTestId)).toEqual(["B", "A"])
+      expect(docIds(getByTestId)).toContain(idA)
+    } finally {
+      delete docAny.execCommand
+    }
   })
 })
 
@@ -615,18 +768,40 @@ describe("zoom (focus mode)", () => {
   const crumb = (container: HTMLElement) =>
     container.querySelector('[data-testid="zoom-breadcrumb"]')
 
-  it("renders only the zoomed subtree, with the block promoted to a title", () => {
+  it("renders only the zoomed subtree, with the block styled as itself", () => {
     const { container } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
     const bodies = Array.from(container.querySelectorAll('[data-testid="block-body"]'))
     expect(bodies.map((el) => el.textContent)).toEqual(["B", "C", "D", "E"])
-    // The title is visually promoted to the note-title scale (the zoomed
-    // block is the page), a full step above its depth-0 child headings.
-    expect(bodies[0].closest(".text-3xl")).not.toBeNull()
-    // The breadcrumb shows the full path, never dropping levels.
+    // Focus mode changes what is visible, never what a block looks like: no
+    // note-title promotion — the zoomed bullet keeps its normal typography.
+    expect(bodies[0].closest(".text-3xl")).toBeNull()
+    // The breadcrumb is the navigation stack: a direct (deep-link) zoom knows
+    // only the note and the block itself.
     expect(crumb(container)?.textContent).toContain("Note")
     expect(crumb(container)?.textContent).toContain("B")
     // Zoom-in lands on the first child, not the title.
     expect(highlightedText(container)).toBe("C")
+  })
+
+  it("the breadcrumb follows the path taken; Shift+F pops back along it", () => {
+    const { container, queryByText } = render(<Harness initial={ZOOMABLE} />)
+    const root = editorRoot(container)
+    selectNth(root, 1) // B
+    fireEvent.keyDown(root, { key: "f" }) // zoom B — selection lands on C
+    fireEvent.keyDown(root, { key: "f" }) // zoom C
+    expect(queryByText("E")).toBeNull()
+    // Crumbs are the hops taken: Note › B, with C current.
+    expect(crumb(container)?.textContent).toBe("Note›B›C")
+    // Pop follows the path back up: first to B…
+    fireEvent.keyDown(root, { key: "F", shiftKey: true })
+    expect(queryByText("E")).not.toBeNull()
+    expect(queryByText("A")).toBeNull()
+    expect(highlightedText(container)).toBe("C")
+    expect(crumb(container)?.textContent).toBe("Note›B")
+    // …then out entirely.
+    fireEvent.keyDown(root, { key: "F", shiftKey: true })
+    expect(queryByText("A")).not.toBeNull()
+    expect(crumb(container)).toBeNull()
   })
 
   it("F zooms into the selected block; Shift+F zooms back out to it", () => {
@@ -645,40 +820,38 @@ describe("zoom (focus mode)", () => {
     expect(highlightedText(container)).toBe("B")
   })
 
-  it("Shift+F from a nested zoom surfaces one level, selecting the old root", () => {
+  it("Shift+F from a deep-linked zoom exits fully (the path back is unknown)", () => {
     const { container, queryByText } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_c" />)
     const root = editorRoot(container)
     expect(queryByText("E")).toBeNull() // C's view: title C + child D
     fireEvent.keyDown(root, { key: "F", shiftKey: true })
-    // Now zoomed into B: E is visible again, and the selection is on C.
-    expect(queryByText("E")).not.toBeNull()
-    expect(queryByText("A")).toBeNull()
+    // No stack below the deep link — pop leaves zoom entirely.
+    expect(queryByText("A")).not.toBeNull()
+    expect(crumb(container)).toBeNull()
     expect(highlightedText(container)).toBe("C")
   })
 
-  it("a zoomed heading hangs a # like the note title; other types keep their style", () => {
+  it("a zoomed block keeps its own marker and style — heading hash, quote ink", () => {
     const heading = ["# Section", "  id:: blk_h", "  - child", "    id:: blk_hc"].join("\n")
     const zoomHeading = render(<Harness initial={heading} zoomRootId="blk_h" />)
-    const hash = zoomHeading.queryByTestId("zoom-title-hash")
-    expect(hash).not.toBeNull()
-    // The wrapper carries the title's typography; the glyph inherits it
-    // (no size of its own — same size as the title beside it).
-    expect(hash!.className).toContain("text-3xl")
-    const glyph = hash!.querySelector("span")!
-    expect(glyph.textContent).toBe("#")
-    expect(glyph.className).not.toMatch(/(^|\s)text-(xs|sm|base|lg|xl|2xl|3xl)(\s|$)/)
+    // The regular heading hash renders, exactly as un-zoomed — no promoted
+    // note-title variant exists any more.
+    expect(zoomHeading.queryByTestId("zoom-title-hash")).toBeNull()
+    expect(zoomHeading.queryAllByTestId("heading-hash").length).toBeGreaterThan(0)
+    const headingBody = zoomHeading
+      .getAllByTestId("block-body")
+      .find((el) => el.textContent === "Section")!
+    expect(headingBody.closest(".text-3xl")).toBeNull()
     zoomHeading.unmount()
 
-    // A zoomed quote keeps its secondary ink (and no hash) — promotion changes
-    // scale, not type.
+    // A zoomed quote keeps its secondary ink at its normal scale.
     const quote = ["> Wise words", "  id:: blk_q", "  - child", "    id:: blk_qc"].join("\n")
     const zoomQuote = render(<Harness initial={quote} zoomRootId="blk_q" />)
-    expect(zoomQuote.queryByTestId("zoom-title-hash")).toBeNull()
     const title = zoomQuote
       .getAllByTestId("block-body")
       .find((el) => el.textContent === "Wise words")!
     expect(title.className).toContain("text-text-secondary")
-    expect(title.className).toContain("text-3xl")
+    expect(title.className).not.toContain("text-3xl")
   })
 
   it("Mod+Enter on the zoomed title creates its FIRST child", () => {
@@ -753,18 +926,22 @@ describe("zoom (focus mode)", () => {
     expect(queryByText("B")).not.toBeNull()
   })
 
-  it("breadcrumb crumbs navigate: an ancestor crumb re-zooms, the note crumb exits", () => {
-    const { container, getByText, queryByText } = render(
-      <Harness initial={ZOOMABLE} zoomRootId="blk_d" />,
-    )
-    // Deep zoom: Note › B › C › D.
-    const nav = crumb(container)!
-    expect(nav.textContent!.replace(/\s+/g, "")).toContain("Note›B›C›D")
+  it("breadcrumb crumbs navigate: an earlier hop re-zooms there, the note crumb exits", () => {
+    const { container, getByText, queryByText } = render(<Harness initial={ZOOMABLE} />)
+    const root = editorRoot(container)
+    // Walk the path by keyboard: B → C → D, so the stack is Note › B › C › D.
+    selectNth(root, 1) // B
+    fireEvent.keyDown(root, { key: "f" }) // zoom B, selection on C
+    fireEvent.keyDown(root, { key: "f" }) // zoom C, selection on D
+    fireEvent.keyDown(root, { key: "f" }) // zoom D
+    expect(crumb(container)!.textContent!.replace(/\s+/g, "")).toBe("Note›B›C›D")
     fireEvent.click(getByText("B", { selector: "nav button" }))
-    // Zoomed out to B: E visible, selection landed on the block we came from.
+    // Truncated back to the B hop: E visible, selection on the block we came
+    // from, and the later hops are gone from the trail.
     expect(queryByText("E")).not.toBeNull()
     expect(queryByText("A")).toBeNull()
     expect(highlightedText(container)).toBe("D")
+    expect(crumb(container)!.textContent!.replace(/\s+/g, "")).toBe("Note›B")
     fireEvent.click(getByText("Note", { selector: "nav button" }))
     expect(crumb(container)).toBeNull()
     expect(queryByText("A")).not.toBeNull()

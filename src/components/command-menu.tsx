@@ -8,7 +8,6 @@ import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
 import {
   blockRevealAtom,
-  githubRepoAtom,
   noteOutlineAtom,
   notesAtom,
   pinnedNotesAtom,
@@ -27,9 +26,7 @@ import { pluralize } from "../utils/pluralize"
 import {
   CalendarDateIcon16,
   CopyIcon16,
-  ExternalLinkIcon16,
   GlobeIcon16,
-  HistoryIcon16,
   NoteIcon16,
   PinFillIcon12,
   PlusIcon16,
@@ -39,7 +36,6 @@ import {
   TagIcon16,
 } from "./icons"
 import { NoteFavicon } from "./note-favicon"
-import { openNoteHistoryDialogAtom } from "./note-history-dialog-state"
 
 export const isCommandMenuOpenAtom = atom(false)
 
@@ -52,7 +48,6 @@ type PaletteMode = "commands" | "outline"
 
 export function CommandMenu() {
   const navigate = useNavigate()
-  const githubRepo = useAtomValue(githubRepoAtom)
   const searchNotes = useSearchNotes()
   const tagSearcher = useAtomValue(tagSearcherAtom)
   const saveNote = useSaveNote()
@@ -277,18 +272,9 @@ export function CommandMenu() {
     })
   }, [navItems, deferredQuery])
 
-  const openNoteHistoryDialog = useSetAtom(openNoteHistoryDialogAtom)
-
   const noteActions = useMemo(() => {
     if (!note) return []
     return [
-      {
-        label: "View note history",
-        icon: <HistoryIcon16 />,
-        onSelect: () => {
-          openNoteHistoryDialog()
-        },
-      },
       {
         label: "Copy note markdown",
         icon: <CopyIcon16 />,
@@ -304,15 +290,6 @@ export function CommandMenu() {
         },
       },
       {
-        label: "Open in GitHub",
-        icon: <ExternalLinkIcon16 />,
-        onSelect: () => {
-          if (!githubRepo) return
-          const url = `https://github.com/${githubRepo.owner}/${githubRepo.name}/blob/main/${note.id}.md`
-          window.open(url, "_blank")
-        },
-      },
-      {
         label: "Print note",
         icon: <PrinterIcon16 />,
         onSelect: () => {
@@ -320,7 +297,7 @@ export function CommandMenu() {
         },
       },
     ]
-  }, [note, githubRepo, openNoteHistoryDialog])
+  }, [note])
 
   const filteredNoteActions = useMemo(() => {
     return noteActions.filter((item) => {

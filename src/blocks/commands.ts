@@ -63,6 +63,11 @@ export interface CommandInput {
    * zoomed, the visible world is this block (rendered as a title) plus its
    * subtree — commands must not move, delete, or navigate past that boundary. */
   zoomRootId?: string | null
+  /** Where zooming out one level returns to: the previous entry in the zoom
+   * navigation stack — the path the user actually took, which under the graph
+   * model (multi-parent blocks) is the only honest "up". Null/absent when
+   * nothing is below on the stack; zoom-out then exits zoom entirely. */
+  zoomBackId?: string | null
 }
 
 /** Where selection / edit focus should land after a command runs. */
@@ -646,10 +651,9 @@ export const COMMANDS: Record<CommandName, Command> = {
     id === zoomRootId ? { handled: true } : { handled: true, zoom: { id } },
 
   /** Zoom out one level — to the zoom root's parent, or fully at the top. */
-  zoomOut: ({ doc, zoomRootId }) => {
+  zoomOut: ({ zoomRootId, zoomBackId }) => {
     if (!zoomRootId) return IGNORED
-    const parentId = siblingsOf(doc, zoomRootId)?.parentId ?? null
-    return { handled: true, zoom: { id: parentId } }
+    return { handled: true, zoom: { id: zoomBackId ?? null } }
   },
 
   /** Exit zoom entirely, back to the whole note. */

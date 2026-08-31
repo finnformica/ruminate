@@ -48,6 +48,10 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{html,css,js,woff2}"],
+        // The experimental SQL store's worker chunk (plus the sqlite wasm it
+        // fetches) is only loaded when the storage flag is on — keep it out of
+        // the precache so flag-off users never download it.
+        globIgnores: ["**/sql-worker-*.js", "**/sqlite3-*.js"],
         ignoreURLParametersMatching: [/^utm_/, /^fbclid$/],
         // No `skipWaiting` here: with registerType "prompt" the new service
         // worker must *wait* until the user clicks "Update Ruminate", which
@@ -69,6 +73,17 @@ export default defineConfig({
     // https://github.com/isomorphic-git/isomorphic-git/issues/1753
     nodePolyfills(),
   ],
+  // The SQLite worker (src/data/sql-worker.ts) is an ES module worker — it
+  // imports @sqlite.org/sqlite-wasm, which locates its .wasm via
+  // import.meta.url and so cannot be bundled as an iife.
+  worker: {
+    format: "es",
+  },
+  optimizeDeps: {
+    // Per @sqlite.org/sqlite-wasm's docs: keep the wasm loader out of the dev
+    // prebundle so its asset URLs resolve correctly.
+    exclude: ["@sqlite.org/sqlite-wasm"],
+  },
   build: {
     // This is a rich editor app (the full markdown/unified + block editor stack),
     // so the bundle is legitimately large. Raise the size-warning threshold

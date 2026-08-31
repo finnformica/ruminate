@@ -1,5 +1,13 @@
 # Architecture notes
 
+> **Superseded by [graph-storage.md](./graph-storage.md).** The database this
+> document anticipated has shipped: notes now live in a local SQLite store
+> replicated to D1, and the git/markdown storage described below has been
+> removed from the app. This file is kept as the historical record of the
+> data-model decisions — the parts about block ids, multi-homing, the
+> `src/data` seam, and view state are still load-bearing and are referenced
+> from the current doc.
+
 A running record of the data-model decisions behind Ruminate's block/note
 storage, and why they were made. The goal is to keep the app simple today while
 leaving a clean path to a block-level graph (and eventually a database) later.

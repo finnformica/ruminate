@@ -1,23 +1,22 @@
-import { atom, useSetAtom } from "jotai"
+import { atom } from "jotai"
 import { useAtomCallback } from "jotai/utils"
 import React from "react"
-import { globalStateMachineAtom, markdownFilesAtom } from "../global-state"
+import { markdownFilesAtom } from "../global-state"
 import type { NoteId } from "../schema"
+import { databaseDeleteFile, databaseWriteFiles } from "./database-mode"
 
 /**
  * The storage seam.
  *
  * This module is the ONLY place that knows notes are persisted as `<id>.md`
- * files driven through the XState machine. Everything above it works in terms
- * of note ids and note content; the file-path convention, the `WRITE_FILES` /
- * `DELETE_FILE` events, and the raw `markdownFiles` shape all live here.
+ * entries in a repo-file-shaped map. Everything above it works in terms of
+ * note ids and note content; the file-path convention and the raw
+ * `markdownFiles` shape live here.
  *
- * Swapping the backing store (e.g. to SQLite) means reimplementing this
- * module — callers do not change.
- *
- * Note ids map 1:1 to files as `<id>.md`. Non-note files that happen to live in
- * the repo (e.g. `.ruminate/view-state.json`) are intentionally excluded from
- * the note accessors below, so note-wide operations never touch them.
+ * Writes route to the database runtime (`src/data/database-mode.ts`): the
+ * files atom updates synchronously, the local SQL store persists the write,
+ * and the replica queue pushes it to D1. Signed out (sample notes) the
+ * runtime is not mounted and writes are no-ops.
  */
 
 const noteIdToPath = (id: NoteId) => `${id}.md`
@@ -38,14 +37,10 @@ const noteContentsAtom = atom((get) => {
  * delete). Used within the data layer only — code outside `src/data` should use
  * the note-oriented API so it never depends on the file-path convention.
  */
-export function useWriteFiles() {
-  const send = useSetAtom(globalStateMachineAtom)
-  return React.useCallback(
-    (files: Record<string, string | null>, commitMessage?: string) => {
-      send({ type: "WRITE_FILES", markdownFiles: files, commitMessage })
-    },
-    [send],
-  )
+function useWriteFiles() {
+  return React.useCallback((files: Record<string, string | null>) => {
+    databaseWriteFiles(files)
+  }, [])
 }
 
 /**
@@ -56,26 +51,22 @@ export function useWriteFiles() {
 export function useWriteNotes() {
   const writeFiles = useWriteFiles()
   return React.useCallback(
-    (updates: Record<NoteId, string | null>, commitMessage?: string) => {
+    (updates: Record<NoteId, string | null>) => {
       const files: Record<string, string | null> = {}
       for (const [id, content] of Object.entries(updates)) {
         files[noteIdToPath(id)] = content
       }
-      writeFiles(files, commitMessage)
+      writeFiles(files)
     },
     [writeFiles],
   )
 }
 
-/** Delete a single note, preserving the machine's dedicated delete/commit path. */
+/** Delete a single note. */
 export function useDeleteNoteFile() {
-  const send = useSetAtom(globalStateMachineAtom)
-  return React.useCallback(
-    (id: NoteId) => {
-      send({ type: "DELETE_FILE", filepath: noteIdToPath(id) })
-    },
-    [send],
-  )
+  return React.useCallback((id: NoteId) => {
+    databaseDeleteFile(noteIdToPath(id))
+  }, [])
 }
 
 /** Imperatively read all note contents (id -> markdown) inside a callback. */

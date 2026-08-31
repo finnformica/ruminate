@@ -1,38 +1,31 @@
 import { useLocation, useNavigate } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
-import { useAtomValue, useSetAtom } from "jotai"
-import { githubRepoAtom, isSignedOutAtom } from "../global-state"
+import { useAtomValue } from "jotai"
+import { isSignedOutAtom } from "../global-state"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { useDeleteNote, useRenameNote, useSaveNote } from "../hooks/note"
 import type { Width } from "../schema"
 import { cx } from "../utils/cx"
 import { updateFrontmatterValue } from "../utils/frontmatter"
-import { clearNoteDraft } from "../utils/note-draft"
 import { getInvalidNoteIdCharacters } from "../utils/note-id"
 import { pluralize } from "../utils/pluralize"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
-import { openNoteHistoryDialogAtom } from "./note-history-dialog-state"
 import {
   CopyIcon16,
   EditIcon16,
-  ExternalLinkIcon16,
-  HistoryIcon16,
   MoreIcon16,
   PinFillIcon16,
   PinIcon16,
   PrinterIcon16,
   ShareIcon16,
   TrashIcon16,
-  UndoIcon16,
   WidthFixedIcon16,
   WidthFullIcon16,
 } from "./icons"
 
 /** Editor-context actions, shown only when the note is open in the editor. */
 interface EditorActions {
-  isDraft?: boolean
-  onDiscard?: () => void
   showWidth?: boolean
   width?: Width
   onWidth?: (width: Width) => void
@@ -75,12 +68,10 @@ export function NoteActionsMenu({
 }) {
   const navigate = useNavigate()
   const location = useLocation()
-  const githubRepo = useAtomValue(githubRepoAtom)
   const isSignedOut = useAtomValue(isSignedOutAtom)
   const saveNote = useSaveNote()
   const renameNote = useRenameNote()
   const deleteNote = useDeleteNote()
-  const openNoteHistoryDialog = useSetAtom(openNoteHistoryDialogAtom)
 
   // Compare the decoded path segment, not the raw pathname: a note id with a
   // space or other special character is percent-encoded in the URL, so a raw
@@ -120,8 +111,6 @@ export function NoteActionsMenu({
       return
     }
 
-    clearNoteDraft({ githubRepo, noteId })
-    clearNoteDraft({ githubRepo, noteId: newNoteId })
     if (isViewing) {
       navigate({
         to: "/notes/$",
@@ -141,7 +130,6 @@ export function NoteActionsMenu({
     ) {
       return
     }
-    clearNoteDraft({ githubRepo, noteId })
     deleteNote(noteId)
     // The header menu passes onDeleted (it's always the open note); the sidebar
     // menu falls back to the path check so deleting the note you're viewing from
@@ -167,14 +155,6 @@ export function NoteActionsMenu({
         }
       />
       <DropdownMenu.Content align={align}>
-        {editor?.isDraft && editor.onDiscard ? (
-          <>
-            <DropdownMenu.Item icon={<UndoIcon16 />} onClick={editor.onDiscard}>
-              Discard changes
-            </DropdownMenu.Item>
-            <DropdownMenu.Separator />
-          </>
-        ) : null}
         {editor?.showWidth && editor.onWidth ? (
           <>
             <DropdownMenu.Group>
@@ -212,17 +192,6 @@ export function NoteActionsMenu({
         <DropdownMenu.Item icon={<EditIcon16 />} disabled={isSignedOut} onClick={rename}>
           Rename file
         </DropdownMenu.Item>
-        {/* The history dialog is mounted by the note page and works off the
-            open note, so the item only appears on the open note's menu. */}
-        {isViewing ? (
-          <DropdownMenu.Item
-            icon={<HistoryIcon16 />}
-            disabled={isSignedOut}
-            onClick={() => openNoteHistoryDialog()}
-          >
-            History
-          </DropdownMenu.Item>
-        ) : null}
         <DropdownMenu.Separator />
         {editor?.onShare ? (
           <DropdownMenu.Item
@@ -233,15 +202,6 @@ export function NoteActionsMenu({
             Share
           </DropdownMenu.Item>
         ) : null}
-        <DropdownMenu.Item
-          icon={<ExternalLinkIcon16 />}
-          href={`https://github.com/${githubRepo?.owner}/${githubRepo?.name}/blob/main/${noteId}.md`}
-          target="_blank"
-          rel="noopener noreferrer"
-          disabled={isSignedOut}
-        >
-          Open in GitHub
-        </DropdownMenu.Item>
         <DropdownMenu.Item icon={<PrinterIcon16 />} onClick={() => window.print()}>
           Print
         </DropdownMenu.Item>

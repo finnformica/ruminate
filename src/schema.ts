@@ -52,11 +52,6 @@ export type Note = {
   backlinks: NoteId[]
 }
 
-export type GitHubRepository = {
-  owner: string
-  name: string
-}
-
 export const githubUserSchema = z.object({
   token: z.string(),
   id: z.number().optional(),

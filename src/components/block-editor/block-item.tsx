@@ -187,17 +187,11 @@ export function BlockItem({
   // keeps the view and the editor pixel-identical — nothing shifts on click.
   const body = stripMarker(block.content)
   const prefix = block.content.slice(0, block.content.length - body.length)
-  // The zoomed block *is* the page, so its title uses the note-title scale
-  // (matching note-title.tsx) — a full step above the depth-0 headings of its
-  // children, which re-derive their sizes from the zoom root. The promotion
-  // changes scale, not type: a quote keeps its bar and secondary ink, a todo
-  // its checkbox (both render on the line independently of the typography).
-  const typo = zoomTitle
-    ? cx(
-        "text-3xl font-bold leading-tight tracking-[-0.02em]",
-        type.kind === "quote" && "text-text-secondary",
-      )
-    : typographyFor(type, depth)
+  // The zoomed block leads the view but renders as ITSELF — same typography,
+  // same marker as anywhere else in the outline (a bullet stays a bullet, a
+  // heading a heading). Focus mode changes what is visible, never what a
+  // block looks like.
+  const typo = typographyFor(type, depth)
 
   // Focus and place the caret when editing starts.
   useLayoutEffect(() => {
@@ -362,7 +356,7 @@ export function BlockItem({
           className={cx("block-checkbox", readOnly ? "cursor-default" : "cursor-pointer")}
         />
       </span>
-    ) : type.kind === "bullet" && !zoomTitle ? (
+    ) : type.kind === "bullet" ? (
       <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
         {zoomable ? (
           <button
@@ -393,7 +387,7 @@ export function BlockItem({
           />
         )}
       </span>
-    ) : type.kind === "heading" && !zoomTitle ? (
+    ) : type.kind === "heading" ? (
       // Headings hang the same grey `#` as the note / zoom titles — the shared
       // `Hash`, at the heading's own scale: the slot carries the heading's
       // size + weight (headingScale + bold, no underline — that lives in
@@ -414,7 +408,7 @@ export function BlockItem({
       >
         <Hash />
       </span>
-    ) : type.kind === "ordered" && !zoomTitle ? (
+    ) : type.kind === "ordered" ? (
       // Numbers are read (they carry order), so they sit one step up the ramp
       // from the dot — muted, not faint — and right-align to the slot edge.
       <span className="flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary">
@@ -535,27 +529,6 @@ export function BlockItem({
               type.kind === "quote" && "rounded-l-none border-l-2 border-border pl-[14px]",
             )}
           >
-            {zoomTitle && type.kind === "heading" ? (
-              // A zoomed section is a page, and pages hang a # to the left of
-              // their title (matching note-title.tsx). It sits in the gutter,
-              // where the chevron is hidden for the title anyway.
-              <span
-                data-testid="zoom-title-hash"
-                // The wrapper carries the title's own typography (`typo`) so
-                // the `Hash` inside inherits it — like the note title's
-                // hanging #, which inherits from its h1 — sitting large on
-                // the same baseline instead of shrinking to body scale.
-                // top-0.5 re-aligns with the text after the line's 2px default
-                // vertical highlight padding (absolute offsets are from the
-                // padding box; the zoom title is first and never mid-run, so it
-                // always carries the 2px variant).
-                // pr-1 keeps the glyph itself where it was when the surface
-                // edge moved 2px left (right-full tracks the edge: -4-4 = -2-6).
-                className={cx(typo, "pointer-events-none absolute right-full top-0.5 pr-1")}
-              >
-                <Hash />
-              </span>
-            ) : null}
             {marker}
             {editing ? (
               <textarea

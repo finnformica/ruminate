@@ -32,7 +32,6 @@ vi.mock("../global-state", async () => {
   const { atom } = await import("jotai")
   const { Searcher } = await import("fast-fuzzy")
   return {
-    githubRepoAtom: atom(null),
     notesAtom: atom(new Map()),
     pinnedNotesAtom: atom([]),
     tagSearcherAtom: atom(

@@ -20,13 +20,14 @@ describe("updateFrontmatterValue", () => {
 
   runTests([
     {
+      // Added frontmatter has no blank line after the closing fence — the
+      // canonical serialized form (serialize(parse(x)) fixpoint) has none.
       description: "add new frontmatter",
       content: "Hello",
       properties: { title: "Test" },
       output: `---
 title: Test
 ---
-
 Hello`,
     },
     {
@@ -36,7 +37,6 @@ Hello`,
       output: `---
 title: ""
 ---
-
 Hello`,
     },
     {
@@ -106,7 +106,6 @@ Hello`,
       output: `---
 draft: true
 ---
-
 Hello`,
     },
     {
@@ -116,7 +115,6 @@ Hello`,
       output: `---
 priority: 1
 ---
-
 Hello`,
     },
     {
@@ -126,7 +124,6 @@ Hello`,
       output: `---
 updated_at: 2024-01-15T10:30:00.000Z
 ---
-
 Hello`,
     },
     {
@@ -136,7 +133,6 @@ Hello`,
       output: `---
 date_string: "2024-01-15"
 ---
-
 Hello`,
     },
     {
@@ -146,7 +142,6 @@ Hello`,
       output: `---
 status: "true"
 ---
-
 Hello`,
     },
     {
@@ -156,7 +151,6 @@ Hello`,
       output: `---
 note: "item: value"
 ---
-
 Hello`,
     },
     {
@@ -177,7 +171,6 @@ Hello`,
       output: `---
 title: Test
 ---
-
 `,
     },
     {
@@ -187,7 +180,6 @@ title: Test
       output: `---
 "draft status": true
 ---
-
 Hello`,
     },
     {
@@ -211,7 +203,6 @@ Hello`,
       output: `---
 "title:subtitle": Part I
 ---
-
 Hello`,
     },
     {

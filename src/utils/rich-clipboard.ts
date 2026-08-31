@@ -16,33 +16,54 @@ import type { Block, BlockDoc } from "../blocks/types"
  *   flavor is the proven approach (Notion and Slack do the same).
  *
  * Paste checks for the embedded payload first: when present, the block tree is
- * rebuilt exactly (content and nesting verbatim, fresh ids), skipping markdown
- * parsing entirely. Foreign HTML instead goes through `htmlToMarkdown`.
+ * rebuilt exactly (content and nesting verbatim), skipping markdown parsing
+ * entirely. Foreign HTML instead goes through `htmlToMarkdown`.
  */
 
-/** One copied block: content verbatim, ids stripped (reminted on paste). */
+/**
+ * One copied block: content verbatim, plus the source block's `id` when the
+ * copied markdown declared one (`id::` lines). The id is what lets a
+ * Ruminate→Ruminate paste LINK the original node instead of duplicating it
+ * ("paste as link", docs/graph-storage.md); the content stays alongside as the
+ * fallback when the node no longer exists anywhere. Neither visible flavor
+ * carries ids — external interop is unchanged.
+ */
 export interface ClipboardBlock {
+  id?: string
   content: string
   children: ClipboardBlock[]
 }
 
 const META_NAME = "x-ruminate-blocks"
 
+/** Ids explicitly declared by `id::` lines in block-format markdown. `parse`
+ * mints ids for undeclared blocks; only declared ones are real source ids the
+ * payload may carry. */
+function declaredIds(blockMarkdown: string): Set<string> {
+  const ids = new Set<string>()
+  for (const match of blockMarkdown.matchAll(/^\s*id::\s+(.+)$/gm)) ids.add(match[1].trim())
+  return ids
+}
+
 /** Build both clipboard flavors from block-format markdown (content lines with
- * two-space nesting — `selectionMarkdown` / the native-copy picked lines). */
+ * two-space nesting and optional `id::` lines — `selectionMarkdown` / the
+ * native-copy picked lines). Declared ids ride along in the embedded payload;
+ * both visible flavors drop them. */
 export function richClipboardFormats(blockMarkdown: string): { plain: string; html: string } {
   return {
     plain: toDisplayMarkdown(blockMarkdown),
-    html: blocksToHtml(docToClipboardBlocks(parse(blockMarkdown))),
+    html: blocksToHtml(docToClipboardBlocks(parse(blockMarkdown), declaredIds(blockMarkdown))),
   }
 }
 
-/** The copied subtree as a plain tree, ids stripped. */
-function docToClipboardBlocks(doc: BlockDoc): ClipboardBlock[] {
+/** The copied subtree as a plain tree; a block keeps its id only when the
+ * source markdown declared it (parse-minted ids are meaningless elsewhere). */
+function docToClipboardBlocks(doc: BlockDoc, declared: Set<string>): ClipboardBlock[] {
   const build = (id: string): ClipboardBlock | null => {
     const block = doc.blocks[id]
     if (!block) return null
     return {
+      ...(declared.has(id) ? { id } : {}),
       content: block.content,
       children: block.children.map(build).filter((b): b is ClipboardBlock => b !== null),
     }
@@ -50,12 +71,34 @@ function docToClipboardBlocks(doc: BlockDoc): ClipboardBlock[] {
   return doc.rootBlockIds.map(build).filter((b): b is ClipboardBlock => b !== null)
 }
 
-/** Rebuild a pasted payload as a BlockDoc fragment with fresh ids. */
+/** Rebuild a pasted payload as a BlockDoc fragment with fresh ids throughout —
+ * the DUPLICATE path (same-note paste, cycle fallback). */
 export function clipboardBlocksToDoc(blocks: ClipboardBlock[]): BlockDoc {
   const map: Record<string, Block> = {}
   const build = (block: ClipboardBlock): string => {
     const id = blockId()
     map[id] = { id, content: block.content, children: block.children.map(build) }
+    return id
+  }
+  return { frontmatter: null, rootBlockIds: blocks.map(build), blocks: map }
+}
+
+/**
+ * Rebuild a pasted payload as a BlockDoc fragment KEEPING the embedded ids —
+ * the LINK path's fallback when a node no longer exists anywhere (deleted
+ * since copy, including the cut side of cut+paste): the clipboard content
+ * comes back under the original ids, so the move still lands as a move.
+ * Blocks without an id (older payloads, foreign fragments) mint fresh ones;
+ * a duplicate id within the payload is reminted so the doc stays consistent.
+ */
+export function clipboardBlocksToDocWithIds(blocks: ClipboardBlock[]): BlockDoc {
+  const map: Record<string, Block> = {}
+  const build = (block: ClipboardBlock): string => {
+    let id = block.id ?? blockId()
+    while (id in map) id = blockId()
+    const built: Block = { id, content: block.content, children: [] }
+    map[id] = built
+    built.children = block.children.map(build)
     return id
   }
   return { frontmatter: null, rootBlockIds: blocks.map(build), blocks: map }
@@ -96,6 +139,8 @@ function isClipboardBlocks(value: unknown): value is ClipboardBlock[] {
         typeof block === "object" &&
         block !== null &&
         typeof (block as ClipboardBlock).content === "string" &&
+        ((block as ClipboardBlock).id === undefined ||
+          typeof (block as ClipboardBlock).id === "string") &&
         isClipboardBlocks((block as ClipboardBlock).children),
     )
   )

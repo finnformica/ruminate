@@ -1,12 +1,13 @@
-import { useAtomValue, useSetAtom } from "jotai"
-import { useEffect, useRef, useState } from "react"
+import { useAtomValue, useSetAtom, useStore } from "jotai"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
 import { emptyBlock } from "../../blocks/ops"
 import type { BlockDoc } from "../../blocks/types"
 import { useCollapseState } from "../../data/view-state"
-import { blockRevealAtom, noteOutlineAtom } from "../../global-state"
+import { blockRevealAtom, markdownFilesAtom, noteOutlineAtom } from "../../global-state"
 import { buildOutline } from "../../utils/note-outline"
+import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
 import { BlockEditor } from "./block-editor"
 
 /** Ensure a parsed doc always has at least one block to edit. */
@@ -54,7 +55,7 @@ function ensureZoomChild(doc: BlockDoc, zoomId: string): BlockDoc {
  * Adapts the block editor to the note page's string-based value model. The
  * note's markdown is parsed into blocks on mount; each edit serializes back to
  * markdown and calls `onChange`, so the surrounding page keeps its existing
- * save/draft logic. Remount (via a `key`) to load a different note.
+ * save logic. Remount (via a `key`) to load a different note.
  *
  * External `value` changes (a git pull updating the open note, a frontmatter
  * edit from the actions menu) re-parse into blocks in place — see the
@@ -81,9 +82,9 @@ export function BlockNoteEditor({
   value: string
   onChange: (value: string) => void
   /**
-   * The note's id. When provided, collapse state is persisted across reloads
-   * and devices via the view-state sidecar; without it, collapse is transient
-   * local state (e.g. Storybook / standalone usage).
+   * The note's id. When provided, collapse state follows the default-expansion
+   * policy with per-device overrides persisted in localStorage; without it,
+   * collapse is transient local state (e.g. Storybook / standalone usage).
    */
   noteId?: string
   /** Start with the first block in edit mode (e.g. a brand-new note). */
@@ -128,7 +129,7 @@ export function BlockNoteEditor({
     setDoc(seedDoc(value))
   }
 
-  const { collapsed, toggleCollapse } = useCollapseState(noteId)
+  const { collapsed, toggleCollapse } = useCollapseState(noteId, doc)
 
   const handleChange = (next: BlockDoc) => {
     // While zoomed, the trailing-blank rule is suspended (a root-level blank
@@ -162,6 +163,23 @@ export function BlockNoteEditor({
   // The palette's preview/commit/cancel messages for the outline jump — the
   // editable editor is the only consumer (read-only views ignore them).
   const revealRequest = useAtomValue(blockRevealAtom)
+
+  // "Paste as link": resolve pasted block ids to their live subtree markdown
+  // from the note corpus. Read lazily through the jotai store (no
+  // subscription — the corpus changes on every autosave of any note, and a
+  // paste only needs the value at the moment it runs). The open note's own
+  // file is excluded: its live truth is this editor's doc, and the file copy
+  // can lag by the autosave debounce (a cut would resurrect pre-cut bytes).
+  const jotaiStore = useStore()
+  const resolveBlocks = useCallback(
+    (ids: string[]) =>
+      resolveBlockSubtrees(
+        jotaiStore.get(markdownFilesAtom),
+        ids,
+        noteId !== undefined ? `${noteId}.md` : undefined,
+      ),
+    [jotaiStore, noteId],
+  )
 
   // Entering a zoom (mount-with-param or navigation) on a childless block adds
   // one empty child so there's something to edit under the title.
@@ -197,6 +215,7 @@ export function BlockNoteEditor({
       onZoomNavigate={onZoomNavigate}
       noteTitle={noteTitle}
       revealRequest={readOnly ? null : revealRequest}
+      resolveBlocks={resolveBlocks}
     />
   )
 }

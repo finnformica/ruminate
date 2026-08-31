@@ -1,92 +1,41 @@
 import { Searcher } from "fast-fuzzy"
-import git, { WORKDIR } from "isomorphic-git"
 import { atom } from "jotai"
 import { atomWithMachine } from "jotai-xstate"
 import { atomWithStorage, selectAtom } from "jotai/utils"
-import { assign, createMachine, raise } from "xstate"
-import {
-  GitHubRepository,
-  GitHubUser,
-  Note,
-  NoteId,
-  Template,
-  githubUserSchema,
-  templateSchema,
-} from "./schema"
-import { fs, fsWipe } from "./utils/fs"
+import { assign, createMachine } from "xstate"
+import { GitHubUser, Note, NoteId, Template, githubUserSchema, templateSchema } from "./schema"
+import { databaseFilesAtom } from "./data/database-mode"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
-import {
-  MergeNotice,
-  REPO_DIR,
-  getRemoteOriginUrl,
-  gitAdd,
-  gitClone,
-  gitCommit,
-  gitHasStagedChanges,
-  gitPull,
-  gitPush,
-  gitRemove,
-  isRepoSynced,
-  mergeNoticeKey,
-} from "./utils/git"
-import { backupUnpushedNotes, restoreUnpushedBackup } from "./utils/local-backup"
-import {
-  clearMarkdownFilesCache,
-  getMarkdownFilesCache,
-  setMarkdownFilesCache,
-} from "./utils/markdown-cache"
-import { withGitLock } from "./utils/mutex"
-import { broadcastSynced, isSyncLeader, requestLeaderSync } from "./utils/sync-leader"
-import { SyncError, canRetrySync, isPushRejectionError, toSyncError } from "./utils/sync"
 import type { BlockRevealRequest, OutlineItem } from "./utils/note-outline"
 import { parseNote } from "./utils/parse-note"
 import { removeTemplateFrontmatter } from "./utils/remove-template-frontmatter"
 import { getSampleMarkdownFiles } from "./utils/sample-markdown-files"
-import { startTimer } from "./utils/timer"
-import { LEGACY_VIEW_STATE_PATH, VIEW_STATE_DIR } from "./data/paths"
 
 // -----------------------------------------------------------------------------
 // State machine
 // -----------------------------------------------------------------------------
 
+/**
+ * The auth machine: resolve the GitHub identity at boot, handle sign-in and
+ * sign-out, and serve the signed-out sample notes. GitHub is identity only —
+ * the note corpus itself lives in the database (docs/graph-storage.md): the
+ * local SQL store is the runtime store and D1 behind the Worker is the
+ * authoritative cross-device copy, mounted by `useDatabaseMode` whenever a
+ * user is signed in.
+ */
+
 type Context = {
   githubUser: GitHubUser | null
-  githubRepo: GitHubRepository | null
+  /** Signed-out demo content only (path → markdown). The signed-in corpus is
+   * served by `databaseFilesAtom` (src/data/database-mode.ts). */
   markdownFiles: Record<string, string>
-  error: Error | null
-  /** Pull→push attempts in the current sync cycle (bounded by MAX_SYNC_ATTEMPTS). */
-  syncAttempts: number
-  /** Why the last sync cycle failed (message + coarse category), for the sidebar. */
-  syncError: SyncError | null
-  /**
-   * Conflicting merges resolved by pulls (each pointing at the losing version
-   * in git history), accumulated (deduped by note + losing commit) so a
-   * follow-up pull can't clear a notice the user hasn't seen. Dismissal is
-   * per-tab UI state (`dismissedMergeNoticeIdsAtom`), not machine state.
-   */
-  mergeNotices: MergeNotice[]
 }
 
-type Event =
-  | { type: "SIGN_IN"; githubUser: GitHubUser }
-  | { type: "SIGN_OUT" }
-  | { type: "SELECT_REPO"; githubRepo: GitHubRepository }
-  | { type: "SYNC" }
-  | { type: "SYNC_DEBOUNCED" }
-  // Re-walk the shared worktree into memory without touching the network —
-  // sent to follower tabs when the leader broadcasts a finished sync.
-  | { type: "REFRESH_FILES" }
-  | {
-      type: "WRITE_FILES"
-      markdownFiles: Record<string, string | null>
-      commitMessage?: string
-    }
-  | { type: "DELETE_FILE"; filepath: string }
+type Event = { type: "SIGN_IN"; githubUser: GitHubUser } | { type: "SIGN_OUT" }
 
 function createGlobalStateMachine() {
   return createMachine(
     {
-      /** @xstate-layout N4IgpgJg5mDOIC5RQDYHsBGBDFA6ATnGigG4CWAdlAKqxj4DEEaFYulJaA1m6pjgSKlKNOvgQc0AYywAXMiwDaABgC6K1YlAAHNLDLyWWkAA9EAFgDsuABwBmS8qcBWSwEZnygGxu3AGhAAT0QAJhDzXEsvAE5lSxtY6OdfEJsAXzSAvmw8QlhicipaegZ6fDR8XG0UOQAzCoBbXGyBPIKRYvFJGUMKDQ1jXX1e4zMEEPdcaOmvOxCvELt7BwDghDdlaNtHczdwkOc7Nys7DKz0HNx9KFYIAHkAV1kGAGUASQBxADkAfTevgZIEBDAwKCijRBeZxeXDQkKxGzhZz2BKrUJHXAHRx2KEbBLI06ZEAtPDXW5vCivT6-O7UAAqgJ0elBRiBY2c5i2HiiyWiXnizhCaIQ5nCuHMuy8NjcPnM-Ls0TOxIuAjJkApgnywioACUwLomCw2JIeM0VaSyDd1RRNe1dfq0BIKJwemD+mpBsyRmzEABaczOXBeWaihLHaI2Vx2YWWOwRZQBqVeZRuabxEJKklXS3km1tbVQPUGsoVKo1WT1fBNLNqiAa-OFQsOp0uuRutSM4FesEQ8ZWIOC5SHQ5xGzuLzC5EhcXjzxzNzuMeZ83Zq11m0UNCyADC6FurwAogAZA-buk-HUHgAKd07IO9oHZi0xx05CcR0UszmFXn7ouDvjOHyEqxsu-AWmuGpSHuIhFmghqsOwzrcLwK61lBMH2roLbSG2Sgdh6QL3j2PoIPENi2BKOIuAs8LmMKsSBhMHhJAk-52IS5zgauua4NBLCwQ6pT4OUlTVHUjRmtx6E2vxFCCdh3R4X0BGaER3aso+iA2Modi4Hs0LJnKrgxDGbh6Rxw52Mo9iCg4YGXDJfF7pAh4nmeF7XrehFMsMJFaQgdkvhKsTmB+X7Cr4MqRAuSzRCEC4JvMDmqjm1rOUaEB8QAFlgVDGhAKBgAwADqOpvHSB4-AAYm8J4vHeGngqRn64MoqROP+rjSlCkUKtYNnmBxlgShyn7pESNZpeuGW3DleUwOwhXFQAIseB6VTVdUHo1fmaaYiCtUB9gylK5jtUBliRXK07JMGg7ddC5gpRBvFyZA835bgADu+CglQ1VkEVsAIcayGmlNkGyS5WVSLlX2-f9UCA8DOGuvh6g+V2e3NQF0LKG10RLKmuxyjYsyRcOkSzNEC6cjpoqWC9PHpe9sPw4tiPyADQNwMJollhJVZSY500YZln2c393PI7zsBo8p7pqb5LK4wdZFxkG5kKp+exxnElN2IGURLOEsS-u1E1caLUOzR9cMLWwEBgEVMso8VzCISaqHSWL0MSw7X3O67IjuwrvRK56OO9q4BNE7FJkLPYkWIgNsYJVEmzeEOzNOWzktOy7YBu7z-OluJFaSZDb0wwXuDB8Xoe8+H7aY8r2Oq72sYRBszh95Y47eCn-YhDZsxLAqGxuFbyq+7b+ewIEFBSFcDxSFIcAgy8ACaXzbrtnekR4ek6eEewRvEST0UE6Lmfp1l8sBTi00zk1oX7dtZYvy+r+vm+vLvbcPw1oACFaR7wPCtA+D51ajzcJEDkiwgIJjhEOYUYRkRtTmCmcy3gvyIlzh-BeS8V4lkYDvPe0D-Lqw5JiU+PgOQmzxN+G+CAjjxFhFYICCoozSkIfPWu39SEiQqAAvewCDxgOoBAqBWNiL7TGAGSiDhPBODUU4CcrCjjzExLTYM+iDHOH4TXCWQj65gAwGgB4y8RBiP3nIpqXc5h0OSHCFhaxFi7EiLpPYnJpj+KMW-OeJi5pmOdpY6xUhbEUKAaA8B25IFUIUdpSw04pRhD0QY-k6DR4wg5KdLJ-JjGs0ESQ8xESbFUAYCYWAsg5BsCwLUWQ9AAAUGwnAAEoGDVxKaYsp4SrGVKgEktWYx4gRAHhdRwY4EhRHQQqCIY5AnW1SgIvpP9tAPBQCgWxnswacAhu-NZoSymbO2SIFuGMRm9hiIGOIA8cRhWfjYGw6CFjwOhPYdq08IzFJmsQjZWydlVLIYLSuwsen-NKYC85VBLkqTblHQ+AUGG4FNpyPxY5fxXVYQcTBDg5j7AOMNP54sTkwuBVABg1zSKykxJM+Y4QsVWHQckCi08Uxxl8MGbwyzZ42xCR9MxmzYDZV2UaJCByfYCt6eSleIqxVwqUhHVSSKYFjOhITVJUpoRJDxOg6InJMQ6vJmOVMY5X4rNerKoVpyHiitsaCiulZqxHMFV-O1DqlXIXRgimlKKnCwn5BMWY9hGLRHQS8wMrhkQCiWFCKwpL-ZyqqPaxVVL-XqzpRMRwjKwpRBZbimwQ1772DjeTRhSbP5XDKXDMAUguAiBeHU2Q9rQaSpQiLVZ7qa0-zrQ2ptLb7XwsjupaOpFPDTjmIKRY-J3DuMQNg6chq-HHAStKBcVaAUr37Y2qgza5Btr2R2w5wSbUer7dlete6oAHtbfLZVrdFBuHbvI0Z2kdHT3eYiHwi4I1aNHsukKtNRTT18Ja-l3bz29p3Vegd+6h0gydeWF1XbrVQvWbB69g7D0Pp9YrVVY7kXq1SYGWmOlXCD00WsOYkxclm12NrLwW7oVYfg7exDdjM1jCSHk1J8wpSOE2HyYU1k+6RE5CNC2PhDUscwzlbDCHcN2IkVImR3HDqatcQsBdbC9gwnhAUwpgSiSbmdvAIEJI1XULGL6BcWwdjWWTPohm0ZWG+jSfCWNrgyaCjlMzBsHQxDWeSWwiI85iYhvarGJIwpi3bATL44lxwRp-MeLIEL77AoKnFMkSZcwuELAYhEMIUIFg62YsWpNmXex2YxI57OLmExubWJyPSVgZRDTJnsdwVbAtYTQDV0iHn4Hcr7pPemUZJyRlhIy9w869bPSCTKmam4dwwyG3jHLRxkxwksgW6bcdxxdalD1twcn5IDc2+rIaWwhyIlSB+cy5McVrHGUGaZYVrJluY8tqDGHbjXds-YbxQ1GvBlc5Fc1kQdKT2OLMvlkKyX2w5mAIHfojag6c94CHzXIqpAM7D2m8PPyI7ddBwOi0yDLXR+sacXmYgKg4kcJIr3EDHA2FMXShr5QfiWBdlHjsfrSybsDWnUY2ocvcP1Ma1H2cEph9z3wYVScC-ZkLhuJciri8mHFSMAmEoOH8KwmUrhqYcQzqbImM8kfJttcvWnvprJTHjl+JIs6EgtdCL4O7kpClFL++h5HF6V6wDXhvWAFmVbqsXRRVIuwUQJTCGOa+HiDgUV0nA3B-Ipxq5g7gMhtOFxtW8Iic6VhZgbDZ2ws+mIhzBkcL+F5yVA8swB-bleAzIkiFpyNaNco+QKh5XL8YEwKLFoDL4Jz+CMyt7zqx1NsKoC97lJEDiF8WfJBsqy7wtgq9EsOPZOfRCF8Kp70RmPZFRSwh6gGS+5NYtFs1nf+Kl1Z0Qdt9Wsxu6cP3t76mcUYlCMaYZ7QUUTGyCyLFNMPuY4EzNIIAA */
       id: "global",
       tsTypes: {} as import("./global-state.typegen").Typegen0,
       schema: {} as {
@@ -96,45 +45,13 @@ function createGlobalStateMachine() {
           resolveUser: {
             data: { githubUser: GitHubUser }
           }
-          resolveRepo: {
-            data: {
-              githubRepo: GitHubRepository
-              markdownFiles: Record<string, string>
-            }
-          }
-          cloneRepo: {
-            data: { markdownFiles: Record<string, string> }
-          }
-          pull: {
-            data: { markdownFiles: Record<string, string>; mergeNotices: MergeNotice[] }
-          }
-          push: {
-            data: void
-          }
-          checkStatus: {
-            data: { isSynced: boolean }
-          }
-          refreshFiles: {
-            data: { markdownFiles: Record<string, string> }
-          }
-          writeFiles: {
-            data: { committed: boolean }
-          }
-          deleteFile: {
-            data: void
-          }
         }
       },
       predictableActionArguments: true,
       initial: "resolvingUser",
       context: {
         githubUser: null,
-        githubRepo: null,
         markdownFiles: {},
-        error: null,
-        syncAttempts: 0,
-        syncError: null,
-        mergeNotices: [],
       },
       states: {
         resolvingUser: {
@@ -148,13 +65,7 @@ function createGlobalStateMachine() {
           },
         },
         signedOut: {
-          entry: [
-            "clearGitHubUser",
-            "clearGitHubUserLocalStorage",
-            "clearMarkdownFilesLocalStorage",
-            "clearFileSystem",
-            "setSampleMarkdownFiles",
-          ],
+          entry: ["clearGitHubUser", "clearGitHubUserLocalStorage", "setSampleMarkdownFiles"],
           exit: ["clearMarkdownFiles"],
           on: {
             SIGN_IN: {
@@ -167,223 +78,10 @@ function createGlobalStateMachine() {
           on: {
             SIGN_OUT: "signedOut",
           },
-          initial: "resolvingRepo",
-          states: {
-            resolvingRepo: {
-              invoke: {
-                src: "resolveRepo",
-                onDone: {
-                  target: "cloned",
-                  actions: ["setGitHubRepo", "setMarkdownFiles", "setMarkdownFilesLocalStorage"],
-                },
-                onError: "notCloned",
-              },
-            },
-            notCloned: {
-              on: {
-                SELECT_REPO: "cloningRepo",
-              },
-            },
-            cloningRepo: {
-              entry: ["setGitHubRepo", "clearMarkdownFiles", "clearMarkdownFilesLocalStorage"],
-              invoke: {
-                src: "cloneRepo",
-                onDone: {
-                  target: "cloned.sync.success",
-                  // Schedule a sync right after the clone so any restored
-                  // conflicted-copy notes (see `restoreUnpushedBackup`) reach
-                  // GitHub instead of sitting local-only.
-                  actions: [
-                    "setMarkdownFiles",
-                    "setMarkdownFilesLocalStorage",
-                    raise("SYNC_DEBOUNCED"),
-                  ],
-                },
-                onError: {
-                  target: "notCloned",
-                  actions: ["clearGitHubRepo", "setError"],
-                },
-              },
-            },
-            cloned: {
-              entry: "logUser",
-              on: {
-                SELECT_REPO: "cloningRepo",
-              },
-              type: "parallel",
-              states: {
-                change: {
-                  initial: "idle",
-                  states: {
-                    idle: {
-                      on: {
-                        WRITE_FILES: "writingFiles",
-                        DELETE_FILE: "deletingFile",
-                      },
-                    },
-                    writingFiles: {
-                      entry: ["mergeMarkdownFiles", "mergeMarkdownFilesLocalStorage"],
-                      invoke: {
-                        src: "writeFiles",
-                        onDone: [
-                          // Only kick off a sync when a commit actually
-                          // happened — a no-op write (e.g. unchanged content)
-                          // must not schedule a pull/push cycle.
-                          {
-                            target: "idle",
-                            cond: "didCommit",
-                            actions: raise("SYNC_DEBOUNCED"),
-                          },
-                          { target: "idle" },
-                        ],
-                        onError: {
-                          target: "idle",
-                          actions: "setError",
-                        },
-                      },
-                    },
-                    deletingFile: {
-                      entry: ["deleteMarkdownFile", "deleteMarkdownFileLocalStorage"],
-                      invoke: {
-                        src: "deleteFile",
-                        onDone: {
-                          target: "idle",
-                          actions: raise("SYNC_DEBOUNCED"),
-                        },
-                        onError: {
-                          target: "idle",
-                          actions: "setError",
-                        },
-                      },
-                    },
-                  },
-                },
-                sync: {
-                  initial: "pulling",
-                  states: {
-                    success: {
-                      entry: "resetSyncAttempts",
-                      on: {
-                        SYNC: "pulling",
-                        SYNC_DEBOUNCED: "debouncing",
-                        REFRESH_FILES: "refreshing",
-                      },
-                    },
-                    error: {
-                      entry: ["setSyncError", "logError", "resetSyncAttempts"],
-                      on: {
-                        SYNC: "pulling",
-                        SYNC_DEBOUNCED: "debouncing",
-                        REFRESH_FILES: "refreshing",
-                      },
-                    },
-                    // Follower tabs land here when the leader tab finishes a
-                    // sync: re-walk the shared worktree into memory (and the
-                    // localStorage cache) without any network work.
-                    refreshing: {
-                      invoke: {
-                        src: "refreshFiles",
-                        onDone: {
-                          target: "success",
-                          actions: ["setMarkdownFiles", "setMarkdownFilesLocalStorage"],
-                        },
-                        onError: "success",
-                      },
-                    },
-                    debouncing: {
-                      entry: "resetSyncAttempts",
-                      after: {
-                        1000: "pulling",
-                      },
-                      on: {
-                        SYNC: "pulling",
-                        SYNC_DEBOUNCED: "debouncing",
-                      },
-                    },
-                    pulling: {
-                      always: [
-                        // Don't pull if offline
-                        { target: "success", cond: "isOffline" },
-                      ],
-                      invoke: {
-                        src: "pull",
-                        onDone: {
-                          target: "pushing",
-                          actions: [
-                            "setMarkdownFiles",
-                            "setMarkdownFilesLocalStorage",
-                            "setMergeNotices",
-                          ],
-                        },
-                        onError: "error",
-                      },
-                    },
-                    pushing: {
-                      always: [
-                        // Don't push if offline
-                        { target: "success", cond: "isOffline" },
-                      ],
-                      invoke: {
-                        src: "push",
-                        onDone: "checkingStatus",
-                        onError: [
-                          // A rejected push (someone else pushed first) is
-                          // fixed by pulling again — bounded per sync cycle so
-                          // a persistent rejection can't loop forever. Network
-                          // and auth errors fall through to the error state.
-                          {
-                            target: "pulling",
-                            cond: "shouldRetryPush",
-                            actions: "incrementSyncAttempts",
-                          },
-                          { target: "error" },
-                        ],
-                      },
-                    },
-                    checkingStatus: {
-                      on: {
-                        SYNC: "pulling",
-                        SYNC_DEBOUNCED: "debouncing",
-                      },
-                      invoke: {
-                        src: "checkStatus",
-                        onDone: [
-                          {
-                            target: "success",
-                            cond: "isSynced",
-                            // Tell follower tabs to refresh from the worktree
-                            // (no-op unless this tab is the sync leader).
-                            actions: "broadcastSynced",
-                          },
-                          // If not synced, pull again — bounded by the same
-                          // per-cycle attempt budget as push retries.
-                          {
-                            target: "pulling",
-                            cond: "canRetrySync",
-                            actions: "incrementSyncAttempts",
-                          },
-                          { target: "error" },
-                        ],
-                        onError: "error",
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
         },
       },
     },
     {
-      guards: {
-        isOffline: () => !navigator.onLine,
-        isSynced: (_, event) => event.data.isSynced,
-        didCommit: (_, event) => event.data.committed,
-        canRetrySync: (context) => canRetrySync(context.syncAttempts),
-        shouldRetryPush: (context, event) =>
-          canRetrySync(context.syncAttempts) && isPushRejectionError(event.data),
-      },
       services: {
         resolveUser: async () => {
           // First, check URL params for user metadata
@@ -442,169 +140,6 @@ function createGlobalStateMachine() {
           const githubUser = JSON.parse(localStorage.getItem(GITHUB_USER_STORAGE_KEY) ?? "null")
           return { githubUser: githubUserSchema.parse(githubUser) }
         },
-        resolveRepo: async () => {
-          const stopTimer = startTimer("resolveRepo()")
-
-          const remoteOriginUrl = await getRemoteOriginUrl()
-
-          // Remove https://github.com/ from the beginning of the URL to get the repo name
-          const repo = String(remoteOriginUrl).replace(/^https:\/\/github.com\//, "")
-
-          const [owner, name] = repo.split("/")
-
-          if (!owner || !name) {
-            throw new Error("Invalid repo")
-          }
-
-          const githubRepo = { owner, name }
-
-          // The localStorage cache is a load-time optimization only; when it
-          // is absent (never written, or cleared after a quota failure) the
-          // worktree walk is the source of truth.
-          const markdownFiles = getMarkdownFilesCache() ?? (await getMarkdownFilesFromFs(REPO_DIR))
-
-          stopTimer()
-
-          return { githubRepo, markdownFiles }
-        },
-        cloneRepo: async (context, event) => {
-          if (!context.githubUser) throw new Error("Not signed in")
-
-          // The clone wipes the browser filesystem. Stash any unpushed work
-          // first, and restore it as conflicted-copy notes afterwards, so
-          // neither "Reset local copy" nor changing the repo can silently
-          // lose local-only changes. Both are best-effort and never block.
-          await backupUnpushedNotes()
-
-          await gitClone(event.githubRepo, context.githubUser)
-
-          await restoreUnpushedBackup()
-
-          return {
-            markdownFiles: await getMarkdownFilesFromFs(REPO_DIR),
-          }
-        },
-        pull: async (context) => {
-          if (!context.githubUser) throw new Error("Not signed in")
-
-          // Follower tabs never touch the network: the leader tab pulls into
-          // the shared worktree; re-walking it is enough to stay current.
-          let mergeNotices: MergeNotice[] = []
-          if (isSyncLeader()) {
-            mergeNotices = await gitPull(context.githubUser, context.githubRepo)
-          }
-
-          return {
-            markdownFiles: await getMarkdownFilesFromFs(REPO_DIR),
-            mergeNotices,
-          }
-        },
-        push: async (context) => {
-          if (!context.githubUser) throw new Error("Not signed in")
-
-          // Follower tabs forward the push (their commits are already in the
-          // shared worktree) to the leader instead of racing it.
-          if (!isSyncLeader()) {
-            requestLeaderSync()
-            return
-          }
-
-          await gitPush(context.githubUser)
-        },
-        checkStatus: async () => {
-          // Followers treat the cycle as converged — the leader does the real
-          // check (and re-pull loop) after the forwarded sync.
-          if (!isSyncLeader()) return { isSynced: true }
-
-          return { isSynced: await isRepoSynced() }
-        },
-        refreshFiles: async () => {
-          return {
-            markdownFiles: await getMarkdownFilesFromFs(REPO_DIR),
-          }
-        },
-        writeFiles: async (context, event) => {
-          if (!context.githubUser) throw new Error("Not signed in")
-
-          // The whole write→stage→commit path holds the git lock so a commit
-          // can never land in the middle of a pull/push (and vice versa).
-          return withGitLock(async () => {
-            const entries = Object.entries(event.markdownFiles)
-            const filesToWrite = entries.filter(([, content]) => content !== null)
-            const filesToDelete = entries.filter(([, content]) => content === null)
-            const fileList = entries.map(([filepath]) => filepath)
-            const commitMessage = event.commitMessage ?? `Update ${fileList.join(" ") || "notes"}`
-
-            // Write files to file system
-            for (const [filepath, content] of filesToWrite) {
-              if (content === null) continue
-
-              // Create directories if needed
-              const dirPath = filepath.split("/").slice(0, -1).join("/")
-              if (dirPath) {
-                let currentPath = REPO_DIR
-                const segments = dirPath.split("/")
-
-                for (const segment of segments) {
-                  currentPath = `${currentPath}/${segment}`
-                  const stats = await fs.promises.stat(currentPath).catch(() => null)
-                  const exists = stats !== null
-                  if (!exists) {
-                    await fs.promises.mkdir(currentPath)
-                  }
-                }
-              }
-
-              // Write file
-              await fs.promises.writeFile(`${REPO_DIR}/${filepath}`, content, "utf8")
-            }
-
-            // Delete files from file system
-            for (const [filepath] of filesToDelete) {
-              await fs.promises.unlink(`${REPO_DIR}/${filepath}`).catch(() => null)
-            }
-
-            // Stage files
-            const filesToAdd = filesToWrite.map(([filepath]) => filepath)
-            if (filesToAdd.length > 0) {
-              await gitAdd(filesToAdd)
-            }
-
-            for (const [filepath] of filesToDelete) {
-              try {
-                await gitRemove(filepath)
-              } catch {
-                // Ignore if the file isn't tracked
-              }
-            }
-
-            // Commit files — but skip the commit entirely when nothing is
-            // actually staged (e.g. content identical to HEAD), so no-op
-            // writes never produce empty commits or sync cycles.
-            const committed = await gitHasStagedChanges(fileList)
-            if (committed) {
-              await gitCommit(commitMessage)
-            }
-
-            return { committed }
-          })
-        },
-        deleteFile: async (context, event) => {
-          if (!context.githubUser) throw new Error("Not signed in")
-
-          const { filepath } = event
-
-          await withGitLock(async () => {
-            // Delete file from file system
-            await fs.promises.unlink(`${REPO_DIR}/${filepath}`)
-
-            // Stage deletion
-            await gitRemove(filepath)
-
-            // Commit deletion
-            await gitCommit(`Delete ${filepath}`)
-          })
-        },
       },
       actions: {
         setGitHubUser: assign({
@@ -623,7 +158,7 @@ function createGlobalStateMachine() {
           switch (event.type) {
             case "SIGN_IN":
               localStorage.setItem(GITHUB_USER_STORAGE_KEY, JSON.stringify(event.githubUser))
-              // Seed the live token session used for git auth + refresh.
+              // Seed the live token session used for Worker API auth + refresh.
               seedSession(event.githubUser)
               break
             case "done.invoke.global.resolvingUser:invocation[0]":
@@ -639,208 +174,58 @@ function createGlobalStateMachine() {
           localStorage.removeItem(GITHUB_USER_STORAGE_KEY)
           clearSession()
         },
-        setGitHubRepo: assign({
-          githubRepo: (_, event) => {
-            switch (event.type) {
-              case "SELECT_REPO":
-                return event.githubRepo
-              case "done.invoke.global.signedIn.resolvingRepo:invocation[0]":
-                return event.data.githubRepo
-            }
-          },
-        }),
-        clearGitHubRepo: assign({
-          githubRepo: null,
-        }),
-        clearFileSystem: () => {
-          fsWipe()
-        },
-        setMarkdownFiles: assign({
-          markdownFiles: (_, event) => event.data.markdownFiles,
-        }),
         setSampleMarkdownFiles: assign({
           markdownFiles: getSampleMarkdownFiles(),
         }),
-        setMarkdownFilesLocalStorage: (_, event) => {
-          setMarkdownFilesCache(event.data.markdownFiles)
-        },
-        mergeMarkdownFiles: assign({
-          markdownFiles: (context, event) => {
-            const merged = { ...context.markdownFiles }
-            for (const [filepath, content] of Object.entries(event.markdownFiles)) {
-              if (content === null) {
-                delete merged[filepath]
-              } else {
-                merged[filepath] = content
-              }
-            }
-            return merged
-          },
-        }),
-        mergeMarkdownFilesLocalStorage: (context, event) => {
-          const merged = { ...context.markdownFiles }
-          for (const [filepath, content] of Object.entries(event.markdownFiles)) {
-            if (content === null) {
-              delete merged[filepath]
-            } else {
-              merged[filepath] = content
-            }
-          }
-          setMarkdownFilesCache(merged)
-        },
-        deleteMarkdownFile: assign({
-          markdownFiles: (context, event) => {
-            const { [event.filepath]: _, ...markdownFiles } = context.markdownFiles
-            return markdownFiles
-          },
-        }),
-        deleteMarkdownFileLocalStorage: (context, event) => {
-          const { [event.filepath]: _, ...markdownFiles } = context.markdownFiles
-          setMarkdownFilesCache(markdownFiles)
-        },
         clearMarkdownFiles: assign({
           markdownFiles: {},
         }),
-        clearMarkdownFilesLocalStorage: () => {
-          clearMarkdownFilesCache()
-        },
-        setError: assign({
-          // TODO: Remove `as Error`
-          error: (_, event) => event.data as Error,
-        }),
-        incrementSyncAttempts: assign({
-          syncAttempts: (context) => context.syncAttempts + 1,
-        }),
-        resetSyncAttempts: assign({
-          syncAttempts: 0,
-        }),
-        setSyncError: assign({
-          syncError: (_, event) => toSyncError((event as { data?: unknown }).data),
-        }),
-        setMergeNotices: assign({
-          // Accumulate rather than replace: pulls run constantly, and a later
-          // conflict-free pull must not clear a notice the user hasn't seen.
-          // Deduped by note + losing commit (`mergeNoticeKey`) so a notice can
-          // never be raised twice.
-          mergeNotices: (context, event) => {
-            const incoming = event.data.mergeNotices
-            if (incoming.length === 0) return context.mergeNotices
-            const known = new Set(context.mergeNotices.map(mergeNoticeKey))
-            return [
-              ...context.mergeNotices,
-              ...incoming.filter((notice) => !known.has(mergeNoticeKey(notice))),
-            ]
-          },
-        }),
-        broadcastSynced: () => {
-          broadcastSynced()
-        },
-        logError: (_, event) => {
-          console.error(event.data)
-        },
-        // Analytics logging was removed with the Supabase backend. The action
-        // is kept as a no-op so the generated XState typegen stays consistent.
-        logUser: () => {},
       },
     },
   )
 }
 
-/** Walk the file system and return the contents of all markdown files */
-async function getMarkdownFilesFromFs(dir: string) {
-  const stopTimer = startTimer("getMarkdownFilesFromFs()")
-
-  const entries = await git.walk({
-    fs,
-    dir,
-    trees: [WORKDIR()],
-    map: async (filepath, [entry]) => {
-      if (!entry) return null
-
-      // Ignore .git directory
-      if (filepath.startsWith(".git")) return
-
-      // Keep markdown notes and the view-state sidecars (per-note files plus
-      // the legacy single file, still read for migration); ignore the rest.
-      if (
-        !filepath.endsWith(".md") &&
-        filepath !== LEGACY_VIEW_STATE_PATH &&
-        !filepath.startsWith(`${VIEW_STATE_DIR}/`)
-      )
-        return
-
-      // Get file content
-      const content = await entry.content()
-
-      if (!content) return null
-
-      console.debug(filepath, (await entry.stat()).size)
-
-      return [filepath, new TextDecoder().decode(content)]
-    },
-  })
-
-  const markdownFiles = Object.fromEntries(entries)
-
-  stopTimer()
-
-  return markdownFiles
-}
-
 export const globalStateMachineAtom = atomWithMachine(createGlobalStateMachine)
 
-export const markdownFilesAtom = selectAtom(
+const machineMarkdownFilesAtom = selectAtom(
   globalStateMachineAtom,
   (state) => state.context.markdownFiles,
 )
 
-export const isRepoNotClonedAtom = selectAtom(globalStateMachineAtom, (state) =>
-  state.matches("signedIn.notCloned"),
+const machineGithubUserAtom = selectAtom(
+  globalStateMachineAtom,
+  (state) => state.context.githubUser,
 )
 
-export const isCloningRepoAtom = selectAtom(globalStateMachineAtom, (state) =>
-  state.matches("signedIn.cloningRepo"),
-)
+/**
+ * Signed in — the database-backed note corpus is the active experience: the
+ * local SQL store serves the notes and D1 syncs them across devices
+ * (docs/graph-storage.md). Signed out, the machine's sample notes render
+ * instead. This is also the "notes are ready" gate: the store serves local
+ * contents immediately, so there is no loading screen to wait behind.
+ */
+export const isDatabaseModeAtom = atom((get) => get(machineGithubUserAtom) !== null)
 
-export const isRepoClonedAtom = selectAtom(globalStateMachineAtom, (state) =>
-  state.matches("signedIn.cloned"),
+/**
+ * The note corpus, in repo-file shape (path → content, `<id>.md` per note).
+ * Signed in it is synthesized from the local SQL store by
+ * `src/data/database-mode.ts` (each entry the rollup of its page node);
+ * signed out it is the machine's sample notes. Every consumer above
+ * `src/data` reads this atom.
+ */
+export const markdownFilesAtom = atom((get) =>
+  get(isDatabaseModeAtom) ? get(databaseFilesAtom) : get(machineMarkdownFilesAtom),
 )
 
 export const isSignedOutAtom = selectAtom(globalStateMachineAtom, (state) =>
   state.matches("signedOut"),
 )
 
-/** The last sync failure (message + coarse category); only meaningful while
- * the sync region is in its error state (see `sync-status.tsx`). */
-export const syncErrorAtom = selectAtom(globalStateMachineAtom, (state) => state.context.syncError)
-
-/** Conflicting merges resolved by pulls (see `Context.mergeNotices`). */
-export const mergeNoticesAtom = selectAtom(
-  globalStateMachineAtom,
-  (state) => state.context.mergeNotices,
-)
-
-/**
- * Keys (`mergeNoticeKey`) of merge notices the user has dismissed (per-tab,
- * not persisted). The banner shows `mergeNoticesAtom` minus these; because the
- * machine dedupes notices by the same key, a dismissed notice can never be
- * re-raised.
- */
-export const dismissedMergeNoticeIdsAtom = atom<string[]>([])
-
 // -----------------------------------------------------------------------------
 // GitHub
 // -----------------------------------------------------------------------------
 
-export const githubUserAtom = selectAtom(
-  globalStateMachineAtom,
-  (state) => state.context.githubUser,
-)
-
-export const githubRepoAtom = selectAtom(
-  globalStateMachineAtom,
-  (state) => state.context.githubRepo,
-)
+export const githubUserAtom = machineGithubUserAtom
 
 // -----------------------------------------------------------------------------
 // Notes
@@ -850,8 +235,7 @@ export const notesAtom = atom((get) => {
   const markdownFiles = get(markdownFilesAtom)
   const notes: Map<NoteId, Note> = new Map()
 
-  // Parse notes. Non-`.md` tracked files (e.g. the view-state sidecar) are not
-  // notes and are skipped here.
+  // Parse notes. Non-`.md` entries are not notes and are skipped here.
   for (const filepath in markdownFiles) {
     if (!filepath.endsWith(".md")) continue
     const id = filepath.replace(/\.md$/, "")

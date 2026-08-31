@@ -1,10 +1,9 @@
 import { Link } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
 import { useAtomValue } from "jotai"
-import { selectAtom } from "jotai/utils"
 import React from "react"
 import { useNetworkState } from "react-use"
-import { githubRepoAtom, globalStateMachineAtom, isSignedOutAtom } from "../global-state"
+import { isSignedOutAtom } from "../global-state"
 import { useDeleteNote, useNoteById, useSaveNote } from "../hooks/note"
 import { NoteId } from "../schema"
 import { copyAsMarkdown } from "../utils/copy-markdown"
@@ -13,41 +12,16 @@ import { updateFrontmatterValue } from "../utils/frontmatter"
 import { pluralize } from "../utils/pluralize"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
-import {
-  CopyIcon16,
-  ExternalLinkIcon16,
-  MoreIcon16,
-  PinFillIcon16,
-  PinIcon16,
-  ShareIcon16,
-  TrashIcon16,
-} from "./icons"
+import { CopyIcon16, MoreIcon16, PinFillIcon16, PinIcon16, ShareIcon16, TrashIcon16 } from "./icons"
 import { NotePreview } from "./note-preview"
 import { ShareDialog } from "./share-dialog"
-
-const isResolvingRepoAtom = selectAtom(globalStateMachineAtom, (state) =>
-  state.matches("signedIn.resolvingRepo"),
-)
 
 type NoteCardProps = {
   id: NoteId
 }
 
-export function NotePreviewCard(props: NoteCardProps) {
-  const isResolvingRepo = useAtomValue(isResolvingRepoAtom)
-
-  // Show a loading state while resolving the repo
-  // TODO: Add shimmer animation
-  if (isResolvingRepo) {
-    return <div className="aspect-[5/3] w-full rounded-lg bg-bg-secondary" />
-  }
-
-  return <_NotePreviewCard {...props} />
-}
-
-const _NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProps) {
+export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProps) {
   const note = useNoteById(id)
-  const githubRepo = useAtomValue(githubRepoAtom)
   const isSignedOut = useAtomValue(isSignedOutAtom)
   const { online } = useNetworkState()
   const saveNote = useSaveNote()
@@ -137,15 +111,6 @@ const _NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProps) {
                 onClick={() => setIsShareDialogOpen(true)}
               >
                 Share
-              </DropdownMenu.Item>
-              <DropdownMenu.Item
-                icon={<ExternalLinkIcon16 />}
-                href={`https://github.com/${githubRepo?.owner}/${githubRepo?.name}/blob/main/${id}.md`}
-                target="_blank"
-                rel="noopener noreferrer"
-                disabled={isSignedOut}
-              >
-                Open in GitHub
               </DropdownMenu.Item>
               <DropdownMenu.Separator />
               <DropdownMenu.Item

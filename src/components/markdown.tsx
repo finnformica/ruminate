@@ -8,7 +8,6 @@ import rehypeRaw from "rehype-raw"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import { z } from "zod"
-import { UPLOADS_DIR } from "../utils/uploads"
 import { useNoteById, useSaveNote } from "../hooks/note"
 import { useMoveTask } from "../hooks/task"
 import { generateNoteId } from "../utils/note-id"
@@ -41,7 +40,6 @@ import { Checkbox } from "./checkbox"
 import { CopyButton } from "./copy-button"
 import { Details } from "./details"
 import { DropdownMenu } from "./dropdown-menu"
-import { FilePreview } from "./file-preview"
 import { GitHubAvatar } from "./github-avatar"
 import { IconButton } from "./icon-button"
 import {
@@ -400,18 +398,10 @@ function Anchor(props: React.ComponentPropsWithoutRef<"a">) {
     return <a {...props} />
   }
 
-  // Transform upload link
-  if (props.href?.startsWith(UPLOADS_DIR)) {
-    return (
-      <Link
-        to="/file"
-        search={{
-          path: props.href,
-        }}
-      >
-        {props.children}
-      </Link>
-    )
+  // Legacy upload links (git-era file attachments): the files themselves are
+  // not stored in the database, so render inert text instead of a dead link.
+  if (props.href?.startsWith("/uploads")) {
+    return <span className="text-text-secondary">{props.children}</span>
   }
 
   // Render relative links with client-side routing
@@ -478,19 +468,13 @@ function Anchor(props: React.ComponentPropsWithoutRef<"a">) {
 }
 
 function Image(props: React.ComponentPropsWithoutRef<"img">) {
-  // Render local files with FilePreview
+  // Legacy local uploads (git-era file attachments) have no backing file in
+  // the database — show a quiet placeholder instead of a broken image.
   if (props.src?.startsWith("/")) {
     return (
-      <Link
-        to="/file"
-        search={{
-          path: props.src,
-        }}
-        className={cx("block w-fit no-underline!", props.className)}
-        style={props.style}
-      >
-        <FilePreview path={props.src} alt={props.alt} width={props.width} height={props.height} />
-      </Link>
+      <span className="text-text-secondary">
+        {props.alt ? `${props.alt} (attachment unavailable)` : "Attachment unavailable"}
+      </span>
     )
   }
 

@@ -18,7 +18,7 @@ export function useRenameTag() {
         }
       }
 
-      writeNotes(updates, `Rename tag #${oldName} to #${newName}`)
+      writeNotes(updates)
     },
     [getNoteContents, writeNotes],
   )
@@ -40,7 +40,7 @@ export function useDeleteTag() {
         }
       }
 
-      writeNotes(updates, `Delete tag #${tagName}`)
+      writeNotes(updates)
     },
     [getNoteContents, writeNotes],
   )

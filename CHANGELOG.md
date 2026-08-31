@@ -2,11 +2,23 @@
 
 ## 2026-W35
 
+### Changed
+
+- Notes now save themselves. Every change is written to the database moments after you stop typing, and immediately when you switch away, refresh, or close the tab, so there is no Save button, no unsaved-changes state, and nothing to lose. <kbd>⌘S</kbd> still works as "save right now", and a quiet "Saving…" appears while a save is in flight. The "updated on another device" warning and its "Save mine anyway" choice are gone along with the local drafts they guarded: with every edit already in the database, conflicts resolve block by block to the most recent edit, and the losing version stays a click away in the note's history.
+- Notes now open with a tidy amount of detail instead of everything unfolded: headings are always expanded, the first two levels beneath them are visible, and anything deeper starts collapsed. Your own folding and unfolding is remembered on each device on top of that default. Collapse state no longer syncs between devices, so folding on your phone never touches how a note looks on your laptop.
+- Sync now works block by block instead of note by note. Editing different parts of the same note on two devices no longer makes the later save overwrite the whole note, only edits to the very same block still resolve to the most recent save.
+
+- Your notes now live in a database instead of a GitHub repository. Sign in and they're just there — no repository to choose, no cloning, no commit/push cycles. Everything is stored in a local database on your device (so the app works fully offline) and syncs to the cloud automatically: every save is pushed in the background within seconds, and opening the app — or returning to its tab, or coming back online — pulls what you wrote on other devices. When the same note is edited on two devices, the most recent edit wins, block by block. GitHub remains only your sign-in.
+- Settings → Storage now shows the live state of your data: local database status, pending cloud pushes, remote row counts, and a "Push full copy to D1 now" button for peace of mind. The sidebar sync indicator reflects the same thing — "Syncing…" until your last save has reached the cloud.
+
 ### Fixed
 
-- A stale device can no longer quietly revert your newer edits. When two devices' changes collide, the newest edit now wins, a banner tells you a merge happened with a "View previous version" action that opens the note's history on the exact version that lost, and saving is blocked with an explicit "Save mine anyway" choice whenever the note has moved on since your editor loaded — so the silent-overwrite path that reverted a restructured note is closed from every direction. Leftover drafts that contain no real edits are cleaned up instead of triggering false "updated on another device" warnings.
+- When your GitHub session expires, the app now says so and returns you to the sign-in screen, with your notes reloading as soon as you sign back in. It used to show a misleading "can't reach the notes database" message, which is now reserved for actually being offline.
+- Opening Ruminate in a second tab no longer shows a silently empty app. The second tab now explains that your notes are open in another tab, works on a temporary copy in the meantime, and offers a one-click reload once the other tab is closed.
+- Switching away from the tab right after typing no longer risks leaving that save behind: pending changes are pushed to the cloud immediately when the tab is hidden or closed, and returning to the app pulls the latest changes right away.
+- A stale device can no longer quietly revert your newer edits. When two devices' changes collide, the newest edit now wins, and a banner tells you a merge happened with a "View previous version" action that opens the note's history on the exact version that lost — so the silent-overwrite path that reverted a restructured note is closed, and nothing is ever lost.
 - Sync between devices no longer gets permanently stuck. Conflicting edits now merge automatically, the newest version wins for the conflicting lines, and the losing version stays a click away in the note's version history — no extra "conflict" notes cluttering your list, and nothing is ever lost. Signing out and back in is no longer the fix, and folding blocks no longer causes cross-device conflicts at all.
-- Changes pulled from another device now appear in the open note immediately, no page refresh needed. If you have unsaved edits, a small notice offers "Show latest" instead of overwriting your typing.
+- Changes pulled from another device now appear in the open note immediately, no page refresh needed. If you're mid-edit, your typing is never interrupted or overwritten; your next autosave settles the note.
 - When sync does fail, the sidebar now says why (network, sign-in, conflict) and clicking retries. Settings gains a "Reset local copy" that backs up any unpushed notes as conflict copies before re-cloning, so recovery can't destroy work. Page loads also stop stalling on a GitHub token refresh.
 - Checkboxes survive copy and paste. Copied todos used to re-paste as plain bullets with a literal `[ ]` in the text.
 - Pasting content that carries block ids can no longer silently overwrite existing blocks with the same id, and pasting no longer breaks references to the block you pasted into.
@@ -17,6 +29,7 @@
 
 ### New
 
+- Paste a copied block into another note and it becomes the same block in both places, not a copy. Edit it in either note and the change shows up in the other, and cut + paste now truly moves a block between notes instead of recreating it. Pasting within the same note still makes an ordinary copy, pasting where the block already sits does nothing (it's already there), and pasting outside Ruminate is completely unchanged.
 - Every note now has version history. Open History from the note's <kbd>···</kbd> menu (or "View note history" in <kbd>⌘K</kbd>) to browse each saved version — including edits merged in from another device, which are labeled — preview any of them exactly as it looked, copy it as markdown, or restore it. Restoring is forward-only: the old content is saved as the newest version, so history is never rewritten and nothing is ever lost.
 - Zoom into any block with <kbd>F</kbd> (or <kbd>⌘.</kbd>, or a click on its bullet) and its subtree becomes the whole page, with a clickable breadcrumb trail showing how you got there. <kbd>⇧F</kbd> goes up one level, <kbd>⌘⇧.</kbd> exits fully, and zoom lives in the URL so the back button and deep links just work.
 - Jump to any heading in the current note with <kbd>⌘P</kbd> (or type `@` in <kbd>⌘K</kbd>). Unfiltered you get the note's outline as an indented tree; typing filters to matches with their parent path shown. Arrowing previews the target behind the dialog, <kbd>Enter</kbd> jumps, <kbd>Esc</kbd> puts everything back exactly as it was. Nested and unsaved headings are included, which the old search missed.
@@ -44,6 +57,9 @@
 
 ### Removed
 
+- Everything git: the repository-selection screen, git sync, "Reset local copy", "Open in GitHub", merge-conflict banners and conflicted-copy notes are gone along with the repository itself.
+- Note version history and the calendar's past-day roll-ups. Both were reconstructed from git commits, which no longer exist; past days now show a simple placeholder. A database-backed history layer is planned to bring these back.
+- File attachments (the git-era `/uploads` folder). Legacy attachment references in notes render as an inert placeholder.
 - The unused e-paper theme has been removed. It was never reachable from the app and was quietly accumulating visual bugs.
 
 ## 2026-W34

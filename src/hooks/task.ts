@@ -1,9 +1,6 @@
-import { useAtomValue } from "jotai"
 import React from "react"
-import { githubRepoAtom } from "../global-state"
 import { useGetNoteContents, useWriteNotes } from "../data/store"
 import { updateFrontmatterValue } from "../utils/frontmatter"
-import { getNoteDraft, setNoteDraft } from "../utils/note-draft"
 
 /**
  * Appends a task line to note content.
@@ -41,7 +38,6 @@ function addUpdatedTimestamp(content: string): string {
 
 export function useMoveTask() {
   const getNoteContents = useGetNoteContents()
-  const githubRepo = useAtomValue(githubRepoAtom)
   const writeNotes = useWriteNotes()
 
   return React.useCallback(
@@ -61,38 +57,15 @@ export function useMoveTask() {
       const endWithNewline = sourceMarkdown[nodeEnd] === "\n" ? nodeEnd + 1 : nodeEnd
       const newSourceContent = sourceMarkdown.slice(0, start) + sourceMarkdown.slice(endWithNewline)
 
-      // Check for drafts
-      const sourceDraft = getNoteDraft({ githubRepo, noteId: sourceNoteId })
-      const targetDraft = getNoteDraft({ githubRepo, noteId: targetNoteId })
-      const sourceHasDraft = sourceDraft !== null
-      const targetHasDraft = targetDraft !== null
-
-      // Build target content (use draft if exists, else saved note)
       const noteContents = getNoteContents()
-      const targetBaseContent = targetDraft ?? noteContents[targetNoteId] ?? ""
+      const targetBaseContent = noteContents[targetNoteId] ?? ""
       const newTargetContent = appendTaskToNote(targetBaseContent, taskLine)
 
-      // Update drafts for dirty files (immediate write since we navigate after)
-      if (sourceHasDraft) {
-        setNoteDraft({ githubRepo, noteId: sourceNoteId, value: newSourceContent, immediate: true })
-      }
-      if (targetHasDraft) {
-        setNoteDraft({ githubRepo, noteId: targetNoteId, value: newTargetContent, immediate: true })
-      }
-
-      // Save clean notes only
-      const notesToSave: Record<string, string> = {}
-      if (!sourceHasDraft) {
-        notesToSave[sourceNoteId] = addUpdatedTimestamp(newSourceContent)
-      }
-      if (!targetHasDraft) {
-        notesToSave[targetNoteId] = addUpdatedTimestamp(newTargetContent)
-      }
-
-      if (Object.keys(notesToSave).length > 0) {
-        writeNotes(notesToSave, `Move task from ${sourceNoteId}.md to ${targetNoteId}.md`)
-      }
+      writeNotes({
+        [sourceNoteId]: addUpdatedTimestamp(newSourceContent),
+        [targetNoteId]: addUpdatedTimestamp(newTargetContent),
+      })
     },
-    [getNoteContents, githubRepo, writeNotes],
+    [getNoteContents, writeNotes],
   )
 }

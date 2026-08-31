@@ -1,35 +1,28 @@
 import { createFileRoute } from "@tanstack/react-router"
 import ejs from "ejs"
 import { useAtomValue } from "jotai"
-import { selectAtom } from "jotai/utils"
 import React, { useEffect, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useNetworkState } from "react-use"
 import useResizeObserver from "use-resize-observer"
-import { Button } from "../components/button"
 import { Calendar } from "../components/calendar"
 import { CalendarHeader } from "../components/calendar-header"
 import { DaysOfWeek } from "../components/days-of-week"
 import { Details } from "../components/details"
-import { DraftIndicator } from "../components/draft-indicator"
-import { IconButton } from "../components/icon-button"
-import { CheckIcon16, LoadingIcon16, NoteIcon16 } from "../components/icons"
+import { LoadingIcon16, NoteIcon16 } from "../components/icons"
 import { BlockNoteEditor } from "../components/block-editor/block-note-editor"
 import { NoteTitle } from "../components/block-editor/note-title"
 import { NoteActionsMenu } from "../components/note-actions-menu"
-import { NoteHistoryDialog } from "../components/note-history-dialog"
-import { DayActivity } from "../components/day-activity"
 import { LinkHighlightProvider } from "../components/link-highlight-provider"
 import { NoteFavicon } from "../components/note-favicon"
 import { NoteList } from "../components/note-list"
-import { Notice } from "../components/notice"
 import { PageLayout } from "../components/page-layout"
 import { ShareDialog } from "../components/share-dialog"
 import { isSyncingAtom } from "../components/sync-status"
+import { useGetNoteContents } from "../data/store"
 import {
   dailyTemplateAtom,
-  githubRepoAtom,
-  globalStateMachineAtom,
+  isDatabaseModeAtom,
   isSignedOutAtom,
   weeklyTemplateAtom,
 } from "../global-state"
@@ -41,7 +34,6 @@ import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
 import { removeFrontmatterComments, updateFrontmatterValue } from "../utils/frontmatter"
-import { clearNoteDraft } from "../utils/note-draft"
 import { getInvalidNoteIdCharacters } from "../utils/note-id"
 import { parseNote } from "../utils/parse-note"
 
@@ -66,16 +58,14 @@ export const Route = createFileRoute("/_appRoot/notes_/$")({
   component: RouteComponent,
 })
 
-const isRepoClonedAtom = selectAtom(globalStateMachineAtom, (state) =>
-  state.matches("signedIn.cloned"),
-)
-
 function RouteComponent() {
   const { _splat: noteId } = Route.useParams()
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  const isRepoCloned = useAtomValue(isRepoClonedAtom)
+  // Signed in, the store serves notes immediately; signed out, the sample
+  // notes render. Only the brief auth resolution at boot is gated.
+  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
 
-  if (isSignedOut || isRepoCloned) {
+  if (isSignedOut || isDatabaseMode) {
     return <NotePage key={noteId} />
   }
 
@@ -105,7 +95,6 @@ function NotePage() {
   const navigate = Route.useNavigate()
 
   // Global state
-  const githubRepo = useAtomValue(githubRepoAtom)
   const isSignedOut = useAtomValue(isSignedOutAtom)
   const isSyncing = useAtomValue(isSyncingAtom)
   const dailyTemplate = useAtomValue(dailyTemplateAtom)
@@ -116,33 +105,49 @@ function NotePage() {
   const note = useNoteById(noteId)
   const isDailyNote = isValidDateString(noteId ?? "")
   const isWeeklyNote = isValidWeekString(noteId ?? "")
-  // A daily note is editable only for the current day. Past/future days show a
-  // read-only, git-reconstructed view of what was written that day (the
-  // calendar time machine). "Today" is resolved in the current timezone, to
-  // match the floating YYYY-MM-DD note naming.
+  // A daily note is editable only for the current day; the database stores
+  // current state only (no history to reconstruct — docs/graph-storage.md),
+  // so past/future days show a placeholder. "Today" is resolved in the
+  // current timezone, to match the floating YYYY-MM-DD note naming.
   const isReadOnlyDailyNote = isDailyNote && noteId !== toDateString(new Date())
-  // Every editable note uses the block editor; only past/future daily notes are
-  // the exception, rendering read-only git history (see DayActivity below).
   const useBlockEditor = !isReadOnlyDailyNote
   const searchNotes = useSearchNotes()
   const saveNote = useSaveNote()
+  const getNoteContents = useGetNoteContents()
   const backlinks = React.useMemo(() => {
     const notes = searchNotes(`link:"${noteId}" -id:"${noteId}"`)
     return new Map<NoteId, Note>(notes.map((note) => [note.id, note]))
   }, [noteId, searchNotes])
 
-  // Editor state
-  const {
-    editorValue,
-    setEditorValue,
-    isDraft,
-    discardChanges,
-    remoteNotice,
-    canSaveSilently,
-    loadRemoteVersion,
-    dismissRemoteNotice,
-  } = useEditorValue({
-    noteId: noteId ?? "",
+  // Show "Saving…" the instant a save is dispatched, rather than waiting for
+  // the debounced sync to actually start. Cleared when the sync finishes (or a
+  // short fallback, in case no sync was needed).
+  const [pendingSave, setPendingSave] = useState(false)
+
+  const handleSave = React.useCallback(
+    (value: string) => {
+      if (isSignedOut || !noteId) return
+
+      // New notes shouldn't be saved if the editor is empty
+      if (!note && !value) return
+
+      // The note was deleted or renamed away — a trailing autosave flush must
+      // not resurrect it under the old id.
+      if (note && getNoteContents()[noteId] === undefined) return
+
+      // Only save if the content has changed
+      if (value !== note?.content) {
+        setPendingSave(true)
+        window.setTimeout(() => setPendingSave(false), 4000)
+        saveNote({ id: noteId, content: value })
+      }
+    },
+    [isSignedOut, noteId, note, getNoteContents, saveNote],
+  )
+
+  // Editor state: seeded from the note, autosaved through handleSave on every
+  // change (debounced), flushed on hide/unmount — see useEditorValue.
+  const { editorValue, setEditorValue, flushNow } = useEditorValue({
     note,
     defaultValue: defaultContent
       ? defaultContent
@@ -151,6 +156,7 @@ function NotePage() {
         : isWeeklyNote && weeklyTemplate
           ? renderTemplate(weeklyTemplate, { week: noteId ?? "" })
           : "",
+    onSave: handleSave,
   })
   const parsedNote = React.useMemo(
     () => parseNote(noteId ?? "", editorValue),
@@ -198,27 +204,6 @@ function NotePage() {
   // Actions
   const renameNote = useRenameNote()
 
-  const handleSave = React.useCallback(
-    (value: string) => {
-      if (isSignedOut || !noteId) return
-
-      // New notes shouldn't be saved if the editor is empty
-      if (!note && !value) return
-
-      // Only save if the content has changed
-      if (value !== note?.content) {
-        saveNote({ id: noteId, content: value })
-      }
-
-      clearNoteDraft({ githubRepo, noteId })
-    },
-    [isSignedOut, noteId, note, saveNote, githubRepo],
-  )
-
-  // Show "Saving…" the instant a save is requested, rather than waiting for the
-  // debounced sync to actually start. Cleared when the sync finishes (or a
-  // short fallback, in case no sync was needed).
-  const [pendingSave, setPendingSave] = useState(false)
   const wasSyncingRef = React.useRef(false)
   useEffect(() => {
     if (isSyncing) {
@@ -229,45 +214,17 @@ function NotePage() {
     }
   }, [isSyncing])
 
-  // A plain save is blocked while the remote notice is up (the editor value is
-  // known to be based on an older version of the note — committing it would
-  // silently overwrite the newer one). ⌘S/Save then flashes the notice
-  // instead; "Save mine anyway" there is the explicit override.
-  const [noticeFlash, setNoticeFlash] = useState(0)
-  const noticeRef = React.useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (noticeFlash === 0) return
-    const notice = noticeRef.current
-    if (!notice) return
-    notice.scrollIntoView({ block: "nearest" })
-    notice.classList.add("ring-2", "ring-border-focus")
-    const timeout = window.setTimeout(
-      () => notice.classList.remove("ring-2", "ring-border-focus"),
-      1000,
-    )
-    return () => window.clearTimeout(timeout)
-  }, [noticeFlash])
-
-  const requestSave = React.useCallback(() => {
-    if (isSignedOut || !isDraft) return
-    if (!canSaveSilently) {
-      setNoticeFlash((n) => n + 1)
-      return
-    }
-    setPendingSave(true)
-    handleSave(editorValue)
-    window.setTimeout(() => setPendingSave(false), 4000)
-  }, [isSignedOut, isDraft, canSaveSilently, handleSave, editorValue])
-
-  /** Explicit override: commit the editor value even though the note is newer. */
-  const saveMineAnyway = React.useCallback(() => {
-    setPendingSave(true)
-    handleSave(editorValue)
-    dismissRemoteNotice()
-    window.setTimeout(() => setPendingSave(false), 4000)
-  }, [handleSave, editorValue, dismissRemoteNotice])
-
   const isSaving = pendingSave || isSyncing
+
+  // Programmatic content updates (width, pin, share) save immediately rather
+  // than waiting out the autosave debounce.
+  const applyAndSave = React.useCallback(
+    (next: string) => {
+      setEditorValue(next)
+      flushNow()
+    },
+    [setEditorValue, flushNow],
+  )
 
   const updateWidth = React.useCallback(
     (width: Width) => {
@@ -279,10 +236,9 @@ function NotePage() {
         properties: { width: width === "fixed" ? null : width },
       })
 
-      setEditorValue(newContent)
-      handleSave(newContent)
+      applyAndSave(newContent)
     },
-    [noteId, editorValue, setEditorValue, handleSave],
+    [noteId, editorValue, applyAndSave],
   )
 
   // Rename the current note to `rawName`. Returns whether it succeeded (so an
@@ -322,9 +278,6 @@ function NotePage() {
         return false
       }
 
-      clearNoteDraft({ githubRepo, noteId: oldNoteId })
-      clearNoteDraft({ githubRepo, noteId: newNoteId })
-
       navigate({
         to: "/notes/$",
         params: { _splat: newNoteId },
@@ -333,11 +286,12 @@ function NotePage() {
       })
       return true
     },
-    [noteId, renameNote, editorValue, githubRepo, navigate],
+    [noteId, renameNote, editorValue, navigate],
   )
 
-  // Save with ⌘S
-  useHotkeys(APP_SHORTCUTS.save, () => requestSave(), GLOBAL_HOTKEY_OPTIONS)
+  // ⌘S flushes the pending autosave immediately (changes save on their own;
+  // this is just "save now").
+  useHotkeys(APP_SHORTCUTS.save, () => flushNow(), GLOBAL_HOTKEY_OPTIONS)
 
   // Focus the editor from anywhere on the page (never while typing): restores
   // the last selected block so `i` means "put me back where I was".
@@ -347,27 +301,17 @@ function NotePage() {
 
   return (
     <PageLayout
-      title={
-        <div className="flex items-center gap-2">
-          <span className="truncate">{noteId}.md</span>
-          {isDraft ? <DraftIndicator /> : null}
-        </div>
-      }
+      title={<span className="truncate">{noteId}.md</span>}
       icon={<NoteFavicon note={parsedNote} />}
       actions={
         <div className="flex items-center gap-2">
-          {useBlockEditor || (!note && editorValue) || isDraft ? (
-            <Button
-              disabled={isSignedOut || isSaving || !isDraft}
-              variant="primary"
-              size="small"
-              shortcut={isSaving ? undefined : ["⌘", "S"]}
-              onClick={requestSave}
-              className="hidden items-center gap-1.5 sm:flex"
-            >
-              {isSaving ? <LoadingIcon16 className="animate-spin" /> : null}
-              {isSaving ? "Saving…" : "Save"}
-            </Button>
+          {/* Changes save automatically; this is the honest-but-quiet trace of
+              a save in flight. */}
+          {isSaving ? (
+            <span className="flex items-center gap-1.5 text-sm text-text-secondary print:hidden">
+              <LoadingIcon16 className="animate-spin" />
+              Saving…
+            </span>
           ) : null}
 
           <div className="flex items-center">
@@ -377,13 +321,8 @@ function NotePage() {
               pinned={parsedNote?.pinned ?? false}
               backlinks={note?.backlinks ?? []}
               align="end"
-              onContentChange={(next) => {
-                setEditorValue(next)
-                handleSave(next)
-              }}
+              onContentChange={applyAndSave}
               editor={{
-                isDraft,
-                onDiscard: discardChanges,
                 showWidth: containerWidth > 800,
                 width: resolvedWidth,
                 onWidth: updateWidth,
@@ -395,50 +334,27 @@ function NotePage() {
             <ShareDialog
               note={parsedNote}
               onPublish={(gistId) => {
-                const newContent = updateFrontmatterValue({
-                  content: editorValue,
-                  properties: { gist_id: gistId },
-                })
-                setEditorValue(newContent)
-                handleSave(newContent)
+                applyAndSave(
+                  updateFrontmatterValue({
+                    content: editorValue,
+                    properties: { gist_id: gistId },
+                  }),
+                )
               }}
               onUnpublish={() => {
-                const newContent = updateFrontmatterValue({
-                  content: editorValue,
-                  properties: { gist_id: null },
-                })
-                setEditorValue(newContent)
-                handleSave(newContent)
+                applyAndSave(
+                  updateFrontmatterValue({
+                    content: editorValue,
+                    properties: { gist_id: null },
+                  }),
+                )
                 setIsShareDialogOpen(false)
               }}
               open={isShareDialogOpen}
               onOpenChange={setIsShareDialogOpen}
             />
-            <NoteHistoryDialog
-              noteId={noteId ?? ""}
-              currentContent={editorValue}
-              onRestore={(next) => {
-                setEditorValue(next)
-                handleSave(next)
-              }}
-            />
           </div>
         </div>
-      }
-      floatingActions={
-        useBlockEditor || (!note && editorValue) || isDraft ? (
-          <div className="card-2 flex gap-1.5 coarse:gap-2 rounded-full! p-1.5 coarse:p-2 sm:hidden print:hidden">
-            <IconButton
-              aria-label={isSaving ? "Saving…" : "Save"}
-              disabled={isSignedOut || isSaving || !isDraft}
-              shortcut={isSaving ? undefined : ["⌘", "S"]}
-              onClick={requestSave}
-              className="size-8 coarse:size-12 rounded-full bg-text text-bg [&_*]:text-bg enabled:hover:bg-text enabled:active:bg-text"
-            >
-              {isSaving ? <LoadingIcon16 className="animate-spin" /> : <CheckIcon16 />}
-            </IconButton>
-          </div>
-        ) : null
       }
     >
       <div ref={containerRef} className="@container">
@@ -458,36 +374,6 @@ function NotePage() {
 
             {useBlockEditor ? (
               <div className="flex flex-col gap-3">
-                {/* Non-blocking notice: the note changed on another device
-                    while there are unsaved local edits (detected live, or at
-                    mount via the draft's recorded provenance). Editing
-                    continues uninterrupted, but plain saves are blocked while
-                    the notice is up (⌘S flashes it instead — see requestSave).
-                    "Show latest" discards the unsaved edits in favor of the
-                    remote version; "Save mine anyway" is the explicit choice
-                    to overwrite the newer note with the edits shown. */}
-                {remoteNotice ? (
-                  <Notice
-                    ref={noticeRef}
-                    tone="info"
-                    className="print:hidden"
-                    actions={
-                      <>
-                        <Button size="small" onClick={loadRemoteVersion}>
-                          Show latest
-                        </Button>
-                        <Button size="small" onClick={saveMineAnyway}>
-                          Save mine anyway
-                        </Button>
-                      </>
-                    }
-                    onDismiss={dismissRemoteNotice}
-                  >
-                    <span className="text-sm text-text-secondary">
-                      This note was updated on another device. Your unsaved edits are shown.
-                    </span>
-                  </Notice>
-                ) : null}
                 {/* While zoomed, the breadcrumb (inside the editor) carries the
                     note title as its first crumb — hide the standalone title to
                     avoid doubling it. */}
@@ -524,7 +410,9 @@ function NotePage() {
                 />
               </div>
             ) : (
-              <DayActivity date={noteId ?? ""} />
+              // The database stores current state only, so there is no
+              // per-day history to reconstruct for past days.
+              <p className="text-text-secondary">History for past days isn’t available.</p>
             )}
             {isWeeklyNote ? (
               <Details className="print:hidden">

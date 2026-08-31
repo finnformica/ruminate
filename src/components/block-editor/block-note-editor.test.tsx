@@ -3,15 +3,15 @@ import { cleanup, fireEvent, render } from "@testing-library/react"
 import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-// `useCollapseState` reaches through the global state machine (and lightning-fs,
-// which needs indexedDB) — these tests only exercise value propagation, and no
-// noteId is passed, so transient collapse state is all that's needed.
+// `useCollapseState` persists per-device collapse overrides to localStorage
+// (src/data/view-state.ts) — these tests only exercise value propagation, and
+// no noteId is passed, so transient collapse state is all that's needed.
 vi.mock("../../data/view-state", () => ({
   useCollapseState: () => ({ collapsed: new Set<string>(), toggleCollapse: () => {} }),
 }))
 vi.mock("../../global-state", async () => {
   const { atom } = await import("jotai")
-  return { noteOutlineAtom: atom(null), blockRevealAtom: atom(null) }
+  return { noteOutlineAtom: atom(null), blockRevealAtom: atom(null), markdownFilesAtom: atom({}) }
 })
 
 import { BlockNoteEditor } from "./block-note-editor"

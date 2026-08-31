@@ -1,16 +1,12 @@
 import { useAtomValue } from "jotai"
-import { LoadingIcon16 } from "../components/icons"
-import { RepoForm } from "../components/repo-form"
-import {
-  githubRepoAtom,
-  isCloningRepoAtom,
-  isRepoClonedAtom,
-  isRepoNotClonedAtom,
-  isSignedOutAtom,
-} from "../global-state"
+import { databaseModeStatusAtom } from "../data/database-mode"
+import { storageDiagnosticsAtom } from "../data/storage-diagnostics"
+import { isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
 import { cx } from "../utils/cx"
+import { Button } from "./button"
 import { PageHeader, PageHeaderProps } from "./page-header"
 import { HoverCard } from "./hover-card"
+import { Notice } from "./notice"
 
 type PageLayoutProps = PageHeaderProps & {
   className?: string
@@ -28,45 +24,51 @@ export function PageLayout({
   ...props
 }: PageLayoutProps) {
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  const isRepoNotCloned = useAtomValue(isRepoNotClonedAtom)
-  const isCloningRepo = useAtomValue(isCloningRepoAtom)
-  const isRepoCloned = useAtomValue(isRepoClonedAtom)
-  const githubRepo = useAtomValue(githubRepoAtom)
+  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
+  const databaseStatus = useAtomValue(databaseModeStatusAtom)
+  const diagnostics = useAtomValue(storageDiagnosticsAtom)
+  // A second Ruminate tab holds the persistent local database — this tab fell
+  // back to a temporary in-memory copy and must say so (defect: it used to
+  // silently show an empty corpus).
+  const otherTabHasDatabase =
+    diagnostics.persistence === "memory" && diagnostics.persistenceReason === "another-tab"
+
+  // Signed in, the store serves notes immediately (isDatabaseMode); signed out,
+  // the sample notes render. The only gated moment is the brief auth
+  // resolution at boot.
+  const showContent = isDatabaseMode || isSignedOut || disableGuard
 
   return (
     <HoverCard.Provider>
       <div className={cx("grid grid-rows-[auto_1fr] overflow-hidden", className)}>
         <PageHeader
           {...props}
-          actions={isRepoCloned || isSignedOut || disableGuard ? actions : undefined}
+          actions={showContent ? actions : undefined}
           className="print:hidden"
         />
         <div className="relative grid overflow-hidden">
           <main className="relative isolate overflow-auto [scrollbar-gutter:stable] scroll-mask">
-            {isRepoNotCloned && !disableGuard ? (
-              <div className="flex h-full flex-col items-center">
-                <div className="mx-auto w-full max-w-lg p-4 pb-8 md:pb-14">
-                  <div className="card-1 flex flex-col gap-6 p-4">
-                    <div className="flex flex-col gap-2">
-                      <h1 className="text-lg font-bold [text-box-trim:trim-start]">
-                        Choose a repository
-                      </h1>
-                      <p className="text-pretty text-text-secondary">
-                        Store your notes as markdown files in a GitHub repository of your choice.
-                      </p>
-                    </div>
-                    <RepoForm />
-                  </div>
-                </div>
+            {otherTabHasDatabase && !disableGuard ? (
+              <div className="p-4">
+                <Notice
+                  tone="warning"
+                  actions={<Button onClick={() => window.location.reload()}>Reload</Button>}
+                >
+                  Ruminate is open in another tab — this tab is using a temporary in-memory copy.
+                  Close the other tab and reload to work here.
+                </Notice>
               </div>
             ) : null}
-            {isCloningRepo && githubRepo && !disableGuard ? (
-              <div className="flex items-center gap-2 p-4 leading-4 text-text-secondary">
-                <LoadingIcon16 />
-                Cloning {githubRepo.owner}/{githubRepo.name}…
+            {databaseStatus.emptyOffline && !disableGuard ? (
+              <div className="p-4">
+                <Notice tone="info">
+                  No notes yet — this device hasn’t been able to reach the notes database. They’ll
+                  load automatically once you’re back online, and anything you write now is kept
+                  locally and synced later.
+                </Notice>
               </div>
             ) : null}
-            {isRepoCloned || isSignedOut || disableGuard ? children : null}
+            {showContent ? children : null}
           </main>
 
           <div className="absolute bottom-3 right-3 flex items-center gap-2 coarse:gap-3">
