@@ -5,6 +5,7 @@
 ### Fixed
 
 - Pasting onto a selected block now puts the content **inside** it rather than next to it, and a pasted section arrives folded — you see the block you pasted, not its whole tree unpacked into the page. The block you pasted onto is opened so the paste is visible.
+- Refreshing a note no longer shows a blank editor. The page used to open in edit mode with nothing in it while the local database was still starting up, and only showed your writing after navigating away and back.
 
 - Renaming a note no longer leaves its old link dead: the old address now redirects to the renamed note (renames chain, so even older names keep working). Previously the old link opened an empty editor that could quietly mint a duplicate note under the dead name.
 

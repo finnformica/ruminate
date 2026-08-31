@@ -51,6 +51,34 @@ describe("useEditorValue (seeding)", () => {
     const { result } = renderEditorValue(undefined, { defaultValue: "# Template\n" })
     expect(result.current.editorValue).toBe("# Template\n")
   })
+
+  it("shows a note that arrives after mount (cold load: store still opening)", () => {
+    // The refresh case: the store is opening, so the note is undefined for a
+    // beat and the editor seeds empty. When the note lands it must replace
+    // that placeholder — comparing the seeded value against the previous
+    // (undefined) note content read as "the user has edits", leaving a blank
+    // editor over real content.
+    const { result, rerender } = renderEditorValue(undefined)
+    expect(result.current.editorValue).toBe("")
+    rerender({ note: note("- pulled from the store\n") })
+    expect(result.current.editorValue).toBe("- pulled from the store\n")
+  })
+
+  it("a template stays put when the note arrives empty-handed, then adopts it", () => {
+    const { result, rerender } = renderEditorValue(undefined, { defaultValue: "# Template\n" })
+    expect(result.current.editorValue).toBe("# Template\n")
+    rerender({ note: note("- real content\n") })
+    expect(result.current.editorValue).toBe("- real content\n")
+  })
+
+  it("does NOT clobber typing that happened before the note arrived", () => {
+    // The genuine new-note flow: the user types into a note that does not
+    // exist yet. Their work must survive the note landing.
+    const { result, rerender } = renderEditorValue(undefined)
+    act(() => result.current.setEditorValue("- my new thought\n"))
+    rerender({ note: note("- something else entirely\n") })
+    expect(result.current.editorValue).toBe("- my new thought\n")
+  })
 })
 
 describe("useEditorValue (autosave)", () => {

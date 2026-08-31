@@ -17,6 +17,7 @@ import { NoteFavicon } from "../components/note-favicon"
 import { PageLayout } from "../components/page-layout"
 import { ShareDialog } from "../components/share-dialog"
 import { isSyncingAtom } from "../components/sync-status"
+import { databaseModeStatusAtom } from "../data/database-mode"
 import { useGetNoteContents } from "../data/store"
 import {
   dailyTemplateAtom,
@@ -95,7 +96,12 @@ function NotePage() {
   const isSyncing = useAtomValue(isSyncingAtom)
   const dailyTemplate = useAtomValue(dailyTemplateAtom)
   const weeklyTemplate = useAtomValue(weeklyTemplateAtom)
+  const databaseStatus = useAtomValue(databaseModeStatusAtom)
   const { online } = useNetworkState()
+  // While the local store is still opening, a missing note means "not loaded
+  // yet", not "new note" — starting an empty editor there shows a blank page
+  // over content that is about to arrive.
+  const notesLoaded = isSignedOut || databaseStatus.status === "ready"
 
   // Note data
   const note = useNoteById(noteId)
@@ -403,7 +409,7 @@ function NotePage() {
                   noteId={noteId}
                   value={editorValue}
                   onChange={setEditorValue}
-                  startEditing={!note}
+                  startEditing={!note && notesLoaded}
                   highlightHeading={highlightHeading}
                   onExitTop={() => setTitleFocusSignal((n) => n + 1)}
                   focusFirstSignal={focusFirstSignal}

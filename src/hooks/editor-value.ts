@@ -32,6 +32,11 @@ export function useEditorValue({
   // Track previous note content to detect external changes
   const [prevNoteContent, setPrevNoteContent] = useState(note?.content)
 
+  // What the editor was last seeded/synced to. Never undefined (unlike
+  // `prevNoteContent`), so "the user changed something" stays a real
+  // comparison even before the note has loaded.
+  const [baseValue, setBaseValue] = useState(() => note?.content ?? defaultValue)
+
   // The last value handed to onSave — edits newer than this are unflushed
   // local work an external note change must never clobber.
   const [lastSavedValue, setLastSavedValue] = useState<string | null>(null)
@@ -95,9 +100,15 @@ export function useEditorValue({
   if (note?.content !== prevNoteContent) {
     setPrevNoteContent(note?.content)
     if (note?.content !== undefined) {
-      const hasUnflushedEdits = editorValue !== prevNoteContent && editorValue !== lastSavedValue
+      // Compare against what the editor was last SEEDED with, not the previous
+      // note content: on a cold load the note is undefined for a beat (the
+      // store is still opening), so the editor seeds from `defaultValue` — and
+      // comparing that against `undefined` read as "the user has edits",
+      // leaving the arriving note unrendered behind a blank editor.
+      const hasUnflushedEdits = editorValue !== baseValue && editorValue !== lastSavedValue
       if (!hasUnflushedEdits) {
         _setEditorValue(note.content)
+        setBaseValue(note.content)
       }
     }
   }
