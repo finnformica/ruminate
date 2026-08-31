@@ -63,21 +63,29 @@ export function applyCollapseOverrides(
   return collapsed
 }
 
-/** Flip one block's state, expressed relative to the defaults. */
+/**
+ * Flip one block's state, expressed relative to the defaults.
+ *
+ * Every toggle first drops any existing opinion about the id, then records a
+ * new one only when it differs from the default. That keeps an id out of both
+ * lists at once — which was reachable (collapse a block the defaults left
+ * open, then let the document grow until the default policy collapses it too)
+ * and left the block permanently stuck: `applyCollapseOverrides` adds the
+ * collapsed list last, so it outvoted the expansion on every click. Dropping
+ * redundant overrides also lets a block return to following the default.
+ */
 export function toggleCollapseOverride(
   defaults: ReadonlySet<string>,
   overrides: CollapseOverrides,
   id: string,
 ): CollapseOverrides {
-  const isCollapsed = applyCollapseOverrides(defaults, overrides).has(id)
-  if (isCollapsed) {
-    return defaults.has(id)
-      ? { ...overrides, expanded: [...overrides.expanded, id] }
-      : { ...overrides, collapsed: overrides.collapsed.filter((x) => x !== id) }
-  }
-  return defaults.has(id)
-    ? { ...overrides, expanded: overrides.expanded.filter((x) => x !== id) }
-    : { ...overrides, collapsed: [...overrides.collapsed, id] }
+  const wantCollapsed = !applyCollapseOverrides(defaults, overrides).has(id)
+  const expanded = overrides.expanded.filter((x) => x !== id)
+  const collapsed = overrides.collapsed.filter((x) => x !== id)
+  if (wantCollapsed === defaults.has(id)) return { expanded, collapsed }
+  return wantCollapsed
+    ? { expanded, collapsed: [...collapsed, id] }
+    : { expanded: [...expanded, id], collapsed }
 }
 
 /**

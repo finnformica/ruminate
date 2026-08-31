@@ -34,6 +34,31 @@ describe("toggleCollapseOverride", () => {
     expect(applyCollapseOverrides(defaults, next).has("blk_deep1")).toBe(false)
   })
 
+  it("frees a block stuck in BOTH override lists", () => {
+    // Reachable without any bug: collapse a block the defaults leave open
+    // (recording it under `collapsed`), then let the document grow until the
+    // default policy collapses it too. The collapse list is applied last, so
+    // the block used to outvote every expansion and stick shut forever.
+    const stuck = { expanded: [], collapsed: ["blk_deep1"] }
+    expect(applyCollapseOverrides(defaults, stuck).has("blk_deep1")).toBe(true)
+
+    const next = toggleCollapseOverride(defaults, stuck, "blk_deep1")
+    expect(applyCollapseOverrides(defaults, next).has("blk_deep1")).toBe(false)
+    // The contradiction is gone, not merely outweighed.
+    expect(next.collapsed).not.toContain("blk_deep1")
+  })
+
+  it("never lets one id land in both lists, however many times it is toggled", () => {
+    let overrides: CollapseOverrides = { expanded: [], collapsed: ["blk_deep1"] }
+    for (let i = 0; i < 5; i++) {
+      overrides = toggleCollapseOverride(defaults, overrides, "blk_deep1")
+      const inBoth = overrides.expanded.filter((id) => overrides.collapsed.includes(id))
+      expect(inBoth).toEqual([])
+      // And no list grows duplicates as it is clicked.
+      expect(new Set(overrides.expanded).size).toBe(overrides.expanded.length)
+    }
+  })
+
   it("toggling twice returns to no overrides (fold-then-unfold is clean)", () => {
     let overrides = none
     overrides = toggleCollapseOverride(defaults, overrides, "blk_top")
