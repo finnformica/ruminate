@@ -182,7 +182,7 @@ const CLIPBOARD_HISTORY_ENTRIES: Shortcut[] = [
   {
     combos: ["Mod+v"],
     scope: "select",
-    description: "Paste blocks after the selection (rich text converts to markdown)",
+    description: "Paste blocks into the selection (rich text converts to markdown)",
     group: "Select mode",
   },
   {

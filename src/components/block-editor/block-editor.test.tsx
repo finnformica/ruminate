@@ -296,16 +296,29 @@ describe("select-mode paste", () => {
     })
   }
 
-  it("pastes parsed blocks after the selected block without entering edit mode", () => {
+  /** Texts of the blocks actually rendered (collapsed children are unmounted).
+   * Scoped to block bodies so the harness's serialized <pre> doesn't match. */
+  const renderedBlocks = (container: HTMLElement): string[] =>
+    Array.from(container.querySelectorAll('[data-testid="block-body"]')).map(
+      (el) => el.textContent ?? "",
+    )
+
+  it("pastes parsed blocks INTO the selected block, without entering edit mode", () => {
     const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
     const root = editorRoot(container)
     paste(root, "# New heading\r\n- new bullet")
     const md = getByTestId("serialized").textContent!
     const lines = md.split("\n").filter((l) => !l.includes("id::") && l.trim() !== "")
-    expect(lines).toEqual(["A", "# New heading", "- new bullet", "B"])
+    // Indented under A, not beside it: pasting onto a selected block links the
+    // content downstream from it — "paste here", not "paste next to".
+    expect(lines).toEqual(["A", "  # New heading", "  - new bullet", "B"])
+    // Nothing landed between A's subtree and B — B is still a root.
+    expect(lines.indexOf("B")).toBe(lines.length - 1)
     // No textarea opened; the last inserted block is highlighted.
     expect(container.querySelector("textarea")).toBeNull()
     expect(highlightedText(container)).toBe("new bullet")
+    // Neither pasted root has children, so nothing was folded away.
+    expect(renderedBlocks(container)).toContain("new bullet")
   })
 
   it("reminting keeps a pasted id:: from clobbering an existing block", () => {
@@ -336,7 +349,7 @@ describe("select-mode paste", () => {
       "a b", // the flat plain flavor loses the nesting…
       "<ul><li><b>a</b><ul><li>b</li></ul></li></ul>", // …the html keeps it
     )
-    expect(serializedLines(getByTestId)).toEqual(["A", "- **a**", "  - b", "B"])
+    expect(serializedLines(getByTestId)).toEqual(["A", "  - **a**", "    - b", "B"])
   })
 
   it("rebuilds the exact block tree from a Ruminate html payload", () => {
@@ -345,15 +358,56 @@ describe("select-mode paste", () => {
     const formats = richClipboardFormats("[ ] task\n  > child")
     const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
     paste(editorRoot(container), formats.plain, formats.html)
-    expect(serializedLines(getByTestId)).toEqual(["A", "[ ] task", "  > child", "B"])
+    // The whole tree arrived under A. The serialized doc is the source of
+    // truth here: the pasted root has a child, so it lands folded and the
+    // quote is not on screen.
+    expect(serializedLines(getByTestId)).toEqual(["A", "  [ ] task", "    > child", "B"])
+    expect(renderedBlocks(container)).toContain("task")
+    expect(renderedBlocks(container)).not.toContain("child")
   })
 
-  it("Mod+Shift+V pastes the plain flavor as one block, ignoring html", () => {
+  it("Mod+Shift+V pastes the plain flavor as one child block, ignoring html", () => {
     const { container, getByTestId } = render(<Harness initial={"A"} />)
     const root = editorRoot(container)
     fireEvent.keyDown(root, { key: "v", metaKey: true, shiftKey: true })
     paste(root, "plain one\nplain two", "<ul><li>rich</li></ul>")
-    expect(serializedLines(getByTestId)).toEqual(["A", "plain one plain two"])
+    expect(serializedLines(getByTestId)).toEqual(["A", "  plain one plain two"])
+  })
+
+  it("expands the target so the paste is visible, even when it was folded", () => {
+    const { container, getByTestId } = render(<Harness initial={"A\n  old\nB"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowLeft" }) // fold A — `old` leaves the DOM
+    expect(renderedBlocks(container)).not.toContain("old")
+    paste(root, "fresh")
+    // The content landed inside A, so A is unfolded rather than swallowing it.
+    expect(serializedLines(getByTestId)).toEqual(["A", "  fresh", "  old", "B"])
+    expect(renderedBlocks(container)).toContain("fresh")
+    expect(renderedBlocks(container)).toContain("old")
+  })
+
+  it("folds each pasted root that has children, so a subtree arrives as one line", () => {
+    const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
+    paste(editorRoot(container), "parent\n  kid\n    grandkid\nleaf")
+    // Both roots landed whole, children and all…
+    expect(serializedLines(getByTestId)).toEqual([
+      "A",
+      "  parent",
+      "    kid",
+      "      grandkid",
+      "  leaf",
+      "B",
+    ])
+    // …but only the roots are on screen: `parent` came in folded, and `leaf`
+    // has no children to fold.
+    expect(renderedBlocks(container)).toContain("parent")
+    expect(renderedBlocks(container)).toContain("leaf")
+    expect(renderedBlocks(container)).not.toContain("kid")
+    expect(renderedBlocks(container)).not.toContain("grandkid")
+    // The fold is real state, not a transient: unfolding shows the subtree.
+    fireEvent.keyDown(editorRoot(container), { key: "ArrowUp" }) // select `parent`
+    fireEvent.keyDown(editorRoot(container), { key: "ArrowRight" })
+    expect(renderedBlocks(container)).toContain("kid")
   })
 
   it("pasted content with its own marker defines the block type (no doubled #)", () => {
@@ -402,8 +456,15 @@ describe("paste as link (Ruminate payload with ids)", () => {
     paste(editorRoot(container), formats.plain, formats.html)
 
     // The node arrives as itself (original ids) with the store's current
-    // content — never the clipboard bytes.
-    expect(serializedLines(getByTestId)).toEqual(["A", "- live from store", "  - live child", "B"])
+    // content — never the clipboard bytes — linked under A, the selection.
+    // Asserted against the serialized doc, since the linked root has a child
+    // and so lands folded.
+    expect(serializedLines(getByTestId)).toEqual([
+      "A",
+      "  - live from store",
+      "    - live child",
+      "B",
+    ])
     expect(docIds(getByTestId)).toContain("blk_xlink00000")
     expect(docIds(getByTestId)).toContain("blk_xchild0000")
     expect(getByTestId("serialized").textContent).not.toContain("clipboard stale")
@@ -417,7 +478,7 @@ describe("paste as link (Ruminate payload with ids)", () => {
     const { container, getByTestId } = render(<Harness initial={"A\nB"} resolveBlocks={resolver} />)
     paste(editorRoot(container), formats.plain, formats.html)
 
-    expect(serializedLines(getByTestId)).toEqual(["A", "- carried along", "B"])
+    expect(serializedLines(getByTestId)).toEqual(["A", "  - carried along", "B"])
     expect(docIds(getByTestId)).toContain("blk_xgone00000")
   })
 
@@ -433,28 +494,30 @@ describe("paste as link (Ruminate payload with ids)", () => {
 
     // Same-note paste stays a duplicate: the original keeps its id; the copy
     // is a fresh block (same-note mirroring is phase 2's occurrence form).
-    expect(serializedLines(getByTestId)).toEqual(["A", "  B", "C", "B"])
+    // The copy lands as C's child, not as C's sibling.
+    expect(serializedLines(getByTestId)).toEqual(["A", "  B", "C", "  B"])
     expect(docIds(getByTestId).filter((id) => id === idB)).toHaveLength(1)
   })
 
-  it("skips a block already a direct child of the insertion parent (twin), keeping its siblings", () => {
-    const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
+  it("skips a block already a direct child of the paste target (twin), keeping its siblings", () => {
+    // The target IS the insertion parent now, so the twin scope is its own
+    // children: B already hangs off A.
+    const { container, getByTestId } = render(<Harness initial={"A\n  B"} />)
     const before = getByTestId("serialized").textContent!
-    const idA = before.match(/A\n\s*id:: (\S+)/)![1]
-    const root = editorRoot(container)
-    fireEvent.keyDown(root, { key: "ArrowDown" }) // select B; parent = the root list
+    const idB = before.match(/B\n\s*id:: (\S+)/)![1]
+    const root = editorRoot(container) // A is selected on mount
 
-    // A alone: the whole paste is a no-op — it's already there.
-    const twinOnly = richClipboardFormats(`A\n  id:: ${idA}`)
+    // B alone: the whole paste is a no-op — it's already there.
+    const twinOnly = richClipboardFormats(`B\n  id:: ${idB}`)
     paste(root, twinOnly.plain, twinOnly.html)
     expect(getByTestId("serialized").textContent).toBe(before)
 
-    // A + an unknown sibling: A is skipped, the sibling still lands.
-    const mixed = richClipboardFormats(`A\n  id:: ${idA}\nZ new\n  id:: blk_znew000000`)
+    // B + an unknown sibling: B is skipped, the sibling still lands under A.
+    const mixed = richClipboardFormats(`B\n  id:: ${idB}\nZ new\n  id:: blk_znew000000`)
     paste(root, mixed.plain, mixed.html)
-    expect(serializedLines(getByTestId)).toEqual(["A", "B", "Z new"])
+    expect(serializedLines(getByTestId)).toEqual(["A", "  Z new", "  B"])
     expect(docIds(getByTestId)).toContain("blk_znew000000")
-    expect(docIds(getByTestId).filter((id) => id === idA)).toHaveLength(1)
+    expect(docIds(getByTestId).filter((id) => id === idB)).toHaveLength(1)
   })
 
   it("falls back to duplicating when the live subtree contains the paste target's ancestry (cycle)", () => {
@@ -484,9 +547,9 @@ describe("paste as link (Ruminate payload with ids)", () => {
     const formats = richClipboardFormats("- X\n  id:: blk_xcycle0000")
     paste(root, formats.plain, formats.html)
 
-    // The content lands as a plain duplicate: fresh ids throughout, P's id
-    // appears exactly once, and the original id was not linked in.
-    expect(serializedLines(getByTestId)).toEqual(["P", "  T", "  - X live", "    - P again"])
+    // The content lands as a plain duplicate under T: fresh ids throughout,
+    // P's id appears exactly once, and the original id was not linked in.
+    expect(serializedLines(getByTestId)).toEqual(["P", "  T", "    - X live", "      - P again"])
     const ids = docIds(getByTestId)
     expect(ids).not.toContain("blk_xcycle0000")
     expect(ids.filter((id) => id === idP)).toHaveLength(1)
@@ -519,10 +582,10 @@ describe("paste as link (Ruminate payload with ids)", () => {
       expect(captured["text/plain"]).toBe("A\n")
       expect(captured["text/html"]).toContain("x-ruminate-blocks")
 
-      // Paste after B: no resolver (the node is gone everywhere) — the
-      // clipboard content returns under the ORIGINAL id.
+      // Paste onto B: no resolver (the node is gone everywhere) — the
+      // clipboard content returns under the ORIGINAL id, as B's child.
       paste(root, captured["text/plain"], captured["text/html"])
-      expect(serializedLines(getByTestId)).toEqual(["B", "A"])
+      expect(serializedLines(getByTestId)).toEqual(["B", "  A"])
       expect(docIds(getByTestId)).toContain(idA)
     } finally {
       delete docAny.execCommand

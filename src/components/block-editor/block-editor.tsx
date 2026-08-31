@@ -17,8 +17,6 @@ import {
   duplicateBlocks,
   emptyBlock,
   indentBlock,
-  insertAfter,
-  insertBlocksAfter,
   insertBlocksAsFirstChildren,
   insertFirstChild,
   moveBlocks,
@@ -888,6 +886,13 @@ export function BlockEditor({
     })
   }
 
+  /** Drive collapse to an explicit state (paste lands its subtrees folded).
+   * `toggleCollapse` is the only setter the controlled caller exposes, so a
+   * block already in the wanted state is left alone rather than flipped. */
+  const setCollapsedState = (id: string, shouldCollapse: boolean) => {
+    if (collapsed.has(id) !== shouldCollapse) toggleCollapse(id)
+  }
+
   // Interpret a command's result: commit any doc change to history, toggle
   // collapse, and move focus/selection where the command asked.
   const applyFocus = (intent: FocusIntent) => {
@@ -1215,19 +1220,29 @@ export function BlockEditor({
     const text = event.clipboardData?.getData("text/plain") ?? ""
     const normalized = text.replace(/\r\n?/g, "\n")
     const target = selectedIds[selectedIds.length - 1] ?? selected
-    // Pasting "after" the zoomed title means the top of its body — a sibling
-    // would land outside the view.
-    const afterZoomTitle = zoomRootId !== null && target === zoomRootId
+    // Pasting onto a selected block puts the content INSIDE it — in the graph
+    // that is a link from the target down to what you pasted, which is what
+    // "paste here" means when a block is the thing selected (a sibling would
+    // be "paste next to"). The zoomed title reaches the same place: its body.
+
+    /** Land a pasted fragment under `target`: reveal the target so the paste
+     * is visible, and fold each pasted root so a big subtree arrives as one
+     * line rather than dumping its whole tree into the view. */
+    const settleAfterPaste = (rootIds: string[], nextDoc: BlockDoc) => {
+      setCollapsedState(target, false)
+      for (const id of rootIds) {
+        if ((nextDoc.blocks[id]?.children.length ?? 0) > 0) setCollapsedState(id, true)
+      }
+    }
     if (plain) {
       // Paste-as-plain: one new paragraph block, newlines collapsed to spaces
       // (a block is a single line in the serialized format). Bypasses the html
       // flavor entirely.
       if (normalized.trim() === "") return
       const fresh = emptyBlock(normalized.replace(/\s*\n+\s*/g, " ").trim())
-      const next = afterZoomTitle
-        ? insertFirstChild(doc, target, fresh)
-        : insertAfter(doc, target, fresh)
+      const next = insertFirstChild(doc, target, fresh)
       if (next === doc) return
+      setCollapsedState(target, false)
       history.commit(doc, next, { type: "structural" })
       setAnchorId(null)
       setFocus(null)
@@ -1245,12 +1260,11 @@ export function BlockEditor({
         // A Ruminate payload: link, duplicate, or skip per block — the
         // fragment arrives with its ids already settled, so it bypasses the
         // remint below (reminting would undo the link).
-        const fragment = embeddedPasteFragment(embedded, doc, target, afterZoomTitle, resolveBlocks)
+        const fragment = embeddedPasteFragment(embedded, doc, target, true, resolveBlocks)
         if (!fragment) return // every pasted block is already a child here
-        const linked = afterZoomTitle
-          ? insertBlocksAsFirstChildren(doc, target, fragment)
-          : insertBlocksAfter(doc, target, fragment)
+        const linked = insertBlocksAsFirstChildren(doc, target, fragment)
         if (!linked) return
+        settleAfterPaste(fragment.rootBlockIds, linked.doc)
         history.commit(doc, linked.doc, { type: "structural" })
         setAnchorId(null)
         setFocus(null)
@@ -1267,10 +1281,9 @@ export function BlockEditor({
     // Remint any pasted ids that already exist here (e.g. content copied with
     // its `id::` lines) so the paste never clobbers an existing block.
     const sub = remintCollidingIds(pasted, doc)
-    const result = afterZoomTitle
-      ? insertBlocksAsFirstChildren(doc, target, sub)
-      : insertBlocksAfter(doc, target, sub)
+    const result = insertBlocksAsFirstChildren(doc, target, sub)
     if (!result) return
+    settleAfterPaste(sub.rootBlockIds, result.doc)
     history.commit(doc, result.doc, { type: "structural" })
     setAnchorId(null)
     setFocus(null)
