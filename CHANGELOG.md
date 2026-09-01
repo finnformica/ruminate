@@ -28,6 +28,7 @@
 - A note's properties (the frontmatter block) are now stored as individual values instead of one opaque text blob, so they sync and query cleanly. Typical frontmatter looks exactly the same; unusual formatting may be tidied once to a canonical form (lists on one line, consistent quoting), and frontmatter with comments is kept byte-for-byte untouched.
 - Signups are open: anyone can now sign in with GitHub and get their own private notes database. The invite allowlist is switched off (it remains available if access ever needs gating again).
 - Settings → Storage now says "cloud" instead of naming the internal database, and the manual action reads "Push full copy to the cloud now".
+- The Settings footer now credits the app correctly: "Made by Finn Formica", with "Built on Lumen by Cole Bemis & contributors" beneath it, linking to Ruminate's author, the upstream project, and its author. Cole's personal signature mark, which the fork had been rendering as Ruminate's sign-off, is gone.
 
 ### Fixed
 

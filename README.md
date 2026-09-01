@@ -2,13 +2,17 @@
 
 A note-taking app that stores your notes as markdown files in a GitHub repository you own.
 
-Ruminate is built on the foundation of [**Lumen**](https://github.com/lumen-notes/lumen)
-by Cole Bemis & contributors (MIT). It keeps Lumen's design system, editor, and
-GitHub sync, trimmed down and re-hosted on Cloudflare:
+Ruminate is built by [Finn Formica](https://github.com/finnformica) on the
+foundation of [**Lumen**](https://github.com/lumen-notes/lumen) by Cole Bemis &
+contributors (MIT). It began as a fork and has since diverged substantially:
 
-- **Kept:** the full frontend (block/outline editor, calendar, command menu, tags,
-  templates, theming), GitHub OAuth login, and in-browser git sync via
-  `isomorphic-git`. State stays in **Jotai** + **XState**; schemas in **Zod**.
+- **From Lumen:** the design system (Tailwind theme, Radix / Base UI component
+  layer, typography, icons), the markdown/remark pipeline, the app shell and
+  routing, the calendar, command menu, tags and templates, and GitHub OAuth
+  login. State stays in **Jotai** + **XState**; schemas in **Zod**.
+- **Rewritten since:** the storage layer, the block/outline editor, and sync are
+  Ruminate's own work — Lumen's git-backed markdown files gave way to a local
+  database that replicates to Cloudflare D1.
 - **Removed:** the Supabase database and all AI features. Vercel is replaced by a
   **Cloudflare Worker** that serves the app and the small set of API endpoints.
 
@@ -92,6 +96,8 @@ npm run test         # vitest
 
 ## Credits & license
 
-Ruminate is derived from [Lumen](https://github.com/lumen-notes/lumen)
-(MIT © 2024 Lumen). The original license is preserved in [`LICENSE`](./LICENSE).
-Ruminate is likewise MIT-licensed.
+Ruminate is by [Finn Formica](https://github.com/finnformica), derived from
+[Lumen](https://github.com/lumen-notes/lumen) by [Cole Bemis](https://colebemis.com)
+& contributors (MIT © 2024 Lumen). Lumen's copyright notice is preserved
+alongside Ruminate's in [`LICENSE`](./LICENSE). Ruminate is likewise
+MIT-licensed.

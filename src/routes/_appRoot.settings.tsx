@@ -7,7 +7,6 @@ import { useSignOut } from "../components/github-auth"
 import { GitHubAvatar } from "../components/github-avatar"
 import { SettingsIcon16 } from "../components/icons"
 import { PageLayout } from "../components/page-layout"
-import { Signature } from "../components/signature"
 import { refreshDatabaseReplicaStatus, requestDatabaseFullPush } from "../data/database-mode"
 import {
   storageDiagnosticsAtom,
@@ -32,9 +31,29 @@ function RouteComponent() {
           <AppearanceSection />
           <StorageSection />
           <GitHubSection />
-          <div className="p-5 text-text-tertiary self-center flex flex-col gap-3 items-center">
+          <div className="flex flex-col items-center gap-1 self-center p-5 text-center text-text-tertiary">
             <span className="text-sm">
               Made by{" "}
+              <a
+                className="link decoration-text-tertiary"
+                href="https://github.com/finnformica"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Finn Formica
+              </a>
+            </span>
+            <span className="text-sm">
+              Built on{" "}
+              <a
+                className="link decoration-text-tertiary"
+                href="https://github.com/lumen-notes/lumen"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Lumen
+              </a>{" "}
+              by{" "}
               <a
                 className="link decoration-text-tertiary"
                 href="https://colebemis.com"
@@ -43,19 +62,8 @@ function RouteComponent() {
               >
                 Cole Bemis
               </a>{" "}
-              &{" "}
-              <a
-                className="link decoration-text-tertiary"
-                href="https://github.com/lumen-notes/lumen/graphs/contributors"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                friends
-              </a>
+              &amp; contributors
             </span>
-            <a href="https://colebemis.com" target="_blank" rel="noopener noreferrer">
-              <Signature width={100} />
-            </a>
           </div>
         </div>
       </div>
