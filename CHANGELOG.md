@@ -7,7 +7,7 @@
 - Pasting onto a selected block now puts the content **inside** it rather than next to it, and a pasted section arrives folded — you see the block you pasted, not its whole tree unpacked into the page. The block you pasted onto is opened so the paste is visible.
 - Refreshing a note no longer shows a blank editor. The page used to open in edit mode with nothing in it while the local database was still starting up, and only showed your writing after navigating away and back.
 
-- Renaming a note no longer leaves its old link dead: the old address now redirects to the renamed note (renames chain, so even older names keep working). Previously the old link opened an empty editor that could quietly mint a duplicate note under the dead name.
+- Renaming a note no longer leaves its old link dead: a note's address doesn't change when you rename it, so there is no old link to break. Previously the old link opened an empty editor that could quietly mint a duplicate note under the dead name.
 
 ### Removed
 
@@ -16,7 +16,7 @@
 ### Changed
 
 - Folding no longer changes under you as a note grows. A note still opens tidy the first time you see it on a device — headings expanded, two levels visible — but that is a starting point, not a rule that keeps reapplying: blocks added afterwards stay open, and nothing you unfolded quietly closes again. Folds you already have are kept as they are.
-- **Renaming a note is now instant, and can't break anything.** A note's name used to _be_ its identity — its filename, its address, and the thing every link pointed at — so renaming rewrote the note under a new name and abandoned the old one. Now every note has its own permanent identity and the name is simply one of its properties: renaming changes that property and nothing else. Its address never changes, so links, bookmarks and browser history keep working, and a rename can no longer collide with an edit you're making on another device. Old addresses from before this change still work too — they redirect to the note they belong to.
+- **Renaming a note is now instant, and can't break anything.** A note's name used to _be_ its identity — its filename, its address, and the thing every link pointed at — so renaming rewrote the note under a new name and abandoned the old one. Now every note has its own permanent identity and the name is simply one of its properties: renaming changes that property and nothing else. Its address never changes, so links, bookmarks and browser history keep working, and a rename can no longer collide with an edit you're making on another device.
 - Note names are free text now. A name can contain a colon, a question mark, brackets, a slash — anything you'd actually want to call a note — and two notes may share a name without one overwriting the other. Previously names were restricted to characters that were legal in a filename and had to be unique.
 - Daily and weekly notes are unchanged: they're still identified by their date (`2026-08-31`, `2026-W35`), because for those the date _is_ the name and never changes.
 - Published gists are now named after the note rather than its internal id, so a shared link shows a readable filename on GitHub.

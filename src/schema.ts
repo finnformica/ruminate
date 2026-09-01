@@ -43,11 +43,6 @@ export type Note = {
   url: string | null
   /** The alias to use when linking to this note, from alias frontmatter */
   alias: string | null
-  /**
-   * Former ids of this note, from `aliases` frontmatter. Recorded on rename so
-   * old note URLs redirect to the live note instead of opening an empty editor.
-   */
-  aliases: NoteId[]
   /** If the note is pinned */
   pinned: boolean
   /** When the note was last updated (from `updated_at` frontmatter), null if not set */

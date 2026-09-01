@@ -172,9 +172,9 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
 
     const store = await openSqlNoteStore(driver)
     // The ladder composes: version 1 typed the block, version 2 re-keyed the
-    // page to a minted id and turned its old id into the title (and an alias).
+    // page to a minted id and turned its old id into the title.
     expect(await store.getNote(derivePageId("a"))).toBe(
-      "---\ntitle: a\npinned: true\naliases: [a]\n---\n[ ] buy milk\n  id:: blk_aaaaaaaaaa\n",
+      "---\ntitle: a\npinned: true\n---\n[ ] buy milk\n  id:: blk_aaaaaaaaaa\n",
     )
     expect(await store.getNote("a")).toBe(null)
     const rows = await driver.exec("SELECT type, updated_at FROM nodes WHERE id = 'blk_aaaaaaaaaa'")
@@ -219,7 +219,7 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
     const store = await openSqlNoteStore(driver)
     // The row survives the DDL step; page identity then re-keys it, so the
     // note is reachable under its minted id (with its old id as the title).
-    expect(await store.getNote(derivePageId("a"))).toBe("---\ntitle: a\naliases: [a]\n---\n")
+    expect(await store.getNote(derivePageId("a"))).toBe("---\ntitle: a\n---\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
       { value: "3" },
     ])
@@ -248,16 +248,16 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
     expect(await reopened.getNote("blk_page0000")).toBe("keep me\n  id:: blk_aaaaaaaaaa\n")
   })
 
-  it("re-keys a title-shaped page id on open, preserving content and the old URL", async () => {
+  it("re-keys a title-shaped page id on open, preserving its content", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await store.writeNotes({ "Flow Engineering": "body\n  id:: blk_aaaaaaaaaa\n" })
 
     const reopened = await openSqlNoteStore(driver)
     const minted = derivePageId("Flow Engineering")
-    // Content survives under the minted id, carrying its former name as both
-    // the title and an alias (which is what keeps the old URL resolving).
+    // Content survives under the minted id, carrying its former name as the
+    // title. The old id is not addressable any more.
     expect(await reopened.getNote(minted)).toBe(
-      "---\ntitle: Flow Engineering\naliases: [Flow Engineering]\n---\nbody\n  id:: blk_aaaaaaaaaa\n",
+      "---\ntitle: Flow Engineering\n---\nbody\n  id:: blk_aaaaaaaaaa\n",
     )
     expect(await reopened.getNote("Flow Engineering")).toBe(null)
     // The block kept its own id and is still parented by the page.

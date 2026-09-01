@@ -1,7 +1,7 @@
 import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import { upgradedPageProps } from "./frontmatter-props"
 import { normalizeBlockText } from "./normalize-block-text"
-import { derivePageIdAvoiding, needsMintedId, pagePropsWithAlias } from "./page-identity"
+import { derivePageIdAvoiding, needsMintedId } from "./page-identity"
 import type { SqlDriver, SqlStatement } from "./sql-driver"
 
 /**
@@ -49,8 +49,9 @@ import type { SqlDriver, SqlStatement } from "./sql-driver"
  * - Every live `type='page'` node whose id is still its title (not already
  *   `blk_`-prefixed, and not a date/week natural key) is re-keyed to a minted
  *   `blk_` id. The old id becomes the page's `text` — the title, now data —
- *   and is recorded in `props.aliases` so its URL keeps resolving. Every
- *   `link` row naming the old id is re-pointed at the new one.
+ *   and the page's `props` carry over unchanged. Every `link` row naming the
+ *   old id is re-pointed at the new one. Pre-migration URLs are not preserved:
+ *   an id nothing resolves falls through to the new-note editor.
  * - **The mint is derived, not random** (`page-identity.ts`), and that is
  *   load-bearing: this transform runs independently on the browser store and
  *   on the D1 partition, so a random id would give one page two identities and
@@ -187,7 +188,7 @@ export function planDataVersion1(nodes: NodeRow[], links: LinkRow[], now: number
  * every engine computes the identical result (see the module header).
  *
  * For each page still keyed by its title: write the minted row (title moved
- * into `text`, old id recorded as an alias), tombstone the old row, and
+ * into `text`, props carried over untouched), tombstone the old row, and
  * re-point every link naming it — again as a fresh row plus a tombstone of the
  * old edge. Returns only changed rows, and nothing at all once every page is
  * minted, which is what makes a rerun a no-op.
@@ -218,9 +219,9 @@ export function planDataVersion2(
       id,
       type: PAGE_TYPE,
       // The old id WAS the title — that is the whole finding this migration
-      // answers — so it becomes the page's text, and its own alias.
+      // answers — so it becomes the page's text.
       text: page.id,
-      props: pagePropsWithAlias(page.props, page.id),
+      props: page.props,
       updated_at: now,
     })
     changedNodes.push({ ...page, updated_at: now, deleted_at: now })

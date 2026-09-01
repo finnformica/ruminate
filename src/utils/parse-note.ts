@@ -243,7 +243,6 @@ function _parseNote(id: NoteId, content: string): Note {
     title,
     url,
     alias: typeof frontmatter.alias === "string" ? frontmatter.alias : null,
-    aliases: Array.isArray(frontmatter.aliases) ? frontmatter.aliases.map(String) : [],
     pinned: frontmatter.pinned === true,
     updatedAt,
     dates: Array.from(dates),

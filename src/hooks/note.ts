@@ -6,7 +6,6 @@ import { useDeleteNoteFile, useWriteNotes } from "../data/store"
 import { Note, NoteId } from "../schema"
 import { parseFrontmatter, updateFrontmatterValue } from "../utils/frontmatter"
 import { deleteGist } from "../utils/gist"
-import { resolveNoteId } from "../utils/note-alias"
 
 const EMPTY_MENTIONS: NoteId[] = []
 
@@ -26,20 +25,6 @@ export function useNoteById(id: NoteId | undefined) {
   )
   const note = useAtomValue(noteAtom)
   return note
-}
-
-/**
- * Resolve a note URL's id: itself when a live note exists, the live note's id
- * when the id is a former id recorded in `aliases` (the route redirects
- * there), or null when the id is brand new (the route shows the new-note
- * editor). See `resolveNoteId` in src/utils/note-alias.ts.
- */
-export function useResolvedNoteId(id: NoteId | undefined) {
-  const resolvedAtom = React.useMemo(
-    () => selectAtom(notesAtom, (notes) => (id ? resolveNoteId(notes, id) : null)),
-    [id],
-  )
-  return useAtomValue(resolvedAtom)
 }
 
 /** Get the notes referencing a date/week id (via frontmatter date properties),

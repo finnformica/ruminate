@@ -8,7 +8,6 @@ import {
   isMintedNoteId,
   liftTitleFromFrontmatter,
   needsMintedId,
-  pagePropsWithAlias,
 } from "./page-identity"
 
 describe("derivePageId", () => {
@@ -114,44 +113,5 @@ describe("the title's ride through the <id>.md seam", () => {
     expect(emittedPageTitle("blk_aaaaaaaaaa", "blk_aaaaaaaaaa")).toBe(null)
     expect(emittedPageTitle("blk_aaaaaaaaaa", "")).toBe(null)
     expect(emittedPageTitle("blk_aaaaaaaaaa", "Flow")).toBe("Flow")
-  })
-})
-
-describe("pagePropsWithAlias", () => {
-  it("records an alias on a page with no props at all", () => {
-    expect(pagePropsWithAlias(null, "Old Name")).toBe(JSON.stringify({ aliases: ["Old Name"] }))
-  })
-
-  it("appends to existing entries, keeping the other props", () => {
-    expect(pagePropsWithAlias(JSON.stringify({ pinned: true }), "Old")).toBe(
-      JSON.stringify({ pinned: true, aliases: ["Old"] }),
-    )
-    expect(pagePropsWithAlias(JSON.stringify({ aliases: ["First"] }), "Second")).toBe(
-      JSON.stringify({ aliases: ["First", "Second"] }),
-    )
-  })
-
-  it("is idempotent: re-recording the same alias changes nothing", () => {
-    const props = JSON.stringify({ aliases: ["Old"] })
-    expect(pagePropsWithAlias(props, "Old")).toBe(props)
-  })
-
-  it("extends the legacy raw shape without losing its comments", () => {
-    // Frontmatter stays raw precisely because entries cannot carry comments —
-    // so the alias is appended as a line rather than through a lossy upgrade.
-    const legacy = JSON.stringify({ frontmatter: "# a comment\npinned: true" })
-    const next = JSON.parse(pagePropsWithAlias(legacy, "Old")) as { frontmatter: string }
-    expect(next.frontmatter).toBe("# a comment\npinned: true\naliases: [Old]")
-  })
-
-  it("merges into an existing aliases line in the legacy shape", () => {
-    const legacy = JSON.stringify({ frontmatter: "# c\naliases: [First]" })
-    const next = JSON.parse(pagePropsWithAlias(legacy, "Second")) as { frontmatter: string }
-    expect(next.frontmatter).toBe("# c\naliases: [First, Second]")
-  })
-
-  it("leaves malformed props untouched rather than destroying them", () => {
-    expect(pagePropsWithAlias("not json", "Old")).toBe("not json")
-    expect(pagePropsWithAlias("[1,2]", "Old")).toBe("[1,2]")
   })
 })

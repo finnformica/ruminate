@@ -76,10 +76,8 @@ export function describeDataVersionConformance(name: string, makeDriver: () => S
         [`${minted}|page|p`, "blk_a|todo|buy milk", "blk_b|text|plain"].sort(),
       )
       // Version 1 upgraded the props; version 2 carried them onto the minted
-      // row and appended the old id as an alias.
-      expect(live.find((row) => row.id === minted)?.props).toBe(
-        JSON.stringify({ pinned: true, aliases: ["p"] }),
-      )
+      // row verbatim, adding nothing of its own.
+      expect(live.find((row) => row.id === minted)?.props).toBe(JSON.stringify({ pinned: true }))
       // The page's old id survives only as a tombstone, so the re-key travels.
       expect(rows.find((row) => row.id === "p")?.deleted_at).toEqual(expect.any(Number))
       // Rewritten rows get a fresh updated_at so they replicate; untouched

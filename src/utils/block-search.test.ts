@@ -25,7 +25,6 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     title: "",
     url: null,
     alias: null,
-    aliases: [],
     pinned: false,
     updatedAt: null,
     dates: [],

@@ -26,7 +26,7 @@ import {
   weeklyTemplateAtom,
 } from "../global-state"
 import { useEditorValue } from "../hooks/editor-value"
-import { useNoteById, useRenameNote, useResolvedNoteId, useSaveNote } from "../hooks/note"
+import { useNoteById, useRenameNote, useSaveNote } from "../hooks/note"
 import { Template, Width, fontSchema, widthSchema } from "../schema"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
@@ -115,21 +115,8 @@ function NotePage() {
   const saveNote = useSaveNote()
   const getNoteContents = useGetNoteContents()
 
-  // A dead id left behind by a rename redirects to the live note (recorded in
-  // its `aliases` frontmatter) instead of opening an empty duplicate. Only a
-  // genuinely new id falls through to the new-note editor below.
-  const resolvedNoteId = useResolvedNoteId(noteId)
-  const redirectNoteId =
-    !note && resolvedNoteId && resolvedNoteId !== noteId ? resolvedNoteId : null
-  React.useEffect(() => {
-    if (!redirectNoteId) return
-    navigate({
-      to: "/notes/$",
-      params: { _splat: redirectNoteId },
-      search: (prev) => ({ ...prev }),
-      replace: true,
-    })
-  }, [redirectNoteId, navigate])
+  // An id no live note claims falls through to the new-note editor below —
+  // renames never leave a dead id behind, since the id never changes.
 
   // Show "Saving…" the instant a save is dispatched, rather than waiting for
   // the debounced sync to actually start. Cleared when the sync finishes (or a
@@ -271,9 +258,6 @@ function NotePage() {
   useHotkeys(APP_SHORTCUTS.focusEditor, () => setRefocusSignal((n) => n + 1), {
     preventDefault: true,
   })
-
-  // Redirecting to the live note (see above) — render nothing in the interim.
-  if (redirectNoteId) return null
 
   return (
     <PageLayout

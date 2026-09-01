@@ -9,9 +9,17 @@ end of this document — ordinary `blk_` ids, no wikilink machinery. Extends
 Sections §3 (wikilink semantics) and the parts of §4–§5 that depend on it are
 kept for the record but describe machinery that was **never built**: wikilinks
 were removed before this landed, so there are no name-keyed references to
-resolve. What shipped is §2(a) plus the date carve-out, the alias-based URL
-compatibility of §5.5, and the migration of §5.3 — with one deliberate
-divergence, noted there.
+resolve. What shipped is §2(a) plus the date carve-out and the migration of
+§5.3 — with one deliberate divergence, noted there.
+
+**Aliases were also dropped** (amendment 4). Every mention of `props.aliases`
+below — §3's rename-by-alias resolution, §5.5's permanent URL compatibility,
+and the (c) alias map — is likewise a record of machinery that is not in the
+codebase. Because a rename is now a property change that never creates a dead
+id, the migration was the only thing that would ever have written an alias, and
+it no longer does. Concretely: **pre-migration `/notes/<title>` URLs no longer
+resolve.** An id nothing claims falls through to the new-note editor, exactly
+as any unrecognized id does.
 
 ## File map (as built)
 
@@ -23,7 +31,6 @@ divergence, noted there.
 | Tenant-scoped half of the write        | `worker/tenancy-db.ts` (`tenantCorpus`)                                                                                     |
 | New notes mint `blk_` ids              | `src/utils/note-id.ts` (`generateNoteId`)                                                                                   |
 | Rename = set the title                 | `src/hooks/note.ts` (`useRenameNote`), `src/components/block-editor/note-title.tsx`, `src/components/note-actions-menu.tsx` |
-| Old-URL resolution                     | `src/utils/note-alias.ts` (`resolveNoteId`), route redirect in `src/routes/_appRoot.notes_.$.tsx`                           |
 | Title in the display ladder            | `src/utils/parse-note.ts`; `title` reserved in `src/utils/frontmatter.ts`                                                   |
 | Name (not id) shown to the user        | `nav-items.tsx`, `note-list.tsx`, `command-menu.tsx`, `search-results.tsx`, the note route header                           |
 | Gist filenames                         | `src/utils/gist.ts`                                                                                                         |
@@ -206,7 +213,7 @@ page temporarily wins the name, deterministically, until the user retitles.
 | Surface                   | Where                                                                                                                         | Change under (a)                                                                                                                                                                                                                                                                                                                |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Route / deep links        | `_appRoot.notes_.$.tsx:88,304`; `?heading=`/`?block=` params `:43-47`                                                         | Splat accepts id or name (name resolves + canonicalizes). `?block=` (`blk_` ids) and `?heading=` (text) untouched.                                                                                                                                                                                                              |
-| Rename flow               | `note.ts:69-128`, `update-wikilinks.ts`, `_appRoot.notes_.$.tsx:246-290`, `note-title.tsx`                                    | `useRenameNote` shrinks to a title-set (+ alias append); post-rename `navigate` deleted — the URL never changes. `updateWikilinks` retires.                                                                                                                                                                                     |
+| Rename flow               | `note.ts:69-128`, `update-wikilinks.ts`, `_appRoot.notes_.$.tsx:246-290`, `note-title.tsx`                                    | `useRenameNote` shrinks to a title-set; post-rename `navigate` deleted — the URL never changes. `updateWikilinks` retires.                                                                                                                                                                                                      |
 | Files seam                | `markdownFilesAtom` (`global-state.ts:218-220,241-244`), `database-mode.ts:169,177,187-188,340`                               | Keys become `<pg id>.md`. The title travels as a projection-owned `title:` frontmatter key: the rollup injects it, `docToGraphParts` lifts it back into node `text`, `parseNote` prefers it over the first `# ` heading (`parse-note.ts:48-58`). The one-atom markdown seam survives intact — and exports carry their titles.   |
 | Note search               | `noteSearcherAtom` keys incl. `note.id` (`global-state.ts:322-328`); `id:`/`title:`/`link:` filters (`search-notes.ts:21-45`) | `note.id` drops out of fuzzy keys (opaque); `title`/`displayName`/`alias` carry it. `link:`/`backlink:` filters compare resolved ids (§3). Backlink queries built as `` `link:"${noteId}"` `` (`_appRoot.notes_.$.tsx:118,429`) keep working — they already pass the id.                                                        |
 | Block search              | hits carry `noteId` (`src/utils/block-search.ts:125-132`)                                                                     | Unchanged — ids flow through to navigation; display uses the note's `displayName` as it does now.                                                                                                                                                                                                                               |
@@ -236,8 +243,8 @@ that ladder.
 3. **The transform (data_version 2).** In one transaction per corpus: for each
    live `type='page'` node whose id is not a date/week literal and not already
    minted — mint a fresh `blk_` id; insert the new node row with `text` = the
-   old id (the name becomes the title) and `props` carried over plus the old
-   id appended to `aliases`; repoint every `link` row
+   old id (the name becomes the title) and `props` carried over unchanged;
+   repoint every `link` row
    (`source_id`/`destination_id`); tombstone the old rows; stamp fresh
    `updated_at` on every touched row; set `data_version = 2`.
 
@@ -267,11 +274,16 @@ that ladder.
    corpus with a re-seedable replica this was judged acceptable against the
    cost of the fence. It is the one place this migration is weaker than the
    original design.
-5. **URL backward compatibility, permanent.** Name-shaped `/notes/<name>`
-   URLs resolve through the index forever (titles first, aliases second) —
-   old bookmarks, old gists' back-references, and browser history keep
-   working with zero stored redirect data for the migration itself, because
-   step 3 made every old id a current title.
+5. **URL backward compatibility — planned, then dropped** (amendment 4). The
+   plan was for name-shaped `/notes/<name>` URLs to keep resolving forever
+   through the index (titles first, aliases second). What ships instead is
+   nothing: **a pre-migration URL no longer resolves**, and an id nothing
+   claims falls through to the new-note editor, the same as any unrecognized
+   id. The compatibility layer only ever had one producer — the migration
+   recording each page's former id — and since a rename now changes a property
+   and never orphans an id, no future rename would add to it. A permanent
+   resolution path for a one-time, single-tenant, four-note corpus was judged
+   not worth its weight.
 6. **Reversibility.** While every title is still unique and matches
    `NOTE_ID_REGEX`, the inverse transform (`id := text`) restores the old
    world exactly — that window closes as users adopt rich or duplicate
@@ -314,9 +326,10 @@ resolution code is step 1 of (a) anyway.
 - Whether the tidy action ("update links to new title") ships with v2 or
   later.
 - Slug format for gist filenames (readable title-slug vs raw `pg_` id).
-- Whether `props.aliases` folds into the user-visible `alias` frontmatter
-  (one alias concept, not two) — leaning yes: rename appends to the same
-  list the user can already edit.
+- ~~Whether `props.aliases` folds into the user-visible `alias` frontmatter~~
+  — moot: `props.aliases` was never shipped (amendment 4). There is one alias
+  concept, the user-visible `alias` frontmatter, and it is unrelated to
+  identity.
 
 ## Amendments (2026-08-31, decided with Finn)
 
@@ -333,4 +346,16 @@ resolution code is step 1 of (a) anyway.
 3. **The rename dead-URL bug is being fixed independently** (ahead of full
    page identity) via the option-(c) partial this document described:
    `props.aliases` recorded on rename + route-level redirect — which
-   remains step 1 of the full design.
+   remains step 1 of the full design. _Superseded by amendment 4: the full
+   design landed first, which removed the bug at its source._
+4. **Aliases are removed entirely** (2026-09-01). Minted ids fix the dead-URL
+   bug by construction — a rename changes a property, so no id is ever
+   orphaned and there is nothing for an alias to point at. That left the
+   version-2 migration as the sole producer of `props.aliases`, purely to
+   keep pre-migration `/notes/<title>` URLs alive, and the whole chain
+   (`pagePropsWithAlias`, `resolveNoteId`, `useResolvedNoteId`, the route
+   redirect, `Note.aliases`) existed to serve that one write. It is deleted.
+   **The consequence, stated plainly: a URL from before the migration no
+   longer resolves** — it falls through to the new-note editor like any
+   unrecognized id. This was accepted for a single-tenant corpus of a handful
+   of notes, and it is the only thing lost.

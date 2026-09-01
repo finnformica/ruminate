@@ -303,8 +303,10 @@ The ladder currently has two rungs, and they compose in one pass and one
 write: **version 1** normalizes near-miss markers and upgrades legacy raw
 frontmatter props; **version 2** mints page ids
 (docs/page-identity-design.md) — re-keying every page still named by its
-title, moving that name into `text`, recording it in `props.aliases` so its
-old URL still resolves, and re-pointing every link row that named it. Version
+title, moving that name into `text` (its `props` carry over unchanged), and
+re-pointing every link row that named it. The old id is not preserved as an
+address: a pre-migration `/notes/<title>` URL no longer resolves and falls
+through to the new-note editor, like any unrecognized id. Version
 2 is why the determinism above is load-bearing rather than merely tidy: it
 mints from a hash of the old id, so the browser store and the D1 partition
 independently arrive at the same new id instead of forking one page into two.

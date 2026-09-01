@@ -133,9 +133,12 @@ describe("planDataVersion2 (pure)", () => {
   const ids = (rows: { id: string; deleted_at?: number }[]) =>
     rows.map((row) => `${row.id}${row.deleted_at === undefined ? "" : ":dead"}`)
 
-  it("re-keys a title-keyed page, moving the title into text and props.aliases", () => {
+  it("re-keys a title-keyed page, moving the title into text and carrying props over", () => {
     const { nodes } = planDataVersion2(
-      [node("Flow Engineering", "page", "Flow Engineering"), node("blk_a", "text", "body")],
+      [
+        node("Flow Engineering", "page", "Flow Engineering", JSON.stringify({ pinned: true })),
+        node("blk_a", "text", "body"),
+      ],
       [link("Flow Engineering", "blk_a")],
       999,
     )
@@ -145,7 +148,10 @@ describe("planDataVersion2 (pure)", () => {
       id: minted,
       type: "page",
       text: "Flow Engineering",
-      props: JSON.stringify({ aliases: ["Flow Engineering"] }),
+      // Props travel verbatim: the re-key adds nothing of its own, so the old
+      // id survives only as the title. Its URL is gone — an id nothing
+      // resolves opens the new-note editor.
+      props: JSON.stringify({ pinned: true }),
       updated_at: 999,
     })
     // The old row is retired, never hard-deleted, so the re-key replicates.
