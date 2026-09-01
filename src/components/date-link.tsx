@@ -27,7 +27,6 @@ export function DateLink({ date, text, className }: DateLinkProps) {
       title: "",
       url: null,
       alias: null,
-      aliases: [],
       pinned: false,
       updatedAt: null,
       dates: [],

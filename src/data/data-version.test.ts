@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import { describeDataVersionConformance } from "./data-version-conformance"
-import { planDataVersion1 } from "./data-version"
+import { planDataVersion1, planDataVersion2 } from "./data-version"
+import { derivePageId } from "./page-identity"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 
 const node = (
@@ -125,6 +126,102 @@ describe("planDataVersion1 (pure)", () => {
       999,
     )
     expect(changed.map((row) => row.id)).toEqual(["blk_x"])
+  })
+})
+
+describe("planDataVersion2 (pure)", () => {
+  const ids = (rows: { id: string; deleted_at?: number }[]) =>
+    rows.map((row) => `${row.id}${row.deleted_at === undefined ? "" : ":dead"}`)
+
+  it("re-keys a title-keyed page, moving the title into text and carrying props over", () => {
+    const { nodes } = planDataVersion2(
+      [
+        node("Flow Engineering", "page", "Flow Engineering", JSON.stringify({ pinned: true })),
+        node("blk_a", "text", "body"),
+      ],
+      [link("Flow Engineering", "blk_a")],
+      999,
+    )
+    const minted = derivePageId("Flow Engineering")
+    expect(ids(nodes)).toEqual([minted, "Flow Engineering:dead"])
+    expect(nodes[0]).toEqual({
+      id: minted,
+      type: "page",
+      text: "Flow Engineering",
+      // Props travel verbatim: the re-key adds nothing of its own, so the old
+      // id survives only as the title. Its URL is gone — an id nothing
+      // resolves opens the new-note editor.
+      props: JSON.stringify({ pinned: true }),
+      updated_at: 999,
+    })
+    // The old row is retired, never hard-deleted, so the re-key replicates.
+    expect(nodes[1].deleted_at).toBe(999)
+  })
+
+  it("re-points every link naming the old page id", () => {
+    const { links } = planDataVersion2(
+      [node("p", "page", "p"), node("blk_a", "text", "a"), node("blk_b", "text", "b")],
+      [link("p", "blk_a", "a0"), link("blk_a", "blk_b", "a0")],
+      999,
+    )
+    const minted = derivePageId("p")
+    // The page's own edge moves; an edge between two blocks is untouched.
+    expect(links.map((row) => `${row.source_id}→${row.destination_id}`)).toEqual([
+      `${minted}→blk_a`,
+      "p→blk_a",
+    ])
+    expect(links[0].deleted_at).toBeUndefined()
+    expect(links[1].deleted_at).toBe(999)
+    expect(links[0].sort_key).toBe("a0")
+  })
+
+  it("re-points a link on BOTH ends when a block is shared between two pages", () => {
+    const { links } = planDataVersion2(
+      [node("p", "page", "p"), node("q", "page", "q")],
+      [link("p", "q", "a0")],
+      999,
+    )
+    expect(links[0].source_id).toBe(derivePageId("p"))
+    expect(links[0].destination_id).toBe(derivePageId("q"))
+  })
+
+  it("leaves date and week pages entirely alone", () => {
+    expect(
+      planDataVersion2(
+        [node("2026-08-31", "page", "2026-08-31"), node("2026-W35", "page", "2026-W35")],
+        [],
+        999,
+      ),
+    ).toEqual({ nodes: [], links: [] })
+  })
+
+  it("returns nothing once every page is minted (idempotent by construction)", () => {
+    expect(
+      planDataVersion2(
+        [node("blk_page00000", "page", "Flow Engineering"), node("blk_a", "text", "body")],
+        [link("blk_page00000", "blk_a")],
+        999,
+      ),
+    ).toEqual({ nodes: [], links: [] })
+  })
+
+  it("resolves a derived-id collision with an existing row, deterministically", () => {
+    // Seed the corpus with the id "p" would otherwise mint.
+    const occupied = derivePageId("p")
+    const { nodes } = planDataVersion2(
+      [node("p", "page", "p"), node(occupied, "text", "an unrelated block")],
+      [],
+      999,
+    )
+    expect(nodes[0].id).toBe(derivePageId("p", 1))
+    expect(nodes[0].id).not.toBe(occupied)
+  })
+
+  it("mints independently of row order, so two engines cannot disagree", () => {
+    const rows = [node("a", "page", "a"), node("b", "page", "b"), node("c", "page", "c")]
+    const forward = planDataVersion2(rows, [], 999).nodes.map((row) => row.id)
+    const reversed = planDataVersion2([...rows].reverse(), [], 999).nodes.map((row) => row.id)
+    expect(new Set(forward)).toEqual(new Set(reversed))
   })
 })
 

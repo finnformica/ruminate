@@ -89,7 +89,7 @@ function typographyFor(type: BlockSearchType): string {
   return ""
 }
 
-/** `note.md › Ancestor › Ancestor` — where this block lives. */
+/** `Note name › Ancestor › Ancestor` — where this block lives. */
 function Breadcrumb({ hit, compact }: { hit: BlockHit; compact: boolean }) {
   return (
     <div
@@ -100,7 +100,7 @@ function Breadcrumb({ hit, compact }: { hit: BlockHit; compact: boolean }) {
     >
       <NoteFavicon note={hit.note} className="shrink-0" />
       <span className="truncate">
-        {hit.noteId}
+        {hit.note.displayName}
         {hit.ancestors.map((ancestor) => (
           <React.Fragment key={ancestor.id}>
             <span className="px-1 text-text-tertiary">›</span>

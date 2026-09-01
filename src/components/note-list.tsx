@@ -409,9 +409,10 @@ export function NoteList({
                         <GlobeIcon16 className="mr-2 coarse:mr-3 shrink-0 text-border-focus" />
                       ) : null}
                       <span className="truncate text-text-secondary">
-                        {/* Show the filename (id), matching the page header and
-                            sidebar — not the note's first heading. */}
-                        <span className="text-text">{note.id}</span>
+                        {/* Show the note's name, matching the page header and
+                            sidebar — ids are opaque now, so that is the title
+                            (docs/page-identity-design.md). */}
+                        <span className="text-text">{note.displayName}</span>
                       </span>
                     </Link>
                   </li>

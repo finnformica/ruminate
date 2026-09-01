@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 import migration0001 from "../../migrations/0001_init.sql?raw"
 import migration0002 from "../../migrations/0002_nodes.sql?raw"
 import { describeNoteStoreConformance } from "./note-store-conformance"
+import { derivePageId } from "./page-identity"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { openSqlNoteStore } from "./sql-note-store"
 
@@ -170,14 +171,17 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
     ])
 
     const store = await openSqlNoteStore(driver)
-    expect(await store.getNote("a")).toBe(
-      "---\npinned: true\n---\n[ ] buy milk\n  id:: blk_aaaaaaaaaa\n",
+    // The ladder composes: version 1 typed the block, version 2 re-keyed the
+    // page to a minted id and turned its old id into the title.
+    expect(await store.getNote(derivePageId("a"))).toBe(
+      "---\ntitle: a\npinned: true\n---\n[ ] buy milk\n  id:: blk_aaaaaaaaaa\n",
     )
+    expect(await store.getNote("a")).toBe(null)
     const rows = await driver.exec("SELECT type, updated_at FROM nodes WHERE id = 'blk_aaaaaaaaaa'")
     expect(rows[0].type).toBe("todo")
     // Fresh updated_at → the rewritten row wins LWW and replicates.
     expect(Number(rows[0].updated_at)).toBeGreaterThan(100)
-    expect(await store.getMeta("data_version")).toBe("1")
+    expect(await store.getMeta("data_version")).toBe("2")
   })
 
   it("migrates a v1 database in place via 0002 (v1 tables dropped)", async () => {
@@ -213,14 +217,16 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
     ])
 
     const store = await openSqlNoteStore(driver)
-    expect(await store.getNote("a")).toBe("\n")
+    // The row survives the DDL step; page identity then re-keys it, so the
+    // note is reachable under its minted id (with its old id as the title).
+    expect(await store.getNote(derivePageId("a"))).toBe("---\ntitle: a\n---\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
       { value: "3" },
     ])
-    // Existing rows are live: a nullable column means NULL = never deleted.
-    expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = 'a'")).toEqual([
-      { deleted_at: null },
-    ])
+    // The minted row is live: a nullable column means NULL = never deleted.
+    expect(
+      await driver.exec("SELECT deleted_at FROM nodes WHERE id = ?", [derivePageId("a")]),
+    ).toEqual([{ deleted_at: null }])
   })
 
   it("resets and re-migrates a database with an unknown schema_version", async () => {
@@ -237,9 +243,78 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
 
   it("keeps existing data when reopening a database with the current schema", async () => {
     const { driver, store } = await makeStoreWithDriver()
-    await store.writeNotes({ a: "keep me\n  id:: blk_aaaaaaaaaa\n" })
+    await store.writeNotes({ blk_page0000: "keep me\n  id:: blk_aaaaaaaaaa\n" })
     const reopened = await openSqlNoteStore(driver)
-    expect(await reopened.getNote("a")).toBe("keep me\n  id:: blk_aaaaaaaaaa\n")
+    expect(await reopened.getNote("blk_page0000")).toBe("keep me\n  id:: blk_aaaaaaaaaa\n")
+  })
+
+  it("re-keys a title-shaped page id on open, preserving its content", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    await store.writeNotes({ "Flow Engineering": "body\n  id:: blk_aaaaaaaaaa\n" })
+
+    const reopened = await openSqlNoteStore(driver)
+    const minted = derivePageId("Flow Engineering")
+    // Content survives under the minted id, carrying its former name as the
+    // title. The old id is not addressable any more.
+    expect(await reopened.getNote(minted)).toBe(
+      "---\ntitle: Flow Engineering\n---\nbody\n  id:: blk_aaaaaaaaaa\n",
+    )
+    expect(await reopened.getNote("Flow Engineering")).toBe(null)
+    // The block kept its own id and is still parented by the page.
+    expect(await reopened.downstream(minted)).toEqual(["blk_aaaaaaaaaa"])
+    // Nothing is hard-deleted: the old page row is a tombstone, so the re-key
+    // replicates to other devices instead of silently diverging.
+    expect(
+      await driver.exec(
+        "SELECT deleted_at FROM nodes WHERE id = 'Flow Engineering' " +
+          "/* includes-deleted: asserting the tombstone the re-key leaves */",
+      ),
+    ).toEqual([{ deleted_at: expect.any(Number) }])
+  })
+
+  it("retitling a note rewrites exactly one row — the page's", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    const id = "blk_page00000"
+    await store.writeNotes({
+      [id]: "---\ntitle: Old Name\n---\nkeep me\n  id:: blk_aaaaaaaaaa\n",
+    })
+    const before = await driver.exec("SELECT id, text, updated_at FROM nodes ORDER BY id")
+
+    const diff = await store.writeNotes({
+      [id]: "---\ntitle: New Name\n---\nkeep me\n  id:: blk_aaaaaaaaaa\n",
+    })
+
+    // ONE node row, no link rows: a rename can no longer bump `updated_at` on
+    // blocks the user never touched, so it cannot clobber a concurrent edit
+    // to one of them under per-row LWW.
+    expect(diff.nodes.map((node) => node.id)).toEqual([id])
+    expect(diff.links).toEqual([])
+    expect(diff.nodes[0].text).toBe("New Name")
+
+    // The id is untouched, so every deep link and block row still resolves.
+    const after = await driver.exec("SELECT id, text, updated_at FROM nodes ORDER BY id")
+    expect(after.map((row) => row.id)).toEqual(before.map((row) => row.id))
+    expect(after.find((row) => row.id === "blk_aaaaaaaaaa")).toEqual(
+      before.find((row) => row.id === "blk_aaaaaaaaaa"),
+    )
+    expect(await store.getNote(id)).toContain("title: New Name")
+  })
+
+  it("leaves daily and weekly pages on their date ids (the natural-key carve-out)", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    await store.writeNotes({
+      "2026-08-31": "today\n  id:: blk_aaaaaaaaaa\n",
+      "2026-W35": "this week\n  id:: blk_bbbbbbbbbb\n",
+    })
+
+    const reopened = await openSqlNoteStore(driver)
+    // Byte-identical: a date page's text IS its id, so no title is emitted.
+    expect(await reopened.getNote("2026-08-31")).toBe("today\n  id:: blk_aaaaaaaaaa\n")
+    expect(await reopened.getNote("2026-W35")).toBe("this week\n  id:: blk_bbbbbbbbbb\n")
+    expect(await driver.exec("SELECT id FROM nodes WHERE type = 'page' ORDER BY id")).toEqual([
+      { id: "2026-08-31" },
+      { id: "2026-W35" },
+    ])
   })
 
   it("reports row counts", async () => {

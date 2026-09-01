@@ -26,13 +26,12 @@ import {
   weeklyTemplateAtom,
 } from "../global-state"
 import { useEditorValue } from "../hooks/editor-value"
-import { useNoteById, useRenameNote, useResolvedNoteId, useSaveNote } from "../hooks/note"
+import { useNoteById, useRenameNote, useSaveNote } from "../hooks/note"
 import { Template, Width, fontSchema, widthSchema } from "../schema"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
 import { removeFrontmatterComments, updateFrontmatterValue } from "../utils/frontmatter"
-import { getInvalidNoteIdCharacters } from "../utils/note-id"
 import { parseNote } from "../utils/parse-note"
 
 type RouteSearch = {
@@ -68,7 +67,7 @@ function RouteComponent() {
   }
 
   return (
-    <PageLayout title={`${noteId}.md`} icon={<NoteIcon16 />}>
+    <PageLayout title="Note" icon={<NoteIcon16 />}>
       <div>{/* TODO */}</div>
     </PageLayout>
   )
@@ -116,21 +115,8 @@ function NotePage() {
   const saveNote = useSaveNote()
   const getNoteContents = useGetNoteContents()
 
-  // A dead id left behind by a rename redirects to the live note (recorded in
-  // its `aliases` frontmatter) instead of opening an empty duplicate. Only a
-  // genuinely new id falls through to the new-note editor below.
-  const resolvedNoteId = useResolvedNoteId(noteId)
-  const redirectNoteId =
-    !note && resolvedNoteId && resolvedNoteId !== noteId ? resolvedNoteId : null
-  React.useEffect(() => {
-    if (!redirectNoteId) return
-    navigate({
-      to: "/notes/$",
-      params: { _splat: redirectNoteId },
-      search: (prev) => ({ ...prev }),
-      replace: true,
-    })
-  }, [redirectNoteId, navigate])
+  // An id no live note claims falls through to the new-note editor below —
+  // renames never leave a dead id behind, since the id never changes.
 
   // Show "Saving…" the instant a save is dispatched, rather than waiting for
   // the debounced sync to actually start. Cleared when the sync finishes (or a
@@ -254,52 +240,13 @@ function NotePage() {
     [noteId, editorValue, applyAndSave],
   )
 
-  // Rename the current note to `rawName`. Returns whether it succeeded (so an
-  // inline title editor can revert on failure).
+  // Retitle the current note. Since ids are minted, this sets one property and
+  // nothing else moves — no new id, no navigation, no broken links. Returns
+  // whether anything changed (so the inline editor can revert a no-op).
   const renameTo = React.useCallback(
-    (rawName: string): boolean => {
-      if (!noteId) return false
-
-      const oldNoteId = noteId
-      const newNoteId = rawName.trim().replace(/\.md$/i, "").trim()
-      if (!newNoteId || newNoteId === oldNoteId) return false
-
-      const result = renameNote({
-        oldName: oldNoteId,
-        newName: newNoteId,
-        content: editorValue,
-      })
-
-      if (!result.success) {
-        switch (result.reason) {
-          case "no-op":
-            return false
-          case "invalid":
-            {
-              const invalidCharacters = Array.from(new Set(getInvalidNoteIdCharacters(newNoteId)))
-              const invalidList = invalidCharacters.map((char) => `"${char}"`).join(", ")
-              const suffix = invalidList ? `: ${invalidList}` : ""
-              window.alert(`"${newNoteId}.md" contains invalid characters${suffix}`)
-            }
-            return false
-          case "duplicate":
-            window.alert(`"${newNoteId}.md" already exists.`)
-            return false
-          default:
-            result.reason satisfies never
-        }
-        return false
-      }
-
-      navigate({
-        to: "/notes/$",
-        params: { _splat: newNoteId },
-        search: (prev) => ({ ...prev, content: undefined }),
-        replace: true,
-      })
-      return true
-    },
-    [noteId, renameNote, editorValue, navigate],
+    (rawName: string): boolean =>
+      renameNote({ noteId: noteId ?? "", newTitle: rawName, content: editorValue }),
+    [noteId, renameNote, editorValue],
   )
 
   // ⌘S flushes the pending autosave immediately (changes save on their own;
@@ -312,12 +259,10 @@ function NotePage() {
     preventDefault: true,
   })
 
-  // Redirecting to the live note (see above) — render nothing in the interim.
-  if (redirectNoteId) return null
-
   return (
     <PageLayout
-      title={<span className="truncate">{noteId}.md</span>}
+      // The note's name is its title now, not its (opaque) id.
+      title={<span className="truncate">{parsedNote?.displayName || "Untitled"}</span>}
       icon={<NoteFavicon note={parsedNote} />}
       actions={
         <div className="flex items-center gap-2">
@@ -394,7 +339,7 @@ function NotePage() {
                     avoid doubling it. */}
                 {!isDailyNote && !isWeeklyNote && !zoomBlockId ? (
                   <NoteTitle
-                    noteId={noteId ?? ""}
+                    title={parsedNote?.title ?? ""}
                     onRename={renameTo}
                     onArrowDown={(mode) => {
                       setFocusFirstMode(mode)
@@ -421,7 +366,7 @@ function NotePage() {
                     // A plain push, so the back button undoes zoom naturally.
                     navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
                   }
-                  noteTitle={noteId ?? ""}
+                  noteTitle={parsedNote?.displayName ?? ""}
                 />
               </div>
             ) : (

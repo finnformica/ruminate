@@ -17,6 +17,7 @@ import {
   isValidWeekString,
   toDateStringUtc,
 } from "./date"
+import { isMintedNoteId } from "../data/page-identity"
 import { removeLeadingEmoji } from "./emoji"
 import { hasVisibleFrontmatter, parseFrontmatter } from "./frontmatter"
 import { getTaskContent, getTaskPriority, getTaskTags } from "./task"
@@ -161,6 +162,14 @@ function _parseNote(id: NoteId, content: string): Note {
     )
   }
 
+  // The projection-owned `title:` key wins over the first `# ` heading: it is
+  // where a page's real title lives now that ids are opaque
+  // (src/data/page-identity.ts). A note with no such key falls back to the
+  // heading exactly as before.
+  if (typeof frontmatter.title === "string" && frontmatter.title) {
+    title = frontmatter.title
+  }
+
   // Determine the type of the note
   if (isValidDateString(id)) {
     type = "daily"
@@ -189,11 +198,13 @@ function _parseNote(id: NoteId, content: string): Note {
       if (title) {
         displayName = removeLeadingEmoji(title)
       }
-      // If there's no title but the ID contains non-numeric characters, use that as the display name
-      else if (id && !/^\d+$/.test(id)) {
+      // If there's no title but the ID is something a human wrote, use it.
+      // A minted id (`blk_…`) is opaque and never a name — like the numeric
+      // timestamp ids before it, it falls through to the content preview.
+      else if (id && !/^\d+$/.test(id) && !isMintedNoteId(id)) {
         displayName = id
       }
-      // For untitled notes with numeric IDs, we use the first 8 words as the title
+      // For untitled notes with opaque IDs, we use the first 8 words as the title
       else if (contentMdast) {
         // Get clean text content without markdown syntax and split into words
         const words = toString(contentMdast).trim().split(/\s+/)
@@ -232,7 +243,6 @@ function _parseNote(id: NoteId, content: string): Note {
     title,
     url,
     alias: typeof frontmatter.alias === "string" ? frontmatter.alias : null,
-    aliases: Array.isArray(frontmatter.aliases) ? frontmatter.aliases.map(String) : [],
     pinned: frontmatter.pinned === true,
     updatedAt,
     dates: Array.from(dates),

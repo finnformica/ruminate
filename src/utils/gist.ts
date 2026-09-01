@@ -1,8 +1,20 @@
 import { request } from "@octokit/request"
 import { GitHubUser, Note } from "../schema"
 
+/** A published gist is read by humans on github.com, so it is named after the
+ * note rather than its (now opaque) id — sanitized to the characters a gist
+ * filename tolerates, and falling back to the id when nothing usable is left. */
+function gistFilename(note: Note): string {
+  const slug = note.displayName
+    .replace(/[^\w \-.]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80)
+  return `${slug || note.id}.md`
+}
+
 export async function createGist({ note, githubUser }: { note: Note; githubUser: GitHubUser }) {
-  const filename = `${note.id}.md`
+  const filename = gistFilename(note)
 
   try {
     const content = note.content

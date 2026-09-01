@@ -295,9 +295,10 @@ function NoteNavItem({
       </span>
       <span className="flex min-w-0 items-center gap-1.5">
         {note.pinned ? <PinFillIcon12 className="shrink-0 text-text-pinned" /> : null}
-        {/* Show the filename (id), matching the page header — not the note's
-            first heading (displayName). */}
-        <span className="truncate">{note.id}</span>
+        {/* Show the note's name, matching the page header. Ids are minted and
+            opaque now (docs/page-identity-design.md), so the name is the
+            title — which is what `displayName` resolves. */}
+        <span className="truncate">{note.displayName}</span>
       </span>
     </Link>
   )

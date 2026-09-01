@@ -23,7 +23,6 @@ function note(id: string, content: string): Note {
     title: id,
     url: null,
     alias: null,
-    aliases: [],
     pinned: false,
     updatedAt: null,
     dates: [],

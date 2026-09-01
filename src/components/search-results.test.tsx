@@ -19,7 +19,6 @@ const NOTE: Note = {
   title: "research",
   url: null,
   alias: null,
-  aliases: [],
   pinned: false,
   updatedAt: null,
   dates: [],

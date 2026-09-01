@@ -208,16 +208,42 @@ export function tenantCorpus(tenant: TenantDb): CorpusAccess {
             "WHERE user_id = :tenant AND deleted_at IS NULL",
         )
       ).map(toLinkRow),
-    write: async (nodes, stampVersion) => {
-      const statements: SqlStatement[] = nodes.map((node) => ({
+    write: async (plan, stampVersion) => {
+      const statements: SqlStatement[] = plan.nodes.map((node) => ({
         sql:
           "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at) " +
-          "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, NULL) " +
+          "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6) " +
           "ON CONFLICT (user_id, id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
           "props = excluded.props, updated_at = excluded.updated_at, " +
           "deleted_at = excluded.deleted_at",
-        params: [node.id, node.type, node.text, node.props, node.updated_at],
+        params: [
+          node.id,
+          node.type,
+          node.text,
+          node.props,
+          node.updated_at,
+          node.deleted_at ?? null,
+        ],
       }))
+      for (const link of plan.links) {
+        statements.push({
+          sql:
+            "INSERT INTO link " +
+            "(user_id, source_id, destination_id, kind, sort_key, updated_at, deleted_at) " +
+            "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6) " +
+            "ON CONFLICT (user_id, source_id, destination_id, kind) DO UPDATE SET " +
+            "sort_key = excluded.sort_key, updated_at = excluded.updated_at, " +
+            "deleted_at = excluded.deleted_at",
+          params: [
+            link.source_id,
+            link.destination_id,
+            link.kind,
+            link.sort_key,
+            link.updated_at,
+            link.deleted_at ?? null,
+          ],
+        })
+      }
       if (stampVersion) {
         statements.push({
           sql:

@@ -96,10 +96,11 @@ describe("rollup equivalence (named cases)", () => {
       "---\ntitle: Weird   spacing\ntags: [a, b]\nnested:\n  - x\n  - 'y: z'\n---\n- body\n"
     const { nodes } = docToGraph("note", markdown, 0)
     const page = nodes.find((node) => node.type === "page")
-    // Individual parsed entries, not the legacy {"frontmatter": raw} blob.
-    expect(page?.props).toBe(
-      JSON.stringify({ title: "Weird   spacing", tags: ["a", "b"], nested: ["x", "y: z"] }),
-    )
+    // Individual parsed entries, not the legacy {"frontmatter": raw} blob —
+    // and WITHOUT `title`, which the projection owns: it is lifted into the
+    // page node's `text` so it is never stored in two places.
+    expect(page?.props).toBe(JSON.stringify({ tags: ["a", "b"], nested: ["x", "y: z"] }))
+    expect(page?.text).toBe("Weird   spacing")
     // Canonicalization changes bytes (the block-style list becomes flow), and
     // the canonical form is a strict fixpoint.
     const normalized = expectConverges(markdown)
@@ -353,6 +354,59 @@ describe("rollup equivalence (named cases)", () => {
     const rolled = rollup("note", buildGraphSnapshot(nodes, links)) as string
     expect(rolled.match(/ {2}id:: /g)).toHaveLength(64)
     expect(rolled.endsWith("\n")).toBe(true)
+  })
+})
+
+describe("the title's round trip through the <id>.md seam", () => {
+  it("lifts a title into the page node and rolls it back out", () => {
+    const markdown = "---\ntitle: Flow Engineering\n---\nbody\n  id:: blk_aaaaaaaaaa\n"
+    const { nodes, links } = docToGraph("blk_page00000", markdown, 0)
+    const page = nodes.find((node) => node.type === "page") as NodeRow
+    // Stored once, in `text` — not duplicated into props.
+    expect(page.text).toBe("Flow Engineering")
+    expect(page.props).toBe(null)
+    expect(rollup("blk_page00000", buildGraphSnapshot(nodes, links))).toBe(markdown)
+  })
+
+  it("is a strict fixpoint for a titled page, with and without other frontmatter", () => {
+    expectConverges("---\ntitle: Flow Engineering\n---\nbody\n", "blk_page00000")
+    expectConverges("---\ntitle: Flow Engineering\npinned: true\n---\nbody\n", "blk_page00000")
+  })
+
+  it("survives titles the filename charset used to forbid", () => {
+    // The point of separating identity from name: a title is just text now.
+    for (const title of ["Q3: the plan", "What? [draft]", "a|b", "100%", "-- dashes"]) {
+      const normalized = expectConverges(
+        `---\ntitle: ${JSON.stringify(title)}\n---\nbody\n`,
+        "blk_page00000",
+      )
+      const { nodes } = docToGraph("blk_page00000", normalized, 0)
+      expect((nodes.find((node) => node.type === "page") as NodeRow).text).toBe(title)
+    }
+  })
+
+  it("emits no title for a date page, whose id IS its name", () => {
+    // Byte-identical to the pre-minting world — the carve-out, end to end.
+    const markdown = "today\n  id:: blk_aaaaaaaaaa\n"
+    const { nodes, links } = docToGraph("2026-08-31", markdown, 0)
+    expect((nodes.find((node) => node.type === "page") as NodeRow).text).toBe("2026-08-31")
+    expect(rollup("2026-08-31", buildGraphSnapshot(nodes, links))).toBe(markdown)
+  })
+
+  it("emits no title for an untitled page", () => {
+    const markdown = "body\n  id:: blk_aaaaaaaaaa\n"
+    const { nodes, links } = docToGraph("blk_page00000", markdown, 0)
+    expect(rollup("blk_page00000", buildGraphSnapshot(nodes, links))).toBe(markdown)
+  })
+
+  it("moves a mid-document title key to the front, then holds still", () => {
+    // The projection owns the key's position, so the first pass normalizes it
+    // (a convergence, like the near-miss markers) and the second is a fixpoint.
+    const normalized = expectConverges(
+      "---\npinned: true\ntitle: Flow\n---\nbody\n",
+      "blk_page00000",
+    )
+    expect(normalized).toContain("---\ntitle: Flow\npinned: true\n---\n")
   })
 })
 

@@ -76,17 +76,6 @@ describe("parseNote", () => {
     expect(tasks[0].text).toBe("Review [[project-alpha]] plan")
   })
 
-  test("parses aliases from frontmatter", () => {
-    const note = parseNote("new-name", "---\naliases: [old-name, older-name]\n---\n# Title")
-    expect(note.aliases).toEqual(["old-name", "older-name"])
-
-    const noAliases = parseNote("1234", "# Title")
-    expect(noAliases.aliases).toEqual([])
-
-    const badAliases = parseNote("1234", "---\naliases: nope\n---\n# Title")
-    expect(badAliases.aliases).toEqual([])
-  })
-
   test("collects dates from frontmatter date properties", () => {
     const note = parseNote("1234", "---\ndue: 2026-01-05\n---\n# Title")
     expect(note.dates).toContain("2026-01-05")
