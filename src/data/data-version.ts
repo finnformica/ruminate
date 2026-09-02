@@ -223,6 +223,10 @@ export function planDataVersion2(
       text: page.id,
       props: page.props,
       updated_at: now,
+      // A deleted page stays deleted. Minting a live row for a tombstoned
+      // page resurrects a note the user threw away — and re-keying makes it a
+      // NEW id, so no later tombstone would ever match it again.
+      ...(page.deleted_at === undefined ? {} : { deleted_at: page.deleted_at }),
     })
     changedNodes.push({ ...page, updated_at: now, deleted_at: now })
   }
