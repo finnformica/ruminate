@@ -469,6 +469,10 @@ function runPull(activation: DatabaseModeRuntime) {
     } catch (error) {
       if (runtime !== activation) return
       const message = error instanceof Error ? error.message : String(error)
+      // A failed pull can leave the app showing nothing at all, so say why —
+      // in the console as well as the status atom. Without this the only
+      // symptom is an empty note list with no explanation anywhere.
+      console.error("[ruminate] pull failed:", error)
       const localCount = Object.keys(notesFromFiles(jotai().get(databaseFilesAtom))).length
       patchStatus({
         pull: "error",
