@@ -158,6 +158,17 @@ describe("planDataVersion2 (pure)", () => {
     expect(nodes[1].deleted_at).toBe(999)
   })
 
+  it("keeps a deleted page deleted instead of resurrecting it", () => {
+    // A tombstoned page must not come back as a live minted row. Re-keying
+    // gives it a NEW id, so no later tombstone would ever match it again —
+    // the note would return permanently.
+    const dead = { ...node("Old Note", "page", "Old Note"), deleted_at: 500 }
+    const { nodes } = planDataVersion2([dead, node("blk_a", "text", "body")], [], 999)
+    const minted = nodes.find((row) => row.id === derivePageId("Old Note"))
+    expect(minted).toBeDefined()
+    expect(minted?.deleted_at).toBe(500)
+  })
+
   it("re-points every link naming the old page id", () => {
     const { links } = planDataVersion2(
       [node("p", "page", "p"), node("blk_a", "text", "a"), node("blk_b", "text", "b")],
