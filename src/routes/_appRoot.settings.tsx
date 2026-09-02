@@ -7,7 +7,12 @@ import { useSignOut } from "../components/github-auth"
 import { GitHubAvatar } from "../components/github-avatar"
 import { SettingsIcon16 } from "../components/icons"
 import { PageLayout } from "../components/page-layout"
-import { refreshDatabaseReplicaStatus, requestDatabaseFullPush } from "../data/database-mode"
+import {
+  databaseModeStatusAtom,
+  refreshDatabaseReplicaStatus,
+  requestDatabaseFullPush,
+  type DatabaseModeStatus,
+} from "../data/database-mode"
 import {
   storageDiagnosticsAtom,
   type ReplicaDiagnostics,
@@ -136,6 +141,7 @@ function AppearanceSection() {
 function StorageSection() {
   const githubUser = useAtomValue(githubUserAtom)
   const diagnostics = useAtomValue(storageDiagnosticsAtom)
+  const modeStatus = useAtomValue(databaseModeStatusAtom)
 
   return (
     <SettingsSection title="Storage">
@@ -146,7 +152,9 @@ function StorageSection() {
           they’re available offline and on every device you sign in from.
         </span>
       </div>
-      {githubUser ? <StorageDiagnosticsPanel diagnostics={diagnostics} /> : null}
+      {githubUser ? (
+        <StorageDiagnosticsPanel diagnostics={diagnostics} status={modeStatus} />
+      ) : null}
     </SettingsSection>
   )
 }
@@ -158,7 +166,13 @@ const STORAGE_STATUS_LABELS: Record<StorageDiagnostics["status"], string> = {
   error: "Error",
 }
 
-function StorageDiagnosticsPanel({ diagnostics }: { diagnostics: StorageDiagnostics }) {
+function StorageDiagnosticsPanel({
+  diagnostics,
+  status: modeStatus,
+}: {
+  diagnostics: StorageDiagnostics
+  status: DatabaseModeStatus
+}) {
   const { status, persistence, notes, writeErrors, writeErrorCount } = diagnostics
 
   return (
@@ -177,7 +191,24 @@ function StorageDiagnosticsPanel({ diagnostics }: { diagnostics: StorageDiagnost
         <dd>{notes}</dd>
         <dt>Write errors</dt>
         <dd className={writeErrorCount > 0 ? "!text-text-danger" : ""}>{writeErrorCount}</dd>
+        <dt>Last pull</dt>
+        <dd className={modeStatus.pull === "error" ? "!text-text-danger" : ""}>
+          {modeStatus.pull === "pulling"
+            ? "Pulling…"
+            : modeStatus.pull === "error"
+              ? "Failed"
+              : modeStatus.lastPullAt
+                ? new Date(modeStatus.lastPullAt).toLocaleTimeString()
+                : "Never"}
+        </dd>
       </dl>
+      {/* A failed pull can leave the note list empty with no other symptom, so
+          the reason is shown rather than only kept in state. */}
+      {modeStatus.lastPullError ? (
+        <DiagnosticList label="Last pull error">
+          <li className="text-text-danger">{modeStatus.lastPullError}</li>
+        </DiagnosticList>
+      ) : null}
       {diagnostics.replica ? <ReplicaDiagnosticsPanel replica={diagnostics.replica} /> : null}
       {writeErrors.length > 0 ? (
         <DiagnosticList label={`Last write errors (${writeErrors.length})`}>
