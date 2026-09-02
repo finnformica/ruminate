@@ -28,13 +28,6 @@
 // §10): planners stay engine-agnostic, and the worker test suites drive this
 // exact code over `node:sqlite`.
 
-import {
-  CURRENT_DATA_VERSION,
-  DATA_VERSION_KEY,
-  toLinkRow,
-  toNodeRow,
-  type CorpusAccess,
-} from "../src/data/data-version"
 import type { SqlDriver, SqlStatement, SqlValue } from "../src/data/sql-driver"
 import { checkStatement, explainRule } from "../src/data/sql-tenancy-guard"
 import { createD1SqlDriver } from "./d1-sql-driver"
@@ -116,29 +109,14 @@ function makeTenantDb(driver: SqlDriver, userId: number, includingDeleted: boole
 /**
  * Mint a tenant handle from a **verified** identity — the identity type only
  * `requireSession` produces, from GitHub's answer to our own token check. This
- * is the single mint on the request path; grep for it and you have found every
- * way a corpus is addressed.
+ * is the ONLY mint there is — grep for it and you have found every way a
+ * corpus is addressed.
  */
 export function forTenant(driver: SqlDriver, identity: VerifiedIdentity): TenantDb {
   if (!Number.isSafeInteger(identity.id)) {
     throw new TenantScopeError("verified identity has a non-integer id", String(identity.id))
   }
   return makeTenantDb(driver, identity.id, false)
-}
-
-/**
- * The ONE non-session mint: the owner-gated DO→D1 import
- * (`handlers/corpus-migration.ts`) has to write into *other* users' partitions,
- * because it is moving their corpora for them. It is reachable only from
- * `POST /api/admin/import-do-corpus`, which requires the bootstrap owner's own
- * verified session, and the ids it may name come from the control plane's
- * `users` table — never from a request. Delete this with the import.
- */
-export function forAdminImport(driver: SqlDriver, userId: number): TenantDb {
-  if (!Number.isSafeInteger(userId)) {
-    throw new TenantScopeError("admin import got a non-integer user id", String(userId))
-  }
-  return makeTenantDb(driver, userId, false)
 }
 
 /** The corpus database, behind the shared `SqlDriver` seam. The only read of
@@ -160,8 +138,7 @@ export const controlPlaneDriver = (env: Env): SqlDriver => createD1SqlDriver(env
 /**
  * `meta` is per-tenant, so a brand-new user starts with no rows in it at all
  * (migration 0004 only stamps the owner's). Seed the two keys the protocol
- * reads, idempotently. `data_version` is deliberately NOT seeded — the
- * transform's empty-corpus rule wants it unset until there is data.
+ * reads, idempotently.
  */
 export async function ensureTenantMeta(tenant: TenantDb): Promise<void> {
   await tenant.batch([
@@ -178,81 +155,4 @@ export async function ensureTenantMeta(tenant: TenantDb): Promise<void> {
       params: [],
     },
   ])
-}
-
-/**
- * The tenant-scoped half of the data-version transform (see the port docs in
- * `src/data/data-version.ts`). Every statement is written out in full, with
- * its tenant predicate — the shape the guard checks, not a stitched fragment.
- */
-export function tenantCorpus(tenant: TenantDb): CorpusAccess {
-  return {
-    readVersion: async () => {
-      const rows = await tenant.exec(
-        "SELECT value FROM meta WHERE user_id = :tenant AND key = ?1",
-        [DATA_VERSION_KEY],
-      )
-      return rows[0]?.value == null ? null : String(rows[0].value)
-    },
-    readNodes: async () =>
-      (
-        await tenant.exec(
-          "SELECT id, type, text, props, updated_at FROM nodes " +
-            "WHERE user_id = :tenant AND deleted_at IS NULL",
-        )
-      ).map(toNodeRow),
-    readLinks: async () =>
-      (
-        await tenant.exec(
-          "SELECT source_id, destination_id, kind, sort_key, updated_at FROM link " +
-            "WHERE user_id = :tenant AND deleted_at IS NULL",
-        )
-      ).map(toLinkRow),
-    write: async (plan, stampVersion) => {
-      const statements: SqlStatement[] = plan.nodes.map((node) => ({
-        sql:
-          "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at) " +
-          "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6) " +
-          "ON CONFLICT (user_id, id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
-          "props = excluded.props, updated_at = excluded.updated_at, " +
-          "deleted_at = excluded.deleted_at",
-        params: [
-          node.id,
-          node.type,
-          node.text,
-          node.props,
-          node.updated_at,
-          node.deleted_at ?? null,
-        ],
-      }))
-      for (const link of plan.links) {
-        statements.push({
-          sql:
-            "INSERT INTO link " +
-            "(user_id, source_id, destination_id, kind, sort_key, updated_at, deleted_at) " +
-            "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6) " +
-            "ON CONFLICT (user_id, source_id, destination_id, kind) DO UPDATE SET " +
-            "sort_key = excluded.sort_key, updated_at = excluded.updated_at, " +
-            "deleted_at = excluded.deleted_at",
-          params: [
-            link.source_id,
-            link.destination_id,
-            link.kind,
-            link.sort_key,
-            link.updated_at,
-            link.deleted_at ?? null,
-          ],
-        })
-      }
-      if (stampVersion) {
-        statements.push({
-          sql:
-            "INSERT INTO meta (user_id, key, value) VALUES (:tenant, ?1, ?2) " +
-            "ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value",
-          params: [DATA_VERSION_KEY, String(CURRENT_DATA_VERSION)],
-        })
-      }
-      if (statements.length > 0) await tenant.batch(statements)
-    },
-  }
 }

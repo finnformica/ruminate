@@ -25,9 +25,7 @@ import { canonicalFrontmatterYaml } from "../utils/frontmatter"
  *   version (or kept legacy by the rules above) still roll up from the raw
  *   text, byte-for-byte.
  *
- * Kept dependency-light (yamljs + the canonical serializer only): this module
- * is bundled into the Worker via the corpus Durable Object's data-transform
- * path (`src/data/data-version.ts`).
+ * Kept dependency-light: yamljs + the canonical serializer, nothing else.
  */
 
 /** Parse raw frontmatter YAML to a plain entries object, or null when the
@@ -108,25 +106,4 @@ export function frontmatterTextFromProps(props: string | null): string | null {
   const entries = parsed as Record<string, unknown>
   if (isLegacyShape(entries)) return entries.frontmatter as string
   return canonicalFrontmatterYaml(entries)
-}
-
-/**
- * The upgraded `props` value for an existing page row, or null when the row
- * is already in its final shape (nothing to write). Used by the `data_version`
- * transform: only the legacy raw shape upgrades, and only when
- * `pagePropsFromFrontmatter` deems the upgrade value-faithful.
- */
-export function upgradedPageProps(props: string | null): string | null {
-  if (props === null) return null
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(props)
-  } catch {
-    return null
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null
-  const entries = parsed as Record<string, unknown>
-  if (!isLegacyShape(entries)) return null
-  const upgraded = pagePropsFromFrontmatter(entries.frontmatter as string)
-  return upgraded === props ? null : upgraded
 }

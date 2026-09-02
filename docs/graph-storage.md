@@ -250,10 +250,10 @@ removed as a feature; `[[...]]` in text is plain text.)
 
 ### `meta` (key/value)
 
-`schema_version` (`3`), `data_version` (see "Data quality" below),
+`schema_version` (`3`),
 `replica_cursor` (the last push a client confirmed), and, in the **local**
 store only, `d1_pull_cursor` (the last replica cursor this device pulled
-through). On D1 the table is per-tenant (`PRIMARY KEY (user_id, key)`), so
+through) and `cache_generation` (see "Migrations" below). On D1 the table is per-tenant (`PRIMARY KEY (user_id, key)`), so
 each user has their own cursor and their own versions; a new tenant's rows are
 seeded on first request (`ensureTenantMeta`), because migration `0004` only
 stamped the owner's. The Worker also writes `do_import_at` there — the marker
@@ -285,19 +285,21 @@ byte-for-byte):
   emitted when a page's `text` equals its id (an untitled note, or a date
   page), which is what leaves daily/weekly notes byte-identical.
 
-**Existing rows** are rewritten once by the versioned data transform
-(`src/data/data-version.ts`): when the `data_version` meta key is below the
-current version, the transform rewrites matching rows — fence-aware,
-idempotent, and transactional (one write carries the rewrites and the version
-stamp) — with a fresh `updated_at` so rewritten rows replicate under per-row
-LWW. The browser store runs it on open (`ensureCorpusSchema →
-ensureDataVersion`); the Worker runs it per verified tenant, before serving
-that tenant's first request. Both go through the same pure planner behind a
-four-method `CorpusAccess` port, because the two schema shapes need different
-statements and stitching SQL fragments together is exactly the leak the query
-guard exists to prevent. Every device and the server therefore run the
-identical deterministic transform, so whichever timestamp wins, the winning
-content is the same and the corpus converges.
+**Existing rows** are migrated **server-side against D1, once** — not by the
+client. A one-shot transform that lives permanently in the app and re-runs on
+every store open is the wrong shape: it re-runs on every device, has to be
+deterministic and idempotent forever, and — as it did in production on
+2026-09-02 — races the sync protocol. The client migrated its local rows,
+never told the push queue, and the next pull's deletion-by-absence removed
+the rows it had just minted, emptying the note list.
+
+The local store needs no data migration at all: it is a **cache** of D1, and
+anything in it can be rebuilt by a full pull. So it carries a
+`cache_generation` instead. When the stored generation does not match the one
+the code expects, the runtime discards the local contents wholesale — cursor
+included, so the next pull is a full one — rather than migrating them in
+place. A device holding a copy from before a migration therefore starts
+clean, instead of merging stale rows with migrated ones.
 
 The ladder currently has two rungs, and they compose in one pass and one
 write: **version 1** normalizes near-miss markers and upgrades legacy raw

@@ -7,16 +7,11 @@
  * else is served straight from static assets (with SPA fallback to index.html).
  */
 import type { Env } from "./types"
-import { admin } from "./handlers/admin"
 import { githubAuth } from "./handlers/github-auth"
 import { githubRefresh } from "./handlers/github-refresh"
 import { fileProxy } from "./handlers/file-proxy"
 import { replica } from "./handlers/replica"
 import { share } from "./handlers/share"
-
-// The per-user corpus Durable Object class; wrangler.jsonc binds it as CORPUS
-// (it must be exported from the Worker's entry module).
-export { UserCorpus } from "./corpus-do"
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -27,7 +22,6 @@ export default {
     if (pathname === "/file-proxy") return fileProxy(request)
     if (pathname.startsWith("/share/")) return share(request, env)
     if (pathname.startsWith("/api/replica/")) return replica(request, env)
-    if (pathname.startsWith("/api/admin/")) return admin(request, env)
 
     // Everything else: static assets (index.html fallback for SPA routes).
     return env.ASSETS.fetch(request)

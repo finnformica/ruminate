@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { canonicalFrontmatterYaml } from "../utils/frontmatter"
-import {
-  frontmatterTextFromProps,
-  pagePropsFromFrontmatter,
-  upgradedPageProps,
-} from "./frontmatter-props"
+import { frontmatterTextFromProps, pagePropsFromFrontmatter } from "./frontmatter-props"
 
 /** The full raw→props→rollup-text pipeline for one frontmatter text. */
 const roundTrip = (raw: string) => frontmatterTextFromProps(pagePropsFromFrontmatter(raw))
@@ -87,21 +83,6 @@ describe("frontmatterTextFromProps — both shapes roll up", () => {
     expect(frontmatterTextFromProps("{not json")).toBeNull()
     expect(frontmatterTextFromProps('"a string"')).toBeNull()
     expect(frontmatterTextFromProps("[1, 2]")).toBeNull()
-  })
-})
-
-describe("upgradedPageProps — the data_version transform's props step", () => {
-  it("upgrades a legacy raw blob to parsed entries", () => {
-    expect(upgradedPageProps(JSON.stringify({ frontmatter: "pinned: true" }))).toBe(
-      JSON.stringify({ pinned: true }),
-    )
-  })
-
-  it("returns null when nothing changes (already entries, degenerate raw, no props)", () => {
-    expect(upgradedPageProps(JSON.stringify({ pinned: true }))).toBeNull()
-    expect(upgradedPageProps(JSON.stringify({ frontmatter: "# comment only" }))).toBeNull()
-    expect(upgradedPageProps(null)).toBeNull()
-    expect(upgradedPageProps("{not json")).toBeNull()
   })
 })
 

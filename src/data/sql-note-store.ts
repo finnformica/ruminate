@@ -2,13 +2,14 @@ import migration0001 from "../../migrations/0001_init.sql?raw"
 import migration0002 from "../../migrations/0002_nodes.sql?raw"
 import {
   emptyGraphDiff,
+  toLinkRow,
+  toNodeRow,
   type GraphDiff,
   type LinkRow,
   type NodeRow,
 } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { ensureCorpusSchema } from "./corpus-schema"
-import { toLinkRow, toNodeRow } from "./data-version"
 import {
   CHILD_KIND,
   PAGE_TYPE,

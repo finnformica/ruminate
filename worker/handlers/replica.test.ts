@@ -442,7 +442,6 @@ async function testEnv(overrides: Partial<Env> = {}): Promise<{ env: Env; driver
   await driver.execScript(migration0003)
   const env = {
     DB: asFakeD1(driver),
-    CORPUS: undefined,
     SIGNUP_MODE: "open",
     ALLOWED_GITHUB_ID: undefined,
     ...overrides,

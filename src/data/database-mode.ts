@@ -26,7 +26,8 @@ import {
  * graph (docs/graph-schema-v2.md): `nodes` + `link` rows are truth, markdown
  * is the rollup.
  *
- *   boot   open SQL store → serve local contents immediately → pull from D1
+ *   boot   open SQL store → discard it if its cache generation or its owner is
+ *          not this one → serve local contents immediately → pull from D1
  *          (full on first boot, since-cursor after) → apply rows into the store
  *   saves  ingest into the SQL store as a row diff + hand that diff to the
  *          replica push queue (replica-sync.ts — write-behind, coalesced)
@@ -56,6 +57,22 @@ const PULL_CURSOR_KEY = "d1_pull_cursor"
  * follows the browser profile — on a shared machine a different signed-in
  * account must never be shown another owner's locally cached notes. */
 const OWNER_KEY = "store_owner"
+/**
+ * The generation of the row shapes the local database holds, and the meta key
+ * it is stamped under.
+ *
+ * **The local store is a CACHE of D1, never a source of truth**, so it is
+ * never data-migrated. Data migrations run ONCE, server-side, against D1;
+ * a device whose cached copy predates one has no way to tell which of its rows
+ * are stale, and merging pre-migration rows with pulled post-migration ones is
+ * how the corpus breaks. So the cache is versioned instead: bump this constant
+ * with every server-side data migration and each device discards its copy and
+ * rebuilds it from a full pull. A few lines, no per-row logic.
+ *
+ * Generation `2` is the minted-page-id corpus (docs/page-identity-design.md).
+ */
+const CACHE_GENERATION = "2"
+const CACHE_GENERATION_KEY = "cache_generation"
 const PULL_RETRY_MS = 60_000
 /** Minimum gap between automatic repair rebuilds after a SQL write failure. */
 const REPAIR_COOLDOWN_MS = 30_000
@@ -248,6 +265,17 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
 
       // Serve local contents immediately — offline boots (after the first)
       // show every note before any network work.
+
+      // Cache generation: a copy left by an older generation is thrown away
+      // wholesale — cursor included, so the next pull is a full one — rather
+      // than migrated in place. Same wipe as the owner mismatch below; a store
+      // that has never held anything loses nothing by it.
+      if ((await opened.store.getMeta(CACHE_GENERATION_KEY)) !== CACHE_GENERATION) {
+        await opened.store.replaceAll({})
+        await opened.store.setMeta(PULL_CURSOR_KEY, "")
+        await opened.store.setMeta(CACHE_GENERATION_KEY, CACHE_GENERATION)
+      }
+      if (runtime !== activation) return
 
       // Owner binding: a store populated under a different identity is wiped
       // (cursor included, so the next pull is a full one) before any local
