@@ -7,6 +7,7 @@ import type {
 } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import {
+  CACHE_GENERATION,
   databaseFilesAtom,
   databaseModeStatusAtom,
   databaseWriteFiles,
@@ -78,24 +79,31 @@ function remoteCorpus(notes: Record<string, string>, updatedAt = 1, cursor: stri
   return body
 }
 
-/** The since-pull shape for a remote corpus: changed rows + full key lists. */
+/** The since-pull shape: only the rows that changed, plus the new cursor. */
 function remoteChanges(
   changed: Record<string, string>,
-  all: Record<string, string>,
   updatedAt: number,
   cursor: string,
 ): ReplicaChangesBody {
-  const changedRows = remoteCorpus(changed, updatedAt)
-  const allRows = remoteCorpus(all, updatedAt)
+  return { ...remoteCorpus(changed, updatedAt), cursor }
+}
+
+/** Every row of these notes, tombstoned — how a remote delete travels. */
+function remoteDeletion(
+  deleted: Record<string, string>,
+  updatedAt: number,
+  cursor: string,
+): ReplicaChangesBody {
+  const body = remoteCorpus(deleted, updatedAt)
   return {
-    nodes: changedRows.nodes,
-    links: changedRows.links,
-    nodeIds: allRows.nodes.map((node) => node.id),
-    linkKeys: allRows.links.map((link) => [link.source_id, link.destination_id, link.kind]),
+    nodes: body.nodes.map((node) => ({ ...node, deleted_at: updatedAt })),
+    links: body.links.map((link) => ({ ...link, deleted_at: updatedAt })),
     cursor,
   }
 }
 
+/** Seed a store that a CURRENT client would have left behind: notes, a pull
+ * cursor, and this release's cache generation (see CACHE_GENERATION). */
 async function boot(options: {
   store?: SqlNoteStore
   source: D1NoteSource
@@ -128,15 +136,20 @@ const NOTE_A = "- A\n  id:: blk_a000000000\n"
 const NOTE_B = "- B\n  id:: blk_b000000000\n"
 
 /** The generation `database-mode.ts` expects a local cache to carry. */
-const CACHE_GENERATION = "2"
 
 /** A local store as the current app leaves it: rows, a cursor, and the cache
  * generation those rows belong to. */
-async function seededStore(notes: Record<string, string>, cursor = "500", generation = "2") {
+async function seededStore(
+  notes: Record<string, string>,
+  cursor = "500",
+  generation: string = CACHE_GENERATION,
+  owner?: string,
+) {
   const store = await openSqlNoteStore(createNodeSqlDriver())
   await store.writeNotes(notes)
   await store.setMeta("d1_pull_cursor", cursor)
   await store.setMeta("cache_generation", generation)
+  if (owner !== undefined) await store.setMeta("store_owner", owner)
   return store
 }
 
@@ -157,16 +170,10 @@ describe("database mode boot", () => {
   })
 
   it("later boots serve local contents and pull with the stored cursor", async () => {
-    const seeded = await seededStore({ "note-a": "- local A\n  id:: blk_a000000000\n" })
+    const seeded = await seededStore({ "note-a": "- local A\n  id:: blk_a000000000\n" }, "500")
 
     const { source, calls } = stubSource({
-      since: () =>
-        remoteChanges(
-          { "note-b": NOTE_B },
-          { "note-a": "- local A\n  id:: blk_a000000000\n", "note-b": NOTE_B },
-          600,
-          "600",
-        ),
+      since: () => remoteChanges({ "note-b": NOTE_B }, 600, "600"),
     })
     const store = await boot({ store: seeded, source })
 
@@ -244,15 +251,11 @@ describe("database mode saves", () => {
 })
 
 describe("database mode since-pulls", () => {
-  it("applies remote row changes and detects deletions via the key lists", async () => {
+  it("applies remote row changes", async () => {
     const KEEP_V2 = "- keep v2\n  id:: blk_keep000000\n"
     const { source } = stubSource({
-      full: remoteCorpus(
-        { keep: "- keep\n  id:: blk_keep000000\n", gone: "- gone\n  id:: blk_gone000000\n" },
-        1,
-        "100",
-      ),
-      since: () => remoteChanges({ keep: KEEP_V2 }, { keep: KEEP_V2 }, 200, "200"),
+      full: remoteCorpus({ keep: "- keep\n  id:: blk_keep000000\n" }, 1, "100"),
+      since: () => remoteChanges({ keep: KEEP_V2 }, 200, "200"),
     })
     const store = await boot({ source })
 
@@ -264,15 +267,50 @@ describe("database mode since-pulls", () => {
     expect(await store.getMeta("d1_pull_cursor")).toBe("200")
   })
 
+  it("a remote deletion arrives as tombstoned rows — no key list needed", async () => {
+    // The property that makes dropping the key lists safe: the since-pull
+    // says nothing at all about `keep` (unchanged, so not a change), and
+    // `gone` disappears purely because its rows came back carrying
+    // `deleted_at`.
+    const KEEP = "- keep\n  id:: blk_keep000000\n"
+    const GONE = "- gone\n  id:: blk_gone000000\n"
+    const { source } = stubSource({
+      full: remoteCorpus({ keep: KEEP, gone: GONE }, 1, "100"),
+      since: () => remoteDeletion({ gone: GONE }, 200, "200"),
+    })
+    const store = await boot({ source })
+    expect(await store.getAllNotes()).toEqual({ keep: KEEP, gone: GONE })
+
+    requestDatabasePull()
+    await flushDatabaseMode()
+
+    expect(await store.getAllNotes()).toEqual({ keep: KEEP })
+    expect(files()).toEqual({ "keep.md": KEEP })
+    expect(await store.getMeta("d1_pull_cursor")).toBe("200")
+  })
+
+  it("a since-pull that mentions nothing changes nothing (silence is not deletion)", async () => {
+    const KEEP = "- keep\n  id:: blk_keep000000\n"
+    const { source } = stubSource({
+      full: remoteCorpus({ keep: KEEP }, 1, "100"),
+      since: () => remoteChanges({}, 200, "200"),
+    })
+    const store = await boot({ source })
+
+    requestDatabasePull()
+    await flushDatabaseMode()
+
+    expect(await store.getAllNotes()).toEqual({ keep: KEEP })
+  })
+
   it("never clobbers notes with queued local pushes (last-writer-wins by push)", async () => {
     const LOCAL_EDIT = "- local edit\n  id:: blk_a000000000\n"
     const CREATED = "- brand new\n  id:: blk_new0000000\n"
     const REMOTE_EDIT = "- remote edit\n  id:: blk_a000000000\n"
     const { source } = stubSource({
       full: remoteCorpus({ "note-a": "- original\n  id:: blk_a000000000\n" }, 1, "100"),
-      since: () =>
-        // The locally created note is unknown remotely.
-        remoteChanges({ "note-a": REMOTE_EDIT }, { "note-a": REMOTE_EDIT }, 9999, "200"),
+      // The locally created note is unknown remotely.
+      since: () => remoteChanges({ "note-a": REMOTE_EDIT }, 9999, "200"),
     })
     const { handle } = stubReplica(["note-a", "created"])
     const store = await boot({ source, replica: handle })
@@ -335,7 +373,7 @@ describe("cache generation", () => {
     const seeded = await seededStore({ "note-a": NOTE_A })
 
     const { source, calls } = stubSource({
-      since: (cursor) => remoteChanges({}, { "note-a": NOTE_A }, 2, cursor),
+      since: (cursor) => remoteChanges({}, 2, cursor),
     })
     const store = await boot({ store: seeded, source })
 
@@ -379,12 +417,9 @@ describe("owner binding", () => {
   })
 
   it("the same owner keeps the local cache and cursor (since-pull, no wipe)", async () => {
-    const seeded = await seededStore({ "note-a": NOTE_A })
-    await seeded.setMeta("store_owner", "42")
+    const seeded = await seededStore({ "note-a": NOTE_A }, "500", CACHE_GENERATION, "42")
 
-    const { source, calls } = stubSource({
-      since: (cursor) => remoteChanges({}, { "note-a": NOTE_A }, 2, cursor),
-    })
+    const { source, calls } = stubSource({ since: (cursor) => remoteChanges({}, 2, cursor) })
     const store = await boot({ store: seeded, source, owner: "42" })
     expect(calls.since).toEqual(["500"])
     expect(calls.full).toBe(0)
@@ -392,8 +427,7 @@ describe("owner binding", () => {
   })
 
   it("a different signed-in identity wipes the local cache before anything renders", async () => {
-    const seeded = await seededStore({ "note-a": NOTE_A })
-    await seeded.setMeta("store_owner", "42")
+    const seeded = await seededStore({ "note-a": NOTE_A }, "500", CACHE_GENERATION, "42")
 
     // A different account signs in on this browser: the previous owner's
     // rows and cursor are gone, the pull starts from scratch (and for a
@@ -408,14 +442,43 @@ describe("owner binding", () => {
   })
 
   it("an ownerless boot leaves an owned store untouched", async () => {
-    const seeded = await seededStore({ "note-a": NOTE_A })
-    await seeded.setMeta("store_owner", "42")
+    const seeded = await seededStore({ "note-a": NOTE_A }, "500", CACHE_GENERATION, "42")
 
-    const { source } = stubSource({
-      since: (cursor) => remoteChanges({}, { "note-a": NOTE_A }, 2, cursor),
-    })
+    const { source } = stubSource({ since: (cursor) => remoteChanges({}, 2, cursor) })
     const store = await boot({ store: seeded, source })
     expect(await store.getMeta("store_owner")).toBe("42")
+    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
+  })
+})
+
+describe("cache generation", () => {
+  it("a cache from an older generation is discarded and re-pulled in full", async () => {
+    // A store left by a client that predates this release: no generation
+    // stamp, and possibly rows the replica hard-deleted before tombstones
+    // existed — which nothing would ever tell this client about again.
+    const stale = await openSqlNoteStore(createNodeSqlDriver())
+    await stale.writeNotes({ "note-a": NOTE_A, purged: "- purged\n  id:: blk_purged000\n" })
+    await stale.setMeta("d1_pull_cursor", "500")
+
+    const { source, calls } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }, 1, "900") })
+    const store = await boot({ store: stale, source })
+
+    expect(calls.since).toEqual([]) // the cursor went with the cache
+    expect(calls.full).toBe(1)
+    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
+    expect(files()).toEqual({ "note-a.md": NOTE_A })
+    expect(await store.getMeta("cache_generation")).toBe(CACHE_GENERATION)
+    expect(await store.getMeta("d1_pull_cursor")).toBe("900")
+  })
+
+  it("a cache of the current generation is kept (the wipe happens once)", async () => {
+    const seeded = await seededStore({ "note-a": NOTE_A }, "500")
+
+    const { source, calls } = stubSource({ since: (cursor) => remoteChanges({}, 2, cursor) })
+    const store = await boot({ store: seeded, source })
+
+    expect(calls.full).toBe(0)
+    expect(calls.since).toEqual(["500"])
     expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
   })
 })

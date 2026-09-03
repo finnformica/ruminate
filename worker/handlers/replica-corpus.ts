@@ -31,16 +31,9 @@ import {
   type ReplicaChangesBody,
   type ReplicaCorpusBody,
   type ReplicaPutPayload,
+  type ReplicaPutResult,
   type ReplicaStatusBody,
 } from "./replica-payload"
-
-/** The body of a successful `PUT /api/replica/notes` — applied row counts. */
-export interface ReplicaPutResult {
-  ok: true
-  nodes: number
-  links: number
-  deletes: number
-}
 
 async function readCursor(tenant: TenantDb): Promise<string | null> {
   const rows = await tenant.exec(
@@ -69,10 +62,17 @@ export async function corpusPullFull(tenant: TenantDb): Promise<ReplicaCorpusBod
 
 /**
  * Incremental pull: rows with `updated_at > since` (tombstones included — a
- * delete bumps `updated_at`, so it arrives as an ordinary change), plus the
- * FULL key list of each table. The key lists predate tombstones and are kept
- * as belt-and-braces while tombstone propagation proves itself; dropping them
- * is a deliberate follow-up (docs/graph-storage.md).
+ * delete bumps `updated_at`, so it arrives as an ordinary change), and nothing
+ * else. Two index scans over `nodes_tenant_updated` / `link_tenant_updated`,
+ * so a quiet pull reads a handful of rows rather than the corpus.
+ *
+ * This used to answer with the full key list of both tables as well, so the
+ * client could delete local rows absent from them. That predates tombstones,
+ * and it cost O(corpus) rows read on **every** pull — every focus, every
+ * visibility change, every `online` event, per device. A tombstoned row is an
+ * ordinary changed row, so the deletion already travels here; the lists said
+ * nothing a client could act on except "purged", and nothing purges
+ * (docs/graph-storage.md).
  */
 export async function corpusPullSince(
   tenant: TenantDb,
@@ -95,25 +95,7 @@ export async function corpusPullSince(
       [since],
     )
   ).map(toLinkRow)
-  const nodeIds = await all.exec(
-    "SELECT id FROM nodes WHERE user_id = :tenant " +
-      "/* includes-deleted: the key lists say which rows EXIST, tombstoned or not */",
-  )
-  const linkKeys = await all.exec(
-    "SELECT source_id, destination_id, kind FROM link WHERE user_id = :tenant " +
-      "/* includes-deleted: the key lists say which rows EXIST, tombstoned or not */",
-  )
-  return {
-    nodes,
-    links,
-    nodeIds: nodeIds.map((row) => String(row.id)),
-    linkKeys: linkKeys.map((row): LinkKey => [
-      String(row.source_id),
-      String(row.destination_id),
-      String(row.kind),
-    ]),
-    cursor: await readCursor(tenant),
-  }
+  return { nodes, links, cursor: await readCursor(tenant) }
 }
 
 /**
@@ -135,10 +117,20 @@ export async function corpusPut(
     nodes: payload.nodes.length,
     links: payload.links.length,
     deletes: (payload.deleteNodes?.length ?? 0) + (payload.deleteLinks?.length ?? 0),
+    cursor: payload.cursor ?? null,
   }
 }
 
-/** LIVE row counts + schema version + cursor, for diagnostics and sync repair. */
+/**
+ * LIVE row counts + schema version + cursor, for diagnostics and sync repair.
+ *
+ * The link count is **joined**, not filtered with `IN (SELECT …)`. The
+ * subquery form re-scanned `nodes` per link row — O(links × nodes), measured
+ * at 188k rows read on a 442-node corpus, which is what put a barely-used app
+ * at 82% of the D1 free-tier daily read limit. Each join is a primary-key
+ * lookup on `(user_id, id)`, so the same answer now costs ~1.8k rows: one pass
+ * over the tenant's rows plus two seeks per link.
+ */
 export async function corpusStatus(tenant: TenantDb): Promise<ReplicaStatusBody> {
   const rows = await tenant.exec(
     "SELECT " +
@@ -146,10 +138,12 @@ export async function corpusStatus(tenant: TenantDb): Promise<ReplicaStatusBody>
       // Read-time discard applies to counts too: a retained link into a
       // tombstoned node is not part of the graph anyone can see, and counting
       // it would make these figures disagree with the client's.
-      "(SELECT COUNT(*) FROM link WHERE user_id = :tenant AND deleted_at IS NULL " +
-      "AND source_id IN (SELECT id FROM nodes WHERE user_id = :tenant AND deleted_at IS NULL) " +
-      "AND destination_id IN (SELECT id FROM nodes WHERE user_id = :tenant " +
-      "AND deleted_at IS NULL)) AS links, " +
+      "(SELECT COUNT(*) FROM link " +
+      "JOIN nodes AS src ON src.user_id = link.user_id AND src.id = link.source_id " +
+      "AND src.deleted_at IS NULL " +
+      "JOIN nodes AS dst ON dst.user_id = link.user_id AND dst.id = link.destination_id " +
+      "AND dst.deleted_at IS NULL " +
+      "WHERE link.user_id = :tenant AND link.deleted_at IS NULL) AS links, " +
       "(SELECT COUNT(*) FROM nodes WHERE user_id = :tenant AND deleted_at IS NULL " +
       "AND type = 'page') AS pages, " +
       "(SELECT value FROM meta WHERE user_id = :tenant AND key = 'schema_version') " +

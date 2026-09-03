@@ -5,6 +5,7 @@
 ### Fixed
 
 - A device holding an out-of-date local copy of your notes now rebuilds it from scratch instead of trying to update it in place. The old behaviour could leave a device disagreeing with the cloud about which notes existed, and briefly emptied the note list.
+- Syncing now reads far less data. Saving a note, and checking for changes from your other devices, used to re-read your entire set of notes every time; both now read only what actually changed — thousands of times less work, with no change in how sync behaves.
 - Pasting onto a selected block now puts the content **inside** it rather than next to it, and a pasted section arrives folded — you see the block you pasted, not its whole tree unpacked into the page. The block you pasted onto is opened so the paste is visible.
 - Refreshing a note no longer shows a blank editor. The page used to open in edit mode with nothing in it while the local database was still starting up, and only showed your writing after navigating away and back.
 

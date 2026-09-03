@@ -77,7 +77,12 @@ sign-in/sign-out, and the signed-out sample notes. The write seam
   local rollups into the atoms immediately → pull rows from D1 (full corpus on
   first boot; `?since=<cursor>` after) → apply into the store and atoms. The
   pull cursor persists in the store's `meta` table (`d1_pull_cursor`), so it
-  can never outlive the data it describes.
+  can never outlive the data it describes. Two bindings are checked before any
+  local row is read: the store's `store_owner` (a different signed-in identity
+  wipes the cache) and its `cache_generation` — bumping `CACHE_GENERATION` in
+  `database-mode.ts` makes every device discard its local copy once and
+  re-pull, the escape hatch for a protocol change that leaves old caches
+  holding rows nothing can correct.
 - **Saves:** files-shaped writes land in the files atom synchronously (the UI
   never waits), then the SQL store ingests them as a **row diff** — nodes
   whose type/text/props changed, links whose sort key changed, deletions —
@@ -132,14 +137,20 @@ table. Consequences, accepted and mitigated:
   a no-op under LWW.
 - Deletions travel as ordinary rows carrying `deleted_at`, so a delete is just
   another change the since-pull returns and the client applies.
-- The response nevertheless still carries the full key list of both tables
-  (`nodeIds`, `linkKeys`), and the client deletes local rows absent from them
-  (rows of pending-push notes excepted). Tombstones made that channel
-  redundant, but it stays as belt-and-braces until tombstone propagation has
-  proven itself in production; dropping it is a deliberate follow-up
-  (docs/multi-tenant-design.md §0). Note that a tombstoned row is still a row,
-  so it appears in the key lists — absence from them now means _purged_, not
-  deleted.
+- **Silence means "unchanged", never "deleted".** A since-pull carries the
+  changed rows and nothing else. It used to carry the full key list of both
+  tables as well (`nodeIds`, `linkKeys`), and the client deleted local rows
+  absent from them; tombstones made that channel redundant, and it cost
+  O(corpus) rows read on _every_ pull — every focus, visibility change and
+  `online` event, per device — which is what put a barely-touched app at 82%
+  of the D1 free-tier daily read limit. It is gone.
+- The one thing the key lists could still say is "this row was purged
+  outright", and nothing purges: the query guard refuses a `DELETE` from
+  `nodes`/`link` (`sql-tenancy-guard.ts`). Rows hard-deleted _before_ soft
+  deletes existed left no tombstone, though, so a device could hold one
+  forever once absence-detection went away — which is why removing the lists
+  came with a bump of `CACHE_GENERATION` (`src/data/database-mode.ts`): every
+  device discards its local copy once and re-pulls the corpus clean.
 
 ### What the database deliberately does not do
 
@@ -397,12 +408,20 @@ shared `SqlDriver` seam.
 - `GET /api/replica/notes` — row pull, the read half:
   - Full: `{ nodes, links, cursor }` — every row of both tables, tombstones
     included.
-  - `?since=<cursor>`: `{ nodes, links, nodeIds, linkKeys, cursor }` — the
-    changed rows (`updated_at > since`, a tombstone being an ordinary change)
-    plus the **full key list of each table**. A malformed `since` is a 400.
+  - `?since=<cursor>`: the same shape, carrying only the changed rows
+    (`updated_at > since`, a tombstone being an ordinary change) — two index
+    scans, so a quiet pull reads a handful of rows. A malformed `since` is a 400.
+  - A successful `PUT` answers `{ ok, nodes, links, deletes, cursor }`, where
+    `cursor` is the cursor that batch committed. The client confirms its
+    cursor from that, so a save costs exactly one request.
 - `GET /api/replica/status` — LIVE row counts (`nodes`, `links`, `pages` —
   tombstones and links into tombstoned nodes excluded, so these agree with the
-  client's own counts), `schema_version`, `replica_cursor`.
+  client's own counts), `schema_version`, `replica_cursor`. The link count
+  **joins** `nodes` twice on its primary key rather than filtering with
+  `IN (SELECT …)`, which re-scanned the node table per link row: measured on a
+  442-node corpus, 188k rows read became 1.8k. It is diagnostics, so it is
+  read when the Settings → Storage panel asks and once per session — never per
+  save.
 - `POST /api/admin/import-do-corpus` (`worker/handlers/admin.ts`, owner-only)
   — the DO→D1 import for the owner and every id in `users`; `?merge=1` to
   LWW-merge into a non-empty partition, `?force=1` to re-run a marked tenant.
@@ -473,11 +492,16 @@ write.
   never thrown.
 - **Cursor.** Each push carries a monotonic ms-timestamp cursor (sent only
   with the final chunk, so it means "the replica reflects local state as of
-  this push"). `GET /api/replica/status` echoes it back — the Settings panel
-  shows it as confirmed — and supplies remote row counts. If the counts show
-  the replica drastically behind (empty, or missing >10% of the pages), a
-  full push is scheduled automatically (cooldown-guarded); the Settings panel
-  also has a manual "Push full copy to the cloud now" action.
+  this push"), and the push's own response echoes the cursor it committed —
+  the Settings panel shows it as confirmed. No second request.
+- **Remote counts are diagnostics.** `GET /api/replica/status` is fetched when
+  the Settings → Storage panel opens, and once per session after the first
+  successful push; it used to run after _every_ push, which is how ~10 saves
+  consumed millions of D1 row reads. If the counts show the replica
+  drastically behind (empty, or missing >10% of the pages), a full push is
+  scheduled automatically (cooldown-guarded) — that is a fact about history,
+  not about the save that just landed, so once a session is enough. The
+  Settings panel also has a manual "Push full copy to the cloud now" action.
 - **Known gap, accepted:** pending rows live only in memory, so a change made
   while the replica was unreachable can be lost remotely if the tab closes
   before the retry lands (the keepalive flush narrows this to actual network

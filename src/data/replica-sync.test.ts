@@ -87,7 +87,18 @@ function createTestServer() {
       for (const id of payload.deleteNodes ?? []) remoteNodes.delete(id)
       for (const [s, d, k] of payload.deleteLinks ?? []) remoteLinks.delete(`${s}|${d}|${k}`)
       if (payload.cursor !== undefined) remoteCursor = payload.cursor
-      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      // The real Worker echoes the cursor the batch committed — that is how
+      // the client confirms it without a second request.
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          nodes: payload.nodes.length,
+          links: payload.links.length,
+          deletes: (payload.deleteNodes?.length ?? 0) + (payload.deleteLinks?.length ?? 0),
+          cursor: payload.cursor ?? null,
+        }),
+        { status: 200 },
+      )
     }
 
     if (url === "/api/replica/status" && method === "GET") {
@@ -190,7 +201,7 @@ afterEach(async () => {
 })
 
 describe("replica sync queue", () => {
-  it("coalesces rapid diffs into one debounced push and confirms via status", async () => {
+  it("coalesces rapid diffs into one debounced push, confirmed by its response", async () => {
     const { handle, server } = createTestSync({ "a.md": "A\n", "b.md": "B\n" })
     handle.notifyGraphChange(["a"], diffOf({ nodes: [node("a"), node("blk_a1", "v1")] }))
     handle.notifyGraphChange(["b"], diffOf({ nodes: [node("b")] }))
@@ -213,6 +224,48 @@ describe("replica sync queue", () => {
     expect(diag.lastPushNotes).toBe(2)
     expect(diag.cursorConfirmed).toBe(true)
     expect(diag.remote?.pages).toBe(2)
+  })
+
+  it("reads the status endpoint once per session, not once per save", async () => {
+    // `GET /api/replica/status` scans the tenant's rows; running it after
+    // every push is what burned through the D1 read budget. The cursor is
+    // confirmed by the push's own response instead.
+    const { handle, server } = createTestSync({ "a.md": "A\n", "b.md": "B\n" })
+    handle.notifyGraphChange(["a"], diffOf({ nodes: [node("a")] }))
+    await advance(handle, DEBOUNCE)
+    expect(server.statuses()).toHaveLength(1)
+
+    for (const id of ["b", "c", "d"]) {
+      handle.notifyGraphChange([id], diffOf({ nodes: [node(id)] }))
+      await advance(handle, DEBOUNCE)
+    }
+
+    expect(server.puts()).toHaveLength(4)
+    expect(server.statuses()).toHaveLength(1)
+    // Every push still knows its cursor landed.
+    expect(replicaDiagnostics().cursorConfirmed).toBe(true)
+  })
+
+  it("a push whose cursor the replica did not commit is not marked confirmed", async () => {
+    // A replica that answers 200 without committing the cursor (an older
+    // Worker, a proxy) must not be reported as confirmed.
+    const server = createTestServer()
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await server.fetchImpl(input, init)
+      return String(input) === "/api/replica/notes" && (init?.method ?? "GET") === "PUT"
+        ? new Response(JSON.stringify({ ok: true }), { status: 200 })
+        : response
+    }) as typeof fetch
+    const { handle } = createTestSync({ "a.md": "A\n" }, { nodes: [], links: [] }, { fetchImpl })
+
+    // Spend the session's one status check up front (as opening the Settings
+    // panel does), so what the push reports comes from the push alone.
+    handle.refreshRemoteStatus()
+    handle.notifyGraphChange(["a"], diffOf({ nodes: [node("a")] }))
+    await advance(handle, DEBOUNCE)
+
+    expect(replicaDiagnostics().cursor).not.toBeNull()
+    expect(replicaDiagnostics().cursorConfirmed).toBe(false)
   })
 
   it("upserts cancel deletes (and vice versa) within the pending diff", async () => {
