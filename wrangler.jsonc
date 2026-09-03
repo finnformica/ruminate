@@ -15,7 +15,6 @@
       "/file-proxy",
       "/share/*",
       "/api/replica/*",
-      "/api/admin/*",
     ],
   },
   // The one database: the control plane (users + allowlist,
@@ -34,17 +33,20 @@
       "migrations_dir": "./migrations",
     },
   ],
-  // The RETIRING per-user corpus Durable Object (worker/corpus-do.ts), kept in
-  // this release only so the rows inside each live object can be imported back
-  // into D1 — a `deleted_classes` migration tag deletes an object's storage
-  // along with its class, so the class must outlive the import. Deploy-day
-  // order and the follow-up that adds
-  //   { "tag": "v2", "deleted_classes": ["UserCorpus"] }
-  // (and deletes the class) are in docs/multi-tenant-design.md.
-  "durable_objects": {
-    "bindings": [{ "name": "CORPUS", "class_name": "UserCorpus" }],
-  },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserCorpus"] }],
+  // Durable Object class migrations. Tags are a cumulative, ordered ledger:
+  // every tag ever applied stays in this array (the platform applies the ones
+  // it has not seen), so `v1` remains even though the class it created is now
+  // gone. `v2` deletes `UserCorpus` (worker/corpus-do.ts, deleted): the corpus
+  // lives in D1 scoped by `user_id`, nothing reads a DO any more, and the
+  // binding is gone with the class.
+  //
+  // THIS IS IRREVERSIBLE. `deleted_classes` deletes every object's STORAGE
+  // along with the class — there is no trash and no undelete. Do not deploy
+  // until every live corpus has been imported into D1 and verified.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["UserCorpus"] },
+    { "tag": "v2", "deleted_classes": ["UserCorpus"] },
+  ],
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": true },
@@ -54,8 +56,8 @@
   // and put both in .dev.vars (git-ignored) for local `wrangler dev`.
   "vars": {
     "VITE_GITHUB_CLIENT_ID": "Ov23lidqIncQ8ul67fUo",
-    // Bootstrap owner id: implicit allowlist entry, /api/admin/* gate, and the
-    // fail-closed fallback if the control-plane migration hasn't run.
+    // Bootstrap owner id: implicit allowlist entry, and the fail-closed
+    // fallback if the control-plane migration hasn't run.
     "ALLOWED_GITHUB_ID": "42536816",
     // Signup gate (worker/handlers/tenancy.ts): "allowlist" admits only ids in
     // the control plane's allowlist table (plus the bootstrap owner); "open"

@@ -75,7 +75,7 @@ CREATE INDEX link_tenant_updated ON link (user_id, updated_at);
 
 CREATE TABLE meta (
   user_id INTEGER NOT NULL,  -- per-tenant: each has its own cursor and versions
-  key TEXT NOT NULL,         -- schema_version = '3', replica_cursor, data_version
+  key TEXT NOT NULL,         -- schema_version = '3', replica_cursor
   value TEXT NOT NULL,
   PRIMARY KEY (user_id, key)
 );

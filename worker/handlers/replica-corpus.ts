@@ -20,10 +20,11 @@
 // the guard checks the string that actually runs, so the string that actually
 // runs is the one a reader sees.
 
-import { toLinkRow, toNodeRow } from "../../src/data/data-version"
 import type { TenantDb } from "../tenancy-db"
 import {
   planReplicaPut,
+  toLinkRow,
+  toNodeRow,
   type LinkKey,
   type LinkRow,
   type NodeRow,
@@ -39,12 +40,6 @@ export interface ReplicaPutResult {
   nodes: number
   links: number
   deletes: number
-}
-
-/** Every row of both tables — the shape the DO→D1 import moves. */
-export interface CorpusRows {
-  nodes: NodeRow[]
-  links: LinkRow[]
 }
 
 async function readCursor(tenant: TenantDb): Promise<string | null> {

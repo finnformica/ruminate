@@ -145,11 +145,14 @@ which would destroy the data being rescued.
 5. Verify: `GET /api/replica/status` per user, plus a D1 console query —
    `SELECT user_id, COUNT(*) FROM nodes WHERE deleted_at IS NULL GROUP BY 1`.
    This is the step the whole reversal was for.
-6. **Follow-up PR (not this one):** delete `worker/corpus-do.ts`,
-   `worker/handlers/corpus-migration.ts` and `forAdminImport`, drop the
-   `CORPUS` binding, and add
-   `{ "tag": "v2", "deleted_classes": ["UserCorpus"] }` to wrangler.jsonc's
-   `migrations`, which tears the class down and reclaims its storage.
+6. **Done (2026-09-02):** `worker/corpus-do.ts`,
+   `worker/handlers/corpus-migration.ts`, the admin import endpoint and the
+   `CORPUS` binding are deleted, and
+   `{ "tag": "v2", "deleted_classes": ["UserCorpus"] }` is in wrangler.jsonc's
+   `migrations` — deploying it tears the class down and reclaims its storage.
+   **That deploy is irreversible**: any corpus still held only in a Durable
+   Object is destroyed with it, so every signed-up user's rows must exist in
+   D1 first.
 
 ### Follow-ups this reversal defers
 

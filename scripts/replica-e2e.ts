@@ -11,10 +11,8 @@
  * which identity a token belongs to.
  *
  * (The Durable Object detour that used to require Miniflare here is gone: the
- * corpus lives in D1 again, and `getPlatformProxy` proxies a D1 binding
- * perfectly well. The retiring `CORPUS` binding is simply absent from this
- * env, which is exactly the state of the world after the DO→D1 import — the
- * import itself is covered by `worker/handlers/corpus-migration.test.ts`.)
+ * corpus lives in D1, and `getPlatformProxy` proxies a D1 binding perfectly
+ * well. There is no DO binding left to wire.)
  *
  * Prereq: npx wrangler d1 migrations apply ruminate --local
  * Run:    npx vite-node scripts/replica-e2e.ts
@@ -79,8 +77,6 @@ const githubStub = (async (input: RequestInfo | URL, init?: RequestInit) => {
 async function main() {
   const platform = await getPlatformProxy<Env>()
   const db = platform.env.DB
-  // The DO binding is deliberately not wired here (see the header): after the
-  // import there is nothing behind it, and the handler must cope with that.
   const env = {
     DB: db,
     SIGNUP_MODE: "allowlist",
@@ -118,10 +114,9 @@ async function main() {
     db.batch([
       db.prepare("DELETE FROM link WHERE source_id LIKE '%e2e%' OR destination_id LIKE '%e2e%'"),
       db.prepare("DELETE FROM nodes WHERE id LIKE '%e2e%'"),
-      // The guest partition goes wholesale, not by id pattern: the
-      // data-version transform can re-key a page (docs/page-identity-design.md)
-      // and an id-matched cleanup would leave the renamed row behind to
-      // poison the next run's isolation check.
+      // The guest partition goes wholesale, not by id pattern: an id-matched
+      // cleanup would leave any row the run wrote under an unexpected id
+      // behind, to poison the next run's isolation check.
       db.prepare("DELETE FROM link WHERE user_id = ?1").bind(GUEST_ID),
       db.prepare("DELETE FROM nodes WHERE user_id = ?1").bind(GUEST_ID),
       db.prepare("DELETE FROM meta WHERE user_id = ?1").bind(GUEST_ID),

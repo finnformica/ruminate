@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest"
 import migration0001 from "../../migrations/0001_init.sql?raw"
 import migration0002 from "../../migrations/0002_nodes.sql?raw"
 import { describeNoteStoreConformance } from "./note-store-conformance"
-import { derivePageId } from "./page-identity"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { openSqlNoteStore } from "./sql-note-store"
 
@@ -148,42 +147,6 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
     )
   })
 
-  it("transforms legacy rows on open (data_version 1) so old data gains types", async () => {
-    const driver = createNodeSqlDriver()
-    await openSqlNoteStore(driver)
-    // Simulate a pre-transform corpus: raw near-miss text rows and legacy
-    // frontmatter props, landed after the (empty) open — like a first pull.
-    await driver.batch([
-      {
-        sql: "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?, ?, ?, ?, ?)",
-        params: ["a", "page", "a", JSON.stringify({ frontmatter: "pinned: true" }), 100],
-      },
-      {
-        sql: "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?, ?, ?, ?, ?)",
-        params: ["blk_aaaaaaaaaa", "text", "[] buy milk", null, 100],
-      },
-      {
-        sql:
-          "INSERT INTO link (source_id, destination_id, kind, sort_key, updated_at) " +
-          "VALUES (?, ?, 'child', 'a0', ?)",
-        params: ["a", "blk_aaaaaaaaaa", 100],
-      },
-    ])
-
-    const store = await openSqlNoteStore(driver)
-    // The ladder composes: version 1 typed the block, version 2 re-keyed the
-    // page to a minted id and turned its old id into the title.
-    expect(await store.getNote(derivePageId("a"))).toBe(
-      "---\ntitle: a\npinned: true\n---\n[ ] buy milk\n  id:: blk_aaaaaaaaaa\n",
-    )
-    expect(await store.getNote("a")).toBe(null)
-    const rows = await driver.exec("SELECT type, updated_at FROM nodes WHERE id = 'blk_aaaaaaaaaa'")
-    expect(rows[0].type).toBe("todo")
-    // Fresh updated_at → the rewritten row wins LWW and replicates.
-    expect(Number(rows[0].updated_at)).toBeGreaterThan(100)
-    expect(await store.getMeta("data_version")).toBe("2")
-  })
-
   it("migrates a v1 database in place via 0002 (v1 tables dropped)", async () => {
     const driver = createNodeSqlDriver()
     // Simulate a v1 store: meta with schema_version 1 and a v1 table.
@@ -217,16 +180,16 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
     ])
 
     const store = await openSqlNoteStore(driver)
-    // The row survives the DDL step; page identity then re-keys it, so the
-    // note is reachable under its minted id (with its old id as the title).
-    expect(await store.getNote(derivePageId("a"))).toBe("---\ntitle: a\n---\n")
+    // The row survives the DDL step, under its own id: the ladder adds
+    // columns, it never rewrites rows.
+    expect(await store.getNote("a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
       { value: "3" },
     ])
-    // The minted row is live: a nullable column means NULL = never deleted.
-    expect(
-      await driver.exec("SELECT deleted_at FROM nodes WHERE id = ?", [derivePageId("a")]),
-    ).toEqual([{ deleted_at: null }])
+    // The row is live: a nullable column means NULL = never deleted.
+    expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = ?", ["a"])).toEqual([
+      { deleted_at: null },
+    ])
   })
 
   it("resets and re-migrates a database with an unknown schema_version", async () => {
@@ -248,28 +211,22 @@ describe("openSqlNoteStore (sql-specific behavior)", () => {
     expect(await reopened.getNote("blk_page0000")).toBe("keep me\n  id:: blk_aaaaaaaaaa\n")
   })
 
-  it("re-keys a title-shaped page id on open, preserving its content", async () => {
+  it("never rewrites rows on open — a title-shaped page id is left alone", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await store.writeNotes({ "Flow Engineering": "body\n  id:: blk_aaaaaaaaaa\n" })
+    const before = await driver.exec("SELECT id, type, text, updated_at FROM nodes ORDER BY id")
 
     const reopened = await openSqlNoteStore(driver)
-    const minted = derivePageId("Flow Engineering")
-    // Content survives under the minted id, carrying its former name as the
-    // title. The old id is not addressable any more.
-    expect(await reopened.getNote(minted)).toBe(
-      "---\ntitle: Flow Engineering\n---\nbody\n  id:: blk_aaaaaaaaaa\n",
+
+    // Opening the store is DDL only. Data migrations are one-shot operations
+    // run server-side against D1; a local copy that predates one is discarded
+    // and re-pulled wholesale (`CACHE_GENERATION`, database-mode.ts), never
+    // transformed in place — which is what stops a device merging rows of two
+    // different generations.
+    expect(await reopened.getNote("Flow Engineering")).toBe("body\n  id:: blk_aaaaaaaaaa\n")
+    expect(await driver.exec("SELECT id, type, text, updated_at FROM nodes ORDER BY id")).toEqual(
+      before,
     )
-    expect(await reopened.getNote("Flow Engineering")).toBe(null)
-    // The block kept its own id and is still parented by the page.
-    expect(await reopened.downstream(minted)).toEqual(["blk_aaaaaaaaaa"])
-    // Nothing is hard-deleted: the old page row is a tombstone, so the re-key
-    // replicates to other devices instead of silently diverging.
-    expect(
-      await driver.exec(
-        "SELECT deleted_at FROM nodes WHERE id = 'Flow Engineering' " +
-          "/* includes-deleted: asserting the tombstone the re-key leaves */",
-      ),
-    ).toEqual([{ deleted_at: expect.any(Number) }])
   })
 
   it("retitling a note rewrites exactly one row — the page's", async () => {

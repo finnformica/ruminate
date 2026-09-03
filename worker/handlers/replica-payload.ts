@@ -60,6 +60,38 @@ export const linkKeyOf = (link: LinkRow): LinkKey => [
 export const isTombstoned = (row: { deleted_at?: number }): boolean =>
   row.deleted_at !== undefined && row.deleted_at !== null
 
+/** Read one node row out of a driver result, keeping `deleted_at` present only
+ * when the row is actually tombstoned (see `NodeRow.deleted_at`). Both engines
+ * hand back the same loose row shape, so both parse it here. */
+export function toNodeRow(row: Record<string, unknown>): NodeRow {
+  const node: NodeRow = {
+    id: String(row.id),
+    type: String(row.type),
+    text: String(row.text),
+    props: row.props === null || row.props === undefined ? null : String(row.props),
+    updated_at: Number(row.updated_at),
+  }
+  if (row.deleted_at !== null && row.deleted_at !== undefined) {
+    node.deleted_at = Number(row.deleted_at)
+  }
+  return node
+}
+
+/** Read one link row out of a driver result (see `toNodeRow`). */
+export function toLinkRow(row: Record<string, unknown>): LinkRow {
+  const link: LinkRow = {
+    source_id: String(row.source_id),
+    destination_id: String(row.destination_id),
+    kind: String(row.kind),
+    sort_key: String(row.sort_key),
+    updated_at: Number(row.updated_at),
+  }
+  if (row.deleted_at !== null && row.deleted_at !== undefined) {
+    link.deleted_at = Number(row.deleted_at)
+  }
+  return link
+}
+
 /**
  * A batch of row-level changes — what one save boils down to, and the unit the
  * push queue accumulates. Since soft deletes, a delete is an ordinary row

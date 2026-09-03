@@ -127,6 +127,19 @@ afterEach(async () => {
 const NOTE_A = "- A\n  id:: blk_a000000000\n"
 const NOTE_B = "- B\n  id:: blk_b000000000\n"
 
+/** The generation `database-mode.ts` expects a local cache to carry. */
+const CACHE_GENERATION = "2"
+
+/** A local store as the current app leaves it: rows, a cursor, and the cache
+ * generation those rows belong to. */
+async function seededStore(notes: Record<string, string>, cursor = "500", generation = "2") {
+  const store = await openSqlNoteStore(createNodeSqlDriver())
+  await store.writeNotes(notes)
+  await store.setMeta("d1_pull_cursor", cursor)
+  await store.setMeta("cache_generation", generation)
+  return store
+}
+
 describe("database mode boot", () => {
   it("first boot: full pull populates the store, the files atom, and the cursor", async () => {
     const { source, calls } = stubSource({
@@ -144,9 +157,7 @@ describe("database mode boot", () => {
   })
 
   it("later boots serve local contents and pull with the stored cursor", async () => {
-    const seeded = await openSqlNoteStore(createNodeSqlDriver())
-    await seeded.writeNotes({ "note-a": "- local A\n  id:: blk_a000000000\n" })
-    await seeded.setMeta("d1_pull_cursor", "500")
+    const seeded = await seededStore({ "note-a": "- local A\n  id:: blk_a000000000\n" })
 
     const { source, calls } = stubSource({
       since: () =>
@@ -295,6 +306,70 @@ describe("database mode lifecycle", () => {
   })
 })
 
+/**
+ * The local store is a CACHE of D1, never a source of truth, so it is never
+ * data-migrated: a copy from an older generation is discarded and rebuilt by a
+ * full pull. This is what stops a device that predates a server-side migration
+ * merging its stale rows with the pulled, migrated ones.
+ */
+describe("cache generation", () => {
+  it("a stale generation wipes the local copy and re-pulls in full", async () => {
+    const seeded = await seededStore({ "note-a": NOTE_A }, "500", "1")
+
+    const { source, calls } = stubSource({
+      full: remoteCorpus({ "note-b": NOTE_B }, 1, "900"),
+    })
+    const store = await boot({ store: seeded, source })
+
+    // The stale cursor went with the rows, so the pull was a FULL one — the
+    // whole point: a since-pull would have merged two generations.
+    expect(calls.full).toBe(1)
+    expect(calls.since).toEqual([])
+    expect(await store.getAllNotes()).toEqual({ "note-b": NOTE_B })
+    expect(files()).toEqual({ "note-b.md": NOTE_B })
+    expect(await store.getMeta("cache_generation")).toBe(CACHE_GENERATION)
+    expect(await store.getMeta("d1_pull_cursor")).toBe("900")
+  })
+
+  it("a matching generation leaves the local copy and its cursor alone", async () => {
+    const seeded = await seededStore({ "note-a": NOTE_A })
+
+    const { source, calls } = stubSource({
+      since: (cursor) => remoteChanges({}, { "note-a": NOTE_A }, 2, cursor),
+    })
+    const store = await boot({ store: seeded, source })
+
+    expect(calls.full).toBe(0)
+    expect(calls.since).toEqual(["500"])
+    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
+  })
+
+  it("a fresh store boots normally and records the generation", async () => {
+    const { source, calls } = stubSource({
+      full: remoteCorpus({ "note-a": NOTE_A }, 1, "1000"),
+    })
+    const store = await boot({ source })
+
+    expect(calls.full).toBe(1)
+    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
+    expect(await store.getMeta("cache_generation")).toBe(CACHE_GENERATION)
+    expect(await store.getMeta("d1_pull_cursor")).toBe("1000")
+  })
+
+  it("keeps the owner binding intact across a generation wipe", async () => {
+    // The two wipes are independent: bumping the generation must not sign the
+    // browser out of its own cache and re-wipe it on the next boot.
+    const seeded = await seededStore({ "note-a": NOTE_A }, "500", "1")
+    await seeded.setMeta("store_owner", "42")
+
+    const { source } = stubSource({ full: { nodes: [], links: [], cursor: null } })
+    const store = await boot({ store: seeded, source, owner: "42" })
+
+    expect(await store.getMeta("store_owner")).toBe("42")
+    expect(await store.getAllNotes()).toEqual({})
+  })
+})
+
 describe("owner binding", () => {
   it("records the owner on first boot", async () => {
     const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }, 1, "1000") })
@@ -304,9 +379,7 @@ describe("owner binding", () => {
   })
 
   it("the same owner keeps the local cache and cursor (since-pull, no wipe)", async () => {
-    const seeded = await openSqlNoteStore(createNodeSqlDriver())
-    await seeded.writeNotes({ "note-a": NOTE_A })
-    await seeded.setMeta("d1_pull_cursor", "500")
+    const seeded = await seededStore({ "note-a": NOTE_A })
     await seeded.setMeta("store_owner", "42")
 
     const { source, calls } = stubSource({
@@ -319,9 +392,7 @@ describe("owner binding", () => {
   })
 
   it("a different signed-in identity wipes the local cache before anything renders", async () => {
-    const seeded = await openSqlNoteStore(createNodeSqlDriver())
-    await seeded.writeNotes({ "note-a": NOTE_A })
-    await seeded.setMeta("d1_pull_cursor", "500")
+    const seeded = await seededStore({ "note-a": NOTE_A })
     await seeded.setMeta("store_owner", "42")
 
     // A different account signs in on this browser: the previous owner's
@@ -337,9 +408,7 @@ describe("owner binding", () => {
   })
 
   it("an ownerless boot leaves an owned store untouched", async () => {
-    const seeded = await openSqlNoteStore(createNodeSqlDriver())
-    await seeded.writeNotes({ "note-a": NOTE_A })
-    await seeded.setMeta("d1_pull_cursor", "500")
+    const seeded = await seededStore({ "note-a": NOTE_A })
     await seeded.setMeta("store_owner", "42")
 
     const { source } = stubSource({

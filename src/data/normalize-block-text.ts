@@ -29,10 +29,9 @@
  *   `[]` (nothing to check off), `[x]tight` (could be prose like "[x]marks"),
  *   and tab-separated markers all stay text — ambiguous, so verbatim wins.
  *
- * The same function runs in two places: ingest (`docToGraphParts`) for new
- * saves, and the versioned `data_version` transform (data-version.ts) that
- * rewrites existing rows once. Keep it dependency-free — it is bundled into
- * the Worker via the corpus Durable Object's schema path.
+ * It runs at ingest (`docToGraphParts`), so every save normalizes what it
+ * writes. Rows written before it existed keep their near-miss spelling until
+ * their note is next saved. Keep it dependency-free.
  */
 
 export interface NormalizedBlockText {

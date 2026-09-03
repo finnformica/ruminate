@@ -1,4 +1,3 @@
-import { ensureDataVersion, singleTenantCorpus } from "./data-version"
 import type { SqlDriver } from "./sql-driver"
 
 /**
@@ -92,11 +91,11 @@ async function applyV3(
  * migration ladder when empty, migrate a v1/v2 database in place, and
  * reset-and-rebuild anything unrecognized.
  *
- * After the DDL ladder, single-tenant engines also run the shared data-version
- * transform (`data-version.ts`) so rows whose *shape* predates the current
- * data version are rewritten on open. Column-tenanted corpora cannot: the
- * transform is per-tenant there, and the Worker runs it per verified user
- * (`ensureTenantDataVersion`, `worker/tenancy-db.ts`) instead.
+ * **DDL only.** This ladder creates tables; it never rewrites rows. Data
+ * migrations run once, server-side, against D1 — the local store is a cache of
+ * that corpus, so when its contents are of an older generation the runtime
+ * discards them and re-pulls (`CACHE_GENERATION` in `database-mode.ts`) rather
+ * than transforming them in place.
  */
 export async function ensureCorpusSchema(
   driver: SqlDriver,
@@ -126,5 +125,4 @@ export async function ensureCorpusSchema(
       await applyV3(driver, migrations, tenancy)
     }
   }
-  if (tenancy === "single") await ensureDataVersion(singleTenantCorpus(driver))
 }
