@@ -37,6 +37,39 @@ Note the density assumption: 42-character blocks is an outline-style corpus.
 Long-form paragraph notes hit the same byte totals at far fewer blocks —
 **which is why the byte thresholds below matter more than the block counts.**
 
+## What a pull costs (corrected 2026-09)
+
+The thresholds below are about the **initial** pull, and that was always the
+honest framing of the transfer cost — but until 2026-09 it was not the whole
+bill, because every _incremental_ pull was corpus-sized too. The since-pull
+carried the full key list of both tables so the client could detect deletions
+by absence, on every focus, visibility change and `online` event.
+
+At the baseline corpus above (333 nodes, 329 links), those lists were:
+
+| Per since-pull           | Old                                     | Now                         |
+| ------------------------ | --------------------------------------- | --------------------------- |
+| Rows read at the replica | 662 + changed                           | changed only (~0 when idle) |
+| Wire bytes when idle     | ~20 KB (5.7 KB ids + 14.8 KB link keys) | ~40 bytes                   |
+
+That is ~56% of the corpus's entire content size (36.6 KB), re-sent for every
+pull that had nothing to report. Tombstones made the lists redundant, so they
+are gone; a quiet pull now transfers an empty row array.
+
+The reads mattered more than the bytes. D1's free tier allows 5M `rows_read`
+per day, and two other corpus-sized reads compounded the same problem: the
+diagnostics status query counted links with `IN (SELECT … FROM nodes)`, an
+O(links × nodes) scan measured at **188k rows read** on a 442-node corpus, and
+it ran after every single push. Roughly ten note saves consumed 4M rows. Both
+are fixed (`graph-storage.md`), but the lesson generalizes:
+
+- **Per-pull and per-push work must be O(changes), not O(corpus).** A cost
+  that scales with the corpus and fires on an ambient browser event will find
+  a quota long before the size thresholds below are anywhere in sight.
+- Watch `rows_read` in the Cloudflare D1 dashboard as a leading indicator. It
+  fails at a corpus size 100× below what the table predicts, because it counts
+  events, not blocks.
+
 ## Thresholds
 
 | Corpus                      | Initial pull (gzip) | JS heap (est.) | Search latency | Action                   |
@@ -67,6 +100,10 @@ Counts are a proxy; these are the actual failures. Act if:
   eviction, and it is the hard stop regardless of what the table says.
 - **OPFS** growth becomes a problem (unlikely; the quota is far larger than
   the other limits).
+- **D1 `rows_read`** passes ~20% of the daily free-tier allowance (1M/day) for
+  a single user. That is not a corpus-size signal — it means something on the
+  save or sync path is reading the whole corpus when it should be reading a
+  change.
 
 ## Instrument before migrating
 
@@ -89,11 +126,13 @@ than it looks, because the current sync protocol assumes a full replica:
 
 - **Working set definition** — what "relevant to the view" means (open note,
   recents, pinned, search results?) and how it is evicted.
-- **Sync protocol rework** — deletion-by-absence sends the complete id list
+- **Sync protocol rework** — ~~deletion-by-absence sends the complete id list
   and the client deletes what is missing; that is incoherent when the client
-  is meant to hold a subset. Soft deletes (tombstones) already remove the
-  need for those lists, which is why they are a prerequisite worth having
-  first.
+  is meant to hold a subset~~ **done (2026-09)**: soft deletes replaced
+  deletion-by-absence, and the key lists were dropped from the since-pull.
+  A pull is now O(changes) rather than O(corpus), which removes the blocker
+  this item described — and, incidentally, the read amplification it was
+  quietly causing ("What a pull costs", above).
 - **Offline behavior** — currently everything works offline. Afterwards only
   the working set does. Writes should stay local-first for loaded notes so
   the never-lose-work guarantee survives for what you are actually editing.

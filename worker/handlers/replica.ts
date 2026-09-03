@@ -150,11 +150,11 @@ export async function replica(
  *
  * - `GET /api/replica/notes` → `{ nodes, links, cursor }`, every row of both
  *   tables, tombstones included.
- * - `GET /api/replica/notes?since=<cursor>` → `{ nodes, links, nodeIds,
- *   linkKeys, cursor }`. Changed rows are `updated_at > since`; because the
- *   comparison can miss (clock skew) the client pulls with an overlap window.
- *   A delete now travels as an ordinary changed row carrying `deleted_at`; the
- *   full key lists are kept as belt-and-braces (see `replica-corpus.ts`).
+ * - `GET /api/replica/notes?since=<cursor>` → the same shape with only the
+ *   rows whose `updated_at > since`; because the comparison can miss (clock
+ *   skew) the client pulls with an overlap window. A delete travels as an
+ *   ordinary changed row carrying `deleted_at` — which is why this response no
+ *   longer carries the corpus-wide key lists (see `replica-corpus.ts`).
  */
 async function replicaPull(request: Request, tenant: TenantDb): Promise<Response> {
   const sinceRaw = new URL(request.url).searchParams.get("since")

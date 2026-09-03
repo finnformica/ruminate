@@ -8,6 +8,7 @@ import {
   type LinkRow,
   type NodeRow,
   type ReplicaPutPayload,
+  type ReplicaPutResult,
   type ReplicaStatusBody,
 } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
@@ -48,9 +49,15 @@ import {
  *   (newer queued rows win) and retries with exponential backoff (2s → 60s);
  *   the browser's `online` event short-circuits the wait.
  * - **Cursor.** A monotonic ms-timestamp cursor is sent with each push and
- *   confirmed via `GET /api/replica/status`, which also supplies the remote
- *   row counts — and triggers an automatic full push when the replica is
- *   drastically behind.
+ *   confirmed by the push's own response, which echoes the cursor the batch
+ *   committed. No second request.
+ * - **Status is diagnostics, not plumbing.** `GET /api/replica/status` costs
+ *   a scan of the tenant's rows, so it is NOT fetched after every push (that
+ *   alone consumed most of a D1 free-tier daily read budget on a corpus of a
+ *   few hundred rows). It runs when the Settings → Storage panel asks for it,
+ *   and once per session after the first successful push — enough to catch a
+ *   replica that is drastically behind, which is a fact about history, not
+ *   about the save that just happened.
  */
 
 const DEBOUNCE_MS = 2_000
@@ -112,7 +119,11 @@ export interface ReplicaSyncHandle {
   pendingNoteIds?(): Set<NoteId>
   /** Queue a full-corpus push (after a repair, or from the Settings action). */
   requestFullPush(): void
-  /** Fetch `GET /api/replica/status` into the diagnostics (any tab). */
+  /**
+   * Fetch `GET /api/replica/status` into the diagnostics (any tab). Called
+   * when the Settings → Storage panel opens — the counts are diagnostics, and
+   * the query scans the tenant's rows, so nothing on the save path calls it.
+   */
   refreshRemoteStatus(): void
   stop(): void
   /** Wait for all queued replication work — tests only. */
@@ -218,6 +229,8 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   let lastCursorMs = 0
   let lastSentCursor: string | null = null
   let lastAutoFullPushAt = 0
+  /** Has the one automatic remote-status check for this session run yet? */
+  let statusCheckedThisSession = false
   /** Serialize all pushes/status fetches; one task's failure never breaks it. */
   let queue: Promise<void> = Promise.resolve()
 
@@ -300,7 +313,11 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     return response
   }
 
-  async function putPayload(payload: ReplicaPutPayload, keepalive: boolean): Promise<void> {
+  /** Push one payload; returns the cursor the replica committed, if any. */
+  async function putPayload(
+    payload: ReplicaPutPayload,
+    keepalive: boolean,
+  ): Promise<string | null> {
     const body = JSON.stringify(payload)
     const response = await authorizedFetch((token) =>
       fetchImpl("/api/replica/notes", {
@@ -311,8 +328,9 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
         ...(keepalive && body.length <= KEEPALIVE_BODY_LIMIT ? { keepalive: true } : {}),
       }),
     )
-    // Drain the (tiny) body so the connection can be reused.
-    await response.json().catch(() => {})
+    // The (tiny) body is drained either way so the connection can be reused.
+    const result = (await response.json().catch(() => null)) as ReplicaPutResult | null
+    return typeof result?.cursor === "string" ? result.cursor : null
   }
 
   async function fetchRemoteStatus(): Promise<void> {
@@ -414,7 +432,10 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
         [...snapshot.deleteLinks.values()],
         cursor,
       )
-      for (const payload of payloads) await putPayload(payload, keepalive)
+      // The cursor rides the final chunk, so the final response is the one
+      // that confirms it — no follow-up request.
+      let committedCursor: string | null = null
+      for (const payload of payloads) committedCursor = await putPayload(payload, keepalive)
 
       inFlightNoteIds = new Set()
       lastSentCursor = cursor
@@ -423,11 +444,17 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
         lastPushAt: Date.now(),
         lastPushNotes: snapshotNoteIds.size,
         cursor,
-        cursorConfirmed: false,
+        cursorConfirmed: committedCursor === cursor,
         lastError: null,
       })
-      // Confirm the cursor + refresh the remote counts (best-effort).
-      await fetchRemoteStatus().catch(recordError)
+      // Once per session, look at the remote counts: a replica that is
+      // drastically behind got that way from lost pushes or a wiped database,
+      // not from the save that just landed, so checking after every push buys
+      // nothing and costs a scan of the corpus. (Best-effort.)
+      if (!statusCheckedThisSession) {
+        statusCheckedThisSession = true
+        await fetchRemoteStatus().catch(recordError)
+      }
     } catch (error) {
       // Merge the snapshot back and retry with backoff. Never touches the
       // local store.
@@ -487,6 +514,9 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     },
     refreshRemoteStatus() {
       if (stopped) return
+      // An explicit refresh IS the session's status check; the push path need
+      // not repeat it.
+      statusCheckedThisSession = true
       queue = queue.then(() => fetchRemoteStatus()).catch(recordError)
     },
     stop() {

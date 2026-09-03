@@ -66,7 +66,7 @@ describe("createD1NoteSource", () => {
   })
 
   it("pullSince subtracts the clock-skew overlap from the cursor (floored at 0)", async () => {
-    const body = { nodes: [], links: [], nodeIds: [], linkKeys: [], cursor: "9000000000" }
+    const body = { nodes: [], links: [], cursor: "9000000000" }
     const fetchImpl = vi.fn(async (_url: string) => jsonResponse(body))
     const { auth } = fakeAuth(["tok-1"])
     const source = createD1NoteSource({ fetchImpl: fetchImpl as unknown as typeof fetch, auth })
@@ -141,8 +141,6 @@ describe("planPullApplication", () => {
       localLinks: [link("a", "blk_1", 100)],
       remoteNodes: [node("a", 100), node("blk_1", 200, "newer")],
       remoteLinks: [link("a", "blk_1", 50, "z9")],
-      remoteNodeIds: ["a", "blk_1"],
-      remoteLinkKeys: [["a", "blk_1", "child"]],
       pendingNodeIds: new Set(),
     })
     expect(plan.nodes).toEqual([node("blk_1", 200, "newer")])
@@ -151,47 +149,44 @@ describe("planPullApplication", () => {
     expect(plan.deleteLinks).toEqual([])
   })
 
-  it("a full pull is 'everything changed' with its own keys — new rows included", () => {
-    const remoteNodes = [node("a", 1), node("fresh", 1)]
+  it("a full pull is 'everything changed' — new rows included", () => {
     const plan = planPullApplication({
       localNodes: [node("a", 1)],
       localLinks: [],
-      remoteNodes,
+      remoteNodes: [node("a", 1), node("fresh", 1)],
       remoteLinks: [],
-      remoteNodeIds: remoteNodes.map((row) => row.id),
-      remoteLinkKeys: [],
       pendingNodeIds: new Set(),
     })
     expect(plan.nodes).toEqual([node("fresh", 1)])
   })
 
-  it("deletes local rows absent from the remote key lists", () => {
+  it("a deletion arrives as a tombstoned ROW, not as an absence", () => {
+    const tombstone = { ...node("gone", 200), deleted_at: 200 }
     const plan = planPullApplication({
-      localNodes: [node("keep", 1), node("gone", 1), node("blk_k", 1)],
-      localLinks: [link("keep", "blk_k", 1), link("gone", "blk_k", 1)],
-      remoteNodes: [],
+      localNodes: [node("keep", 1), node("gone", 1)],
+      localLinks: [link("keep", "blk_k", 1)],
+      // The remote says nothing about `keep` and nothing about the link: a
+      // since-pull only carries what changed, and silence must mean "still
+      // there", never "delete it".
+      remoteNodes: [tombstone],
       remoteLinks: [],
-      remoteNodeIds: ["keep", "blk_k"],
-      remoteLinkKeys: [["keep", "blk_k", "child"]],
       pendingNodeIds: new Set(),
     })
-    expect(plan.deleteNodes).toEqual(["gone"])
-    // gone's own link goes with its node delete; no redundant link delete.
+    expect(plan.nodes).toEqual([tombstone])
+    expect(plan.deleteNodes).toEqual([])
     expect(plan.deleteLinks).toEqual([])
   })
 
-  it("deletes a removed link whose source survives", () => {
+  it("a tombstoned link is a row too — and an older tombstone still loses", () => {
+    const tombstone = { ...link("a", "blk_1", 200), deleted_at: 200 }
     const plan = planPullApplication({
-      localNodes: [node("a", 1), node("blk_1", 1)],
-      localLinks: [link("a", "blk_1", 1)],
+      localNodes: [],
+      localLinks: [link("a", "blk_1", 100), link("a", "blk_2", 300)],
+      remoteLinks: [tombstone, { ...link("a", "blk_2", 150), deleted_at: 150 }],
       remoteNodes: [],
-      remoteLinks: [],
-      remoteNodeIds: ["a", "blk_1"],
-      remoteLinkKeys: [],
       pendingNodeIds: new Set(),
     })
-    expect(plan.deleteNodes).toEqual([])
-    expect(plan.deleteLinks).toEqual([["a", "blk_1", "child"]])
+    expect(plan.links).toEqual([tombstone])
   })
 
   it("never touches rows owned by pending notes — in either direction", () => {
@@ -203,8 +198,6 @@ describe("planPullApplication", () => {
       localLinks: [link("a", "blk_a1", 1)],
       remoteNodes: [node("a", 999), node("blk_a1", 999)],
       remoteLinks: [link("a", "blk_a1", 999, "b0")],
-      remoteNodeIds: ["a", "blk_a1"],
-      remoteLinkKeys: [],
       pendingNodeIds: pending,
     })
     expect(plan).toEqual({ nodes: [], links: [], deleteNodes: [], deleteLinks: [] })
@@ -216,8 +209,6 @@ describe("planPullApplication", () => {
       localLinks: [link("a", "blk_1", 5)],
       remoteNodes: [node("a", 5)],
       remoteLinks: [link("a", "blk_1", 5)],
-      remoteNodeIds: ["a"],
-      remoteLinkKeys: [["a", "blk_1", "child"]],
       pendingNodeIds: new Set(),
     })
     expect(plan).toEqual({ nodes: [], links: [], deleteNodes: [], deleteLinks: [] })
