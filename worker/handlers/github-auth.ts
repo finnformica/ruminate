@@ -115,20 +115,40 @@ async function getUser(token: string) {
     throw new Error("Error getting user's emails")
   }
 
-  const emails = (await emailResponse.json()) as Array<{
-    email: string
-    primary: boolean
-    visibility: string
-  }>
-  const primaryEmail = emails.find((email) => email.visibility !== "private")
+  const emails = (await emailResponse.json()) as GitHubEmail[]
+  const email = resolveSignInEmail(emails)
 
-  if (!primaryEmail) {
+  if (!email) {
     throw new Error(
       "No public email found. Check your email settings in https://github.com/settings/emails",
     )
   }
 
-  return { id, login, name: resolveDisplayName(name, login), email: primaryEmail.email }
+  return { id, login, name: resolveDisplayName(name, login), email }
+}
+
+interface GitHubEmail {
+  email: string
+  primary: boolean
+  verified?: boolean
+  visibility: string | null
+}
+
+/**
+ * The address that identifies the signed-in account: the PRIMARY verified
+ * email, whatever its visibility. Before this the first non-private entry
+ * won, which on an account with "keep my email addresses private" ticked is
+ * the `users.noreply.github.com` alias rather than the person's address — so
+ * anything keyed on the email (developer mode, `src/hooks/is-developer.ts`)
+ * never matched. The `user:email` scope returns private addresses too, so
+ * the primary is always readable. Falls back to the old rule (first
+ * non-private), then null.
+ */
+export function resolveSignInEmail(emails: GitHubEmail[]): string | null {
+  const primary = emails.find((entry) => entry.primary && entry.verified !== false)
+  if (primary) return primary.email
+  const visible = emails.find((entry) => entry.visibility !== "private")
+  return visible?.email ?? null
 }
 
 /**

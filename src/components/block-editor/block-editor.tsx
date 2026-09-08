@@ -38,7 +38,13 @@ import {
   writeRichClipboard,
   type ClipboardBlock,
 } from "../../utils/rich-clipboard"
-import { BlockItem, type BlockEditorApi, type FocusRequest } from "./block-item"
+import {
+  BlockItem,
+  type BlockDebugOptions,
+  type BlockEditorApi,
+  type FocusRequest,
+} from "./block-item"
+export type { BlockDebugOptions } from "./block-item"
 import { useBlockHistory } from "./use-block-history"
 
 /** The id of the first heading block whose text matches `heading`, in document
@@ -211,6 +217,7 @@ export function BlockEditor({
   noteTitle,
   revealRequest = null,
   resolveBlocks,
+  debug,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc) => void
@@ -264,6 +271,11 @@ export function BlockEditor({
    * clipboard-embedded content, ids intact.
    */
   resolveBlocks?: (ids: string[]) => Record<string, string | null>
+  /**
+   * Developer-mode debug readouts (block ids beside rows, metadata beneath
+   * them — `src/hooks/is-developer.ts`). Absent in ordinary use.
+   */
+  debug?: BlockDebugOptions
 }) {
   // ── Zoom state ────────────────────────────────────────────────────────────
   // Controlled by the caller (URL) when `onZoomNavigate` is given; otherwise
@@ -943,6 +955,7 @@ export function BlockEditor({
   }
 
   const api: BlockEditorApi = {
+    debug,
     focus,
     selected,
     selectedSet,

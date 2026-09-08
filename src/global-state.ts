@@ -6,6 +6,7 @@ import { assign, createMachine } from "xstate"
 import { GitHubUser, Note, NoteId, Template, githubUserSchema, templateSchema } from "./schema"
 import { databaseFilesAtom } from "./data/database-mode"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
+import { backfillPrimaryEmail } from "./utils/github-email"
 import { createBlockIndexer, searchBlocks } from "./utils/block-search"
 import type { BlockRevealRequest, OutlineItem } from "./utils/note-outline"
 import { parseNote } from "./utils/parse-note"
@@ -138,9 +139,12 @@ function createGlobalStateMachine() {
             }
           }
 
-          // Next, check localStorage for user metadata
+          // Next, check localStorage for user metadata. A session stored under
+          // GitHub's noreply alias (pre-primary-email sign-ins) is repaired
+          // from the account's primary address; the done action below then
+          // persists whatever comes back (`utils/github-email.ts`).
           const githubUser = JSON.parse(localStorage.getItem(GITHUB_USER_STORAGE_KEY) ?? "null")
-          return { githubUser: githubUserSchema.parse(githubUser) }
+          return { githubUser: await backfillPrimaryEmail(githubUserSchema.parse(githubUser)) }
         },
       },
       actions: {
