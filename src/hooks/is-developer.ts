@@ -7,21 +7,46 @@ import { buildBlockHomesIndex, type BlockHomesIndex } from "../utils/block-homes
  * Developer mode: debug affordances that only the app's developer should ever
  * see (block ids beside every block, graph metadata beneath them, …).
  *
- * The gate is the signed-in GitHub account's primary email — the Worker
- * resolves it from `/user/emails` at sign-in, so it is the verified address,
- * not a profile field anyone can type. This is client-side gating of debug
- * CHROME only: it decides what the UI shows, it protects nothing. Signed out
- * (sample notes) there is no email, so there is no developer.
+ * The gate is the signed-in GitHub account. The numeric id is the strongest
+ * signal — it is the tenant key and the bootstrap owner (`ALLOWED_GITHUB_ID`)
+ * and cannot be changed — so it is checked first; the login and the primary
+ * email are accepted too, and so is GitHub's private-email alias
+ * (`<id>+<login>@users.noreply.github.com`), which is what an account with
+ * "keep my email addresses private" used to be stored under. This is
+ * client-side gating of debug CHROME only: it decides what the UI shows, it
+ * protects nothing. Signed out (sample notes) there is no developer.
  */
-const DEVELOPER_EMAILS: readonly string[] = ["finnformica@gmail.com"]
-
-export function isDeveloperEmail(email: string | null | undefined): boolean {
-  if (!email) return false
-  return DEVELOPER_EMAILS.includes(email.trim().toLowerCase())
+const DEVELOPER = {
+  githubId: 42536816,
+  login: "finnformica",
+  emails: ["finnformica@gmail.com"] as readonly string[],
 }
 
-/** Whether the signed-in user is the developer (see the module note). */
-const isDeveloperAtom = atom((get) => isDeveloperEmail(get(githubUserAtom)?.email))
+const NOREPLY_RE = /^(\d+)\+([^@]+)@users\.noreply\.github\.com$/
+
+/** Whether an email identifies the developer: the primary address, or the
+ * noreply alias carrying the developer's id or login. */
+export function isDeveloperEmail(email: string | null | undefined): boolean {
+  if (!email) return false
+  const normalized = email.trim().toLowerCase()
+  if (DEVELOPER.emails.includes(normalized)) return true
+  const alias = NOREPLY_RE.exec(normalized)
+  if (!alias) return false
+  return Number(alias[1]) === DEVELOPER.githubId || alias[2] === DEVELOPER.login
+}
+
+/** Whether a signed-in GitHub user is the developer (see the module note). */
+export function isDeveloperUser(
+  user: { id?: number; login?: string; email?: string | null } | null | undefined,
+): boolean {
+  if (!user) return false
+  if (user.id === DEVELOPER.githubId) return true
+  if (user.login?.trim().toLowerCase() === DEVELOPER.login) return true
+  return isDeveloperEmail(user.email)
+}
+
+/** Whether the signed-in user is the developer. */
+const isDeveloperAtom = atom((get) => isDeveloperUser(get(githubUserAtom)))
 
 export function useIsDeveloper(): boolean {
   return useAtomValue(isDeveloperAtom)

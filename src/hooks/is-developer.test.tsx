@@ -18,6 +18,7 @@ import {
   developerDebugAtom,
   developerDebugPreferenceAtom,
   isDeveloperEmail,
+  isDeveloperUser,
   useDeveloperDebug,
   useIsDeveloper,
 } from "./is-developer"
@@ -40,12 +41,33 @@ describe("isDeveloperEmail", () => {
     expect(isDeveloperEmail("  FinnFormica@Gmail.com ")).toBe(true)
   })
 
+  it("matches GitHub's private-email alias by id or login", () => {
+    expect(isDeveloperEmail("42536816+finnformica@users.noreply.github.com")).toBe(true)
+    expect(isDeveloperEmail("42536816+renamed@users.noreply.github.com")).toBe(true)
+    expect(isDeveloperEmail("1+finnformica@users.noreply.github.com")).toBe(true)
+    expect(isDeveloperEmail("1+someone@users.noreply.github.com")).toBe(false)
+  })
+
   it("rejects everyone else, including no email at all", () => {
     expect(isDeveloperEmail("someone@example.com")).toBe(false)
     expect(isDeveloperEmail("finnformica@gmail.com.evil.com")).toBe(false)
     expect(isDeveloperEmail("")).toBe(false)
     expect(isDeveloperEmail(null)).toBe(false)
     expect(isDeveloperEmail(undefined)).toBe(false)
+  })
+})
+
+describe("isDeveloperUser", () => {
+  it("accepts the developer's GitHub id, login, or email on their own", () => {
+    expect(isDeveloperUser({ id: 42536816, login: "x", email: "x@example.com" })).toBe(true)
+    expect(isDeveloperUser({ login: "FinnFormica", email: "x@example.com" })).toBe(true)
+    expect(isDeveloperUser({ email: DEVELOPER })).toBe(true)
+  })
+
+  it("rejects other accounts and no account", () => {
+    expect(isDeveloperUser({ id: 1, login: "someone", email: "someone@example.com" })).toBe(false)
+    expect(isDeveloperUser(null)).toBe(false)
+    expect(isDeveloperUser(undefined)).toBe(false)
   })
 })
 
