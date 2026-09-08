@@ -11,7 +11,13 @@ vi.mock("../../data/view-state", () => ({
 }))
 vi.mock("../../global-state", async () => {
   const { atom } = await import("jotai")
-  return { noteOutlineAtom: atom(null), blockRevealAtom: atom(null), markdownFilesAtom: atom({}) }
+  return {
+    noteOutlineAtom: atom(null),
+    blockRevealAtom: atom(null),
+    markdownFilesAtom: atom({}),
+    // Signed out: developer mode (`hooks/is-developer.ts`) stays off.
+    githubUserAtom: atom(null),
+  }
 })
 
 import { BlockNoteEditor } from "./block-note-editor"

@@ -72,6 +72,27 @@ keymaps), and how VS Code dispatches everything through named command ids.
 
 That's the whole change — no component edits for a standard key behaviour.
 
+## Developer mode
+
+`useIsDeveloper` (`src/hooks/is-developer.ts`) is true only for the
+developer's signed-in GitHub account, matched on the verified primary email.
+It gates the **Developer** section of Settings, whose toggles drive two
+readouts in the editor (`BlockEditor`'s `debug` prop, wired by
+`BlockNoteEditor`):
+
+- **Show block ids** — every block's `blk_` id beside its content; click to
+  copy.
+- **Show block metadata** — type, depth, child count, and the block's
+  _homes_: the notes whose rollup declares its id (`buildBlockHomesIndex`,
+  `src/utils/block-homes.ts`). `linked ×2` is the proof that a paste linked
+  the node (docs/graph-storage.md, "Mirroring"); `homes 1` under a fresh id
+  means it was duplicated; `homes 0` means the block has not been saved yet.
+
+The flags are read through `developerDebugAtom`, which returns all-off for
+any other account, so a preference left in localStorage never shows debug
+chrome to someone else. The corpus index behind "homes" is only built while
+the metadata toggle is on, so ordinary use pays nothing for it.
+
 ## Future: user-overridable keymaps
 
 The keymap is currently a hard-coded default. Because it's already plain data,

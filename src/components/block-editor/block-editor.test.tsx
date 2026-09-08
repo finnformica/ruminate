@@ -8,7 +8,7 @@ import { serialize } from "../../blocks/serialize"
 import type { BlockDoc } from "../../blocks/types"
 import type { BlockRevealRequest } from "../../utils/note-outline"
 import { richClipboardFormats } from "../../utils/rich-clipboard"
-import { BlockEditor } from "./block-editor"
+import { BlockEditor, type BlockDebugOptions } from "./block-editor"
 
 afterEach(cleanup)
 
@@ -27,12 +27,14 @@ function Harness({
   zoomRootId,
   refocusSignal,
   resolveBlocks,
+  debug,
 }: {
   initial: string
   startEditing?: boolean
   zoomRootId?: string | null
   refocusSignal?: number
   resolveBlocks?: (ids: string[]) => Record<string, string | null>
+  debug?: BlockDebugOptions
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => withStarter(parse(initial)))
   return (
@@ -44,6 +46,7 @@ function Harness({
         zoomRootId={zoomRootId}
         refocusSignal={refocusSignal}
         resolveBlocks={resolveBlocks}
+        debug={debug}
       />
       <pre data-testid="serialized">{serialize(doc)}</pre>
     </>
@@ -1471,5 +1474,50 @@ describe("brand placeholder (empty block being edited)", () => {
     const textarea = container.querySelector("textarea")!
     expect(textarea.value).toBe("Parent")
     expect(textarea.placeholder).toBe("")
+  })
+})
+
+describe("developer debug readouts", () => {
+  const initial = "- A\n  id:: blk_a000000000\n  - B\n    id:: blk_b000000000\n"
+
+  it("renders no debug chrome unless asked", () => {
+    const { queryAllByTestId } = render(<Harness initial={initial} />)
+    expect(queryAllByTestId("block-debug-id")).toHaveLength(0)
+    expect(queryAllByTestId("block-debug-meta")).toHaveLength(0)
+  })
+
+  it("shows every block's id beside it, in document order", () => {
+    const { getAllByTestId } = render(<Harness initial={initial} debug={{ showIds: true }} />)
+    expect(getAllByTestId("block-debug-id").map((el) => el.textContent)).toEqual([
+      "blk_a000000000",
+      "blk_b000000000",
+    ])
+    // The badge sits outside the block body, so the body's text is unchanged.
+    expect(getAllByTestId("block-body").map((el) => el.textContent)).toEqual(["A", "B"])
+  })
+
+  it("shows type, depth, children, and the block's homes from the corpus lookup", () => {
+    const homesOf = (id: string) =>
+      id === "blk_a000000000" ? ["blk_note0000", "blk_note1111"] : []
+    const { getAllByTestId } = render(
+      <Harness initial={initial} debug={{ showMetadata: true, homesOf }} />,
+    )
+    const [metaA, metaB] = getAllByTestId("block-debug-meta").map((el) => el.textContent)
+    expect(metaA).toContain("bullet")
+    expect(metaA).toContain("depth 0")
+    expect(metaA).toContain("children 1")
+    // A lives in two notes: it is linked, and both homes are named.
+    expect(metaA).toContain("linked ×2 · blk_note0000, blk_note1111")
+    expect(metaB).toContain("depth 1")
+    expect(metaB).toContain("children 0")
+    expect(metaB).toContain("homes 0 · not saved yet")
+  })
+
+  it("omits homes when no corpus lookup is wired", () => {
+    const { getAllByTestId } = render(<Harness initial={initial} debug={{ showMetadata: true }} />)
+    for (const el of getAllByTestId("block-debug-meta")) {
+      expect(el.textContent).not.toContain("homes")
+      expect(el.textContent).not.toContain("linked")
+    }
   })
 })
