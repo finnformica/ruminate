@@ -187,8 +187,8 @@ export function BlockItem({
   block: Block
   depth: number
   api: BlockEditorApi
-  /** Render as the zoomed view's title: promoted typography, no marker or
-   * chevron, and no children (the editor renders those itself at depth 0). */
+  /** Render as the zoomed view's title: promoted typography, no collapse
+   * toggle, and no children (the editor renders those itself at depth 0). */
   zoomTitle?: boolean
 }) {
   const readOnly = api.readOnly ?? false
@@ -464,13 +464,75 @@ export function BlockItem({
     api.onPaste(block.id, prefix, before, pasted, after)
   }
 
+  // Whether this block owns a collapse toggle at all: parents only, and never
+  // the zoom title (the editor renders its children itself, at depth 0).
+  const hasToggle = hasChildren && !zoomTitle
+  // Where that toggle lives. A bullet dot, heading `#` or number is pure
+  // chrome, so the KEY SWAPS for the chevron: hover the row and the key fades
+  // out while the chevron fades in, in the same 15px slot — nothing moves. A
+  // checkbox is a control in its own right (a swap would leave a parent todo
+  // un-tickable), and paragraphs / quotes carry no key at all, so their
+  // chevron sits BESIDE the content instead, centred on the highlight
+  // surface's left edge — the same reveal, one column to the left.
+  const toggleInKey =
+    hasToggle && (type.kind === "bullet" || type.kind === "heading" || type.kind === "ordered")
+
+  // The chevron. `.block-toggle` (block-editor.css) keeps it invisible until
+  // the row is hovered (or, on a device with nothing to hover with, always) —
+  // except on a COLLAPSED block, which pins it visible so hidden content is
+  // never a secret. It floats out of the flow, centred on whatever slot holds
+  // it, so the reveal never shifts the text. Centred by its own midpoint
+  // (left/top 50% + a half-size translate), NOT by `inset-0 m-auto`: the
+  // 24px square is wider than the 15px slot, and an over-constrained absolute
+  // box drops its left margin to zero instead of going negative — which
+  // left-aligned the square and put the chevron 4.5px right of the guide.
+  // Press feedback lives on the control (IconButton supplies the hover
+  // surface); the content itself never animates on collapse.
+  const toggle = hasToggle ? (
+    <IconButton
+      aria-label={isCollapsed ? "Expand" : "Collapse"}
+      size="small"
+      disableTooltip
+      tabIndex={-1}
+      onClick={() => api.toggleCollapse(block.id)}
+      className={cx(
+        "block-toggle absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150 active:scale-[0.92] motion-reduce:active:scale-100",
+        // In the key slot the hover square is the full 24px — it fits: the
+        // slot's centre is 11.5px into the content column, so the square spans
+        // -0.5..23.5px, inside the surface and short of the text at 27px.
+        // Beside the content it shrinks to 16px so it never covers the first
+        // glyph.
+        toggleInKey ? "h-6 w-6" : "h-4 w-4",
+        isCollapsed && "block-toggle-pinned",
+      )}
+    >
+      <svg
+        width="8"
+        height="8"
+        viewBox="0 0 8 8"
+        aria-hidden
+        className={cx(
+          "transition-transform duration-200 ease-[var(--ease-out-strong)] motion-reduce:transition-none",
+          isCollapsed ? "rotate-0" : "rotate-90",
+        )}
+      >
+        <path d="M2 1l4 3-4 3z" fill="currentColor" />
+      </svg>
+    </IconButton>
+  ) : null
+  // The key of a swapping parent: fades out as the chevron fades in, and is
+  // hidden outright while collapsed (the pinned chevron stands in for it).
+  const keyClass = toggleInKey ? cx("block-key", isCollapsed && "block-key-hidden") : undefined
+
   // List markers double as zoom targets (Logseq-style: click the bullet to
-  // make this block the page). The negative-margin padding enlarges the hit
-  // area without shifting the marker's layout size.
-  const zoomable = !readOnly && !zoomTitle
+  // make this block the page) — on leaves. A parent's key is its collapse
+  // toggle, so zoom stays on F / Cmd+. there. The negative-margin padding
+  // enlarges the hit area without shifting the marker's layout size.
+  const zoomable = !readOnly && !zoomTitle && !hasToggle
   // Every marker occupies the same 15px slot (the checkbox's width), so body
   // text starts at one column across bullet / todo / numbered blocks and the
-  // markers read as one chrome family.
+  // markers read as one chrome family. Each slot is `relative` so a swapped-in
+  // chevron centres on it.
   const marker =
     type.kind === "todo" ? (
       <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
@@ -484,7 +546,7 @@ export function BlockItem({
         />
       </span>
     ) : type.kind === "bullet" ? (
-      <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
+      <span className="relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
         {zoomable ? (
           <button
             type="button"
@@ -493,26 +555,13 @@ export function BlockItem({
             onClick={() => api.zoomInto(block.id)}
             className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-90 motion-reduce:active:scale-100"
           >
-            <span
-              aria-hidden
-              className={cx(
-                // Faint, like the chevron — pure chrome; content leads.
-                "size-1.5 rounded-full bg-text-tertiary",
-                // A halo marks a bullet whose children are hidden (Logseq-style),
-                // so collapsed content is never a secret.
-                isCollapsed && hasChildren && "ring-[3px] ring-[color:var(--neutral-a4)]",
-              )}
-            />
+            {/* Faint, like the chevron — pure chrome; content leads. */}
+            <span aria-hidden className="size-1.5 rounded-full bg-text-tertiary" />
           </button>
         ) : (
-          <span
-            aria-hidden
-            className={cx(
-              "size-1.5 rounded-full bg-text-tertiary",
-              isCollapsed && hasChildren && "ring-[3px] ring-[color:var(--neutral-a4)]",
-            )}
-          />
+          <span aria-hidden className={cx("size-1.5 rounded-full bg-text-tertiary", keyClass)} />
         )}
+        {toggle}
       </span>
     ) : type.kind === "heading" ? (
       // Headings hang the same grey `#` as the note / zoom titles — the shared
@@ -522,23 +571,25 @@ export function BlockItem({
       // beside it, at every depth. The slot stays the shared 15px column
       // (heading text aligns with every other marked block); the hash
       // right-aligns in it and, when a large scale outgrows the slot,
-      // overflows LEFT toward the gutter — the text column never moves. The
-      // slot's `h-[1lh]` (resolved at the heading's scale) centres the glyph
-      // on the heading's first line. A static glyph, like the note title's —
-      // no zoom button (zoom stays on F / Cmd+. and bullet/number clicks).
+      // overflows LEFT, past the surface's edge — the text column never
+      // moves. The slot's `h-[1lh]` (resolved at the heading's scale) centres
+      // the glyph on the heading's first line. A static glyph, like the note
+      // title's — never a zoom button (zoom stays on F / Cmd+. and
+      // bullet/number clicks); on a parent it swaps for the collapse chevron.
       <span
         data-testid="heading-hash"
         className={cx(
-          "flex h-[1lh] w-[15px] shrink-0 items-center justify-end font-bold",
+          "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-end font-bold",
           headingScale(depth),
         )}
       >
-        <Hash />
+        <Hash className={keyClass} />
+        {toggle}
       </span>
     ) : type.kind === "ordered" ? (
       // Numbers are read (they carry order), so they sit one step up the ramp
       // from the dot — muted, not faint — and right-align to the slot edge.
-      <span className="flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary">
+      <span className="relative flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary">
         {zoomable ? (
           <button
             type="button"
@@ -550,8 +601,11 @@ export function BlockItem({
             {type.number}.
           </button>
         ) : (
-          <span aria-hidden>{type.number}.</span>
+          <span aria-hidden className={keyClass}>
+            {type.number}.
+          </span>
         )}
+        {toggle}
       </span>
     ) : null
 
@@ -560,191 +614,174 @@ export function BlockItem({
       data-block-row={block.id}
       className={cx("group/subtree", zoomTitle ? "mb-3" : headingTopMargin(type, depth))}
     >
-      {/* gap-1.5 (6px) between the collapse gutter and the content column: the
-          highlight surface reaches 4px left of the text column, so the wider
-          gap keeps 2px of daylight between the surface and the chevron's
-          hover square. */}
-      <div className="group relative flex items-start gap-1.5">
-        {/* The toggle stays a fixed square; the wrapper mirrors the content
-            cell's padding + line-height (via `typo`) and centres the square on
-            the block's first line, so it aligns whatever the heading size. */}
-        <div className={cx("relative flex shrink-0 py-0.5 font-content leading-relaxed", typo)}>
-          <span className="flex h-[1lh] items-center">
-            <IconButton
-              aria-label={isCollapsed ? "Expand" : "Collapse"}
-              size="small"
-              disableTooltip
-              tabIndex={-1}
-              onClick={() => api.toggleCollapse(block.id)}
+      {/* `.block-row` is the hover scope for the toggle reveal: this row only.
+          The children below are siblings of it, so hovering a child never
+          swaps the parent's key. */}
+      <div className="block-row relative min-w-0 py-0.5 font-content leading-relaxed">
+        <div
+          // The visible content line (carries the highlight). Scroll-into-view
+          // targets this, not the row wrapper, so a heading's top margin can't
+          // distort where the highlight lands.
+          data-block-line
+          className={cx(
+            // Negative margin + padding pairs grow the highlight surface
+            // while the text (and every marker) stays exactly where it was —
+            // the background extends outward instead of pushing content.
+            // Horizontally: symmetric — the surface extends 4px each side
+            // (-mx-1) and gives the text 8px of inner breathing room
+            // (pl-2 pr-2), so the left edge nets to the same text column as
+            // before (-4+8 = +4).
+            // Vertically the extension is CONDITIONAL, per side (see the
+            // runEdges pairs below): 2px by default — the midpoint of the
+            // nested 4px inter-row gap, so two adjacent surfaces painted in
+            // DIFFERENT colors (a hover next to a selection) can at most
+            // abut edge-to-edge, never overlap — and the full 4px only on a
+            // side that sits mid-run in a multi-select, where the neighbour
+            // is the same solid accent and the overlap is what merges the
+            // run into one continuous surface. Either way the negative
+            // margin equals the padding, so the text never moves a pixel
+            // and the block rhythm gains nothing.
+            "relative -ml-1 -mr-1 flex items-start gap-2 rounded pl-2 pr-2",
+            // Per-side vertical pairs. Mid-run sides also square their
+            // corners so the run reads as ONE surface rounded only at its
+            // ends (the editor computes which neighbours actually touch —
+            // heading top margins break a run). Nested rows sit 4px apart:
+            // 4+4 overlaps seamlessly (same solid); root rows sit 6px
+            // apart: 4+4 still overlaps 2px, so runs merge at every level.
+            runEdges?.top ? "-mt-1 pt-1 rounded-t-none" : "-mt-0.5 pt-0.5",
+            runEdges?.bottom ? "-mb-1 pb-1 rounded-b-none" : "-mb-0.5 pb-0.5",
+            // bg-bg-secondary is the structural "selected" hook (tests query
+            // it); .block-highlight paints the solid accent surface over it
+            // so selection reads as selected, not hovered.
+            selected && "bg-bg-secondary block-highlight",
+            // When the editor doesn't own the keyboard (focus is in the
+            // sidebar, a dialog, the ⌘P palette mid-preview), the selection
+            // demotes to a quiet neutral — additive class only, so the
+            // structural hooks above are untouched.
+            selected && !api.keyboardActive && "block-highlight-inactive",
+            // A quiet neutral hover marks the row as interactive (see
+            // .block-hoverable); never while read-only or already editing,
+            // and selection (accent) always wins because the class is
+            // simply absent on selected rows.
+            !readOnly && !editing && !selected && "block-hoverable",
+            // Square left corners so the quote bar stays a straight rule
+            // instead of curving with the highlight radius. The wider pl
+            // holds the quote text at its usual column: the bar rides the
+            // surface's left edge (-4), so border (2) + pl (14) nets +12.
+            // (14px is arbitrary-valued — the spacing scale has no 3.5 step.)
+            type.kind === "quote" && "rounded-l-none border-l-2 border-border pl-[14px]",
+          )}
+        >
+          {hasToggle && !toggleInKey ? (
+            // The beside toggle: a 16px slot (the chevron's h-4 w-4 square)
+            // straddling the surface's left edge, on the block's first line.
+            // `typo` + h-[1lh] size the slot to that line whatever the scale;
+            // the top offset mirrors the line's own vertical padding.
+            <span
               className={cx(
-                // Press feedback on the control (IconButton supplies the hover
-                // surface); the content itself never animates on collapse.
-                "size-6 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150 active:scale-[0.92] motion-reduce:active:scale-100",
-                // Always visible for blocks with children — expanded sections
-                // keep their toggle (hover-reveal read as it disappearing).
-                (zoomTitle || !hasChildren) && "pointer-events-none opacity-0",
+                "absolute -left-2 h-[1lh] w-4",
+                runEdges?.top ? "top-1" : "top-0.5",
+                typo,
               )}
             >
-              <svg
-                width="8"
-                height="8"
-                viewBox="0 0 8 8"
-                aria-hidden
-                className={cx(
-                  "transition-transform duration-200 ease-[var(--ease-out-strong)] motion-reduce:transition-none",
-                  isCollapsed ? "rotate-0" : "rotate-90",
-                )}
-              >
-                <path d="M2 1l4 3-4 3z" fill="currentColor" />
-              </svg>
-            </IconButton>
-          </span>
-        </div>
-
-        <div className="min-w-0 flex-1 py-0.5 font-content leading-relaxed">
-          <div
-            // The visible content line (carries the highlight). Scroll-into-view
-            // targets this, not the row wrapper, so a heading's top margin can't
-            // distort where the highlight lands.
-            data-block-line
-            className={cx(
-              // Negative margin + padding pairs grow the highlight surface
-              // while the text (and every marker) stays exactly where it was —
-              // the background extends outward instead of pushing content.
-              // Horizontally: symmetric — the surface extends 4px each side
-              // (-mx-1) and gives the text 8px of inner breathing room
-              // (pl-2 pr-2), so the left edge nets to the same text column as
-              // before (-4+8 = +4).
-              // Vertically the extension is CONDITIONAL, per side (see the
-              // runEdges pairs below): 2px by default — the midpoint of the
-              // nested 4px inter-row gap, so two adjacent surfaces painted in
-              // DIFFERENT colors (a hover next to a selection) can at most
-              // abut edge-to-edge, never overlap — and the full 4px only on a
-              // side that sits mid-run in a multi-select, where the neighbour
-              // is the same solid accent and the overlap is what merges the
-              // run into one continuous surface. Either way the negative
-              // margin equals the padding, so the text never moves a pixel
-              // and the block rhythm gains nothing.
-              "relative -ml-1 -mr-1 flex items-start gap-2 rounded pl-2 pr-2",
-              // Per-side vertical pairs. Mid-run sides also square their
-              // corners so the run reads as ONE surface rounded only at its
-              // ends (the editor computes which neighbours actually touch —
-              // heading top margins break a run). Nested rows sit 4px apart:
-              // 4+4 overlaps seamlessly (same solid); root rows sit 6px
-              // apart: 4+4 still overlaps 2px, so runs merge at every level.
-              runEdges?.top ? "-mt-1 pt-1 rounded-t-none" : "-mt-0.5 pt-0.5",
-              runEdges?.bottom ? "-mb-1 pb-1 rounded-b-none" : "-mb-0.5 pb-0.5",
-              // bg-bg-secondary is the structural "selected" hook (tests query
-              // it); .block-highlight paints the solid accent surface over it
-              // so selection reads as selected, not hovered.
-              selected && "bg-bg-secondary block-highlight",
-              // When the editor doesn't own the keyboard (focus is in the
-              // sidebar, a dialog, the ⌘P palette mid-preview), the selection
-              // demotes to a quiet neutral — additive class only, so the
-              // structural hooks above are untouched.
-              selected && !api.keyboardActive && "block-highlight-inactive",
-              // A quiet neutral hover marks the row as interactive (see
-              // .block-hoverable); never while read-only or already editing,
-              // and selection (accent) always wins because the class is
-              // simply absent on selected rows.
-              !readOnly && !editing && !selected && "block-hoverable",
-              // Square left corners so the quote bar stays a straight rule
-              // instead of curving with the highlight radius. The wider pl
-              // holds the quote text at its usual column: the bar rides the
-              // surface's left edge (-4), so border (2) + pl (14) nets +12.
-              // (14px is arbitrary-valued — the spacing scale has no 3.5 step.)
-              type.kind === "quote" && "rounded-l-none border-l-2 border-border pl-[14px]",
-            )}
-          >
-            {marker}
-            {editing ? (
-              <>
-                <textarea
-                  ref={textareaRef}
-                  value={body}
-                  rows={1}
-                  spellCheck
-                  // A quiet brand prompt in an empty block: a ghost at
-                  // placeholder rank (tertiary — chrome, not ink) that the
-                  // browser shows only while the textarea is empty, so it never
-                  // appears in view mode or over content. The turn-into keys
-                  // live in the `?` reference, not here.
-                  // The zoom title is a page title, not a block — no ghost.
-                  placeholder={zoomTitle ? undefined : "Ruminate…"}
-                  onChange={handleTextareaChange}
-                  onKeyDown={handleEditKeyDown}
-                  // Caret moves that aren't edits (arrows, Home/End, a click)
-                  // still decide whether the caret is inside a `/phrase`.
-                  onKeyUp={(event) => {
-                    if (/^(Arrow(Left|Right)|Home|End)$/.test(event.key)) {
-                      syncSlash(event.currentTarget.value, event.currentTarget.selectionStart)
-                    }
-                  }}
-                  onClick={(event) =>
+              {toggle}
+            </span>
+          ) : null}
+          {marker}
+          {editing ? (
+            <>
+              <textarea
+                ref={textareaRef}
+                value={body}
+                rows={1}
+                spellCheck
+                // A quiet brand prompt in an empty block: a ghost at
+                // placeholder rank (tertiary — chrome, not ink) that the
+                // browser shows only while the textarea is empty, so it never
+                // appears in view mode or over content. The turn-into keys
+                // live in the `?` reference, not here.
+                // The zoom title is a page title, not a block — no ghost.
+                placeholder={zoomTitle ? undefined : "Ruminate…"}
+                onChange={handleTextareaChange}
+                onKeyDown={handleEditKeyDown}
+                // Caret moves that aren't edits (arrows, Home/End, a click)
+                // still decide whether the caret is inside a `/phrase`.
+                onKeyUp={(event) => {
+                  if (/^(Arrow(Left|Right)|Home|End)$/.test(event.key)) {
                     syncSlash(event.currentTarget.value, event.currentTarget.selectionStart)
                   }
-                  onPaste={handlePaste}
-                  onBlur={() => api.setFocus(null)}
-                  className={cx(
-                    "min-w-0 flex-1 resize-none overflow-hidden border-none bg-transparent p-0 font-content leading-relaxed text-text outline-none placeholder:text-text-tertiary",
-                    typo,
-                  )}
-                />
-                {slashOpen && slash ? (
-                  <SlashMenu
-                    items={slashItems}
-                    activeIndex={Math.min(slash.index, slashItems.length - 1)}
-                    style={slashStyle}
-                    onHover={(index) => setSlash({ ...slash, index })}
-                    onPick={pickSlashItem}
-                  />
-                ) : null}
-              </>
-            ) : (
-              // Keyboard for select mode is handled by the editor container (it
-              // holds focus); this element only needs the pointer interactions.
-              // eslint-disable-next-line jsx-a11y/no-static-element-interactions
-              <div
-                data-testid="block-body"
-                data-block-id={block.id}
+                }}
+                onClick={(event) =>
+                  syncSlash(event.currentTarget.value, event.currentTarget.selectionStart)
+                }
+                onPaste={handlePaste}
+                onBlur={() => api.setFocus(null)}
                 className={cx(
-                  "min-h-[1lh] min-w-0 flex-1 outline-none",
-                  !readOnly && "cursor-text",
+                  "min-w-0 flex-1 resize-none overflow-hidden border-none bg-transparent p-0 font-content leading-relaxed text-text outline-none placeholder:text-text-tertiary",
                   typo,
-                  // Checking a todo mutes its text; the fade marks the state
-                  // change without delaying it.
-                  type.kind === "todo" && "transition-colors duration-200",
-                  type.kind === "todo" && type.checked && "text-text-secondary line-through",
                 )}
-                {...(readOnly
-                  ? {}
-                  : {
-                      onClick: () => api.select(block.id),
-                      onDoubleClick: () => api.edit(block.id),
-                    })}
-              >
-                <BlockContent content={body} doc={doc} />
-              </div>
-            )}
-            {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
-          </div>
-          {api.debug?.showMetadata ? (
-            <BlockDebugMeta
-              block={block}
-              depth={depth}
-              upstream={api.debug.upstreamOf ? api.debug.upstreamOf(block.id) : null}
-            />
-          ) : null}
+              />
+              {slashOpen && slash ? (
+                <SlashMenu
+                  items={slashItems}
+                  activeIndex={Math.min(slash.index, slashItems.length - 1)}
+                  style={slashStyle}
+                  onHover={(index) => setSlash({ ...slash, index })}
+                  onPick={pickSlashItem}
+                />
+              ) : null}
+            </>
+          ) : (
+            // Keyboard for select mode is handled by the editor container (it
+            // holds focus); this element only needs the pointer interactions.
+            // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+            <div
+              data-testid="block-body"
+              data-block-id={block.id}
+              className={cx(
+                "min-h-[1lh] min-w-0 flex-1 outline-none",
+                !readOnly && "cursor-text",
+                typo,
+                // Checking a todo mutes its text; the fade marks the state
+                // change without delaying it.
+                type.kind === "todo" && "transition-colors duration-200",
+                type.kind === "todo" && type.checked && "text-text-secondary line-through",
+              )}
+              {...(readOnly
+                ? {}
+                : {
+                    onClick: () => api.select(block.id),
+                    onDoubleClick: () => api.edit(block.id),
+                  })}
+            >
+              <BlockContent content={body} doc={doc} />
+            </div>
+          )}
+          {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
         </div>
+        {api.debug?.showMetadata ? (
+          <BlockDebugMeta
+            block={block}
+            depth={depth}
+            upstream={api.debug.upstreamOf ? api.debug.upstreamOf(block.id) : null}
+          />
+        ) : null}
       </div>
 
       {hasChildren && !isCollapsed && !zoomTitle ? (
-        // Left margin puts the guide line under the toggle's centre (w-6 → 12px).
+        // The guide hangs from the block's key: a 1px rule under the centre of
+        // the 15px marker slot, which starts 4px into the content column (the
+        // surface's -4px reach + 8px inner padding) — centre 11.5px, so the
+        // rule sits at 11px. A keyless block (paragraph, quote) hangs it from
+        // the surface's left edge (-4px) instead, where its toggle lives and
+        // where a quote's own bar already runs, so the guide simply continues
+        // the bar. Either way children start 24px in (margin + rule + padding).
         // The guide brightens while the pointer is anywhere in the subtree
         // (group/subtree is the block's outer wrapper), tracing the structure.
         <div
           className={cx(
-            "ml-3 border-l border-border-secondary pl-3 transition-colors duration-200 group-hover/subtree:border-[color:var(--neutral-a6)]",
+            marker ? "ml-[11px] pl-3" : "-ml-1 pl-[27px]",
+            "border-l border-border-secondary transition-colors duration-200 group-hover/subtree:border-[color:var(--neutral-a6)]",
             justExpanded && "block-expand",
           )}
         >

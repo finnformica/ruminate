@@ -1043,16 +1043,127 @@ describe("heading hash marker", () => {
 
   it("is a static glyph, never a zoom button, in every view", () => {
     // The hash reads as typography (like the note title's), not a control —
-    // zoom stays on F / Cmd+. and the bullet/number click targets.
+    // zoom stays on F / Cmd+. and the bullet/number click targets. (A parent
+    // heading's slot also hosts the collapse chevron; that is not a zoom.)
     for (const readOnly of [false, true]) {
       const { container, unmount } = render(
         <BlockEditor doc={parse(NESTED)} onChange={() => {}} readOnly={readOnly} />,
       )
       const slot = container.querySelector('[data-testid="heading-hash"]')!
-      expect(slot.querySelector("button")).toBeNull()
+      expect(slot.querySelector('button[aria-label="Zoom into block"]')).toBeNull()
       expect(slot.textContent).toBe("#")
       unmount()
     }
+  })
+})
+
+describe("collapse toggle", () => {
+  // One parent per marker family plus a leaf: the toggle either SWAPS for the
+  // key (bullet / heading / number) or sits BESIDE the content (checkbox,
+  // paragraph, quote), and the guide line hangs from the key.
+  const OUTLINE = [
+    "- Bullet parent",
+    "  id:: blk_bp",
+    "  - child",
+    "    id:: blk_bc",
+    "# Heading parent",
+    "  id:: blk_hp",
+    "  - child",
+    "    id:: blk_hc",
+    "[ ] Todo parent",
+    "  id:: blk_tp",
+    "  - child",
+    "    id:: blk_tc",
+    "Paragraph parent",
+    "  id:: blk_pp",
+    "  - child",
+    "    id:: blk_pc",
+    "- Leaf",
+    "  id:: blk_leaf",
+  ].join("\n")
+
+  const rowOf = (container: HTMLElement, id: string) =>
+    container.querySelector<HTMLElement>(`[data-block-row="${id}"]`)!
+  const lineOf = (container: HTMLElement, id: string) =>
+    rowOf(container, id).querySelector<HTMLElement>("[data-block-line]")!
+  const toggleOf = (container: HTMLElement, id: string) =>
+    lineOf(container, id).querySelector<HTMLButtonElement>(
+      'button[aria-label="Collapse"], button[aria-label="Expand"]',
+    )
+  /** The subtree container (the guide line + children) under a row. */
+  const guideOf = (container: HTMLElement, id: string) =>
+    rowOf(container, id).querySelector<HTMLElement>(":scope > .border-l")
+
+  it("only parents carry a toggle; there is no separate gutter", () => {
+    const { container } = render(<Harness initial={OUTLINE} />)
+    for (const id of ["blk_bp", "blk_hp", "blk_tp", "blk_pp"]) {
+      expect(toggleOf(container, id), id).not.toBeNull()
+    }
+    expect(toggleOf(container, "blk_leaf")).toBeNull()
+    // Exactly one toggle per parent — the old always-rendered gutter button
+    // (opacity-0 on leaves) is gone, so labels are unambiguous.
+    expect(container.querySelectorAll('button[aria-label="Collapse"]')).toHaveLength(4)
+  })
+
+  it("a bullet parent's toggle shares the marker slot with the dot, which becomes the key", () => {
+    const { container } = render(<Harness initial={OUTLINE} />)
+    const toggle = toggleOf(container, "blk_bp")!
+    const slot = toggle.parentElement!
+    expect(slot.className).toContain("w-[15px]")
+    expect(slot.className).toContain("relative")
+    // The dot is the fading key; it is no longer a zoom button.
+    expect(slot.querySelector(".block-key")).not.toBeNull()
+    expect(slot.querySelector('button[aria-label="Zoom into block"]')).toBeNull()
+    // Same for the heading's hash.
+    const hashSlot = toggleOf(container, "blk_hp")!.parentElement!
+    expect(hashSlot.getAttribute("data-testid")).toBe("heading-hash")
+    expect(hashSlot.querySelector(".block-key")?.textContent).toBe("#")
+  })
+
+  it("a leaf bullet still zooms on click", () => {
+    const { container } = render(<Harness initial={OUTLINE} />)
+    const line = lineOf(container, "blk_leaf")
+    expect(line.querySelector('button[aria-label="Zoom into block"]')).not.toBeNull()
+    expect(line.querySelector(".block-key")).toBeNull()
+  })
+
+  it("a todo parent keeps its checkbox and takes the toggle beside the content", () => {
+    const { container } = render(<Harness initial={OUTLINE} />)
+    const line = lineOf(container, "blk_tp")
+    const checkbox = line.querySelector('input[type="checkbox"]')!
+    expect(checkbox).not.toBeNull()
+    expect(checkbox.parentElement!.querySelector("button")).toBeNull()
+    const toggle = toggleOf(container, "blk_tp")!
+    expect(toggle.parentElement!.className).toContain("-left-2")
+    // Paragraphs have no key at all, so theirs sits beside too.
+    expect(toggleOf(container, "blk_pp")!.parentElement!.className).toContain("-left-2")
+  })
+
+  it("clicking the toggle collapses and expands, pinning the chevron while collapsed", () => {
+    const { container } = render(<Harness initial={OUTLINE} />)
+    fireEvent.click(toggleOf(container, "blk_bp")!)
+    expect(container.querySelector('[data-block-row="blk_bc"]')).toBeNull()
+    const pinned = toggleOf(container, "blk_bp")!
+    expect(pinned.getAttribute("aria-label")).toBe("Expand")
+    expect(pinned.className).toContain("block-toggle-pinned")
+    // The dot yields to the chevron for the duration.
+    expect(pinned.parentElement!.querySelector(".block-key")!.className).toContain(
+      "block-key-hidden",
+    )
+    fireEvent.click(pinned)
+    expect(container.querySelector('[data-block-row="blk_bc"]')).not.toBeNull()
+    expect(toggleOf(container, "blk_bp")!.className).not.toContain("block-toggle-pinned")
+  })
+
+  it("hangs the guide line from the key, or from the surface edge without one", () => {
+    const { container } = render(<Harness initial={OUTLINE} />)
+    // Keyed blocks (a checkbox is a key too): under the 15px slot's centre.
+    for (const id of ["blk_bp", "blk_hp", "blk_tp"]) {
+      expect(guideOf(container, id)!.className, id).toContain("ml-[11px] pl-3")
+    }
+    // A paragraph has no key: the guide continues the surface's left edge.
+    expect(guideOf(container, "blk_pp")!.className).toContain("-ml-1 pl-[27px]")
+    expect(guideOf(container, "blk_leaf")).toBeNull()
   })
 })
 

@@ -113,6 +113,47 @@
   }
 }
 
+/* ── Collapse toggle reveal ──────────────────────────────────────────────────
+ * A parent's collapse chevron lives in its marker slot (bullet, `#`, number)
+ * or just beside the content (checkbox, paragraph, quote) — see block-item.tsx.
+ * It is invisible until the pointer is over the ROW (`.block-row`, the line
+ * only — never the subtree, so hovering a child leaves the parent's key
+ * alone); a swapping key (`.block-key`) fades out as the chevron fades in, in
+ * the same slot, so nothing moves. Two things pin the chevron visible: a
+ * collapsed block (hidden content is never a secret — the key hides for the
+ * duration), and a device with nothing to hover with, where the chevron stands
+ * in for the key outright, exactly as the old always-on gutter toggle did. The
+ * fades ride the elements' own opacity transitions (block-item.tsx). */
+.block-toggle {
+  opacity: 0;
+}
+.block-key {
+  transition: opacity 150ms ease-out;
+}
+@media (hover: hover) and (pointer: fine) {
+  .block-row:hover .block-toggle {
+    opacity: 1;
+  }
+  .block-row:hover .block-key {
+    opacity: 0;
+  }
+}
+@media (hover: none), (pointer: coarse) {
+  .block-toggle {
+    opacity: 1;
+  }
+  .block-key {
+    opacity: 0;
+  }
+}
+.block-toggle:focus-visible,
+.block-toggle.block-toggle-pinned {
+  opacity: 1;
+}
+.block-key.block-key-hidden {
+  opacity: 0;
+}
+
 /* ── Transclusion ────────────────────────────────────────────────────────────
  * `((ref))` embeds are still content — full ink on a faint accent tint with a
  * hairline accent underline (the "live" color role). */

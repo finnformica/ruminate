@@ -154,8 +154,9 @@ function ExpandToggle({ row, onToggle }: { row: ResultRow; onToggle: (row: Resul
 /**
  * The row's gutter: one indent guide per level of revealed depth (matching the
  * editor's subtree rule, so an expanded result reads like the outline it came
- * from) and the expand chevron. Sits OUTSIDE the row's own surface, exactly as
- * the editor's collapse gutter sits outside the block's highlight.
+ * from) and the expand chevron. Sits OUTSIDE the row's own surface (unlike the
+ * editor, whose toggle now lives in the block's marker slot): a result row is
+ * one flat hit, so its chrome stays clear of it.
  */
 function ResultRowGutter({
   row,

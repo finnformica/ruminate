@@ -2,6 +2,10 @@
 
 ## 2026-W37
 
+### Improved
+
+- Collapsing is now done from the block itself. Hover a block that has children and its bullet, `#` or number turns into a collapse arrow; click it to fold or unfold the block. The indent guide line for the children hangs straight down from that marker rather than from a separate column of arrows to the left, so the outline reads as one structure. A folded block keeps its arrow showing so you can always see where content is hidden. To-do blocks keep their checkbox and show the arrow just to its left, and plain paragraphs and quotes get the arrow there too. Clicking a bullet or number still zooms into a block that has no children; for a block with children, zoom with <kbd>F</kbd> or <kbd>⌘.</kbd>.
+
 ### Added
 
 - A slash menu in the editor. Type `/` at the start of a word while editing a block and a small menu opens under the caret: **Today**, **Tomorrow**, **Yesterday**, **Next week** and **Last week** insert that date, and any phrase you type after the slash that reads as a day (`/friday`, `/next week on friday`, `/in 2 weeks`, `/1 oct`) is offered too. Underneath, **Turn into** switches the block to Text, Bullet list, Numbered list, To-do, Heading or Quote. Keep typing to filter, <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>↵</kbd> to pick, <kbd>Esc</kbd> to leave the slash as typed. Dates are inserted as `dd-mm-yyyy`, and a pick is its own undo step.

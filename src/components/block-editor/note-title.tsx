@@ -90,13 +90,15 @@ export function NoteTitle({
   }
 
   return (
-    // pl-[34px] aligns the title with the block content column (past the block
-    // editor's 24px collapse-toggle gutter + 6px gap + the highlight surface's
-    // net 4px). The # hangs to its left as a marker. (34px is arbitrary-valued
-    // — the spacing scale has no 8.5 step.)
+    // pl-[27px] aligns the title with the block TEXT column: the marker slot
+    // starts 4px into the content column (the highlight surface's net reach)
+    // and is 15px wide, then an 8px gap. The # sits in that slot exactly as a
+    // heading's does — right-aligned, overflowing left when the 3xl glyph
+    // outgrows 15px — so the title reads as the outline's top heading. (27px
+    // is arbitrary-valued — the spacing scale has no 6.75 step.)
     <h1 className="relative font-content text-3xl font-bold leading-tight tracking-[-0.02em]">
       {/* The hanging # inherits the h1's full typography — same size as the title. */}
-      <Hash className="pointer-events-none absolute left-1 top-0" />
+      <Hash className="pointer-events-none absolute left-1 top-0 flex w-[15px] justify-end" />
       {editing ? (
         <input
           ref={inputRef}
@@ -132,7 +134,7 @@ export function NoteTitle({
           spellCheck={false}
           aria-label="Note name"
           placeholder="Untitled"
-          className="w-full border-none bg-transparent py-0 pl-[34px] pr-0 text-text outline-none placeholder:text-text-tertiary"
+          className="w-full border-none bg-transparent py-0 pl-[27px] pr-0 text-text outline-none placeholder:text-text-tertiary"
         />
       ) : (
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
@@ -162,10 +164,10 @@ export function NoteTitle({
             }
           }}
           className={cx(
-            // -mx-1 + pl-[38px]/pr-1 keep the text at the block content column
-            // (pl-[34px]) while the highlight surface gains the same breathing
+            // -mx-1 + pl-[31px]/pr-1 keep the text at the block text column
+            // (pl-[27px]) while the highlight surface gains the same breathing
             // room as a selected block line.
-            "-mx-1 cursor-text rounded py-0 pl-[38px] pr-1 outline-none transition-colors duration-100",
+            "-mx-1 cursor-text rounded py-0 pl-[31px] pr-1 outline-none transition-colors duration-100",
             // Same selection treatment as a block (see .block-highlight).
             selected && "bg-bg-secondary block-highlight",
           )}
