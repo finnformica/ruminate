@@ -95,15 +95,15 @@ export interface BlockEditorApi {
 export interface BlockDebugOptions {
   /** Show each block's `blk_` id beside its content (click to copy). */
   showIds?: boolean
-  /** Show each block's metadata beneath it: type, depth, children, homes. */
+  /** Show each block's metadata beneath it: type, depth, downstream, upstream. */
   showMetadata?: boolean
   /**
-   * The notes whose content contains the block — its homes under the graph
-   * model (a linked block has several; a duplicated one has one, under a
+   * The notes upstream of the block — the pages that reach it through child
+   * links (a linked block has several; a duplicated one has one, under a
    * fresh id). Absent when no corpus is available; the readout then omits
-   * homes.
+   * the upstream line.
    */
-  homesOf?: (id: string) => readonly string[]
+  upstreamOf?: (id: string) => readonly string[]
 }
 
 /** Extra space above a heading, proportional to its size (i.e. its outline
@@ -732,7 +732,7 @@ export function BlockItem({
             <BlockDebugMeta
               block={block}
               depth={depth}
-              homes={api.debug.homesOf ? api.debug.homesOf(block.id) : null}
+              upstream={api.debug.upstreamOf ? api.debug.upstreamOf(block.id) : null}
             />
           ) : null}
         </div>
@@ -783,27 +783,27 @@ function BlockIdBadge({ id }: { id: string }) {
 }
 
 /**
- * The block's graph metadata: its derived type, outline depth, child count,
- * and — when the corpus lookup is wired — its homes. "linked ×N" is the tell
- * that a paste really linked the node rather than duplicating its text; no
- * home at all means the block has not been saved yet (the corpus file lags
- * the editor by the autosave debounce).
+ * The block's graph metadata: its derived type, outline depth, how many
+ * blocks are downstream (direct children), and — when the corpus lookup is
+ * wired — the notes upstream of it. `upstream 2` is the tell that a paste
+ * really linked the node rather than duplicating its text; nothing upstream
+ * means the block has not been saved yet (the corpus file lags the editor by
+ * the autosave debounce).
  */
 function BlockDebugMeta({
   block,
   depth,
-  homes,
+  upstream,
 }: {
   block: Block
   depth: number
-  homes: readonly string[] | null
+  upstream: readonly string[] | null
 }) {
   const kind = getBlockType(block.content).kind
-  let homesLabel: string | null = null
-  if (homes !== null) {
-    if (homes.length === 0) homesLabel = "homes 0 · not saved yet"
-    else if (homes.length === 1) homesLabel = `homes 1 · ${homes[0]}`
-    else homesLabel = `linked ×${homes.length} · ${homes.join(", ")}`
+  let upstreamLabel: string | null = null
+  if (upstream !== null) {
+    if (upstream.length === 0) upstreamLabel = "upstream 0 · not saved yet"
+    else upstreamLabel = `upstream ${upstream.length} · ${upstream.join(", ")}`
   }
   return (
     <div
@@ -812,10 +812,10 @@ function BlockDebugMeta({
     >
       <span>{kind}</span>
       <span>depth {depth}</span>
-      <span>children {block.children.length}</span>
-      {homesLabel !== null ? (
-        <span className={homes && homes.length > 1 ? "text-text-secondary" : undefined}>
-          {homesLabel}
+      <span>downstream {block.children.length}</span>
+      {upstreamLabel !== null ? (
+        <span className={upstream && upstream.length > 1 ? "text-text-secondary" : undefined}>
+          {upstreamLabel}
         </span>
       ) : null}
     </div>

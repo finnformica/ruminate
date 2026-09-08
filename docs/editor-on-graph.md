@@ -132,8 +132,8 @@ shippable.
 `parse` and `serialize` stay, scoped to their real jobs: foreign paste,
 template rendering (EJS output is imported like any markdown), copy as
 markdown, gist share, and the corpus export. The round-trip test suite
-stays as the contract for that import/export path. The developer "homes"
-readout reads `upstream` instead of scanning `id::` lines.
+stays as the contract for that import/export path. The developer "upstream"
+readout reads `NoteStore.upstream` instead of scanning `id::` lines.
 
 ## How simple is it?
 

@@ -14,7 +14,7 @@ vi.mock("../global-state", async () => {
 
 import { githubUserAtom, markdownFilesAtom } from "../global-state"
 import {
-  blockHomesIndexAtom,
+  upstreamIndexAtom,
   developerDebugAtom,
   developerDebugPreferenceAtom,
   isDeveloperEmail,
@@ -119,7 +119,7 @@ describe("useDeveloperDebug", () => {
   })
 })
 
-describe("blockHomesIndexAtom", () => {
+describe("upstreamIndexAtom", () => {
   it("indexes the corpus only while block metadata is on", () => {
     const { store } = setup({ email: DEVELOPER })
     store.set(
@@ -129,12 +129,9 @@ describe("blockHomesIndexAtom", () => {
         "blk_noteb.md": "- shared\n  id:: blk_shared0000\n",
       } as never,
     )
-    expect(store.get(blockHomesIndexAtom)).toBeNull()
+    expect(store.get(upstreamIndexAtom)).toBeNull()
 
     store.set(developerDebugPreferenceAtom, { blockIds: false, blockMetadata: true })
-    expect(store.get(blockHomesIndexAtom)?.get("blk_shared0000")).toEqual([
-      "blk_notea",
-      "blk_noteb",
-    ])
+    expect(store.get(upstreamIndexAtom)?.get("blk_shared0000")).toEqual(["blk_notea", "blk_noteb"])
   })
 })

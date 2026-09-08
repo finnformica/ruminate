@@ -1,7 +1,7 @@
 import { atom, useAtomValue } from "jotai"
 import { atomWithStorage } from "jotai/utils"
 import { githubUserAtom, markdownFilesAtom } from "../global-state"
-import { buildBlockHomesIndex, type BlockHomesIndex } from "../utils/block-homes"
+import { buildUpstreamIndex, type UpstreamIndex } from "../utils/block-upstream"
 
 /**
  * Developer mode: debug affordances that only the app's developer should ever
@@ -87,10 +87,10 @@ export function useDeveloperDebug(): DeveloperDebugFlags {
 }
 
 /**
- * Block id → the notes whose content declares it, for the block-metadata
- * readout. Null (and, importantly, NOT subscribed to the corpus — which
+ * Block id → the notes upstream of it (whose content declares it), for the
+ * block-metadata readout. Null (and, importantly, NOT subscribed to the corpus — which
  * changes on every autosave of any note) unless block metadata is on.
  */
-export const blockHomesIndexAtom = atom<BlockHomesIndex | null>((get) =>
-  get(developerDebugAtom).blockMetadata ? buildBlockHomesIndex(get(markdownFilesAtom)) : null,
+export const upstreamIndexAtom = atom<UpstreamIndex | null>((get) =>
+  get(developerDebugAtom).blockMetadata ? buildUpstreamIndex(get(markdownFilesAtom)) : null,
 )

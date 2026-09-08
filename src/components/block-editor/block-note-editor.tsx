@@ -6,7 +6,7 @@ import { emptyBlock } from "../../blocks/ops"
 import type { BlockDoc } from "../../blocks/types"
 import { useCollapseState } from "../../data/view-state"
 import { blockRevealAtom, markdownFilesAtom, noteOutlineAtom } from "../../global-state"
-import { blockHomesIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
+import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
 import { buildOutline } from "../../utils/note-outline"
 import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
 import { BlockEditor, type BlockDebugOptions } from "./block-editor"
@@ -184,18 +184,18 @@ export function BlockNoteEditor({
   )
 
   // Developer mode (`src/hooks/is-developer.ts`): the debug readouts, and the
-  // corpus index behind the "homes" metadata. Both are inert — no corpus
+  // corpus index behind the "upstream" metadata. Both are inert — no corpus
   // subscription, no extra chrome — unless the developer switched them on.
   const debugFlags = useDeveloperDebug()
-  const homesIndex = useAtomValue(blockHomesIndexAtom)
+  const upstreamIndex = useAtomValue(upstreamIndexAtom)
   const debug = useMemo<BlockDebugOptions | undefined>(() => {
     if (!debugFlags.blockIds && !debugFlags.blockMetadata) return undefined
     return {
       showIds: debugFlags.blockIds,
       showMetadata: debugFlags.blockMetadata,
-      homesOf: homesIndex ? (id) => homesIndex.get(id) ?? [] : undefined,
+      upstreamOf: upstreamIndex ? (id) => upstreamIndex.get(id) ?? [] : undefined,
     }
-  }, [debugFlags, homesIndex])
+  }, [debugFlags, upstreamIndex])
 
   // Entering a zoom (mount-with-param or navigation) on a childless block adds
   // one empty child so there's something to edit under the title.

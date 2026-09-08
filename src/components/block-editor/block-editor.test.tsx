@@ -1496,28 +1496,27 @@ describe("developer debug readouts", () => {
     expect(getAllByTestId("block-body").map((el) => el.textContent)).toEqual(["A", "B"])
   })
 
-  it("shows type, depth, children, and the block's homes from the corpus lookup", () => {
-    const homesOf = (id: string) =>
+  it("shows type, depth, downstream count, and the notes upstream from the corpus lookup", () => {
+    const upstreamOf = (id: string) =>
       id === "blk_a000000000" ? ["blk_note0000", "blk_note1111"] : []
     const { getAllByTestId } = render(
-      <Harness initial={initial} debug={{ showMetadata: true, homesOf }} />,
+      <Harness initial={initial} debug={{ showMetadata: true, upstreamOf }} />,
     )
     const [metaA, metaB] = getAllByTestId("block-debug-meta").map((el) => el.textContent)
     expect(metaA).toContain("bullet")
     expect(metaA).toContain("depth 0")
-    expect(metaA).toContain("children 1")
-    // A lives in two notes: it is linked, and both homes are named.
-    expect(metaA).toContain("linked ×2 · blk_note0000, blk_note1111")
+    expect(metaA).toContain("downstream 1")
+    // A is reached from two notes: it is linked, and both are named upstream.
+    expect(metaA).toContain("upstream 2 · blk_note0000, blk_note1111")
     expect(metaB).toContain("depth 1")
-    expect(metaB).toContain("children 0")
-    expect(metaB).toContain("homes 0 · not saved yet")
+    expect(metaB).toContain("downstream 0")
+    expect(metaB).toContain("upstream 0 · not saved yet")
   })
 
-  it("omits homes when no corpus lookup is wired", () => {
+  it("omits the upstream line when no corpus lookup is wired", () => {
     const { getAllByTestId } = render(<Harness initial={initial} debug={{ showMetadata: true }} />)
     for (const el of getAllByTestId("block-debug-meta")) {
-      expect(el.textContent).not.toContain("homes")
-      expect(el.textContent).not.toContain("linked")
+      expect(el.textContent).not.toContain("upstream")
     }
   })
 })
