@@ -97,7 +97,7 @@ that they're captured here rather than rushed:
 Built, in a different shape. The wikilink form is gone with wikilinks; the
 feature lives on as the **slash menu**: `/today`, `/tomorrow`, `/friday next
 week` (any phrase `chrono-node` resolves to a whole day, plus a small grammar
-for "next week on <day>", which chrono misreads) insert a `YYYY-MM-DD` date,
+for "next week on <day>", which chrono misreads) insert a `dd-mm-yyyy` date,
 and the same menu offers "turn into" for the block types. The model —
 trigger detection, the date grammar, filtering, and applying a pick — is pure
 (`src/blocks/slash-menu.ts`, unit-tested); `block-item.tsx` owns the transient

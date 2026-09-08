@@ -1475,10 +1475,11 @@ describe("brand placeholder (empty block being edited)", () => {
 })
 
 describe("slash menu (edit mode)", () => {
+  /** Today as the inserted `dd-mm-yyyy`. */
   const today = () => {
     const now = new Date()
     const pad = (n: number) => String(n).padStart(2, "0")
-    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+    return `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}`
   }
 
   function typeInto(textarea: HTMLTextAreaElement, value: string) {
@@ -1573,7 +1574,7 @@ describe("slash menu (edit mode)", () => {
     expect(rows).toHaveLength(1)
     expect(rows[0].getAttribute("data-slash-item")).toBe("date:parsed")
     fireEvent.keyDown(textarea, { key: "Enter" })
-    expect(container.querySelector("textarea")!.value).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(container.querySelector("textarea")!.value).toMatch(/^\d{2}-\d{2}-\d{4}$/)
   })
 
   it("clicking a row picks it", () => {

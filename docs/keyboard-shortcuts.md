@@ -238,7 +238,7 @@ space) opens a small menu under the caret. Two groups:
 - **Dates** — Today, Tomorrow, Yesterday, Next week, Last week, plus whatever
   the phrase you type after the slash resolves to: `/friday`, `/next week on
 friday`, `/in 2 weeks`, `/1 oct`. Picking a row replaces the `/phrase` with
-  the date as `YYYY-MM-DD` (the same form daily notes use).
+  the date as `dd-mm-yyyy`.
 - **Turn into** — Text, Bullet list, Numbered list, To-do, Heading, Quote.
   Picking one swaps the block's marker and removes the `/phrase`; the rest of
   the text stays.

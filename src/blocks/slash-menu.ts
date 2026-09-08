@@ -136,7 +136,7 @@ export type SlashItem =
       label: string
       /** The resolved date, formatted — so the row says which day you'll get. */
       detail: string
-      /** `YYYY-MM-DD`, what gets inserted. */
+      /** The resolved day as `YYYY-MM-DD` (the app's canonical form). */
       date: string
     }
   | { kind: "block"; id: string; label: string; type: SlashBlockKind }
@@ -205,6 +205,12 @@ export function slashMenuItems(query: string, now: Date): SlashItem[] {
 
 // ── Applying a pick ─────────────────────────────────────────────────────────
 
+/** The form a picked date is written into the note: `dd-mm-yyyy`. */
+export function toInsertedDate(date: string): string {
+  const [year, month, day] = date.split("-")
+  return `${day}-${month}-${year}`
+}
+
 export interface SlashApplyResult {
   /** The block's full new content (marker included). */
   content: string
@@ -217,7 +223,7 @@ export interface SlashApplyResult {
  * `body` the visible text the trigger was found in (the marker stripped); the
  * `/phrase` is the span from the trigger's `/` to the caret.
  *
- * - A date replaces the `/phrase` with `YYYY-MM-DD`, caret after it.
+ * - A date replaces the `/phrase` with the date as `dd-mm-yyyy`, caret after it.
  * - A block type removes the `/phrase` and sets the marker (Text strips it),
  *   caret where the `/` was.
  */
@@ -231,9 +237,10 @@ export function applySlashItem(
   const before = body.slice(0, trigger.start)
   const after = body.slice(trigger.start + 1 + trigger.query.length)
   if (item.kind === "date") {
+    const text = toInsertedDate(item.date)
     return {
-      content: prefix + before + item.date + after,
-      caret: trigger.start + item.date.length,
+      content: prefix + before + text + after,
+      caret: trigger.start + text.length,
     }
   }
   return {

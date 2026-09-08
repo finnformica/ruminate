@@ -17,7 +17,7 @@ the removed `src/codemirror-extensions/` for the original implementations).
     feature.)
 - ~~**In-editor natural-language dates** (`chrono-node`)~~ — **rebuilt** as the
   slash menu (`src/blocks/slash-menu.ts`, `src/components/block-editor/slash-menu.tsx`):
-  `/tomorrow`, `/friday next week` and so on insert a `YYYY-MM-DD` date, and the
+  `/tomorrow`, `/friday next week` and so on insert a `dd-mm-yyyy` date, and the
   same menu offers "turn into" for the block types. The menu's caret-anchored
   popup + key handling is the infrastructure a `#` tag autocomplete would reuse.
 - **Template insertion at the cursor** (`insert-template.tsx` dispatches into a

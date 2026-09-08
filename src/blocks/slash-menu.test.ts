@@ -4,6 +4,7 @@ import {
   findSlashTrigger,
   parseDateShortcut,
   slashMenuItems,
+  toInsertedDate,
   type SlashItem,
 } from "./slash-menu"
 
@@ -151,6 +152,13 @@ describe("slashMenuItems", () => {
   })
 })
 
+describe("toInsertedDate", () => {
+  test("writes the day first", () => {
+    expect(toInsertedDate("2026-09-09")).toBe("09-09-2026")
+    expect(toInsertedDate("2026-12-25")).toBe("25-12-2026")
+  })
+})
+
 describe("applySlashItem", () => {
   const tomorrow: SlashItem = {
     kind: "date",
@@ -174,7 +182,7 @@ describe("applySlashItem", () => {
       { start: 9, query: "tom" },
       tomorrow,
     )
-    expect(result).toEqual({ content: "- call mum 2026-09-09", caret: 19 })
+    expect(result).toEqual({ content: "- call mum 09-09-2026", caret: 19 })
   })
 
   test("text after the caret is kept", () => {
@@ -184,7 +192,7 @@ describe("applySlashItem", () => {
       { start: 0, query: "tom" },
       tomorrow,
     )
-    expect(result).toEqual({ content: "2026-09-09 and more", caret: 10 })
+    expect(result).toEqual({ content: "09-09-2026 and more", caret: 10 })
   })
 
   test("a block type sets the marker and drops the /phrase", () => {
