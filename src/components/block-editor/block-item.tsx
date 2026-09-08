@@ -459,10 +459,14 @@ export function BlockItem({
   // The chevron. `.block-toggle` (block-editor.css) keeps it invisible until
   // the row is hovered (or, on a device with nothing to hover with, always) —
   // except on a COLLAPSED block, which pins it visible so hidden content is
-  // never a secret. It floats out of the flow, centred in whatever slot holds
-  // it, so the reveal never shifts the text. Press feedback lives on the
-  // control (IconButton supplies the hover surface); the content itself never
-  // animates on collapse.
+  // never a secret. It floats out of the flow, centred on whatever slot holds
+  // it, so the reveal never shifts the text. Centred by its own midpoint
+  // (left/top 50% + a half-size translate), NOT by `inset-0 m-auto`: the
+  // 24px square is wider than the 15px slot, and an over-constrained absolute
+  // box drops its left margin to zero instead of going negative — which
+  // left-aligned the square and put the chevron 4.5px right of the guide.
+  // Press feedback lives on the control (IconButton supplies the hover
+  // surface); the content itself never animates on collapse.
   const toggle = hasToggle ? (
     <IconButton
       aria-label={isCollapsed ? "Expand" : "Collapse"}
@@ -471,7 +475,7 @@ export function BlockItem({
       tabIndex={-1}
       onClick={() => api.toggleCollapse(block.id)}
       className={cx(
-        "block-toggle absolute inset-0 m-auto shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150 active:scale-[0.92] motion-reduce:active:scale-100",
+        "block-toggle absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150 active:scale-[0.92] motion-reduce:active:scale-100",
         // In the key slot the hover square is the full 24px — it fits: the
         // slot's centre is 11.5px into the content column, so the square spans
         // -0.5..23.5px, inside the surface and short of the text at 27px.
