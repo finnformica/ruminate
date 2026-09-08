@@ -14,8 +14,12 @@ asks for it.
 2. **Quiet chrome, hover affordances.** Structural controls (collapse chevron,
    hover surfaces) are invisible until the row is hovered or they hold focus, and
    they appear **without any layout shift** — always reserving their space, only
-   fading opacity. Exception: a _collapsed_ block keeps its chevron visible, so
-   hidden content is never a secret.
+   fading opacity. The collapse chevron reveals _in the block's own key_:
+   hovering a row fades the bullet dot, `#` or number out and the chevron in,
+   in the same slot (see 6 for the checkbox and keyless blocks). Exception: a
+   _collapsed_ block keeps its chevron visible (the key stays hidden for the
+   duration), so hidden content is never a secret. Without a hovering pointer
+   (touch) the chevron simply stands in for a parent's key.
 3. **Selection has its own color.** Hover is neutral; selection is accent. A
    block line hovers at a whisper (`--neutral-a2`, editable editors only —
    never read-only views, the row being edited, or a selected row) and selects
@@ -68,12 +72,19 @@ asks for it.
 5. **Generous reading rhythm.** Body line-height is 1.65 (`leading-relaxed` —
    defined for real in `tailwind.config.cjs`; it was previously a silent no-op).
    Headings tighten as they grow (1.25 at the top of the scale).
-6. **Markers align to a fixed gutter.** The collapse gutter is a fixed 24px
-   square centered on the first line; the indent unit is 24px with the guide
-   line under the gutter's center. A 6px gap separates the gutter from the
-   content column, so the highlight surface (which reaches 4px left of the
-   text) keeps 2px of daylight to the chevron's hover square. Affordances
-   float out of the flow (absolute/negative margin) so hover never moves text.
+6. **The key is the toggle; the guide hangs from it.** There is no collapse
+   gutter. A parent's chevron lives in its 15px marker slot and swaps in for
+   the key on hover (2), and the indent guide is a 1px rule under that slot's
+   centre — the slot starts 4px into the content column (the surface's reach),
+   so its centre is 11.5px in and the rule sits at 11px — with children
+   starting 24px in (`ml-[11px]` + rule + `pl-3`). A checkbox is a control in
+   its own right (a swap would leave a parent todo un-tickable) and a
+   paragraph or quote has no key at all, so those take the chevron _beside_
+   the content, centred on the highlight surface's left edge (-4px) in a 16px
+   square that never covers the first glyph; the guide of a keyless block
+   hangs from that same edge (`-ml-1` + rule + `pl-[27px]`), where a quote's
+   own bar already runs, so it simply continues the bar. Affordances float out
+   of the flow (absolute/negative margin) so hover never moves text.
 7. **One marker slot.** Every block marker — bullet dot, checkbox, ordered
    number, heading `#` — occupies the same 15px slot (the checkbox's width):
    dots center in it; numbers and the heading `#` right-align to its edge.
@@ -82,10 +93,13 @@ asks for it.
    zoom title, section headings — with no typography of its own: it inherits
    its parent's scale (the titles' 3xl, each heading's depth size and bold),
    so the hash is always the same size as the text beside it, only recolored
-   to tertiary. A large heading's hash outgrows the slot and overflows left
-   toward the gutter — the text column never moves — and, like the bullet
-   and number. Unlike them it is NOT a click target — the hash reads as
-   typography, and zoom stays on F / Cmd+. and the bullet/number clicks.
+   to tertiary. A large heading's hash outgrows the slot and overflows left,
+   past the surface's edge — the text column never moves. The note title's
+   hash sits in the same slot, so the title reads as the outline's top
+   heading with its text at the block text column. Unlike the bullet and
+   number the hash is NOT a zoom target — it reads as typography, and zoom
+   stays on F / Cmd+. and the bullet/number clicks (on leaves; a parent's key
+   is its collapse toggle).
 
 ## Type scale
 
@@ -122,14 +136,15 @@ _is_ the page — keeping a full step between it and its depth-0 children.
 - **Headings breathe above:** top margin scales with the heading — 20 / 16 / 10 /
   6px by depth. Space belongs _above_ a heading (it opens a section), never
   below.
-- **Indent unit:** 24px per level (`ml-3` + `pl-3`), guide line at 12px.
+- **Indent unit:** 24px per level (`ml-[11px]` + 1px rule + `pl-3`; a keyless
+  block: `-ml-1` + rule + `pl-[27px]`), guide line under the key at 11px, or
+  at the surface's edge (-4px) without one.
 - **Highlight inset:** highlighted line surfaces give the text 8px of
   horizontal breathing room (symmetric — 8px inner padding each side, the
   surface extending 4px past the text column on both, via `-mx-1 px-2`; the
-  note title's `-mx-1 pl-[38px] pr-1` extends the same 4px left) so the
-  **text never moves** — only the background extends outward, into the gutter
-  gap and the inter-row space. The gutter gap is 6px so the surface's 4px
-  reach still leaves 2px of daylight to the chevron's hover square. Block
+  note title's `-mx-1 pl-[31px] pr-1` extends the same 4px left) so the
+  **text never moves** — only the background extends outward, into the indent
+  and the inter-row space. Block
   rhythm is untouched: the surface borrows the space between rows, it never
   adds any. The text column is sacred; surfaces flex around it.
 - **Vertical extension is conditional, per side.** The inter-row gap is 4px
