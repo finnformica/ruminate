@@ -97,8 +97,7 @@ export function formatDate(
   return formattedDate
 }
 
-export function formatDateDistance(dateString: string) {
-  const now = new Date()
+export function formatDateDistance(dateString: string, now: Date = new Date()) {
   const currentYear = now.getFullYear()
   const currentMonth = now.getMonth()
   const currentDay = now.getDate()

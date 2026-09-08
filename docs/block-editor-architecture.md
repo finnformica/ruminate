@@ -94,8 +94,17 @@ that they're captured here rather than rushed:
 
 ### Natural-language dates (`[[today]]` → a date link)
 
-Obsolete: this was a wikilink feature, and wikilinks were removed. `[[...]]`
-in a note is plain text now.
+Built, in a different shape. The wikilink form is gone with wikilinks; the
+feature lives on as the **slash menu**: `/today`, `/tomorrow`, `/friday next
+week` (any phrase `chrono-node` resolves to a whole day, plus a small grammar
+for "next week on <day>", which chrono misreads) insert a `dd-mm-yyyy` date,
+and the same menu offers "turn into" for the block types. The model —
+trigger detection, the date grammar, filtering, and applying a pick — is pure
+(`src/blocks/slash-menu.ts`, unit-tested); `block-item.tsx` owns the transient
+state and the caret-anchored popup (`slash-menu.tsx`), which sits _beside_ the
+keymap rather than in it: while the menu is open, Arrow/Enter/Tab/Escape are
+consumed before `dispatchKey` runs, and a pick commits as its own history step
+so one undo restores the typed `/phrase`.
 
 ### Title-derived slugs for note URLs
 
