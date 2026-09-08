@@ -322,9 +322,6 @@ function GitHubSection() {
             <span className="truncate">{githubUser.login}</span>
           </span>
           <span className="truncate text-sm leading-5 text-text-secondary">{githubUser.email}</span>
-          <span className="text-sm leading-5 text-text-secondary">
-            Used to sign in — your notes are stored in the database, not a repository.
-          </span>
         </div>
         <Button
           className="shrink-0"
