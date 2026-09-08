@@ -62,6 +62,17 @@
     // Signup gate (worker/handlers/tenancy.ts): "allowlist" admits only ids in
     // the control plane's allowlist table (plus the bootstrap owner); "open"
     // auto-provisions any verified GitHub id; absent = bootstrap owner only.
-    "SIGNUP_MODE": "open",
+    //
+    // Closed 2026-09-08. Under "open" three ids other than the owner
+    // provisioned themselves within a week — invited or not, an open door on a
+    // personal instance spends a shared quota: D1's free-tier limits are per
+    // ACCOUNT, not per tenant, so any tenant's corpus competes with the
+    // owner's 5M daily reads.
+    //
+    // This gates NEW ids only. `resolveTenancy` answers from the `users` table
+    // before it ever consults the mode, so every id already provisioned keeps
+    // its access — closing signups is not a revocation. Revoking is
+    // `UPDATE users SET status = 'blocked'`, deliberately a separate act.
+    "SIGNUP_MODE": "allowlist",
   },
 }
