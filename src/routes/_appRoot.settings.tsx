@@ -6,7 +6,6 @@ import { Button } from "../components/button"
 import { useSignOut } from "../components/github-auth"
 import { GitHubAvatar } from "../components/github-avatar"
 import { SettingsIcon16 } from "../components/icons"
-import { Switch } from "../components/switch"
 import { PageLayout } from "../components/page-layout"
 import {
   databaseModeStatusAtom,
@@ -20,11 +19,6 @@ import {
   type StorageDiagnostics,
 } from "../data/storage-diagnostics"
 import { AccentColor, accentAtom, githubUserAtom } from "../global-state"
-import {
-  developerDebugPreferenceAtom,
-  useIsDeveloper,
-  type DeveloperDebugFlags,
-} from "../hooks/is-developer"
 import { cx } from "../utils/cx"
 
 export const Route = createFileRoute("/_appRoot/settings")({
@@ -42,7 +36,6 @@ function RouteComponent() {
           <AppearanceSection />
           <StorageSection />
           <GitHubSection />
-          <DeveloperSection />
           <div className="flex flex-col items-center gap-1 self-center p-5 text-center text-text-tertiary">
             <span className="text-sm">
               Made by{" "}
@@ -302,68 +295,6 @@ function DiagnosticList({ label, children }: { label: string; children: React.Re
 
 function formatDiagnosticTime(at: number) {
   return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-}
-
-/**
- * Developer-only debug toggles (`src/hooks/is-developer.ts`). The section
- * itself is gated on the developer's account, so nobody else ever sees it —
- * and the toggles are gated again where they are read, so a stored preference
- * can never leak into another account's session on the same browser.
- */
-function DeveloperSection() {
-  const isDeveloper = useIsDeveloper()
-  const [flags, setFlags] = useAtom(developerDebugPreferenceAtom)
-  if (!isDeveloper) return null
-
-  const toggle = (key: keyof DeveloperDebugFlags) => (checked: boolean) =>
-    setFlags({ ...flags, [key]: checked })
-
-  return (
-    <SettingsSection title="Developer">
-      <div className="flex flex-col gap-4">
-        <DebugToggle
-          id="developer-block-ids"
-          label="Show block ids"
-          description="Every block's id beside it, in the editor. Click an id to copy it."
-          checked={flags.blockIds === true}
-          onCheckedChange={toggle("blockIds")}
-        />
-        <DebugToggle
-          id="developer-block-metadata"
-          label="Show block metadata"
-          description="Each block's type, depth, children, and the notes it lives in — a linked block shows every home, a duplicate shows one."
-          checked={flags.blockMetadata === true}
-          onCheckedChange={toggle("blockMetadata")}
-        />
-      </div>
-    </SettingsSection>
-  )
-}
-
-function DebugToggle({
-  id,
-  label,
-  description,
-  checked,
-  onCheckedChange,
-}: {
-  id: string
-  label: string
-  description: string
-  checked: boolean
-  onCheckedChange: (checked: boolean) => void
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4">
-      <div className="flex flex-col gap-1">
-        <label htmlFor={id} className="leading-4">
-          {label}
-        </label>
-        <span className="text-sm leading-5 text-text-secondary">{description}</span>
-      </div>
-      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
-    </div>
-  )
 }
 
 function GitHubSection() {

@@ -76,9 +76,10 @@ That's the whole change — no component edits for a standard key behaviour.
 
 `useIsDeveloper` (`src/hooks/is-developer.ts`) is true only for the
 developer's signed-in GitHub account, matched on the verified primary email.
-It gates the **Developer** section of Settings, whose toggles drive two
-readouts in the editor (`BlockEditor`'s `debug` prop, wired by
-`BlockNoteEditor`):
+It gates a **Developer** group at the bottom of the open note's actions menu
+(the `⋯` button), whose toggles — a localStorage preference,
+`developer-debug` — drive two readouts in the editor (`BlockEditor`'s `debug`
+prop, wired by `BlockNoteEditor`):
 
 - **Show block ids** — every block's `blk_` id beside its content; click to
   copy.

@@ -27,7 +27,8 @@ export function useIsDeveloper(): boolean {
   return useAtomValue(isDeveloperAtom)
 }
 
-/** The developer's debug toggles. Each is off until switched on in Settings. */
+/** The developer's debug toggles. Each is off until switched on from the
+ * open note's actions menu (`note-actions-menu.tsx`). */
 export interface DeveloperDebugFlags {
   /** Show every block's `blk_` id beside it (click to copy). */
   blockIds: boolean
