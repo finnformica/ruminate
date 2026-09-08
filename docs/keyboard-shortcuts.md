@@ -225,9 +225,30 @@ format). With nothing selected (after <kbd>Esc</kbd>), <kbd>↓</kbd> /
 | Select all text, then grow by structure | <kbd>⌘</kbd> <kbd>A</kbd> (repeat — see the selection ladder)              |
 | Zoom into the block / exit zoom         | <kbd>⌘</kbd> <kbd>.</kbd> / <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>         |
 | Strip the block's marker → merge up     | <kbd>⌫</kbd> at line start                                                 |
+| Slash menu (dates, turn into)           | <kbd>/</kbd> at the start of a word                                        |
 
 Enter from a heading nests the new block underneath it. Enter on an empty list
 item exits the list.
+
+### Slash menu
+
+Typing <kbd>/</kbd> at the start of a word (the start of the block, or after a
+space) opens a small menu under the caret. Two groups:
+
+- **Dates** — Today, Tomorrow, Yesterday, Next week, Last week, plus whatever
+  the phrase you type after the slash resolves to: `/friday`, `/next week on
+friday`, `/in 2 weeks`, `/1 oct`. Picking a row replaces the `/phrase` with
+  the date as `YYYY-MM-DD` (the same form daily notes use).
+- **Turn into** — Text, Bullet list, Numbered list, To-do, Heading, Quote.
+  Picking one swaps the block's marker and removes the `/phrase`; the rest of
+  the text stays.
+
+Keep typing to filter (`/tom` → Tomorrow, `/list` → both lists, `/task` →
+To-do); <kbd>↑</kbd> / <kbd>↓</kbd> move, <kbd>↵</kbd> or <kbd>⇥</kbd> pick,
+<kbd>Esc</kbd> closes and leaves the text as typed. A space straight after the
+slash, a slash inside a word (`and/or`, a URL), or a phrase that matches
+nothing all leave the slash as ordinary text. A pick is its own undo step, so
+<kbd>⌘</kbd> <kbd>Z</kbd> puts the typed `/phrase` back.
 
 Pasting while editing follows the same rich-clipboard rules as select mode: a
 Ruminate copy splices in with its exact structure, rich text from other apps is

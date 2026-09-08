@@ -205,6 +205,16 @@ const CLIPBOARD_HISTORY_ENTRIES: Shortcut[] = [
   },
 ]
 
+const SLASH_MENU_ENTRIES: Shortcut[] = [
+  {
+    combos: ["/"],
+    scope: "edit",
+    description:
+      "Open the slash menu at the start of a word: insert a date (today, tomorrow, “friday next week”…) or turn the block into another type",
+    group: "Edit mode",
+  },
+]
+
 const LADDER_ENTRIES: Shortcut[] = [
   {
     combos: ["Mod+a"],
@@ -528,6 +538,7 @@ export const SHORTCUTS: Shortcut[] = [
   ...SEARCH_RESULT_ENTRIES,
   ...editorEntries(),
   ...CLIPBOARD_HISTORY_ENTRIES,
+  ...SLASH_MENU_ENTRIES,
   ...MULTI_SELECT_ENTRIES,
   ...LADDER_ENTRIES,
   ...PALETTE_ENTRIES,
