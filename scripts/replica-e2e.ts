@@ -157,7 +157,15 @@ async function main() {
       cursor,
     })
     assert.equal(putResponse.status, 200)
-    assert.deepEqual(await putResponse.json(), { ok: true, nodes: 5, links: 3, deletes: 0 })
+    // The response echoes the cursor it committed — how the client confirms
+    // the push without a second (corpus-scanning) status request.
+    assert.deepEqual(await putResponse.json(), {
+      ok: true,
+      nodes: 5,
+      links: 3,
+      deletes: 0,
+      cursor,
+    })
 
     const after = await status()
     assert.equal(after.counts.nodes, before.counts.nodes + 5)
@@ -186,32 +194,32 @@ async function main() {
     assert.equal(rollup("blk_e2enoteb00", snapshot), NOTE_B)
     console.log("GET full: rollup reproduces the ingested markdown ✓")
 
-    // --- since pull: changed rows + full key lists
+    // --- since pull: changed rows ONLY (no corpus-wide key lists)
     const changes = (await (
       await api(`/api/replica/notes?since=${T0 - 1000}`, {
         headers: authHeaders("e2e-owner-token"),
       })
     ).json()) as ReplicaChangesBody
     assert.equal(e2eNodes(changes.nodes).length, 5)
-    assert.ok(
-      changes.nodeIds.includes("blk_e2enotea00") && changes.nodeIds.includes("blk_e2eb000001"),
-    )
-    assert.ok(changes.linkKeys.some(([s, d]) => s === "blk_e2enoteb00" && d === "blk_e2eb000001"))
+    assert.equal(e2eLinks(changes.links).length, 3)
+    assert.deepEqual(Object.keys(changes).sort(), ["cursor", "links", "nodes"])
 
     const noChanges = (await (
       await api(`/api/replica/notes?since=${Date.now() + 60_000}`, {
         headers: authHeaders("e2e-owner-token"),
       })
     ).json()) as ReplicaChangesBody
-    assert.equal(e2eNodes(noChanges.nodes).length, 0)
-    assert.ok(noChanges.nodeIds.includes("blk_e2enoteb00"))
+    // A quiet pull reads (and returns) nothing at all — it used to answer with
+    // every key in the corpus.
+    assert.equal(noChanges.nodes.length, 0)
+    assert.equal(noChanges.links.length, 0)
 
     assert.equal(
       (await api("/api/replica/notes?since=nope", { headers: authHeaders("e2e-owner-token") }))
         .status,
       400,
     )
-    console.log("GET since: changed rows + full key lists, 400 on malformed since ✓")
+    console.log("GET since: changed rows only, nothing when quiet, 400 on malformed since ✓")
 
     // --- per-row LWW: replays are idempotent, stale rows cannot clobber newer
     await put({
@@ -253,10 +261,9 @@ async function main() {
     ).json()) as ReplicaChangesBody
     assert.ok(
       sinceDelete.nodes.some((row) => row.id === "blk_e2eb000001" && row.deleted_at === deletedAt),
-      "a since-pull must deliver the tombstone as an ordinary change",
+      "a since-pull must deliver the tombstone as an ordinary change — with the " +
+        "key lists gone, this IS how a deletion reaches another device",
     )
-    // The row still EXISTS, so it stays in the key lists — no purge implied.
-    assert.ok(sinceDelete.nodeIds.includes("blk_e2eb000001"))
     // Reviving the id clears the stamp.
     await put({
       nodes: [{ ...graphB.nodes[1], text: "Back", updated_at: deletedAt + 1000 }],
@@ -305,8 +312,12 @@ async function main() {
     const guestSince = (await (
       await api("/api/replica/notes?since=0", { headers: authHeaders("e2e-guest-token") })
     ).json()) as ReplicaChangesBody
-    // The destructive channel: the guest's key list must be theirs alone.
-    assert.deepEqual(guestSince.nodeIds, ["blk_e2eguest00"])
+    // A since-pull carries rows and nothing else — the guest's must be theirs.
+    assert.deepEqual(
+      guestSince.nodes.map((row) => row.id),
+      ["blk_e2eguest00"],
+    )
+    assert.deepEqual(guestSince.links, [])
 
     const ownerAfterGuest = await pull()
     assert.ok(!ownerAfterGuest.nodes.some((row) => row.id === "blk_e2eguest00"))

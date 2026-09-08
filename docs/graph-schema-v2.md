@@ -241,9 +241,10 @@ distinct rows that merge cleanly — no ordering conflict to resolve.
 Since v3, **a deletion is just a change**: the tombstoned row carries
 `deleted_at` and a fresh `updated_at`, so it arrives in an ordinary since-pull
 and the client applies it like any edit. The old deletion-by-absence channel
-(the full key lists) is kept as belt-and-braces until tombstone propagation
-has proven itself — note that a tombstoned row is still a row and still
-appears in those lists, so absence from them now means _purged_.
+(the full key lists on every pull) is gone — it was redundant once tombstones
+propagated, and it made every pull cost a read of the whole corpus. A pull
+that mentions nothing about a row now means the row is unchanged, never that
+it is gone (docs/graph-storage.md).
 
 **Known sharp edge — the cross-parent move.** A move is delete-link +
 insert-link (two rows), so it is not atomic under plain LWW: a badly timed

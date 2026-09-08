@@ -95,9 +95,13 @@ export function toLinkRow(row: Record<string, unknown>): LinkRow {
 /**
  * A batch of row-level changes — what one save boils down to, and the unit the
  * push queue accumulates. Since soft deletes, a delete is an ordinary row
- * carrying `deleted_at`, so it rides in `nodes`/`links`; `deleteNodes` /
- * `deleteLinks` remain for the one case that is still a real removal — a pull
- * discovering a row absent from the replica's key lists entirely.
+ * carrying `deleted_at`, so it rides in `nodes`/`links`.
+ *
+ * `deleteNodes` / `deleteLinks` are the **purge** channel: a real removal,
+ * with no tombstone to mirror. Nothing produces one today — pulls stopped
+ * detecting deletion by absence when the key lists went away — so it is
+ * carried for the wire contract older clients still push on, and for a purge
+ * tool if one is ever built.
  */
 export interface GraphDiff {
   nodes: NodeRow[]
@@ -132,6 +136,21 @@ export interface ReplicaPutPayload {
   cursor?: string
 }
 
+/** Body of a successful `PUT /api/replica/notes` — applied row counts. */
+export interface ReplicaPutResult {
+  ok: true
+  nodes: number
+  links: number
+  deletes: number
+  /**
+   * The cursor this batch committed, echoed back so the client can mark it
+   * confirmed without a second request. The batch is one transaction, so a
+   * 200 means this is what `meta.replica_cursor` now holds. Null when the
+   * push carried no cursor (every chunk but the last).
+   */
+  cursor: string | null
+}
+
 /** Body of a full pull: `GET /api/replica/notes` — every row of both tables. */
 export interface ReplicaCorpusBody {
   nodes: NodeRow[]
@@ -141,24 +160,18 @@ export interface ReplicaCorpusBody {
   cursor: string | null
 }
 
-/** Body of an incremental pull: `GET /api/replica/notes?since=<cursor>`. */
-export interface ReplicaChangesBody {
-  /** Rows whose `updated_at` is newer than the `since` timestamp — tombstoned
-   * rows included, which is how a deletion now travels. */
-  nodes: NodeRow[]
-  links: LinkRow[]
-  /**
-   * EVERY row key currently in the replica, changed or not, tombstoned or
-   * not, per table. Tombstones made these lists redundant for ordinary
-   * deletes; they are kept as belt-and-braces while tombstone propagation
-   * proves itself, and because they are still the only way a client learns
-   * that a row was purged outright. Dropping them is a deliberate follow-up
-   * (docs/graph-storage.md).
-   */
-  nodeIds: string[]
-  linkKeys: LinkKey[]
-  cursor: string | null
-}
+/**
+ * Body of an incremental pull: `GET /api/replica/notes?since=<cursor>` — rows
+ * whose `updated_at` is newer than the `since` timestamp, tombstoned rows
+ * included, which is how a deletion travels.
+ *
+ * Structurally identical to a full pull: it carries fewer rows, not different
+ * fields. It used to carry the full key list of both tables as well, so the
+ * client could delete local rows absent from them; tombstones replaced that
+ * channel, and the lists were O(corpus) reads on every pull
+ * (docs/graph-storage.md).
+ */
+export type ReplicaChangesBody = ReplicaCorpusBody
 
 /** The body of `GET /api/replica/status`. */
 export interface ReplicaStatusBody {

@@ -51,8 +51,9 @@ export interface D1NoteSource {
   /** The full corpus: every node + link row, plus the replica cursor. */
   pullFull(): Promise<ReplicaCorpusBody>
   /**
-   * Rows changed since `cursor` (minus the overlap window), plus the full
-   * remote key lists for deletion detection and the new cursor.
+   * Rows changed since `cursor` (minus the overlap window) and the new
+   * cursor — the same shape as a full pull, with fewer rows. Deletions are
+   * among those rows, carrying `deleted_at`.
    */
   pullSince(cursor: string): Promise<ReplicaChangesBody>
 }
@@ -133,17 +134,20 @@ export function expandPendingNodeIds(
 
 /**
  * Plan how a pull lands in the local store — pure, unit-tested, shared by the
- * full and since pulls (a full pull is just "everything changed" with the key
- * lists derived from the pulled rows themselves). Per-row last-writer-wins:
+ * full and since pulls (a full pull is just "everything changed").
+ * Per-row last-writer-wins:
  *
  * - A remote row lands only when it is strictly newer than the local copy (or
  *   the local copy is missing) — re-applying identical rows is a no-op, so
  *   the overlap window churns nothing.
- * - A local row absent from the remote key list was deleted remotely →
- *   delete it locally.
+ * - **A deletion is a row, not an absence.** A deleted row arrives carrying
+ *   `deleted_at` and lands like any other change; the store then hides it
+ *   from the rollup. There is no deletion-by-absence step any more: it
+ *   required every pull to carry the whole corpus's key list, and tombstones
+ *   made it redundant (docs/graph-storage.md).
  * - Rows owned by pending notes (see `expandPendingNodeIds`) are NEVER
  *   touched: a queued local edit outruns the pull that would revert it, and a
- *   locally created note that hasn't pushed yet must not be "deleted" for
+ *   locally created note that hasn't pushed yet must not be reverted for
  *   being unknown remotely. Links are owned by their source node.
  */
 export function planPullApplication(params: {
@@ -151,22 +155,10 @@ export function planPullApplication(params: {
   localLinks: LinkRow[]
   remoteNodes: NodeRow[]
   remoteLinks: LinkRow[]
-  /** Every remote node id (full pulls: the pulled ids themselves). */
-  remoteNodeIds: string[]
-  /** Every remote link key (full pulls: the pulled keys themselves). */
-  remoteLinkKeys: LinkKey[]
   /** Node ids with unpushed local changes (pages + their subtrees). */
   pendingNodeIds: Set<string>
 }): GraphDiff {
-  const {
-    localNodes,
-    localLinks,
-    remoteNodes,
-    remoteLinks,
-    remoteNodeIds,
-    remoteLinkKeys,
-    pendingNodeIds,
-  } = params
+  const { localNodes, localLinks, remoteNodes, remoteLinks, pendingNodeIds } = params
   const plan = emptyGraphDiff()
 
   const localNodeById = new Map(localNodes.map((node) => [node.id, node]))
@@ -184,23 +176,6 @@ export function planPullApplication(params: {
     const local = localLinkByKey.get(linkKeyString(linkKeyOf(link)))
     if (local && local.updated_at >= link.updated_at) continue
     plan.links.push(link)
-  }
-
-  const remoteNodeIdSet = new Set(remoteNodeIds)
-  for (const node of localNodes) {
-    if (remoteNodeIdSet.has(node.id) || pendingNodeIds.has(node.id)) continue
-    plan.deleteNodes.push(node.id)
-  }
-
-  const remoteLinkKeySet = new Set(remoteLinkKeys.map(linkKeyString))
-  for (const link of localLinks) {
-    const key = linkKeyOf(link)
-    if (remoteLinkKeySet.has(linkKeyString(key))) continue
-    if (pendingNodeIds.has(link.source_id)) continue
-    // A link whose source node is itself being deleted goes with it (the
-    // store's node delete cleans its links) — skip the redundant row.
-    if (!remoteNodeIdSet.has(link.source_id)) continue
-    plan.deleteLinks.push(key)
   }
 
   return plan

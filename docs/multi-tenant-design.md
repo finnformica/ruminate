@@ -54,12 +54,15 @@ unobservable. That trade was wrong for this product at this size.
 **What is being given up, stated plainly.** §2(a) is right that column-scoped
 tenancy is _filtered_, not structural: the wrong-tenant query stops being
 unrepresentable and becomes merely forbidden. §2 also names the specific
-danger, and it is not disclosure — it is destruction. The since-pull returns
-the full key list of both tables, and the client deletes local rows absent
-from it (`planPullApplication`), so a missing `WHERE` on that one read would
-tell every user's client to delete every note it holds. That risk is real, it
-is now ours, and this section exists so nobody later mistakes it for an
-oversight.
+danger, and it is not disclosure — it is destruction. At the time of writing
+the since-pull returned the full key list of both tables and the client
+deleted local rows absent from it (`planPullApplication`), so a missing
+`WHERE` on that one read would have told every user's client to delete every
+note it holds. **That channel is now gone** (§0, "Dropping the since-pull key
+lists"): deletions travel as tombstoned rows, and a pull that says nothing
+about a row means it is unchanged. The remaining risk is disclosure rather
+than destruction — smaller, but the mitigations below are what keep it small,
+and this section stays so nobody mistakes their absence for an oversight.
 
 **The price paid for the trade — four structural mitigations, all shipped.**
 §4's parenthetical listed exactly what option (a) would owe; this is that
@@ -93,9 +96,10 @@ bill, paid:
 
 Plus the standing adversarial suite §4 asked for: `replica.test.ts` drives
 every endpoint with tenant A's session against seeded tenant-B rows and
-asserts zero visibility — the full pull, the since-pull, the status counts,
-and **the key lists**, which get their own test because that is the
-destructive channel.
+asserts zero visibility — the full pull, the since-pull, and the status
+counts. The pull assertions are exhaustive (`toEqual` on the whole body), not
+merely "no B rows in `nodes`": a since-pull now carries rows and a cursor and
+nothing else, so anything of B's appearing anywhere in it is a failure.
 
 **What survives untouched.** The control plane (§3) is unchanged — `users`,
 `allowlist`, `SIGNUP_MODE`, the `ALLOWED_GITHUB_ID` fail-closed bootstrap, and
@@ -159,13 +163,18 @@ which would destroy the data being rescued.
 - **Purge / GC of tombstoned rows.** Out of scope by decision: there is not
   enough data for it to matter yet. Tombstones accumulate, and a full pull
   currently ships them to a fresh device. When it does matter, purge is a
-  scheduled `DELETE` past a retention window plus the key lists (below) doing
-  their job.
-- **Dropping the since-pull key lists.** Tombstones make deletion-by-absence
-  redundant, but the lists stay as belt-and-braces until tombstone propagation
-  has proven itself in production. Removing them shrinks the widest read in
-  the system and closes §2's destructive channel by construction — worth
-  doing, deliberately, once.
+  scheduled `DELETE` past a retention window. Note that with the key lists
+  gone (below) a purge is no longer something a client can be told about: it
+  would need a cache-generation bump, or a retention window long enough that
+  no live client can still be holding the row.
+- **Dropping the since-pull key lists — DONE (2026-09).** Tombstones made
+  deletion-by-absence redundant, and the lists were the widest read in the
+  system: O(corpus) rows on every pull, on every focus, visibility change and
+  `online` event. They are gone, which closes §2's destructive channel by
+  construction — a pull now carries changed rows and a cursor, nothing else.
+  Because rows hard-deleted _before_ tombstones existed left nothing behind to
+  propagate, the change shipped with a `CACHE_GENERATION` bump: every device
+  discards its local copy once and re-pulls clean (docs/graph-storage.md).
 - **Restore UI.** The data supports it (every row a single delete retires
   shares one `deleted_at`, so a restore is "revive the rows stamped at T", and
   links to deleted nodes are retained so the revived node comes back where it
@@ -238,7 +247,9 @@ index to lead with it, and scope every query.
   there and every user's node ids ship to every other user; worse, the
   client _deletes local rows absent from the list_ (`d1-note-source.ts:
 planPullApplication`), so a filtering bug can silently destroy data, not
-  just disclose it.
+  just disclose it. (Written at decision time. That channel was removed in
+  2026-09 — see §0's follow-ups — so the destructive half of this argument no
+  longer applies; the disclosure half still does.)
 - **Schema damage.** `nodes.id` is a global TEXT PK of client-minted `blk_`
   ids (`migrations/0002_nodes.sql:12-19`). Two users can legitimately mint
   the same id, so the PK must become `(tenant_id, id)`, the link table's

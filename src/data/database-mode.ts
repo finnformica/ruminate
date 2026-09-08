@@ -1,5 +1,5 @@
 import { atom, getDefaultStore } from "jotai"
-import { linkKeyOf, type ReplicaChangesBody } from "../../worker/handlers/replica-payload"
+import type { ReplicaChangesBody } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { SessionExpiredError } from "../utils/github-token"
 import {
@@ -69,9 +69,19 @@ const OWNER_KEY = "store_owner"
  * with every server-side data migration and each device discards its copy and
  * rebuilds it from a full pull. A few lines, no per-row logic.
  *
- * Generation `2` is the minted-page-id corpus (docs/page-identity-design.md).
+ * Generation `2` covers two changes that both need one clean re-pull: the
+ * minted-page-id corpus (docs/page-identity-design.md), and dropping
+ * deletion-by-absence from pulls — rows HARD-deleted at the replica before
+ * soft deletes existed left no tombstone, so a device still holding one would
+ * keep it forever. The same wipe retires both.
+ *
+ * The wipe costs what an owner change costs: local rows that were never
+ * pushed (edits made while the replica was unreachable, still only in this
+ * browser) go with it. The push queue flushes within ~2s of a save and again
+ * when the tab hides, so the window is small — but it is real, and it is why
+ * this is bumped deliberately rather than routinely.
  */
-const CACHE_GENERATION = "2"
+export const CACHE_GENERATION = "2"
 const CACHE_GENERATION_KEY = "cache_generation"
 const PULL_RETRY_MS = 60_000
 /** Minimum gap between automatic repair rebuilds after a SQL write failure. */
@@ -293,6 +303,16 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
         if (runtime !== activation) return
       }
 
+      // Generation binding: a cache written by an older protocol is discarded
+      // wholesale (cursor included, so the next pull is a full one) before any
+      // local read can surface it. See CACHE_GENERATION.
+      if ((await opened.store.getMeta(CACHE_GENERATION_KEY)) !== CACHE_GENERATION) {
+        await opened.store.replaceAll({})
+        await opened.store.setMeta(PULL_CURSOR_KEY, "")
+        await opened.store.setMeta(CACHE_GENERATION_KEY, CACHE_GENERATION)
+        if (runtime !== activation) return
+      }
+
       const notes = await opened.store.getAllNotes()
       if (runtime !== activation) return
       jotai().set(databaseFilesAtom, synthesizeFiles(notes))
@@ -448,30 +468,21 @@ function runPull(activation: DatabaseModeRuntime) {
       const cursor = await store.getMeta(PULL_CURSOR_KEY)
       // An unusable cursor (never pulled, or not the ms-timestamp shape the
       // server compares against) degrades to a full pull — always correct,
-      // just bigger. A full pull is "everything changed" with the key lists
-      // derived from the pulled rows themselves.
+      // just bigger. Both pulls answer in the same shape; a full pull is
+      // simply "everything changed".
       const useSince = cursor !== null && /^\d+$/.test(cursor)
-      const body = useSince
+      const body: ReplicaChangesBody = useSince
         ? await activation.source.pullSince(cursor)
         : await activation.source.pullFull()
       if (runtime !== activation) return
-      const changes: ReplicaChangesBody = useSince
-        ? (body as ReplicaChangesBody)
-        : {
-            ...body,
-            nodeIds: body.nodes.map((node) => node.id),
-            linkKeys: body.links.map(linkKeyOf),
-          }
 
       const local = await store.getAllRows()
       const pendingNoteIds = activation.replica?.pendingNoteIds?.() ?? new Set<string>()
       const plan = planPullApplication({
         localNodes: local.nodes,
         localLinks: local.links,
-        remoteNodes: changes.nodes,
-        remoteLinks: changes.links,
-        remoteNodeIds: changes.nodeIds,
-        remoteLinkKeys: changes.linkKeys,
+        remoteNodes: body.nodes,
+        remoteLinks: body.links,
         pendingNodeIds: expandPendingNodeIds(pendingNoteIds, local.links),
       })
 

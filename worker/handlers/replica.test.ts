@@ -226,24 +226,34 @@ describe("corpus operations over the real D1 schema", () => {
     expect(await corpusPullFull(tenant)).toEqual({ nodes, links, cursor: "42" })
   })
 
-  it("since pull returns only newer rows, plus ALL keys", async () => {
+  it("since pull returns ONLY newer rows — no corpus-wide key lists", async () => {
     const tenant = await openTenant(1)
     await corpusPut(tenant, { nodes, links, cursor: "301" }, NOW)
     const body = await corpusPullSince(tenant, 200)
-    expect(body.nodes).toEqual([nodes[1]])
-    expect(body.links).toEqual([])
-    expect([...body.nodeIds].sort()).toEqual(["blk_a000000000", "blk_noteaaaaaa"])
-    expect(body.linkKeys).toEqual([["blk_noteaaaaaa", "blk_a000000000", "child"]])
-    expect(body.cursor).toBe("301")
+    // Exhaustive: the unchanged page and link must not ride along in any
+    // shape — that O(corpus) key list is what the pull stopped reading.
+    expect(body).toEqual({ nodes: [nodes[1]], links: [], cursor: "301" })
   })
 
   it("since equal to the newest updated_at returns no changes (strict >)", async () => {
     const tenant = await openTenant(1)
     await corpusPut(tenant, { nodes, links }, NOW)
     const body = await corpusPullSince(tenant, 300)
-    expect(body.nodes).toEqual([])
-    expect(body.links).toEqual([])
-    expect(body.nodeIds).toHaveLength(2)
+    expect(body).toEqual({ nodes: [], links: [], cursor: "" })
+  })
+
+  it("a push echoes the cursor it committed, so no status call is needed", async () => {
+    const tenant = await openTenant(1)
+    expect(await corpusPut(tenant, { nodes, links, cursor: "42" }, NOW)).toEqual({
+      ok: true,
+      nodes: 2,
+      links: 1,
+      deletes: 0,
+      cursor: "42",
+    })
+    // Chunked pushes carry the cursor only on the last chunk; the rest say so.
+    expect((await corpusPut(tenant, { nodes: [], links: [] }, NOW)).cursor).toBeNull()
+    expect((await corpusStatus(tenant)).replica_cursor).toBe("42")
   })
 
   it("a fresh corpus pulls empty with the seeded empty-string cursor", async () => {
@@ -356,10 +366,11 @@ describe("soft deletes at the replica", () => {
 
     const pulled = await corpusPullFull(tenant)
     expect(pulled.nodes.find((row) => row.id === "blk_a000000000")?.deleted_at).toBe(200)
-    // The row still EXISTS, so it stays in the key lists — no purge is implied.
+    // THE property that makes dropping the key lists safe: the tombstone is
+    // itself the change a since-pull returns, carrying its stamp — the client
+    // needs nothing else to learn about the deletion.
     const since = await corpusPullSince(tenant, 150)
-    expect(since.nodes.map((row) => row.id)).toEqual(["blk_a000000000"])
-    expect([...since.nodeIds].sort()).toEqual(["blk_a000000000", "blk_noteaaaaaa"])
+    expect(since.nodes).toEqual([{ ...rows.nodes[1], updated_at: 200, deleted_at: 200 }])
     // …and the link to it is retained, untouched — though a link into a
     // tombstoned node is not part of the graph anyone can see, so it stops
     // counting alongside the node.
@@ -568,18 +579,14 @@ describe("tenant scoping — the adversarial suite", () => {
     expect(body).toEqual({ nodes: [], links: [], cursor: "" })
   })
 
-  it("B's since-pull — rows AND key lists — contains none of A's", async () => {
+  it("B's since-pull contains none of A's rows", async () => {
     const { env } = await seededEnv()
     const body = (await (
       await get(env, "bob-token", "/api/replica/notes?since=0")
     ).json()) as ReplicaChangesBody
-    // The key lists are the destructive channel: a leak here does not merely
-    // disclose A's ids, it tells B's client to delete rows it does not have —
-    // and would tell A's client that B's absent rows are gone.
-    expect(body.nodeIds).toEqual([])
-    expect(body.linkKeys).toEqual([])
-    expect(body.nodes).toEqual([])
-    expect(body.links).toEqual([])
+    // Exhaustive, because a since-pull now carries nothing BUT rows: any of
+    // A's ids appearing here would be a cross-tenant disclosure.
+    expect(body).toEqual({ nodes: [], links: [], cursor: "" })
   })
 
   it("B's status counts none of A's rows", async () => {

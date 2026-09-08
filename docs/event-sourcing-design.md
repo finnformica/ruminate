@@ -26,14 +26,14 @@ The cutover traded git's history for D1's simplicity. The dormant-features
 list in graph-storage.md ("Features dormant in database mode") is the honest
 gap inventory:
 
-| Gap                                                                                                                                 | Needs full ES? | Needs an op log? | Needs less?                            |
-| ----------------------------------------------------------------------------------------------------------------------------------- | -------------- | ---------------- | -------------------------------------- |
-| **Note version history** (git mode: `src/utils/note-history.ts`; hidden in database mode)                                           | No             | No               | Yes — per-save snapshots suffice       |
-| **Day-activity** (git mode: boundary-commit diff in `src/data/history.ts`; placeholder in database mode)                            | No             | No               | Yes — snapshots + timestamps           |
-| **Cross-device merge better than LWW** ("the later push wins wholesale; losing content unrecoverable")                              | No             | **Yes**          | No — needs operations to interleave    |
-| **Cross-device undo**                                                                                                               | No             | **Yes**          | No — needs attributed operations       |
-| **Audit / "what changed when, from where"**                                                                                         | No             | **Yes**          | Partially (snapshots lack attribution) |
-| **Exact incremental sync** (today: `updated_at` heuristic + 10-min skew window + deletion-by-absence, `src/data/d1-note-source.ts`) | No             | **Yes**          | No — needs a server-ordered cursor     |
+| Gap                                                                                                           | Needs full ES? | Needs an op log? | Needs less?                            |
+| ------------------------------------------------------------------------------------------------------------- | -------------- | ---------------- | -------------------------------------- |
+| **Note version history** (git mode: `src/utils/note-history.ts`; hidden in database mode)                     | No             | No               | Yes — per-save snapshots suffice       |
+| **Day-activity** (git mode: boundary-commit diff in `src/data/history.ts`; placeholder in database mode)      | No             | No               | Yes — snapshots + timestamps           |
+| **Cross-device merge better than LWW** ("the later push wins wholesale; losing content unrecoverable")        | No             | **Yes**          | No — needs operations to interleave    |
+| **Cross-device undo**                                                                                         | No             | **Yes**          | No — needs attributed operations       |
+| **Audit / "what changed when, from where"**                                                                   | No             | **Yes**          | Partially (snapshots lack attribution) |
+| **Exact incremental sync** (today: `updated_at` heuristic + 10-min skew window, `src/data/d1-note-source.ts`) | No             | **Yes**          | No — needs a server-ordered cursor     |
 
 Two conclusions fall out:
 
@@ -45,10 +45,10 @@ Two conclusions fall out:
    ([event-driven.io](https://event-driven.io/en/audit_log_event_sourcing/)).
 2. **The sync upgrades genuinely need an op log.** LWW-at-note-granularity is
    the current model's real ceiling (graph-storage.md "Conflict semantics"),
-   and the since-pull's clock-skew window, null-`updated_at` blind spot, and
-   tombstone-less deletion-by-absence (graph-storage.md "Since-pull fidelity")
-   are all artifacts of syncing _state_ instead of _changes_. A
-   server-sequenced event log fixes all four at once — exactly the fix Linear's
+   and the since-pull's clock-skew window and null-`updated_at` blind spot
+   (graph-storage.md "Since-pull fidelity") are artifacts of syncing _state_
+   instead of _changes_. (Deletion-by-absence was the third; tombstones
+   retired it in 2026-09.) A server-sequenced event log fixes the rest at once — exactly the fix Linear's
    `lastSyncId` delta protocol embodies
    ([reverse-engineered writeup](https://github.com/wzhudev/reverse-linear-sync-engine),
    [Linear's own delta-sync post](https://linear.app/now/rebuilding-delta-sync-read-path)).
@@ -187,12 +187,11 @@ to event batches:
   The existing queue mechanics survive verbatim: coalescing, chunking,
   backoff, `pendingNoteIds` (`replica-sync.ts:419`).
 - **Pull:** `GET /api/events?after=<seq>` returns `{ events, seq }` — exact,
-  ordered, complete. This **deletes three standing workarounds at once**: the
-  10-minute `SINCE_OVERLAP_MS` clock-skew window (`d1-note-source.ts:28`), the
-  null-`updated_at` blind spot, and the full-`ids`-list deletion-by-absence
-  hack (`ReplicaChangesBody.ids`, `replica-payload.ts:75`) — deletions are now
-  `note.deleted` events. Cursors compare server-assigned integers, never
-  device clocks.
+  ordered, complete. This **deletes the two remaining workarounds at once**:
+  the 10-minute `SINCE_OVERLAP_MS` clock-skew window (`d1-note-source.ts`) and
+  the null-`updated_at` blind spot. (The third, the full-`ids`-list
+  deletion-by-absence hack, is already gone — tombstones replaced it.) Cursors
+  compare server-assigned integers, never device clocks.
 - **Ordering and causality.** For a single-user, few-devices app, the
   pragmatic answer is the one Figma and Linear both chose: **the server
   sequence is the total order**; no vector clocks, no per-object version
