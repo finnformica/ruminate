@@ -72,6 +72,30 @@ keymaps), and how VS Code dispatches everything through named command ids.
 
 That's the whole change — no component edits for a standard key behaviour.
 
+## Developer mode
+
+`useIsDeveloper` (`src/hooks/is-developer.ts`) is true only for the
+developer's signed-in GitHub account, matched on the numeric GitHub id
+first, then the login, then the primary email (or GitHub's noreply alias), so
+it never depends on GitHub email settings. It gates a **Developer** group at
+the bottom of the open note's actions menu (the `⋯` button), whose toggles —
+a localStorage preference, `developer-debug` — drive two readouts in the
+editor (`BlockEditor`'s `debug` prop, wired by `BlockNoteEditor`):
+
+- **Show block ids** — every block's `blk_` id beside its content; click to
+  copy.
+- **Show block metadata** — type, depth, the _downstream_ count (direct
+  children), and what is _upstream_ of the block: the notes whose rollup
+  declares its id (`buildUpstreamIndex`, `src/utils/block-upstream.ts`).
+  `upstream 2` is the proof that a paste linked the node
+  (docs/graph-storage.md, "Mirroring"); `upstream 1` under a fresh id means
+  it was duplicated; `upstream 0` means the block has not been saved yet.
+
+The flags are read through `developerDebugAtom`, which returns all-off for
+any other account, so a preference left in localStorage never shows debug
+chrome to someone else. The corpus index behind "upstream" is only built while
+the metadata toggle is on, so ordinary use pays nothing for it.
+
 ## Future: user-overridable keymaps
 
 The keymap is currently a hard-coded default. Because it's already plain data,

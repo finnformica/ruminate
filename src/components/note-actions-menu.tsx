@@ -1,8 +1,9 @@
 import { useLocation, useNavigate } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
-import { useAtomValue } from "jotai"
+import { useAtom, useAtomValue } from "jotai"
 import { isSignedOutAtom } from "../global-state"
 import { copyAsMarkdown } from "../utils/copy-markdown"
+import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
 import { useDeleteNote, useRenameNote, useSaveNote } from "../hooks/note"
 import type { Width } from "../schema"
 import { cx } from "../utils/cx"
@@ -67,6 +68,10 @@ export function NoteActionsMenu({
   const saveNote = useSaveNote()
   const renameNote = useRenameNote()
   const deleteNote = useDeleteNote()
+  // Developer mode (`src/hooks/is-developer.ts`): the debug toggles live at
+  // the bottom of the open note's menu, for the developer's account only.
+  const isDeveloper = useIsDeveloper()
+  const [debug, setDebug] = useAtom(developerDebugPreferenceAtom)
 
   // Compare the decoded path segment, not the raw pathname: a note id with a
   // space or other special character is percent-encoded in the URL, so a raw
@@ -181,6 +186,28 @@ export function NoteActionsMenu({
         >
           Delete
         </DropdownMenu.Item>
+        {editor && isDeveloper ? (
+          <>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Group>
+              <DropdownMenu.GroupLabel>Developer</DropdownMenu.GroupLabel>
+              <DropdownMenu.Item
+                selected={debug.blockIds === true}
+                closeOnClick={false}
+                onClick={() => setDebug({ ...debug, blockIds: !debug.blockIds })}
+              >
+                Show block ids
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                selected={debug.blockMetadata === true}
+                closeOnClick={false}
+                onClick={() => setDebug({ ...debug, blockMetadata: !debug.blockMetadata })}
+              >
+                Show block metadata
+              </DropdownMenu.Item>
+            </DropdownMenu.Group>
+          </>
+        ) : null}
       </DropdownMenu.Content>
     </DropdownMenu>
   )

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Env } from "../types"
-import { githubAuth, resolveDisplayName } from "./github-auth"
+import { githubAuth, resolveDisplayName, resolveSignInEmail } from "./github-auth"
 
 describe("githubAuth", () => {
   afterEach(() => {
@@ -57,5 +57,36 @@ describe("resolveDisplayName", () => {
     expect(resolveDisplayName("", "ada")).toBe("ada")
     expect(resolveDisplayName("   ", "ada")).toBe("ada")
     expect(resolveDisplayName("null", "ada")).toBe("ada")
+  })
+})
+
+describe("resolveSignInEmail", () => {
+  it("prefers the primary verified address even when it is private", () => {
+    expect(
+      resolveSignInEmail([
+        {
+          email: "1+ada@users.noreply.github.com",
+          primary: false,
+          verified: true,
+          visibility: null,
+        },
+        { email: "ada@example.com", primary: true, verified: true, visibility: "private" },
+      ]),
+    ).toBe("ada@example.com")
+  })
+
+  it("falls back to the first non-private address when no primary is verified", () => {
+    expect(
+      resolveSignInEmail([
+        { email: "old@example.com", primary: true, verified: false, visibility: "private" },
+        { email: "ada@example.com", primary: false, verified: true, visibility: "public" },
+      ]),
+    ).toBe("ada@example.com")
+  })
+
+  it("is null when every address is private and none is a verified primary", () => {
+    expect(
+      resolveSignInEmail([{ email: "x@example.com", primary: false, visibility: "private" }]),
+    ).toBeNull()
   })
 })

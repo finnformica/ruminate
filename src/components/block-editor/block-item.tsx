@@ -83,6 +83,27 @@ export interface BlockEditorApi {
    * (Cmd/Ctrl+A pressed with the textarea's text already fully selected).
    */
   startSelectionLadder: (id: string) => void
+  /** Developer-mode debug readouts; absent in ordinary use. */
+  debug?: BlockDebugOptions
+}
+
+/**
+ * Developer-mode debug readouts (`src/hooks/is-developer.ts`): the block's
+ * id beside it and its graph metadata beneath it. Every field is optional so
+ * the editor stays standalone (Storybook, tests) without any of them.
+ */
+export interface BlockDebugOptions {
+  /** Show each block's `blk_` id beside its content (click to copy). */
+  showIds?: boolean
+  /** Show each block's metadata beneath it: type, depth, downstream, upstream. */
+  showMetadata?: boolean
+  /**
+   * The notes upstream of the block — the pages that reach it through child
+   * links (a linked block has several; a duplicated one has one, under a
+   * fresh id). Absent when no corpus is available; the readout then omits
+   * the upstream line.
+   */
+  upstreamOf?: (id: string) => readonly string[]
 }
 
 /** Extra space above a heading, proportional to its size (i.e. its outline
@@ -736,7 +757,15 @@ export function BlockItem({
               <BlockContent content={body} doc={doc} />
             </div>
           )}
+          {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
         </div>
+        {api.debug?.showMetadata ? (
+          <BlockDebugMeta
+            block={block}
+            depth={depth}
+            upstream={api.debug.upstreamOf ? api.debug.upstreamOf(block.id) : null}
+          />
+        ) : null}
       </div>
 
       {hasChildren && !isCollapsed && !zoomTitle ? (
@@ -762,6 +791,69 @@ export function BlockItem({
             return <BlockItem key={childId} doc={doc} block={child} depth={depth + 1} api={api} />
           })}
         </div>
+      ) : null}
+    </div>
+  )
+}
+
+// ── Developer-mode readouts ───────────────────────────────────────────────
+
+/** The block's id, in the row's far right. Clicking copies it; the mousedown
+ * is swallowed so a click never blurs a textarea being edited beside it. */
+function BlockIdBadge({ id }: { id: string }) {
+  return (
+    <button
+      type="button"
+      data-testid="block-debug-id"
+      title="Copy block id"
+      tabIndex={-1}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={(event) => {
+        event.stopPropagation()
+        void navigator.clipboard?.writeText(id).catch(() => {})
+      }}
+      className="ml-auto shrink-0 select-none self-start rounded px-1 font-mono text-[11px] leading-relaxed text-text-tertiary hover:bg-bg-secondary hover:text-text-secondary"
+    >
+      {id}
+    </button>
+  )
+}
+
+/**
+ * The block's graph metadata: its derived type, outline depth, how many
+ * blocks are downstream (direct children), and — when the corpus lookup is
+ * wired — the notes upstream of it. `upstream 2` is the tell that a paste
+ * really linked the node rather than duplicating its text; nothing upstream
+ * means the block has not been saved yet (the corpus file lags the editor by
+ * the autosave debounce).
+ */
+function BlockDebugMeta({
+  block,
+  depth,
+  upstream,
+}: {
+  block: Block
+  depth: number
+  upstream: readonly string[] | null
+}) {
+  const kind = getBlockType(block.content).kind
+  let upstreamLabel: string | null = null
+  if (upstream !== null) {
+    if (upstream.length === 0) upstreamLabel = "upstream 0 · not saved yet"
+    else upstreamLabel = `upstream ${upstream.length} · ${upstream.join(", ")}`
+  }
+  return (
+    <div
+      data-testid="block-debug-meta"
+      className="mb-1 flex select-none flex-wrap gap-x-3 pl-1 font-mono text-[11px] leading-4 text-text-tertiary"
+    >
+      <span>{kind}</span>
+      <span>depth {depth}</span>
+      <span>downstream {block.children.length}</span>
+      {upstreamLabel !== null ? (
+        <span className={upstream && upstream.length > 1 ? "text-text-secondary" : undefined}>
+          {upstreamLabel}
+        </span>
       ) : null}
     </div>
   )

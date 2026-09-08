@@ -1,14 +1,15 @@
 import { useAtomValue, useSetAtom, useStore } from "jotai"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
 import { emptyBlock } from "../../blocks/ops"
 import type { BlockDoc } from "../../blocks/types"
 import { useCollapseState } from "../../data/view-state"
 import { blockRevealAtom, markdownFilesAtom, noteOutlineAtom } from "../../global-state"
+import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
 import { buildOutline } from "../../utils/note-outline"
 import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
-import { BlockEditor } from "./block-editor"
+import { BlockEditor, type BlockDebugOptions } from "./block-editor"
 
 /** Ensure a parsed doc always has at least one block to edit. */
 function withStarterBlock(doc: BlockDoc): BlockDoc {
@@ -182,6 +183,20 @@ export function BlockNoteEditor({
     [jotaiStore, noteId],
   )
 
+  // Developer mode (`src/hooks/is-developer.ts`): the debug readouts, and the
+  // corpus index behind the "upstream" metadata. Both are inert — no corpus
+  // subscription, no extra chrome — unless the developer switched them on.
+  const debugFlags = useDeveloperDebug()
+  const upstreamIndex = useAtomValue(upstreamIndexAtom)
+  const debug = useMemo<BlockDebugOptions | undefined>(() => {
+    if (!debugFlags.blockIds && !debugFlags.blockMetadata) return undefined
+    return {
+      showIds: debugFlags.blockIds,
+      showMetadata: debugFlags.blockMetadata,
+      upstreamOf: upstreamIndex ? (id) => upstreamIndex.get(id) ?? [] : undefined,
+    }
+  }, [debugFlags, upstreamIndex])
+
   // Entering a zoom (mount-with-param or navigation) on a childless block adds
   // one empty child so there's something to edit under the title.
   const docRef = useRef(doc)
@@ -217,6 +232,7 @@ export function BlockNoteEditor({
       noteTitle={noteTitle}
       revealRequest={readOnly ? null : revealRequest}
       resolveBlocks={resolveBlocks}
+      debug={debug}
     />
   )
 }
