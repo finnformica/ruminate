@@ -1521,3 +1521,125 @@ describe("developer debug readouts", () => {
     }
   })
 })
+
+describe("slash menu (edit mode)", () => {
+  /** Today as the inserted `dd-mm-yyyy`. */
+  const today = () => {
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, "0")
+    return `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}`
+  }
+
+  function typeInto(textarea: HTMLTextAreaElement, value: string) {
+    fireEvent.change(textarea, { target: { value } })
+    // jsdom leaves the caret at the end after a value change, as a browser does.
+    textarea.setSelectionRange(value.length, value.length)
+  }
+
+  it("typing / opens the menu with dates above block types", () => {
+    const { container, queryByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    expect(queryByTestId("slash-menu")).toBeNull()
+    typeInto(textarea, "/")
+    const menu = queryByTestId("slash-menu")!
+    expect(menu).not.toBeNull()
+    const labels = Array.from(menu.querySelectorAll("[role=option]")).map((row) =>
+      row.getAttribute("data-slash-item")!,
+    )
+    expect(labels[0]).toBe("date:Today")
+    expect(labels).toContain("block:heading")
+    expect(labels.indexOf("date:Today")).toBeLessThan(labels.indexOf("block:paragraph"))
+  })
+
+  it("Enter on a date row replaces the /phrase with the date", () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    typeInto(textarea, "call mum /toda")
+    expect(getByTestId("slash-menu").querySelectorAll("[role=option]")).toHaveLength(1)
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    expect(container.querySelector("textarea")!.value).toBe(`call mum ${today()}`)
+    expect(serializedLines(getByTestId)).toEqual([`call mum ${today()}`])
+    // Still one block: Enter picked a row rather than splitting the block.
+    expect(container.querySelectorAll("[data-block-row]")).toHaveLength(1)
+  })
+
+  it("arrows move the highlight and Enter picks the highlighted row", () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    typeInto(textarea, "/list")
+    fireEvent.keyDown(textarea, { key: "ArrowDown" })
+    const active = getByTestId("slash-menu").querySelector("[aria-selected=true]")!
+    expect(active.getAttribute("data-slash-item")).toBe("block:ordered")
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    expect(serializedLines(getByTestId)).toEqual(["1. "])
+  })
+
+  it("a block-type row swaps the marker and keeps the surrounding text", () => {
+    const { container, getByTestId } = render(<Harness initial="- plan" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    typeInto(textarea, "plan /head")
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    expect(serializedLines(getByTestId)).toEqual(["# plan "])
+    expect(container.querySelector("textarea")!.value).toBe("plan ")
+  })
+
+  it("Escape closes the menu and leaves the text as typed", () => {
+    const { container, queryByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    typeInto(textarea, "/tom")
+    expect(queryByTestId("slash-menu")).not.toBeNull()
+    fireEvent.keyDown(textarea, { key: "Escape" })
+    expect(queryByTestId("slash-menu")).toBeNull()
+    expect(container.querySelector("textarea")!.value).toBe("/tom")
+    // Escape is consumed by the menu; the block is still being edited.
+    expect(container.querySelector("textarea")).not.toBeNull()
+    // Typing on keeps that slash dismissed.
+    typeInto(textarea, "/tomo")
+    expect(queryByTestId("slash-menu")).toBeNull()
+  })
+
+  it("a slash inside a word, or followed by a space, never opens the menu", () => {
+    const { container, queryByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    typeInto(textarea, "and/or")
+    expect(queryByTestId("slash-menu")).toBeNull()
+    typeInto(textarea, "and/or / ")
+    expect(queryByTestId("slash-menu")).toBeNull()
+  })
+
+  it("prose after the slash closes the menu", () => {
+    const { container, queryByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    typeInto(textarea, "/meeting notes")
+    expect(queryByTestId("slash-menu")).toBeNull()
+  })
+
+  it("a phrase that resolves to a date is offered as a row", () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    typeInto(textarea, "/in 3 days")
+    const rows = getByTestId("slash-menu").querySelectorAll("[role=option]")
+    expect(rows).toHaveLength(1)
+    expect(rows[0].getAttribute("data-slash-item")).toBe("date:parsed")
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    expect(container.querySelector("textarea")!.value).toMatch(/^\d{2}-\d{2}-\d{4}$/)
+  })
+
+  it("clicking a row picks it", () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    typeInto(textarea, "/quote")
+    fireEvent.click(getByTestId("slash-menu").querySelector("[role=option]")!)
+    expect(serializedLines(getByTestId)).toEqual(["> "])
+  })
+
+  it("undo after a pick puts the typed /phrase back", () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    typeInto(textarea, "/toda")
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    expect(container.querySelector("textarea")!.value).toBe(today())
+    fireEvent.keyDown(container.querySelector("textarea")!, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["/toda"])
+  })
+})

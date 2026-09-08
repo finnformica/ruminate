@@ -33,8 +33,12 @@ const MIRROR_PROPS = [
   "overflowWrap",
 ] as const
 
-/** The top offset (px) of the caret line for `position` within `textarea`. */
-function caretTop(textarea: HTMLTextAreaElement, position: number): number {
+/** Where the caret for `position` sits within `textarea`, in px from its
+ * top-left (padding included), measured in the mirror. */
+function measureCaret(
+  textarea: HTMLTextAreaElement,
+  position: number,
+): { top: number; left: number } {
   const doc = textarea.ownerDocument
   const div = doc.createElement("div")
   const computed = getComputedStyle(textarea)
@@ -56,8 +60,27 @@ function caretTop(textarea: HTMLTextAreaElement, position: number): number {
 
   doc.body.appendChild(div)
   const top = marker.offsetTop
+  const left = marker.offsetLeft
   doc.body.removeChild(div)
-  return top
+  return { top, left }
+}
+
+/** The top offset (px) of the caret line for `position` within `textarea`. */
+function caretTop(textarea: HTMLTextAreaElement, position: number): number {
+  return measureCaret(textarea, position).top
+}
+
+/**
+ * The caret's box for `position`, relative to the textarea's top-left — where
+ * a popover anchored to a character (the slash menu's `/`) should hang from.
+ */
+export function caretCoordinates(
+  textarea: HTMLTextAreaElement,
+  position: number,
+): { top: number; left: number; height: number } {
+  const { top, left } = measureCaret(textarea, position)
+  const height = parseFloat(getComputedStyle(textarea).lineHeight) || 16
+  return { top, left, height }
 }
 
 /**

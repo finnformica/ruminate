@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef } from "react"
-import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import type { ChangeEvent, ClipboardEvent, CSSProperties, KeyboardEvent } from "react"
 import { cx } from "../../utils/cx"
 import type { Block, BlockDoc } from "../../blocks/types"
 import {
@@ -11,12 +11,20 @@ import {
 } from "../../blocks/block-type"
 import type { CaretInput, Mode } from "../../blocks/commands"
 import type { KeyLike } from "../../blocks/keymap"
+import {
+  applySlashItem,
+  findSlashTrigger,
+  slashMenuItems,
+  type SlashItem,
+  type SlashTrigger,
+} from "../../blocks/slash-menu"
 import { htmlToMarkdown } from "../../utils/html-to-markdown"
 import { clipboardBlocksToMarkdown, extractClipboardBlocks } from "../../utils/rich-clipboard"
 import { IconButton } from "../icon-button"
 import { BlockContent } from "./block-content"
-import { caretLineFlags } from "./caret"
+import { caretCoordinates, caretLineFlags } from "./caret"
 import { Hash } from "./hash"
+import { SLASH_MENU_WIDTH, SlashMenu } from "./slash-menu"
 
 export interface FocusRequest {
   id: string
@@ -54,7 +62,12 @@ export interface BlockEditorApi {
   edit: (id: string, atStart?: boolean) => void
   toggleCollapse: (id: string) => void
   setFocus: (focus: FocusRequest | null) => void
-  onContentChange: (id: string, content: string) => void
+  /**
+   * Replace a block's content. Text edits coalesce into one undo step; pass
+   * `"structural"` for a change that must stand alone (a slash-menu pick, so
+   * one undo puts the typed `/phrase` back).
+   */
+  onContentChange: (id: string, content: string, op?: "text" | "structural") => void
   /** Replace `id` with blocks parsed from pasted markdown, placing the caret. */
   onPaste: (id: string, prefix: string, before: string, pasted: string, after: string) => void
   /**
@@ -194,6 +207,19 @@ export function BlockItem({
   // plain text at the caret (newlines collapsed, no block splitting).
   const plainPaste = useRef(false)
 
+  // The slash menu: open while the caret sits in a `/phrase` (see
+  // `findSlashTrigger`) that matches at least one row. `index` is the
+  // highlighted row; Escape remembers the dismissed `/` so the menu stays
+  // shut until that slash is gone.
+  const [slash, setSlash] = useState<{ trigger: SlashTrigger; index: number } | null>(null)
+  const dismissedSlash = useRef<number | null>(null)
+  const [slashStyle, setSlashStyle] = useState<CSSProperties>({})
+  const slashQuery = slash?.trigger.query
+  const slashItems = useMemo(
+    () => (slashQuery === undefined ? [] : slashMenuItems(slashQuery, new Date())),
+    [slashQuery],
+  )
+
   // True only on the render where the block goes collapsed → open, so the
   // revealed children play their brief entrance (never on initial mount).
   const prevCollapsedRef = useRef(isCollapsed)
@@ -248,6 +274,60 @@ export function BlockItem({
     }
   }, [editing, block.content])
 
+  /** Re-read the caret and open / move / close the slash menu accordingly. */
+  const syncSlash = (value: string, caret: number) => {
+    const trigger = findSlashTrigger(value, caret)
+    if (!trigger) {
+      dismissedSlash.current = null
+      setSlash(null)
+      return
+    }
+    if (dismissedSlash.current === trigger.start) {
+      setSlash(null)
+      return
+    }
+    setSlash((prev) =>
+      prev && prev.trigger.start === trigger.start && prev.trigger.query === trigger.query
+        ? prev
+        : { trigger, index: 0 },
+    )
+  }
+
+  const slashOpen = editing && slash !== null && slashItems.length > 0
+
+  // Leaving edit mode closes the menu.
+  useEffect(() => {
+    if (!editing) setSlash(null)
+  }, [editing])
+
+  // Hang the popup under the `/` (re-measured as the text reflows). The
+  // textarea's offsetParent is the block line (`relative`), which the popup
+  // is positioned within; the left edge is clamped so the popup never spills
+  // past the line's right edge.
+  const slashStart = slash?.trigger.start
+  useLayoutEffect(() => {
+    if (!slashOpen || slashStart === undefined) return
+    const el = textareaRef.current
+    if (!el) return
+    const { top, left, height } = caretCoordinates(el, slashStart)
+    const lineWidth = el.offsetParent?.clientWidth ?? Infinity
+    setSlashStyle({
+      top: el.offsetTop + top + height,
+      left: Math.max(0, Math.min(el.offsetLeft + left, lineWidth - SLASH_MENU_WIDTH)),
+    })
+  }, [slashOpen, slashStart, block.content])
+
+  const pickSlashItem = (item: SlashItem) => {
+    const el = textareaRef.current
+    if (!el || !slash) return
+    const result = applySlashItem(block.content, el.value, slash.trigger, item)
+    pendingCaret.current = result.caret
+    dismissedSlash.current = null
+    setSlash(null)
+    // Its own undo step, so Cmd/Ctrl+Z puts the typed `/phrase` back.
+    api.onContentChange(block.id, result.content, "structural")
+  }
+
   const handleTextareaChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     const el = event.currentTarget
     const newBody = el.value
@@ -265,10 +345,36 @@ export function BlockItem({
       pendingCaret.current = Math.max(0, caret - (newBody.length - derivedBody.length))
     }
     api.onContentChange(block.id, newContent)
+    syncSlash(derivedBody, pendingCaret.current ?? caret)
   }
 
   const handleEditKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const el = event.currentTarget
+    // While the slash menu is open it owns the navigation keys; everything
+    // else falls through to the textarea (typing narrows the menu).
+    if (slashOpen && slash && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const count = slashItems.length
+      switch (event.key) {
+        case "ArrowDown":
+          event.preventDefault()
+          setSlash({ ...slash, index: (slash.index + 1) % count })
+          return
+        case "ArrowUp":
+          event.preventDefault()
+          setSlash({ ...slash, index: (slash.index - 1 + count) % count })
+          return
+        case "Enter":
+        case "Tab":
+          event.preventDefault()
+          pickSlashItem(slashItems[Math.min(slash.index, count - 1)])
+          return
+        case "Escape":
+          event.preventDefault()
+          dismissedSlash.current = slash.trigger.start
+          setSlash(null)
+          return
+      }
+    }
     // Cmd/Ctrl+Shift+V: flag paste-as-plain and let the native paste event fire
     // (handlePaste reads the flag). Any other key clears a stale flag.
     plainPaste.current =
@@ -552,27 +658,48 @@ export function BlockItem({
           >
             {marker}
             {editing ? (
-              <textarea
-                ref={textareaRef}
-                value={body}
-                rows={1}
-                spellCheck
-                // A quiet brand prompt in an empty block: a ghost at
-                // placeholder rank (tertiary — chrome, not ink) that the
-                // browser shows only while the textarea is empty, so it never
-                // appears in view mode or over content. The turn-into keys
-                // live in the `?` reference, not here.
-                // The zoom title is a page title, not a block — no ghost.
-                placeholder={zoomTitle ? undefined : "Ruminate…"}
-                onChange={handleTextareaChange}
-                onKeyDown={handleEditKeyDown}
-                onPaste={handlePaste}
-                onBlur={() => api.setFocus(null)}
-                className={cx(
-                  "min-w-0 flex-1 resize-none overflow-hidden border-none bg-transparent p-0 font-content leading-relaxed text-text outline-none placeholder:text-text-tertiary",
-                  typo,
-                )}
-              />
+              <>
+                <textarea
+                  ref={textareaRef}
+                  value={body}
+                  rows={1}
+                  spellCheck
+                  // A quiet brand prompt in an empty block: a ghost at
+                  // placeholder rank (tertiary — chrome, not ink) that the
+                  // browser shows only while the textarea is empty, so it never
+                  // appears in view mode or over content. The turn-into keys
+                  // live in the `?` reference, not here.
+                  // The zoom title is a page title, not a block — no ghost.
+                  placeholder={zoomTitle ? undefined : "Ruminate…"}
+                  onChange={handleTextareaChange}
+                  onKeyDown={handleEditKeyDown}
+                  // Caret moves that aren't edits (arrows, Home/End, a click)
+                  // still decide whether the caret is inside a `/phrase`.
+                  onKeyUp={(event) => {
+                    if (/^(Arrow(Left|Right)|Home|End)$/.test(event.key)) {
+                      syncSlash(event.currentTarget.value, event.currentTarget.selectionStart)
+                    }
+                  }}
+                  onClick={(event) =>
+                    syncSlash(event.currentTarget.value, event.currentTarget.selectionStart)
+                  }
+                  onPaste={handlePaste}
+                  onBlur={() => api.setFocus(null)}
+                  className={cx(
+                    "min-w-0 flex-1 resize-none overflow-hidden border-none bg-transparent p-0 font-content leading-relaxed text-text outline-none placeholder:text-text-tertiary",
+                    typo,
+                  )}
+                />
+                {slashOpen && slash ? (
+                  <SlashMenu
+                    items={slashItems}
+                    activeIndex={Math.min(slash.index, slashItems.length - 1)}
+                    style={slashStyle}
+                    onHover={(index) => setSlash({ ...slash, index })}
+                    onPick={pickSlashItem}
+                  />
+                ) : null}
+              </>
             ) : (
               // Keyboard for select mode is handled by the editor container (it
               // holds focus); this element only needs the pointer interactions.

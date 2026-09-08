@@ -15,10 +15,11 @@ the removed `src/codemirror-extensions/` for the original implementations).
   - template insertion by name
   - (Wikilink autocomplete is gone for good — wikilinks were removed as a
     feature.)
-- **In-editor natural-language dates** (`chrono-node`): resolving shorthand like
-  "next monday" into a date while typing. (`chrono-node` stays in the repo — it's
-  also used by the command menu, note picker, and search — but the _in-editor_
-  parsing is CodeMirror-only.)
+- ~~**In-editor natural-language dates** (`chrono-node`)~~ — **rebuilt** as the
+  slash menu (`src/blocks/slash-menu.ts`, `src/components/block-editor/slash-menu.tsx`):
+  `/tomorrow`, `/friday next week` and so on insert a `dd-mm-yyyy` date, and the
+  same menu offers "turn into" for the block types. The menu's caret-anchored
+  popup + key handling is the infrastructure a `#` tag autocomplete would reuse.
 - **Template insertion at the cursor** (`insert-template.tsx` dispatches into a
   CodeMirror `EditorView`): the block editor has no `EditorView`, so mid-document
   template insertion needs a block-aware equivalent. (Daily/weekly templates that

@@ -110,3 +110,13 @@ export function toggleMarker(content: string, kind: MarkerKind): string {
   const body = stripMarker(content)
   return getBlockType(content).kind === kind ? body : MARKER_OF[kind] + body
 }
+
+/**
+ * Set `content` to the given kind outright (the slash menu's "turn into"):
+ * a paragraph strips the marker, anything else swaps it in. Unlike
+ * {@link toggleMarker}, asking for the kind the block already is keeps it.
+ */
+export function withMarker(content: string, kind: BlockType["kind"]): string {
+  const body = stripMarker(content)
+  return kind === "paragraph" ? body : MARKER_OF[kind] + body
+}

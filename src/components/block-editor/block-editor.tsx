@@ -969,8 +969,12 @@ export function BlockEditor({
     edit,
     toggleCollapse,
     setFocus,
-    onContentChange: (id, content) =>
-      history.commit(doc, updateContent(doc, id, content), { type: "text", blockId: id }),
+    onContentChange: (id, content, op = "text") =>
+      history.commit(
+        doc,
+        updateContent(doc, id, content),
+        op === "structural" ? { type: "structural" } : { type: "text", blockId: id },
+      ),
     onPaste: (id, prefix, before, pasted, after) => {
       // Re-form the block's line with the pasted text spliced in at the caret,
       // then parse the whole thing so markdown prefixes and blank lines become
