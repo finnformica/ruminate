@@ -69,11 +69,17 @@ const OWNER_KEY = "store_owner"
  * with every server-side data migration and each device discards its copy and
  * rebuilds it from a full pull. A few lines, no per-row logic.
  *
- * Generation `2` covers two changes that both need one clean re-pull: the
- * minted-page-id corpus (docs/page-identity-design.md), and dropping
- * deletion-by-absence from pulls — rows HARD-deleted at the replica before
- * soft deletes existed left no tombstone, so a device still holding one would
- * keep it forever. The same wipe retires both.
+ * Generation `2` was the minted-page-id corpus (docs/page-identity-design.md).
+ *
+ * Generation `3` retires deletion-by-absence. Pulls no longer carry the full
+ * key list of each table, so a row HARD-deleted at the replica before soft
+ * deletes existed — one that left no tombstone to replicate — would sit in a
+ * device's cache forever, invisible to every future pull. One clean re-pull
+ * settles it.
+ *
+ * This is why the constant is bumped rather than merely re-documented: every
+ * device that already booted on generation `2` has `"2"` stamped in its meta,
+ * so folding a new change into the old number is a wipe that never fires.
  *
  * The wipe costs what an owner change costs: local rows that were never
  * pushed (edits made while the replica was unreachable, still only in this
@@ -81,7 +87,7 @@ const OWNER_KEY = "store_owner"
  * when the tab hides, so the window is small — but it is real, and it is why
  * this is bumped deliberately rather than routinely.
  */
-export const CACHE_GENERATION = "2"
+export const CACHE_GENERATION = "3"
 const CACHE_GENERATION_KEY = "cache_generation"
 const PULL_RETRY_MS = 60_000
 /** Minimum gap between automatic repair rebuilds after a SQL write failure. */
@@ -300,16 +306,6 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
           }
           await opened.store.setMeta(OWNER_KEY, options.owner)
         }
-        if (runtime !== activation) return
-      }
-
-      // Generation binding: a cache written by an older protocol is discarded
-      // wholesale (cursor included, so the next pull is a full one) before any
-      // local read can surface it. See CACHE_GENERATION.
-      if ((await opened.store.getMeta(CACHE_GENERATION_KEY)) !== CACHE_GENERATION) {
-        await opened.store.replaceAll({})
-        await opened.store.setMeta(PULL_CURSOR_KEY, "")
-        await opened.store.setMeta(CACHE_GENERATION_KEY, CACHE_GENERATION)
         if (runtime !== activation) return
       }
 
