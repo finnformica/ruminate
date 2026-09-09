@@ -4,6 +4,7 @@ import { atomWithMachine } from "jotai-xstate"
 import { atomWithStorage, selectAtom } from "jotai/utils"
 import { assign, createMachine } from "xstate"
 import { GitHubUser, Note, NoteId, Template, githubUserSchema, templateSchema } from "./schema"
+import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/commands"
 import { databaseFilesAtom } from "./data/database-mode"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
 import { backfillPrimaryEmail } from "./utils/github-email"
@@ -464,3 +465,14 @@ export const noteOutlineAtom = atom<{ noteId: string; items: OutlineItem[] } | n
 export const blockRevealAtom = atom<BlockRevealRequest | null>(null)
 
 export const calendarLayoutAtom = atomWithStorage<"week" | "month">("calendar-layout", "week")
+
+/**
+ * The markdown a new block starts with when Enter creates one in the block
+ * editor (from anything but a todo / ordered item, which continue their own
+ * list). `"- "` by default; `""` makes Enter produce plain paragraphs. Read by
+ * `BlockEditor` and handed to the command layer via `CommandInput`.
+ */
+export const newBlockMarkerAtom = atomWithStorage<string>(
+  "new-block-marker",
+  DEFAULT_NEW_BLOCK_MARKER,
+)

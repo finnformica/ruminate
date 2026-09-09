@@ -17,6 +17,8 @@ vi.mock("../../global-state", async () => {
     markdownFilesAtom: atom({}),
     // Signed out: developer mode (`hooks/is-developer.ts`) stays off.
     githubUserAtom: atom(null),
+    // Enter's new-block marker preference (Settings → Editor), at its default.
+    newBlockMarkerAtom: atom("- "),
   }
 })
 

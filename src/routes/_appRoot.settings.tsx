@@ -2,11 +2,14 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useAtom, useAtomValue } from "jotai"
 import { useEffect } from "react"
 import { useNetworkState } from "react-use"
+import { DEFAULT_NEW_BLOCK_MARKER } from "../blocks/commands"
+import { getBlockType } from "../blocks/block-type"
 import { Button } from "../components/button"
 import { useSignOut } from "../components/github-auth"
 import { GitHubAvatar } from "../components/github-avatar"
 import { SettingsIcon16 } from "../components/icons"
 import { PageLayout } from "../components/page-layout"
+import { TextInput } from "../components/text-input"
 import {
   databaseModeStatusAtom,
   refreshDatabaseReplicaStatus,
@@ -18,7 +21,7 @@ import {
   type ReplicaDiagnostics,
   type StorageDiagnostics,
 } from "../data/storage-diagnostics"
-import { AccentColor, accentAtom, githubUserAtom } from "../global-state"
+import { AccentColor, accentAtom, githubUserAtom, newBlockMarkerAtom } from "../global-state"
 import { cx } from "../utils/cx"
 
 export const Route = createFileRoute("/_appRoot/settings")({
@@ -34,6 +37,7 @@ function RouteComponent() {
       <div className="p-4 pb-6">
         <div className="mx-auto flex max-w-xl flex-col gap-6">
           <AppearanceSection />
+          <EditorSection />
           <StorageSection />
           <GitHubSection />
           <div className="flex flex-col items-center gap-1 self-center p-5 text-center text-text-tertiary">
@@ -132,6 +136,80 @@ function AppearanceSection() {
         </div>
         <span className="text-sm leading-5 text-text-secondary">
           {ACCENT_OPTIONS.find((option) => option.value === accent)?.label}
+        </span>
+      </div>
+    </SettingsSection>
+  )
+}
+
+/** Quick picks for the new-block marker; anything else can be typed in. */
+const NEW_BLOCK_MARKER_PRESETS: Array<{ value: string; label: string }> = [
+  { value: DEFAULT_NEW_BLOCK_MARKER, label: "Bullet" },
+  { value: "", label: "Paragraph" },
+  { value: "[ ] ", label: "To-do" },
+  { value: "> ", label: "Quote" },
+]
+
+const BLOCK_KIND_LABELS: Record<ReturnType<typeof getBlockType>["kind"], string> = {
+  heading: "a heading",
+  todo: "a to-do",
+  quote: "a quote",
+  bullet: "a bullet point",
+  ordered: "a numbered item",
+  paragraph: "a paragraph",
+}
+
+/** Plain-English summary of what a marker turns a new block into. */
+function describeNewBlockMarker(marker: string): string {
+  if (marker === "") return "New blocks will be plain paragraphs."
+  const kind = getBlockType(marker).kind
+  if (kind !== "paragraph") return `New blocks will be ${BLOCK_KIND_LABELS[kind]}.`
+  return `New blocks will start with the text “${marker}”.`
+}
+
+function EditorSection() {
+  const [newBlockMarker, setNewBlockMarker] = useAtom(newBlockMarkerAtom)
+
+  return (
+    <SettingsSection title="Editor">
+      <div className="flex flex-col gap-2">
+        <label htmlFor="new-block-marker" className="text-sm leading-4 text-text-secondary">
+          New block markdown
+        </label>
+        <span className="text-sm leading-5 text-text-secondary">
+          What a new block starts with when you press Enter. To-do and numbered items always
+          continue their own list.
+        </span>
+        <TextInput
+          id="new-block-marker"
+          className="font-mono"
+          value={newBlockMarker}
+          placeholder="(none)"
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(event) => setNewBlockMarker(event.target.value)}
+        />
+        <div role="group" aria-label="New block markdown presets" className="flex flex-wrap gap-1">
+          {NEW_BLOCK_MARKER_PRESETS.map((preset) => {
+            const isSelected = newBlockMarker === preset.value
+            return (
+              <Button
+                key={preset.label}
+                size="small"
+                aria-pressed={isSelected}
+                onClick={() => setNewBlockMarker(preset.value)}
+                className={cx(isSelected && "ring-1 ring-inset ring-border-focus")}
+              >
+                {preset.label}
+                {preset.value ? (
+                  <span className="ml-1 font-mono text-text-secondary">{preset.value.trim()}</span>
+                ) : null}
+              </Button>
+            )
+          })}
+        </div>
+        <span className="text-sm leading-5 text-text-secondary">
+          {describeNewBlockMarker(newBlockMarker)}
         </span>
       </div>
     </SettingsSection>
