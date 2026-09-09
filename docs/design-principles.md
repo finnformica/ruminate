@@ -91,7 +91,8 @@ asks for it.
    so a parent todo's chevron sits _beside_ the slot, hugging the highlight
    surface's left edge from outside (its ink ~3px off the edge, clear of the
    parent's guide line 11px out when nested) — same reveal (hover its own
-   square), same pin while collapsed — and that square is a hit area only,
+   square, or the checkbox), same pin while collapsed — and that square is a
+   hit area only,
    with no hover surface, so it never clashes with the box or the highlight
    it straddles. The chevron's hover square is 20px,
    with the small (4px) radius: inside the 27px-tall surface that is an even

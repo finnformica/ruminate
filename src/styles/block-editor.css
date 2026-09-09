@@ -124,6 +124,15 @@
     opacity: 0;
   }
 }
+/* A parent todo's checkbox slot also reveals the chevron beside it: hover
+ * the box and the chevron shows exactly as if hovered itself, so the fold
+ * control is found from the marker everyone looks at, while the box keeps
+ * its own click. */
+@media (hover: hover) and (pointer: fine) {
+  .block-toggle-hint:hover ~ .block-toggle-beside .block-toggle {
+    opacity: 1;
+  }
+}
 .block-toggle:focus-visible,
 .block-toggle.block-toggle-pinned {
   opacity: 1;

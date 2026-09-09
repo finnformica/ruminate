@@ -1135,12 +1135,16 @@ describe("collapse toggle", () => {
     expect(checkbox).not.toBeNull()
     const slot = checkbox.parentElement!
     expect(slot.className).toContain("w-[15px]")
-    // The checkbox slot is not a hover area and holds no button.
+    // The checkbox slot never swaps (no key slot) and holds no button, but it
+    // hints at the chevron beside it.
     expect(slot.className).not.toContain("block-toggle-slot")
+    expect(slot.className).toContain("block-toggle-hint")
     expect(slot.querySelector("button")).toBeNull()
-    // The chevron hugs the surface's edge from outside, with no hover surface.
+    // The chevron hugs the surface's edge from outside, with no hover surface,
+    // and follows the slot in the DOM so the hint can reach it.
     const toggle = toggleOf(container, "blk_tp")!
     expect(toggle.parentElement!.className).toContain("-left-[15px]")
+    expect(slot.nextElementSibling).toBe(toggle.parentElement)
     expect(toggle.className).toContain("enabled:hover:bg-transparent")
     // It folds on click and pins while collapsed.
     fireEvent.click(toggle)

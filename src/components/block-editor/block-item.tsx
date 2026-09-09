@@ -620,9 +620,16 @@ export function BlockItem({
     type.kind === "todo" ? (
       // The checkbox IS the todo's marker — a control in the key slot, which
       // is why a parent todo's chevron sits beside it (see `toggleBeside`).
-      // On coarse pointers the box grows its own tap area
-      // (`.block-checkbox::before`, block-editor.css).
-      <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
+      // Hovering the box also reveals that chevron (`.block-toggle-hint`,
+      // block-editor.css) — the marker is where people look for the fold
+      // control — without the box ever giving up its own click. On coarse
+      // pointers the box grows its own tap area (`.block-checkbox::before`).
+      <span
+        className={cx(
+          "flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
+          toggleBeside && "block-toggle-hint",
+        )}
+      >
         <input
           type="checkbox"
           checked={type.checked}
@@ -756,10 +763,12 @@ export function BlockItem({
             // runs 11px outside the edge — the glyph's ink ends ≥2.5px right
             // of it, so the two never touch. `typo` + h-[1lh] size the slot
             // to that line whatever the scale; the top offset mirrors the
-            // line's own vertical padding.
+            // line's own vertical padding. It FOLLOWS the marker in the DOM
+            // (position is absolute, so order is invisible) so the checkbox
+            // slot's hover can reach it with a sibling selector.
             <span
               className={cx(
-                "absolute -left-[15px] h-[1lh] w-5",
+                "block-toggle-beside absolute -left-[15px] h-[1lh] w-5",
                 runEdges?.top ? "top-1" : "top-0.5",
                 typo,
               )}
