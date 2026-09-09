@@ -1058,9 +1058,10 @@ describe("heading hash marker", () => {
 })
 
 describe("collapse toggle", () => {
-  // One parent per marker family plus a leaf: the toggle SWAPS for the key —
-  // every block type has one (dot, `#`, number, `¶`, `>`; a todo's checkbox
-  // sits after the slot) — and the guide line hangs from the key.
+  // One parent per marker family plus a leaf: the toggle SWAPS for the key
+  // (dot, `#`, number, `>`), sits in a paragraph's empty slot, and is absent
+  // on a todo (its checkbox fills the slot); the guide line hangs from the
+  // slot either way.
   const OUTLINE = [
     "- Bullet parent",
     "  id:: blk_bp",
@@ -1096,13 +1097,15 @@ describe("collapse toggle", () => {
 
   it("only parents carry a toggle; there is no separate gutter", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
-    for (const id of ["blk_bp", "blk_hp", "blk_tp", "blk_pp"]) {
+    for (const id of ["blk_bp", "blk_hp", "blk_pp"]) {
       expect(toggleOf(container, id), id).not.toBeNull()
     }
+    // A todo parent has none: its checkbox fills the slot (keyboard folds it).
+    expect(toggleOf(container, "blk_tp")).toBeNull()
     expect(toggleOf(container, "blk_leaf")).toBeNull()
-    // Exactly one toggle per parent — the old always-rendered gutter button
-    // (opacity-0 on leaves) is gone, so labels are unambiguous.
-    expect(container.querySelectorAll('button[aria-label="Collapse"]')).toHaveLength(4)
+    // Exactly one toggle per chevron-bearing parent — the old always-rendered
+    // gutter button (opacity-0 on leaves) is gone, so labels are unambiguous.
+    expect(container.querySelectorAll('button[aria-label="Collapse"]')).toHaveLength(3)
   })
 
   it("a bullet parent's toggle shares the marker slot with the dot, which becomes the key", () => {
@@ -1127,33 +1130,32 @@ describe("collapse toggle", () => {
     expect(line.querySelector(".block-key")).toBeNull()
   })
 
-  it("a todo parent keys on a dot like a bullet; its checkbox follows the slot, inline", () => {
+  it("a todo parent keeps its checkbox in the slot and carries no chevron", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
     const line = lineOf(container, "blk_tp")
-    const toggle = toggleOf(container, "blk_tp")!
-    const slot = toggle.parentElement!
-    expect(slot.className).toContain("w-[15px]")
-    expect(slot.querySelector(".block-key")).not.toBeNull()
-    // The checkbox is a control, so it never shares the key slot: it sits in
-    // the next flex child, before the content.
     const checkbox = line.querySelector('input[type="checkbox"]')!
     expect(checkbox).not.toBeNull()
-    expect(slot.contains(checkbox)).toBe(false)
-    expect(slot.nextElementSibling!.contains(checkbox)).toBe(true)
+    expect(checkbox.parentElement!.className).toContain("w-[15px]")
+    expect(line.querySelector("button")).toBeNull()
+    // Still folds from the keyboard.
+    const root = editorRoot(container)
+    selectNth(root, 4) // Todo parent
+    fireEvent.keyDown(root, { key: " " })
+    expect(container.querySelector('[data-block-row="blk_tc"]')).toBeNull()
   })
 
-  it("paragraph and quote parents key on a glyph in the same slot", () => {
+  it("a paragraph parent's slot is empty but keeps the column and hosts the chevron", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
     const slot = toggleOf(container, "blk_pp")!.parentElement!
-    expect(slot.getAttribute("data-testid")).toBe("paragraph-glyph")
+    expect(slot.getAttribute("data-testid")).toBe("paragraph-slot")
     expect(slot.className).toContain("w-[15px]")
-    expect(slot.querySelector(".block-key")?.textContent).toBe("¶")
-    // Leaves carry the glyph too — it is the block's marker, not a toggle hint.
+    expect(slot.querySelector(".block-key")).toBeNull()
+    // A quote keys on `>`; a leaf paragraph keeps the empty slot, no toggle.
     const { container: c2 } = render(
       <Harness initial={"A paragraph\n  id:: blk_p\n> A quote\n  id:: blk_q\n"} />,
     )
-    expect(lineOf(c2, "blk_p").querySelector('[data-testid="paragraph-glyph"]')?.textContent).toBe(
-      "¶",
+    expect(lineOf(c2, "blk_p").querySelector('[data-testid="paragraph-slot"]')?.textContent).toBe(
+      "",
     )
     expect(lineOf(c2, "blk_q").querySelector('[data-testid="quote-glyph"]')?.textContent).toBe(">")
     expect(toggleOf(c2, "blk_p")).toBeNull()

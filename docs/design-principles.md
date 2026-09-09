@@ -79,27 +79,27 @@ asks for it.
    defined for real in `tailwind.config.cjs`; it was previously a silent no-op).
    Headings tighten as they grow (1.25 at the top of the scale).
 6. **The key is the toggle; the guide hangs from it.** There is no collapse
-   gutter. Every block type carries a key in its 15px marker slot — a bullet
-   or todo dot, a heading `#`, a number, a paragraph `¶`, a quote `>` — and a
-   parent's chevron lives in that slot and swaps in for the key on hover (2).
-   The indent guide is a 1px rule under the slot's centre — the slot starts
-   4px into the content column (the surface's reach), so its centre is 11.5px
-   in and the rule sits at 11px — with children starting 24px in (`ml-[11px]`
-   - rule + `pl-3`), so a guide never hangs from anything but a key and the
-     markers never sit off the lines. A checkbox is a control in its own right
-     (a swap would leave a parent todo un-tickable), so it never lives in the
-     slot: a todo keys on a dot like any list item and its checkbox follows the
-     slot, inline, before the text. The chevron's hover square is 20px, with
-     the small (4px) radius: inside the 27px-tall surface that is an even
-     ~3.5px inset on every side, because the key slot's centre sits 13.5px in
-     from the surface's edge — the same as the surface's vertical centre.
-     Affordances float out of the flow (absolute/negative margin) so hover
-     never moves text.
-7. **One marker slot.** Every block marker — bullet and todo dot, ordered
-   number, heading `#`, paragraph `¶`, quote `>` — occupies the same 15px slot
-   (the checkbox's width): dots centre in it; text glyphs right-align to its
-   edge. Body text therefore starts at one column across all block types
-   (a todo's text sits one checkbox further in).
+   gutter. Every block type owns the 15px marker slot, and a parent's chevron
+   lives in that slot: it swaps in for the key on hover (2) — a bullet dot, a
+   heading `#`, a number, a quote `>` — or simply appears in a paragraph's
+   empty slot. The indent guide is a 1px rule under the slot's centre — the
+   slot starts 4px into the content column (the surface's reach), so its
+   centre is 11.5px in and the rule sits at 11px — with children starting
+   24px in (`ml-[11px]` + rule + `pl-3`), so a guide never hangs from
+   anything but a slot and the markers never sit off the lines. A checkbox is
+   a control in its own right (a swap would leave a parent todo un-tickable),
+   so a todo carries no chevron at all: it folds from the keyboard. The
+   chevron's hover square is 20px, with the small (4px) radius: inside the
+   27px-tall surface that is an even ~3.5px inset on every side, because the
+   slot's centre sits 13.5px in from the surface's edge — the same as the
+   surface's vertical centre. Affordances float out of the flow
+   (absolute/negative margin) so hover never moves text.
+7. **One marker slot.** Every block marker — bullet dot, checkbox, ordered
+   number, heading `#`, quote `>` — occupies the same 15px slot (the
+   checkbox's width): dots centre in it; text glyphs right-align to its edge;
+   a paragraph leaves it empty. Body text therefore starts at one column
+   across all block types. A quote also keeps its bar on the highlight
+   surface's left edge, beside the `>`.
    The grey `#` is one component (`Hash`) everywhere it appears — note title,
    zoom title, section headings — with no typography of its own: it inherits
    its parent's scale (the titles' 3xl, each heading's depth size and bold),
@@ -205,7 +205,7 @@ full-width highlight.)
 | Muted        | `--color-text-secondary`   | quotes, done todos, ordered numbers, crumbs                                            |
 | Faint        | `--color-text-tertiary`    | bullet dots, chevron, placeholders, `#`                                                |
 | Guide        | `--color-border-secondary` | indent guide lines (rest state)                                                        |
-| Structure    | `--color-border` (a7)      | unchecked checkbox border                                                              |
+| Structure    | `--color-border` (a7)      | quote bar, unchecked checkbox border                                                   |
 | Hover        | `--neutral-a2` tint        | non-selected block lines under the pointer                                             |
 | Selection    | `--color-bg-selected`      | selected block(s), list highlight — accent-9 wash: 13% light; dark 8% over an 18% lift |
 | Selected ink | `--color-text-selected`    | ink on a selected row — 50% toward accent-12                                           |

@@ -466,12 +466,16 @@ export function BlockItem({
 
   // Whether this block owns a collapse toggle at all: parents only, and never
   // the zoom title (the editor renders its children itself, at depth 0).
-  const hasToggle = hasChildren && !zoomTitle
-  // Every block type carries a KEY in the 15px marker slot — a bullet dot,
-  // heading `#`, number, paragraph `¶`, quote `>`, and a todo's dot (its
-  // checkbox sits after the slot, inline) — and the key is pure chrome, so
-  // on a parent it SWAPS for the chevron: hover the slot and the key fades
-  // out while the chevron fades in, in the same slot — nothing moves.
+  // A todo never has one: its checkbox fills the slot, and a control never
+  // swaps out (that would leave a parent todo un-tickable) — a parent todo
+  // folds from the keyboard (Space, ←) only.
+  const hasToggle = hasChildren && !zoomTitle && type.kind !== "todo"
+  // Every block type owns the 15px marker slot. Most carry a KEY there — a
+  // bullet dot, heading `#`, number, quote `>` — and the key is pure chrome,
+  // so on a parent it SWAPS for the chevron: hover the slot and the key fades
+  // out while the chevron fades in, in the same slot — nothing moves. A
+  // paragraph's slot is empty (its text still starts in the shared column);
+  // a todo's holds the checkbox.
 
   // The chevron. `.block-toggle` (block-editor.css) keeps it invisible until
   // its own square — the key slot; never the whole row — is hovered (or, on a
@@ -539,14 +543,13 @@ export function BlockItem({
   const zoomable = !readOnly && !zoomTitle && !hasToggle
   // Every marker occupies the same 15px slot, so body text starts at one
   // column across every block type and the markers read as one chrome
-  // family: dots centre in it; text glyphs (`#`, number, `¶`, `>`) right-align
-  // to its edge. Each slot is `relative` so a swapped-in chevron centres on
-  // it, and carries `slotClass` so hovering it reveals the chevron.
+  // family: dots centre in it; text glyphs (`#`, number, `>`) right-align
+  // to its edge; a paragraph's slot is simply empty. Each slot is `relative`
+  // so a swapped-in chevron centres on it, and carries `slotClass` so
+  // hovering it reveals the chevron.
   //
-  // A dot for bullets AND todos (a todo is a list item that happens to carry
-  // a checkbox — the box follows the slot, inline, see `checkbox` below). On
-  // a leaf the dot zooms; on a parent it is the key that swaps for the
-  // chevron.
+  // The bullet's dot: on a leaf it zooms; on a parent it is the key that
+  // swaps for the chevron.
   const dotSlot = (
     <span
       className={cx(
@@ -571,23 +574,41 @@ export function BlockItem({
       {toggle}
     </span>
   )
-  // A static text glyph key (paragraph `¶`, quote `>`): faint, like the dot
-  // and the `#` — chrome, not content — right-aligned to the slot's edge like
-  // every other text glyph. Never a zoom button (zoom stays on F / Cmd+. and
-  // bullet/number clicks); on a parent it swaps for the collapse chevron.
-  const glyphSlot = (glyph: string, testId: string) => (
+  // A static text glyph key (the quote's `>`) or none at all (a paragraph):
+  // faint, like the dot and the `#` — chrome, not content — right-aligned to
+  // the slot's edge like every other text glyph. Never a zoom button (zoom
+  // stays on F / Cmd+. and bullet/number clicks); on a parent it swaps for
+  // the collapse chevron. The empty paragraph slot keeps its width so the
+  // text stays in the shared column, and still hosts a parent's chevron.
+  const glyphSlot = (glyph: string | null, testId: string) => (
     <span
       data-testid={testId}
       className={cx("relative flex h-[1lh] w-[15px] shrink-0 items-center justify-end", slotClass)}
     >
-      <span aria-hidden className={cx("select-none text-text-tertiary", keyClass)}>
-        {glyph}
-      </span>
+      {glyph ? (
+        <span aria-hidden className={cx("select-none text-text-tertiary", keyClass)}>
+          {glyph}
+        </span>
+      ) : null}
       {toggle}
     </span>
   )
   const marker =
-    type.kind === "todo" || type.kind === "bullet" ? (
+    type.kind === "todo" ? (
+      // The checkbox IS the todo's marker — a control in the key slot, which
+      // is why a todo carries no collapse chevron. On coarse pointers the box
+      // grows its own tap area (`.block-checkbox::before`, block-editor.css).
+      <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
+        <input
+          type="checkbox"
+          checked={type.checked}
+          disabled={readOnly}
+          onClick={(event) => event.stopPropagation()}
+          onChange={() => api.onContentChange(block.id, toggleTodo(block.content))}
+          className={cx("block-checkbox", readOnly ? "cursor-default" : "cursor-pointer")}
+        />
+      </span>
+    ) : type.kind === "bullet" ? (
       dotSlot
     ) : type.kind === "heading" ? (
       // Headings hang the same grey `#` as the note / zoom titles — the shared
@@ -642,26 +663,8 @@ export function BlockItem({
     ) : type.kind === "quote" ? (
       glyphSlot(">", "quote-glyph")
     ) : (
-      glyphSlot("¶", "paragraph-glyph")
+      glyphSlot(null, "paragraph-slot")
     )
-
-  // A todo's checkbox: a control, so it never shares the key slot (a swap
-  // would leave a parent todo un-tickable). It follows the dot, inline, and
-  // the text follows it — Logseq's shape. On coarse pointers the box grows
-  // its own tap area (`.block-checkbox::before`, block-editor.css).
-  const checkbox =
-    type.kind === "todo" ? (
-      <span className="flex h-[1lh] shrink-0 items-center">
-        <input
-          type="checkbox"
-          checked={type.checked}
-          disabled={readOnly}
-          onClick={(event) => event.stopPropagation()}
-          onChange={() => api.onContentChange(block.id, toggleTodo(block.content))}
-          className={cx("block-checkbox", readOnly ? "cursor-default" : "cursor-pointer")}
-        />
-      </span>
-    ) : null
 
   return (
     <div
@@ -717,10 +720,15 @@ export function BlockItem({
             // and selection (accent) always wins because the class is
             // simply absent on selected rows.
             !readOnly && !editing && !selected && "block-hoverable",
+            // The quote's bar rides the surface's left edge, alongside the
+            // `>` in the slot. Square left corners keep it a straight rule
+            // instead of curving with the highlight radius; border (2) +
+            // pl (4) nets the usual 6px inner padding, so the slot and the
+            // text stay in their columns.
+            type.kind === "quote" && "rounded-l-none border-l-2 border-border pl-1",
           )}
         >
           {marker}
-          {checkbox}
           {editing ? (
             <>
               <textarea
