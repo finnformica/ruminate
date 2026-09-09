@@ -91,7 +91,7 @@ asks for it.
    block hangs from that edge (`-ml-0.5` + rule + `pl-[25px]`), where a
    quote's own bar already runs, so it simply continues the bar. A parent
    todo's checkbox slot _hints_ at the chevron beside it (hover the box and
-   the chevron half-shows), so the control is discoverable from the key
+   the chevron shows, on its square), so the control is discoverable from the key
    without the two ever sharing a click target; the beside square is painted
    in the page colour so, nested, it sits on top of the parent's guide line
    rather than tangling with it. The chevron's hover square is 20px wherever

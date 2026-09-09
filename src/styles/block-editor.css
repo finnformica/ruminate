@@ -122,13 +122,15 @@
     opacity: 0;
   }
 }
-/* A parent todo's checkbox slot hints at the chevron beside it: hover the
- * box and the chevron half-shows in the gutter (a pinned one is already
- * full), so the collapse control is discoverable from the key everyone
- * looks at, while the two stay separate click targets. */
+/* A parent todo's checkbox slot reveals the chevron beside it: hover the box
+ * and the chevron shows in the gutter exactly as if hovered itself — full
+ * opacity, on its filled square — so the collapse control is discoverable
+ * from the key everyone looks at, while the two stay separate click
+ * targets. */
 @media (hover: hover) and (pointer: fine) {
-  .block-toggle-hint:hover ~ .block-toggle-beside .block-toggle:not(.block-toggle-pinned) {
-    opacity: 0.55;
+  .block-toggle-hint:hover ~ .block-toggle-beside .block-toggle {
+    opacity: 1;
+    background-color: var(--color-bg-hover);
   }
 }
 .block-toggle:focus-visible,

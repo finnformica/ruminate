@@ -507,6 +507,9 @@ export function BlockItem({
       onClick={() => api.toggleCollapse(block.id)}
       className={cx(
         "block-toggle absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150 active:scale-[0.92] motion-reduce:active:scale-100",
+        // IconButton's default radius is the 8px base — on a 20px square that
+        // reads as a pill. The small radius (4px) keeps it a square.
+        "rounded-sm",
         // Coarse pointers get a 28px square to tap instead of IconButton's
         // 40px-tall padded bar (which would overlap neighbouring rows and
         // squeeze the glyph): beside the content it still stops 2px short of
@@ -558,8 +561,9 @@ export function BlockItem({
     type.kind === "todo" ? (
       // On a parent todo the slot is also the chevron's HINT area
       // (`.block-toggle-hint`, block-editor.css): hovering the checkbox
-      // half-reveals the chevron beside it, so a todo's collapse control is
-      // discoverable without the two ever sharing a click target. On coarse
+      // reveals the chevron beside it, square and all, so a todo's collapse
+      // control is discoverable without the two ever sharing a click
+      // target. On coarse
       // pointers the box grows its own tap area (`.block-checkbox::before`,
       // block-editor.css) — the 15px slot never changes.
       <span
