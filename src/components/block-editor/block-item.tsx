@@ -507,7 +507,19 @@ export function BlockItem({
       onClick={() => api.toggleCollapse(block.id)}
       className={cx(
         "block-toggle absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150 active:scale-[0.92] motion-reduce:active:scale-100",
-        "h-5 w-5",
+        // Coarse pointers get a 28px square to tap instead of IconButton's
+        // 40px-tall padded bar (which would overlap neighbouring rows and
+        // squeeze the glyph): beside the content it still stops 2px short of
+        // the checkbox, in the key slot it stays inside the surface.
+        "h-5 w-5 coarse:h-7 coarse:w-7 coarse:px-0",
+        // Beside the content the square sits in the gutter, where a nested
+        // block's chevron lands on its parent's guide line: paint it in the
+        // page colour so, when revealed, it reads as a control on top of the
+        // line rather than a glyph tangled with it. Inside the highlight it
+        // stays transparent — it must never punch a hole in the surface —
+        // and on coarse pointers, where every chevron is always showing, it
+        // stays transparent too, or the guides would read as broken.
+        !toggleInKey && "bg-bg coarse:bg-transparent",
         isCollapsed && "block-toggle-pinned",
       )}
     >
@@ -544,7 +556,18 @@ export function BlockItem({
   // the chevron.
   const marker =
     type.kind === "todo" ? (
-      <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
+      // On a parent todo the slot is also the chevron's HINT area
+      // (`.block-toggle-hint`, block-editor.css): hovering the checkbox
+      // half-reveals the chevron beside it, so a todo's collapse control is
+      // discoverable without the two ever sharing a click target. On coarse
+      // pointers the box grows its own tap area (`.block-checkbox::before`,
+      // block-editor.css) — the 15px slot never changes.
+      <span
+        className={cx(
+          "flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
+          hasToggle && "block-toggle-hint",
+        )}
+      >
         <input
           type="checkbox"
           checked={type.checked}
@@ -690,6 +713,7 @@ export function BlockItem({
             type.kind === "quote" && "rounded-l-none border-l-2 border-border pl-3",
           )}
         >
+          {marker}
           {hasToggle && !toggleInKey ? (
             // The beside toggle: a 20px slot (the chevron's square) hung
             // fully OUTSIDE the surface, its right edge on the surface's left
@@ -697,10 +721,12 @@ export function BlockItem({
             // checkbox (6px clear of it) or a paragraph's first glyph, and
             // never paints over the highlight. `typo` + h-[1lh] size the slot
             // to that line whatever the scale; the top offset mirrors the
-            // line's own vertical padding.
+            // line's own vertical padding. It FOLLOWS the marker in the DOM
+            // (position is absolute, so order is invisible) so the todo
+            // slot's hover can reach it with a sibling selector.
             <span
               className={cx(
-                "absolute -left-5 h-[1lh] w-5",
+                "block-toggle-beside absolute -left-5 h-[1lh] w-5",
                 runEdges?.top ? "top-1" : "top-0.5",
                 typo,
               )}
@@ -708,7 +734,6 @@ export function BlockItem({
               {toggle}
             </span>
           ) : null}
-          {marker}
           {editing ? (
             <>
               <textarea

@@ -150,6 +150,15 @@
     opacity: 0;
   }
 }
+/* A parent todo's checkbox slot hints at the chevron beside it: hover the
+ * box and the chevron half-shows in the gutter (a pinned one is already
+ * full), so the collapse control is discoverable from the key everyone
+ * looks at, while the two stay separate click targets. */
+@media (hover: hover) and (pointer: fine) {
+  .block-toggle-hint:hover ~ .block-toggle-beside .block-toggle:not(.block-toggle-pinned) {
+    opacity: 0.55;
+  }
+}
 .block-toggle:focus-visible,
 .block-toggle.block-toggle-pinned {
   opacity: 1;
@@ -185,6 +194,20 @@
   transition:
     background-color 150ms ease,
     border-color 150ms ease;
+}
+
+/* Coarse pointers: a 15px box beside an always-visible chevron is easy to
+ * mis-tap, so the box's hit area grows to ~35px through a pseudo-element
+ * (drawn size unchanged; the chevron's square widens too, see block-item). */
+@media (pointer: coarse) {
+  .block-checkbox {
+    position: relative;
+  }
+  .block-checkbox::before {
+    content: "";
+    position: absolute;
+    inset: -10px;
+  }
 }
 
 .block-checkbox:hover:not(:disabled) {

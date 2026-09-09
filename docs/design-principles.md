@@ -84,8 +84,13 @@ asks for it.
    the content, hung just outside the highlight surface's left edge (-2px) so
    it never crowds the checkbox or the first glyph; the guide of a keyless
    block hangs from that edge (`-ml-0.5` + rule + `pl-[25px]`), where a
-   quote's own bar already runs, so it simply continues the bar. The chevron's
-   hover square is 20px wherever it lives: inside the 27px-tall surface that
+   quote's own bar already runs, so it simply continues the bar. A parent
+   todo's checkbox slot _hints_ at the chevron beside it (hover the box and
+   the chevron half-shows), so the control is discoverable from the key
+   without the two ever sharing a click target; the beside square is painted
+   in the page colour so, nested, it sits on top of the parent's guide line
+   rather than tangling with it. The chevron's hover square is 20px wherever
+   it lives: inside the 27px-tall surface that
    is an even ~3.5px inset on every side, because the key slot's centre sits
    13.5px in from the surface's edge — the same as the surface's vertical
    centre. Affordances float out of the flow (absolute/negative margin) so

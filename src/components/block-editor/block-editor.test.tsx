@@ -1132,9 +1132,13 @@ describe("collapse toggle", () => {
     const line = lineOf(container, "blk_tp")
     const checkbox = line.querySelector('input[type="checkbox"]')!
     expect(checkbox).not.toBeNull()
-    expect(checkbox.parentElement!.querySelector("button")).toBeNull()
+    const slot = checkbox.closest(".block-toggle-hint")!
+    expect(slot).not.toBeNull()
+    expect(slot.querySelector("button")).toBeNull()
     const toggle = toggleOf(container, "blk_tp")!
     expect(toggle.parentElement!.className).toContain("-left-5")
+    // The beside slot follows the checkbox slot, so its hover can hint at it.
+    expect(slot.nextElementSibling).toBe(toggle.parentElement)
     // Paragraphs have no key at all, so theirs sits beside too.
     expect(toggleOf(container, "blk_pp")!.parentElement!.className).toContain("-left-5")
   })
