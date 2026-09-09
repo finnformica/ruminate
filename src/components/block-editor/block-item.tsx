@@ -467,27 +467,38 @@ export function BlockItem({
   // Whether this block owns a collapse toggle at all: parents only, and never
   // the zoom title (the editor renders its children itself, at depth 0).
   const hasToggle = hasChildren && !zoomTitle
-  // Where that toggle lives. A bullet dot, heading `#` or number is pure
-  // chrome, so the KEY SWAPS for the chevron: hover the row and the key fades
-  // out while the chevron fades in, in the same 15px slot — nothing moves. A
-  // checkbox is a control in its own right (a swap would leave a parent todo
-  // un-tickable), and paragraphs / quotes carry no key at all, so their
-  // chevron sits BESIDE the content instead, centred on the highlight
-  // surface's left edge — the same reveal, one column to the left.
-  const toggleInKey =
-    hasToggle && (type.kind === "bullet" || type.kind === "heading" || type.kind === "ordered")
+  // Every block type owns the 15px marker slot. Most carry a KEY there — a
+  // bullet dot, heading `#`, number, quote `>` — and the key is pure chrome,
+  // so on a parent it SWAPS for the chevron: hover the slot and the key fades
+  // out while the chevron fades in, in the same slot — nothing moves. A
+  // paragraph's slot is empty (its text still starts in the shared column).
+  // A todo's slot holds its checkbox — a control, which never swaps out (that
+  // would leave a parent todo un-tickable) — so a parent todo's chevron sits
+  // BESIDE the slot instead, in the gutter just outside the highlight
+  // surface: same reveal (hover its own square), same pin while collapsed.
+  const toggleBeside = hasToggle && type.kind === "todo"
 
   // The chevron. `.block-toggle` (block-editor.css) keeps it invisible until
-  // the row is hovered (or, on a device with nothing to hover with, always) —
+  // its own square — the key slot, or the gutter square beside a todo; never
+  // the whole row — is hovered (or, on a device with nothing to hover with,
+  // always) —
   // except on a COLLAPSED block, which pins it visible so hidden content is
   // never a secret. It floats out of the flow, centred on whatever slot holds
   // it, so the reveal never shifts the text. Centred by its own midpoint
   // (left/top 50% + a half-size translate), NOT by `inset-0 m-auto`: the
-  // 24px square is wider than the 15px slot, and an over-constrained absolute
+  // 20px square is wider than the 15px slot, and an over-constrained absolute
   // box drops its left margin to zero instead of going negative — which
   // left-aligned the square and put the chevron 4.5px right of the guide.
   // Press feedback lives on the control (IconButton supplies the hover
   // surface); the content itself never animates on collapse.
+  //
+  // The square is 20px everywhere so it sits an even ~3.5px inside the
+  // highlight surface on every side it touches: the surface is 27px tall
+  // (a 23px line + 2px each side) and the key slot's centre is 13.5px in
+  // from its left edge (2px reach + 6px padding + half of 15px) — the same
+  // distance as the surface's vertical centre, so the square inset matches
+  // horizontally and vertically. Beside a todo the same square straddles the
+  // surface's left edge, its glyph tucked just outside it.
   const toggle = hasToggle ? (
     <IconButton
       aria-label={isCollapsed ? "Expand" : "Collapse"}
@@ -497,12 +508,18 @@ export function BlockItem({
       onClick={() => api.toggleCollapse(block.id)}
       className={cx(
         "block-toggle absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150 active:scale-[0.92] motion-reduce:active:scale-100",
-        // In the key slot the hover square is the full 24px — it fits: the
-        // slot's centre is 11.5px into the content column, so the square spans
-        // -0.5..23.5px, inside the surface and short of the text at 27px.
-        // Beside the content it shrinks to 16px so it never covers the first
-        // glyph.
-        toggleInKey ? "h-6 w-6" : "h-4 w-4",
+        // IconButton's default radius is the 8px base — on a 20px square that
+        // reads as a pill. The small radius (4px) keeps it a square.
+        "rounded-sm",
+        // Coarse pointers get a 28px square to tap instead of IconButton's
+        // 40px-tall padded bar (which would overlap neighbouring rows and
+        // squeeze the glyph); it still sits inside the surface.
+        "h-5 w-5 coarse:h-7 coarse:w-7 coarse:px-0",
+        // Beside a todo the square is a hit area only — no hover surface, so
+        // it never clashes with the checkbox or the highlight it straddles;
+        // the chevron's own fade-in is the whole reveal. It stays 20px wide
+        // on coarse pointers too: 28px would reach the checkbox.
+        toggleBeside && "enabled:hover:bg-transparent enabled:active:bg-transparent coarse:w-5",
         isCollapsed && "block-toggle-pinned",
       )}
     >
@@ -516,26 +533,103 @@ export function BlockItem({
           isCollapsed ? "rotate-0" : "rotate-90",
         )}
       >
-        <path d="M2 1l4 3-4 3z" fill="currentColor" />
+        {/* A filled triangle with softened corners: the fill plus a round-
+            joined stroke of the same ink, which rounds the three points. */}
+        <path
+          d="M2.6 1.6l3.2 2.4-3.2 2.4z"
+          fill="currentColor"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinejoin="round"
+        />
       </svg>
     </IconButton>
   ) : null
   // The key of a swapping parent: fades out as the chevron fades in, and is
   // hidden outright while collapsed (the pinned chevron stands in for it).
-  const keyClass = toggleInKey ? cx("block-key", isCollapsed && "block-key-hidden") : undefined
+  const keyClass = hasToggle ? cx("block-key", isCollapsed && "block-key-hidden") : undefined
+  // The slot of a swapping parent is the chevron's hover area (see
+  // `.block-toggle-slot` in block-editor.css). Not a todo's: its chevron is
+  // beside, and hovering the checkbox must mean the checkbox.
+  const slotClass = hasToggle && !toggleBeside ? "block-toggle-slot" : undefined
 
   // List markers double as zoom targets (Logseq-style: click the bullet to
   // make this block the page) — on leaves. A parent's key is its collapse
   // toggle, so zoom stays on F / Cmd+. there. The negative-margin padding
   // enlarges the hit area without shifting the marker's layout size.
   const zoomable = !readOnly && !zoomTitle && !hasToggle
-  // Every marker occupies the same 15px slot (the checkbox's width), so body
-  // text starts at one column across bullet / todo / numbered blocks and the
-  // markers read as one chrome family. Each slot is `relative` so a swapped-in
-  // chevron centres on it.
+  // Every marker occupies the same 15px slot, so body text starts at one
+  // column across every block type and the markers read as one chrome
+  // family: dots centre in it; text glyphs (`#`, number, `>`) right-align
+  // to its edge; a paragraph's slot is simply empty. Each slot is `relative`
+  // so a swapped-in chevron centres on it, and carries `slotClass` so
+  // hovering it reveals the chevron.
+  //
+  // The bullet's dot: on a leaf it zooms; on a parent it is the key that
+  // swaps for the chevron.
+  const dotSlot = (
+    <span
+      className={cx(
+        "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
+        slotClass,
+      )}
+    >
+      {zoomable ? (
+        <button
+          type="button"
+          aria-label="Zoom into block"
+          tabIndex={-1}
+          onClick={() => api.zoomInto(block.id)}
+          className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-90 motion-reduce:active:scale-100"
+        >
+          {/* Faint, like the chevron — pure chrome; content leads. */}
+          <span aria-hidden className="size-1.5 rounded-full bg-text-tertiary" />
+        </button>
+      ) : (
+        <span aria-hidden className={cx("size-1.5 rounded-full bg-text-tertiary", keyClass)} />
+      )}
+      {toggle}
+    </span>
+  )
+  // A static text glyph key (the quote's `>`) or none at all (a paragraph):
+  // faint, like the dot and the `#` — chrome, not content. CENTRED in the
+  // slot, like the dot and the checkbox, not right-aligned like `#` and the
+  // numbers: `>` is a narrow glyph, and right-aligned its ink sat 3px right
+  // of the dot's centre (and of the guide line that hangs from it). Never a
+  // zoom button (zoom stays on F / Cmd+. and bullet/number clicks); on a
+  // parent it swaps for the collapse chevron. The empty paragraph slot keeps
+  // its width so the text stays in the shared column, and still hosts a
+  // parent's chevron.
+  const glyphSlot = (glyph: string | null, testId: string) => (
+    <span
+      data-testid={testId}
+      className={cx(
+        "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
+        slotClass,
+      )}
+    >
+      {glyph ? (
+        <span aria-hidden className={cx("select-none text-text-tertiary", keyClass)}>
+          {glyph}
+        </span>
+      ) : null}
+      {toggle}
+    </span>
+  )
   const marker =
     type.kind === "todo" ? (
-      <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
+      // The checkbox IS the todo's marker — a control in the key slot, which
+      // is why a parent todo's chevron sits beside it (see `toggleBeside`).
+      // Hovering the box also reveals that chevron (`.block-toggle-hint`,
+      // block-editor.css) — the marker is where people look for the fold
+      // control — without the box ever giving up its own click. On coarse
+      // pointers the box grows its own tap area (`.block-checkbox::before`).
+      <span
+        className={cx(
+          "flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
+          toggleBeside && "block-toggle-hint",
+        )}
+      >
         <input
           type="checkbox"
           checked={type.checked}
@@ -546,23 +640,7 @@ export function BlockItem({
         />
       </span>
     ) : type.kind === "bullet" ? (
-      <span className="relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
-        {zoomable ? (
-          <button
-            type="button"
-            aria-label="Zoom into block"
-            tabIndex={-1}
-            onClick={() => api.zoomInto(block.id)}
-            className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-90 motion-reduce:active:scale-100"
-          >
-            {/* Faint, like the chevron — pure chrome; content leads. */}
-            <span aria-hidden className="size-1.5 rounded-full bg-text-tertiary" />
-          </button>
-        ) : (
-          <span aria-hidden className={cx("size-1.5 rounded-full bg-text-tertiary", keyClass)} />
-        )}
-        {toggle}
-      </span>
+      dotSlot
     ) : type.kind === "heading" ? (
       // Headings hang the same grey `#` as the note / zoom titles — the shared
       // `Hash`, at the heading's own scale: the slot carries the heading's
@@ -581,6 +659,7 @@ export function BlockItem({
         className={cx(
           "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-end font-bold",
           headingScale(depth),
+          slotClass,
         )}
       >
         <Hash className={keyClass} />
@@ -589,7 +668,12 @@ export function BlockItem({
     ) : type.kind === "ordered" ? (
       // Numbers are read (they carry order), so they sit one step up the ramp
       // from the dot — muted, not faint — and right-align to the slot edge.
-      <span className="relative flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary">
+      <span
+        className={cx(
+          "relative flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary",
+          slotClass,
+        )}
+      >
         {zoomable ? (
           <button
             type="button"
@@ -607,17 +691,18 @@ export function BlockItem({
         )}
         {toggle}
       </span>
-    ) : null
+    ) : type.kind === "quote" ? (
+      glyphSlot(">", "quote-glyph")
+    ) : (
+      glyphSlot(null, "paragraph-slot")
+    )
 
   return (
     <div
       data-block-row={block.id}
       className={cx("group/subtree", zoomTitle ? "mb-3" : headingTopMargin(type, depth))}
     >
-      {/* `.block-row` is the hover scope for the toggle reveal: this row only.
-          The children below are siblings of it, so hovering a child never
-          swaps the parent's key. */}
-      <div className="block-row relative min-w-0 py-0.5 font-content leading-relaxed">
+      <div className="relative min-w-0 py-0.5 font-content leading-relaxed">
         <div
           // The visible content line (carries the highlight). Scroll-into-view
           // targets this, not the row wrapper, so a heading's top margin can't
@@ -627,10 +712,12 @@ export function BlockItem({
             // Negative margin + padding pairs grow the highlight surface
             // while the text (and every marker) stays exactly where it was —
             // the background extends outward instead of pushing content.
-            // Horizontally: symmetric — the surface extends 4px each side
-            // (-mx-1) and gives the text 8px of inner breathing room
-            // (pl-2 pr-2), so the left edge nets to the same text column as
-            // before (-4+8 = +4).
+            // Horizontally: symmetric — the surface extends 2px each side
+            // (-mx-0.5) and gives the text 6px of inner breathing room
+            // (pl-1.5 pr-1.5), so the left edge nets to the same text column
+            // as before (-2+6 = +4). 2px, not more, so the key slot's centre
+            // (13.5px in) matches the surface's vertical centre and the
+            // collapse chevron's square sits evenly inside it (see `toggle`).
             // Vertically the extension is CONDITIONAL, per side (see the
             // runEdges pairs below): 2px by default — the midpoint of the
             // nested 4px inter-row gap, so two adjacent surfaces painted in
@@ -641,7 +728,7 @@ export function BlockItem({
             // run into one continuous surface. Either way the negative
             // margin equals the padding, so the text never moves a pixel
             // and the block rhythm gains nothing.
-            "relative -ml-1 -mr-1 flex items-start gap-2 rounded pl-2 pr-2",
+            "relative -ml-0.5 -mr-0.5 flex items-start gap-2 rounded pl-1.5 pr-1.5",
             // Per-side vertical pairs. Mid-run sides also square their
             // corners so the run reads as ONE surface rounded only at its
             // ends (the editor computes which neighbours actually touch —
@@ -664,22 +751,24 @@ export function BlockItem({
             // and selection (accent) always wins because the class is
             // simply absent on selected rows.
             !readOnly && !editing && !selected && "block-hoverable",
-            // Square left corners so the quote bar stays a straight rule
-            // instead of curving with the highlight radius. The wider pl
-            // holds the quote text at its usual column: the bar rides the
-            // surface's left edge (-4), so border (2) + pl (14) nets +12.
-            // (14px is arbitrary-valued — the spacing scale has no 3.5 step.)
-            type.kind === "quote" && "rounded-l-none border-l-2 border-border pl-[14px]",
           )}
         >
-          {hasToggle && !toggleInKey ? (
-            // The beside toggle: a 16px slot (the chevron's h-4 w-4 square)
-            // straddling the surface's left edge, on the block's first line.
-            // `typo` + h-[1lh] size the slot to that line whatever the scale;
-            // the top offset mirrors the line's own vertical padding.
+          {marker}
+          {toggleBeside ? (
+            // The beside toggle: a 20px slot (the chevron's square) centred
+            // 5px OUTSIDE the surface's left edge, on the block's first line,
+            // so the glyph hugs the block: its ink sits ~3px off the edge and
+            // stops short of the checkbox (the slot ends 1px before it).
+            // Nested, that keeps it clear of the parent's guide line, which
+            // runs 11px outside the edge — the glyph's ink ends ≥2.5px right
+            // of it, so the two never touch. `typo` + h-[1lh] size the slot
+            // to that line whatever the scale; the top offset mirrors the
+            // line's own vertical padding. It FOLLOWS the marker in the DOM
+            // (position is absolute, so order is invisible) so the checkbox
+            // slot's hover can reach it with a sibling selector.
             <span
               className={cx(
-                "absolute -left-2 h-[1lh] w-4",
+                "block-toggle-beside absolute -left-[15px] h-[1lh] w-5",
                 runEdges?.top ? "top-1" : "top-0.5",
                 typo,
               )}
@@ -687,7 +776,19 @@ export function BlockItem({
               {toggle}
             </span>
           ) : null}
-          {marker}
+          {type.kind === "quote" ? (
+            // The quote's bar stands at the text column — where every other
+            // block's text begins — and pushes the quote's text 10px in (bar
+            // 2px + the 8px gap): a quote is set in from the rest, the way it
+            // is on the page. Rounded ends and the glyph ink (tertiary), so
+            // it reads as chrome of the same family as the `>` beside it. It
+            // stretches the line's full height so a wrapped quote reads as
+            // one block.
+            <span
+              aria-hidden
+              className="w-0.5 shrink-0 self-stretch rounded-full bg-text-tertiary"
+            />
+          ) : null}
           {editing ? (
             <>
               <textarea
@@ -770,17 +871,15 @@ export function BlockItem({
 
       {hasChildren && !isCollapsed && !zoomTitle ? (
         // The guide hangs from the block's key: a 1px rule under the centre of
-        // the 15px marker slot, which starts 4px into the content column (the
-        // surface's -4px reach + 8px inner padding) — centre 11.5px, so the
-        // rule sits at 11px. A keyless block (paragraph, quote) hangs it from
-        // the surface's left edge (-4px) instead, where its toggle lives and
-        // where a quote's own bar already runs, so the guide simply continues
-        // the bar. Either way children start 24px in (margin + rule + padding).
+        // the 15px marker slot (every block type has one), which starts 4px
+        // into the content column (the surface's -2px reach + 6px inner
+        // padding) — centre 11.5px, so the rule sits at 11px. Children start
+        // 24px in (margin + rule + padding).
         // The guide brightens while the pointer is anywhere in the subtree
         // (group/subtree is the block's outer wrapper), tracing the structure.
         <div
           className={cx(
-            marker ? "ml-[11px] pl-3" : "-ml-1 pl-[27px]",
+            "ml-[11px] pl-3",
             "border-l border-border-secondary transition-colors duration-200 group-hover/subtree:border-[color:var(--neutral-a6)]",
             justExpanded && "block-expand",
           )}

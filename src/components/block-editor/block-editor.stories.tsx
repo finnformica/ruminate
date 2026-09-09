@@ -82,6 +82,26 @@ export const NestedTodo: Story = {
   args: { initial: "[ ] Parent todo\n  id:: blk_pt\n  - child bullet\n    id:: blk_pc\n" },
 }
 
+/** Todo and paragraph parents nested under a bullet: a todo's checkbox fills
+ * its slot so its chevron hugs the block's edge, clear of the guide line; a
+ * paragraph's slot is empty but hosts the chevron. */
+export const NestedParents: Story = {
+  args: {
+    initial: [
+      "- Bullet parent",
+      "  id:: blk_nb",
+      "  [ ] Nested todo parent",
+      "    id:: blk_nt",
+      "    - grandchild",
+      "      id:: blk_ng",
+      "  Nested paragraph parent",
+      "    id:: blk_np",
+      "    - grandchild two",
+      "      id:: blk_ng2",
+    ].join("\n"),
+  },
+}
+
 /** Every block type in one document — used to audit the selected-state
  * highlight across types (select all via the Cmd+A ladder and screenshot). */
 const SWEEP_SAMPLE = `# Alpha heading

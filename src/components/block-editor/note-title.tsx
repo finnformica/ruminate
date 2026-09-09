@@ -164,10 +164,10 @@ export function NoteTitle({
             }
           }}
           className={cx(
-            // -mx-1 + pl-[31px]/pr-1 keep the text at the block text column
-            // (pl-[27px]) while the highlight surface gains the same breathing
-            // room as a selected block line.
-            "-mx-1 cursor-text rounded py-0 pl-[31px] pr-1 outline-none transition-colors duration-100",
+            // -mx-0.5 + pl-[29px]/pr-0.5 keep the text at the block text column
+            // (pl-[27px]) while the highlight surface gains the same 2px reach
+            // as a selected block line.
+            "-mx-0.5 cursor-text rounded py-0 pl-[29px] pr-0.5 outline-none transition-colors duration-100",
             // Same selection treatment as a block (see .block-highlight).
             selected && "bg-bg-secondary block-highlight",
           )}

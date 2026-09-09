@@ -86,12 +86,17 @@
 }
 
 /* ── Collapse toggle reveal ──────────────────────────────────────────────────
- * A parent's collapse chevron lives in its marker slot (bullet, `#`, number)
- * or just beside the content (checkbox, paragraph, quote) — see block-item.tsx.
- * It is invisible until the pointer is over the ROW (`.block-row`, the line
- * only — never the subtree, so hovering a child leaves the parent's key
- * alone); a swapping key (`.block-key`) fades out as the chevron fades in, in
- * the same slot, so nothing moves. Two things pin the chevron visible: a
+ * A parent's collapse chevron lives in its marker slot — the key there (dot,
+ * `#`, number, `>`) swaps for it; a paragraph's empty slot simply hosts it; a
+ * todo's checkbox fills its slot, so its chevron sits beside, in the gutter —
+ * see block-item.tsx.
+ * It is invisible until the pointer is over the CONTROL'S OWN AREA — the
+ * 20px square, never the whole row — so the chevron and its hover surface
+ * appear together, and a row can be read and edited without chrome
+ * surfacing. The slot (`.block-toggle-slot`) is that area: the chevron's
+ * square covers the slot, so hovering the slot IS hovering the chevron; the
+ * key (`.block-key`) fades out as the chevron fades in, in the same slot, so
+ * nothing moves. Two things pin the chevron visible: a
  * collapsed block (hidden content is never a secret — the key hides for the
  * duration), and a device with nothing to hover with, where the chevron stands
  * in for the key outright, exactly as the old always-on gutter toggle did. The
@@ -103,10 +108,11 @@
   transition: opacity 150ms ease-out;
 }
 @media (hover: hover) and (pointer: fine) {
-  .block-row:hover .block-toggle {
+  .block-toggle:hover,
+  .block-toggle-slot:hover .block-toggle {
     opacity: 1;
   }
-  .block-row:hover .block-key {
+  .block-toggle-slot:hover .block-key {
     opacity: 0;
   }
 }
@@ -116,6 +122,15 @@
   }
   .block-key {
     opacity: 0;
+  }
+}
+/* A parent todo's checkbox slot also reveals the chevron beside it: hover
+ * the box and the chevron shows exactly as if hovered itself, so the fold
+ * control is found from the marker everyone looks at, while the box keeps
+ * its own click. */
+@media (hover: hover) and (pointer: fine) {
+  .block-toggle-hint:hover ~ .block-toggle-beside .block-toggle {
+    opacity: 1;
   }
 }
 .block-toggle:focus-visible,
@@ -153,6 +168,20 @@
   transition:
     background-color 150ms ease,
     border-color 150ms ease;
+}
+
+/* Coarse pointers: a 15px box is a small tap target, so its hit area grows
+ * through a pseudo-element (drawn size unchanged) — less to the LEFT, where a
+ * parent todo's always-showing chevron square ends 1px short of the box. */
+@media (pointer: coarse) {
+  .block-checkbox {
+    position: relative;
+  }
+  .block-checkbox::before {
+    content: "";
+    position: absolute;
+    inset: -10px -10px -10px -2px;
+  }
 }
 
 .block-checkbox:hover:not(:disabled) {
