@@ -32,6 +32,12 @@ export interface NodeRow {
    * at T".
    */
   deleted_at?: number
+  /**
+   * Server-assigned row sequence (migrations/0005). Present on rows the
+   * replica hands OUT; absent on rows a client pushes IN, because only the
+   * replica may assign one — `planReplicaPut` never reads this field.
+   */
+  seq?: number
 }
 
 /** One row of the `link` table — containment (`kind: "child"`) today. */
@@ -45,6 +51,12 @@ export interface LinkRow {
   /** Soft-delete stamp; see `NodeRow.deleted_at`. A link to a tombstoned node
    * is NOT itself tombstoned — it is retained, just never traversed. */
   deleted_at?: number
+  /**
+   * Server-assigned row sequence (migrations/0005). Present on rows the
+   * replica hands OUT; absent on rows a client pushes IN, because only the
+   * replica may assign one — `planReplicaPut` never reads this field.
+   */
+  seq?: number
 }
 
 /** The `link` table's primary key (within one tenant): [source, dest, kind]. */
@@ -74,6 +86,7 @@ export function toNodeRow(row: Record<string, unknown>): NodeRow {
   if (row.deleted_at !== null && row.deleted_at !== undefined) {
     node.deleted_at = Number(row.deleted_at)
   }
+  if (row.seq !== null && row.seq !== undefined) node.seq = Number(row.seq)
   return node
 }
 
@@ -89,6 +102,7 @@ export function toLinkRow(row: Record<string, unknown>): LinkRow {
   if (row.deleted_at !== null && row.deleted_at !== undefined) {
     link.deleted_at = Number(row.deleted_at)
   }
+  if (row.seq !== null && row.seq !== undefined) link.seq = Number(row.seq)
   return link
 }
 
@@ -314,13 +328,34 @@ export function parseReplicaPayload(body: unknown): ReplicaPutPayload | null {
  *
  * Statement order: tombstones first, then node upserts before link upserts.
  */
+/**
+ * Build the statements for one push.
+ *
+ * **The sequence expression is written out in each statement, not shared.**
+ * `check:queries` reads SQL string LITERALS, so a statement assembled around a
+ * named constant is a statement the guard cannot see — the same reason every
+ * query in `replica-corpus.ts` is spelled out in full. The repetition is the
+ * price of the guard being able to prove what actually runs.
+ *
+ * What it does: takes the tenant's highest `seq` across both tables and adds
+ * one. Evaluated by the database inside the write transaction, so it cannot
+ * disagree with a concurrent writer — D1 runs a `batch()` as one transaction
+ * and serializes writes, and each statement sees what the previous ones wrote.
+ * A batch of twenty upserts therefore takes twenty consecutive values with no
+ * counter row, no lock and no round trip. Each half is an index seek on
+ * `(user_id, seq)` (migrations/0005), so it reads two rows, not two tables.
+ *
+ * Tombstones are included deliberately: a delete is a change that has to
+ * replicate, so it takes a sequence value like any other write.
+ */
 export function planReplicaPut(payload: ReplicaPutPayload, now: number): SqlStatement[] {
   const statements: SqlStatement[] = []
 
   for (const [source, destination, kind] of payload.deleteLinks ?? []) {
     statements.push({
       sql:
-        "UPDATE link SET deleted_at = ?4, updated_at = ?4 WHERE user_id = :tenant " +
+        "UPDATE link SET deleted_at = ?4, updated_at = ?4, seq = (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */)) " +
+        "WHERE user_id = :tenant " +
         "AND source_id = ?1 AND destination_id = ?2 AND kind = ?3 AND deleted_at IS NULL",
       params: [source, destination, kind, now],
     })
@@ -328,7 +363,7 @@ export function planReplicaPut(payload: ReplicaPutPayload, now: number): SqlStat
   for (const id of payload.deleteNodes ?? []) {
     statements.push({
       sql:
-        "UPDATE nodes SET deleted_at = ?2, updated_at = ?2 " +
+        "UPDATE nodes SET deleted_at = ?2, updated_at = ?2, seq = (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */)) " +
         "WHERE user_id = :tenant AND id = ?1 AND deleted_at IS NULL",
       params: [id, now],
     })
@@ -337,11 +372,11 @@ export function planReplicaPut(payload: ReplicaPutPayload, now: number): SqlStat
   for (const node of payload.nodes) {
     statements.push({
       sql:
-        "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at) " +
-        "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6) " +
+        "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at, seq) " +
+        "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6, (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */))) " +
         "ON CONFLICT (user_id, id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
         "props = excluded.props, updated_at = excluded.updated_at, " +
-        "deleted_at = excluded.deleted_at " +
+        "deleted_at = excluded.deleted_at, seq = (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */)) " +
         "WHERE excluded.updated_at >= nodes.updated_at",
       params: [node.id, node.type, node.text, node.props, node.updated_at, node.deleted_at ?? null],
     })
@@ -349,11 +384,12 @@ export function planReplicaPut(payload: ReplicaPutPayload, now: number): SqlStat
   for (const link of payload.links) {
     statements.push({
       sql:
-        "INSERT INTO link (user_id, source_id, destination_id, kind, sort_key, updated_at, deleted_at) " +
-        "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6) " +
+        "INSERT INTO link " +
+        "(user_id, source_id, destination_id, kind, sort_key, updated_at, deleted_at, seq) " +
+        "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6, (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */))) " +
         "ON CONFLICT (user_id, source_id, destination_id, kind) DO UPDATE SET " +
         "sort_key = excluded.sort_key, updated_at = excluded.updated_at, " +
-        "deleted_at = excluded.deleted_at " +
+        "deleted_at = excluded.deleted_at, seq = (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */)) " +
         "WHERE excluded.updated_at >= link.updated_at",
       params: [
         link.source_id,

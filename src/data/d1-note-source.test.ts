@@ -1,11 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
-import {
-  SINCE_OVERLAP_MS,
-  createD1NoteSource,
-  expandPendingNodeIds,
-  planPullApplication,
-} from "./d1-note-source"
+import { createD1NoteSource, expandPendingNodeIds, planPullApplication } from "./d1-note-source"
 
 /** Fake auth mirroring the real helpers: `withAuthRetry` refreshes once and
  * retries when the operation throws a 401-shaped error. */
@@ -65,18 +60,16 @@ describe("createD1NoteSource", () => {
     })
   })
 
-  it("pullSince subtracts the clock-skew overlap from the cursor (floored at 0)", async () => {
-    const body = { nodes: [], links: [], cursor: "9000000000" }
+  it("pullSince sends the cursor verbatim — no skew window to subtract", async () => {
+    const body = { nodes: [], links: [], cursor: "412" }
     const fetchImpl = vi.fn(async (_url: string) => jsonResponse(body))
     const { auth } = fakeAuth(["tok-1"])
     const source = createD1NoteSource({ fetchImpl: fetchImpl as unknown as typeof fetch, auth })
 
-    await expect(source.pullSince("9000000000")).resolves.toEqual(body)
-    expect(fetchImpl.mock.calls[0][0]).toBe(
-      `/api/replica/notes?since=${9000000000 - SINCE_OVERLAP_MS}`,
-    )
+    await expect(source.pullSince("407")).resolves.toEqual(body)
+    expect(fetchImpl.mock.calls[0][0]).toBe("/api/replica/notes?since=407")
 
-    await source.pullSince("5")
+    await source.pullSince("0")
     expect(fetchImpl.mock.calls[1][0]).toBe("/api/replica/notes?since=0")
   })
 

@@ -35,36 +35,56 @@ import {
   type ReplicaStatusBody,
 } from "./replica-payload"
 
-async function readCursor(tenant: TenantDb): Promise<string | null> {
-  const rows = await tenant.exec(
-    "SELECT value FROM meta WHERE user_id = :tenant AND key = 'replica_cursor'",
-  )
-  return (rows[0]?.value as string | null | undefined) ?? null
+/**
+ * The cursor a pull answers with: the highest `seq` among the rows it is
+ * returning, or null when it returns none.
+ *
+ * Derived from the rows THEMSELVES rather than read separately, and that is
+ * the whole safety argument. A separate `SELECT MAX(seq)` could observe a
+ * write that landed after the row queries ran, and the client would store a
+ * cursor for rows it never received — skipping them permanently. A maximum
+ * taken over the delivered rows can only ever name something the client has.
+ *
+ * Null means "nothing new": the client keeps the cursor it already had, which
+ * is exactly right, and the next `seq > ?` stays a single index seek.
+ */
+function cursorOf(nodes: NodeRow[], links: LinkRow[]): string | null {
+  let max = 0
+  for (const node of nodes) if ((node.seq ?? 0) > max) max = node.seq ?? 0
+  for (const link of links) if ((link.seq ?? 0) > max) max = link.seq ?? 0
+  return max === 0 ? null : String(max)
 }
 
-/** Full pull: every row of both tables, plus the replica cursor. */
+/** Full pull: every row of both tables, plus the sequence they reach. */
 export async function corpusPullFull(tenant: TenantDb): Promise<ReplicaCorpusBody> {
   const all = tenant.includingDeleted()
   const nodes = (
     await all.exec(
-      "SELECT id, type, text, props, updated_at, deleted_at FROM nodes " +
+      "SELECT id, type, text, props, updated_at, deleted_at, seq FROM nodes " +
         "WHERE user_id = :tenant /* includes-deleted: replication carries tombstones */",
     )
   ).map(toNodeRow)
   const links = (
     await all.exec(
-      "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at FROM link " +
+      "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at, seq " +
+        "FROM link " +
         "WHERE user_id = :tenant /* includes-deleted: replication carries tombstones */",
     )
   ).map(toLinkRow)
-  return { nodes, links, cursor: await readCursor(tenant) }
+  return { nodes, links, cursor: cursorOf(nodes, links) }
 }
 
 /**
- * Incremental pull: rows with `updated_at > since` (tombstones included — a
- * delete bumps `updated_at`, so it arrives as an ordinary change), and nothing
- * else. Two index scans over `nodes_tenant_updated` / `link_tenant_updated`,
- * so a quiet pull reads a handful of rows rather than the corpus.
+ * Incremental pull: rows with `seq > since` (tombstones included — a delete
+ * takes a sequence value like any other write, so it arrives as an ordinary
+ * change), and nothing else. Two index seeks on `nodes_tenant_seq` /
+ * `link_tenant_seq`, so a quiet pull reads one row per table.
+ *
+ * `seq` is assigned by the replica (`planReplicaPut`), so `>` is EXACT: no
+ * device clock is involved, nothing can land with a stamp behind the cursor,
+ * and the client no longer asks for a ten-minute overlap to cover the
+ * possibility. That window was costing a full re-read of every row the device
+ * had written in the preceding ten minutes, on every pull.
  *
  * This used to answer with the full key list of both tables as well, so the
  * client could delete local rows absent from them. That predates tombstones,
@@ -81,21 +101,22 @@ export async function corpusPullSince(
   const all = tenant.includingDeleted()
   const nodes = (
     await all.exec(
-      "SELECT id, type, text, props, updated_at, deleted_at FROM nodes " +
-        "WHERE user_id = :tenant AND updated_at > ?1 " +
+      "SELECT id, type, text, props, updated_at, deleted_at, seq FROM nodes " +
+        "WHERE user_id = :tenant AND seq > ?1 " +
         "/* includes-deleted: a tombstoned row IS the change being pulled */",
       [since],
     )
   ).map(toNodeRow)
   const links = (
     await all.exec(
-      "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at FROM link " +
-        "WHERE user_id = :tenant AND updated_at > ?1 " +
+      "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at, seq " +
+        "FROM link " +
+        "WHERE user_id = :tenant AND seq > ?1 " +
         "/* includes-deleted: a tombstoned row IS the change being pulled */",
       [since],
     )
   ).map(toLinkRow)
-  return { nodes, links, cursor: await readCursor(tenant) }
+  return { nodes, links, cursor: cursorOf(nodes, links) }
 }
 
 /**
