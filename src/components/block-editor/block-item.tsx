@@ -720,15 +720,17 @@ export function BlockItem({
             // and selection (accent) always wins because the class is
             // simply absent on selected rows.
             !readOnly && !editing && !selected && "block-hoverable",
-            // The quote's bar rides the surface's left edge, alongside the
-            // `>` in the slot. Square left corners keep it a straight rule
-            // instead of curving with the highlight radius; border (2) +
-            // pl (4) nets the usual 6px inner padding, so the slot and the
-            // text stay in their columns.
-            type.kind === "quote" && "rounded-l-none border-l-2 border-border pl-1",
           )}
         >
           {marker}
+          {type.kind === "quote" ? (
+            // The quote's bar runs between the `>` and the text, centred in
+            // the 8px gap: 2px wide with -5px side margins, so gap + bar +
+            // gap still nets 8px and the text column never moves. It
+            // stretches the line's full height so a wrapped quote reads as
+            // one block; the `>` stays in the slot with every other key.
+            <span aria-hidden className="-mx-[5px] w-0.5 shrink-0 self-stretch bg-border" />
+          ) : null}
           {editing ? (
             <>
               <textarea
