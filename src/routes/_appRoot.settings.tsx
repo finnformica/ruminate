@@ -2,11 +2,13 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useAtom, useAtomValue } from "jotai"
 import { useEffect } from "react"
 import { useNetworkState } from "react-use"
+import { DEFAULT_NEW_BLOCK_MARKER } from "../blocks/commands"
 import { Button } from "../components/button"
 import { useSignOut } from "../components/github-auth"
 import { GitHubAvatar } from "../components/github-avatar"
 import { SettingsIcon16 } from "../components/icons"
 import { PageLayout } from "../components/page-layout"
+import { TextInput } from "../components/text-input"
 import {
   databaseModeStatusAtom,
   refreshDatabaseReplicaStatus,
@@ -18,7 +20,7 @@ import {
   type ReplicaDiagnostics,
   type StorageDiagnostics,
 } from "../data/storage-diagnostics"
-import { AccentColor, accentAtom, githubUserAtom } from "../global-state"
+import { AccentColor, accentAtom, githubUserAtom, newBlockMarkerAtom } from "../global-state"
 import { cx } from "../utils/cx"
 
 export const Route = createFileRoute("/_appRoot/settings")({
@@ -34,6 +36,7 @@ function RouteComponent() {
       <div className="p-4 pb-6">
         <div className="mx-auto flex max-w-xl flex-col gap-6">
           <AppearanceSection />
+          <EditorSection />
           <StorageSection />
           <GitHubSection />
           <div className="flex flex-col items-center gap-1 self-center p-5 text-center text-text-tertiary">
@@ -138,6 +141,56 @@ function AppearanceSection() {
   )
 }
 
+/** Quick picks for the new-block marker; anything else can be typed in. */
+const NEW_BLOCK_MARKER_PRESETS: Array<{ value: string; label: string }> = [
+  { value: DEFAULT_NEW_BLOCK_MARKER, label: "Bullet" },
+  { value: "", label: "Paragraph" },
+  { value: "[ ] ", label: "To-do" },
+  { value: "> ", label: "Quote" },
+]
+
+function EditorSection() {
+  const [newBlockMarker, setNewBlockMarker] = useAtom(newBlockMarkerAtom)
+
+  return (
+    <SettingsSection title="Editor">
+      <div className="flex flex-col gap-2">
+        <label htmlFor="new-block-marker" className="text-sm leading-4 text-text-secondary">
+          New block markdown
+        </label>
+        <TextInput
+          id="new-block-marker"
+          className="font-mono"
+          value={newBlockMarker}
+          placeholder="(none)"
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(event) => setNewBlockMarker(event.target.value)}
+        />
+        <div role="group" aria-label="New block markdown presets" className="flex flex-wrap gap-1">
+          {NEW_BLOCK_MARKER_PRESETS.map((preset) => {
+            const isSelected = newBlockMarker === preset.value
+            return (
+              <Button
+                key={preset.label}
+                size="small"
+                aria-pressed={isSelected}
+                onClick={() => setNewBlockMarker(preset.value)}
+                className={cx(isSelected && "ring-1 ring-inset ring-border-focus")}
+              >
+                {preset.label}
+                {preset.value ? (
+                  <span className="ml-1 font-mono text-text-secondary">{preset.value.trim()}</span>
+                ) : null}
+              </Button>
+            )
+          })}
+        </div>
+      </div>
+    </SettingsSection>
+  )
+}
+
 function StorageSection() {
   const githubUser = useAtomValue(githubUserAtom)
   const diagnostics = useAtomValue(storageDiagnosticsAtom)
@@ -148,8 +201,7 @@ function StorageSection() {
       <div className="flex flex-col gap-1">
         <span className="leading-4">Database</span>
         <span className="text-sm leading-5 text-text-secondary">
-          Notes live in a local database on this device and sync to the cloud automatically, so
-          they’re available offline and on every device you sign in from.
+          Notes live in a local database on this device and sync to the cloud automatically.
         </span>
       </div>
       {githubUser ? (

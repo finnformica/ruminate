@@ -614,6 +614,34 @@ describe("insertBelow", () => {
     expect(result.doc!.blocks.h.children).toEqual([id])
     expect(result.doc!.blocks[id].content).toBe("- ")
   })
+
+  it("uses the configured new-block marker instead of the default", () => {
+    const doc = fixture()
+    for (const marker of ["", "[ ] ", "> ", "→ "]) {
+      const result = runCommand(
+        "insertBelow",
+        input(doc, "a", { mode: "edit", newBlockMarker: marker }),
+      )
+      const id = newBlockId(doc, result.doc!)
+      expect(result.doc!.blocks[id].content).toBe(marker)
+    }
+  })
+
+  it("still continues todo and numbered lists whatever the configured marker", () => {
+    const doc: BlockDoc = {
+      frontmatter: null,
+      rootBlockIds: ["t", "n"],
+      blocks: {
+        t: { id: "t", content: "[ ] task", children: [] },
+        n: { id: "n", content: "2. second", children: [] },
+      },
+    }
+    const over = { mode: "edit" as const, visibleOrder: ["t", "n"], newBlockMarker: "" }
+    const todo = runCommand("insertBelow", input(doc, "t", over))
+    expect(todo.doc!.blocks[newBlockId(doc, todo.doc!)].content).toBe("[ ] ")
+    const ordered = runCommand("insertBelow", input(doc, "n", over))
+    expect(ordered.doc!.blocks[newBlockId(doc, ordered.doc!)].content).toBe("3. ")
+  })
 })
 
 describe("insertSiblingBelow", () => {
@@ -656,6 +684,26 @@ describe("split", () => {
     expect(result.doc!.blocks.x.content).toBe("- he")
     expect(result.doc!.blocks[id].content).toBe("- llo")
     expect(result.focus).toEqual({ mode: "edit", id, atStart: true })
+  })
+
+  it("splits a paragraph at the caret using the configured new-block marker", () => {
+    const doc: BlockDoc = {
+      frontmatter: null,
+      rootBlockIds: ["x"],
+      blocks: { x: { id: "x", content: "hello", children: [] } },
+    }
+    const result = runCommand(
+      "splitContinuingList",
+      input(doc, "x", {
+        mode: "edit",
+        visibleOrder: ["x"],
+        caret: caret("hello", 2),
+        newBlockMarker: "> ",
+      }),
+    )
+    const id = newBlockId(doc, result.doc!)
+    expect(result.doc!.blocks.x.content).toBe("he")
+    expect(result.doc!.blocks[id].content).toBe("> llo")
   })
 
   it("shift-enter splits carrying the same block type", () => {

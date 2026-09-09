@@ -1,5 +1,7 @@
+import { useAtomValue } from "jotai"
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent } from "react"
+import { newBlockMarkerAtom } from "../../global-state"
 import type { BlockDoc } from "../../blocks/types"
 import { getBlockType, MARKER_KEYS, stripMarker, toggleMarker } from "../../blocks/block-type"
 import {
@@ -302,6 +304,8 @@ export function BlockEditor({
   }, [zoomRootId])
   // Where Shift+F returns to: one step back along the path (null exits zoom).
   const zoomBackId = zoomStack.length > 1 ? zoomStack[zoomStack.length - 2] : null
+  // What Enter puts in a fresh block — a user preference (Settings → Editor).
+  const newBlockMarker = useAtomValue(newBlockMarkerAtom)
 
   const navigateZoom = (id: string | null) => {
     if (onZoomNavigate) onZoomNavigate(id)
@@ -946,7 +950,16 @@ export function BlockEditor({
   // dispatch the same commands. Returns whether the gesture was consumed.
   const dispatchKey = (mode: Mode, id: string, event: KeyLike, caret?: CaretInput): boolean => {
     if (readOnly) return false
-    const input: CommandInput = { doc, id, mode, visibleOrder, caret, zoomRootId, zoomBackId }
+    const input: CommandInput = {
+      doc,
+      id,
+      mode,
+      visibleOrder,
+      caret,
+      zoomRootId,
+      zoomBackId,
+      newBlockMarker,
+    }
     const name = resolveKey(mode, event, input)
     if (!name) return false
     const result = runCommand(name, input)

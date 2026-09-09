@@ -8,6 +8,7 @@
 
 ### Added
 
+- You can now choose what a new block starts with when you press Enter. Settings → Editor has a "New block markdown" field with Bullet, Paragraph, To-do and Quote presets, or type any marker you like. Bullets remain the default, and to-do and numbered items still continue their own list.
 - A slash menu in the editor. Type `/` at the start of a word while editing a block and a small menu opens under the caret: **Today**, **Tomorrow**, **Yesterday**, **Next week** and **Last week** insert that date, and any phrase you type after the slash that reads as a day (`/friday`, `/next week on friday`, `/in 2 weeks`, `/1 oct`) is offered too. Underneath, **Turn into** switches the block to Text, Bullet list, Numbered list, To-do, Heading or Quote. Keep typing to filter, <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>↵</kbd> to pick, <kbd>Esc</kbd> to leave the slash as typed. Dates are inserted as `dd-mm-yyyy`, and a pick is its own undo step.
 
 ## 2026-W36

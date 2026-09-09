@@ -68,6 +68,13 @@ export interface CommandInput {
    * model (multi-parent blocks) is the only honest "up". Null/absent when
    * nothing is below on the stack; zoom-out then exits zoom entirely. */
   zoomBackId?: string | null
+  /**
+   * The markdown a fresh block starts with when Enter creates one from a block
+   * that isn't a todo or ordered item (those continue their own list). A user
+   * preference — `"- "` by default, `""` for a plain paragraph, or any other
+   * marker (`"[ ] "`, `"> "`). Absent = the default.
+   */
+  newBlockMarker?: string
 }
 
 /** Where selection / edit focus should land after a command runs. */
@@ -111,19 +118,24 @@ function markerPrefix(content: string): string {
   return content.slice(0, content.length - stripMarker(content).length)
 }
 
+/** What Enter puts in a new block unless the user has chosen otherwise
+ * (`CommandInput.newBlockMarker`): a fresh unordered list item. */
+export const DEFAULT_NEW_BLOCK_MARKER = "- "
+
 /**
  * The marker a new sibling block should carry. Todo / ordered lists continue
- * their own type; everything else (paragraph, heading, quote, bullet) starts a
- * fresh unordered list item by default.
+ * their own type; everything else (paragraph, heading, quote, bullet) starts
+ * with the user's configured new-block marker — an unordered list item by
+ * default.
  */
-function continuationMarker(type: BlockType): string {
+function continuationMarker(type: BlockType, input: CommandInput): string {
   switch (type.kind) {
     case "todo":
       return "[ ] "
     case "ordered":
       return `${type.number + 1}. `
     default:
-      return "- "
+      return input.newBlockMarker ?? DEFAULT_NEW_BLOCK_MARKER
   }
 }
 
@@ -227,8 +239,9 @@ function moveEditFocus(direction: "up" | "down"): Command {
 
 /** Split the block at the caret; `markerFor` decides the new block's marker —
  * a list continuation for Enter, the same type for Shift-Enter. */
-function splitAtCaret(markerFor: (type: BlockType) => string): Command {
-  return ({ doc, id, caret, zoomRootId }) => {
+function splitAtCaret(markerFor: (type: BlockType, input: CommandInput) => string): Command {
+  return (input) => {
+    const { doc, id, caret, zoomRootId } = input
     if (!caret) return IGNORED
     const content = doc.blocks[id]?.content ?? ""
     const type = getBlockType(content)
@@ -236,7 +249,7 @@ function splitAtCaret(markerFor: (type: BlockType) => string): Command {
     const before = caret.value.slice(0, caret.start)
     const after = caret.value.slice(caret.end)
     const updated = updateContent(doc, id, prefix + before)
-    const fresh = emptyBlock(markerFor(type) + after)
+    const fresh = emptyBlock(markerFor(type, input) + after)
     // Splitting the zoomed title makes the tail its FIRST child (title + body
     // metaphor) — a sibling would fall outside the zoomed view.
     const next =
@@ -574,10 +587,11 @@ export const COMMANDS: Record<CommandName, Command> = {
 
   /** Enter at end of line: a fresh continuation block below. Enter from a
    * heading nests the new block under it, like an outline section. */
-  insertBelow: ({ doc, id, zoomRootId }) => {
+  insertBelow: (input) => {
+    const { doc, id, zoomRootId } = input
     const content = doc.blocks[id]?.content ?? ""
     const type = getBlockType(content)
-    const fresh = emptyBlock(continuationMarker(type))
+    const fresh = emptyBlock(continuationMarker(type, input))
     // On the zoomed title, "below" means the top of its body — the first child
     // (a sibling would land outside the view).
     if (zoomRootId && id === zoomRootId) {
