@@ -21,10 +21,21 @@
   // docs/multi-tenant-design.md §3) AND every user's corpus, scoped by the
   // `user_id` column (migrations/0004_tenant_columns.sql). Only
   // worker/tenancy-db.ts may touch this binding — `npm run check:queries`
-  // fails the build otherwise. Migrations live in ./migrations and are applied
-  // with
+  // fails the build otherwise. Migrations live in ./migrations:
   //   npx wrangler d1 migrations apply ruminate --local   (dev)
-  //   npx wrangler d1 migrations apply ruminate --remote  (production)
+  //   npm run migrate:remote                              (production)
+  //
+  // Production migrations run as part of `npm run deploy`, BEFORE
+  // `wrangler deploy`, and a failure aborts the deploy. That ordering is not
+  // cosmetic: Workers Builds ships on merge, so code that reads a new column
+  // can reach production minutes before a human remembers to create it. On
+  // 2026-09-09 migration 0005 was applied with about four minutes to spare.
+  //
+  // The ordering is only safe for ADDITIVE migrations — new columns, new
+  // indexes, new tables — because between migrate and deploy the OLD code
+  // runs against the NEW schema. Anything destructive (dropping or renaming a
+  // column live code still reads) has to be split across two deploys: expand,
+  // ship the code that stops using it, then contract.
   "d1_databases": [
     {
       "binding": "DB",
