@@ -205,6 +205,13 @@ async function openTenant(id: number, existing?: SqlDriver): Promise<TenantDb> {
   return tenant
 }
 
+/**
+ * Attach the sequence the replica would have assigned. `planReplicaPut`
+ * writes deletes first, then nodes, then links, and each statement takes the
+ * next value — so a push of two nodes and one link lays down 1, 2, 3.
+ */
+const withSeq = <T>(row: T, seq: number): T & { seq: number } => ({ ...row, seq })
+
 describe("corpus operations over the real D1 schema", () => {
   const nodes: NodeRow[] = [
     { id: "blk_noteaaaaaa", type: "page", text: "blk_noteaaaaaa", props: null, updated_at: 100 },
@@ -220,26 +227,61 @@ describe("corpus operations over the real D1 schema", () => {
     },
   ]
 
-  it("full pull returns every row of both tables plus the cursor", async () => {
+  it("full pull returns every row of both tables, and the sequence they reach", async () => {
     const tenant = await openTenant(1)
     await corpusPut(tenant, { nodes, links, cursor: "42" }, NOW)
-    expect(await corpusPullFull(tenant)).toEqual({ nodes, links, cursor: "42" })
+    // The cursor is the row sequence now, NOT the client's push cursor ("42"):
+    // the two were conflated, and only one of them can order a pull.
+    expect(await corpusPullFull(tenant)).toEqual({
+      nodes: [withSeq(nodes[0], 1), withSeq(nodes[1], 2)],
+      links: [withSeq(links[0], 3)],
+      cursor: "3",
+    })
   })
 
-  it("since pull returns ONLY newer rows — no corpus-wide key lists", async () => {
-    const tenant = await openTenant(1)
-    await corpusPut(tenant, { nodes, links, cursor: "301" }, NOW)
-    const body = await corpusPullSince(tenant, 200)
-    // Exhaustive: the unchanged page and link must not ride along in any
-    // shape — that O(corpus) key list is what the pull stopped reading.
-    expect(body).toEqual({ nodes: [nodes[1]], links: [], cursor: "301" })
-  })
-
-  it("since equal to the newest updated_at returns no changes (strict >)", async () => {
+  it("since pull returns ONLY rows above the cursor", async () => {
     const tenant = await openTenant(1)
     await corpusPut(tenant, { nodes, links }, NOW)
-    const body = await corpusPullSince(tenant, 300)
-    expect(body).toEqual({ nodes: [], links: [], cursor: "" })
+    const { cursor } = await corpusPullFull(tenant)
+    // A later edit to one node, at a LOWER updated_at than the rows already
+    // stored — proof the pull orders by sequence and not by any clock.
+    await corpusPut(
+      tenant,
+      { nodes: [{ ...nodes[1], text: "A2", updated_at: 301 }], links: [] },
+      NOW,
+    )
+
+    const body = await corpusPullSince(tenant, Number(cursor))
+    // Exhaustive: the unchanged page and link must not ride along in any shape.
+    expect(body).toEqual({
+      nodes: [withSeq({ ...nodes[1], text: "A2", updated_at: 301 }, 4)],
+      links: [],
+      cursor: "4",
+    })
+  })
+
+  it("a write from a device with a BEHIND clock is still pulled", async () => {
+    const tenant = await openTenant(1)
+    await corpusPut(tenant, { nodes, links }, NOW)
+    const { cursor } = await corpusPullFull(tenant)
+
+    // Device B's clock is four minutes slow, so this row lands with an
+    // `updated_at` well BEHIND rows already stored. Under the old scheme the
+    // since-pull compared timestamps and this row was invisible — which is the
+    // entire reason the client asked for a ten-minute overlap window on every
+    // pull, re-reading its own recent writes to compensate.
+    const skewed = { ...nodes[1], id: "blk_skewed0001", text: "late", updated_at: 60 }
+    await corpusPut(tenant, { nodes: [skewed], links: [] }, NOW)
+
+    const body = await corpusPullSince(tenant, Number(cursor))
+    expect(body.nodes).toEqual([withSeq(skewed, 4)])
+  })
+
+  it("since equal to the newest seq returns no changes (strict >), and no cursor", async () => {
+    const tenant = await openTenant(1)
+    await corpusPut(tenant, { nodes, links }, NOW)
+    // Nothing newer means nothing to say: the client keeps the cursor it has.
+    expect(await corpusPullSince(tenant, 3)).toEqual({ nodes: [], links: [], cursor: null })
   })
 
   it("a push echoes the cursor it committed, so no status call is needed", async () => {
@@ -256,9 +298,9 @@ describe("corpus operations over the real D1 schema", () => {
     expect((await corpusStatus(tenant)).replica_cursor).toBe("42")
   })
 
-  it("a fresh corpus pulls empty with the seeded empty-string cursor", async () => {
+  it("a fresh corpus pulls empty, with no cursor to report", async () => {
     const tenant = await openTenant(1)
-    expect(await corpusPullFull(tenant)).toEqual({ nodes: [], links: [], cursor: "" })
+    expect(await corpusPullFull(tenant)).toEqual({ nodes: [], links: [], cursor: null })
   })
 
   it("status reports LIVE counts, schema version, and cursor", async () => {
@@ -369,12 +411,14 @@ describe("soft deletes at the replica", () => {
     // THE property that makes dropping the key lists safe: the tombstone is
     // itself the change a since-pull returns, carrying its stamp — the client
     // needs nothing else to learn about the deletion.
-    const since = await corpusPullSince(tenant, 150)
-    expect(since.nodes).toEqual([{ ...rows.nodes[1], updated_at: 200, deleted_at: 200 }])
+    const since = await corpusPullSince(tenant, 3)
+    expect(since.nodes).toEqual([
+      withSeq({ ...rows.nodes[1], updated_at: 200, deleted_at: 200 }, 4),
+    ])
     // …and the link to it is retained, untouched — though a link into a
     // tombstoned node is not part of the graph anyone can see, so it stops
     // counting alongside the node.
-    expect(pulled.links).toEqual(rows.links)
+    expect(pulled.links).toEqual([withSeq(rows.links[0], 3)])
     expect((await corpusStatus(tenant)).counts).toEqual({ nodes: 1, links: 0, pages: 1 })
   })
 
@@ -393,7 +437,7 @@ describe("soft deletes at the replica", () => {
     )
     const pulled = await corpusPullFull(tenant)
     const revived = pulled.nodes.find((row) => row.id === "blk_a000000000")
-    expect(revived).toEqual({ ...rows.nodes[1], text: "back", updated_at: 300 })
+    expect(revived).toEqual(withSeq({ ...rows.nodes[1], text: "back", updated_at: 300 }, 5))
     expect((await corpusStatus(tenant)).counts.nodes).toBe(2)
   })
 
@@ -576,7 +620,7 @@ describe("tenant scoping — the adversarial suite", () => {
     const body = (await (
       await get(env, "bob-token", "/api/replica/notes")
     ).json()) as ReplicaCorpusBody
-    expect(body).toEqual({ nodes: [], links: [], cursor: "" })
+    expect(body).toEqual({ nodes: [], links: [], cursor: null })
   })
 
   it("B's since-pull contains none of A's rows", async () => {
@@ -586,7 +630,7 @@ describe("tenant scoping — the adversarial suite", () => {
     ).json()) as ReplicaChangesBody
     // Exhaustive, because a since-pull now carries nothing BUT rows: any of
     // A's ids appearing here would be a cross-tenant disclosure.
-    expect(body).toEqual({ nodes: [], links: [], cursor: "" })
+    expect(body).toEqual({ nodes: [], links: [], cursor: null })
   })
 
   it("B's status counts none of A's rows", async () => {
@@ -613,7 +657,7 @@ describe("tenant scoping — the adversarial suite", () => {
     const alice = (await (
       await get(env, "alice-token", "/api/replica/notes")
     ).json()) as ReplicaCorpusBody
-    expect(alice.nodes).toEqual(aliceRows.nodes)
+    expect(alice.nodes).toEqual(aliceRows.nodes.map((row, i) => withSeq(row, i + 1)))
     // Both tenants now hold the same id — proof the composite key is per-tenant.
     const rows = await driver.exec(
       "SELECT user_id, text FROM nodes WHERE id = 'blk_noteaaaaaa' ORDER BY user_id",

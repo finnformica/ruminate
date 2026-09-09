@@ -27,13 +27,6 @@ import { trackReplicaAccess } from "./replica-access"
  * pulls for itself and converges on the same remote state.
  */
 
-/** How far the since-pull reaches back behind the stored cursor. The server
- * compares row `updated_at` (a client-stamped write time) against the cursor
- * (minted on a possibly different device), so a slack window absorbs modest
- * clock skew; re-applying an unchanged row is idempotent, so overlap is
- * cheap. Changes missed beyond this window are caught by a full pull. */
-export const SINCE_OVERLAP_MS = 10 * 60_000
-
 interface D1NoteSourceAuth {
   ensureFreshToken(): Promise<void>
   getAccessToken(): string | undefined
@@ -51,9 +44,10 @@ export interface D1NoteSource {
   /** The full corpus: every node + link row, plus the replica cursor. */
   pullFull(): Promise<ReplicaCorpusBody>
   /**
-   * Rows changed since `cursor` (minus the overlap window) and the new
-   * cursor — the same shape as a full pull, with fewer rows. Deletions are
-   * among those rows, carrying `deleted_at`.
+   * Rows with a sequence above `cursor`, and the sequence they reach — the
+   * same shape as a full pull, with fewer rows. Exact: no overlap window, no
+   * clock comparison. Deletions are among those rows, carrying `deleted_at`.
+   * A null cursor back means nothing was newer; keep the one you had.
    */
   pullSince(cursor: string): Promise<ReplicaChangesBody>
 }
@@ -95,8 +89,10 @@ export function createD1NoteSource(options: D1NoteSourceOptions = {}): D1NoteSou
     },
 
     pullSince: async (cursor) => {
-      const since = Math.max(0, Number(cursor) - SINCE_OVERLAP_MS)
-      const response = await authorizedGet(`/api/replica/notes?since=${since}`)
+      // Straight through: `cursor` is a server-assigned sequence, so there is
+      // nothing to compensate for. It used to be a device timestamp minus a
+      // ten-minute skew window (migrations/0005 retired both).
+      const response = await authorizedGet(`/api/replica/notes?since=${cursor}`)
       return (await response.json()) as ReplicaChangesBody
     },
   }

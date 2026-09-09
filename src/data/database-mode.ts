@@ -52,6 +52,19 @@ import {
  */
 
 const PULL_CURSOR_KEY = "d1_pull_cursor"
+/**
+ * Cursors at or above this are pre-0005 millisecond timestamps, not row
+ * sequences, and mean nothing to a server that now compares `seq > ?`.
+ *
+ * A device that stored one before the cutover would otherwise ask for
+ * `seq > 1788891492616`, match nothing, and never pull again — silently, and
+ * forever. Treating it as "no cursor" costs that device one full pull and
+ * leaves it on a sequence cursor from then on.
+ *
+ * The two spaces cannot collide in practice: sequences count writes from 1 and
+ * this floor is a trillion, which the corpus would reach roughly never.
+ */
+const LEGACY_TIMESTAMP_CURSOR_FLOOR = 1e12
 /** The identity (GitHub id, or login for pre-id sessions) whose notes the
  * local database holds. The server is owner-locked, but the OPFS cache
  * follows the browser profile — on a shared machine a different signed-in
@@ -524,11 +537,12 @@ function runPull(activation: DatabaseModeRuntime) {
     patchStatus({ pull: "pulling" })
     try {
       const cursor = await store.getMeta(PULL_CURSOR_KEY)
-      // An unusable cursor (never pulled, or not the ms-timestamp shape the
-      // server compares against) degrades to a full pull — always correct,
-      // just bigger. Both pulls answer in the same shape; a full pull is
-      // simply "everything changed".
-      const useSince = cursor !== null && /^\d+$/.test(cursor)
+      // An unusable cursor — never pulled, malformed, or a retired
+      // pre-0005 timestamp — degrades to a full pull: always correct, just
+      // bigger, and it comes back with a sequence cursor. Both pulls answer
+      // in the same shape; a full pull is simply "everything changed".
+      const useSince =
+        cursor !== null && /^\d+$/.test(cursor) && Number(cursor) < LEGACY_TIMESTAMP_CURSOR_FLOOR
       const body: ReplicaChangesBody = useSince
         ? await activation.source.pullSince(cursor)
         : await activation.source.pullFull()

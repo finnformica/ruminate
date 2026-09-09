@@ -41,6 +41,10 @@ export interface CorpusMigrations {
   nodes: string
   /** migrations/0004_tenant_columns.sql — required in `"columns"` mode. */
   tenantColumns?: string
+  /** migrations/0005_row_seq.sql — required in `"columns"` mode. The local
+   * store has no `seq`: the sequence is assigned by the replica, and a cache
+   * has no ordering of its own to keep. */
+  rowSeq?: string
 }
 
 /** Which v3 shape the ladder should produce (see the module header). */
@@ -84,6 +88,10 @@ async function applyV3(
     throw new Error('ensureCorpusSchema: "columns" tenancy needs migrations.tenantColumns (0004)')
   }
   await driver.execScript(migrations.tenantColumns)
+  if (!migrations.rowSeq) {
+    throw new Error('ensureCorpusSchema: "columns" tenancy needs migrations.rowSeq (0005)')
+  }
+  await driver.execScript(migrations.rowSeq)
 }
 
 /**
