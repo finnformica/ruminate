@@ -575,15 +575,21 @@ export function BlockItem({
     </span>
   )
   // A static text glyph key (the quote's `>`) or none at all (a paragraph):
-  // faint, like the dot and the `#` — chrome, not content — right-aligned to
-  // the slot's edge like every other text glyph. Never a zoom button (zoom
-  // stays on F / Cmd+. and bullet/number clicks); on a parent it swaps for
-  // the collapse chevron. The empty paragraph slot keeps its width so the
-  // text stays in the shared column, and still hosts a parent's chevron.
+  // faint, like the dot and the `#` — chrome, not content. CENTRED in the
+  // slot, like the dot and the checkbox, not right-aligned like `#` and the
+  // numbers: `>` is a narrow glyph, and right-aligned its ink sat 3px right
+  // of the dot's centre (and of the guide line that hangs from it). Never a
+  // zoom button (zoom stays on F / Cmd+. and bullet/number clicks); on a
+  // parent it swaps for the collapse chevron. The empty paragraph slot keeps
+  // its width so the text stays in the shared column, and still hosts a
+  // parent's chevron.
   const glyphSlot = (glyph: string | null, testId: string) => (
     <span
       data-testid={testId}
-      className={cx("relative flex h-[1lh] w-[15px] shrink-0 items-center justify-end", slotClass)}
+      className={cx(
+        "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
+        slotClass,
+      )}
     >
       {glyph ? (
         <span aria-hidden className={cx("select-none text-text-tertiary", keyClass)}>
@@ -724,12 +730,17 @@ export function BlockItem({
         >
           {marker}
           {type.kind === "quote" ? (
-            // The quote's bar runs between the `>` and the text, centred in
-            // the 8px gap: 2px wide with -5px side margins, so gap + bar +
-            // gap still nets 8px and the text column never moves. It
+            // The quote's bar stands at the text column — where every other
+            // block's text begins — and pushes the quote's text 10px in (bar
+            // 2px + the 8px gap): a quote is set in from the rest, the way it
+            // is on the page. Rounded ends and the glyph ink (tertiary), so
+            // it reads as chrome of the same family as the `>` beside it. It
             // stretches the line's full height so a wrapped quote reads as
-            // one block; the `>` stays in the slot with every other key.
-            <span aria-hidden className="-mx-[5px] w-0.5 shrink-0 self-stretch bg-border" />
+            // one block.
+            <span
+              aria-hidden
+              className="w-0.5 shrink-0 self-stretch rounded-full bg-text-tertiary"
+            />
           ) : null}
           {editing ? (
             <>

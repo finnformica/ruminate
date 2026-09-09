@@ -98,9 +98,10 @@ asks for it.
    number, heading `#`, quote `>` — occupies the same 15px slot (the
    checkbox's width): dots centre in it; text glyphs right-align to its edge;
    a paragraph leaves it empty. Body text therefore starts at one column
-   across all block types. A quote's bar runs between its `>` and the text,
-   centred in the 8px gap, so the `>` sits with every other key and the text
-   column never moves.
+   across all block types (dots, the checkbox and the quote's `>` centre in
+   the slot; `#` and numbers right-align). A quote's bar stands at the text
+   column, in the glyph ink with rounded ends, and pushes the quote's text
+   10px in — the one block whose text is set in from the column.
    The grey `#` is one component (`Hash`) everywhere it appears — note title,
    zoom title, section headings — with no typography of its own: it inherits
    its parent's scale (the titles' 3xl, each heading's depth size and bold),
