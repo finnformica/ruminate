@@ -1134,9 +1134,9 @@ describe("collapse toggle", () => {
     expect(checkbox).not.toBeNull()
     expect(checkbox.parentElement!.querySelector("button")).toBeNull()
     const toggle = toggleOf(container, "blk_tp")!
-    expect(toggle.parentElement!.className).toContain("-left-2")
+    expect(toggle.parentElement!.className).toContain("-left-5")
     // Paragraphs have no key at all, so theirs sits beside too.
-    expect(toggleOf(container, "blk_pp")!.parentElement!.className).toContain("-left-2")
+    expect(toggleOf(container, "blk_pp")!.parentElement!.className).toContain("-left-5")
   })
 
   it("clicking the toggle collapses and expands, pinning the chevron while collapsed", () => {
@@ -1162,7 +1162,7 @@ describe("collapse toggle", () => {
       expect(guideOf(container, id)!.className, id).toContain("ml-[11px] pl-3")
     }
     // A paragraph has no key: the guide continues the surface's left edge.
-    expect(guideOf(container, "blk_pp")!.className).toContain("-ml-1 pl-[27px]")
+    expect(guideOf(container, "blk_pp")!.className).toContain("-ml-0.5 pl-[25px]")
     expect(guideOf(container, "blk_leaf")).toBeNull()
   })
 })

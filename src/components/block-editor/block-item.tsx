@@ -472,7 +472,7 @@ export function BlockItem({
   // out while the chevron fades in, in the same 15px slot — nothing moves. A
   // checkbox is a control in its own right (a swap would leave a parent todo
   // un-tickable), and paragraphs / quotes carry no key at all, so their
-  // chevron sits BESIDE the content instead, centred on the highlight
+  // chevron sits BESIDE the content instead, just outside the highlight
   // surface's left edge — the same reveal, one column to the left.
   const toggleInKey =
     hasToggle && (type.kind === "bullet" || type.kind === "heading" || type.kind === "ordered")
@@ -483,11 +483,19 @@ export function BlockItem({
   // never a secret. It floats out of the flow, centred on whatever slot holds
   // it, so the reveal never shifts the text. Centred by its own midpoint
   // (left/top 50% + a half-size translate), NOT by `inset-0 m-auto`: the
-  // 24px square is wider than the 15px slot, and an over-constrained absolute
+  // 20px square is wider than the 15px slot, and an over-constrained absolute
   // box drops its left margin to zero instead of going negative — which
   // left-aligned the square and put the chevron 4.5px right of the guide.
   // Press feedback lives on the control (IconButton supplies the hover
   // surface); the content itself never animates on collapse.
+  //
+  // The square is 20px everywhere so it sits an even ~3.5px inside the
+  // highlight surface on every side it touches: the surface is 27px tall
+  // (a 23px line + 2px each side) and the key slot's centre is 13.5px in
+  // from its left edge (2px reach + 6px padding + half of 15px) — the same
+  // distance as the surface's vertical centre, so the square inset matches
+  // horizontally and vertically. The beside placement uses the same square,
+  // hung fully outside the surface, so the two read as one control.
   const toggle = hasToggle ? (
     <IconButton
       aria-label={isCollapsed ? "Expand" : "Collapse"}
@@ -497,12 +505,7 @@ export function BlockItem({
       onClick={() => api.toggleCollapse(block.id)}
       className={cx(
         "block-toggle absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150 active:scale-[0.92] motion-reduce:active:scale-100",
-        // In the key slot the hover square is the full 24px — it fits: the
-        // slot's centre is 11.5px into the content column, so the square spans
-        // -0.5..23.5px, inside the surface and short of the text at 27px.
-        // Beside the content it shrinks to 16px so it never covers the first
-        // glyph.
-        toggleInKey ? "h-6 w-6" : "h-4 w-4",
+        "h-5 w-5",
         isCollapsed && "block-toggle-pinned",
       )}
     >
@@ -627,10 +630,12 @@ export function BlockItem({
             // Negative margin + padding pairs grow the highlight surface
             // while the text (and every marker) stays exactly where it was —
             // the background extends outward instead of pushing content.
-            // Horizontally: symmetric — the surface extends 4px each side
-            // (-mx-1) and gives the text 8px of inner breathing room
-            // (pl-2 pr-2), so the left edge nets to the same text column as
-            // before (-4+8 = +4).
+            // Horizontally: symmetric — the surface extends 2px each side
+            // (-mx-0.5) and gives the text 6px of inner breathing room
+            // (pl-1.5 pr-1.5), so the left edge nets to the same text column
+            // as before (-2+6 = +4). 2px, not more, so the key slot's centre
+            // (13.5px in) matches the surface's vertical centre and the
+            // collapse chevron's square sits evenly inside it (see `toggle`).
             // Vertically the extension is CONDITIONAL, per side (see the
             // runEdges pairs below): 2px by default — the midpoint of the
             // nested 4px inter-row gap, so two adjacent surfaces painted in
@@ -641,7 +646,7 @@ export function BlockItem({
             // run into one continuous surface. Either way the negative
             // margin equals the padding, so the text never moves a pixel
             // and the block rhythm gains nothing.
-            "relative -ml-1 -mr-1 flex items-start gap-2 rounded pl-2 pr-2",
+            "relative -ml-0.5 -mr-0.5 flex items-start gap-2 rounded pl-1.5 pr-1.5",
             // Per-side vertical pairs. Mid-run sides also square their
             // corners so the run reads as ONE surface rounded only at its
             // ends (the editor computes which neighbours actually touch —
@@ -667,19 +672,21 @@ export function BlockItem({
             // Square left corners so the quote bar stays a straight rule
             // instead of curving with the highlight radius. The wider pl
             // holds the quote text at its usual column: the bar rides the
-            // surface's left edge (-4), so border (2) + pl (14) nets +12.
-            // (14px is arbitrary-valued — the spacing scale has no 3.5 step.)
-            type.kind === "quote" && "rounded-l-none border-l-2 border-border pl-[14px]",
+            // surface's left edge (-2), so border (2) + pl (12) nets +12.
+            type.kind === "quote" && "rounded-l-none border-l-2 border-border pl-3",
           )}
         >
           {hasToggle && !toggleInKey ? (
-            // The beside toggle: a 16px slot (the chevron's h-4 w-4 square)
-            // straddling the surface's left edge, on the block's first line.
-            // `typo` + h-[1lh] size the slot to that line whatever the scale;
-            // the top offset mirrors the line's own vertical padding.
+            // The beside toggle: a 20px slot (the chevron's square) hung
+            // fully OUTSIDE the surface, its right edge on the surface's left
+            // edge, on the block's first line. Outside, so it never crowds the
+            // checkbox (6px clear of it) or a paragraph's first glyph, and
+            // never paints over the highlight. `typo` + h-[1lh] size the slot
+            // to that line whatever the scale; the top offset mirrors the
+            // line's own vertical padding.
             <span
               className={cx(
-                "absolute -left-2 h-[1lh] w-4",
+                "absolute -left-5 h-[1lh] w-5",
                 runEdges?.top ? "top-1" : "top-0.5",
                 typo,
               )}
@@ -771,16 +778,16 @@ export function BlockItem({
       {hasChildren && !isCollapsed && !zoomTitle ? (
         // The guide hangs from the block's key: a 1px rule under the centre of
         // the 15px marker slot, which starts 4px into the content column (the
-        // surface's -4px reach + 8px inner padding) — centre 11.5px, so the
+        // surface's -2px reach + 6px inner padding) — centre 11.5px, so the
         // rule sits at 11px. A keyless block (paragraph, quote) hangs it from
-        // the surface's left edge (-4px) instead, where its toggle lives and
-        // where a quote's own bar already runs, so the guide simply continues
-        // the bar. Either way children start 24px in (margin + rule + padding).
+        // the surface's left edge (-2px) instead, where a quote's own bar
+        // already runs, so the guide simply continues the bar. Either way
+        // children start 24px in (margin + rule + padding).
         // The guide brightens while the pointer is anywhere in the subtree
         // (group/subtree is the block's outer wrapper), tracing the structure.
         <div
           className={cx(
-            marker ? "ml-[11px] pl-3" : "-ml-1 pl-[27px]",
+            marker ? "ml-[11px] pl-3" : "-ml-0.5 pl-[25px]",
             "border-l border-border-secondary transition-colors duration-200 group-hover/subtree:border-[color:var(--neutral-a6)]",
             justExpanded && "block-expand",
           )}

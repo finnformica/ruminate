@@ -80,11 +80,15 @@ asks for it.
    starting 24px in (`ml-[11px]` + rule + `pl-3`). A checkbox is a control in
    its own right (a swap would leave a parent todo un-tickable) and a
    paragraph or quote has no key at all, so those take the chevron _beside_
-   the content, centred on the highlight surface's left edge (-4px) in a 16px
-   square that never covers the first glyph; the guide of a keyless block
-   hangs from that same edge (`-ml-1` + rule + `pl-[27px]`), where a quote's
-   own bar already runs, so it simply continues the bar. Affordances float out
-   of the flow (absolute/negative margin) so hover never moves text.
+   the content, hung just outside the highlight surface's left edge (-2px) so
+   it never crowds the checkbox or the first glyph; the guide of a keyless
+   block hangs from that edge (`-ml-0.5` + rule + `pl-[25px]`), where a
+   quote's own bar already runs, so it simply continues the bar. The chevron's
+   hover square is 20px wherever it lives: inside the 27px-tall surface that
+   is an even ~3.5px inset on every side, because the key slot's centre sits
+   13.5px in from the surface's edge — the same as the surface's vertical
+   centre. Affordances float out of the flow (absolute/negative margin) so
+   hover never moves text.
 7. **One marker slot.** Every block marker — bullet dot, checkbox, ordered
    number, heading `#` — occupies the same 15px slot (the checkbox's width):
    dots center in it; numbers and the heading `#` right-align to its edge.
@@ -137,14 +141,16 @@ _is_ the page — keeping a full step between it and its depth-0 children.
   6px by depth. Space belongs _above_ a heading (it opens a section), never
   below.
 - **Indent unit:** 24px per level (`ml-[11px]` + 1px rule + `pl-3`; a keyless
-  block: `-ml-1` + rule + `pl-[27px]`), guide line under the key at 11px, or
-  at the surface's edge (-4px) without one.
-- **Highlight inset:** highlighted line surfaces give the text 8px of
-  horizontal breathing room (symmetric — 8px inner padding each side, the
-  surface extending 4px past the text column on both, via `-mx-1 px-2`; the
-  note title's `-mx-1 pl-[31px] pr-1` extends the same 4px left) so the
-  **text never moves** — only the background extends outward, into the indent
-  and the inter-row space. Block
+  block: `-ml-0.5` + rule + `pl-[25px]`), guide line under the key at 11px, or
+  at the surface's edge (-2px) without one.
+- **Highlight inset:** highlighted line surfaces give the text 6px of
+  horizontal breathing room (symmetric — 6px inner padding each side, the
+  surface extending 2px past the text column on both, via `-mx-0.5 px-1.5`;
+  the note title's `-mx-0.5 pl-[29px] pr-0.5` extends the same 2px left) so
+  the **text never moves** — only the background extends outward, into the
+  indent and the inter-row space. The 2px reach is what puts the key slot's
+  centre on the surface's vertical centre line, so the collapse chevron's
+  square sits evenly inside. Block
   rhythm is untouched: the surface borrows the space between rows, it never
   adds any. The text column is sacred; surfaces flex around it.
 - **Vertical extension is conditional, per side.** The inter-row gap is 4px
