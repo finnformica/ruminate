@@ -14,6 +14,7 @@ import {
   databaseDeleteFile,
   flushDatabaseMode,
   isDatabaseModeActive,
+  requestAmbientDatabasePull,
   requestDatabasePull,
   startDatabaseMode,
   stopDatabaseMode,
@@ -480,5 +481,77 @@ describe("cache generation", () => {
     expect(calls.full).toBe(0)
     expect(calls.since).toEqual(["500"])
     expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
+  })
+})
+
+/**
+ * Ambient pull coalescing. `focus`, `visibilitychange` and `online` fire on
+ * every alt-tab, in pairs, for every open tab — wired straight to a pull they
+ * spent 61% of a day's D1 read budget learning nothing. The gap is the fix;
+ * these tests are what stop it being quietly removed.
+ */
+describe("ambient pull coalescing", () => {
+  const seeded = () => ({
+    full: remoteCorpus({ keep: "- keep\n  id:: blk_keep000000\n" }, 1, "100"),
+    since: () => remoteChanges({}, 200, "200"),
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("collapses a burst of triggers into a single pull", async () => {
+    vi.useFakeTimers()
+    const { source, calls } = stubSource(seeded())
+    await boot({ source })
+    expect(calls.since).toHaveLength(0)
+
+    // Four alt-tabs in quick succession — eight events in the real browser,
+    // since a tab switch raises focus AND visibilitychange.
+    for (let i = 0; i < 8; i += 1) requestAmbientDatabasePull()
+    await flushDatabaseMode()
+    expect(calls.since).toHaveLength(0)
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    await flushDatabaseMode()
+    expect(calls.since).toHaveLength(1)
+  })
+
+  it("pulls immediately once the gap has passed", async () => {
+    vi.useFakeTimers()
+    const { source, calls } = stubSource(seeded())
+    await boot({ source })
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    requestAmbientDatabasePull()
+    await flushDatabaseMode()
+    expect(calls.since).toHaveLength(1)
+  })
+
+  it("nothing is dropped — a later burst still gets its own pull", async () => {
+    vi.useFakeTimers()
+    const { source, calls } = stubSource(seeded())
+    await boot({ source })
+
+    requestAmbientDatabasePull()
+    await vi.advanceTimersByTimeAsync(30_000)
+    await flushDatabaseMode()
+    expect(calls.since).toHaveLength(1)
+
+    requestAmbientDatabasePull()
+    await vi.advanceTimersByTimeAsync(30_000)
+    await flushDatabaseMode()
+    expect(calls.since).toHaveLength(2)
+  })
+
+  it("a deliberate pull is never coalesced — the sync button answers now", async () => {
+    vi.useFakeTimers()
+    const { source, calls } = stubSource(seeded())
+    await boot({ source })
+
+    // Inside the gap, where an ambient trigger would only schedule one.
+    requestDatabasePull()
+    await flushDatabaseMode()
+    expect(calls.since).toHaveLength(1)
   })
 })

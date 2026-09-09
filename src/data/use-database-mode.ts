@@ -3,7 +3,7 @@ import React from "react"
 import { useEvent, useNetworkState } from "react-use"
 import { githubUserAtom, globalStateMachineAtom } from "../global-state"
 import { sessionStatusAtom } from "../utils/github-session"
-import { requestDatabasePull, startDatabaseMode, stopDatabaseMode } from "./database-mode"
+import { requestAmbientDatabasePull, startDatabaseMode, stopDatabaseMode } from "./database-mode"
 
 /**
  * Mounts the database storage runtime (see `database-mode.ts`). Rendered once
@@ -12,8 +12,10 @@ import { requestDatabasePull, startDatabaseMode, stopDatabaseMode } from "./data
  * render instead.
  *
  * Cross-device pulls re-run when the app becomes visible again, when the
- * window regains focus, and when the browser comes back online. (Failed pulls
- * also self-retry on a timer inside `database-mode.ts`.)
+ * window regains focus, and when the browser comes back online — coalesced to
+ * at most one pull per 30s, because those events fire in bursts and in pairs
+ * and a pull is not free (`AMBIENT_PULL_INTERVAL_MS` in `database-mode.ts`).
+ * (Failed pulls also self-retry on a timer inside `database-mode.ts`.)
  *
  * A terminally expired GitHub session (the Worker's /github-refresh answered
  * 401 — the refresh token is dead) signs the machine out cleanly: the stale
@@ -48,17 +50,21 @@ export function useDatabaseMode() {
     if (session === "expired" && active) send({ type: "SIGN_OUT" })
   }, [session, active, send])
 
+  // All three are AMBIENT: they fire on every alt-tab and window raise, and a
+  // single tab switch raises `focus` and `visibilitychange` together. They go
+  // through the coalescing entry point so a burst costs one pull, not one
+  // each (see AMBIENT_PULL_INTERVAL_MS).
   useEvent("visibilitychange", () => {
     if (active && document.visibilityState === "visible" && online) {
-      requestDatabasePull()
+      requestAmbientDatabasePull()
     }
   })
 
   useEvent("focus", () => {
-    if (active && online) requestDatabasePull()
+    if (active && online) requestAmbientDatabasePull()
   })
 
   useEvent("online", () => {
-    if (active) requestDatabasePull()
+    if (active) requestAmbientDatabasePull()
   })
 }
