@@ -1,3 +1,7 @@
+// vitest 2 pulled @types/node into the program for us; vitest 5 no longer
+// does, and tsconfig's `types` list is deliberately narrow — so this file,
+// the only one that reaches for a Node builtin, asks for those types itself.
+/// <reference types="node" />
 import type * as nodeSqlite from "node:sqlite"
 import type { SqlDriver, SqlValue } from "./sql-driver"
 
