@@ -97,25 +97,25 @@ body:has([data-resizing="true"]) * {
 }
 
 /* "You are here" (the current route — including the open note in the sidebar
- * list) speaks the selection accent language: an accent-tinted row with
- * accent-ink text, the same family as the editor's block selection, so one
- * color means "current" app-wide. Alpha (not solid) because nav rows never
- * merge into runs; the Neutral accent's one-step-darker alpha bias (see
+ * list) is painted with the app-wide selected tokens (variables.css) — the
+ * very same surface and ink as the editor's block selection and the list
+ * keyboard highlight, so one color means "current" app-wide and follows the
+ * user's accent choice. The Neutral accent's deeper light-scheme wash (see
  * variables.css) keeps it distinguishable from the plain `bg-bg-hover` row
- * hover there too. Hover/press on the active row step up the same ramp — the
+ * hover there too. Hover/press on the active row step up the same wash — the
  * attribute selectors outrank the base `.nav-item:is(a, button)` states. */
 .nav-item[aria-current] {
   @apply font-bold;
-  color: var(--accent-12);
-  background-color: var(--accent-a3);
+  color: var(--color-text-selected);
+  background-color: var(--color-bg-selected);
 }
 
 .nav-item[aria-current]:hover {
-  background-color: var(--accent-a4);
+  background-color: var(--color-bg-selected-hover);
 }
 
 .nav-item[aria-current]:active {
-  background-color: var(--accent-a5);
+  background-color: var(--color-bg-selected-active);
 }
 
 /* Toggled-open panels (e.g. Help) are a state, not a place — they keep the

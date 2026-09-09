@@ -43,6 +43,7 @@ module.exports = {
         danger: "var(--color-text-danger)",
         pending: "var(--color-text-pending)",
         pinned: "var(--color-text-pinned)",
+        selected: "var(--color-text-selected)",
       },
       bg: {
         DEFAULT: "var(--color-bg)",
@@ -60,6 +61,7 @@ module.exports = {
         "code-block": "var(--color-bg-code-block)",
         highlight: "var(--color-bg-highlight)",
         selection: "var(--color-bg-selection)",
+        selected: "var(--color-bg-selected)",
       },
       border: {
         DEFAULT: "var(--color-border)",
