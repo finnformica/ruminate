@@ -96,9 +96,9 @@
      whichever ramp `data-accent` maps the accent family onto. Mixing opaque
      inputs is computed-solid, so adjacent selected block lines merge
      seamlessly. Hover/active step the same wash up for the current nav row. */
-  --color-bg-selected: color-mix(in srgb, var(--accent-9) 8%, var(--color-bg));
-  --color-bg-selected-hover: color-mix(in srgb, var(--accent-9) 12%, var(--color-bg));
-  --color-bg-selected-active: color-mix(in srgb, var(--accent-9) 16%, var(--color-bg));
+  --color-bg-selected: color-mix(in srgb, var(--accent-9) 13%, var(--color-bg));
+  --color-bg-selected-hover: color-mix(in srgb, var(--accent-9) 17%, var(--color-bg));
+  --color-bg-selected-active: color-mix(in srgb, var(--accent-9) 21%, var(--color-bg));
   /* The selected row's ink leans halfway toward the accent's text step
      (accent-12 is the ramp's contrast-safe ink, so legibility never suffers):
      the whole line reads slightly "lit" by the selection. */
@@ -179,17 +179,17 @@
     --color-bg-selected: color-mix(
       in srgb,
       var(--accent-9) 8%,
-      color-mix(in srgb, white 14%, var(--color-bg))
+      color-mix(in srgb, white 18%, var(--color-bg))
     );
     --color-bg-selected-hover: color-mix(
       in srgb,
       var(--accent-9) 8%,
-      color-mix(in srgb, white 18%, var(--color-bg))
+      color-mix(in srgb, white 22%, var(--color-bg))
     );
     --color-bg-selected-active: color-mix(
       in srgb,
       var(--accent-9) 8%,
-      color-mix(in srgb, white 22%, var(--color-bg))
+      color-mix(in srgb, white 26%, var(--color-bg))
     );
 
     /* Border colors */
@@ -265,15 +265,15 @@
 }
 
 /* The neutral accent's selected wash keeps the same one-step-darker bias in
- * the light scheme: an 8% sand-9 wash over the light bg would land within a
- * step of the neutral hover surfaces, so it deepens to 15% (hover/active
+ * the light scheme: a 13% sand-9 wash over the light bg would land within a
+ * step of the neutral hover surfaces, so it deepens to 18% (hover/active
  * follow). Light-only — in dark the white lift already guarantees selection
  * sits clear of the (darker) hover wash. */
 @media (prefers-color-scheme: light) {
   [data-accent="neutral"] {
-    --color-bg-selected: color-mix(in srgb, var(--accent-9) 15%, var(--color-bg));
-    --color-bg-selected-hover: color-mix(in srgb, var(--accent-9) 19%, var(--color-bg));
-    --color-bg-selected-active: color-mix(in srgb, var(--accent-9) 23%, var(--color-bg));
+    --color-bg-selected: color-mix(in srgb, var(--accent-9) 18%, var(--color-bg));
+    --color-bg-selected-hover: color-mix(in srgb, var(--accent-9) 22%, var(--color-bg));
+    --color-bg-selected-active: color-mix(in srgb, var(--accent-9) 26%, var(--color-bg));
   }
 }
 

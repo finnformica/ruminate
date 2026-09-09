@@ -28,13 +28,13 @@ asks for it.
    a small accent contribution color-mixed over the app background — pale,
    light, slightly tinted — rather than a solid accent step that reads as a
    color band. Light scheme:
-   `color-mix(in srgb, var(--accent-9) 8%, var(--color-bg))`. Dark scheme:
+   `color-mix(in srgb, var(--accent-9) 13%, var(--color-bg))`. Dark scheme:
    the same wash over a **white-lifted** base —
-   `color-mix(in srgb, var(--accent-9) 8%, color-mix(in srgb, white 14%, var(--color-bg)))`
+   `color-mix(in srgb, var(--accent-9) 8%, color-mix(in srgb, white 18%, var(--color-bg)))`
    — so the lift does the "selected" work (a lightened row is unmistakable on
    a dark page, and guaranteed lighter than any dark hover wash) and the
    accent only names the color. A white lift is invisible on a light page, so
-   light gets none; its 8% wash is judged by eye to match the dark version's
+   light gets none; its 13% wash is judged by eye to match the dark version's
    weight. A highlighted block must read as "selected", not "hovered", and
    selection always wins visually.
    `color-mix` of opaque inputs is **computed-solid**, keeping the two virtues
@@ -192,20 +192,20 @@ full-width highlight.)
 
 ## Color roles
 
-| Role         | Light / dark token         | Used for                                                                              |
-| ------------ | -------------------------- | ------------------------------------------------------------------------------------- |
-| Ink          | `--color-text` (sand-12)   | body, headings, checked-off text ink                                                  |
-| Muted        | `--color-text-secondary`   | quotes, done todos, ordered numbers, crumbs                                           |
-| Faint        | `--color-text-tertiary`    | bullet dots, chevron, placeholders, `#`                                               |
-| Guide        | `--color-border-secondary` | indent guide lines (rest state)                                                       |
-| Structure    | `--color-border` (a7)      | quote bar, unchecked checkbox border                                                  |
-| Hover        | `--neutral-a2` tint        | non-selected block lines under the pointer                                            |
-| Selection    | `--color-bg-selected`      | selected block(s), list highlight — accent-9 wash: 8% light; dark 8% over a 14% lift  |
-| Selected ink | `--color-text-selected`    | ink on a selected row — 50% toward accent-12                                          |
-| Inactive sel | neutral wash (see §3)      | the selection while the editor lacks focus — 10% neutral-9 light / 9% white lift dark |
-| Current      | `--color-bg-selected`      | sidebar active route / open note row (same tokens as Selection)                       |
-| Accent solid | `--accent-9`               | checked checkbox fill                                                                 |
-| Transclusion | `--accent-a2` tint         | `((ref))` embeds — quietly "live" content                                             |
+| Role         | Light / dark token         | Used for                                                                               |
+| ------------ | -------------------------- | -------------------------------------------------------------------------------------- |
+| Ink          | `--color-text` (sand-12)   | body, headings, checked-off text ink                                                   |
+| Muted        | `--color-text-secondary`   | quotes, done todos, ordered numbers, crumbs                                            |
+| Faint        | `--color-text-tertiary`    | bullet dots, chevron, placeholders, `#`                                                |
+| Guide        | `--color-border-secondary` | indent guide lines (rest state)                                                        |
+| Structure    | `--color-border` (a7)      | quote bar, unchecked checkbox border                                                   |
+| Hover        | `--neutral-a2` tint        | non-selected block lines under the pointer                                             |
+| Selection    | `--color-bg-selected`      | selected block(s), list highlight — accent-9 wash: 13% light; dark 8% over an 18% lift |
+| Selected ink | `--color-text-selected`    | ink on a selected row — 50% toward accent-12                                           |
+| Inactive sel | neutral wash (see §3)      | the selection while the editor lacks focus — 10% neutral-9 light / 9% white lift dark  |
+| Current      | `--color-bg-selected`      | sidebar active route / open note row (same tokens as Selection)                        |
+| Accent solid | `--accent-9`               | checked checkbox fill                                                                  |
+| Transclusion | `--accent-a2` tint         | `((ref))` embeds — quietly "live" content                                              |
 
 All roles are Radix alpha/step tokens, so both color schemes (and print, which
 remaps the semantic tokens) resolve automatically. Never hardcode a hex.
@@ -223,7 +223,7 @@ is the default and needs no attribute. Rules for a new accent:
   the app's original pre-accent gray — would collide with the neutral hover
   surfaces, so its alpha steps are biased one step darker, and the selection
   wash follows the same bias in the light scheme: neutral's
-  `--color-bg-selected` deepens from the 8% to a 15% `--accent-9` (= `sand-9`)
+  `--color-bg-selected` deepens from the 13% to an 18% `--accent-9` (= `sand-9`)
   wash (see `variables.css`), keeping a clear step above the `--neutral-a2`
   line hover. Dark needs no bias — the white lift already guarantees selection
   sits clear of the (darkening) hover wash.

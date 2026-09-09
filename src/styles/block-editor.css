@@ -58,7 +58,7 @@
  * inherited ink (`color: inherit`), so demotion also drains the color from
  * the text. Computed-solid, so multi-select runs keep merging seamlessly.
  * One accent-independent pair covers all five accents; for the Neutral
- * accent light it sits at two-thirds the strength of its 15% active wash
+ * accent light it sits at just over half the strength of its 18% active wash
  * (variables.css). Restore rides the 100ms fade on [data-block-line] — perceptually instant. */
 .block-highlight.block-highlight-inactive {
   background-color: color-mix(in srgb, var(--neutral-9) 10%, var(--color-bg));
