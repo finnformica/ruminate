@@ -2,6 +2,12 @@
 // that silently stops ringing, and this one exists because a single query
 // shape once consumed 97% of a day's D1 read budget — the regression it
 // watches for is invisible until a quota email arrives.
+//
+// tenant-guard: exempt — the SQL here is a FIXTURE, never executed. These
+// tests drive a fake D1 whose row counts are dictated by the test, and the
+// statements are written to resemble the ones that caused the incident so a
+// reader can see what the threshold is calibrated against. Scoping them would
+// make them lie about what they stand in for; running them is impossible.
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createD1SqlDriver } from "./d1-sql-driver"
