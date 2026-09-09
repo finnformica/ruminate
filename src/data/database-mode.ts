@@ -149,6 +149,10 @@ interface DatabaseModeRuntime {
   replica: ReplicaSyncHandle | null
   source: D1NoteSource
   pullRetryTimer: ReturnType<typeof setTimeout> | null
+  /** Pending coalesced ambient pull (see `requestAmbientDatabasePull`). */
+  ambientPullTimer: ReturnType<typeof setTimeout> | null
+  /** When the last pull STARTED — the clock the ambient gap is measured on. */
+  lastPullStartedAt: number
   lastRepairAt: number
   generation: number
 }
@@ -259,6 +263,8 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     replica: null,
     source: options.source ?? createD1NoteSource(),
     pullRetryTimer: null,
+    ambientPullTimer: null,
+    lastPullStartedAt: 0,
     lastRepairAt: 0,
     generation,
   }
@@ -356,6 +362,7 @@ export function stopDatabaseMode() {
   stopped.replica?.stop()
   stopped.replica = null
   if (stopped.pullRetryTimer !== null) clearTimeout(stopped.pullRetryTimer)
+  if (stopped.ambientPullTimer !== null) clearTimeout(stopped.ambientPullTimer)
   enqueue(async () => {
     await stopped.store?.close().catch(() => {})
   })
@@ -444,11 +451,60 @@ function scheduleRepair(activation: DatabaseModeRuntime) {
 // Pulls (boot + the SYNC triggers: visibility, focus, online)
 // -----------------------------------------------------------------------------
 
-/** Queue a pull: since-cursor when a cursor is stored, else the full corpus. */
+/**
+ * Queue a pull NOW: since-cursor when a cursor is stored, else the full
+ * corpus. For deliberate acts — the sync button, a repair — where the user is
+ * waiting on the answer.
+ */
 export function requestDatabasePull() {
   const activation = runtime
   if (!activation) return
   runPull(activation)
+}
+
+/**
+ * Minimum gap between pulls triggered by ambient browser events.
+ *
+ * `focus`, `visibilitychange` and `online` are not user intent — they fire on
+ * every alt-tab, every window raise, and in PAIRS (a tab switch raises both
+ * `focus` and `visibilitychange`), for every open tab, forever. Wired straight
+ * to a pull they produced ~3,100 pulls in a day against a corpus nobody had
+ * written to: 412k rows read, 61% of the day's entire D1 budget, to learn
+ * nothing 3,099 times (docs/scaling-thresholds.md).
+ *
+ * 30s is chosen against what a pull is FOR — noticing another device's edit.
+ * A cross-device change that lands within 30 seconds is already indis-
+ * tinguishable from one that lands instantly, because the writing device's
+ * own push is debounced 2s and the reading human takes longer than that to
+ * look. What it removes is the burst: alt-tabbing four times in ten seconds
+ * is one pull, not eight.
+ */
+const AMBIENT_PULL_INTERVAL_MS = 30_000
+
+/**
+ * Queue a pull from an ambient trigger, coalescing bursts.
+ *
+ * At most one pull per `AMBIENT_PULL_INTERVAL_MS`: a trigger inside the gap
+ * schedules a single pull at the boundary rather than running one, and
+ * further triggers before it fires are absorbed into it. Nothing is dropped —
+ * every burst still results in a pull, just one of them.
+ */
+export function requestAmbientDatabasePull() {
+  const activation = runtime
+  if (!activation) return
+  // A pull is already scheduled for the end of this gap; it will cover this
+  // trigger too.
+  if (activation.ambientPullTimer !== null) return
+
+  const wait = AMBIENT_PULL_INTERVAL_MS - (Date.now() - activation.lastPullStartedAt)
+  if (wait <= 0) {
+    runPull(activation)
+    return
+  }
+  activation.ambientPullTimer = setTimeout(() => {
+    activation.ambientPullTimer = null
+    if (runtime === activation) runPull(activation)
+  }, wait)
 }
 
 function runPull(activation: DatabaseModeRuntime) {
@@ -456,6 +512,12 @@ function runPull(activation: DatabaseModeRuntime) {
     clearTimeout(activation.pullRetryTimer)
     activation.pullRetryTimer = null
   }
+  // This pull covers whatever the pending ambient one was going to fetch.
+  if (activation.ambientPullTimer !== null) {
+    clearTimeout(activation.ambientPullTimer)
+    activation.ambientPullTimer = null
+  }
+  activation.lastPullStartedAt = Date.now()
   enqueue(async () => {
     if (runtime !== activation || !activation.store) return
     const store = activation.store
