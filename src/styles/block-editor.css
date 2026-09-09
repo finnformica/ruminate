@@ -116,10 +116,13 @@
 /* ── Collapse toggle reveal ──────────────────────────────────────────────────
  * A parent's collapse chevron lives in its marker slot (bullet, `#`, number)
  * or just beside the content (checkbox, paragraph, quote) — see block-item.tsx.
- * It is invisible until the pointer is over the ROW (`.block-row`, the line
- * only — never the subtree, so hovering a child leaves the parent's key
- * alone); a swapping key (`.block-key`) fades out as the chevron fades in, in
- * the same slot, so nothing moves. Two things pin the chevron visible: a
+ * It is invisible until the pointer is over the CONTROL'S OWN AREA — the
+ * 20px square, never the whole row — so the chevron and its hover surface
+ * appear together, and a row can be read and edited without chrome
+ * surfacing. For a swapping key (`.block-key`) the slot (`.block-toggle-slot`)
+ * is that area: the chevron's square covers the slot, so hovering the slot IS
+ * hovering the chevron; the key fades out as the chevron fades in, in the
+ * same slot, so nothing moves. Two things pin the chevron visible: a
  * collapsed block (hidden content is never a secret — the key hides for the
  * duration), and a device with nothing to hover with, where the chevron stands
  * in for the key outright, exactly as the old always-on gutter toggle did. The
@@ -131,10 +134,11 @@
   transition: opacity 150ms ease-out;
 }
 @media (hover: hover) and (pointer: fine) {
-  .block-row:hover .block-toggle {
+  .block-toggle:hover,
+  .block-toggle-slot:hover .block-toggle {
     opacity: 1;
   }
-  .block-row:hover .block-key {
+  .block-toggle-slot:hover .block-key {
     opacity: 0;
   }
 }

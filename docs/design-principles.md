@@ -12,11 +12,12 @@ asks for it.
    two or three steps down the gray ramp (`secondary` → `tertiary` → `border`).
    Never promote chrome to ink.
 2. **Quiet chrome, hover affordances.** Structural controls (collapse chevron,
-   hover surfaces) are invisible until the row is hovered or they hold focus, and
-   they appear **without any layout shift** — always reserving their space, only
-   fading opacity. The collapse chevron reveals _in the block's own key_:
-   hovering a row fades the bullet dot, `#` or number out and the chevron in,
-   in the same slot (see 6 for the checkbox and keyless blocks). Exception: a
+   hover surfaces) are invisible until their own area is hovered or they hold
+   focus, and they appear **without any layout shift** — always reserving their
+   space, only fading opacity. The collapse chevron reveals _in the block's own
+   key_: hovering the key slot (never the whole row) fades the bullet dot, `#`
+   or number out and the chevron in, in the same slot, together with its hover
+   square (see 6 for the checkbox and keyless blocks). Exception: a
    _collapsed_ block keeps its chevron visible (the key stays hidden for the
    duration), so hidden content is never a secret. Without a hovering pointer
    (touch) the chevron simply stands in for a parent's key.

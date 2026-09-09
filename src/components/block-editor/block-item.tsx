@@ -468,7 +468,7 @@ export function BlockItem({
   // the zoom title (the editor renders its children itself, at depth 0).
   const hasToggle = hasChildren && !zoomTitle
   // Where that toggle lives. A bullet dot, heading `#` or number is pure
-  // chrome, so the KEY SWAPS for the chevron: hover the row and the key fades
+  // chrome, so the KEY SWAPS for the chevron: hover the slot and the key fades
   // out while the chevron fades in, in the same 15px slot — nothing moves. A
   // checkbox is a control in its own right (a swap would leave a parent todo
   // un-tickable), and paragraphs / quotes carry no key at all, so their
@@ -478,7 +478,9 @@ export function BlockItem({
     hasToggle && (type.kind === "bullet" || type.kind === "heading" || type.kind === "ordered")
 
   // The chevron. `.block-toggle` (block-editor.css) keeps it invisible until
-  // the row is hovered (or, on a device with nothing to hover with, always) —
+  // its own square is hovered — the key slot for a swapping key, the gutter
+  // square beside the content otherwise; never the whole row — (or, on a
+  // device with nothing to hover with, always) —
   // except on a COLLAPSED block, which pins it visible so hidden content is
   // never a secret. It floats out of the flow, centred on whatever slot holds
   // it, so the reveal never shifts the text. Centred by its own midpoint
@@ -526,6 +528,9 @@ export function BlockItem({
   // The key of a swapping parent: fades out as the chevron fades in, and is
   // hidden outright while collapsed (the pinned chevron stands in for it).
   const keyClass = toggleInKey ? cx("block-key", isCollapsed && "block-key-hidden") : undefined
+  // The slot of a swapping parent is the chevron's hover area (see
+  // `.block-toggle-slot` in block-editor.css).
+  const slotClass = toggleInKey ? "block-toggle-slot" : undefined
 
   // List markers double as zoom targets (Logseq-style: click the bullet to
   // make this block the page) — on leaves. A parent's key is its collapse
@@ -535,7 +540,8 @@ export function BlockItem({
   // Every marker occupies the same 15px slot (the checkbox's width), so body
   // text starts at one column across bullet / todo / numbered blocks and the
   // markers read as one chrome family. Each slot is `relative` so a swapped-in
-  // chevron centres on it.
+  // chevron centres on it, and carries `slotClass` so hovering it reveals
+  // the chevron.
   const marker =
     type.kind === "todo" ? (
       <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
@@ -549,7 +555,12 @@ export function BlockItem({
         />
       </span>
     ) : type.kind === "bullet" ? (
-      <span className="relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
+      <span
+        className={cx(
+          "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
+          slotClass,
+        )}
+      >
         {zoomable ? (
           <button
             type="button"
@@ -584,6 +595,7 @@ export function BlockItem({
         className={cx(
           "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-end font-bold",
           headingScale(depth),
+          slotClass,
         )}
       >
         <Hash className={keyClass} />
@@ -592,7 +604,12 @@ export function BlockItem({
     ) : type.kind === "ordered" ? (
       // Numbers are read (they carry order), so they sit one step up the ramp
       // from the dot — muted, not faint — and right-align to the slot edge.
-      <span className="relative flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary">
+      <span
+        className={cx(
+          "relative flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary",
+          slotClass,
+        )}
+      >
         {zoomable ? (
           <button
             type="button"
@@ -617,10 +634,7 @@ export function BlockItem({
       data-block-row={block.id}
       className={cx("group/subtree", zoomTitle ? "mb-3" : headingTopMargin(type, depth))}
     >
-      {/* `.block-row` is the hover scope for the toggle reveal: this row only.
-          The children below are siblings of it, so hovering a child never
-          swaps the parent's key. */}
-      <div className="block-row relative min-w-0 py-0.5 font-content leading-relaxed">
+      <div className="relative min-w-0 py-0.5 font-content leading-relaxed">
         <div
           // The visible content line (carries the highlight). Scroll-into-view
           // targets this, not the row wrapper, so a heading's top margin can't
