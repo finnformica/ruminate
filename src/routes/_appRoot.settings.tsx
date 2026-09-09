@@ -3,7 +3,6 @@ import { useAtom, useAtomValue } from "jotai"
 import { useEffect } from "react"
 import { useNetworkState } from "react-use"
 import { DEFAULT_NEW_BLOCK_MARKER } from "../blocks/commands"
-import { getBlockType } from "../blocks/block-type"
 import { Button } from "../components/button"
 import { useSignOut } from "../components/github-auth"
 import { GitHubAvatar } from "../components/github-avatar"
@@ -150,23 +149,6 @@ const NEW_BLOCK_MARKER_PRESETS: Array<{ value: string; label: string }> = [
   { value: "> ", label: "Quote" },
 ]
 
-const BLOCK_KIND_LABELS: Record<ReturnType<typeof getBlockType>["kind"], string> = {
-  heading: "a heading",
-  todo: "a to-do",
-  quote: "a quote",
-  bullet: "a bullet point",
-  ordered: "a numbered item",
-  paragraph: "a paragraph",
-}
-
-/** Plain-English summary of what a marker turns a new block into. */
-function describeNewBlockMarker(marker: string): string {
-  if (marker === "") return "New blocks will be plain paragraphs."
-  const kind = getBlockType(marker).kind
-  if (kind !== "paragraph") return `New blocks will be ${BLOCK_KIND_LABELS[kind]}.`
-  return `New blocks will start with the text “${marker}”.`
-}
-
 function EditorSection() {
   const [newBlockMarker, setNewBlockMarker] = useAtom(newBlockMarkerAtom)
 
@@ -176,10 +158,6 @@ function EditorSection() {
         <label htmlFor="new-block-marker" className="text-sm leading-4 text-text-secondary">
           New block markdown
         </label>
-        <span className="text-sm leading-5 text-text-secondary">
-          What a new block starts with when you press Enter. To-do and numbered items always
-          continue their own list.
-        </span>
         <TextInput
           id="new-block-marker"
           className="font-mono"
@@ -208,9 +186,6 @@ function EditorSection() {
             )
           })}
         </div>
-        <span className="text-sm leading-5 text-text-secondary">
-          {describeNewBlockMarker(newBlockMarker)}
-        </span>
       </div>
     </SettingsSection>
   )
@@ -226,8 +201,7 @@ function StorageSection() {
       <div className="flex flex-col gap-1">
         <span className="leading-4">Database</span>
         <span className="text-sm leading-5 text-text-secondary">
-          Notes live in a local database on this device and sync to the cloud automatically, so
-          they’re available offline and on every device you sign in from.
+          Notes live in a local database on this device and sync to the cloud automatically.
         </span>
       </div>
       {githubUser ? (
