@@ -497,8 +497,8 @@ export function BlockItem({
   // (a 23px line + 2px each side) and the key slot's centre is 13.5px in
   // from its left edge (2px reach + 6px padding + half of 15px) — the same
   // distance as the surface's vertical centre, so the square inset matches
-  // horizontally and vertically. Beside a todo the same square hangs outside
-  // the surface, its right edge on the surface's left edge.
+  // horizontally and vertically. Beside a todo the same square straddles the
+  // surface's left edge, its glyph tucked just outside it.
   const toggle = hasToggle ? (
     <IconButton
       aria-label={isCollapsed ? "Expand" : "Collapse"}
@@ -516,9 +516,10 @@ export function BlockItem({
         // squeeze the glyph); it still sits inside the surface.
         "h-5 w-5 coarse:h-7 coarse:w-7 coarse:px-0",
         // Beside a todo the square is a hit area only — no hover surface, so
-        // it never clashes with the checkbox, the highlight or a guide line
-        // it sits on; the chevron's own fade-in is the whole reveal.
-        toggleBeside && "enabled:hover:bg-transparent enabled:active:bg-transparent",
+        // it never clashes with the checkbox or the highlight it straddles;
+        // the chevron's own fade-in is the whole reveal. It stays 20px wide
+        // on coarse pointers too: 28px would reach the checkbox.
+        toggleBeside && "enabled:hover:bg-transparent enabled:active:bg-transparent coarse:w-5",
         isCollapsed && "block-toggle-pinned",
       )}
     >
@@ -747,16 +748,18 @@ export function BlockItem({
         >
           {marker}
           {toggleBeside ? (
-            // The beside toggle: a 20px slot (the chevron's square) hung
-            // fully OUTSIDE the surface, its right edge on the surface's left
-            // edge, on the block's first line — 6px clear of the checkbox.
-            // `typo` + h-[1lh] size the slot to that line whatever the scale;
-            // the top offset mirrors the line's own vertical padding. Nested,
-            // it sits on the parent's guide line; with no hover surface the
-            // chevron simply reads as a node on it.
+            // The beside toggle: a 20px slot (the chevron's square) centred
+            // 5px OUTSIDE the surface's left edge, on the block's first line,
+            // so the glyph hugs the block: its ink sits ~3px off the edge and
+            // stops short of the checkbox (the slot ends 1px before it).
+            // Nested, that keeps it clear of the parent's guide line, which
+            // runs 11px outside the edge — the glyph's ink ends ≥2.5px right
+            // of it, so the two never touch. `typo` + h-[1lh] size the slot
+            // to that line whatever the scale; the top offset mirrors the
+            // line's own vertical padding.
             <span
               className={cx(
-                "absolute -left-5 h-[1lh] w-5",
+                "absolute -left-[15px] h-[1lh] w-5",
                 runEdges?.top ? "top-1" : "top-0.5",
                 typo,
               )}

@@ -88,11 +88,12 @@ asks for it.
    24px in (`ml-[11px]` + rule + `pl-3`), so a guide never hangs from
    anything but a slot and the markers never sit off the lines. A checkbox is
    a control in its own right (a swap would leave a parent todo un-tickable),
-   so a parent todo's chevron sits _beside_ the slot, in the gutter just
-   outside the highlight surface, 6px clear of the box — same reveal (hover
-   its own square), same pin while collapsed — and that square is a hit area
-   only, with no hover surface, so it never clashes with the box, the
-   highlight or a guide line it sits on. The chevron's hover square is 20px,
+   so a parent todo's chevron sits _beside_ the slot, hugging the highlight
+   surface's left edge from outside (its ink ~3px off the edge, clear of the
+   parent's guide line 11px out when nested) — same reveal (hover its own
+   square), same pin while collapsed — and that square is a hit area only,
+   with no hover surface, so it never clashes with the box or the highlight
+   it straddles. The chevron's hover square is 20px,
    with the small (4px) radius: inside the 27px-tall surface that is an even
    ~3.5px inset on every side, because the slot's centre sits 13.5px in from
    the surface's edge — the same as the surface's vertical centre. The

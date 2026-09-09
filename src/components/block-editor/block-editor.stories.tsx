@@ -83,7 +83,7 @@ export const NestedTodo: Story = {
 }
 
 /** Todo and paragraph parents nested under a bullet: a todo's checkbox fills
- * its slot so its chevron sits beside it, on the parent's guide line; a
+ * its slot so its chevron hugs the block's edge, clear of the guide line; a
  * paragraph's slot is empty but hosts the chevron. */
 export const NestedParents: Story = {
   args: {
