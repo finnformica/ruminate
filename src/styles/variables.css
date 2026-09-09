@@ -85,6 +85,25 @@
   --color-bg-highlight: var(--yellow-a3);
   --color-bg-selection: var(--accent-a3);
 
+  /* Selected / "current" colors — see docs/design-principles.md §3.
+     One token family paints every "you are here / keys act here" state: the
+     editor's block selection, the notes/tags list keyboard highlight and the
+     sidebar's current route, so they can never drift apart. The surface is a
+     LUMINOUS WASH rather than a Radix alpha step: a small accent-9
+     contribution color-mixed over the app background (in dark, over a
+     white-lifted background — see below), so selection reads pale, airy and
+     lit-from-within rather than as a saturated color band, and follows
+     whichever ramp `data-accent` maps the accent family onto. Mixing opaque
+     inputs is computed-solid, so adjacent selected block lines merge
+     seamlessly. Hover/active step the same wash up for the current nav row. */
+  --color-bg-selected: color-mix(in srgb, var(--accent-9) 8%, var(--color-bg));
+  --color-bg-selected-hover: color-mix(in srgb, var(--accent-9) 12%, var(--color-bg));
+  --color-bg-selected-active: color-mix(in srgb, var(--accent-9) 16%, var(--color-bg));
+  /* The selected row's ink leans halfway toward the accent's text step
+     (accent-12 is the ramp's contrast-safe ink, so legibility never suffers):
+     the whole line reads slightly "lit" by the selection. */
+  --color-text-selected: color-mix(in srgb, var(--accent-12) 50%, var(--color-text));
+
   /* Border colors */
   --color-border: var(--neutral-a7);
   --color-border-secondary: var(--neutral-a4);
@@ -152,6 +171,26 @@
     --color-bg-backdrop: #111111cc;
     --color-bg-overlay-backdrop: #222222cc;
     --color-bg-code-block: var(--neutral-a2);
+
+    /* Selected colors: the same wash over a white-LIFTED background. The
+       lift does the "selected" work (a lightened row is unmistakable on a
+       dark page, and guaranteed lighter than any dark hover wash); the accent
+       only names the color. Hover/active on the current nav row lift further. */
+    --color-bg-selected: color-mix(
+      in srgb,
+      var(--accent-9) 8%,
+      color-mix(in srgb, white 14%, var(--color-bg))
+    );
+    --color-bg-selected-hover: color-mix(
+      in srgb,
+      var(--accent-9) 8%,
+      color-mix(in srgb, white 18%, var(--color-bg))
+    );
+    --color-bg-selected-active: color-mix(
+      in srgb,
+      var(--accent-9) 8%,
+      color-mix(in srgb, white 22%, var(--color-bg))
+    );
 
     /* Border colors */
     --color-border-focus: var(--accent-11);
@@ -223,6 +262,19 @@
   --accent-a11: var(--sand-a11);
   --accent-a12: var(--sand-a12);
   --accent-contrast: #fff;
+}
+
+/* The neutral accent's selected wash keeps the same one-step-darker bias in
+ * the light scheme: an 8% sand-9 wash over the light bg would land within a
+ * step of the neutral hover surfaces, so it deepens to 15% (hover/active
+ * follow). Light-only — in dark the white lift already guarantees selection
+ * sits clear of the (darker) hover wash. */
+@media (prefers-color-scheme: light) {
+  [data-accent="neutral"] {
+    --color-bg-selected: color-mix(in srgb, var(--accent-9) 15%, var(--color-bg));
+    --color-bg-selected-hover: color-mix(in srgb, var(--accent-9) 19%, var(--color-bg));
+    --color-bg-selected-active: color-mix(in srgb, var(--accent-9) 23%, var(--color-bg));
+  }
 }
 
 [data-accent="green"] {

@@ -722,7 +722,7 @@ function ListItem({ node, children, className, ...props }: ListItemProps) {
   }, [hasNodePosition, markdownBody, nodeStart, nodeEnd, onChange])
 
   return (
-    <li {...props} className={cx("rounded-lg", isMenuOpen && "bg-bg-selection", className)}>
+    <li {...props} className={cx("rounded-lg", isMenuOpen && "bg-bg-selected", className)}>
       <div
         className={cx("flex p-1.5 gap-1.5 rounded-lg", {
           "relative pr-10 sm:fine:pr-[74px] coarse:pr-12 group/task": isTask && onChange,

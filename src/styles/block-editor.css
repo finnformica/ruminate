@@ -11,22 +11,17 @@
  * color fade lives on the line itself so it plays in both directions; at 100ms
  * it is perceptually instant on keyboard repeat.
  *
- * The surface is a LUMINOUS WASH, not a solid accent step: a modest accent
- * contribution color-mixed over the app background — and, in dark mode, over a
- * white-LIFTED background — so selection reads airy and lit-from-within rather
- * than as a color band. `color-mix(in srgb, …)` of opaque inputs is itself
- * computed-solid (opaque), so it keeps the two properties the old solid step
- * had: no alpha muddying over the warm sand background, and seamless
- * multi-select runs where adjacent selected surfaces deliberately overlap (the
- * run-edge sides carry a full -mt-1/pt-1-style 4px extension; see the runEdges
- * pairs in block-item.tsx). Every other side extends only 2px, so
- * differently-painted neighbours (a hover beside a selection) can never
- * overlap.
- *
- * Light: 10% accent-9 straight over the app bg (a white lift is invisible on a
- * light page). Dark: 9% accent-9 over an 11%-white lift of the app bg — the
- * lift does the "selected" work (guaranteed lighter than any dark hover wash),
- * the accent only names the color. */
+ * The colors are the app-wide selected tokens (`--color-bg-selected` /
+ * `--color-text-selected`, variables.css): a luminous accent wash over the app
+ * background — in dark over a white-lifted one — shared verbatim with the
+ * sidebar's current row, so one color means "selected" everywhere and follows
+ * the user's accent choice. The wash is computed-solid (opaque inputs), which
+ * keeps the two properties the old solid step had: no alpha muddying over the
+ * warm sand background, and seamless multi-select runs where adjacent selected
+ * surfaces deliberately overlap (the run-edge sides carry a full
+ * -mt-1/pt-1-style 4px extension; see the runEdges pairs in block-item.tsx).
+ * Every other side extends only 2px, so differently-painted neighbours (a
+ * hover beside a selection) can never overlap. */
 [data-block-line] {
   transition:
     background-color 100ms ease,
@@ -38,37 +33,14 @@
  * "Selection has its own color" in docs/design-principles.md).
  *
  * The `color` is the Notion-overlay text tint: the selected row's inherited
- * ink leans 9% toward the accent, so the whole line — body text and anything
+ * ink leans toward the accent, so the whole line — body text and anything
  * else that inherits — reads slightly "lit" by the selection. Elements that
  * set an explicit color (quote/done-todo secondary ink, tertiary markers,
  * code, links) naturally keep theirs. */
 .block-highlight,
 .list-highlight {
-  background-color: color-mix(in srgb, var(--accent-9) 10%, var(--color-bg));
-  color: color-mix(in srgb, var(--accent-9) 9%, var(--color-text));
-}
-
-/* The neutral (sand) accent keeps its historical one-step-darker bias, wash
- * style: 10% sand-9 over the light bg lands within a step of the neutral
- * hover surfaces, so neutral's wash deepens to 15%. Light-only — in dark the
- * white lift already guarantees selection sits clear of the (darker) hover
- * wash, and this (0,2,0) selector would otherwise outrank the dark rule
- * below. */
-@media (prefers-color-scheme: light) {
-  [data-accent="neutral"] :is(.block-highlight, .list-highlight) {
-    background-color: color-mix(in srgb, var(--accent-9) 15%, var(--color-bg));
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  .block-highlight,
-  .list-highlight {
-    background-color: color-mix(
-      in srgb,
-      var(--accent-9) 9%,
-      color-mix(in srgb, white 11%, var(--color-bg))
-    );
-  }
+  background-color: var(--color-bg-selected);
+  color: var(--color-text-selected);
 }
 
 /* ── Inactive selection ──────────────────────────────────────────────────────
@@ -86,8 +58,8 @@
  * inherited ink (`color: inherit`), so demotion also drains the color from
  * the text. Computed-solid, so multi-select runs keep merging seamlessly.
  * One accent-independent pair covers all five accents; for the Neutral
- * accent light it sits at two-thirds the strength of its 15% active wash.
- * Restore rides the 100ms fade on [data-block-line] — perceptually instant. */
+ * accent light it sits at two-thirds the strength of its 15% active wash
+ * (variables.css). Restore rides the 100ms fade on [data-block-line] — perceptually instant. */
 .block-highlight.block-highlight-inactive {
   background-color: color-mix(in srgb, var(--neutral-9) 10%, var(--color-bg));
   color: inherit;
