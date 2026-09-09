@@ -79,31 +79,27 @@ asks for it.
    defined for real in `tailwind.config.cjs`; it was previously a silent no-op).
    Headings tighten as they grow (1.25 at the top of the scale).
 6. **The key is the toggle; the guide hangs from it.** There is no collapse
-   gutter. A parent's chevron lives in its 15px marker slot and swaps in for
-   the key on hover (2), and the indent guide is a 1px rule under that slot's
-   centre — the slot starts 4px into the content column (the surface's reach),
-   so its centre is 11.5px in and the rule sits at 11px — with children
-   starting 24px in (`ml-[11px]` + rule + `pl-3`). A checkbox is a control in
-   its own right (a swap would leave a parent todo un-tickable) and a
-   paragraph or quote has no key at all, so those take the chevron _beside_
-   the content, hung just outside the highlight surface's left edge (-2px) so
-   it never crowds the checkbox or the first glyph; the guide of a keyless
-   block hangs from that edge (`-ml-0.5` + rule + `pl-[25px]`), where a
-   quote's own bar already runs, so it simply continues the bar. A parent
-   todo's checkbox slot _hints_ at the chevron beside it (hover the box and
-   the chevron shows, on its square), so the control is discoverable from the key
-   without the two ever sharing a click target; the beside square is painted
-   in the page colour so, nested, it sits on top of the parent's guide line
-   rather than tangling with it. The chevron's hover square is 20px wherever
-   it lives: inside the 27px-tall surface that
-   is an even ~3.5px inset on every side, because the key slot's centre sits
-   13.5px in from the surface's edge — the same as the surface's vertical
-   centre. Affordances float out of the flow (absolute/negative margin) so
-   hover never moves text.
-7. **One marker slot.** Every block marker — bullet dot, checkbox, ordered
-   number, heading `#` — occupies the same 15px slot (the checkbox's width):
-   dots center in it; numbers and the heading `#` right-align to its edge.
-   Body text therefore starts at one column across all marked block types.
+   gutter. Every block type carries a key in its 15px marker slot — a bullet
+   or todo dot, a heading `#`, a number, a paragraph `¶`, a quote `>` — and a
+   parent's chevron lives in that slot and swaps in for the key on hover (2).
+   The indent guide is a 1px rule under the slot's centre — the slot starts
+   4px into the content column (the surface's reach), so its centre is 11.5px
+   in and the rule sits at 11px — with children starting 24px in (`ml-[11px]`
+   - rule + `pl-3`), so a guide never hangs from anything but a key and the
+     markers never sit off the lines. A checkbox is a control in its own right
+     (a swap would leave a parent todo un-tickable), so it never lives in the
+     slot: a todo keys on a dot like any list item and its checkbox follows the
+     slot, inline, before the text. The chevron's hover square is 20px, with
+     the small (4px) radius: inside the 27px-tall surface that is an even
+     ~3.5px inset on every side, because the key slot's centre sits 13.5px in
+     from the surface's edge — the same as the surface's vertical centre.
+     Affordances float out of the flow (absolute/negative margin) so hover
+     never moves text.
+7. **One marker slot.** Every block marker — bullet and todo dot, ordered
+   number, heading `#`, paragraph `¶`, quote `>` — occupies the same 15px slot
+   (the checkbox's width): dots centre in it; text glyphs right-align to its
+   edge. Body text therefore starts at one column across all block types
+   (a todo's text sits one checkbox further in).
    The grey `#` is one component (`Hash`) everywhere it appears — note title,
    zoom title, section headings — with no typography of its own: it inherits
    its parent's scale (the titles' 3xl, each heading's depth size and bold),
@@ -151,9 +147,8 @@ _is_ the page — keeping a full step between it and its depth-0 children.
 - **Headings breathe above:** top margin scales with the heading — 20 / 16 / 10 /
   6px by depth. Space belongs _above_ a heading (it opens a section), never
   below.
-- **Indent unit:** 24px per level (`ml-[11px]` + 1px rule + `pl-3`; a keyless
-  block: `-ml-0.5` + rule + `pl-[25px]`), guide line under the key at 11px, or
-  at the surface's edge (-2px) without one.
+- **Indent unit:** 24px per level (`ml-[11px]` + 1px rule + `pl-3`), guide
+  line under the key at 11px — every block type has one.
 - **Highlight inset:** highlighted line surfaces give the text 6px of
   horizontal breathing room (symmetric — 6px inner padding each side, the
   surface extending 2px past the text column on both, via `-mx-0.5 px-1.5`;
@@ -210,7 +205,7 @@ full-width highlight.)
 | Muted        | `--color-text-secondary`   | quotes, done todos, ordered numbers, crumbs                                            |
 | Faint        | `--color-text-tertiary`    | bullet dots, chevron, placeholders, `#`                                                |
 | Guide        | `--color-border-secondary` | indent guide lines (rest state)                                                        |
-| Structure    | `--color-border` (a7)      | quote bar, unchecked checkbox border                                                   |
+| Structure    | `--color-border` (a7)      | unchecked checkbox border                                                              |
 | Hover        | `--neutral-a2` tint        | non-selected block lines under the pointer                                             |
 | Selection    | `--color-bg-selected`      | selected block(s), list highlight — accent-9 wash: 13% light; dark 8% over an 18% lift |
 | Selected ink | `--color-text-selected`    | ink on a selected row — 50% toward accent-12                                           |

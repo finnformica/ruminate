@@ -82,9 +82,9 @@ export const NestedTodo: Story = {
   args: { initial: "[ ] Parent todo\n  id:: blk_pt\n  - child bullet\n    id:: blk_pc\n" },
 }
 
-/** Todo and paragraph parents nested under a bullet: their beside chevron
- * sits in the gutter, on the parent's guide line. */
-export const NestedBesideParents: Story = {
+/** Todo and paragraph parents nested under a bullet: a todo keys on a dot
+ * with its checkbox inline after it; a paragraph keys on `¶`. */
+export const NestedParents: Story = {
   args: {
     initial: [
       "- Bullet parent",

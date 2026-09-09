@@ -245,8 +245,8 @@ describe("BlockEditor focus + keyboard", () => {
     const { container } = render(<Harness initial={"A\nB\nC"} />)
     const root = editorRoot(container)
     fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true })
-    const highlighted = Array.from(container.querySelectorAll(".bg-bg-secondary")).map(
-      (el) => el.textContent,
+    const highlighted = Array.from(container.querySelectorAll(".bg-bg-secondary")).map((el) =>
+      lineBody(el),
     )
     expect(highlighted).toEqual(["A", "B"])
   })
@@ -1058,9 +1058,9 @@ describe("heading hash marker", () => {
 })
 
 describe("collapse toggle", () => {
-  // One parent per marker family plus a leaf: the toggle either SWAPS for the
-  // key (bullet / heading / number) or sits BESIDE the content (checkbox,
-  // paragraph, quote), and the guide line hangs from the key.
+  // One parent per marker family plus a leaf: the toggle SWAPS for the key —
+  // every block type has one (dot, `#`, number, `¶`, `>`; a todo's checkbox
+  // sits after the slot) — and the guide line hangs from the key.
   const OUTLINE = [
     "- Bullet parent",
     "  id:: blk_bp",
@@ -1127,20 +1127,36 @@ describe("collapse toggle", () => {
     expect(line.querySelector(".block-key")).toBeNull()
   })
 
-  it("a todo parent keeps its checkbox and takes the toggle beside the content", () => {
+  it("a todo parent keys on a dot like a bullet; its checkbox follows the slot, inline", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
     const line = lineOf(container, "blk_tp")
+    const toggle = toggleOf(container, "blk_tp")!
+    const slot = toggle.parentElement!
+    expect(slot.className).toContain("w-[15px]")
+    expect(slot.querySelector(".block-key")).not.toBeNull()
+    // The checkbox is a control, so it never shares the key slot: it sits in
+    // the next flex child, before the content.
     const checkbox = line.querySelector('input[type="checkbox"]')!
     expect(checkbox).not.toBeNull()
-    const slot = checkbox.closest(".block-toggle-hint")!
-    expect(slot).not.toBeNull()
-    expect(slot.querySelector("button")).toBeNull()
-    const toggle = toggleOf(container, "blk_tp")!
-    expect(toggle.parentElement!.className).toContain("-left-5")
-    // The beside slot follows the checkbox slot, so its hover can hint at it.
-    expect(slot.nextElementSibling).toBe(toggle.parentElement)
-    // Paragraphs have no key at all, so theirs sits beside too.
-    expect(toggleOf(container, "blk_pp")!.parentElement!.className).toContain("-left-5")
+    expect(slot.contains(checkbox)).toBe(false)
+    expect(slot.nextElementSibling!.contains(checkbox)).toBe(true)
+  })
+
+  it("paragraph and quote parents key on a glyph in the same slot", () => {
+    const { container } = render(<Harness initial={OUTLINE} />)
+    const slot = toggleOf(container, "blk_pp")!.parentElement!
+    expect(slot.getAttribute("data-testid")).toBe("paragraph-glyph")
+    expect(slot.className).toContain("w-[15px]")
+    expect(slot.querySelector(".block-key")?.textContent).toBe("¶")
+    // Leaves carry the glyph too — it is the block's marker, not a toggle hint.
+    const { container: c2 } = render(
+      <Harness initial={"A paragraph\n  id:: blk_p\n> A quote\n  id:: blk_q\n"} />,
+    )
+    expect(lineOf(c2, "blk_p").querySelector('[data-testid="paragraph-glyph"]')?.textContent).toBe(
+      "¶",
+    )
+    expect(lineOf(c2, "blk_q").querySelector('[data-testid="quote-glyph"]')?.textContent).toBe(">")
+    expect(toggleOf(c2, "blk_p")).toBeNull()
   })
 
   it("clicking the toggle collapses and expands, pinning the chevron while collapsed", () => {
@@ -1159,14 +1175,12 @@ describe("collapse toggle", () => {
     expect(toggleOf(container, "blk_bp")!.className).not.toContain("block-toggle-pinned")
   })
 
-  it("hangs the guide line from the key, or from the surface edge without one", () => {
+  it("hangs the guide line from the key of every block type", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
-    // Keyed blocks (a checkbox is a key too): under the 15px slot's centre.
-    for (const id of ["blk_bp", "blk_hp", "blk_tp"]) {
+    // Under the 15px slot's centre — every block type has a key there.
+    for (const id of ["blk_bp", "blk_hp", "blk_tp", "blk_pp"]) {
       expect(guideOf(container, id)!.className, id).toContain("ml-[11px] pl-3")
     }
-    // A paragraph has no key: the guide continues the surface's left edge.
-    expect(guideOf(container, "blk_pp")!.className).toContain("-ml-0.5 pl-[25px]")
     expect(guideOf(container, "blk_leaf")).toBeNull()
   })
 })
@@ -1277,8 +1291,8 @@ describe("duplicate + move via keyboard", () => {
     const lines = md.split("\n").filter((l) => !l.includes("id::") && l.trim() !== "")
     expect(lines).toEqual(["A", "B", "A", "B", "C"])
     // The copies are selected as a range.
-    const highlighted = Array.from(container.querySelectorAll(".bg-bg-secondary")).map(
-      (el) => el.textContent,
+    const highlighted = Array.from(container.querySelectorAll(".bg-bg-secondary")).map((el) =>
+      lineBody(el),
     )
     expect(highlighted).toEqual(["A", "B"])
   })
