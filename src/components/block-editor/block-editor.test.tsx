@@ -1059,9 +1059,9 @@ describe("heading hash marker", () => {
 
 describe("collapse toggle", () => {
   // One parent per marker family plus a leaf: the toggle SWAPS for the key
-  // (dot, `#`, number, `>`), sits in a paragraph's empty slot, and is absent
-  // on a todo (its checkbox fills the slot); the guide line hangs from the
-  // slot either way.
+  // (dot, `#`, number, `>`), sits in a paragraph's empty slot, and sits
+  // BESIDE a todo's checkbox (a control never swaps out); the guide line
+  // hangs from the slot either way.
   const OUTLINE = [
     "- Bullet parent",
     "  id:: blk_bp",
@@ -1097,15 +1097,13 @@ describe("collapse toggle", () => {
 
   it("only parents carry a toggle; there is no separate gutter", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
-    for (const id of ["blk_bp", "blk_hp", "blk_pp"]) {
+    for (const id of ["blk_bp", "blk_hp", "blk_tp", "blk_pp"]) {
       expect(toggleOf(container, id), id).not.toBeNull()
     }
-    // A todo parent has none: its checkbox fills the slot (keyboard folds it).
-    expect(toggleOf(container, "blk_tp")).toBeNull()
     expect(toggleOf(container, "blk_leaf")).toBeNull()
-    // Exactly one toggle per chevron-bearing parent — the old always-rendered
-    // gutter button (opacity-0 on leaves) is gone, so labels are unambiguous.
-    expect(container.querySelectorAll('button[aria-label="Collapse"]')).toHaveLength(3)
+    // Exactly one toggle per parent — the old always-rendered gutter button
+    // (opacity-0 on leaves) is gone, so labels are unambiguous.
+    expect(container.querySelectorAll('button[aria-label="Collapse"]')).toHaveLength(4)
   })
 
   it("a bullet parent's toggle shares the marker slot with the dot, which becomes the key", () => {
@@ -1130,18 +1128,24 @@ describe("collapse toggle", () => {
     expect(line.querySelector(".block-key")).toBeNull()
   })
 
-  it("a todo parent keeps its checkbox in the slot and carries no chevron", () => {
+  it("a todo parent keeps its checkbox in the slot and takes the chevron beside it", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
     const line = lineOf(container, "blk_tp")
     const checkbox = line.querySelector('input[type="checkbox"]')!
     expect(checkbox).not.toBeNull()
-    expect(checkbox.parentElement!.className).toContain("w-[15px]")
-    expect(line.querySelector("button")).toBeNull()
-    // Still folds from the keyboard.
-    const root = editorRoot(container)
-    selectNth(root, 4) // Todo parent
-    fireEvent.keyDown(root, { key: " " })
+    const slot = checkbox.parentElement!
+    expect(slot.className).toContain("w-[15px]")
+    // The checkbox slot is not a hover area and holds no button.
+    expect(slot.className).not.toContain("block-toggle-slot")
+    expect(slot.querySelector("button")).toBeNull()
+    // The chevron hangs beside, outside the surface, with no hover surface.
+    const toggle = toggleOf(container, "blk_tp")!
+    expect(toggle.parentElement!.className).toContain("-left-5")
+    expect(toggle.className).toContain("enabled:hover:bg-transparent")
+    // It folds on click and pins while collapsed.
+    fireEvent.click(toggle)
     expect(container.querySelector('[data-block-row="blk_tc"]')).toBeNull()
+    expect(toggleOf(container, "blk_tp")!.className).toContain("block-toggle-pinned")
   })
 
   it("a paragraph parent's slot is empty but keeps the column and hosts the chevron", () => {

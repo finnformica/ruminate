@@ -88,8 +88,8 @@
 /* ── Collapse toggle reveal ──────────────────────────────────────────────────
  * A parent's collapse chevron lives in its marker slot — the key there (dot,
  * `#`, number, `>`) swaps for it; a paragraph's empty slot simply hosts it; a
- * todo's checkbox fills its slot and a todo has no chevron — see
- * block-item.tsx.
+ * todo's checkbox fills its slot, so its chevron sits beside, in the gutter —
+ * see block-item.tsx.
  * It is invisible until the pointer is over the CONTROL'S OWN AREA — the
  * 20px square, never the whole row — so the chevron and its hover surface
  * appear together, and a row can be read and edited without chrome
@@ -161,8 +161,9 @@
     border-color 150ms ease;
 }
 
-/* Coarse pointers: a 15px box is a small tap target, so its hit area grows to
- * ~35px through a pseudo-element (drawn size unchanged). */
+/* Coarse pointers: a 15px box is a small tap target, so its hit area grows
+ * through a pseudo-element (drawn size unchanged) — less to the LEFT, where a
+ * parent todo's always-showing chevron square ends 1px short of the box. */
 @media (pointer: coarse) {
   .block-checkbox {
     position: relative;
@@ -170,7 +171,7 @@
   .block-checkbox::before {
     content: "";
     position: absolute;
-    inset: -10px;
+    inset: -10px -10px -10px -2px;
   }
 }
 

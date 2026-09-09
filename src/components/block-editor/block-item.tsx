@@ -466,20 +466,22 @@ export function BlockItem({
 
   // Whether this block owns a collapse toggle at all: parents only, and never
   // the zoom title (the editor renders its children itself, at depth 0).
-  // A todo never has one: its checkbox fills the slot, and a control never
-  // swaps out (that would leave a parent todo un-tickable) — a parent todo
-  // folds from the keyboard (Space, ←) only.
-  const hasToggle = hasChildren && !zoomTitle && type.kind !== "todo"
+  const hasToggle = hasChildren && !zoomTitle
   // Every block type owns the 15px marker slot. Most carry a KEY there — a
   // bullet dot, heading `#`, number, quote `>` — and the key is pure chrome,
   // so on a parent it SWAPS for the chevron: hover the slot and the key fades
   // out while the chevron fades in, in the same slot — nothing moves. A
-  // paragraph's slot is empty (its text still starts in the shared column);
-  // a todo's holds the checkbox.
+  // paragraph's slot is empty (its text still starts in the shared column).
+  // A todo's slot holds its checkbox — a control, which never swaps out (that
+  // would leave a parent todo un-tickable) — so a parent todo's chevron sits
+  // BESIDE the slot instead, in the gutter just outside the highlight
+  // surface: same reveal (hover its own square), same pin while collapsed.
+  const toggleBeside = hasToggle && type.kind === "todo"
 
   // The chevron. `.block-toggle` (block-editor.css) keeps it invisible until
-  // its own square — the key slot; never the whole row — is hovered (or, on a
-  // device with nothing to hover with, always) —
+  // its own square — the key slot, or the gutter square beside a todo; never
+  // the whole row — is hovered (or, on a device with nothing to hover with,
+  // always) —
   // except on a COLLAPSED block, which pins it visible so hidden content is
   // never a secret. It floats out of the flow, centred on whatever slot holds
   // it, so the reveal never shifts the text. Centred by its own midpoint
@@ -495,7 +497,8 @@ export function BlockItem({
   // (a 23px line + 2px each side) and the key slot's centre is 13.5px in
   // from its left edge (2px reach + 6px padding + half of 15px) — the same
   // distance as the surface's vertical centre, so the square inset matches
-  // horizontally and vertically.
+  // horizontally and vertically. Beside a todo the same square hangs outside
+  // the surface, its right edge on the surface's left edge.
   const toggle = hasToggle ? (
     <IconButton
       aria-label={isCollapsed ? "Expand" : "Collapse"}
@@ -512,6 +515,10 @@ export function BlockItem({
         // 40px-tall padded bar (which would overlap neighbouring rows and
         // squeeze the glyph); it still sits inside the surface.
         "h-5 w-5 coarse:h-7 coarse:w-7 coarse:px-0",
+        // Beside a todo the square is a hit area only — no hover surface, so
+        // it never clashes with the checkbox, the highlight or a guide line
+        // it sits on; the chevron's own fade-in is the whole reveal.
+        toggleBeside && "enabled:hover:bg-transparent enabled:active:bg-transparent",
         isCollapsed && "block-toggle-pinned",
       )}
     >
@@ -525,7 +532,15 @@ export function BlockItem({
           isCollapsed ? "rotate-0" : "rotate-90",
         )}
       >
-        <path d="M2 1l4 3-4 3z" fill="currentColor" />
+        {/* A filled triangle with softened corners: the fill plus a round-
+            joined stroke of the same ink, which rounds the three points. */}
+        <path
+          d="M2.6 1.6l3.2 2.4-3.2 2.4z"
+          fill="currentColor"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinejoin="round"
+        />
       </svg>
     </IconButton>
   ) : null
@@ -533,8 +548,9 @@ export function BlockItem({
   // hidden outright while collapsed (the pinned chevron stands in for it).
   const keyClass = hasToggle ? cx("block-key", isCollapsed && "block-key-hidden") : undefined
   // The slot of a swapping parent is the chevron's hover area (see
-  // `.block-toggle-slot` in block-editor.css).
-  const slotClass = hasToggle ? "block-toggle-slot" : undefined
+  // `.block-toggle-slot` in block-editor.css). Not a todo's: its chevron is
+  // beside, and hovering the checkbox must mean the checkbox.
+  const slotClass = hasToggle && !toggleBeside ? "block-toggle-slot" : undefined
 
   // List markers double as zoom targets (Logseq-style: click the bullet to
   // make this block the page) — on leaves. A parent's key is its collapse
@@ -602,8 +618,9 @@ export function BlockItem({
   const marker =
     type.kind === "todo" ? (
       // The checkbox IS the todo's marker — a control in the key slot, which
-      // is why a todo carries no collapse chevron. On coarse pointers the box
-      // grows its own tap area (`.block-checkbox::before`, block-editor.css).
+      // is why a parent todo's chevron sits beside it (see `toggleBeside`).
+      // On coarse pointers the box grows its own tap area
+      // (`.block-checkbox::before`, block-editor.css).
       <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
         <input
           type="checkbox"
@@ -729,6 +746,24 @@ export function BlockItem({
           )}
         >
           {marker}
+          {toggleBeside ? (
+            // The beside toggle: a 20px slot (the chevron's square) hung
+            // fully OUTSIDE the surface, its right edge on the surface's left
+            // edge, on the block's first line — 6px clear of the checkbox.
+            // `typo` + h-[1lh] size the slot to that line whatever the scale;
+            // the top offset mirrors the line's own vertical padding. Nested,
+            // it sits on the parent's guide line; with no hover surface the
+            // chevron simply reads as a node on it.
+            <span
+              className={cx(
+                "absolute -left-5 h-[1lh] w-5",
+                runEdges?.top ? "top-1" : "top-0.5",
+                typo,
+              )}
+            >
+              {toggle}
+            </span>
+          ) : null}
           {type.kind === "quote" ? (
             // The quote's bar stands at the text column — where every other
             // block's text begins — and pushes the quote's text 10px in (bar

@@ -88,12 +88,17 @@ asks for it.
    24px in (`ml-[11px]` + rule + `pl-3`), so a guide never hangs from
    anything but a slot and the markers never sit off the lines. A checkbox is
    a control in its own right (a swap would leave a parent todo un-tickable),
-   so a todo carries no chevron at all: it folds from the keyboard. The
-   chevron's hover square is 20px, with the small (4px) radius: inside the
-   27px-tall surface that is an even ~3.5px inset on every side, because the
-   slot's centre sits 13.5px in from the surface's edge — the same as the
-   surface's vertical centre. Affordances float out of the flow
-   (absolute/negative margin) so hover never moves text.
+   so a parent todo's chevron sits _beside_ the slot, in the gutter just
+   outside the highlight surface, 6px clear of the box — same reveal (hover
+   its own square), same pin while collapsed — and that square is a hit area
+   only, with no hover surface, so it never clashes with the box, the
+   highlight or a guide line it sits on. The chevron's hover square is 20px,
+   with the small (4px) radius: inside the 27px-tall surface that is an even
+   ~3.5px inset on every side, because the slot's centre sits 13.5px in from
+   the surface's edge — the same as the surface's vertical centre. The
+   chevron itself is a filled triangle with softened corners. Affordances
+   float out of the flow (absolute/negative margin) so hover never moves
+   text.
 7. **One marker slot.** Every block marker — bullet dot, checkbox, ordered
    number, heading `#`, quote `>` — occupies the same 15px slot (the
    checkbox's width): dots centre in it; text glyphs right-align to its edge;
