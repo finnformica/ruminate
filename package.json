@@ -43,7 +43,7 @@
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "@tanstack/react-router": "^1.112.18",
     "buffer": "^6.0.3",
-    "chrono-node": "^2.7.0",
+    "chrono-node": "^2.10.1",
     "clsx": "^2.1.0",
     "cmdk": "^0.2.0",
     "copy-to-clipboard": "^3.3.3",
