@@ -94,6 +94,7 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   turnIntoTodo: "Turn into a todo (again: back to a paragraph)",
   turnIntoQuote: "Turn into a quote (again: back to a paragraph)",
   turnIntoOrdered: "Turn into a numbered item (again: back to a paragraph)",
+  turnIntoCode: "Turn the block into a code block (```lang then Enter)",
   jumpLevelTop: "Jump to the top of the current level",
   jumpLevelBottom: "Jump to the bottom of the current level",
   moveBlockUp: "Move the block up (with its subtree)",

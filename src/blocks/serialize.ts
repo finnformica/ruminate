@@ -34,6 +34,21 @@ const codeLanguage = (block: Block): string => {
   return typeof language === "string" ? language : ""
 }
 
+/**
+ * A block's own content lines, unindented: the marker plus its text, with a
+ * multi-line text's continuation lines after; a code block as a fence
+ * carrying its language. What `serialize` writes before the `id::` line, and
+ * what copy writes for a selection.
+ */
+export function blockLines(block: Block, olPosition = 1): string[] {
+  if (block.type === "code") {
+    return [`\`\`\`${codeLanguage(block)}`, ...block.text.split("\n"), "```"]
+  }
+  const [first, ...rest] = block.text.split("\n")
+  // The content line (empty text → just the marker, so depth is preserved).
+  return [`${markerFor(block.type, olPosition)}${first}`, ...rest]
+}
+
 export function serialize(doc: BlockDoc): string {
   const lines: string[] = []
 
@@ -49,16 +64,7 @@ export function serialize(doc: BlockDoc): string {
     if (!block) return
     const indent = "  ".repeat(depth)
 
-    if (block.type === "code") {
-      lines.push(`${indent}\`\`\`${codeLanguage(block)}`)
-      for (const line of block.text.split("\n")) lines.push(`${indent}${line}`)
-      lines.push(`${indent}\`\`\``)
-    } else {
-      const [first, ...rest] = block.text.split("\n")
-      // The content line (empty text → just the marker, so depth is preserved).
-      lines.push(`${indent}${markerFor(block.type, olPosition)}${first}`)
-      for (const line of rest) lines.push(`${indent}${line}`)
-    }
+    for (const line of blockLines(block, olPosition)) lines.push(`${indent}${line}`)
     lines.push(`${indent}  id:: ${block.id}`)
 
     if (depth + 1 >= MAX_SERIALIZE_DEPTH) return

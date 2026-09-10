@@ -25,9 +25,11 @@ export function BlockContent({ content }: { content: string }) {
           </a>
         ),
         code: ({ children }) => (
-          // py is a hairline so the chip never inflates the line box (which
-          // would break the pixel-identical view/edit swap).
-          <code className="rounded-sm bg-bg-secondary box-decoration-clone px-1 py-px font-mono text-[0.9em]">
+          // The inline code chip: a bordered, tinted pill in the mono face,
+          // a touch smaller than the text around it (the Linear / Notion
+          // idiom). py is a hairline so the chip never inflates the line box
+          // (which would break the pixel-identical view/edit swap).
+          <code className="rounded-md border border-border-secondary bg-[var(--color-bg-code-block)] box-decoration-clone px-1.5 py-px font-mono text-[0.85em]">
             {children}
           </code>
         ),
