@@ -504,12 +504,30 @@ describe("qualifier suggestions", () => {
     expect(screen.getByTestId("qualifier-suggestions").textContent).toContain("work")
   })
 
-  it("Escape closes it and leaves the query as typed", () => {
+  it("Escape closes it and leaves the query as typed — the palette stays open", () => {
     renderMenu({ open: true })
     const input = type("type:")
     fireEvent.keyDown(input, { key: "Escape" })
     expect(screen.queryByTestId("qualifier-suggestions")).toBeNull()
     expect(input.value).toBe("type:")
+    // The dialog's own Escape (close) must not fire for the picker's Escape.
+    expect(screen.getByPlaceholderText("Search or jump to…")).toBe(input)
+    expect(input.isConnected).toBe(true)
+  })
+
+  it("points the palette's input at the highlighted row, and hands cmdk its ARIA back", () => {
+    renderMenu({ open: true })
+    const input = commandsInput()
+    const cmdkControls = input.getAttribute("aria-controls")
+    type("type:")
+    const list = screen.getByTestId("qualifier-suggestions")
+    expect(input.getAttribute("aria-controls")).toBe(list.id)
+    const rows = list.querySelectorAll('[role="option"]')
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    expect(input.getAttribute("aria-activedescendant")).toBe(rows[1].id)
+    fireEvent.keyDown(input, { key: "Escape" })
+    expect(input.getAttribute("aria-controls")).toBe(cmdkControls)
+    expect(input.getAttribute("aria-activedescendant")).toBeNull()
   })
 
   it("stays shut for plain text and for unknown keys", () => {

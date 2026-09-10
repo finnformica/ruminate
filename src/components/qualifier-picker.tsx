@@ -1,6 +1,10 @@
 import React from "react"
 import { useValueRef } from "../hooks/value-ref"
-import { QualifierSuggestions, useQualifierSuggestions } from "./qualifier-suggestions"
+import {
+  QualifierSuggestions,
+  useComboboxAria,
+  useQualifierSuggestions,
+} from "./qualifier-suggestions"
 
 /**
  * The qualifier picker for a plain search box (`SearchInput`): hangs the
@@ -27,6 +31,7 @@ export default function QualifierPicker({
   const [caret, setCaret] = React.useState<number | null>(null)
   const [focused, setFocused] = React.useState(false)
   const suggestions = useQualifierSuggestions({ value, caret: focused ? caret : null })
+  useComboboxAria(inputRef, suggestions)
   const handleKeyDown = useValueRef(suggestions.handleKeyDown)
   const pick = useValueRef(onPick)
 
@@ -73,6 +78,7 @@ export default function QualifierPicker({
   if (!suggestions.visible || !suggestions.trigger) return null
   return (
     <QualifierSuggestions
+      id={suggestions.listboxId}
       variant="floating"
       trigger={suggestions.trigger}
       items={suggestions.items}

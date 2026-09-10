@@ -126,6 +126,22 @@ describe("search input suggestions", () => {
     document.removeEventListener("keydown", seen)
   })
 
+  it("tells assistive technology which row is highlighted, without moving focus", async () => {
+    const { input } = renderInput()
+    type(input, "in:")
+    const list = await findPicker()
+    expect(input.getAttribute("aria-controls")).toBe(list.id)
+    expect(input.getAttribute("aria-expanded")).toBe("true")
+    const rows = list.querySelectorAll('[role="option"]')
+    expect(input.getAttribute("aria-activedescendant")).toBe(rows[0].id)
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    expect(input.getAttribute("aria-activedescendant")).toBe(rows[1].id)
+    expect(document.activeElement).toBe(input)
+    fireEvent.keyDown(input, { key: "Escape" })
+    expect(input.getAttribute("aria-activedescendant")).toBeNull()
+    expect(input.getAttribute("aria-expanded")).toBeNull()
+  })
+
   it("closes once the value is typed out in full", async () => {
     const { input } = renderInput()
     type(input, "type:quot")

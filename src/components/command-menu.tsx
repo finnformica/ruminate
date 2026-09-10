@@ -34,7 +34,11 @@ import {
   TagIcon16,
 } from "./icons"
 import { NoteFavicon } from "./note-favicon"
-import { QualifierSuggestions, useQualifierSuggestions } from "./qualifier-suggestions"
+import {
+  QualifierSuggestions,
+  useComboboxAria,
+  useQualifierSuggestions,
+} from "./qualifier-suggestions"
 import { ScopePill } from "./scope-pill"
 import { SearchResults, blockHitNavigation, resultRowValue } from "./search-results"
 
@@ -91,6 +95,7 @@ export function CommandMenu() {
     caret: mode === "commands" ? caret : null,
     currentNoteId: noteId,
   })
+  useComboboxAria(inputRef, suggestions)
   // A pick moves the caret past the token; the DOM is told after the render
   // that writes the new value.
   const pendingCaret = useRef<number | null>(null)
@@ -582,6 +587,7 @@ export function CommandMenu() {
 
         {suggestions.visible && suggestions.trigger ? (
           <QualifierSuggestions
+            id={suggestions.listboxId}
             variant="inline"
             trigger={suggestions.trigger}
             items={suggestions.items}

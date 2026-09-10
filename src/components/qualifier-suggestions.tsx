@@ -13,6 +13,7 @@ import {
   type QualifierTrigger,
 } from "../utils/qualifier-suggestions"
 import { TagIcon16 } from "./icons"
+import { Keys } from "./keys"
 import { NoteFavicon } from "./note-favicon"
 
 /**
@@ -113,6 +114,15 @@ export function useQualifierSuggestions({
     items[0].value.toLowerCase() === trigger.partial.trim().toLowerCase()
   const visible = trigger !== null && items.length > 0 && !complete && dismissed !== tokenKey
 
+  // The listbox and its rows carry ids so the input can point at the
+  // highlighted row (`aria-activedescendant`, see `useComboboxAria`): a
+  // screen reader then reads the row as the arrows move, though focus never
+  // leaves the box.
+  const listboxId = React.useId()
+  const activeOptionId = visible
+    ? optionId(listboxId, Math.min(activeIndex, items.length - 1))
+    : null
+
   const pick = React.useCallback(
     (item: SuggestionItem, at: QualifierTrigger | null = trigger) => {
       if (!at) return null
@@ -156,7 +166,64 @@ export function useQualifierSuggestions({
     [visible, items, activeIndex, pick, tokenKey],
   )
 
-  return { visible, trigger, items, activeIndex, setActiveIndex, handleKeyDown, pick }
+  return {
+    visible,
+    trigger,
+    items,
+    activeIndex,
+    setActiveIndex,
+    handleKeyDown,
+    pick,
+    listboxId,
+    activeOptionId,
+  }
+}
+
+/** The DOM id of one row of the listbox. */
+function optionId(listboxId: string, index: number): string {
+  return `${listboxId}-option-${index}`
+}
+
+/**
+ * Make the input read as the combobox the picker belongs to — for the whole
+ * time the picker is open, and only then: `aria-expanded`, `aria-controls`
+ * pointing at the listbox, and `aria-activedescendant` following the
+ * highlighted row, so assistive technology announces each row as the arrows
+ * move while keyboard focus stays in the box. Set on the element directly
+ * (the palette's input belongs to cmdk, which owns its ARIA props) and put
+ * back exactly as found when the picker closes.
+ */
+export function useComboboxAria(
+  inputRef: React.RefObject<HTMLInputElement>,
+  {
+    visible,
+    listboxId,
+    activeOptionId,
+  }: { visible: boolean; listboxId: string; activeOptionId: string | null },
+) {
+  React.useEffect(() => {
+    const input = inputRef.current
+    if (!input || !visible) return
+    const names = ["role", "aria-expanded", "aria-controls", "aria-autocomplete"] as const
+    const previous = names.map((name) => [name, input.getAttribute(name)] as const)
+    input.setAttribute("role", "combobox")
+    input.setAttribute("aria-expanded", "true")
+    input.setAttribute("aria-controls", listboxId)
+    input.setAttribute("aria-autocomplete", "list")
+    return () => {
+      for (const [name, value] of previous) {
+        if (value === null) input.removeAttribute(name)
+        else input.setAttribute(name, value)
+      }
+    }
+  }, [inputRef, visible, listboxId])
+
+  React.useEffect(() => {
+    const input = inputRef.current
+    if (!input) return
+    if (visible && activeOptionId) input.setAttribute("aria-activedescendant", activeOptionId)
+    else input.removeAttribute("aria-activedescendant")
+  }, [inputRef, visible, activeOptionId])
 }
 
 /** The group label for a key: the qualifier as typed, so the row reads as
@@ -172,6 +239,7 @@ function headingFor(trigger: QualifierTrigger): string {
  * list. Mousedown is cancelled so a click never blurs the input.
  */
 export function QualifierSuggestions({
+  id,
   trigger,
   items,
   activeIndex,
@@ -179,6 +247,8 @@ export function QualifierSuggestions({
   onHover,
   onPick,
 }: {
+  /** The listbox's id (the input's `aria-controls`). */
+  id: string
   trigger: QualifierTrigger
   items: SuggestionItem[]
   activeIndex: number
@@ -196,6 +266,7 @@ export function QualifierSuggestions({
   return (
     <div
       ref={listRef}
+      id={id}
       role="listbox"
       aria-label="Suggestions"
       data-testid="qualifier-suggestions"
@@ -208,8 +279,20 @@ export function QualifierSuggestions({
       )}
       onMouseDown={(event) => event.preventDefault()}
     >
-      <div className="flex h-7 items-center px-2 font-mono text-sm text-text-tertiary">
-        {headingFor(trigger)}
+      <div className="flex h-7 items-center gap-3 px-2 text-sm text-text-tertiary">
+        <span className="font-mono">{headingFor(trigger)}</span>
+        {/* The keys are the box's — say so, since nothing here takes focus. */}
+        <span aria-hidden className="ml-auto flex shrink-0 items-center gap-2 text-xs">
+          <span className="flex items-center gap-1">
+            <Keys keys={["↑", "↓"]} className="text-text-tertiary" /> move
+          </span>
+          <span className="flex items-center gap-1">
+            <Keys keys={["↵"]} className="text-text-tertiary" /> pick
+          </span>
+          <span className="flex items-center gap-1">
+            <Keys keys={["esc"]} className="text-text-tertiary" /> close
+          </span>
+        </span>
       </div>
       {items.map((item, index) => {
         const active = index === activeIndex
@@ -219,6 +302,7 @@ export function QualifierSuggestions({
           // eslint-disable-next-line jsx-a11y/click-events-have-key-events
           <div
             key={item.value}
+            id={optionId(id, index)}
             role="option"
             aria-selected={active}
             tabIndex={-1}
