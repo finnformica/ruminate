@@ -23,12 +23,13 @@ function fixture(): BlockDoc {
   }
 }
 
+/** Command input for the row `key` (an occurrence key: `b/b1` is b1 under b). */
 function input(
   doc: BlockDoc,
-  id: string,
-  over: Partial<Omit<CommandInput, "doc" | "id">> = {},
+  key: string,
+  over: Partial<Omit<CommandInput, "doc" | "key">> = {},
 ): CommandInput {
-  return { doc, id, mode: "select", visibleOrder: ["a", "b", "b1", "c"], ...over }
+  return { doc, key, mode: "select", visibleOrder: ["a", "b", "b/b1", "c"], ...over }
 }
 
 function caret(value: string, start: number, end = start, lines = {}): CaretInput {
@@ -49,14 +50,15 @@ describe("indent / outdent", () => {
     expect(result.handled).toBe(true)
     expect(result.doc!.blocks.b.children).toEqual(["b1", "c"])
     expect(result.doc!.rootBlockIds).toEqual(["a", "b"])
-    expect(result.focus).toEqual({ mode: "select", id: "c" })
+    // Focus follows the row to where it went.
+    expect(result.focus).toEqual({ mode: "select", key: "b/c" })
   })
 
   it("keeps edit focus and the caret position when indenting in edit mode", () => {
     const doc = fixture()
     const result = runCommand("indent", input(doc, "c", { mode: "edit", caret: caret("C", 1) }))
     // The caret rides along with the block rather than jumping to its end.
-    expect(result.focus).toEqual({ mode: "edit", id: "c", caret: 1 })
+    expect(result.focus).toEqual({ mode: "edit", key: "b/c", caret: 1 })
   })
 
   it("consumes the key but does nothing when it cannot indent", () => {
@@ -68,7 +70,7 @@ describe("indent / outdent", () => {
 
   it("outdents a nested block to sibling of its parent", () => {
     const doc = fixture()
-    const result = runCommand("outdent", input(doc, "b1", { mode: "select" }))
+    const result = runCommand("outdent", input(doc, "b/b1", { mode: "select" }))
     expect(result.doc!.blocks.b.children).toEqual([])
     expect(result.doc!.rootBlockIds).toEqual(["a", "b", "b1", "c"])
   })
@@ -78,7 +80,7 @@ describe("selection movement", () => {
   it("moves the highlight down the visible order", () => {
     const doc = fixture()
     const result = runCommand("moveSelectionDown", input(doc, "b"))
-    expect(result.focus).toEqual({ mode: "select", id: "b1" })
+    expect(result.focus).toEqual({ mode: "select", key: "b/b1" })
   })
 
   it("signals exitTop when moving up past the first block", () => {
@@ -101,11 +103,11 @@ describe("selection movement", () => {
     const doc = fixture()
     expect(runCommand("moveEditFocusUp", input(doc, "b", { mode: "edit" })).focus).toEqual({
       mode: "select",
-      id: "a",
+      key: "a",
     })
     expect(runCommand("moveEditFocusDown", input(doc, "b", { mode: "edit" })).focus).toEqual({
       mode: "select",
-      id: "b1",
+      key: "b/b1",
     })
   })
 
@@ -113,7 +115,7 @@ describe("selection movement", () => {
     const doc = fixture()
     expect(runCommand("moveEditFocusDown", input(doc, "c", { mode: "edit" })).focus).toEqual({
       mode: "select",
-      id: "c",
+      key: "c",
     })
   })
 
@@ -128,32 +130,35 @@ describe("selection movement", () => {
     const doc = fixture()
     const result = runCommand(
       "moveSelectionDown",
-      input(doc, "b1", { visibleOrder: ["a", "b", "c"] }),
+      input(doc, "b/b1", { visibleOrder: ["a", "b", "c"] }),
     )
     expect(result.handled).toBe(true)
-    expect(result.focus).toEqual({ mode: "select", id: "b" })
+    expect(result.focus).toEqual({ mode: "select", key: "b" })
   })
 })
 
 describe("sibling & level navigation", () => {
   it("jumps to the previous / next sibling, skipping nested blocks", () => {
     const doc = fixture()
-    expect(runCommand("nextSibling", input(doc, "b")).focus).toEqual({ mode: "select", id: "c" })
-    expect(runCommand("prevSibling", input(doc, "b")).focus).toEqual({ mode: "select", id: "a" })
+    expect(runCommand("nextSibling", input(doc, "b")).focus).toEqual({ mode: "select", key: "c" })
+    expect(runCommand("prevSibling", input(doc, "b")).focus).toEqual({ mode: "select", key: "a" })
   })
 
   it("stops at the ends of a sibling group", () => {
     const doc = fixture()
     expect(runCommand("prevSibling", input(doc, "a")).focus).toBeUndefined()
     // b1 is an only child, so it has no siblings to move to.
-    expect(runCommand("nextSibling", input(doc, "b1")).focus).toBeUndefined()
+    expect(runCommand("nextSibling", input(doc, "b/b1")).focus).toBeUndefined()
   })
 
   it("jumps to the top of the level, then up to the parent", () => {
     const doc = fixture()
-    expect(runCommand("jumpLevelTop", input(doc, "c")).focus).toEqual({ mode: "select", id: "a" })
+    expect(runCommand("jumpLevelTop", input(doc, "c")).focus).toEqual({ mode: "select", key: "a" })
     // b1's level has one item; already at top, so step up to parent b.
-    expect(runCommand("jumpLevelTop", input(doc, "b1")).focus).toEqual({ mode: "select", id: "b" })
+    expect(runCommand("jumpLevelTop", input(doc, "b/b1")).focus).toEqual({
+      mode: "select",
+      key: "b",
+    })
     // a is already the first root block — nowhere further up.
     expect(runCommand("jumpLevelTop", input(doc, "a")).focus).toBeUndefined()
   })
@@ -162,7 +167,7 @@ describe("sibling & level navigation", () => {
     const doc = fixture()
     expect(runCommand("jumpLevelBottom", input(doc, "a")).focus).toEqual({
       mode: "select",
-      id: "c",
+      key: "c",
     })
   })
 })
@@ -191,13 +196,13 @@ describe("wasd sibling traversal (treePrev / treeNext break out of the level)", 
 
   it("moves across siblings mid-level, skipping descendants", () => {
     const doc = fixture()
-    expect(runCommand("treeNext", input(doc, "b")).focus).toEqual({ mode: "select", id: "c" })
-    expect(runCommand("treePrev", input(doc, "c")).focus).toEqual({ mode: "select", id: "b" })
+    expect(runCommand("treeNext", input(doc, "b")).focus).toEqual({ mode: "select", key: "c" })
+    expect(runCommand("treePrev", input(doc, "c")).focus).toEqual({ mode: "select", key: "b" })
   })
 
   it("treePrev at the first sibling of a level breaks out to the parent", () => {
     const doc = fixture()
-    expect(runCommand("treePrev", input(doc, "b1")).focus).toEqual({ mode: "select", id: "b" })
+    expect(runCommand("treePrev", input(doc, "b/b1")).focus).toEqual({ mode: "select", key: "b" })
   })
 
   it("treePrev on the first root block no-ops (nothing above)", () => {
@@ -209,13 +214,16 @@ describe("wasd sibling traversal (treePrev / treeNext break out of the level)", 
 
   it("treeNext at the last sibling continues at the ancestor's next sibling", () => {
     const doc = fixture()
-    expect(runCommand("treeNext", input(doc, "b1")).focus).toEqual({ mode: "select", id: "c" })
+    expect(runCommand("treeNext", input(doc, "b/b1")).focus).toEqual({ mode: "select", key: "c" })
   })
 
   it("treeNext walks multiple levels up to find the next block", () => {
     const doc = deep()
     // b2 → b1 (last) → b (has next sibling c): two levels up.
-    expect(runCommand("treeNext", input(doc, "b2")).focus).toEqual({ mode: "select", id: "c" })
+    expect(runCommand("treeNext", input(doc, "b/b1/b2")).focus).toEqual({
+      mode: "select",
+      key: "c",
+    })
   })
 
   it("treeNext no-ops at the true end of the document", () => {
@@ -224,13 +232,13 @@ describe("wasd sibling traversal (treePrev / treeNext break out of the level)", 
     // Deep last block with no ancestor-next anywhere: also a no-op.
     const noTail = deep()
     noTail.rootBlockIds = ["a", "b"]
-    expect(runCommand("treeNext", input(noTail, "b2")).focus).toBeUndefined()
+    expect(runCommand("treeNext", input(noTail, "b/b1/b2")).focus).toBeUndefined()
   })
 
   it("clamps at the zoom boundary (never escapes the zoomed subtree)", () => {
     const doc = deep()
     const zoomed = (id: string): Parameters<typeof runCommand>[1] =>
-      input(doc, id, { visibleOrder: ["b", "b1", "b2"], zoomRootId: "b" })
+      input(doc, id, { visibleOrder: ["b", "b/b1", "b/b1/b2"], zoomRootId: "b" })
     // The title's own siblings are outside the view: both no-op on the title
     // (w does NOT zoom out — that stays `a`'s job).
     for (const name of ["treePrev", "treeNext"] as const) {
@@ -240,18 +248,21 @@ describe("wasd sibling traversal (treePrev / treeNext break out of the level)", 
       expect(result.zoom).toBeUndefined()
     }
     // w on a direct child of the zoom root breaks out to the title (in view).
-    expect(runCommand("treePrev", zoomed("b1")).focus).toEqual({ mode: "select", id: "b" })
+    expect(runCommand("treePrev", zoomed("b/b1")).focus).toEqual({ mode: "select", key: "b" })
     // s at the end of the zoomed subtree would have to climb past the title
     // to reach c — clamp instead.
-    expect(runCommand("treeNext", zoomed("b2")).focus).toBeUndefined()
-    expect(runCommand("treeNext", zoomed("b1")).focus).toBeUndefined()
+    expect(runCommand("treeNext", zoomed("b/b1/b2")).focus).toBeUndefined()
+    expect(runCommand("treeNext", zoomed("b/b1")).focus).toBeUndefined()
   })
 })
 
 describe("wasd depth navigation (selectParent / selectFirstChild)", () => {
   it("selectParent steps from a nested block to its parent", () => {
     const doc = fixture()
-    expect(runCommand("selectParent", input(doc, "b1")).focus).toEqual({ mode: "select", id: "b" })
+    expect(runCommand("selectParent", input(doc, "b/b1")).focus).toEqual({
+      mode: "select",
+      key: "b",
+    })
   })
 
   it("selectParent consumes the key but stays put on a root-level block", () => {
@@ -265,7 +276,7 @@ describe("wasd depth navigation (selectParent / selectFirstChild)", () => {
   it("selectFirstChild steps into the first child, demanding it be expanded", () => {
     const doc = fixture()
     const result = runCommand("selectFirstChild", input(doc, "b"))
-    expect(result.focus).toEqual({ mode: "select", id: "b1" })
+    expect(result.focus).toEqual({ mode: "select", key: "b/b1" })
     // A collapsed parent must open in the same keypress: the command can't see
     // collapse state, so it always demands the block be expanded.
     expect(result.expand).toBe("b")
@@ -273,7 +284,7 @@ describe("wasd depth navigation (selectParent / selectFirstChild)", () => {
 
   it("selectFirstChild consumes the key but does nothing on a leaf", () => {
     const doc = fixture()
-    const result = runCommand("selectFirstChild", input(doc, "b1"))
+    const result = runCommand("selectFirstChild", input(doc, "b/b1"))
     expect(result.handled).toBe(true)
     expect(result.focus).toBeUndefined()
     expect(result.expand).toBeUndefined()
@@ -282,16 +293,16 @@ describe("wasd depth navigation (selectParent / selectFirstChild)", () => {
   it("while zoomed, selectParent on a direct child selects the title, and on the title zooms out", () => {
     const doc = fixture()
     const zoomed = (id: string): Parameters<typeof runCommand>[1] =>
-      input(doc, id, { visibleOrder: ["b", "b1"], zoomRootId: "b" })
+      input(doc, id, { visibleOrder: ["b", "b/b1"], zoomRootId: "b" })
     // Direct child of the zoom root → the zoom-root title (falls out of the
     // ordinary parent walk, since the title is the child's parent).
-    expect(runCommand("selectParent", zoomed("b1")).focus).toEqual({ mode: "select", id: "b" })
+    expect(runCommand("selectParent", zoomed("b/b1")).focus).toEqual({ mode: "select", key: "b" })
     // The title itself → zoom out one level ("a always goes up the tree").
     // b is root-level, so one level out is a full exit — same as zoomOut.
     expect(runCommand("selectParent", zoomed("b")).zoom).toEqual({ id: null })
     // With a navigation stack below, the title pops back along the path taken
     // (zoomBackId) instead of exiting fully.
-    const nested = input(doc, "b1", { visibleOrder: ["b1"], zoomRootId: "b1", zoomBackId: "b" })
+    const nested = input(doc, "b/b1", { visibleOrder: ["b/b1"], zoomRootId: "b1", zoomBackId: "b" })
     expect(runCommand("selectParent", nested).zoom).toEqual({ id: "b" })
   })
 
@@ -299,9 +310,9 @@ describe("wasd depth navigation (selectParent / selectFirstChild)", () => {
     const doc = fixture()
     const result = runCommand(
       "selectFirstChild",
-      input(doc, "b", { visibleOrder: ["b", "b1"], zoomRootId: "b" }),
+      input(doc, "b", { visibleOrder: ["b", "b/b1"], zoomRootId: "b" }),
     )
-    expect(result.focus).toEqual({ mode: "select", id: "b1" })
+    expect(result.focus).toEqual({ mode: "select", key: "b/b1" })
   })
 })
 
@@ -321,13 +332,13 @@ describe("arrow-key folding (expandOrFirstChild / collapseOrParent)", () => {
   it("→ on an expanded block steps into the first child (no expand demand)", () => {
     const doc = fixture()
     const result = runCommand("expandOrFirstChild", input(doc, "b"))
-    expect(result.focus).toEqual({ mode: "select", id: "b1" })
+    expect(result.focus).toEqual({ mode: "select", key: "b/b1" })
     expect(result.expand).toBeUndefined()
   })
 
   it("→ consumes the key but does nothing on a leaf", () => {
     const doc = fixture()
-    const result = runCommand("expandOrFirstChild", input(doc, "b1"))
+    const result = runCommand("expandOrFirstChild", input(doc, "b/b1"))
     expect(result.handled).toBe(true)
     expect(result.focus).toBeUndefined()
     expect(result.expand).toBeUndefined()
@@ -345,8 +356,8 @@ describe("arrow-key folding (expandOrFirstChild / collapseOrParent)", () => {
 
   it("← on a leaf steps out to the parent", () => {
     const doc = fixture()
-    const result = runCommand("collapseOrParent", input(doc, "b1"))
-    expect(result.focus).toEqual({ mode: "select", id: "b" })
+    const result = runCommand("collapseOrParent", input(doc, "b/b1"))
+    expect(result.focus).toEqual({ mode: "select", key: "b" })
     expect(result.collapse).toBeUndefined()
   })
 
@@ -355,8 +366,8 @@ describe("arrow-key folding (expandOrFirstChild / collapseOrParent)", () => {
     const doc = fixture()
     doc.blocks.b1 = { id: "b1", type: "text", text: "B1", children: ["b1a"] }
     doc.blocks.b1a = { id: "b1a", type: "text", text: "B1a", children: [] }
-    const result = runCommand("collapseOrParent", input(doc, "b1"))
-    expect(result.focus).toEqual({ mode: "select", id: "b" })
+    const result = runCommand("collapseOrParent", input(doc, "b/b1"))
+    expect(result.focus).toEqual({ mode: "select", key: "b" })
     expect(result.collapse).toBeUndefined()
   })
 
@@ -374,7 +385,7 @@ describe("arrow-key folding (expandOrFirstChild / collapseOrParent)", () => {
 
   it("while zoomed, ← is a no-op on the title and selects the title from a direct child", () => {
     const doc = fixture()
-    const zoomed = (id: string) => input(doc, id, { visibleOrder: ["b", "b1"], zoomRootId: "b" })
+    const zoomed = (id: string) => input(doc, id, { visibleOrder: ["b", "b/b1"], zoomRootId: "b" })
     // The title is pinned open and zoom-out stays `a`'s job — never collapse,
     // never zoom, never escape the subtree.
     const onTitle = runCommand("collapseOrParent", zoomed("b"))
@@ -383,16 +394,19 @@ describe("arrow-key folding (expandOrFirstChild / collapseOrParent)", () => {
     expect(onTitle.focus).toBeUndefined()
     expect(onTitle.zoom).toBeUndefined()
     // A direct child's "parent" is the zoom root — its title, still in view.
-    expect(runCommand("collapseOrParent", zoomed("b1")).focus).toEqual({ mode: "select", id: "b" })
+    expect(runCommand("collapseOrParent", zoomed("b/b1")).focus).toEqual({
+      mode: "select",
+      key: "b",
+    })
   })
 
   it("while zoomed, → on the title steps into its first child (children always render)", () => {
     const doc = fixture()
     const result = runCommand(
       "expandOrFirstChild",
-      input(doc, "b", { visibleOrder: ["b", "b1"], zoomRootId: "b" }),
+      input(doc, "b", { visibleOrder: ["b", "b/b1"], zoomRootId: "b" }),
     )
-    expect(result.focus).toEqual({ mode: "select", id: "b1" })
+    expect(result.focus).toEqual({ mode: "select", key: "b/b1" })
     expect(result.expand).toBeUndefined()
   })
 })
@@ -402,7 +416,7 @@ describe("moveBlock", () => {
     const doc = fixture()
     const result = runCommand("moveBlockDown", input(doc, "a", { mode: "select" }))
     expect(result.doc!.rootBlockIds).toEqual(["b", "a", "c"])
-    expect(result.focus).toEqual({ mode: "select", id: "a" })
+    expect(result.focus).toEqual({ mode: "select", key: "a" })
   })
 
   it("consumes the key but does nothing at the boundary", () => {
@@ -427,7 +441,7 @@ describe("duplicate", () => {
     expect(result.doc!.blocks[childCopy].text).toBe("B1")
     // The original is untouched.
     expect(result.doc!.blocks.b.children).toEqual(["b1"])
-    expect(result.focus).toEqual({ mode: "select", id: copyId })
+    expect(result.focus).toEqual({ mode: "select", key: copyId })
   })
 
   it("duplicateAbove inserts the copy before the original and selects it", () => {
@@ -436,7 +450,7 @@ describe("duplicate", () => {
     const copyId = result.doc!.rootBlockIds[0]
     expect(result.doc!.rootBlockIds).toEqual([copyId, "a", "b", "c"])
     expect(result.doc!.blocks[copyId].text).toBe("A")
-    expect(result.focus).toEqual({ mode: "select", id: copyId })
+    expect(result.focus).toEqual({ mode: "select", key: copyId })
   })
 
   it("keeps editing the copy (caret preserved) in edit mode", () => {
@@ -446,7 +460,7 @@ describe("duplicate", () => {
       input(doc, "a", { mode: "edit", caret: caret("A", 1) }),
     )
     const copyId = result.doc!.rootBlockIds[1]
-    expect(result.focus).toEqual({ mode: "edit", id: copyId, caret: 1 })
+    expect(result.focus).toEqual({ mode: "edit", key: copyId, caret: 1 })
   })
 })
 
@@ -456,7 +470,7 @@ describe("deleteBlock", () => {
     const result = runCommand("deleteBlock", input(doc, "a"))
     expect(result.doc!.blocks.a).toBeUndefined()
     expect(result.doc!.rootBlockIds).toEqual(["b", "c"])
-    expect(result.focus).toEqual({ mode: "select", id: "b" })
+    expect(result.focus).toEqual({ mode: "select", key: "b" })
   })
 
   it("skips the deleted block's own subtree when looking below", () => {
@@ -465,7 +479,7 @@ describe("deleteBlock", () => {
     // b's subtree (b, b1) is gone; the first visible survivor below is c.
     expect(result.doc!.blocks.b).toBeUndefined()
     expect(result.doc!.blocks.b1).toBeUndefined()
-    expect(result.focus).toEqual({ mode: "select", id: "c" })
+    expect(result.focus).toEqual({ mode: "select", key: "c" })
   })
 
   it("falls back to the visible block above when the deleted block was last", () => {
@@ -473,7 +487,7 @@ describe("deleteBlock", () => {
     const result = runCommand("deleteBlock", input(doc, "c"))
     expect(result.doc!.blocks.c).toBeUndefined()
     expect(result.doc!.rootBlockIds).toEqual(["a", "b"])
-    expect(result.focus).toEqual({ mode: "select", id: "b1" })
+    expect(result.focus).toEqual({ mode: "select", key: "b/b1" })
   })
 
   it("refuses to delete the only block", () => {
@@ -572,7 +586,7 @@ describe("turn into (select-mode marker keys)", () => {
 
   it("stays selected on a block with content, as one structural undo step", () => {
     const result = turn("turnIntoHeading", "A")
-    expect(result.focus).toEqual({ mode: "select", id: "x" })
+    expect(result.focus).toEqual({ mode: "select", key: "x" })
     expect(result.op).toEqual({ type: "structural" })
   })
 
@@ -580,12 +594,12 @@ describe("turn into (select-mode marker keys)", () => {
     const result = turn("turnIntoBullet", "")
     expect(result.doc!.blocks.x.type).toBe("ul")
     expect(result.doc!.blocks.x.text).toBe("")
-    expect(result.focus).toEqual({ mode: "edit", id: "x" })
+    expect(result.focus).toEqual({ mode: "edit", key: "x" })
     // Swapping one empty marker for another stays in edit too.
     const swapped = turn("turnIntoTodo", "- ")
     expect(swapped.doc!.blocks.x.type).toBe("todo")
     expect(swapped.doc!.blocks.x.text).toBe("")
-    expect(swapped.focus).toEqual({ mode: "edit", id: "x" })
+    expect(swapped.focus).toEqual({ mode: "edit", key: "x" })
   })
 
   it("never touches children (marker swap only)", () => {
@@ -601,7 +615,7 @@ describe("turn into (select-mode marker keys)", () => {
     const doc = fixture()
     const result = runCommand(
       "turnIntoHeading",
-      input(doc, "b", { visibleOrder: ["b", "b1"], zoomRootId: "b" }),
+      input(doc, "b", { visibleOrder: ["b", "b/b1"], zoomRootId: "b" }),
     )
     expect(result.doc!.blocks.b.type).toBe("h1")
     expect(result.doc!.blocks.b.text).toBe("B")
@@ -616,7 +630,7 @@ describe("insertBelow", () => {
     expect(result.doc!.blocks[id].type).toBe("ul")
     expect(result.doc!.blocks[id].text).toBe("")
     expect(result.doc!.rootBlockIds).toEqual(["a", id, "b", "c"])
-    expect(result.focus).toEqual({ mode: "edit", id })
+    expect(result.focus).toEqual({ mode: "edit", key: id })
   })
 
   it("nests the new block under a heading", () => {
@@ -708,7 +722,7 @@ describe("split", () => {
     expect(result.doc!.blocks.x.text).toBe("he")
     expect(result.doc!.blocks[id].type).toBe("ul")
     expect(result.doc!.blocks[id].text).toBe("llo")
-    expect(result.focus).toEqual({ mode: "edit", id, atStart: true })
+    expect(result.focus).toEqual({ mode: "edit", key: id, atStart: true })
   })
 
   it("splits a paragraph at the caret using the configured new-block marker", () => {
@@ -786,7 +800,7 @@ describe("marker editing", () => {
     const result = runCommand("stripMarker", input(doc, "x", { mode: "edit", visibleOrder: ["x"] }))
     expect(result.doc!.blocks.x.type).toBe("text")
     expect(result.doc!.blocks.x.text).toBe("Heading")
-    expect(result.focus).toEqual({ mode: "edit", id: "x", atStart: true })
+    expect(result.focus).toEqual({ mode: "edit", key: "x", atStart: true })
   })
 
   it("backspaceEmpty removes an empty block and edits the previous one", () => {
@@ -794,14 +808,14 @@ describe("marker editing", () => {
     const result = runCommand("backspaceEmpty", input(doc, "c", { mode: "edit" }))
     expect(result.doc!.blocks.c).toBeUndefined()
     // removeBlock hands focus to the previous *sibling* (b), not b1.
-    expect(result.focus).toEqual({ mode: "edit", id: "b" })
+    expect(result.focus).toEqual({ mode: "edit", key: "b" })
   })
 })
 
 describe("zoom", () => {
   /** Command input as seen while zoomed into `b` (visible: b as title, then b1). */
-  function zoomed(doc: BlockDoc, id: string, over: Partial<CommandInput> = {}): CommandInput {
-    return { doc, id, mode: "select", visibleOrder: ["b", "b1"], zoomRootId: "b", ...over }
+  function zoomed(doc: BlockDoc, key: string, over: Partial<CommandInput> = {}): CommandInput {
+    return { doc, key, mode: "select", visibleOrder: ["b", "b/b1"], zoomRootId: "b", ...over }
   }
 
   it("zoomIn requests a zoom into the block", () => {
@@ -823,11 +837,11 @@ describe("zoom", () => {
     expect(
       runCommand(
         "zoomOut",
-        input(doc, "b1", { visibleOrder: ["b1"], zoomRootId: "b1", zoomBackId: "b" }),
+        input(doc, "b/b1", { visibleOrder: ["b/b1"], zoomRootId: "b1", zoomBackId: "b" }),
       ).zoom,
     ).toEqual({ id: "b" })
     // No stack below (deep link): out exits fully.
-    expect(runCommand("zoomOut", zoomed(doc, "b1")).zoom).toEqual({ id: null })
+    expect(runCommand("zoomOut", zoomed(doc, "b/b1")).zoom).toEqual({ id: null })
   })
 
   it("zoomOut / zoomExit are ignored when not zoomed", () => {
@@ -838,18 +852,18 @@ describe("zoom", () => {
 
   it("zoomExit requests a full exit", () => {
     const doc = fixture()
-    expect(runCommand("zoomExit", zoomed(doc, "b1")).zoom).toEqual({ id: null })
+    expect(runCommand("zoomExit", zoomed(doc, "b/b1")).zoom).toEqual({ id: null })
   })
 
   it("outdent refuses at the zoom boundary (root and its direct children)", () => {
     const doc = fixture()
-    for (const id of ["b", "b1"]) {
-      const result = runCommand("outdent", zoomed(doc, id))
+    for (const key of ["b", "b/b1"]) {
+      const result = runCommand("outdent", zoomed(doc, key))
       expect(result.handled).toBe(true)
       expect(result.doc).toBeUndefined()
     }
     // The same block outdents fine when not zoomed.
-    expect(runCommand("outdent", input(doc, "b1")).doc).toBeDefined()
+    expect(runCommand("outdent", input(doc, "b/b1")).doc).toBeDefined()
   })
 
   it("indent refuses on the zoom root", () => {
@@ -862,9 +876,9 @@ describe("zoom", () => {
     expect(runCommand("deleteBlock", zoomed(doc, "b")).doc).toBeUndefined()
     expect(runCommand("backspaceEmpty", zoomed(doc, "b", { mode: "edit" })).doc).toBeUndefined()
     // Deleting the last child is allowed — the title alone is a valid view.
-    const result = runCommand("deleteBlock", zoomed(doc, "b1"))
+    const result = runCommand("deleteBlock", zoomed(doc, "b/b1"))
     expect(result.doc!.blocks.b1).toBeUndefined()
-    expect(result.focus).toEqual({ mode: "select", id: "b" })
+    expect(result.focus).toEqual({ mode: "select", key: "b" })
   })
 
   it("move / duplicate are no-ops on the zoom root", () => {
@@ -889,9 +903,9 @@ describe("zoom", () => {
       expect(result.focus).toBeUndefined()
     }
     // A child can still jump up to the (visible) zoom root.
-    expect(runCommand("jumpLevelTop", zoomed(doc, "b1")).focus).toEqual({
+    expect(runCommand("jumpLevelTop", zoomed(doc, "b/b1")).focus).toEqual({
       mode: "select",
-      id: "b",
+      key: "b",
     })
   })
 
@@ -902,7 +916,7 @@ describe("zoom", () => {
       const id = newBlockId(doc, result.doc!)
       expect(result.doc!.blocks.b.children).toEqual([id, "b1"])
       expect(result.doc!.rootBlockIds).toEqual(["a", "b", "c"])
-      expect(result.focus).toEqual({ mode: "edit", id })
+      expect(result.focus).toEqual({ mode: "edit", key: `b/${id}` })
     }
     // Splitting the title mid-line drops the tail into the first child too.
     const split = runCommand(
@@ -922,11 +936,11 @@ describe("zoom", () => {
     // Edit mode on the title: commit the edit, stay on the title.
     const edit = runCommand("moveEditFocusUp", zoomed(doc, "b", { mode: "edit" }))
     expect(edit.exitTop).toBeUndefined()
-    expect(edit.focus).toEqual({ mode: "select", id: "b" })
+    expect(edit.focus).toEqual({ mode: "select", key: "b" })
     // Arrow-up from the first child selects the title.
-    expect(runCommand("moveSelectionUp", zoomed(doc, "b1")).focus).toEqual({
+    expect(runCommand("moveSelectionUp", zoomed(doc, "b/b1")).focus).toEqual({
       mode: "select",
-      id: "b",
+      key: "b",
     })
   })
 
@@ -946,12 +960,78 @@ describe("mode toggles", () => {
   ]
   it.each(cases)("%s focuses %s → %s", (name, from, to) => {
     const result = runCommand(name, input(doc, "a", { mode: from }))
-    expect(result.focus).toEqual({ mode: to, id: "a" })
+    expect(result.focus).toEqual({ mode: to, key: "a" })
   })
 
   it("deselect clears the highlight entirely", () => {
     const result = runCommand("deselect", input(doc, "a"))
     expect(result.handled).toBe(true)
-    expect(result.focus).toEqual({ mode: "select", id: null })
+    expect(result.focus).toEqual({ mode: "select", key: null })
+  })
+})
+
+describe("rows of a shared block", () => {
+  /** `s` hangs under both `p` and `q`: one block, two rows. */
+  function shared(): BlockDoc {
+    return {
+      props: null,
+      rootBlockIds: ["p", "q"],
+      blocks: {
+        p: { id: "p", type: "ul", text: "p", children: ["s"] },
+        q: { id: "q", type: "ul", text: "q", children: ["s", "r"] },
+        s: { id: "s", type: "ul", text: "shared", children: [] },
+        r: { id: "r", type: "ul", text: "r", children: [] },
+      },
+    }
+  }
+  const order = ["p", "p/s", "q", "q/s", "q/r"]
+
+  it("navigates from the row asked for: the parent is read off the key", () => {
+    const doc = shared()
+    expect(runCommand("selectParent", input(doc, "q/s", { visibleOrder: order })).focus).toEqual({
+      mode: "select",
+      key: "q",
+    })
+    expect(runCommand("nextSibling", input(doc, "q/s", { visibleOrder: order })).focus).toEqual({
+      mode: "select",
+      key: "q/r",
+    })
+    // Under p the block has no next sibling.
+    expect(
+      runCommand("nextSibling", input(doc, "p/s", { visibleOrder: order })).focus,
+    ).toBeUndefined()
+  })
+
+  it("deletes one row and keeps the block in the other", () => {
+    const doc = shared()
+    const result = runCommand("deleteBlock", input(doc, "q/s", { visibleOrder: order }))
+    expect(result.doc!.blocks.q.children).toEqual(["r"])
+    expect(result.doc!.blocks.p.children).toEqual(["s"])
+    expect(result.doc!.blocks.s).toBeDefined()
+    expect(result.focus).toEqual({ mode: "select", key: "q/r" })
+  })
+
+  it("moves one row, leaving the other where it was", () => {
+    const doc = shared()
+    const result = runCommand("moveBlockDown", input(doc, "q/s", { visibleOrder: order }))
+    expect(result.doc!.blocks.q.children).toEqual(["r", "s"])
+    expect(result.doc!.blocks.p.children).toEqual(["s"])
+    expect(result.focus).toEqual({ mode: "select", key: "q/s" })
+  })
+
+  it("inserts beside the row, and the new block's key is under that parent", () => {
+    const doc = shared()
+    const result = runCommand("insertSiblingBelow", input(doc, "q/s", { visibleOrder: order }))
+    const id = newBlockId(doc, result.doc!)
+    expect(result.doc!.blocks.q.children).toEqual(["s", id, "r"])
+    expect(result.doc!.blocks.p.children).toEqual(["s"])
+    expect(result.focus).toEqual({ mode: "edit", key: `q/${id}` })
+  })
+
+  it("a type change is the block's: it shows in both rows", () => {
+    const doc = shared()
+    const result = runCommand("turnIntoHeading", input(doc, "p/s", { visibleOrder: order }))
+    expect(result.doc!.blocks.s.type).toBe("h1")
+    expect(result.focus).toEqual({ mode: "select", key: "p/s" })
   })
 })

@@ -1,5 +1,6 @@
 import type { CommandInput, CommandName, Mode } from "./commands"
 import { isListItem } from "./markers"
+import { idOfKey } from "./view"
 
 /**
  * The block editor's **keymap**: a declarative table mapping a mode + key combo
@@ -30,7 +31,8 @@ interface Binding {
   when?: Predicate
 }
 
-const blockOf = (input: CommandInput) => input.doc.blocks[input.id]
+/** The block the row shows (the row is an occurrence key; the block is by id). */
+const blockOf = (input: CommandInput) => input.doc.blocks[idOfKey(input.key)]
 
 const isEmptyListItem: Predicate = (input) => {
   const block = blockOf(input)

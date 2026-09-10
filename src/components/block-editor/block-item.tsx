@@ -23,8 +23,10 @@ import { caretCoordinates, caretLineFlags } from "./caret"
 import { Hash } from "./hash"
 import { SLASH_MENU_WIDTH, SlashMenu } from "./slash-menu"
 
+/** A request to edit a row (an occurrence key — a block twice in the view is
+ * two rows, and only the one asked for opens). */
 export interface FocusRequest {
-  id: string
+  key: string
   atStart?: boolean
   /** Explicit caret offset; overrides `atStart` when set. */
   caret?: number
@@ -32,12 +34,13 @@ export interface FocusRequest {
 
 export interface BlockEditorApi {
   focus: FocusRequest | null
-  /** The head of the selection in select mode (null while editing/unfocused). */
+  /** The head of the selection in select mode (null while editing/unfocused):
+   * a row's occurrence key, as is everything positional below. */
   selected: string | null
-  /** All highlighted block ids (a Shift+Arrow range, or just the head). */
+  /** All highlighted rows (a Shift+Arrow range, or just the head), by key. */
   selectedSet: Set<string>
   /**
-   * For each block in a multi-selection whose highlight surface touches a
+   * For each row in a multi-selection whose highlight surface touches a
    * selected neighbour, which of its corners (top/bottom) should go straight
    * so the run reads as one continuous surface. Empty for single selections.
    */
@@ -52,10 +55,10 @@ export interface BlockEditorApi {
    * state, not a keyboard cursor).
    */
   keyboardActive: boolean
-  /** Highlight a block (leaves edit mode, collapses any multi-selection). */
-  select: (id: string) => void
-  /** Enter edit mode for a block. */
-  edit: (id: string, atStart?: boolean) => void
+  /** Highlight a row (leaves edit mode, collapses any multi-selection). */
+  select: (key: string) => void
+  /** Enter edit mode on a row. */
+  edit: (key: string, atStart?: boolean) => void
   /** Fold or unfold a row (by occurrence key — folds are per row). */
   toggleCollapse: (key: string) => void
   setFocus: (focus: FocusRequest | null) => void
@@ -65,21 +68,21 @@ export interface BlockEditorApi {
    * slash-menu pick, so one undo puts the typed `/phrase` back).
    */
   onBlockChange: (id: string, patch: BlockPatch, op?: "text" | "structural") => void
-  /** Replace `id` with blocks imported from pasted markdown, placing the caret. */
-  onPaste: (id: string, before: string, pasted: string, after: string) => void
+  /** Replace the row with blocks imported from pasted markdown, placing the caret. */
+  onPaste: (key: string, before: string, pasted: string, after: string) => void
   /**
    * Resolve a key event to an editor command (via the keymap) and run it.
    * Every keyboard interaction funnels through here; returns whether the event
    * was consumed (so the caller can `preventDefault`).
    */
-  dispatchKey: (mode: Mode, id: string, event: KeyLike, caret?: CaretInput) => boolean
+  dispatchKey: (mode: Mode, key: string, event: KeyLike, caret?: CaretInput) => boolean
   /** Zoom into a block: its subtree becomes the whole editor view. */
   zoomInto: (id: string) => void
   /**
-   * Exit edit mode and take the first selection-ladder rung on this block
+   * Exit edit mode and take the first selection-ladder rung on this row
    * (Cmd/Ctrl+A pressed with the textarea's text already fully selected).
    */
-  startSelectionLadder: (id: string) => void
+  startSelectionLadder: (key: string) => void
   /** Developer-mode debug readouts; absent in ordinary use. */
   debug?: BlockDebugOptions
 }
@@ -201,13 +204,14 @@ export function BlockItem({
 }) {
   const { depth, zoomTitle, olNumber, hasChildren, collapsed: isCollapsed } = occurrence
   const readOnly = api.readOnly ?? false
-  const editing = !readOnly && api.focus?.id === block.id
-  const selected = api.selectedSet.has(block.id) && !editing
+  // Selection and edit focus are per row: this occurrence, not the block.
+  const editing = !readOnly && api.focus?.key === occurrence.key
+  const selected = api.selectedSet.has(occurrence.key) && !editing
   // Which sides of this row sit MID-RUN in a multi-select (the adjacent
   // visible row is also selected and the surfaces touch) — those sides keep
   // the full 4px vertical extension so the run merges seamlessly; every other
   // side extends only 2px (see the data-block-line classes below).
-  const runEdges = selected ? api.selectionRunEdges.get(block.id) : undefined
+  const runEdges = selected ? api.selectionRunEdges.get(occurrence.key) : undefined
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const pendingCaret = useRef<number | null>(null)
   // Set by a Cmd/Ctrl+Shift+V keydown so the paste event that follows inserts
@@ -401,7 +405,7 @@ export function BlockItem({
         el.value.length === 0 || (el.selectionStart === 0 && el.selectionEnd === el.value.length)
       if (allSelected) {
         event.preventDefault()
-        api.startSelectionLadder(block.id)
+        api.startSelectionLadder(occurrence.key)
       }
       return
     }
@@ -417,7 +421,7 @@ export function BlockItem({
       atFirstLine: flags.atFirst,
       atLastLine: flags.atLast,
     }
-    if (api.dispatchKey("edit", block.id, event, caret)) event.preventDefault()
+    if (api.dispatchKey("edit", occurrence.key, event, caret)) event.preventDefault()
   }
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -469,7 +473,7 @@ export function BlockItem({
     const el = event.currentTarget
     const before = el.value.slice(0, el.selectionStart)
     const after = el.value.slice(el.selectionEnd)
-    api.onPaste(block.id, before, pasted, after)
+    api.onPaste(occurrence.key, before, pasted, after)
   }
 
   // Whether this block owns a collapse toggle at all: parents only, and never
@@ -878,8 +882,8 @@ export function BlockItem({
               {...(readOnly
                 ? {}
                 : {
-                    onClick: () => api.select(block.id),
-                    onDoubleClick: () => api.edit(block.id),
+                    onClick: () => api.select(occurrence.key),
+                    onDoubleClick: () => api.edit(occurrence.key),
                   })}
             >
               <BlockContent content={body} />
