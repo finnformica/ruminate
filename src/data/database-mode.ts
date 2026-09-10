@@ -1,7 +1,5 @@
 import { atom, getDefaultStore } from "jotai"
 import type { ReplicaChangesBody } from "../../worker/handlers/replica-payload"
-import { serialize } from "../blocks/serialize"
-import type { BlockDoc } from "../blocks/types"
 import type { NoteId } from "../schema"
 import { SessionExpiredError } from "../utils/github-token"
 import {
@@ -10,7 +8,8 @@ import {
   planPullApplication,
   type D1NoteSource,
 } from "./d1-note-source"
-import { buildGraphSnapshot, withDocApplied, type GraphSnapshot } from "./graph"
+import { buildGraphSnapshot, rollup, type GraphSnapshot } from "./graph"
+import { applyOps, pagesTouchedBy, type Op } from "./ops"
 import { resetReplicaAccess } from "./replica-access"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import type { SqlNoteStore } from "./sql-note-store"
@@ -32,8 +31,12 @@ import {
  *   boot   open SQL store → discard it if its cache generation or its owner is
  *          not this one → serve local contents immediately → pull from D1
  *          (full on first boot, since-cursor after) → apply rows into the store
- *   saves  ingest into the SQL store as a row diff + hand that diff to the
- *          replica push queue (replica-sync.ts — write-behind, coalesced)
+ *   edits  the editor's ops (src/data/ops.ts) apply to the graph atom at
+ *          once, coalesce for a moment, then write the SQL store as rows and
+ *          hand the row diff to the replica push queue (replica-sync.ts —
+ *          write-behind, coalesced)
+ *   saves  the remaining markdown writers (rename, pin, delete…) ingest a
+ *          note as a row diff the same way
  *   sync   visibility/focus/online triggers re-run the since-cursor pull;
  *          hiding the tab flushes the push queue immediately
  *
@@ -51,8 +54,8 @@ import {
  * notice still protects unsaved (uncommitted) edits when a pulled change
  * lands under them.
  *
- * All SQL work is serialized on one promise queue; the files atom is updated
- * optimistically on write so the UI never waits on the database.
+ * All SQL work is serialized on one promise queue; the graph and files atoms
+ * are updated optimistically on write so the UI never waits on the database.
  */
 
 const PULL_CURSOR_KEY = "d1_pull_cursor"
@@ -107,6 +110,9 @@ const OWNER_KEY = "store_owner"
 export const CACHE_GENERATION = "3"
 const CACHE_GENERATION_KEY = "cache_generation"
 const PULL_RETRY_MS = 60_000
+/** How long a run of ops coalesces before it is written: a typed word is one
+ * row write, not one per keystroke. Hiding the tab flushes at once. */
+const OPS_FLUSH_MS = 150
 /** Minimum gap between automatic repair rebuilds after a SQL write failure. */
 const REPAIR_COOLDOWN_MS = 30_000
 
@@ -186,6 +192,11 @@ interface DatabaseModeRuntime {
   lastPullStartedAt: number
   lastRepairAt: number
   generation: number
+  /** Ops applied to the graph atom and not yet written to the store. */
+  pendingOps: Op[]
+  /** Pages those ops touched — whose rollups the flush refreshes. */
+  pendingPages: Set<NoteId>
+  opsFlushTimer: ReturnType<typeof setTimeout> | null
 }
 
 let runtime: DatabaseModeRuntime | null = null
@@ -298,8 +309,16 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     lastPullStartedAt: 0,
     lastRepairAt: 0,
     generation,
+    pendingOps: [],
+    pendingPages: new Set(),
+    opsFlushTimer: null,
   }
   runtime = activation
+  // Backgrounding the tab must not strand a coalescing run of ops.
+  if (typeof window !== "undefined") {
+    window.addEventListener("pagehide", onPageHidden)
+    document.addEventListener("visibilitychange", onPageHidden)
+  }
   jotai().set(databaseModeStatusAtom, { ...OFF_STATUS, status: "opening" })
   patchDiagnostics({ status: "opening" })
 
@@ -396,7 +415,17 @@ export function stopDatabaseMode() {
   stopped.replica = null
   if (stopped.pullRetryTimer !== null) clearTimeout(stopped.pullRetryTimer)
   if (stopped.ambientPullTimer !== null) clearTimeout(stopped.ambientPullTimer)
+  if (stopped.opsFlushTimer !== null) clearTimeout(stopped.opsFlushTimer)
+  if (typeof window !== "undefined") {
+    window.removeEventListener("pagehide", onPageHidden)
+    document.removeEventListener("visibilitychange", onPageHidden)
+  }
   enqueue(async () => {
+    // Ops still coalescing are written before the store closes (no replica
+    // to notify any more — the next boot's full push carries them).
+    const ops = stopped.pendingOps
+    stopped.pendingOps = []
+    if (ops.length > 0) await stopped.store?.applyOps(ops).catch(recordWriteError)
     await stopped.store?.close().catch(() => {})
   })
   const store = jotai()
@@ -439,6 +468,7 @@ export function databaseWriteFiles(files: Record<string, string | null>) {
   enqueue(async () => {
     if (runtime !== activation || !activation.store) return
     try {
+      await flushOps(activation)
       const diff = await activation.store.writeNotes(noteUpdates)
       activation.replica?.notifyGraphChange(Object.keys(noteUpdates), diff)
       await refreshGraph(activation)
@@ -452,53 +482,88 @@ export function databaseWriteFiles(files: Record<string, string | null>) {
 }
 
 /**
- * Persist a batch of typed note docs (`null` deletes) — the editor's save
- * path. No markdown is parsed on the way in: the doc's blocks become rows
- * directly (`docToParts`). Both atoms update synchronously — the graph by
- * applying the doc to the current snapshot, the files map with the doc's
- * rollup for the markdown consumers — so the UI never waits; the SQL ingest
- * is queued, its row diff goes to the replica queue, and the graph atom is
- * then refreshed from the store so it carries the reconciled rows.
+ * Apply a batch of graph ops (`src/data/ops.ts`) — the editor's change path.
+ * The graph atom takes the ops synchronously (the screen never waits); the
+ * store write coalesces for `OPS_FLUSH_MS` and then lands the same rows,
+ * hands the row diff to the replica queue, and refreshes the markdown
+ * rollups of the pages the batch touched for the consumers that still read
+ * them. Nothing here parses or reconciles: the ops are the rows.
  */
-export function databaseWriteDocs(docs: Record<NoteId, BlockDoc | null>) {
+export function databaseApplyOps(ops: readonly Op[]) {
   const activation = runtime
-  if (!activation) return
-  if (Object.keys(docs).length === 0) return
+  if (!activation || ops.length === 0) return
 
   const store = jotai()
-  const now = Date.now()
-  let graph = store.get(databaseGraphAtom)
-  const noteUpdates: Record<NoteId, string | null> = {}
-  for (const [id, doc] of Object.entries(docs)) {
-    graph = withDocApplied(graph, id, doc, now)
-    noteUpdates[id] = doc === null ? null : serialize(doc)
-  }
-  store.set(databaseGraphAtom, graph)
-  applyToFilesAtom(noteUpdates)
+  const before = store.get(databaseGraphAtom)
+  const after = applyOps(before, ops, Date.now())
+  store.set(databaseGraphAtom, after)
+  // Pages that reached a touched node before (an unlink) or after (a link).
+  for (const page of pagesTouchedBy(before, ops)) activation.pendingPages.add(page)
+  for (const page of pagesTouchedBy(after, ops)) activation.pendingPages.add(page)
+  activation.pendingOps.push(...ops)
   patchStatus({ emptyOffline: false })
-  patchDiagnostics({
-    notes: Object.keys(notesFromFiles(store.get(databaseFilesAtom))).length,
-  })
 
-  enqueue(async () => {
-    if (runtime !== activation || !activation.store) return
-    try {
-      const diff = await activation.store.writeNoteDocs(docs)
-      activation.replica?.notifyGraphChange(Object.keys(docs), diff)
-      await refreshGraph(activation)
-    } catch (error) {
-      recordWriteError(error)
-      scheduleRepair(activation)
-    }
-  })
+  if (activation.opsFlushTimer !== null) clearTimeout(activation.opsFlushTimer)
+  activation.opsFlushTimer = setTimeout(() => {
+    activation.opsFlushTimer = null
+    if (runtime === activation) enqueue(() => flushOps(activation))
+  }, OPS_FLUSH_MS)
 }
 
-/** Re-read the graph atom from the store (after an ingest, repair or pull). */
+/** Write the coalesced ops now (⌘S, tab hidden). */
+export function requestDatabaseFlush() {
+  const activation = runtime
+  if (!activation || activation.pendingOps.length === 0) return
+  if (activation.opsFlushTimer !== null) {
+    clearTimeout(activation.opsFlushTimer)
+    activation.opsFlushTimer = null
+  }
+  enqueue(() => flushOps(activation))
+}
+
+function onPageHidden() {
+  if (typeof document !== "undefined" && document.visibilityState !== "hidden") return
+  requestDatabaseFlush()
+}
+
+/**
+ * Land the pending ops in the store: runs on the serial queue, and at the
+ * head of every other queued task (a markdown write, a repair, a pull) so
+ * the store never reads or rebuilds behind what the screen already shows.
+ */
+async function flushOps(activation: DatabaseModeRuntime) {
+  if (runtime !== activation || !activation.store) return
+  const ops = activation.pendingOps
+  const pages = [...activation.pendingPages]
+  if (ops.length === 0) return
+  activation.pendingOps = []
+  activation.pendingPages = new Set()
+  try {
+    const diff = await activation.store.applyOps(ops)
+    activation.replica?.notifyGraphChange(pages, diff)
+    // The markdown projection of every page the batch touched, from the
+    // graph atom — which already holds these ops and any newer ones.
+    const graph = jotai().get(databaseGraphAtom)
+    const updates: Record<NoteId, string | null> = {}
+    for (const page of pages) updates[page] = rollup(page, graph)
+    applyToFilesAtom(updates)
+    patchDiagnostics({
+      notes: Object.keys(notesFromFiles(jotai().get(databaseFilesAtom))).length,
+    })
+  } catch (error) {
+    recordWriteError(error)
+    scheduleRepair(activation)
+  }
+}
+
+/** Re-read the graph atom from the store (after an ingest, repair or pull),
+ * with any ops that arrived meanwhile re-applied on top — they are applied
+ * on screen already and will land in the store on their own flush. */
 async function refreshGraph(activation: DatabaseModeRuntime) {
   if (runtime !== activation || !activation.store) return
   const graph = await activation.store.getGraph()
   if (runtime !== activation) return
-  jotai().set(databaseGraphAtom, graph)
+  jotai().set(databaseGraphAtom, applyOps(graph, activation.pendingOps, Date.now()))
 }
 
 /** The machine's dedicated single-file delete path, database edition. */
@@ -517,7 +582,7 @@ export function refreshDatabaseReplicaStatus() {
   runtime?.replica?.refreshRemoteStatus()
 }
 
-/** After a SQL-side failure, rebuild the store from the files atom (the
+/** After a SQL-side failure, rebuild the store from the graph atom (the
  * authoritative in-memory copy), cooldown-guarded, then push the full corpus
  * so the replica converges on the repaired rows. */
 function scheduleRepair(activation: DatabaseModeRuntime) {
@@ -526,8 +591,19 @@ function scheduleRepair(activation: DatabaseModeRuntime) {
   activation.lastRepairAt = now
   enqueue(async () => {
     if (runtime !== activation || !activation.store) return
-    const files = jotai().get(databaseFilesAtom)
-    await activation.store.replaceAll(notesFromFiles(files))
+    // The graph atom is the authoritative in-memory copy: rebuild from its
+    // rows (the pending ops are in it already, so they are dropped here and
+    // land through the rebuild).
+    activation.pendingOps = []
+    activation.pendingPages = new Set()
+    const graph = jotai().get(databaseGraphAtom)
+    await activation.store.replaceAll({})
+    await activation.store.applyPull({
+      nodes: [...graph.nodes.values()],
+      links: [...graph.childLinks.values()].flat(),
+      deleteNodes: [],
+      deleteLinks: [],
+    })
     await refreshGraph(activation)
     activation.replica?.requestFullPush()
   })
@@ -609,6 +685,7 @@ function runPull(activation: DatabaseModeRuntime) {
     const store = activation.store
     patchStatus({ pull: "pulling" })
     try {
+      await flushOps(activation)
       const cursor = await store.getMeta(PULL_CURSOR_KEY)
       // An unusable cursor — never pulled, malformed, or a retired
       // pre-0005 timestamp — degrades to a full pull: always correct, just
@@ -677,7 +754,8 @@ function runPull(activation: DatabaseModeRuntime) {
   })
 }
 
-/** Wait for all queued work — tests only. */
+/** Flush coalescing ops and wait for all queued work — tests only. */
 export function flushDatabaseMode(): Promise<void> {
+  requestDatabaseFlush()
   return queue
 }

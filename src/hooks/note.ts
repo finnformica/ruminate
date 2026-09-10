@@ -2,14 +2,9 @@ import { useAtomValue } from "jotai"
 import { selectAtom, useAtomCallback } from "jotai/utils"
 import React from "react"
 import { dateMentionsAtom, githubUserAtom, notesAtom } from "../global-state"
-import type { BlockDoc } from "../blocks/types"
-import { useDeleteNoteFile, useWriteNoteDocs, useWriteNotes } from "../data/store"
+import { useDeleteNoteFile, useWriteNotes } from "../data/store"
 import { Note, NoteId } from "../schema"
-import {
-  parseFrontmatter,
-  updateDocFrontmatter,
-  updateFrontmatterValue,
-} from "../utils/frontmatter"
+import { parseFrontmatter, updateFrontmatterValue } from "../utils/frontmatter"
 import { deleteGist } from "../utils/gist"
 
 const EMPTY_MENTIONS: NoteId[] = []
@@ -65,20 +60,6 @@ export function useSaveNote() {
   )
 
   return saveNote
-}
-
-/** The editor's save: one typed doc, stamped and written as rows. */
-export function useSaveNoteDoc() {
-  const writeNoteDocs = useWriteNoteDocs()
-
-  return React.useCallback(
-    (id: NoteId, doc: BlockDoc) => {
-      // Stamp `updated_at` — this is also what makes the replica's incremental
-      // pulls work (docs/graph-storage.md).
-      writeNoteDocs({ [id]: updateDocFrontmatter(doc, { updated_at: new Date() }) })
-    },
-    [writeNoteDocs],
-  )
 }
 
 /**

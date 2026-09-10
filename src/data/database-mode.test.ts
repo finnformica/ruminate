@@ -8,13 +8,14 @@ import type {
 import type { NoteId } from "../schema"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
+import { docToOps } from "./ops"
 import {
   CACHE_GENERATION,
   EMPTY_GRAPH,
   databaseFilesAtom,
   databaseGraphAtom,
   databaseModeStatusAtom,
-  databaseWriteDocs,
+  databaseApplyOps,
   databaseWriteFiles,
   databaseDeleteFile,
   flushDatabaseMode,
@@ -250,21 +251,23 @@ describe("database mode saves", () => {
     expect(new Set(tombstoned.map((node) => node.deleted_at)).size).toBe(1)
   })
 
-  it("a doc save updates the graph atom at once and lands as rows (no markdown parsed)", async () => {
+  it("ops apply to the graph atom at once and land as rows after the coalescing window", async () => {
     const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
     expect(walked("note-a")).toBe(NOTE_A)
 
     const edited = "- A edited\n  id:: blk_a000000000\n- new\n  id:: blk_n000000000\n"
-    databaseWriteDocs({ "note-a": parse(edited) })
-    // Optimistic, pre-flush: the editor's next walk already sees the edit, and
-    // so do the markdown readers.
+    databaseApplyOps(docToOps("note-a", parse(edited), graph()))
+    // On screen at once…
     expect(walked("note-a")).toBe(edited)
-    expect(files()["note-a.md"]).toBe(edited)
+    // …in the store and the files map only once the run is written.
+    expect(await store.getNote("note-a")).toBe(NOTE_A)
+    expect(files()["note-a.md"]).toBe(NOTE_A)
     await flushDatabaseMode()
 
     expect(await store.getNote("note-a")).toBe(edited)
+    expect(files()["note-a.md"]).toBe(edited)
     expect(walked("note-a")).toBe(edited)
     expect(calls.changes).toHaveLength(1)
     expect(calls.changes[0].noteIds).toEqual(["note-a"])
@@ -274,19 +277,59 @@ describe("database mode saves", () => {
     ])
   })
 
-  it("a doc delete removes the page from the graph atom and tombstones its rows", async () => {
+  it("a run of ops is one store write, and a markdown write never lands behind it", async () => {
     const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
 
-    databaseWriteDocs({ "note-a": null })
-    expect(walked("note-a")).toBeNull()
-    expect(files()).toEqual({})
+    databaseApplyOps([{ op: "setText", id: "blk_a000000000", text: "A1" }])
+    databaseApplyOps([{ op: "setText", id: "blk_a000000000", text: "A12" }])
+    databaseApplyOps([{ op: "setText", id: "blk_a000000000", text: "A123" }])
+    // A markdown write queued meanwhile flushes the ops first, so the store
+    // is never rebuilt or read behind what the screen shows.
+    databaseWriteFiles({ "note-b.md": NOTE_B })
     await flushDatabaseMode()
 
-    expect(await store.getNote("note-a")).toBeNull()
-    expect(walked("note-a")).toBeNull()
-    expect(calls.changes[0].diff.nodes.every((node) => node.deleted_at !== null)).toBe(true)
+    expect(await store.getNote("note-a")).toBe("- A123\n  id:: blk_a000000000\n")
+    expect(await store.getNote("note-b")).toBe(NOTE_B)
+    expect(walked("note-a")).toBe("- A123\n  id:: blk_a000000000\n")
+    expect(calls.changes.map((change) => change.noteIds)).toEqual([["note-a"], ["note-b"]])
+  })
+
+  it("a pull never clobbers ops still coalescing", async () => {
+    const { source } = stubSource({
+      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
+      since: () => remoteChanges({ "note-b": NOTE_B }, 200, "200"),
+    })
+    // The push queue reports note-a pending only once the edit is made.
+    const pending: NoteId[] = []
+    const { handle } = stubReplica(pending)
+    const store = await boot({ source, replica: handle })
+
+    databaseApplyOps([{ op: "setText", id: "blk_a000000000", text: "typed" }])
+    pending.push("note-a")
+    requestDatabasePull()
+    await flushDatabaseMode()
+
+    expect(walked("note-a")).toBe("- typed\n  id:: blk_a000000000\n")
+    expect(await store.getNote("note-a")).toBe("- typed\n  id:: blk_a000000000\n")
+    expect(walked("note-b")).toBe(NOTE_B)
+  })
+
+  it("removing a page's last block through ops tombstones the rows", async () => {
+    const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
+    const { handle, calls } = stubReplica()
+    const store = await boot({ source, replica: handle })
+
+    databaseApplyOps(docToOps("note-a", parse(""), graph()))
+    expect(walked("note-a")).toBe(serialize(parse("")))
+    await flushDatabaseMode()
+
+    expect(await store.getNote("note-a")).toBe(serialize(parse("")))
+    expect(files()["note-a.md"]).toBe(serialize(parse("")))
+    expect(calls.changes[0].diff.nodes.map((n) => [n.id, n.deleted_at != null])).toEqual([
+      ["blk_a000000000", true],
+    ])
   })
 
   it("the graph atom follows pulls and file writes too", async () => {

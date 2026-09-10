@@ -74,7 +74,7 @@ const PAGES: SamplePage[] = [
 ]
 
 /** The sample corpus as rows (fresh, evenly spaced sort keys). */
-export function sampleRows(now = 0): { nodes: NodeRow[]; links: LinkRow[] } {
+function sampleRows(now = 0): { nodes: NodeRow[]; links: LinkRow[] } {
   const nodes: NodeRow[] = []
   const links: LinkRow[] = []
   const walk = (parentId: string, blocks: SampleBlock[]) => {

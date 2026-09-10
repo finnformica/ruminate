@@ -9,7 +9,6 @@ import { CalendarHeader } from "../components/calendar-header"
 import { DaysOfWeek } from "../components/days-of-week"
 import { Details } from "../components/details"
 import { LoadingIcon16, NoteIcon16 } from "../components/icons"
-import { isEmptyDoc } from "../blocks/ops"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
@@ -21,10 +20,10 @@ import { PageLayout } from "../components/page-layout"
 import { ShareDialog } from "../components/share-dialog"
 import { isSyncingAtom } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
-import { useGetNoteContents } from "../data/store"
-import { graphSnapshotAtom, isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
-import { useEditorDoc } from "../hooks/editor-doc"
-import { useNoteById, useRenameNote, useSaveNoteDoc } from "../hooks/note"
+import { requestDatabaseFlush } from "../data/database-mode"
+import { isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
+import { useNoteById, useRenameNote } from "../hooks/note"
+import { useNoteDoc } from "../hooks/note-doc"
 import { Width, fontSchema, widthSchema } from "../schema"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
@@ -101,51 +100,38 @@ function NotePage() {
   // current timezone, to match the floating YYYY-MM-DD note naming.
   const isReadOnlyDailyNote = isDailyNote && noteId !== toDateString(new Date())
   const useBlockEditor = !isReadOnlyDailyNote
-  const saveNoteDoc = useSaveNoteDoc()
-  const getNoteContents = useGetNoteContents()
-  const snapshot = useAtomValue(graphSnapshotAtom)
-
   // An id no live note claims falls through to the new-note editor below —
   // renames never leave a dead id behind, since the id never changes.
 
-  // Show "Saving…" the instant a save is dispatched, rather than waiting for
+  // Show "Saving…" the instant a change is dispatched, rather than waiting for
   // the debounced sync to actually start. Cleared when the sync finishes (or a
   // short fallback, in case no sync was needed).
   const [pendingSave, setPendingSave] = useState(false)
-
-  const handleSave = React.useCallback(
-    (doc: BlockDoc) => {
-      if (isSignedOut || !noteId) return
-
-      // New notes shouldn't be saved if the editor is empty
-      if (!note && isEmptyDoc(doc)) return
-
-      // The note was deleted or renamed away — a trailing autosave flush must
-      // not resurrect it under the old id.
-      if (note && getNoteContents()[noteId] === undefined) return
-
-      // Only save if the content has changed
-      if (serialize(doc) !== note?.content) {
-        setPendingSave(true)
-        window.setTimeout(() => setPendingSave(false), 4000)
-        saveNoteDoc(noteId, doc)
-      }
-    },
-    [isSignedOut, noteId, note, getNoteContents, saveNoteDoc],
-  )
 
   // What a note that is not in the graph yet starts as: the `?content=`
   // search param (markdown, imported here once), or nothing.
   const defaultDoc = React.useMemo(() => parse(defaultContent ?? ""), [defaultContent])
 
-  // Editor state: walked from the graph, autosaved through handleSave on every
-  // change (debounced), flushed on hide/unmount — see useEditorDoc.
-  const { editorDoc, setEditorDoc, flushNow } = useEditorDoc({
+  // The doc is the walk of the page over the live graph; every change the
+  // editor hands back becomes ops applied to the graph — see useNoteDoc.
+  const {
+    doc: editorDoc,
+    exists: pageExists,
+    setDoc,
+  } = useNoteDoc({
     noteId,
-    snapshot,
     defaultDoc,
-    onSave: handleSave,
   })
+  const setEditorDoc = React.useCallback(
+    (next: BlockDoc) => {
+      if (!isSignedOut) {
+        setPendingSave(true)
+        window.setTimeout(() => setPendingSave(false), 4000)
+      }
+      setDoc(next)
+    },
+    [isSignedOut, setDoc],
+  )
   // The markdown consumers of the page (title, favicon, actions menu, share)
   // still read the note's rollup — the doc's bytes.
   const editorValue = React.useMemo(() => serialize(editorDoc), [editorDoc])
@@ -207,14 +193,14 @@ function NotePage() {
 
   const isSaving = pendingSave || isSyncing
 
-  // Programmatic content updates (width, pin, share) save immediately rather
-  // than waiting out the autosave debounce.
+  // Programmatic content updates (width, pin, share) write immediately rather
+  // than waiting out the coalescing window.
   const applyAndSave = React.useCallback(
     (next: BlockDoc) => {
       setEditorDoc(next)
-      flushNow()
+      requestDatabaseFlush()
     },
-    [setEditorDoc, flushNow],
+    [setEditorDoc],
   )
 
   const updateWidth = React.useCallback(
@@ -238,9 +224,9 @@ function NotePage() {
     [noteId, renameNote, editorValue],
   )
 
-  // ⌘S flushes the pending autosave immediately (changes save on their own;
+  // ⌘S writes the coalescing ops immediately (changes save on their own;
   // this is just "save now").
-  useHotkeys(APP_SHORTCUTS.save, () => flushNow(), GLOBAL_HOTKEY_OPTIONS)
+  useHotkeys(APP_SHORTCUTS.save, () => requestDatabaseFlush(), GLOBAL_HOTKEY_OPTIONS)
 
   // Focus the editor from anywhere on the page (never while typing): restores
   // the last selected block so `i` means "put me back where I was".
@@ -334,7 +320,7 @@ function NotePage() {
                   noteId={noteId}
                   doc={editorDoc}
                   onChange={setEditorDoc}
-                  startEditing={!note && notesLoaded}
+                  startEditing={!pageExists && notesLoaded}
                   highlightHeading={highlightHeading}
                   onExitTop={() => setTitleFocusSignal((n) => n + 1)}
                   focusFirstSignal={focusFirstSignal}
