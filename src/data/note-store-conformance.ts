@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
+import { updateText } from "../blocks/ops"
 import { parse } from "../blocks/parse"
+import { serialize } from "../blocks/serialize"
+import { pageDoc } from "./graph"
 import type { NoteStore } from "./note-store"
 
 /**
@@ -405,6 +408,53 @@ export function describeNoteStoreConformance(
       expect(await store.downstream("blk_broot00000")).toEqual(["blk_shared0000"])
       expect(await store.upstream("blk_onlya00000")).toEqual([])
       expect(await store.downstream("b")).toEqual(["blk_broot00000"])
+    })
+
+    // The editor's own path: typed docs in, the graph out — no markdown
+    // between them (docs/graph-native-app.md).
+
+    it("writeNoteDocs: a doc lands as rows, and getGraph walks it back unchanged", async () => {
+      const store = await makeStore()
+      const markdown = "# Title\n  id:: blk_title00000\n  [ ] task\n    id:: blk_task000000\n"
+      await store.writeNoteDocs({ a: parse(markdown) })
+
+      const walked = pageDoc("a", await store.getGraph())
+      expect(walked).not.toBeNull()
+      expect(serialize(walked!)).toBe(markdown)
+      expect(walked!.blocks.blk_task000000.type).toBe("todo")
+      // The rollup is the same bytes — the markdown readers see what the
+      // editor wrote.
+      expect(await store.getNote("a")).toBe(markdown)
+    })
+
+    it("writeNoteDocs: editing a mirrored block through one note's doc keeps ONE node with two links", async () => {
+      const store = await makeStore()
+      await store.writeNotes({
+        a: "- shared\n  id:: blk_shared0000\n",
+        b: "- b's own\n  id:: blk_bown000000\n",
+      })
+      await store.addLink("b", "blk_shared0000")
+
+      // Walk b out of the graph, edit the shared block, save b's doc back.
+      const doc = pageDoc("b", await store.getGraph())!
+      await store.writeNoteDocs({ b: updateText(doc, "blk_shared0000", "edited via doc") })
+
+      expect(await store.upstream("blk_shared0000")).toEqual(["a", "b"])
+      expect(await store.getNote("a")).toBe("- edited via doc\n  id:: blk_shared0000\n")
+      const graph = await store.getGraph()
+      expect(graph.nodes.get("blk_shared0000")?.text).toBe("edited via doc")
+    })
+
+    it("writeNoteDocs: an unchanged doc is a no-op, and null deletes", async () => {
+      const store = await makeStore()
+      await store.writeNoteDocs({ a: parse("- A\n  id:: blk_aaaaaaaaaa\n") })
+      const again = await store.writeNoteDocs({ a: pageDoc("a", await store.getGraph())! })
+      expect(again.nodes).toEqual([])
+      expect(again.links).toEqual([])
+
+      await store.writeNoteDocs({ a: null })
+      expect(await store.getNote("a")).toBeNull()
+      expect(pageDoc("a", await store.getGraph())).toBeNull()
     })
   })
 }

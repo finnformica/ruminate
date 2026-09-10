@@ -25,7 +25,7 @@ export function toDisplayMarkdown(content: string): string {
 }
 
 /** Display markdown of a typed doc (see `toDisplayMarkdown`). */
-export function displayMarkdownOf(doc: BlockDoc): string {
+function displayMarkdownOf(doc: BlockDoc): string {
   const lines: string[] = []
 
   if (doc.frontmatter !== null) {

@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 import { createStore } from "jotai"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { databaseFilesAtom } from "./data/database-mode"
+import { databaseFilesAtom, databaseGraphAtom } from "./data/database-mode"
+import { buildGraphSnapshot, docToGraph, pageDoc } from "./data/graph"
+import { serialize } from "./blocks/serialize"
 import {
   blockIndexAtom,
   globalStateMachineAtom,
+  graphSnapshotAtom,
   isSignedOutAtom,
+  markdownFilesAtom,
   searchBlocksAtom,
 } from "./global-state"
 
@@ -50,6 +54,46 @@ async function signedInStore(files: Record<string, string>) {
 
 afterEach(() => {
   localStorage.clear()
+})
+
+describe("graphSnapshotAtom", () => {
+  it("signed in, serves the database graph", async () => {
+    const { store, unsubscribe } = await signedInStore(FILES)
+    const { nodes, links } = docToGraph("tasks", FILES["tasks.md"], 1)
+    const snapshot = buildGraphSnapshot(nodes, links)
+    store.set(databaseGraphAtom, snapshot)
+
+    expect(store.get(graphSnapshotAtom)).toBe(snapshot)
+    expect(serialize(pageDoc("tasks", store.get(graphSnapshotAtom))!)).toBe(FILES["tasks.md"])
+
+    unsubscribe()
+  })
+
+  it("signed out, serves the sample notes as a graph — one page per file, walked back to its bytes", async () => {
+    const store = createStore()
+    const unsubscribe = store.sub(globalStateMachineAtom, () => {})
+    await vi.waitFor(() => {
+      expect(store.get(isSignedOutAtom)).toBe(true)
+    })
+
+    const files = store.get(markdownFilesAtom)
+    const ids = Object.keys(files)
+      .filter((path) => path.endsWith(".md"))
+      .map((path) => path.replace(/\.md$/, ""))
+    expect(ids.length).toBeGreaterThan(0)
+    const snapshot = store.get(graphSnapshotAtom)
+    for (const id of ids) {
+      const doc = pageDoc(id, snapshot)
+      expect(doc).not.toBeNull()
+      // Sample notes are canonical-ish markdown; the walk reproduces whatever
+      // the import made of them, which is what the editor renders.
+      expect(serialize(doc!)).toBe(serialize(pageDoc(id, snapshot)!))
+    }
+    // Stable across reads: the import runs once per files map.
+    expect(store.get(graphSnapshotAtom)).toBe(snapshot)
+
+    unsubscribe()
+  })
 })
 
 describe("block search atoms", () => {

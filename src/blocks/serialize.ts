@@ -26,7 +26,7 @@ import type { Block, BlockDoc } from "./types"
 
 /** Walk depth cap — belt-and-braces so even a corrupted (cyclic) doc from a
  * bad sync can never hang the export. Mirrors the rollup's historic cap. */
-export const MAX_SERIALIZE_DEPTH = 64
+const MAX_SERIALIZE_DEPTH = 64
 
 const codeLanguage = (block: Block): string => {
   const language = block.props?.language

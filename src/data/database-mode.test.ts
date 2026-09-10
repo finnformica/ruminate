@@ -6,10 +6,15 @@ import type {
   ReplicaCorpusBody,
 } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
+import { parse } from "../blocks/parse"
+import { serialize } from "../blocks/serialize"
 import {
   CACHE_GENERATION,
+  EMPTY_GRAPH,
   databaseFilesAtom,
+  databaseGraphAtom,
   databaseModeStatusAtom,
+  databaseWriteDocs,
   databaseWriteFiles,
   databaseDeleteFile,
   flushDatabaseMode,
@@ -20,7 +25,7 @@ import {
   stopDatabaseMode,
 } from "./database-mode"
 import type { D1NoteSource } from "./d1-note-source"
-import { docToGraph } from "./graph"
+import { docToGraph, pageDoc } from "./graph"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { openSqlNoteStore, type SqlNoteStore } from "./sql-note-store"
@@ -125,6 +130,12 @@ async function boot(options: {
 
 const jotai = getDefaultStore()
 const files = () => jotai.get(databaseFilesAtom)
+const graph = () => jotai.get(databaseGraphAtom)
+/** The note's doc as the graph atom holds it, as bytes (or null). */
+const walked = (id: string) => {
+  const doc = pageDoc(id, graph())
+  return doc ? serialize(doc) : null
+}
 const status = () => jotai.get(databaseModeStatusAtom)
 
 afterEach(async () => {
@@ -239,6 +250,63 @@ describe("database mode saves", () => {
     expect(new Set(tombstoned.map((node) => node.deleted_at)).size).toBe(1)
   })
 
+  it("a doc save updates the graph atom at once and lands as rows (no markdown parsed)", async () => {
+    const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
+    const { handle, calls } = stubReplica()
+    const store = await boot({ source, replica: handle })
+    expect(walked("note-a")).toBe(NOTE_A)
+
+    const edited = "- A edited\n  id:: blk_a000000000\n- new\n  id:: blk_n000000000\n"
+    databaseWriteDocs({ "note-a": parse(edited) })
+    // Optimistic, pre-flush: the editor's next walk already sees the edit, and
+    // so do the markdown readers.
+    expect(walked("note-a")).toBe(edited)
+    expect(files()["note-a.md"]).toBe(edited)
+    await flushDatabaseMode()
+
+    expect(await store.getNote("note-a")).toBe(edited)
+    expect(walked("note-a")).toBe(edited)
+    expect(calls.changes).toHaveLength(1)
+    expect(calls.changes[0].noteIds).toEqual(["note-a"])
+    expect(calls.changes[0].diff.nodes.map((node) => node.id).sort()).toEqual([
+      "blk_a000000000",
+      "blk_n000000000",
+    ])
+  })
+
+  it("a doc delete removes the page from the graph atom and tombstones its rows", async () => {
+    const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
+    const { handle, calls } = stubReplica()
+    const store = await boot({ source, replica: handle })
+
+    databaseWriteDocs({ "note-a": null })
+    expect(walked("note-a")).toBeNull()
+    expect(files()).toEqual({})
+    await flushDatabaseMode()
+
+    expect(await store.getNote("note-a")).toBeNull()
+    expect(walked("note-a")).toBeNull()
+    expect(calls.changes[0].diff.nodes.every((node) => node.deleted_at !== null)).toBe(true)
+  })
+
+  it("the graph atom follows pulls and file writes too", async () => {
+    const { source } = stubSource({
+      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
+      since: () => remoteChanges({ "note-b": NOTE_B }, 200, "200"),
+    })
+    await boot({ source, replica: null })
+    expect(walked("note-a")).toBe(NOTE_A)
+    expect(walked("note-b")).toBeNull()
+
+    databaseWriteFiles({ "note-c.md": "- C\n  id:: blk_c000000000\n" })
+    await flushDatabaseMode()
+    expect(walked("note-c")).toBe("- C\n  id:: blk_c000000000\n")
+
+    requestDatabasePull()
+    await flushDatabaseMode()
+    expect(walked("note-b")).toBe(NOTE_B)
+  })
+
   it("non-note file writes are dropped (nothing else lives in the graph)", async () => {
     const { source } = stubSource({})
     const { handle, calls } = stubReplica()
@@ -340,6 +408,7 @@ describe("database mode lifecycle", () => {
     expect(calls.stopped).toBe(true)
     expect(close).toHaveBeenCalled()
     expect(files()).toEqual({})
+    expect(graph()).toBe(EMPTY_GRAPH)
     expect(status().status).toBe("off")
     expect(isDatabaseModeActive()).toBe(false)
   })

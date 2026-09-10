@@ -5,7 +5,8 @@ import { atomWithStorage, selectAtom } from "jotai/utils"
 import { assign, createMachine } from "xstate"
 import { GitHubUser, Note, NoteId, Template, githubUserSchema, templateSchema } from "./schema"
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
-import { databaseFilesAtom } from "./data/database-mode"
+import { databaseFilesAtom, databaseGraphAtom } from "./data/database-mode"
+import { buildGraphSnapshot, docToGraph, type GraphSnapshot } from "./data/graph"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
 import { backfillPrimaryEmail } from "./utils/github-email"
 import { createBlockIndexer, searchBlocks } from "./utils/block-search"
@@ -223,6 +224,34 @@ export const isDatabaseModeAtom = atom((get) => get(machineGithubUserAtom) !== n
 export const markdownFilesAtom = atom((get) =>
   get(isDatabaseModeAtom) ? get(databaseFilesAtom) : get(machineMarkdownFilesAtom),
 )
+
+/**
+ * The live graph — every node and child link, indexed for walking. Signed in
+ * it is the local SQL store's rows (`src/data/database-mode.ts`); signed out
+ * it is the sample notes, imported once. The editor walks its note out of
+ * this rather than parsing markdown.
+ */
+export const graphSnapshotAtom = atom((get) =>
+  get(isDatabaseModeAtom) ? get(databaseGraphAtom) : sampleGraph(get(machineMarkdownFilesAtom)),
+)
+
+// The sample corpus is a constant per session; import it once per files map.
+const sampleGraphCache = new WeakMap<Record<string, string>, GraphSnapshot>()
+function sampleGraph(files: Record<string, string>): GraphSnapshot {
+  const cached = sampleGraphCache.get(files)
+  if (cached) return cached
+  const nodes = []
+  const links = []
+  for (const filepath in files) {
+    if (!filepath.endsWith(".md")) continue
+    const graph = docToGraph(filepath.replace(/\.md$/, ""), files[filepath], 0)
+    nodes.push(...graph.nodes)
+    links.push(...graph.links)
+  }
+  const snapshot = buildGraphSnapshot(nodes, links)
+  sampleGraphCache.set(files, snapshot)
+  return snapshot
+}
 
 export const isSignedOutAtom = selectAtom(globalStateMachineAtom, (state) =>
   state.matches("signedOut"),

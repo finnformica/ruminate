@@ -1,4 +1,5 @@
 import yaml from "yamljs"
+import type { BlockDoc } from "../blocks/types"
 
 /** Reserved frontmatter keys that are not displayed to users. `title` is
  * projection-owned (src/data/page-identity.ts): it carries the page's name
@@ -275,6 +276,19 @@ export function updateFrontmatterValue({
 
     return `---\n${frontmatterLines}\n---\n${content}`
   }
+}
+
+/**
+ * `updateFrontmatterValue` for a typed doc: the doc's frontmatter (the YAML
+ * between the fences, verbatim) with the properties applied, blocks untouched.
+ */
+export function updateDocFrontmatter(doc: BlockDoc, properties: Record<string, unknown>): BlockDoc {
+  const content = doc.frontmatter === null ? "" : `---\n${doc.frontmatter}\n---\n`
+  const updated = updateFrontmatterValue({ content, properties })
+  const match = updated.match(/^---\n([\s\S]*?)\n---/)
+  const frontmatter = match ? match[1] : null
+  if (frontmatter === doc.frontmatter) return doc
+  return { ...doc, frontmatter }
 }
 
 /**

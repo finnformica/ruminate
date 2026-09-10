@@ -2,8 +2,9 @@ import { atom } from "jotai"
 import { useAtomCallback } from "jotai/utils"
 import React from "react"
 import { markdownFilesAtom } from "../global-state"
+import type { BlockDoc } from "../blocks/types"
 import type { NoteId } from "../schema"
-import { databaseDeleteFile, databaseWriteFiles } from "./database-mode"
+import { databaseDeleteFile, databaseWriteDocs, databaseWriteFiles } from "./database-mode"
 
 /**
  * The storage seam.
@@ -60,6 +61,16 @@ export function useWriteNotes() {
     },
     [writeFiles],
   )
+}
+
+/**
+ * Persist a batch of typed note docs (`null` deletes) — the editor's save
+ * path. The doc's blocks become rows directly; no markdown is parsed.
+ */
+export function useWriteNoteDocs() {
+  return React.useCallback((updates: Record<NoteId, BlockDoc | null>) => {
+    databaseWriteDocs(updates)
+  }, [])
 }
 
 /** Delete a single note. */

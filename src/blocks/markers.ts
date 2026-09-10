@@ -16,7 +16,7 @@ import type { BlockType } from "./types"
  * position (`markerFor`), `code` is fenced, `page` is a note root: those three
  * are handled structurally by the serializer.
  */
-export const MARKER_OF_TYPE: Readonly<Record<BlockType, string>> = {
+const MARKER_OF_TYPE: Readonly<Record<BlockType, string>> = {
   text: "",
   h1: "# ",
   h2: "## ",
@@ -38,7 +38,7 @@ export function markerFor(type: BlockType, olPosition = 1): string {
 
 /** Headings carry a single `#` on export regardless of how many were typed —
  * their size comes from outline depth — so `## Foo` reads as `# Foo`. */
-export function normalizeHeadingMarker(line: string): string {
+function normalizeHeadingMarker(line: string): string {
   return line.replace(/^#{2,6}(\s)/, "#$1")
 }
 

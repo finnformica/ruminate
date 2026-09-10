@@ -10,6 +10,10 @@ import { CalendarHeader } from "../components/calendar-header"
 import { DaysOfWeek } from "../components/days-of-week"
 import { Details } from "../components/details"
 import { LoadingIcon16, NoteIcon16 } from "../components/icons"
+import { isEmptyDoc } from "../blocks/ops"
+import { parse } from "../blocks/parse"
+import { serialize } from "../blocks/serialize"
+import type { BlockDoc } from "../blocks/types"
 import { BlockNoteEditor } from "../components/block-editor/block-note-editor"
 import { NoteTitle } from "../components/block-editor/note-title"
 import { NoteActionsMenu } from "../components/note-actions-menu"
@@ -21,17 +25,18 @@ import { databaseModeStatusAtom } from "../data/database-mode"
 import { useGetNoteContents } from "../data/store"
 import {
   dailyTemplateAtom,
+  graphSnapshotAtom,
   isDatabaseModeAtom,
   isSignedOutAtom,
   weeklyTemplateAtom,
 } from "../global-state"
-import { useEditorValue } from "../hooks/editor-value"
-import { useNoteById, useRenameNote, useSaveNote } from "../hooks/note"
+import { useEditorDoc } from "../hooks/editor-doc"
+import { useNoteById, useRenameNote, useSaveNoteDoc } from "../hooks/note"
 import { Template, Width, fontSchema, widthSchema } from "../schema"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
-import { removeFrontmatterComments, updateFrontmatterValue } from "../utils/frontmatter"
+import { removeFrontmatterComments, updateDocFrontmatter } from "../utils/frontmatter"
 import { parseNote } from "../utils/parse-note"
 
 type RouteSearch = {
@@ -112,8 +117,9 @@ function NotePage() {
   // current timezone, to match the floating YYYY-MM-DD note naming.
   const isReadOnlyDailyNote = isDailyNote && noteId !== toDateString(new Date())
   const useBlockEditor = !isReadOnlyDailyNote
-  const saveNote = useSaveNote()
+  const saveNoteDoc = useSaveNoteDoc()
   const getNoteContents = useGetNoteContents()
+  const snapshot = useAtomValue(graphSnapshotAtom)
 
   // An id no live note claims falls through to the new-note editor below —
   // renames never leave a dead id behind, since the id never changes.
@@ -124,39 +130,54 @@ function NotePage() {
   const [pendingSave, setPendingSave] = useState(false)
 
   const handleSave = React.useCallback(
-    (value: string) => {
+    (doc: BlockDoc) => {
       if (isSignedOut || !noteId) return
 
       // New notes shouldn't be saved if the editor is empty
-      if (!note && !value) return
+      if (!note && isEmptyDoc(doc)) return
 
       // The note was deleted or renamed away — a trailing autosave flush must
       // not resurrect it under the old id.
       if (note && getNoteContents()[noteId] === undefined) return
 
       // Only save if the content has changed
-      if (value !== note?.content) {
+      if (serialize(doc) !== note?.content) {
         setPendingSave(true)
         window.setTimeout(() => setPendingSave(false), 4000)
-        saveNote({ id: noteId, content: value })
+        saveNoteDoc(noteId, doc)
       }
     },
-    [isSignedOut, noteId, note, getNoteContents, saveNote],
+    [isSignedOut, noteId, note, getNoteContents, saveNoteDoc],
   )
 
-  // Editor state: seeded from the note, autosaved through handleSave on every
-  // change (debounced), flushed on hide/unmount — see useEditorValue.
-  const { editorValue, setEditorValue, flushNow } = useEditorValue({
-    note,
-    defaultValue: defaultContent
-      ? defaultContent
-      : isDailyNote && dailyTemplate
-        ? renderTemplate(dailyTemplate, { date: noteId ?? "" })
-        : isWeeklyNote && weeklyTemplate
-          ? renderTemplate(weeklyTemplate, { week: noteId ?? "" })
-          : "",
+  // What a note that is not in the graph yet starts as: the `?content=`
+  // search param, a daily/weekly template, or nothing. Templates are markdown
+  // (docs/graph-native-app.md) and are imported here, once.
+  const defaultDoc = React.useMemo(
+    () =>
+      parse(
+        defaultContent
+          ? defaultContent
+          : isDailyNote && dailyTemplate
+            ? renderTemplate(dailyTemplate, { date: noteId ?? "" })
+            : isWeeklyNote && weeklyTemplate
+              ? renderTemplate(weeklyTemplate, { week: noteId ?? "" })
+              : "",
+      ),
+    [defaultContent, isDailyNote, dailyTemplate, isWeeklyNote, weeklyTemplate, noteId],
+  )
+
+  // Editor state: walked from the graph, autosaved through handleSave on every
+  // change (debounced), flushed on hide/unmount — see useEditorDoc.
+  const { editorDoc, setEditorDoc, flushNow } = useEditorDoc({
+    noteId,
+    snapshot,
+    defaultDoc,
     onSave: handleSave,
   })
+  // The markdown consumers of the page (title, favicon, actions menu, share)
+  // still read the note's rollup — the doc's bytes.
+  const editorValue = React.useMemo(() => serialize(editorDoc), [editorDoc])
   const parsedNote = React.useMemo(
     () => parseNote(noteId ?? "", editorValue),
     [noteId, editorValue],
@@ -218,26 +239,23 @@ function NotePage() {
   // Programmatic content updates (width, pin, share) save immediately rather
   // than waiting out the autosave debounce.
   const applyAndSave = React.useCallback(
-    (next: string) => {
-      setEditorValue(next)
+    (next: BlockDoc) => {
+      setEditorDoc(next)
       flushNow()
     },
-    [setEditorValue, flushNow],
+    [setEditorDoc, flushNow],
   )
 
   const updateWidth = React.useCallback(
     (width: Width) => {
       if (!noteId) return
 
-      const newContent = updateFrontmatterValue({
-        content: editorValue,
+      applyAndSave(
         // "fixed" is the default width
-        properties: { width: width === "fixed" ? null : width },
-      })
-
-      applyAndSave(newContent)
+        updateDocFrontmatter(editorDoc, { width: width === "fixed" ? null : width }),
+      )
     },
-    [noteId, editorValue, applyAndSave],
+    [noteId, editorDoc, applyAndSave],
   )
 
   // Retitle the current note. Since ids are minted, this sets one property and
@@ -281,7 +299,8 @@ function NotePage() {
               content={editorValue}
               pinned={parsedNote?.pinned ?? false}
               align="end"
-              onContentChange={applyAndSave}
+              // The menu still speaks markdown; import its result.
+              onContentChange={(content) => applyAndSave(parse(content))}
               editor={{
                 showWidth: containerWidth > 800,
                 width: resolvedWidth,
@@ -294,20 +313,10 @@ function NotePage() {
             <ShareDialog
               note={parsedNote}
               onPublish={(gistId) => {
-                applyAndSave(
-                  updateFrontmatterValue({
-                    content: editorValue,
-                    properties: { gist_id: gistId },
-                  }),
-                )
+                applyAndSave(updateDocFrontmatter(editorDoc, { gist_id: gistId }))
               }}
               onUnpublish={() => {
-                applyAndSave(
-                  updateFrontmatterValue({
-                    content: editorValue,
-                    properties: { gist_id: null },
-                  }),
-                )
+                applyAndSave(updateDocFrontmatter(editorDoc, { gist_id: null }))
                 setIsShareDialogOpen(false)
               }}
               open={isShareDialogOpen}
@@ -352,8 +361,8 @@ function NotePage() {
                 <BlockNoteEditor
                   key={noteId}
                   noteId={noteId}
-                  value={editorValue}
-                  onChange={setEditorValue}
+                  doc={editorDoc}
+                  onChange={setEditorDoc}
                   startEditing={!note && notesLoaded}
                   highlightHeading={highlightHeading}
                   onExitTop={() => setTitleFocusSignal((n) => n + 1)}

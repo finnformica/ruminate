@@ -63,7 +63,7 @@ import { useBlockHistory } from "./use-block-history"
  * it is an ordered item (the number is a fact of position in the run, never
  * of the text — see `olPositions`).
  */
-export function renderItems(doc: BlockDoc, ids: string[], depth: number, api: BlockEditorApi) {
+function renderItems(doc: BlockDoc, ids: string[], depth: number, api: BlockEditorApi) {
   const numbers = olPositions(doc, ids)
   return ids.map((id, index) => {
     const block = doc.blocks[id]

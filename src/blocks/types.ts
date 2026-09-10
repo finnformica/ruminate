@@ -24,7 +24,7 @@
 export type BlockType =
   "text" | "h1" | "h2" | "h3" | "todo" | "done" | "ul" | "ol" | "quote" | "code" | "page"
 
-export const BLOCK_TYPES: readonly BlockType[] = [
+const BLOCK_TYPES: readonly BlockType[] = [
   "text",
   "h1",
   "h2",
