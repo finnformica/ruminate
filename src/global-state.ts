@@ -5,6 +5,7 @@ import { atomWithStorage, selectAtom } from "jotai/utils"
 import { assign, createMachine } from "xstate"
 import { GitHubUser, NoteId, githubUserSchema } from "./schema"
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
+import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
 import { databaseGraphAtom } from "./data/database-mode"
 import type { GraphSnapshot } from "./data/graph"
 import { createNotesBuilder } from "./data/note-meta"
@@ -423,4 +424,15 @@ export const calendarLayoutAtom = atomWithStorage<"week" | "month">("calendar-la
 export const newBlockMarkerAtom = atomWithStorage<string>(
   "new-block-marker",
   DEFAULT_NEW_BLOCK_MARKER,
+)
+
+/**
+ * How many levels a note opens with beneath a heading or its top, until the
+ * reader folds or unfolds something themselves (Settings → Editor; see
+ * `defaultCollapsedKeys`). Stored on this device.
+ */
+const storedExpandedLevelsAtom = atomWithStorage<number>("expanded-levels", DEFAULT_EXPANDED_LEVELS)
+export const expandedLevelsAtom = atom(
+  (get) => clampExpandedLevels(get(storedExpandedLevelsAtom)),
+  (_get, set, value: number) => set(storedExpandedLevelsAtom, clampExpandedLevels(value)),
 )

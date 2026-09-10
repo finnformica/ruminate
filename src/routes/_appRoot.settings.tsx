@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useAtom, useAtomValue } from "jotai"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useNetworkState } from "react-use"
 import { DEFAULT_NEW_BLOCK_MARKER } from "../blocks/markers"
 import { Button } from "../components/button"
@@ -20,8 +20,17 @@ import {
   type ReplicaDiagnostics,
   type StorageDiagnostics,
 } from "../data/storage-diagnostics"
-import { AccentColor, accentAtom, githubUserAtom, newBlockMarkerAtom } from "../global-state"
+import { MAX_EXPANDED_LEVELS, MIN_EXPANDED_LEVELS } from "../blocks/default-collapsed"
+import { clearStoredFolds } from "../data/view-state"
+import {
+  AccentColor,
+  accentAtom,
+  expandedLevelsAtom,
+  githubUserAtom,
+  newBlockMarkerAtom,
+} from "../global-state"
 import { cx } from "../utils/cx"
+import { pluralize } from "../utils/pluralize"
 
 export const Route = createFileRoute("/_appRoot/settings")({
   component: RouteComponent,
@@ -151,9 +160,50 @@ const NEW_BLOCK_MARKER_PRESETS: Array<{ value: string; label: string }> = [
 
 function EditorSection() {
   const [newBlockMarker, setNewBlockMarker] = useAtom(newBlockMarkerAtom)
+  const [expandedLevels, setExpandedLevels] = useAtom(expandedLevelsAtom)
+  const [forgotten, setForgotten] = useState<number | null>(null)
 
   return (
     <SettingsSection title="Editor">
+      <div className="flex flex-col gap-2">
+        <label htmlFor="expanded-levels" className="text-sm leading-4 text-text-secondary">
+          Levels open by default
+        </label>
+        <div className="flex items-center gap-3">
+          <input
+            id="expanded-levels"
+            type="range"
+            min={MIN_EXPANDED_LEVELS}
+            max={MAX_EXPANDED_LEVELS}
+            step={1}
+            value={expandedLevels}
+            onChange={(event) => setExpandedLevels(Number(event.target.value))}
+            className="focus-ring h-2 w-full max-w-64 cursor-pointer accent-[var(--color-border-focus)]"
+          />
+          <span className="w-6 tabular-nums" aria-live="polite">
+            {expandedLevels}
+          </span>
+        </div>
+        <span className="text-sm leading-5 text-text-secondary">
+          How many levels a note opens with beneath a heading or its top. Folds you make yourself
+          are kept per note on this device; a note you have not folded follows this setting.
+        </span>
+        <div className="flex items-center gap-3">
+          <Button
+            size="small"
+            onClick={() => {
+              setForgotten(clearStoredFolds())
+            }}
+          >
+            Forget my folds on this device
+          </Button>
+          {forgotten !== null ? (
+            <span className="text-sm text-text-secondary" role="status">
+              {forgotten === 0 ? "Nothing to forget" : `Forgot ${pluralize(forgotten, "note")}`}
+            </span>
+          ) : null}
+        </div>
+      </div>
       <div className="flex flex-col gap-2">
         <label htmlFor="new-block-marker" className="text-sm leading-4 text-text-secondary">
           New block markdown
