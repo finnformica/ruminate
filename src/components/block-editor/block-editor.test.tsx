@@ -22,21 +22,24 @@ function withStarter(doc: BlockDoc): BlockDoc {
 /** A controlled host, like the real note page: it owns the doc and re-renders
  * on change, while the editor keeps its own selection/focus state. */
 function Harness({
-  initial,
+  initial = "",
+  initialDoc,
   startEditing,
   zoomRootId,
   refocusSignal,
   resolveBlocks,
   debug,
 }: {
-  initial: string
+  initial?: string
+  /** A doc built by hand — for shapes markdown cannot express (a shared block). */
+  initialDoc?: BlockDoc
   startEditing?: boolean
   zoomRootId?: string | null
   refocusSignal?: number
   resolveBlocks?: (ids: string[]) => Record<string, string | null>
   debug?: BlockDebugOptions
 }) {
-  const [doc, setDoc] = useState<BlockDoc>(() => withStarter(parse(initial)))
+  const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarter(parse(initial)))
   return (
     <>
       <BlockEditor
@@ -1091,9 +1094,12 @@ describe("collapse toggle", () => {
     lineOf(container, id).querySelector<HTMLButtonElement>(
       'button[aria-label="Collapse"], button[aria-label="Expand"]',
     )
-  /** The subtree container (the guide line + children) under a row. */
-  const guideOf = (container: HTMLElement, id: string) =>
-    rowOf(container, id).querySelector<HTMLElement>(":scope > .border-l")
+  /** The guide line hanging from a row's key: drawn by its children's rows
+   * (the view is flat), keyed by the parent's occurrence. */
+  const guideOf = (container: HTMLElement, id: string) => {
+    const key = rowOf(container, id).dataset.occurrence
+    return container.querySelector<HTMLElement>(`[data-guide="${key}"]`)
+  }
 
   it("only parents carry a toggle; there is no separate gutter", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
@@ -1187,11 +1193,41 @@ describe("collapse toggle", () => {
 
   it("hangs the guide line from the key of every block type", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
-    // Under the 15px slot's centre — every block type has a key there.
+    // Under the 15px slot's centre — every block type has a key there — and
+    // the children start one indent in.
     for (const id of ["blk_bp", "blk_hp", "blk_tp", "blk_pp"]) {
-      expect(guideOf(container, id)!.className, id).toContain("ml-[11px] pl-3")
+      const guide = guideOf(container, id)
+      expect(guide, id).not.toBeNull()
+      expect(guide!.style.left, id).toBe("11px")
+      const child = guide!.closest<HTMLElement>("[data-block-row]")!
+      expect(child.style.paddingLeft).toBe("24px")
     }
     expect(guideOf(container, "blk_leaf")).toBeNull()
+  })
+
+  it("a shared block is two rows, folded independently", () => {
+    // Markdown cannot say "the same block twice" (a duplicate id:: is
+    // re-minted on import); the graph can, so build the doc by hand.
+    const shared: BlockDoc = {
+      frontmatter: null,
+      rootBlockIds: ["blk_p", "blk_q"],
+      blocks: {
+        blk_p: { id: "blk_p", type: "ul", text: "p", children: ["blk_s"] },
+        blk_q: { id: "blk_q", type: "ul", text: "q", children: ["blk_s"] },
+        blk_s: { id: "blk_s", type: "ul", text: "shared", children: ["blk_t"] },
+        blk_t: { id: "blk_t", type: "ul", text: "t", children: [] },
+      },
+    }
+    const { container } = render(<Harness initialDoc={shared} />)
+    const rows = container.querySelectorAll('[data-block-row="blk_s"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].getAttribute("data-occurrence")).toBe("blk_p/blk_s")
+    expect(rows[1].getAttribute("data-occurrence")).toBe("blk_q/blk_s")
+    expect(container.querySelectorAll('[data-block-row="blk_t"]')).toHaveLength(2)
+    // Fold the second occurrence only.
+    fireEvent.click(rows[1].querySelector<HTMLButtonElement>('button[aria-label="Collapse"]')!)
+    expect(container.querySelectorAll('[data-block-row="blk_t"]')).toHaveLength(1)
+    expect(container.querySelector('[data-occurrence="blk_p/blk_s/blk_t"]')).not.toBeNull()
   })
 })
 

@@ -245,6 +245,12 @@
   }
 }
 
+/* The guide lines under the pointer's subtree brighten (the editor toggles
+   this straight on the DOM — see `setHotGuides` in block-editor.tsx). */
+.block-guide.block-guide-hot {
+  background-color: var(--neutral-a6);
+}
+
 /* Keyboard travel keeps a few lines of context (scrolloff): `nearest` reveals
    land this far from the viewport edge instead of flush against it. */
 [data-block-line] {

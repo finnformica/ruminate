@@ -1,16 +1,17 @@
 import { describe, expect, it } from "vitest"
-import { defaultCollapsedIds } from "./default-collapsed"
+import { defaultCollapsedKeys } from "./default-collapsed"
 import { parse } from "./parse"
+import { idOfKey } from "./view"
 
 const doc = (markdown: string) => parse(markdown)
 
-/** Map minted ids back to content so assertions read naturally. */
+/** Map occurrence keys back to content so assertions read naturally. */
 const collapsedContents = (markdown: string) => {
   const parsed = doc(markdown)
-  return defaultCollapsedIds(parsed).map((id) => parsed.blocks[id].text)
+  return defaultCollapsedKeys(parsed).map((key) => parsed.blocks[idOfKey(key)].text)
 }
 
-describe("defaultCollapsedIds", () => {
+describe("defaultCollapsedKeys", () => {
   it("keeps a flat document fully expanded", () => {
     expect(collapsedContents("- a\n- b\n- c\n")).toEqual([])
   })
@@ -47,6 +48,6 @@ describe("defaultCollapsedIds", () => {
   })
 
   it("handles an empty document", () => {
-    expect(defaultCollapsedIds(doc(""))).toEqual([])
+    expect(defaultCollapsedKeys(doc(""))).toEqual([])
   })
 })

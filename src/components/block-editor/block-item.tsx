@@ -4,7 +4,8 @@ import { cx } from "../../utils/cx"
 import type { Block, BlockDoc } from "../../blocks/types"
 import { isHeading, isTodo, leadingMarker } from "../../blocks/markers"
 import type { BlockType } from "../../blocks/types"
-import { olPositions, type BlockPatch } from "../../blocks/ops"
+import type { BlockPatch } from "../../blocks/ops"
+import type { Occurrence } from "../../blocks/view"
 import type { CaretInput, Mode } from "../../blocks/commands"
 import type { KeyLike } from "../../blocks/keymap"
 import {
@@ -41,7 +42,6 @@ export interface BlockEditorApi {
    * so the run reads as one continuous surface. Empty for single selections.
    */
   selectionRunEdges: Map<string, { top: boolean; bottom: boolean }>
-  collapsed: Set<string>
   /** Display-only: no editing, selection, or mutation (collapse still works). */
   readOnly?: boolean
   /**
@@ -56,7 +56,8 @@ export interface BlockEditorApi {
   select: (id: string) => void
   /** Enter edit mode for a block. */
   edit: (id: string, atStart?: boolean) => void
-  toggleCollapse: (id: string) => void
+  /** Fold or unfold a row (by occurrence key — folds are per row). */
+  toggleCollapse: (key: string) => void
   setFocus: (focus: FocusRequest | null) => void
   /**
    * Change a block's text and/or type. Text edits coalesce into one undo
@@ -104,20 +105,32 @@ export interface BlockDebugOptions {
 
 /** Extra space above a heading, proportional to its size (i.e. its outline
  * depth), so sections breathe. Applied to the block's outer wrapper (shared by
- * view and edit) so switching modes never shifts the text. */
-function headingTopMargin(type: BlockType, depth: number): string {
-  if (!isHeading(type)) return ""
+ * view and edit) so switching modes never shifts the text. In px, because the
+ * row's guide lines reach back up through it (see the wrapper below). */
+function headingTopMarginPx(type: BlockType, depth: number): number {
+  if (!isHeading(type)) return 0
   switch (depth) {
     case 0:
-      return "mt-5"
+      return 20
     case 1:
-      return "mt-4"
+      return 16
     case 2:
-      return "mt-2.5"
+      return 10
     default:
-      return "mt-1.5"
+      return 6
   }
 }
+
+/** Row geometry, in px. Each level indents by `INDENT`: the guide line hangs
+ * from the parent's key — a 1px rule under the centre of the 15px marker
+ * slot, which starts 4px into the content column (the highlight surface's
+ * -2px reach + 6px inner padding) — so the rule sits at `GUIDE_X`, and the
+ * child's content starts `INDENT` in (rule + 12px of padding). */
+const INDENT = 24
+const GUIDE_X = 11
+/** Root rows sit 2px further apart than nested ones (which meet at their
+ * 2px + 2px vertical padding). */
+const ROOT_GAP = 2
 
 /** A heading's font size + line-height by outline depth. Shared by the full
  * typography (`typographyFor`) and the heading's `#` marker slot, whose
@@ -172,22 +185,21 @@ function typographyFor(type: BlockType, depth: number): string {
 export function BlockItem({
   doc,
   block,
-  depth,
+  occurrence,
   api,
-  zoomTitle = false,
-  olNumber = 1,
+  animateIn = false,
 }: {
   doc: BlockDoc
   block: Block
-  depth: number
+  /** This row's place in the view (`src/blocks/view.ts`): its depth, fold,
+   * ordered number, guide lines — and whether it is the zoomed view's title
+   * (promoted typography, no toggle; its children follow it at depth 0). */
+  occurrence: Occurrence
   api: BlockEditorApi
-  /** Render as the zoomed view's title: promoted typography, no collapse
-   * toggle, and no children (the editor renders those itself at depth 0). */
-  zoomTitle?: boolean
-  /** An ordered item's number: its position in the run of ordered siblings,
-   * computed by whoever renders the level (`olPositions`). */
-  olNumber?: number
+  /** Mounting as a just-revealed row: play the brief entrance. */
+  animateIn?: boolean
 }) {
+  const { depth, zoomTitle, olNumber, hasChildren, collapsed: isCollapsed } = occurrence
   const readOnly = api.readOnly ?? false
   const editing = !readOnly && api.focus?.id === block.id
   const selected = api.selectedSet.has(block.id) && !editing
@@ -196,8 +208,6 @@ export function BlockItem({
   // the full 4px vertical extension so the run merges seamlessly; every other
   // side extends only 2px (see the data-block-line classes below).
   const runEdges = selected ? api.selectionRunEdges.get(block.id) : undefined
-  const hasChildren = block.children.length > 0
-  const isCollapsed = api.collapsed.has(block.id)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const pendingCaret = useRef<number | null>(null)
   // Set by a Cmd/Ctrl+Shift+V keydown so the paste event that follows inserts
@@ -217,13 +227,10 @@ export function BlockItem({
     [slashQuery],
   )
 
-  // True only on the render where the block goes collapsed → open, so the
-  // revealed children play their brief entrance (never on initial mount).
-  const prevCollapsedRef = useRef(isCollapsed)
-  const justExpanded = prevCollapsedRef.current && !isCollapsed
-  useEffect(() => {
-    prevCollapsedRef.current = isCollapsed
-  }, [isCollapsed])
+  // A row revealed by unfolding its parent rises in briefly. Captured at
+  // mount so the class stays for the row's lifetime — an animation that is
+  // never cut short by a re-render, and never replayed.
+  const [entrance] = useState(animateIn)
 
   const type = block.type
   // The block's text is marker-free by construction: its type is drawn as a
@@ -506,7 +513,7 @@ export function BlockItem({
       size="small"
       disableTooltip
       tabIndex={-1}
-      onClick={() => api.toggleCollapse(block.id)}
+      onClick={() => api.toggleCollapse(occurrence.key)}
       className={cx(
         "block-toggle absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150 active:scale-[0.92] motion-reduce:active:scale-100",
         // IconButton's default radius is the 8px base — on a 20px square that
@@ -698,11 +705,30 @@ export function BlockItem({
     glyphSlot(null, "paragraph-slot")
   )
 
+  // The wrapper: indented by depth, carrying the guide lines of every row it
+  // sits under. A heading's breathing room is a margin, so the highlight
+  // surface never grows; the guides reach back up through it (`top`), so a
+  // parent's line runs unbroken beside its subtree.
+  const marginTop = zoomTitle
+    ? 0
+    : Math.max(headingTopMarginPx(type, depth), depth === 0 && occurrence.index > 0 ? ROOT_GAP : 0)
+
   return (
     <div
       data-block-row={block.id}
-      className={cx("group/subtree", zoomTitle ? "mb-3" : headingTopMargin(type, depth))}
+      data-occurrence={occurrence.key}
+      className={cx("relative", zoomTitle && "mb-3", entrance && "block-expand")}
+      style={{ paddingLeft: depth * INDENT, marginTop }}
     >
+      {occurrence.guideKeys.map((guideKey, level) => (
+        <span
+          key={guideKey}
+          aria-hidden
+          data-guide={guideKey}
+          className="block-guide pointer-events-none absolute bottom-0 w-px bg-border-secondary transition-colors duration-200"
+          style={{ left: GUIDE_X + level * INDENT, top: -marginTop }}
+        />
+      ))}
       <div className="relative min-w-0 py-0.5 font-content leading-relaxed">
         <div
           // The visible content line (carries the highlight). Scroll-into-view
@@ -869,39 +895,6 @@ export function BlockItem({
           />
         ) : null}
       </div>
-
-      {hasChildren && !isCollapsed && !zoomTitle ? (
-        // The guide hangs from the block's key: a 1px rule under the centre of
-        // the 15px marker slot (every block type has one), which starts 4px
-        // into the content column (the surface's -2px reach + 6px inner
-        // padding) — centre 11.5px, so the rule sits at 11px. Children start
-        // 24px in (margin + rule + padding).
-        // The guide brightens while the pointer is anywhere in the subtree
-        // (group/subtree is the block's outer wrapper), tracing the structure.
-        <div
-          className={cx(
-            "ml-[11px] pl-3",
-            "border-l border-border-secondary transition-colors duration-200 group-hover/subtree:border-[color:var(--neutral-a6)]",
-            justExpanded && "block-expand",
-          )}
-        >
-          {olPositions(doc, block.children).map((number, index) => {
-            const childId = block.children[index]
-            const child = doc.blocks[childId]
-            if (!child) return null
-            return (
-              <BlockItem
-                key={childId}
-                doc={doc}
-                block={child}
-                depth={depth + 1}
-                api={api}
-                olNumber={number}
-              />
-            )
-          })}
-        </div>
-      ) : null}
     </div>
   )
 }
