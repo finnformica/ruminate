@@ -50,7 +50,7 @@ export function imageFilesOf(transfer: DataTransfer | null | undefined): File[] 
 
 /** Why a file cannot be uploaded, or null when it can. Checked before the
  * network so the reader hears about a 12 MB screenshot at once. */
-export function rejectImage(file: File): ImageUploadError | null {
+function rejectImage(file: File): ImageUploadError | null {
   if (!isImageMime(file.type)) {
     return new ImageUploadError(
       "unsupported",
