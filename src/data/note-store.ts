@@ -2,6 +2,7 @@ import type { GraphDiff } from "../../worker/handlers/replica-payload"
 import type { BlockDoc } from "../blocks/types"
 import type { NoteId } from "../schema"
 import type { GraphSnapshot } from "./graph"
+import type { Op } from "./ops"
 
 /**
  * The storage contract behind the `src/data` seam, over the schema v2 graph
@@ -40,6 +41,15 @@ export interface NoteStore {
    * deletes. Returns the row-level diff.
    */
   writeNoteDocs(updates: Record<NoteId, BlockDoc | null>): Promise<GraphDiff>
+  /**
+   * Apply a batch of graph ops (`src/data/ops.ts`) as row writes, in one
+   * transaction: `create`/`set*` upsert node rows, `link` upserts a link row
+   * with the key the op carries, `unlink` and `delete` tombstone. The batch
+   * is applied verbatim — the client decided what cascades (`docToOps`), so
+   * the store and the snapshot it was applied to agree row for row. Returns
+   * the row-level diff.
+   */
+  applyOps(ops: readonly Op[]): Promise<GraphDiff>
   /** Delete a single note (no-op when it does not exist). */
   deleteNote(id: NoteId): Promise<GraphDiff>
   /** Ids of the nodes containing this node (child links, deterministic order). */

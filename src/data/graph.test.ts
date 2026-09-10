@@ -3,7 +3,7 @@ import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
-import { getSampleMarkdownFiles } from "../utils/sample-markdown-files"
+import { sampleGraph } from "./sample-graph"
 import {
   buildGraphSnapshot,
   docFromGraph,
@@ -250,9 +250,13 @@ describe("rollup equivalence (named cases)", () => {
     expectEquivalent("- a\n  - b\n    - c\n      - d\n        \n- e\n")
   })
 
-  it("round-trips the sample notes shipped to signed-out users", () => {
-    for (const content of Object.values(getSampleMarkdownFiles())) {
-      expectEquivalent(content)
+  it("round-trips the sample graph shipped to signed-out users", () => {
+    const graph = sampleGraph()
+    for (const node of graph.nodes.values()) {
+      if (node.type !== "page") continue
+      const markdown = rollup(node.id, graph)
+      expect(markdown).not.toBeNull()
+      expectEquivalent(markdown as string, node.id)
     }
   })
 

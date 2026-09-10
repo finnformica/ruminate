@@ -27,10 +27,8 @@ export interface Typegen0 {
   eventsCausingActions: {
     clearGitHubUser: "SIGN_OUT" | "error.platform.global.resolvingUser:invocation[0]"
     clearGitHubUserLocalStorage: "SIGN_OUT" | "error.platform.global.resolvingUser:invocation[0]"
-    clearMarkdownFiles: "SIGN_IN" | "xstate.stop"
     setGitHubUser: "SIGN_IN" | "done.invoke.global.resolvingUser:invocation[0]"
     setGitHubUserLocalStorage: "SIGN_IN" | "done.invoke.global.resolvingUser:invocation[0]"
-    setSampleMarkdownFiles: "SIGN_OUT" | "error.platform.global.resolvingUser:invocation[0]"
   }
   eventsCausingDelays: {}
   eventsCausingGuards: {}

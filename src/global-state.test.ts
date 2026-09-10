@@ -4,12 +4,14 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { databaseFilesAtom, databaseGraphAtom } from "./data/database-mode"
 import { buildGraphSnapshot, docToGraph, pageDoc } from "./data/graph"
 import { serialize } from "./blocks/serialize"
+import { applyOps } from "./data/ops"
 import {
   blockIndexAtom,
   globalStateMachineAtom,
   graphSnapshotAtom,
   isSignedOutAtom,
   markdownFilesAtom,
+  sampleGraphAtom,
   searchBlocksAtom,
 } from "./global-state"
 
@@ -69,28 +71,31 @@ describe("graphSnapshotAtom", () => {
     unsubscribe()
   })
 
-  it("signed out, serves the sample notes as a graph — one page per file, walked back to its bytes", async () => {
+  it("signed out, serves the sample graph, and the files map is its rollup", async () => {
     const store = createStore()
     const unsubscribe = store.sub(globalStateMachineAtom, () => {})
     await vi.waitFor(() => {
       expect(store.get(isSignedOutAtom)).toBe(true)
     })
 
-    const files = store.get(markdownFilesAtom)
-    const ids = Object.keys(files)
-      .filter((path) => path.endsWith(".md"))
-      .map((path) => path.replace(/\.md$/, ""))
-    expect(ids.length).toBeGreaterThan(0)
     const snapshot = store.get(graphSnapshotAtom)
+    expect(snapshot).toBe(store.get(sampleGraphAtom))
+    const files = store.get(markdownFilesAtom)
+    const ids = Object.keys(files).map((path) => path.replace(/\.md$/, ""))
+    expect(ids).toContain("readme")
     for (const id of ids) {
-      const doc = pageDoc(id, snapshot)
-      expect(doc).not.toBeNull()
-      // Sample notes are canonical-ish markdown; the walk reproduces whatever
-      // the import made of them, which is what the editor renders.
-      expect(serialize(doc!)).toBe(serialize(pageDoc(id, snapshot)!))
+      expect(files[`${id}.md`]).toBe(serialize(pageDoc(id, snapshot)!))
     }
-    // Stable across reads: the import runs once per files map.
-    expect(store.get(graphSnapshotAtom)).toBe(snapshot)
+    // The readme's title and props come from the page node, not markdown.
+    expect(files["readme.md"]).toContain("title: 👋 Welcome to Ruminate")
+    expect(files["readme.md"]).toContain("pinned: true")
+
+    // An edit signed out applies to the sample graph in memory.
+    store.set(
+      sampleGraphAtom,
+      applyOps(snapshot, [{ op: "setText", id: "blk_welcome001", text: "edited" }], 1),
+    )
+    expect(store.get(markdownFilesAtom)["readme.md"]).toContain("edited")
 
     unsubscribe()
   })

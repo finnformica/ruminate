@@ -47,7 +47,7 @@ interface GraphParts {
   childrenOf: Map<string, string[]>
 }
 
-const propsJson = (props: BlockProps | null | undefined): string | null =>
+export const propsJson = (props: BlockProps | null | undefined): string | null =>
   props && Object.keys(props).length > 0 ? JSON.stringify(props) : null
 
 /**

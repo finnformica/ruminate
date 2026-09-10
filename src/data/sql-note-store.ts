@@ -24,6 +24,7 @@ import {
   type GraphSnapshot,
 } from "./graph"
 import type { NoteStore } from "./note-store"
+import type { Op } from "./ops"
 import type { SqlDriver, SqlStatement } from "./sql-driver"
 
 /**
@@ -121,6 +122,11 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<SqlNoteStore>
           if (doc === null) planNoteDelete(writer, id)
           else planNoteWrite(writer, id, doc)
         }
+      }),
+
+    applyOps: (ops) =>
+      runWrite((writer) => {
+        for (const op of ops) planOp(writer, op)
       }),
 
     deleteNote: (id) => runWrite((writer) => planNoteDelete(writer, id)),
@@ -573,6 +579,50 @@ function planNoteWrite(writer: GraphWriter, noteId: NoteId, doc: BlockDoc) {
 
   const candidates = new Set([...oldSubtree].filter((id) => !newIds.has(id)))
   cascadeOrphans(writer, candidates, noteId)
+}
+
+/** One op as row writes. A `set*` on a node the store does not hold is
+ * dropped (it was deleted underneath); everything else is verbatim. */
+function planOp(writer: GraphWriter, op: Op) {
+  const { mem, now } = writer
+  switch (op.op) {
+    case "create":
+      writer.upsertNode({
+        id: op.id,
+        type: op.type,
+        text: op.text,
+        props: op.props,
+        updated_at: now,
+      })
+      return
+    case "setText":
+    case "setType":
+    case "setProps": {
+      const node = mem.nodes.get(op.id)
+      if (!node) return
+      const next: NodeRow = { ...node, updated_at: now }
+      if (op.op === "setText") next.text = op.text
+      else if (op.op === "setType") next.type = op.type
+      else next.props = op.props
+      writer.upsertNode(next)
+      return
+    }
+    case "link":
+      writer.upsertLink({
+        source_id: op.source,
+        destination_id: op.destination,
+        kind: CHILD_KIND,
+        sort_key: op.sortKey,
+        updated_at: now,
+      })
+      return
+    case "unlink":
+      writer.tombstoneLink(op.source, op.destination, CHILD_KIND)
+      return
+    case "delete":
+      writer.tombstoneNode(op.id)
+      return
+  }
 }
 
 /** Delete a page: the page node is tombstoned, and every node that is thereby

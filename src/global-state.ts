@@ -6,14 +6,14 @@ import { assign, createMachine } from "xstate"
 import { GitHubUser, Note, NoteId, githubUserSchema } from "./schema"
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { databaseFilesAtom, databaseGraphAtom } from "./data/database-mode"
-import { buildGraphSnapshot, docToGraph, type GraphSnapshot } from "./data/graph"
+import { PAGE_TYPE, rollup, type GraphSnapshot } from "./data/graph"
+import { sampleGraph } from "./data/sample-graph"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
 import { backfillPrimaryEmail } from "./utils/github-email"
 import { createBlockIndexer, searchBlocks } from "./utils/block-search"
 import type { BlockRevealRequest, OutlineItem } from "./utils/note-outline"
 import { parseNote } from "./utils/parse-note"
 import { parseQuery, type Query } from "./utils/search"
-import { getSampleMarkdownFiles } from "./utils/sample-markdown-files"
 
 // -----------------------------------------------------------------------------
 // State machine
@@ -30,9 +30,6 @@ import { getSampleMarkdownFiles } from "./utils/sample-markdown-files"
 
 type Context = {
   githubUser: GitHubUser | null
-  /** Signed-out demo content only (path → markdown). The signed-in corpus is
-   * served by `databaseFilesAtom` (src/data/database-mode.ts). */
-  markdownFiles: Record<string, string>
 }
 
 type Event = { type: "SIGN_IN"; githubUser: GitHubUser } | { type: "SIGN_OUT" }
@@ -55,7 +52,6 @@ function createGlobalStateMachine() {
       initial: "resolvingUser",
       context: {
         githubUser: null,
-        markdownFiles: {},
       },
       states: {
         resolvingUser: {
@@ -69,8 +65,7 @@ function createGlobalStateMachine() {
           },
         },
         signedOut: {
-          entry: ["clearGitHubUser", "clearGitHubUserLocalStorage", "setSampleMarkdownFiles"],
-          exit: ["clearMarkdownFiles"],
+          entry: ["clearGitHubUser", "clearGitHubUserLocalStorage"],
           on: {
             SIGN_IN: {
               target: "signedIn",
@@ -181,23 +176,12 @@ function createGlobalStateMachine() {
           localStorage.removeItem(GITHUB_USER_STORAGE_KEY)
           clearSession()
         },
-        setSampleMarkdownFiles: assign({
-          markdownFiles: getSampleMarkdownFiles(),
-        }),
-        clearMarkdownFiles: assign({
-          markdownFiles: {},
-        }),
       },
     },
   )
 }
 
 export const globalStateMachineAtom = atomWithMachine(createGlobalStateMachine)
-
-const machineMarkdownFilesAtom = selectAtom(
-  globalStateMachineAtom,
-  (state) => state.context.markdownFiles,
-)
 
 const machineGithubUserAtom = selectAtom(
   globalStateMachineAtom,
@@ -214,43 +198,44 @@ const machineGithubUserAtom = selectAtom(
 export const isDatabaseModeAtom = atom((get) => get(machineGithubUserAtom) !== null)
 
 /**
- * The note corpus, in repo-file shape (path → content, `<id>.md` per note).
- * Signed in it is synthesized from the local SQL store by
- * `src/data/database-mode.ts` (each entry the rollup of its page node);
- * signed out it is the machine's sample notes. Every consumer above
- * `src/data` reads this atom.
+ * The signed-out graph: the hard-coded sample blocks (`src/data/sample-graph.ts`),
+ * held in memory. Edits made signed out apply to it and are gone on reload.
  */
-export const markdownFilesAtom = atom((get) =>
-  get(isDatabaseModeAtom) ? get(databaseFilesAtom) : get(machineMarkdownFilesAtom),
-)
+export const sampleGraphAtom = atom<GraphSnapshot>(sampleGraph())
 
 /**
  * The live graph — every node and child link, indexed for walking. Signed in
  * it is the local SQL store's rows (`src/data/database-mode.ts`); signed out
- * it is the sample notes, imported once. The editor walks its note out of
- * this rather than parsing markdown.
+ * it is the sample graph. The editor walks its note out of this rather than
+ * parsing markdown; every change is a batch of ops applied to it
+ * (`src/data/ops.ts`).
  */
 export const graphSnapshotAtom = atom((get) =>
-  get(isDatabaseModeAtom) ? get(databaseGraphAtom) : sampleGraph(get(machineMarkdownFilesAtom)),
+  get(isDatabaseModeAtom) ? get(databaseGraphAtom) : get(sampleGraphAtom),
 )
 
-// The sample corpus is a constant per session; import it once per files map.
-const sampleGraphCache = new WeakMap<Record<string, string>, GraphSnapshot>()
-function sampleGraph(files: Record<string, string>): GraphSnapshot {
-  const cached = sampleGraphCache.get(files)
-  if (cached) return cached
-  const nodes = []
-  const links = []
-  for (const filepath in files) {
-    if (!filepath.endsWith(".md")) continue
-    const graph = docToGraph(filepath.replace(/\.md$/, ""), files[filepath], 0)
-    nodes.push(...graph.nodes)
-    links.push(...graph.links)
+/** Every page of a graph rolled up to markdown, in repo-file shape. */
+function rollupFiles(graph: GraphSnapshot): Record<string, string> {
+  const files: Record<string, string> = {}
+  for (const node of graph.nodes.values()) {
+    if (node.type !== PAGE_TYPE) continue
+    const markdown = rollup(node.id, graph)
+    if (markdown !== null) files[`${node.id}.md`] = markdown
   }
-  const snapshot = buildGraphSnapshot(nodes, links)
-  sampleGraphCache.set(files, snapshot)
-  return snapshot
+  return files
 }
+const sampleFilesAtom = atom((get) => rollupFiles(get(sampleGraphAtom)))
+
+/**
+ * The note corpus, in repo-file shape (path → content, `<id>.md` per note) —
+ * the markdown projection the notes list, tags and search still read (it
+ * retires with them, docs/graph-native-app.md). Signed in it is synthesized
+ * from the local SQL store by `src/data/database-mode.ts`; signed out it is
+ * the sample graph rolled up.
+ */
+export const markdownFilesAtom = atom((get) =>
+  get(isDatabaseModeAtom) ? get(databaseFilesAtom) : get(sampleFilesAtom),
+)
 
 export const isSignedOutAtom = selectAtom(globalStateMachineAtom, (state) =>
   state.matches("signedOut"),
