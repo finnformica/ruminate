@@ -123,7 +123,7 @@ export function zoomRootKey(doc: BlockDoc, zoomRootId: string): string {
  * siblings (0 for anything that isn't an ordered item) — the number an `ol`
  * block shows, which is a fact of its position, not of its text.
  */
-function olPositions(doc: BlockDoc, ids: string[]): number[] {
+export function olPositions(doc: BlockDoc, ids: string[]): number[] {
   let run = 0
   return ids.map((id) => {
     run = doc.blocks[id]?.type === "ol" ? run + 1 : 0

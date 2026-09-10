@@ -3,8 +3,9 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { useBlockResultTree } from "../hooks/block-result-tree"
 import { useListKeyboardNav } from "../hooks/list-keyboard-nav"
+import type { BlockType } from "../blocks/types"
 import type { Note } from "../schema"
-import type { BlockHit, BlockSearchType } from "../utils/block-search"
+import type { BlockHit } from "../utils/block-search"
 import type { BlockSearchSource } from "../utils/block-search-source"
 import { SearchResults, blockHitNavigation } from "./search-results"
 
@@ -30,11 +31,11 @@ const NOTE: Note = {
 function hit(
   blockId: string,
   text: string,
-  type: BlockSearchType,
+  type: BlockType,
   ancestors: { id: string; text: string }[] = [],
   childCount = 0,
 ): BlockHit {
-  return { blockId, noteId: NOTE.id, text, type, ancestors, childCount, note: NOTE }
+  return { blockId, noteId: NOTE.id, text, type, olNumber: 1, ancestors, childCount, note: NOTE }
 }
 
 /** The owner's two reported cases, as fixtures: a heading nested two levels
@@ -52,9 +53,9 @@ const NVIDIA = hit(
 const MILK = hit("blk_milk", "buy milk", "todo")
 const SHIP = hit("blk_ship", "ship it", "done")
 
-const H100 = hit("blk_h100", "H100 supply", "bullet", [], 1)
+const H100 = hit("blk_h100", "H100 supply", "ul", [], 1)
 const H100_DETAIL = hit("blk_detail", "80GB HBM3", "text")
-const REVENUE = hit("blk_rev", "datacenter revenue", "bullet")
+const REVENUE = hit("blk_rev", "datacenter revenue", "ul")
 
 /** A synchronous source over a fixed child table, counting its calls so lazy
  * resolution can be pinned. */
@@ -127,27 +128,44 @@ describe("search results (page)", () => {
     expect(row?.textContent).toContain("GPUs")
   })
 
-  it("renders each block in its own type's style", () => {
+  it("draws each block exactly as the editor does — the same row component", () => {
     renderResults([NVIDIA, MILK, SHIP])
-    // A heading keeps its `#` and its weight.
-    expect(rowAt(0)?.querySelector('[data-testid="result-block"]')?.className).toContain(
-      "font-bold",
-    )
-    // Todos render as real checkboxes; a done one is struck through.
+    // A heading hangs the editor's `#` in the marker slot, at its scale.
+    expect(rowAt(0)?.querySelector('[data-testid="heading-hash"]')).not.toBeNull()
+    expect(rowAt(0)?.querySelector('[data-testid="block-body"]')?.className).toContain("font-bold")
+    // Todos are the editor's checkboxes (read-only here); a done one is
+    // struck through by the same rule.
     const boxes = document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
     expect(boxes).toHaveLength(2)
     expect(boxes[0].checked).toBe(false)
+    expect(boxes[0].disabled).toBe(true)
     expect(boxes[1].checked).toBe(true)
-    expect(rowAt(2)?.querySelector('[data-testid="result-block"]')?.className).toContain(
+    expect(rowAt(2)?.querySelector('[data-testid="block-body"]')?.className).toContain(
       "line-through",
+    )
+    // Rows are occurrences: the editor's own DOM hooks are there.
+    expect(rowAt(0)?.querySelector("[data-occurrence]")?.getAttribute("data-block-row")).toBe(
+      "blk_nvidia",
     )
   })
 
-  it("draws the expand affordance only for blocks with something downstream", () => {
+  it("draws the collapse chevron only for blocks with something downstream, in the marker slot", () => {
     renderResults([NVIDIA, MILK])
     const toggles = screen.getAllByLabelText("Expand")
-    expect(toggles[0].className).not.toContain("opacity-0")
-    expect(toggles[1].className).toContain("opacity-0")
+    expect(toggles).toHaveLength(1)
+    expect(rowAt(0)?.contains(toggles[0])).toBe(true)
+    // Collapsed by default, so the chevron is pinned visible.
+    expect(toggles[0].className).toContain("block-toggle-pinned")
+  })
+
+  it("the keyboard highlight is the editor's selection surface", () => {
+    renderResults([NVIDIA, MILK])
+    arrow("ArrowDown")
+    expect(rowAt(0)?.querySelector(".block-highlight")).not.toBeNull()
+    expect(rowAt(1)?.querySelector(".block-highlight")).toBeNull()
+    arrow("ArrowDown")
+    expect(rowAt(0)?.querySelector(".block-highlight")).toBeNull()
+    expect(rowAt(1)?.querySelector(".block-highlight")).not.toBeNull()
   })
 
   it("expands on click, resolving children lazily and once", () => {
@@ -160,8 +178,13 @@ describe("search results (page)", () => {
     expect(calls).toEqual(["blk_nvidia"])
     expect(screen.getByText("H100 supply")).toBeTruthy()
     expect(screen.getByText("datacenter revenue")).toBeTruthy()
-    // Children are rows of their own, indented under the hit.
+    // Children are rows of their own, indented under the hit and hanging
+    // from its guide line, as in the note.
     expect(rowAt(1)?.textContent).toContain("H100 supply")
+    expect(rowAt(1)?.querySelector("[data-guide]")).not.toBeNull()
+    expect(rowAt(1)?.querySelector<HTMLElement>("[data-occurrence]")?.style.paddingLeft).not.toBe(
+      "0px",
+    )
 
     fireEvent.click(screen.getByLabelText("Collapse"))
     expect(screen.queryByText("H100 supply")).toBeNull()
@@ -217,9 +240,14 @@ describe("search results (page)", () => {
   it("only the matched hits carry a breadcrumb — revealed children are context", () => {
     renderResults([NVIDIA], { blk_nvidia: [REVENUE] })
     fireEvent.click(screen.getByLabelText("Expand"))
-    expect(rowAt(0)?.textContent).toContain("Semiconductors")
+    expect(rowAt(0)?.querySelector('[data-testid="result-breadcrumb"]')?.textContent).toContain(
+      "Semiconductors",
+    )
     // The child row is already positioned under its parent; repeating the
     // note and ancestry there would be noise.
-    expect(rowAt(1)?.textContent).toBe("datacenter revenue")
+    expect(rowAt(1)?.querySelector('[data-testid="result-breadcrumb"]')).toBeNull()
+    expect(rowAt(1)?.querySelector('[data-testid="block-body"]')?.textContent).toBe(
+      "datacenter revenue",
+    )
   })
 })
