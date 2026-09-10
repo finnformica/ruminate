@@ -2,48 +2,14 @@
 import { renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { parse } from "../blocks/parse"
-import type { BlockDoc } from "../blocks/types"
-
 const writeNotes = vi.fn()
-const writeNoteDocs = vi.fn()
 vi.mock("../data/store", () => ({
   useWriteNotes: () => writeNotes,
-  useWriteNoteDocs: () => writeNoteDocs,
   useDeleteNoteFile: () => vi.fn(),
   useGetNoteContents: () => () => ({}),
 }))
 
-import { useRenameNote, useSaveNoteDoc } from "./note"
-
-describe("useSaveNoteDoc", () => {
-  beforeEach(() => writeNoteDocs.mockClear())
-
-  it("writes the doc under its id with updated_at stamped, blocks untouched", () => {
-    const { result } = renderHook(() => useSaveNoteDoc())
-    const doc = parse("- hello\n  id:: blk_a000000000\n")
-    result.current("blk_page00000", doc)
-
-    expect(writeNoteDocs).toHaveBeenCalledTimes(1)
-    const [updates] = writeNoteDocs.mock.calls[0] as [Record<string, BlockDoc>]
-    expect(Object.keys(updates)).toEqual(["blk_page00000"])
-    const saved = updates.blk_page00000
-    expect(saved.frontmatter).toMatch(/^updated_at: \d{4}-/)
-    expect(saved.blocks).toBe(doc.blocks)
-    expect(saved.rootBlockIds).toBe(doc.rootBlockIds)
-  })
-
-  it("updates an existing updated_at rather than adding a second", () => {
-    const { result } = renderHook(() => useSaveNoteDoc())
-    const doc = parse("---\ntitle: T\nupdated_at: 2020-01-01T00:00:00.000Z\n---\n- x\n")
-    result.current("blk_page00000", doc)
-    const [updates] = writeNoteDocs.mock.calls[0] as [Record<string, BlockDoc>]
-    const lines = updates.blk_page00000.frontmatter!.split("\n")
-    expect(lines.filter((line) => line.startsWith("updated_at:"))).toHaveLength(1)
-    expect(lines[0]).toBe("title: T")
-    expect(lines[1]).not.toContain("2020-01-01")
-  })
-})
+import { useRenameNote } from "./note"
 
 /**
  * Renaming, since page ids are minted and opaque

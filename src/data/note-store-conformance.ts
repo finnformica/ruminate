@@ -4,6 +4,7 @@ import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import { pageDoc } from "./graph"
 import type { NoteStore } from "./note-store"
+import { docToOps } from "./ops"
 
 /**
  * The `NoteStore` contract, as an executable specification.
@@ -455,6 +456,71 @@ export function describeNoteStoreConformance(
       await store.writeNoteDocs({ a: null })
       expect(await store.getNote("a")).toBeNull()
       expect(pageDoc("a", await store.getGraph())).toBeNull()
+    })
+
+    // Ops (src/data/ops.ts): the editor's changes as row writes.
+
+    it("applyOps: a create and a link land as two rows; the diff carries both", async () => {
+      const store = await makeStore()
+      await store.writeNoteDocs({ a: parse("- A\n  id:: blk_aaaaaaaaaa\n") })
+      const diff = await store.applyOps([
+        { op: "create", id: "blk_bbbbbbbbbb", type: "todo", text: "B", props: null },
+        { op: "link", source: "a", destination: "blk_bbbbbbbbbb", sortKey: "a1" },
+      ])
+      expect(diff.nodes.map((node) => node.id)).toEqual(["blk_bbbbbbbbbb"])
+      expect(diff.links).toHaveLength(1)
+      expect(await store.getNote("a")).toBe(
+        "- A\n  id:: blk_aaaaaaaaaa\n[ ] B\n  id:: blk_bbbbbbbbbb\n",
+      )
+    })
+
+    it("applyOps: sets change one row; unlink and delete tombstone", async () => {
+      const store = await makeStore()
+      await store.writeNoteDocs({
+        a: parse("- A\n  id:: blk_aaaaaaaaaa\n- B\n  id:: blk_bbbbbbbbbb\n"),
+      })
+      const diff = await store.applyOps([
+        { op: "setText", id: "blk_aaaaaaaaaa", text: "A!" },
+        { op: "setType", id: "blk_aaaaaaaaaa", type: "h1" },
+        { op: "unlink", source: "a", destination: "blk_bbbbbbbbbb" },
+        { op: "delete", id: "blk_bbbbbbbbbb" },
+      ])
+      expect(diff.nodes.map((node) => [node.id, node.deleted_at != null]).sort()).toEqual([
+        ["blk_aaaaaaaaaa", false],
+        ["blk_bbbbbbbbbb", true],
+      ])
+      expect(diff.links.map((link) => link.deleted_at != null)).toEqual([true])
+      expect(await store.getNote("a")).toBe("# A!\n  id:: blk_aaaaaaaaaa\n")
+      expect(await store.upstream("blk_bbbbbbbbbb")).toEqual([])
+    })
+
+    it("applyOps: a set on a node the store lacks is dropped, not an error", async () => {
+      const store = await makeStore()
+      const diff = await store.applyOps([{ op: "setText", id: "ghost", text: "x" }])
+      expect(diff.nodes).toEqual([])
+    })
+
+    it("applyOps: the batch docToOps derives lands exactly as the doc, and is then a no-op", async () => {
+      const store = await makeStore()
+      await store.writeNoteDocs({
+        a: parse("- shared\n  id:: blk_shared0000\n"),
+        b: parse("- b's own\n  id:: blk_bown000000\n"),
+      })
+      await store.addLink("b", "blk_shared0000")
+      // Through b's doc: edit the shared block, add one, drop b's own.
+      const doc = parse(
+        "- shared, edited\n  id:: blk_shared0000\n- new in b\n  id:: blk_newb000000\n",
+      )
+      const ops = docToOps("b", doc, await store.getGraph())
+      await store.applyOps(ops)
+      expect(await store.getNote("b")).toBe(
+        "- shared, edited\n  id:: blk_shared0000\n- new in b\n  id:: blk_newb000000\n",
+      )
+      expect(await store.getNote("a")).toBe("- shared, edited\n  id:: blk_shared0000\n")
+      expect(await store.upstream("blk_bown000000")).toEqual([])
+      expect(docToOps("b", pageDoc("b", await store.getGraph())!, await store.getGraph())).toEqual(
+        [],
+      )
     })
   })
 }

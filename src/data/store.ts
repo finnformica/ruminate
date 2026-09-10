@@ -1,10 +1,10 @@
 import { atom } from "jotai"
 import { useAtomCallback } from "jotai/utils"
 import React from "react"
-import { markdownFilesAtom } from "../global-state"
-import type { BlockDoc } from "../blocks/types"
+import { isDatabaseModeAtom, markdownFilesAtom, sampleGraphAtom } from "../global-state"
 import type { NoteId } from "../schema"
-import { databaseDeleteFile, databaseWriteDocs, databaseWriteFiles } from "./database-mode"
+import { databaseApplyOps, databaseDeleteFile, databaseWriteFiles } from "./database-mode"
+import { applyOps, type Op } from "./ops"
 
 /**
  * The storage seam.
@@ -64,13 +64,18 @@ export function useWriteNotes() {
 }
 
 /**
- * Persist a batch of typed note docs (`null` deletes) — the editor's save
- * path. The doc's blocks become rows directly; no markdown is parsed.
+ * Apply a batch of graph ops (`src/data/ops.ts`) — the editor's change path.
+ * Signed in they go to the database runtime (graph atom at once, store and
+ * replica behind it); signed out they apply to the in-memory sample graph.
  */
-export function useWriteNoteDocs() {
-  return React.useCallback((updates: Record<NoteId, BlockDoc | null>) => {
-    databaseWriteDocs(updates)
-  }, [])
+export function useApplyOps() {
+  return useAtomCallback(
+    React.useCallback((get, set, ops: readonly Op[]) => {
+      if (ops.length === 0) return
+      if (get(isDatabaseModeAtom)) databaseApplyOps(ops)
+      else set(sampleGraphAtom, applyOps(get(sampleGraphAtom), ops, Date.now()))
+    }, []),
+  )
 }
 
 /** Delete a single note. */

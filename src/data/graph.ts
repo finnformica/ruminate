@@ -47,7 +47,7 @@ interface GraphParts {
   childrenOf: Map<string, string[]>
 }
 
-const propsJson = (props: BlockProps | null | undefined): string | null =>
+export const propsJson = (props: BlockProps | null | undefined): string | null =>
   props && Object.keys(props).length > 0 ? JSON.stringify(props) : null
 
 /**
@@ -363,48 +363,4 @@ export function pageDoc(pageId: string, graph: GraphSnapshot): BlockDoc | null {
 export function rollup(pageId: string, graph: GraphSnapshot): string | null {
   const doc = pageDoc(pageId, graph)
   return doc ? serialize(doc) : null
-}
-
-/**
- * A snapshot with one note's doc applied — what the screen should show the
- * instant a save is dispatched, before the store has reconciled the rows
- * (the store's own snapshot replaces this once the write lands). A `null`
- * doc is a delete. Nodes a doc no longer names are left in place (the store
- * decides what is orphaned); the page simply stops reaching them. Sort keys
- * here are fresh and evenly spaced — order is what matters to a reader, and
- * the store's reconciled keys arrive with its snapshot.
- */
-export function withDocApplied(
-  graph: GraphSnapshot,
-  noteId: NoteId,
-  doc: BlockDoc | null,
-  updatedAt: number,
-): GraphSnapshot {
-  const nodes = new Map(graph.nodes)
-  const childLinks = new Map(graph.childLinks)
-  if (doc === null) {
-    nodes.delete(noteId)
-    childLinks.delete(noteId)
-    return { nodes, childLinks }
-  }
-  const reserved = new Set<string>()
-  for (const node of graph.nodes.values()) {
-    if (node.type === PAGE_TYPE && node.id !== noteId) reserved.add(node.id)
-  }
-  const parts = docToParts(noteId, doc, updatedAt, reserved)
-  for (const node of parts.nodes) nodes.set(node.id, node)
-  for (const [sourceId, childIds] of parts.childrenOf) {
-    const keys = generateNKeysBetween(null, null, childIds.length)
-    childLinks.set(
-      sourceId,
-      childIds.map((destinationId, i) => ({
-        source_id: sourceId,
-        destination_id: destinationId,
-        kind: CHILD_KIND,
-        sort_key: keys[i],
-        updated_at: updatedAt,
-      })),
-    )
-  }
-  return { nodes, childLinks }
 }
