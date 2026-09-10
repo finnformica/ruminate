@@ -2,6 +2,10 @@
 
 ## 2026-W37
 
+### Fixed
+
+- Pasting an outline keeps every glyph. Markdown where each line is a bullet carrying another marker — `- # Heading`, `- > quote`, `- [ ] task`, the shape most outliners and rich-text apps export — used to keep the bullet and leave the `#` or `>` as literal text. The inner marker is now the block's type and the bullet is dropped, so a pasted heading is a heading and a pasted quote a quote.
+
 ### Improved
 
 - A search result now looks exactly like the block it is. The filtered view used to draw blocks with its own simplified markers and text styles; results are now drawn by the editor's own row, so a heading has its `#` and its size, a numbered item its number, a quote its `>` and bar, a to-do its checkbox, and a result with something inside it carries the editor's collapse arrow in its marker slot (beside the checkbox on a to-do). Expanded results hang from the same guide line as in the note, the keyboard highlight on the results page is the editor's own selection surface, and the full results view shows each block whole rather than clipped to two lines.

@@ -74,6 +74,36 @@ describe("block round-trip", () => {
     expect(serialize(doc2)).toBe(serialized)
   })
 
+  it("keeps the glyph of a bullet-wrapped marker (outliner and task-list shapes)", () => {
+    const doc = parse(
+      [
+        "- # Heading",
+        "- [ ] task",
+        "* [x] done",
+        "+ > quote",
+        "- plain bullet",
+        "- - a dash in text",
+        "- ```js",
+        "x = 1",
+        "```",
+      ].join("\n"),
+    )
+    const typed = doc.rootBlockIds.map((id) => [doc.blocks[id].type, doc.blocks[id].text])
+    expect(typed).toEqual([
+      ["h1", "Heading"],
+      ["todo", "task"],
+      ["done", "done"],
+      ["quote", "quote"],
+      ["ul", "plain bullet"],
+      ["ul", "- a dash in text"],
+      // A fence keeps its backticks as text (fences are not typed on import);
+      // the bullet that wrapped it is dropped like any other.
+      ["text", "```js"],
+      ["text", "x = 1"],
+      ["text", "```"],
+    ])
+  })
+
   it("imports plain markdown lines as blocks", () => {
     const doc = parse(`# A heading\nA loose paragraph\n`)
     expect(doc.rootBlockIds).toHaveLength(2)
