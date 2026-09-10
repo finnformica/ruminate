@@ -209,10 +209,9 @@ function CalendarWeek({
     if (existingNote) return existingNote
     return {
       id: weekString,
-      content: "",
       type: "weekly",
       displayName: formatWeek(weekString),
-      frontmatter: {},
+      props: {},
       title: "",
       url: null,
       alias: null,
@@ -221,6 +220,8 @@ function CalendarWeek({
       dates: [],
       tags: [],
       tasks: [],
+      headings: [],
+      text: "",
     }
   }, [existingNote, weekString])
 
@@ -258,10 +259,9 @@ function CalendarDate({ date, isActive = false }: { date: Date; isActive?: boole
     if (existingNote) return existingNote
     return {
       id: dateString,
-      content: "",
       type: "daily",
       displayName: formatDate(dateString),
-      frontmatter: {},
+      props: {},
       title: "",
       url: null,
       alias: null,
@@ -270,6 +270,8 @@ function CalendarDate({ date, isActive = false }: { date: Date; isActive?: boole
       dates: [],
       tags: [],
       tasks: [],
+      headings: [],
+      text: "",
     }
   }, [existingNote, dateString])
 
@@ -447,10 +449,9 @@ function MonthWeekRow({
     if (existingNote) return existingNote
     return {
       id: weekString,
-      content: "",
       type: "weekly",
       displayName: formatWeek(weekString),
-      frontmatter: {},
+      props: {},
       title: "",
       url: null,
       alias: null,
@@ -459,6 +460,8 @@ function MonthWeekRow({
       dates: [],
       tags: [],
       tasks: [],
+      headings: [],
+      text: "",
     }
   }, [existingNote, weekString])
 
@@ -547,10 +550,9 @@ function MonthDateCell({
     if (existingNote) return existingNote
     return {
       id: dateString,
-      content: "",
       type: "daily",
       displayName: formatDate(dateString),
-      frontmatter: {},
+      props: {},
       title: "",
       url: null,
       alias: null,
@@ -559,6 +561,8 @@ function MonthDateCell({
       dates: [],
       tags: [],
       tasks: [],
+      headings: [],
+      text: "",
     }
   }, [existingNote, dateString])
 

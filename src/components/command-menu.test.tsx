@@ -30,7 +30,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 vi.mock("../hooks/note", () => ({
   useNoteById: () => undefined,
-  useSaveNote: () => vi.fn(),
+  useCreateNote: () => vi.fn(),
 }))
 
 vi.mock("../hooks/search-notes", () => ({
@@ -236,10 +236,9 @@ describe("outline palette (⌘P)", () => {
 function makeNote(id: string) {
   return {
     id,
-    content: "",
     type: "note",
     displayName: id,
-    frontmatter: {},
+    props: {},
     title: id,
     url: null,
     alias: null,
@@ -248,6 +247,8 @@ function makeNote(id: string) {
     dates: [],
     tags: [],
     tasks: [],
+    headings: [],
+    text: "",
   }
 }
 

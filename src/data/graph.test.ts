@@ -635,7 +635,7 @@ describe("docFromGraph (the walk, N roots)", () => {
 
   it("walks each root's subtree in sort order, typed and marker-free", () => {
     const doc = docFromGraph(["blk_a"], graph())
-    expect(doc.frontmatter).toBeNull()
+    expect(doc.props).toBeNull()
     expect(doc.rootBlockIds).toEqual(["blk_a"])
     expect(shape(doc, "blk_a")).toEqual(["ul", "a", ["blk_b", "blk_s"]])
     expect(shape(doc, "blk_s")).toEqual(["ol", "shared", ["blk_t"]])
@@ -696,7 +696,7 @@ describe("docFromGraph (the walk, N roots)", () => {
     )
     const doc = pageDoc("p", snapshot)!
     expect(doc.rootBlockIds).toEqual(["blk_a"])
-    expect(doc.frontmatter).toContain("title: Titled")
+    expect(doc.props).toEqual({ title: "Titled", tags: ["x"] })
     expect(serialize(doc)).toBe(rollup("p", snapshot))
     expect(pageDoc("blk_a", snapshot)).toBeNull()
   })

@@ -14,7 +14,7 @@ vi.mock("../../global-state", async () => {
   return {
     noteOutlineAtom: atom(null),
     blockRevealAtom: atom(null),
-    markdownFilesAtom: atom({}),
+    graphSnapshotAtom: atom({ nodes: new Map(), childLinks: new Map() }),
     // Signed out: developer mode (`hooks/is-developer.ts`) stays off.
     githubUserAtom: atom(null),
     // Enter's new-block marker preference (Settings → Editor), at its default.

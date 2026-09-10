@@ -10,7 +10,6 @@ import { DaysOfWeek } from "../components/days-of-week"
 import { Details } from "../components/details"
 import { LoadingIcon16, NoteIcon16 } from "../components/icons"
 import { parse } from "../blocks/parse"
-import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
 import { BlockNoteEditor } from "../components/block-editor/block-note-editor"
 import { NoteTitle } from "../components/block-editor/note-title"
@@ -22,14 +21,12 @@ import { isSyncingAtom } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
 import { isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
-import { useNoteById, useRenameNote } from "../hooks/note"
+import { useNoteById, useRenameNote, useSetPageProps } from "../hooks/note"
 import { useNoteDoc } from "../hooks/note-doc"
 import { Width, fontSchema, widthSchema } from "../schema"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
-import { updateDocFrontmatter } from "../utils/frontmatter"
-import { parseNote } from "../utils/parse-note"
 
 type RouteSearch = {
   query: string | undefined
@@ -132,23 +129,15 @@ function NotePage() {
     },
     [isSignedOut, setDoc],
   )
-  // The markdown consumers of the page (title, favicon, actions menu, share)
-  // still read the note's rollup — the doc's bytes.
-  const editorValue = React.useMemo(() => serialize(editorDoc), [editorDoc])
-  const parsedNote = React.useMemo(
-    () => parseNote(noteId ?? "", editorValue),
-    [noteId, editorValue],
-  )
+  const setPageProps = useSetPageProps()
 
-  // Resolve font (frontmatter font or default)
-  const frontmatterFont = parsedNote?.frontmatter?.font
-  const parseResult = fontSchema.safeParse(frontmatterFont)
+  // Resolve font (the `font` prop or default)
+  const parseResult = fontSchema.safeParse(note?.props.font)
   const parsedFont = parseResult.success ? parseResult.data : null
   const resolvedFont = parsedFont || "sans"
 
-  // Resolve width (frontmatter width or default)
-  const frontmatterWidth = parsedNote?.frontmatter?.width
-  const parsedWidthResult = widthSchema.safeParse(frontmatterWidth)
+  // Resolve width (the `width` prop or default)
+  const parsedWidthResult = widthSchema.safeParse(note?.props.width)
   const resolvedWidth = parsedWidthResult.success ? parsedWidthResult.data : "fixed"
 
   // Set the font
@@ -193,35 +182,28 @@ function NotePage() {
 
   const isSaving = pendingSave || isSyncing
 
-  // Programmatic content updates (width, pin, share) write immediately rather
-  // than waiting out the coalescing window.
-  const applyAndSave = React.useCallback(
-    (next: BlockDoc) => {
-      setEditorDoc(next)
+  // Page props (width, gist) are one `setProps` op, written at once.
+  const setProp = React.useCallback(
+    (patch: Record<string, unknown>) => {
+      if (!noteId) return
+      setPageProps(noteId, patch)
       requestDatabaseFlush()
     },
-    [setEditorDoc],
+    [noteId, setPageProps],
   )
 
   const updateWidth = React.useCallback(
-    (width: Width) => {
-      if (!noteId) return
-
-      applyAndSave(
-        // "fixed" is the default width
-        updateDocFrontmatter(editorDoc, { width: width === "fixed" ? null : width }),
-      )
-    },
-    [noteId, editorDoc, applyAndSave],
+    // "fixed" is the default width
+    (width: Width) => setProp({ width: width === "fixed" ? null : width }),
+    [setProp],
   )
 
   // Retitle the current note. Since ids are minted, this sets one property and
   // nothing else moves — no new id, no navigation, no broken links. Returns
   // whether anything changed (so the inline editor can revert a no-op).
   const renameTo = React.useCallback(
-    (rawName: string): boolean =>
-      renameNote({ noteId: noteId ?? "", newTitle: rawName, content: editorValue }),
-    [noteId, renameNote, editorValue],
+    (rawName: string): boolean => renameNote({ noteId: noteId ?? "", newTitle: rawName }),
+    [noteId, renameNote],
   )
 
   // ⌘S writes the coalescing ops immediately (changes save on their own;
@@ -237,8 +219,8 @@ function NotePage() {
   return (
     <PageLayout
       // The note's name is its title now, not its (opaque) id.
-      title={<span className="truncate">{parsedNote?.displayName || "Untitled"}</span>}
-      icon={<NoteFavicon note={parsedNote} />}
+      title={<span className="truncate">{note?.displayName || "Untitled"}</span>}
+      icon={note ? <NoteFavicon note={note} /> : <NoteIcon16 />}
       actions={
         <div className="flex items-center gap-2">
           {/* Changes save automatically; this is the honest-but-quiet trace of
@@ -253,11 +235,8 @@ function NotePage() {
           <div className="flex items-center">
             <NoteActionsMenu
               noteId={noteId ?? ""}
-              content={editorValue}
-              pinned={parsedNote?.pinned ?? false}
+              pinned={note?.pinned ?? false}
               align="end"
-              // The menu still speaks markdown; import its result.
-              onContentChange={(content) => applyAndSave(parse(content))}
               editor={{
                 showWidth: containerWidth > 800,
                 width: resolvedWidth,
@@ -267,18 +246,18 @@ function NotePage() {
                 onDeleted: () => navigate({ to: "/", search: { query: undefined }, replace: true }),
               }}
             />
-            <ShareDialog
-              note={parsedNote}
-              onPublish={(gistId) => {
-                applyAndSave(updateDocFrontmatter(editorDoc, { gist_id: gistId }))
-              }}
-              onUnpublish={() => {
-                applyAndSave(updateDocFrontmatter(editorDoc, { gist_id: null }))
-                setIsShareDialogOpen(false)
-              }}
-              open={isShareDialogOpen}
-              onOpenChange={setIsShareDialogOpen}
-            />
+            {note ? (
+              <ShareDialog
+                note={note}
+                onPublish={(gistId) => setProp({ gist_id: gistId })}
+                onUnpublish={() => {
+                  setProp({ gist_id: null })
+                  setIsShareDialogOpen(false)
+                }}
+                open={isShareDialogOpen}
+                onOpenChange={setIsShareDialogOpen}
+              />
+            ) : null}
           </div>
         </div>
       }
@@ -305,7 +284,7 @@ function NotePage() {
                     avoid doubling it. */}
                 {!isDailyNote && !isWeeklyNote && !zoomBlockId ? (
                   <NoteTitle
-                    title={parsedNote?.title ?? ""}
+                    title={note?.title ?? ""}
                     onRename={renameTo}
                     onArrowDown={(mode) => {
                       setFocusFirstMode(mode)
@@ -332,7 +311,7 @@ function NotePage() {
                     // A plain push, so the back button undoes zoom naturally.
                     navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
                   }
-                  noteTitle={parsedNote?.displayName ?? ""}
+                  noteTitle={note?.displayName ?? ""}
                 />
               </div>
             ) : (

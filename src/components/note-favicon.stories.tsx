@@ -1,7 +1,15 @@
 import { StoryObj } from "@storybook/react"
 import { expect, within } from "@storybook/test"
 import { NoteFavicon } from "./note-favicon"
-import { parseNote } from "../utils/parse-note"
+import { buildGraphSnapshot, docToGraph } from "../data/graph"
+import { noteFromPage } from "../data/note-meta"
+import type { Note } from "../schema"
+
+/** A note from markdown, exactly as the app derives one for a page. */
+function parseNote(id: string, markdown: string): Note {
+  const { nodes, links } = docToGraph(id, markdown, 0)
+  return noteFromPage(id, buildGraphSnapshot(nodes, links)) as Note
+}
 
 export default {
   title: "NoteFavicon",

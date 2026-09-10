@@ -29,7 +29,7 @@ import type { Block, BlockDoc } from "./types"
  */
 function fixture(): BlockDoc {
   return {
-    frontmatter: "title: t",
+    props: { title: "t" },
     rootBlockIds: ["a", "b", "c"],
     blocks: {
       a: { id: "a", type: "text", text: "A", children: [] },
@@ -50,7 +50,7 @@ function fixture(): BlockDoc {
  */
 function deepFixture(): BlockDoc {
   return {
-    frontmatter: null,
+    props: null,
     rootBlockIds: ["a", "b", "c"],
     blocks: {
       a: { id: "a", type: "text", text: "A", children: [] },
@@ -119,8 +119,8 @@ describe("updateText", () => {
     expect(updateText(doc, "nope", "x")).toBe(doc)
   })
 
-  it("carries frontmatter through", () => {
-    expect(updateText(fixture(), "a", "A!").frontmatter).toBe("title: t")
+  it("carries the page props through", () => {
+    expect(updateText(fixture(), "a", "A!").props).toEqual({ title: "t" })
   })
 })
 
@@ -492,7 +492,7 @@ describe("outdentBlock", () => {
   it("preserves a deeper subtree when outdenting", () => {
     // a > b > b1 > b1a; outdent b1 -> a > [b, b1>b1a]
     const doc: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["a"],
       blocks: {
         a: { id: "a", type: "text", text: "A", children: ["b"] },

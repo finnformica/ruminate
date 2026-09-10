@@ -10,10 +10,9 @@ import type { Note } from "../schema"
 function makeNote(overrides: Partial<Note> = {}): Note {
   return {
     id: "1",
-    content: "",
     type: "note",
     displayName: "",
-    frontmatter: {},
+    props: {},
     title: "",
     url: null,
     alias: null,
@@ -22,6 +21,8 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     dates: [],
     tags: [],
     tasks: [],
+    headings: [],
+    text: "",
     ...overrides,
   }
 }
@@ -31,21 +32,21 @@ describe("filtering", () => {
     const note = makeNote({
       type: "daily",
       title: "Title 1",
-      frontmatter: { priority: "high" },
+      props: { priority: "high" },
       tasks: [
         {
           completed: false,
           text: "do it",
           tags: [],
           priority: null,
-          startOffset: 0,
+          blockId: "blk",
         },
         {
           completed: true,
           text: "done",
           tags: [],
           priority: null,
-          startOffset: 10,
+          blockId: "blk",
         },
       ],
       tags: ["a", "b"],
@@ -96,7 +97,7 @@ describe("filtering", () => {
   })
 
   test("has and no on frontmatter keys consider presence not truthiness", () => {
-    const note = makeNote({ frontmatter: { read: false } })
+    const note = makeNote({ props: { read: false } })
     expect(testNoteFilters([{ key: "has", values: ["read"], exclude: false }], note)).toBe(true)
     expect(testNoteFilters([{ key: "no", values: ["read"], exclude: false }], note)).toBe(false)
   })
@@ -134,7 +135,7 @@ describe("filtering", () => {
           text: "x",
           tags: [],
           priority: null,
-          startOffset: 0,
+          blockId: "blk",
         },
       ],
     })
@@ -246,10 +247,10 @@ describe("integration: parse + filter + sort", () => {
 
   test("sort by arbitrary frontmatter key (numeric)", () => {
     const notes = [
-      makeNote({ id: "1", frontmatter: { priority: 3 } }),
-      makeNote({ id: "2", frontmatter: { priority: 1 } }),
-      makeNote({ id: "3", frontmatter: {} }), // missing key sorts to end
-      makeNote({ id: "4", frontmatter: { priority: 2 } }),
+      makeNote({ id: "1", props: { priority: 3 } }),
+      makeNote({ id: "2", props: { priority: 1 } }),
+      makeNote({ id: "3", props: {} }), // missing key sorts to end
+      makeNote({ id: "4", props: { priority: 2 } }),
     ]
     const { sorts } = parseQuery("sort:priority")
     const sorted = sortNotes(notes, sorts)
@@ -258,9 +259,9 @@ describe("integration: parse + filter + sort", () => {
 
   test("sort by arbitrary frontmatter key (string)", () => {
     const notes = [
-      makeNote({ id: "1", frontmatter: { status: "draft" } }),
-      makeNote({ id: "2", frontmatter: { status: "published" } }),
-      makeNote({ id: "3", frontmatter: { status: "archived" } }),
+      makeNote({ id: "1", props: { status: "draft" } }),
+      makeNote({ id: "2", props: { status: "published" } }),
+      makeNote({ id: "3", props: { status: "archived" } }),
     ]
     const { sorts } = parseQuery("sort:status")
     const sorted = sortNotes(notes, sorts)

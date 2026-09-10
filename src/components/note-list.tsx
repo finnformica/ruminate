@@ -405,7 +405,7 @@ export function NoteList({
                       {note.pinned ? (
                         <PinFillIcon12 className="mr-2 coarse:mr-3 shrink-0 text-text-pinned" />
                       ) : null}
-                      {note?.frontmatter?.gist_id ? (
+                      {note?.props?.gist_id ? (
                         <GlobeIcon16 className="mr-2 coarse:mr-3 shrink-0 text-border-focus" />
                       ) : null}
                       <span className="truncate text-text-secondary">

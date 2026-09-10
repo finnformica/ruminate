@@ -92,7 +92,9 @@ interface ReplicaAuth {
 export interface ReplicaSyncOptions {
   /** The current files map (path → content) — local corpus size for the
    * drastically-behind check. */
-  getFiles: () => Record<string, string>
+  /** How many pages the local graph holds — compared against the replica's
+   * page count to notice a replica left drastically behind. */
+  getNoteCount: () => number
   /** Every current row of both tables — the full-push source (the store). */
   getAllRows: () => Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
   /** Injectable for tests; default global fetch (same-origin URLs). */
@@ -137,12 +139,6 @@ export function isReplicaDrasticallyBehind(localNotes: number, remotePages: numb
   if (localNotes === 0) return false
   if (remotePages <= 0) return true
   return localNotes - remotePages > Math.max(3, Math.ceil(localNotes * 0.1))
-}
-
-const countLocalNotes = (files: Record<string, string>): number => {
-  let count = 0
-  for (const filepath in files) if (filepath.endsWith(".md")) count += 1
-  return count
 }
 
 const linkKeyString = (key: LinkKey) => key.join("\x1f")
@@ -355,7 +351,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
 
     // Counts drastically behind → the replica missed pushes (another device,
     // an old bug, a wiped database): schedule a self-healing full push.
-    const localNotes = countLocalNotes(options.getFiles())
+    const localNotes = options.getNoteCount()
     const now = Date.now()
     if (
       isReplicaDrasticallyBehind(localNotes, body.counts.pages) &&

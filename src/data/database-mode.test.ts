@@ -8,16 +8,13 @@ import type {
 import type { NoteId } from "../schema"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
-import { docToOps } from "./ops"
+import { deletePageOps, docToOps } from "./ops"
 import {
   CACHE_GENERATION,
   EMPTY_GRAPH,
-  databaseFilesAtom,
   databaseGraphAtom,
   databaseModeStatusAtom,
   databaseApplyOps,
-  databaseWriteFiles,
-  databaseDeleteFile,
   flushDatabaseMode,
   isDatabaseModeActive,
   requestAmbientDatabasePull,
@@ -26,7 +23,7 @@ import {
   stopDatabaseMode,
 } from "./database-mode"
 import type { D1NoteSource } from "./d1-note-source"
-import { docToGraph, pageDoc } from "./graph"
+import { PAGE_TYPE, docToGraph, pageDoc, rollup } from "./graph"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { openSqlNoteStore, type SqlNoteStore } from "./sql-note-store"
@@ -130,7 +127,19 @@ async function boot(options: {
 }
 
 const jotai = getDefaultStore()
-const files = () => jotai.get(databaseFilesAtom)
+/** Every page's rollup, keyed `<id>.md` — the shape the old files map had,
+ * derived from the graph atom for the assertions below. */
+const files = () => {
+  const out: Record<string, string> = {}
+  const snapshot = jotai.get(databaseGraphAtom)
+  for (const node of snapshot.nodes.values()) {
+    if (node.type === PAGE_TYPE) out[`${node.id}.md`] = rollup(node.id, snapshot) as string
+  }
+  return out
+}
+/** Write a note's markdown as the ops its doc derives to (the editor's path). */
+const writeNote = (id: string, markdown: string) =>
+  databaseApplyOps(docToOps(id, parse(markdown), jotai.get(databaseGraphAtom)))
 const graph = () => jotai.get(databaseGraphAtom)
 /** The note's doc as the graph atom holds it, as bytes (or null). */
 const walked = (id: string) => {
@@ -207,19 +216,19 @@ describe("database mode boot", () => {
     expect(status().lastPullError).toBe("offline")
     expect(files()).toEqual({})
 
-    databaseWriteFiles({ "first.md": "- written offline\n" })
+    writeNote("first", "- written offline\n  id:: blk_first00000\n")
     expect(status().emptyOffline).toBe(false)
-    expect(files()["first.md"]).toBe("- written offline\n")
+    expect(files()["first.md"]).toBe("- written offline\n  id:: blk_first00000\n")
   })
 })
 
 describe("database mode saves", () => {
-  it("a save writes the SQL store, updates the atom, and hands its diff to the push queue", async () => {
+  it("a new page's ops write the SQL store, update the atom, and hand their diff to the push queue", async () => {
     const { source } = stubSource({})
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
 
-    databaseWriteFiles({ "note-a.md": "- hello\n  id:: blk_a000000000\n" })
+    writeNote("note-a", "- hello\n  id:: blk_a000000000\n")
     expect(files()["note-a.md"]).toBe("- hello\n  id:: blk_a000000000\n") // optimistic, pre-flush
     await flushDatabaseMode()
 
@@ -237,7 +246,7 @@ describe("database mode saves", () => {
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
 
-    databaseDeleteFile("note-a.md")
+    databaseApplyOps(deletePageOps("note-a", jotai.get(databaseGraphAtom)))
     await flushDatabaseMode()
 
     expect(await store.getNote("note-a")).toBeNull()
@@ -261,9 +270,8 @@ describe("database mode saves", () => {
     databaseApplyOps(docToOps("note-a", parse(edited), graph()))
     // On screen at once…
     expect(walked("note-a")).toBe(edited)
-    // …in the store and the files map only once the run is written.
+    // …in the store only once the run is written.
     expect(await store.getNote("note-a")).toBe(NOTE_A)
-    expect(files()["note-a.md"]).toBe(NOTE_A)
     await flushDatabaseMode()
 
     expect(await store.getNote("note-a")).toBe(edited)
@@ -277,7 +285,7 @@ describe("database mode saves", () => {
     ])
   })
 
-  it("a run of ops is one store write, and a markdown write never lands behind it", async () => {
+  it("a run of ops is one store write, and a later batch never lands ahead of it", async () => {
     const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
@@ -285,15 +293,14 @@ describe("database mode saves", () => {
     databaseApplyOps([{ op: "setText", id: "blk_a000000000", text: "A1" }])
     databaseApplyOps([{ op: "setText", id: "blk_a000000000", text: "A12" }])
     databaseApplyOps([{ op: "setText", id: "blk_a000000000", text: "A123" }])
-    // A markdown write queued meanwhile flushes the ops first, so the store
-    // is never rebuilt or read behind what the screen shows.
-    databaseWriteFiles({ "note-b.md": NOTE_B })
+    writeNote("note-b", NOTE_B)
     await flushDatabaseMode()
 
     expect(await store.getNote("note-a")).toBe("- A123\n  id:: blk_a000000000\n")
     expect(await store.getNote("note-b")).toBe(NOTE_B)
     expect(walked("note-a")).toBe("- A123\n  id:: blk_a000000000\n")
-    expect(calls.changes.map((change) => change.noteIds)).toEqual([["note-a"], ["note-b"]])
+    expect(calls.changes).toHaveLength(1)
+    expect(calls.changes[0].noteIds.sort()).toEqual(["note-a", "note-b"])
   })
 
   it("a pull never clobbers ops still coalescing", async () => {
@@ -332,7 +339,7 @@ describe("database mode saves", () => {
     ])
   })
 
-  it("the graph atom follows pulls and file writes too", async () => {
+  it("the graph atom follows pulls too", async () => {
     const { source } = stubSource({
       full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
       since: () => remoteChanges({ "note-b": NOTE_B }, 200, "200"),
@@ -341,24 +348,13 @@ describe("database mode saves", () => {
     expect(walked("note-a")).toBe(NOTE_A)
     expect(walked("note-b")).toBeNull()
 
-    databaseWriteFiles({ "note-c.md": "- C\n  id:: blk_c000000000\n" })
+    writeNote("note-c", "- C\n  id:: blk_c000000000\n")
     await flushDatabaseMode()
     expect(walked("note-c")).toBe("- C\n  id:: blk_c000000000\n")
 
     requestDatabasePull()
     await flushDatabaseMode()
     expect(walked("note-b")).toBe(NOTE_B)
-  })
-
-  it("non-note file writes are dropped (nothing else lives in the graph)", async () => {
-    const { source } = stubSource({})
-    const { handle, calls } = stubReplica()
-    await boot({ source, replica: handle })
-
-    databaseWriteFiles({ ".ruminate/view-state/x.json": "[]" })
-    await flushDatabaseMode()
-    expect(files()).toEqual({})
-    expect(calls.changes).toEqual([])
   })
 })
 
@@ -427,7 +423,8 @@ describe("database mode since-pulls", () => {
     const { handle } = stubReplica(["note-a", "created"])
     const store = await boot({ source, replica: handle })
 
-    databaseWriteFiles({ "note-a.md": LOCAL_EDIT, "created.md": CREATED })
+    writeNote("note-a", LOCAL_EDIT)
+    writeNote("created", CREATED)
     await flushDatabaseMode()
     requestDatabasePull()
     await flushDatabaseMode()

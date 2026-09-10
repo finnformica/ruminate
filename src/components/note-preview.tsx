@@ -1,5 +1,8 @@
 import { useMatch } from "@tanstack/react-router"
+import { useAtomValue } from "jotai"
 import { useMemo } from "react"
+import { pageDoc } from "../data/graph"
+import { graphSnapshotAtom } from "../global-state"
 import { Note, fontSchema } from "../schema"
 import { cx } from "../utils/cx"
 import {
@@ -8,15 +11,14 @@ import {
   formatWeekDistance,
   isValidDateString,
 } from "../utils/date"
-import { toDisplayMarkdown } from "../blocks/to-display-markdown"
-import { parseFrontmatter } from "../utils/frontmatter"
+import { BlockEditor } from "./block-editor/block-editor"
 import { GlobeIcon12, TagIcon12 } from "./icons"
 import { Label } from "./label"
 import { useLinkHighlight } from "./link-highlight-provider"
-import { Markdown } from "./markdown"
 import { withOrdinalSuffix } from "../utils/pluralize"
 
 const NUM_VISIBLE_TAGS = 3
+const noop = () => {}
 
 type NotePreviewProps = {
   note: Note
@@ -27,16 +29,12 @@ type NotePreviewProps = {
 export function NotePreview({ note, className, hideProperties }: NotePreviewProps) {
   const highlightedHrefs = useLinkHighlight()
 
-  const resolvedContent = note.content
+  const resolvedFrontmatter = note.props
 
-  const resolvedFrontmatter = useMemo(() => {
-    return parseFrontmatter(resolvedContent).frontmatter
-  }, [resolvedContent])
-
-  // The stored content is the block format (id:: lines, bare `[ ]` todos); turn
-  // it into plain markdown before rendering so the preview isn't full of raw
-  // block metadata.
-  const displayContent = useMemo(() => toDisplayMarkdown(resolvedContent), [resolvedContent])
+  // The preview is the page's view, read-only: the same rows the note page
+  // renders, walked out of the live graph.
+  const snapshot = useAtomValue(graphSnapshotAtom)
+  const doc = useMemo(() => pageDoc(note.id, snapshot), [note.id, snapshot])
 
   // Resolve note font (frontmatter font or the sans default)
   const resolvedFont = useMemo(() => {
@@ -140,9 +138,11 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
       ) : null}
       <div className="grow overflow-hidden [mask-image:linear-gradient(to_bottom,black_0%,black_75%,transparent_100%)] [&_*::-webkit-scrollbar]:hidden">
         <div className="w-[152%] origin-top-left scale-[66%]">
-          <Markdown hideFrontmatter emptyText="Empty note">
-            {displayContent}
-          </Markdown>
+          {doc && note.text.trim() !== "" ? (
+            <BlockEditor doc={doc} onChange={noop} readOnly />
+          ) : (
+            <span className="text-text-tertiary italic font-sans">Empty note</span>
+          )}
         </div>
       </div>
       {!hideProperties ? (

@@ -2,6 +2,7 @@ import { StoryObj } from "@storybook/react"
 import { useBlockResultTree } from "../hooks/block-result-tree"
 import { useListKeyboardNav } from "../hooks/list-keyboard-nav"
 import type { Note } from "../schema"
+import { buildGraphSnapshot, docToGraph } from "../data/graph"
 import { createBlockIndexer, searchBlocks, type BlockHit } from "../utils/block-search"
 import { inMemoryBlockSearchSource } from "../utils/block-search-source"
 import { parseQuery } from "../utils/search"
@@ -13,13 +14,13 @@ import { SearchResults } from "./search-results"
  * to read the blocks inside it.
  */
 
-function note(id: string, content: string): Note {
+function note(id: string, text: string): Note {
   return {
     id,
-    content,
+    text,
     type: "note",
     displayName: id,
-    frontmatter: {},
+    props: {},
     title: id,
     url: null,
     alias: null,
@@ -28,6 +29,7 @@ function note(id: string, content: string): Note {
     dates: [],
     tags: [],
     tasks: [],
+    headings: [],
   }
 }
 
@@ -66,7 +68,17 @@ const CORPUS = [
   ),
 ]
 
-const index = createBlockIndexer()(CORPUS)
+const CORPUS_GRAPH = (() => {
+  const nodes = []
+  const links = []
+  for (const n of CORPUS) {
+    const g = docToGraph(n.id, n.text, 1)
+    nodes.push(...g.nodes)
+    links.push(...g.links)
+  }
+  return buildGraphSnapshot(nodes, links)
+})()
+const index = createBlockIndexer()(CORPUS, CORPUS_GRAPH)
 const source = inMemoryBlockSearchSource(index)
 
 function Harness({ query }: { query: string }) {

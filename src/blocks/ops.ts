@@ -11,9 +11,9 @@ export function emptyBlock(type: BlockType = "text", text = ""): Block {
   return { id: blockId(), type, text, children: [] }
 }
 
-/** Nothing worth saving: no frontmatter and no block carrying any text. */
+/** Nothing worth saving: no page props and no block carrying any text. */
 export function isEmptyDoc(doc: BlockDoc): boolean {
-  if (doc.frontmatter !== null && doc.frontmatter.trim() !== "") return false
+  if (doc.props !== null && Object.keys(doc.props).length > 0) return false
   return Object.values(doc.blocks).every(
     (block) => block.type === "text" && block.text === "" && !block.props,
   )
@@ -21,7 +21,7 @@ export function isEmptyDoc(doc: BlockDoc): boolean {
 
 function clone(doc: BlockDoc): BlockDoc {
   return {
-    frontmatter: doc.frontmatter,
+    props: doc.props,
     rootBlockIds: [...doc.rootBlockIds],
     blocks: { ...doc.blocks },
   }

@@ -1,15 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { parse } from "../blocks/parse"
-import { getHeadings } from "./headings"
 import { buildOutline, filterOutline } from "./note-outline"
 
 describe("buildOutline", () => {
-  it("finds nested (indented) headings that the on-disk regex misses", () => {
-    // In the block format, a nested heading is indented — getHeadings' regex
-    // is anchored at column 0 and misses it, which is exactly why the palette
-    // builds its outline from the live doc instead.
+  it("finds nested (indented) headings", () => {
     const content = "# Top\n  ## Nested\n    para\n  ## Second"
-    expect(getHeadings(content).map((h) => h.text)).toEqual(["Top"])
     expect(buildOutline(parse(content)).map((item) => item.text)).toEqual([
       "Top",
       "Nested",

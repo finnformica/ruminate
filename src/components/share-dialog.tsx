@@ -1,8 +1,9 @@
 import copy from "copy-to-clipboard"
-import { useAtomValue } from "jotai"
+import { useAtomValue, useStore } from "jotai"
 import React from "react"
 import { useNetworkState } from "react-use"
-import { githubUserAtom } from "../global-state"
+import { rollup } from "../data/graph"
+import { githubUserAtom, graphSnapshotAtom } from "../global-state"
 import { Note } from "../schema"
 import { createGist, deleteGist } from "../utils/gist"
 import { Button } from "./button"
@@ -35,8 +36,9 @@ export function ShareDialog({
   onOpenChange,
 }: ShareDialogProps) {
   const githubUser = useAtomValue(githubUserAtom)
+  const jotaiStore = useStore()
   const { online } = useNetworkState()
-  const gistId = note.frontmatter.gist_id as string | undefined
+  const gistId = note.props.gist_id as string | undefined
   const shareLink = gistId ? `${window.location.origin}/share/${gistId}` : ""
   const [isPublishing, setIsPublishing] = React.useState(false)
   const [isUnpublishing, setIsUnpublishing] = React.useState(false)
@@ -47,14 +49,15 @@ export function ShareDialog({
     if (!githubUser) return
 
     setIsPublishing(true)
-    const gist = await createGist({ note, githubUser })
+    const content = rollup(note.id, jotaiStore.get(graphSnapshotAtom)) ?? ""
+    const gist = await createGist({ note, content, githubUser })
     setIsPublishing(false)
 
     // TODO: Handle error
     if (!gist?.id) return
 
     onPublish(gist.id)
-  }, [githubUser, note, onPublish])
+  }, [githubUser, jotaiStore, note, onPublish])
 
   const handleUnpublish = React.useCallback(async () => {
     if (!githubUser?.token || !gistId) return

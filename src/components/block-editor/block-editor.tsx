@@ -167,7 +167,7 @@ function embeddedPasteFragment(
   const resolved =
     resolveBlocks && linkableIds.length > 0 ? resolveBlocks(linkableIds) : ({} as const)
 
-  let out: BlockDoc = { frontmatter: null, rootBlockIds: [], blocks: {} }
+  let out: BlockDoc = { props: null, rootBlockIds: [], blocks: {} }
   for (const block of roots) {
     let sub: BlockDoc
     if (!linkable(block)) {
@@ -186,7 +186,7 @@ function embeddedPasteFragment(
     // graph) would put one id in this doc twice; remint the later occurrence.
     sub = remintCollidingIds(sub, out)
     out = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: [...out.rootBlockIds, ...sub.rootBlockIds],
       blocks: { ...out.blocks, ...sub.blocks },
     }

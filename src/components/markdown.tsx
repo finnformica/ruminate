@@ -7,49 +7,20 @@ import rehypeRaw from "rehype-raw"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import { z } from "zod"
-import { useSaveNote } from "../hooks/note"
-import { useMoveTask } from "../hooks/task"
-import { generateNoteId } from "../utils/note-id"
-import {
-  canMoveListItemUp,
-  canMoveListItemDown,
-  canMoveListItemToTop,
-  canMoveListItemToBottom,
-  moveListItemUp,
-  moveListItemDown,
-  moveListItemToTop,
-  moveListItemToBottom,
-} from "../utils/reorder-list-item"
 import { remarkPriority } from "../remark-plugins/priority"
 import { remarkTag } from "../remark-plugins/tag"
 import { cx } from "../utils/cx"
 import { getLeadingEmoji } from "../utils/emoji"
 import {
   getVisibleFrontmatter,
+  hasVisibleFrontmatter,
   parseFrontmatter,
-  updateFrontmatterKey,
-  updateFrontmatterValue,
 } from "../utils/frontmatter"
-import { isNoteEmpty } from "../utils/parse-note"
 import { Checkbox } from "./checkbox"
 import { CopyButton } from "./copy-button"
 import { Details } from "./details"
-import { DropdownMenu } from "./dropdown-menu"
 import { GitHubAvatar } from "./github-avatar"
-import { IconButton } from "./icon-button"
-import {
-  ArrowDownIcon16,
-  ArrowDownRightIcon16,
-  ArrowDownToLineIcon16,
-  ArrowUpIcon16,
-  ArrowUpToLineIcon16,
-  CopyIcon16,
-  CutIcon16,
-  MoreIcon16,
-  TrashIcon16,
-} from "./icons"
 import { FootnoteRefLink } from "./footnote-ref-link"
-import { NotePickerPopover, NotePickerDialog } from "./note-picker"
 import { PriorityIndicator } from "./priority-indicator"
 import { PropertyKeyEditor } from "./property-key"
 import { PropertyValueEditor } from "./property-value"
@@ -58,22 +29,23 @@ import { TagLink } from "./tag-link"
 import { Tooltip } from "./tooltip"
 import { WebsiteFavicon } from "./website-favicon"
 
+/**
+ * Read-only markdown rendering: the gist share page, property values and the
+ * help panel. Notes themselves render as views of the graph (the block
+ * editor); markdown reaches this component only at the edges.
+ */
 export type MarkdownProps = {
   children: string
   className?: string
   hideFrontmatter?: boolean
   fontSize?: "small" | "large"
-  onChange?: (value: string) => void
   emptyText?: React.ReactNode
-  noteId?: string
 }
 
 export const MarkdownContext = React.createContext<{
   markdown: string
   markdownBody: string
   markdownBodyStartOffset: number
-  onChange?: (value: string) => void
-  noteId?: string
 }>({
   markdown: "",
   markdownBody: "",
@@ -86,9 +58,7 @@ export const Markdown = React.memo(
     className,
     hideFrontmatter = false,
     fontSize = "large",
-    onChange,
     emptyText = "Empty",
-    noteId,
   }: MarkdownProps) => {
     const { online } = useNetworkState()
     const { frontmatter, content } = React.useMemo(() => parseFrontmatter(children), [children])
@@ -150,21 +120,11 @@ export const Markdown = React.memo(
     const showFavicon = online && url && !hasAvatar && !hasLeadingEmoji
 
     const contextValue = React.useMemo(
-      () => ({
-        markdown: children,
-        markdownBody: body,
-        markdownBodyStartOffset,
-        onChange: onChange
-          ? (value: string) => {
-              const start = markdownBodyStartOffset
-              const end = markdownBodyStartOffset + body.length
-              onChange(children.slice(0, start) + value + children.slice(end))
-            }
-          : undefined,
-        noteId,
-      }),
-      [body, children, markdownBodyStartOffset, onChange, noteId],
+      () => ({ markdown: children, markdownBody: body, markdownBodyStartOffset }),
+      [body, children, markdownBodyStartOffset],
     )
+    // Nothing to show: no body, and no properties that would be shown.
+    const isEmpty = !content.trim() && (hideFrontmatter || !hasVisibleFrontmatter(frontmatter))
 
     return (
       <MarkdownContext.Provider value={contextValue}>
@@ -190,26 +150,7 @@ export const Markdown = React.memo(
                   <Details>
                     <Details.Summary>Properties</Details.Summary>
                     <div className="-mx-2 coarse:-mx-3">
-                      <Frontmatter
-                        frontmatter={visibleFrontmatter}
-                        onKeyChange={(oldKey, newKey) =>
-                          onChange?.(
-                            updateFrontmatterKey({
-                              content: children,
-                              oldKey,
-                              newKey,
-                            }),
-                          )
-                        }
-                        onValueChange={(key, newValue) =>
-                          onChange?.(
-                            updateFrontmatterValue({
-                              content: children,
-                              properties: { [key]: newValue },
-                            }),
-                          )
-                        }
-                      />
+                      <Frontmatter frontmatter={visibleFrontmatter} />
                     </div>
                   </Details>
                 ) : null}
@@ -217,7 +158,7 @@ export const Markdown = React.memo(
               <div className={cx("empty:hidden", fontSize === "large" && "markdown-large")}>
                 {
                   // If there's no content and no visible frontmatter, show a placeholder
-                  isNoteEmpty({ markdown: children, hideFrontmatter }) ? (
+                  isEmpty ? (
                     <span className="text-text-tertiary italic font-sans">{emptyText}</span>
                   ) : body ? (
                     <MarkdownContent>{body}</MarkdownContent>
@@ -334,13 +275,9 @@ export function MarkdownContent({ children, className }: { children: string; cla
 function Frontmatter({
   frontmatter,
   className,
-  onKeyChange,
-  onValueChange,
 }: {
   frontmatter: Record<string, unknown>
   className?: string
-  onKeyChange?: (oldKey: string, newKey: string) => void
-  onValueChange?: (key: string, value: unknown) => void
 }) {
   if (Object.keys(frontmatter).length === 0) return null
 
@@ -349,11 +286,8 @@ function Frontmatter({
       {Object.entries(frontmatter).map(([key, value], i) => {
         return (
           <div key={i} className="grid grid-cols-[2fr_3fr] gap-1 @[24rem]:grid-cols-[10rem_1fr]">
-            <PropertyKeyEditor name={key} onChange={(newName) => onKeyChange?.(key, newName)} />
-            <PropertyValueEditor
-              property={[key, value]}
-              onChange={(newValue) => onValueChange?.(key, newValue)}
-            />
+            <PropertyKeyEditor name={key} />
+            <PropertyValueEditor property={[key, value]} />
           </div>
         )
       })}
@@ -558,162 +492,21 @@ function extractListItemElements(children: React.ReactNode): {
 
 type ListItemProps = React.ComponentPropsWithoutRef<"li"> & ExtraProps
 
-function ListItem({ node, children, className, ...props }: ListItemProps) {
-  const { markdownBody, markdown, markdownBodyStartOffset, onChange, noteId } =
-    React.useContext(MarkdownContext)
+function ListItem({ node: _node, children, className, ...props }: ListItemProps) {
   const ordered = React.useContext(OrderedListContext)
   const isTask = className?.includes("task-list-item")
-  const [isMoveMenuOpen, setIsMoveMenuOpen] = React.useState(false)
-  const [isMoreMenuOpen, setIsMoreMenuOpen] = React.useState(false)
-  const [isMoveDialogOpen, setIsMoveDialogOpen] = React.useState(false)
-  const isMenuOpen = isMoveMenuOpen || isMoreMenuOpen || isMoveDialogOpen
-  const moveTask = useMoveTask()
-  const saveNote = useSaveNote()
 
   const { checkbox, content, nestedLists } = React.useMemo(
     () => extractListItemElements(children),
     [children],
   )
 
-  const handleMoveTo = React.useCallback(
-    (targetNoteId: string) => {
-      if (!node?.position || !noteId) return
-
-      moveTask({
-        sourceNoteId: noteId,
-        targetNoteId,
-        sourceMarkdown: markdown,
-        nodeStart: markdownBodyStartOffset + (node.position.start.offset ?? 0),
-        nodeEnd: markdownBodyStartOffset + (node.position.end.offset ?? 0),
-      })
-    },
-    [markdownBodyStartOffset, markdown, moveTask, node?.position, noteId],
-  )
-
-  // Get the task line text for copy/cut operations
-  const getTaskLine = React.useCallback(() => {
-    if (!node?.position) return ""
-    let start = node.position.start.offset ?? 0
-    while (start > 0 && markdownBody[start - 1] !== "\n") {
-      start--
-    }
-    const end = node.position.end.offset ?? 0
-    return markdownBody.slice(start, end).trim()
-  }, [markdownBody, node?.position])
-
-  const deleteTask = React.useCallback(() => {
-    if (!node?.position) return
-    let start = node.position.start.offset ?? 0
-    while (start > 0 && markdownBody[start - 1] !== "\n") {
-      start--
-    }
-    const end = node.position.end.offset ?? 0
-    const endWithNewline = markdownBody[end] === "\n" ? end + 1 : end
-    onChange?.(markdownBody.slice(0, start) + markdownBody.slice(endWithNewline))
-  }, [markdownBody, node?.position, onChange])
-
-  const handleCreateNote = React.useCallback(
-    async (title: string) => {
-      const id = generateNoteId()
-      const content = `# ${title}\n\n${getTaskLine()}`
-
-      // Create new note with task content
-      await saveNote({ id, content })
-
-      // Delete task from this note
-      deleteTask()
-    },
-    [getTaskLine, saveNote, deleteTask],
-  )
-
-  const nodeStart = node?.position?.start.offset
-  const nodeEnd = node?.position?.end.offset
-  const hasNodePosition = nodeStart != null && nodeEnd != null
-
-  const canMoveUp = React.useMemo(
-    () => (hasNodePosition ? canMoveListItemUp(markdownBody, nodeStart!, nodeEnd!) : false),
-    [hasNodePosition, markdownBody, nodeStart, nodeEnd],
-  )
-
-  const canMoveDown = React.useMemo(
-    () => (hasNodePosition ? canMoveListItemDown(markdownBody, nodeStart!, nodeEnd!) : false),
-    [hasNodePosition, markdownBody, nodeStart, nodeEnd],
-  )
-
-  const canMoveToTop = React.useMemo(
-    () => (hasNodePosition ? canMoveListItemToTop(markdownBody, nodeStart!, nodeEnd!) : false),
-    [hasNodePosition, markdownBody, nodeStart, nodeEnd],
-  )
-
-  const canMoveToBottom = React.useMemo(
-    () => (hasNodePosition ? canMoveListItemToBottom(markdownBody, nodeStart!, nodeEnd!) : false),
-    [hasNodePosition, markdownBody, nodeStart, nodeEnd],
-  )
-
-  const handleMoveUp = React.useCallback(() => {
-    if (!hasNodePosition) return
-    const result = moveListItemUp(markdownBody, nodeStart!, nodeEnd!)
-    if (result !== null) {
-      onChange?.(result)
-    }
-  }, [hasNodePosition, markdownBody, nodeStart, nodeEnd, onChange])
-
-  const handleMoveDown = React.useCallback(() => {
-    if (!hasNodePosition) return
-    const result = moveListItemDown(markdownBody, nodeStart!, nodeEnd!)
-    if (result !== null) {
-      onChange?.(result)
-    }
-  }, [hasNodePosition, markdownBody, nodeStart, nodeEnd, onChange])
-
-  const handleMoveToTop = React.useCallback(() => {
-    if (!hasNodePosition) return
-    const result = moveListItemToTop(markdownBody, nodeStart!, nodeEnd!)
-    if (result !== null) {
-      onChange?.(result)
-    }
-  }, [hasNodePosition, markdownBody, nodeStart, nodeEnd, onChange])
-
-  const handleMoveToBottom = React.useCallback(() => {
-    if (!hasNodePosition) return
-    const result = moveListItemToBottom(markdownBody, nodeStart!, nodeEnd!)
-    if (result !== null) {
-      onChange?.(result)
-    }
-  }, [hasNodePosition, markdownBody, nodeStart, nodeEnd, onChange])
-
   return (
-    <li {...props} className={cx("rounded-lg", isMenuOpen && "bg-bg-selected", className)}>
-      <div
-        className={cx("flex p-1.5 gap-1.5 rounded-lg", {
-          "relative pr-10 sm:fine:pr-[74px] coarse:pr-12 group/task": isTask && onChange,
-          "hover:bg-bg-hover": isTask && !isMenuOpen,
-        })}
-      >
+    <li {...props} className={cx("rounded-lg", className)}>
+      <div className="flex p-1.5 gap-1.5 rounded-lg">
         <div className="size-7 coarse:size-9 shrink-0 grid place-items-center">
           {isTask ? (
-            <Checkbox
-              key={String(checkbox?.checked)}
-              defaultChecked={checkbox?.checked}
-              disabled={!onChange}
-              onMouseDown={(event) => {
-                // Prevent double-click from propagating
-                if (event.detail > 1) {
-                  event.stopPropagation()
-                }
-              }}
-              onCheckedChange={(newChecked) => {
-                if (!node?.position) return
-
-                // Update the corresponding checkbox in the markdownBody string
-                const newValue =
-                  markdownBody.slice(0, node.position.start.offset) +
-                  (newChecked ? "- [x]" : "- [ ]") +
-                  markdownBody.slice((node.position.start.offset ?? 0) + 5)
-
-                onChange?.(newValue)
-              }}
-            />
+            <Checkbox key={String(checkbox?.checked)} defaultChecked={checkbox?.checked} disabled />
           ) : ordered ? (
             <span className="list-item-number text-text-secondary justify-self-end" />
           ) : (
@@ -729,133 +522,6 @@ function ListItem({ node, children, className, ...props }: ListItemProps) {
           )}
         </div>
         <div className="first-child:mt-0 last-child:mt-0 grow coarse:py-1">{content}</div>
-        {isTask && onChange ? (
-          <div className="absolute top-1 right-1 flex gap-0.5">
-            <NotePickerPopover
-              open={isMoveMenuOpen}
-              onOpenChange={setIsMoveMenuOpen}
-              placeholder="Move to…"
-              exclude={noteId ? [noteId] : []}
-              onSelect={(targetNoteId) => {
-                handleMoveTo(targetNoteId)
-                setIsMoveMenuOpen(false)
-              }}
-              onCreateNote={(title) => {
-                handleCreateNote(title)
-                setIsMoveMenuOpen(false)
-              }}
-              trigger={
-                <IconButton
-                  aria-label="Move to…"
-                  tooltipSide="top"
-                  className={cx(
-                    "opacity-0 group-hover/task:opacity-100 focus-visible:opacity-100",
-                    isMenuOpen && "opacity-100",
-                    "hidden sm:fine:inline-flex coarse:hidden!",
-                  )}
-                >
-                  <ArrowDownRightIcon16 />
-                </IconButton>
-              }
-            />
-            <DropdownMenu open={isMoreMenuOpen} onOpenChange={setIsMoreMenuOpen} modal={false}>
-              <DropdownMenu.Trigger
-                render={
-                  <IconButton
-                    aria-label="More actions"
-                    tooltipSide="top"
-                    className={cx(
-                      "opacity-0 group-hover/task:opacity-100 focus-visible:opacity-100 coarse:opacity-100",
-                      isMenuOpen && "opacity-100",
-                    )}
-                  >
-                    <MoreIcon16 />
-                  </IconButton>
-                }
-              />
-              <DropdownMenu.Content align="end" width={280} sideOffset={8}>
-                <div className="sm:fine:hidden">
-                  <DropdownMenu.Item
-                    icon={<ArrowDownRightIcon16 />}
-                    onClick={() => setIsMoveDialogOpen(true)}
-                  >
-                    Move to…
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Separator />
-                </div>
-                {canMoveUp || canMoveDown || canMoveToTop || canMoveToBottom ? (
-                  <>
-                    <DropdownMenu.Group>
-                      <DropdownMenu.GroupLabel>Reorder</DropdownMenu.GroupLabel>
-                      <DropdownMenu.Item
-                        icon={<ArrowUpToLineIcon16 />}
-                        onClick={handleMoveToTop}
-                        disabled={!canMoveToTop}
-                      >
-                        Move to top
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item
-                        icon={<ArrowUpIcon16 />}
-                        onClick={handleMoveUp}
-                        disabled={!canMoveUp}
-                      >
-                        Move up
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item
-                        icon={<ArrowDownIcon16 />}
-                        onClick={handleMoveDown}
-                        disabled={!canMoveDown}
-                      >
-                        Move down
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item
-                        icon={<ArrowDownToLineIcon16 />}
-                        onClick={handleMoveToBottom}
-                        disabled={!canMoveToBottom}
-                      >
-                        Move to bottom
-                      </DropdownMenu.Item>
-                    </DropdownMenu.Group>
-                    <DropdownMenu.Separator />
-                  </>
-                ) : null}
-                <DropdownMenu.Item
-                  icon={<CopyIcon16 />}
-                  onClick={() => navigator.clipboard.writeText(getTaskLine())}
-                >
-                  Copy task
-                </DropdownMenu.Item>
-                <DropdownMenu.Item
-                  icon={<CutIcon16 />}
-                  onClick={() => {
-                    navigator.clipboard.writeText(getTaskLine())
-                    deleteTask()
-                  }}
-                >
-                  Cut task
-                </DropdownMenu.Item>
-                <DropdownMenu.Separator />
-                <DropdownMenu.Item variant="danger" icon={<TrashIcon16 />} onClick={deleteTask}>
-                  Delete task
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu>
-            <NotePickerDialog
-              open={isMoveDialogOpen}
-              onOpenChange={setIsMoveDialogOpen}
-              placeholder="Move to…"
-              exclude={noteId ? [noteId] : []}
-              onSelect={(targetNoteId) => {
-                handleMoveTo(targetNoteId)
-                setIsMoveDialogOpen(false)
-              }}
-              onCreateNote={(title) => {
-                handleCreateNote(title)
-                setIsMoveDialogOpen(false)
-              }}
-            />
-          </div>
-        ) : null}
       </div>
       {nestedLists.length > 0 && (
         <div className="[&_:is(ul,ol)]:m-0! pl-7 coarse:pl-6">

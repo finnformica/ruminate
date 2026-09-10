@@ -12,7 +12,7 @@ import type { BlockDoc, BlockType } from "./types"
  */
 function fixture(): BlockDoc {
   return {
-    frontmatter: null,
+    props: null,
     rootBlockIds: ["a", "b", "c"],
     blocks: {
       a: { id: "a", type: "text", text: "A", children: [] },
@@ -177,7 +177,7 @@ describe("wasd sibling traversal (treePrev / treeNext break out of the level)", 
    */
   function deep(): BlockDoc {
     return {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["a", "b", "c"],
       blocks: {
         a: { id: "a", type: "text", text: "A", children: [] },
@@ -478,7 +478,7 @@ describe("deleteBlock", () => {
 
   it("refuses to delete the only block", () => {
     const doc: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["only"],
       blocks: { only: { id: "only", type: "text", text: "", children: [] } },
     }
@@ -491,7 +491,7 @@ describe("deleteBlock", () => {
 describe("toggleTodo", () => {
   it("checks an unchecked todo", () => {
     const doc: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["t"],
       blocks: { t: { id: "t", type: "todo", text: "task", children: [] } },
     }
@@ -526,7 +526,7 @@ describe("turn into (select-mode marker keys)", () => {
   function docOf(content: string): BlockDoc {
     const { type, text } = parseLine(content)
     return {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["x"],
       blocks: { x: { id: "x", type, text, children: [] } },
     }
@@ -621,7 +621,7 @@ describe("insertBelow", () => {
 
   it("nests the new block under a heading", () => {
     const doc: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["h"],
       blocks: { h: { id: "h", type: "h1", text: "Title", children: [] } },
     }
@@ -648,7 +648,7 @@ describe("insertBelow", () => {
 
   it("still continues todo and numbered lists whatever the configured marker", () => {
     const doc: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["t", "n"],
       blocks: {
         t: { id: "t", type: "todo", text: "task", children: [] },
@@ -668,7 +668,7 @@ describe("insertBelow", () => {
 describe("insertSiblingBelow", () => {
   it("keeps the block's own type (heading stays a heading, sibling not nested)", () => {
     const doc: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["h"],
       blocks: { h: { id: "h", type: "h1", text: "Title", children: [] } },
     }
@@ -681,7 +681,7 @@ describe("insertSiblingBelow", () => {
 
   it("keeps a todo a todo", () => {
     const doc: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["t"],
       blocks: { t: { id: "t", type: "done", text: "done", children: [] } },
     }
@@ -695,7 +695,7 @@ describe("insertSiblingBelow", () => {
 describe("split", () => {
   it("splits a list item at the caret, continuing the marker", () => {
     const doc: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["x"],
       blocks: { x: { id: "x", type: "ul", text: "hello", children: [] } },
     }
@@ -713,7 +713,7 @@ describe("split", () => {
 
   it("splits a paragraph at the caret using the configured new-block marker", () => {
     const doc: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["x"],
       blocks: { x: { id: "x", type: "text", text: "hello", children: [] } },
     }
@@ -734,7 +734,7 @@ describe("split", () => {
 
   it("shift-enter splits carrying the same block type", () => {
     const doc: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["x"],
       blocks: { x: { id: "x", type: "ul", text: "hello", children: [] } },
     }
@@ -751,7 +751,7 @@ describe("split", () => {
 
   it("shift-enter on a heading makes another heading", () => {
     const doc: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["x"],
       blocks: { x: { id: "x", type: "h1", text: "Title", children: [] } },
     }
@@ -768,7 +768,7 @@ describe("split", () => {
 describe("marker editing", () => {
   it("exitList clears an empty list item to a paragraph", () => {
     const doc: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["x"],
       blocks: { x: { id: "x", type: "ul", text: "", children: [] } },
     }
@@ -779,7 +779,7 @@ describe("marker editing", () => {
 
   it("stripMarker removes the leading marker", () => {
     const doc: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["x"],
       blocks: { x: { id: "x", type: "h1", text: "Heading", children: [] } },
     }

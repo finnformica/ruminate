@@ -28,7 +28,7 @@ const pruned = parse(["- alpha", "  id:: a", "  - beta", "    id:: b", ""].join(
 /** What a note is on a cold load: nothing but the editor's starter blank,
  * because the note store hasn't opened yet. */
 const empty: BlockDoc = {
-  frontmatter: null,
+  props: null,
   rootBlockIds: ["blank"],
   blocks: { blank: { id: "blank", type: "text", text: "", children: [] } },
 }
@@ -66,7 +66,7 @@ describe("readCollapsedKeys", () => {
     expect(readCollapsedKeys("note-a", deep)).toEqual(new Set(["a/b", "a/b/c"]))
     // A shared block folded by id is folded wherever it shows up.
     const shared: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["p", "q"],
       blocks: {
         p: { id: "p", type: "ul", text: "p", children: ["s"] },

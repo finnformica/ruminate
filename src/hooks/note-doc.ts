@@ -7,7 +7,6 @@ import { docToOps } from "../data/ops"
 import { useApplyOps } from "../data/store"
 import { graphSnapshotAtom } from "../global-state"
 import type { NoteId } from "../schema"
-import { updateDocFrontmatter } from "../utils/frontmatter"
 
 /**
  * The note page's doc, straight from the graph — and the way back.
@@ -60,7 +59,10 @@ export function useNoteDoc({
         if (seenRef.current) return // deleted underneath: let it stay deleted
         if (isEmptyDoc(next)) return // nothing worth creating a page for
       }
-      const stamped = updateDocFrontmatter(next, { updated_at: new Date() })
+      const stamped: BlockDoc = {
+        ...next,
+        props: { ...(next.props ?? {}), updated_at: new Date().toISOString() },
+      }
       apply(docToOps(noteId, stamped, current))
     },
     [noteId, store, apply],

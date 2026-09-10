@@ -1,6 +1,6 @@
 # Graph-native app: retiring the markdown bridge
 
-Status: **steps 1 and 2 landed** (2026-09-10) — see §5 for what each step
+Status: **steps 1 to 3 landed** (2026-09-10) — see §5 for what each step
 delivered and what remains. Extends
 [editor-on-graph.md](./editor-on-graph.md) (which assessed the same move
 from the editor's side) and [graph-schema-v2.md](./graph-schema-v2.md) (the
@@ -368,15 +368,25 @@ each branched from the last.
    in-memory sample graph (hard-coded blocks, no markdown), `useNoteDoc`.
    The string autosave, `useEditorDoc`, doc-level saves and the file-shaped
    optimistic update are gone. Undo is unchanged (see §3.3).
-3. **Metadata and search from the graph.** `notesAtom` and friends from the
-   snapshot; `Note.content` removed; previews render views; `parseNote`
-   retires to the gist page; `blockIndexAtom` over nodes. Page metadata is
-   the page node's props — no frontmatter concept in the app; YAML exists
-   only in markdown import and export. `markdownFilesAtom` has no reader
-   left and is deleted with `database-mode.ts`'s file helpers.
-4. **Surgery and creation as ops.** Task move, tag rename, pin/width/font/
-   gist, new note, delete note. `frontmatter.ts`'s edit helpers and
-   `store.ts`'s file API go. Selection and focus re-key by occurrence.
+3. **Metadata, search and previews from the graph; every writer is ops** —
+   _landed_. `Note` is read off the graph (`src/data/note-meta.ts`: the
+   page node's text and props, tags found in block text, tasks as
+   `todo`/`done` blocks by id, headings, the text preview); `Note.content`
+   and `frontmatter` are gone, `props` and `text` replace them. `notesAtom`
+   and `blockIndexAtom` derive from the snapshot with per-page memoization.
+   Previews render the page's view read-only; copy and gists take the
+   rollup explicitly; the gist share page imports its markdown into a
+   graph of its own. Rename, pin/width/font/gist props, tag rename and
+   delete, create and delete note are each one batch of ops. The doc
+   carries page `props` (the title inline) rather than frontmatter text —
+   YAML exists only where `parse` and `serialize` meet markdown. The
+   markdown files layer, `parseNote`, the task and list-item markdown
+   surgery, the markdown component's editing affordances and five mdast
+   dependencies are deleted.
+4. **The last of the doc-level editor.** Selection and focus re-key by
+   occurrence (so a block twice in one note is two addressable rows), and
+   the commands take the row rather than the id. `?content=` (a new note's
+   seed) is the one import left on the note path.
 5. **Views everywhere.** The filtered results as a multi-root view, page
    nodes as results, `in:` as reachability, one vocabulary, the caret
    popover. (Absorbs the results renderer of PR #60, rebased onto this.)
@@ -385,6 +395,10 @@ each branched from the last.
 
 - **Occurrence keys** for rows, folds and the DOM hooks: yes, in step 1.
   Selection and focus follow in step 4.
+- **Metadata from the graph, memoized per page.** A `Note` object is kept
+  while the rows its page reaches are unchanged (row identity, no content
+  compare), so the notes list, search index and React keys stay stable
+  across an edit to another note. Done.
 - **Folds per occurrence**, stored per note by key; folds stored by id from
   before resolve to every occurrence of the block. Done.
 - **Undo** stays snapshot restore; the inverse ops are derived (§3.3). The
@@ -393,13 +407,17 @@ each branched from the last.
   before the store write. Done.
 - **The page node is a row.** Its title leads a zoomed view today; as a
   result row in step 5.
-- **`Note.content` removal** in step 3. Pending.
+- **`Note.content` removal.** Done; the rollup is an export (`rollup`), not
+  a field, and `Note.text` (the blocks' text) is what fuzzy search matches.
 - **Delete-rescue** stays as the `removeLink` semantics of the store API;
   `docToOps` cascades explicitly and never rescues (a child the doc still
   names has a parent in it). Unchanged.
-- **Page metadata is props.** There is no frontmatter in the app; the page
-  node's props are the metadata and the "props editor" is a metadata
-  editor over them. YAML survives only at the markdown edge. Step 3.
+- **Page metadata is props.** There is no frontmatter in the app: the page
+  node's props are the metadata (`Note.props`, `BlockDoc.props`,
+  `useSetPageProps`), and YAML survives only at the markdown edge
+  (`pagePropsFromText` / `frontmatterTextOfProps`). Done. A metadata editor
+  over the props is UI still to build; the gist share page keeps the
+  read-only markdown renderer.
 - **Sample notes are hard-coded blocks** (`src/data/sample-graph.ts`),
   held in a writable atom signed out. Done.
 - **Transclusions and templates** removed rather than carried over. Done.

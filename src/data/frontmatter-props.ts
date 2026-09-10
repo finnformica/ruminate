@@ -1,5 +1,7 @@
 import yaml from "yamljs"
+import type { BlockProps } from "../blocks/types"
 import { canonicalFrontmatterYaml } from "../utils/frontmatter"
+import { injectTitleIntoFrontmatter, liftTitleFromFrontmatter } from "./page-identity"
 
 /**
  * Page-node `props` ↔ frontmatter mapping (docs/graph-schema-v2.md).
@@ -105,4 +107,36 @@ export function frontmatterTextFromProps(props: string | null): string | null {
   const entries = parsed as Record<string, unknown>
   if (isLegacyShape(entries)) return entries.frontmatter as string
   return canonicalFrontmatterYaml(entries)
+}
+
+/**
+ * A doc's page props from raw frontmatter text — the markdown import edge.
+ * The title rides inline (`{ title, …entries }`); the rest is the entries
+ * shape when the YAML is value-faithful, else the legacy raw shape
+ * (`{ frontmatter: raw }`), exactly as the rows hold it. `null` for no
+ * frontmatter; `{}` for an empty block (kept distinct, as the rows keep it).
+ */
+export function pagePropsFromText(raw: string | null): BlockProps | null {
+  if (raw === null) return null
+  const { title, rest } = liftTitleFromFrontmatter(raw)
+  const entries: BlockProps =
+    rest === null ? {} : (JSON.parse(pagePropsFromFrontmatter(rest)) as BlockProps)
+  return title !== null ? { title, ...entries } : entries
+}
+
+/**
+ * The frontmatter text for a doc's page props — the markdown export edge,
+ * and the rollup's bytes: the title line first, then the entries canonically
+ * (or the legacy raw text verbatim). `null` for null props; `""` for `{}`.
+ */
+export function frontmatterTextOfProps(props: BlockProps | null): string | null {
+  if (props === null) return null
+  const { title, ...rest } = props
+  const restText = isLegacyShape(rest)
+    ? (rest.frontmatter as string)
+    : Object.keys(rest).length === 0
+      ? null
+      : canonicalFrontmatterYaml(rest)
+  if (typeof title === "string") return injectTitleIntoFrontmatter(restText, title)
+  return restText ?? ""
 }

@@ -12,7 +12,7 @@ function key(over: Partial<KeyLike> & { key: string }): KeyLike {
 function docWith(content: string): BlockDoc {
   const { type, text } = parseLine(content)
   return {
-    frontmatter: null,
+    props: null,
     rootBlockIds: ["x"],
     blocks: { x: { id: "x", type, text, children: [] } },
   }

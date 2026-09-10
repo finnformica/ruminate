@@ -1,14 +1,14 @@
 import { Link } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
-import { useAtomValue } from "jotai"
+import { useAtomValue, useStore } from "jotai"
 import React from "react"
 import { useNetworkState } from "react-use"
-import { isSignedOutAtom } from "../global-state"
-import { useDeleteNote, useNoteById, useSaveNote } from "../hooks/note"
+import { rollup } from "../data/graph"
+import { graphSnapshotAtom, isSignedOutAtom } from "../global-state"
+import { useDeleteNote, useNoteById, useSetPageProps } from "../hooks/note"
 import { NoteId } from "../schema"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { cx } from "../utils/cx"
-import { updateFrontmatterValue } from "../utils/frontmatter"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
 import { CopyIcon16, MoreIcon16, PinFillIcon16, PinIcon16, ShareIcon16, TrashIcon16 } from "./icons"
@@ -23,7 +23,8 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
   const note = useNoteById(id)
   const isSignedOut = useAtomValue(isSignedOutAtom)
   const { online } = useNetworkState()
-  const saveNote = useSaveNote()
+  const setPageProps = useSetPageProps()
+  const jotaiStore = useStore()
   const deleteNote = useDeleteNote()
   const [isDropdownOpen, setIsDropdownOpen] = React.useState(false)
   const [isShareDialogOpen, setIsShareDialogOpen] = React.useState(false)
@@ -66,13 +67,7 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
           disabled={isSignedOut}
           onClick={() => {
             if (isSignedOut) return
-            saveNote({
-              id,
-              content: updateFrontmatterValue({
-                content: note.content,
-                properties: { pinned: note.pinned ? null : true },
-              }),
-            })
+            setPageProps(id, { pinned: note.pinned ? null : true })
           }}
         >
           {note.pinned ? <PinFillIcon16 className="text-text-pinned" /> : <PinIcon16 />}
@@ -96,7 +91,7 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
             <DropdownMenu.Content align="end" side="top">
               <DropdownMenu.Item
                 icon={<CopyIcon16 />}
-                onClick={() => copyAsMarkdown(note?.content ?? "")}
+                onClick={() => copyAsMarkdown(rollup(id, jotaiStore.get(graphSnapshotAtom)) ?? "")}
               >
                 Copy markdown
               </DropdownMenu.Item>
@@ -126,22 +121,10 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
             open={isShareDialogOpen}
             note={note}
             onPublish={(gistId) => {
-              saveNote({
-                id,
-                content: updateFrontmatterValue({
-                  content: note.content,
-                  properties: { gist_id: gistId },
-                }),
-              })
+              setPageProps(id, { gist_id: gistId })
             }}
             onUnpublish={() => {
-              saveNote({
-                id,
-                content: updateFrontmatterValue({
-                  content: note.content,
-                  properties: { gist_id: null },
-                }),
-              })
+              setPageProps(id, { gist_id: null })
             }}
             onOpenChange={setIsShareDialogOpen}
           />

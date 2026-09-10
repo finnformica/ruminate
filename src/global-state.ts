@@ -3,16 +3,16 @@ import { atom } from "jotai"
 import { atomWithMachine } from "jotai-xstate"
 import { atomWithStorage, selectAtom } from "jotai/utils"
 import { assign, createMachine } from "xstate"
-import { GitHubUser, Note, NoteId, githubUserSchema } from "./schema"
+import { GitHubUser, NoteId, githubUserSchema } from "./schema"
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
-import { databaseFilesAtom, databaseGraphAtom } from "./data/database-mode"
-import { PAGE_TYPE, rollup, type GraphSnapshot } from "./data/graph"
+import { databaseGraphAtom } from "./data/database-mode"
+import type { GraphSnapshot } from "./data/graph"
+import { createNotesBuilder } from "./data/note-meta"
 import { sampleGraph } from "./data/sample-graph"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
 import { backfillPrimaryEmail } from "./utils/github-email"
 import { createBlockIndexer, searchBlocks } from "./utils/block-search"
 import type { BlockRevealRequest, OutlineItem } from "./utils/note-outline"
-import { parseNote } from "./utils/parse-note"
 import { parseQuery, type Query } from "./utils/search"
 
 // -----------------------------------------------------------------------------
@@ -214,29 +214,6 @@ export const graphSnapshotAtom = atom((get) =>
   get(isDatabaseModeAtom) ? get(databaseGraphAtom) : get(sampleGraphAtom),
 )
 
-/** Every page of a graph rolled up to markdown, in repo-file shape. */
-function rollupFiles(graph: GraphSnapshot): Record<string, string> {
-  const files: Record<string, string> = {}
-  for (const node of graph.nodes.values()) {
-    if (node.type !== PAGE_TYPE) continue
-    const markdown = rollup(node.id, graph)
-    if (markdown !== null) files[`${node.id}.md`] = markdown
-  }
-  return files
-}
-const sampleFilesAtom = atom((get) => rollupFiles(get(sampleGraphAtom)))
-
-/**
- * The note corpus, in repo-file shape (path → content, `<id>.md` per note) —
- * the markdown projection the notes list, tags and search still read (it
- * retires with them, docs/graph-native-app.md). Signed in it is synthesized
- * from the local SQL store by `src/data/database-mode.ts`; signed out it is
- * the sample graph rolled up.
- */
-export const markdownFilesAtom = atom((get) =>
-  get(isDatabaseModeAtom) ? get(databaseFilesAtom) : get(sampleFilesAtom),
-)
-
 export const isSignedOutAtom = selectAtom(globalStateMachineAtom, (state) =>
   state.matches("signedOut"),
 )
@@ -251,20 +228,13 @@ export const githubUserAtom = machineGithubUserAtom
 // Notes
 // -----------------------------------------------------------------------------
 
-export const notesAtom = atom((get) => {
-  const markdownFiles = get(markdownFilesAtom)
-  const notes: Map<NoteId, Note> = new Map()
+// The builder's per-page memo lives in the module closure: on each graph
+// change only pages whose reachable rows changed are re-derived; the rest
+// keep their `Note` object.
+const buildNotes = createNotesBuilder()
 
-  // Parse notes. Non-`.md` entries are not notes and are skipped here.
-  for (const filepath in markdownFiles) {
-    if (!filepath.endsWith(".md")) continue
-    const id = filepath.replace(/\.md$/, "")
-    const content = markdownFiles[filepath]
-    notes.set(id, parseNote(id, content))
-  }
-
-  return notes
-})
+/** Every page as a `Note` (src/data/note-meta.ts), read off the graph. */
+export const notesAtom = atom((get) => buildNotes(get(graphSnapshotAtom)))
 
 /**
  * Date (or week) id → the notes that reference it via frontmatter date
@@ -334,7 +304,7 @@ export const noteSearcherAtom = atom((get) => {
     // (docs/page-identity-design.md), so matching them would only add noise —
     // every note would half-match a query containing "blk". The `id:` filter
     // still matches ids exactly (src/utils/search-notes.ts).
-    keySelector: (note) => [note.title, note.displayName, note.content, note.alias || ""],
+    keySelector: (note) => [note.title, note.displayName, note.text, note.alias || ""],
     threshold: 0.8,
   })
 })
@@ -343,9 +313,9 @@ export const noteSearcherAtom = atom((get) => {
 // Blocks
 // -----------------------------------------------------------------------------
 
-// The indexer's per-note memo lives in the module closure: on each corpus
-// change only notes whose content changed are re-parsed (unchanged notes reuse
-// their block entries), which keeps the derived atom cheap at corpus scale.
+// The indexer's per-note memo lives in the module closure: on each graph
+// change only notes whose `Note` changed are re-walked (the rest reuse their
+// block entries), which keeps the derived atom cheap at corpus scale.
 const buildBlockIndex = createBlockIndexer()
 
 /**
@@ -354,7 +324,9 @@ const buildBlockIndex = createBlockIndexer()
  * `sortedNotesAtom` order). The index's fuzzy searcher is built lazily on
  * first block-text search, so pure `type:` queries never pay for it.
  */
-export const blockIndexAtom = atom((get) => buildBlockIndex(get(sortedNotesAtom)))
+export const blockIndexAtom = atom((get) =>
+  buildBlockIndex(get(sortedNotesAtom), get(graphSnapshotAtom)),
+)
 
 /**
  * Block-granular search (`src/utils/block-search.ts`): resolves a query to

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { createStore } from "jotai"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { databaseFilesAtom, databaseGraphAtom } from "./data/database-mode"
-import { buildGraphSnapshot, docToGraph, pageDoc } from "./data/graph"
+import { databaseGraphAtom } from "./data/database-mode"
+import { buildGraphSnapshot, docToGraph, pageDoc, rollup } from "./data/graph"
 import { serialize } from "./blocks/serialize"
 import { applyOps } from "./data/ops"
 import {
@@ -10,17 +10,29 @@ import {
   globalStateMachineAtom,
   graphSnapshotAtom,
   isSignedOutAtom,
-  markdownFilesAtom,
+  notesAtom,
   sampleGraphAtom,
   searchBlocksAtom,
 } from "./global-state"
 
 /**
  * The unchecked-boxes flow end-to-end at the atom level: sign the machine in,
- * feed the database files atom a corpus, and `type:todo` resolves to block
- * hits through `markdownFilesAtom` → `notesAtom` → `blockIndexAtom` →
+ * feed the database graph atom a corpus, and `type:todo` resolves to block
+ * hits through `graphSnapshotAtom` → `notesAtom` → `blockIndexAtom` →
  * `searchBlocksAtom` — the exact derivation chain the app runs.
  */
+
+/** A graph from `<id>.md` → markdown, as a full pull would leave it. */
+function graphOf(files: Record<string, string>) {
+  const nodes = []
+  const links = []
+  for (const [path, markdown] of Object.entries(files)) {
+    const g = docToGraph(path.replace(/\.md$/, ""), markdown, 1)
+    nodes.push(...g.nodes)
+    links.push(...g.links)
+  }
+  return buildGraphSnapshot(nodes, links)
+}
 
 /** Markdown from lines, with a trailing newline (the canonical file shape). */
 const md = (...lines: string[]) => lines.join("\n") + "\n"
@@ -50,7 +62,7 @@ async function signedInStore(files: Record<string, string>) {
     type: "SIGN_IN",
     githubUser: { token: "t", login: "finn", name: "Finn", email: "finn@example.com" },
   })
-  store.set(databaseFilesAtom, files)
+  store.set(databaseGraphAtom, graphOf(files))
   return { store, unsubscribe }
 }
 
@@ -71,7 +83,7 @@ describe("graphSnapshotAtom", () => {
     unsubscribe()
   })
 
-  it("signed out, serves the sample graph, and the files map is its rollup", async () => {
+  it("signed out, serves the sample graph, and notes derive from it", async () => {
     const store = createStore()
     const unsubscribe = store.sub(globalStateMachineAtom, () => {})
     await vi.waitFor(() => {
@@ -80,22 +92,21 @@ describe("graphSnapshotAtom", () => {
 
     const snapshot = store.get(graphSnapshotAtom)
     expect(snapshot).toBe(store.get(sampleGraphAtom))
-    const files = store.get(markdownFilesAtom)
-    const ids = Object.keys(files).map((path) => path.replace(/\.md$/, ""))
-    expect(ids).toContain("readme")
-    for (const id of ids) {
-      expect(files[`${id}.md`]).toBe(serialize(pageDoc(id, snapshot)!))
-    }
+    const notes = store.get(notesAtom)
+    const readme = notes.get("readme")!
     // The readme's title and props come from the page node, not markdown.
-    expect(files["readme.md"]).toContain("title: 👋 Welcome to Ruminate")
-    expect(files["readme.md"]).toContain("pinned: true")
+    expect(readme.title).toBe("👋 Welcome to Ruminate")
+    expect(readme.pinned).toBe(true)
+    expect(readme.tags).toEqual(["ruminate", "ruminate/welcome"])
+    expect(rollup("readme", snapshot)).toBe(serialize(pageDoc("readme", snapshot)!))
 
-    // An edit signed out applies to the sample graph in memory.
+    // An edit signed out applies to the sample graph in memory, and the
+    // note follows.
     store.set(
       sampleGraphAtom,
       applyOps(snapshot, [{ op: "setText", id: "blk_welcome001", text: "edited" }], 1),
     )
-    expect(store.get(markdownFilesAtom)["readme.md"]).toContain("edited")
+    expect(store.get(notesAtom).get("readme")!.text).toContain("edited")
 
     unsubscribe()
   })
@@ -147,10 +158,10 @@ describe("block search atoms", () => {
     const { store, unsubscribe } = await signedInStore(FILES)
     expect(store.get(searchBlocksAtom)("type:todo")).toHaveLength(2)
 
-    store.set(databaseFilesAtom, {
-      ...FILES,
-      "misc.md": md("[x] water plants", "  id:: blk_plants"),
-    })
+    store.set(
+      databaseGraphAtom,
+      graphOf({ ...FILES, "misc.md": md("[x] water plants", "  id:: blk_plants") }),
+    )
     expect(
       store
         .get(searchBlocksAtom)("type:todo")

@@ -2,17 +2,26 @@ import { z } from "zod"
 
 export type NoteId = string
 
-export type NoteType = "note" | "daily" | "weekly"
+type NoteType = "note" | "daily" | "weekly"
+
+/** A heading block: its level (its outline depth, from 1) and text. */
+export type Heading = { level: number; text: string }
 
 export type Task = {
+  /** The `todo`/`done` block this task is. */
+  blockId: string
   completed: boolean
   text: string
   tags: string[]
   priority: 1 | 2 | 3 | null
-  /** The character offset where the task starts in the content (for position-based updates) */
-  startOffset: number
 }
 
+/**
+ * What the app knows about a page, read off the graph
+ * (`src/data/note-meta.ts`): the page node's text and props, and the blocks
+ * it reaches. Never markdown — the rollup is an export (`rollup`), not a
+ * field.
+ */
 export type Note = {
   /**
    * The note's stable, opaque identity — a minted `blk_` id
@@ -22,36 +31,33 @@ export type Note = {
    * identity. Not a name: use `displayName` to show a note to a human.
    */
   id: NoteId
-  /** The content of the markdown file */
-  content: string
-
-  // ↓ Parsed from the content
-
   /** The type of the note */
   type: NoteType
-  /** Depending on the type, either the title, template name, or the date */
+  /** Depending on the type, either the title or the date */
   displayName: string
-  /** The frontmatter of the markdown file */
-  frontmatter: Record<string, unknown>
-  /**
-   * The note's title: the projection-owned `title:` frontmatter key (which
-   * carries the page node's `text` through the `<id>.md` seam), falling back
-   * to an h1 in the content (e.g. `# title`).
-   */
+  /** The page node's props — the note's metadata (pinned, width, font,
+   * gist_id, updated_at, tags, dates…), with dates as `Date`s. */
+  props: Record<string, unknown>
+  /** The page node's text, falling back to the first heading block. */
   title: string
-  /** If the title contains a link (e.g. `# [title](url)`), we use that as the url */
+  /** The `url` prop, or the link when the title is one (`[title](url)`). */
   url: string | null
-  /** The alias to use when linking to this note, from alias frontmatter */
+  /** The alias to use when linking to this note, from the `alias` prop */
   alias: string | null
   /** If the note is pinned */
   pinned: boolean
-  /** When the note was last updated (from `updated_at` frontmatter), null if not set */
+  /** When the note was last updated (the `updated_at` prop), null if not set */
   updatedAt: number | null
-  /** The dates this note references (frontmatter date properties, e.g. a birthday) */
+  /** The dates this note references (date props, e.g. a birthday) */
   dates: string[]
   tags: string[]
-  /** The tasks in the note (e.g. `- [ ] Do laundry` → `{ completed: false, text: "Do laundry" }`) */
+  /** The tasks in the note: its `todo` and `done` blocks. */
   tasks: Task[]
+  /** The heading blocks, in document order. */
+  headings: Heading[]
+  /** The text of every block, in document order — what fuzzy search and
+   * previews read. */
+  text: string
 }
 
 export const githubUserSchema = z.object({

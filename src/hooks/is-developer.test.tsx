@@ -8,11 +8,12 @@ vi.mock("../global-state", async () => {
   const { atom } = await import("jotai")
   return {
     githubUserAtom: atom<{ email: string } | null>(null),
-    markdownFilesAtom: atom<Record<string, string>>({}),
+    graphSnapshotAtom: atom({ nodes: new Map(), childLinks: new Map() }),
   }
 })
 
-import { githubUserAtom, markdownFilesAtom } from "../global-state"
+import { buildGraphSnapshot, docToGraph } from "../data/graph"
+import { githubUserAtom, graphSnapshotAtom } from "../global-state"
 import {
   upstreamIndexAtom,
   developerDebugAtom,
@@ -122,12 +123,11 @@ describe("useDeveloperDebug", () => {
 describe("upstreamIndexAtom", () => {
   it("indexes the corpus only while block metadata is on", () => {
     const { store } = setup({ email: DEVELOPER })
+    const a = docToGraph("blk_notea", "- shared\n  id:: blk_shared0000\n", 1)
+    const b = docToGraph("blk_noteb", "- shared\n  id:: blk_shared0000\n", 1)
     store.set(
-      markdownFilesAtom as never,
-      {
-        "blk_notea.md": "- shared\n  id:: blk_shared0000\n",
-        "blk_noteb.md": "- shared\n  id:: blk_shared0000\n",
-      } as never,
+      graphSnapshotAtom as never,
+      buildGraphSnapshot([...a.nodes, ...b.nodes], [...a.links, ...b.links]) as never,
     )
     expect(store.get(upstreamIndexAtom)).toBeNull()
 

@@ -127,6 +127,53 @@ export function applyOps(snapshot: GraphSnapshot, ops: readonly Op[], now: numbe
   return { nodes, childLinks }
 }
 
+/** Every node's parents (sources of the child links into it). */
+function parentsIndex(snapshot: GraphSnapshot): Map<string, Set<string>> {
+  const parentsOf = new Map<string, Set<string>>()
+  for (const [source, list] of snapshot.childLinks) {
+    for (const link of list) {
+      let parents = parentsOf.get(link.destination_id)
+      if (!parents) parentsOf.set(link.destination_id, (parents = new Set()))
+      parents.add(source)
+    }
+  }
+  return parentsOf
+}
+
+/**
+ * Delete a page: its node, and every node left without a parent by that —
+ * cascading down through children that thereby lose theirs. A block another
+ * page holds survives (the page's link to it is simply gone).
+ */
+export function deletePageOps(pageId: NoteId, snapshot: GraphSnapshot): Op[] {
+  const page = snapshot.nodes.get(pageId)
+  if (!page || page.type !== PAGE_TYPE) return []
+  const parentsOf = parentsIndex(snapshot)
+  const parents = (id: string): Set<string> => {
+    let set = parentsOf.get(id)
+    if (!set) parentsOf.set(id, (set = new Set()))
+    return set
+  }
+  const ops: Op[] = []
+  const deleted = new Set<string>()
+  const queue: string[] = []
+  const remove = (id: string) => {
+    deleted.add(id)
+    ops.push({ op: "delete", id })
+    for (const link of snapshot.childLinks.get(id) ?? []) {
+      parents(link.destination_id).delete(id)
+      if (parents(link.destination_id).size === 0) queue.push(link.destination_id)
+    }
+  }
+  remove(pageId)
+  while (queue.length > 0) {
+    const id = queue.shift() as string
+    if (deleted.has(id) || !snapshot.nodes.has(id) || parents(id).size > 0) continue
+    remove(id)
+  }
+  return ops
+}
+
 /** Ids reachable from `rootId` through child links, the root excluded. */
 function descendantsOf(snapshot: GraphSnapshot, rootId: string): Set<string> {
   const seen = new Set<string>()
@@ -215,14 +262,7 @@ export function docToOps(pageId: NoteId, doc: BlockDoc, snapshot: GraphSnapshot)
 
   // Parents after this batch: the snapshot's links, minus what is unlinked
   // here, plus what is linked — the cascade below decides on these.
-  const parentsOf = new Map<string, Set<string>>()
-  for (const [source, list] of snapshot.childLinks) {
-    for (const link of list) {
-      let parents = parentsOf.get(link.destination_id)
-      if (!parents) parentsOf.set(link.destination_id, (parents = new Set()))
-      parents.add(source)
-    }
-  }
+  const parentsOf = parentsIndex(snapshot)
   const parents = (id: string): Set<string> => {
     let set = parentsOf.get(id)
     if (!set) parentsOf.set(id, (set = new Set()))

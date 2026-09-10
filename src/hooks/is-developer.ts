@@ -1,6 +1,6 @@
 import { atom, useAtomValue } from "jotai"
 import { atomWithStorage } from "jotai/utils"
-import { githubUserAtom, markdownFilesAtom } from "../global-state"
+import { githubUserAtom, graphSnapshotAtom } from "../global-state"
 import { buildUpstreamIndex, type UpstreamIndex } from "../utils/block-upstream"
 
 /**
@@ -92,5 +92,5 @@ export function useDeveloperDebug(): DeveloperDebugFlags {
  * changes on every autosave of any note) unless block metadata is on.
  */
 export const upstreamIndexAtom = atom<UpstreamIndex | null>((get) =>
-  get(developerDebugAtom).blockMetadata ? buildUpstreamIndex(get(markdownFilesAtom)) : null,
+  get(developerDebugAtom).blockMetadata ? buildUpstreamIndex(get(graphSnapshotAtom)) : null,
 )

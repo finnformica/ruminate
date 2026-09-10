@@ -20,10 +20,9 @@ export function DateLink({ date, text, className }: DateLinkProps) {
     if (existingNote) return existingNote
     return {
       id: date,
-      content: "",
       type: "daily",
       displayName: formatDate(date),
-      frontmatter: {},
+      props: {},
       title: "",
       url: null,
       alias: null,
@@ -32,6 +31,8 @@ export function DateLink({ date, text, className }: DateLinkProps) {
       dates: [],
       tags: [],
       tasks: [],
+      headings: [],
+      text: "",
     }
   }, [existingNote, date])
 

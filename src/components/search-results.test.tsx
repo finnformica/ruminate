@@ -12,10 +12,9 @@ afterEach(cleanup)
 
 const NOTE: Note = {
   id: "research",
-  content: "",
   type: "note",
   displayName: "research",
-  frontmatter: {},
+  props: {},
   title: "research",
   url: null,
   alias: null,
@@ -24,6 +23,8 @@ const NOTE: Note = {
   dates: [],
   tags: [],
   tasks: [],
+  headings: [],
+  text: "",
 }
 
 function hit(

@@ -131,7 +131,7 @@ describe("docToOps", () => {
 
   it("retitling and re-propping the page are sets on the page node", () => {
     const snapshot = graphOf({ a: A })
-    const doc: BlockDoc = { ...pageDoc("a", snapshot)!, frontmatter: "title: Alpha\npinned: true" }
+    const doc: BlockDoc = { ...pageDoc("a", snapshot)!, props: { title: "Alpha", pinned: true } }
     const ops = docToOps("a", doc, snapshot)
     expect(ops).toEqual([
       { op: "setText", id: "a", text: "Alpha" },

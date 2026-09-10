@@ -161,7 +161,7 @@ function createTestSync(
   const auth = createTestAuth()
   let files = { ...initialFiles }
   const handle = startReplicaSync({
-    getFiles: () => ({ ...files }),
+    getNoteCount: () => Object.keys(files).length,
     getAllRows: async () => allRows,
     fetchImpl: server.fetchImpl,
     auth,

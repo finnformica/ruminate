@@ -62,7 +62,7 @@ describe("useNoteDoc", () => {
     // The hook re-walks: what it holds IS the graph.
     expect(serialize(result.current.doc)).toBe(serialize(stored))
     // Every change stamps the page's updated_at.
-    expect(stored.frontmatter).toMatch(/^updated_at: /)
+    expect(typeof stored.props?.updated_at).toBe("string")
     unsubscribe()
   })
 

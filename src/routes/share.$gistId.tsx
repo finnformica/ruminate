@@ -9,12 +9,13 @@ import { IconButton } from "../components/icon-button"
 import { EditIcon16, ExternalLinkIcon16, LinkIcon16, MoreIcon16 } from "../components/icons"
 import { Markdown } from "../components/markdown"
 import { HoverCard } from "../components/hover-card"
+import { buildGraphSnapshot, docToGraph } from "../data/graph"
+import { noteFromPage } from "../data/note-meta"
 import { githubUserAtom } from "../global-state"
 import { useNoteById } from "../hooks/note"
 import { fontSchema, widthSchema } from "../schema"
 import { getLeadingEmoji, removeLeadingEmoji } from "../utils/emoji"
 import { cx } from "../utils/cx"
-import { parseNote } from "../utils/parse-note"
 
 export const Route = createFileRoute("/share/$gistId")({
   component: RouteComponent,
@@ -42,18 +43,22 @@ export const Route = createFileRoute("/share/$gistId")({
         throw new Error("No markdown file found in gist")
       }
 
+      // The gist's markdown, imported into a graph of its own, gives the
+      // note its metadata exactly as the app derives it for a page.
+      const id = markdownFile.filename?.replace(/\.md$/, "") ?? ""
+      const markdown = markdownFile.content ?? ""
+      const { nodes, links } = docToGraph(id, markdown, 0)
       return {
         gist,
-        note: parseNote(
-          markdownFile.filename?.replace(/\.md$/, "") ?? "",
-          markdownFile.content ?? "",
-        ),
+        note: noteFromPage(id, buildGraphSnapshot(nodes, links)),
+        markdown,
       }
     } catch (error) {
       console.error(error)
       return {
         gist: null,
         note: null,
+        markdown: "",
       }
     }
   },
@@ -75,35 +80,33 @@ export const Route = createFileRoute("/share/$gistId")({
 })
 
 function RouteComponent() {
-  const { gist, note } = Route.useLoaderData()
+  const { gist, note, markdown } = Route.useLoaderData()
   const githubUser = useAtomValue(githubUserAtom)
   const userNote = useNoteById(note?.id) // Check if the note is owned by the user
   const navigate = useNavigate()
 
   const content = React.useMemo(() => {
-    let content = note?.content ?? ""
+    let content = markdown
 
     // If there's no title, and there's a description, we use the description as the title
     if (!note?.title && gist?.description) {
       content = `# ${gist.description}\n\n${content}`
     }
     return content
-  }, [gist?.description, note?.title, note?.content])
+  }, [gist?.description, note?.title, markdown])
 
-  // Resolve font (frontmatter font or default)
+  // Resolve font (the `font` prop or default)
   const resolvedFont = React.useMemo(() => {
-    const frontmatterFont = note?.frontmatter?.font
-    const parseResult = fontSchema.safeParse(frontmatterFont)
+    const parseResult = fontSchema.safeParse(note?.props.font)
     const parsedFont = parseResult.success ? parseResult.data : null
     return parsedFont || "sans"
-  }, [note?.frontmatter?.font])
+  }, [note?.props.font])
 
-  // Resolve width (frontmatter width or default)
+  // Resolve width (the `width` prop or default)
   const resolvedWidth = React.useMemo(() => {
-    const frontmatterWidth = note?.frontmatter?.width
-    const parseResult = widthSchema.safeParse(frontmatterWidth)
+    const parseResult = widthSchema.safeParse(note?.props.width)
     return parseResult.success ? parseResult.data : "fixed"
-  }, [note?.frontmatter?.width])
+  }, [note?.props.width])
 
   if (!gist || !note) {
     return (

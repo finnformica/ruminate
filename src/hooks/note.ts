@@ -1,10 +1,13 @@
-import { useAtomValue } from "jotai"
-import { selectAtom, useAtomCallback } from "jotai/utils"
+import { useAtomValue, useStore } from "jotai"
+import { selectAtom } from "jotai/utils"
 import React from "react"
-import { dateMentionsAtom, githubUserAtom, notesAtom } from "../global-state"
-import { useDeleteNoteFile, useWriteNotes } from "../data/store"
-import { Note, NoteId } from "../schema"
-import { parseFrontmatter, updateFrontmatterValue } from "../utils/frontmatter"
+import { PAGE_TYPE, propsJson } from "../data/graph"
+import { pagePropsOps } from "../data/note-meta"
+import { deletePageOps, type Op } from "../data/ops"
+import { emittedPageTitle } from "../data/page-identity"
+import { useApplyOps } from "../data/store"
+import { dateMentionsAtom, githubUserAtom, graphSnapshotAtom, notesAtom } from "../global-state"
+import type { NoteId } from "../schema"
 import { deleteGist } from "../utils/gist"
 
 const EMPTY_MENTIONS: NoteId[] = []
@@ -27,8 +30,8 @@ export function useNoteById(id: NoteId | undefined) {
   return note
 }
 
-/** Get the notes referencing a date/week id (via frontmatter date properties),
- * even if no note exists for that id */
+/** Get the notes referencing a date/week id (via date props), even if no
+ * note exists for that id */
 export function useDateMentions(id: NoteId | undefined) {
   const mentionsAtom = React.useMemo(
     () =>
@@ -42,92 +45,98 @@ export function useDateMentions(id: NoteId | undefined) {
   return useAtomValue(mentionsAtom)
 }
 
-export function useSaveNote() {
-  const writeNotes = useWriteNotes()
-
-  const saveNote = React.useCallback(
-    ({ id, content }: Pick<Note, "id" | "content">) => {
-      // Add updated_at timestamp to frontmatter — this is also what makes the
-      // replica's incremental pulls work (docs/graph-storage.md).
-      const contentWithTimestamp = updateFrontmatterValue({
-        content,
-        properties: { updated_at: new Date() },
-      })
-
-      writeNotes({ [id]: contentWithTimestamp })
+/**
+ * Set props on a page (pin, width, font, gist id, tags…): the current props
+ * with the patch applied — a `null` value removes the key — and
+ * `updated_at` stamped, as one `setProps` op.
+ */
+export function useSetPageProps() {
+  const store = useStore()
+  const apply = useApplyOps()
+  return React.useCallback(
+    (id: NoteId, patch: Record<string, unknown>) => {
+      apply(pagePropsOps(id, patch, store.get(graphSnapshotAtom)))
     },
-    [writeNotes],
+    [store, apply],
   )
-
-  return saveNote
 }
 
 /**
  * Rename a note — which, since ids are minted and opaque
- * (docs/page-identity-design.md), is simply **setting its title**.
- *
- * The title travels as the projection-owned `title:` frontmatter key, so this
- * writes one property and ingest lifts it onto the page node's `text`. Nothing
- * else moves: the id, the URL, every deep link and every block row are
- * untouched, and exactly one row changes, so a rename cannot clobber a
- * concurrent edit under per-row LWW.
- *
- * The old world's failure modes are gone with the old world: there is no
- * filename charset to violate and no uniqueness to collide with, because the
- * title is no longer an identifier.
+ * (docs/page-identity-design.md), is simply **setting the page node's
+ * text**. Nothing else moves: the id, the URL, every deep link and every
+ * block row are untouched, and exactly one row changes, so a rename cannot
+ * clobber a concurrent edit under per-row LWW. An emptied title puts the
+ * page back to untitled (its text is its id), so it falls back to its content
+ * preview like any untitled note. Returns whether anything changed.
  */
 export function useRenameNote() {
-  const writeNotes = useWriteNotes()
+  const store = useStore()
+  const apply = useApplyOps()
 
   return React.useCallback(
-    (params: { noteId: NoteId; newTitle: string; content: string }): boolean => {
-      const { noteId, newTitle, content } = params
+    (params: { noteId: NoteId; newTitle: string }): boolean => {
+      const { noteId, newTitle } = params
       if (!noteId) return false
+      const snapshot = store.get(graphSnapshotAtom)
+      const page = snapshot.nodes.get(noteId)
+      if (!page || page.type !== PAGE_TYPE) return false
 
       const title = newTitle.trim()
-      const { frontmatter } = parseFrontmatter(content)
-      const current = typeof frontmatter.title === "string" ? frontmatter.title : ""
+      const current = emittedPageTitle(noteId, page.text) ?? ""
       if (title === current) return false
 
-      writeNotes({
-        // An emptied title clears the key rather than storing "", so the note
-        // falls back to its content preview like any untitled note.
-        [noteId]: updateFrontmatterValue({
-          content,
-          properties: { title: title || null },
-        }),
-      })
+      apply([
+        { op: "setText", id: noteId, text: title || noteId },
+        ...pagePropsOps(noteId, {}, snapshot),
+      ])
       return true
     },
-    [writeNotes],
+    [store, apply],
   )
 }
 
-export function useDeleteNote() {
-  const deleteNoteFile = useDeleteNoteFile()
-  const githubUser = useAtomValue(githubUserAtom)
-  const getNoteById = useAtomCallback(
-    React.useCallback((get, set, id: NoteId) => {
-      const notes = get(notesAtom)
-      return notes.get(id)
-    }, []),
-  )
-
-  const deleteNote = React.useCallback(
-    async (id: NoteId) => {
-      // If the note has a gist ID, delete the gist
-      const note = getNoteById(id)
-      if (typeof note?.frontmatter.gist_id === "string" && githubUser?.token) {
-        await deleteGist({
-          githubToken: githubUser.token,
-          gistId: note.frontmatter.gist_id,
-        })
+/**
+ * Create a page: one node (its title, its props, `updated_at` stamped). The
+ * blocks come with the first edit (`useNoteDoc`).
+ */
+export function useCreateNote() {
+  const store = useStore()
+  const apply = useApplyOps()
+  return React.useCallback(
+    (
+      id: NoteId,
+      { title = "", props = {} }: { title?: string; props?: Record<string, unknown> },
+    ) => {
+      if (store.get(graphSnapshotAtom).nodes.has(id)) return
+      const op: Op = {
+        op: "create",
+        id,
+        type: PAGE_TYPE,
+        text: title.trim() || id,
+        props: propsJson({ ...props, updated_at: new Date().toISOString() }),
       }
-
-      deleteNoteFile(id)
+      apply([op])
     },
-    [deleteNoteFile, githubUser, getNoteById],
+    [store, apply],
   )
+}
 
-  return deleteNote
+/** Delete a page and everything only it held (`deletePageOps`); a published
+ * gist goes with it. */
+export function useDeleteNote() {
+  const store = useStore()
+  const apply = useApplyOps()
+  const githubUser = useAtomValue(githubUserAtom)
+
+  return React.useCallback(
+    async (id: NoteId) => {
+      const note = store.get(notesAtom).get(id)
+      if (typeof note?.props.gist_id === "string" && githubUser?.token) {
+        await deleteGist({ githubToken: githubUser.token, gistId: note.props.gist_id })
+      }
+      apply(deletePageOps(id, store.get(graphSnapshotAtom)))
+    },
+    [store, apply, githubUser],
+  )
 }
