@@ -149,7 +149,8 @@ function PropertyValue({ property: [key, value], onChange }: PropertyValueProps)
 
 type PropertyValueEditorProps = {
   property: [string, unknown]
-  onChange: (value: unknown) => void
+  /** Absent: read-only (the gist share page). */
+  onChange?: (value: unknown) => void
 }
 
 export function PropertyValueEditor({

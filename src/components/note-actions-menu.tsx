@@ -1,13 +1,13 @@
 import { useLocation, useNavigate } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
-import { useAtom, useAtomValue } from "jotai"
-import { isSignedOutAtom } from "../global-state"
+import { useAtom, useAtomValue, useStore } from "jotai"
+import { graphSnapshotAtom, isSignedOutAtom } from "../global-state"
+import { rollup } from "../data/graph"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
-import { useDeleteNote, useRenameNote, useSaveNote } from "../hooks/note"
+import { useDeleteNote, useNoteById, useRenameNote, useSetPageProps } from "../hooks/note"
 import type { Width } from "../schema"
 import { cx } from "../utils/cx"
-import { parseFrontmatter, updateFrontmatterValue } from "../utils/frontmatter"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
 import {
@@ -42,30 +42,23 @@ interface EditorActions {
  */
 export function NoteActionsMenu({
   noteId,
-  content,
   pinned = false,
   className,
   align = "start",
-  onContentChange,
   editor,
 }: {
   noteId: string
-  /** Current note content (the live editor value when open, else the saved file). */
-  content: string
   pinned?: boolean
   className?: string
   align?: "start" | "end"
-  /**
-   * When the note is open in the editor, route frontmatter changes (pin) back
-   * through it so the open editor stays in sync; otherwise they save directly.
-   */
-  onContentChange?: (content: string) => void
   editor?: EditorActions
 }) {
   const navigate = useNavigate()
   const location = useLocation()
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  const saveNote = useSaveNote()
+  const setPageProps = useSetPageProps()
+  const note = useNoteById(noteId)
+  const jotaiStore = useStore()
   const renameNote = useRenameNote()
   const deleteNote = useDeleteNote()
   // Developer mode (`src/hooks/is-developer.ts`): the debug toggles live at
@@ -81,24 +74,16 @@ export function NoteActionsMenu({
     : ""
   const isViewing = openNoteId === noteId
 
-  const applyContent = (next: string) => {
-    if (onContentChange) onContentChange(next)
-    else saveNote({ id: noteId, content: next })
-  }
-
-  const togglePin = () => {
-    applyContent(updateFrontmatterValue({ content, properties: { pinned: pinned ? null : true } }))
-  }
+  const togglePin = () => setPageProps(noteId, { pinned: pinned ? null : true })
 
   // Renaming sets the note's title (docs/page-identity-design.md). The id and
   // the URL are untouched, so there is nothing to navigate to afterwards and
   // no name to reject: any text is a valid title.
   const rename = () => {
-    const { frontmatter } = parseFrontmatter(content)
-    const current = typeof frontmatter.title === "string" ? frontmatter.title : ""
+    const current = note?.title ?? ""
     const raw = window.prompt("Rename note", current)
     if (raw == null) return
-    renameNote({ noteId, newTitle: raw, content })
+    renameNote({ noteId, newTitle: raw })
   }
 
   const remove = () => {
@@ -155,7 +140,10 @@ export function NoteActionsMenu({
         >
           {pinned ? "Unpin" : "Pin"}
         </DropdownMenu.Item>
-        <DropdownMenu.Item icon={<CopyIcon16 />} onClick={() => copyAsMarkdown(content)}>
+        <DropdownMenu.Item
+          icon={<CopyIcon16 />}
+          onClick={() => copyAsMarkdown(rollup(noteId, jotaiStore.get(graphSnapshotAtom)) ?? "")}
+        >
           Copy markdown
         </DropdownMenu.Item>
         <DropdownMenu.Item icon={<CopyIcon16 />} onClick={() => copy(noteId)}>

@@ -276,7 +276,7 @@ function childIdsOf(graph: GraphSnapshot, id: string): string[] {
 
 /** A node's props as an object, or null — tolerant of malformed JSON (a bad
  * row renders without its props rather than not at all). */
-function parseProps(props: string | null): BlockProps | null {
+export function parseProps(props: string | null): BlockProps | null {
   if (props === null) return null
   try {
     const parsed: unknown = JSON.parse(props)

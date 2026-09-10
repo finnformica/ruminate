@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { emptyBlock } from "../../blocks/ops"
 import type { BlockDoc } from "../../blocks/types"
 import { useCollapseState } from "../../data/view-state"
-import { blockRevealAtom, markdownFilesAtom, noteOutlineAtom } from "../../global-state"
+import { blockRevealAtom, graphSnapshotAtom, noteOutlineAtom } from "../../global-state"
 import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
 import { buildOutline } from "../../utils/note-outline"
 import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
@@ -164,20 +164,14 @@ export function BlockNoteEditor({
   const revealRequest = useAtomValue(blockRevealAtom)
 
   // "Paste as link": resolve pasted block ids to their live subtree markdown
-  // from the note corpus. Read lazily through the jotai store (no
-  // subscription — the corpus changes on every autosave of any note, and a
-  // paste only needs the value at the moment it runs). The open note's own
-  // file is excluded: its live truth is this editor's doc, and the file copy
-  // can lag by the autosave debounce (a cut would resurrect pre-cut bytes).
+  // from the graph. Read lazily through the jotai store (no subscription —
+  // the graph changes on every edit of any note, and a paste only needs the
+  // value at the moment it runs). The graph IS the live truth of the open
+  // note too, so nothing is excluded.
   const jotaiStore = useStore()
   const resolveBlocks = useCallback(
-    (ids: string[]) =>
-      resolveBlockSubtrees(
-        jotaiStore.get(markdownFilesAtom),
-        ids,
-        noteId !== undefined ? `${noteId}.md` : undefined,
-      ),
-    [jotaiStore, noteId],
+    (ids: string[]) => resolveBlockSubtrees(jotaiStore.get(graphSnapshotAtom), ids),
+    [jotaiStore],
   )
 
   // Developer mode (`src/hooks/is-developer.ts`): the debug readouts, and the

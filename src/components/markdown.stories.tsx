@@ -265,11 +265,6 @@ const taskList = `## Tasks
 - [ ] Task 3
 `
 
-function MarkdownWithState({ children }: MarkdownProps) {
-  const [value, setValue] = React.useState(children)
-  return <Markdown onChange={setValue}>{value}</Markdown>
-}
-
 export const TaskList: StoryObj<typeof Markdown> = {
   args: {
     children: taskList,
@@ -277,7 +272,7 @@ export const TaskList: StoryObj<typeof Markdown> = {
   render: (args: MarkdownProps) => {
     return (
       <div className="mx-auto max-w-[700px] p-4">
-        <MarkdownWithState>{args.children}</MarkdownWithState>
+        <Markdown>{args.children}</Markdown>
       </div>
     )
   },

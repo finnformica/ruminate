@@ -75,7 +75,7 @@ describe("denial plumbing through the real fetch paths", () => {
   it("a refused push sets the status and the queue keeps the rows for retry", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ error: "blocked" }, 403))
     const handle = startReplicaSync({
-      getFiles: () => ({}),
+      getNoteCount: () => 0,
       getAllRows: async () => ({ nodes: [], links: [] }),
       fetchImpl: fetchImpl as unknown as typeof fetch,
       auth: stubAuth,

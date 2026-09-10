@@ -8,7 +8,7 @@ import {
   planPullApplication,
   type D1NoteSource,
 } from "./d1-note-source"
-import { buildGraphSnapshot, rollup, type GraphSnapshot } from "./graph"
+import { PAGE_TYPE, buildGraphSnapshot, type GraphSnapshot } from "./graph"
 import { applyOps, pagesTouchedBy, type Op } from "./ops"
 import { resetReplicaAccess } from "./replica-access"
 import type { ReplicaSyncHandle } from "./replica-sync"
@@ -35,18 +35,14 @@ import {
  *          once, coalesce for a moment, then write the SQL store as rows and
  *          hand the row diff to the replica push queue (replica-sync.ts —
  *          write-behind, coalesced)
- *   saves  the remaining markdown writers (rename, pin, delete…) ingest a
- *          note as a row diff the same way
  *   sync   visibility/focus/online triggers re-run the since-cursor pull;
  *          hiding the tab flushes the push queue immediately
  *
- * **How the UI is fed.** The editor reads the graph itself: this module
- * publishes the store's indexed rows as `databaseGraphAtom`, served as
- * `graphSnapshotAtom` whenever a user is signed in (see global-state.ts),
- * and the note page walks its doc out of it. The markdown consumers (notes
- * list, tags, templates, search) still read `markdownFilesAtom`, so the same
- * rows are also rolled up per page — `<id>.md` entries — into
- * `databaseFilesAtom`.
+ * **How the UI is fed.** This module publishes the store's indexed rows as
+ * `databaseGraphAtom`, served as `graphSnapshotAtom` whenever a user is
+ * signed in (see global-state.ts). Everything above reads that graph: the
+ * note page walks its doc out of it, and note metadata, tags and search are
+ * derived from it (`src/data/note-meta.ts`).
  *
  * **Conflicts are last-writer-wins per row**, decided by push order at the
  * replica. Pulls never touch rows of notes with queued/in-flight local pushes
@@ -116,13 +112,6 @@ const OPS_FLUSH_MS = 150
 /** Minimum gap between automatic repair rebuilds after a SQL write failure. */
 const REPAIR_COOLDOWN_MS = 30_000
 
-/**
- * The synthesized repo-file-shaped map (note rollups) served as
- * `markdownFilesAtom` while database mode is active. Written only by this
- * module.
- */
-export const databaseFilesAtom = atom<Record<string, string>>({})
-
 /** The graph with nothing in it — what the atom holds before the store opens
  * and after it closes. */
 export const EMPTY_GRAPH: GraphSnapshot = buildGraphSnapshot([], [])
@@ -172,7 +161,7 @@ export interface DatabaseModeOptions {
   /** Injectable for tests; defaults to the real replica push loop. Return
    * null to run without pushing. */
   openReplicaSync?: (
-    getFiles: () => Record<string, string>,
+    getNoteCount: () => number,
     getAllRows: SqlNoteStore["getAllRows"],
   ) => Promise<ReplicaSyncHandle | null>
   /** Injectable for tests; defaults to the real authed fetch source. */
@@ -240,37 +229,6 @@ export function isDatabaseModeActive(): boolean {
 }
 
 // -----------------------------------------------------------------------------
-// Files-map synthesis
-// -----------------------------------------------------------------------------
-
-/** Build the repo-file-shaped map from store contents (note rollups). */
-function synthesizeFiles(notes: Record<NoteId, string>): Record<string, string> {
-  const files: Record<string, string> = {}
-  for (const [id, content] of Object.entries(notes)) files[`${id}.md`] = content
-  return files
-}
-
-/** Note contents (id → markdown) currently in the files atom. */
-function notesFromFiles(files: Record<string, string>): Record<NoteId, string> {
-  const notes: Record<NoteId, string> = {}
-  for (const filepath in files) {
-    if (filepath.endsWith(".md")) notes[filepath.replace(/\.md$/, "")] = files[filepath]
-  }
-  return notes
-}
-
-/** Apply note updates (`null` deletes) to the files atom. */
-function applyToFilesAtom(noteUpdates: Record<NoteId, string | null>) {
-  const store = jotai()
-  const files = { ...store.get(databaseFilesAtom) }
-  for (const [id, content] of Object.entries(noteUpdates)) {
-    if (content === null) delete files[`${id}.md`]
-    else files[`${id}.md`] = content
-  }
-  store.set(databaseFilesAtom, files)
-}
-
-// -----------------------------------------------------------------------------
 // Lifecycle
 // -----------------------------------------------------------------------------
 
@@ -286,13 +244,20 @@ async function defaultOpenStore() {
 }
 
 async function defaultOpenReplicaSync(
-  getFiles: () => Record<string, string>,
+  getNoteCount: () => number,
   getAllRows: SqlNoteStore["getAllRows"],
 ) {
   const { startReplicaSync } = await import("./replica-sync")
   // Every tab pushes its own writes; concurrent tabs converge by per-row
   // last-writer-wins at the replica.
-  return startReplicaSync({ getFiles, getAllRows })
+  return startReplicaSync({ getNoteCount, getAllRows })
+}
+
+/** How many pages the graph holds (the diagnostics' note count). */
+function pageCount(graph: GraphSnapshot): number {
+  let count = 0
+  for (const node of graph.nodes.values()) if (node.type === PAGE_TYPE) count += 1
+  return count
 }
 
 /** Start the database runtime. Idempotent per activation. */
@@ -365,19 +330,17 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
         if (runtime !== activation) return
       }
 
-      const notes = await opened.store.getAllNotes()
       const graph = await opened.store.getGraph()
       if (runtime !== activation) return
-      jotai().set(databaseFilesAtom, synthesizeFiles(notes))
       jotai().set(databaseGraphAtom, graph)
       patchStatus({ status: "ready" })
-      patchDiagnostics({ status: "ready", notes: Object.keys(notes).length })
+      patchDiagnostics({ status: "ready", notes: pageCount(graph) })
 
       // Start the push loop before the first pull, so the pull can consult
       // `pendingNoteIds` (edits made while the pull is in flight are safe).
       try {
         const replica = await (options.openReplicaSync ?? defaultOpenReplicaSync)(
-          () => jotai().get(databaseFilesAtom),
+          () => pageCount(jotai().get(databaseGraphAtom)),
           () => {
             const store = activation.store
             if (!store) return Promise.resolve({ nodes: [], links: [] })
@@ -430,7 +393,6 @@ export function stopDatabaseMode() {
   })
   const store = jotai()
   store.set(databaseModeStatusAtom, OFF_STATUS)
-  store.set(databaseFilesAtom, {})
   store.set(databaseGraphAtom, EMPTY_GRAPH)
   store.set(storageDiagnosticsAtom, OFF_STORAGE_DIAGNOSTICS)
   // A denial belongs to the account that was refused; the signed-out screen
@@ -443,51 +405,11 @@ export function stopDatabaseMode() {
 // -----------------------------------------------------------------------------
 
 /**
- * Persist a batch of repo-file-shaped note writes (`null` deletes) — the
- * shapes the `store.ts` seam already produces. The files atom updates
- * synchronously (the UI never waits); the SQL ingest is queued; the row diff
- * it returns is handed to the replica queue.
- */
-export function databaseWriteFiles(files: Record<string, string | null>) {
-  const activation = runtime
-  if (!activation) return
-
-  const noteUpdates: Record<NoteId, string | null> = {}
-  for (const [filepath, content] of Object.entries(files)) {
-    // Only notes live in the graph; anything else has no meaning here.
-    if (filepath.endsWith(".md")) noteUpdates[filepath.replace(/\.md$/, "")] = content
-  }
-  if (Object.keys(noteUpdates).length === 0) return
-
-  applyToFilesAtom(noteUpdates)
-  patchStatus({ emptyOffline: false })
-  patchDiagnostics({
-    notes: Object.keys(notesFromFiles(jotai().get(databaseFilesAtom))).length,
-  })
-
-  enqueue(async () => {
-    if (runtime !== activation || !activation.store) return
-    try {
-      await flushOps(activation)
-      const diff = await activation.store.writeNotes(noteUpdates)
-      activation.replica?.notifyGraphChange(Object.keys(noteUpdates), diff)
-      await refreshGraph(activation)
-    } catch (error) {
-      // The files atom still carries the content; repair the local store from
-      // it (and follow with a full push) so neither copy can lose the write.
-      recordWriteError(error)
-      scheduleRepair(activation)
-    }
-  })
-}
-
-/**
- * Apply a batch of graph ops (`src/data/ops.ts`) — the editor's change path.
+ * Apply a batch of graph ops (`src/data/ops.ts`) — the app's one change path.
  * The graph atom takes the ops synchronously (the screen never waits); the
- * store write coalesces for `OPS_FLUSH_MS` and then lands the same rows,
- * hands the row diff to the replica queue, and refreshes the markdown
- * rollups of the pages the batch touched for the consumers that still read
- * them. Nothing here parses or reconciles: the ops are the rows.
+ * store write coalesces for `OPS_FLUSH_MS` and then lands the same rows and
+ * hands the row diff to the replica queue. Nothing here parses or
+ * reconciles: the ops are the rows.
  */
 export function databaseApplyOps(ops: readonly Op[]) {
   const activation = runtime
@@ -528,8 +450,8 @@ function onPageHidden() {
 
 /**
  * Land the pending ops in the store: runs on the serial queue, and at the
- * head of every other queued task (a markdown write, a repair, a pull) so
- * the store never reads or rebuilds behind what the screen already shows.
+ * head of every other queued task (a repair, a pull) so the store never
+ * reads or rebuilds behind what the screen already shows.
  */
 async function flushOps(activation: DatabaseModeRuntime) {
   if (runtime !== activation || !activation.store) return
@@ -541,15 +463,7 @@ async function flushOps(activation: DatabaseModeRuntime) {
   try {
     const diff = await activation.store.applyOps(ops)
     activation.replica?.notifyGraphChange(pages, diff)
-    // The markdown projection of every page the batch touched, from the
-    // graph atom — which already holds these ops and any newer ones.
-    const graph = jotai().get(databaseGraphAtom)
-    const updates: Record<NoteId, string | null> = {}
-    for (const page of pages) updates[page] = rollup(page, graph)
-    applyToFilesAtom(updates)
-    patchDiagnostics({
-      notes: Object.keys(notesFromFiles(jotai().get(databaseFilesAtom))).length,
-    })
+    patchDiagnostics({ notes: pageCount(jotai().get(databaseGraphAtom)) })
   } catch (error) {
     recordWriteError(error)
     scheduleRepair(activation)
@@ -564,11 +478,6 @@ async function refreshGraph(activation: DatabaseModeRuntime) {
   const graph = await activation.store.getGraph()
   if (runtime !== activation) return
   jotai().set(databaseGraphAtom, applyOps(graph, activation.pendingOps, Date.now()))
-}
-
-/** The machine's dedicated single-file delete path, database edition. */
-export function databaseDeleteFile(filepath: string) {
-  databaseWriteFiles({ [filepath]: null })
 }
 
 /** Settings action: replicate the full corpus to D1 now. No-op unless the
@@ -712,9 +621,6 @@ function runPull(activation: DatabaseModeRuntime) {
         plan.nodes.length + plan.links.length + plan.deleteNodes.length + plan.deleteLinks.length
       if (planSize > 0) {
         await store.applyPull(plan)
-        // Re-synthesize the whole files map — rollups are cheap at this scale
-        // and identical contents keep their string equality for consumers.
-        jotai().set(databaseFilesAtom, synthesizeFiles(await store.getAllNotes()))
         await refreshGraph(activation)
       }
       if (body.cursor !== null) await store.setMeta(PULL_CURSOR_KEY, body.cursor)
@@ -725,9 +631,7 @@ function runPull(activation: DatabaseModeRuntime) {
         lastPullError: null,
         emptyOffline: false,
       })
-      patchDiagnostics({
-        notes: Object.keys(notesFromFiles(jotai().get(databaseFilesAtom))).length,
-      })
+      patchDiagnostics({ notes: pageCount(jotai().get(databaseGraphAtom)) })
     } catch (error) {
       if (runtime !== activation) return
       const message = error instanceof Error ? error.message : String(error)
@@ -735,7 +639,7 @@ function runPull(activation: DatabaseModeRuntime) {
       // in the console as well as the status atom. Without this the only
       // symptom is an empty note list with no explanation anywhere.
       console.error("[ruminate] pull failed:", error)
-      const localCount = Object.keys(notesFromFiles(jotai().get(databaseFilesAtom))).length
+      const localCount = pageCount(jotai().get(databaseGraphAtom))
       patchStatus({
         pull: "error",
         lastPullError: message,

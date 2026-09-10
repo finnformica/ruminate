@@ -13,12 +13,19 @@ function gistFilename(note: Note): string {
   return `${slug || note.id}.md`
 }
 
-export async function createGist({ note, githubUser }: { note: Note; githubUser: GitHubUser }) {
+export async function createGist({
+  note,
+  content,
+  githubUser,
+}: {
+  note: Note
+  /** The note's markdown rollup — what the gist holds. */
+  content: string
+  githubUser: GitHubUser
+}) {
   const filename = gistFilename(note)
 
   try {
-    const content = note.content
-
     const response = await request("POST /gists", {
       headers: {
         authorization: `token ${githubUser.token}`,

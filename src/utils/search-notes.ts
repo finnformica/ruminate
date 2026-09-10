@@ -14,7 +14,7 @@ export function testNoteFilters(filters: Filter[], note: Note) {
 }
 
 function testNoteFilter(filter: Filter, note: Note) {
-  const frontmatter = note.frontmatter
+  const frontmatter = note.props
 
   let value = false
 
@@ -133,8 +133,8 @@ export function compareNotes(a: Note, b: Note, sorts: Sort[]) {
       }
       default: {
         // Sort by arbitrary frontmatter key
-        const aValue = a.frontmatter[sort.key]
-        const bValue = b.frontmatter[sort.key]
+        const aValue = a.props[sort.key]
+        const bValue = b.props[sort.key]
 
         // Notes missing the key sort to end (regardless of direction)
         const aHas = aValue !== undefined && aValue !== null

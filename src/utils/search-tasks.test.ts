@@ -6,10 +6,9 @@ import type { Note, TaskWithNote } from "../schema"
 function makeNote(overrides: Partial<Note> = {}): Note {
   return {
     id: "note-1",
-    content: "",
     type: "note",
     displayName: "",
-    frontmatter: {},
+    props: {},
     title: "",
     url: null,
     alias: null,
@@ -18,6 +17,8 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     dates: [],
     tags: [],
     tasks: [],
+    headings: [],
+    text: "",
     ...overrides,
   }
 }
@@ -28,7 +29,7 @@ function makeTask(overrides: Partial<TaskWithNote> = {}): TaskWithNote {
     text: "do something",
     tags: [],
     priority: null,
-    startOffset: 0,
+    blockId: "blk",
     note: makeNote(),
     ...overrides,
   }

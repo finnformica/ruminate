@@ -40,8 +40,8 @@ export const NoteFavicon = React.memo(
     }
 
     // GitHub
-    if (typeof note.frontmatter.github === "string" && online) {
-      icon = <GitHubAvatar data-testid="favicon-github" login={note.frontmatter.github} size={16} />
+    if (typeof note.props.github === "string" && online) {
+      icon = <GitHubAvatar data-testid="favicon-github" login={note.props.github} size={16} />
     }
 
     // URL

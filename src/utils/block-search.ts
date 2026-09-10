@@ -1,6 +1,6 @@
 import { Searcher, type FullOptions } from "fast-fuzzy"
 import type { BlockType } from "../blocks/types"
-import { parse } from "../blocks/parse"
+import { pageDoc, type GraphSnapshot } from "../data/graph"
 import type { Note, NoteId } from "../schema"
 import type { Filter, Query, Sort } from "./search"
 import { compareNotes, testNoteFilters } from "./search-notes"
@@ -10,8 +10,8 @@ import { compareNotes, testNoteFilters } from "./search-notes"
  * notes. This is the data-layer engine behind the `type:` qualifier
  * (`type:todo` = every unchecked checkbox in the corpus) and the block-results
  * UI (`src/components/search-results.tsx`). Everything runs client-side over
- * the parsed docs derived from the files atom — see `blockIndexAtom` /
- * `searchBlocksAtom` in global-state.ts for the derived-atom wiring.
+ * the graph — see `blockIndexAtom` / `searchBlocksAtom` in global-state.ts
+ * for the derived-atom wiring.
  *
  * A hit is a ROW, not a subtree: it carries its own text, its breadcrumb
  * ancestry and a `childCount` presence flag, and nothing below it. Children
@@ -213,13 +213,13 @@ function blockSearchType(type: BlockType, text: string, inFence: boolean): Block
 }
 
 /**
- * Parse one note into its block hits, in document order (the depth-first walk
- * the serializer emits — which is also how the fence state must be tracked),
- * plus the parent → child-ids edges. This is the expensive per-note step the
- * indexer memoizes.
+ * Walk one note's page into its block hits, in document order (the
+ * depth-first walk the serializer emits — which is also how the fence state
+ * must be tracked), plus the parent → child-ids edges. This is the per-note
+ * step the indexer memoizes.
  */
-export function indexNoteBlocks(note: Note): NoteBlockIndex {
-  const doc = parse(note.content)
+export function indexNoteBlocks(note: Note, snapshot: GraphSnapshot): NoteBlockIndex {
+  const doc = pageDoc(note.id, snapshot) ?? { frontmatter: null, rootBlockIds: [], blocks: {} }
   const hits: BlockHit[] = []
   const childIds = new Map<string, string[]>()
   let fenceOpen = false
@@ -265,16 +265,17 @@ export interface BlockIndex {
 
 /**
  * A memoizing index builder: call the returned function with the current note
- * list and only notes whose content changed are re-parsed. A note whose
- * content is unchanged but whose Note object was recreated (every corpus
- * change re-derives all Note objects) keeps its parsed blocks and just gets
- * the fresh `note` reference stitched in, so note-level qualifiers (tags,
- * dates) never go stale. Notes that disappear are evicted.
+ * list and the graph, and only notes whose `Note` changed are re-walked — a
+ * `Note` object is kept as long as the rows its page reaches are unchanged
+ * (`createNotesBuilder`), so an untouched note reuses its block entries.
+ * Notes that disappear are evicted.
  */
-export function createBlockIndexer(indexNote: (note: Note) => NoteBlockIndex = indexNoteBlocks) {
-  const cache = new Map<NoteId, { content: string; note: Note; blocks: NoteBlockIndex }>()
+export function createBlockIndexer(
+  indexNote: (note: Note, snapshot: GraphSnapshot) => NoteBlockIndex = indexNoteBlocks,
+) {
+  const cache = new Map<NoteId, { note: Note; blocks: NoteBlockIndex }>()
 
-  return function buildIndex(notes: Note[]): BlockIndex {
+  return function buildIndex(notes: Note[], snapshot: GraphSnapshot): BlockIndex {
     const seen = new Set<NoteId>()
     const all: BlockHit[] = []
     // Per-note edge tables, referenced (never copied) from the memo.
@@ -283,18 +284,8 @@ export function createBlockIndexer(indexNote: (note: Note) => NoteBlockIndex = i
     for (const note of notes) {
       seen.add(note.id)
       let cached = cache.get(note.id)
-      if (!cached || cached.content !== note.content) {
-        cached = { content: note.content, note, blocks: indexNote(note) }
-        cache.set(note.id, cached)
-      } else if (cached.note !== note) {
-        cached = {
-          content: cached.content,
-          note,
-          blocks: {
-            hits: cached.blocks.hits.map((hit) => ({ ...hit, note })),
-            childIds: cached.blocks.childIds,
-          },
-        }
+      if (!cached || cached.note !== note) {
+        cached = { note, blocks: indexNote(note, snapshot) }
         cache.set(note.id, cached)
       }
       for (const hit of cached.blocks.hits) all.push(hit)

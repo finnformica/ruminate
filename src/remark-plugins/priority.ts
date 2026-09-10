@@ -91,7 +91,7 @@ declare module "mdast" {
 }
 
 /** MDAST extension (tokens -> MDAST) */
-export function priorityFromMarkdown(): FromMarkdownExtension {
+function priorityFromMarkdown(): FromMarkdownExtension {
   // Initialize state
   let level: 1 | 2 | 3 = 1
 

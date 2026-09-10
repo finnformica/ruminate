@@ -2,21 +2,26 @@ import { useMatch, useNavigate } from "@tanstack/react-router"
 import { parseDate } from "chrono-node"
 import { Command } from "cmdk"
 import copy from "copy-to-clipboard"
-import { atom, useAtom, useAtomValue, useSetAtom } from "jotai"
+import { atom, useAtom, useAtomValue, useSetAtom, useStore } from "jotai"
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
-import { blockRevealAtom, noteOutlineAtom, pinnedNotesAtom, tagSearcherAtom } from "../global-state"
+import {
+  blockRevealAtom,
+  graphSnapshotAtom,
+  noteOutlineAtom,
+  pinnedNotesAtom,
+  tagSearcherAtom,
+} from "../global-state"
 import { useBlockResultTree, type ResultRow } from "../hooks/block-result-tree"
-import { useNoteById, useSaveNote } from "../hooks/note"
+import { useCreateNote, useNoteById } from "../hooks/note"
 import { useBlockSearchSource, useSearchResults } from "../hooks/search-results"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
+import { rollup } from "../data/graph"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { useSearchNotes } from "../hooks/search-notes"
 import { Note } from "../schema"
 import { formatDate, formatDateDistance, toDateString } from "../utils/date"
-import { updateFrontmatterValue } from "../utils/frontmatter"
-import { getHeadings } from "../utils/headings"
 import { generateNoteId } from "../utils/note-id"
 import { filterOutline } from "../utils/note-outline"
 import { pluralize } from "../utils/pluralize"
@@ -51,7 +56,8 @@ export function CommandMenu() {
   const navigate = useNavigate()
   const searchNotes = useSearchNotes()
   const tagSearcher = useAtomValue(tagSearcherAtom)
-  const saveNote = useSaveNote()
+  const createNote = useCreateNote()
+  const jotaiStore = useStore()
   const pinnedNotes = useAtomValue(pinnedNotesAtom)
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
 
@@ -282,7 +288,7 @@ export function CommandMenu() {
         label: "Copy note markdown",
         icon: <CopyIcon16 />,
         onSelect: () => {
-          copyAsMarkdown(note.content)
+          copyAsMarkdown(rollup(note.id, jotaiStore.get(graphSnapshotAtom)) ?? "")
         },
       },
       {
@@ -300,7 +306,7 @@ export function CommandMenu() {
         },
       },
     ]
-  }, [note])
+  }, [note, jotaiStore])
 
   const filteredNoteActions = useMemo(() => {
     return noteActions.filter((item) => {
@@ -688,13 +694,7 @@ export function CommandMenu() {
                       // against and no name collision to avoid, so a fresh
                       // note is always a fresh note.
                       const id = generateNoteId()
-                      saveNote({
-                        id,
-                        content: updateFrontmatterValue({
-                          content: "",
-                          properties: { title: deferredQuery.trim() || null },
-                        }),
-                      })
+                      createNote(id, { title: deferredQuery.trim() })
 
                       navigate({
                         to: "/notes/$",
@@ -765,7 +765,7 @@ function NoteItem({
   // Show the note by its name, with its headings listed (tabbed over) as
   // children so you can find a note by a heading it contains. Selecting the
   // note opens it; selecting a heading opens it and highlights that heading.
-  const headings = getHeadings(note.content).slice(0, NUM_VISIBLE_HEADINGS)
+  const headings = note.headings.slice(0, NUM_VISIBLE_HEADINGS)
   // cmdk matches on `value`, so it carries the name (what the user typed
   // against) plus the id (still unique, and how duplicates stay distinct).
   const itemValue = `${note.displayName} ${note.id}`
@@ -776,9 +776,7 @@ function NoteItem({
           {!hidePinIcon && note.pinned ? (
             <PinFillIcon12 className="shrink-0 text-text-pinned" />
           ) : null}
-          {note?.frontmatter?.gist_id ? (
-            <GlobeIcon16 className="shrink-0 text-border-focus" />
-          ) : null}
+          {note.props.gist_id ? <GlobeIcon16 className="shrink-0 text-border-focus" /> : null}
           <span className="truncate">{note.displayName}</span>
         </span>
       </CommandItem>

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest"
+import { buildGraphSnapshot, docToGraph, type GraphSnapshot } from "../data/graph"
 import type { Note } from "../schema"
 import {
   blockKey,
@@ -15,13 +16,16 @@ import {
 } from "./block-search"
 import { parseQuery } from "./search"
 
-function makeNote(overrides: Partial<Note> = {}): Note {
+/** A note plus the markdown its page holds — the graph the tests index. */
+type Fixture = Note & { content: string }
+
+function makeNote(overrides: Partial<Fixture> = {}): Fixture {
   return {
     id: "1",
     content: "",
     type: "note",
     displayName: "",
-    frontmatter: {},
+    props: {},
     title: "",
     url: null,
     alias: null,
@@ -30,8 +34,22 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     dates: [],
     tags: [],
     tasks: [],
+    headings: [],
+    text: "",
     ...overrides,
   }
+}
+
+/** The graph holding every fixture's page. */
+function snapshotFor(notes: Fixture[]): GraphSnapshot {
+  const nodes = []
+  const links = []
+  for (const note of notes) {
+    const g = docToGraph(note.id, note.content, 1)
+    nodes.push(...g.nodes)
+    links.push(...g.links)
+  }
+  return buildGraphSnapshot(nodes, links)
 }
 
 /** Markdown from lines, with a trailing newline (the canonical file shape). */
@@ -71,11 +89,11 @@ const MISC_NOTE = makeNote({
   ),
 })
 
-function buildIndex(notes: Note[]) {
-  return createBlockIndexer()(notes)
+function buildIndex(notes: Fixture[]) {
+  return createBlockIndexer()(notes, snapshotFor(notes))
 }
 
-function run(query: string, notes: Note[] = [TASKS_NOTE, MISC_NOTE]) {
+function run(query: string, notes: Fixture[] = [TASKS_NOTE, MISC_NOTE]) {
   return searchBlocks(parseQuery(query), buildIndex(notes))
 }
 
@@ -83,7 +101,10 @@ const ids = (hits: BlockHit[]) => hits.map((hit) => hit.blockId)
 
 describe("type mapping", () => {
   const types = (content: string): [string, BlockSearchType][] =>
-    indexNoteBlocks(makeNote({ content })).hits.map((hit) => [hit.text, hit.type])
+    indexNoteBlocks(makeNote({ content }), snapshotFor([makeNote({ content })])).hits.map((hit) => [
+      hit.text,
+      hit.type,
+    ])
 
   test("maps every marker to its canonical block type", () => {
     // Every heading marker is one heading type: size comes from outline depth
@@ -145,7 +166,7 @@ describe("block hits", () => {
         "      id:: blk_auth",
       ),
     })
-    const { hits } = indexNoteBlocks(note)
+    const { hits } = indexNoteBlocks(note, snapshotFor([note]))
     const auth = hits.find((hit) => hit.blockId === "blk_auth")
     const expected: BlockAncestor[] = [
       { id: "blk_setup", text: "Setup" },
@@ -174,7 +195,8 @@ describe("block hits", () => {
   test("childCount is the block's true child count, however many", () => {
     const lines = ["# Big", "  id:: blk_big"]
     for (let i = 0; i < 25; i++) lines.push(`  - child ${i}`, `    id:: blk_c${i}`)
-    const [big] = indexNoteBlocks(makeNote({ content: md(...lines) })).hits
+    const bigNote = makeNote({ content: md(...lines) })
+    const [big] = indexNoteBlocks(bigNote, snapshotFor([bigNote])).hits
     expect(big.blockId).toBe("blk_big")
     expect(big.childCount).toBe(25)
   })
@@ -241,9 +263,9 @@ describe("lazy child resolution", () => {
     expect(index.getChildren(head)).toBe(index.getChildren(head))
   })
 
-  test("resolution is note-scoped: a pinned id reused in two notes stays distinct", () => {
-    // `id::` lines are authored, so the same id can legitimately appear in two
-    // notes — each hit must resolve its OWN children.
+  test("a block reached from two pages is one node: both hits resolve the same children", () => {
+    // In the graph an id names ONE block; a second page naming it links the
+    // same node, so every child it has is there from either page.
     const a = makeNote({
       id: "a",
       content: md("# Shared", "  id:: blk_dup", "  - only in a", "    id:: blk_a1"),
@@ -263,10 +285,10 @@ describe("lazy child resolution", () => {
     const [fromA, fromB] = searchBlocks(parseQuery("type:h1"), index)
     expect(blockKey(fromA)).toBe("a::blk_dup")
     expect(blockKey(fromB)).toBe("b::blk_dup")
-    expect(fromA.childCount).toBe(1)
-    expect(fromB.childCount).toBe(2)
-    expect(ids(index.getChildren(fromA))).toEqual(["blk_a1"])
-    expect(ids(index.getChildren(fromB))).toEqual(["blk_b1", "blk_b2"])
+    expect(fromA.childCount).toBe(3)
+    expect(fromB.childCount).toBe(3)
+    expect(ids(index.getChildren(fromA)).sort()).toEqual(["blk_a1", "blk_b1", "blk_b2"])
+    expect(ids(index.getChildren(fromB)).sort()).toEqual(["blk_a1", "blk_b1", "blk_b2"])
   })
 })
 
@@ -351,53 +373,41 @@ describe("block-scoped type detection", () => {
 })
 
 describe("createBlockIndexer", () => {
-  test("recomputes only notes whose content changed", () => {
+  test("re-walks only notes whose Note object changed", () => {
     const calls: string[] = []
-    const build = createBlockIndexer((note) => {
+    const build = createBlockIndexer((note, snapshot) => {
       calls.push(note.id)
-      return indexNoteBlocks(note)
+      return indexNoteBlocks(note, snapshot)
     })
+    const notes = [TASKS_NOTE, MISC_NOTE]
+    const snapshot = snapshotFor(notes)
 
-    build([TASKS_NOTE, MISC_NOTE])
+    build(notes, snapshot)
     expect(calls).toEqual(["tasks", "misc"])
 
-    // Same notes again: nothing recomputed.
-    build([TASKS_NOTE, MISC_NOTE])
+    // Same Note objects again: nothing recomputed.
+    build(notes, snapshot)
     expect(calls).toEqual(["tasks", "misc"])
 
-    // One note's content changed: only it is re-parsed.
+    // One note changed (a new Note object — `createNotesBuilder` keeps the
+    // object while a page's rows are unchanged): only it is re-walked.
     const changed = makeNote({ id: "misc", content: md("[ ] new todo", "  id:: blk_new") })
-    const index = build([TASKS_NOTE, changed])
+    const index = build([TASKS_NOTE, changed], snapshotFor([TASKS_NOTE, changed]))
     expect(calls).toEqual(["tasks", "misc", "misc"])
     expect(ids(searchBlocks(parseQuery("type:todo"), index))).toEqual(["blk_milk", "blk_new"])
-  })
-
-  test("refreshes the note reference when metadata changes without content", () => {
-    const calls: string[] = []
-    const build = createBlockIndexer((note) => {
-      calls.push(note.id)
-      return indexNoteBlocks(note)
-    })
-    build([TASKS_NOTE])
-
-    // The corpus re-derives Note objects on every change — same content, new
-    // object, new tags. The cached blocks are kept but carry the fresh note.
-    const retagged = { ...TASKS_NOTE, tags: ["urgent"] }
-    const index = build([retagged])
-    expect(calls).toEqual(["tasks"])
-    expect(ids(searchBlocks(parseQuery("type:todo tag:urgent"), index))).toEqual(["blk_milk"])
-    expect(index.hits[0].note).toBe(retagged)
+    expect(index.hits[0].note).toBe(TASKS_NOTE)
   })
 
   test("evicts deleted notes and re-indexes them if they return", () => {
     const calls: string[] = []
-    const build = createBlockIndexer((note) => {
+    const build = createBlockIndexer((note, snapshot) => {
       calls.push(note.id)
-      return indexNoteBlocks(note)
+      return indexNoteBlocks(note, snapshot)
     })
-    build([TASKS_NOTE, MISC_NOTE])
-    expect(ids(build([TASKS_NOTE]).hits)).toEqual(["blk_head", "blk_milk", "blk_ship"])
-    build([TASKS_NOTE, MISC_NOTE])
+    const snapshot = snapshotFor([TASKS_NOTE, MISC_NOTE])
+    build([TASKS_NOTE, MISC_NOTE], snapshot)
+    expect(ids(build([TASKS_NOTE], snapshot).hits)).toEqual(["blk_head", "blk_milk", "blk_ship"])
+    build([TASKS_NOTE, MISC_NOTE], snapshot)
     expect(calls).toEqual(["tasks", "misc", "misc"])
   })
 })
