@@ -169,44 +169,29 @@ describe("applySlashItem", () => {
   }
   const heading: SlashItem = {
     kind: "block",
-    id: "block:heading",
+    id: "block:h1",
     label: "Heading",
-    type: "heading",
+    type: "h1",
   }
-  const text: SlashItem = { kind: "block", id: "block:paragraph", label: "Text", type: "paragraph" }
+  const text: SlashItem = { kind: "block", id: "block:text", label: "Text", type: "text" }
 
   test("a date replaces the /phrase and leaves the caret after it", () => {
-    const result = applySlashItem(
-      "- call mum /tom",
-      "call mum /tom",
-      { start: 9, query: "tom" },
-      tomorrow,
-    )
-    expect(result).toEqual({ content: "- call mum 09-09-2026", caret: 19 })
+    const result = applySlashItem("call mum /tom", { start: 9, query: "tom" }, tomorrow)
+    expect(result).toEqual({ text: "call mum 09-09-2026", caret: 19 })
   })
 
   test("text after the caret is kept", () => {
-    const result = applySlashItem(
-      "/tom and more",
-      "/tom and more",
-      { start: 0, query: "tom" },
-      tomorrow,
-    )
-    expect(result).toEqual({ content: "09-09-2026 and more", caret: 10 })
+    const result = applySlashItem("/tom and more", { start: 0, query: "tom" }, tomorrow)
+    expect(result).toEqual({ text: "09-09-2026 and more", caret: 10 })
   })
 
-  test("a block type sets the marker and drops the /phrase", () => {
-    const result = applySlashItem(
-      "- plan /head",
-      "plan /head",
-      { start: 5, query: "head" },
-      heading,
-    )
-    expect(result).toEqual({ content: "# plan ", caret: 5 })
+  test("a block type sets the type and drops the /phrase", () => {
+    const result = applySlashItem("plan /head", { start: 5, query: "head" }, heading)
+    expect(result).toEqual({ text: "plan ", type: "h1", caret: 5 })
   })
 
-  test("Text strips the marker", () => {
-    const result = applySlashItem("[ ] /text", "/text", { start: 0, query: "text" }, text)
-    expect(result).toEqual({ content: "", caret: 0 })
+  test("Text turns the block back into a paragraph", () => {
+    const result = applySlashItem("/text", { start: 0, query: "text" }, text)
+    expect(result).toEqual({ text: "", type: "text", caret: 0 })
   })
 })

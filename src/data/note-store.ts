@@ -1,5 +1,7 @@
 import type { GraphDiff } from "../../worker/handlers/replica-payload"
+import type { BlockDoc } from "../blocks/types"
 import type { NoteId } from "../schema"
+import type { GraphSnapshot } from "./graph"
 
 /**
  * The storage contract behind the `src/data` seam, over the schema v2 graph
@@ -18,12 +20,26 @@ export interface NoteStore {
   getNote(id: NoteId): Promise<string | null>
   /** Rolled-up markdown of every note, keyed by note id. */
   getAllNotes(): Promise<Record<NoteId, string>>
+  /** The live graph — every non-tombstoned node and child link — indexed for
+   * walking (`docFromGraph`, `pageDoc`). What the app renders from. */
+  getGraph(): Promise<GraphSnapshot>
   /**
-   * Persist a batch of note writes/deletes in one transaction. Keys are
-   * note ids; a string value writes that note, `null` deletes it. Returns the
-   * row-level diff the write produced (what the replica queue pushes).
+   * Persist a batch of note writes/deletes in one transaction, from
+   * markdown. Keys are note ids; a string value writes that note, `null`
+   * deletes it. Returns the row-level diff the write produced (what the
+   * replica queue pushes). This is the IMPORT path: the markdown is parsed
+   * into typed blocks first — the editor's own saves go through
+   * `writeNoteDocs`.
    */
   writeNotes(updates: Record<NoteId, string | null>): Promise<GraphDiff>
+  /**
+   * Persist a batch of note docs — the editor's typed blocks, exactly as it
+   * holds them — with no markdown in between: `docToParts` turns each doc
+   * into rows and the store reconciles them against what it has. A block the
+   * doc names under two parents stays ONE node with two links. `null`
+   * deletes. Returns the row-level diff.
+   */
+  writeNoteDocs(updates: Record<NoteId, BlockDoc | null>): Promise<GraphDiff>
   /** Delete a single note (no-op when it does not exist). */
   deleteNote(id: NoteId): Promise<GraphDiff>
   /** Ids of the nodes containing this node (child links, deterministic order). */

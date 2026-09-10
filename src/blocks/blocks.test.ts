@@ -27,35 +27,40 @@ describe("block round-trip", () => {
     const doc = parse(CANONICAL)
     expect(doc.frontmatter).toBe("title: My note")
     expect(doc.rootBlockIds).toEqual(["blk_aaa", "blk_ccc", "blk_ddd"])
-    expect(doc.blocks["blk_aaa"].content).toBe("# A heading")
+    expect(doc.blocks["blk_aaa"].type).toBe("h1")
+    expect(doc.blocks["blk_aaa"].text).toBe("A heading")
     expect(doc.blocks["blk_aaa"].children).toEqual(["blk_bbb"])
-    expect(doc.blocks["blk_bbb"].content).toBe("- A nested bullet")
-    expect(doc.blocks["blk_ccc"].content).toBe("[ ] a todo")
+    expect(doc.blocks["blk_bbb"].type).toBe("ul")
+    expect(doc.blocks["blk_bbb"].text).toBe("A nested bullet")
+    expect(doc.blocks["blk_ccc"].type).toBe("todo")
+    expect(doc.blocks["blk_ccc"].text).toBe("a todo")
   })
 
   it("normalizes a multi-# heading to a single # on serialize", () => {
     // Heading size comes from outline depth, so the marker is always one `#`.
     const doc = parse(`### Deep heading\n  id:: blk_x\n`)
-    expect(doc.blocks["blk_x"].content).toBe("### Deep heading")
+    expect(doc.blocks["blk_x"].type).toBe("h1")
+    expect(doc.blocks["blk_x"].text).toBe("Deep heading")
     expect(serialize(doc)).toBe(`# Deep heading\n  id:: blk_x\n`)
   })
 
   it("does not double a bullet's marker", () => {
     // A block whose content is a bullet keeps exactly one `- ` on disk.
     const doc = parse(`- item\n  id:: blk_x\n`)
-    expect(doc.blocks["blk_x"].content).toBe("- item")
+    expect(doc.blocks["blk_x"].type).toBe("ul")
+    expect(doc.blocks["blk_x"].text).toBe("item")
     expect(serialize(doc)).toBe(`- item\n  id:: blk_x\n`)
   })
 
   it("preserves block references verbatim in content", () => {
     const doc = parse(CANONICAL)
-    expect(doc.blocks["blk_ddd"].content).toBe("References ((blk_aaa))")
+    expect(doc.blocks["blk_ddd"].text).toBe("References ((blk_aaa))")
   })
 
   it("round-trips an empty block", () => {
     const md = `\n  id:: blk_x\n`
     const doc = parse(md)
-    expect(doc.blocks["blk_x"].content).toBe("")
+    expect(doc.blocks["blk_x"].text).toBe("")
     expect(serialize(doc)).toBe(md)
   })
 
@@ -72,8 +77,11 @@ describe("block round-trip", () => {
   it("imports plain markdown lines as blocks", () => {
     const doc = parse(`# A heading\nA loose paragraph\n`)
     expect(doc.rootBlockIds).toHaveLength(2)
-    const contents = doc.rootBlockIds.map((id) => doc.blocks[id].content)
-    expect(contents).toEqual(["# A heading", "A loose paragraph"])
+    const blocks = doc.rootBlockIds.map((id) => [doc.blocks[id].type, doc.blocks[id].text])
+    expect(blocks).toEqual([
+      ["h1", "A heading"],
+      ["text", "A loose paragraph"],
+    ])
   })
 })
 
@@ -86,7 +94,7 @@ describe("duplicate ids", () => {
     expect(Object.keys(doc.blocks)).toHaveLength(2)
     const [firstId, secondId] = doc.rootBlockIds
     expect(firstId).not.toBe(secondId)
-    expect(doc.rootBlockIds.map((id) => doc.blocks[id].content)).toEqual(["first", "second"])
+    expect(doc.rootBlockIds.map((id) => doc.blocks[id].text)).toEqual(["first", "second"])
     // The first occurrence keeps the on-disk id; the duplicate is regenerated.
     expect(firstId).toBe("blk_dup")
     expect(secondId).toMatch(/^blk_[0-9a-z]{10}$/)
@@ -97,8 +105,8 @@ describe("duplicate ids", () => {
     const children = doc.blocks["blk_p"].children
     expect(children).toHaveLength(2)
     expect(children[0]).not.toBe(children[1])
-    expect(doc.blocks[children[0]].content).toBe("a")
-    expect(doc.blocks[children[1]].content).toBe("b")
+    expect(doc.blocks[children[0]].text).toBe("a")
+    expect(doc.blocks[children[1]].text).toBe("b")
   })
 })
 
@@ -155,40 +163,42 @@ describe("nesting", () => {
     const doc = parse(`a\n  a1\nb\n`)
     expect(doc.rootBlockIds).toHaveLength(2)
     const [aId, bId] = doc.rootBlockIds
-    expect(doc.blocks[aId].content).toBe("a")
+    expect(doc.blocks[aId].text).toBe("a")
     expect(doc.blocks[aId].children).toHaveLength(1)
-    expect(doc.blocks[bId].content).toBe("b")
+    expect(doc.blocks[bId].text).toBe("b")
     expect(doc.blocks[bId].children).toEqual([])
   })
 })
 
 describe("indent normalization (pasted outlines)", () => {
   const childrenOf = (doc: ReturnType<typeof parse>, id: string) =>
-    doc.blocks[id].children.map((cid) => doc.blocks[cid].content)
+    doc.blocks[id].children.map((cid) => doc.blocks[cid].text)
 
   it("treats each leading tab as one nesting level", () => {
     const doc = parse("- a\n\t- b\n\t\t- c\n- d")
     expect(doc.rootBlockIds).toHaveLength(2)
     const [aId, dId] = doc.rootBlockIds
-    expect(doc.blocks[aId].content).toBe("- a")
-    expect(childrenOf(doc, aId)).toEqual(["- b"])
-    expect(childrenOf(doc, doc.blocks[aId].children[0])).toEqual(["- c"])
-    expect(doc.blocks[dId].content).toBe("- d")
+    expect(doc.blocks[aId].type).toBe("ul")
+    expect(doc.blocks[aId].text).toBe("a")
+    expect(childrenOf(doc, aId)).toEqual(["b"])
+    expect(childrenOf(doc, doc.blocks[aId].children[0])).toEqual(["c"])
+    expect(doc.blocks[dId].type).toBe("ul")
+    expect(doc.blocks[dId].text).toBe("d")
   })
 
   it("infers a 4-space indent unit when every indent is a multiple of 4", () => {
     const doc = parse("- a\n    - b\n        - c\n    - d")
     expect(doc.rootBlockIds).toHaveLength(1)
     const aId = doc.rootBlockIds[0]
-    expect(childrenOf(doc, aId)).toEqual(["- b", "- d"])
-    expect(childrenOf(doc, doc.blocks[aId].children[0])).toEqual(["- c"])
+    expect(childrenOf(doc, aId)).toEqual(["b", "d"])
+    expect(childrenOf(doc, doc.blocks[aId].children[0])).toEqual(["c"])
   })
 
   it("keeps 2-space content at 2-space levels (a 4-space line means depth 2)", () => {
     const doc = parse("- a\n  - b\n    - c")
     const aId = doc.rootBlockIds[0]
-    expect(childrenOf(doc, aId)).toEqual(["- b"])
-    expect(childrenOf(doc, doc.blocks[aId].children[0])).toEqual(["- c"])
+    expect(childrenOf(doc, aId)).toEqual(["b"])
+    expect(childrenOf(doc, doc.blocks[aId].children[0])).toEqual(["c"])
   })
 
   it("keeps serialized 2-space content byte-identical through a round-trip", () => {
@@ -216,12 +226,16 @@ describe("content preservation", () => {
   id:: blk_f
 `
     const doc = parse(md)
-    expect(doc.blocks["blk_a"].content).toBe("# A heading")
-    expect(doc.blocks["blk_b"].content).toBe("**bold** and _italic_ and `code`")
-    expect(doc.blocks["blk_c"].content).toBe("[ ] unchecked")
-    expect(doc.blocks["blk_d"].content).toBe("[x] checked")
-    expect(doc.blocks["blk_e"].content).toBe("> a quote")
-    expect(doc.blocks["blk_f"].content).toBe("[a link](https://example.com)")
+    expect(doc.blocks["blk_a"].type).toBe("h1")
+    expect(doc.blocks["blk_a"].text).toBe("A heading")
+    expect(doc.blocks["blk_b"].text).toBe("**bold** and _italic_ and `code`")
+    expect(doc.blocks["blk_c"].type).toBe("todo")
+    expect(doc.blocks["blk_c"].text).toBe("unchecked")
+    expect(doc.blocks["blk_d"].type).toBe("done")
+    expect(doc.blocks["blk_d"].text).toBe("checked")
+    expect(doc.blocks["blk_e"].type).toBe("quote")
+    expect(doc.blocks["blk_e"].text).toBe("a quote")
+    expect(doc.blocks["blk_f"].text).toBe("[a link](https://example.com)")
     expect(serialize(doc)).toBe(md)
   })
 })
@@ -231,9 +245,9 @@ describe("whitespace and line endings", () => {
     const md = `---\r\ntitle: t\r\n---\r\na block\r\n  id:: blk_a\r\n  child\r\n    id:: blk_b\r\n`
     const doc = parse(md)
     expect(doc.frontmatter).toBe("title: t")
-    expect(doc.blocks["blk_a"].content).toBe("a block")
+    expect(doc.blocks["blk_a"].text).toBe("a block")
     expect(doc.blocks["blk_a"].children).toEqual(["blk_b"])
-    expect(doc.blocks["blk_b"].content).toBe("child")
+    expect(doc.blocks["blk_b"].text).toBe("child")
     expect(serialize(doc)).toBe(
       `---\ntitle: t\n---\na block\n  id:: blk_a\n  child\n    id:: blk_b\n`,
     )

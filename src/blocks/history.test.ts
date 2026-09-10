@@ -7,7 +7,7 @@ function docWith(text: string): BlockDoc {
   return {
     frontmatter: "",
     rootBlockIds: ["a"],
-    blocks: { a: { id: "a", content: text, children: [] } },
+    blocks: { a: { id: "a", type: "text", text, children: [] } },
   }
 }
 

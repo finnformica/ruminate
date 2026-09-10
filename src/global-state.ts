@@ -3,16 +3,16 @@ import { atom } from "jotai"
 import { atomWithMachine } from "jotai-xstate"
 import { atomWithStorage, selectAtom } from "jotai/utils"
 import { assign, createMachine } from "xstate"
-import { GitHubUser, Note, NoteId, Template, githubUserSchema, templateSchema } from "./schema"
-import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/commands"
-import { databaseFilesAtom } from "./data/database-mode"
+import { GitHubUser, Note, NoteId, githubUserSchema } from "./schema"
+import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
+import { databaseFilesAtom, databaseGraphAtom } from "./data/database-mode"
+import { buildGraphSnapshot, docToGraph, type GraphSnapshot } from "./data/graph"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
 import { backfillPrimaryEmail } from "./utils/github-email"
 import { createBlockIndexer, searchBlocks } from "./utils/block-search"
 import type { BlockRevealRequest, OutlineItem } from "./utils/note-outline"
 import { parseNote } from "./utils/parse-note"
 import { parseQuery, type Query } from "./utils/search"
-import { removeTemplateFrontmatter } from "./utils/remove-template-frontmatter"
 import { getSampleMarkdownFiles } from "./utils/sample-markdown-files"
 
 // -----------------------------------------------------------------------------
@@ -224,6 +224,34 @@ export const markdownFilesAtom = atom((get) =>
   get(isDatabaseModeAtom) ? get(databaseFilesAtom) : get(machineMarkdownFilesAtom),
 )
 
+/**
+ * The live graph — every node and child link, indexed for walking. Signed in
+ * it is the local SQL store's rows (`src/data/database-mode.ts`); signed out
+ * it is the sample notes, imported once. The editor walks its note out of
+ * this rather than parsing markdown.
+ */
+export const graphSnapshotAtom = atom((get) =>
+  get(isDatabaseModeAtom) ? get(databaseGraphAtom) : sampleGraph(get(machineMarkdownFilesAtom)),
+)
+
+// The sample corpus is a constant per session; import it once per files map.
+const sampleGraphCache = new WeakMap<Record<string, string>, GraphSnapshot>()
+function sampleGraph(files: Record<string, string>): GraphSnapshot {
+  const cached = sampleGraphCache.get(files)
+  if (cached) return cached
+  const nodes = []
+  const links = []
+  for (const filepath in files) {
+    if (!filepath.endsWith(".md")) continue
+    const graph = docToGraph(filepath.replace(/\.md$/, ""), files[filepath], 0)
+    nodes.push(...graph.nodes)
+    links.push(...graph.links)
+  }
+  const snapshot = buildGraphSnapshot(nodes, links)
+  sampleGraphCache.set(files, snapshot)
+  return snapshot
+}
+
 export const isSignedOutAtom = selectAtom(globalStateMachineAtom, (state) =>
   state.matches("signedOut"),
 )
@@ -390,43 +418,6 @@ export const tagSearcherAtom = atom((get) => {
     threshold: 0.8,
   })
 })
-
-// -----------------------------------------------------------------------------
-// Templates
-// -----------------------------------------------------------------------------
-
-const templatesAtom = atom((get) => {
-  const notes = get(notesAtom)
-  const templates: Record<string, Template> = {}
-
-  for (const { id, content, frontmatter } of notes.values()) {
-    const template = frontmatter["template"]
-
-    // Skip if note isn't a template
-    if (!template) continue
-
-    try {
-      const parsedTemplate = templateSchema.omit({ body: true }).parse(template)
-
-      const body = removeTemplateFrontmatter(content)
-
-      templates[id] = { ...parsedTemplate, body }
-    } catch (error) {
-      // Template frontmatter didn't match the schema
-      console.error(error)
-    }
-  }
-
-  return templates
-})
-
-export const dailyTemplateAtom = selectAtom(templatesAtom, (templates) =>
-  Object.values(templates).find((t) => t.name.match(/^daily$/i)),
-)
-
-export const weeklyTemplateAtom = selectAtom(templatesAtom, (templates) =>
-  Object.values(templates).find((t) => t.name.match(/^weekly$/i)),
-)
 
 // -----------------------------------------------------------------------------
 // UI state

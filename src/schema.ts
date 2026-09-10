@@ -2,7 +2,7 @@ import { z } from "zod"
 
 export type NoteId = string
 
-export type NoteType = "note" | "daily" | "weekly" | "template"
+export type NoteType = "note" | "daily" | "weekly"
 
 export type Task = {
   completed: boolean
@@ -69,22 +69,6 @@ export const githubUserSchema = z.object({
 })
 
 export type GitHubUser = z.infer<typeof githubUserSchema>
-
-const templateInputSchema = z.object({
-  type: z.literal("string"),
-  required: z.boolean().optional(),
-  default: z.string().optional(),
-  description: z.string().optional(),
-})
-
-export const templateSchema = z.object({
-  name: z.string(),
-  description: z.string().optional(),
-  inputs: z.record(z.string(), templateInputSchema).optional(),
-  body: z.string(),
-})
-
-export type Template = z.infer<typeof templateSchema>
 
 export const fontSchema = z.enum(["sans", "serif", "handwriting"])
 

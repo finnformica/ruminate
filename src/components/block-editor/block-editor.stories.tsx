@@ -106,7 +106,7 @@ export const NestedParents: Story = {
  * highlight across types (select all via the Cmd+A ladder and screenshot). */
 const SWEEP_SAMPLE = `# Alpha heading
   id:: blk_s1
-Paragraph with \`inline code\` and a ((blk_sq)) transclusion
+Paragraph with \`inline code\` and a [link](https://example.com)
   id:: blk_s2
 - Bullet parent
   id:: blk_s3
@@ -126,7 +126,7 @@ Paragraph with \`inline code\` and a ((blk_sq)) transclusion
   id:: blk_s10
 [x] Done todo
   id:: blk_s11
-> The quoted line, which is also transcluded above
+> The quoted line
   id:: blk_sq
 A long wrapping paragraph to check tall highlights: the quick brown fox jumps over the lazy dog again and again until the line wraps onto a second and third visual line inside a single block.
   id:: blk_s12

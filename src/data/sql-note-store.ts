@@ -8,6 +8,8 @@ import {
   type LinkRow,
   type NodeRow,
 } from "../../worker/handlers/replica-payload"
+import { parse } from "../blocks/parse"
+import type { BlockDoc } from "../blocks/types"
 import type { NoteId } from "../schema"
 import { ensureCorpusSchema } from "./corpus-schema"
 import {
@@ -15,10 +17,11 @@ import {
   PAGE_TYPE,
   buildGraphSnapshot,
   docToGraph,
-  docToGraphParts,
+  docToParts,
   reconcileSortKeys,
   rollup,
   sortKeyBetween,
+  type GraphSnapshot,
 } from "./graph"
 import type { NoteStore } from "./note-store"
 import type { SqlDriver, SqlStatement } from "./sql-driver"
@@ -84,11 +87,13 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<SqlNoteStore>
     return diff
   }
 
+  const snapshotOf = (mem: MemGraph): GraphSnapshot =>
+    buildGraphSnapshot([...mem.nodes.values()], [...mem.links.values()])
+
   return {
-    getNote: async (id) => {
-      const mem = await loadGraph()
-      return rollup(id, buildGraphSnapshot([...mem.nodes.values()], [...mem.links.values()]))
-    },
+    getGraph: async () => snapshotOf(await loadGraph()),
+
+    getNote: async (id) => rollup(id, snapshotOf(await loadGraph())),
 
     getAllNotes: async () => {
       const mem = await loadGraph()
@@ -106,7 +111,15 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<SqlNoteStore>
       runWrite((writer) => {
         for (const [id, content] of Object.entries(updates)) {
           if (content === null) planNoteDelete(writer, id)
-          else planNoteWrite(writer, id, content)
+          else planNoteWrite(writer, id, parse(content))
+        }
+      }),
+
+    writeNoteDocs: (updates) =>
+      runWrite((writer) => {
+        for (const [id, doc] of Object.entries(updates)) {
+          if (doc === null) planNoteDelete(writer, id)
+          else planNoteWrite(writer, id, doc)
         }
       }),
 
@@ -497,22 +510,24 @@ function emitWrite(writer: GraphWriter): { statements: SqlStatement[]; diff: Gra
 }
 
 /**
- * Ingest one note as a diff against the current graph: nodes whose
+ * Write one note's doc as a diff against the current graph: nodes whose
  * type/text/props changed are upserted (fresh `updated_at`), sibling orders
  * are reconciled so unchanged links keep their sort keys, nodes that fell out
  * of the note and have no other parent are tombstoned, and children orphaned
- * by those deletions are rescued to the page root.
+ * by those deletions are rescued to the page root. The doc's blocks are
+ * already typed and marker-free; a block the doc names under two parents is
+ * one row with two links.
  */
-function planNoteWrite(writer: GraphWriter, noteId: NoteId, content: string) {
+function planNoteWrite(writer: GraphWriter, noteId: NoteId, doc: BlockDoc) {
   const { mem, now } = writer
   // Every OTHER page's id is reserved: a block row claiming one (a stray
   // `id::` line from an external edit) must be re-minted, never allowed to
-  // clobber that page's node row. Ingest also guards `noteId` itself.
+  // clobber that page's node row. `docToParts` also guards `noteId` itself.
   const reserved = new Set<string>()
   for (const node of mem.nodes.values()) {
     if (node.type === PAGE_TYPE && node.id !== noteId) reserved.add(node.id)
   }
-  const { nodes, childrenOf } = docToGraphParts(noteId, content, now, reserved)
+  const { nodes, childrenOf } = docToParts(noteId, doc, now, reserved)
 
   // Cycle guard (belt-and-braces — reachable only through cross-note id
   // collisions): drop any desired edge that would close a loop, preferring

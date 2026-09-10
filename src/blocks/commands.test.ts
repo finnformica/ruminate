@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { runCommand, type CaretInput, type CommandInput, type Mode } from "./commands"
-import type { BlockDoc } from "./types"
+import { parseLine } from "./parse"
+import type { BlockDoc, BlockType } from "./types"
 
 /**
  * A small fixture:
@@ -14,10 +15,10 @@ function fixture(): BlockDoc {
     frontmatter: null,
     rootBlockIds: ["a", "b", "c"],
     blocks: {
-      a: { id: "a", content: "A", children: [] },
-      b: { id: "b", content: "B", children: ["b1"] },
-      b1: { id: "b1", content: "B1", children: [] },
-      c: { id: "c", content: "C", children: [] },
+      a: { id: "a", type: "text", text: "A", children: [] },
+      b: { id: "b", type: "text", text: "B", children: ["b1"] },
+      b1: { id: "b1", type: "text", text: "B1", children: [] },
+      c: { id: "c", type: "text", text: "C", children: [] },
     },
   }
 }
@@ -179,11 +180,11 @@ describe("wasd sibling traversal (treePrev / treeNext break out of the level)", 
       frontmatter: null,
       rootBlockIds: ["a", "b", "c"],
       blocks: {
-        a: { id: "a", content: "A", children: [] },
-        b: { id: "b", content: "B", children: ["b1"] },
-        b1: { id: "b1", content: "B1", children: ["b2"] },
-        b2: { id: "b2", content: "B2", children: [] },
-        c: { id: "c", content: "C", children: [] },
+        a: { id: "a", type: "text", text: "A", children: [] },
+        b: { id: "b", type: "text", text: "B", children: ["b1"] },
+        b1: { id: "b1", type: "text", text: "B1", children: ["b2"] },
+        b2: { id: "b2", type: "text", text: "B2", children: [] },
+        c: { id: "c", type: "text", text: "C", children: [] },
       },
     }
   }
@@ -352,8 +353,8 @@ describe("arrow-key folding (expandOrFirstChild / collapseOrParent)", () => {
   it("← on a collapsed (non-root) block steps out to the parent", () => {
     // b1 gains a child of its own and is collapsed (b1a hidden from the order).
     const doc = fixture()
-    doc.blocks.b1 = { id: "b1", content: "B1", children: ["b1a"] }
-    doc.blocks.b1a = { id: "b1a", content: "B1a", children: [] }
+    doc.blocks.b1 = { id: "b1", type: "text", text: "B1", children: ["b1a"] }
+    doc.blocks.b1a = { id: "b1a", type: "text", text: "B1a", children: [] }
     const result = runCommand("collapseOrParent", input(doc, "b1"))
     expect(result.focus).toEqual({ mode: "select", id: "b" })
     expect(result.collapse).toBeUndefined()
@@ -419,11 +420,11 @@ describe("duplicate", () => {
     expect(result.doc!.rootBlockIds).toHaveLength(4)
     const copyId = result.doc!.rootBlockIds[2]
     expect(result.doc!.rootBlockIds).toEqual(["a", "b", copyId, "c"])
-    expect(result.doc!.blocks[copyId].content).toBe("B")
+    expect(result.doc!.blocks[copyId].text).toBe("B")
     // The subtree came along, with a fresh id of its own.
     const childCopy = result.doc!.blocks[copyId].children[0]
     expect(childCopy).not.toBe("b1")
-    expect(result.doc!.blocks[childCopy].content).toBe("B1")
+    expect(result.doc!.blocks[childCopy].text).toBe("B1")
     // The original is untouched.
     expect(result.doc!.blocks.b.children).toEqual(["b1"])
     expect(result.focus).toEqual({ mode: "select", id: copyId })
@@ -434,7 +435,7 @@ describe("duplicate", () => {
     const result = runCommand("duplicateAbove", input(doc, "a", { mode: "select" }))
     const copyId = result.doc!.rootBlockIds[0]
     expect(result.doc!.rootBlockIds).toEqual([copyId, "a", "b", "c"])
-    expect(result.doc!.blocks[copyId].content).toBe("A")
+    expect(result.doc!.blocks[copyId].text).toBe("A")
     expect(result.focus).toEqual({ mode: "select", id: copyId })
   })
 
@@ -479,7 +480,7 @@ describe("deleteBlock", () => {
     const doc: BlockDoc = {
       frontmatter: null,
       rootBlockIds: ["only"],
-      blocks: { only: { id: "only", content: "", children: [] } },
+      blocks: { only: { id: "only", type: "text", text: "", children: [] } },
     }
     const result = runCommand("deleteBlock", input(doc, "only", { visibleOrder: ["only"] }))
     expect(result.handled).toBe(true)
@@ -492,10 +493,11 @@ describe("toggleTodo", () => {
     const doc: BlockDoc = {
       frontmatter: null,
       rootBlockIds: ["t"],
-      blocks: { t: { id: "t", content: "[ ] task", children: [] } },
+      blocks: { t: { id: "t", type: "todo", text: "task", children: [] } },
     }
     const result = runCommand("toggleTodo", input(doc, "t", { visibleOrder: ["t"] }))
-    expect(result.doc!.blocks.t.content).toBe("[x] task")
+    expect(result.doc!.blocks.t.type).toBe("done")
+    expect(result.doc!.blocks.t.text).toBe("task")
   })
 
   it("ignores non-todo blocks", () => {
@@ -519,43 +521,53 @@ describe("toggleCollapse", () => {
 })
 
 describe("turn into (select-mode marker keys)", () => {
+  /** A one-block doc from a marked line (`# A`, `- A`…), typed as the parser
+   * would type it — the fixtures read as the markdown they stand for. */
   function docOf(content: string): BlockDoc {
+    const { type, text } = parseLine(content)
     return {
       frontmatter: null,
       rootBlockIds: ["x"],
-      blocks: { x: { id: "x", content, children: [] } },
+      blocks: { x: { id: "x", type, text, children: [] } },
     }
   }
   const turn = (name: Parameters<typeof runCommand>[0], content: string) =>
     runCommand(name, input(docOf(content), "x", { visibleOrder: ["x"] }))
 
   it("toggles each type on from a paragraph, and back off to a paragraph", () => {
-    const cases: [Parameters<typeof runCommand>[0], string][] = [
-      ["turnIntoHeading", "# A"],
-      ["turnIntoBullet", "- A"],
-      ["turnIntoTodo", "[ ] A"],
-      ["turnIntoQuote", "> A"],
-      ["turnIntoOrdered", "1. A"],
+    const cases: [Parameters<typeof runCommand>[0], string, BlockType][] = [
+      ["turnIntoHeading", "# A", "h1"],
+      ["turnIntoBullet", "- A", "ul"],
+      ["turnIntoTodo", "[ ] A", "todo"],
+      ["turnIntoQuote", "> A", "quote"],
+      ["turnIntoOrdered", "1. A", "ol"],
     ]
-    for (const [name, marked] of cases) {
-      expect(turn(name, "A").doc!.blocks.x.content).toBe(marked)
-      expect(turn(name, marked).doc!.blocks.x.content).toBe("A")
+    for (const [name, marked, type] of cases) {
+      const on = turn(name, "A").doc!.blocks.x
+      expect([on.type, on.text]).toEqual([type, "A"])
+      const off = turn(name, marked).doc!.blocks.x
+      expect([off.type, off.text]).toEqual(["text", "A"])
     }
   })
 
   it("swaps the marker when the block is another type, body byte-exact", () => {
-    expect(turn("turnIntoHeading", "- hello  world").doc!.blocks.x.content).toBe("# hello  world")
-    expect(turn("turnIntoTodo", "# hello  world").doc!.blocks.x.content).toBe("[ ] hello  world")
-    expect(turn("turnIntoBullet", "3) counted").doc!.blocks.x.content).toBe("- counted")
+    expect(turn("turnIntoHeading", "- hello  world").doc!.blocks.x.type).toBe("h1")
+    expect(turn("turnIntoHeading", "- hello  world").doc!.blocks.x.text).toBe("hello  world")
+    expect(turn("turnIntoTodo", "# hello  world").doc!.blocks.x.type).toBe("todo")
+    expect(turn("turnIntoTodo", "# hello  world").doc!.blocks.x.text).toBe("hello  world")
+    expect(turn("turnIntoBullet", "3) counted").doc!.blocks.x.type).toBe("ul")
+    expect(turn("turnIntoBullet", "3) counted").doc!.blocks.x.text).toBe("counted")
   })
 
   it("a checked todo is still a todo: [ strips it, x keeps toggling the check", () => {
-    expect(turn("turnIntoTodo", "[x] done").doc!.blocks.x.content).toBe("done")
-    expect(turn("toggleTodo", "[x] done").doc!.blocks.x.content).toBe("[ ] done")
+    expect(turn("turnIntoTodo", "[x] done").doc!.blocks.x.type).toBe("text")
+    expect(turn("turnIntoTodo", "[x] done").doc!.blocks.x.text).toBe("done")
+    expect(turn("toggleTodo", "[x] done").doc!.blocks.x.type).toBe("todo")
+    expect(turn("toggleTodo", "[x] done").doc!.blocks.x.text).toBe("done")
   })
 
   it("ordered toggles off from any number", () => {
-    expect(turn("turnIntoOrdered", "7. seventh").doc!.blocks.x.content).toBe("seventh")
+    expect(turn("turnIntoOrdered", "7. seventh").doc!.blocks.x.text).toBe("seventh")
   })
 
   it("stays selected on a block with content, as one structural undo step", () => {
@@ -566,20 +578,23 @@ describe("turn into (select-mode marker keys)", () => {
 
   it("an empty block applies the marker AND opens editing", () => {
     const result = turn("turnIntoBullet", "")
-    expect(result.doc!.blocks.x.content).toBe("- ")
+    expect(result.doc!.blocks.x.type).toBe("ul")
+    expect(result.doc!.blocks.x.text).toBe("")
     expect(result.focus).toEqual({ mode: "edit", id: "x" })
     // Swapping one empty marker for another stays in edit too.
     const swapped = turn("turnIntoTodo", "- ")
-    expect(swapped.doc!.blocks.x.content).toBe("[ ] ")
+    expect(swapped.doc!.blocks.x.type).toBe("todo")
+    expect(swapped.doc!.blocks.x.text).toBe("")
     expect(swapped.focus).toEqual({ mode: "edit", id: "x" })
   })
 
   it("never touches children (marker swap only)", () => {
     const doc = fixture() // b "B" has child b1
     const result = runCommand("turnIntoQuote", input(doc, "b"))
-    expect(result.doc!.blocks.b.content).toBe("> B")
+    expect(result.doc!.blocks.b.type).toBe("quote")
+    expect(result.doc!.blocks.b.text).toBe("B")
     expect(result.doc!.blocks.b.children).toEqual(["b1"])
-    expect(result.doc!.blocks.b1.content).toBe("B1")
+    expect(result.doc!.blocks.b1.text).toBe("B1")
   })
 
   it("works on the zoomed title (a content-type change stays in view)", () => {
@@ -588,7 +603,8 @@ describe("turn into (select-mode marker keys)", () => {
       "turnIntoHeading",
       input(doc, "b", { visibleOrder: ["b", "b1"], zoomRootId: "b" }),
     )
-    expect(result.doc!.blocks.b.content).toBe("# B")
+    expect(result.doc!.blocks.b.type).toBe("h1")
+    expect(result.doc!.blocks.b.text).toBe("B")
   })
 })
 
@@ -597,7 +613,8 @@ describe("insertBelow", () => {
     const doc = fixture()
     const result = runCommand("insertBelow", input(doc, "a", { mode: "edit" }))
     const id = newBlockId(doc, result.doc!)
-    expect(result.doc!.blocks[id].content).toBe("- ")
+    expect(result.doc!.blocks[id].type).toBe("ul")
+    expect(result.doc!.blocks[id].text).toBe("")
     expect(result.doc!.rootBlockIds).toEqual(["a", id, "b", "c"])
     expect(result.focus).toEqual({ mode: "edit", id })
   })
@@ -606,24 +623,26 @@ describe("insertBelow", () => {
     const doc: BlockDoc = {
       frontmatter: null,
       rootBlockIds: ["h"],
-      blocks: { h: { id: "h", content: "# Title", children: [] } },
+      blocks: { h: { id: "h", type: "h1", text: "Title", children: [] } },
     }
     const result = runCommand("insertBelow", input(doc, "h", { mode: "edit", visibleOrder: ["h"] }))
     const id = newBlockId(doc, result.doc!)
     expect(result.doc!.rootBlockIds).toEqual(["h"])
     expect(result.doc!.blocks.h.children).toEqual([id])
-    expect(result.doc!.blocks[id].content).toBe("- ")
+    expect(result.doc!.blocks[id].type).toBe("ul")
+    expect(result.doc!.blocks[id].text).toBe("")
   })
 
-  it("uses the configured new-block marker instead of the default", () => {
+  it("uses the configured new-block type instead of the default", () => {
     const doc = fixture()
-    for (const marker of ["", "[ ] ", "> ", "→ "]) {
+    for (const type of ["text", "todo", "quote"] as const) {
       const result = runCommand(
         "insertBelow",
-        input(doc, "a", { mode: "edit", newBlockMarker: marker }),
+        input(doc, "a", { mode: "edit", newBlockType: type }),
       )
       const id = newBlockId(doc, result.doc!)
-      expect(result.doc!.blocks[id].content).toBe(marker)
+      expect(result.doc!.blocks[id].type).toBe(type)
+      expect(result.doc!.blocks[id].text).toBe("")
     }
   })
 
@@ -632,15 +651,17 @@ describe("insertBelow", () => {
       frontmatter: null,
       rootBlockIds: ["t", "n"],
       blocks: {
-        t: { id: "t", content: "[ ] task", children: [] },
-        n: { id: "n", content: "2. second", children: [] },
+        t: { id: "t", type: "todo", text: "task", children: [] },
+        n: { id: "n", type: "ol", text: "second", children: [] },
       },
     }
-    const over = { mode: "edit" as const, visibleOrder: ["t", "n"], newBlockMarker: "" }
+    const over = { mode: "edit" as const, visibleOrder: ["t", "n"], newBlockType: "text" as const }
     const todo = runCommand("insertBelow", input(doc, "t", over))
-    expect(todo.doc!.blocks[newBlockId(doc, todo.doc!)].content).toBe("[ ] ")
+    expect(todo.doc!.blocks[newBlockId(doc, todo.doc!)].type).toBe("todo")
+    expect(todo.doc!.blocks[newBlockId(doc, todo.doc!)].text).toBe("")
     const ordered = runCommand("insertBelow", input(doc, "n", over))
-    expect(ordered.doc!.blocks[newBlockId(doc, ordered.doc!)].content).toBe("3. ")
+    expect(ordered.doc!.blocks[newBlockId(doc, ordered.doc!)].type).toBe("ol")
+    expect(ordered.doc!.blocks[newBlockId(doc, ordered.doc!)].text).toBe("")
   })
 })
 
@@ -649,23 +670,25 @@ describe("insertSiblingBelow", () => {
     const doc: BlockDoc = {
       frontmatter: null,
       rootBlockIds: ["h"],
-      blocks: { h: { id: "h", content: "# Title", children: [] } },
+      blocks: { h: { id: "h", type: "h1", text: "Title", children: [] } },
     }
     const result = runCommand("insertSiblingBelow", input(doc, "h", { visibleOrder: ["h"] }))
     const id = newBlockId(doc, result.doc!)
     expect(result.doc!.rootBlockIds).toEqual(["h", id])
-    expect(result.doc!.blocks[id].content).toBe("# ")
+    expect(result.doc!.blocks[id].type).toBe("h1")
+    expect(result.doc!.blocks[id].text).toBe("")
   })
 
   it("keeps a todo a todo", () => {
     const doc: BlockDoc = {
       frontmatter: null,
       rootBlockIds: ["t"],
-      blocks: { t: { id: "t", content: "[x] done", children: [] } },
+      blocks: { t: { id: "t", type: "done", text: "done", children: [] } },
     }
     const result = runCommand("insertSiblingBelow", input(doc, "t", { visibleOrder: ["t"] }))
     const id = newBlockId(doc, result.doc!)
-    expect(result.doc!.blocks[id].content).toBe("[ ] ")
+    expect(result.doc!.blocks[id].type).toBe("todo")
+    expect(result.doc!.blocks[id].text).toBe("")
   })
 })
 
@@ -674,15 +697,17 @@ describe("split", () => {
     const doc: BlockDoc = {
       frontmatter: null,
       rootBlockIds: ["x"],
-      blocks: { x: { id: "x", content: "- hello", children: [] } },
+      blocks: { x: { id: "x", type: "ul", text: "hello", children: [] } },
     }
     const result = runCommand(
       "splitContinuingList",
       input(doc, "x", { mode: "edit", visibleOrder: ["x"], caret: caret("hello", 2) }),
     )
     const id = newBlockId(doc, result.doc!)
-    expect(result.doc!.blocks.x.content).toBe("- he")
-    expect(result.doc!.blocks[id].content).toBe("- llo")
+    expect(result.doc!.blocks.x.type).toBe("ul")
+    expect(result.doc!.blocks.x.text).toBe("he")
+    expect(result.doc!.blocks[id].type).toBe("ul")
+    expect(result.doc!.blocks[id].text).toBe("llo")
     expect(result.focus).toEqual({ mode: "edit", id, atStart: true })
   })
 
@@ -690,7 +715,7 @@ describe("split", () => {
     const doc: BlockDoc = {
       frontmatter: null,
       rootBlockIds: ["x"],
-      blocks: { x: { id: "x", content: "hello", children: [] } },
+      blocks: { x: { id: "x", type: "text", text: "hello", children: [] } },
     }
     const result = runCommand(
       "splitContinuingList",
@@ -698,41 +723,45 @@ describe("split", () => {
         mode: "edit",
         visibleOrder: ["x"],
         caret: caret("hello", 2),
-        newBlockMarker: "> ",
+        newBlockType: "quote",
       }),
     )
     const id = newBlockId(doc, result.doc!)
-    expect(result.doc!.blocks.x.content).toBe("he")
-    expect(result.doc!.blocks[id].content).toBe("> llo")
+    expect(result.doc!.blocks.x.text).toBe("he")
+    expect(result.doc!.blocks[id].type).toBe("quote")
+    expect(result.doc!.blocks[id].text).toBe("llo")
   })
 
   it("shift-enter splits carrying the same block type", () => {
     const doc: BlockDoc = {
       frontmatter: null,
       rootBlockIds: ["x"],
-      blocks: { x: { id: "x", content: "- hello", children: [] } },
+      blocks: { x: { id: "x", type: "ul", text: "hello", children: [] } },
     }
     const result = runCommand(
       "splitPlain",
       input(doc, "x", { mode: "edit", visibleOrder: ["x"], caret: caret("hello", 2) }),
     )
     const id = newBlockId(doc, result.doc!)
-    expect(result.doc!.blocks.x.content).toBe("- he")
-    expect(result.doc!.blocks[id].content).toBe("- llo")
+    expect(result.doc!.blocks.x.type).toBe("ul")
+    expect(result.doc!.blocks.x.text).toBe("he")
+    expect(result.doc!.blocks[id].type).toBe("ul")
+    expect(result.doc!.blocks[id].text).toBe("llo")
   })
 
   it("shift-enter on a heading makes another heading", () => {
     const doc: BlockDoc = {
       frontmatter: null,
       rootBlockIds: ["x"],
-      blocks: { x: { id: "x", content: "# Title", children: [] } },
+      blocks: { x: { id: "x", type: "h1", text: "Title", children: [] } },
     }
     const result = runCommand(
       "splitPlain",
       input(doc, "x", { mode: "edit", visibleOrder: ["x"], caret: caret("Title", 5) }),
     )
     const id = newBlockId(doc, result.doc!)
-    expect(result.doc!.blocks[id].content).toBe("# ")
+    expect(result.doc!.blocks[id].type).toBe("h1")
+    expect(result.doc!.blocks[id].text).toBe("")
   })
 })
 
@@ -741,20 +770,22 @@ describe("marker editing", () => {
     const doc: BlockDoc = {
       frontmatter: null,
       rootBlockIds: ["x"],
-      blocks: { x: { id: "x", content: "- ", children: [] } },
+      blocks: { x: { id: "x", type: "ul", text: "", children: [] } },
     }
     const result = runCommand("exitList", input(doc, "x", { mode: "edit", visibleOrder: ["x"] }))
-    expect(result.doc!.blocks.x.content).toBe("")
+    expect(result.doc!.blocks.x.type).toBe("text")
+    expect(result.doc!.blocks.x.text).toBe("")
   })
 
   it("stripMarker removes the leading marker", () => {
     const doc: BlockDoc = {
       frontmatter: null,
       rootBlockIds: ["x"],
-      blocks: { x: { id: "x", content: "# Heading", children: [] } },
+      blocks: { x: { id: "x", type: "h1", text: "Heading", children: [] } },
     }
     const result = runCommand("stripMarker", input(doc, "x", { mode: "edit", visibleOrder: ["x"] }))
-    expect(result.doc!.blocks.x.content).toBe("Heading")
+    expect(result.doc!.blocks.x.type).toBe("text")
+    expect(result.doc!.blocks.x.text).toBe("Heading")
     expect(result.focus).toEqual({ mode: "edit", id: "x", atStart: true })
   })
 

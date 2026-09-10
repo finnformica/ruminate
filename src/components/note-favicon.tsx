@@ -5,7 +5,7 @@ import { cx } from "../utils/cx"
 import { getLeadingEmoji } from "../utils/emoji"
 import { EmojiFavicon } from "./emoji-favicon"
 import { GitHubAvatar } from "./github-avatar"
-import { CalendarDateIcon16, CalendarIcon16, NoteIcon16, NoteTemplateIcon16 } from "./icons"
+import { CalendarDateIcon16, CalendarIcon16, NoteIcon16 } from "./icons"
 import { WebsiteFavicon } from "./website-favicon"
 
 type NoteFaviconProps = React.ComponentPropsWithoutRef<"span"> & {
@@ -47,11 +47,6 @@ export const NoteFavicon = React.memo(
     // URL
     if (note.url && online) {
       icon = <WebsiteFavicon data-testid="favicon-url" url={note.url} />
-    }
-
-    // Template
-    if (note.type === "template") {
-      icon = <NoteTemplateIcon16 data-testid="favicon-template" />
     }
 
     if (!icon) {

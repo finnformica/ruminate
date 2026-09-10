@@ -86,11 +86,13 @@ describe("type mapping", () => {
     indexNoteBlocks(makeNote({ content })).hits.map((hit) => [hit.text, hit.type])
 
   test("maps every marker to its canonical block type", () => {
+    // Every heading marker is one heading type: size comes from outline depth
+    // (docs/graph-schema-v2.md), and that is what the graph stores.
     expect(types(md("# one", "## two", "### three", "###### six"))).toEqual([
       ["one", "h1"],
-      ["two", "h2"],
-      ["three", "h3"],
-      ["six", "h6"],
+      ["two", "h1"],
+      ["three", "h1"],
+      ["six", "h1"],
     ])
     expect(types(md("[ ] open", "[] shorthand", "[x] closed", "[X] closed too"))).toEqual([
       ["open", "todo"],

@@ -48,14 +48,6 @@ export function NoteFillIcon16(props: IconProps) {
   )
 }
 
-export function NoteTemplateIcon16(props: IconProps) {
-  return (
-    <Icon size={16} {...props}>
-      <path d="M1.5 12.5C1.5 13.0523 1.94772 13.5 2.5 13.5H4V15H2.5C1.11929 15 0 13.8807 0 12.5V11H1.5V12.5ZM11 15H5V13.5H11V15ZM16 12.5C16 13.8807 14.8807 15 13.5 15H12V13.5H13.5C14.0523 13.5 14.5 13.0523 14.5 12.5V11H16V12.5ZM1.5 10H0V6H1.5V10ZM16 10H14.5V6H16V10ZM4 2.5H2.5C1.94772 2.5 1.5 2.94772 1.5 3.5V5H0V3.5C0 2.11929 1.11929 1 2.5 1H4V2.5ZM13.5 1C14.8807 1 16 2.11929 16 3.5V5H14.5V3.5C14.5 2.94772 14.0523 2.5 13.5 2.5H12V1H13.5ZM11 2.5H5V1H11V2.5Z" />
-    </Icon>
-  )
-}
-
 export function TagIcon16(props: IconProps) {
   return (
     <Icon size={16} {...props}>

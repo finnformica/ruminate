@@ -22,27 +22,29 @@ vi.mock("../../global-state", async () => {
   }
 })
 
+import { parse } from "../../blocks/parse"
+import { serialize } from "../../blocks/serialize"
 import { BlockNoteEditor } from "./block-note-editor"
 
 afterEach(cleanup)
 
-/** A controlled host, like the real note page: it owns the markdown value and
- * echoes editor changes back down as the `value` prop. */
+/** A controlled host, like the real note page: it owns the doc and echoes
+ * editor changes back down as the `doc` prop. */
 function Host({ initial, startEditing }: { initial: string; startEditing?: boolean }) {
-  const [value, setValue] = useState(initial)
+  const [doc, setDoc] = useState(() => parse(initial))
   return (
     <>
-      <BlockNoteEditor value={value} onChange={setValue} startEditing={startEditing} />
-      <button data-testid="external-update" onClick={() => setValue("- pulled from remote")}>
+      <BlockNoteEditor doc={doc} onChange={setDoc} startEditing={startEditing} />
+      <button data-testid="external-update" onClick={() => setDoc(parse("- pulled from remote"))}>
         external
       </button>
-      <pre data-testid="value">{value}</pre>
+      <pre data-testid="value">{serialize(doc)}</pre>
     </>
   )
 }
 
-describe("BlockNoteEditor value propagation", () => {
-  it("re-parses external value changes (a pull updating the open note) without a remount", () => {
+describe("BlockNoteEditor doc propagation", () => {
+  it("re-seeds from an external doc (a pull updating the open note) without a remount", () => {
     const { container, getByTestId } = render(<Host initial="- original local line" />)
     expect(container.textContent).toContain("original local line")
 
@@ -53,7 +55,7 @@ describe("BlockNoteEditor value propagation", () => {
     expect(container.textContent).not.toContain("original local line")
   })
 
-  it("does not re-parse its own edits when the parent echoes them back (typing survives)", () => {
+  it("does not re-seed from its own edits when the parent echoes them back (typing survives)", () => {
     // A brand-new note mounts with its starter block already in edit mode.
     const { container } = render(<Host initial="" startEditing />)
     const textarea = container.querySelector("textarea")
@@ -63,7 +65,7 @@ describe("BlockNoteEditor value propagation", () => {
     fireEvent.change(textarea!, { target: { value: "typing in progress" } })
 
     // The editor keeps its live edit session: same textarea, same content —
-    // the echoed value must not trigger a re-parse that would clobber it.
+    // the echoed doc must not trigger a re-seed that would clobber it.
     const after = container.querySelector("textarea")
     expect(after).toBe(textarea)
     expect(after!.value).toBe("typing in progress")

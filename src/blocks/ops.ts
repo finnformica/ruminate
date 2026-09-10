@@ -1,5 +1,5 @@
 import { blockId } from "./id"
-import type { Block, BlockDoc } from "./types"
+import type { Block, BlockDoc, BlockType } from "./types"
 
 /**
  * Immutable operations on a BlockDoc. Each returns a new doc; the original is
@@ -7,8 +7,16 @@ import type { Block, BlockDoc } from "./types"
  * UI-only concern and lives in the editor component, not here.
  */
 
-export function emptyBlock(content = ""): Block {
-  return { id: blockId(), content, children: [] }
+export function emptyBlock(type: BlockType = "text", text = ""): Block {
+  return { id: blockId(), type, text, children: [] }
+}
+
+/** Nothing worth saving: no frontmatter and no block carrying any text. */
+export function isEmptyDoc(doc: BlockDoc): boolean {
+  if (doc.frontmatter !== null && doc.frontmatter.trim() !== "") return false
+  return Object.values(doc.blocks).every(
+    (block) => block.type === "text" && block.text === "" && !block.props,
+  )
 }
 
 function clone(doc: BlockDoc): BlockDoc {
@@ -47,12 +55,54 @@ export function siblingsOf(
   return { parentId, siblings, index: siblings.indexOf(id) }
 }
 
-export function updateContent(doc: BlockDoc, id: string, content: string): BlockDoc {
+/** Replace a block's text (its type and children untouched). */
+export function updateText(doc: BlockDoc, id: string, text: string): BlockDoc {
+  const block = doc.blocks[id]
+  if (!block || block.text === text) return doc
+  const next = clone(doc)
+  next.blocks[id] = { ...block, text }
+  return next
+}
+
+/** Change a block's type (its text and children untouched). */
+export function updateType(doc: BlockDoc, id: string, type: BlockType): BlockDoc {
+  const block = doc.blocks[id]
+  if (!block || block.type === type) return doc
+  const next = clone(doc)
+  next.blocks[id] = { ...block, type }
+  return next
+}
+
+/** A change to a block's own fields (never its children). */
+export interface BlockPatch {
+  text?: string
+  type?: BlockType
+}
+
+/** Apply a text and/or type change to one block; the doc is returned as-is
+ * when nothing would change. */
+export function updateBlock(doc: BlockDoc, id: string, patch: BlockPatch): BlockDoc {
   const block = doc.blocks[id]
   if (!block) return doc
+  const text = patch.text ?? block.text
+  const type = patch.type ?? block.type
+  if (text === block.text && type === block.type) return doc
   const next = clone(doc)
-  next.blocks[id] = { ...block, content }
+  next.blocks[id] = { ...block, text, type }
   return next
+}
+
+/**
+ * The 1-based position of each of `ids` in its run of consecutive ordered
+ * siblings (0 for anything that isn't an ordered item) — the number an `ol`
+ * block shows, which is a fact of its position, not of its text.
+ */
+export function olPositions(doc: BlockDoc, ids: string[]): number[] {
+  let run = 0
+  return ids.map((id) => {
+    run = doc.blocks[id]?.type === "ol" ? run + 1 : 0
+    return run
+  })
 }
 
 /** Insert `block` as a sibling immediately after `refId`. */
@@ -189,7 +239,7 @@ export function remintCollidingIds(sub: BlockDoc, doc: BlockDoc): BlockDoc {
   const blocks: Record<string, Block> = {}
   for (const block of Object.values(sub.blocks)) {
     const id = rename(block.id)
-    blocks[id] = { id, content: block.content, children: block.children.map(rename) }
+    blocks[id] = { ...block, id, children: block.children.map(rename) }
   }
   return { ...sub, rootBlockIds: sub.rootBlockIds.map(rename), blocks }
 }
@@ -199,8 +249,8 @@ function cloneSubtree(doc: BlockDoc, id: string, into: Record<string, Block>): s
   const block = doc.blocks[id]
   const fresh = blockId()
   into[fresh] = {
+    ...block,
     id: fresh,
-    content: block.content,
     children: block.children.map((child) => cloneSubtree(doc, child, into)),
   }
   return fresh

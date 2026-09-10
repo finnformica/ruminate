@@ -1,5 +1,7 @@
 import { atom, getDefaultStore } from "jotai"
 import type { ReplicaChangesBody } from "../../worker/handlers/replica-payload"
+import { serialize } from "../blocks/serialize"
+import type { BlockDoc } from "../blocks/types"
 import type { NoteId } from "../schema"
 import { SessionExpiredError } from "../utils/github-token"
 import {
@@ -8,6 +10,7 @@ import {
   planPullApplication,
   type D1NoteSource,
 } from "./d1-note-source"
+import { buildGraphSnapshot, withDocApplied, type GraphSnapshot } from "./graph"
 import { resetReplicaAccess } from "./replica-access"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import type { SqlNoteStore } from "./sql-note-store"
@@ -34,12 +37,13 @@ import {
  *   sync   visibility/focus/online triggers re-run the since-cursor pull;
  *          hiding the tab flushes the push queue immediately
  *
- * **How the UI is fed.** Everything above `src/data` reads
- * `markdownFilesAtom` (notes, tags, templates, the editor's external-change
- * path). This module synthesizes the repo-file-shaped map those consumers
- * expect — `<id>.md` entries, each the rollup of its page node — into
- * `databaseFilesAtom`, and `markdownFilesAtom` serves it whenever a user is
- * signed in (see global-state.ts).
+ * **How the UI is fed.** The editor reads the graph itself: this module
+ * publishes the store's indexed rows as `databaseGraphAtom`, served as
+ * `graphSnapshotAtom` whenever a user is signed in (see global-state.ts),
+ * and the note page walks its doc out of it. The markdown consumers (notes
+ * list, tags, templates, search) still read `markdownFilesAtom`, so the same
+ * rows are also rolled up per page — `<id>.md` entries — into
+ * `databaseFilesAtom`.
  *
  * **Conflicts are last-writer-wins per row**, decided by push order at the
  * replica. Pulls never touch rows of notes with queued/in-flight local pushes
@@ -112,6 +116,20 @@ const REPAIR_COOLDOWN_MS = 30_000
  * module.
  */
 export const databaseFilesAtom = atom<Record<string, string>>({})
+
+/** The graph with nothing in it — what the atom holds before the store opens
+ * and after it closes. */
+export const EMPTY_GRAPH: GraphSnapshot = buildGraphSnapshot([], [])
+
+/**
+ * The live graph (every node and child link the local store holds, indexed
+ * for walking) served as `graphSnapshotAtom` while database mode is active.
+ * The editor walks its note out of this; the files atom above is the same
+ * data rolled up per page for the consumers that still read markdown.
+ * Written only by this module: optimistically on a doc write, and from the
+ * store after every ingest, repair and pull.
+ */
+export const databaseGraphAtom = atom<GraphSnapshot>(EMPTY_GRAPH)
 
 export interface DatabaseModeStatus {
   status: "off" | "opening" | "ready" | "error"
@@ -329,8 +347,10 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
       }
 
       const notes = await opened.store.getAllNotes()
+      const graph = await opened.store.getGraph()
       if (runtime !== activation) return
       jotai().set(databaseFilesAtom, synthesizeFiles(notes))
+      jotai().set(databaseGraphAtom, graph)
       patchStatus({ status: "ready" })
       patchDiagnostics({ status: "ready", notes: Object.keys(notes).length })
 
@@ -382,6 +402,7 @@ export function stopDatabaseMode() {
   const store = jotai()
   store.set(databaseModeStatusAtom, OFF_STATUS)
   store.set(databaseFilesAtom, {})
+  store.set(databaseGraphAtom, EMPTY_GRAPH)
   store.set(storageDiagnosticsAtom, OFF_STORAGE_DIAGNOSTICS)
   // A denial belongs to the account that was refused; the signed-out screen
   // (and any next sign-in) starts clean.
@@ -420,6 +441,7 @@ export function databaseWriteFiles(files: Record<string, string | null>) {
     try {
       const diff = await activation.store.writeNotes(noteUpdates)
       activation.replica?.notifyGraphChange(Object.keys(noteUpdates), diff)
+      await refreshGraph(activation)
     } catch (error) {
       // The files atom still carries the content; repair the local store from
       // it (and follow with a full push) so neither copy can lose the write.
@@ -427,6 +449,56 @@ export function databaseWriteFiles(files: Record<string, string | null>) {
       scheduleRepair(activation)
     }
   })
+}
+
+/**
+ * Persist a batch of typed note docs (`null` deletes) — the editor's save
+ * path. No markdown is parsed on the way in: the doc's blocks become rows
+ * directly (`docToParts`). Both atoms update synchronously — the graph by
+ * applying the doc to the current snapshot, the files map with the doc's
+ * rollup for the markdown consumers — so the UI never waits; the SQL ingest
+ * is queued, its row diff goes to the replica queue, and the graph atom is
+ * then refreshed from the store so it carries the reconciled rows.
+ */
+export function databaseWriteDocs(docs: Record<NoteId, BlockDoc | null>) {
+  const activation = runtime
+  if (!activation) return
+  if (Object.keys(docs).length === 0) return
+
+  const store = jotai()
+  const now = Date.now()
+  let graph = store.get(databaseGraphAtom)
+  const noteUpdates: Record<NoteId, string | null> = {}
+  for (const [id, doc] of Object.entries(docs)) {
+    graph = withDocApplied(graph, id, doc, now)
+    noteUpdates[id] = doc === null ? null : serialize(doc)
+  }
+  store.set(databaseGraphAtom, graph)
+  applyToFilesAtom(noteUpdates)
+  patchStatus({ emptyOffline: false })
+  patchDiagnostics({
+    notes: Object.keys(notesFromFiles(store.get(databaseFilesAtom))).length,
+  })
+
+  enqueue(async () => {
+    if (runtime !== activation || !activation.store) return
+    try {
+      const diff = await activation.store.writeNoteDocs(docs)
+      activation.replica?.notifyGraphChange(Object.keys(docs), diff)
+      await refreshGraph(activation)
+    } catch (error) {
+      recordWriteError(error)
+      scheduleRepair(activation)
+    }
+  })
+}
+
+/** Re-read the graph atom from the store (after an ingest, repair or pull). */
+async function refreshGraph(activation: DatabaseModeRuntime) {
+  if (runtime !== activation || !activation.store) return
+  const graph = await activation.store.getGraph()
+  if (runtime !== activation) return
+  jotai().set(databaseGraphAtom, graph)
 }
 
 /** The machine's dedicated single-file delete path, database edition. */
@@ -456,6 +528,7 @@ function scheduleRepair(activation: DatabaseModeRuntime) {
     if (runtime !== activation || !activation.store) return
     const files = jotai().get(databaseFilesAtom)
     await activation.store.replaceAll(notesFromFiles(files))
+    await refreshGraph(activation)
     activation.replica?.requestFullPush()
   })
 }
@@ -565,6 +638,7 @@ function runPull(activation: DatabaseModeRuntime) {
         // Re-synthesize the whole files map — rollups are cheap at this scale
         // and identical contents keep their string equality for consumers.
         jotai().set(databaseFilesAtom, synthesizeFiles(await store.getAllNotes()))
+        await refreshGraph(activation)
       }
       if (body.cursor !== null) await store.setMeta(PULL_CURSOR_KEY, body.cursor)
 

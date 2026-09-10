@@ -2,13 +2,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent, ClipboardEvent, CSSProperties, KeyboardEvent } from "react"
 import { cx } from "../../utils/cx"
 import type { Block, BlockDoc } from "../../blocks/types"
-import {
-  getBlockType,
-  leadingMarker,
-  stripMarker,
-  toggleTodo,
-  type BlockType,
-} from "../../blocks/block-type"
+import { isHeading, isTodo, leadingMarker } from "../../blocks/markers"
+import type { BlockType } from "../../blocks/types"
+import type { BlockPatch } from "../../blocks/ops"
+import type { Occurrence } from "../../blocks/view"
 import type { CaretInput, Mode } from "../../blocks/commands"
 import type { KeyLike } from "../../blocks/keymap"
 import {
@@ -45,7 +42,6 @@ export interface BlockEditorApi {
    * so the run reads as one continuous surface. Empty for single selections.
    */
   selectionRunEdges: Map<string, { top: boolean; bottom: boolean }>
-  collapsed: Set<string>
   /** Display-only: no editing, selection, or mutation (collapse still works). */
   readOnly?: boolean
   /**
@@ -60,16 +56,17 @@ export interface BlockEditorApi {
   select: (id: string) => void
   /** Enter edit mode for a block. */
   edit: (id: string, atStart?: boolean) => void
-  toggleCollapse: (id: string) => void
+  /** Fold or unfold a row (by occurrence key — folds are per row). */
+  toggleCollapse: (key: string) => void
   setFocus: (focus: FocusRequest | null) => void
   /**
-   * Replace a block's content. Text edits coalesce into one undo step; pass
-   * `"structural"` for a change that must stand alone (a slash-menu pick, so
-   * one undo puts the typed `/phrase` back).
+   * Change a block's text and/or type. Text edits coalesce into one undo
+   * step; pass `"structural"` for a change that must stand alone (a
+   * slash-menu pick, so one undo puts the typed `/phrase` back).
    */
-  onContentChange: (id: string, content: string, op?: "text" | "structural") => void
-  /** Replace `id` with blocks parsed from pasted markdown, placing the caret. */
-  onPaste: (id: string, prefix: string, before: string, pasted: string, after: string) => void
+  onBlockChange: (id: string, patch: BlockPatch, op?: "text" | "structural") => void
+  /** Replace `id` with blocks imported from pasted markdown, placing the caret. */
+  onPaste: (id: string, before: string, pasted: string, after: string) => void
   /**
    * Resolve a key event to an editor command (via the keymap) and run it.
    * Every keyboard interaction funnels through here; returns whether the event
@@ -108,20 +105,32 @@ export interface BlockDebugOptions {
 
 /** Extra space above a heading, proportional to its size (i.e. its outline
  * depth), so sections breathe. Applied to the block's outer wrapper (shared by
- * view and edit) so switching modes never shifts the text. */
-function headingTopMargin(type: BlockType, depth: number): string {
-  if (type.kind !== "heading") return ""
+ * view and edit) so switching modes never shifts the text. In px, because the
+ * row's guide lines reach back up through it (see the wrapper below). */
+function headingTopMarginPx(type: BlockType, depth: number): number {
+  if (!isHeading(type)) return 0
   switch (depth) {
     case 0:
-      return "mt-5"
+      return 20
     case 1:
-      return "mt-4"
+      return 16
     case 2:
-      return "mt-2.5"
+      return 10
     default:
-      return "mt-1.5"
+      return 6
   }
 }
+
+/** Row geometry, in px. Each level indents by `INDENT`: the guide line hangs
+ * from the parent's key — a 1px rule under the centre of the 15px marker
+ * slot, which starts 4px into the content column (the highlight surface's
+ * -2px reach + 6px inner padding) — so the rule sits at `GUIDE_X`, and the
+ * child's content starts `INDENT` in (rule + 12px of padding). */
+const INDENT = 24
+const GUIDE_X = 11
+/** Root rows sit 2px further apart than nested ones (which meet at their
+ * 2px + 2px vertical padding). */
+const ROOT_GAP = 2
 
 /** A heading's font size + line-height by outline depth. Shared by the full
  * typography (`typographyFor`) and the heading's `#` marker slot, whose
@@ -149,48 +158,48 @@ function headingScale(depth: number): string {
  * as a heading rather than a paragraph.
  */
 function typographyFor(type: BlockType, depth: number): string {
-  switch (type.kind) {
-    case "heading":
-      // Headings tighten as they grow: large display sizes get a snugger
-      // line-height and slightly negative tracking (see the type scale in
-      // docs/design-principles.md).
-      switch (depth) {
-        case 0:
-          return cx(headingScale(0), "font-bold tracking-[-0.015em]")
-        case 1:
-          return cx(headingScale(1), "font-bold tracking-[-0.01em]")
-        case 2:
-          return cx(headingScale(2), "font-bold")
-        default:
-          // Floors at body size; a soft offset underline keeps it reading as a
-          // heading without the weight of a full text-color rule.
-          return cx(
-            headingScale(depth),
-            "font-bold underline decoration-[color:var(--neutral-a6)] decoration-2 underline-offset-4",
-          )
-      }
-    case "quote":
-      return "text-base leading-relaxed text-text-secondary"
-    default:
-      return "text-base leading-relaxed"
+  if (isHeading(type)) {
+    // Headings tighten as they grow: large display sizes get a snugger
+    // line-height and slightly negative tracking (see the type scale in
+    // docs/design-principles.md).
+    switch (depth) {
+      case 0:
+        return cx(headingScale(0), "font-bold tracking-[-0.015em]")
+      case 1:
+        return cx(headingScale(1), "font-bold tracking-[-0.01em]")
+      case 2:
+        return cx(headingScale(2), "font-bold")
+      default:
+        // Floors at body size; a soft offset underline keeps it reading as a
+        // heading without the weight of a full text-color rule.
+        return cx(
+          headingScale(depth),
+          "font-bold underline decoration-[color:var(--neutral-a6)] decoration-2 underline-offset-4",
+        )
+    }
   }
+  if (type === "quote") return "text-base leading-relaxed text-text-secondary"
+  return "text-base leading-relaxed"
 }
 
 export function BlockItem({
   doc,
   block,
-  depth,
+  occurrence,
   api,
-  zoomTitle = false,
+  animateIn = false,
 }: {
   doc: BlockDoc
   block: Block
-  depth: number
+  /** This row's place in the view (`src/blocks/view.ts`): its depth, fold,
+   * ordered number, guide lines — and whether it is the zoomed view's title
+   * (promoted typography, no toggle; its children follow it at depth 0). */
+  occurrence: Occurrence
   api: BlockEditorApi
-  /** Render as the zoomed view's title: promoted typography, no collapse
-   * toggle, and no children (the editor renders those itself at depth 0). */
-  zoomTitle?: boolean
+  /** Mounting as a just-revealed row: play the brief entrance. */
+  animateIn?: boolean
 }) {
+  const { depth, zoomTitle, olNumber, hasChildren, collapsed: isCollapsed } = occurrence
   const readOnly = api.readOnly ?? false
   const editing = !readOnly && api.focus?.id === block.id
   const selected = api.selectedSet.has(block.id) && !editing
@@ -199,8 +208,6 @@ export function BlockItem({
   // the full 4px vertical extension so the run merges seamlessly; every other
   // side extends only 2px (see the data-block-line classes below).
   const runEdges = selected ? api.selectionRunEdges.get(block.id) : undefined
-  const hasChildren = block.children.length > 0
-  const isCollapsed = api.collapsed.has(block.id)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const pendingCaret = useRef<number | null>(null)
   // Set by a Cmd/Ctrl+Shift+V keydown so the paste event that follows inserts
@@ -220,20 +227,16 @@ export function BlockItem({
     [slashQuery],
   )
 
-  // True only on the render where the block goes collapsed → open, so the
-  // revealed children play their brief entrance (never on initial mount).
-  const prevCollapsedRef = useRef(isCollapsed)
-  const justExpanded = prevCollapsedRef.current && !isCollapsed
-  useEffect(() => {
-    prevCollapsedRef.current = isCollapsed
-  }, [isCollapsed])
+  // A row revealed by unfolding its parent rises in briefly. Captured at
+  // mount so the class stays for the row's lifetime — an animation that is
+  // never cut short by a re-render, and never replayed.
+  const [entrance] = useState(animateIn)
 
-  const type = getBlockType(block.content)
-  // The block is edited and rendered *without* its marker (the `- `, `# `,
-  // `[ ] `, `> `), which is shown as a real bullet/checkbox/heading style. This
+  const type = block.type
+  // The block's text is marker-free by construction: its type is drawn as a
+  // real bullet/checkbox/heading style in the marker slot, never as text. This
   // keeps the view and the editor pixel-identical — nothing shifts on click.
-  const body = stripMarker(block.content)
-  const prefix = block.content.slice(0, block.content.length - body.length)
+  const body = block.text
   // The zoomed block leads the view but renders as ITSELF — same typography,
   // same marker as anywhere else in the outline (a bullet stays a bullet, a
   // heading a heading). Focus mode changes what is visible, never what a
@@ -272,7 +275,7 @@ export function BlockItem({
       pendingCaret.current = null
       el.setSelectionRange(pos, pos)
     }
-  }, [editing, block.content])
+  }, [editing, block.text])
 
   /** Re-read the caret and open / move / close the slash menu accordingly. */
   const syncSlash = (value: string, caret: number) => {
@@ -315,37 +318,42 @@ export function BlockItem({
       top: el.offsetTop + top + height,
       left: Math.max(0, Math.min(el.offsetLeft + left, lineWidth - SLASH_MENU_WIDTH)),
     })
-  }, [slashOpen, slashStart, block.content])
+  }, [slashOpen, slashStart, block.text])
 
   const pickSlashItem = (item: SlashItem) => {
     const el = textareaRef.current
     if (!el || !slash) return
-    const result = applySlashItem(block.content, el.value, slash.trigger, item)
+    const result = applySlashItem(el.value, slash.trigger, item)
     pendingCaret.current = result.caret
     dismissedSlash.current = null
     setSlash(null)
     // Its own undo step, so Cmd/Ctrl+Z puts the typed `/phrase` back.
-    api.onContentChange(block.id, result.content, "structural")
+    api.onBlockChange(
+      block.id,
+      result.type !== undefined ? { text: result.text, type: result.type } : { text: result.text },
+      "structural",
+    )
   }
 
   const handleTextareaChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     const el = event.currentTarget
     const newBody = el.value
     const caret = el.selectionStart
-    // A marker typed at the very start of the body switches the block's type,
-    // *replacing* any current marker (checkbox → `- ` becomes a bullet, → `1. `
-    // an ordered item, → `# ` a heading, and so on). Otherwise the block keeps
-    // its existing marker and the edit is to its text.
+    // The typing shortcut: a marker typed at the very start of the text
+    // switches the block's type, *replacing* the current one (checkbox → `- `
+    // becomes a bullet, → `1. ` an ordered item, → `# ` a heading, and so on),
+    // and the marker itself is dropped — the feel of markdown, none stored.
+    // Otherwise the edit is to the block's text.
     const typed = leadingMarker(newBody)
-    const newContent = typed !== null ? newBody : prefix + newBody
-    const derivedBody = stripMarker(newContent)
-    if (derivedBody.length !== newBody.length) {
-      // A marker moved into (or out of) the prefix; keep the caret relative to
-      // the visible text.
-      pendingCaret.current = Math.max(0, caret - (newBody.length - derivedBody.length))
+    const text = typed !== null ? typed.text : newBody
+    if (typed !== null) {
+      // The marker left the visible text; keep the caret relative to it.
+      pendingCaret.current = Math.max(0, caret - (newBody.length - text.length))
+      api.onBlockChange(block.id, { type: typed.type, text })
+    } else {
+      api.onBlockChange(block.id, { text })
     }
-    api.onContentChange(block.id, newContent)
-    syncSlash(derivedBody, pendingCaret.current ?? caret)
+    syncSlash(text, pendingCaret.current ?? caret)
   }
 
   const handleEditKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -427,7 +435,7 @@ export function BlockItem({
       const before = el.value.slice(0, el.selectionStart)
       const after = el.value.slice(el.selectionEnd)
       pendingCaret.current = (before + collapsed).length
-      api.onContentChange(block.id, prefix + before + collapsed + after)
+      api.onBlockChange(block.id, { text: before + collapsed + after })
       return
     }
     // Rich paste: prefer the html flavor — our own embedded block payload
@@ -453,7 +461,7 @@ export function BlockItem({
       const before = el.value.slice(0, el.selectionStart)
       const after = el.value.slice(el.selectionEnd)
       pendingCaret.current = (before + pasted).length
-      api.onContentChange(block.id, prefix + before + pasted + after)
+      api.onBlockChange(block.id, { text: before + pasted + after })
       return
     }
     // Multi-line paste is spread across blocks.
@@ -461,7 +469,7 @@ export function BlockItem({
     const el = event.currentTarget
     const before = el.value.slice(0, el.selectionStart)
     const after = el.value.slice(el.selectionEnd)
-    api.onPaste(block.id, prefix, before, pasted, after)
+    api.onPaste(block.id, before, pasted, after)
   }
 
   // Whether this block owns a collapse toggle at all: parents only, and never
@@ -476,7 +484,7 @@ export function BlockItem({
   // would leave a parent todo un-tickable) — so a parent todo's chevron sits
   // BESIDE the slot instead, in the gutter just outside the highlight
   // surface: same reveal (hover its own square), same pin while collapsed.
-  const toggleBeside = hasToggle && type.kind === "todo"
+  const toggleBeside = hasToggle && isTodo(type)
 
   // The chevron. `.block-toggle` (block-editor.css) keeps it invisible until
   // its own square — the key slot, or the gutter square beside a todo; never
@@ -505,7 +513,7 @@ export function BlockItem({
       size="small"
       disableTooltip
       tabIndex={-1}
-      onClick={() => api.toggleCollapse(block.id)}
+      onClick={() => api.toggleCollapse(occurrence.key)}
       className={cx(
         "block-toggle absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150 active:scale-[0.92] motion-reduce:active:scale-100",
         // IconButton's default radius is the 8px base — on a 20px square that
@@ -616,92 +624,111 @@ export function BlockItem({
       {toggle}
     </span>
   )
-  const marker =
-    type.kind === "todo" ? (
-      // The checkbox IS the todo's marker — a control in the key slot, which
-      // is why a parent todo's chevron sits beside it (see `toggleBeside`).
-      // Hovering the box also reveals that chevron (`.block-toggle-hint`,
-      // block-editor.css) — the marker is where people look for the fold
-      // control — without the box ever giving up its own click. On coarse
-      // pointers the box grows its own tap area (`.block-checkbox::before`).
-      <span
-        className={cx(
-          "flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
-          toggleBeside && "block-toggle-hint",
-        )}
-      >
-        <input
-          type="checkbox"
-          checked={type.checked}
-          disabled={readOnly}
-          onClick={(event) => event.stopPropagation()}
-          onChange={() => api.onContentChange(block.id, toggleTodo(block.content))}
-          className={cx("block-checkbox", readOnly ? "cursor-default" : "cursor-pointer")}
-        />
-      </span>
-    ) : type.kind === "bullet" ? (
-      dotSlot
-    ) : type.kind === "heading" ? (
-      // Headings hang the same grey `#` as the note / zoom titles — the shared
-      // `Hash`, at the heading's own scale: the slot carries the heading's
-      // size + weight (headingScale + bold, no underline — that lives in
-      // `typo`) and the glyph inherits it, so the hash always matches the text
-      // beside it, at every depth. The slot stays the shared 15px column
-      // (heading text aligns with every other marked block); the hash
-      // right-aligns in it and, when a large scale outgrows the slot,
-      // overflows LEFT, past the surface's edge — the text column never
-      // moves. The slot's `h-[1lh]` (resolved at the heading's scale) centres
-      // the glyph on the heading's first line. A static glyph, like the note
-      // title's — never a zoom button (zoom stays on F / Cmd+. and
-      // bullet/number clicks); on a parent it swaps for the collapse chevron.
-      <span
-        data-testid="heading-hash"
-        className={cx(
-          "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-end font-bold",
-          headingScale(depth),
-          slotClass,
-        )}
-      >
-        <Hash className={keyClass} />
-        {toggle}
-      </span>
-    ) : type.kind === "ordered" ? (
-      // Numbers are read (they carry order), so they sit one step up the ramp
-      // from the dot — muted, not faint — and right-align to the slot edge.
-      <span
-        className={cx(
-          "relative flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary",
-          slotClass,
-        )}
-      >
-        {zoomable ? (
-          <button
-            type="button"
-            aria-label="Zoom into block"
-            tabIndex={-1}
-            onClick={() => api.zoomInto(block.id)}
-            className="-mx-0.5 cursor-pointer rounded-sm px-0.5 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-95 motion-reduce:active:scale-100"
-          >
-            {type.number}.
-          </button>
-        ) : (
-          <span aria-hidden className={keyClass}>
-            {type.number}.
-          </span>
-        )}
-        {toggle}
-      </span>
-    ) : type.kind === "quote" ? (
-      glyphSlot(">", "quote-glyph")
-    ) : (
-      glyphSlot(null, "paragraph-slot")
-    )
+  const marker = isTodo(type) ? (
+    // The checkbox IS the todo's marker — a control in the key slot, which
+    // is why a parent todo's chevron sits beside it (see `toggleBeside`).
+    // Hovering the box also reveals that chevron (`.block-toggle-hint`,
+    // block-editor.css) — the marker is where people look for the fold
+    // control — without the box ever giving up its own click. On coarse
+    // pointers the box grows its own tap area (`.block-checkbox::before`).
+    <span
+      className={cx(
+        "flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
+        toggleBeside && "block-toggle-hint",
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={type === "done"}
+        disabled={readOnly}
+        onClick={(event) => event.stopPropagation()}
+        // Checked is a TYPE (docs/graph-schema-v2.md): ticking is `todo` ↔ `done`.
+        onChange={() => api.onBlockChange(block.id, { type: type === "done" ? "todo" : "done" })}
+        className={cx("block-checkbox", readOnly ? "cursor-default" : "cursor-pointer")}
+      />
+    </span>
+  ) : type === "ul" ? (
+    dotSlot
+  ) : isHeading(type) ? (
+    // Headings hang the same grey `#` as the note / zoom titles — the shared
+    // `Hash`, at the heading's own scale: the slot carries the heading's
+    // size + weight (headingScale + bold, no underline — that lives in
+    // `typo`) and the glyph inherits it, so the hash always matches the text
+    // beside it, at every depth. The slot stays the shared 15px column
+    // (heading text aligns with every other marked block); the hash
+    // right-aligns in it and, when a large scale outgrows the slot,
+    // overflows LEFT, past the surface's edge — the text column never
+    // moves. The slot's `h-[1lh]` (resolved at the heading's scale) centres
+    // the glyph on the heading's first line. A static glyph, like the note
+    // title's — never a zoom button (zoom stays on F / Cmd+. and
+    // bullet/number clicks); on a parent it swaps for the collapse chevron.
+    <span
+      data-testid="heading-hash"
+      className={cx(
+        "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-end font-bold",
+        headingScale(depth),
+        slotClass,
+      )}
+    >
+      <Hash className={keyClass} />
+      {toggle}
+    </span>
+  ) : type === "ol" ? (
+    // Numbers are read (they carry order), so they sit one step up the ramp
+    // from the dot — muted, not faint — and right-align to the slot edge.
+    <span
+      className={cx(
+        "relative flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary",
+        slotClass,
+      )}
+    >
+      {zoomable ? (
+        <button
+          type="button"
+          aria-label="Zoom into block"
+          tabIndex={-1}
+          onClick={() => api.zoomInto(block.id)}
+          className="-mx-0.5 cursor-pointer rounded-sm px-0.5 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-95 motion-reduce:active:scale-100"
+        >
+          {olNumber}.
+        </button>
+      ) : (
+        <span aria-hidden className={keyClass}>
+          {olNumber}.
+        </span>
+      )}
+      {toggle}
+    </span>
+  ) : type === "quote" ? (
+    glyphSlot(">", "quote-glyph")
+  ) : (
+    glyphSlot(null, "paragraph-slot")
+  )
+
+  // The wrapper: indented by depth, carrying the guide lines of every row it
+  // sits under. A heading's breathing room is a margin, so the highlight
+  // surface never grows; the guides reach back up through it (`top`), so a
+  // parent's line runs unbroken beside its subtree.
+  const marginTop = zoomTitle
+    ? 0
+    : Math.max(headingTopMarginPx(type, depth), depth === 0 && occurrence.index > 0 ? ROOT_GAP : 0)
 
   return (
     <div
       data-block-row={block.id}
-      className={cx("group/subtree", zoomTitle ? "mb-3" : headingTopMargin(type, depth))}
+      data-occurrence={occurrence.key}
+      className={cx("relative", zoomTitle && "mb-3", entrance && "block-expand")}
+      style={{ paddingLeft: depth * INDENT, marginTop }}
     >
+      {occurrence.guideKeys.map((guideKey, level) => (
+        <span
+          key={guideKey}
+          aria-hidden
+          data-guide={guideKey}
+          className="block-guide pointer-events-none absolute bottom-0 w-px bg-border-secondary transition-colors duration-200"
+          style={{ left: GUIDE_X + level * INDENT, top: -marginTop }}
+        />
+      ))}
       <div className="relative min-w-0 py-0.5 font-content leading-relaxed">
         <div
           // The visible content line (carries the highlight). Scroll-into-view
@@ -776,7 +803,7 @@ export function BlockItem({
               {toggle}
             </span>
           ) : null}
-          {type.kind === "quote" ? (
+          {type === "quote" ? (
             // The quote's bar stands at the text column — where every other
             // block's text begins — and pushes the quote's text 10px in (bar
             // 2px + the 8px gap): a quote is set in from the rest, the way it
@@ -845,8 +872,8 @@ export function BlockItem({
                 typo,
                 // Checking a todo mutes its text; the fade marks the state
                 // change without delaying it.
-                type.kind === "todo" && "transition-colors duration-200",
-                type.kind === "todo" && type.checked && "text-text-secondary line-through",
+                isTodo(type) && "transition-colors duration-200",
+                type === "done" && "text-text-secondary line-through",
               )}
               {...(readOnly
                 ? {}
@@ -855,7 +882,7 @@ export function BlockItem({
                     onDoubleClick: () => api.edit(block.id),
                   })}
             >
-              <BlockContent content={body} doc={doc} />
+              <BlockContent content={body} />
             </div>
           )}
           {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
@@ -868,29 +895,6 @@ export function BlockItem({
           />
         ) : null}
       </div>
-
-      {hasChildren && !isCollapsed && !zoomTitle ? (
-        // The guide hangs from the block's key: a 1px rule under the centre of
-        // the 15px marker slot (every block type has one), which starts 4px
-        // into the content column (the surface's -2px reach + 6px inner
-        // padding) — centre 11.5px, so the rule sits at 11px. Children start
-        // 24px in (margin + rule + padding).
-        // The guide brightens while the pointer is anywhere in the subtree
-        // (group/subtree is the block's outer wrapper), tracing the structure.
-        <div
-          className={cx(
-            "ml-[11px] pl-3",
-            "border-l border-border-secondary transition-colors duration-200 group-hover/subtree:border-[color:var(--neutral-a6)]",
-            justExpanded && "block-expand",
-          )}
-        >
-          {block.children.map((childId) => {
-            const child = doc.blocks[childId]
-            if (!child) return null
-            return <BlockItem key={childId} doc={doc} block={child} depth={depth + 1} api={api} />
-          })}
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -935,7 +939,7 @@ function BlockDebugMeta({
   depth: number
   upstream: readonly string[] | null
 }) {
-  const kind = getBlockType(block.content).kind
+  const kind = block.type
   let upstreamLabel: string | null = null
   if (upstream !== null) {
     if (upstream.length === 0) upstreamLabel = "upstream 0 · not saved yet"

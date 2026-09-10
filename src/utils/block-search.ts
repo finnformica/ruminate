@@ -1,5 +1,5 @@
 import { Searcher, type FullOptions } from "fast-fuzzy"
-import { getBlockType, stripMarker } from "../blocks/block-type"
+import type { BlockType } from "../blocks/types"
 import { parse } from "../blocks/parse"
 import type { Note, NoteId } from "../schema"
 import type { Filter, Query, Sort } from "./search"
@@ -69,7 +69,7 @@ export type BlockSearchType =
  * | `text`          | plain paragraph                            |
  *
  * A `type:` value outside this table is NOT block vocabulary: on its own the
- * filter stays a note-type filter (`type:daily`, `type:template` — see
+ * filter stays a note-type filter (`type:daily` — see
  * search-notes.ts), unchanged from before. Mixed into a block-scoped comma
  * list (`type:todo,zzz`) an unknown value simply matches no blocks.
  */
@@ -191,20 +191,21 @@ export interface NoteBlockIndex {
   childIds: Map<string, string[]>
 }
 
-/** Classify a block, given the document's fence state where it sits. */
-function blockSearchType(content: string, inFence: boolean): BlockSearchType {
-  if (inFence || content.trimStart().startsWith("```")) return "code"
-  const type = getBlockType(content)
-  switch (type.kind) {
-    case "heading":
-      return `h${type.level}` as BlockSearchType
+/** The search type of a block: its stored type, in the query vocabulary, with
+ * fence tracking on top (a text line inside a fence is code, whatever it is). */
+function blockSearchType(type: BlockType, text: string, inFence: boolean): BlockSearchType {
+  if (inFence || type === "code" || text.trimStart().startsWith("```")) return "code"
+  switch (type) {
+    case "h1":
+    case "h2":
+    case "h3":
     case "todo":
-      return type.checked ? "done" : "todo"
+    case "done":
     case "quote":
-      return "quote"
-    case "bullet":
+      return type
+    case "ul":
       return "bullet"
-    case "ordered":
+    case "ol":
       return "ordered"
     default:
       return "text"
@@ -228,10 +229,9 @@ export function indexNoteBlocks(note: Note): NoteBlockIndex {
       const block = doc.blocks[id]
       if (!block) continue
       const inFence = fenceOpen
-      if (block.content.trimStart().startsWith("```")) fenceOpen = !fenceOpen
-      const type = blockSearchType(block.content, inFence)
-      // Inside a fence the marker is code, not markup — keep the line verbatim.
-      const text = type === "code" ? block.content : stripMarker(block.content)
+      if (block.text.trimStart().startsWith("```")) fenceOpen = !fenceOpen
+      const type = blockSearchType(block.type, block.text, inFence)
+      const text = block.text
       hits.push({
         blockId: id,
         noteId: note.id,

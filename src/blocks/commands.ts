@@ -1,12 +1,5 @@
-import {
-  getBlockType,
-  stripMarker,
-  toggleMarker,
-  toggleTodo as toggleTodoContent,
-  type BlockType,
-  type MarkerKind,
-} from "./block-type"
 import type { BlockOp } from "./history"
+import { DEFAULT_NEW_BLOCK_TYPE, isHeading, isTodo, toggleType } from "./markers"
 import {
   duplicateBlocks,
   emptyBlock,
@@ -17,9 +10,10 @@ import {
   outdentBlock,
   removeBlock,
   siblingsOf,
-  updateContent,
+  updateText,
+  updateType,
 } from "./ops"
-import type { BlockDoc } from "./types"
+import type { BlockDoc, BlockType } from "./types"
 
 /**
  * The block editor's **command layer**: named, input-agnostic intents ("indent
@@ -69,12 +63,12 @@ export interface CommandInput {
    * nothing is below on the stack; zoom-out then exits zoom entirely. */
   zoomBackId?: string | null
   /**
-   * The markdown a fresh block starts with when Enter creates one from a block
-   * that isn't a todo or ordered item (those continue their own list). A user
-   * preference — `"- "` by default, `""` for a plain paragraph, or any other
-   * marker (`"[ ] "`, `"> "`). Absent = the default.
+   * The type a fresh block starts as when Enter creates one from a block that
+   * isn't a todo or ordered item (those continue their own list). A user
+   * preference — `ul` by default, `text` for a plain paragraph, or any other
+   * type (`todo`, `quote`). Absent = the default.
    */
-  newBlockMarker?: string
+  newBlockType?: BlockType
 }
 
 /** Where selection / edit focus should land after a command runs. */
@@ -113,49 +107,25 @@ type Command = (input: CommandInput) => CommandResult
 const IGNORED: CommandResult = { handled: false }
 const STRUCTURAL: BlockOp = { type: "structural" }
 
-/** The block's own leading marker (`# `, `- `, `[ ] `, `> `, `1. `), or "". */
-function markerPrefix(content: string): string {
-  return content.slice(0, content.length - stripMarker(content).length)
-}
-
-/** What Enter puts in a new block unless the user has chosen otherwise
- * (`CommandInput.newBlockMarker`): a fresh unordered list item. */
-export const DEFAULT_NEW_BLOCK_MARKER = "- "
-
 /**
- * The marker a new sibling block should carry. Todo / ordered lists continue
+ * The type a new sibling block should take. Todo / ordered lists continue
  * their own type; everything else (paragraph, heading, quote, bullet) starts
- * with the user's configured new-block marker — an unordered list item by
+ * as the user's configured new-block type — an unordered list item by
  * default.
  */
-function continuationMarker(type: BlockType, input: CommandInput): string {
-  switch (type.kind) {
-    case "todo":
-      return "[ ] "
-    case "ordered":
-      return `${type.number + 1}. `
-    default:
-      return input.newBlockMarker ?? DEFAULT_NEW_BLOCK_MARKER
-  }
+function continuationType(type: BlockType, input: CommandInput): BlockType {
+  if (isTodo(type)) return "todo"
+  if (type === "ol") return "ol"
+  return input.newBlockType ?? DEFAULT_NEW_BLOCK_TYPE
 }
 
-/** The marker for a new block of the *same* type as `type` — used by Shift-Enter
- * so a heading splits into a heading, a quote into a quote, and so on. */
-function sameTypeMarker(type: BlockType): string {
-  switch (type.kind) {
-    case "heading":
-      return "# "
-    case "todo":
-      return "[ ] "
-    case "ordered":
-      return `${type.number + 1}. `
-    case "quote":
-      return "> "
-    case "bullet":
-      return "- "
-    default:
-      return ""
-  }
+/** The type for a new block of the *same* type as `type` — used by Shift-Enter
+ * so a heading splits into a heading, a quote into a quote, and so on. A
+ * checked todo continues as an unchecked one; a page never continues. */
+function sameType(type: BlockType): BlockType {
+  if (isTodo(type)) return "todo"
+  if (type === "page" || type === "code") return "text"
+  return type
 }
 
 /**
@@ -237,19 +207,17 @@ function moveEditFocus(direction: "up" | "down"): Command {
   }
 }
 
-/** Split the block at the caret; `markerFor` decides the new block's marker —
- * a list continuation for Enter, the same type for Shift-Enter. */
-function splitAtCaret(markerFor: (type: BlockType, input: CommandInput) => string): Command {
+/** Split the block at the caret; `typeFor` decides the new block's type — a
+ * list continuation for Enter, the same type for Shift-Enter. */
+function splitAtCaret(typeFor: (type: BlockType, input: CommandInput) => BlockType): Command {
   return (input) => {
     const { doc, id, caret, zoomRootId } = input
     if (!caret) return IGNORED
-    const content = doc.blocks[id]?.content ?? ""
-    const type = getBlockType(content)
-    const prefix = markerPrefix(content)
+    const type = doc.blocks[id]?.type ?? "text"
     const before = caret.value.slice(0, caret.start)
     const after = caret.value.slice(caret.end)
-    const updated = updateContent(doc, id, prefix + before)
-    const fresh = emptyBlock(markerFor(type, input) + after)
+    const updated = updateText(doc, id, before)
+    const fresh = emptyBlock(typeFor(type, input), after)
     // Splitting the zoomed title makes the tail its FIRST child (title + body
     // metaphor) — a sibling would fall outside the zoomed view.
     const next =
@@ -285,23 +253,22 @@ function duplicate(direction: "above" | "below"): Command {
 }
 
 /**
- * Select-mode "turn into": toggle the block to the given marker kind. Content
- * and children are never touched — this is a marker swap only, one structural
+ * Select-mode "turn into": toggle the block to the given type. Text and
+ * children are never touched — this is a type change only, one structural
  * undo step. An *empty* block additionally opens editing (caret at the end) so
  * the marker key starts you typing that block type immediately. Allowed on the
- * zoomed title too (a content-type change never escapes the view).
+ * zoomed title too (a type change never escapes the view).
  */
-function turnInto(kind: MarkerKind): Command {
+function turnInto(target: BlockType): Command {
   return ({ doc, id, mode }) => {
     const block = doc.blocks[id]
     if (!block) return IGNORED
-    const content = toggleMarker(block.content, kind)
     const result: CommandResult = {
       handled: true,
-      doc: updateContent(doc, id, content),
+      doc: updateType(doc, id, toggleType(block.type, target)),
       op: STRUCTURAL,
     }
-    if (stripMarker(content).trim() === "") return { ...result, focus: { mode: "edit", id } }
+    if (block.text.trim() === "") return { ...result, focus: { mode: "edit", id } }
     return { ...result, focus: keepFocus(mode, id) }
   }
 }
@@ -555,24 +522,25 @@ export const COMMANDS: Record<CommandName, Command> = {
     }
   },
 
-  /** Toggle a todo's checkbox from select mode (no-op on other blocks). */
+  /** Toggle a todo's checkbox from select mode (no-op on other blocks):
+   * checked is a TYPE, so this is `todo` ↔ `done`. */
   toggleTodo: ({ doc, id, mode }) => {
-    const content = doc.blocks[id]?.content ?? ""
-    if (getBlockType(content).kind !== "todo") return IGNORED
+    const type = doc.blocks[id]?.type
+    if (type !== "todo" && type !== "done") return IGNORED
     return {
       handled: true,
-      doc: updateContent(doc, id, toggleTodoContent(content)),
+      doc: updateType(doc, id, type === "todo" ? "done" : "todo"),
       op: { type: "text", blockId: id },
       focus: keepFocus(mode, id),
     }
   },
 
   /** Select-mode marker keys: toggle the block's type (see `turnInto`). */
-  turnIntoHeading: turnInto("heading"),
-  turnIntoBullet: turnInto("bullet"),
+  turnIntoHeading: turnInto("h1"),
+  turnIntoBullet: turnInto("ul"),
   turnIntoTodo: turnInto("todo"),
   turnIntoQuote: turnInto("quote"),
-  turnIntoOrdered: turnInto("ordered"),
+  turnIntoOrdered: turnInto("ol"),
 
   /** Collapse / expand a block with children; consumes Space regardless (so the
    * page never scrolls) but only toggles when there's something to fold. */
@@ -589,9 +557,8 @@ export const COMMANDS: Record<CommandName, Command> = {
    * heading nests the new block under it, like an outline section. */
   insertBelow: (input) => {
     const { doc, id, zoomRootId } = input
-    const content = doc.blocks[id]?.content ?? ""
-    const type = getBlockType(content)
-    const fresh = emptyBlock(continuationMarker(type, input))
+    const type = doc.blocks[id]?.type ?? "text"
+    const fresh = emptyBlock(continuationType(type, input))
     // On the zoomed title, "below" means the top of its body — the first child
     // (a sibling would land outside the view).
     if (zoomRootId && id === zoomRootId) {
@@ -599,15 +566,14 @@ export const COMMANDS: Record<CommandName, Command> = {
       return { handled: true, doc: next, op: STRUCTURAL, focus: { mode: "edit", id: fresh.id } }
     }
     let next = insertAfter(doc, id, fresh)
-    if (type.kind === "heading") next = indentBlock(next, fresh.id)
+    if (isHeading(type)) next = indentBlock(next, fresh.id)
     return { handled: true, doc: next, op: STRUCTURAL, focus: { mode: "edit", id: fresh.id } }
   },
 
   /** New sibling block below, of the *same* type (Cmd/Shift+Enter). Unlike
    * `insertBelow` a heading stays a heading and doesn't nest. */
   insertSiblingBelow: ({ doc, id, zoomRootId }) => {
-    const content = doc.blocks[id]?.content ?? ""
-    const fresh = emptyBlock(sameTypeMarker(getBlockType(content)))
+    const fresh = emptyBlock(sameType(doc.blocks[id]?.type ?? "text"))
     // On the zoomed title a "sibling" would leave the view — first child instead.
     const next =
       zoomRootId && id === zoomRootId
@@ -616,28 +582,26 @@ export const COMMANDS: Record<CommandName, Command> = {
     return { handled: true, doc: next, op: STRUCTURAL, focus: { mode: "edit", id: fresh.id } }
   },
 
-  splitContinuingList: splitAtCaret(continuationMarker),
+  splitContinuingList: splitAtCaret(continuationType),
   // Shift-Enter keeps the current block's type for the new block.
-  splitPlain: splitAtCaret(sameTypeMarker),
+  splitPlain: splitAtCaret(sameType),
 
   /** Enter on an empty list item exits the list (becomes a paragraph). */
   exitList: ({ doc, id }) => ({
     handled: true,
-    doc: updateContent(doc, id, ""),
+    doc: updateType(updateText(doc, id, ""), id, "text"),
     op: { type: "text", blockId: id },
     focus: { mode: "edit", id },
   }),
 
-  /** Backspace at the start of a marked block strips its marker (→ paragraph). */
-  stripMarker: ({ doc, id }) => {
-    const content = doc.blocks[id]?.content ?? ""
-    return {
-      handled: true,
-      doc: updateContent(doc, id, stripMarker(content)),
-      op: { type: "text", blockId: id },
-      focus: { mode: "edit", id, atStart: true },
-    }
-  },
+  /** Backspace at the start of a typed block drops its type (→ paragraph); the
+   * text stays exactly as it was. */
+  stripMarker: ({ doc, id }) => ({
+    handled: true,
+    doc: updateType(doc, id, "text"),
+    op: { type: "text", blockId: id },
+    focus: { mode: "edit", id, atStart: true },
+  }),
 
   /** Backspace at the start of an empty block removes it, merging upward. */
   backspaceEmpty: ({ doc, id, zoomRootId }) => {

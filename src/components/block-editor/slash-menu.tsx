@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react"
 import type { CSSProperties } from "react"
 import { slashGroupOf, type SlashItem } from "../../blocks/slash-menu"
+import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
 import { CalendarDateIcon16 } from "../icons"
 
@@ -9,20 +10,23 @@ export const SLASH_MENU_WIDTH = 256
 
 /** The glyph in a "turn into" row's icon slot — the marker the block will
  * carry, drawn as chrome the way the editor draws real markers. */
-function blockGlyph(type: Extract<SlashItem, { kind: "block" }>["type"]): string {
+function blockGlyph(type: BlockType): string {
   switch (type) {
-    case "paragraph":
-      return "Aa"
-    case "bullet":
+    case "ul":
       return "•"
-    case "ordered":
+    case "ol":
       return "1."
     case "todo":
+    case "done":
       return "☐"
-    case "heading":
+    case "h1":
+    case "h2":
+    case "h3":
       return "#"
     case "quote":
       return "❝"
+    default:
+      return "Aa"
   }
 }
 

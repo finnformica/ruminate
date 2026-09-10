@@ -1,9 +1,16 @@
 import { useAtomValue } from "jotai"
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import type { ClipboardEvent, FocusEvent, KeyboardEvent } from "react"
+import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent } from "react"
 import { newBlockMarkerAtom } from "../../global-state"
 import type { BlockDoc } from "../../blocks/types"
-import { getBlockType, MARKER_KEYS, stripMarker, toggleMarker } from "../../blocks/block-type"
+import {
+  isHeading,
+  leadingMarker,
+  markerFor,
+  toggleType,
+  TURN_INTO_KEYS,
+  typeOfMarker,
+} from "../../blocks/markers"
 import {
   runCommand,
   type CaretInput,
@@ -14,6 +21,7 @@ import {
 } from "../../blocks/commands"
 import { resolveKey, type KeyLike } from "../../blocks/keymap"
 import { parse } from "../../blocks/parse"
+import { buildRows, firstOccurrenceKey, keyOf } from "../../blocks/view"
 import {
   ancestorsOf,
   duplicateBlocks,
@@ -28,7 +36,8 @@ import {
   siblingsOf,
   spliceBlocks,
   subtreeIds,
-  updateContent,
+  updateBlock,
+  updateType,
 } from "../../blocks/ops"
 import { htmlToMarkdown } from "../../utils/html-to-markdown"
 import type { BlockRevealRequest } from "../../utils/note-outline"
@@ -59,10 +68,7 @@ function findHeadingBlockId(doc: BlockDoc, heading: string): string | null {
       if (found) return
       const block = doc.blocks[id]
       if (!block) continue
-      if (
-        getBlockType(block.content).kind === "heading" &&
-        stripMarker(block.content).trim() === target
-      ) {
+      if (isHeading(block.type) && block.text.trim() === target) {
         found = id
         return
       }
@@ -228,12 +234,13 @@ export function BlockEditor({
   /** Highlight the block for this heading text on mount / when it changes. */
   highlightHeading?: string
   /**
-   * Collapsed block ids. Optional: when provided (with `onToggleCollapse`),
-   * collapse is controlled and persisted by the caller; otherwise it falls back
-   * to transient local state (e.g. Storybook / standalone usage).
+   * Folded occurrence keys (`src/blocks/view.ts`). Optional: when provided
+   * (with `onToggleCollapse`), collapse is controlled and persisted by the
+   * caller; otherwise it falls back to transient local state (e.g. Storybook /
+   * standalone usage).
    */
   collapsed?: Set<string>
-  onToggleCollapse?: (id: string) => void
+  onToggleCollapse?: (key: string) => void
   /** Called when the user navigates up past the first block — lets the caller
    * move focus to whatever sits above the editor (e.g. the note title). */
   onExitTop?: () => void
@@ -518,29 +525,24 @@ export function BlockEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealRequest, readOnly])
 
-  // Blocks in the order they appear on screen (depth-first, skipping the
-  // children of collapsed blocks). Used for up/down navigation.
-  const visibleOrder = useMemo(() => {
-    const order: string[] = []
-    const walk = (ids: string[]) => {
-      for (const id of ids) {
-        const block = doc.blocks[id]
-        if (!block) continue
-        order.push(id)
-        if (!collapsed.has(id)) walk(block.children)
-      }
-    }
-    if (zoomRoot) {
-      // The zoomed block leads the order as the view's editable title (so
-      // arrow-up from the first child selects it); its children always render
-      // — the root's own collapse state is ignored while zoomed.
-      order.push(zoomRoot.id)
-      walk(zoomRoot.children)
-    } else {
-      walk(doc.rootBlockIds)
-    }
-    return order
-  }, [doc, collapsed, zoomRoot])
+  // The view: the rows on screen, in order, indented by depth, folds applied
+  // (`buildRows`). Zoomed, the zoomed block leads as the view's editable
+  // title (so arrow-up from the first child selects it) and its children
+  // always render — the root's own fold is ignored while zoomed.
+  const rows = useMemo(
+    () => buildRows(doc, { zoomRootId: zoomRoot ? zoomRoot.id : null, folds: collapsed }),
+    [doc, collapsed, zoomRoot],
+  )
+  // Block ids in the order they appear on screen. Used for up/down navigation.
+  // (Selection and the commands still key by block id; a block occurring
+  // twice in the view is addressed by its first row — docs/graph-native-app.md.)
+  const visibleOrder = useMemo(() => rows.map((row) => row.id), [rows])
+  // The occurrence key a block id is addressed by: its first row in the view,
+  // else its first occurrence in the document (a block hidden under a fold).
+  const keyOfId = (id: string, inDoc: BlockDoc = doc): string => {
+    for (const row of rows) if (row.id === id) return row.key
+    return firstOccurrenceKey(inDoc, id) ?? id
+  }
 
   // The selected block ids. Single select is just `[selected]`; a Shift+Arrow
   // range is the contiguous span of `visibleOrder` between anchor and head.
@@ -568,15 +570,15 @@ export function BlockEditor({
   const selectionRunEdges = useMemo(() => {
     const edges = new Map<string, { top: boolean; bottom: boolean }>()
     if (selectedSet.size < 2) return edges
-    const isHeading = (id: string) => getBlockType(doc.blocks[id]?.content ?? "").kind === "heading"
+    const headingAt = (id: string) => isHeading(doc.blocks[id]?.type ?? "text")
     for (let i = 0; i < visibleOrder.length; i++) {
       const id = visibleOrder[i]
       if (!selectedSet.has(id)) continue
       const prev = i > 0 ? visibleOrder[i - 1] : null
       const next = i + 1 < visibleOrder.length ? visibleOrder[i + 1] : null
-      const top = prev !== null && selectedSet.has(prev) && !isHeading(id) && prev !== zoomRoot?.id
+      const top = prev !== null && selectedSet.has(prev) && !headingAt(id) && prev !== zoomRoot?.id
       const bottom =
-        next !== null && selectedSet.has(next) && !isHeading(next) && id !== zoomRoot?.id
+        next !== null && selectedSet.has(next) && !headingAt(next) && id !== zoomRoot?.id
       if (top || bottom) edges.set(id, { top, bottom })
     }
     return edges
@@ -765,7 +767,9 @@ export function BlockEditor({
       const block = doc.blocks[id]
       if (!block) return
       const indent = "  ".repeat(depth)
-      lines.push(indent + block.content)
+      // Markers are export-only: an ordered item is written `1.` here and
+      // renumbered wherever it lands (the parse side reads runs by position).
+      lines.push(indent + markerFor(block.type) + block.text)
       lines.push(`${indent}  id:: ${block.id}`)
       for (const childId of block.children) walk(childId, depth + 1)
     }
@@ -889,24 +893,35 @@ export function BlockEditor({
     return true
   }
 
-  const toggleCollapse = (id: string) => {
+  // The occurrence just unfolded, for the render that reveals its rows: those
+  // rows mount with their brief entrance (see `animateIn` in block-item.tsx).
+  // Cleared right after — the rows keep the class for their lifetime, so the
+  // animation is never cut short, and later rows under the same key never
+  // replay it.
+  const [justOpened, setJustOpened] = useState<string | null>(null)
+  useEffect(() => {
+    if (justOpened !== null) setJustOpened(null)
+  }, [justOpened])
+
+  const toggleCollapse = (key: string) => {
+    if (collapsed.has(key)) setJustOpened(key)
     if (onToggleCollapse) {
-      onToggleCollapse(id)
+      onToggleCollapse(key)
       return
     }
     setCollapsedInternal((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
 
   /** Drive collapse to an explicit state (paste lands its subtrees folded).
    * `toggleCollapse` is the only setter either owner of the state exposes, so
-   * a block already in the wanted state is left alone rather than flipped. */
-  const setCollapsedState = (id: string, shouldCollapse: boolean) => {
-    if (collapsed.has(id) !== shouldCollapse) toggleCollapse(id)
+   * a row already in the wanted state is left alone rather than flipped. */
+  const setCollapsedState = (key: string, shouldCollapse: boolean) => {
+    if (collapsed.has(key) !== shouldCollapse) toggleCollapse(key)
   }
 
   // Interpret a command's result: commit any doc change to history, toggle
@@ -924,13 +939,15 @@ export function BlockEditor({
   }
   const applyResult = (result: CommandResult) => {
     if (result.doc) history.commit(doc, result.doc, result.op ?? { type: "structural" })
-    if (result.toggleCollapse) toggleCollapse(result.toggleCollapse)
+    // Commands name blocks; folds are per row — resolve through the view.
+    const next = result.doc ?? doc
+    if (result.toggleCollapse) toggleCollapse(keyOfId(result.toggleCollapse, next))
     // `expand` is a demand ("this block must be open"), not a toggle: only act
     // when the block is actually collapsed (commands can't see collapse state).
-    if (result.expand && collapsed.has(result.expand)) toggleCollapse(result.expand)
+    if (result.expand) setCollapsedState(keyOfId(result.expand, next), false)
     // `collapse` is the symmetric demand ("this block must be closed"): only
     // act when the block is actually open.
-    if (result.collapse && !collapsed.has(result.collapse)) toggleCollapse(result.collapse)
+    if (result.collapse) setCollapsedState(keyOfId(result.collapse, next), true)
     if (result.focus) applyFocus(result.focus)
     // Zoom changes navigate (URL state); the zoom-change effect then places the
     // selection (first child on zoom-in, the block zoomed out from on zoom-out).
@@ -958,7 +975,7 @@ export function BlockEditor({
       caret,
       zoomRootId,
       zoomBackId,
-      newBlockMarker,
+      newBlockType: typeOfMarker(newBlockMarker),
     }
     const name = resolveKey(mode, event, input)
     if (!name) return false
@@ -973,7 +990,6 @@ export function BlockEditor({
     selected,
     selectedSet,
     selectionRunEdges,
-    collapsed,
     readOnly,
     // Read-only views never take keyboard focus, but their highlights are
     // plain display state — never demote them to "inactive".
@@ -982,35 +998,40 @@ export function BlockEditor({
     edit,
     toggleCollapse,
     setFocus,
-    onContentChange: (id, content, op = "text") =>
+    onBlockChange: (id, patch, op = "text") => {
+      const next = updateBlock(doc, id, patch)
+      if (next === doc) return
       history.commit(
         doc,
-        updateContent(doc, id, content),
+        next,
         op === "structural" ? { type: "structural" } : { type: "text", blockId: id },
-      ),
-    onPaste: (id, prefix, before, pasted, after) => {
-      // Re-form the block's line with the pasted text spliced in at the caret,
-      // then parse the whole thing so markdown prefixes and blank lines become
-      // the right blocks. The current block's marker stays on the first line —
+      )
+    },
+    onPaste: (id, before, pasted, after) => {
+      // Re-form the block's text with the pasted text spliced in at the caret,
+      // then parse (import) the whole thing so markdown markers and blank
+      // lines become the right blocks. The current block keeps its type —
       // unless the caret sits at the start and the pasted content opens with
       // its own marker, in which case the paste defines the block type (so
-      // pasting "# Title" into a heading doesn't become "# # Title", leaving
-      // a literal "#" in the text).
+      // pasting "# Title" into a heading is a heading, not a heading whose
+      // text starts with a literal "#").
       const pastedFirstLine = pasted.slice(
         0,
         pasted.includes("\n") ? pasted.indexOf("\n") : undefined,
       )
-      const pastedHasMarker = stripMarker(pastedFirstLine) !== pastedFirstLine
-      const line =
-        before === "" && pastedHasMarker ? pasted + after : prefix + before + pasted + after
+      const pasteDefinesType = before === "" && leadingMarker(pastedFirstLine) !== null
       // Reminting keeps a pasted `id::` from clobbering an existing block.
-      const sub = remintCollidingIds(parse(line), doc)
+      let sub = remintCollidingIds(parse(before + pasted + after), doc)
+      const currentType = doc.blocks[id]?.type
+      if (!pasteDefinesType && currentType !== undefined && sub.rootBlockIds.length > 0) {
+        sub = updateType(sub, sub.rootBlockIds[0], currentType)
+      }
       const result = spliceBlocks(doc, id, sub)
       if (!result) return
       history.commit(doc, result.doc, { type: "structural" })
       // Place the caret at the paste boundary — just before the trailing text.
       const last = result.doc.blocks[result.lastId]
-      const caret = Math.max(0, stripMarker(last.content).length - after.length)
+      const caret = Math.max(0, last.text.length - after.length)
       setSelected(result.lastId)
       setFocus({ id: result.lastId, caret })
     },
@@ -1160,13 +1181,13 @@ export function BlockEditor({
       // structural commit = one undo step. Shift AND Alt are fine — # and >
       // need Shift on many layouts, and non-US Macs type symbols with Option
       // (UK # is Alt+3). Only Mod combos stay the browser's.
-      const kind = MARKER_KEYS[event.key]
-      if (kind && !mod) {
+      const target = TURN_INTO_KEYS[event.key]
+      if (target && !mod) {
         event.preventDefault()
         let next = doc
         for (const rootId of selectionRoots()) {
           const block = next.blocks[rootId]
-          if (block) next = updateContent(next, rootId, toggleMarker(block.content, kind))
+          if (block) next = updateType(next, rootId, toggleType(block.type, target))
         }
         if (next !== doc) history.commit(doc, next, { type: "structural" })
         return
@@ -1259,9 +1280,12 @@ export function BlockEditor({
      * is visible, and fold each pasted root so a big subtree arrives as one
      * line rather than dumping its whole tree into the view. */
     const settleAfterPaste = (rootIds: string[], nextDoc: BlockDoc) => {
-      setCollapsedState(target, false)
+      const targetKey = keyOfId(target)
+      setCollapsedState(targetKey, false)
       for (const id of rootIds) {
-        if ((nextDoc.blocks[id]?.children.length ?? 0) > 0) setCollapsedState(id, true)
+        // Pasted roots land as the target's first children.
+        if ((nextDoc.blocks[id]?.children.length ?? 0) > 0)
+          setCollapsedState(keyOf(targetKey, id), true)
       }
     }
     if (plain) {
@@ -1269,10 +1293,10 @@ export function BlockEditor({
       // (a block is a single line in the serialized format). Bypasses the html
       // flavor entirely.
       if (normalized.trim() === "") return
-      const fresh = emptyBlock(normalized.replace(/\s*\n+\s*/g, " ").trim())
+      const fresh = emptyBlock("text", normalized.replace(/\s*\n+\s*/g, " ").trim())
       const next = insertFirstChild(doc, target, fresh)
       if (next === doc) return
-      setCollapsedState(target, false)
+      setCollapsedState(keyOfId(target), false)
       history.commit(doc, next, { type: "structural" })
       setAnchorId(null)
       setFocus(null)
@@ -1342,7 +1366,7 @@ export function BlockEditor({
           // One entry per block (content + id line) so `picked.length` still
           // counts blocks; the id rides to the embedded payload only.
           const indent = "  ".repeat(depth)
-          picked.push(`${indent}${block.content}\n${indent}  id:: ${bid}`)
+          picked.push(`${indent}${markerFor(block.type)}${block.text}\n${indent}  id:: ${bid}`)
           pickedSet.add(bid)
         }
         walk(block.children, depth + 1)
@@ -1403,7 +1427,7 @@ export function BlockEditor({
         if (el && selection.containsNode(el, true)) {
           // Content + id line as one entry — see the cut handler's note.
           const indent = "  ".repeat(depth)
-          picked.push(`${indent}${block.content}\n${indent}  id:: ${id}`)
+          picked.push(`${indent}${markerFor(block.type)}${block.text}\n${indent}  id:: ${id}`)
         }
         walk(block.children, depth + 1)
       }
@@ -1432,11 +1456,38 @@ export function BlockEditor({
     [doc, zoomRootId, zoomStack],
   )
   const crumbLabel = (id: string): string => {
-    const text = stripMarker(doc.blocks[id]?.content ?? "").trim()
+    const text = (doc.blocks[id]?.text ?? "").trim()
     return text === "" ? "…" : text
   }
   const crumbClass =
     "min-w-0 max-w-48 cursor-pointer truncate rounded-sm px-1 transition-colors duration-150 hover:bg-bg-secondary hover:text-text"
+
+  // ── Guide lines ───────────────────────────────────────────────────────────
+  // Every row draws the guide lines of the rows it is indented under (one per
+  // level, `guideKeys`), so a parent's line runs continuously beside its
+  // subtree. Pointing anywhere in a subtree brightens the lines that trace it
+  // — the guides of the row under the pointer and of all its ancestors. That
+  // is a class toggled straight on the DOM: the rows themselves never
+  // re-render for a hover.
+  const hotGuides = useRef<{ key: string | null; els: Element[] }>({ key: null, els: [] })
+  const setHotGuides = (key: string | null) => {
+    if (hotGuides.current.key === key) return
+    for (const el of hotGuides.current.els) el.classList.remove("block-guide-hot")
+    hotGuides.current = { key, els: [] }
+    const container = containerRef.current
+    if (key === null || !container) return
+    const segments = key.split("/")
+    const selector = segments
+      .map((_, i) => `[data-guide="${segments.slice(0, i + 1).join("/")}"]`)
+      .join(",")
+    const els = Array.from(container.querySelectorAll(selector))
+    for (const el of els) el.classList.add("block-guide-hot")
+    hotGuides.current.els = els
+  }
+  const handleMouseOver = (event: MouseEvent<HTMLDivElement>) => {
+    const row = (event.target as HTMLElement).closest<HTMLElement>("[data-occurrence]")
+    setHotGuides(row?.dataset.occurrence ?? null)
+  }
 
   return (
     <>
@@ -1472,7 +1523,7 @@ export function BlockEditor({
           which block is highlighted. outline-none hides the focus ring. */}
       {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
       <div
-        className="space-y-0.5 outline-none"
+        className="outline-none"
         ref={containerRef}
         tabIndex={-1}
         onKeyDown={handleKeyDown}
@@ -1481,25 +1532,26 @@ export function BlockEditor({
         onCopy={handleCopy}
         onPaste={handleContainerPaste}
         onCut={handleCut}
+        onMouseOver={handleMouseOver}
+        onMouseLeave={() => setHotGuides(null)}
       >
-        {zoomRoot ? (
-          <>
-            {/* The zoomed block is the view's editable title; its children are
-                the page, starting again at depth 0. */}
-            <BlockItem key={zoomRoot.id} doc={doc} block={zoomRoot} depth={0} api={api} zoomTitle />
-            {zoomRoot.children.map((id) => {
-              const block = doc.blocks[id]
-              if (!block) return null
-              return <BlockItem key={id} doc={doc} block={block} depth={0} api={api} />
-            })}
-          </>
-        ) : (
-          doc.rootBlockIds.map((id) => {
-            const block = doc.blocks[id]
-            if (!block) return null
-            return <BlockItem key={id} doc={doc} block={block} depth={0} api={api} />
-          })
-        )}
+        {/* The view is a flat list: one row per occurrence, indented by its
+            depth. Zoomed, the first row is the zoomed block as the view's
+            editable title and its children follow at depth 0. */}
+        {rows.map((row) => {
+          const block = doc.blocks[row.id]
+          if (!block) return null
+          return (
+            <BlockItem
+              key={row.key}
+              doc={doc}
+              block={block}
+              occurrence={row}
+              api={api}
+              animateIn={justOpened !== null && row.guideKeys.includes(justOpened)}
+            />
+          )
+        })}
       </div>
     </>
   )

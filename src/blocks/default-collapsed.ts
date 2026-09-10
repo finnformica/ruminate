@@ -1,5 +1,6 @@
-import { getBlockType } from "./block-type"
+import { isHeading } from "./markers"
 import type { BlockDoc } from "./types"
+import { keyOf } from "./view"
 
 /**
  * The default-expansion policy (docs/graph-schema-v2.md): headings are always
@@ -12,25 +13,29 @@ import type { BlockDoc } from "./types"
  */
 const EXPANDED_LEVELS = 2
 
-/** Block ids collapsed by default for this document. Pure; O(blocks). */
-export function defaultCollapsedIds(doc: BlockDoc): string[] {
+/** Occurrence keys collapsed by default for this document. Pure; O(rows). */
+export function defaultCollapsedKeys(doc: BlockDoc): string[] {
   const collapsed: string[] = []
 
   // `level` = distance below the nearest heading ancestor (or the page root):
   // direct children are level 1. A heading resets the count for its subtree.
-  const walk = (ids: string[], level: number) => {
+  const path = new Set<string>()
+  const walk = (ids: string[], parentKey: string | null, level: number) => {
     for (const id of ids) {
       const block = doc.blocks[id]
-      if (!block) continue
-      if (getBlockType(block.content).kind === "heading") {
-        walk(block.children, 1)
-        continue
+      if (!block || path.has(id)) continue
+      const key = keyOf(parentKey, id)
+      path.add(id)
+      if (isHeading(block.type)) {
+        walk(block.children, key, 1)
+      } else {
+        if (level >= EXPANDED_LEVELS && block.children.length > 0) collapsed.push(key)
+        walk(block.children, key, level + 1)
       }
-      if (level >= EXPANDED_LEVELS && block.children.length > 0) collapsed.push(id)
-      walk(block.children, level + 1)
+      path.delete(id)
     }
   }
-  walk(doc.rootBlockIds, 1)
+  walk(doc.rootBlockIds, null, 1)
 
   return collapsed
 }

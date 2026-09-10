@@ -1,4 +1,5 @@
 import yaml from "yamljs"
+import type { BlockDoc } from "../blocks/types"
 
 /** Reserved frontmatter keys that are not displayed to users. `title` is
  * projection-owned (src/data/page-identity.ts): it carries the page's name
@@ -278,6 +279,19 @@ export function updateFrontmatterValue({
 }
 
 /**
+ * `updateFrontmatterValue` for a typed doc: the doc's frontmatter (the YAML
+ * between the fences, verbatim) with the properties applied, blocks untouched.
+ */
+export function updateDocFrontmatter(doc: BlockDoc, properties: Record<string, unknown>): BlockDoc {
+  const content = doc.frontmatter === null ? "" : `---\n${doc.frontmatter}\n---\n`
+  const updated = updateFrontmatterValue({ content, properties })
+  const match = updated.match(/^---\n([\s\S]*?)\n---/)
+  const frontmatter = match ? match[1] : null
+  if (frontmatter === doc.frontmatter) return doc
+  return { ...doc, frontmatter }
+}
+
+/**
  * Renames a frontmatter key, preserving the existing value formatting.
  * If the new key already exists, its value will be replaced
  * with the old key's value, and the old key will be removed.
@@ -336,30 +350,4 @@ export function updateFrontmatterKey({
 
     return `---\n${lines.join("\n")}\n---`
   })
-}
-
-/**
- * Strips comment lines (`# …`) from a template's frontmatter block, leaving the
- * body untouched. Used when materializing a template into a note.
- */
-export function removeFrontmatterComments(text: string) {
-  const lines = text.split("\n")
-  const frontmatterStart = lines.findIndex((line) => line.startsWith("---"))
-  const frontmatterEnd =
-    lines.slice(frontmatterStart + 1).findIndex((line) => line.startsWith("---")) +
-    frontmatterStart +
-    1
-
-  if (frontmatterStart === -1 || frontmatterEnd === -1) {
-    return text
-  }
-
-  const frontmatterLines = lines
-    .slice(frontmatterStart, frontmatterEnd + 1)
-    .filter((line) => !line.startsWith("#"))
-  return lines
-    .slice(0, frontmatterStart)
-    .concat(frontmatterLines)
-    .concat(lines.slice(frontmatterEnd + 1))
-    .join("\n")
 }
