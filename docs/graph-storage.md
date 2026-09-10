@@ -57,19 +57,26 @@ one D1 database behind the Worker                 ← the authoritative cross-de
 
 ### How the app is fed
 
-Everything above `src/data` reads one atom: `markdownFilesAtom`, a
-repo-file-shaped map of `<id>.md` entries. `src/data/database-mode.ts`
-synthesizes that map from the SQL store — each entry is the rollup of its page
-node — into `databaseFilesAtom`, and `markdownFilesAtom` serves it whenever a
-user is signed in. `notesAtom`, tags, templates, search, the editor's
-external-change path (`useEditorValue`), all read the same shape. The editor,
-parser, and UI were untouched by the v2 cutover — they still speak markdown.
+Everything above `src/data` reads one atom: `graphSnapshotAtom`, the
+`GraphSnapshot` of every live row (`nodes` by id, `childLinks` by parent).
+`src/data/database-mode.ts` serves the SQL store's rows into
+`databaseGraphAtom`, and `graphSnapshotAtom` reads it whenever a user is
+signed in. `notesAtom` is derived from it per page (`src/data/note-meta.ts`:
+title, props, tags and priorities from block text, tasks, headings, memoized
+by the page's row identities), search and the block index read those notes,
+and the open note's editor walks its page straight off the snapshot
+(`pageDoc` via `useNoteDoc`). Markdown is a projection at the edges only —
+the rollup for copy, share and export, `parse` for pasted or imported text.
 
 A small XState machine (`src/global-state.ts`) handles the rest: auth
-resolution at boot (`resolvingUser` → `signedIn` / `signedOut`),
-sign-in/sign-out, and the signed-out sample notes. The write seam
-(`src/data/store.ts`) routes all writes to `databaseWriteFiles`; signed out
-(sample notes) the runtime is not mounted and writes are no-ops.
+resolution at boot (`resolvingUser` → `signedIn` / `signedOut`) and
+sign-in/sign-out. Signed out, `graphSnapshotAtom` reads `sampleGraphAtom`
+(hard-coded sample blocks, `src/data/sample-graph.ts`), which the same
+writers edit in memory. The write seam (`src/data/store.ts`) is one hook,
+`useApplyOps`: every writer — the editor's diff (`docToOps`), rename, page
+props, create, delete, tag rename — hands it a batch of graph ops
+(`src/data/ops.ts`), routed to `databaseApplyOps` signed in and to the sample
+atom signed out (docs/graph-native-app.md).
 
 ### Boot, saves, and sync
 
@@ -83,18 +90,21 @@ sign-in/sign-out, and the signed-out sample notes. The write seam
   `database-mode.ts` makes every device discard its local copy once and
   re-pull, the escape hatch for a protocol change that leaves old caches
   holding rows nothing can correct.
-- **Saves:** files-shaped writes land in the files atom synchronously (the UI
-  never waits), then the SQL store ingests them as a **row diff** — nodes
-  whose type/text/props changed, links whose sort key changed, deletions —
-  and that diff (not a whole-note replace) is queued for the replica —
-  write-behind, coalesced by row, backoff-retried (`replica-sync.ts`). Hiding
-  or closing the tab flushes the queue immediately with `fetch keepalive`.
+- **Saves:** a batch of ops is applied to the graph atom synchronously (the
+  UI never waits) and coalesced for 150 ms, then written to the SQL store
+  verbatim — it is already the **row diff**: nodes whose type/text/props
+  changed, links whose sort key changed, deletions — and that diff (not a
+  whole-note replace) is queued for the replica — write-behind, coalesced by
+  row, backoff-retried (`replica-sync.ts`). Pulls, repairs, ⌘S and hiding or
+  closing the tab flush pending ops first; closing also flushes the replica
+  queue with `fetch keepalive`.
   The push loop is not leader-gated: every tab pushes its own writes, and
   per-row last-writer-wins at the replica makes concurrent tab pushes safe.
 - **Cross-device sync:** visibility change, window focus, and coming back
   online (plus a retry timer after a failed pull) re-run the since-cursor
-  pull. Applied rows flow through the store into the atoms; the open editor
-  picks them up through `useEditorValue`'s existing external-change path.
+  pull. Applied rows flow through the store into the graph atom (pending
+  local ops re-applied on top); the open editor re-walks its page from the
+  new snapshot, so another device's edit shows the moment it lands.
 - **Offline:** the OPFS store serves everything; pushes queue with backoff and
   pulls retry on the `online` event. A first-ever boot while offline shows an
   explanatory empty state; anything written then is kept locally and synced
@@ -256,7 +266,7 @@ write path (`reconcileSortKeys`) keeps existing keys wherever the relative
 order allows, so an unchanged sibling produces no row change. Multi-parent is
 just two link rows pointing at one node; the same-parent duplicate is
 unrepresentable by the primary key. Tags stay derived from `text` in memory
-(`parseNote`), not materialized — `kind` reserves the slot. (Wikilinks were
+(`tagsInText` in `note-meta.ts`), not materialized — `kind` reserves the slot. (Wikilinks were
 removed as a feature; `[[...]]` in text is plain text.)
 
 ### `meta` (key/value)
