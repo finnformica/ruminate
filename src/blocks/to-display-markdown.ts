@@ -1,4 +1,5 @@
 import { frontmatterTextOfProps } from "../data/frontmatter-props"
+import { imageLine } from "./image"
 import { isListItem, markerFor } from "./markers"
 import { parse } from "./parse"
 import type { Block, BlockDoc } from "./types"
@@ -16,6 +17,7 @@ import type { Block, BlockDoc } from "./types"
  * prose blocks are separated by blank lines so they don't run together.
  */
 function displayLine(block: Block, olPosition: number): string {
+  if (block.type === "image") return imageLine(block)
   const marker = markerFor(block.type, olPosition)
   // Todos are stored as `[ ] text`; GFM needs a list bullet in front.
   return (block.type === "todo" || block.type === "done" ? "- " : "") + marker + block.text

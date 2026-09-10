@@ -2,10 +2,16 @@ import { useAtomValue, useSetAtom, useStore } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { emptyBlock } from "../../blocks/ops"
 import type { BlockDoc } from "../../blocks/types"
+import { imagesEnabled, uploadImage } from "../../data/images"
 import { deleteBlockOps, parentCount } from "../../data/ops"
 import { useApplyOps } from "../../data/store"
 import { useCollapseState } from "../../data/view-state"
-import { blockRevealAtom, graphSnapshotAtom, noteOutlineAtom } from "../../global-state"
+import {
+  blockRevealAtom,
+  graphSnapshotAtom,
+  isDatabaseModeAtom,
+  noteOutlineAtom,
+} from "../../global-state"
 import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
 import { buildOutline } from "../../utils/note-outline"
 import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
@@ -190,6 +196,12 @@ export function BlockNoteEditor({
     [applyOps, jotaiStore],
   )
 
+  // Images (docs/images.md): pasted pictures upload to the Worker — only where
+  // the build has the feature on and the reader is signed in (the sample
+  // corpus has nowhere to put bytes). Off, the editor never offers it.
+  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
+  const onImageUpload = imagesEnabled && isDatabaseMode && !readOnly ? uploadImage : undefined
+
   // Developer mode (`src/hooks/is-developer.ts`): the debug readouts, and the
   // corpus index behind the "upstream" metadata. Both are inert — no corpus
   // subscription, no extra chrome — unless the developer switched them on.
@@ -242,6 +254,7 @@ export function BlockNoteEditor({
       noteId={noteId}
       parentCountOf={noteId ? parentCountOf : undefined}
       onDeleteEverywhere={noteId ? deleteEverywhere : undefined}
+      onImageUpload={onImageUpload}
     />
   )
 }

@@ -11,6 +11,9 @@
  * - `VITE_GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` drive the GitHub OAuth
  *   token exchange. The secret must be set with `wrangler secret put`, never
  *   committed.
+ * - `IMAGES` (an R2 bucket) and `VITE_IMAGES_ENABLED` switch on image
+ *   uploads (worker/handlers/images.ts, docs/images.md). Both optional: with
+ *   either missing the image routes answer 501 and the feature is a no-op.
  */
 export interface Env {
   ASSETS: Fetcher
@@ -23,4 +26,9 @@ export interface Env {
    * (fail closed). See worker/handlers/tenancy.ts. */
   SIGNUP_MODE?: string
   GITHUB_CLIENT_SECRET: string
+  /** Image bytes (docs/images.md). Absent until the bucket is bound. */
+  IMAGES?: R2Bucket
+  /** "true" switches the image routes on; the same variable, at build time,
+   * switches the client's upload paths on. Anything else = off. */
+  VITE_IMAGES_ENABLED?: string
 }

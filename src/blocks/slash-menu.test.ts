@@ -195,3 +195,12 @@ describe("applySlashItem", () => {
     expect(result).toEqual({ text: "", type: "text", caret: 0 })
   })
 })
+
+describe("image option", () => {
+  test("is offered only where images are switched on", () => {
+    const labels = (items: SlashItem[]) => items.map((item) => item.label)
+    expect(labels(slashMenuItems("ima", NOW))).toEqual([])
+    expect(labels(slashMenuItems("ima", NOW, { images: true }))).toEqual(["Image"])
+    expect(labels(slashMenuItems("photo", NOW, { images: true }))).toEqual(["Image"])
+  })
+})

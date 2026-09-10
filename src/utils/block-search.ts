@@ -72,6 +72,7 @@ const BLOCK_TYPE_VALUES: Record<string, readonly BlockType[]> = {
   ol: ["ol"],
   quote: ["quote"],
   code: ["code"],
+  image: ["image"],
   text: ["text"],
 }
 

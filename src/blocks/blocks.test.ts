@@ -305,3 +305,29 @@ describe("whitespace and line endings", () => {
     expect(doc.blocks).toEqual({})
   })
 })
+
+describe("image blocks", () => {
+  const IMAGE = `A picture:
+  id:: blk_aaa
+  ![A sunset](/api/images/img_abcdefghijklmnop)
+    id:: blk_bbb
+![](https://example.com/pic.png)
+  id:: blk_ccc
+`
+
+  it("reads a whole-line markdown image as an image block and writes it back", () => {
+    const doc = parse(IMAGE)
+    expect(doc.blocks["blk_bbb"].type).toBe("image")
+    expect(doc.blocks["blk_bbb"].text).toBe("A sunset")
+    expect(doc.blocks["blk_bbb"].props).toEqual({ image: "img_abcdefghijklmnop" })
+    // An external picture keeps its URL as `src`.
+    expect(doc.blocks["blk_ccc"].type).toBe("image")
+    expect(doc.blocks["blk_ccc"].props).toEqual({ src: "https://example.com/pic.png" })
+    expect(serialize(doc)).toBe(IMAGE)
+  })
+
+  it("an image mid-sentence stays text", () => {
+    const doc = parse("See ![pic](/api/images/img_abcdefghijklmnop) here\n  id:: blk_a\n")
+    expect(doc.blocks["blk_a"].type).toBe("text")
+  })
+})

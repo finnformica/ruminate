@@ -134,6 +134,7 @@ export const STATIC_QUALIFIER_OPTIONS: Readonly<Record<string, readonly Qualifie
     { value: "ordered", description: "numbered item" },
     { value: "quote", description: "quote" },
     { value: "code", description: "code" },
+    { value: "image", description: "image" },
     { value: "text", description: "paragraph" },
     { value: "note", description: "notes: plain notes" },
     { value: "daily", description: "notes: daily" },

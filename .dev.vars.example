@@ -4,3 +4,6 @@
 
 VITE_GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
+# Image uploads (docs/images.md): "true" with an IMAGES R2 binding in
+# wrangler.jsonc switches the /api/images routes on; otherwise they answer 501.
+VITE_IMAGES_ENABLED=false

@@ -47,6 +47,9 @@ export interface BlockMenuActions {
   remove: (key: string) => void
   /** Delete the block from every place it appears. Absent standalone. */
   deleteEverywhere?: (id: string) => void
+  /** Image rows: expand the picture, and save it to the device. */
+  openImage?: (id: string) => void
+  downloadImage?: (id: string) => void
 }
 
 /** The types a block can be turned into, in the slash menu's order. */
@@ -106,39 +109,51 @@ export function BlockContextMenu({
 function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMenuActions }) {
   const { key, id } = target
   const shared = target.places > 1
+  const image = target.type === "image"
   return (
     <>
       <DropdownMenu.Item icon={<EditIcon16 />} shortcut={["↵"]} onClick={() => actions.edit(key)}>
-        Edit
+        {image ? "Edit caption" : "Edit"}
       </DropdownMenu.Item>
-      <Menu.SubmenuRoot>
-        <Menu.SubmenuTrigger className="group flex h-8 cursor-pointer select-none items-center gap-3 rounded px-3 outline-hidden focus:bg-bg-hover data-[popup-open]:bg-bg-hover coarse:h-10">
-          <div className="flex w-0 grow items-center gap-3">
-            <div className="flex w-4 text-text-secondary" />
-            <span className="grow truncate">Turn into</span>
-          </div>
-          <span aria-hidden className="text-text-tertiary">
-            ›
-          </span>
-        </Menu.SubmenuTrigger>
-        <Menu.Portal>
-          <Menu.Positioner side="right" align="start" sideOffset={4}>
-            <Menu.Popup className={popupClass} style={{ width: 200 }}>
-              <div className="grid p-1">
-                {TYPES.map((option) => (
-                  <DropdownMenu.Item
-                    key={option.type}
-                    selected={currentType(target.type) === option.type}
-                    onClick={() => actions.setType(id, option.type)}
-                  >
-                    {option.label}
-                  </DropdownMenu.Item>
-                ))}
-              </div>
-            </Menu.Popup>
-          </Menu.Positioner>
-        </Menu.Portal>
-      </Menu.SubmenuRoot>
+      {image && actions.openImage ? (
+        <DropdownMenu.Item onClick={() => actions.openImage?.(id)}>Open image</DropdownMenu.Item>
+      ) : null}
+      {image && actions.downloadImage ? (
+        <DropdownMenu.Item onClick={() => actions.downloadImage?.(id)}>
+          Download image
+        </DropdownMenu.Item>
+      ) : null}
+      {/* An image is its picture: "turn into" would only keep the caption. */}
+      {image ? null : (
+        <Menu.SubmenuRoot>
+          <Menu.SubmenuTrigger className="group flex h-8 cursor-pointer select-none items-center gap-3 rounded px-3 outline-hidden focus:bg-bg-hover data-[popup-open]:bg-bg-hover coarse:h-10">
+            <div className="flex w-0 grow items-center gap-3">
+              <div className="flex w-4 text-text-secondary" />
+              <span className="grow truncate">Turn into</span>
+            </div>
+            <span aria-hidden className="text-text-tertiary">
+              ›
+            </span>
+          </Menu.SubmenuTrigger>
+          <Menu.Portal>
+            <Menu.Positioner side="right" align="start" sideOffset={4}>
+              <Menu.Popup className={popupClass} style={{ width: 200 }}>
+                <div className="grid p-1">
+                  {TYPES.map((option) => (
+                    <DropdownMenu.Item
+                      key={option.type}
+                      selected={currentType(target.type) === option.type}
+                      onClick={() => actions.setType(id, option.type)}
+                    >
+                      {option.label}
+                    </DropdownMenu.Item>
+                  ))}
+                </div>
+              </Menu.Popup>
+            </Menu.Positioner>
+          </Menu.Portal>
+        </Menu.SubmenuRoot>
+      )}
       <DropdownMenu.Separator />
       <DropdownMenu.Item shortcut={["Tab"]} onClick={() => actions.indent(key)}>
         Indent

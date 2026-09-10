@@ -64,19 +64,20 @@ Keep typing to narrow the list, <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>↵<
 
 `type:` with a block-type value resolves the query at _block_ granularity. For example, `type:todo` finds every unchecked checkbox in your notes.
 
-| Value           | Matches                                   |
-| :-------------- | :---------------------------------------- |
-| `todo`          | unchecked checkbox                        |
-| `done`          | checked checkbox                          |
-| `task`          | any checkbox, checked or not              |
-| `heading`       | any heading                               |
-| `h1`…`h3`       | a specific heading type                   |
-| `list`          | bullet or ordered list item               |
-| `bullet` / `ul` | bullet list item                          |
-| `ordered`/ `ol` | ordered list item                         |
-| `quote`         | quote                                     |
-| `code`          | code-fence delimiter or a line inside one |
-| `text`          | plain paragraph                           |
+| Value           | Matches                                                   |
+| :-------------- | :-------------------------------------------------------- |
+| `todo`          | unchecked checkbox                                        |
+| `done`          | checked checkbox                                          |
+| `task`          | any checkbox, checked or not                              |
+| `heading`       | any heading                                               |
+| `h1`…`h3`       | a specific heading type                                   |
+| `list`          | bullet or ordered list item                               |
+| `bullet` / `ul` | bullet list item                                          |
+| `ordered`/ `ol` | ordered list item                                         |
+| `quote`         | quote                                                     |
+| `code`          | code-fence delimiter or a line inside one                 |
+| `image`         | an image block (docs/images.md); text matches its caption |
+| `text`          | plain paragraph                                           |
 
 Block queries compose with everything else: note-level qualifiers filter by the containing note (`type:todo tag:work` = open todos in notes tagged `work`), `in:` scopes to a note or a block's subtree, fuzzy text matches the block's own text (`type:todo milk`), `-type:done` excludes, and `sort:updated` orders blocks by their note's last update, most recent first.
 

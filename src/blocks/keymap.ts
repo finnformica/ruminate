@@ -45,7 +45,12 @@ const caretAtEnd: Predicate = ({ caret }) =>
 const caretAtStart: Predicate = ({ caret }) => !!caret && caret.start === 0 && caret.end === 0
 
 /** The block has a type of its own — anything but a plain paragraph. */
-const hasMarker: Predicate = (input) => (blockOf(input)?.type ?? "text") !== "text"
+// An image's marker is the picture itself — Backspace at the start of its
+// caption must not quietly turn it into a paragraph (delete the row instead).
+const hasMarker: Predicate = (input) => {
+  const type = blockOf(input)?.type ?? "text"
+  return type !== "text" && type !== "image"
+}
 
 const atStartWithMarker: Predicate = (input) => caretAtStart(input) && hasMarker(input)
 

@@ -22,7 +22,7 @@
  * a view is built with a page among its blocks.
  */
 export type BlockType =
-  "text" | "h1" | "h2" | "h3" | "todo" | "done" | "ul" | "ol" | "quote" | "code" | "page"
+  "text" | "h1" | "h2" | "h3" | "todo" | "done" | "ul" | "ol" | "quote" | "code" | "image" | "page"
 
 const BLOCK_TYPES: readonly BlockType[] = [
   "text",
@@ -35,6 +35,7 @@ const BLOCK_TYPES: readonly BlockType[] = [
   "ol",
   "quote",
   "code",
+  "image",
   "page",
 ]
 
@@ -59,7 +60,8 @@ export interface Block {
   /** Marker-free content. Inline markdown (bold, links, code spans) is
    * content and renders as such; a leading marker never is. */
   text: string
-  /** Pages: frontmatter entries; code: `{ language }`. Absent for most. */
+  /** Pages: frontmatter entries; code: `{ language }`; images: where the
+   * picture is (`src/blocks/image.ts`). Absent for most. */
   props?: BlockProps | null
   /** Ordered ids of child blocks. */
   children: string[]

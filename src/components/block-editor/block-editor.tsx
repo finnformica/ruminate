@@ -1,13 +1,22 @@
 import copy from "copy-to-clipboard"
 import { useAtomValue } from "jotai"
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import type React from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent } from "react"
 import { newBlockMarkerAtom } from "../../global-state"
-import type { BlockDoc } from "../../blocks/types"
+import type { Block, BlockDoc } from "../../blocks/types"
+import { blockId } from "../../blocks/id"
+import { blockLine } from "../../blocks/serialize"
+import {
+  downloadImage,
+  imageFilesOf,
+  ImageUploadError,
+  type UploadedImage,
+} from "../../data/images"
+import { ImageLightbox } from "./image-lightbox"
 import {
   isHeading,
   leadingMarker,
-  markerFor,
   toggleType,
   TURN_INTO_KEYS,
   typeOfMarker,
@@ -40,6 +49,7 @@ import {
   emptyBlock,
   indentBlock,
   insertBlocksAsFirstChildren,
+  insertAfter,
   insertFirstChild,
   moveBlocks,
   outdentBlock,
@@ -218,9 +228,17 @@ export function BlockEditor({
   noteId,
   parentCountOf,
   onDeleteEverywhere,
+  onImageUpload,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc) => void
+  /**
+   * Upload a pasted/dropped picture and return what the image block should
+   * hold (`src/data/images.ts`). Absent = images are switched off here: an
+   * image paste or drop is left to the browser and the slash menu offers no
+   * "Image".
+   */
+  onImageUpload?: (file: File) => Promise<UploadedImage>
   /** The note this doc is the page of — what "Copy link to block" links into. */
   noteId?: string
   /** How many places a block appears across the corpus (the context menu's
@@ -812,7 +830,7 @@ export function BlockEditor({
       const indent = "  ".repeat(depth)
       // Markers are export-only: an ordered item is written `1.` here and
       // renumbered wherever it lands (the parse side reads runs by position).
-      lines.push(indent + markerFor(block.type) + block.text)
+      lines.push(indent + blockLine(block))
       lines.push(`${indent}  id:: ${block.id}`)
       for (const childId of block.children) walk(childId, depth + 1)
     }
@@ -1071,8 +1089,111 @@ export function BlockEditor({
     // under the menu; the menu's row becomes the selection.
     if (!selectedSet.has(row.key)) select(row.key)
   }
+  // ── Images ────────────────────────────────────────────────────────────────
+  // A pasted, dropped or picked picture is uploaded first and only then
+  // becomes a block (a failed upload leaves the doc as it was and says so),
+  // landing after the row it was given to — or replacing that row when it is
+  // an empty paragraph/bullet, so "/image" on a blank line puts the picture
+  // on that line. Several files arrive in order, each its own undo step.
+  const [lightbox, setLightbox] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimer = useRef<number | null>(null)
+  const showNotice = (message: string) => {
+    setNotice(message)
+    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current)
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 6000)
+  }
+  useEffect(
+    () => () => {
+      if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current)
+    },
+    [],
+  )
+  const insertImages = async (key: string, files: File[]) => {
+    if (!onImageUpload) return
+    // Chained locally, so a second picture lands after the first even before
+    // the host has re-rendered with the first one in.
+    let current = docRef.current
+    for (const file of files) {
+      try {
+        const asset = await onImageUpload(file)
+        const targetId = idOfKey(key)
+        const target = current.blocks[targetId]
+        if (!target) return
+        const props = {
+          image: asset.id,
+          ...(asset.width && asset.height ? { width: asset.width, height: asset.height } : {}),
+        }
+        const row = rows.find((r) => r.key === key)
+        const blank =
+          !row?.zoomTitle &&
+          (target.type === "text" || target.type === "ul") &&
+          target.text === "" &&
+          target.children.length === 0
+        let next: BlockDoc
+        let nextKey: string
+        if (blank) {
+          next = {
+            ...current,
+            blocks: { ...current.blocks, [targetId]: { ...target, type: "image", props } },
+          }
+          nextKey = key
+        } else {
+          const image: Block = { id: blockId(), type: "image", text: "", props, children: [] }
+          if (row?.zoomTitle) {
+            next = insertFirstChild(current, targetId, image)
+            nextKey = keyOf(key, image.id)
+          } else {
+            next = insertAfter(current, key, image)
+            nextKey = keyOf(parentKeyOf(key), image.id)
+          }
+        }
+        history.commit(current, next, { type: "structural" })
+        current = next
+        docRef.current = next
+        setAnchorKey(null)
+        setFocus(null)
+        setSelected(nextKey)
+        key = nextKey
+      } catch (error) {
+        showNotice(error instanceof ImageUploadError ? error.message : "Image upload failed")
+      }
+    }
+  }
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const imageInputKey = useRef<string | null>(null)
+  const requestImage = (key: string) => {
+    imageInputKey.current = key
+    imageInputRef.current?.click()
+  }
+  const handleImagePicked = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? [])
+    event.currentTarget.value = ""
+    const key = imageInputKey.current
+    imageInputKey.current = null
+    if (key && files.length > 0) void insertImages(key, files)
+  }
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!onImageUpload || readOnly) return
+    if (Array.from(event.dataTransfer.types).includes("Files")) event.preventDefault()
+  }
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!onImageUpload || readOnly) return
+    const files = imageFilesOf(event.dataTransfer)
+    if (files.length === 0) return
+    event.preventDefault()
+    const rowEl = (event.target as HTMLElement).closest<HTMLElement>("[data-occurrence]")
+    const key = rowEl?.dataset.occurrence ?? rows[rows.length - 1]?.key
+    if (key) void insertImages(key, files)
+  }
+
   const menuActions: BlockMenuActions = {
     edit: (key) => edit(key),
+    openImage: (id) => setLightbox(id),
+    downloadImage: (id) => {
+      const block = doc.blocks[id]
+      if (block) void downloadImage(block)
+    },
     setType: (id, type) => {
       const next = updateBlock(doc, id, { type })
       if (next !== doc) history.commit(doc, next, { type: "structural" })
@@ -1094,6 +1215,10 @@ export function BlockEditor({
 
   const api: BlockEditorApi = {
     debug,
+    onImageFiles:
+      onImageUpload && !readOnly ? (key, files) => void insertImages(key, files) : undefined,
+    requestImage: onImageUpload && !readOnly ? requestImage : undefined,
+    openImage: (id) => setLightbox(id),
     focus,
     selected,
     selectedSet,
@@ -1378,11 +1503,19 @@ export function BlockEditor({
     const plain = plainPasteRef.current
     plainPasteRef.current = false
     if (readOnly || focus || !selected) return
+    // The row pasted onto (the last of a range), and its block.
+    const target = selectedKeys[selectedKeys.length - 1] ?? selected
+    // A pasted picture becomes an image block after the row (images on).
+    const files = imageFilesOf(event.clipboardData)
+    if (files.length > 0) {
+      if (!onImageUpload) return
+      event.preventDefault()
+      void insertImages(target, files)
+      return
+    }
     event.preventDefault()
     const text = event.clipboardData?.getData("text/plain") ?? ""
     const normalized = text.replace(/\r\n?/g, "\n")
-    // The row pasted onto (the last of a range), and its block.
-    const target = selectedKeys[selectedKeys.length - 1] ?? selected
     const targetId = idOfKey(target)
     // Pasting onto a selected block puts the content INSIDE it — in the graph
     // that is a link from the target down to what you pasted, which is what
@@ -1476,7 +1609,7 @@ export function BlockEditor({
       // Zoomed, the title's body rows read one level beneath it.
       const depth = row.zoomTitle ? 0 : row.depth + (zoomRoot ? 1 : 0)
       const indent = "  ".repeat(depth)
-      picked.push(`${indent}${markerFor(block.type)}${block.text}\n${indent}  id:: ${block.id}`)
+      picked.push(`${indent}${blockLine(block)}\n${indent}  id:: ${block.id}`)
       keys.push(row.key)
     }
     return { picked, keys, partial }
@@ -1635,6 +1768,8 @@ export function BlockEditor({
           onMouseOver={handleMouseOver}
           onMouseLeave={() => setHotGuides(null)}
           onContextMenuCapture={handleContextMenuCapture}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
         >
           {/* The view is a flat list: one row per occurrence, indented by its
             depth. Zoomed, the first row is the zoomed block as the view's
@@ -1653,8 +1788,28 @@ export function BlockEditor({
               />
             )
           })}
+          {notice ? (
+            <div role="status" className="mt-2 px-1 text-sm text-text-danger">
+              {notice}
+            </div>
+          ) : null}
         </div>
       </BlockContextMenu>
+      {onImageUpload ? (
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          data-testid="image-input"
+          onChange={handleImagePicked}
+        />
+      ) : null}
+      <ImageLightbox
+        block={lightbox ? (doc.blocks[lightbox] ?? null) : null}
+        onClose={() => setLightbox(null)}
+      />
     </>
   )
 }

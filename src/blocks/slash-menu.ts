@@ -122,6 +122,9 @@ const BLOCK_OPTIONS: BlockOption[] = [
   { type: "todo", label: "To-do", keywords: ["todo", "task", "checkbox"] },
   { type: "h1", label: "Heading", keywords: ["header", "h1", "heading"] },
   { type: "quote", label: "Quote", keywords: ["blockquote", "callout"] },
+  // Offered only where images are switched on (`slashMenuItems` options); a
+  // pick opens the file picker rather than changing the type in place.
+  { type: "image", label: "Image", keywords: ["picture", "photo", "upload", "img"] },
 ]
 
 // ── The menu model ──────────────────────────────────────────────────────────
@@ -158,7 +161,11 @@ function matches(query: string, label: string, keywords: string[] = []): boolean
  * when nothing matches — the caller closes the menu and the text stays as
  * typed.
  */
-export function slashMenuItems(query: string, now: Date): SlashItem[] {
+export function slashMenuItems(
+  query: string,
+  now: Date,
+  options: { images?: boolean } = {},
+): SlashItem[] {
   const q = query.trim().toLowerCase().replace(/\s+/g, " ")
   const items: SlashItem[] = []
 
@@ -189,6 +196,7 @@ export function slashMenuItems(query: string, now: Date): SlashItem[] {
   }
 
   for (const option of BLOCK_OPTIONS) {
+    if (option.type === "image" && !options.images) continue
     if (!matches(q, option.label, option.keywords)) continue
     items.push({
       kind: "block",

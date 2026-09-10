@@ -10,6 +10,7 @@ import type { Env } from "./types"
 import { githubAuth } from "./handlers/github-auth"
 import { githubRefresh } from "./handlers/github-refresh"
 import { fileProxy } from "./handlers/file-proxy"
+import { images } from "./handlers/images"
 import { replica } from "./handlers/replica"
 import { share } from "./handlers/share"
 
@@ -22,6 +23,9 @@ export default {
     if (pathname === "/file-proxy") return fileProxy(request)
     if (pathname.startsWith("/share/")) return share(request, env)
     if (pathname.startsWith("/api/replica/")) return replica(request, env)
+    if (pathname === "/api/images" || pathname.startsWith("/api/images/")) {
+      return images(request, env)
+    }
 
     // Everything else: static assets (index.html fallback for SPA routes).
     return env.ASSETS.fetch(request)
