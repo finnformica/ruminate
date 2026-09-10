@@ -1,5 +1,6 @@
 .markdown {
   font-size: var(--font-size-base);
+  overflow-wrap: anywhere;
   line-height: 28px;
 }
 

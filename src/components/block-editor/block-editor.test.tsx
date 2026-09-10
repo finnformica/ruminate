@@ -108,6 +108,19 @@ function serializedLines(getByTestId: (id: string) => HTMLElement): string[] {
     .filter((l) => !l.includes("id::") && l.trim() !== "")
 }
 
+describe("BlockEditor text wrapping", () => {
+  it("lets a long unbroken word (a URL) break instead of overflowing the row", () => {
+    const { container } = render(
+      <Harness initial={"https://example.com/a/very/long/path/that/never/breaks"} />,
+    )
+    const body = container.querySelector('[data-testid="block-body"]')!
+    expect(body.className).toContain("[overflow-wrap:anywhere]")
+    // The edit textarea wraps the same way, so switching modes never reflows.
+    fireEvent.doubleClick(body)
+    expect(container.querySelector("textarea")!.className).toContain("[overflow-wrap:anywhere]")
+  })
+})
+
 describe("BlockEditor focus + keyboard", () => {
   it("starts a new note in edit mode with the textarea focused", () => {
     const { container } = render(<Harness initial="" startEditing />)

@@ -263,7 +263,7 @@ function NotePage() {
       }
     >
       <div ref={containerRef} className="@container">
-        <div className="p-5 @[640px]:p-10">
+        <div className="p-4 @[480px]:p-5 @[640px]:p-10">
           <div
             className={cx(
               "flex flex-col gap-8 pb-[50vh]",

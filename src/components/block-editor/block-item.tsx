@@ -856,7 +856,7 @@ export function BlockItem({
                 onPaste={handlePaste}
                 onBlur={() => api.setFocus(null)}
                 className={cx(
-                  "min-w-0 flex-1 resize-none overflow-hidden border-none bg-transparent p-0 font-content leading-relaxed text-text outline-none placeholder:text-text-tertiary",
+                  "min-w-0 flex-1 resize-none overflow-hidden border-none bg-transparent p-0 font-content leading-relaxed text-text outline-none [overflow-wrap:anywhere] placeholder:text-text-tertiary",
                   typo,
                 )}
               />
@@ -878,7 +878,9 @@ export function BlockItem({
               data-testid="block-body"
               data-block-id={block.id}
               className={cx(
-                "min-h-[1lh] min-w-0 flex-1 outline-none",
+                // A long link or an unbroken word breaks rather than running
+                // off a narrow screen (the textarea wraps the same way).
+                "min-h-[1lh] min-w-0 flex-1 outline-none [overflow-wrap:anywhere]",
                 !readOnly && "cursor-text",
                 readOnly && api.activate && "cursor-pointer",
                 typo,

@@ -122,7 +122,9 @@ module.exports = {
       // CSS — this custom lineHeight scale replaces Tailwind's defaults.
       tight: "1.25",
       snug: "1.4",
-      relaxed: "1.65",
+      // Block text leading; a variable so touch screens can tighten it
+      // (src/styles/variables.css).
+      relaxed: "var(--line-height-relaxed)",
       3: "12px",
       4: "16px",
       5: "20px",
