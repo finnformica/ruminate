@@ -2,6 +2,10 @@
 
 ## 2026-W37
 
+### Fixed
+
+- Pasting an outline keeps every glyph. Markdown where each line is a bullet carrying another marker — `- # Heading`, `- > quote`, `- [ ] task`, the shape most outliners and rich-text apps export — used to keep the bullet and leave the `#` or `>` as literal text. The inner marker is now the block's type and the bullet is dropped, so a pasted heading is a heading and a pasted quote a quote.
+
 ### Improved
 
 - Selected rows now look the same everywhere. The highlighted block in the editor, the keyboard highlight in the notes and tags lists, and the current page in the sidebar all share one colour, a paler, lighter tint of your chosen accent, so "you are here" reads the same wherever you see it. It follows whichever accent you pick in Settings, in both light and dark mode.

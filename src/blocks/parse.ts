@@ -9,7 +9,9 @@ import type { Block, BlockDoc, BlockType } from "./types"
  * - Frontmatter (a leading `---` … `---` block) is preserved verbatim.
  * - Every non-blank, non-`id::` line is a block: its leading marker decides
  *   the type and is dropped from the text (`classifyLine`, which also folds
- *   near-miss spellings such as `[] x` or `* x` into their typed form), and
+ *   near-miss spellings such as `[] x` or `* x` into their typed form). A
+ *   bullet that carries another marker (`- # Heading`, `- [ ] task`, `- >
+ *   quote`) is that marker's block — the bullet was only the container. And
  *   nesting comes from indentation — two spaces per level in the canonical
  *   serialized form, with tab-indented and 4-space outlines (common in pasted
  *   content from other tools) normalized to the same levels (see
@@ -35,10 +37,13 @@ interface ParsedNode {
 
 const ID_RE = /^\s*id::\s+(.+)$/
 
-// A GFM task-list item (`- [ ] task`, `* [x] done`). Copy emits todos in this
-// form (see to-display-markdown.ts); parsing normalizes it back to the app's
-// bare `[ ] task` marker so the round-trip preserves the block type.
-const GFM_TODO_RE = /^[-*]\s+(?=\[[ xX]?\]\s)/
+// A bullet carrying another block's marker: a GFM task-list item (`- [ ] task`,
+// `* [x] done` — the form copy emits, see to-display-markdown.ts), and the
+// outliner shape where every line is a bullet and the real glyph follows it
+// (`- # Heading`, `- > quote`, `- \`\`\``). The inner marker is the block's
+// type; the bullet is the container it came in. Parsing drops the bullet so
+// the glyph is kept as the type rather than lost as literal text.
+const BULLET_WRAPPED_MARKER_RE = /^[-*+]\s+(?=(?:\[[ xX]?\]\s|#{1,6}\s|>\s|```))/
 
 export function parse(markdown: string): BlockDoc {
   // Normalize line endings so Windows/GitHub CRLF never leaks into content/ids.
@@ -90,7 +95,7 @@ export function parse(markdown: string): BlockDoc {
       continue
     }
 
-    const content = line.slice(cut).replace(GFM_TODO_RE, "")
+    const content = line.slice(cut).replace(BULLET_WRAPPED_MARKER_RE, "")
     const node: ParsedNode = { line: content, children: [] }
 
     // An `id::` line immediately after belongs to this block.
