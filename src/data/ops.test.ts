@@ -4,7 +4,7 @@ import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
 import { buildGraphSnapshot, docToGraph, pageDoc, type GraphSnapshot } from "./graph"
-import { applyOps, docToOps, pagesTouchedBy, type Op } from "./ops"
+import { applyOps, deleteBlockOps, docToOps, pagesTouchedBy, parentCount, type Op } from "./ops"
 
 const NOW = 1000
 
@@ -261,5 +261,44 @@ describe("pagesTouchedBy", () => {
     expect([
       ...pagesTouchedBy(snapshot, [{ op: "create", id: "new", type: "ul", text: "", props: null }]),
     ]).toEqual([])
+  })
+})
+
+describe("deleteBlockOps / parentCount", () => {
+  it("unlinks a block from every parent and cascades through what only it held", () => {
+    const snapshot = graphOf({
+      a: "- shared\n  id:: blk_shared0000\n  - under shared\n    id:: blk_under00000\n- only a\n  id:: blk_onlya00000\n",
+      b: "- b\n  id:: blk_b000000000\n",
+    })
+    // b holds the shared block too.
+    const linked = applyOps(
+      snapshot,
+      [{ op: "link", source: "b", destination: "blk_shared0000", sortKey: "a1" }],
+      2,
+    )
+    expect(parentCount(linked, "blk_shared0000")).toBe(2)
+    expect(parentCount(linked, "blk_onlya00000")).toBe(1)
+    expect(parentCount(linked, "nope")).toBe(0)
+
+    const ops = deleteBlockOps("blk_shared0000", linked)
+    expect(
+      ops
+        .filter((op) => op.op === "unlink")
+        .map((op) => (op as { source: string }).source)
+        .sort(),
+    ).toEqual(["a", "b"])
+    expect(ops.filter((op) => op.op === "delete").map((op) => (op as { id: string }).id)).toEqual([
+      "blk_shared0000",
+      "blk_under00000",
+    ])
+    const next = applyOps(linked, ops, 3)
+    expect(next.nodes.has("blk_shared0000")).toBe(false)
+    expect(next.nodes.has("blk_under00000")).toBe(false)
+    expect(next.nodes.has("blk_onlya00000")).toBe(true)
+    expect(next.childLinks.get("a")?.map((l) => l.destination_id)).toEqual(["blk_onlya00000"])
+    expect(next.childLinks.get("b")?.map((l) => l.destination_id)).toEqual(["blk_b000000000"])
+    // Pages are not blocks; unknown ids are nothing.
+    expect(deleteBlockOps("a", linked)).toEqual([])
+    expect(deleteBlockOps("nope", linked)).toEqual([])
   })
 })
