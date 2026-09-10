@@ -12,8 +12,8 @@ import {
   searchBlocks,
   type BlockAncestor,
   type BlockHit,
-  type BlockSearchType,
 } from "./block-search"
+import type { BlockType } from "../blocks/types"
 import { parseQuery } from "./search"
 
 /** A note plus the markdown its page holds — the graph the tests index. */
@@ -100,13 +100,13 @@ function run(query: string, notes: Fixture[] = [TASKS_NOTE, MISC_NOTE]) {
 const ids = (hits: BlockHit[]) => hits.map((hit) => hit.blockId)
 
 describe("type mapping", () => {
-  const types = (content: string): [string, BlockSearchType][] =>
+  const types = (content: string): [string, BlockType][] =>
     indexNoteBlocks(makeNote({ content }), snapshotFor([makeNote({ content })])).hits.map((hit) => [
       hit.text,
       hit.type,
     ])
 
-  test("maps every marker to its canonical block type", () => {
+  test("types every block by its stored type — the registry's vocabulary", () => {
     // Every heading marker is one heading type: size comes from outline depth
     // (docs/graph-schema-v2.md), and that is what the graph stores.
     expect(types(md("# one", "## two", "### three", "###### six"))).toEqual([
@@ -122,10 +122,10 @@ describe("type mapping", () => {
       ["closed too", "done"],
     ])
     expect(types(md("- dash", "* star", "1. first", "2) second"))).toEqual([
-      ["dash", "bullet"],
-      ["star", "bullet"],
-      ["first", "ordered"],
-      ["second", "ordered"],
+      ["dash", "ul"],
+      ["star", "ul"],
+      ["first", "ol"],
+      ["second", "ol"],
     ])
     expect(types(md("> quoted", "no marker"))).toEqual([
       ["quoted", "quote"],
@@ -184,6 +184,19 @@ describe("block hits", () => {
     expect(head).not.toHaveProperty("children")
     // Children are context, not matches: the heading is the only hit.
     expect(ids(run("type:h1"))).toEqual(["blk_head"])
+  })
+
+  test("carry an ordered item's number in its run", () => {
+    const note = makeNote({
+      id: "n",
+      content: md("1. one", "  id:: blk_1", "2. two", "  id:: blk_2", "- dash", "  id:: blk_d"),
+    })
+    const { hits } = indexNoteBlocks(note, snapshotFor([note]))
+    expect(hits.map((hit) => [hit.blockId, hit.olNumber])).toEqual([
+      ["blk_1", 1],
+      ["blk_2", 2],
+      ["blk_d", 1],
+    ])
   })
 
   test("a leaf block reports no downstream", () => {
@@ -356,6 +369,39 @@ describe("searchBlocks", () => {
     // of type "zzz"); mixed into a block-scoped list it matches no blocks.
     expect(run("type:zzz")).toEqual([])
     expect(ids(run("type:todo,zzz"))).toEqual(["blk_milk", "blk_plants"])
+  })
+
+  test("in: scopes to the blocks downstream of a note, by id or by name", () => {
+    expect(ids(run("type:todo in:tasks"))).toEqual(["blk_milk"])
+    expect(ids(run("type:todo in:misc"))).toEqual(["blk_plants"])
+    // By the note's name (case-insensitive), quoted when it has spaces.
+    const named = makeNote({ ...TASKS_NOTE, displayName: "Today's tasks", title: "Today's tasks" })
+    expect(ids(run('type:task in:"today\'s tasks"', [named, MISC_NOTE]))).toEqual([
+      "blk_milk",
+      "blk_ship",
+    ])
+    // Comma lists OR; `-in:` excludes.
+    expect(ids(run("type:todo in:tasks,misc"))).toEqual(["blk_milk", "blk_plants"])
+    expect(ids(run("type:todo -in:tasks"))).toEqual(["blk_plants"])
+    // A note nothing is in.
+    expect(run("type:todo in:nowhere")).toEqual([])
+  })
+
+  test("in: with a block id scopes to what is reachable beneath it — the block itself excluded", () => {
+    expect(ids(run("in:blk_head"))).toEqual(["blk_milk", "blk_ship"])
+    expect(ids(run("type:done in:blk_head"))).toEqual(["blk_ship"])
+    // Composes with everything else, and a leaf has nothing downstream.
+    expect(ids(run("type:todo in:blk_head tag:work"))).toEqual(["blk_milk"])
+    expect(run("in:blk_milk")).toEqual([])
+  })
+})
+
+describe("getBlock", () => {
+  test("looks a block up by id alone, in the first note carrying it", () => {
+    const index = buildIndex([TASKS_NOTE, MISC_NOTE])
+    expect(index.getBlock("blk_milk")?.text).toBe("buy milk")
+    expect(index.getBlock("blk_milk")?.noteId).toBe("tasks")
+    expect(index.getBlock("blk_nope")).toBeUndefined()
   })
 })
 

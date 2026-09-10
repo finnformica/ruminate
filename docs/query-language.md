@@ -23,6 +23,7 @@ Search your notes with Ruminate's [GitHub-style](https://docs.github.com/en/sear
 | `no`    | `no:tags` matches notes without a tag. `no` can be used with any filter qualifier key or frontmatter key.                                                                                                                                                                                 |
 | `has`   | `has:tags` matches notes with one or more tag. `has` can be used with any filter qualifier key or frontmatter key.                                                                                                                                                                        |
 | `type`  | `type:daily` matches daily notes (`note`, `daily`, `weekly`, `template`). With a block-type value it matches _blocks_ instead — see below.                                                                                                                                                |
+| `in`    | `in:1652342106359` scopes the query to what is _inside_ a note (by id, or by name: `in:"Reading list"`); with a block id, to the blocks under that block. See "Scoping with `in:`" below.                                                                                                 |
 | `sort`  | `sort:title`, `sort:id:desc`, `sort:tags,title:desc`. Supports `id`, `title`, `tags`, `updated_at`, and any frontmatter key. Use `:asc` or `:desc`. Default is `asc` for `id` and `title`. `tags` and `updated_at` default to `desc`. Multiple comma-separated sorts apply left-to-right. |
 
 Unrecognized qualifier keys are assumed to be [frontmatter](/docs/metadata.md) keys. For example, `read:true` matches notes with `read: true` in their frontmatter.
@@ -38,6 +39,27 @@ Any query with text in it — or a block-scoped `type:` (below) — resolves at 
 
 A query that names only notes — `tag:recipe` on its own, a date, a bare frontmatter qualifier, or an empty query — still lists notes: every block of every tagged note isn't a search result, it's your corpus.
 
+## Scoping with `in:`
+
+`in:` limits a query to what is downstream of a note or a block — the blocks inside it.
+
+- `in:<note>` names a note by its id or by its name (quote a name with spaces: `in:"Reading list"`). `type:todo in:"Reading list"` is every open to-do in that note; `in:"Reading list"` on its own lists just that note.
+- `in:<block id>` names a block; the query then runs over the blocks under it (the block itself is not inside itself). `type:heading in:blk_a1b2c3` lists the headings within that section.
+- It composes like any qualifier: `-in:` excludes, `in:a,b` means either, and it stacks with `tag:`, `type:` and text.
+
+**It is set for you inside a note.** Open <kbd>⌘</kbd> <kbd>K</kbd> from a note and block results are scoped to that note — or, if you have zoomed into a block, to that block — shown as a pill under the query (**Blocks in …**). Click the pill to search everything instead, or type your own `in:` to scope elsewhere. "See all …" carries the scope into the results view as a plain `in:` in the URL, so it reads back as what it is.
+
+## Suggestions as you type
+
+Typing a qualifier whose values are a known set opens a picker under the search box — on the notes and tags pages and in <kbd>⌘</kbd> <kbd>K</kbd>:
+
+- `type:` — the block types below, then the note types.
+- `in:` — your notes, by name, most recent first (the open note leads).
+- `tag:` — your tags, with how many notes carry each.
+- `has:` / `no:` — `tags`, `dates`, `tasks`, `title`.
+
+Keep typing to narrow the list, <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>↵</kbd> or <kbd>Tab</kbd> to pick (a note lands as its id; a value with spaces is quoted), <kbd>Esc</kbd> to leave what you typed. `-type:` and comma lists (`type:todo,done`) work the same way.
+
 ## Block types
 
 `type:` with a block-type value resolves the query at _block_ granularity. For example, `type:todo` finds every unchecked checkbox in your notes.
@@ -48,7 +70,7 @@ A query that names only notes — `tag:recipe` on its own, a date, a bare frontm
 | `done`          | checked checkbox                          |
 | `task`          | any checkbox, checked or not              |
 | `heading`       | any heading                               |
-| `h1`…`h6`       | a specific heading level                  |
+| `h1`…`h3`       | a specific heading type                   |
 | `list`          | bullet or ordered list item               |
 | `bullet` / `ul` | bullet list item                          |
 | `ordered`/ `ol` | ordered list item                         |
@@ -56,4 +78,6 @@ A query that names only notes — `tag:recipe` on its own, a date, a bare frontm
 | `code`          | code-fence delimiter or a line inside one |
 | `text`          | plain paragraph                           |
 
-Block queries compose with everything else: note-level qualifiers filter by the containing note (`type:todo tag:work` = open todos in notes tagged `work`), fuzzy text matches the block's own text (`type:todo milk`), `-type:done` excludes, and `sort:updated` orders blocks by their note's last update, most recent first.
+Block queries compose with everything else: note-level qualifiers filter by the containing note (`type:todo tag:work` = open todos in notes tagged `work`), `in:` scopes to a note or a block's subtree, fuzzy text matches the block's own text (`type:todo milk`), `-type:done` excludes, and `sort:updated` orders blocks by their note's last update, most recent first.
+
+Each result is drawn exactly as the block is in its note — by the editor's own row, so the same marker (dot, `#`, number, checkbox, `>`), the same type scale, the same collapse chevron in the marker slot and the same guide lines under an expanded result — with only the breadcrumb added to say where it lives. The `type:` vocabulary above is the block registry's: a query value names stored block types, so `type:ul` and the row's bullet mean the same thing.

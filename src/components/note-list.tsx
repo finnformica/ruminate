@@ -8,7 +8,7 @@ import { useBlockResultTree } from "../hooks/block-result-tree"
 import { useListKeyboardNav } from "../hooks/list-keyboard-nav"
 import { useBlockSearchSource, useSearchResults } from "../hooks/search-results"
 import { cx } from "../utils/cx"
-import { parseQuery } from "../utils/search"
+import { parseQuery, removeQualifier } from "../utils/search"
 import { formatNumber, pluralize } from "../utils/pluralize"
 import { Button } from "./button"
 import { Dice } from "./dice"
@@ -28,6 +28,7 @@ import { LinkHighlightProvider } from "./link-highlight-provider"
 import { NoteFavicon } from "./note-favicon"
 import { NotePreviewCard } from "./note-preview-card"
 import { PillButton } from "./pill-button"
+import { ScopePill } from "./scope-pill"
 import { SearchInput } from "./search-input"
 import { SearchResults, blockHitNavigation } from "./search-results"
 
@@ -177,6 +178,12 @@ export function NoteList({
     return filters.filter((filter) => filter.key === "tag")
   }, [filters])
 
+  // `in:` scopes — shown as pills naming the note (or block), since the
+  // query carries an id.
+  const scopeFilters = React.useMemo(() => {
+    return filters.filter((filter) => filter.key === "in")
+  }, [filters])
+
   const highlightPaths = React.useMemo(() => {
     return filters
       .filter((filter) => !filter.exclude)
@@ -205,6 +212,7 @@ export function NoteList({
               value={query}
               autoCapitalize="off"
               spellCheck="false"
+              suggest
               onChange={(value) => {
                 onQueryChange(value)
 
@@ -256,9 +264,24 @@ export function NoteList({
               </DropdownMenu>
             )}
           </div>
-          {sortedTagFrequencies.length > 0 || tagFilters.length > 0 || deferredQuery ? (
+          {sortedTagFrequencies.length > 0 ||
+          tagFilters.length > 0 ||
+          scopeFilters.length > 0 ||
+          deferredQuery ? (
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap gap-2 empty:hidden">
+                {scopeFilters.flatMap((filter) =>
+                  filter.values.map((value) => (
+                    <ScopePill
+                      key={`${filter.exclude ? "-" : ""}in:${value}`}
+                      value={value}
+                      exclude={filter.exclude}
+                      // Remove the scope from the query (the whole qualifier:
+                      // a comma list goes as one).
+                      onRemove={() => onQueryChange(removeQualifier(query, filter))}
+                    />
+                  )),
+                )}
                 {sortedTagFrequencies.length > 0 || tagFilters.length > 0 ? (
                   <>
                     {tagFilters.map((filter) => (
@@ -267,17 +290,8 @@ export function NoteList({
                         data-tag={filter.values.join(",")}
                         variant="primary"
                         onClick={() => {
-                          const text = `${filter.exclude ? "-" : ""}tag:${filter.values.join(",")}`
-
-                          const index = query.indexOf(text)
-
-                          if (index === -1) return
-
-                          const newQuery =
-                            query.slice(0, index) + query.slice(index + text.length).trimStart()
-
                           // Remove the tag qualifier from the query
-                          onQueryChange(newQuery.trim())
+                          onQueryChange(removeQualifier(query, filter))
 
                           // TODO: Move focus
                         }}

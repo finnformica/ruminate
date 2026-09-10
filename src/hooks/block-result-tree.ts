@@ -7,20 +7,29 @@ import type { BlockSearchSource } from "../utils/block-search-source"
  * expansion tree. Rows are FLAT — the list renders `rows` in order and shows
  * nesting with an indent — so the same array drives rendering, the roving
  * keyboard highlight, and the ⌘K palette's items without three notions of
- * "which row is that".
+ * "which row is that". A row is an occurrence in the editor's sense
+ * (`src/blocks/view.ts`): the results view is a view whose roots are the
+ * hits, and its rows are drawn by the editor's own row component.
  */
 export interface ResultRow {
   /**
-   * Stable identity for this row *in this tree*. A top-level row is keyed by
-   * the block (note-scoped — the same block id can exist in two notes); a
-   * revealed child is keyed by its path, so the same block expanded under two
-   * different parents keeps independent open/closed state.
+   * Stable identity for this row *in this tree* — its occurrence key. A
+   * top-level row is keyed by the block (note-scoped — the same block id can
+   * exist in two notes); a revealed child is keyed by its path beneath the
+   * hit, so the same block expanded under two different parents keeps
+   * independent open/closed state.
    */
   key: string
   hit: BlockHit
   /** 0 for a matched hit; 1+ for children revealed by expanding. */
   depth: number
   parentKey: string | null
+  /** Position among its siblings: a hit's rank among the hits, a revealed
+   * child's place among its parent's children. */
+  index: number
+  /** The keys of the rows this one is indented under, outermost first —
+   * exactly `depth` of them; each owns a guide line beside this row. */
+  guideKeys: string[]
   /** Whether the block has anything downstream (drives the chevron). */
   hasChildren: boolean
   expanded: boolean
@@ -39,16 +48,23 @@ function flattenResultRows(
 ): ResultRow[] {
   const rows: ResultRow[] = []
 
-  const push = (hit: BlockHit, depth: number, parentKey: string | null) => {
-    const key = parentKey === null ? blockKey(hit) : `${parentKey}>${hit.blockId}`
+  const push = (
+    hit: BlockHit,
+    depth: number,
+    parentKey: string | null,
+    index: number,
+    guideKeys: string[],
+  ) => {
+    const key = parentKey === null ? blockKey(hit) : `${parentKey}/${hit.blockId}`
     const hasChildren = hit.childCount > 0
     const expanded = hasChildren && expandedKeys.has(key)
-    rows.push({ key, hit, depth, parentKey, hasChildren, expanded })
+    rows.push({ key, hit, depth, parentKey, index, guideKeys, hasChildren, expanded })
     if (!expanded) return
-    for (const child of childrenByKey.get(key) ?? []) push(child, depth + 1, key)
+    const children = childrenByKey.get(key) ?? []
+    children.forEach((child, i) => push(child, depth + 1, key, i, [...guideKeys, key]))
   }
 
-  for (const hit of hits) push(hit, 0, null)
+  hits.forEach((hit, i) => push(hit, 0, null, i, []))
   return rows
 }
 

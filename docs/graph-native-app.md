@@ -1,6 +1,6 @@
 # Graph-native app: retiring the markdown bridge
 
-Status: **steps 1 to 4 landed** (2026-09-10) — see §5 for what each step
+Status: **steps 1 to 5 landed** (2026-09-10) — see §5 for what each step
 delivered and what remains. Extends
 [editor-on-graph.md](./editor-on-graph.md) (which assessed the same move
 from the editor's side) and [graph-schema-v2.md](./graph-schema-v2.md) (the
@@ -396,9 +396,26 @@ each branched from the last.
    focus and a multi-row selection follow the move. The native cut/copy
    handlers pick rows. `?content=` (a new note's seed) is the one import
    left on the note path.
-5. **Views everywhere.** The filtered results as a multi-root view, page
-   nodes as results, `in:` as reachability, one vocabulary, the caret
-   popover. (Absorbs the results renderer of PR #60, rebased onto this.)
+5. **Views everywhere** — _landed_. The filtered results are a view whose
+   roots are the matching blocks: each row is an occurrence (`ResultRow`
+   carries the key, depth, sibling index and guide keys), drawn by the
+   editor's own row component (`BlockItem`, read-only, with `api.activate`
+   for a row that opens on click) so a result has the block's marker, type
+   scale, checkbox, quote bar, chevron and guide lines; the results page's
+   keyboard highlight is the editor's selection surface. Children are still
+   resolved on expand through `BlockSearchSource` (the seam for a server-side
+   source), one level at a time. `in:` is reachability read off the row's
+   own ancestry (a block reachable by two paths is in scope through the one
+   that passes the scope block), by note id or name, or by block id. One
+   vocabulary: hits are typed by the registry's `BlockType`, and the `type:`
+   values map onto it (`bullet`/`ul`, `ordered`/`ol`, `heading` = `h1`–`h3`).
+   The caret popover offers qualifier values as you type (`type:`, `in:`,
+   `tag:`, `has:`, `no:`) in the search box and ⌘K, and ⌘K scopes itself to
+   the open note or zoomed block with a removable pill. Absorbs PR #60,
+   which is superseded. Still open: page nodes as result rows (a title match
+   is still the Notes group, not a row), and the results view as one
+   `buildRows` walk over a multi-root doc — the lazy tree keeps the async
+   seam for now.
 
 ## 6. Decisions
 
@@ -416,8 +433,10 @@ each branched from the last.
   op log, if it comes, records the batches `docToOps` emits.
 - **Autosave granularity.** Per-batch, applied at once, 150 ms coalescing
   before the store write. Done.
-- **The page node is a row.** Its title leads a zoomed view today; as a
-  result row in step 5.
+- **The page node is a row.** Its title leads a zoomed view today. As a
+  result row: deferred past step 5 — the palette's Notes group covers title
+  matches, and a page row in the block results would duplicate it until the
+  two lists are one.
 - **`Note.content` removal.** Done; the rollup is an export (`rollup`), not
   a field, and `Note.text` (the blocks' text) is what fuzzy search matches.
 - **Delete-rescue** stays as the `removeLink` semantics of the store API;

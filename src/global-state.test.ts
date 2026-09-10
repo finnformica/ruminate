@@ -179,7 +179,7 @@ describe("block search atoms", () => {
     expect(byId.get("blk_head")).toBe("h1")
     expect(byId.get("blk_milk")).toBe("todo")
     expect(byId.get("blk_ship")).toBe("done")
-    expect(byId.get("blk_bullet")).toBe("bullet")
+    expect(byId.get("blk_bullet")).toBe("ul")
 
     unsubscribe()
   })

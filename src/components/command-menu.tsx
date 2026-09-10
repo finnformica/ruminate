@@ -3,7 +3,7 @@ import { parseDate } from "chrono-node"
 import { Command } from "cmdk"
 import copy from "copy-to-clipboard"
 import { atom, useAtom, useAtomValue, useSetAtom, useStore } from "jotai"
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
 import {
@@ -25,6 +25,7 @@ import { formatDate, formatDateDistance, toDateString } from "../utils/date"
 import { generateNoteId } from "../utils/note-id"
 import { filterOutline } from "../utils/note-outline"
 import { pluralize } from "../utils/pluralize"
+import { parseQuery } from "../utils/search"
 import {
   CalendarDateIcon16,
   CopyIcon16,
@@ -38,6 +39,12 @@ import {
   TagIcon16,
 } from "./icons"
 import { NoteFavicon } from "./note-favicon"
+import {
+  QualifierSuggestions,
+  useComboboxAria,
+  useQualifierSuggestions,
+} from "./qualifier-suggestions"
+import { ScopePill } from "./scope-pill"
 import { SearchResults, blockHitNavigation, resultRowValue } from "./search-results"
 
 export const isCommandMenuOpenAtom = atom(false)
@@ -66,6 +73,9 @@ export function CommandMenu() {
   const noteMatch = useMatch({ from: "/_appRoot/notes_/$", shouldThrow: false })
   const noteId = noteMatch?.params._splat
   const note = useNoteById(noteId)
+  // The block the note is zoomed into, if any — the view's scope is then that
+  // subtree, not the whole note.
+  const zoomBlockId = noteMatch?.search?.block
 
   // Refs
   const prevActiveElement = useRef<HTMLElement>()
@@ -74,6 +84,38 @@ export function CommandMenu() {
   const [query, setQuery] = useState("")
   const [deferredQuery] = useDebounce(query, 150)
   const [mode, setMode] = useState<PaletteMode>("commands")
+  // Inside a note the palette searches THAT note by default — its blocks,
+  // or the zoomed subtree — as an `in:` scope the reader can take off (the
+  // pill under the input) or override by typing their own `in:`. Comes back
+  // on each open: a fresh palette is a fresh view.
+  const [scopeRemoved, setScopeRemoved] = useState(false)
+
+  // The qualifier picker: `type:`, `in:`, `tag:` … typed into the query open
+  // a list of values (see qualifier-suggestions.tsx). It follows the caret,
+  // read off the input on every change and caret move.
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [caret, setCaret] = useState<number | null>(null)
+  const syncCaret = useCallback(() => setCaret(inputRef.current?.selectionStart ?? null), [])
+  const suggestions = useQualifierSuggestions({
+    value: query,
+    caret: mode === "commands" ? caret : null,
+    currentNoteId: noteId,
+  })
+  useComboboxAria(inputRef, suggestions)
+  // A pick moves the caret past the token; the DOM is told after the render
+  // that writes the new value.
+  const pendingCaret = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    if (pendingCaret.current === null) return
+    const at = pendingCaret.current
+    pendingCaret.current = null
+    inputRef.current?.setSelectionRange(at, at)
+  })
+  const applyPick = useCallback((next: { value: string; caret: number }) => {
+    setQuery(next.value)
+    setCaret(next.caret)
+    pendingCaret.current = next.caret
+  }, [])
   // The cmdk-highlighted item's value, controlled: cmdk only reports highlight
   // changes (the outline preview trigger) through onValueChange when `value`
   // is a controlled prop.
@@ -134,6 +176,7 @@ export function CommandMenu() {
         setMode("commands")
         setHighlightedValue("")
       }
+      setScopeRemoved(false)
       setIsOpen(true)
     },
     [setIsOpen, enterOutlineMode],
@@ -211,6 +254,9 @@ export function CommandMenu() {
   // stripped from the query (like VS Code's Go to Symbol).
   const handleQueryChange = useCallback(
     (value: string) => {
+      // cmdk reports the new value before React commits it; the caret is
+      // where the browser already put it.
+      syncCaret()
       if (mode === "commands" && query === "" && value.startsWith("@")) {
         enterOutlineMode("prefix")
         setQuery(value.slice(1))
@@ -218,7 +264,7 @@ export function CommandMenu() {
       }
       setQuery(value)
     },
-    [mode, query, enterOutlineMode],
+    [mode, query, enterOutlineMode, syncCaret],
   )
 
   const navItems = useMemo(() => {
@@ -331,10 +377,24 @@ export function CommandMenu() {
     return searchNotes(deferredQuery)
   }, [searchNotes, deferredQuery])
 
+  // The scope in force: the zoomed block, else the open note — unless the
+  // reader took it off or wrote an `in:` of their own.
+  const explicitScope = useMemo(
+    () => parseQuery(deferredQuery).filters.some((filter) => filter.key === "in"),
+    [deferredQuery],
+  )
+  const scope =
+    noteId && mode === "commands" && !scopeRemoved && !explicitScope
+      ? (zoomBlockId ?? noteId)
+      : null
+  // What the block search (and the results view) actually run: the scope is
+  // spelled out as a qualifier, so the URL the palette hands off to says it.
+  const scopedQuery = scope ? `in:${scope} ${deferredQuery}`.trim() : deferredQuery
+
   // Search BLOCKS — the palette's primary results. A nested heading or a todo
   // is a first-class row here, not a note it happens to live in.
   const source = useBlockSearchSource()
-  const { mode: resultMode, hits, notes: hitNotes } = useSearchResults(deferredQuery)
+  const { mode: resultMode, hits, notes: hitNotes } = useSearchResults(scopedQuery)
   const showBlocks = resultMode === "blocks"
   const { rows, expand, collapse } = useBlockResultTree({
     hits,
@@ -357,8 +417,8 @@ export function CommandMenu() {
     setIsOpen(false)
     setQuery("")
     setMode("commands")
-    navigate({ to: "/", search: { query: deferredQuery } })
-  }, [setIsOpen, navigate, deferredQuery])
+    navigate({ to: "/", search: { query: scopedQuery } })
+  }, [setIsOpen, navigate, scopedQuery])
 
   const openBlock = useCallback(
     (hit: Parameters<typeof blockHitNavigation>[0]) => {
@@ -504,11 +564,47 @@ export function CommandMenu() {
     >
       <div className="card-3 overflow-hidden rounded-xl!">
         <Command.Input
+          ref={inputRef}
           placeholder={mode === "outline" ? "Jump to a heading…" : "Search or jump to…"}
           value={query}
           onValueChange={handleQueryChange}
           autoCapitalize="off"
+          onKeyDown={(event) => {
+            // While the picker is open it owns ↑/↓/↵/Tab/Esc; the event
+            // stops here so cmdk's list never moves under it.
+            const handled = suggestions.handleKeyDown(event)
+            if (!handled) return
+            event.stopPropagation()
+            if (typeof handled === "object") applyPick(handled)
+          }}
+          onKeyUp={syncCaret}
+          onClick={syncCaret}
         />
+
+        {scope && deferredQuery ? (
+          <div
+            data-testid="palette-scope"
+            className="flex flex-wrap items-center gap-2 border-t border-border-secondary px-3 py-2 text-sm text-text-secondary"
+          >
+            <span>Blocks in</span>
+            <ScopePill value={scope} onRemove={() => setScopeRemoved(true)} />
+          </div>
+        ) : null}
+
+        {suggestions.visible && suggestions.trigger ? (
+          <QualifierSuggestions
+            id={suggestions.listboxId}
+            variant="inline"
+            trigger={suggestions.trigger}
+            items={suggestions.items}
+            activeIndex={suggestions.activeIndex}
+            onHover={suggestions.setActiveIndex}
+            onPick={(item) => {
+              const next = suggestions.pick(item)
+              if (next) applyPick(next)
+            }}
+          />
+        ) : null}
 
         <Command.List>
           {mode === "outline" ? (

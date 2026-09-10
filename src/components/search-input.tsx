@@ -7,9 +7,19 @@ import { IconButton } from "./icon-button"
 import { ClearIcon16, SearchIcon16 } from "./icons"
 import { Keys } from "./keys"
 
+// Loaded only for boxes that take a query: the picker reads the corpus, which
+// a plain filter box (the help panel's) has no business pulling in.
+const QualifierPicker = React.lazy(() => import("./qualifier-picker"))
+
 type SearchInputProps = Omit<React.ComponentPropsWithoutRef<"input">, "onChange"> & {
   shortcut?: string[]
   onChange?: (value: string) => void
+  /**
+   * Offer values for the query language's qualifiers as they are typed
+   * (`type:`, `in:`, `tag:`, …) — for inputs that take a search query, not
+   * a plain filter string.
+   */
+  suggest?: boolean
 }
 
 export function SearchInput({
@@ -17,11 +27,30 @@ export function SearchInput({
   placeholder = "Search…",
   value,
   onChange,
+  suggest = false,
   ...props
 }: SearchInputProps) {
   const ref = React.useRef<HTMLInputElement>(null)
   const [inputValue, setInputValue] = React.useState(value || "")
   const inputValueRef = useValueRef(inputValue)
+
+  // A pick from the qualifier picker moves the caret past the token; the DOM
+  // is told after the render that writes the new value.
+  const pendingCaret = React.useRef<number | null>(null)
+  React.useLayoutEffect(() => {
+    if (pendingCaret.current === null) return
+    const at = pendingCaret.current
+    pendingCaret.current = null
+    ref.current?.setSelectionRange(at, at)
+  })
+  const applyPick = React.useCallback(
+    (next: { value: string; caret: number }) => {
+      setInputValue(next.value)
+      onChange?.(next.value)
+      pendingCaret.current = next.caret
+    },
+    [onChange],
+  )
 
   // When the caller shows the "/" hint, "/" also focuses the input — but never
   // while typing somewhere else (form tags stay disabled for this hotkey).
@@ -67,6 +96,11 @@ export function SearchInput({
         onChange={handleChange}
         {...props}
       />
+      {suggest ? (
+        <React.Suspense fallback={null}>
+          <QualifierPicker inputRef={ref} value={String(inputValue)} onPick={applyPick} />
+        </React.Suspense>
+      ) : null}
       {shortcut && !inputValue ? (
         <div
           aria-hidden

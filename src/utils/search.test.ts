@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { isInRange, parseQuery, resolveRelativeDate } from "./search"
+import { isInRange, parseQuery, removeQualifier, resolveRelativeDate } from "./search"
 
 describe("parseQuery", () => {
   test("parses quoted values, comma lists, exclusions, and multiple sorts", () => {
@@ -151,5 +151,41 @@ describe("isInRange with relative dates", () => {
     const tomorrow = resolveRelativeDate("tomorrow")
     expect(isInRange(tomorrow, ">today")).toBe(true)
     expect(isInRange(today, ">today")).toBe(false)
+  })
+})
+
+describe("removeQualifier", () => {
+  test("takes one qualifier out of the query, as parsed, and tidies the spacing", () => {
+    expect(
+      removeQualifier("type:todo tag:work milk", { key: "tag", values: ["work"], exclude: false }),
+    ).toBe("type:todo milk")
+    expect(removeQualifier("-tag:work milk", { key: "tag", values: ["work"], exclude: true })).toBe(
+      "milk",
+    )
+    expect(removeQualifier("in:n1 type:todo", { key: "in", values: ["n1"], exclude: false })).toBe(
+      "type:todo",
+    )
+  })
+
+  test("finds quoted and comma-list values as typed", () => {
+    expect(
+      removeQualifier('milk in:"reading list" type:todo', {
+        key: "in",
+        values: ["reading list"],
+        exclude: false,
+      }),
+    ).toBe("milk type:todo")
+    expect(
+      removeQualifier("tag:a,b milk", { key: "tag", values: ["a", "b"], exclude: false }),
+    ).toBe("milk")
+  })
+
+  test("leaves the query alone when nothing matches exactly", () => {
+    expect(removeQualifier("tag:work milk", { key: "tag", values: ["home"], exclude: false })).toBe(
+      "tag:work milk",
+    )
+    expect(removeQualifier("tag:work milk", { key: "tag", values: ["work"], exclude: true })).toBe(
+      "tag:work milk",
+    )
   })
 })

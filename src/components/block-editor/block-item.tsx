@@ -83,6 +83,12 @@ export interface BlockEditorApi {
    * (Cmd/Ctrl+A pressed with the textarea's text already fully selected).
    */
   startSelectionLadder: (key: string) => void
+  /**
+   * A read-only row that opens something when clicked (a search result):
+   * the body takes the click, and the row shows the hover surface and a
+   * pointer. Absent in the editor, where a click selects the row.
+   */
+  activate?: (key: string) => void
   /** Developer-mode debug readouts; absent in ordinary use. */
   debug?: BlockDebugOptions
 }
@@ -778,10 +784,11 @@ export function BlockItem({
             // structural hooks above are untouched.
             selected && !api.keyboardActive && "block-highlight-inactive",
             // A quiet neutral hover marks the row as interactive (see
-            // .block-hoverable); never while read-only or already editing,
-            // and selection (accent) always wins because the class is
-            // simply absent on selected rows.
-            !readOnly && !editing && !selected && "block-hoverable",
+            // .block-hoverable); never while read-only (unless the row opens
+            // something — `api.activate`) or already editing, and selection
+            // (accent) always wins because the class is simply absent on
+            // selected rows.
+            (!readOnly || api.activate) && !editing && !selected && "block-hoverable",
           )}
         >
           {marker}
@@ -873,6 +880,7 @@ export function BlockItem({
               className={cx(
                 "min-h-[1lh] min-w-0 flex-1 outline-none",
                 !readOnly && "cursor-text",
+                readOnly && api.activate && "cursor-pointer",
                 typo,
                 // Checking a todo mutes its text; the fade marks the state
                 // change without delaying it.
@@ -880,7 +888,9 @@ export function BlockItem({
                 type === "done" && "text-text-secondary line-through",
               )}
               {...(readOnly
-                ? {}
+                ? api.activate
+                  ? { onClick: () => api.activate?.(occurrence.key) }
+                  : {}
                 : {
                     onClick: () => api.select(occurrence.key),
                     onDoubleClick: () => api.edit(occurrence.key),

@@ -1,9 +1,10 @@
 import { Searcher, type FullOptions } from "fast-fuzzy"
 import type { BlockType } from "../blocks/types"
+import { olPositions } from "../blocks/view"
 import { pageDoc, type GraphSnapshot } from "../data/graph"
 import type { Note, NoteId } from "../schema"
 import type { Filter, Query, Sort } from "./search"
-import { compareNotes, testNoteFilters } from "./search-notes"
+import { compareNotes, matchesNoteScope, testNoteFilters } from "./search-notes"
 
 /**
  * Block-granular search: resolve a query to individual BLOCKS instead of
@@ -13,82 +14,62 @@ import { compareNotes, testNoteFilters } from "./search-notes"
  * the graph — see `blockIndexAtom` / `searchBlocksAtom` in global-state.ts
  * for the derived-atom wiring.
  *
- * A hit is a ROW, not a subtree: it carries its own text, its breadcrumb
- * ancestry and a `childCount` presence flag, and nothing below it. Children
- * are resolved on expand through `BlockIndex.getChildren`, and cached — see
- * `createChildResolver`, which is also the seam an async (server-side) source
- * would slot into.
+ * A hit is a ROW, not a subtree: it carries its own text and type, its
+ * breadcrumb ancestry and a `childCount` presence flag, and nothing below it.
+ * Children are resolved on expand through `BlockIndex.getChildren`, and
+ * cached — see `createChildResolver`, which is also the seam an async
+ * (server-side) source would slot into.
  *
  * Query semantics (all composable with the existing `parseQuery` vocabulary):
  * - `type:` filters with block-type values (the table below) match the block
- *   itself; every other qualifier (`tag:`, `date:`, frontmatter, `has:`/`no:`,
- *   …) filters by the containing note, exactly as note search does.
- * - Fuzzy text matches the block's own marker-free text (fast-fuzzy, same
- *   threshold as note search); with fuzzy text present, results rank by fuzzy
- *   relevance, otherwise document order grouped by note (in the note order the
- *   index was built from — `sortedNotesAtom`).
+ *   itself; `in:` scopes to what is downstream of a note or a block (see
+ *   `testScopeFilter`); every other qualifier (`tag:`, `date:`, frontmatter,
+ *   `has:`/`no:`, …) filters by the containing note, exactly as note search
+ *   does.
+ * - Fuzzy text matches the block's own text (fast-fuzzy, same threshold as
+ *   note search); with fuzzy text present, results rank by fuzzy relevance,
+ *   otherwise document order grouped by note (in the note order the index
+ *   was built from — `sortedNotesAtom`).
  * - `-` exclusion and comma lists work on `type:` like any other qualifier.
  */
 
 /**
- * The canonical type of a block, for search. Derived from the block's marker
- * (`getBlockType`) plus code-fence tracking — a block that opens/closes a
- * fence, or sits inside one, is `code` regardless of its marker (a `- [ ]`
- * inside a fence is code, not a todo — the same rule as the graph ingest).
- */
-export type BlockSearchType =
-  | "todo"
-  | "done"
-  | "h1"
-  | "h2"
-  | "h3"
-  | "h4"
-  | "h5"
-  | "h6"
-  | "bullet"
-  | "ordered"
-  | "quote"
-  | "code"
-  | "text"
-
-/**
- * The `type:` query vocabulary → the canonical block types each value matches.
+ * The `type:` query vocabulary → the stored block types each value matches
+ * (the registry in `src/blocks/types.ts` — one vocabulary for the query
+ * language, the index and the rows that draw the results).
  *
- * | value           | matches                                    |
- * | --------------- | ------------------------------------------ |
- * | `todo`          | unchecked checkbox                         |
- * | `done`          | checked checkbox                           |
- * | `task`          | any checkbox, checked or not               |
- * | `heading`       | any heading level                          |
- * | `h1`…`h6`       | that heading level (marker `#`…`######`)   |
- * | `list`          | bullet or ordered list item                |
- * | `bullet` / `ul` | bullet list item                           |
- * | `ordered`/ `ol` | ordered list item                          |
- * | `quote`         | quote                                      |
- * | `code`          | code-fence delimiter or line inside one    |
- * | `text`          | plain paragraph                            |
+ * | value           | matches                                  |
+ * | --------------- | ---------------------------------------- |
+ * | `todo`          | unchecked checkbox                       |
+ * | `done`          | checked checkbox                         |
+ * | `task`          | any checkbox, checked or not             |
+ * | `heading`       | any heading                              |
+ * | `h1`…`h3`       | that heading type                        |
+ * | `list`          | bullet or ordered list item              |
+ * | `bullet` / `ul` | bullet list item                         |
+ * | `ordered`/ `ol` | ordered list item                        |
+ * | `quote`         | quote                                    |
+ * | `code`          | a code block, or a line inside a fence   |
+ * | `text`          | plain paragraph                          |
  *
  * A `type:` value outside this table is NOT block vocabulary: on its own the
  * filter stays a note-type filter (`type:daily` — see
  * search-notes.ts), unchanged from before. Mixed into a block-scoped comma
  * list (`type:todo,zzz`) an unknown value simply matches no blocks.
  */
-const BLOCK_TYPE_VALUES: Record<string, readonly BlockSearchType[]> = {
+const BLOCK_TYPE_VALUES: Record<string, readonly BlockType[]> = {
   todo: ["todo"],
   done: ["done"],
   task: ["todo", "done"],
-  heading: ["h1", "h2", "h3", "h4", "h5", "h6"],
+  heading: ["h1", "h2", "h3"],
   h1: ["h1"],
   h2: ["h2"],
   h3: ["h3"],
-  h4: ["h4"],
-  h5: ["h5"],
-  h6: ["h6"],
-  list: ["bullet", "ordered"],
-  bullet: ["bullet"],
-  ul: ["bullet"],
-  ordered: ["ordered"],
-  ol: ["ordered"],
+  list: ["ul", "ol"],
+  bullet: ["ul"],
+  ul: ["ul"],
+  ordered: ["ol"],
+  ol: ["ol"],
   quote: ["quote"],
   code: ["code"],
   text: ["text"],
@@ -109,7 +90,7 @@ export function hasBlockTypeFilter(filters: Filter[]): boolean {
 /** One ancestor block on a hit's breadcrumb trail. */
 export interface BlockAncestor {
   id: string
-  /** Marker-free display text. */
+  /** Display text. */
   text: string
 }
 
@@ -127,9 +108,13 @@ export interface BlockAncestor {
 export interface BlockHit {
   blockId: string
   noteId: NoteId
-  /** The block's own text with its leading marker removed. */
+  /** The block's own text. */
   text: string
-  type: BlockSearchType
+  /** The block's stored type (a line inside a code fence reads as `code`). */
+  type: BlockType
+  /** An ordered item's number in its run of ordered siblings (1 otherwise) —
+   * a fact of its position in the note, carried so the row shows it. */
+  olNumber: number
   /** Ancestor blocks, outermost first (ids + display texts, for breadcrumbs). */
   ancestors: BlockAncestor[]
   /**
@@ -183,7 +168,7 @@ export function createChildResolver<T>(source: (hit: BlockHit) => T): (hit: Bloc
   }
 }
 
-/** One note's parsed blocks: its hits in document order, plus the parent →
+/** One note's blocks: its hits in document order, plus the parent →
  * child-ids edges the lazy resolver walks (ids only — no block payload). */
 export interface NoteBlockIndex {
   hits: BlockHit[]
@@ -191,25 +176,11 @@ export interface NoteBlockIndex {
   childIds: Map<string, string[]>
 }
 
-/** The search type of a block: its stored type, in the query vocabulary, with
- * fence tracking on top (a text line inside a fence is code, whatever it is). */
-function blockSearchType(type: BlockType, text: string, inFence: boolean): BlockSearchType {
-  if (inFence || type === "code" || text.trimStart().startsWith("```")) return "code"
-  switch (type) {
-    case "h1":
-    case "h2":
-    case "h3":
-    case "todo":
-    case "done":
-    case "quote":
-      return type
-    case "ul":
-      return "bullet"
-    case "ol":
-      return "ordered"
-    default:
-      return "text"
-  }
+/** The type a hit reports: the stored type, except that a line inside a
+ * code fence (or a fence delimiter) is code whatever it is. */
+function hitType(type: BlockType, text: string, inFence: boolean): BlockType {
+  if (inFence || text.trimStart().startsWith("```")) return "code"
+  return type
 }
 
 /**
@@ -225,25 +196,27 @@ export function indexNoteBlocks(note: Note, snapshot: GraphSnapshot): NoteBlockI
   let fenceOpen = false
 
   const walk = (ids: string[], ancestors: BlockAncestor[]) => {
-    for (const id of ids) {
+    const numbers = olPositions(doc, ids)
+    ids.forEach((id, index) => {
       const block = doc.blocks[id]
-      if (!block) continue
+      if (!block) return
       const inFence = fenceOpen
       if (block.text.trimStart().startsWith("```")) fenceOpen = !fenceOpen
-      const type = blockSearchType(block.type, block.text, inFence)
+      const type = hitType(block.type, block.text, inFence)
       const text = block.text
       hits.push({
         blockId: id,
         noteId: note.id,
         text,
         type,
+        olNumber: numbers[index] || 1,
         ancestors,
         childCount: block.children.length,
         note,
       })
       if (block.children.length > 0) childIds.set(id, block.children)
       walk(block.children, [...ancestors, { id, text }])
-    }
+    })
   }
   walk(doc.rootBlockIds, [])
 
@@ -261,6 +234,13 @@ export interface BlockIndex {
   readonly searcher: Searcher<BlockHit, FullOptions<BlockHit>>
   /** A hit's direct children in document order, memoized per block. */
   getChildren: BlockChildResolver
+  /**
+   * Look a block up by id alone — the first note (in index order) carrying
+   * it. For describing an `in:` scope to a human (a block id names a
+   * subtree, but the reader wants to see its text); a block shared across
+   * notes resolves to the same text wherever it lives, so "first" is fine.
+   */
+  getBlock: (blockId: string) => BlockHit | undefined
 }
 
 /**
@@ -299,6 +279,13 @@ export function createBlockIndexer(
     let searcher: Searcher<BlockHit, FullOptions<BlockHit>> | null = null
     let byKey: Map<string, BlockHit> | null = null
     const lookup = () => (byKey ??= new Map(all.map((hit) => [blockKey(hit), hit])))
+    let byBlockId: Map<string, BlockHit> | null = null
+    const lookupById = () => {
+      if (byBlockId) return byBlockId
+      byBlockId = new Map()
+      for (const hit of all) if (!byBlockId.has(hit.blockId)) byBlockId.set(hit.blockId, hit)
+      return byBlockId
+    }
 
     return {
       hits: all,
@@ -314,12 +301,41 @@ export function createBlockIndexer(
           .map((id) => blocks.get(blockKey({ noteId: hit.noteId, blockId: id })))
           .filter((child): child is BlockHit => child !== undefined)
       }),
+      getBlock: (blockId) => lookupById().get(blockId),
     }
   }
 }
 
 function testBlockTypeFilter(filter: Filter, hit: BlockHit): boolean {
   const match = filter.values.some((value) => BLOCK_TYPE_VALUES[value]?.includes(hit.type) ?? false)
+  return filter.exclude ? !match : match
+}
+
+/** Is this the `in:` qualifier — the scope filter (see `testScopeFilter`)? */
+function isScopeFilter(filter: Filter): boolean {
+  return filter.key === "in"
+}
+
+/**
+ * `in:` — everything DOWNSTREAM of a note or a block: reachability from the
+ * scope, read off the row's own ancestry. A value names either a note (by
+ * id, or by its name, case-insensitively — `in:"Reading list"`) or a block
+ * (by id): a row is in scope when it lives in that note, or when that block
+ * is on its path from the page — so a block reachable by two paths is in
+ * scope through the one that passes the scope block. The scoping block
+ * itself is not in its own scope — `in:` is "inside", the way a zoomed
+ * view's title is not one of the page's blocks. `-in:` excludes, comma lists
+ * OR, like any qualifier.
+ *
+ * The same `in:` on a NOTE query (`src/utils/search-notes.ts`) matches the
+ * note by id or name; a block-id scope only means something at block
+ * granularity.
+ */
+function testScopeFilter(filter: Filter, hit: BlockHit): boolean {
+  const match = filter.values.some(
+    (value) =>
+      matchesNoteScope(value, hit.note) || hit.ancestors.some((ancestor) => ancestor.id === value),
+  )
   return filter.exclude ? !match : match
 }
 
@@ -358,8 +374,9 @@ function compareBlockHits(a: BlockHit, b: BlockHit, sorts: Sort[]): number {
 
 /**
  * Run a parsed query against the block index. Qualifiers AND together:
- * block-scoped `type:` filters test the block, everything else tests the
- * containing note. Fuzzy text ranks by relevance over block text; without it,
+ * block-scoped `type:` filters test the block, `in:` tests the block's
+ * ancestry / note (`testScopeFilter`), everything else tests the containing
+ * note. Fuzzy text ranks by relevance over block text; without it,
  * hits keep index order (document order grouped by note). `sort:` keys:
  * `text` (block text), `updated`/`updated_at` (note fallback, see above), and
  * any note-level key (`title`, frontmatter, …) applied via the containing
@@ -367,12 +384,16 @@ function compareBlockHits(a: BlockHit, b: BlockHit, sorts: Sort[]): number {
  */
 export function searchBlocks(query: Query, index: BlockIndex): BlockHit[] {
   const blockFilters = query.filters.filter(isBlockTypeFilter)
-  const noteFilters = query.filters.filter((filter) => !isBlockTypeFilter(filter))
+  const scopeFilters = query.filters.filter(isScopeFilter)
+  const noteFilters = query.filters.filter(
+    (filter) => !isBlockTypeFilter(filter) && !isScopeFilter(filter),
+  )
 
   const candidates = query.fuzzy ? index.searcher.search(query.fuzzy) : index.hits
   const results = candidates.filter(
     (hit) =>
       blockFilters.every((filter) => testBlockTypeFilter(filter, hit)) &&
+      scopeFilters.every((filter) => testScopeFilter(filter, hit)) &&
       testNoteFilters(noteFilters, hit.note),
   )
 
