@@ -1,28 +1,40 @@
 import { Command } from "cmdk"
 import React from "react"
+import { getBlockType, stripMarker } from "../blocks/block-type"
 import type { ResultRow } from "../hooks/block-result-tree"
-import type { BlockHit, BlockSearchType } from "../utils/block-search"
+import type { BlockHit } from "../utils/block-search"
 import { cx } from "../utils/cx"
 import { BlockContent } from "./block-editor/block-content"
-import { Hash } from "./block-editor/hash"
-import { IconButton } from "./icon-button"
+import {
+  BlockMarker,
+  BlockToggle,
+  BlockToggleBeside,
+  QuoteBar,
+  headingTopMargin,
+  typographyFor,
+} from "./block-editor/block-marker"
 import { NoteFavicon } from "./note-favicon"
 
 /**
  * The block-results list, shared by the ⌘K palette and the full results view
  * (`/?query=…`). One component, two chromes: `palette` renders cmdk items
  * (cmdk owns the highlight and Enter), `page` renders a keyboard-navigable
- * list drawn in the editor's selection tokens. Everything else — how a block
- * renders for its type, the breadcrumb, the expand affordance, the indent
- * guides — is identical by construction, so the two can't drift.
+ * list drawn in the editor's selection tokens.
+ *
+ * A result IS the block, drawn as the editor draws it. Each row is built from
+ * the editor's own pieces (`block-editor/block-marker.tsx`): the block's type
+ * is read from its raw `content` by the same rule (`getBlockType`), its marker
+ * sits in the same 15px slot, headings take the same scale for their depth,
+ * a quote gets its bar, a parent's collapse chevron swaps into its marker
+ * slot (beside a todo's checkbox) exactly as in the note, and revealed
+ * children hang from the same 24px guide. What a result adds is only where
+ * it lives — the breadcrumb under a matched hit — and what it does (open the
+ * note, zoomed to the block).
  *
  * Rows come from `useBlockResultTree`, which asks the data source for a row's
  * children only when it is expanded (see `BlockSearchSource`). This component
  * never touches the source itself — it renders rows and reports intent.
  */
-
-/** Heading types, which render bold behind a `#` like the editor's headings. */
-const HEADING_TYPES = new Set<BlockSearchType>(["h1", "h2", "h3", "h4", "h5", "h6"])
 
 /** The cmdk item value for a row (cmdk lowercases these — see the palette's
  * value → row map). */
@@ -41,55 +53,28 @@ export function blockHitNavigation(hit: BlockHit) {
 }
 
 /**
- * A block's marker, in the editor's vocabulary and its 15px marker column:
- * a checkbox for todos, a dot for list items, a `#` for headings. Plain
- * paragraphs, quotes and code have no marker in the editor either — their
- * type reads from the row's own styling instead.
+ * The editor's heading breathing room, as padding rather than margin: a
+ * result row's indent guides stretch over its own box, so the gap must sit
+ * inside it to keep the rule continuous (in the editor the margin sits
+ * inside the parent's guide container, which does the same job).
  */
-function BlockMarker({ type }: { type: BlockSearchType }) {
-  if (type === "todo" || type === "done") {
-    return (
-      <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
-        <input
-          type="checkbox"
-          checked={type === "done"}
-          readOnly
-          disabled
-          tabIndex={-1}
-          aria-hidden
-          className="block-checkbox cursor-default"
-        />
-      </span>
-    )
+function headingTopPadding(type: ReturnType<typeof getBlockType>, depth: number): string {
+  switch (headingTopMargin(type, depth)) {
+    case "mt-5":
+      return "pt-5"
+    case "mt-4":
+      return "pt-4"
+    case "mt-2.5":
+      return "pt-2.5"
+    case "mt-1.5":
+      return "pt-1.5"
+    default:
+      return ""
   }
-  if (HEADING_TYPES.has(type)) {
-    return (
-      <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-end font-bold">
-        <Hash />
-      </span>
-    )
-  }
-  if (type === "bullet" || type === "ordered") {
-    return (
-      <span className="flex h-[1lh] w-[15px] shrink-0 items-center justify-center">
-        <span aria-hidden className="size-1.5 rounded-full bg-text-tertiary" />
-      </span>
-    )
-  }
-  return null
 }
 
-/** The type's own text treatment — the editor's, minus the outline-depth type
- * scale (a result row has no outline depth to be sized by). */
-function typographyFor(type: BlockSearchType): string {
-  if (HEADING_TYPES.has(type)) return "font-bold"
-  if (type === "done") return "text-text-secondary line-through"
-  if (type === "quote") return "text-text-secondary"
-  if (type === "code") return "font-mono text-[0.9em]"
-  return ""
-}
-
-/** `Note name › Ancestor › Ancestor` — where this block lives. */
+/** `Note name › Ancestor › Ancestor` — where this block lives. Set like the
+ * editor's zoom breadcrumb (font-content, secondary ink, `›` separators). */
 function Breadcrumb({ hit, compact }: { hit: BlockHit; compact: boolean }) {
   return (
     <div
@@ -112,99 +97,84 @@ function Breadcrumb({ hit, compact }: { hit: BlockHit; compact: boolean }) {
   )
 }
 
-/** The expand chevron — drawn only when the block has something downstream
- * (`childCount`), which is the whole point of carrying that flag on the hit. */
-function ExpandToggle({ row, onToggle }: { row: ResultRow; onToggle: (row: ResultRow) => void }) {
-  return (
-    <span className="flex h-[1lh] shrink-0 items-center">
-      <IconButton
-        aria-label={row.expanded ? "Collapse" : "Expand"}
-        size="small"
-        disableTooltip
-        tabIndex={-1}
-        onClick={(event) => {
-          // In the palette this button lives inside a cmdk item, which would
-          // otherwise treat the click as "select this result".
-          event.preventDefault()
-          event.stopPropagation()
-          onToggle(row)
-        }}
-        className={cx(
-          "size-6 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150 active:scale-[0.92] motion-reduce:active:scale-100",
-          !row.hasChildren && "pointer-events-none opacity-0",
-        )}
-      >
-        <svg
-          width="8"
-          height="8"
-          viewBox="0 0 8 8"
-          aria-hidden
-          className={cx(
-            "transition-transform duration-200 ease-[var(--ease-out-strong)] motion-reduce:transition-none",
-            row.expanded ? "rotate-90" : "rotate-0",
-          )}
-        >
-          <path d="M2 1l4 3-4 3z" fill="currentColor" />
-        </svg>
-      </IconButton>
-    </span>
-  )
-}
-
 /**
- * The row's gutter: one indent guide per level of revealed depth (matching the
- * editor's subtree rule, so an expanded result reads like the outline it came
- * from) and the expand chevron. Sits OUTSIDE the row's own surface (unlike the
- * editor, whose toggle now lives in the block's marker slot): a result row is
- * one flat hit, so its chrome stays clear of it.
+ * The block itself — marker, quote bar, text in its type's style — plus (for
+ * a matched hit) the breadcrumb saying where it lives. The chevron of a
+ * result with something downstream lives in its marker slot, pinned while
+ * the result is closed, precisely as a folded block's is in the editor.
  */
-function ResultRowGutter({
+function ResultBlock({
   row,
+  compact,
   onToggle,
 }: {
   row: ResultRow
+  compact: boolean
   onToggle: (row: ResultRow) => void
 }) {
+  const type = getBlockType(row.hit.content)
+  const body = stripMarker(row.hit.content)
+  const typo = typographyFor(type, row.depth)
+  // A closed result is a folded block: its chevron stays visible.
+  const collapsed = row.hasChildren && !row.expanded
+  const toggleBeside = row.hasChildren && type.kind === "todo"
+  const toggle = row.hasChildren ? (
+    <BlockToggle collapsed={collapsed} beside={toggleBeside} onToggle={() => onToggle(row)} />
+  ) : null
+
   return (
     <>
-      {Array.from({ length: row.depth }, (_, level) => (
-        <span
-          key={level}
-          aria-hidden
-          className="w-3 shrink-0 self-stretch border-l border-border-secondary"
-        />
-      ))}
-      <ExpandToggle row={row} onToggle={onToggle} />
+      <BlockMarker
+        type={type}
+        depth={row.depth}
+        collapsed={collapsed}
+        toggle={toggle}
+        toggleBeside={toggleBeside}
+        readOnly
+      />
+      {toggleBeside ? (
+        <BlockToggleBeside className={cx("top-0.5", typo)}>{toggle}</BlockToggleBeside>
+      ) : null}
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
+        <div className="flex min-w-0 items-start gap-2">
+          {type.kind === "quote" ? <QuoteBar /> : null}
+          <div
+            data-testid="result-block"
+            className={cx(
+              "min-h-[1lh] min-w-0 flex-1",
+              typo,
+              type.kind === "todo" && type.checked && "text-text-secondary line-through",
+              // The palette is a popup: long blocks clip to keep it scannable.
+              // The full results view shows the block whole, like the note.
+              compact && "line-clamp-2",
+            )}
+          >
+            <BlockContent content={body} />
+          </div>
+        </div>
+        {row.depth === 0 ? <Breadcrumb hit={row.hit} compact={compact} /> : null}
+      </div>
     </>
   )
 }
 
 /**
- * The block itself: its marker and text in its own type's style, plus (for a
- * matched hit) the breadcrumb saying where it lives. Identical in both
- * variants — only the density differs.
+ * One indent guide per level of revealed depth — the editor's own geometry
+ * (11px in, a 1px rule, 12px of padding: children start 24px in), so an
+ * expanded result reads like the outline it came from. Rows sit flush, so
+ * the segments join into one continuous rule.
  */
-function ResultRowBody({ row, compact }: { row: ResultRow; compact: boolean }) {
+function IndentGuides({ depth }: { depth: number }) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-left leading-relaxed">
-      <div className="flex min-w-0 items-start gap-2">
-        <BlockMarker type={row.hit.type} />
-        <div
-          data-testid="result-block"
-          className={cx(
-            "min-w-0 flex-1 font-content",
-            compact ? "line-clamp-1" : "line-clamp-2",
-            typographyFor(row.hit.type),
-            // The editor's quote rule, on the text rather than the whole row
-            // (the row's surface belongs to the selection, not to the block).
-            row.hit.type === "quote" && "border-l-2 border-border pl-2",
-          )}
-        >
-          <BlockContent content={row.hit.text} />
-        </div>
-      </div>
-      {row.depth === 0 ? <Breadcrumb hit={row.hit} compact={compact} /> : null}
-    </div>
+    <>
+      {Array.from({ length: depth }, (_, level) => (
+        <span
+          key={level}
+          aria-hidden
+          className="ml-[11px] shrink-0 self-stretch border-l border-border-secondary pl-3"
+        />
+      ))}
+    </>
   )
 }
 
@@ -237,9 +207,11 @@ export function SearchResults({
             onSelect={() => onActivate(row.hit)}
             className="leading-normal!"
           >
-            <div className="flex min-w-0 items-start gap-1.5">
-              <ResultRowGutter row={row} onToggle={onToggle} />
-              <ResultRowBody row={row} compact={compact} />
+            <div className="flex min-w-0 items-stretch font-content leading-relaxed">
+              <IndentGuides depth={row.depth} />
+              <div className="relative flex min-w-0 flex-1 items-start gap-2">
+                <ResultBlock row={row} compact={compact} onToggle={onToggle} />
+              </div>
             </div>
           </Command.Item>
         ))}
@@ -248,28 +220,55 @@ export function SearchResults({
   }
 
   return (
-    // No vertical gap: rows sit flush so the indent guides of an expanded
-    // result join into one continuous rule, as they do in the editor.
+    // No vertical gap between nested rows: they sit flush so the indent
+    // guides of an expanded result join into one continuous rule, as they do
+    // in the editor. Matched hits (depth 0) keep the editor's root spacing.
     <ul className="flex flex-col">
-      {rows.map((row, index) => (
-        <li key={row.key} data-list-index={index} className="flex items-start gap-1.5">
-          <ResultRowGutter row={row} onToggle={onToggle} />
-          <button
-            type="button"
-            data-block-line
-            data-active={activeIndex === index ? "true" : undefined}
-            onClick={() => onActivate(row.hit)}
+      {rows.map((row, index) => {
+        const active = activeIndex === index
+        return (
+          <li
+            key={row.key}
+            data-list-index={index}
             className={cx(
-              // -ml-1/pl-2 mirrors the editor: the surface reaches 4px left of
-              // the text column without moving the text.
-              "focus-ring -ml-1 flex min-w-0 flex-1 cursor-default rounded py-1 pl-2 pr-2",
-              activeIndex === index ? "bg-bg-secondary list-highlight" : "block-hoverable",
+              "flex items-stretch",
+              row.depth === 0 && index > 0 && "mt-0.5",
+              // Inside a revealed outline a heading breathes as it does in the
+              // note; matched hits are a list, spaced evenly.
+              row.depth > 0 && headingTopPadding(getBlockType(row.hit.content), row.depth),
             )}
           >
-            <ResultRowBody row={row} compact={compact} />
-          </button>
-        </li>
-      ))}
+            <IndentGuides depth={row.depth} />
+            <div className="relative min-w-0 flex-1 py-0.5 font-content leading-relaxed">
+              {/* The editor's line surface (`data-block-line`, see block-item.tsx):
+                  the highlight reaches 2px past the text on every side while the
+                  text and every marker stay in the shared column. A div, not a
+                  button: the chevron and checkbox inside are controls of their
+                  own. */}
+              {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+              <div
+                role="button"
+                tabIndex={0}
+                data-block-line
+                data-active={active ? "true" : undefined}
+                onClick={() => onActivate(row.hit)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault()
+                    onActivate(row.hit)
+                  }
+                }}
+                className={cx(
+                  "focus-ring relative -mx-0.5 -my-0.5 flex cursor-default items-start gap-2 rounded px-1.5 py-0.5",
+                  active ? "bg-bg-secondary list-highlight" : "block-hoverable",
+                )}
+              >
+                <ResultBlock row={row} compact={compact} onToggle={onToggle} />
+              </div>
+            </div>
+          </li>
+        )
+      })}
     </ul>
   )
 }

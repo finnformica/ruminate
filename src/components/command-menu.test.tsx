@@ -11,7 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 // behavior.
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
-  match: { params: { _splat: "note-1" } } as { params: { _splat: string } } | undefined,
+  match: { params: { _splat: "note-1" } } as
+    { params: { _splat: string }; search?: { block?: string } } | undefined,
   // The block-search data source, injected at its single seam
   // (`useBlockSearchSource`) — see src/utils/block-search-source.ts.
   results: { mode: "notes", hits: [], notes: [] } as {
@@ -54,11 +55,15 @@ vi.mock("../global-state", async () => {
   return {
     notesAtom: atom(new Map()),
     pinnedNotesAtom: atom([]),
+    sortedNotesAtom: atom([]),
+    sortedTagEntriesAtom: atom([["work", ["note-1"]]]),
     tagSearcherAtom: atom(
       new Searcher([] as [string, string[]][], { keySelector: ([tag]) => tag }),
     ),
     noteOutlineAtom: atom(null),
     blockRevealAtom: atom(null),
+    // The block index only serves the scope pill's label here.
+    blockIndexAtom: atom({ hits: [], getBlock: () => undefined }),
   }
 })
 
@@ -260,7 +265,17 @@ function hit(
   ancestors: { id: string; text: string }[] = [],
   childCount = 0,
 ) {
-  return { blockId, noteId: RESEARCH.id, text, type, ancestors, childCount, note: RESEARCH }
+  const content = type === "todo" ? `[ ] ${text}` : type.startsWith("h") ? `# ${text}` : text
+  return {
+    blockId,
+    noteId: RESEARCH.id,
+    content,
+    text,
+    type,
+    ancestors,
+    childCount,
+    note: RESEARCH,
+  }
 }
 
 /** A heading nested under two other blocks — invisible to the old note-only
@@ -323,10 +338,56 @@ describe("block results", () => {
   })
 
   it("Enter on the query opens the full results view at ?query=", async () => {
+    // Outside a note there is nothing to scope to.
+    mocks.match = undefined
     await openWithBlocks([NVIDIA])
     // Nothing arrowed: cmdk highlights the first row, which is "see all".
     fireEvent.keyDown(commandsInput(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", search: { query: "nvidia" } })
+  })
+
+  it("inside a note, scopes the search to it — an `in:` the results view inherits", async () => {
+    await openWithBlocks([NVIDIA])
+    // Said plainly under the query, as a pill naming the note.
+    expect(screen.getByTestId("palette-scope").textContent).toContain("note-1")
+    fireEvent.keyDown(commandsInput(), { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/",
+      search: { query: "in:note-1 nvidia" },
+    })
+  })
+
+  it("the scope comes off with its pill", async () => {
+    await openWithBlocks([NVIDIA])
+    fireEvent.click(screen.getByTestId("palette-scope").querySelector("button")!)
+    expect(screen.queryByTestId("palette-scope")).toBeNull()
+    fireEvent.keyDown(commandsInput(), { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", search: { query: "nvidia" } })
+  })
+
+  it("a typed in: replaces the automatic scope rather than stacking on it", async () => {
+    await openWithBlocks([NVIDIA])
+    const input = commandsInput()
+    fireEvent.change(input, { target: { value: "in:other nvidia" } })
+    await waitFor(() => {
+      expect(screen.queryByTestId("palette-scope")).toBeNull()
+    })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/",
+      search: { query: "in:other nvidia" },
+    })
+  })
+
+  it("zoomed into a block, the scope is that block", async () => {
+    mocks.match = { params: { _splat: "note-1" }, search: { block: "blk_zoom" } }
+    await openWithBlocks([NVIDIA])
+    expect(screen.getByTestId("palette-scope").textContent).toContain("blk_zoom")
+    fireEvent.keyDown(commandsInput(), { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/",
+      search: { query: "in:blk_zoom nvidia" },
+    })
   })
 
   it("Enter on a highlighted hit opens its note, zoomed to the block", async () => {
@@ -380,8 +441,8 @@ describe("block results", () => {
 
   it("a leaf hit draws no expand affordance", async () => {
     await openWithBlocks([TODO_MILK])
-    const toggle = screen.getByLabelText("Expand")
-    expect(toggle.className).toContain("opacity-0")
+    // Like a leaf in the editor: its marker slot holds only its key.
+    expect(screen.queryByLabelText("Expand")).toBeNull()
   })
 
   it("leaves the arrows to the query input while the caret is inside the text", async () => {
@@ -394,5 +455,68 @@ describe("block results", () => {
     fireEvent.keyDown(input, { key: "ArrowRight" })
     expect(screen.queryByText("H100 supply")).toBeNull()
     expect(mocks.childCalls).toEqual([])
+  })
+})
+
+// ── Qualifier suggestions ───────────────────────────────────────────────────
+// Typing `type:` (or `tag:`, `in:`, …) opens the value picker inside the
+// palette; its keys are the picker's until it closes, so cmdk's list never
+// moves under it.
+
+describe("qualifier suggestions", () => {
+  /** Type into the palette with the caret parked at the end (jsdom doesn't
+   * place it for us). */
+  function type(value: string) {
+    const input = commandsInput()
+    fireEvent.change(input, { target: { value } })
+    input.setSelectionRange(value.length, value.length)
+    fireEvent.keyUp(input, { key: value.slice(-1) })
+    return input
+  }
+
+  it("opens on `type:` with the block types, and Enter picks the highlighted one", () => {
+    renderMenu({ open: true })
+    const input = type("type:")
+    const picker = screen.getByTestId("qualifier-suggestions")
+    expect(picker.textContent).toContain("todo")
+    expect(picker.textContent).toContain("heading")
+    // ↓ moves the highlight within the picker, not cmdk's list.
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(input.value).toBe("type:done ")
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    // Picked: the picker is gone, the query carries on.
+    expect(screen.queryByTestId("qualifier-suggestions")).toBeNull()
+  })
+
+  it("narrows as you type, and Tab picks too", () => {
+    renderMenu({ open: true })
+    const input = type("milk type:qu")
+    const picker = screen.getByTestId("qualifier-suggestions")
+    expect(picker.querySelectorAll('[role="option"]')).toHaveLength(1)
+    fireEvent.keyDown(input, { key: "Tab" })
+    expect(input.value).toBe("milk type:quote ")
+  })
+
+  it("lists the corpus's tags for `tag:`", () => {
+    renderMenu({ open: true })
+    type("tag:")
+    expect(screen.getByTestId("qualifier-suggestions").textContent).toContain("work")
+  })
+
+  it("Escape closes it and leaves the query as typed", () => {
+    renderMenu({ open: true })
+    const input = type("type:")
+    fireEvent.keyDown(input, { key: "Escape" })
+    expect(screen.queryByTestId("qualifier-suggestions")).toBeNull()
+    expect(input.value).toBe("type:")
+  })
+
+  it("stays shut for plain text and for unknown keys", () => {
+    renderMenu({ open: true })
+    type("nvidia")
+    expect(screen.queryByTestId("qualifier-suggestions")).toBeNull()
+    type("https://example.com")
+    expect(screen.queryByTestId("qualifier-suggestions")).toBeNull()
   })
 })

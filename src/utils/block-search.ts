@@ -3,7 +3,7 @@ import { getBlockType, stripMarker } from "../blocks/block-type"
 import { parse } from "../blocks/parse"
 import type { Note, NoteId } from "../schema"
 import type { Filter, Query, Sort } from "./search"
-import { compareNotes, testNoteFilters } from "./search-notes"
+import { compareNotes, matchesNoteScope, testNoteFilters } from "./search-notes"
 
 /**
  * Block-granular search: resolve a query to individual BLOCKS instead of
@@ -21,8 +21,10 @@ import { compareNotes, testNoteFilters } from "./search-notes"
  *
  * Query semantics (all composable with the existing `parseQuery` vocabulary):
  * - `type:` filters with block-type values (the table below) match the block
- *   itself; every other qualifier (`tag:`, `date:`, frontmatter, `has:`/`no:`,
- *   …) filters by the containing note, exactly as note search does.
+ *   itself; `in:` scopes to what is downstream of a note or a block (see
+ *   `testScopeFilter`); every other qualifier (`tag:`, `date:`, frontmatter,
+ *   `has:`/`no:`, …) filters by the containing note, exactly as note search
+ *   does.
  * - Fuzzy text matches the block's own marker-free text (fast-fuzzy, same
  *   threshold as note search); with fuzzy text present, results rank by fuzzy
  *   relevance, otherwise document order grouped by note (in the note order the
@@ -127,7 +129,14 @@ export interface BlockAncestor {
 export interface BlockHit {
   blockId: string
   noteId: NoteId
-  /** The block's own text with its leading marker removed. */
+  /**
+   * The block's raw markdown line, marker and all — exactly what the editor
+   * renders from, so a result row can be drawn by the same rule as the block
+   * in its note (`getBlockType` + `stripMarker`, see `BlockMarker`).
+   */
+  content: string
+  /** The block's own text with its leading marker removed (what fuzzy search
+   * and the breadcrumb read). */
   text: string
   type: BlockSearchType
   /** Ancestor blocks, outermost first (ids + display texts, for breadcrumbs). */
@@ -235,6 +244,7 @@ export function indexNoteBlocks(note: Note): NoteBlockIndex {
       hits.push({
         blockId: id,
         noteId: note.id,
+        content: block.content,
         text,
         type,
         ancestors,
@@ -261,6 +271,13 @@ export interface BlockIndex {
   readonly searcher: Searcher<BlockHit, FullOptions<BlockHit>>
   /** A hit's direct children in document order, memoized per block. */
   getChildren: BlockChildResolver
+  /**
+   * Look a block up by id alone — the first note (in index order) carrying
+   * it. For describing an `in:` scope to a human (a block id names a
+   * subtree, but the reader wants to see its text); a mirrored id resolves to
+   * the same text wherever it lives, so "first" is fine here.
+   */
+  getBlock: (blockId: string) => BlockHit | undefined
 }
 
 /**
@@ -308,6 +325,13 @@ export function createBlockIndexer(indexNote: (note: Note) => NoteBlockIndex = i
     let searcher: Searcher<BlockHit, FullOptions<BlockHit>> | null = null
     let byKey: Map<string, BlockHit> | null = null
     const lookup = () => (byKey ??= new Map(all.map((hit) => [blockKey(hit), hit])))
+    let byBlockId: Map<string, BlockHit> | null = null
+    const lookupById = () => {
+      if (byBlockId) return byBlockId
+      byBlockId = new Map()
+      for (const hit of all) if (!byBlockId.has(hit.blockId)) byBlockId.set(hit.blockId, hit)
+      return byBlockId
+    }
 
     return {
       hits: all,
@@ -323,12 +347,38 @@ export function createBlockIndexer(indexNote: (note: Note) => NoteBlockIndex = i
           .map((id) => blocks.get(blockKey({ noteId: hit.noteId, blockId: id })))
           .filter((child): child is BlockHit => child !== undefined)
       }),
+      getBlock: (blockId) => lookupById().get(blockId),
     }
   }
 }
 
 function testBlockTypeFilter(filter: Filter, hit: BlockHit): boolean {
   const match = filter.values.some((value) => BLOCK_TYPE_VALUES[value]?.includes(hit.type) ?? false)
+  return filter.exclude ? !match : match
+}
+
+/** Is this the `in:` qualifier — the scope filter (see `testScopeFilter`)? */
+function isScopeFilter(filter: Filter): boolean {
+  return filter.key === "in"
+}
+
+/**
+ * `in:` — everything DOWNSTREAM of a note or a block. A value names either a
+ * note (by id, or by its name, case-insensitively — `in:"Reading list"`) or
+ * a block (by id): a block is in scope when it lives in that note, or when
+ * that block is one of its ancestors. The scoping block itself is not in its
+ * own scope — `in:` is "inside", the way a zoomed view's title is not one of
+ * the page's blocks. `-in:` excludes, comma lists OR, like any qualifier.
+ *
+ * The same `in:` on a NOTE query (`src/utils/search-notes.ts`) matches the
+ * note by id or name; a block-id scope only means something at block
+ * granularity.
+ */
+function testScopeFilter(filter: Filter, hit: BlockHit): boolean {
+  const match = filter.values.some(
+    (value) =>
+      matchesNoteScope(value, hit.note) || hit.ancestors.some((ancestor) => ancestor.id === value),
+  )
   return filter.exclude ? !match : match
 }
 
@@ -367,8 +417,9 @@ function compareBlockHits(a: BlockHit, b: BlockHit, sorts: Sort[]): number {
 
 /**
  * Run a parsed query against the block index. Qualifiers AND together:
- * block-scoped `type:` filters test the block, everything else tests the
- * containing note. Fuzzy text ranks by relevance over block text; without it,
+ * block-scoped `type:` filters test the block, `in:` tests the block's
+ * ancestry / note (`testScopeFilter`), everything else tests the containing
+ * note. Fuzzy text ranks by relevance over block text; without it,
  * hits keep index order (document order grouped by note). `sort:` keys:
  * `text` (block text), `updated`/`updated_at` (note fallback, see above), and
  * any note-level key (`title`, frontmatter, …) applied via the containing
@@ -376,12 +427,16 @@ function compareBlockHits(a: BlockHit, b: BlockHit, sorts: Sort[]): number {
  */
 export function searchBlocks(query: Query, index: BlockIndex): BlockHit[] {
   const blockFilters = query.filters.filter(isBlockTypeFilter)
-  const noteFilters = query.filters.filter((filter) => !isBlockTypeFilter(filter))
+  const scopeFilters = query.filters.filter(isScopeFilter)
+  const noteFilters = query.filters.filter(
+    (filter) => !isBlockTypeFilter(filter) && !isScopeFilter(filter),
+  )
 
   const candidates = query.fuzzy ? index.searcher.search(query.fuzzy) : index.hits
   const results = candidates.filter(
     (hit) =>
       blockFilters.every((filter) => testBlockTypeFilter(filter, hit)) &&
+      scopeFilters.every((filter) => testScopeFilter(filter, hit)) &&
       testNoteFilters(noteFilters, hit.note),
   )
 

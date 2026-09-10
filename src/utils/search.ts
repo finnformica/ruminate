@@ -34,7 +34,6 @@ export function parseQuery(query: string): Query {
 
     const key = match.groups.key
     const value = match.groups.value
-    const exclude = Boolean(match.groups.exclude)
 
     if (key === "sort") {
       const values = value.split(",")
@@ -51,24 +50,55 @@ export function parseQuery(query: string): Query {
       continue
     }
 
-    let values = [] as string[]
-    if (value.startsWith('"')) {
-      values = [value.slice(1, -1)]
-    } else if (value.includes(",")) {
-      values = value
-        .split(",")
-        .map((v) => v.trim())
-        .filter(Boolean)
-    } else {
-      values = [value.trim()]
-    }
-
-    filters.push({ key, values, exclude })
+    filters.push(parseQualifier(match.groups))
   }
 
   const fuzzy = query.replace(QUALIFIER_REGEX, "").trim()
 
   return { fuzzy, filters, sorts }
+}
+
+/**
+ * The query with one qualifier taken out — the `filter` as `parseQuery`
+ * returned it (key, values, exclusion). Matched on the parsed form rather
+ * than by re-spelling it, so a quoted value (`in:"Reading list"`) is found as
+ * typed. Only the first occurrence goes; surrounding whitespace collapses.
+ */
+export function removeQualifier(query: string, filter: Filter): string {
+  for (const match of query.matchAll(QUALIFIER_REGEX)) {
+    if (!match.groups || match.index === undefined) continue
+    const { key, values, exclude } = parseQualifier(match.groups)
+    if (
+      key !== filter.key ||
+      exclude !== filter.exclude ||
+      values.length !== filter.values.length ||
+      values.some((value, index) => value !== filter.values[index])
+    ) {
+      continue
+    }
+    const before = query.slice(0, match.index)
+    const after = query.slice(match.index + match[0].length)
+    return `${before.trimEnd()} ${after.trimStart()}`.trim()
+  }
+  return query
+}
+
+/** One `key:value` match, as a filter. `sort:` is not a filter; callers
+ * handle it before reaching here. */
+function parseQualifier(groups: Record<string, string>): Filter {
+  const value = groups.value
+  let values: string[]
+  if (value.startsWith('"')) {
+    values = [value.slice(1, -1)]
+  } else if (value.includes(",")) {
+    values = value
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean)
+  } else {
+    values = [value.trim()]
+  }
+  return { key: groups.key, values, exclude: Boolean(groups.exclude) }
 }
 
 function getSortDirection(key: string, direction?: string): SortDirection {

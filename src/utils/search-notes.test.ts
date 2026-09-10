@@ -26,6 +26,20 @@ function makeNote(overrides: Partial<Note> = {}): Note {
   }
 }
 
+describe("in: scope", () => {
+  test("matches a note by id, or by its name (case-insensitively)", () => {
+    const note = makeNote({ id: "n1", displayName: "Reading list", title: "Reading list" })
+    const scope = (value: string) =>
+      testNoteFilters([{ key: "in", values: [value], exclude: false }], note)
+    expect(scope("n1")).toBe(true)
+    expect(scope("reading LIST")).toBe(true)
+    expect(scope("n2")).toBe(false)
+    // A block id means nothing at note granularity.
+    expect(scope("blk_abc")).toBe(false)
+    expect(testNoteFilters([{ key: "in", values: ["n1"], exclude: true }], note)).toBe(false)
+  })
+})
+
 describe("filtering", () => {
   test("matches by tag, title, type, frontmatter, counts, dates, has and no filters", () => {
     const note = makeNote({

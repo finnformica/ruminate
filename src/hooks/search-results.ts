@@ -14,10 +14,12 @@ import { useSearchNotes } from "./search-notes"
  * filename.
  *
  * A query that only names NOTES — `tag:recipe`, `date:2026-01-01`, a bare
- * frontmatter qualifier, or nothing at all — stays a note listing: every block
- * in every tagged note is not a search result, it's the corpus. That rule is
- * what keeps the tags page (which drives its list with a `tag:` base query)
- * browsing notes, while typing text into it narrows to blocks.
+ * frontmatter qualifier, an `in:` scope, or nothing at all — stays a note
+ * listing: every block in every tagged note is not a search result, it's the
+ * corpus. That rule is what keeps the tags page (which drives its list with a
+ * `tag:` base query) browsing notes, while typing text into it narrows to
+ * blocks — and what lets the palette scope itself to the open note (`in:`)
+ * without turning an empty query into a dump of that note.
  */
 function resolvesToBlocks(query: string): boolean {
   const parsed = parseQuery(query)

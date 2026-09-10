@@ -85,6 +85,12 @@ function testNoteFilter(filter: Filter, note: Note) {
     case "type":
       value = filter.values.includes(note.type)
       break
+    case "in":
+      // The scope qualifier at note granularity: the note itself, by id or
+      // name. (A block-id scope only means something for block results —
+      // see `testScopeFilter` in block-search.ts.)
+      value = filter.values.some((scope) => matchesNoteScope(scope, note))
+      break
     default:
       if (filter.key in frontmatter) {
         value = filter.values.includes(String(frontmatter[filter.key]))
@@ -93,6 +99,16 @@ function testNoteFilter(filter: Filter, note: Note) {
   }
 
   return filter.exclude ? !value : value
+}
+
+/** Does an `in:` value name this note — by id, or by its name (case-insensitive)? */
+export function matchesNoteScope(value: string, note: Note): boolean {
+  if (value === note.id) return true
+  const name = value.toLowerCase()
+  return (
+    name === note.displayName.toLowerCase() ||
+    (note.title !== "" && name === note.title.toLowerCase())
+  )
 }
 
 export function sortNotes(results: Array<Note>, sorts: Sort[]): Array<Note> {

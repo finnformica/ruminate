@@ -129,6 +129,9 @@ describe("block hits", () => {
     expect(hit.text).toBe("Today")
     expect(hit.type).toBe("h1")
     expect(hit.note).toBe(TASKS_NOTE)
+    // The raw line too — what the editor draws the block from.
+    expect(hit.content).toBe("# Today")
+    expect(run("type:todo")[0].content).toBe("[ ] buy milk")
   })
 
   test("carry ancestry under headings and nested lists, outermost first", () => {
@@ -327,11 +330,44 @@ describe("searchBlocks", () => {
     ])
   })
 
+  test("in: scopes to the blocks downstream of a note, by id or by name", () => {
+    expect(ids(run("type:todo in:tasks"))).toEqual(["blk_milk"])
+    expect(ids(run("type:todo in:misc"))).toEqual(["blk_plants"])
+    // By the note's name (case-insensitive), quoted when it has spaces.
+    const named = makeNote({ ...TASKS_NOTE, displayName: "Today's tasks", title: "Today's tasks" })
+    expect(ids(run('type:task in:"today\'s tasks"', [named, MISC_NOTE]))).toEqual([
+      "blk_milk",
+      "blk_ship",
+    ])
+    // Comma lists OR; `-in:` excludes.
+    expect(ids(run("type:todo in:tasks,misc"))).toEqual(["blk_milk", "blk_plants"])
+    expect(ids(run("type:todo -in:tasks"))).toEqual(["blk_plants"])
+    // A note nothing is in.
+    expect(run("type:todo in:nowhere")).toEqual([])
+  })
+
+  test("in: with a block id scopes to that block's subtree — the block itself excluded", () => {
+    expect(ids(run("in:blk_head"))).toEqual(["blk_milk", "blk_ship"])
+    expect(ids(run("type:done in:blk_head"))).toEqual(["blk_ship"])
+    // Composes with everything else, and a leaf has nothing downstream.
+    expect(ids(run("type:todo in:blk_head tag:work"))).toEqual(["blk_milk"])
+    expect(run("in:blk_milk")).toEqual([])
+  })
+
   test("an unknown type value matches nothing", () => {
     // Alone it is not block vocabulary (stays a note-type filter → no notes
     // of type "zzz"); mixed into a block-scoped list it matches no blocks.
     expect(run("type:zzz")).toEqual([])
     expect(ids(run("type:todo,zzz"))).toEqual(["blk_milk", "blk_plants"])
+  })
+})
+
+describe("getBlock", () => {
+  test("looks a block up by id alone, in the first note carrying it", () => {
+    const index = buildIndex([TASKS_NOTE, MISC_NOTE])
+    expect(index.getBlock("blk_milk")?.text).toBe("buy milk")
+    expect(index.getBlock("blk_milk")?.noteId).toBe("tasks")
+    expect(index.getBlock("blk_nope")).toBeUndefined()
   })
 })
 
