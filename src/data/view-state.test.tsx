@@ -3,7 +3,16 @@ import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { parse } from "../blocks/parse"
 import type { BlockDoc } from "../blocks/types"
-import { readCollapsedKeys, useCollapseState, writeCollapsedKeys } from "./view-state"
+import { Provider, createStore } from "jotai"
+import type { ReactNode } from "react"
+import { expandedLevelsAtom } from "../global-state"
+import {
+  MAX_STORED_NOTES,
+  clearStoredFolds,
+  readCollapsedKeys,
+  useCollapseState,
+  writeCollapsedKeys,
+} from "./view-state"
 
 /** A four-deep outline with stable ids — occurrence keys `a`, `a/b`, `a/b/c`,
  * `a/b/c/d`. The policy collapses `b` and `c` (a parent two or more levels
@@ -41,7 +50,25 @@ const stored = (noteId: string): unknown => {
 const keys = (set: ReadonlySet<string>) => [...set].sort()
 
 /** The stored keys, sorted — a set has no meaningful order. */
-const storedKeys = (noteId: string) => [...((stored(noteId) as string[] | null) ?? [])].sort()
+const storedKeys = (noteId: string) => {
+  const entry = stored(noteId) as { collapsed?: string[] } | string[] | null
+  const list = Array.isArray(entry) ? entry : (entry?.collapsed ?? [])
+  return [...list].sort()
+}
+
+/** Render the hook against a store with the given depth setting. */
+function renderWithLevels(levels: number, noteId: string | undefined, initial: BlockDoc) {
+  const store = createStore()
+  store.set(expandedLevelsAtom, levels)
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <Provider store={store}>{children}</Provider>
+  )
+  const rendered = renderHook(({ doc }) => useCollapseState(noteId, doc), {
+    initialProps: { doc: initial },
+    wrapper,
+  })
+  return { ...rendered, store }
+}
 
 beforeEach(() => localStorage.clear())
 afterEach(cleanup)
@@ -59,6 +86,11 @@ describe("readCollapsedKeys", () => {
   it("reads back a stored key set, ignoring junk entries", () => {
     localStorage.setItem("collapse:note-a", JSON.stringify(["a/b", 7, null, "a/b/c"]))
     expect(readCollapsedKeys("note-a", deep)).toEqual(new Set(["a/b", "a/b/c"]))
+    localStorage.setItem(
+      "collapse:note-b",
+      JSON.stringify({ v: 2, collapsed: ["a/b", 7, "a/b/c"], t: 1 }),
+    )
+    expect(readCollapsedKeys("note-b", deep)).toEqual(new Set(["a/b", "a/b/c"]))
   })
 
   it("resolves entries stored as block ids (pre-occurrence folds) to every occurrence", () => {
@@ -101,20 +133,67 @@ describe("readCollapsedKeys", () => {
 describe("writeCollapsedKeys", () => {
   it("drops occurrences the document no longer has", () => {
     writeCollapsedKeys("note-a", new Set(["a/b", "a/b/c"]), pruned)
-    expect(stored("note-a")).toEqual(["a/b"])
+    expect(storedKeys("note-a")).toEqual(["a/b"])
   })
 
-  it("writes an empty entry rather than removing it (the note stays seeded)", () => {
+  it("writes an empty entry rather than removing it (everything unfolded is a state)", () => {
     writeCollapsedKeys("note-a", new Set(), deep)
-    expect(stored("note-a")).toEqual([])
+    expect(stored("note-a")).toMatchObject({ v: 2, collapsed: [] })
+  })
+
+  it("keeps at most MAX_STORED_NOTES notes, dropping the least recently written", () => {
+    for (let i = 0; i < MAX_STORED_NOTES - 1; i += 1) {
+      localStorage.setItem(`collapse:n${i}`, JSON.stringify({ v: 2, collapsed: [], t: i + 1 }))
+    }
+    // An entry in the old shape has no time: it is the oldest of all.
+    localStorage.setItem("collapse:old", JSON.stringify(["a/b"]))
+    writeCollapsedKeys("fresh", new Set(["a/b"]), deep)
+    expect(stored("old")).toBe(null)
+    expect(stored("n0")).not.toBe(null)
+    expect(stored("fresh")).not.toBe(null)
+    // One more, and the oldest timed entry goes.
+    writeCollapsedKeys("fresher", new Set(), deep)
+    expect(stored("n0")).toBe(null)
+    expect(stored("n1")).not.toBe(null)
+  })
+
+  it("clearStoredFolds forgets every note's folds and nothing else", () => {
+    writeCollapsedKeys("a", new Set(["a/b"]), deep)
+    writeCollapsedKeys("b", new Set(), deep)
+    localStorage.setItem("accent", "cyan")
+    expect(clearStoredFolds()).toBe(2)
+    expect(stored("a")).toBe(null)
+    expect(localStorage.getItem("accent")).toBe("cyan")
   })
 })
 
 describe("useCollapseState", () => {
-  it("seeds from the policy on first open and persists the seed", () => {
+  it("opens as the policy says, and stores nothing until the reader folds", () => {
     const { result } = renderHook(() => useCollapseState("n1", deep))
     expect(keys(result.current.collapsed)).toEqual(["a/b", "a/b/c"])
-    expect(storedKeys("n1")).toEqual(["a/b", "a/b/c"])
+    expect(stored("n1")).toBe(null)
+  })
+
+  it("opens to the depth the reader chose", () => {
+    expect(keys(renderWithLevels(1, "n1", deep).result.current.collapsed)).toEqual([
+      "a",
+      "a/b",
+      "a/b/c",
+    ])
+    expect(keys(renderWithLevels(4, "n1", deep).result.current.collapsed)).toEqual([])
+  })
+
+  it("a changed depth re-seeds a note the reader never touched, and leaves one they did", () => {
+    const untouched = renderWithLevels(2, "n1", deep)
+    expect(keys(untouched.result.current.collapsed)).toEqual(["a/b", "a/b/c"])
+    act(() => untouched.store.set(expandedLevelsAtom, 4))
+    expect(keys(untouched.result.current.collapsed)).toEqual([])
+
+    const touched = renderWithLevels(2, "n2", deep)
+    act(() => touched.result.current.toggleCollapse("a/b"))
+    expect(keys(touched.result.current.collapsed)).toEqual(["a/b/c"])
+    act(() => touched.store.set(expandedLevelsAtom, 4))
+    expect(keys(touched.result.current.collapsed)).toEqual(["a/b/c"])
   })
 
   it("toggles in both directions — one meaning, one direction", () => {
@@ -145,14 +224,10 @@ describe("useCollapseState", () => {
     const { result, rerender } = renderHook(({ doc }) => useCollapseState("late", doc), {
       initialProps: { doc: empty },
     })
-    // Nothing to seed from yet — and nothing written, or the note would be
-    // stuck fully expanded once its content landed.
+    // Nothing to seed from yet.
     expect(keys(result.current.collapsed)).toEqual([])
-    expect(stored("late")).toBe(null)
-
     rerender({ doc: deep })
     expect(keys(result.current.collapsed)).toEqual(["a/b", "a/b/c"])
-    expect(storedKeys("late")).toEqual(["a/b", "a/b/c"])
   })
 
   it("leaves blocks added after the first open expanded", () => {
@@ -169,10 +244,11 @@ describe("useCollapseState", () => {
     const { result, rerender } = renderHook(({ doc }) => useCollapseState("n1", doc), {
       initialProps: { doc: deep },
     })
-    expect(stored("n1")).toEqual(["a/b", "a/b/c"])
+    act(() => result.current.toggleCollapse("a"))
+    expect(storedKeys("n1")).toEqual(["a", "a/b", "a/b/c"])
     rerender({ doc: pruned })
     act(() => result.current.toggleCollapse("a"))
-    expect(storedKeys("n1")).toEqual(["a", "a/b"])
+    expect(storedKeys("n1")).toEqual(["a/b"])
   })
 
   it("migrates an old override entry on open and rewrites it in the new shape", () => {
@@ -180,6 +256,7 @@ describe("useCollapseState", () => {
     const { result } = renderHook(() => useCollapseState("n1", deep))
     expect(keys(result.current.collapsed)).toEqual(["a", "a/b/c"])
     expect(storedKeys("n1")).toEqual(["a", "a/b/c"])
+    expect(stored("n1")).toMatchObject({ v: 2 })
   })
 
   it("never leaves a block un-expandable, whatever was stored", () => {

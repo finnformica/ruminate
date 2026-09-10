@@ -342,17 +342,20 @@ nothing to normalize.
 ### No view_state table
 
 Collapse state is per-device ephemera. localStorage holds one set of collapsed
-block ids per note (`collapse:<noteId>`, `src/data/view-state.ts`): collapsed
-means folded, everything else is open, so a block can never hold two opinions
-at once. The default-expansion policy is pure (`defaultCollapsedIds`,
-`src/blocks/default-collapsed.ts`): headings always expanded, two levels
-expanded below any heading (or the page root), deeper starts collapsed — and
-it **seeds** that set the first time a note is opened on a device rather than
-sitting underneath it as a layer. After that the reader's toggles are the only
-thing that moves the set (blocks added later start expanded), ids the document
-has lost are pruned on write, and losing localStorage simply re-seeds from the
-policy. The rollup's hard depth cap doubles as the render guard against
-corrupted (cyclic) graphs.
+occurrence keys per note the reader has folded (`collapse:<noteId>`,
+`src/data/view-state.ts`): collapsed means folded, everything else is open, so
+a row can never hold two opinions at once. The default-expansion policy is
+pure (`defaultCollapsedKeys`, `src/blocks/default-collapsed.ts`): headings
+always expanded, _n_ levels expanded below any heading (or the page root),
+deeper starts collapsed — _n_ is a preference (Settings → Editor, two by
+default). A note the reader has never folded is not stored: it opens as the
+policy says every time, so the setting governs it and nothing accumulates for
+notes merely read. The first fold takes the note over — from then on its set
+is the reader's, persisted and never re-seeded (blocks added later start
+expanded). Keys the document has lost are pruned on write, the least recently
+written notes fall off past a cap, Settings can forget every fold on the
+device, and losing localStorage simply re-seeds from the policy. The rollup's
+hard depth cap doubles as the render guard against corrupted (cyclic) graphs.
 
 ## Delete = unlink + rescue (and, underneath, a tombstone)
 
