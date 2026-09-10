@@ -116,6 +116,12 @@ describe("BlockEditor focus + keyboard", () => {
     expect(document.activeElement).toBe(textarea)
   })
 
+  it("an empty block shows nothing in view mode (no placeholder text)", () => {
+    const { container } = render(<Harness initial="" />)
+    expect(container.querySelector('[data-testid="block-body"]')?.textContent).toBe("")
+    expect(container.textContent).not.toContain("Empty")
+  })
+
   it("focuses the container on mount so a highlighted block responds to keys", () => {
     const { container } = render(<Harness initial={"A\nB\nC"} />)
     expect(document.activeElement).toBe(editorRoot(container))

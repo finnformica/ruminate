@@ -1,11 +1,11 @@
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
-/** Renders a single block's content *inline* (bold/italic/links/code spans). */
+/** Renders a single block's content *inline* (bold/italic/links/code spans).
+ * An empty block renders nothing: the row keeps its line height on its own,
+ * and the editor's placeholder lives in the textarea. */
 export function BlockContent({ content }: { content: string }) {
-  if (!content.trim()) {
-    return <span className="text-text-tertiary italic">Empty</span>
-  }
+  if (!content.trim()) return null
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
