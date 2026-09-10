@@ -526,14 +526,15 @@ The rules, per pasted root (`embeddedPasteFragment` in `block-editor.tsx`):
 - **Link** (ids unknown in this doc, i.e. cross-note): insert with original
   ids, using the node's LIVE content resolved from the corpus
   (`resolve-blocks.ts`, wired by `BlockNoteEditor`; the open note's own file
-  is excluded — it lags the editor by the autosave debounce). A node that no
-  longer exists anywhere falls back to the clipboard-embedded content, still
-  under its original ids — that fallback is what makes cut+paste a robust
-  move regardless of autosave timing.
+  is excluded — it lags the editor by the ops flush). A node that no longer
+  exists anywhere falls back to the clipboard-embedded content, still under
+  its original ids — that fallback is what makes cut+paste a robust move
+  regardless of flush timing.
 - **Same-doc** (an id already lives in this doc): duplicate with fresh ids —
-  same-note mirroring is deliberately out of scope until the `((blk_x))`
-  occurrence form (the markdown bridge re-mints a duplicate `id::` and would
-  fork it).
+  the graph can hold a block under two parents of one page and the view
+  renders it as two rows, but selection and the commands still address a
+  block by id, so same-note mirroring waits for that re-keying
+  (docs/graph-native-app.md, step 4).
 - **Twin** (the id is already a direct child of the insertion parent): skip
   that block — no duplicate, no error, it's already there. The DB's
   `(source, destination, kind)` primary key backstops the invariant.

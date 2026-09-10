@@ -43,6 +43,5 @@ the removed `src/codemirror-extensions/` for the original implementations).
 
 For reference, these CodeMirror-era behaviours already exist natively in the
 block editor and need no rebuild: block types (headings, todos, bullets, ordered,
-quote), block references `((blk_…))` with live transclusion, collapse/expand,
-per-block markdown rendering, multi-line paste split across blocks, browser
+quote), collapse/expand, per-block markdown rendering, multi-line paste split across blocks, browser
 spellcheck (the block textarea sets `spellCheck`), and document-level undo/redo.
