@@ -61,7 +61,7 @@ function BlankKeepingHarness({ initial }: { initial: string }) {
   const handleChange = (next: BlockDoc) => {
     const lastId = next.rootBlockIds[next.rootBlockIds.length - 1]
     const last = lastId ? next.blocks[lastId] : undefined
-    if (last && last.content === "" && last.children.length === 0) {
+    if (last && last.type === "text" && last.text === "" && last.children.length === 0) {
       setDoc(next)
       return
     }
@@ -1642,7 +1642,7 @@ describe("developer debug readouts", () => {
       <Harness initial={initial} debug={{ showMetadata: true, upstreamOf }} />,
     )
     const [metaA, metaB] = getAllByTestId("block-debug-meta").map((el) => el.textContent)
-    expect(metaA).toContain("bullet")
+    expect(metaA).toContain("ul")
     expect(metaA).toContain("depth 0")
     expect(metaA).toContain("downstream 1")
     // A is reached from two notes: it is linked, and both are named upstream.
@@ -1685,8 +1685,8 @@ describe("slash menu (edit mode)", () => {
       row.getAttribute("data-slash-item")!,
     )
     expect(labels[0]).toBe("date:Today")
-    expect(labels).toContain("block:heading")
-    expect(labels.indexOf("date:Today")).toBeLessThan(labels.indexOf("block:paragraph"))
+    expect(labels).toContain("block:h1")
+    expect(labels.indexOf("date:Today")).toBeLessThan(labels.indexOf("block:text"))
   })
 
   it("Enter on a date row replaces the /phrase with the date", () => {
@@ -1707,7 +1707,7 @@ describe("slash menu (edit mode)", () => {
     typeInto(textarea, "/list")
     fireEvent.keyDown(textarea, { key: "ArrowDown" })
     const active = getByTestId("slash-menu").querySelector("[aria-selected=true]")!
-    expect(active.getAttribute("data-slash-item")).toBe("block:ordered")
+    expect(active.getAttribute("data-slash-item")).toBe("block:ol")
     fireEvent.keyDown(textarea, { key: "Enter" })
     expect(serializedLines(getByTestId)).toEqual(["1. "])
   })

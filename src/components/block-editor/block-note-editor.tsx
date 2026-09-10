@@ -26,7 +26,7 @@ function withStarterBlock(doc: BlockDoc): BlockDoc {
 function ensureTrailingBlank(doc: BlockDoc): BlockDoc {
   const lastId = doc.rootBlockIds[doc.rootBlockIds.length - 1]
   const last = lastId ? doc.blocks[lastId] : undefined
-  if (last && last.content === "" && last.children.length === 0) return doc
+  if (last && last.type === "text" && last.text === "" && last.children.length === 0) return doc
   const block = emptyBlock()
   return {
     ...doc,

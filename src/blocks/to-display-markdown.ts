@@ -1,9 +1,11 @@
-import { getBlockType } from "./block-type"
+import { isListItem, markerFor } from "./markers"
 import { parse } from "./parse"
+import type { Block, BlockDoc } from "./types"
 
 /**
- * Convert a note's on-disk block format into plain display markdown for
- * rendering (previews).
+ * Convert block-format markdown (the canonical `<id>.md` shape, or a copied
+ * selection in that shape) into plain display markdown for rendering and for
+ * the clipboard's `text/plain` flavor.
  *
  * The stored format annotates every block with an `id:: blk_…` line and writes
  * todos as a bare `[ ] task` marker — neither of which is valid markdown, so a
@@ -12,34 +14,42 @@ import { parse } from "./parse"
  * become GFM task-list items, list nesting is preserved via indentation, and
  * prose blocks are separated by blank lines so they don't run together.
  */
-function blockLine(content: string): string {
+function displayLine(block: Block, olPosition: number): string {
+  const marker = markerFor(block.type, olPosition)
   // Todos are stored as `[ ] text`; GFM needs a list bullet in front.
-  return getBlockType(content).kind === "todo" ? `- ${content}` : content
+  return (block.type === "todo" || block.type === "done" ? "- " : "") + marker + block.text
 }
 
 export function toDisplayMarkdown(content: string): string {
-  const doc = parse(content)
+  return displayMarkdownOf(parse(content))
+}
+
+/** Display markdown of a typed doc (see `toDisplayMarkdown`). */
+export function displayMarkdownOf(doc: BlockDoc): string {
   const lines: string[] = []
 
   if (doc.frontmatter !== null) {
     lines.push("---", doc.frontmatter, "---")
   }
 
-  const walk = (id: string, depth: number) => {
-    const block = doc.blocks[id]
-    if (!block) return
-    const kind = getBlockType(block.content).kind
-    const isListItem = kind === "bullet" || kind === "todo" || kind === "ordered"
-    // Indent list items so nesting renders; keep prose at the margin so headings
-    // and paragraphs render as themselves rather than as indented code.
-    const indent = isListItem ? "  ".repeat(depth) : ""
-    lines.push(indent + blockLine(block.content))
-    // A blank line after prose keeps consecutive paragraphs/headings distinct;
-    // list items stay tight.
-    if (!isListItem) lines.push("")
-    block.children.forEach((childId) => walk(childId, isListItem ? depth + 1 : depth))
+  const walk = (ids: string[], depth: number) => {
+    let olRun = 0
+    for (const id of ids) {
+      const block = doc.blocks[id]
+      if (!block) continue
+      const listItem = isListItem(block.type)
+      olRun = block.type === "ol" ? olRun + 1 : 0
+      // Indent list items so nesting renders; keep prose at the margin so headings
+      // and paragraphs render as themselves rather than as indented code.
+      const indent = listItem ? "  ".repeat(depth) : ""
+      lines.push(indent + displayLine(block, olRun))
+      // A blank line after prose keeps consecutive paragraphs/headings distinct;
+      // list items stay tight.
+      if (!listItem) lines.push("")
+      walk(block.children, listItem ? depth + 1 : depth)
+    }
   }
 
-  doc.rootBlockIds.forEach((id) => walk(id, 0))
+  walk(doc.rootBlockIds, 0)
   return lines.join("\n")
 }

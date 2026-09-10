@@ -81,7 +81,7 @@ export function BlockContent({
         // Transcluded content is still content — full ink on a faint accent
         // tint (the "live" color role), not muted like chrome.
         <span key={key++} className="block-transclusion" title={`Transcluded from ${refId}`}>
-          <BlockContent content={target.content} doc={doc} visited={nextSeen} />
+          <BlockContent content={target.text} doc={doc} visited={nextSeen} />
         </span>,
       )
     } else {

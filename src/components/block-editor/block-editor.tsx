@@ -3,7 +3,14 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import type { ClipboardEvent, FocusEvent, KeyboardEvent } from "react"
 import { newBlockMarkerAtom } from "../../global-state"
 import type { BlockDoc } from "../../blocks/types"
-import { getBlockType, MARKER_KEYS, stripMarker, toggleMarker } from "../../blocks/block-type"
+import {
+  isHeading,
+  leadingMarker,
+  markerFor,
+  toggleType,
+  TURN_INTO_KEYS,
+  typeOfMarker,
+} from "../../blocks/markers"
 import {
   runCommand,
   type CaretInput,
@@ -28,7 +35,9 @@ import {
   siblingsOf,
   spliceBlocks,
   subtreeIds,
-  updateContent,
+  olPositions,
+  updateBlock,
+  updateType,
 } from "../../blocks/ops"
 import { htmlToMarkdown } from "../../utils/html-to-markdown"
 import type { BlockRevealRequest } from "../../utils/note-outline"
@@ -49,6 +58,29 @@ import {
 export type { BlockDebugOptions } from "./block-item"
 import { useBlockHistory } from "./use-block-history"
 
+/**
+ * One level of the outline: a `BlockItem` per id, each told its number when
+ * it is an ordered item (the number is a fact of position in the run, never
+ * of the text — see `olPositions`).
+ */
+export function renderItems(doc: BlockDoc, ids: string[], depth: number, api: BlockEditorApi) {
+  const numbers = olPositions(doc, ids)
+  return ids.map((id, index) => {
+    const block = doc.blocks[id]
+    if (!block) return null
+    return (
+      <BlockItem
+        key={id}
+        doc={doc}
+        block={block}
+        depth={depth}
+        api={api}
+        olNumber={numbers[index]}
+      />
+    )
+  })
+}
+
 /** The id of the first heading block whose text matches `heading`, in document
  * order, or null. Used to highlight a heading arrived at from the command menu. */
 function findHeadingBlockId(doc: BlockDoc, heading: string): string | null {
@@ -59,10 +91,7 @@ function findHeadingBlockId(doc: BlockDoc, heading: string): string | null {
       if (found) return
       const block = doc.blocks[id]
       if (!block) continue
-      if (
-        getBlockType(block.content).kind === "heading" &&
-        stripMarker(block.content).trim() === target
-      ) {
+      if (isHeading(block.type) && block.text.trim() === target) {
         found = id
         return
       }
@@ -568,15 +597,15 @@ export function BlockEditor({
   const selectionRunEdges = useMemo(() => {
     const edges = new Map<string, { top: boolean; bottom: boolean }>()
     if (selectedSet.size < 2) return edges
-    const isHeading = (id: string) => getBlockType(doc.blocks[id]?.content ?? "").kind === "heading"
+    const headingAt = (id: string) => isHeading(doc.blocks[id]?.type ?? "text")
     for (let i = 0; i < visibleOrder.length; i++) {
       const id = visibleOrder[i]
       if (!selectedSet.has(id)) continue
       const prev = i > 0 ? visibleOrder[i - 1] : null
       const next = i + 1 < visibleOrder.length ? visibleOrder[i + 1] : null
-      const top = prev !== null && selectedSet.has(prev) && !isHeading(id) && prev !== zoomRoot?.id
+      const top = prev !== null && selectedSet.has(prev) && !headingAt(id) && prev !== zoomRoot?.id
       const bottom =
-        next !== null && selectedSet.has(next) && !isHeading(next) && id !== zoomRoot?.id
+        next !== null && selectedSet.has(next) && !headingAt(next) && id !== zoomRoot?.id
       if (top || bottom) edges.set(id, { top, bottom })
     }
     return edges
@@ -765,7 +794,9 @@ export function BlockEditor({
       const block = doc.blocks[id]
       if (!block) return
       const indent = "  ".repeat(depth)
-      lines.push(indent + block.content)
+      // Markers are export-only: an ordered item is written `1.` here and
+      // renumbered wherever it lands (the parse side reads runs by position).
+      lines.push(indent + markerFor(block.type) + block.text)
       lines.push(`${indent}  id:: ${block.id}`)
       for (const childId of block.children) walk(childId, depth + 1)
     }
@@ -958,7 +989,7 @@ export function BlockEditor({
       caret,
       zoomRootId,
       zoomBackId,
-      newBlockMarker,
+      newBlockType: typeOfMarker(newBlockMarker),
     }
     const name = resolveKey(mode, event, input)
     if (!name) return false
@@ -982,35 +1013,40 @@ export function BlockEditor({
     edit,
     toggleCollapse,
     setFocus,
-    onContentChange: (id, content, op = "text") =>
+    onBlockChange: (id, patch, op = "text") => {
+      const next = updateBlock(doc, id, patch)
+      if (next === doc) return
       history.commit(
         doc,
-        updateContent(doc, id, content),
+        next,
         op === "structural" ? { type: "structural" } : { type: "text", blockId: id },
-      ),
-    onPaste: (id, prefix, before, pasted, after) => {
-      // Re-form the block's line with the pasted text spliced in at the caret,
-      // then parse the whole thing so markdown prefixes and blank lines become
-      // the right blocks. The current block's marker stays on the first line —
+      )
+    },
+    onPaste: (id, before, pasted, after) => {
+      // Re-form the block's text with the pasted text spliced in at the caret,
+      // then parse (import) the whole thing so markdown markers and blank
+      // lines become the right blocks. The current block keeps its type —
       // unless the caret sits at the start and the pasted content opens with
       // its own marker, in which case the paste defines the block type (so
-      // pasting "# Title" into a heading doesn't become "# # Title", leaving
-      // a literal "#" in the text).
+      // pasting "# Title" into a heading is a heading, not a heading whose
+      // text starts with a literal "#").
       const pastedFirstLine = pasted.slice(
         0,
         pasted.includes("\n") ? pasted.indexOf("\n") : undefined,
       )
-      const pastedHasMarker = stripMarker(pastedFirstLine) !== pastedFirstLine
-      const line =
-        before === "" && pastedHasMarker ? pasted + after : prefix + before + pasted + after
+      const pasteDefinesType = before === "" && leadingMarker(pastedFirstLine) !== null
       // Reminting keeps a pasted `id::` from clobbering an existing block.
-      const sub = remintCollidingIds(parse(line), doc)
+      let sub = remintCollidingIds(parse(before + pasted + after), doc)
+      const currentType = doc.blocks[id]?.type
+      if (!pasteDefinesType && currentType !== undefined && sub.rootBlockIds.length > 0) {
+        sub = updateType(sub, sub.rootBlockIds[0], currentType)
+      }
       const result = spliceBlocks(doc, id, sub)
       if (!result) return
       history.commit(doc, result.doc, { type: "structural" })
       // Place the caret at the paste boundary — just before the trailing text.
       const last = result.doc.blocks[result.lastId]
-      const caret = Math.max(0, stripMarker(last.content).length - after.length)
+      const caret = Math.max(0, last.text.length - after.length)
       setSelected(result.lastId)
       setFocus({ id: result.lastId, caret })
     },
@@ -1160,13 +1196,13 @@ export function BlockEditor({
       // structural commit = one undo step. Shift AND Alt are fine — # and >
       // need Shift on many layouts, and non-US Macs type symbols with Option
       // (UK # is Alt+3). Only Mod combos stay the browser's.
-      const kind = MARKER_KEYS[event.key]
-      if (kind && !mod) {
+      const target = TURN_INTO_KEYS[event.key]
+      if (target && !mod) {
         event.preventDefault()
         let next = doc
         for (const rootId of selectionRoots()) {
           const block = next.blocks[rootId]
-          if (block) next = updateContent(next, rootId, toggleMarker(block.content, kind))
+          if (block) next = updateType(next, rootId, toggleType(block.type, target))
         }
         if (next !== doc) history.commit(doc, next, { type: "structural" })
         return
@@ -1269,7 +1305,7 @@ export function BlockEditor({
       // (a block is a single line in the serialized format). Bypasses the html
       // flavor entirely.
       if (normalized.trim() === "") return
-      const fresh = emptyBlock(normalized.replace(/\s*\n+\s*/g, " ").trim())
+      const fresh = emptyBlock("text", normalized.replace(/\s*\n+\s*/g, " ").trim())
       const next = insertFirstChild(doc, target, fresh)
       if (next === doc) return
       setCollapsedState(target, false)
@@ -1342,7 +1378,7 @@ export function BlockEditor({
           // One entry per block (content + id line) so `picked.length` still
           // counts blocks; the id rides to the embedded payload only.
           const indent = "  ".repeat(depth)
-          picked.push(`${indent}${block.content}\n${indent}  id:: ${bid}`)
+          picked.push(`${indent}${markerFor(block.type)}${block.text}\n${indent}  id:: ${bid}`)
           pickedSet.add(bid)
         }
         walk(block.children, depth + 1)
@@ -1403,7 +1439,7 @@ export function BlockEditor({
         if (el && selection.containsNode(el, true)) {
           // Content + id line as one entry — see the cut handler's note.
           const indent = "  ".repeat(depth)
-          picked.push(`${indent}${block.content}\n${indent}  id:: ${id}`)
+          picked.push(`${indent}${markerFor(block.type)}${block.text}\n${indent}  id:: ${id}`)
         }
         walk(block.children, depth + 1)
       }
@@ -1432,7 +1468,7 @@ export function BlockEditor({
     [doc, zoomRootId, zoomStack],
   )
   const crumbLabel = (id: string): string => {
-    const text = stripMarker(doc.blocks[id]?.content ?? "").trim()
+    const text = (doc.blocks[id]?.text ?? "").trim()
     return text === "" ? "…" : text
   }
   const crumbClass =
@@ -1487,18 +1523,10 @@ export function BlockEditor({
             {/* The zoomed block is the view's editable title; its children are
                 the page, starting again at depth 0. */}
             <BlockItem key={zoomRoot.id} doc={doc} block={zoomRoot} depth={0} api={api} zoomTitle />
-            {zoomRoot.children.map((id) => {
-              const block = doc.blocks[id]
-              if (!block) return null
-              return <BlockItem key={id} doc={doc} block={block} depth={0} api={api} />
-            })}
+            {renderItems(doc, zoomRoot.children, 0, api)}
           </>
         ) : (
-          doc.rootBlockIds.map((id) => {
-            const block = doc.blocks[id]
-            if (!block) return null
-            return <BlockItem key={id} doc={doc} block={block} depth={0} api={api} />
-          })
+          renderItems(doc, doc.rootBlockIds, 0, api)
         )}
       </div>
     </>

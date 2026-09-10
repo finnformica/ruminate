@@ -1,8 +1,10 @@
+import { markerFor } from "./markers"
 import type { Block, BlockDoc } from "./types"
 
 /**
- * Serialize a BlockDoc to markdown — the canonical on-disk form committed to
- * the GitHub repo.
+ * **Export.** Serialize typed blocks to markdown — the canonical `<id>.md`
+ * form, the *same bytes* the store's rollup produces for a page (the rollup
+ * IS this function over a doc built from the graph, `src/data/graph.ts`).
  *
  *   ---
  *   title: My note
@@ -14,20 +16,21 @@ import type { Block, BlockDoc } from "./types"
  *   A plain paragraph
  *     id:: blk_ghi
  *
- * Each block's content is written *directly* (so a bullet keeps its single
- * `- `, a paragraph has no marker, a heading keeps `# `), followed by an
- * `id::` line indented two spaces further. Nesting is two spaces of indent per
- * depth. Writing the content verbatim — rather than wrapping every block in a
- * `- ` outline marker — keeps the markdown clean and lets blocks be real
- * paragraphs/headings, not just list items.
+ * Each block's marker comes from its type (`markerFor`: ordered items are
+ * renumbered by run position, headings always carry one `#`), followed by an
+ * `id::` line indented two spaces further. Nesting is two spaces of indent
+ * per depth. A `code` block becomes a fence with its language; a multi-line
+ * text keeps its continuation lines at the block's indent. A block reached
+ * from two parents is written out in both places — that is the feature.
  */
-/**
- * Headings carry a single `#` on disk regardless of how many were typed — their
- * visual level comes from outline depth, not the marker — so the marker is
- * normalised here on the way out. `## Foo` → `# Foo`; non-headings untouched.
- */
-export function normalizeHeadingMarker(content: string): string {
-  return content.replace(/^#{2,6}(\s)/, "#$1")
+
+/** Walk depth cap — belt-and-braces so even a corrupted (cyclic) doc from a
+ * bad sync can never hang the export. Mirrors the rollup's historic cap. */
+export const MAX_SERIALIZE_DEPTH = 64
+
+const codeLanguage = (block: Block): string => {
+  const language = block.props?.language
+  return typeof language === "string" ? language : ""
 }
 
 export function serialize(doc: BlockDoc): string {
@@ -39,17 +42,36 @@ export function serialize(doc: BlockDoc): string {
     lines.push("---")
   }
 
-  const walk = (id: string, depth: number) => {
+  const emitBlock = (id: string, depth: number, olPosition: number) => {
     const block: Block | undefined = doc.blocks[id]
     if (!block) return
     const indent = "  ".repeat(depth)
-    // The content line (empty content → just the indent, so depth is preserved).
-    lines.push(`${indent}${normalizeHeadingMarker(block.content)}`)
+
+    if (block.type === "code") {
+      lines.push(`${indent}\`\`\`${codeLanguage(block)}`)
+      for (const line of block.text.split("\n")) lines.push(`${indent}${line}`)
+      lines.push(`${indent}\`\`\``)
+    } else {
+      const [first, ...rest] = block.text.split("\n")
+      // The content line (empty text → just the marker, so depth is preserved).
+      lines.push(`${indent}${markerFor(block.type, olPosition)}${first}`)
+      for (const line of rest) lines.push(`${indent}${line}`)
+    }
     lines.push(`${indent}  id:: ${block.id}`)
-    for (const childId of block.children) walk(childId, depth + 1)
+
+    if (depth + 1 >= MAX_SERIALIZE_DEPTH) return
+    emitChildren(block.children, depth + 1)
   }
 
-  for (const id of doc.rootBlockIds) walk(id, 0)
+  const emitChildren = (ids: string[], depth: number) => {
+    let olRun = 0
+    for (const id of ids) {
+      olRun = doc.blocks[id]?.type === "ol" ? olRun + 1 : 0
+      emitBlock(id, depth, olRun)
+    }
+  }
+
+  emitChildren(doc.rootBlockIds, 0)
 
   return lines.join("\n") + "\n"
 }

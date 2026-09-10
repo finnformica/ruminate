@@ -2,8 +2,18 @@ import { describe, expect, it } from "vitest"
 import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
+import type { BlockDoc } from "../blocks/types"
 import { getSampleMarkdownFiles } from "../utils/sample-markdown-files"
-import { buildGraphSnapshot, docToGraph, reconcileSortKeys, rollup, sortKeyBetween } from "./graph"
+import {
+  buildGraphSnapshot,
+  docFromGraph,
+  docToGraph,
+  docToParts,
+  pageDoc,
+  reconcileSortKeys,
+  rollup,
+  sortKeyBetween,
+} from "./graph"
 
 /**
  * The rollup test plan (docs/graph-schema-v2.md). The rollup replaces stored
@@ -438,7 +448,7 @@ describe("rollup (graph-side behavior)", () => {
     expect(rollup("p", snapshot)).toBe("a\n  id:: blk_a\nb\n  id:: blk_b\n")
   })
 
-  it("caps the walk depth so a corrupted (cyclic) graph cannot hang it", () => {
+  it("drops the back-edge of a corrupted (cyclic) graph so nothing can hang on it", () => {
     const nodes = [row("p", "page", "p"), row("blk_x", "text", "x"), row("blk_y", "text", "y")]
     const links = [
       edge("p", "blk_x", "a0"),
@@ -446,9 +456,10 @@ describe("rollup (graph-side behavior)", () => {
       edge("blk_y", "blk_x", "a0"),
     ]
     const markdown = rollup("p", buildGraphSnapshot(nodes, links)) as string
-    expect(markdown).not.toBeNull()
-    // The cycle unrolls to exactly the depth cap (64 levels), no further.
-    expect(markdown.match(/ {2}id:: /g)).toHaveLength(64)
+    // The walk keeps the first path to each node and drops the edge that
+    // would close the loop: every node renders once, the doc is a DAG, and
+    // every walk over it (export, render, navigation) terminates.
+    expect(markdown).toBe("x\n  id:: blk_x\n  y\n    id:: blk_y\n")
     // And deterministically: row input order does not change the output.
     const shuffled = buildGraphSnapshot([...nodes].reverse(), [...links].reverse())
     expect(rollup("p", shuffled)).toBe(markdown)
@@ -496,9 +507,10 @@ describe("rollup from adversarial row sets (bad syncs)", () => {
       [row("p", "page", "p"), row("blk_a", "ol", "a"), row("blk_b", "ol", "b")],
       [edge("p", "blk_a", "a0"), edge("p", "blk_ghost", "a1"), edge("p", "blk_b", "a2")],
     )
-    // The gap is invisible in the output, but the run restarts after it —
-    // pinned so the degraded rendering stays stable across versions.
-    expect(rollup("p", snapshot)).toBe("1. a\n  id:: blk_a\n1. b\n  id:: blk_b\n")
+    // The ghost is dropped from the doc entirely, so the run it would have
+    // broken simply continues — pinned so the degraded rendering stays
+    // stable across versions.
+    expect(rollup("p", snapshot)).toBe("1. a\n  id:: blk_a\n2. b\n  id:: blk_b\n")
   })
 
   it("excludes orphan node rows (no inbound link) without crashing", () => {
@@ -582,8 +594,127 @@ describe("rollup from adversarial row sets (bad syncs)", () => {
       [row("p", "page", "p"), row("blk_a", "text", "a")],
       [edge("p", "blk_a", "a0"), edge("blk_a", "blk_a", "a0")],
     )
-    const markdown = rollup("p", snapshot) as string
-    expect(markdown.match(/ {2}id:: /g)).toHaveLength(64)
+    expect(rollup("p", snapshot)).toBe("a\n  id:: blk_a\n")
+  })
+})
+
+/**
+ * The walk itself (`docFromGraph`), which the rollup is one instance of —
+ * what a view is built from, given any set of roots. Row-first, because
+ * markdown cannot express these shapes.
+ */
+describe("docFromGraph (the walk, N roots)", () => {
+  const graph = () =>
+    buildGraphSnapshot(
+      [
+        row("home", "page", "Home"),
+        row("other", "page", "Other"),
+        row("blk_a", "ul", "a"),
+        row("blk_b", "text", "b"),
+        row("blk_c", "todo", "c"),
+        row("blk_s", "ol", "shared"),
+        row("blk_t", "text", "under shared"),
+      ],
+      [
+        edge("home", "blk_a", "a0"),
+        edge("home", "blk_c", "a1"),
+        edge("blk_a", "blk_b", "a0"),
+        edge("blk_a", "blk_s", "a1"),
+        edge("other", "blk_s", "a0"),
+        edge("blk_s", "blk_t", "a0"),
+      ],
+    )
+  const shape = (doc: BlockDoc, id: string) => {
+    const block = doc.blocks[id]
+    return [block.type, block.text, block.children]
+  }
+
+  it("walks each root's subtree in sort order, typed and marker-free", () => {
+    const doc = docFromGraph(["blk_a"], graph())
+    expect(doc.frontmatter).toBeNull()
+    expect(doc.rootBlockIds).toEqual(["blk_a"])
+    expect(shape(doc, "blk_a")).toEqual(["ul", "a", ["blk_b", "blk_s"]])
+    expect(shape(doc, "blk_s")).toEqual(["ol", "shared", ["blk_t"]])
+    expect(Object.keys(doc.blocks).sort()).toEqual(["blk_a", "blk_b", "blk_s", "blk_t"])
+  })
+
+  it("takes several roots, in the order given; a root inside another root is walked once", () => {
+    const doc = docFromGraph(["blk_c", "blk_a", "blk_s"], graph())
+    expect(doc.rootBlockIds).toEqual(["blk_c", "blk_a", "blk_s"])
+    // `blk_s` is both a root and a child of `blk_a`: one block, two mentions.
+    expect(doc.blocks.blk_a.children).toContain("blk_s")
+    expect(Object.keys(doc.blocks).sort()).toEqual(["blk_a", "blk_b", "blk_c", "blk_s", "blk_t"])
+  })
+
+  it("a page is a block like any other when it is a root", () => {
+    const doc = docFromGraph(["other"], graph())
+    expect(shape(doc, "other")).toEqual(["page", "Other", ["blk_s"]])
+  })
+
+  it("skips missing roots and dangling children", () => {
+    const doc = docFromGraph(["nope", "blk_a"], graph())
+    expect(doc.rootBlockIds).toEqual(["blk_a"])
+    const dangling = buildGraphSnapshot([row("blk_a", "ul", "a")], [edge("blk_a", "ghost", "a0")])
+    expect(docFromGraph(["blk_a"], dangling).blocks.blk_a.children).toEqual([])
+  })
+
+  it("holds a node reached by two paths once, and never a back-edge", () => {
+    const doc = docFromGraph(["home", "other"], graph())
+    expect(doc.blocks.blk_s.children).toEqual(["blk_t"])
+    expect(doc.blocks.other.children).toEqual(["blk_s"])
+    const cyclic = buildGraphSnapshot(
+      [row("blk_a", "text", "a"), row("blk_b", "text", "b")],
+      [edge("blk_a", "blk_b", "a0"), edge("blk_b", "blk_a", "a0")],
+    )
+    const dag = docFromGraph(["blk_a"], cyclic)
+    expect(dag.blocks.blk_a.children).toEqual(["blk_b"])
+    expect(dag.blocks.blk_b.children).toEqual([])
+  })
+
+  it("reads props into the block and unknown types as text", () => {
+    const snapshot = buildGraphSnapshot(
+      [
+        row("blk_c", "code", "x = 1", JSON.stringify({ language: "py" })),
+        row("blk_f", "hologram", "future", "{not json"),
+      ],
+      [],
+    )
+    const doc = docFromGraph(["blk_c", "blk_f"], snapshot)
+    expect(doc.blocks.blk_c.props).toEqual({ language: "py" })
+    expect(doc.blocks.blk_f.type).toBe("text")
+    expect(doc.blocks.blk_f.props).toBeUndefined()
+  })
+
+  it("pageDoc is the page's children with its frontmatter, and rollup is its serialization", () => {
+    const snapshot = buildGraphSnapshot(
+      [row("p", "page", "Titled", JSON.stringify({ tags: ["x"] })), row("blk_a", "ul", "a")],
+      [edge("p", "blk_a", "a0")],
+    )
+    const doc = pageDoc("p", snapshot)!
+    expect(doc.rootBlockIds).toEqual(["blk_a"])
+    expect(doc.frontmatter).toContain("title: Titled")
+    expect(serialize(doc)).toBe(rollup("p", snapshot))
+    expect(pageDoc("blk_a", snapshot)).toBeNull()
+  })
+
+  it("docToParts of a walked doc reproduces the rows it was walked from (no markdown between)", () => {
+    const md = canonical("# Head\n  - [ ] child\n  - 1. one\n  - 2. two\nplain\n")
+    const { nodes, links } = docToGraph("note", md, 1)
+    const doc = pageDoc("note", buildGraphSnapshot(nodes, links))!
+    const parts = docToParts("note", doc, 1)
+    const rows = (list: typeof nodes) =>
+      list
+        .map((n) => [n.id, n.type, n.text, n.props])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+    expect(rows(parts.nodes)).toEqual(rows(nodes))
+    for (const [parent, children] of parts.childrenOf) {
+      expect(children).toEqual(
+        links
+          .filter((l) => l.source_id === parent)
+          .sort((a, b) => (a.sort_key < b.sort_key ? -1 : 1))
+          .map((l) => l.destination_id),
+      )
+    }
   })
 })
 
@@ -653,6 +784,20 @@ describe("property: generated documents round-trip", () => {
       // The deliberate normalization pass (near-miss markers, canonical
       // frontmatter) converges in one step — never a byte flip-flop.
       expect(viaGraph(normalized), `seed doc ${i}:\n${markdown}`).toBe(normalized)
+    }
+  })
+
+  it("the walk hands the editor the same doc the parser would (200 documents)", () => {
+    // Structural equality, ids included: what `parse` reads from the rollup
+    // is exactly what the walk builds from the rows — so the editor can read
+    // the graph directly and nothing on screen changes.
+    const rand = mulberry32(20260910)
+    for (let i = 0; i < 200; i += 1) {
+      const fixed = canonical(generateDocument(rand))
+      const { nodes, links } = docToGraph("note", fixed, 1)
+      const walked = pageDoc("note", buildGraphSnapshot(nodes, links))
+      const parsed = parse(rollup("note", buildGraphSnapshot(nodes, links)) as string)
+      expect(walked, `seed doc ${i}`).toEqual(parsed)
     }
   })
 

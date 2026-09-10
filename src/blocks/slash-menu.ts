@@ -1,7 +1,7 @@
 import { parse as chronoParse } from "chrono-node"
 import { addDays, addWeeks, startOfISOWeek } from "date-fns"
 import { formatDate, formatDateDistance, toDateString } from "../utils/date"
-import { stripMarker, withMarker, type BlockType } from "./block-type"
+import type { BlockType } from "./types"
 
 /**
  * The block editor's **slash menu**: typing `/` at the start of a word opens
@@ -108,22 +108,20 @@ const DATE_OPTIONS: DateOption[] = [
 
 // ── Block types ─────────────────────────────────────────────────────────────
 
-type SlashBlockKind = BlockType["kind"]
-
 interface BlockOption {
-  kind: SlashBlockKind
+  type: BlockType
   label: string
   /** Extra words the row answers to (`/task` finds To-do). */
   keywords: string[]
 }
 
 const BLOCK_OPTIONS: BlockOption[] = [
-  { kind: "paragraph", label: "Text", keywords: ["paragraph", "plain"] },
-  { kind: "bullet", label: "Bullet list", keywords: ["unordered", "ul"] },
-  { kind: "ordered", label: "Numbered list", keywords: ["ordered", "ol"] },
-  { kind: "todo", label: "To-do", keywords: ["todo", "task", "checkbox"] },
-  { kind: "heading", label: "Heading", keywords: ["header", "h1"] },
-  { kind: "quote", label: "Quote", keywords: ["blockquote", "callout"] },
+  { type: "text", label: "Text", keywords: ["paragraph", "plain"] },
+  { type: "ul", label: "Bullet list", keywords: ["unordered", "ul", "bullet"] },
+  { type: "ol", label: "Numbered list", keywords: ["ordered", "ol", "numbered"] },
+  { type: "todo", label: "To-do", keywords: ["todo", "task", "checkbox"] },
+  { type: "h1", label: "Heading", keywords: ["header", "h1", "heading"] },
+  { type: "quote", label: "Quote", keywords: ["blockquote", "callout"] },
 ]
 
 // ── The menu model ──────────────────────────────────────────────────────────
@@ -139,7 +137,7 @@ export type SlashItem =
       /** The resolved day as `YYYY-MM-DD` (the app's canonical form). */
       date: string
     }
-  | { kind: "block"; id: string; label: string; type: SlashBlockKind }
+  | { kind: "block"; id: string; label: string; type: BlockType }
 
 export type SlashGroup = "Dates" | "Turn into"
 
@@ -194,9 +192,9 @@ export function slashMenuItems(query: string, now: Date): SlashItem[] {
     if (!matches(q, option.label, option.keywords)) continue
     items.push({
       kind: "block",
-      id: `block:${option.kind}`,
+      id: `block:${option.type}`,
       label: option.label,
-      type: option.kind,
+      type: option.type,
     })
   }
 
@@ -212,39 +210,32 @@ export function toInsertedDate(date: string): string {
 }
 
 export interface SlashApplyResult {
-  /** The block's full new content (marker included). */
-  content: string
-  /** Where the caret lands, as an offset into the new *visible* body. */
+  /** The block's new text. */
+  text: string
+  /** The block's new type, when the pick was a "turn into". */
+  type?: BlockType
+  /** Where the caret lands, as an offset into the new text. */
   caret: number
 }
 
 /**
- * Apply a picked row to the block. `content` is the block's full content and
- * `body` the visible text the trigger was found in (the marker stripped); the
- * `/phrase` is the span from the trigger's `/` to the caret.
+ * Apply a picked row to the block. `text` is the block's text the trigger was
+ * found in; the `/phrase` is the span from the trigger's `/` to the caret.
  *
  * - A date replaces the `/phrase` with the date as `dd-mm-yyyy`, caret after it.
- * - A block type removes the `/phrase` and sets the marker (Text strips it),
- *   caret where the `/` was.
+ * - A block type removes the `/phrase` and sets the type, caret where the `/`
+ *   was.
  */
 export function applySlashItem(
-  content: string,
-  body: string,
+  text: string,
   trigger: SlashTrigger,
   item: SlashItem,
 ): SlashApplyResult {
-  const prefix = content.slice(0, content.length - stripMarker(content).length)
-  const before = body.slice(0, trigger.start)
-  const after = body.slice(trigger.start + 1 + trigger.query.length)
+  const before = text.slice(0, trigger.start)
+  const after = text.slice(trigger.start + 1 + trigger.query.length)
   if (item.kind === "date") {
-    const text = toInsertedDate(item.date)
-    return {
-      content: prefix + before + text + after,
-      caret: trigger.start + text.length,
-    }
+    const inserted = toInsertedDate(item.date)
+    return { text: before + inserted + after, caret: trigger.start + inserted.length }
   }
-  return {
-    content: withMarker(prefix + before + after, item.type),
-    caret: trigger.start,
-  }
+  return { text: before + after, type: item.type, caret: trigger.start }
 }

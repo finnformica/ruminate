@@ -2,10 +2,10 @@ import { generateKeyBetween, generateNKeysBetween } from "fractional-indexing"
 import { isTombstoned, type LinkRow, type NodeRow } from "../../worker/handlers/replica-payload"
 import { blockId } from "../blocks/id"
 import { parse } from "../blocks/parse"
-import { normalizeHeadingMarker } from "../blocks/serialize"
+import { serialize } from "../blocks/serialize"
+import { asBlockType, type Block, type BlockDoc, type BlockProps } from "../blocks/types"
 import type { NoteId } from "../schema"
 import { frontmatterTextFromProps, pagePropsFromFrontmatter } from "./frontmatter-props"
-import { normalizeBlockText } from "./normalize-block-text"
 import {
   emittedPageTitle,
   injectTitleIntoFrontmatter,
@@ -13,82 +13,33 @@ import {
 } from "./page-identity"
 
 /**
- * Schema v2's two most load-bearing transforms (docs/graph-schema-v2.md):
+ * The graph ↔ doc seam (docs/graph-schema-v2.md, docs/graph-native-app.md).
  *
- * - `docToGraph` — ingest: parse a note's markdown and flatten it into
- *   `nodes` + `link` rows (typed nodes, marker-free text, fractional sort
- *   keys).
- * - `rollup` — projection: walk a page node's child links in sort-key order
- *   and serialize each node by type back to markdown.
+ * - `docFromGraph` / `pageDoc` — the **walk**: start at some root nodes,
+ *   follow `child` links in sort-key order, and hand back a `BlockDoc` — the
+ *   typed, marker-free slice of the graph the editor renders and edits. A
+ *   node reached from two parents is in the doc once, named by both parents'
+ *   `children` (that is the feature); a back-edge (a corrupted, cyclic graph
+ *   from a bad sync) is dropped so the slice is always a DAG.
+ * - `rollup` — the markdown **projection** of one page: `serialize` over that
+ *   page's doc. There is one walk and one emitter in the codebase.
+ * - `docToParts` — the **write** direction: a doc's typed blocks become node
+ *   rows and per-parent child orders, with no markdown in between. The store
+ *   reconciles those against the rows it holds (`planNoteWrite`). Markdown
+ *   enters only through `parse` (`docToGraphParts`, the import path).
  *
  * The invariant everything rests on: for canonical markdown (the fixpoint of
- * the editor's `serialize(parse(md))`), `rollup(docToGraph(md))` is itself a
- * fixpoint of the round trip — and for markdown already in normalized form it
- * reproduces the input byte-for-byte, frontmatter included.
- *
- * Two deliberate normalizations happen at ingest (so the round trip is a
- * *convergence*, not always an identity — docs/graph-storage.md):
- *
- * - Near-miss marker spellings (`[] x`, `[X] x`, `* x`, `2) x` — see
- *   `normalize-block-text.ts`) are typed and canonicalized instead of staying
- *   verbatim `text` nodes. Anything ambiguous still stays text.
- * - Frontmatter is stored as parsed entries in the page props and re-emitted
- *   by the canonical YAML serializer (`frontmatter-props.ts`), with the
- *   legacy raw-blob shape as a value-fidelity fallback.
+ * `serialize(parse(md))`), `rollup(docToGraph(md))` is itself a fixpoint of
+ * the round trip — and for markdown already in normalized form it reproduces
+ * the input byte-for-byte, frontmatter included. Two deliberate
+ * normalizations happen on import (so the round trip is a *convergence*, not
+ * always an identity — docs/graph-storage.md): near-miss marker spellings
+ * are typed (`src/blocks/normalize-block-text.ts`), and frontmatter is stored
+ * as parsed entries and re-emitted canonically (`frontmatter-props.ts`).
  */
 
 export const CHILD_KIND = "child"
 export const PAGE_TYPE = "page"
-
-/**
- * The pure type→marker map — the serializer half of the type registry.
- * `ol` (renumbered), `code` (fenced), and `page` are handled structurally in
- * `rollup`. `h2`/`h3` exist for future minting; ingest only produces `h1`
- * because canonical markdown collapses all heading markers to `# ` (visual
- * level comes from outline depth).
- */
-const MARKER_OF_TYPE: Record<string, string> = {
-  text: "",
-  h1: "# ",
-  h2: "## ",
-  h3: "### ",
-  todo: "[ ] ",
-  done: "[x] ",
-  ul: "- ",
-  quote: "> ",
-}
-
-/** Renderer walk depth cap — belt-and-braces so even a corrupted graph (bad
- * sync merge introducing a cycle) can never hang the rollup. */
-const MAX_ROLLUP_DEPTH = 64
-
-const OL_RE = /^(0|[1-9]\d*)\. /
-
-/**
- * Classify one canonical content line into `{type, text}`. `olPosition` is the
- * 1-based position the line would take in the current run of consecutive
- * ordered siblings — an ordered marker is only typed `ol` when its number
- * matches, because the serializer renumbers by run position and any other
- * number must survive verbatim.
- */
-function classifyLine(
-  line: string,
-  olPosition: number,
-  inFence: boolean,
-): { type: string; text: string } {
-  if (!inFence) {
-    for (const [type, marker] of Object.entries(MARKER_OF_TYPE)) {
-      if (marker !== "" && line.startsWith(marker)) {
-        return { type, text: line.slice(marker.length) }
-      }
-    }
-    const ordered = OL_RE.exec(line)
-    if (ordered && ordered[1] === String(olPosition)) {
-      return { type: "ol", text: line.slice(ordered[0].length) }
-    }
-  }
-  return { type: "text", text: line }
-}
 
 interface GraphParts {
   nodes: NodeRow[]
@@ -96,10 +47,14 @@ interface GraphParts {
   childrenOf: Map<string, string[]>
 }
 
+const propsJson = (props: BlockProps | null | undefined): string | null =>
+  props && Object.keys(props).length > 0 ? JSON.stringify(props) : null
+
 /**
- * Parse a note and produce its node rows + desired child orders (no sort keys
- * yet — `docToGraph` assigns fresh evenly-spaced ones; the store reconciles
- * against existing keys instead so unchanged siblings keep their rows).
+ * A doc's node rows + desired child orders (no sort keys yet — `docToGraph`
+ * assigns fresh evenly-spaced ones; the store reconciles against existing
+ * keys instead so unchanged siblings keep their rows). Nothing here reads
+ * markdown: the doc's blocks are already typed and marker-free.
  *
  * `reservedIds` are ids a block row must never take (the store passes every
  * other page's id): block ids and page ids share the `nodes` table, so a block
@@ -108,14 +63,12 @@ interface GraphParts {
  * Such ids are re-minted here: content survives (never-lose-work), and the
  * fresh id persists on the next save.
  */
-export function docToGraphParts(
+export function docToParts(
   noteId: NoteId,
-  markdown: string,
+  doc: BlockDoc,
   updatedAt: number,
   reservedIds?: ReadonlySet<string>,
 ): GraphParts {
-  const doc = parse(markdown)
-
   const rename = new Map<string, string>()
   for (const id of Object.keys(doc.blocks)) {
     if (id !== noteId && !reservedIds?.has(id)) continue
@@ -126,22 +79,6 @@ export function docToGraphParts(
     rename.set(id, fresh)
   }
   const safeId = (id: string) => rename.get(id) ?? id
-
-  // Pass 1 — code-fence state per block, over the exact line order the
-  // serializer emits (depth-first). A line inside an open fence must never be
-  // typed by its marker: `- [ ]` in a fence is code, not a todo.
-  const inFence = new Map<string, boolean>()
-  let fenceOpen = false
-  const scanFences = (ids: string[]) => {
-    for (const id of ids) {
-      const block = doc.blocks[id]
-      if (!block) continue
-      inFence.set(id, fenceOpen)
-      if (block.content.trimStart().startsWith("```")) fenceOpen = !fenceOpen
-      scanFences(block.children)
-    }
-  }
-  scanFences(doc.rootBlockIds)
 
   // The title is data, and it rides the `<id>.md` seam as a projection-owned
   // `title:` frontmatter key (`page-identity.ts`): lift it into the page node's
@@ -161,27 +98,23 @@ export function docToGraphParts(
   ]
   const childrenOf = new Map<string, string[]>()
 
-  // Pass 2 — type each block. The ordered-run position is tracked per parent
-  // over its (consecutive) children, mirroring the rollup's renumbering.
+  // Depth-first from the roots: node rows in document order, and each block's
+  // child order once (a block reached from two parents is one row, and its
+  // children are the same wherever it is).
+  const seen = new Set<string>()
   const walk = (parentId: string, ids: string[]) => {
     childrenOf.set(parentId, ids.map(safeId))
-    let olRun = 0
     for (const id of ids) {
       const block = doc.blocks[id]
-      if (!block) continue
-      // Canonical content first: the serializer collapses `##`+ heading
-      // markers to `#` on the way out, so ingest sees what serialize emits.
-      const line = normalizeHeadingMarker(block.content)
-      const fenced = inFence.get(id) ?? false
-      let { type, text } = classifyLine(line, olRun + 1, fenced)
-      if (type === "text" && !fenced) {
-        // Near-miss marker spellings normalize to their typed form (the
-        // deliberate byte change — see the module header).
-        const normalized = normalizeBlockText(line)
-        if (normalized) ({ type, text } = normalized)
-      }
-      olRun = type === "ol" ? olRun + 1 : 0
-      nodes.push({ id: safeId(id), type, text, props: null, updated_at: updatedAt })
+      if (!block || seen.has(id)) continue
+      seen.add(id)
+      nodes.push({
+        id: safeId(id),
+        type: block.type,
+        text: block.text,
+        props: propsJson(block.props),
+        updated_at: updatedAt,
+      })
       walk(safeId(id), block.children)
     }
   }
@@ -190,10 +123,20 @@ export function docToGraphParts(
   return { nodes, childrenOf }
 }
 
+/** The import path: markdown → typed blocks (`parse`) → rows. */
+export function docToGraphParts(
+  noteId: NoteId,
+  markdown: string,
+  updatedAt: number,
+  reservedIds?: ReadonlySet<string>,
+): GraphParts {
+  return docToParts(noteId, parse(markdown), updatedAt, reservedIds)
+}
+
 /**
  * Ingest one note: markdown → node + link rows, with fresh evenly-spaced sort
  * keys per parent (which doubles as the rebalancing mechanism — see the
- * schema doc). The store's diffing write path uses `docToGraphParts` +
+ * schema doc). The store's diffing write path uses `docToParts` +
  * `reconcileSortKeys` instead, so unchanged rows stay untouched.
  */
 export function docToGraph(
@@ -271,7 +214,7 @@ export function sortKeyBetween(a: string | null, b: string | null): string {
 }
 
 // -----------------------------------------------------------------------------
-// Rollup
+// The walk: graph → doc
 // -----------------------------------------------------------------------------
 
 export interface GraphSnapshot {
@@ -331,72 +274,93 @@ function childIdsOf(graph: GraphSnapshot, id: string): string[] {
   return (graph.childLinks.get(id) ?? []).map((link) => link.destination_id)
 }
 
-/** The page node's frontmatter text, or null. Handles both props shapes —
- * parsed entries (canonical YAML) and the legacy raw blob (verbatim) — and is
- * tolerant of malformed props (`frontmatter-props.ts`). */
-const pageFrontmatter = (page: NodeRow): string | null => frontmatterTextFromProps(page.props)
-
-const codeLanguage = (node: NodeRow): string => {
-  if (node.props === null) return ""
+/** A node's props as an object, or null — tolerant of malformed JSON (a bad
+ * row renders without its props rather than not at all). */
+export function parseProps(props: string | null): BlockProps | null {
+  if (props === null) return null
   try {
-    const language = (JSON.parse(node.props) as { language?: unknown } | null)?.language
-    return typeof language === "string" ? language : ""
+    const parsed: unknown = JSON.parse(props)
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as BlockProps)
+      : null
   } catch {
-    return ""
+    return null
   }
 }
 
 /**
- * Render one page node to markdown — the canonical serialization, exactly the
- * bytes the editor's `serialize` would produce for the same outline. A node
- * reached from two parents renders fully in both places (that is the feature).
- * Returns null when the page node does not exist.
+ * The walk: a `BlockDoc` of everything reachable from `rootIds` over child
+ * links, in sort-key order — the typed slice of the graph a view renders.
+ *
+ * - A root that does not exist is skipped; the doc's `rootBlockIds` are the
+ *   roots that do, in the order given.
+ * - Every reachable node is in `blocks` once, however many parents name it;
+ *   a dangling link (destination row missing) is dropped from its parent's
+ *   `children`, exactly as the rollup has always skipped it.
+ * - A back-edge — a child that is also an ancestor on the current path, which
+ *   only a corrupted (cyclic) graph can hold — is dropped, so the slice is a
+ *   DAG that every walk over it (export, render, navigation) can finish.
+ * - Unknown node types (a newer client's) become `text`, marker-free.
+ *
+ * The page node itself is not part of a page's doc (see `pageDoc`); pass a
+ * page id as a root and it walks like any node — a page linked under a block
+ * renders as a `page` block.
  */
-export function rollup(pageId: string, graph: GraphSnapshot): string | null {
+export function docFromGraph(rootIds: string[], graph: GraphSnapshot): BlockDoc {
+  const blocks: Record<string, Block> = {}
+  const onPath = new Set<string>()
+
+  const visit = (id: string): boolean => {
+    const node = graph.nodes.get(id)
+    if (!node) return false
+    if (onPath.has(id)) return false // a back-edge: dropped
+    if (blocks[id]) return true // reached again by another path: already built
+    onPath.add(id)
+    const props = parseProps(node.props)
+    // `props` only when there are any: a walked doc and a parsed one must be
+    // the same object, key for key (the walk-equals-parse invariant).
+    const block: Block = {
+      id,
+      type: asBlockType(node.type),
+      text: node.text,
+      ...(props ? { props } : {}),
+      children: [],
+    }
+    blocks[id] = block
+    block.children = childIdsOf(graph, id).filter((childId) => visit(childId))
+    onPath.delete(id)
+    return true
+  }
+
+  const rootBlockIds = rootIds.filter((id) => visit(id))
+  return { frontmatter: null, rootBlockIds, blocks }
+}
+
+/**
+ * A page's doc — what the note page edits: the page's children as the roots,
+ * and the page's frontmatter (its props, with the projection-owned `title:`
+ * re-emitted from the page node's `text` — `page-identity.ts`) as the doc's
+ * frontmatter text, so `serialize` of this doc is the page's rollup. Null
+ * when the page node does not exist.
+ */
+export function pageDoc(pageId: string, graph: GraphSnapshot): BlockDoc | null {
   const page = graph.nodes.get(pageId)
   if (!page || page.type !== PAGE_TYPE) return null
-
-  const lines: string[] = []
-  // Re-emit the projection-owned `title:` key from the page node's `text` (see
-  // `page-identity.ts`). A page whose only frontmatter is its title still gets
-  // a block; an untitled or date page emits exactly what it emitted before.
-  const stored = pageFrontmatter(page)
+  const stored = frontmatterTextFromProps(page.props)
   const title = emittedPageTitle(page.id, page.text)
   const frontmatter = title !== null ? injectTitleIntoFrontmatter(stored, title) : stored
-  if (frontmatter !== null) {
-    lines.push("---", frontmatter, "---")
-  }
+  const doc = docFromGraph(childIdsOf(graph, pageId), graph)
+  return { ...doc, frontmatter }
+}
 
-  const emitNode = (id: string, depth: number, olPosition: number) => {
-    const node = graph.nodes.get(id)
-    if (!node) return
-    const indent = "  ".repeat(depth)
-
-    if (node.type === "code") {
-      lines.push(`${indent}\`\`\`${codeLanguage(node)}`)
-      for (const line of node.text.split("\n")) lines.push(`${indent}${line}`)
-      lines.push(`${indent}\`\`\``)
-    } else {
-      const marker = node.type === "ol" ? `${olPosition}. ` : (MARKER_OF_TYPE[node.type] ?? "")
-      const [first, ...rest] = node.text.split("\n")
-      lines.push(`${indent}${marker}${first}`)
-      for (const line of rest) lines.push(`${indent}${line}`)
-    }
-    lines.push(`${indent}  id:: ${node.id}`)
-
-    if (depth + 1 >= MAX_ROLLUP_DEPTH) return
-    emitChildren(id, depth + 1)
-  }
-
-  const emitChildren = (id: string, depth: number) => {
-    let olRun = 0
-    for (const childId of childIdsOf(graph, id)) {
-      const child = graph.nodes.get(childId)
-      olRun = child?.type === "ol" ? olRun + 1 : 0
-      emitNode(childId, depth, olRun)
-    }
-  }
-
-  emitChildren(pageId, 0)
-  return lines.join("\n") + "\n"
+/**
+ * Render one page node to markdown — the canonical serialization, exactly the
+ * bytes the editor's `serialize` would produce for the same outline, because
+ * it IS that: the page's doc, serialized. A node reached from two parents
+ * renders fully in both places (that is the feature). Returns null when the
+ * page node does not exist.
+ */
+export function rollup(pageId: string, graph: GraphSnapshot): string | null {
+  const doc = pageDoc(pageId, graph)
+  return doc ? serialize(doc) : null
 }

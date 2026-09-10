@@ -38,18 +38,20 @@ describe("richClipboardFormats", () => {
     const blocks = extractClipboardBlocks(html)!
     expect(blocks).toEqual([
       {
-        content: "# Head",
+        type: "h1",
+        text: "Head",
         children: [
           {
-            content: "- bullet",
+            type: "ul",
+            text: "bullet",
             children: [
-              { content: "[ ] task", children: [] },
-              { content: "[x] done", children: [] },
+              { type: "todo", text: "task", children: [] },
+              { type: "done", text: "done", children: [] },
             ],
           },
-          { content: "1. first", children: [] },
-          { content: "> quoted", children: [] },
-          { content: "plain `code` **bold** [link](https://e.com)", children: [] },
+          { type: "ol", text: "first", children: [] },
+          { type: "quote", text: "quoted", children: [] },
+          { type: "text", text: "plain `code` **bold** [link](https://e.com)", children: [] },
         ],
       },
     ])
@@ -120,12 +122,14 @@ describe("block ids in the payload (paste as link)", () => {
     expect(extractClipboardBlocks(html)).toEqual([
       {
         id: "blk_head000000",
-        content: "# Head",
+        type: "h1",
+        text: "Head",
         children: [
           {
             id: "blk_bullet0000",
-            content: "- bullet",
-            children: [{ id: "blk_task000000", content: "[ ] task", children: [] }],
+            type: "ul",
+            text: "bullet",
+            children: [{ id: "blk_task000000", type: "todo", text: "task", children: [] }],
           },
         ],
       },
@@ -163,8 +167,8 @@ describe("block ids in the payload (paste as link)", () => {
     expect(doc.blocks["blk_bullet0000"].children).toEqual(["blk_task000000"])
 
     const mixed = clipboardBlocksToDocWithIds([
-      { id: "blk_kept000000", content: "- kept", children: [] },
-      { content: "- minted", children: [] },
+      { id: "blk_kept000000", type: "ul", text: "kept", children: [] },
+      { type: "ul", text: "minted", children: [] },
     ])
     expect(mixed.rootBlockIds[0]).toBe("blk_kept000000")
     expect(mixed.rootBlockIds[1]).toMatch(/^blk_/)
@@ -173,8 +177,8 @@ describe("block ids in the payload (paste as link)", () => {
 
   it("clipboardBlocksToDocWithIds remints a duplicate id within one payload", () => {
     const doc = clipboardBlocksToDocWithIds([
-      { id: "blk_dupe000000", content: "- one", children: [] },
-      { id: "blk_dupe000000", content: "- two", children: [] },
+      { id: "blk_dupe000000", type: "ul", text: "one", children: [] },
+      { id: "blk_dupe000000", type: "ul", text: "two", children: [] },
     ])
     expect(doc.rootBlockIds[0]).toBe("blk_dupe000000")
     expect(doc.rootBlockIds[1]).not.toBe("blk_dupe000000")

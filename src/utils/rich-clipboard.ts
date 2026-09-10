@@ -1,8 +1,8 @@
-import { getBlockType, stripMarker } from "../blocks/block-type"
 import { blockId } from "../blocks/id"
-import { parse } from "../blocks/parse"
+import { isHeading, isTodo, markerFor } from "../blocks/markers"
+import { parse, parseLine } from "../blocks/parse"
 import { toDisplayMarkdown } from "../blocks/to-display-markdown"
-import type { Block, BlockDoc } from "../blocks/types"
+import { isBlockType, type Block, type BlockDoc, type BlockType } from "../blocks/types"
 
 /**
  * Rich clipboard round-trip for the block editor.
@@ -21,16 +21,17 @@ import type { Block, BlockDoc } from "../blocks/types"
  */
 
 /**
- * One copied block: content verbatim, plus the source block's `id` when the
- * copied markdown declared one (`id::` lines). The id is what lets a
- * Ruminate→Ruminate paste LINK the original node instead of duplicating it
- * ("paste as link", docs/graph-storage.md); the content stays alongside as the
- * fallback when the node no longer exists anywhere. Neither visible flavor
- * carries ids — external interop is unchanged.
+ * One copied block: its type and marker-free text, plus the source block's
+ * `id` when the copied markdown declared one (`id::` lines). The id is what
+ * lets a Ruminate→Ruminate paste LINK the original node instead of
+ * duplicating it ("paste as link", docs/graph-storage.md); the text stays
+ * alongside as the fallback when the node no longer exists anywhere. Neither
+ * visible flavor carries ids — external interop is unchanged.
  */
 export interface ClipboardBlock {
   id?: string
-  content: string
+  type: BlockType
+  text: string
   children: ClipboardBlock[]
 }
 
@@ -64,7 +65,8 @@ function docToClipboardBlocks(doc: BlockDoc, declared: Set<string>): ClipboardBl
     if (!block) return null
     return {
       ...(declared.has(id) ? { id } : {}),
-      content: block.content,
+      type: block.type,
+      text: block.text,
       children: block.children.map(build).filter((b): b is ClipboardBlock => b !== null),
     }
   }
@@ -77,7 +79,7 @@ export function clipboardBlocksToDoc(blocks: ClipboardBlock[]): BlockDoc {
   const map: Record<string, Block> = {}
   const build = (block: ClipboardBlock): string => {
     const id = blockId()
-    map[id] = { id, content: block.content, children: block.children.map(build) }
+    map[id] = { id, type: block.type, text: block.text, children: block.children.map(build) }
     return id
   }
   return { frontmatter: null, rootBlockIds: blocks.map(build), blocks: map }
@@ -96,7 +98,7 @@ export function clipboardBlocksToDocWithIds(blocks: ClipboardBlock[]): BlockDoc 
   const build = (block: ClipboardBlock): string => {
     let id = block.id ?? blockId()
     while (id in map) id = blockId()
-    const built: Block = { id, content: block.content, children: [] }
+    const built: Block = { id, type: block.type, text: block.text, children: [] }
     map[id] = built
     built.children = block.children.map(build)
     return id
@@ -104,11 +106,12 @@ export function clipboardBlocksToDocWithIds(blocks: ClipboardBlock[]): BlockDoc 
   return { frontmatter: null, rootBlockIds: blocks.map(build), blocks: map }
 }
 
-/** A pasted payload as block-format markdown (for the edit-mode caret splice). */
+/** A pasted payload as block-format markdown (for the edit-mode caret splice).
+ * Ordered items are written `1.` and renumbered where they land. */
 export function clipboardBlocksToMarkdown(blocks: ClipboardBlock[]): string {
   const lines: string[] = []
   const walk = (block: ClipboardBlock, depth: number) => {
-    lines.push("  ".repeat(depth) + block.content)
+    lines.push("  ".repeat(depth) + markerFor(block.type) + block.text)
     for (const child of block.children) walk(child, depth + 1)
   }
   for (const block of blocks) walk(block, 0)
@@ -125,25 +128,47 @@ export function extractClipboardBlocks(html: string): ClipboardBlock[] | null {
   try {
     const decoded: unknown = JSON.parse(decodeBase64(encoded))
     const blocks = (decoded as { blocks?: unknown }).blocks
-    return isClipboardBlocks(blocks) ? blocks : null
+    return isClipboardBlocks(blocks) ? blocks.map(normalizeClipboardBlock) : null
   } catch {
     return null
   }
 }
 
-function isClipboardBlocks(value: unknown): value is ClipboardBlock[] {
+/** A payload block as written by this version (`type` + `text`) or by an
+ * older one (`content`, a marker-prefixed line — read as an import). */
+type RawClipboardBlock =
+  | { id?: string; type: string; text: string; children: RawClipboardBlock[] }
+  | { id?: string; content: string; children: RawClipboardBlock[] }
+
+function isClipboardBlocks(value: unknown): value is RawClipboardBlock[] {
   return (
     Array.isArray(value) &&
-    value.every(
-      (block) =>
-        typeof block === "object" &&
-        block !== null &&
-        typeof (block as ClipboardBlock).content === "string" &&
-        ((block as ClipboardBlock).id === undefined ||
-          typeof (block as ClipboardBlock).id === "string") &&
-        isClipboardBlocks((block as ClipboardBlock).children),
-    )
+    value.every((block) => {
+      if (typeof block !== "object" || block === null) return false
+      const raw = block as Record<string, unknown>
+      const typed = typeof raw.type === "string" && typeof raw.text === "string"
+      const legacy = typeof raw.content === "string"
+      return (
+        (typed || legacy) &&
+        (raw.id === undefined || typeof raw.id === "string") &&
+        isClipboardBlocks(raw.children)
+      )
+    })
   )
+}
+
+function normalizeClipboardBlock(raw: RawClipboardBlock): ClipboardBlock {
+  const children = raw.children.map(normalizeClipboardBlock)
+  if ("content" in raw) {
+    const { type, text } = parseLine(raw.content)
+    return { ...(raw.id !== undefined ? { id: raw.id } : {}), type, text, children }
+  }
+  return {
+    ...(raw.id !== undefined ? { id: raw.id } : {}),
+    type: isBlockType(raw.type) ? raw.type : "text",
+    text: raw.text,
+    children,
+  }
 }
 
 // ── HTML rendering ──────────────────────────────────────────────────────────
@@ -158,14 +183,13 @@ function renderBlocks(blocks: ClipboardBlock[]): string {
   let html = ""
   let i = 0
   while (i < blocks.length) {
-    const kind = getBlockType(blocks[i].content).kind
-    if (kind === "bullet" || kind === "todo" || kind === "ordered") {
+    const type = blocks[i].type
+    if (type === "ul" || type === "ol" || isTodo(type)) {
       // Consecutive same-flavor list items share one list element.
-      const tag = kind === "ordered" ? "ol" : "ul"
-      const sameFlavor = (k: string) =>
-        tag === "ol" ? k === "ordered" : k === "bullet" || k === "todo"
+      const tag = type === "ol" ? "ol" : "ul"
+      const sameFlavor = (t: BlockType) => (tag === "ol" ? t === "ol" : t === "ul" || isTodo(t))
       let items = ""
-      while (i < blocks.length && sameFlavor(getBlockType(blocks[i].content).kind)) {
+      while (i < blocks.length && sameFlavor(blocks[i].type)) {
         items += renderListItem(blocks[i])
         i += 1
       }
@@ -179,21 +203,20 @@ function renderBlocks(blocks: ClipboardBlock[]): string {
 }
 
 function renderListItem(block: ClipboardBlock): string {
-  const type = getBlockType(block.content)
-  const checkbox =
-    type.kind === "todo" ? `<input type="checkbox"${type.checked ? " checked" : ""} disabled> ` : ""
+  const checkbox = isTodo(block.type)
+    ? `<input type="checkbox"${block.type === "done" ? " checked" : ""} disabled> `
+    : ""
   const children = block.children.length > 0 ? renderBlocks(block.children) : ""
-  return `<li>${checkbox}${inlineHtml(stripMarker(block.content))}${children}</li>`
+  return `<li>${checkbox}${inlineHtml(block.text)}${children}</li>`
 }
 
 function renderProse(block: ClipboardBlock): string {
-  const type = getBlockType(block.content)
-  const body = inlineHtml(stripMarker(block.content))
+  const body = inlineHtml(block.text)
   let html: string
-  if (type.kind === "heading") {
-    const level = Math.min(type.level, 6)
+  if (isHeading(block.type)) {
+    const level = block.type === "h2" ? 2 : block.type === "h3" ? 3 : 1
     html = `<h${level}>${body}</h${level}>`
-  } else if (type.kind === "quote") {
+  } else if (block.type === "quote") {
     html = `<blockquote><p>${body}</p></blockquote>`
   } else {
     html = `<p>${body}</p>`

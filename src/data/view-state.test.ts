@@ -29,7 +29,7 @@ const pruned = parse(["- alpha", "  id:: a", "  - beta", "    id:: b", ""].join(
 const empty: BlockDoc = {
   frontmatter: null,
   rootBlockIds: ["blank"],
-  blocks: { blank: { id: "blank", content: "", children: [] } },
+  blocks: { blank: { id: "blank", type: "text", text: "", children: [] } },
 }
 
 const stored = (noteId: string): unknown => {

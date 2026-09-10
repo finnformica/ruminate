@@ -1,9 +1,32 @@
 import { blockId } from "./id"
-import type { Block, BlockDoc } from "./types"
+import { classifyLine } from "./markers"
+import type { Block, BlockDoc, BlockType } from "./types"
 
-/** A node in the intermediate tree, before ids are finalized. */
+/**
+ * **Import.** Parse markdown into typed blocks.
+ *
+ * - Frontmatter (a leading `---` … `---` block) is preserved verbatim.
+ * - Every non-blank, non-`id::` line is a block: its leading marker decides
+ *   the type and is dropped from the text (`classifyLine`, which also folds
+ *   near-miss spellings such as `[] x` or `* x` into their typed form), and
+ *   nesting comes from indentation — two spaces per level in the canonical
+ *   serialized form, with tab-indented and 4-space outlines (common in pasted
+ *   content from other tools) normalized to the same levels (see
+ *   `inferIndentUnit`).
+ * - Inside a code fence nothing is a marker: a `- [ ]` in a fence is code.
+ * - An `id::` line immediately after a block attaches its id to that block;
+ *   blocks without one are minted a fresh id (so plain/imported markdown gains
+ *   stable ids on the next save).
+ *
+ * This is the only place markdown becomes blocks. The editor never calls it
+ * on its own state — only on foreign text (paste, templates, the sample
+ * notes) — so a duplicated `id::` here really is two blocks, and re-minting
+ * the second (below) is the right reading.
+ */
+
+/** A node in the intermediate tree, before ids and types are finalized. */
 interface ParsedNode {
-  content: string
+  line: string
   /** Id read from an `id::` line, if present. */
   fileId?: string
   children: ParsedNode[]
@@ -16,20 +39,6 @@ const ID_RE = /^\s*id::\s+(.+)$/
 // bare `[ ] task` marker so the round-trip preserves the block type.
 const GFM_TODO_RE = /^[-*]\s+(?=\[[ xX]?\]\s)/
 
-/**
- * Parse markdown into a BlockDoc.
- *
- * - Frontmatter (a leading `---` … `---` block) is preserved verbatim.
- * - Every non-blank, non-`id::` line is a block; its content is written
- *   verbatim (a bullet keeps its `- `, a heading its `# `, a paragraph nothing)
- *   and nesting comes from indentation — two spaces per level in the canonical
- *   serialized form, with tab-indented and 4-space outlines (common in pasted
- *   content from other tools) normalized to the same levels (see
- *   `inferIndentUnit`).
- * - An `id::` line immediately after a block attaches its id to that block;
- *   blocks without one are minted a fresh id (so plain/imported markdown gains
- *   stable ids on the next save).
- */
 export function parse(markdown: string): BlockDoc {
   // Normalize line endings so Windows/GitHub CRLF never leaks into content/ids.
   const { frontmatter, body } = splitFrontmatter(markdown.replace(/\r\n/g, "\n"))
@@ -75,14 +84,13 @@ export function parse(markdown: string): BlockDoc {
       // Reached an `id::` line directly — the block's content line was empty.
       // The id sits one level deeper than its (empty) content line.
       const depth = Math.max(0, level - 1)
-      insert(depth, { content: "", children: [], fileId: idMatch[1].trim() })
+      insert(depth, { line: "", children: [], fileId: idMatch[1].trim() })
       i += 1
       continue
     }
 
     const content = line.slice(cut).replace(GFM_TODO_RE, "")
-    const depth = level
-    const node: ParsedNode = { content, children: [] }
+    const node: ParsedNode = { line: content, children: [] }
 
     // An `id::` line immediately after belongs to this block.
     const next = i + 1 < lines.length ? lines[i + 1] : undefined
@@ -94,7 +102,7 @@ export function parse(markdown: string): BlockDoc {
       i += 1
     }
 
-    insert(depth, node)
+    insert(level, node)
   }
 
   const blocks: Record<string, Block> = {}
@@ -105,18 +113,39 @@ export function parse(markdown: string): BlockDoc {
   // collision so every block keeps a distinct id; the fresh id persists on the
   // next save. (Also covers the rare case of a freshly minted id colliding.)
   const usedIds = new Set<string>()
-  const flatten = (node: ParsedNode): string => {
-    let id = node.fileId ?? blockId()
-    while (usedIds.has(id)) id = blockId()
-    usedIds.add(id)
-    const block: Block = { id, content: node.content, children: [] }
-    blocks[id] = block
-    block.children = node.children.map(flatten)
-    return id
+  // Code-fence state runs over the document in emission order (depth-first),
+  // which is also the order the lines were read in; a line inside an open
+  // fence must never be typed by its marker.
+  let fenceOpen = false
+
+  const flatten = (nodes: ParsedNode[]): string[] => {
+    const ids: string[] = []
+    // Ordered runs are per parent: consecutive `ol` siblings number from 1.
+    let olRun = 0
+    for (const node of nodes) {
+      let id = node.fileId ?? blockId()
+      while (usedIds.has(id)) id = blockId()
+      usedIds.add(id)
+      const inFence = fenceOpen
+      if (node.line.trimStart().startsWith("```")) fenceOpen = !fenceOpen
+      const { type, text } = classifyLine(node.line, olRun + 1, inFence)
+      olRun = type === "ol" ? olRun + 1 : 0
+      const block: Block = { id, type, text, children: [] }
+      blocks[id] = block
+      block.children = flatten(node.children)
+      ids.push(id)
+    }
+    return ids
   }
-  const rootBlockIds = roots.map(flatten)
+  const rootBlockIds = flatten(roots)
 
   return { frontmatter, rootBlockIds, blocks }
+}
+
+/** A typed block from one line of markdown, outside any document — what the
+ * clipboard and the "new block" preference use to read a marker. */
+export function parseLine(line: string): { type: BlockType; text: string } {
+  return classifyLine(line, 1, false)
 }
 
 /**

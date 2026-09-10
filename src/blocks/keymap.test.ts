@@ -1,17 +1,20 @@
 import { describe, expect, it } from "vitest"
 import { COMMANDS, type CaretInput, type CommandInput, type Mode } from "./commands"
 import { comboFromEvent, KEYMAP, resolveKey, type KeyLike } from "./keymap"
+import { parseLine } from "./parse"
 import type { BlockDoc } from "./types"
 
 function key(over: Partial<KeyLike> & { key: string }): KeyLike {
   return { shiftKey: false, metaKey: false, ctrlKey: false, altKey: false, ...over }
 }
 
+/** A one-block doc from a marked line, typed as the parser would type it. */
 function docWith(content: string): BlockDoc {
+  const { type, text } = parseLine(content)
   return {
     frontmatter: null,
     rootBlockIds: ["x"],
-    blocks: { x: { id: "x", content, children: [] } },
+    blocks: { x: { id: "x", type, text, children: [] } },
   }
 }
 

@@ -81,7 +81,7 @@ export function writeCollapsedIds(noteId: string, collapsed: ReadonlySet<string>
  * its first impression.
  */
 function hasContent(doc: BlockDoc): boolean {
-  return Object.values(doc.blocks).some((b) => b.content !== "" || b.children.length > 0)
+  return Object.values(doc.blocks).some((b) => b.text !== "" || b.children.length > 0)
 }
 
 interface CollapseState {

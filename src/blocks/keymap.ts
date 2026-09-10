@@ -1,5 +1,5 @@
-import { getBlockType, stripMarker } from "./block-type"
 import type { CommandInput, CommandName, Mode } from "./commands"
+import { isListItem } from "./markers"
 
 /**
  * The block editor's **keymap**: a declarative table mapping a mode + key combo
@@ -30,15 +30,11 @@ interface Binding {
   when?: Predicate
 }
 
-function contentOf(input: CommandInput): string {
-  return input.doc.blocks[input.id]?.content ?? ""
-}
+const blockOf = (input: CommandInput) => input.doc.blocks[input.id]
 
 const isEmptyListItem: Predicate = (input) => {
-  const content = contentOf(input)
-  const kind = getBlockType(content).kind
-  const isList = kind === "bullet" || kind === "todo" || kind === "ordered"
-  return isList && stripMarker(content).trim() === ""
+  const block = blockOf(input)
+  return !!block && isListItem(block.type) && block.text.trim() === ""
 }
 
 const caretAtEnd: Predicate = ({ caret }) =>
@@ -46,13 +42,14 @@ const caretAtEnd: Predicate = ({ caret }) =>
 
 const caretAtStart: Predicate = ({ caret }) => !!caret && caret.start === 0 && caret.end === 0
 
-const hasMarker: Predicate = (input) => getBlockType(contentOf(input)).kind !== "paragraph"
+/** The block has a type of its own — anything but a plain paragraph. */
+const hasMarker: Predicate = (input) => (blockOf(input)?.type ?? "text") !== "text"
 
 const atStartWithMarker: Predicate = (input) => caretAtStart(input) && hasMarker(input)
 
 /** Caret at the very start of an unmarked, empty block (Backspace merges up). */
 const atStartEmpty: Predicate = (input) =>
-  caretAtStart(input) && !hasMarker(input) && contentOf(input) === ""
+  caretAtStart(input) && !hasMarker(input) && (blockOf(input)?.text ?? "") === ""
 
 const atFirstLine: Predicate = ({ caret }) => !!caret && caret.atFirstLine
 const atLastLine: Predicate = ({ caret }) => !!caret && caret.atLastLine

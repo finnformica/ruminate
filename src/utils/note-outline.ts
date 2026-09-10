@@ -1,5 +1,5 @@
 import { Searcher } from "fast-fuzzy"
-import { getBlockType, stripMarker } from "../blocks/block-type"
+import { isHeading } from "../blocks/markers"
 import type { BlockDoc } from "../blocks/types"
 
 /** One heading in a note's live outline (see `noteOutlineAtom`). */
@@ -46,12 +46,12 @@ export function buildOutline(doc: BlockDoc): OutlineItem[] {
     for (const id of ids) {
       const block = doc.blocks[id]
       if (!block) continue
-      const isHeading = getBlockType(block.content).kind === "heading"
-      if (isHeading) {
-        const text = stripMarker(block.content).trim()
+      const heading = isHeading(block.type)
+      if (heading) {
+        const text = block.text.trim()
         if (text !== "") items.push({ id, text, depth })
       }
-      walk(block.children, depth + (isHeading ? 1 : 0))
+      walk(block.children, depth + (heading ? 1 : 0))
     }
   }
   walk(doc.rootBlockIds, 0)

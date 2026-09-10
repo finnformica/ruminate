@@ -1,4 +1,4 @@
-import { getBlockType } from "./block-type"
+import { isHeading } from "./markers"
 import type { BlockDoc } from "./types"
 
 /**
@@ -22,7 +22,7 @@ export function defaultCollapsedIds(doc: BlockDoc): string[] {
     for (const id of ids) {
       const block = doc.blocks[id]
       if (!block) continue
-      if (getBlockType(block.content).kind === "heading") {
+      if (isHeading(block.type)) {
         walk(block.children, 1)
         continue
       }
