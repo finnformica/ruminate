@@ -5,7 +5,7 @@ import type { BlockDoc } from "./types"
 /** A doc whose single block's content is `text`, for terse assertions. */
 function docWith(text: string): BlockDoc {
   return {
-    frontmatter: "",
+    props: null,
     rootBlockIds: ["a"],
     blocks: { a: { id: "a", type: "text", text, children: [] } },
   }

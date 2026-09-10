@@ -1,4 +1,5 @@
 import { markerFor } from "./markers"
+import { frontmatterTextOfProps } from "../data/frontmatter-props"
 import type { Block, BlockDoc } from "./types"
 
 /**
@@ -36,9 +37,10 @@ const codeLanguage = (block: Block): string => {
 export function serialize(doc: BlockDoc): string {
   const lines: string[] = []
 
-  if (doc.frontmatter !== null) {
+  const frontmatter = frontmatterTextOfProps(doc.props)
+  if (frontmatter !== null) {
     lines.push("---")
-    lines.push(doc.frontmatter)
+    lines.push(frontmatter)
     lines.push("---")
   }
 

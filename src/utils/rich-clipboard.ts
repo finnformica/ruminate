@@ -82,7 +82,7 @@ export function clipboardBlocksToDoc(blocks: ClipboardBlock[]): BlockDoc {
     map[id] = { id, type: block.type, text: block.text, children: block.children.map(build) }
     return id
   }
-  return { frontmatter: null, rootBlockIds: blocks.map(build), blocks: map }
+  return { props: null, rootBlockIds: blocks.map(build), blocks: map }
 }
 
 /**
@@ -103,7 +103,7 @@ export function clipboardBlocksToDocWithIds(blocks: ClipboardBlock[]): BlockDoc 
     built.children = block.children.map(build)
     return id
   }
-  return { frontmatter: null, rootBlockIds: blocks.map(build), blocks: map }
+  return { props: null, rootBlockIds: blocks.map(build), blocks: map }
 }
 
 /** A pasted payload as block-format markdown (for the edit-mode caret splice).

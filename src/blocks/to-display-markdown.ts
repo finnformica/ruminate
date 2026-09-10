@@ -1,3 +1,4 @@
+import { frontmatterTextOfProps } from "../data/frontmatter-props"
 import { isListItem, markerFor } from "./markers"
 import { parse } from "./parse"
 import type { Block, BlockDoc } from "./types"
@@ -28,8 +29,9 @@ export function toDisplayMarkdown(content: string): string {
 function displayMarkdownOf(doc: BlockDoc): string {
   const lines: string[] = []
 
-  if (doc.frontmatter !== null) {
-    lines.push("---", doc.frontmatter, "---")
+  const frontmatter = frontmatterTextOfProps(doc.props)
+  if (frontmatter !== null) {
+    lines.push("---", frontmatter, "---")
   }
 
   const walk = (ids: string[], depth: number) => {

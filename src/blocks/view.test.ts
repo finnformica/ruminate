@@ -32,7 +32,7 @@ const outline = parse(
 
 /** A doc where `s` hangs under both `p` and `q` — one block, two occurrences. */
 const shared: BlockDoc = {
-  frontmatter: null,
+  props: null,
   rootBlockIds: ["p", "q"],
   blocks: {
     p: { id: "p", type: "ul", text: "p", children: ["s"] },
@@ -74,7 +74,7 @@ describe("occurrence keys", () => {
 
   it("never loop on a cyclic doc", () => {
     const cyclic: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["x"],
       blocks: {
         x: { id: "x", type: "ul", text: "x", children: ["y"] },

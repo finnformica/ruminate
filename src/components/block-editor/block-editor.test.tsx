@@ -1215,7 +1215,7 @@ describe("collapse toggle", () => {
     // Markdown cannot say "the same block twice" (a duplicate id:: is
     // re-minted on import); the graph can, so build the doc by hand.
     const shared: BlockDoc = {
-      frontmatter: null,
+      props: null,
       rootBlockIds: ["blk_p", "blk_q"],
       blocks: {
         blk_p: { id: "blk_p", type: "ul", text: "p", children: ["blk_s"] },

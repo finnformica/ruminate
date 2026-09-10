@@ -25,7 +25,7 @@ describe("block round-trip", () => {
 
   it("parses the structure and ids", () => {
     const doc = parse(CANONICAL)
-    expect(doc.frontmatter).toBe("title: My note")
+    expect(doc.props).toEqual({ title: "My note" })
     expect(doc.rootBlockIds).toEqual(["blk_aaa", "blk_ccc", "blk_ddd"])
     expect(doc.blocks["blk_aaa"].type).toBe("h1")
     expect(doc.blocks["blk_aaa"].text).toBe("A heading")
@@ -110,14 +110,14 @@ describe("duplicate ids", () => {
   })
 })
 
-describe("frontmatter handling", () => {
-  it("returns null frontmatter when there is none", () => {
+describe("frontmatter handling (the markdown edge)", () => {
+  it("returns null props when there is no frontmatter", () => {
     const doc = parse(`just a block\n  id:: blk_x\n`)
-    expect(doc.frontmatter).toBeNull()
+    expect(doc.props).toBeNull()
     expect(serialize(doc)).toBe(`just a block\n  id:: blk_x\n`)
   })
 
-  it("preserves multi-line YAML verbatim, including lines that look like blocks", () => {
+  it("imports multi-line YAML as entries (lines that look like blocks included) and converges", () => {
     const md = `---
 title: My note
 tags:
@@ -129,15 +129,24 @@ A block
   id:: blk_x
 `
     const doc = parse(md)
-    expect(doc.frontmatter).toBe("title: My note\ntags:\n  - foo\n  - bar\ndate: 2026-08-20")
+    expect(doc.props).toEqual({
+      title: "My note",
+      tags: ["foo", "bar"],
+      date: "2026-08-20T00:00:00.000Z",
+    })
     expect(doc.rootBlockIds).toEqual(["blk_x"])
-    expect(serialize(doc)).toBe(md)
+    // Non-canonical YAML converges to the canonical form in one step.
+    const once = serialize(doc)
+    expect(once).toBe(
+      "---\ntitle: My note\ntags: [foo, bar]\ndate: 2026-08-20T00:00:00.000Z\n---\nA block\n  id:: blk_x\n",
+    )
+    expect(serialize(parse(once))).toBe(once)
   })
 
-  it("preserves an empty frontmatter block round-trip", () => {
+  it("keeps an empty frontmatter block distinct from none", () => {
     const md = `---\n\n---\nA block\n  id:: blk_x\n`
     const doc = parse(md)
-    expect(doc.frontmatter).toBe("")
+    expect(doc.props).toEqual({})
     expect(serialize(doc)).toBe(md)
   })
 })
@@ -244,7 +253,7 @@ describe("whitespace and line endings", () => {
   it("normalizes CRLF so ids and content never carry a stray \\r", () => {
     const md = `---\r\ntitle: t\r\n---\r\na block\r\n  id:: blk_a\r\n  child\r\n    id:: blk_b\r\n`
     const doc = parse(md)
-    expect(doc.frontmatter).toBe("title: t")
+    expect(doc.props).toEqual({ title: "t" })
     expect(doc.blocks["blk_a"].text).toBe("a block")
     expect(doc.blocks["blk_a"].children).toEqual(["blk_b"])
     expect(doc.blocks["blk_b"].text).toBe("child")
@@ -255,7 +264,7 @@ describe("whitespace and line endings", () => {
 
   it("parses an empty document to an empty doc", () => {
     const doc = parse("")
-    expect(doc.frontmatter).toBeNull()
+    expect(doc.props).toBeNull()
     expect(doc.rootBlockIds).toEqual([])
     expect(doc.blocks).toEqual({})
   })

@@ -219,7 +219,7 @@ function blockSearchType(type: BlockType, text: string, inFence: boolean): Block
  * step the indexer memoizes.
  */
 export function indexNoteBlocks(note: Note, snapshot: GraphSnapshot): NoteBlockIndex {
-  const doc = pageDoc(note.id, snapshot) ?? { frontmatter: null, rootBlockIds: [], blocks: {} }
+  const doc = pageDoc(note.id, snapshot) ?? { props: null, rootBlockIds: [], blocks: {} }
   const hits: BlockHit[] = []
   const childIds = new Map<string, string[]>()
   let fenceOpen = false

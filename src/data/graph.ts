@@ -5,12 +5,7 @@ import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import { asBlockType, type Block, type BlockDoc, type BlockProps } from "../blocks/types"
 import type { NoteId } from "../schema"
-import { frontmatterTextFromProps, pagePropsFromFrontmatter } from "./frontmatter-props"
-import {
-  emittedPageTitle,
-  injectTitleIntoFrontmatter,
-  liftTitleFromFrontmatter,
-} from "./page-identity"
+import { emittedPageTitle } from "./page-identity"
 
 /**
  * The graph ↔ doc seam (docs/graph-schema-v2.md, docs/graph-native-app.md).
@@ -80,19 +75,25 @@ export function docToParts(
   }
   const safeId = (id: string) => rename.get(id) ?? id
 
-  // The title is data, and it rides the `<id>.md` seam as a projection-owned
-  // `title:` frontmatter key (`page-identity.ts`): lift it into the page node's
-  // `text` and keep it OUT of `props`, so it is never stored twice and the
-  // rollup can re-emit it from the one place that owns it.
-  const { title, rest } = liftTitleFromFrontmatter(doc.frontmatter)
+  // The title is data: the page node's `text`. It rides the doc's props as
+  // `title` (`page-identity.ts`) and is lifted out here, so it is never stored
+  // twice and the walk re-emits it from the one place that owns it.
+  const { title, ...rest } = doc.props ?? {}
+  const titled = typeof title === "string"
   const nodes: NodeRow[] = [
     {
       id: noteId,
       type: PAGE_TYPE,
-      // No title key means an untitled page (or a date page, whose id IS its
+      // No title means an untitled page (or a date page, whose id IS its
       // name) — `text` stays the id, exactly as it was before minting.
-      text: title ?? noteId,
-      props: rest !== null ? pagePropsFromFrontmatter(rest) : null,
+      text: titled ? title : noteId,
+      // A page whose only prop was its title holds none; an empty props
+      // object (an empty frontmatter block at import) is kept distinct from
+      // null, as the rows keep it.
+      props:
+        doc.props === null || (titled && Object.keys(rest).length === 0)
+          ? null
+          : JSON.stringify(rest),
       updated_at: updatedAt,
     },
   ]
@@ -333,7 +334,7 @@ export function docFromGraph(rootIds: string[], graph: GraphSnapshot): BlockDoc 
   }
 
   const rootBlockIds = rootIds.filter((id) => visit(id))
-  return { frontmatter: null, rootBlockIds, blocks }
+  return { props: null, rootBlockIds, blocks }
 }
 
 /**
@@ -346,11 +347,24 @@ export function docFromGraph(rootIds: string[], graph: GraphSnapshot): BlockDoc 
 export function pageDoc(pageId: string, graph: GraphSnapshot): BlockDoc | null {
   const page = graph.nodes.get(pageId)
   if (!page || page.type !== PAGE_TYPE) return null
-  const stored = frontmatterTextFromProps(page.props)
+  const entries = pageEntries(page.props)
   const title = emittedPageTitle(page.id, page.text)
-  const frontmatter = title !== null ? injectTitleIntoFrontmatter(stored, title) : stored
+  const props = title !== null ? { title, ...(entries ?? {}) } : entries
   const doc = docFromGraph(childIdsOf(graph, pageId), graph)
-  return { ...doc, frontmatter }
+  return { ...doc, props }
+}
+
+/** A page row's props as entries — an object even when empty (`{}` is an
+ * empty frontmatter block, distinct from none), null for none or malformed. */
+function pageEntries(props: string | null): BlockProps | null {
+  if (props === null) return null
+  try {
+    const parsed: unknown = JSON.parse(props)
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null
+    return parsed as BlockProps
+  } catch {
+    return null
+  }
 }
 
 /**

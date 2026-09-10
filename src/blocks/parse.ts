@@ -1,4 +1,5 @@
 import { blockId } from "./id"
+import { pagePropsFromText } from "../data/frontmatter-props"
 import { classifyLine } from "./markers"
 import type { Block, BlockDoc, BlockType } from "./types"
 
@@ -139,7 +140,7 @@ export function parse(markdown: string): BlockDoc {
   }
   const rootBlockIds = flatten(roots)
 
-  return { frontmatter, rootBlockIds, blocks }
+  return { props: pagePropsFromText(frontmatter), rootBlockIds, blocks }
 }
 
 /** A typed block from one line of markdown, outside any document — what the

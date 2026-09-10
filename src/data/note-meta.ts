@@ -11,7 +11,6 @@ import {
 } from "../utils/date"
 import { removeLeadingEmoji } from "../utils/emoji"
 import { parseFrontmatter } from "../utils/frontmatter"
-import { frontmatterTextFromProps } from "./frontmatter-props"
 import { PAGE_TYPE, pageDoc, parseProps, propsJson, type GraphSnapshot } from "./graph"
 import type { Op } from "./ops"
 import { emittedPageTitle, isMintedNoteId } from "./page-identity"
@@ -55,27 +54,20 @@ export function priorityInText(text: string): 1 | 2 | 3 | null {
   return priority
 }
 
-/** The page's props as the values the app reads (dates as `Date`s): the
- * canonical frontmatter text of the props, parsed — one rule for both the
- * entries shape and the legacy raw shape (`frontmatter-props.ts`). */
-function pagePropsOf(props: string | null): Record<string, unknown> {
-  const text = frontmatterTextFromProps(props)
-  if (text === null) return {}
-  return parseFrontmatter(`---\n${text}\n---\n`).frontmatter
-}
-
 /**
  * The page's props as JSON-safe entries — the shape the `props` column holds
  * and `setProps` writes (dates as ISO strings). Both stored shapes resolve
- * (`frontmatter-props.ts`).
+ * (`frontmatter-props.ts`): a legacy raw-YAML row is parsed here.
  */
 export function pagePropsEntries(props: string | null): Record<string, unknown> {
   const parsed = parseProps(props)
-  if (parsed && !(Object.keys(parsed).length === 1 && typeof parsed.frontmatter === "string")) {
+  if (!parsed) return {}
+  if (!(Object.keys(parsed).length === 1 && typeof parsed.frontmatter === "string")) {
     return { ...parsed }
   }
   try {
-    return JSON.parse(JSON.stringify(pagePropsOf(props))) as Record<string, unknown>
+    const raw = parseFrontmatter(`---\n${parsed.frontmatter}\n---\n`).frontmatter
+    return JSON.parse(JSON.stringify(raw)) as Record<string, unknown>
   } catch {
     return {}
   }
@@ -142,7 +134,7 @@ export function noteFromPage(id: NoteId, snapshot: GraphSnapshot): Note | null {
   if (!page || page.type !== PAGE_TYPE) return null
   const doc = pageDoc(id, snapshot) as BlockDoc
   const blocks = blocksInOrder(doc)
-  const props = pagePropsOf(page.props)
+  const props = pagePropsEntries(page.props)
 
   // Title: the page node's text (the id when untitled), else the first
   // heading block — the old markdown convention, still honoured for imports.
@@ -191,13 +183,16 @@ export function noteFromPage(id: NoteId, snapshot: GraphSnapshot): Note | null {
     const date = dateOf(value)
     if (date) dates.add(date)
   }
-  if (
-    props.birthday instanceof Date ||
-    (typeof props.birthday === "string" && /^\d{2}-\d{2}$/.test(props.birthday))
-  ) {
-    const birthday =
-      props.birthday instanceof Date ? props.birthday : new Date(`0000-${props.birthday}`)
-    if (!Number.isNaN(birthday.getTime())) dates.add(toDateStringUtc(getNextBirthday(birthday)))
+  // A birthday — `MM-DD`, or a full date — also names its next occurrence.
+  if (typeof props.birthday === "string") {
+    const birthday = /^\d{2}-\d{2}$/.test(props.birthday)
+      ? new Date(`0000-${props.birthday}`)
+      : /^\d{4}-\d{2}-\d{2}/.test(props.birthday)
+        ? new Date(props.birthday)
+        : null
+    if (birthday && !Number.isNaN(birthday.getTime())) {
+      dates.add(toDateStringUtc(getNextBirthday(birthday)))
+    }
   }
 
   const type = isValidDateString(id) ? "daily" : isValidWeekString(id) ? "weekly" : "note"
@@ -225,8 +220,7 @@ export function noteFromPage(id: NoteId, snapshot: GraphSnapshot): Note | null {
   }
 
   let updatedAt: number | null = null
-  if (props.updated_at instanceof Date) updatedAt = props.updated_at.getTime()
-  else if (typeof props.updated_at === "string") {
+  if (typeof props.updated_at === "string") {
     const parsed = Date.parse(props.updated_at)
     if (!Number.isNaN(parsed)) updatedAt = parsed
   }

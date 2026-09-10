@@ -67,12 +67,13 @@ export interface Block {
 
 export interface BlockDoc {
   /**
-   * The raw text *between* the `---` frontmatter fences (verbatim), or null.
-   * An import/export concern: a doc built from the graph carries the page's
-   * props as its frontmatter text so that `serialize` emits exactly what the
-   * rollup emits.
+   * The page's props — its metadata (`title`, `pinned`, `tags`, `updated_at`…)
+   * as the entries the page node holds — or null for a doc that is not a
+   * page's (a clipboard fragment, a subtree). There is no frontmatter in the
+   * app: YAML exists only at the markdown edge, where `parse` turns it into
+   * these entries and `serialize` turns them back (`frontmatter-props.ts`).
    */
-  frontmatter: string | null
+  props: BlockProps | null
   /** Top-level block ids, in order. */
   rootBlockIds: string[]
   /** Every block in the doc, keyed by id — each once, however many parents. */
