@@ -1,6 +1,6 @@
 # Graph-native app: retiring the markdown bridge
 
-Status: **steps 1 to 3 landed** (2026-09-10) — see §5 for what each step
+Status: **steps 1 to 4 landed** (2026-09-10) — see §5 for what each step
 delivered and what remains. Extends
 [editor-on-graph.md](./editor-on-graph.md) (which assessed the same move
 from the editor's side) and [graph-schema-v2.md](./graph-schema-v2.md) (the
@@ -383,10 +383,19 @@ each branched from the last.
    markdown files layer, `parseNote`, the task and list-item markdown
    surgery, the markdown component's editing affordances and five mdast
    dependencies are deleted.
-4. **The last of the doc-level editor.** Selection and focus re-key by
-   occurrence (so a block twice in one note is two addressable rows), and
-   the commands take the row rather than the id. `?content=` (a new note's
-   seed) is the one import left on the note path.
+4. **The last of the doc-level editor** — _landed_. Selection, the range
+   anchor and edit focus are rows (occurrence keys), so a block twice in one
+   note is two places to be: select one, edit one, delete one and the other
+   stays. The commands take the row (`CommandInput.key`, `visibleOrder` of
+   keys) and answer with rows (`FocusIntent.key`, the fold demands); the
+   positional doc ops (`insertAfter`, `removeBlock`, `indentBlock`,
+   `outdentBlock`, `moveBlocks`, `duplicateBlocks`, `spliceBlocks`) take a
+   key and read the parent off it — nothing scans for a parent any more.
+   `removeBlock` unlinks one occurrence and drops only what the document no
+   longer reaches; `indentBlock`/`outdentBlock` report the row's new key so
+   focus and a multi-row selection follow the move. The native cut/copy
+   handlers pick rows. `?content=` (a new note's seed) is the one import
+   left on the note path.
 5. **Views everywhere.** The filtered results as a multi-root view, page
    nodes as results, `in:` as reachability, one vocabulary, the caret
    popover. (Absorbs the results renderer of PR #60, rebased onto this.)
@@ -394,7 +403,9 @@ each branched from the last.
 ## 6. Decisions
 
 - **Occurrence keys** for rows, folds and the DOM hooks: yes, in step 1.
-  Selection and focus follow in step 4.
+  Selection, focus and the commands followed in step 4. Done. The block's
+  own fields (text, type) stay addressed by id: a change to them shows in
+  every row.
 - **Metadata from the graph, memoized per page.** A `Note` object is kept
   while the rows its page reaches are unchanged (row identity, no content
   compare), so the notes list, search index and React keys stay stable

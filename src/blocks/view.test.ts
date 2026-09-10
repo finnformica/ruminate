@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest"
 import { parse } from "./parse"
 import type { BlockDoc } from "./types"
 import {
+  ancestorKeys,
   buildRows,
   firstOccurrenceKey,
   hasOccurrence,
   idOfKey,
+  isWithin,
   keyOf,
   occurrenceKeys,
+  parentKeyOf,
+  zoomRootKey,
 } from "./view"
 
 const NONE: ReadonlySet<string> = new Set()
@@ -51,6 +55,22 @@ describe("occurrence keys", () => {
     expect(keyOf("a/b", "c")).toBe("a/b/c")
     expect(idOfKey("a/b/c")).toBe("c")
     expect(idOfKey("a")).toBe("a")
+  })
+
+  it("carry the parent and the ancestors, nearest first", () => {
+    expect(parentKeyOf("a/b/c")).toBe("a/b")
+    expect(parentKeyOf("a")).toBeNull()
+    expect(ancestorKeys("a/b/c")).toEqual(["a/b", "a"])
+    expect(ancestorKeys("a")).toEqual([])
+    expect(isWithin("a/b/c", "a/b")).toBe(true)
+    expect(isWithin("a/b", "a/b")).toBe(true)
+    expect(isWithin("a/bc", "a/b")).toBe(false)
+    expect(isWithin("a", "a/b")).toBe(false)
+  })
+
+  it("address the zoomed block by its first occurrence", () => {
+    expect(zoomRootKey(shared, "s")).toBe("p/s")
+    expect(zoomRootKey(shared, "nope")).toBe("nope")
   })
 
   it("enumerate every occurrence, depth-first", () => {

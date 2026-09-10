@@ -1,4 +1,3 @@
-import { olPositions } from "./ops"
 import type { BlockDoc } from "./types"
 
 /**
@@ -7,8 +6,9 @@ import type { BlockDoc } from "./types"
  * A block is a node; where it shows up on screen is an **occurrence** — one
  * per path from a root to the block, so a node reachable from two parents is
  * two rows sharing one block. Everything positional keys by the occurrence:
- * React keys, folds, the guide lines. (Selection and focus still key by block
- * id while the commands do — see docs/graph-native-app.md.)
+ * React keys, folds, the guide lines, selection and focus, and the position
+ * a command acts on (`src/blocks/commands.ts`). A block's own fields — its
+ * text and type — are the node's, addressed by id.
  *
  * The key is the path of ids from the root, joined by `/` (ids never contain
  * one): a root's key is its id, its child's is `root/child`, and so on. Keys
@@ -43,6 +43,28 @@ export function keyOf(parentKey: string | null, id: string): string {
 /** The block id an occurrence key names (its last segment). */
 export function idOfKey(key: string): string {
   return key.slice(key.lastIndexOf("/") + 1)
+}
+
+/** The key of the occurrence this one hangs under, or null for a root. */
+export function parentKeyOf(key: string): string | null {
+  const at = key.lastIndexOf("/")
+  return at === -1 ? null : key.slice(0, at)
+}
+
+/** The keys of an occurrence's ancestors, nearest first (empty for a root). */
+export function ancestorKeys(key: string): string[] {
+  const out: string[] = []
+  let parent = parentKeyOf(key)
+  while (parent !== null) {
+    out.push(parent)
+    parent = parentKeyOf(parent)
+  }
+  return out
+}
+
+/** Is `key` the occurrence `ancestor` or one beneath it? */
+export function isWithin(key: string, ancestor: string): boolean {
+  return key === ancestor || key.startsWith(`${ancestor}/`)
 }
 
 /** Does the document have this occurrence — is the key a real path? */
@@ -87,6 +109,26 @@ export function firstOccurrenceKey(doc: BlockDoc, id: string): string | null {
     if (key === id || key.endsWith(suffix)) return key
   }
   return null
+}
+
+/** The key the zoomed block is addressed by: its first occurrence in the
+ * document (so a fold made while zoomed is the same fold un-zoomed), or its
+ * bare id when the document does not reach it. */
+export function zoomRootKey(doc: BlockDoc, zoomRootId: string): string {
+  return firstOccurrenceKey(doc, zoomRootId) ?? zoomRootId
+}
+
+/**
+ * The 1-based position of each of `ids` in its run of consecutive ordered
+ * siblings (0 for anything that isn't an ordered item) — the number an `ol`
+ * block shows, which is a fact of its position, not of its text.
+ */
+function olPositions(doc: BlockDoc, ids: string[]): number[] {
+  let run = 0
+  return ids.map((id) => {
+    run = doc.blocks[id]?.type === "ol" ? run + 1 : 0
+    return run
+  })
 }
 
 /**
@@ -134,7 +176,7 @@ export function buildRows(
 
   const zoomRoot = zoomRootId ? doc.blocks[zoomRootId] : undefined
   if (zoomRoot) {
-    const key = firstOccurrenceKey(doc, zoomRoot.id) ?? zoomRoot.id
+    const key = zoomRootKey(doc, zoomRoot.id)
     rows.push({
       key,
       id: zoomRoot.id,

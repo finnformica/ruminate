@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import {
-  ancestorsOf,
   duplicateBlocks,
   emptyBlock,
   indentBlock,
@@ -13,6 +12,7 @@ import {
   outdentBlock,
   remintCollidingIds,
   removeBlock,
+  siblingsOf,
   spliceBlocks,
   subtreeIds,
   updateText,
@@ -73,17 +73,25 @@ describe("subtreeIds", () => {
   })
 })
 
-describe("ancestorsOf", () => {
-  it("lists ancestors nearest-first up to the root", () => {
-    expect(ancestorsOf(deepFixture(), "b1a")).toEqual(["b1", "b"])
+describe("siblingsOf", () => {
+  it("reads a row's parent and siblings off its key", () => {
+    expect(siblingsOf(deepFixture(), "b/b1")).toEqual({
+      parentKey: "b",
+      parentId: "b",
+      siblings: ["b1", "b2"],
+      index: 0,
+    })
+    expect(siblingsOf(deepFixture(), "c")).toEqual({
+      parentKey: null,
+      parentId: null,
+      siblings: ["a", "b", "c"],
+      index: 2,
+    })
   })
 
-  it("is empty for a root block", () => {
-    expect(ancestorsOf(deepFixture(), "a")).toEqual([])
-  })
-
-  it("is empty for an unknown block", () => {
-    expect(ancestorsOf(deepFixture(), "nope")).toEqual([])
+  it("is null for a key the document does not have", () => {
+    expect(siblingsOf(deepFixture(), "a/b1")).toBeNull()
+    expect(siblingsOf(deepFixture(), "nope")).toBeNull()
   })
 })
 
@@ -138,7 +146,7 @@ describe("insertAfter", () => {
   it("inserts a sibling after a nested block", () => {
     const doc = fixture()
     const fresh: Block = { id: "b2", type: "text", text: "B2", children: [] }
-    const next = insertAfter(doc, "b1", fresh)
+    const next = insertAfter(doc, "b/b1", fresh)
     expect(next.blocks["b"].children).toEqual(["b1", "b2"])
     // Original child list untouched.
     expect(doc.blocks["b"].children).toEqual(["b1"])
@@ -168,7 +176,7 @@ describe("insertBefore", () => {
   it("inserts before the first child of a parent", () => {
     const doc = fixture()
     const fresh: Block = { id: "b0", type: "text", text: "B0", children: [] }
-    const next = insertBefore(doc, "b1", fresh)
+    const next = insertBefore(doc, "b/b1", fresh)
     expect(next.blocks["b"].children).toEqual(["b0", "b1"])
   })
 
@@ -208,7 +216,7 @@ describe("spliceBlocks", () => {
   it("splices into a nested sibling list", () => {
     const doc = fixture()
     const sub = parse("p\nq")
-    const result = spliceBlocks(doc, "b1", sub)!
+    const result = spliceBlocks(doc, "b/b1", sub)!
     const childContents = result.doc.blocks["b"].children.map((id) => result.doc.blocks[id].text)
     expect(childContents).toEqual(["p", "q"])
   })
@@ -236,7 +244,7 @@ describe("insertBlocksAfter", () => {
   it("inserts as siblings inside a nested list", () => {
     const doc = fixture()
     const sub = parse("x")
-    const result = insertBlocksAfter(doc, "b1", sub)!
+    const result = insertBlocksAfter(doc, "b/b1", sub)!
     const childContents = result.doc.blocks["b"].children.map((id) => result.doc.blocks[id].text)
     expect(childContents).toEqual(["B1", "x"])
   })
@@ -358,6 +366,15 @@ describe("duplicateBlocks", () => {
     expect(duplicateBlocks(fixture(), ["nope"], "below")).toBeNull()
     expect(duplicateBlocks(fixture(), [], "below")).toBeNull()
   })
+
+  it("names the copies by their keys under the anchor's parent", () => {
+    const result = duplicateBlocks(fixture(), ["b/b1"], "below")!
+    expect(result.copies).toHaveLength(1)
+    expect(result.copies[0].startsWith("b/")).toBe(true)
+    const copyId = result.copies[0].slice(2)
+    expect(result.doc.blocks["b"].children).toEqual(["b1", copyId])
+    expect(result.doc.blocks[copyId].text).toBe("B1")
+  })
 })
 
 describe("moveBlocks", () => {
@@ -383,7 +400,7 @@ describe("moveBlocks", () => {
 
   it("is a no-op when the ids span parents", () => {
     const doc = fixture()
-    expect(moveBlocks(doc, ["b1", "c"], "down")).toBe(doc)
+    expect(moveBlocks(doc, ["b/b1", "c"], "down")).toBe(doc)
   })
 
   it("is a no-op when the siblings are not contiguous", () => {
@@ -394,9 +411,9 @@ describe("moveBlocks", () => {
 
 describe("removeBlock", () => {
   it("removes a middle root and focuses the previous sibling", () => {
-    const { doc, focusId } = removeBlock(fixture(), "c")
+    const { doc, focusKey } = removeBlock(fixture(), "c")
     expect(doc.rootBlockIds).toEqual(["a", "b"])
-    expect(focusId).toBe("b")
+    expect(focusKey).toBe("b")
   })
 
   it("removes a block and its whole subtree from the blocks map", () => {
@@ -407,14 +424,37 @@ describe("removeBlock", () => {
   })
 
   it("focuses the parent when removing a first child", () => {
-    const { doc, focusId } = removeBlock(fixture(), "b1")
+    const { doc, focusKey } = removeBlock(fixture(), "b/b1")
     expect(doc.blocks["b"].children).toEqual([])
-    expect(focusId).toBe("b")
+    expect(focusKey).toBe("b")
   })
 
   it("focuses null when removing the first root", () => {
-    const { focusId } = removeBlock(fixture(), "a")
-    expect(focusId).toBeNull()
+    const { focusKey } = removeBlock(fixture(), "a")
+    expect(focusKey).toBeNull()
+  })
+
+  it("removes one row of a shared block and keeps the block in the other", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["p", "q"],
+      blocks: {
+        p: { id: "p", type: "ul", text: "p", children: ["s"] },
+        q: { id: "q", type: "ul", text: "q", children: ["s"] },
+        s: { id: "s", type: "ul", text: "shared", children: ["t"] },
+        t: { id: "t", type: "ul", text: "t", children: [] },
+      },
+    }
+    const once = removeBlock(doc, "q/s")
+    expect(once.doc.blocks["q"].children).toEqual([])
+    expect(once.doc.blocks["p"].children).toEqual(["s"])
+    expect(once.doc.blocks["s"]).toBeDefined()
+    expect(once.doc.blocks["t"]).toBeDefined()
+    expect(once.focusKey).toBe("q")
+    // The last row takes the subtree with it.
+    const twice = removeBlock(once.doc, "p/s")
+    expect(twice.doc.blocks["s"]).toBeUndefined()
+    expect(twice.doc.blocks["t"]).toBeUndefined()
   })
 
   it("leaves the original doc untouched", () => {
@@ -424,23 +464,26 @@ describe("removeBlock", () => {
     expect(doc.blocks["b1"]).toBeDefined()
   })
 
-  it("returns the same doc and null focus for an unknown id", () => {
+  it("returns the same doc and null focus for an unknown key", () => {
     const doc = fixture()
-    const result = removeBlock(doc, "nope")
-    expect(result.doc).toBe(doc)
-    expect(result.focusId).toBeNull()
+    for (const key of ["nope", "a/b1"]) {
+      const result = removeBlock(doc, key)
+      expect(result.doc).toBe(doc)
+      expect(result.focusKey).toBeNull()
+    }
   })
 })
 
 describe("indentBlock", () => {
-  it("makes a block the last child of its previous sibling", () => {
+  it("makes a block the last child of its previous sibling, and says where it went", () => {
     const next = indentBlock(fixture(), "c")
-    expect(next.rootBlockIds).toEqual(["a", "b"])
-    expect(next.blocks["b"].children).toEqual(["b1", "c"])
+    expect(next.doc.rootBlockIds).toEqual(["a", "b"])
+    expect(next.doc.blocks["b"].children).toEqual(["b1", "c"])
+    expect(next.key).toBe("b/c")
   })
 
   it("carries a block's own subtree when indenting", () => {
-    const next = indentBlock(fixture(), "b")
+    const next = indentBlock(fixture(), "b").doc
     expect(next.rootBlockIds).toEqual(["a", "c"])
     expect(next.blocks["a"].children).toEqual(["b"])
     // b keeps its child.
@@ -449,12 +492,26 @@ describe("indentBlock", () => {
 
   it("is a no-op for the first block in its list", () => {
     const doc = fixture()
-    expect(indentBlock(doc, "a")).toBe(doc)
+    expect(indentBlock(doc, "a")).toEqual({ doc, key: "a" })
   })
 
   it("is a no-op for a first child", () => {
     const doc = fixture()
-    expect(indentBlock(doc, "b1")).toBe(doc)
+    expect(indentBlock(doc, "b/b1").doc).toBe(doc)
+  })
+
+  it("is a no-op when the previous sibling already holds the block", () => {
+    // s hangs under p, and beside p at the root: indenting the root row would
+    // put s under p twice.
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["p", "s"],
+      blocks: {
+        p: { id: "p", type: "ul", text: "p", children: ["s"] },
+        s: { id: "s", type: "ul", text: "s", children: [] },
+      },
+    }
+    expect(indentBlock(doc, "s").doc).toBe(doc)
   })
 
   it("leaves the original doc untouched", () => {
@@ -466,25 +523,26 @@ describe("indentBlock", () => {
 })
 
 describe("outdentBlock", () => {
-  it("lifts a block to be a sibling of its parent, just after it", () => {
-    const next = outdentBlock(fixture(), "b1")
-    expect(next.rootBlockIds).toEqual(["a", "b", "b1", "c"])
-    expect(next.blocks["b"].children).toEqual([])
+  it("lifts a block to be a sibling of its parent, just after it, and says where", () => {
+    const next = outdentBlock(fixture(), "b/b1")
+    expect(next.doc.rootBlockIds).toEqual(["a", "b", "b1", "c"])
+    expect(next.doc.blocks["b"].children).toEqual([])
+    expect(next.key).toBe("b1")
   })
 
   it("is a no-op for a top-level block", () => {
     const doc = fixture()
-    expect(outdentBlock(doc, "a")).toBe(doc)
+    expect(outdentBlock(doc, "a")).toEqual({ doc, key: "a" })
   })
 
-  it("returns the same doc for an unknown id", () => {
+  it("returns the same doc for an unknown key", () => {
     const doc = fixture()
-    expect(outdentBlock(doc, "nope")).toBe(doc)
+    expect(outdentBlock(doc, "nope").doc).toBe(doc)
   })
 
   it("leaves the original doc untouched", () => {
     const doc = fixture()
-    outdentBlock(doc, "b1")
+    outdentBlock(doc, "b/b1")
     expect(doc.rootBlockIds).toEqual(["a", "b", "c"])
     expect(doc.blocks["b"].children).toEqual(["b1"])
   })
@@ -501,9 +559,10 @@ describe("outdentBlock", () => {
         b1a: { id: "b1a", type: "text", text: "B1A", children: [] },
       },
     }
-    const next = outdentBlock(doc, "b1")
-    expect(next.blocks["a"].children).toEqual(["b", "b1"])
-    expect(next.blocks["b"].children).toEqual([])
-    expect(next.blocks["b1"].children).toEqual(["b1a"])
+    const next = outdentBlock(doc, "a/b/b1")
+    expect(next.doc.blocks["a"].children).toEqual(["b", "b1"])
+    expect(next.doc.blocks["b"].children).toEqual([])
+    expect(next.doc.blocks["b1"].children).toEqual(["b1a"])
+    expect(next.key).toBe("a/b1")
   })
 })

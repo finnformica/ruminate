@@ -21,9 +21,19 @@ import {
 } from "../../blocks/commands"
 import { resolveKey, type KeyLike } from "../../blocks/keymap"
 import { parse } from "../../blocks/parse"
-import { buildRows, firstOccurrenceKey, keyOf } from "../../blocks/view"
 import {
-  ancestorsOf,
+  ancestorKeys,
+  buildRows,
+  firstOccurrenceKey,
+  hasOccurrence,
+  idOfKey,
+  isWithin,
+  keyOf,
+  occurrenceKeys,
+  parentKeyOf,
+  zoomRootKey,
+} from "../../blocks/view"
+import {
   duplicateBlocks,
   emptyBlock,
   indentBlock,
@@ -33,9 +43,7 @@ import {
   outdentBlock,
   remintCollidingIds,
   removeBlock,
-  siblingsOf,
   spliceBlocks,
-  subtreeIds,
   updateBlock,
   updateType,
 } from "../../blocks/ops"
@@ -58,29 +66,20 @@ import {
 export type { BlockDebugOptions } from "./block-item"
 import { useBlockHistory } from "./use-block-history"
 
-/** The id of the first heading block whose text matches `heading`, in document
- * order, or null. Used to highlight a heading arrived at from the command menu. */
-function findHeadingBlockId(doc: BlockDoc, heading: string): string | null {
+/** The row (occurrence key) of the first heading block whose text matches
+ * `heading`, in document order, or null. Used to highlight a heading arrived
+ * at from the command menu. */
+function findHeadingKey(doc: BlockDoc, heading: string): string | null {
   const target = heading.trim()
-  let found: string | null = null
-  const walk = (ids: string[]) => {
-    for (const id of ids) {
-      if (found) return
-      const block = doc.blocks[id]
-      if (!block) continue
-      if (isHeading(block.type) && block.text.trim() === target) {
-        found = id
-        return
-      }
-      walk(block.children)
-    }
+  for (const key of occurrenceKeys(doc)) {
+    const block = doc.blocks[idOfKey(key)]
+    if (block && isHeading(block.type) && block.text.trim() === target) return key
   }
-  walk(doc.rootBlockIds)
-  return found
+  return null
 }
 
-/** What a reveal `cancel` puts back: the selection and every scroll position
- * captured when the outline palette's first preview moved the view. */
+/** What a reveal `cancel` puts back: the selected row and every scroll
+ * position captured when the outline palette's first preview moved the view. */
 type RevealSnapshot = {
   selected: string | null
   scrolls: { el: Element; top: number; left: number }[]
@@ -88,23 +87,10 @@ type RevealSnapshot = {
   windowY: number
 }
 
-/** The first block (in document order) present in `restored` but not in
- * `current` — the block an undo brought back, e.g. after a delete. */
+/** The first row (in document order) of a block present in `restored` but
+ * not in `current` — the block an undo brought back, e.g. after a delete. */
 function findReappeared(current: BlockDoc, restored: BlockDoc): string | null {
-  let found: string | null = null
-  const walk = (ids: string[]) => {
-    for (const id of ids) {
-      if (found) return
-      if (!(id in current.blocks)) {
-        found = id
-        return
-      }
-      const block = restored.blocks[id]
-      if (block) walk(block.children)
-    }
-  }
-  walk(restored.rootBlockIds)
-  return found
+  return occurrenceKeys(restored).find((key) => !(idOfKey(key) in current.blocks)) ?? null
 }
 
 /**
@@ -136,15 +122,15 @@ function findReappeared(current: BlockDoc, restored: BlockDoc): string | null {
 function embeddedPasteFragment(
   embedded: ClipboardBlock[],
   doc: BlockDoc,
-  target: string,
-  asFirstChildren: boolean,
+  /** The row pasted onto: the fragment lands as its block's first children. */
+  targetKey: string,
   resolveBlocks?: (ids: string[]) => Record<string, string | null>,
 ): BlockDoc | null {
+  const target = idOfKey(targetKey)
   // Direct children of the insertion parent (the twin check's scope).
-  const parentChildren = asFirstChildren
-    ? (doc.blocks[target]?.children ?? [])
-    : (siblingsOf(doc, target)?.siblings ?? [])
-  const forbidden = new Set([target, ...ancestorsOf(doc, target)])
+  const parentChildren = doc.blocks[target]?.children ?? []
+  // The row's own path: linking any of these beneath it would close a cycle.
+  const forbidden = new Set([target, ...ancestorKeys(targetKey).map(idOfKey)])
 
   const payloadIds = (block: ClipboardBlock): string[] => {
     const ids: string[] = []
@@ -319,23 +305,51 @@ export function BlockEditor({
     else setZoomInternal(id)
   }
   const zoomRoot = zoomRootId ? (doc.blocks[zoomRootId] ?? null) : null
+  // The zoomed block's row: its first occurrence in the document.
+  const zoomKey = useMemo(() => (zoomRoot ? zoomRootKey(doc, zoomRoot.id) : null), [doc, zoomRoot])
 
-  // The first selectable block: while zoomed, the zoom root's first child (the
+  // Everything positional — the selection, its anchor, edit focus — is a row:
+  // an occurrence key (`src/blocks/view.ts`), so a block that appears twice
+  // in the note is two places to be. The block itself is by id.
+
+  // The first selectable row: while zoomed, the zoom root's first child (the
   // title itself is deliberately not the landing spot — avoids accidental edits).
-  const firstBlockId = zoomRoot
-    ? (zoomRoot.children[0] ?? zoomRoot.id)
-    : (doc.rootBlockIds[0] ?? null)
+  const firstKey =
+    zoomRoot && zoomKey
+      ? zoomRoot.children[0]
+        ? keyOf(zoomKey, zoomRoot.children[0])
+        : zoomKey
+      : (doc.rootBlockIds[0] ?? null)
   const [focus, setFocus] = useState<FocusRequest | null>(() =>
-    startEditing && firstBlockId ? { id: firstBlockId } : null,
+    startEditing && firstKey ? { key: firstKey } : null,
   )
   const [selected, setSelected] = useState<string | null>(() =>
-    highlightHeading ? (findHeadingBlockId(doc, highlightHeading) ?? firstBlockId) : firstBlockId,
+    highlightHeading ? (findHeadingKey(doc, highlightHeading) ?? firstKey) : firstKey,
   )
   const [collapsedInternal, setCollapsedInternal] = useState<Set<string>>(new Set())
   const collapsed = collapsedProp ?? collapsedInternal
-  // The other end of a multi-block selection (Shift+Arrow). null = single select.
-  const [anchorId, setAnchorId] = useState<string | null>(null)
+  // The other end of a multi-row selection (Shift+Arrow). null = single select.
+  const [anchorKey, setAnchorKey] = useState<string | null>(null)
   const history = useBlockHistory(onChange)
+
+  // The view: the rows on screen, in order, indented by depth, folds applied
+  // (`buildRows`). Zoomed, the zoomed block leads as the view's editable
+  // title (so arrow-up from the first child selects it) and its children
+  // always render — the root's own fold is ignored while zoomed.
+  const rows = useMemo(
+    () => buildRows(doc, { zoomRootId: zoomRoot ? zoomRoot.id : null, folds: collapsed }),
+    [doc, collapsed, zoomRoot],
+  )
+  // The rows' keys in the order they appear on screen — what up/down
+  // navigation and a Shift+Arrow range walk.
+  const visibleOrder = useMemo(() => rows.map((row) => row.key), [rows])
+  // The row a block id is addressed by when something outside names a block
+  // (the outline palette, `?heading=`): its first row in the view, else its
+  // first occurrence in the document (a block hidden under a fold).
+  const keyOfId = (id: string, inDoc: BlockDoc = doc): string => {
+    for (const row of rows) if (row.id === id) return row.key
+    return firstOccurrenceKey(inDoc, id) ?? id
+  }
 
   // The container is the focusable keyboard target for select mode.
   const containerRef = useRef<HTMLDivElement>(null)
@@ -401,26 +415,33 @@ export function BlockEditor({
     prevZoomRef.current = zoomRootId
     if (readOnly) return
     const current = docRef.current
-    setAnchorId(null)
+    setAnchorKey(null)
     setFocus(null)
     if (zoomRootId) {
       const root = current.blocks[zoomRootId]
       if (!root) return // the graceful-exit effect above cleans this up
-      const zoomedOut = prev !== null && ancestorsOf(current, prev).includes(zoomRootId)
-      if (zoomedOut && current.blocks[prev]) setSelected(prev)
-      else setSelected(root.children[0] ?? zoomRootId)
-    } else if (prev !== null && current.blocks[prev]) {
-      setSelected(prev)
+      const rootKey = zoomRootKey(current, zoomRootId)
+      // Zoomed out to an ancestor: the block we came from has a row inside
+      // the new view — land there.
+      const back =
+        prev === null
+          ? undefined
+          : occurrenceKeys(current).find((key) => isWithin(key, rootKey) && idOfKey(key) === prev)
+      if (back) setSelected(back)
+      else setSelected(root.children[0] ? keyOf(rootKey, root.children[0]) : rootKey)
+    } else if (prev !== null) {
+      const back = firstOccurrenceKey(current, prev)
+      if (back) setSelected(back)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoomRootId, readOnly])
 
   useEffect(() => {
     if (!highlightHeading) return
-    const id = findHeadingBlockId(docRef.current, highlightHeading)
-    if (id) {
+    const key = findHeadingKey(docRef.current, highlightHeading)
+    if (key) {
       setFocus(null)
-      setSelected(id)
+      setSelected(key)
     }
   }, [highlightHeading])
 
@@ -430,7 +451,7 @@ export function BlockEditor({
   // palette never has to know the editor's selection or scroll internals.
   const selectedRef = useRef(selected)
   selectedRef.current = selected
-  // Survives deselection (Escape, focus loss): the block `refocusSignal`
+  // Survives deselection (Escape, focus loss): the row `refocusSignal`
   // returns the user to.
   const lastSelectedRef = useRef(selected)
   if (selected) lastSelectedRef.current = selected
@@ -442,11 +463,11 @@ export function BlockEditor({
   // previous mount (or a re-render) never re-fires.
   const lastRevealNonceRef = useRef(revealRequest?.nonce ?? 0)
 
-  // Center a block's content line, same target the select-mode auto-scroll
-  // uses. Called directly so a repeat jump to the already-selected block still
+  // Center a row's content line, same target the select-mode auto-scroll
+  // uses. Called directly so a repeat jump to the already-selected row still
   // scrolls (state effects wouldn't re-run — the old `?heading=` param bug).
-  const scrollBlockLineIntoView = (id: string) => {
-    const row = containerRef.current?.querySelector<HTMLElement>(`[data-block-row="${id}"]`)
+  const scrollBlockLineIntoView = (key: string) => {
+    const row = containerRef.current?.querySelector<HTMLElement>(`[data-occurrence="${key}"]`)
     const line = row?.querySelector<HTMLElement>("[data-block-line]") ?? row
     if (line && typeof line.scrollIntoView === "function") line.scrollIntoView({ block: "center" })
   }
@@ -476,24 +497,28 @@ export function BlockEditor({
     lastRevealNonceRef.current = request.nonce
     if (readOnly) return
     const current = docRef.current
+    // The palette names a block; the editor lands on its row (the first on
+    // screen, or the first the document has).
     if (request.type === "preview") {
       if (!current.blocks[request.id]) return
+      const key = keyOfId(request.id, current)
       // The first preview of a sequence captures what cancel must restore.
       if (!revealSnapshotRef.current) revealSnapshotRef.current = captureRevealSnapshot()
-      setAnchorId(null)
+      setAnchorKey(null)
       setFocus(null)
-      setSelected(request.id)
-      scrollBlockLineIntoView(request.id)
+      setSelected(key)
+      scrollBlockLineIntoView(key)
       return
     }
     const snapshot = revealSnapshotRef.current
     revealSnapshotRef.current = null
     if (request.type === "commit") {
       if (current.blocks[request.id]) {
-        setAnchorId(null)
+        const key = keyOfId(request.id, current)
+        setAnchorKey(null)
         setFocus(null)
-        setSelected(request.id)
-        scrollBlockLineIntoView(request.id)
+        setSelected(key)
+        scrollBlockLineIntoView(key)
       }
       // After the dialog unmounts (and its own focus juggling settles), make
       // the container the keyboard target so arrows work from the landing spot.
@@ -502,12 +527,12 @@ export function BlockEditor({
     }
     // cancel — put back exactly what the first preview captured.
     if (!snapshot) return
-    setAnchorId(null)
+    setAnchorKey(null)
     setFocus(null)
     setSelected(
       snapshot.selected === null
         ? null
-        : current.blocks[snapshot.selected]
+        : hasOccurrence(current, snapshot.selected)
           ? snapshot.selected
           : firstSelectable(current),
     )
@@ -525,37 +550,18 @@ export function BlockEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealRequest, readOnly])
 
-  // The view: the rows on screen, in order, indented by depth, folds applied
-  // (`buildRows`). Zoomed, the zoomed block leads as the view's editable
-  // title (so arrow-up from the first child selects it) and its children
-  // always render — the root's own fold is ignored while zoomed.
-  const rows = useMemo(
-    () => buildRows(doc, { zoomRootId: zoomRoot ? zoomRoot.id : null, folds: collapsed }),
-    [doc, collapsed, zoomRoot],
-  )
-  // Block ids in the order they appear on screen. Used for up/down navigation.
-  // (Selection and the commands still key by block id; a block occurring
-  // twice in the view is addressed by its first row — docs/graph-native-app.md.)
-  const visibleOrder = useMemo(() => rows.map((row) => row.id), [rows])
-  // The occurrence key a block id is addressed by: its first row in the view,
-  // else its first occurrence in the document (a block hidden under a fold).
-  const keyOfId = (id: string, inDoc: BlockDoc = doc): string => {
-    for (const row of rows) if (row.id === id) return row.key
-    return firstOccurrenceKey(inDoc, id) ?? id
-  }
-
-  // The selected block ids. Single select is just `[selected]`; a Shift+Arrow
+  // The selected rows. Single select is just `[selected]`; a Shift+Arrow
   // range is the contiguous span of `visibleOrder` between anchor and head.
-  const selectedIds: string[] = useMemo(() => {
+  const selectedKeys: string[] = useMemo(() => {
     if (!selected) return []
-    if (!anchorId || anchorId === selected) return [selected]
-    const a = visibleOrder.indexOf(anchorId)
+    if (!anchorKey || anchorKey === selected) return [selected]
+    const a = visibleOrder.indexOf(anchorKey)
     const b = visibleOrder.indexOf(selected)
     if (a === -1 || b === -1) return [selected]
     const [lo, hi] = a < b ? [a, b] : [b, a]
     return visibleOrder.slice(lo, hi + 1)
-  }, [selected, anchorId, visibleOrder])
-  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
+  }, [selected, anchorKey, visibleOrder])
+  const selectedSet = useMemo(() => new Set(selectedKeys), [selectedKeys])
 
   // Where two selected rows' highlight surfaces touch on screen, the sides
   // between them get the FULL 4px vertical extension and straight corners so
@@ -570,30 +576,29 @@ export function BlockEditor({
   const selectionRunEdges = useMemo(() => {
     const edges = new Map<string, { top: boolean; bottom: boolean }>()
     if (selectedSet.size < 2) return edges
-    const headingAt = (id: string) => isHeading(doc.blocks[id]?.type ?? "text")
+    const headingAt = (key: string) => isHeading(doc.blocks[idOfKey(key)]?.type ?? "text")
     for (let i = 0; i < visibleOrder.length; i++) {
-      const id = visibleOrder[i]
-      if (!selectedSet.has(id)) continue
+      const key = visibleOrder[i]
+      if (!selectedSet.has(key)) continue
       const prev = i > 0 ? visibleOrder[i - 1] : null
       const next = i + 1 < visibleOrder.length ? visibleOrder[i + 1] : null
-      const top = prev !== null && selectedSet.has(prev) && !headingAt(id) && prev !== zoomRoot?.id
-      const bottom =
-        next !== null && selectedSet.has(next) && !headingAt(next) && id !== zoomRoot?.id
-      if (top || bottom) edges.set(id, { top, bottom })
+      const top = prev !== null && selectedSet.has(prev) && !headingAt(key) && prev !== zoomKey
+      const bottom = next !== null && selectedSet.has(next) && !headingAt(next) && key !== zoomKey
+      if (top || bottom) edges.set(key, { top, bottom })
     }
     return edges
-  }, [selectedSet, visibleOrder, doc, zoomRoot])
+  }, [selectedSet, visibleOrder, doc, zoomKey])
 
-  const select = (id: string) => {
+  const select = (key: string) => {
     setFocus(null)
-    setAnchorId(null)
-    setSelected(id)
+    setAnchorKey(null)
+    setSelected(key)
     // Grab keyboard focus so arrows work immediately, even re-clicking the block
     // that's already highlighted (which wouldn't trigger the focus effect).
     focusContainer()
   }
 
-  // Extend the multi-selection by moving the head one block along, keeping the
+  // Extend the multi-selection by moving the head one row along, keeping the
   // anchor fixed (starting a range from the current head if there isn't one).
   const extendSelection = (direction: "up" | "down") => {
     if (!selected) return
@@ -601,7 +606,7 @@ export function BlockEditor({
     if (i === -1) return
     const next = direction === "up" ? i - 1 : i + 1
     if (next < 0 || next >= visibleOrder.length) return
-    if (!anchorId) setAnchorId(selected)
+    if (!anchorKey) setAnchorKey(selected)
     setFocus(null)
     setSelected(visibleOrder[next])
   }
@@ -613,7 +618,7 @@ export function BlockEditor({
   // stateless (derived from the current selection each press); only the shrink
   // history lives in a ref, cleared whenever the selection changes by any
   // other means (arrows, click, Escape, structural edits). No timers.
-  const ladderRef = useRef<{ selected: string; anchorId: string | null }[]>([])
+  const ladderRef = useRef<{ selected: string; anchorKey: string | null }[]>([])
   // Set just before a ladder move's own setState so the clear effect below can
   // tell ladder-driven selection changes from everything else.
   const ladderMove = useRef(false)
@@ -626,135 +631,159 @@ export function BlockEditor({
       return
     }
     ladderRef.current = []
-  }, [selected, anchorId, doc])
+  }, [selected, anchorKey, doc])
 
-  // The contiguous run of `visibleOrder` covered by `id`'s subtree: the block
-  // plus its visible descendants (just the block for a leaf or collapsed one).
-  const visibleSubtree = (id: string): string[] => {
-    const start = visibleOrder.indexOf(id)
+  // The contiguous run of `visibleOrder` covered by a row's subtree: the row
+  // plus its visible descendants (just the row for a leaf or collapsed one).
+  // Descendant rows are exactly the keys beneath it.
+  const visibleSubtree = (key: string): string[] => {
+    const start = visibleOrder.indexOf(key)
     if (start === -1) return []
-    const sub = new Set(subtreeIds(doc, id))
     let end = start + 1
-    while (end < visibleOrder.length && sub.has(visibleOrder[end])) end++
+    while (end < visibleOrder.length && isWithin(visibleOrder[end], key)) end++
     return visibleOrder.slice(start, end)
   }
 
-  // One rung up: grow `ids` (a contiguous run of `visibleOrder`) to the visible
-  // subtree of the deepest block strictly containing it — the head block itself
-  // when the selection is a strict subset of its own subtree, otherwise the
-  // nearest ancestor whose subtree covers it — falling back to the whole page
-  // (e.g. a selection spanning multiple roots). `snapshot` is the selection to
-  // restore when Cmd/Ctrl+Shift+A steps back down.
-  const escalateFrom = (ids: string[], snapshot: { selected: string; anchorId: string | null }) => {
-    if (ids.length === 0 || visibleOrder.length === 0) return
-    const first = ids[0]
-    const last = ids[ids.length - 1]
+  // One rung up: grow `keys` (a contiguous run of `visibleOrder`) to the
+  // visible subtree of the deepest row strictly containing it — the head row
+  // itself when the selection is a strict subset of its own subtree, otherwise
+  // the nearest ancestor whose subtree covers it — falling back to the whole
+  // page (e.g. a selection spanning multiple roots). `snapshot` is the
+  // selection to restore when Cmd/Ctrl+Shift+A steps back down.
+  const escalateFrom = (
+    keys: string[],
+    snapshot: { selected: string; anchorKey: string | null },
+  ) => {
+    if (keys.length === 0 || visibleOrder.length === 0) return
+    const first = keys[0]
+    const last = keys[keys.length - 1]
     // `sub` when it strictly contains the selection (both endpoints of a
     // contiguous range inside another contiguous range ⇒ the whole range is).
-    const strictSuperset = (rootId: string): string[] | null => {
-      const sub = visibleSubtree(rootId)
-      if (sub.length <= ids.length) return null
+    const strictSuperset = (rootKey: string): string[] | null => {
+      const sub = visibleSubtree(rootKey)
+      if (sub.length <= keys.length) return null
       return sub.includes(first) && sub.includes(last) ? sub : null
     }
     let target = strictSuperset(first)
     if (!target) {
-      for (const ancestor of ancestorsOf(doc, first)) {
+      for (const ancestor of ancestorKeys(first)) {
         target = strictSuperset(ancestor)
         if (target) break
       }
     }
     const range = target ?? visibleOrder
-    if (range.length <= ids.length) return // already the whole page
+    if (range.length <= keys.length) return // already the whole page
     ladderRef.current.push(snapshot)
     ladderMove.current = true
     skipCenterScroll.current = true
     setFocus(null)
     setSelected(range[0])
-    setAnchorId(range[range.length - 1])
+    setAnchorKey(range[range.length - 1])
   }
   const escalateSelection = () => {
     if (!selected) return
-    escalateFrom(selectedIds, { selected, anchorId })
+    escalateFrom(selectedKeys, { selected, anchorKey })
   }
   const shrinkSelection = () => {
     const prev = ladderRef.current.pop()
-    if (!prev || !doc.blocks[prev.selected]) return
+    if (!prev || !hasOccurrence(doc, prev.selected)) return
     ladderMove.current = true
     skipCenterScroll.current = true
     setFocus(null)
     setSelected(prev.selected)
-    setAnchorId(prev.anchorId && doc.blocks[prev.anchorId] ? prev.anchorId : null)
+    setAnchorKey(prev.anchorKey && hasOccurrence(doc, prev.anchorKey) ? prev.anchorKey : null)
   }
 
-  // The top-level blocks of the selection (those with no selected ancestor), in
+  // The top-level rows of the selection (those with no selected ancestor), in
   // document order — the roots to act on so a subtree is moved/copied once.
   const selectionRoots = (): string[] => {
     const set = selectedSet
-    return selectedIds.filter((id) => {
-      let parent = siblingsOf(doc, id)?.parentId ?? null
-      while (parent) {
-        if (set.has(parent)) return false
-        parent = siblingsOf(doc, parent)?.parentId ?? null
-      }
-      return true
-    })
+    return selectedKeys.filter((key) => !ancestorKeys(key).some((ancestor) => set.has(ancestor)))
   }
 
   // Selection roots for *structural* ops. The zoomed title can be part of a
   // selection (e.g. the Cmd+A "page" rung) but must never be moved, indented,
   // outdented, or deleted from inside its own view.
-  const structuralRoots = () => selectionRoots().filter((id) => id !== zoomRootId)
+  const structuralRoots = () => selectionRoots().filter((key) => key !== zoomKey)
 
-  // The first selectable block of a given doc, honouring the current zoom.
-  const firstSelectable = (d: BlockDoc): string | null =>
-    zoomRootId && d.blocks[zoomRootId]
-      ? (d.blocks[zoomRootId].children[0] ?? zoomRootId)
-      : (d.rootBlockIds[0] ?? null)
+  // The first selectable row of a given doc, honouring the current zoom.
+  const firstSelectable = (d: BlockDoc): string | null => {
+    if (zoomRootId && d.blocks[zoomRootId]) {
+      const rootKey = zoomRootKey(d, zoomRootId)
+      const child = d.blocks[zoomRootId].children[0]
+      return child ? keyOf(rootKey, child) : rootKey
+    }
+    return d.rootBlockIds[0] ?? null
+  }
 
+  // A structural move gives the moved rows new keys (a row's key is its
+  // path). Carry the selection across: the head and anchor follow whichever
+  // moved root they sit under.
+  const followMoved = (moved: [from: string, to: string][]) => {
+    const follow = (key: string | null) => {
+      if (key === null) return key
+      const hit = moved.find(([from]) => isWithin(key, from))
+      return hit ? hit[1] + key.slice(hit[0].length) : key
+    }
+    setSelected(follow)
+    setAnchorKey(follow)
+  }
   const indentSelection = () => {
     let next = doc
-    // In document order: each block's new previous sibling is the one the group
+    const moved: [string, string][] = []
+    // In document order: each row's new previous sibling is the one the group
     // is nesting under, so a contiguous sibling range nests together.
-    for (const id of structuralRoots()) next = indentBlock(next, id)
-    if (next !== doc) history.commit(doc, next, { type: "structural" })
+    for (const key of structuralRoots()) {
+      const result = indentBlock(next, key)
+      if (result.doc !== next) moved.push([key, result.key])
+      next = result.doc
+    }
+    if (next === doc) return
+    history.commit(doc, next, { type: "structural" })
+    followMoved(moved)
   }
   const outdentSelection = () => {
     let next = doc
+    const moved: [string, string][] = []
     // Reverse order keeps siblings in place as each is lifted out. At the zoom
     // boundary, outdenting a direct child would eject it from the view — skip.
-    for (const id of [...structuralRoots()].reverse()) {
-      if (zoomRootId && siblingsOf(next, id)?.parentId === zoomRootId) continue
-      next = outdentBlock(next, id)
+    for (const key of [...structuralRoots()].reverse()) {
+      if (zoomKey !== null && parentKeyOf(key) === zoomKey) continue
+      const result = outdentBlock(next, key)
+      if (result.doc !== next) moved.push([key, result.key])
+      next = result.doc
     }
-    if (next !== doc) history.commit(doc, next, { type: "structural" })
+    if (next === doc) return
+    history.commit(doc, next, { type: "structural" })
+    followMoved(moved)
   }
   const removeSelection = () => {
     let next = doc
-    for (const id of structuralRoots()) {
-      if (!next.blocks[id]) continue
-      next = removeBlock(next, id).doc
+    for (const key of structuralRoots()) {
+      if (!hasOccurrence(next, key)) continue
+      next = removeBlock(next, key).doc
     }
     if (next === doc) return
-    // Select the block that visually takes the removed range's place: the
-    // first surviving block below the range, falling back to the first above
-    // (mirroring the single-block deleteBlock command).
-    const indices = selectedIds
-      .map((id) => visibleOrder.indexOf(id))
+    // Select the row that visually takes the removed range's place: the first
+    // surviving row below the range, falling back to the first above
+    // (mirroring the single-row deleteBlock command).
+    const indices = selectedKeys
+      .map((key) => visibleOrder.indexOf(key))
       .filter((index) => index !== -1)
     const lo = indices.length > 0 ? Math.min(...indices) : 0
     const hi = indices.length > 0 ? Math.max(...indices) : -1
-    let focusId: string | null = null
-    for (let i = hi + 1; i < visibleOrder.length && !focusId; i++) {
-      if (next.blocks[visibleOrder[i]]) focusId = visibleOrder[i]
+    let focusKey: string | null = null
+    for (let i = hi + 1; i < visibleOrder.length && !focusKey; i++) {
+      if (hasOccurrence(next, visibleOrder[i])) focusKey = visibleOrder[i]
     }
-    for (let i = lo - 1; i >= 0 && !focusId; i--) {
-      if (next.blocks[visibleOrder[i]]) focusId = visibleOrder[i]
+    for (let i = lo - 1; i >= 0 && !focusKey; i--) {
+      if (hasOccurrence(next, visibleOrder[i])) focusKey = visibleOrder[i]
     }
     history.commit(doc, next, { type: "structural" })
-    setAnchorId(null)
+    setAnchorKey(null)
     setFocus(null)
     // An emptied doc regains a blank block via the editor's trailing-blank rule.
-    setSelected(focusId ?? firstSelectable(next))
+    setSelected(focusKey ?? firstSelectable(next))
   }
 
   // Serialize the selected subtrees to block markdown (markers + nesting +
@@ -773,7 +802,7 @@ export function BlockEditor({
       lines.push(`${indent}  id:: ${block.id}`)
       for (const childId of block.children) walk(childId, depth + 1)
     }
-    for (const id of selectionRoots()) walk(id, 0)
+    for (const key of selectionRoots()) walk(idOfKey(key), 0)
     return lines.join("\n")
   }
   const copySelection = () => {
@@ -792,23 +821,24 @@ export function BlockEditor({
     if (!focusFirstSignal || readOnly) return
     const first = firstSelectable(docRef.current)
     if (!first) return
-    setAnchorId(null)
+    setAnchorKey(null)
     setSelected(first)
     // Mirror the title's own state: editing the title drops into the first block
     // editing (caret at its start); a highlighted title just highlights it.
-    setFocus(focusFirstMode === "edit" ? { id: first, atStart: true } : null)
+    setFocus(focusFirstMode === "edit" ? { key: first, atStart: true } : null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusFirstSignal])
 
   // When the caller bumps `refocusSignal` (the global `i` shortcut), give the
-  // editor keyboard focus back and restore the LAST selected block — "put me
-  // back where I was" — falling back to the first selectable block.
+  // editor keyboard focus back and restore the LAST selected row — "put me
+  // back where I was" — falling back to the first selectable row.
   useEffect(() => {
     if (!refocusSignal || readOnly) return
     const last = lastSelectedRef.current
-    const target = last && docRef.current.blocks[last] ? last : firstSelectable(docRef.current)
+    const target =
+      last && hasOccurrence(docRef.current, last) ? last : firstSelectable(docRef.current)
     if (!target) return
-    setAnchorId(null)
+    setAnchorKey(null)
     setSelected(target)
     setFocus(null)
     containerRef.current?.focus({ preventScroll: true })
@@ -823,32 +853,33 @@ export function BlockEditor({
     const fresh = emptyBlock()
     // While zoomed, "a new root" means a new first child of the zoom root —
     // the zoomed subtree is the page.
-    const next: BlockDoc =
-      zoomRootId && current.blocks[zoomRootId]
-        ? insertFirstChild(current, zoomRootId, fresh)
-        : {
-            ...current,
-            rootBlockIds: [fresh.id, ...current.rootBlockIds],
-            blocks: { ...current.blocks, [fresh.id]: fresh },
-          }
+    const zoomed = zoomRootId && current.blocks[zoomRootId] ? zoomRootId : null
+    const next: BlockDoc = zoomed
+      ? insertFirstChild(current, zoomed, fresh)
+      : {
+          ...current,
+          rootBlockIds: [fresh.id, ...current.rootBlockIds],
+          blocks: { ...current.blocks, [fresh.id]: fresh },
+        }
+    const key = zoomed ? keyOf(zoomRootKey(current, zoomed), fresh.id) : fresh.id
     history.commit(current, next, { type: "structural" })
-    setAnchorId(null)
-    setSelected(fresh.id)
-    setFocus({ id: fresh.id })
+    setAnchorKey(null)
+    setSelected(key)
+    setFocus({ key })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newRootSignal])
 
-  const edit = (id: string, atStart = false) => {
+  const edit = (key: string, atStart = false) => {
     if (readOnly) return
-    setAnchorId(null)
-    setSelected(id)
-    setFocus({ id, atStart })
+    setAnchorKey(null)
+    setSelected(key)
+    setFocus({ key, atStart })
   }
 
-  // After restoring a snapshot, keep editing/selecting the same block if it
-  // still exists; otherwise fall back to select mode on a valid block.
+  // After restoring a snapshot, keep editing/selecting the same row if it
+  // still exists; otherwise fall back to select mode on a valid row.
   const reconcileToDoc = (restored: BlockDoc) => {
-    setAnchorId(null)
+    setAnchorKey(null)
     // If a block reappeared (e.g. undo of a delete), highlight it so the thing
     // you brought back is where your focus lands.
     const reappeared = findReappeared(doc, restored)
@@ -857,7 +888,7 @@ export function BlockEditor({
       setSelected(reappeared)
       return
     }
-    // The selected block vanished (e.g. undoing its creation): land on its
+    // The selected row vanished (e.g. undoing its creation): land on its
     // nearest surviving neighbour in the CURRENT visible order — above first
     // (for an undone create that's the block Enter was pressed on), then below
     // — never jumping to the top of the file unless nothing survives.
@@ -865,16 +896,16 @@ export function BlockEditor({
       const at = visibleOrder.indexOf(vanished)
       if (at === -1) return null
       for (let i = at - 1; i >= 0; i--) {
-        if (restored.blocks[visibleOrder[i]]) return visibleOrder[i]
+        if (hasOccurrence(restored, visibleOrder[i])) return visibleOrder[i]
       }
       for (let i = at + 1; i < visibleOrder.length; i++) {
-        if (restored.blocks[visibleOrder[i]]) return visibleOrder[i]
+        if (hasOccurrence(restored, visibleOrder[i])) return visibleOrder[i]
       }
       return null
     }
-    setFocus((cur) => (cur && restored.blocks[cur.id] ? cur : null))
+    setFocus((cur) => (cur && hasOccurrence(restored, cur.key) ? cur : null))
     setSelected((cur) => {
-      if (cur && restored.blocks[cur]) return cur
+      if (cur && hasOccurrence(restored, cur)) return cur
       const survivor = cur ? nearestSurvivor(cur) : null
       return survivor ?? firstSelectable(restored)
     })
@@ -927,27 +958,26 @@ export function BlockEditor({
   // Interpret a command's result: commit any doc change to history, toggle
   // collapse, and move focus/selection where the command asked.
   const applyFocus = (intent: FocusIntent) => {
-    // Any single-target command collapses a multi-block selection.
-    setAnchorId(null)
+    // Any single-target command collapses a multi-row selection.
+    setAnchorKey(null)
     if (intent.mode === "select") {
       setFocus(null)
-      setSelected(intent.id)
+      setSelected(intent.key)
     } else {
-      setSelected(intent.id)
-      setFocus({ id: intent.id, atStart: intent.atStart, caret: intent.caret })
+      setSelected(intent.key)
+      setFocus({ key: intent.key, atStart: intent.atStart, caret: intent.caret })
     }
   }
   const applyResult = (result: CommandResult) => {
     if (result.doc) history.commit(doc, result.doc, result.op ?? { type: "structural" })
-    // Commands name blocks; folds are per row — resolve through the view.
-    const next = result.doc ?? doc
-    if (result.toggleCollapse) toggleCollapse(keyOfId(result.toggleCollapse, next))
-    // `expand` is a demand ("this block must be open"), not a toggle: only act
-    // when the block is actually collapsed (commands can't see collapse state).
-    if (result.expand) setCollapsedState(keyOfId(result.expand, next), false)
-    // `collapse` is the symmetric demand ("this block must be closed"): only
-    // act when the block is actually open.
-    if (result.collapse) setCollapsedState(keyOfId(result.collapse, next), true)
+    // Commands name rows, and folds are per row.
+    if (result.toggleCollapse) toggleCollapse(result.toggleCollapse)
+    // `expand` is a demand ("this row must be open"), not a toggle: only act
+    // when the row is actually collapsed (commands can't see collapse state).
+    if (result.expand) setCollapsedState(result.expand, false)
+    // `collapse` is the symmetric demand ("this row must be closed"): only
+    // act when the row is actually open.
+    if (result.collapse) setCollapsedState(result.collapse, true)
     if (result.focus) applyFocus(result.focus)
     // Zoom changes navigate (URL state); the zoom-change effect then places the
     // selection (first child on zoom-in, the block zoomed out from on zoom-out).
@@ -957,7 +987,7 @@ export function BlockEditor({
       // below while focus moves up to the title.
       setFocus(null)
       setSelected(null)
-      setAnchorId(null)
+      setAnchorKey(null)
       onExitTop?.()
     }
   }
@@ -965,11 +995,11 @@ export function BlockEditor({
   // The single entry point every keyboard handler funnels through: resolve the
   // event to a command via the keymap and run it. Touch/menu entry points would
   // dispatch the same commands. Returns whether the gesture was consumed.
-  const dispatchKey = (mode: Mode, id: string, event: KeyLike, caret?: CaretInput): boolean => {
+  const dispatchKey = (mode: Mode, key: string, event: KeyLike, caret?: CaretInput): boolean => {
     if (readOnly) return false
     const input: CommandInput = {
       doc,
-      id,
+      key,
       mode,
       visibleOrder,
       caret,
@@ -1007,7 +1037,7 @@ export function BlockEditor({
         op === "structural" ? { type: "structural" } : { type: "text", blockId: id },
       )
     },
-    onPaste: (id, before, pasted, after) => {
+    onPaste: (key, before, pasted, after) => {
       // Re-form the block's text with the pasted text spliced in at the caret,
       // then parse (import) the whole thing so markdown markers and blank
       // lines become the right blocks. The current block keeps its type —
@@ -1022,32 +1052,34 @@ export function BlockEditor({
       const pasteDefinesType = before === "" && leadingMarker(pastedFirstLine) !== null
       // Reminting keeps a pasted `id::` from clobbering an existing block.
       let sub = remintCollidingIds(parse(before + pasted + after), doc)
-      const currentType = doc.blocks[id]?.type
+      const currentType = doc.blocks[idOfKey(key)]?.type
       if (!pasteDefinesType && currentType !== undefined && sub.rootBlockIds.length > 0) {
         sub = updateType(sub, sub.rootBlockIds[0], currentType)
       }
-      const result = spliceBlocks(doc, id, sub)
+      const result = spliceBlocks(doc, key, sub)
       if (!result) return
       history.commit(doc, result.doc, { type: "structural" })
       // Place the caret at the paste boundary — just before the trailing text.
       const last = result.doc.blocks[result.lastId]
       const caret = Math.max(0, last.text.length - after.length)
-      setSelected(result.lastId)
-      setFocus({ id: result.lastId, caret })
+      // The pasted blocks took the row's place among its siblings.
+      const lastKey = keyOf(parentKeyOf(key), result.lastId)
+      setSelected(lastKey)
+      setFocus({ key: lastKey, caret })
     },
     dispatchKey,
     zoomInto: (id) => {
       if (!readOnly) navigateZoom(id)
     },
-    startSelectionLadder: (id) => {
+    startSelectionLadder: (key) => {
       if (readOnly) return
       // Called from edit mode (Cmd/Ctrl+A with the textarea already fully
-      // selected): leave edit mode and take the first ladder rung on the block.
+      // selected): leave edit mode and take the first ladder rung on the row.
       setFocus(null)
-      setSelected(id)
-      setAnchorId(null)
+      setSelected(key)
+      setAnchorKey(null)
       focusContainer()
-      escalateFrom([id], { selected: id, anchorId: null })
+      escalateFrom([key], { selected: key, anchorKey: null })
     },
   }
 
@@ -1078,7 +1110,7 @@ export function BlockEditor({
           event.key === "ArrowDown" ? visibleOrder[0] : visibleOrder[visibleOrder.length - 1]
         if (target) {
           event.preventDefault()
-          setAnchorId(null)
+          setAnchorKey(null)
           setSelected(target)
         }
       }
@@ -1087,7 +1119,7 @@ export function BlockEditor({
 
     // Edit mode: the textarea's own handler owns the keys; don't double-handle.
     if (focus || !selected || event.defaultPrevented) return
-    const id = selected
+    const key = selected
     const mod = event.metaKey || event.ctrlKey
 
     // Shift+Arrow grows / shrinks a multi-block selection — but NOT with Cmd/Ctrl
@@ -1128,8 +1160,8 @@ export function BlockEditor({
       plainPasteRef.current = true
       return
     }
-    // Actions that only make sense on a multi-block selection.
-    if (selectedIds.length > 1) {
+    // Actions that only make sense on a multi-row selection.
+    if (selectedKeys.length > 1) {
       const isArrow = event.key === "ArrowUp" || event.key === "ArrowDown"
       const direction = event.key === "ArrowUp" ? "up" : "down"
       // Shift+Alt+Arrow duplicates the selection roots as one group and
@@ -1144,7 +1176,7 @@ export function BlockEditor({
         if (result) {
           history.commit(doc, result.doc, { type: "structural" })
           setFocus(null)
-          setAnchorId(result.copies[0])
+          setAnchorKey(result.copies[0])
           setSelected(result.copies[result.copies.length - 1])
         }
         return
@@ -1173,19 +1205,20 @@ export function BlockEditor({
       }
       if (event.key === "Escape") {
         event.preventDefault()
-        select(id)
+        select(key)
         return
       }
       // Marker keys "turn into" across the whole selection: toggle each root
       // to the kind (marker swap only — content and children untouched). One
       // structural commit = one undo step. Shift AND Alt are fine — # and >
       // need Shift on many layouts, and non-US Macs type symbols with Option
-      // (UK # is Alt+3). Only Mod combos stay the browser's.
+      // (UK # is Alt+3). Only Mod combos stay the browser's. The type is the
+      // block's, so a block selected in two rows toggles once.
       const target = TURN_INTO_KEYS[event.key]
       if (target && !mod) {
         event.preventDefault()
         let next = doc
-        for (const rootId of selectionRoots()) {
+        for (const rootId of new Set(selectionRoots().map(idOfKey))) {
           const block = next.blocks[rootId]
           if (block) next = updateType(next, rootId, toggleType(block.type, target))
         }
@@ -1194,7 +1227,7 @@ export function BlockEditor({
       }
     }
     // Single-select: resolve through the keymap.
-    if (dispatchKey("select", id, event)) event.preventDefault()
+    if (dispatchKey("select", key, event)) event.preventDefault()
   }
 
   // Keep the container focused whenever a block is highlighted (select mode), so
@@ -1211,7 +1244,7 @@ export function BlockEditor({
     if (!el) return
     if (!el.contains(document.activeElement)) el.focus({ preventScroll: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, focus, anchorId, doc, readOnly])
+  }, [selected, focus, anchorKey, doc, readOnly])
 
   // Keep the highlighted block centred as it moves, since focusing the
   // container itself no longer scrolls it into view. Let the browser do the
@@ -1223,7 +1256,7 @@ export function BlockEditor({
   // the note fits on screen there's nothing to scroll, so this is a no-op.
   useLayoutEffect(() => {
     if (readOnly || focus || !selected) return
-    const row = containerRef.current?.querySelector<HTMLElement>(`[data-block-row="${selected}"]`)
+    const row = containerRef.current?.querySelector<HTMLElement>(`[data-occurrence="${selected}"]`)
     const line = row?.querySelector<HTMLElement>("[data-block-line]") ?? row
     if (!line || typeof line.scrollIntoView !== "function") return
     skipCenterScroll.current = false
@@ -1241,7 +1274,7 @@ export function BlockEditor({
     const far = rect.bottom < -vh || rect.top > 2 * vh
     line.scrollIntoView({ block: far ? "center" : "nearest" })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, anchorId, focus, readOnly])
+  }, [selected, anchorKey, focus, readOnly])
 
   // When focus falls to nothing (a click on empty page space) while a block is
   // still highlighted, keep the keyboard alive by re-grabbing focus. A click on
@@ -1270,7 +1303,9 @@ export function BlockEditor({
     event.preventDefault()
     const text = event.clipboardData?.getData("text/plain") ?? ""
     const normalized = text.replace(/\r\n?/g, "\n")
-    const target = selectedIds[selectedIds.length - 1] ?? selected
+    // The row pasted onto (the last of a range), and its block.
+    const target = selectedKeys[selectedKeys.length - 1] ?? selected
+    const targetId = idOfKey(target)
     // Pasting onto a selected block puts the content INSIDE it — in the graph
     // that is a link from the target down to what you pasted, which is what
     // "paste here" means when a block is the thing selected (a sibling would
@@ -1280,12 +1315,11 @@ export function BlockEditor({
      * is visible, and fold each pasted root so a big subtree arrives as one
      * line rather than dumping its whole tree into the view. */
     const settleAfterPaste = (rootIds: string[], nextDoc: BlockDoc) => {
-      const targetKey = keyOfId(target)
-      setCollapsedState(targetKey, false)
+      setCollapsedState(target, false)
       for (const id of rootIds) {
         // Pasted roots land as the target's first children.
         if ((nextDoc.blocks[id]?.children.length ?? 0) > 0)
-          setCollapsedState(keyOf(targetKey, id), true)
+          setCollapsedState(keyOf(target, id), true)
       }
     }
     if (plain) {
@@ -1294,13 +1328,13 @@ export function BlockEditor({
       // flavor entirely.
       if (normalized.trim() === "") return
       const fresh = emptyBlock("text", normalized.replace(/\s*\n+\s*/g, " ").trim())
-      const next = insertFirstChild(doc, target, fresh)
+      const next = insertFirstChild(doc, targetId, fresh)
       if (next === doc) return
-      setCollapsedState(keyOfId(target), false)
+      setCollapsedState(target, false)
       history.commit(doc, next, { type: "structural" })
-      setAnchorId(null)
+      setAnchorKey(null)
       setFocus(null)
-      setSelected(fresh.id)
+      setSelected(keyOf(target, fresh.id))
       return
     }
     // Rich paste: prefer the html flavor — our own embedded block payload
@@ -1314,15 +1348,15 @@ export function BlockEditor({
         // A Ruminate payload: link, duplicate, or skip per block — the
         // fragment arrives with its ids already settled, so it bypasses the
         // remint below (reminting would undo the link).
-        const fragment = embeddedPasteFragment(embedded, doc, target, true, resolveBlocks)
+        const fragment = embeddedPasteFragment(embedded, doc, target, resolveBlocks)
         if (!fragment) return // every pasted block is already a child here
-        const linked = insertBlocksAsFirstChildren(doc, target, fragment)
+        const linked = insertBlocksAsFirstChildren(doc, targetId, fragment)
         if (!linked) return
         settleAfterPaste(fragment.rootBlockIds, linked.doc)
         history.commit(doc, linked.doc, { type: "structural" })
-        setAnchorId(null)
+        setAnchorKey(null)
         setFocus(null)
-        setSelected(linked.lastId)
+        setSelected(keyOf(target, linked.lastId))
         return
       }
       const converted = htmlToMarkdown(html)
@@ -1335,17 +1369,43 @@ export function BlockEditor({
     // Remint any pasted ids that already exist here (e.g. content copied with
     // its `id::` lines) so the paste never clobbers an existing block.
     const sub = remintCollidingIds(pasted, doc)
-    const result = insertBlocksAsFirstChildren(doc, target, sub)
+    const result = insertBlocksAsFirstChildren(doc, targetId, sub)
     if (!result) return
     settleAfterPaste(sub.rootBlockIds, result.doc)
     history.commit(doc, result.doc, { type: "structural" })
-    setAnchorId(null)
+    setAnchorKey(null)
     setFocus(null)
-    setSelected(result.lastId)
+    setSelected(keyOf(target, result.lastId))
+  }
+
+  // The rows a DOM text selection touches, in view order, each as one block
+  // line (content + id line, so a count of entries is a count of rows; the id
+  // rides to the embedded payload only). `partial` when the selection covers
+  // some row only in part. Rows are what is on screen — a folded subtree's
+  // hidden rows are never picked, so a cut never deletes what the user could
+  // not see selected.
+  const pickSelectedRows = (selection: Selection) => {
+    const picked: string[] = []
+    const keys: string[] = []
+    let partial = false
+    for (const row of rows) {
+      const block = doc.blocks[row.id]
+      const el = containerRef.current?.querySelector(
+        `[data-occurrence="${row.key}"] [data-block-id]`,
+      )
+      if (!block || !el || !selection.containsNode(el, true)) continue
+      if (!selection.containsNode(el, false)) partial = true
+      // Zoomed, the title's body rows read one level beneath it.
+      const depth = row.zoomTitle ? 0 : row.depth + (zoomRoot ? 1 : 0)
+      const indent = "  ".repeat(depth)
+      picked.push(`${indent}${markerFor(block.type)}${block.text}\n${indent}  id:: ${block.id}`)
+      keys.push(row.key)
+    }
+    return { picked, keys, partial }
   }
 
   // Native cut over a DOM text selection: only when the selection fully covers
-  // every block it touches do we take over — copy them as markdown and remove
+  // every row it touches do we take over — copy them as markdown and remove
   // them in one structural step. Partial coverage is a strict no-op, so content
   // the user didn't fully select is never deleted.
   const handleCut = (event: ClipboardEvent<HTMLDivElement>) => {
@@ -1353,43 +1413,18 @@ export function BlockEditor({
     const selection = window.getSelection()
     if (!selection || selection.isCollapsed) return
 
-    const picked: string[] = []
-    const pickedSet = new Set<string>()
-    let partial = false
-    const walk = (ids: string[], depth: number) => {
-      for (const bid of ids) {
-        const block = doc.blocks[bid]
-        if (!block) continue
-        const el = containerRef.current?.querySelector(`[data-block-id="${bid}"]`)
-        if (el && selection.containsNode(el, true)) {
-          if (!selection.containsNode(el, false)) partial = true
-          // One entry per block (content + id line) so `picked.length` still
-          // counts blocks; the id rides to the embedded payload only.
-          const indent = "  ".repeat(depth)
-          picked.push(`${indent}${markerFor(block.type)}${block.text}\n${indent}  id:: ${bid}`)
-          pickedSet.add(bid)
-        }
-        walk(block.children, depth + 1)
-      }
-    }
-    walk(doc.rootBlockIds, 0)
+    const { picked, keys, partial } = pickSelectedRows(selection)
     if (picked.length === 0 || partial) return
+    const pickedSet = new Set(keys)
     // Never let a native cut delete the zoomed title out of its own view.
-    if (zoomRootId && pickedSet.has(zoomRootId)) return
+    if (zoomKey !== null && pickedSet.has(zoomKey)) return
 
-    // Removal happens by subtree root; every block a root drags along must
+    // Removal happens by subtree root; every row a root drags along must
     // itself be covered, or the cut would delete unselected content.
-    const roots = [...pickedSet].filter((bid) => {
-      let parent = siblingsOf(doc, bid)?.parentId ?? null
-      while (parent) {
-        if (pickedSet.has(parent)) return false
-        parent = siblingsOf(doc, parent)?.parentId ?? null
-      }
-      return true
-    })
-    const covered = (bid: string): boolean => {
-      if (!pickedSet.has(bid)) return false
-      return (doc.blocks[bid]?.children ?? []).every(covered)
+    const roots = keys.filter((key) => !ancestorKeys(key).some((a) => pickedSet.has(a)))
+    const covered = (key: string): boolean => {
+      if (!pickedSet.has(key)) return false
+      return (doc.blocks[idOfKey(key)]?.children ?? []).every((child) => covered(keyOf(key, child)))
     }
     if (!roots.every(covered)) return
 
@@ -1399,43 +1434,29 @@ export function BlockEditor({
     event.preventDefault()
 
     let next = doc
-    let focusId: string | null = null
-    for (const bid of roots) {
-      if (!next.blocks[bid]) continue
-      const result = removeBlock(next, bid)
+    let focusKey: string | null = null
+    for (const key of roots) {
+      if (!hasOccurrence(next, key)) continue
+      const result = removeBlock(next, key)
       next = result.doc
-      focusId = result.focusId
+      focusKey = result.focusKey
     }
     if (next === doc) return
-    if (focusId && !next.blocks[focusId]) focusId = null
+    if (focusKey && !hasOccurrence(next, focusKey)) focusKey = null
     history.commit(doc, next, { type: "structural" })
-    setAnchorId(null)
+    setAnchorKey(null)
     setFocus(null)
-    setSelected(focusId ?? firstSelectable(next))
+    setSelected(focusKey ?? firstSelectable(next))
   }
 
   const handleCopy = (event: ClipboardEvent<HTMLDivElement>) => {
     const selection = window.getSelection()
     if (!selection || selection.isCollapsed) return
 
-    const picked: string[] = []
-    const walk = (ids: string[], depth: number) => {
-      for (const id of ids) {
-        const block = doc.blocks[id]
-        if (!block) continue
-        const el = containerRef.current?.querySelector(`[data-block-id="${id}"]`)
-        if (el && selection.containsNode(el, true)) {
-          // Content + id line as one entry — see the cut handler's note.
-          const indent = "  ".repeat(depth)
-          picked.push(`${indent}${markerFor(block.type)}${block.text}\n${indent}  id:: ${id}`)
-        }
-        walk(block.children, depth + 1)
-      }
-    }
-    walk(doc.rootBlockIds, 0)
+    const { picked } = pickSelectedRows(selection)
 
-    // Only take over for multi-block selections; a partial single-block copy
-    // is better served by the plain selected text.
+    // Only take over for multi-row selections; a partial single-row copy is
+    // better served by the plain selected text.
     if (picked.length < 2) return
     // Route through the same display-markdown path as every other copy action so
     // the result is clean markdown (blank lines between prose, GFM todos) rather

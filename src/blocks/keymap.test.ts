@@ -19,7 +19,7 @@ function docWith(content: string): BlockDoc {
 }
 
 function input(content: string, mode: Mode, caret?: CaretInput): CommandInput {
-  return { doc: docWith(content), id: "x", mode, visibleOrder: ["x"], caret }
+  return { doc: docWith(content), key: "x", mode, visibleOrder: ["x"], caret }
 }
 
 function caret(value: string, start: number, end = start, lines = {}): CaretInput {

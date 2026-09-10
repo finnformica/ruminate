@@ -1237,6 +1237,86 @@ describe("collapse toggle", () => {
   })
 })
 
+describe("rows of a shared block (selection by occurrence)", () => {
+  /** `blk_s` hangs under both `blk_p` and `blk_q`: one block, two rows. */
+  const shared = (): BlockDoc => ({
+    props: null,
+    rootBlockIds: ["blk_p", "blk_q"],
+    blocks: {
+      blk_p: { id: "blk_p", type: "ul", text: "p", children: ["blk_s"] },
+      blk_q: { id: "blk_q", type: "ul", text: "q", children: ["blk_s", "blk_r"] },
+      blk_s: { id: "blk_s", type: "ul", text: "shared", children: ["blk_t"] },
+      blk_t: { id: "blk_t", type: "ul", text: "t", children: [] },
+      blk_r: { id: "blk_r", type: "ul", text: "r", children: [] },
+    },
+  })
+  const rowByKey = (container: HTMLElement, key: string) =>
+    container.querySelector<HTMLElement>(`[data-occurrence="${key}"]`)!
+  const bodyOf = (row: HTMLElement) => row.querySelector<HTMLElement>('[data-testid="block-body"]')!
+
+  it("selects one row, not every row of the block", () => {
+    const { container } = render(<Harness initialDoc={shared()} />)
+    fireEvent.click(bodyOf(rowByKey(container, "blk_q/blk_s")))
+    const lit = container.querySelectorAll(".bg-bg-secondary")
+    expect(lit).toHaveLength(1)
+    expect(lit[0].closest("[data-occurrence]")!.getAttribute("data-occurrence")).toBe("blk_q/blk_s")
+    // Arrow-down walks the rows in view order: the shared block's child under q.
+    fireEvent.keyDown(editorRoot(container), { key: "ArrowDown" })
+    expect(
+      container
+        .querySelector(".bg-bg-secondary")!
+        .closest("[data-occurrence]")!
+        .getAttribute("data-occurrence"),
+    ).toBe("blk_q/blk_s/blk_t")
+  })
+
+  it("edits one row: the other row of the same block stays a view", () => {
+    const { container } = render(<Harness initialDoc={shared()} />)
+    fireEvent.doubleClick(bodyOf(rowByKey(container, "blk_q/blk_s")))
+    expect(container.querySelectorAll("textarea")).toHaveLength(1)
+    expect(rowByKey(container, "blk_q/blk_s").querySelector("textarea")).not.toBeNull()
+    expect(rowByKey(container, "blk_p/blk_s").querySelector("textarea")).toBeNull()
+    // Typing changes the block: both rows show the new text.
+    const textarea = container.querySelector("textarea")!
+    fireEvent.change(textarea, { target: { value: "shared!" } })
+    expect(bodyOf(rowByKey(container, "blk_p/blk_s")).textContent).toBe("shared!")
+  })
+
+  it("deletes the row under q and keeps the block under p", () => {
+    const { container, getByTestId } = render(<Harness initialDoc={shared()} />)
+    fireEvent.click(bodyOf(rowByKey(container, "blk_q/blk_s")))
+    fireEvent.keyDown(editorRoot(container), { key: "Backspace" })
+    expect(serializedLines(getByTestId)).toEqual(["- p", "  - shared", "    - t", "- q", "  - r"])
+    // The selection lands on the row that slid into the deleted one's place.
+    expect(highlightedText(container)).toBe("r")
+  })
+
+  it("indents the row under q beside its own siblings; p's row is untouched", () => {
+    const { container, getByTestId } = render(<Harness initialDoc={shared()} />)
+    // Move r above s under q so s has a previous sibling to nest under.
+    fireEvent.click(bodyOf(rowByKey(container, "blk_q/blk_r")))
+    fireEvent.keyDown(editorRoot(container), { key: "ArrowUp", altKey: true })
+    fireEvent.click(bodyOf(rowByKey(container, "blk_q/blk_s")))
+    fireEvent.keyDown(editorRoot(container), { key: "Tab" })
+    expect(serializedLines(getByTestId)).toEqual([
+      "- p",
+      "  - shared",
+      "    - t",
+      "- q",
+      "  - r",
+      "    - shared",
+      "      - t",
+    ])
+    // The highlight followed the row to its new place.
+    expect(
+      container
+        .querySelector(".bg-bg-secondary")!
+        .closest("[data-occurrence]")!
+        .getAttribute("data-occurrence"),
+    ).toBe("blk_q/blk_r/blk_s")
+  })
+})
+
 describe("reveal requests (outline palette)", () => {
   // jsdom's window.scrollTo only logs "Not implemented" — stub it so the
   // cancel path's scroll restore stays quiet.
