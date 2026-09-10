@@ -33,7 +33,7 @@ export function useEditorDoc({
   noteId: string | undefined
   /** The live graph (`graphSnapshotAtom`). */
   snapshot: GraphSnapshot
-  /** What a note that is not in the graph yet starts as (a template, or empty). */
+  /** What a note that is not in the graph yet starts as (`?content=`, or empty). */
   defaultDoc: BlockDoc
   /** Persist one editor doc (the route's save path: stamp `updated_at` → write the store). */
   onSave: (doc: BlockDoc) => void

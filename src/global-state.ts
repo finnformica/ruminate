@@ -3,7 +3,7 @@ import { atom } from "jotai"
 import { atomWithMachine } from "jotai-xstate"
 import { atomWithStorage, selectAtom } from "jotai/utils"
 import { assign, createMachine } from "xstate"
-import { GitHubUser, Note, NoteId, Template, githubUserSchema, templateSchema } from "./schema"
+import { GitHubUser, Note, NoteId, githubUserSchema } from "./schema"
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { databaseFilesAtom, databaseGraphAtom } from "./data/database-mode"
 import { buildGraphSnapshot, docToGraph, type GraphSnapshot } from "./data/graph"
@@ -13,7 +13,6 @@ import { createBlockIndexer, searchBlocks } from "./utils/block-search"
 import type { BlockRevealRequest, OutlineItem } from "./utils/note-outline"
 import { parseNote } from "./utils/parse-note"
 import { parseQuery, type Query } from "./utils/search"
-import { removeTemplateFrontmatter } from "./utils/remove-template-frontmatter"
 import { getSampleMarkdownFiles } from "./utils/sample-markdown-files"
 
 // -----------------------------------------------------------------------------
@@ -419,43 +418,6 @@ export const tagSearcherAtom = atom((get) => {
     threshold: 0.8,
   })
 })
-
-// -----------------------------------------------------------------------------
-// Templates
-// -----------------------------------------------------------------------------
-
-const templatesAtom = atom((get) => {
-  const notes = get(notesAtom)
-  const templates: Record<string, Template> = {}
-
-  for (const { id, content, frontmatter } of notes.values()) {
-    const template = frontmatter["template"]
-
-    // Skip if note isn't a template
-    if (!template) continue
-
-    try {
-      const parsedTemplate = templateSchema.omit({ body: true }).parse(template)
-
-      const body = removeTemplateFrontmatter(content)
-
-      templates[id] = { ...parsedTemplate, body }
-    } catch (error) {
-      // Template frontmatter didn't match the schema
-      console.error(error)
-    }
-  }
-
-  return templates
-})
-
-export const dailyTemplateAtom = selectAtom(templatesAtom, (templates) =>
-  Object.values(templates).find((t) => t.name.match(/^daily$/i)),
-)
-
-export const weeklyTemplateAtom = selectAtom(templatesAtom, (templates) =>
-  Object.values(templates).find((t) => t.name.match(/^weekly$/i)),
-)
 
 // -----------------------------------------------------------------------------
 // UI state

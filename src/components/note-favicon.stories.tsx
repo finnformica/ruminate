@@ -20,21 +20,6 @@ export const Default: Story = {
   play: async ({ canvasElement }) => expectFavicon(canvasElement, "favicon-default"),
 }
 
-export const IsTemplate: Story = {
-  args: {
-    note: parseNote(
-      "1",
-      `---
-template:
-  name: Example
----
-
-# Example`,
-    ),
-  },
-  play: async ({ canvasElement }) => expectFavicon(canvasElement, "favicon-template"),
-}
-
 export const IsDailyNote: Story = {
   args: {
     note: parseNote("2023-07-11", ""),

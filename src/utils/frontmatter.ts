@@ -351,29 +351,3 @@ export function updateFrontmatterKey({
     return `---\n${lines.join("\n")}\n---`
   })
 }
-
-/**
- * Strips comment lines (`# …`) from a template's frontmatter block, leaving the
- * body untouched. Used when materializing a template into a note.
- */
-export function removeFrontmatterComments(text: string) {
-  const lines = text.split("\n")
-  const frontmatterStart = lines.findIndex((line) => line.startsWith("---"))
-  const frontmatterEnd =
-    lines.slice(frontmatterStart + 1).findIndex((line) => line.startsWith("---")) +
-    frontmatterStart +
-    1
-
-  if (frontmatterStart === -1 || frontmatterEnd === -1) {
-    return text
-  }
-
-  const frontmatterLines = lines
-    .slice(frontmatterStart, frontmatterEnd + 1)
-    .filter((line) => !line.startsWith("#"))
-  return lines
-    .slice(0, frontmatterStart)
-    .concat(frontmatterLines)
-    .concat(lines.slice(frontmatterEnd + 1))
-    .join("\n")
-}

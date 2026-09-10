@@ -8,7 +8,7 @@ import { visit } from "unist-util-visit"
 import { z } from "zod"
 import { priority, priorityFromMarkdown } from "../remark-plugins/priority"
 import { tag, tagFromMarkdown } from "../remark-plugins/tag"
-import { Note, NoteId, NoteType, Task, Template, templateSchema } from "../schema"
+import { Note, NoteId, NoteType, Task } from "../schema"
 import {
   formatDate,
   formatWeek,
@@ -177,8 +177,6 @@ function _parseNote(id: NoteId, content: string): Note {
     dates.add(id)
   } else if (isValidWeekString(id)) {
     type = "weekly"
-  } else if (templateSchema.omit({ body: true }).safeParse(frontmatter.template).success) {
-    type = "template"
   }
 
   switch (type) {
@@ -189,9 +187,6 @@ function _parseNote(id: NoteId, content: string): Note {
     case "weekly":
       // Fallback to the formatted week if there's no title
       displayName = title ? removeLeadingEmoji(title) : formatWeek(id)
-      break
-    case "template":
-      displayName = `${(frontmatter.template as Template).name} template`
       break
     case "note":
       // If there's a title, use it as the display name

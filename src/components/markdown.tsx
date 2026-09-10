@@ -22,7 +22,6 @@ import {
 } from "../utils/reorder-list-item"
 import { remarkPriority } from "../remark-plugins/priority"
 import { remarkTag } from "../remark-plugins/tag"
-import { templateSchema } from "../schema"
 import { cx } from "../utils/cx"
 import { getLeadingEmoji } from "../utils/emoji"
 import {
@@ -32,7 +31,6 @@ import {
   updateFrontmatterValue,
 } from "../utils/frontmatter"
 import { isNoteEmpty } from "../utils/parse-note"
-import { removeTemplateFrontmatter } from "../utils/remove-template-frontmatter"
 import { Checkbox } from "./checkbox"
 import { CopyButton } from "./copy-button"
 import { Details } from "./details"
@@ -52,11 +50,10 @@ import {
 } from "./icons"
 import { FootnoteRefLink } from "./footnote-ref-link"
 import { NotePickerPopover, NotePickerDialog } from "./note-picker"
-import { PillButton } from "./pill-button"
 import { PriorityIndicator } from "./priority-indicator"
 import { PropertyKeyEditor } from "./property-key"
 import { PropertyValueEditor } from "./property-value"
-import { SyntaxHighlighter, TemplateSyntaxHighlighter } from "./syntax-highlighter"
+import { SyntaxHighlighter } from "./syntax-highlighter"
 import { TagLink } from "./tag-link"
 import { Tooltip } from "./tooltip"
 import { WebsiteFavicon } from "./website-favicon"
@@ -134,8 +131,6 @@ export const Markdown = React.memo(
       [contentStartOffset, bodyStartOffset],
     )
 
-    const parsedTemplate = templateSchema.omit({ body: true }).safeParse(frontmatter?.template)
-
     // Extract URL from title if the entire title is a single link (e.g. "# [Google](https://google.com)")
     // This matches the logic in parse-note.ts
     const titleUrl = React.useMemo(() => {
@@ -174,97 +169,63 @@ export const Markdown = React.memo(
     return (
       <MarkdownContext.Provider value={contextValue}>
         <div className={cx("font-content", className)}>
-          {parsedTemplate.success ? (
-            <div className="flex flex-col gap-5">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl font-bold leading-5">{parsedTemplate.data.name}</h1>
-                <PillButton variant="dashed" asChild>
-                  <Link to="/" search={{ query: "type:template" }}>
-                    Template
-                  </Link>
-                </PillButton>
+          <>
+            {typeof frontmatter?.github === "string" && online ? (
+              // If the note has a GitHub username, show the GitHub avatar
+              <div className="mb-5 inline-flex">
+                <GitHubAvatar login={frontmatter.github} size={64} />
               </div>
-              {/* TODO: Display more input metadata (type, description, etc.) */}
-              {parsedTemplate.data.inputs ? (
-                <div className="flex flex-col gap-1">
-                  <span className="font-sans text-sm text-text-secondary">Inputs</span>
-                  <div className="flex flex-row flex-wrap gap-x-2 gap-y-1">
-                    {Object.entries(parsedTemplate.data.inputs).map(([name]) => (
-                      <div key={name}>
-                        <code className="rounded-sm bg-bg-secondary px-1">{name}</code>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-              {/* Render template as a code block */}
-              <div className={cx("markdown", fontSize === "large" && "markdown-large")}>
-                <pre>
-                  <TemplateSyntaxHighlighter>
-                    {removeTemplateFrontmatter(children)}
-                  </TemplateSyntaxHighlighter>
-                </pre>
+            ) : null}
+            <div className="flex flex-col gap-5">
+              <div className="flex flex-col gap-5 empty:hidden">
+                {showFavicon && url ? (
+                  <WebsiteFavicon url={url} size={32} className="align-baseline" />
+                ) : null}
+                {title ? (
+                  <MarkdownContent className="[&_h1]:[text-box-trim:trim-start]">
+                    {title}
+                  </MarkdownContent>
+                ) : null}
+                {!hideFrontmatter && !isObjectEmpty(visibleFrontmatter) ? (
+                  <Details>
+                    <Details.Summary>Properties</Details.Summary>
+                    <div className="-mx-2 coarse:-mx-3">
+                      <Frontmatter
+                        frontmatter={visibleFrontmatter}
+                        onKeyChange={(oldKey, newKey) =>
+                          onChange?.(
+                            updateFrontmatterKey({
+                              content: children,
+                              oldKey,
+                              newKey,
+                            }),
+                          )
+                        }
+                        onValueChange={(key, newValue) =>
+                          onChange?.(
+                            updateFrontmatterValue({
+                              content: children,
+                              properties: { [key]: newValue },
+                            }),
+                          )
+                        }
+                      />
+                    </div>
+                  </Details>
+                ) : null}
+              </div>
+              <div className={cx("empty:hidden", fontSize === "large" && "markdown-large")}>
+                {
+                  // If there's no content and no visible frontmatter, show a placeholder
+                  isNoteEmpty({ markdown: children, hideFrontmatter }) ? (
+                    <span className="text-text-tertiary italic font-sans">{emptyText}</span>
+                  ) : body ? (
+                    <MarkdownContent>{body}</MarkdownContent>
+                  ) : null
+                }
               </div>
             </div>
-          ) : (
-            <>
-              {typeof frontmatter?.github === "string" && online ? (
-                // If the note has a GitHub username, show the GitHub avatar
-                <div className="mb-5 inline-flex">
-                  <GitHubAvatar login={frontmatter.github} size={64} />
-                </div>
-              ) : null}
-              <div className="flex flex-col gap-5">
-                <div className="flex flex-col gap-5 empty:hidden">
-                  {showFavicon && url ? (
-                    <WebsiteFavicon url={url} size={32} className="align-baseline" />
-                  ) : null}
-                  {title ? (
-                    <MarkdownContent className="[&_h1]:[text-box-trim:trim-start]">
-                      {title}
-                    </MarkdownContent>
-                  ) : null}
-                  {!hideFrontmatter && !isObjectEmpty(visibleFrontmatter) ? (
-                    <Details>
-                      <Details.Summary>Properties</Details.Summary>
-                      <div className="-mx-2 coarse:-mx-3">
-                        <Frontmatter
-                          frontmatter={visibleFrontmatter}
-                          onKeyChange={(oldKey, newKey) =>
-                            onChange?.(
-                              updateFrontmatterKey({
-                                content: children,
-                                oldKey,
-                                newKey,
-                              }),
-                            )
-                          }
-                          onValueChange={(key, newValue) =>
-                            onChange?.(
-                              updateFrontmatterValue({
-                                content: children,
-                                properties: { [key]: newValue },
-                              }),
-                            )
-                          }
-                        />
-                      </div>
-                    </Details>
-                  ) : null}
-                </div>
-                <div className={cx("empty:hidden", fontSize === "large" && "markdown-large")}>
-                  {
-                    // If there's no content and no visible frontmatter, show a placeholder
-                    isNoteEmpty({ markdown: children, hideFrontmatter }) ? (
-                      <span className="text-text-tertiary italic font-sans">{emptyText}</span>
-                    ) : body ? (
-                      <MarkdownContent>{body}</MarkdownContent>
-                    ) : null
-                  }
-                </div>
-              </div>
-            </>
-          )}
+          </>
         </div>
       </MarkdownContext.Provider>
     )

@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router"
-import ejs from "ejs"
 import { useAtomValue } from "jotai"
 import React, { useEffect, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
@@ -23,20 +22,14 @@ import { ShareDialog } from "../components/share-dialog"
 import { isSyncingAtom } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { useGetNoteContents } from "../data/store"
-import {
-  dailyTemplateAtom,
-  graphSnapshotAtom,
-  isDatabaseModeAtom,
-  isSignedOutAtom,
-  weeklyTemplateAtom,
-} from "../global-state"
+import { graphSnapshotAtom, isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
 import { useEditorDoc } from "../hooks/editor-doc"
 import { useNoteById, useRenameNote, useSaveNoteDoc } from "../hooks/note"
-import { Template, Width, fontSchema, widthSchema } from "../schema"
+import { Width, fontSchema, widthSchema } from "../schema"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
-import { removeFrontmatterComments, updateDocFrontmatter } from "../utils/frontmatter"
+import { updateDocFrontmatter } from "../utils/frontmatter"
 import { parseNote } from "../utils/parse-note"
 
 type RouteSearch = {
@@ -78,13 +71,6 @@ function RouteComponent() {
   )
 }
 
-function renderTemplate(template: Template, args: Record<string, unknown> = {}) {
-  let text = ejs.render(template.body, args)
-  text = removeFrontmatterComments(text)
-  text = text.replace("{cursor}", "")
-  return text
-}
-
 function NotePage() {
   // Router
   const { _splat: noteId } = Route.useParams()
@@ -98,8 +84,6 @@ function NotePage() {
   // Global state
   const isSignedOut = useAtomValue(isSignedOutAtom)
   const isSyncing = useAtomValue(isSyncingAtom)
-  const dailyTemplate = useAtomValue(dailyTemplateAtom)
-  const weeklyTemplate = useAtomValue(weeklyTemplateAtom)
   const databaseStatus = useAtomValue(databaseModeStatusAtom)
   const { online } = useNetworkState()
   // While the local store is still opening, a missing note means "not loaded
@@ -151,21 +135,8 @@ function NotePage() {
   )
 
   // What a note that is not in the graph yet starts as: the `?content=`
-  // search param, a daily/weekly template, or nothing. Templates are markdown
-  // (docs/graph-native-app.md) and are imported here, once.
-  const defaultDoc = React.useMemo(
-    () =>
-      parse(
-        defaultContent
-          ? defaultContent
-          : isDailyNote && dailyTemplate
-            ? renderTemplate(dailyTemplate, { date: noteId ?? "" })
-            : isWeeklyNote && weeklyTemplate
-              ? renderTemplate(weeklyTemplate, { week: noteId ?? "" })
-              : "",
-      ),
-    [defaultContent, isDailyNote, dailyTemplate, isWeeklyNote, weeklyTemplate, noteId],
-  )
+  // search param (markdown, imported here once), or nothing.
+  const defaultDoc = React.useMemo(() => parse(defaultContent ?? ""), [defaultContent])
 
   // Editor state: walked from the graph, autosaved through handleSave on every
   // change (debounced), flushed on hide/unmount — see useEditorDoc.

@@ -313,7 +313,7 @@ describe("rollup equivalence (named cases)", () => {
     }
   })
 
-  it("keeps transclusion text and hostile wikilink targets verbatim", () => {
+  it("keeps reference-looking text and hostile wikilink targets verbatim", () => {
     const markdown =
       '- ((blk_target1234))\n- [[target|alias]]\n- [[a "quoted" [target]]]\n- [[pipe||double]] tail\n'
     expectEquivalent(markdown)

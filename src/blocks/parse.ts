@@ -19,7 +19,7 @@ import type { Block, BlockDoc, BlockType } from "./types"
  *   stable ids on the next save).
  *
  * This is the only place markdown becomes blocks. The editor never calls it
- * on its own state — only on foreign text (paste, templates, the sample
+ * on its own state — only on foreign text (paste, the sample
  * notes) — so a duplicated `id::` here really is two blocks, and re-minting
  * the second (below) is the right reading.
  */

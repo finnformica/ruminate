@@ -882,7 +882,7 @@ export function BlockItem({
                     onDoubleClick: () => api.edit(block.id),
                   })}
             >
-              <BlockContent content={body} doc={doc} />
+              <BlockContent content={body} />
             </div>
           )}
           {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}

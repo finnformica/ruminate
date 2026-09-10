@@ -17,8 +17,7 @@ import { canonicalFrontmatterYaml } from "../utils/frontmatter"
  * - Ingest keeps `{"frontmatter": raw}` whenever parsing the raw text to
  *   entries and re-serializing canonically is not value-faithful: YAML that
  *   fails to parse, parses to a non-map, contains comments (which entries
- *   cannot carry — template frontmatter uses them, see
- *   `removeFrontmatterComments`), would collide with the legacy shape itself
+ *   cannot carry), would collide with the legacy shape itself
  *   (a single `frontmatter:` string key), or fails the round-trip check.
  *   Verbatim bytes win over a lossy upgrade.
  * - The rollup accepts both shapes forever: rows pushed by an older app

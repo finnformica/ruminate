@@ -69,7 +69,7 @@ export type BlockSearchType =
  * | `text`          | plain paragraph                            |
  *
  * A `type:` value outside this table is NOT block vocabulary: on its own the
- * filter stays a note-type filter (`type:daily`, `type:template` — see
+ * filter stays a note-type filter (`type:daily` — see
  * search-notes.ts), unchanged from before. Mixed into a block-scoped comma
  * list (`type:todo,zzz`) an unknown value simply matches no blocks.
  */

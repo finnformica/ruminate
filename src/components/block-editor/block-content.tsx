@@ -1,13 +1,8 @@
-import type { ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import type { BlockDoc } from "../../blocks/types"
 
-/** Matches a block reference: `((blk_abc123))`. */
-const REF_RE = /\(\(([a-z0-9_]+)\)\)/g
-
-/** Renders a single block's markdown *inline* (bold/italic/links/code spans). */
-function InlineMarkdown({ content }: { content: string }) {
+/** Renders a single block's content *inline* (bold/italic/links/code spans). */
+export function BlockContent({ content }: { content: string }) {
   if (!content.trim()) {
     return <span className="text-text-tertiary italic">Empty</span>
   }
@@ -41,64 +36,4 @@ function InlineMarkdown({ content }: { content: string }) {
       {content}
     </ReactMarkdown>
   )
-}
-
-/**
- * Renders a block's content, resolving `((block-ref))` transclusions live from
- * the doc — so editing the source block updates every reference. A cycle guard
- * (`visited`) prevents infinite recursion.
- *
- * `doc` is optional: outside the editor (search results, previews) there is no
- * parsed document to resolve against, so references render as their literal
- * token in chrome ink — unresolved, but not flagged as broken.
- */
-export function BlockContent({
-  content,
-  doc,
-  visited,
-}: {
-  content: string
-  doc?: BlockDoc
-  visited?: Set<string>
-}) {
-  const seen = visited ?? new Set<string>()
-  const segments: ReactNode[] = []
-  let cursor = 0
-  let key = 0
-  REF_RE.lastIndex = 0
-
-  let match: RegExpExecArray | null
-  while ((match = REF_RE.exec(content)) !== null) {
-    if (match.index > cursor) {
-      segments.push(<InlineMarkdown key={key++} content={content.slice(cursor, match.index)} />)
-    }
-    const refId = match[1]
-    const target = doc?.blocks[refId]
-    if (target && !seen.has(refId)) {
-      const nextSeen = new Set(seen)
-      nextSeen.add(refId)
-      segments.push(
-        // Transcluded content is still content — full ink on a faint accent
-        // tint (the "live" color role), not muted like chrome.
-        <span key={key++} className="block-transclusion" title={`Transcluded from ${refId}`}>
-          <BlockContent content={target.text} doc={doc} visited={nextSeen} />
-        </span>,
-      )
-    } else {
-      // Broken or cyclic reference — show it literally, flagged. With no doc
-      // to resolve against, nothing is broken: the token is just unresolved.
-      segments.push(
-        <span key={key++} className={doc ? "text-text-danger" : "text-text-tertiary"}>
-          (({refId}))
-        </span>,
-      )
-    }
-    cursor = match.index + match[0].length
-  }
-
-  if (cursor < content.length) {
-    segments.push(<InlineMarkdown key={key++} content={content.slice(cursor)} />)
-  }
-
-  return <>{segments}</>
 }
