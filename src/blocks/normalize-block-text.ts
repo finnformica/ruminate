@@ -29,7 +29,7 @@
  *   `[]` (nothing to check off), `[x]tight` (could be prose like "[x]marks"),
  *   and tab-separated markers all stay text — ambiguous, so verbatim wins.
  *
- * It runs at ingest (`docToGraphParts`), so every save normalizes what it
+ * It runs at ingest (`parse`), so every save normalizes what it
  * writes. Rows written before it existed keep their near-miss spelling until
  * their note is next saved. Keep it dependency-free.
  */

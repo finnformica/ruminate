@@ -10,7 +10,6 @@ import {
   toDateStringUtc,
 } from "../utils/date"
 import { removeLeadingEmoji } from "../utils/emoji"
-import { parseFrontmatter } from "../utils/frontmatter"
 import { PAGE_TYPE, pageDoc, parseProps, propsJson, type GraphSnapshot } from "./graph"
 import type { Op } from "./ops"
 import { emittedPageTitle, isMintedNoteId } from "./page-identity"
@@ -56,21 +55,16 @@ export function priorityInText(text: string): 1 | 2 | 3 | null {
 
 /**
  * The page's props as JSON-safe entries — the shape the `props` column holds
- * and `setProps` writes (dates as ISO strings). Both stored shapes resolve
- * (`frontmatter-props.ts`): a legacy raw-YAML row is parsed here.
+ * and `setProps` writes (dates as ISO strings). A row still in the retired
+ * raw-YAML shape (`{"frontmatter": "…"}`, written by app versions before
+ * parsed entries) reads as no properties: the text is kept on the row, but
+ * nothing parses YAML any more.
  */
 export function pagePropsEntries(props: string | null): Record<string, unknown> {
   const parsed = parseProps(props)
   if (!parsed) return {}
-  if (!(Object.keys(parsed).length === 1 && typeof parsed.frontmatter === "string")) {
-    return { ...parsed }
-  }
-  try {
-    const raw = parseFrontmatter(`---\n${parsed.frontmatter}\n---\n`).frontmatter
-    return JSON.parse(JSON.stringify(raw)) as Record<string, unknown>
-  } catch {
-    return {}
-  }
+  if (Object.keys(parsed).length === 1 && typeof parsed.frontmatter === "string") return {}
+  return { ...parsed }
 }
 
 /**

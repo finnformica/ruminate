@@ -16,7 +16,10 @@ import { useCreateNote, useDeleteNote, useRenameNote, useSetPageProps } from "./
  * held). Signed in the same ops go to the database runtime.
  */
 
-async function signedOutStore(pages: Record<string, string>) {
+/** A page fixture: its markdown body, with its metadata as props. */
+type Page = string | { markdown: string; props: Record<string, unknown> }
+
+async function signedOutStore(pages: Record<string, Page>) {
   const store = createStore()
   const unsubscribe = store.sub(githubUserAtom, () => {})
   await vi.waitFor(() => {
@@ -24,8 +27,9 @@ async function signedOutStore(pages: Record<string, string>) {
   })
   const nodes = []
   const links = []
-  for (const [id, markdown] of Object.entries(pages)) {
-    const g = docToGraph(id, serialize(parse(markdown)), 1)
+  for (const [id, page] of Object.entries(pages)) {
+    const { markdown, props } = typeof page === "string" ? { markdown: page, props: null } : page
+    const g = docToGraph(id, serialize(parse(markdown)), 1, props)
     nodes.push(...g.nodes)
     links.push(...g.links)
   }
@@ -36,7 +40,7 @@ async function signedOutStore(pages: Record<string, string>) {
   return { store, wrapper, unsubscribe }
 }
 
-const NOTE = "---\ntitle: Old Name\n---\n- body\n  id:: blk_body000000\n"
+const NOTE = { markdown: "- body\n  id:: blk_body000000\n", props: { title: "Old Name" } }
 
 describe("useRenameNote", () => {
   it("sets the page node's text — one row, same id, nothing deleted", async () => {
@@ -95,7 +99,7 @@ describe("useRenameNote", () => {
 describe("useSetPageProps", () => {
   it("merges a patch into the page's props, removing null keys, and stamps updated_at", async () => {
     const { store, wrapper, unsubscribe } = await signedOutStore({
-      p: "---\npinned: true\n---\n- x\n",
+      p: { markdown: "- x\n", props: { pinned: true } },
     })
     const { result } = renderHook(() => useSetPageProps(), { wrapper })
     act(() => result.current("p", { width: "full", pinned: null }))

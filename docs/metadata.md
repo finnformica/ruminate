@@ -26,6 +26,6 @@ These are recognised on notes that carry them (imported notes, or older notes wr
 
 Date-valued properties in general put the note on the calendar for that date.
 
-## Frontmatter
+## No frontmatter
 
-Markdown pasted or imported with a leading `---` YAML block has that block read into the page's properties; `title:` becomes the note's name. Notes copied out as markdown carry the properties back as frontmatter. Within the app the properties are never shown or edited as YAML.
+Properties are never read from or written to markdown. A leading `---` YAML block in pasted text is dropped rather than turned into blocks, and a note copied out as markdown carries its blocks only.

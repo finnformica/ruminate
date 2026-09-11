@@ -46,7 +46,7 @@ CREATE TABLE nodes (
   id TEXT NOT NULL,          -- minted blk_ ids; date pages keep their date key
   type TEXT NOT NULL,        -- see the type registry below
   text TEXT NOT NULL,        -- marker-free content; for pages, the title
-  props TEXT,                -- JSON or NULL; pages: parsed frontmatter entries; code: language
+  props TEXT,                -- JSON or NULL; pages: metadata entries; code: language
   updated_at INTEGER NOT NULL, -- ms epoch, drives LWW + since-cursor pulls
   deleted_at INTEGER,        -- NULL = live; a tombstoned node never renders
   PRIMARY KEY (user_id, id)
@@ -141,7 +141,7 @@ serializer is a pure type→marker map.
 
 | type           | markdown marker    | notes                                                                      |
 | -------------- | ------------------ | -------------------------------------------------------------------------- |
-| `page`         | — (file root)      | `text` = title; `props` = frontmatter                                      |
+| `page`         | — (file root)      | `text` = title; `props` = metadata entries                                 |
 | `text`         | `- `               | plain outline bullet                                                       |
 | `h1` `h2` `h3` | `# ` `## ` `### `  | always expanded by default                                                 |
 | `todo`         | `- [ ] `           | checked state is a TYPE, not an attribute                                  |
@@ -213,7 +213,7 @@ tested harder than anything else:
 
 1. **Real-corpus equivalence.** Ingest every note in the live corpus and
    assert one ingest+rollup pass converges: the output may normalize the
-   bytes (near-miss markers, canonical frontmatter — the data-quality pass,
+   bytes (near-miss markers, a dropped frontmatter block — the data-quality pass,
    see graph-storage.md), and must be a strict byte-for-byte fixpoint of a
    second pass. Already-normalized notes round-trip byte-identically.
 2. **Property tests.** `parse → rows → rollup → parse` is a fixpoint for
@@ -280,11 +280,9 @@ untouched on main's seed.
 
 ## Open items
 
-- ~~`props` schema for pages~~ — **decided (2026-W36, the data-quality
-  bundle):** individual parsed entries (`{"updated_at": …, "tags": […]}`),
-  re-serialized by the canonical YAML serializer; the raw-blob
-  `{"frontmatter": "…"}` shape survives as a value-fidelity fallback for
-  degenerate YAML and rows from older versions. See graph-storage.md.
+- Page `props` are metadata entries (docs/metadata.md); frontmatter is neither
+  read nor written. A row in the retired raw-blob `{"frontmatter": "…"}`
+  shape reads as no properties. See graph-storage.md.
 - Whether `((blk_x))` syntax survives in `text` as an authoring gesture that
   the editor converts into a child link, or disappears entirely.
 - Materialized reference edges (as new link `kind`s) — explicitly deferred;

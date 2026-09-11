@@ -1,4 +1,3 @@
-import { frontmatterTextOfProps } from "../data/frontmatter-props"
 import { isListItem } from "./markers"
 import { defOf } from "./registry"
 import { parse } from "./parse"
@@ -30,11 +29,6 @@ export function toDisplayMarkdown(content: string): string {
 /** Display markdown of a typed doc (see `toDisplayMarkdown`). */
 function displayMarkdownOf(doc: BlockDoc): string {
   const lines: string[] = []
-
-  const frontmatter = frontmatterTextOfProps(doc.props)
-  if (frontmatter !== null) {
-    lines.push("---", frontmatter, "---")
-  }
 
   const walk = (ids: string[], depth: number) => {
     let olRun = 0

@@ -181,7 +181,7 @@ const buildNotes = createNotesBuilder()
 export const notesAtom = atom((get) => buildNotes(get(graphSnapshotAtom)))
 
 /**
- * Date (or week) id → the notes that reference it via frontmatter date
+ * Date (or week) id → the notes that reference it via date-valued
  * properties (e.g. a birthday or due date). Powers the calendar dots and the
  * date/week hover cards.
  */

@@ -1,12 +1,13 @@
 import { blockId } from "./id"
-import { pagePropsFromText } from "../data/frontmatter-props"
 import { classifyLine } from "./markers"
 import type { Block, BlockDoc, BlockProps, BlockType } from "./types"
 
 /**
  * **Import.** Parse markdown into typed blocks.
  *
- * - Frontmatter (a leading `---` … `---` block) is preserved verbatim.
+ * - A leading `---` … `---` block (frontmatter from another tool) is dropped:
+ *   metadata is the page node's props, never markdown, so a doc parsed from
+ *   text has `props: null`.
  * - Every non-blank, non-`id::` line is a block: its leading marker decides
  *   the type and is dropped from the text (`classifyLine`, which also folds
  *   near-miss spellings such as `[] x` or `* x` into their typed form). A
@@ -58,7 +59,7 @@ const BULLET_WRAPPED_MARKER_RE = /^[-*+]\s+(?=(?:\[[ xX]?\]\s|#{1,6}\s|>\s|```))
 
 export function parse(markdown: string): BlockDoc {
   // Normalize line endings so Windows/GitHub CRLF never leaks into content/ids.
-  const { frontmatter, body } = splitFrontmatter(markdown.replace(/\r\n/g, "\n"))
+  const body = stripFrontmatter(markdown.replace(/\r\n/g, "\n"))
   const lines = body.split("\n")
   // Drop the single trailing empty line produced by the final newline.
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop()
@@ -182,7 +183,7 @@ export function parse(markdown: string): BlockDoc {
   }
   const rootBlockIds = flatten(roots)
 
-  return { props: pagePropsFromText(frontmatter), rootBlockIds, blocks }
+  return { props: null, rootBlockIds, blocks }
 }
 
 /** A typed block from one line of markdown, outside any document — what the
@@ -214,12 +215,8 @@ function inferIndentUnit(lines: string[]): number {
   return sawFour ? 4 : 2
 }
 
-/** Split a leading YAML frontmatter block from the body, keeping it verbatim. */
-function splitFrontmatter(markdown: string): {
-  frontmatter: string | null
-  body: string
-} {
-  const match = markdown.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/)
-  if (!match) return { frontmatter: null, body: markdown }
-  return { frontmatter: match[1], body: match[2] }
+/** Drop a leading YAML frontmatter block, so its lines never become blocks. */
+function stripFrontmatter(markdown: string): string {
+  const match = markdown.match(/^---\n[\s\S]*?\n---\n?([\s\S]*)$/)
+  return match ? match[1] : markdown
 }

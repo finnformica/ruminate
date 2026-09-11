@@ -16,6 +16,7 @@
 
 ### Removed
 
+- Frontmatter. A note's metadata (its title, pin, font, width, tags, `updated_at`) lives on the note itself, never as a `---` YAML block in its text: copying a note as markdown now gives you its blocks only, and pasting markdown that starts with a YAML block drops that block instead of turning its lines into blocks. A note created from a tag page still starts with that tag.
 - Sharing a note as a GitHub gist. The **Share** item, the publish dialog, the public `/share/…` page and the "published" globe on shared notes are gone; gists you already published stay on your GitHub account, but their share links no longer render. Signing in now asks GitHub for your email only, not gist access.
 - The help panel's formatting list is drawn by the note renderer itself, so each example shows exactly what a block will look like; the block markers (`#`, `-`, `1.`, `[ ]`, `>`, a code fence) are listed with the block they make.
 

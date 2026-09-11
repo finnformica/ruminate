@@ -18,11 +18,9 @@ import { useNoteDoc } from "./note-doc"
 
 const NOTE = "- one\n  id:: blk_one0000000\n- two\n  id:: blk_two0000000\n"
 
-/** The content lines of a doc: frontmatter (the `updated_at` stamp) and
- * `id::` lines dropped. */
+/** The content lines of a doc: `id::` lines dropped. */
 const body = (markdown: string) =>
   markdown
-    .replace(/^---\n[\s\S]*?\n---\n/, "")
     .split("\n")
     .filter((line) => !line.trim().startsWith("id::"))
     .join("\n")

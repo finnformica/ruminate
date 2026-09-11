@@ -14,7 +14,7 @@ import { useSearchNotes } from "./search-notes"
  * filename.
  *
  * A query that only names NOTES — `tag:recipe`, `date:2026-01-01`, a bare
- * frontmatter qualifier, or nothing at all — stays a note listing: every block
+ * property qualifier, or nothing at all — stays a note listing: every block
  * in every tagged note is not a search result, it's the corpus. That rule is
  * what keeps the tags page (which drives its list with a `tag:` base query)
  * browsing notes, while typing text into it narrows to blocks.

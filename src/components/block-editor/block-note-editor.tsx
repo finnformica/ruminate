@@ -64,7 +64,7 @@ function ensureZoomChild(doc: BlockDoc, zoomId: string): BlockDoc {
  * doc, so the surrounding page keeps its save logic. Remount (via a `key`) to
  * load a different note.
  *
- * An external `doc` (a pull updating the open note, a frontmatter edit from
+ * An external `doc` (a pull updating the open note, a props edit from
  * the actions menu) re-seeds the editor in place — see the `lastDoc` tracking
  * below — so pulled content appears without a remount or page refresh.
  * Internal edits update `lastDoc` first and are never re-seeded, so live
@@ -128,7 +128,7 @@ export function BlockNoteEditor({
   // The last doc this editor produced (or was seeded from). When the incoming
   // `doc` is a different object, the change came from *outside* the editor —
   // a pull that updated the open note, or the page transforming the content
-  // (frontmatter updates) — so re-seed from it. Internal edits go through
+  // (props updates) — so re-seed from it. Internal edits go through
   // `handleChange`, which updates `lastDoc` before `onChange` round-trips, so
   // live typing is never re-seeded or lost.
   const [lastDoc, setLastDoc] = useState(incoming)

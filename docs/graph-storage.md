@@ -237,21 +237,18 @@ One row per node. `id` is a minted TEXT id — `blk_…` for blocks **and** page
 alike, since a page is just a node whose `type` is `page`
 (docs/archive/page-identity-design.md); daily and weekly pages are the one exception
 and keep their date key (`2026-08-31`, `2026-W35`), where the date is the
-identity. A page's _name_ is not its id but its `text`: the title, which the
-rollup carries through the `<id>.md` seam as a projection-owned `title:`
-frontmatter key. `type` is stored, not derived — the registry in the
+identity. A page's _name_ is not its id but its `text`: the title, which
+rides the page's doc as `props.title` between the walk and the write
+(`page-identity.ts`). `type` is stored, not derived — the registry in the
 schema doc (`page`, `text`, `h1`–`h3`, `todo`, `done`, `ul`, `ol`, `quote`,
 `code`); checked state is a type (`todo` ↔ `done`), so a checkbox toggle is a
 generic type transition. `text` is marker-free. `props` is JSON: a page node
-carries its frontmatter as **individual parsed entries** (e.g.
-`{"updated_at": "…", "tags": […]}`); the rollup re-serializes them with the
-canonical YAML serializer (`canonicalFrontmatterYaml`,
-`src/utils/frontmatter.ts` + `src/data/frontmatter-props.ts`), which is a
-`parse(serialize(x))` fixpoint. Frontmatter that parsing cannot represent
-faithfully — comments, non-map YAML, anything failing the round-trip guard —
-stays in the legacy raw-blob shape (`{"frontmatter": "…"}`, emitted verbatim),
-which the rollup accepts forever for rows from older app versions. A code
-node carries `{"language": "…"}`. `updated_at` (ms epoch) drives per-row LWW
+carries its metadata as **individual entries** (e.g.
+`{"updated_at": "…", "tags": […]}`, docs/metadata.md). There is no
+frontmatter: the rollup writes blocks only, and `parse` drops a leading YAML
+block rather than reading it. A row still in the retired raw-YAML shape
+(`{"frontmatter": "…"}`, written before entries existed) reads as no
+properties. A code node carries `{"language": "…"}`. `updated_at` (ms epoch) drives per-row LWW
 and since-cursor pulls.
 
 ### `link` (source_id, destination_id, kind, sort_key, updated_at, deleted_at)
@@ -282,9 +279,8 @@ that this tenant's Durable-Object corpus has been imported
 
 ## Data quality: normalization + versioned data transforms
 
-Two deliberate departures from byte preservation (2026-W36 — before this,
-ingest kept every near-miss marker spelling and the raw frontmatter text
-byte-for-byte):
+One deliberate departure from byte preservation (2026-W36 — before this,
+ingest kept every near-miss marker spelling byte-for-byte):
 
 - **Near-miss marker normalization.** Ingest types and canonicalizes the
   conservative near-miss set in `src/data/normalize-block-text.ts` (`[] x` →
@@ -292,18 +288,11 @@ byte-for-byte):
   leaving them untyped `text` nodes invisible to `type:todo` search.
   Ambiguous spellings (`#word` — the tag syntax; tight markers; 4+ digit
   "ordered" numbers) stay verbatim text.
-- **Canonical frontmatter.** Page props hold parsed entries and the rollup
-  emits canonical YAML (above), so re-serialization can change bytes vs the
-  originally saved text (flow-style lists, canonical quoting) — accepted; the
-  canonical form is a strict fixpoint, and each save's `updated_at` stamp
-  round-trips byte-identically.
-- **The projection-owned `title:` key.** A page's title lives in its node
-  `text` (docs/archive/page-identity-design.md); the rollup injects it as the FIRST
-  frontmatter key and ingest lifts it back out, so a hand-written `title:`
-  further down the block moves to the top on the first pass. Like the two
-  above, that is a convergence: the moved form is a strict fixpoint. No key is
-  emitted when a page's `text` equals its id (an untitled note, or a date
-  page), which is what leaves daily/weekly notes byte-identical.
+
+Page metadata never touches markdown at all: it is props on the page node,
+the rollup writes none of it, and a leading YAML block in pasted text is
+dropped (2026-W37; before this the rollup emitted canonical YAML frontmatter
+with a projection-owned `title:` key, and ingest read it back).
 
 **Existing rows** are migrated **server-side against D1, once** — not by the
 client. A one-shot transform that lives permanently in the app and re-runs on

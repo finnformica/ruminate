@@ -29,19 +29,14 @@ export function useCreateNewNote() {
   return useCallback(() => {
     const noteId = generateNoteId()
 
-    // Add tags to the note
-    let content = ""
-    if (tags.length > 0) {
-      // No blank line after the fence — matches the canonical serialized form.
-      content = `---\ntags: [${tags.join(", ")}]\n---\n`
-    }
-
+    // A note created from a tag page or a tag-filtered list starts with
+    // those tags (as page props, applied when the note is first saved).
     navigate({
       to: "/notes/$",
       params: { _splat: noteId },
       search: {
         query: undefined,
-        content: content || undefined,
+        tags: tags.length > 0 ? tags.join(",") : undefined,
       },
     })
   }, [navigate, tags])
