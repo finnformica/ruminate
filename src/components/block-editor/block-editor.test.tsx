@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { emptyBlock } from "../../blocks/ops"
@@ -9,6 +9,15 @@ import type { BlockDoc } from "../../blocks/types"
 import type { BlockRevealRequest } from "../../utils/note-outline"
 import { richClipboardFormats } from "../../utils/rich-clipboard"
 import { BlockEditor, type BlockDebugOptions } from "./block-editor"
+
+// The context menu (Base UI) measures its popup with a ResizeObserver and
+// scrolls the highlighted item into view; jsdom implements neither.
+Element.prototype.scrollIntoView = vi.fn()
+globalThis.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
 
 afterEach(cleanup)
 
@@ -29,6 +38,8 @@ function Harness({
   refocusSignal,
   resolveBlocks,
   debug,
+  parentCountOf,
+  onDeleteEverywhere,
 }: {
   initial?: string
   /** A doc built by hand — for shapes markdown cannot express (a shared block). */
@@ -38,6 +49,8 @@ function Harness({
   refocusSignal?: number
   resolveBlocks?: (ids: string[]) => Record<string, string | null>
   debug?: BlockDebugOptions
+  parentCountOf?: (id: string) => number
+  onDeleteEverywhere?: (id: string) => void
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarter(parse(initial)))
   return (
@@ -50,6 +63,8 @@ function Harness({
         refocusSignal={refocusSignal}
         resolveBlocks={resolveBlocks}
         debug={debug}
+        parentCountOf={parentCountOf}
+        onDeleteEverywhere={onDeleteEverywhere}
       />
       <pre data-testid="serialized">{serialize(doc)}</pre>
     </>
@@ -2010,5 +2025,92 @@ describe("slash menu (edit mode)", () => {
     expect(container.querySelector("textarea")!.value).toBe(today())
     fireEvent.keyDown(container.querySelector("textarea")!, { key: "z", metaKey: true })
     expect(serializedLines(getByTestId)).toEqual(["/toda"])
+  })
+})
+
+describe("BlockEditor context menu", () => {
+  /** Right-click the row at `index` and return the opened menu. */
+  async function openMenuOn(container: HTMLElement, index: number): Promise<HTMLElement> {
+    const row = container.querySelectorAll("[data-occurrence]")[index]!
+    await act(async () => {
+      fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
+    })
+    return screen.getByTestId("block-context-menu")
+  }
+
+  async function pick(label: string) {
+    await act(async () => {
+      fireEvent.click(screen.getByText(label))
+    })
+  }
+
+  it("opens on a row with the standard actions, and selects that row", async () => {
+    const { container } = render(<Harness initial={"A\nB\nC"} />)
+    const menu = await openMenuOn(container, 1)
+    for (const label of ["Edit", "Turn into", "Duplicate", "Zoom into", "Copy", "Delete"]) {
+      expect(menu.textContent).toContain(label)
+    }
+    // The row under the pointer becomes the selection (and the menu's target).
+    expect(highlightedText(container)).toBe("B")
+    // Not shared: Delete alone, nothing to unlink from.
+    expect(menu.textContent).not.toContain("Unlink")
+    expect(menu.textContent).not.toContain("places")
+    // Structure moves stay on the keyboard.
+    for (const label of ["Indent", "Outdent", "Move up", "Move down"]) {
+      expect(menu.textContent).not.toContain(label)
+    }
+  })
+
+  it("Delete removes the row (an undoable edit)", async () => {
+    const { container, getByTestId } = render(<Harness initial={"A\nB\nC"} />)
+    await openMenuOn(container, 1)
+    await pick("Delete")
+    expect(serializedLines(getByTestId)).toEqual(["A", "C"])
+    fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "C"])
+  })
+
+  it("Turn into changes the block's type from the submenu", async () => {
+    const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
+    await openMenuOn(container, 0)
+    await act(async () => {
+      fireEvent.click(screen.getByText("Turn into"))
+    })
+    await pick("Heading")
+    expect(serializedLines(getByTestId)).toEqual(["# A", "B"])
+  })
+
+  it("a block held in more than one place offers Unlink, and Delete reaches every place", async () => {
+    const deleteEverywhere = vi.fn()
+    const { container, getByTestId } = render(
+      <Harness initial={"A\nB"} parentCountOf={() => 2} onDeleteEverywhere={deleteEverywhere} />,
+    )
+    const menu = await openMenuOn(container, 1)
+    expect(menu.textContent).toContain("Unlink")
+    expect(menu.textContent).toContain("Delete")
+    expect(menu.textContent).toContain("2 places")
+    const id = getByTestId("serialized").textContent!.match(/id:: (\S+)\n?$/)![1]
+    await pick("Delete")
+    expect(deleteEverywhere).toHaveBeenCalledWith(id)
+    // The graph-level delete is the host's; the row is left for the snapshot
+    // to drop, so nothing was removed by the editor itself.
+    expect(serializedLines(getByTestId)).toEqual(["A", "B"])
+  })
+
+  it("Unlink drops only this row", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"A\nB"} parentCountOf={() => 2} onDeleteEverywhere={() => {}} />,
+    )
+    await openMenuOn(container, 1)
+    await pick("Unlink")
+    expect(serializedLines(getByTestId)).toEqual(["A"])
+  })
+
+  it("does not open on the empty space below the rows", async () => {
+    const { container } = render(<Harness initial={"A\nB"} />)
+    await act(async () => {
+      fireEvent.contextMenu(editorRoot(container), { clientX: 10, clientY: 500 })
+    })
+    expect(screen.queryByTestId("block-context-menu")).toBeNull()
   })
 })

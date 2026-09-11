@@ -2,6 +2,8 @@ import { useAtomValue, useSetAtom, useStore } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { emptyBlock } from "../../blocks/ops"
 import type { BlockDoc } from "../../blocks/types"
+import { deleteBlockOps, parentCount } from "../../data/ops"
+import { useApplyOps } from "../../data/store"
 import { useCollapseState } from "../../data/view-state"
 import { blockRevealAtom, graphSnapshotAtom, noteOutlineAtom } from "../../global-state"
 import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
@@ -174,6 +176,20 @@ export function BlockNoteEditor({
     [jotaiStore],
   )
 
+  // The context menu's graph-aware delete: how many places a block appears
+  // (read at open, off the live graph), and deleting it from all of them —
+  // a batch of ops applied straight to the graph, which the page then
+  // re-walks (not an editor edit, so not an undo step).
+  const applyOps = useApplyOps()
+  const parentCountOf = useCallback(
+    (id: string) => parentCount(jotaiStore.get(graphSnapshotAtom), id),
+    [jotaiStore],
+  )
+  const deleteEverywhere = useCallback(
+    (id: string) => applyOps(deleteBlockOps(id, jotaiStore.get(graphSnapshotAtom))),
+    [applyOps, jotaiStore],
+  )
+
   // Developer mode (`src/hooks/is-developer.ts`): the debug readouts, and the
   // corpus index behind the "upstream" metadata. Both are inert — no corpus
   // subscription, no extra chrome — unless the developer switched them on.
@@ -223,6 +239,9 @@ export function BlockNoteEditor({
       revealRequest={readOnly ? null : revealRequest}
       resolveBlocks={resolveBlocks}
       debug={debug}
+      noteId={noteId}
+      parentCountOf={noteId ? parentCountOf : undefined}
+      onDeleteEverywhere={noteId ? deleteEverywhere : undefined}
     />
   )
 }
