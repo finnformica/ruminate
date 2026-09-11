@@ -2196,6 +2196,27 @@ describe("BlockEditor images", () => {
     expect(container.querySelector('[data-testid="paragraph-slot"]')).toBeNull()
   })
 
+  it("a click on the empty space around a picture selects its row", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a", "b"],
+      blocks: {
+        a: { id: "a", type: "text", text: "A", children: [] },
+        b: {
+          id: "b",
+          type: "image",
+          text: "",
+          props: { src: "https://example.com/sunset.png" },
+          children: [],
+        },
+      },
+    }
+    const { container } = render(<Harness initialDoc={doc} />)
+    expect(container.querySelector('.bg-bg-secondary [data-testid="block-image"]')).toBeNull()
+    fireEvent.click(container.querySelector('[data-testid="image-block"]')!)
+    expect(container.querySelector('.bg-bg-secondary [data-testid="block-image"]')).not.toBeNull()
+  })
+
   it("hangs no caption line under an uncaptioned picture", () => {
     const withCaption = (text: string): BlockDoc => ({
       props: null,

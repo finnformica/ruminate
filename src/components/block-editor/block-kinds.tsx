@@ -1,3 +1,4 @@
+import type React from "react"
 import type { ReactNode } from "react"
 import { BLOCK_TYPE_DEFS } from "../../blocks/registry"
 import type { Block, BlockType } from "../../blocks/types"
@@ -193,14 +194,38 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     // drops the line entirely rather than leaving a blank one under it — the
     // row is then just the picture. It comes back the moment the row is
     // being edited, so a caption can still be typed.
-    wrap: (content, { block, occurrence, api, editing }) => (
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <ImageFigure block={block} occurrence={occurrence} api={api} />
-        {editing || block.text.trim() !== "" ? (
-          <div className="flex min-w-0 flex-col">{content}</div>
-        ) : null}
-      </div>
-    ),
+    //
+    // The wrap is the block's own padding: the row's surface gives text 6px
+    // at the sides and 2px above and below, and the wrap tops that up so the
+    // picture sits 10px in from the surface's edge all round. Its empty
+    // space (beside a narrow picture, around the caption) is the block, so a
+    // click there selects the row and a double click edits the caption, as
+    // clicking text does — the picture itself keeps its own click (the
+    // lightbox) and stops it here.
+    wrap: (content, { block, occurrence, api, editing }) => {
+      const own = (event: React.MouseEvent) => event.target === event.currentTarget
+      const pointer = api.readOnly
+        ? api.activate
+          ? { onClick: (e: React.MouseEvent) => own(e) && api.activate?.(occurrence.key) }
+          : {}
+        : {
+            onClick: (e: React.MouseEvent) => own(e) && api.select(occurrence.key),
+            onDoubleClick: (e: React.MouseEvent) => own(e) && api.edit(occurrence.key),
+          }
+      return (
+        // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
+        <div
+          data-testid="image-block"
+          className="flex min-w-0 flex-1 flex-col gap-1.5 px-1 py-2"
+          {...pointer}
+        >
+          <ImageFigure block={block} occurrence={occurrence} api={api} />
+          {editing || block.text.trim() !== "" ? (
+            <div className="flex min-w-0 flex-col">{content}</div>
+          ) : null}
+        </div>
+      )
+    },
   },
 }
 
