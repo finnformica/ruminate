@@ -1358,15 +1358,16 @@ describe("collapse toggle", () => {
       fireEvent.click(toggleOf(container, "blk_bp")!)
       // Gone as a row at once…
       expect(container.querySelector('[data-block-row="blk_bc"]')).toBeNull()
-      // …but still on screen, folding away: no row identity, hidden from
-      // assistive tech, and playing the fold.
-      const ghosts = container.querySelectorAll("[data-folding]")
-      expect(ghosts.length).toBeGreaterThan(0)
-      for (const ghost of ghosts) {
-        expect(ghost.getAttribute("aria-hidden")).toBe("true")
-        expect(ghost.hasAttribute("data-occurrence")).toBe(false)
-        expect(ghost.className).toContain("block-fold-close")
-      }
+      // …but still on screen, in its subtree's box folding away: hidden
+      // from assistive tech, playing the fold, and its rows without row
+      // identity.
+      const boxes = container.querySelectorAll("[data-folding]")
+      expect(boxes.length).toBe(1)
+      const box = boxes[0]
+      expect(box.getAttribute("aria-hidden")).toBe("true")
+      expect(box.className).toContain("block-subtree-close")
+      expect(box.querySelectorAll('[data-testid="block-body"]').length).toBeGreaterThan(0)
+      expect(box.querySelectorAll("[data-occurrence], [data-block-row]").length).toBe(0)
       act(() => {
         vi.advanceTimersByTime(250)
       })
@@ -1386,7 +1387,7 @@ describe("collapse toggle", () => {
       expect(container.querySelectorAll("[data-folding]").length).toBe(0)
       const back = container.querySelector('[data-block-row="blk_bc"]')!
       expect(back).not.toBeNull()
-      expect(back.className).toContain("block-fold-open")
+      expect(back.closest(".block-subtree-open")).not.toBeNull()
       act(() => {
         vi.advanceTimersByTime(250)
       })

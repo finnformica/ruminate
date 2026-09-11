@@ -320,29 +320,32 @@ growing the row.
 
 Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`):
 
-| What                                    | How                                                                          |
-| --------------------------------------- | ---------------------------------------------------------------------------- |
-| Hover affordances                       | opacity 150ms ease-out                                                       |
-| Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease                                                  |
-| Block line hover (neutral)              | background-color 100ms ease                                                  |
-| Selection highlight                     | background-color + color 100ms ease                                          |
-| Chevron rotation                        | transform 300ms spring (small overshoot)                                     |
-| Unfold (collapsed → open)               | each child's height 0 → full + fade, 200ms strong ease-out                   |
-| Fold (open → collapsed)                 | each child's height full → 0 + fade, 160ms ease-in; rows linger inert for it |
-| Todo check → text mutes                 | color 200ms ease                                                             |
-| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms                                       |
+| What                                    | How                                                                                    |
+| --------------------------------------- | -------------------------------------------------------------------------------------- |
+| Hover affordances                       | opacity 150ms ease-out                                                                 |
+| Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease                                                            |
+| Block line hover (neutral)              | background-color 100ms ease                                                            |
+| Selection highlight                     | background-color + color 100ms ease                                                    |
+| Chevron rotation                        | transform 300ms strong ease-out                                                        |
+| Unfold (collapsed → open)               | the subtree's box, height 0 → full + fade, 200ms strong ease-out                       |
+| Fold (open → collapsed)                 | the subtree's box, height full → 0 + fade, 160ms ease-in; its rows linger inert for it |
+| Todo check → text mutes                 | color 200ms ease                                                                       |
+| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms                                                 |
 
 Press feedback lives on the **control**, never the content: collapsing a
 subtree gives the chevron a pressed scale and hover surface. Pressed scale is
 removed under `prefers-reduced-motion`.
 
-**The fold is the one layout animation.** Folding and unfolding run each
-affected row's own height (a one-row grid track, `0fr ↔ 1fr`; the view is a
-flat list, so there is no subtree box), so children concertina beneath their
-parent and the rows below follow. It never holds the editor up: the state
-changes at once, and the rows a fold hid stay only as inert ghosts for the
-animation's length (`folding`, block-editor.tsx), so `Space` on repeat is as
-quick as ever. Reduced motion keeps the fade and drops the height.
+**The fold is the one layout animation.** Rows render as nested subtrees
+(`Subtree`, block-editor.tsx), and folding or unfolding runs a parent's
+children as one box (a one-row grid track, `0fr ↔ 1fr`, the body clipped
+meanwhile): the rows inside keep their full size and the parent's edge
+sweeps over them, so nothing squashes, and the rows below follow. It never
+holds the editor up: the state changes at once, and the rows a fold hid stay
+only as inert ghosts in the box for the animation's length (`folding`), so
+`Space` on repeat is as quick as ever. The clipping class leaves when the
+animation ends, so nothing that reaches beyond a row is clipped at rest.
+Reduced motion keeps the fade and drops the height.
 
 **What never animates:**
 

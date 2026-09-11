@@ -52,9 +52,59 @@ import {
 } from "../../blocks/view"
 
 /** How long a folded subtree's rows stay for their fold animation
- * (`.block-fold-close`, block-editor.css): the animation's length, and no
+ * (`.block-subtree-close`, block-editor.css): the animation's length, and no
  * longer — they are inert the whole time. */
 const FOLD_MS = 200
+
+/** The rows of a list grouped under their parent's key, in order. */
+function childrenByParent(list: readonly Occurrence[]): Map<string | null, Occurrence[]> {
+  const map = new Map<string | null, Occurrence[]>()
+  for (const row of list) {
+    const parent = parentKeyOf(row.key)
+    const siblings = map.get(parent)
+    if (siblings) siblings.push(row)
+    else map.set(parent, [row])
+  }
+  return map
+}
+
+/**
+ * A row's children, as one box beneath it: the box the fold animates
+ * (block-editor.css). It unfolds when its parent has just been opened
+ * (`opening`, true for that one render; kept until the animation ends so a
+ * re-render never cuts it short) and folds away while it holds the rows a
+ * fold just hid (`closing`), inert for the duration. Between, it is a plain
+ * wrapper — the class that clips it (needed for the height to read) goes the
+ * moment the animation ends, so nothing that reaches beyond a row (a to-do's
+ * chevron beside its checkbox, a heading's hash) is ever clipped at rest.
+ */
+function Subtree({
+  opening,
+  closing,
+  children,
+}: {
+  opening: boolean
+  closing: boolean
+  children: React.ReactNode
+}) {
+  const [entrance, setEntrance] = useState(opening)
+  useEffect(() => {
+    if (opening) setEntrance(true)
+  }, [opening])
+  const open = !closing && (opening || entrance)
+  return (
+    <div
+      data-folding={closing || undefined}
+      aria-hidden={closing || undefined}
+      className={closing ? "block-subtree-close" : open ? "block-subtree-open" : undefined}
+      onAnimationEnd={(event) => {
+        if (event.target === event.currentTarget) setEntrance(false)
+      }}
+    >
+      <div className="block-subtree-body">{children}</div>
+    </div>
+  )
+}
 import {
   duplicateBlocks,
   emptyBlock,
@@ -1012,7 +1062,12 @@ export function BlockEditor({
   // selection never wait for the motion. Each entry is the folded parent's
   // key and the rows that were beneath it; unfolding that parent again
   // drops its entry at once, so the returning rows never meet their ghosts.
-  const [folding, setFolding] = useState<{ id: number; key: string; rows: Occurrence[] }[]>([])
+  // The rows grouped by parent, for rendering them as nested subtrees.
+  const childrenOf = useMemo(() => childrenByParent(rows), [rows])
+  const rowKeys = useMemo(() => new Set(visibleOrder), [visibleOrder])
+  const [folding, setFolding] = useState<
+    { id: number; key: string; rows: Occurrence[]; children: Map<string | null, Occurrence[]> }[]
+  >([])
   const foldSerial = useRef(0)
   const foldTimers = useRef<number[]>([])
   useEffect(() => {
@@ -1023,7 +1078,8 @@ export function BlockEditor({
     const hidden = rows.filter((row) => row.guideKeys.includes(key))
     if (hidden.length === 0) return
     const id = ++foldSerial.current
-    setFolding((prev) => [...prev.filter((f) => f.key !== key), { id, key, rows: hidden }])
+    const entry = { id, key, rows: hidden, children: childrenByParent(hidden) }
+    setFolding((prev) => [...prev.filter((f) => f.key !== key), entry])
     foldTimers.current.push(
       window.setTimeout(() => setFolding((prev) => prev.filter((f) => f.id !== id)), FOLD_MS),
     )
@@ -1345,6 +1401,38 @@ export function BlockEditor({
     deleteEverywhere: onDeleteEverywhere,
     deleteSubtree: onDeleteSubtree,
   }
+
+  /**
+   * The view, as nested subtrees: each row, then — when it has rows beneath
+   * it, live or folding away — its `Subtree` holding them, rendered the same
+   * way. The DOM order is the flat view's (depth first), and every row keeps
+   * its place across a fold: the rows a fold hid render inside the same
+   * subtree they were in, with the same keys, so React keeps their instances
+   * and the box folds over them as they are.
+   */
+  const renderRows = (list: readonly Occurrence[], ghost: boolean): React.ReactNode =>
+    list.map((row) => {
+      const block = doc.blocks[row.id]
+      if (!block) return null
+      const fold = ghost ? undefined : folding.find((f) => f.key === row.key)
+      const live = ghost ? undefined : childrenOf.get(row.key)
+      // A ghost row's own children come from its fold entry's grouping.
+      const ghostKids = ghost
+        ? folding.find((f) => f.rows.includes(row))?.children.get(row.key)
+        : fold?.children.get(row.key)
+      const kids = live && live.length > 0 ? live : ghostKids
+      const closing = !ghost && !(live && live.length > 0) && fold !== undefined
+      return (
+        <Fragment key={row.key}>
+          <BlockItem doc={doc} block={block} occurrence={row} api={api} folding={ghost} />
+          {kids && kids.length > 0 ? (
+            <Subtree opening={!ghost && justOpened === row.key} closing={closing}>
+              {renderRows(kids, ghost || closing)}
+            </Subtree>
+          ) : null}
+        </Fragment>
+      )
+    })
 
   const api: BlockEditorApi = {
     debug,
@@ -1952,44 +2040,13 @@ export function BlockEditor({
           {/* The view is a flat list: one row per occurrence, indented by its
             depth. Zoomed, the first row is the zoomed block as the view's
             editable title and its children follow at depth 0. */}
-          {rows.map((row) => {
-            const block = doc.blocks[row.id]
-            if (!block) return null
-            // Every row sits in its own keyed fragment, always — the shape
-            // never changes when a fold comes or goes, so the row itself is
-            // never remounted (its chevron's turn, its textarea's focus).
-            // The rows a fold on this row just hid follow it in the
-            // fragment, folding away.
-            const fold = folding.filter((f) => f.key === row.key)
-            const live = fold.length > 0 ? new Set(visibleOrder) : null
-            return (
-              <Fragment key={row.key}>
-                <BlockItem
-                  doc={doc}
-                  block={block}
-                  occurrence={row}
-                  api={api}
-                  animateIn={justOpened !== null && row.guideKeys.includes(justOpened)}
-                />
-                {fold.flatMap((f) =>
-                  f.rows.map((ghost) => {
-                    const ghostBlock = doc.blocks[ghost.id]
-                    if (!ghostBlock || live?.has(ghost.key)) return null
-                    return (
-                      <BlockItem
-                        key={ghost.key}
-                        doc={doc}
-                        block={ghostBlock}
-                        occurrence={ghost}
-                        api={api}
-                        folding
-                      />
-                    )
-                  }),
-                )}
-              </Fragment>
-            )
-          })}
+          {renderRows(
+            rows.filter((row) => {
+              const parent = parentKeyOf(row.key)
+              return parent === null || !rowKeys.has(parent)
+            }),
+            false,
+          )}
         </div>
       </BlockContextMenu>
       {onImageUpload ? (
