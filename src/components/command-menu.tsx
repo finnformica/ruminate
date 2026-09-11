@@ -29,7 +29,6 @@ import { parseQuery } from "../utils/search"
 import {
   CalendarDateIcon16,
   CopyIcon16,
-  GlobeIcon16,
   NoteIcon16,
   PinFillIcon12,
   PlusIcon16,
@@ -785,7 +784,7 @@ export function CommandMenu() {
                     icon={<PlusIcon16 />}
                     onSelect={handleSelect(() => {
                       // The typed text becomes the note's TITLE; the id is
-                      // minted and opaque (docs/page-identity-design.md). Any
+                      // minted and opaque (docs/archive/page-identity-design.md). Any
                       // text works — there is no filename charset to sanitize
                       // against and no name collision to avoid, so a fresh
                       // note is always a fresh note.
@@ -872,7 +871,6 @@ function NoteItem({
           {!hidePinIcon && note.pinned ? (
             <PinFillIcon12 className="shrink-0 text-text-pinned" />
           ) : null}
-          {note.props.gist_id ? <GlobeIcon16 className="shrink-0 text-border-focus" /> : null}
           <span className="truncate">{note.displayName}</span>
         </span>
       </CommandItem>

@@ -13,7 +13,6 @@
       "/github-auth",
       "/github-refresh",
       "/file-proxy",
-      "/share/*",
       "/api/replica/*",
       "/api/images",
       "/api/images/*",

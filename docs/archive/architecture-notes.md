@@ -1,6 +1,6 @@
 # Architecture notes
 
-> **Superseded by [graph-storage.md](./graph-storage.md).** The database this
+> **Superseded by [graph-storage.md](../graph-storage.md).** The database this
 > document anticipated has shipped: notes now live in a local SQLite store
 > replicated to D1, and the git/markdown storage described below has been
 > removed from the app. This file is kept as the historical record of the

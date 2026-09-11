@@ -1,6 +1,9 @@
+import type { Root } from "mdast"
 import { Fragment } from "react"
 import ReactMarkdown from "react-markdown"
+import rehypeKatex from "rehype-katex"
 import remarkGfm from "remark-gfm"
+import remarkMath from "remark-math"
 import type { Processor } from "unified"
 
 /**
@@ -9,7 +12,8 @@ import type { Processor } from "unified"
  * stored: a leading `- `, `# `, `> `, `1. `, a code fence, a tab — anything a
  * document parser would swallow as structure — stays visible, which is how a
  * line that migrated badly gets noticed and fixed. Only inline formatting
- * (bold, italic, links, code spans, strikethrough) is interpreted.
+ * (bold, italic, links, code spans, strikethrough, `$$…$$` maths) is
+ * interpreted.
  */
 const BLOCK_CONSTRUCTS = [
   "codeIndented",
@@ -23,12 +27,44 @@ const BLOCK_CONSTRUCTS = [
   "definition",
   "table",
   "gfmFootnoteDefinition",
+  "mathFlow",
 ]
 
 function remarkInlineOnly(this: Processor) {
   const data = this.data() as { micromarkExtensions?: unknown[] }
   const extensions = (data.micromarkExtensions ??= [])
   extensions.push({ disable: { null: BLOCK_CONSTRUCTS } })
+}
+
+/**
+ * Maths: `$$…$$` within a line is set inline; a line that is nothing but
+ * maths is set in display mode (centred, full-size operators). Single-dollar
+ * maths is off, so a price in a sentence is never mistaken for a formula.
+ * KaTeX emits MathML only — the browser typesets it, no stylesheet needed.
+ */
+const MATH_OPTIONS = { singleDollarTextMath: false }
+const KATEX_OPTIONS = { output: "mathml" as const }
+
+interface MathNode {
+  type: string
+  children?: MathNode[]
+  data?: { hName?: string; hProperties?: Record<string, unknown> }
+}
+
+function remarkDisplayMathLines() {
+  return (tree: Root) => {
+    const visit = (node: MathNode) => {
+      const only = node.children?.length === 1 ? node.children[0] : null
+      if (node.type === "paragraph" && only?.type === "inlineMath") {
+        only.data = {
+          ...only.data,
+          hProperties: { ...only.data?.hProperties, className: ["language-math", "math-display"] },
+        }
+      }
+      for (const child of node.children ?? []) visit(child)
+    }
+    visit(tree as unknown as MathNode)
+  }
 }
 
 const components = {
@@ -78,7 +114,16 @@ export function BlockContent({ content }: { content: string }) {
             {index > 0 ? "\n" : null}
             {lead}
             {middle ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm, remarkInlineOnly]} components={components}>
+              <ReactMarkdown
+                remarkPlugins={[
+                  remarkGfm,
+                  [remarkMath, MATH_OPTIONS],
+                  remarkInlineOnly,
+                  remarkDisplayMathLines,
+                ]}
+                rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
+                components={components}
+              >
                 {middle}
               </ReactMarkdown>
             ) : null}

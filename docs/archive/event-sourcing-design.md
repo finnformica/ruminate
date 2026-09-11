@@ -1,13 +1,13 @@
 # Event sourcing design
 
 > **Status (2026-09-10):** a design record. The bridge it describes has been
-> retired — see [graph-native-app.md](./graph-native-app.md) for what was
+> retired — see [graph-native-app.md](../graph-native-app.md) for what was
 > built; code references below may no longer exist.
 
 A decision-ready design for adding an event log to Ruminate's
 database-authoritative storage — what it would buy, what it would cost, and
 the concrete shapes (event vocabulary, DDL, sync protocol, migration path) to
-implement from. This extends [graph-storage.md](./graph-storage.md) (the
+implement from. This extends [graph-storage.md](../graph-storage.md) (the
 D1-authoritative cutover) and [architecture-notes.md](./architecture-notes.md);
 nothing here is built — graph-storage.md reserves it explicitly ("No event
 sourcing — reserved").

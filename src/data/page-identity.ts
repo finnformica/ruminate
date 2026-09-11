@@ -2,7 +2,7 @@ import { canonicalFrontmatterYaml, parseFrontmatter } from "../utils/frontmatter
 import { isValidDateString, isValidWeekString } from "../utils/date"
 
 /**
- * Page identity (docs/page-identity-design.md) — what names a page, and where
+ * Page identity (docs/archive/page-identity-design.md) — what names a page, and where
  * its title lives.
  *
  * A page used to *be* its title: the node id, the `<id>.md` key, the route
@@ -44,7 +44,7 @@ import { isValidDateString, isValidWeekString } from "../utils/date"
 const MINTED_ID_PREFIX = "blk_"
 
 /** The frontmatter key the projection owns (see the module header). It is also
- * in `RESERVED_FRONTMATTER_KEYS` so it never renders as a user-facing property
+ * shown as the title, never as a user-facing property
  * chip — the title is shown as the title, not as metadata. */
 const TITLE_KEY = "title"
 

@@ -17,9 +17,9 @@ export function beginGitHubSignIn() {
     // hosts); without an explicit redirect_uri GitHub falls back to the FIRST
     // registered one, which would bounce preview sign-ins to production.
     redirect_uri: `${window.location.origin}/github-auth`,
-    // Identity + gist publishing only — notes live in the database, not a
-    // repository, so no repo scope is requested.
-    scope: "gist,user:email",
+    // Identity only — notes live in the database, not a repository, so no
+    // repo scope is requested.
+    scope: "user:email",
   })
 
   // Open in new tab if in iframe (GitHub doesn't load inside iframes)

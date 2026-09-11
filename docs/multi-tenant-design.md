@@ -12,7 +12,7 @@ This document designed the path from the single-owner instance (one D1, one
 permitted GitHub id, fail-closed) to a product where each signed-up user has
 their own private corpus. It extends [graph-storage.md](./graph-storage.md)
 and [graph-schema-v2.md](./graph-schema-v2.md), and coordinates with
-[event-sourcing-design.md](https://github.com/finnformica/ruminate/blob/claude/event-sourcing-design/docs/event-sourcing-design.md)
+[event-sourcing-design.md](https://github.com/finnformica/ruminate/blob/claude/event-sourcing-design/docs/archive/event-sourcing-design.md)
 (branch `claude/event-sourcing-design`) without building any of it.
 
 **Recommendation, up front** (made 2026-08-31, reversed 2026-W36 — read §0

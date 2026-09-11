@@ -2,10 +2,10 @@
 
 Status: **steps 1 to 5 landed** (2026-09-10) — see §5 for what each step
 delivered and what remains. Extends
-[editor-on-graph.md](./editor-on-graph.md) (which assessed the same move
+[editor-on-graph.md](./archive/editor-on-graph.md) (which assessed the same move
 from the editor's side) and [graph-schema-v2.md](./graph-schema-v2.md) (the
 storage this runs on); the mutation model below is shaped to fit
-[event-sourcing-design.md](./event-sourcing-design.md) without depending on
+[event-sourcing-design.md](./archive/event-sourcing-design.md) without depending on
 it.
 
 ## 0. The target

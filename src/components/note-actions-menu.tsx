@@ -17,7 +17,6 @@ import {
   PinFillIcon16,
   PinIcon16,
   PrinterIcon16,
-  ShareIcon16,
   TrashIcon16,
   WidthFixedIcon16,
   WidthFullIcon16,
@@ -28,8 +27,6 @@ interface EditorActions {
   showWidth?: boolean
   width?: Width
   onWidth?: (width: Width) => void
-  onShare?: () => void
-  canShare?: boolean
   /** Called after the open note is deleted, so the page can navigate away. */
   onDeleted?: () => void
 }
@@ -76,7 +73,7 @@ export function NoteActionsMenu({
 
   const togglePin = () => setPageProps(noteId, { pinned: pinned ? null : true })
 
-  // Renaming sets the note's title (docs/page-identity-design.md). The id and
+  // Renaming sets the note's title (docs/archive/page-identity-design.md). The id and
   // the URL are untouched, so there is nothing to navigate to afterwards and
   // no name to reject: any text is a valid title.
   const rename = () => {
@@ -153,15 +150,6 @@ export function NoteActionsMenu({
           Rename
         </DropdownMenu.Item>
         <DropdownMenu.Separator />
-        {editor?.onShare ? (
-          <DropdownMenu.Item
-            icon={<ShareIcon16 />}
-            disabled={!editor.canShare}
-            onClick={editor.onShare}
-          >
-            Share
-          </DropdownMenu.Item>
-        ) : null}
         <DropdownMenu.Item icon={<PrinterIcon16 />} onClick={() => window.print()}>
           Print
         </DropdownMenu.Item>

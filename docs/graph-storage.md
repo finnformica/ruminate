@@ -1,7 +1,7 @@
 # Graph storage
 
 The database-backed storage architecture Ruminate runs on. This document
-extends [architecture-notes.md](./architecture-notes.md); the principles there
+extends [architecture-notes.md](./archive/architecture-notes.md); the principles there
 (stable `blk_` ids, multi-homing by reference, the `src/data` seam, view state
 as UI state) are load-bearing here and are not restated in full. The schema
 itself — and the reasoning behind it — is
@@ -235,7 +235,7 @@ node survives as the position a restore would put it back into.
 
 One row per node. `id` is a minted TEXT id — `blk_…` for blocks **and** pages
 alike, since a page is just a node whose `type` is `page`
-(docs/page-identity-design.md); daily and weekly pages are the one exception
+(docs/archive/page-identity-design.md); daily and weekly pages are the one exception
 and keep their date key (`2026-08-31`, `2026-W35`), where the date is the
 identity. A page's _name_ is not its id but its `text`: the title, which the
 rollup carries through the `<id>.md` seam as a projection-owned `title:`
@@ -298,7 +298,7 @@ byte-for-byte):
   canonical form is a strict fixpoint, and each save's `updated_at` stamp
   round-trips byte-identically.
 - **The projection-owned `title:` key.** A page's title lives in its node
-  `text` (docs/page-identity-design.md); the rollup injects it as the FIRST
+  `text` (docs/archive/page-identity-design.md); the rollup injects it as the FIRST
   frontmatter key and ingest lifts it back out, so a hand-written `title:`
   further down the block moves to the top on the first pass. Like the two
   above, that is a convergence: the moved form is a strict fixpoint. No key is
@@ -324,7 +324,7 @@ clean, instead of merging stale rows with migrated ones.
 The ladder currently has two rungs, and they compose in one pass and one
 write: **version 1** normalizes near-miss markers and upgrades legacy raw
 frontmatter props; **version 2** mints page ids
-(docs/page-identity-design.md) — re-keying every page still named by its
+(docs/archive/page-identity-design.md) — re-keying every page still named by its
 title, moving that name into `text` (its `props` carry over unchanged), and
 re-pointing every link row that named it. The old id is not preserved as an
 address: a pre-migration `/notes/<title>` URL no longer resolves and falls
@@ -565,7 +565,7 @@ Until this architecture landed, Ruminate was a git app: notes were markdown
 files in a GitHub repository cloned into the browser (isomorphic-git +
 lightning-fs), synced by a pull/commit/push state machine, with version
 history, merge drivers, conflicted-copy notes, and a repo-selection screen.
-That architecture is recorded in [architecture-notes.md](./architecture-notes.md)
+That architecture is recorded in [architecture-notes.md](./archive/architecture-notes.md)
 and in git history (`main` holds the git app until this branch merges). The
 database architecture was built alongside it in phases — the `NoteStore`
 contract and shared schema first, then the local
