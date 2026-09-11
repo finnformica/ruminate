@@ -1,5 +1,19 @@
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
+import type { Processor } from "unified"
+
+/**
+ * Switch off markdown's indented-code rule for block bodies. A block is one
+ * line of an outline: indentation is structure (the row's depth), never
+ * syntax, so text that happens to begin with a tab or four spaces (pasted
+ * from elsewhere, say) must read as text. Left on, such a line rendered as a
+ * `<pre>` code chip that never wrapped, running off a narrow screen.
+ */
+function remarkNoIndentedCode(this: Processor) {
+  const data = this.data() as { micromarkExtensions?: unknown[] }
+  const extensions = (data.micromarkExtensions ??= [])
+  extensions.push({ disable: { null: ["codeIndented"] } })
+}
 
 /** Renders a single block's content *inline* (bold/italic/links/code spans).
  * An empty block renders nothing: the row keeps its line height on its own,
@@ -8,7 +22,7 @@ export function BlockContent({ content }: { content: string }) {
   if (!content.trim()) return null
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkNoIndentedCode]}
       components={{
         p: ({ children }) => <>{children}</>,
         ul: ({ children }) => <span>{children}</span>,

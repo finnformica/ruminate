@@ -109,6 +109,21 @@ function serializedLines(getByTestId: (id: string) => HTMLElement): string[] {
 }
 
 describe("BlockEditor text wrapping", () => {
+  it("a line beginning with a tab is text, not an indented code block", () => {
+    // Markdown cannot express this (a leading tab would nest), so build it.
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a"],
+      blocks: {
+        a: { id: "a", type: "text", text: "\tTabbed prose that must wrap", children: [] },
+      },
+    }
+    const { container } = render(<Harness initialDoc={doc} />)
+    const body = container.querySelector('[data-testid="block-body"]')!
+    expect(body.querySelector("pre, code")).toBeNull()
+    expect(body.textContent).toContain("Tabbed prose that must wrap")
+  })
+
   it("lets a long unbroken word (a URL) break instead of overflowing the row", () => {
     const { container } = render(
       <Harness initial={"https://example.com/a/very/long/path/that/never/breaks"} />,
