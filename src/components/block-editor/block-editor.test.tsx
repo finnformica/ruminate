@@ -693,7 +693,7 @@ describe("paste as link (Ruminate payload with ids)", () => {
     expect(ids.filter((id) => id === idP)).toHaveLength(2)
   })
 
-  it("renders a loop's closing row once, marked, with nothing beneath it", () => {
+  it("renders a loop's closing row once, with an inert chevron and nothing beneath it", () => {
     const doc: BlockDoc = {
       props: null,
       rootBlockIds: ["a"],
@@ -706,9 +706,21 @@ describe("paste as link (Ruminate payload with ids)", () => {
     expect(serializedLines(getByTestId)).toEqual(["- A", "  - B", "    - A"])
     const rows = container.querySelectorAll("[data-occurrence]")
     expect([...rows].map((r) => r.getAttribute("data-occurrence"))).toEqual(["a", "a/b", "a/b/a"])
-    expect(container.querySelectorAll('[data-testid="loop-marker"]')).toHaveLength(1)
-    // Nothing to fold on the closing row: no collapse toggle under it.
+    // The closing row keeps a chevron — the block has children, above it —
+    // pinned, inert and explained, never a working fold toggle.
     expect(rows[2].querySelector('[aria-label="Collapse"], [aria-label="Expand"]')).toBeNull()
+    const loop = rows[2].querySelector<HTMLButtonElement>(
+      '[aria-label="Loops back to a block above"]',
+    )!
+    expect(loop).not.toBeNull()
+    expect(loop.getAttribute("aria-disabled")).toBe("true")
+    expect(loop.className).toContain("cursor-not-allowed")
+    expect(loop.className).toContain("block-toggle-pinned")
+    fireEvent.click(loop)
+    expect(serializedLines(getByTestId)).toEqual(["- A", "  - B", "    - A"])
+    // Ordinary parents are unchanged: a real toggle, no explanation.
+    expect(rows[0].querySelector('[aria-label="Collapse"]')).not.toBeNull()
+    expect(container.querySelectorAll('[aria-label="Loops back to a block above"]')).toHaveLength(1)
   })
 
   it("keeps the same ids through a cut + paste (a true move)", () => {
