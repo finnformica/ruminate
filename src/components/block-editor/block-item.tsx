@@ -123,6 +123,11 @@ export interface BlockDebugOptions {
   upstreamOf?: (id: string) => readonly string[]
 }
 
+/** The scale names the stylesheet keys a heading's surface reach off, by
+ * outline depth — the same steps as `headingScale`; deeper headings are at
+ * body scale and keep the ordinary surface. */
+const HEADING_SCALE_NAMES: Record<number, "2xl" | "xl" | "lg"> = { 0: "2xl", 1: "xl", 2: "lg" }
+
 /** Row geometry, in px. Each level indents by `INDENT`: the guide line hangs
  * from the parent's key — a 1px rule under the centre of the 15px marker
  * slot, which starts 4px into the content column (the highlight surface's
@@ -795,6 +800,10 @@ export function BlockItem({
           // targets this, not the row wrapper, so a heading's top margin can't
           // distort where the highlight lands.
           data-block-line
+          // A heading's surface reaches further left at the larger scales
+          // (`[data-heading-scale]` in block-editor.css), so its chevron and
+          // `#` sit as far from the left edge as from the top and bottom.
+          data-heading-scale={kind.slot === "hash" ? HEADING_SCALE_NAMES[depth] : undefined}
           className={cx(
             // Negative margin + padding pairs grow the highlight surface
             // while the text (and every marker) stays exactly where it was —

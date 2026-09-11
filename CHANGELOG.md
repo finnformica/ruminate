@@ -14,6 +14,10 @@
 
 ### Improved
 
+- A selected heading's `#` now takes a tint of the accent too, a shade deeper than its usual grey, so it sits with the highlighted text rather than beside it in plain grey.
+- A heading's highlight now reaches a little further left at the larger sizes, so the collapse arrow (and the `#` it stands in for) sits the same distance from the left edge as from the top and bottom; the text itself does not move.
+- The picture alignment toolbar's corners now follow its buttons' corners, so the ends no longer look squeezed.
+
 - Keyboard shortcuts are drawn as keycaps everywhere, the way the help panel's reference already drew them: in tooltips, menu items, the sidebar, the command menu and the search box's hint, a shortcut is a row of small keys rather than a run of characters, so it reads the same wherever it appears. Keyboard shortcuts show where the buttons are. The sidebar lists the keys beside Notes, Calendar, Settings and Help (<kbd>g</kbd> then <kbd>n</kbd>, <kbd>g</kbd> then <kbd>d</kbd>, <kbd>g</kbd> then <kbd>s</kbd>, <kbd>⌘</kbd> <kbd>/</kbd>), the command menu's Jump to items show the same chords, and the back and forward buttons' tooltips name <kbd>⌘</kbd> <kbd>[</kbd> and <kbd>⌘</kbd> <kbd>]</kbd>. Touch screens, which have no keys to press, show none of them.
 - The settings in the Editor section sit apart from each other rather than running together.
 - A note's actions button in the sidebar sits inside the note's own row. It appears at the row's end when you hover the note, evenly inset from the row's edge like the collapse arrow in a block, and the title shortens with an ellipsis to make room, rather than a separate pill appearing beside a narrower row.

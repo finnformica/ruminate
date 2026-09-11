@@ -114,7 +114,14 @@ asks for it.
    its parent's scale (the titles' 3xl, each heading's depth size and bold),
    so the hash is always the same size as the text beside it, only recolored
    to tertiary. A large heading's hash outgrows the slot and overflows left,
-   past the surface's edge — the text column never moves. The note title's
+   past the surface's edge — the text column never moves. At the three
+   larger heading scales the surface itself reaches further left
+   (`[data-heading-scale]`, block-editor.css), by exactly the amount that
+   makes the chevron's square as far from the left edge as from the top and
+   bottom of the taller line; still a negative-margin + padding pair, so the
+   text column is untouched. Selected, the hash takes a quiet accent tint of
+   its own (`.block-hash`): the selection's text tint never reaches an
+   element with explicit ink. The note title's
    hash sits in the same slot, so the title reads as the outline's top
    heading with its text at the block text column. Unlike the bullet and
    number the hash is NOT a zoom target — it reads as typography, and zoom

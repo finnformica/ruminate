@@ -7,12 +7,13 @@ import { cx } from "../../utils/cx"
  * Deliberately dumb: it carries **no typography of its own** (no size, weight,
  * line-height, or tracking) so it inherits the parent's entirely — the whole
  * point is that the hash is always exactly the size of the text it labels.
- * Only the ink changes (tertiary: chrome, not content). Positioning is the
- * consumer's job, via `className`.
+ * Only the ink changes (tertiary: chrome, not content) — and, in a selected
+ * block row, a quiet accent tint of its own (`.block-hash` in
+ * block-editor.css). Positioning is the consumer's job, via `className`.
  */
 export function Hash({ className }: { className?: string }) {
   return (
-    <span aria-hidden className={cx("select-none text-text-tertiary", className)}>
+    <span aria-hidden className={cx("block-hash select-none text-text-tertiary", className)}>
       #
     </span>
   )

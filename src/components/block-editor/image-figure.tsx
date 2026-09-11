@@ -281,7 +281,14 @@ export function ImageFigure({
               role="toolbar"
               aria-label="Image layout"
               data-testid="image-toolbar"
-              className={cx("card-2 absolute right-2 top-2 flex gap-0.5 rounded-md p-0.5", reveal)}
+              className={cx(
+                "absolute right-2 top-2 flex gap-0.5 p-0.5",
+                // The card surface without `card`'s radius: the corners are
+                // concentric with the buttons' — their 4px plus the 2px of
+                // padding around them — so nothing is squeezed at the ends.
+                "rounded-[6px] bg-bg-overlay-backdrop shadow-lg ring-1 ring-[var(--neutral-a3)] backdrop-blur-lg dark:ring-inset",
+                reveal,
+              )}
             >
               {IMAGE_ALIGNS.map((option) => {
                 const Icon = ALIGN_ICONS[option]
@@ -297,7 +304,12 @@ export function ImageFigure({
                       event.stopPropagation()
                       if (option !== align) setLayout({ align: option })
                     }}
-                    className={cx("px-1.5", option === align && "bg-bg-secondary text-text")}
+                    // The small radius: on a 24px button the 8px base reads
+                    // as a pill, and the toolbar's corners follow this one.
+                    className={cx(
+                      "rounded-sm px-1.5",
+                      option === align && "bg-bg-secondary text-text",
+                    )}
                   >
                     <Icon />
                   </IconButton>

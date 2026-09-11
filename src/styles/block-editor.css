@@ -69,6 +69,54 @@
   background-color: color-mix(in srgb, white 9%, var(--color-bg));
 }
 
+/* ── Selected heading's `#` ──────────────────────────────────────────────────
+ * The hash is chrome with an ink of its own, so the selection's text tint
+ * (above) never reaches it, and it sat beside the lit heading as a grey
+ * stranger. Selected, it takes a quieter tint of its own: the accent's text
+ * step over the SECONDARY ink — a shade more present than its tertiary rest,
+ * well short of the text's half-accent — so it reads as part of the selected
+ * row without competing with the words. The inactive selection drains it
+ * back to its rest, as it drains the text. */
+.block-highlight .block-hash {
+  color: color-mix(in srgb, var(--accent-11) 40%, var(--color-text-secondary));
+}
+
+.block-highlight.block-highlight-inactive .block-hash {
+  color: var(--color-text-tertiary);
+}
+
+/* ── Heading surface reach ───────────────────────────────────────────────────
+ * A heading's line is taller than a paragraph's, so the collapse chevron's
+ * 20px square, centred on the marker slot, sits well inside the surface's
+ * top and bottom edges at the larger scales (~11px at the top scale) but only
+ * 3.5px inside its left edge (measured: the slot starts 4px in and the
+ * square, centred on it, outgrows it by 2.5px a side, less a 2px lean of the
+ * heading's slot). The surface reaches further left on such a heading —
+ * by exactly that difference — so the chevron, and the `#` it swaps with,
+ * sit the same distance from every edge. A negative margin paired with
+ * padding, as every other reach of the surface: the text column never
+ * moves. The reach is the scale's own line box (font size × leading, as
+ * `headingScale` sets them) plus the surface's 2px above and below, less the
+ * 20px square, halved, less the 3.5px the square already has — so it follows
+ * the touch-screen type scale too. Unlayered, so it wins over the line's
+ * `-ml-0.5 pl-1.5` utilities. */
+[data-block-line][data-heading-scale] {
+  margin-left: calc(-2px - var(--heading-reach));
+  padding-left: calc(6px + var(--heading-reach));
+}
+
+[data-block-line][data-heading-scale="2xl"] {
+  --heading-reach: calc((var(--font-size-2xl) * 1.25 - 23px) / 2);
+}
+
+[data-block-line][data-heading-scale="xl"] {
+  --heading-reach: calc((var(--font-size-xl) * 1.25 - 23px) / 2);
+}
+
+[data-block-line][data-heading-scale="lg"] {
+  --heading-reach: calc((var(--font-size-lg) * 1.4 - 23px) / 2);
+}
+
 /* ── Neutral hover ───────────────────────────────────────────────────────────
  * Non-selected lines in an editable editor get a whisper of neutral on hover —
  * enough to say "this row is interactive", one clear step below selection.
