@@ -123,7 +123,7 @@ Design notes, and why:
   siblings of one parent, a handful of rows).
 - **No stored upstream, no second direction.** `link_destination` _is_ the
   reverse edge — maintained atomically by the engine, zero drift risk. The
-  store exposes `upstream(id)` / `downstream(id)` as first-class methods so
+  in-memory snapshot (`buildGraphSnapshot`) indexes the reverse direction, so
   callers never care that one direction is an index scan.
 - **`kind` is `'child'` only, for now.** Tags stay derived from `text` at
   load (the v1 links table was a derived index). Wikilinks were removed as a
@@ -226,11 +226,11 @@ tested harder than anything else:
    location; delete-rescue re-parenting; the cycle rejection; ol renumbering;
    unicode/whitespace preservation inside `text`; sort-key collision on
    concurrent same-gap inserts (deterministic tiebreak).
-4. **Conformance suite.** `describeNoteStoreConformance` grows the graph
-   operations (multi-parent add/remove, delete-rescue, cycle rejection,
-   ordered insertion) and runs against the local store; the D1 replica
-   handler is exercised by the existing live e2e script, updated for
-   node + link rows.
+4. **Store tests.** `sql-note-store.test.ts` pins the row-level behaviour
+   of ops (diffs, tombstones, the migration ladder); the graph operations
+   (multi-parent add/remove, delete-rescue, cycle dropping, ordered
+   insertion) are pinned in `ops.test.ts`; the D1 replica handler is
+   exercised by the existing live e2e script, updated for node + link rows.
 
 ## Sync
 

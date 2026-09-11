@@ -26,11 +26,12 @@ import type { D1NoteSource } from "./d1-note-source"
 import { PAGE_TYPE, docToGraph, pageDoc, rollup } from "./graph"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
-import { openSqlNoteStore, type SqlNoteStore } from "./sql-note-store"
+import type { NoteStore } from "./note-store"
+import { openSqlNoteStore } from "./sql-note-store"
 
 /**
  * Boot-flow tests for database-authoritative mode, at the highest level the
- * node harness allows: a REAL SqlNoteStore (node:sqlite, same migrations as
+ * node harness allows: a REAL NoteStore (node:sqlite, same migrations as
  * production), with only the network (D1 source) and the push loop stubbed.
  */
 
@@ -109,7 +110,7 @@ function remoteDeletion(
 /** Seed a store that a CURRENT client would have left behind: notes, a pull
  * cursor, and this release's cache generation (see CACHE_GENERATION). */
 async function boot(options: {
-  store?: SqlNoteStore
+  store?: NoteStore
   source: D1NoteSource
   replica?: ReplicaSyncHandle | null
   owner?: string
@@ -157,7 +158,28 @@ afterEach(async () => {
 const NOTE_A = "- A\n  id:: blk_a000000000\n"
 const NOTE_B = "- B\n  id:: blk_b000000000\n"
 
-/** The generation `database-mode.ts` expects a local cache to carry. */
+/** Save pages as the app does: each doc diffed against the live graph into
+ * ops, applied in turn. Markdown is only the fixture's spelling. */
+async function seedNotes(store: NoteStore, notes: Record<string, string>) {
+  for (const [id, markdown] of Object.entries(notes)) {
+    await store.applyOps(docToOps(id, parse(markdown), await store.getGraph()))
+  }
+}
+
+/** A page's markdown projection off the store's live graph, or null. */
+const noteOf = async (store: NoteStore, id: string) => rollup(id, await store.getGraph())
+
+/** Every page's markdown projection, keyed by id — what the store holds. */
+async function notesOf(store: NoteStore): Promise<Record<string, string>> {
+  const graph = await store.getGraph()
+  const notes: Record<string, string> = {}
+  for (const node of graph.nodes.values()) {
+    if (node.type !== PAGE_TYPE) continue
+    const markdown = rollup(node.id, graph)
+    if (markdown !== null) notes[node.id] = markdown
+  }
+  return notes
+}
 
 /** A local store as the current app leaves it: rows, a cursor, and the cache
  * generation those rows belong to. */
@@ -168,7 +190,7 @@ async function seededStore(
   owner?: string,
 ) {
   const store = await openSqlNoteStore(createNodeSqlDriver())
-  await store.writeNotes(notes)
+  await seedNotes(store, notes)
   await store.setMeta("d1_pull_cursor", cursor)
   await store.setMeta("cache_generation", generation)
   if (owner !== undefined) await store.setMeta("store_owner", owner)
@@ -183,7 +205,7 @@ describe("database mode boot", () => {
     const store = await boot({ source })
 
     expect(calls.full).toBe(1)
-    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A, "note-b": NOTE_B })
+    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A, "note-b": NOTE_B })
     expect(await store.getMeta("d1_pull_cursor")).toBe("1000")
     // The files atom carries the repo-file-shaped map every consumer reads.
     expect(files()).toEqual({ "note-a.md": NOTE_A, "note-b.md": NOTE_B })
@@ -201,7 +223,7 @@ describe("database mode boot", () => {
 
     expect(calls.full).toBe(0)
     expect(calls.since).toEqual(["500"])
-    expect(await store.getAllNotes()).toEqual({
+    expect(await notesOf(store)).toEqual({
       "note-a": "- local A\n  id:: blk_a000000000\n",
       "note-b": NOTE_B,
     })
@@ -232,7 +254,7 @@ describe("database mode saves", () => {
     expect(files()["note-a.md"]).toBe("- hello\n  id:: blk_a000000000\n") // optimistic, pre-flush
     await flushDatabaseMode()
 
-    expect(await store.getNote("note-a")).toBe("- hello\n  id:: blk_a000000000\n")
+    expect(await noteOf(store, "note-a")).toBe("- hello\n  id:: blk_a000000000\n")
     expect(calls.changes).toHaveLength(1)
     expect(calls.changes[0].noteIds).toEqual(["note-a"])
     const diff = calls.changes[0].diff
@@ -249,7 +271,7 @@ describe("database mode saves", () => {
     databaseApplyOps(deletePageOps("note-a", jotai.get(databaseGraphAtom)))
     await flushDatabaseMode()
 
-    expect(await store.getNote("note-a")).toBeNull()
+    expect(await noteOf(store, "note-a")).toBeNull()
     expect(files()).toEqual({})
     // Deleted rows travel as ordinary rows carrying `deleted_at` — that is how
     // the delete reaches another device — and they all share one stamp.
@@ -271,10 +293,10 @@ describe("database mode saves", () => {
     // On screen at once…
     expect(walked("note-a")).toBe(edited)
     // …in the store only once the run is written.
-    expect(await store.getNote("note-a")).toBe(NOTE_A)
+    expect(await noteOf(store, "note-a")).toBe(NOTE_A)
     await flushDatabaseMode()
 
-    expect(await store.getNote("note-a")).toBe(edited)
+    expect(await noteOf(store, "note-a")).toBe(edited)
     expect(files()["note-a.md"]).toBe(edited)
     expect(walked("note-a")).toBe(edited)
     expect(calls.changes).toHaveLength(1)
@@ -296,8 +318,8 @@ describe("database mode saves", () => {
     writeNote("note-b", NOTE_B)
     await flushDatabaseMode()
 
-    expect(await store.getNote("note-a")).toBe("- A123\n  id:: blk_a000000000\n")
-    expect(await store.getNote("note-b")).toBe(NOTE_B)
+    expect(await noteOf(store, "note-a")).toBe("- A123\n  id:: blk_a000000000\n")
+    expect(await noteOf(store, "note-b")).toBe(NOTE_B)
     expect(walked("note-a")).toBe("- A123\n  id:: blk_a000000000\n")
     expect(calls.changes).toHaveLength(1)
     expect(calls.changes[0].noteIds.sort()).toEqual(["note-a", "note-b"])
@@ -319,7 +341,7 @@ describe("database mode saves", () => {
     await flushDatabaseMode()
 
     expect(walked("note-a")).toBe("- typed\n  id:: blk_a000000000\n")
-    expect(await store.getNote("note-a")).toBe("- typed\n  id:: blk_a000000000\n")
+    expect(await noteOf(store, "note-a")).toBe("- typed\n  id:: blk_a000000000\n")
     expect(walked("note-b")).toBe(NOTE_B)
   })
 
@@ -332,7 +354,7 @@ describe("database mode saves", () => {
     expect(walked("note-a")).toBe(serialize(parse("")))
     await flushDatabaseMode()
 
-    expect(await store.getNote("note-a")).toBe(serialize(parse("")))
+    expect(await noteOf(store, "note-a")).toBe(serialize(parse("")))
     expect(files()["note-a.md"]).toBe(serialize(parse("")))
     expect(calls.changes[0].diff.nodes.map((n) => [n.id, n.deleted_at != null])).toEqual([
       ["blk_a000000000", true],
@@ -370,7 +392,7 @@ describe("database mode since-pulls", () => {
     requestDatabasePull()
     await flushDatabaseMode()
 
-    expect(await store.getAllNotes()).toEqual({ keep: KEEP_V2 })
+    expect(await notesOf(store)).toEqual({ keep: KEEP_V2 })
     expect(files()).toEqual({ "keep.md": KEEP_V2 })
     expect(await store.getMeta("d1_pull_cursor")).toBe("200")
   })
@@ -387,12 +409,12 @@ describe("database mode since-pulls", () => {
       since: () => remoteDeletion({ gone: GONE }, 200, "200"),
     })
     const store = await boot({ source })
-    expect(await store.getAllNotes()).toEqual({ keep: KEEP, gone: GONE })
+    expect(await notesOf(store)).toEqual({ keep: KEEP, gone: GONE })
 
     requestDatabasePull()
     await flushDatabaseMode()
 
-    expect(await store.getAllNotes()).toEqual({ keep: KEEP })
+    expect(await notesOf(store)).toEqual({ keep: KEEP })
     expect(files()).toEqual({ "keep.md": KEEP })
     expect(await store.getMeta("d1_pull_cursor")).toBe("200")
   })
@@ -408,7 +430,7 @@ describe("database mode since-pulls", () => {
     requestDatabasePull()
     await flushDatabaseMode()
 
-    expect(await store.getAllNotes()).toEqual({ keep: KEEP })
+    expect(await notesOf(store)).toEqual({ keep: KEEP })
   })
 
   it("never clobbers notes with queued local pushes (last-writer-wins by push)", async () => {
@@ -430,8 +452,8 @@ describe("database mode since-pulls", () => {
     await flushDatabaseMode()
 
     // The pull neither reverted the local edit nor deleted the unpushed note.
-    expect(await store.getNote("note-a")).toBe(LOCAL_EDIT)
-    expect(await store.getNote("created")).toBe(CREATED)
+    expect(await noteOf(store, "note-a")).toBe(LOCAL_EDIT)
+    expect(await noteOf(store, "created")).toBe(CREATED)
   })
 })
 
@@ -473,7 +495,7 @@ describe("cache generation", () => {
     // whole point: a since-pull would have merged two generations.
     expect(calls.full).toBe(1)
     expect(calls.since).toEqual([])
-    expect(await store.getAllNotes()).toEqual({ "note-b": NOTE_B })
+    expect(await notesOf(store)).toEqual({ "note-b": NOTE_B })
     expect(files()).toEqual({ "note-b.md": NOTE_B })
     expect(await store.getMeta("cache_generation")).toBe(CACHE_GENERATION)
     expect(await store.getMeta("d1_pull_cursor")).toBe("900")
@@ -489,7 +511,7 @@ describe("cache generation", () => {
 
     expect(calls.full).toBe(0)
     expect(calls.since).toEqual(["500"])
-    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
+    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
   })
 
   it("a fresh store boots normally and records the generation", async () => {
@@ -499,7 +521,7 @@ describe("cache generation", () => {
     const store = await boot({ source })
 
     expect(calls.full).toBe(1)
-    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
+    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
     expect(await store.getMeta("cache_generation")).toBe(CACHE_GENERATION)
     expect(await store.getMeta("d1_pull_cursor")).toBe("1000")
   })
@@ -514,7 +536,7 @@ describe("cache generation", () => {
     const store = await boot({ store: seeded, source, owner: "42" })
 
     expect(await store.getMeta("store_owner")).toBe("42")
-    expect(await store.getAllNotes()).toEqual({})
+    expect(await notesOf(store)).toEqual({})
   })
 })
 
@@ -523,7 +545,7 @@ describe("owner binding", () => {
     const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }, 1, "1000") })
     const store = await boot({ source, owner: "42" })
     expect(await store.getMeta("store_owner")).toBe("42")
-    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
+    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
   })
 
   it("the same owner keeps the local cache and cursor (since-pull, no wipe)", async () => {
@@ -533,7 +555,7 @@ describe("owner binding", () => {
     const store = await boot({ store: seeded, source, owner: "42" })
     expect(calls.since).toEqual(["500"])
     expect(calls.full).toBe(0)
-    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
+    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
   })
 
   it("a different signed-in identity wipes the local cache before anything renders", async () => {
@@ -547,7 +569,7 @@ describe("owner binding", () => {
     expect(await store.getMeta("store_owner")).toBe("7")
     expect(calls.full).toBe(1)
     expect(calls.since).toEqual([])
-    expect(await store.getAllNotes()).toEqual({})
+    expect(await notesOf(store)).toEqual({})
     expect(files()).toEqual({})
   })
 
@@ -557,7 +579,7 @@ describe("owner binding", () => {
     const { source } = stubSource({ since: (cursor) => remoteChanges({}, 2, cursor) })
     const store = await boot({ store: seeded, source })
     expect(await store.getMeta("store_owner")).toBe("42")
-    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
+    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
   })
 })
 
@@ -567,7 +589,7 @@ describe("cache generation", () => {
     // stamp, and possibly rows the replica hard-deleted before tombstones
     // existed — which nothing would ever tell this client about again.
     const stale = await openSqlNoteStore(createNodeSqlDriver())
-    await stale.writeNotes({ "note-a": NOTE_A, purged: "- purged\n  id:: blk_purged000\n" })
+    await seedNotes(stale, { "note-a": NOTE_A, purged: "- purged\n  id:: blk_purged000\n" })
     await stale.setMeta("d1_pull_cursor", "500")
 
     const { source, calls } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }, 1, "900") })
@@ -575,7 +597,7 @@ describe("cache generation", () => {
 
     expect(calls.since).toEqual([]) // the cursor went with the cache
     expect(calls.full).toBe(1)
-    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
+    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
     expect(files()).toEqual({ "note-a.md": NOTE_A })
     expect(await store.getMeta("cache_generation")).toBe(CACHE_GENERATION)
     expect(await store.getMeta("d1_pull_cursor")).toBe("900")
@@ -589,7 +611,7 @@ describe("cache generation", () => {
 
     expect(calls.full).toBe(0)
     expect(calls.since).toEqual(["500"])
-    expect(await store.getAllNotes()).toEqual({ "note-a": NOTE_A })
+    expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
   })
 })
 

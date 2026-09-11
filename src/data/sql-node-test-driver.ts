@@ -18,7 +18,7 @@ const { DatabaseSync } = sqlite
 
 /**
  * A `SqlDriver` over `node:sqlite`'s synchronous in-memory database — the test
- * engine behind the conformance suite. The SQL store runs the exact same
+ * engine behind the store tests. The SQL store runs the exact same
  * statements here that the wasm worker runs in the browser, with no native
  * devDependency and no wasm loading in node.
  */

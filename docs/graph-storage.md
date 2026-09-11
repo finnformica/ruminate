@@ -180,18 +180,18 @@ for later rather than half-built here. The v2 shape was chosen so that
 migration is additive: every mutation is already a text edit, a type change,
 or a link-row change.
 
-## The contract: `NoteStore` + conformance suite
+## The contract: `NoteStore`
 
-`src/data/note-store-conformance.ts` exports
-`describeNoteStoreConformance(name, makeStore)` — an executable specification
-covering write/read/delete round-trips, id-keyed semantics, batch writes, and
-the graph semantics of graph-schema-v2.md: `upstream`/`downstream`
-containment queries, multi-parent `addLink` (the shared node renders fully in
-every location), ordered insertion by fractional sort key, cycle rejection at
-write, and delete-rescue (unlinking a node's last occurrence re-parents its
-orphaned children to the page root). The SQL store
-(`src/data/sql-note-store.test.ts`) passes it; anything the suite doesn't pin
-down is an implementation detail a store may choose freely.
+`src/data/note-store.ts` is the whole storage seam: `getGraph` (the live
+rows as a `GraphSnapshot`), `applyOps` (a batch of graph ops landed verbatim
+as row upserts and tombstones, returning the row diff the replica pushes),
+`getAllRows` / `applyPull` (the replica exchange, tombstones included),
+`clear` (a cache reset), and `getMeta` / `setMeta` for the pull cursor and
+owner. The store never sees markdown: what to write is decided above it
+(`docToOps`, `deleteBlockOps` in `src/data/ops.ts`), and the markdown
+projection is `rollup` over the snapshot. `src/data/sql-note-store.test.ts`
+pins the row-level behaviour — diffs, one timestamp per delete, tombstones
+that render as absent but travel on push, the migration ladder.
 
 ## Schema (`migrations/0001` → `0002` → `0004`)
 
@@ -556,9 +556,9 @@ The rules, per pasted root (`embeddedPasteFragment` in `block-editor.tsx`):
   remains the backstop.
 
 Edit-mode (textarea) paste is unchanged — a caret splice is textual. On the
-store side, `planNoteWrite` already had the required property (pinned in the
-conformance suite): a save whose diff drops a node that is still linked from
-another note only unlinks it — node rows and the other note's links survive.
+store side, `docToOps` has the required property (pinned in `ops.test.ts`): a
+save whose diff drops a node that is still linked from another note only
+unlinks it — the node row and the other note's link survive.
 
 ## History: the git era, and schema v1
 
@@ -569,7 +569,7 @@ history, merge drivers, conflicted-copy notes, and a repo-selection screen.
 That architecture is recorded in [architecture-notes.md](./architecture-notes.md)
 and in git history (`main` holds the git app until this branch merges). The
 database architecture was built alongside it in phases — the `NoteStore`
-contract + conformance suite and shared schema first, then the local
+contract and shared schema first, then the local
 sqlite-wasm store validated by a dual-write/shadow-read mirror while git
 stayed canonical, then write-behind D1 replication, then the cutover — and
 the git path, the storage flag, and the mirror were deleted once the database

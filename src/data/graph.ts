@@ -19,9 +19,10 @@ import { emittedPageTitle } from "./page-identity"
  * - `rollup` — the markdown **projection** of one page: `serialize` over that
  *   page's doc. There is one walk and one emitter in the codebase.
  * - `docToParts` — the **write** direction: a doc's typed blocks become node
- *   rows and per-parent child orders, with no markdown in between. The store
- *   reconciles those against the rows it holds (`planNoteWrite`). Markdown
- *   enters only through `parse` (`docToGraphParts`, the import path).
+ *   rows and per-parent child orders, with no markdown in between. `docToOps`
+ *   diffs those against the snapshot into ops, which the store applies
+ *   verbatim. Markdown enters only through `parse` (`docToGraphParts`, the
+ *   import path).
  *
  * The invariant everything rests on: for canonical markdown (the fixpoint of
  * `serialize(parse(md))`), `rollup(docToGraph(md))` is itself a fixpoint of

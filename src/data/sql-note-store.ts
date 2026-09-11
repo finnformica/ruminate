@@ -8,21 +8,8 @@ import {
   type LinkRow,
   type NodeRow,
 } from "../../worker/handlers/replica-payload"
-import { parse } from "../blocks/parse"
-import type { BlockDoc } from "../blocks/types"
-import type { NoteId } from "../schema"
 import { ensureCorpusSchema } from "./corpus-schema"
-import {
-  CHILD_KIND,
-  PAGE_TYPE,
-  buildGraphSnapshot,
-  docToGraph,
-  docToParts,
-  reconcileSortKeys,
-  rollup,
-  sortKeyBetween,
-  type GraphSnapshot,
-} from "./graph"
+import { CHILD_KIND, buildGraphSnapshot } from "./graph"
 import type { NoteStore } from "./note-store"
 import type { Op } from "./ops"
 import type { SqlDriver, SqlStatement } from "./sql-driver"
@@ -35,10 +22,8 @@ import type { SqlDriver, SqlStatement } from "./sql-driver"
  * tests) and the exact migration files that initialize the D1 replica — in the
  * **single-tenant** shape (`corpus-schema.ts`): one user per browser profile,
  * so no `user_id` column, but the same `deleted_at` soft deletes the replica
- * has. The graph is truth; markdown reads are the rollup. Writes ingest
- * markdown through `docToGraphParts` and land as row *diffs* — unchanged rows
- * keep their `updated_at` (and sort keys), which is what makes per-row LWW
- * sync meaningful.
+ * has. Ops land as row *diffs* — only the rows an op names are written, with
+ * a fresh `updated_at` — which is what makes per-row LWW sync meaningful.
  *
  * **Soft deletes.** Nothing here hard-deletes a corpus row. A delete stamps
  * `deleted_at` (and bumps `updated_at`, so the tombstone replicates like any
@@ -49,24 +34,6 @@ import type { SqlDriver, SqlStatement } from "./sql-driver"
  * cascade at write time and a link to a deleted node survives as the position
  * a restore would put it back into.
  */
-export interface SqlNoteStore extends NoteStore {
-  /** Wipe the graph and repopulate from a full corpus, in one transaction. */
-  replaceAll(notes: Record<NoteId, string>): Promise<void>
-  /** LIVE row counts, for the diagnostics panel. */
-  counts(): Promise<{ pages: number; nodes: number; links: number }>
-  /** Every row of both tables, **tombstones included** — the replica
-   * full-push source, and a delete only reaches other devices if it travels. */
-  getAllRows(): Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
-  /** Apply a planned pull (row upserts + deletes) in one transaction. Rows
-   * land verbatim — remote `updated_at` and `deleted_at` are preserved. */
-  applyPull(plan: GraphDiff): Promise<void>
-  /** Read a `meta` key (e.g. the D1 pull cursor), or null when unset. */
-  getMeta(key: string): Promise<string | null>
-  /** Write a `meta` key. Kept in the same database as the rows it describes,
-   * so wiping the store can never leave a stale cursor behind. */
-  setMeta(key: string, value: string): Promise<void>
-  close(): Promise<void>
-}
 
 /**
  * Open a `NoteStore` on `driver`, applying the migrations when the database is
@@ -75,153 +42,21 @@ export interface SqlNoteStore extends NoteStore {
  * columns, and anything else unrecognized is reset. The ladder itself lives in
  * `corpus-schema.ts`, shared with the D1 corpus.
  */
-export async function openSqlNoteStore(driver: SqlDriver): Promise<SqlNoteStore> {
+export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
   await ensureCorpusSchema(driver, { init: migration0001, nodes: migration0002 }, "single")
 
-  const loadGraph = () => loadMemGraph(driver)
-
-  const runWrite = async (write: (writer: GraphWriter) => void): Promise<GraphDiff> => {
-    const writer = createGraphWriter(await loadGraph())
-    write(writer)
-    const { statements, diff } = emitWrite(writer)
-    if (statements.length > 0) await driver.batch(statements)
-    return diff
-  }
-
-  const snapshotOf = (mem: MemGraph): GraphSnapshot =>
-    buildGraphSnapshot([...mem.nodes.values()], [...mem.links.values()])
-
   return {
-    getGraph: async () => snapshotOf(await loadGraph()),
-
-    getNote: async (id) => rollup(id, snapshotOf(await loadGraph())),
-
-    getAllNotes: async () => {
-      const mem = await loadGraph()
-      const snapshot = buildGraphSnapshot([...mem.nodes.values()], [...mem.links.values()])
-      const notes: Record<NoteId, string> = {}
-      for (const node of mem.nodes.values()) {
-        if (node.type !== PAGE_TYPE) continue
-        const markdown = rollup(node.id, snapshot)
-        if (markdown !== null) notes[node.id] = markdown
-      }
-      return notes
+    getGraph: async () => {
+      const mem = await loadMemGraph(driver)
+      return buildGraphSnapshot([...mem.nodes.values()], [...mem.links.values()])
     },
 
-    writeNotes: (updates) =>
-      runWrite((writer) => {
-        for (const [id, content] of Object.entries(updates)) {
-          if (content === null) planNoteDelete(writer, id)
-          else planNoteWrite(writer, id, parse(content))
-        }
-      }),
-
-    writeNoteDocs: (updates) =>
-      runWrite((writer) => {
-        for (const [id, doc] of Object.entries(updates)) {
-          if (doc === null) planNoteDelete(writer, id)
-          else planNoteWrite(writer, id, doc)
-        }
-      }),
-
-    applyOps: (ops) =>
-      runWrite((writer) => {
-        for (const op of ops) planOp(writer, op)
-      }),
-
-    deleteNote: (id) => runWrite((writer) => planNoteDelete(writer, id)),
-
-    upstream: async (id) => {
-      const rows = await driver.exec(
-        "SELECT source_id FROM link WHERE destination_id = ? AND kind = ? " +
-          "AND deleted_at IS NULL " +
-          "AND source_id IN (SELECT id FROM nodes WHERE deleted_at IS NULL) " +
-          "AND destination_id IN (SELECT id FROM nodes WHERE deleted_at IS NULL) " +
-          "ORDER BY source_id",
-        [id, CHILD_KIND],
-      )
-      return rows.map((row) => String(row.source_id))
-    },
-
-    downstream: async (id) => {
-      const rows = await driver.exec(
-        "SELECT destination_id FROM link WHERE source_id = ? AND kind = ? " +
-          "AND deleted_at IS NULL " +
-          "AND source_id IN (SELECT id FROM nodes WHERE deleted_at IS NULL) " +
-          "AND destination_id IN (SELECT id FROM nodes WHERE deleted_at IS NULL) " +
-          "ORDER BY sort_key, destination_id",
-        [id, CHILD_KIND],
-      )
-      return rows.map((row) => String(row.destination_id))
-    },
-
-    addLink: async (sourceId, destinationId, position) => {
-      await runWrite((writer) => {
-        const { mem } = writer
-        if (!mem.nodes.has(sourceId)) throw new Error(`addLink: unknown source ${sourceId}`)
-        if (!mem.nodes.has(destinationId)) {
-          throw new Error(`addLink: unknown destination ${destinationId}`)
-        }
-        // Cycles are forbidden at write: reject when the source is reachable
-        // from the destination (the new edge would close a loop).
-        if (sourceId === destinationId || reaches(mem, destinationId, sourceId)) {
-          throw new Error("addLink: link would create a cycle")
-        }
-
-        const siblings = childLinksOf(mem, sourceId).filter(
-          (link) => link.destination_id !== destinationId,
-        )
-        let before: string | null = null
-        let after: string | null = null
-        if (position === undefined || position.after === undefined) {
-          before = siblings.length > 0 ? siblings[siblings.length - 1].sort_key : null
-        } else if (position.after === null) {
-          after = siblings.length > 0 ? siblings[0].sort_key : null
-        } else {
-          const index = siblings.findIndex((link) => link.destination_id === position.after)
-          if (index === -1) throw new Error(`addLink: unknown sibling ${position.after}`)
-          before = siblings[index].sort_key
-          after = index + 1 < siblings.length ? siblings[index + 1].sort_key : null
-        }
-        writer.upsertLink({
-          source_id: sourceId,
-          destination_id: destinationId,
-          kind: CHILD_KIND,
-          sort_key: sortKeyBetween(before, after),
-          updated_at: writer.now,
-        })
-      })
-    },
-
-    removeLink: async (sourceId, destinationId) => {
-      await runWrite((writer) => {
-        const { mem } = writer
-        if (!hasLink(mem, sourceId, destinationId)) return
-        // Rescue target: the page root of the context the removal happens in.
-        const pageRoot = findPageRoot(mem, sourceId)
-        writer.tombstoneLink(sourceId, destinationId, CHILD_KIND)
-        cascadeOrphans(writer, new Set([destinationId]), pageRoot)
-      })
-    },
-
-    replaceAll: async (notes) => {
-      const now = Date.now()
-      const statements: SqlStatement[] = [
-        // tenant-exempt: the repair path rebuilds the whole local corpus from
-        // the files atom — a wipe, not a delete, and tombstones would only
-        // resurrect the rows it is replacing.
-        { sql: "DELETE FROM link" },
-        // tenant-exempt: as above — replaceAll discards the local database.
-        { sql: "DELETE FROM nodes" },
-      ]
-      const nodeStatements: SqlStatement[] = []
-      const linkStatements: SqlStatement[] = []
-      for (const id of Object.keys(notes).sort()) {
-        const { nodes: rows, links } = docToGraph(id, notes[id], now)
-        for (const node of rows) nodeStatements.push(upsertNodeStatement(node))
-        for (const link of links) linkStatements.push(upsertLinkStatement(link))
-      }
-      await driver.batch([...statements, ...nodeStatements, ...linkStatements])
+    applyOps: async (ops) => {
+      const writer = createGraphWriter(await loadMemGraph(driver))
+      for (const op of ops) planOp(writer, op)
+      const { statements, diff } = emitWrite(writer)
+      if (statements.length > 0) await driver.batch(statements)
+      return diff
     },
 
     getAllRows: () => loadAllRows(driver),
@@ -251,6 +86,17 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<SqlNoteStore>
       if (statements.length > 0) await driver.batch(statements)
     },
 
+    clear: async () => {
+      await driver.batch([
+        // tenant-exempt: a cache reset discards the local database wholesale —
+        // a wipe, not a delete, and tombstones would only resurrect the rows
+        // the next pull replaces.
+        { sql: "DELETE FROM link" },
+        // tenant-exempt: as above.
+        { sql: "DELETE FROM nodes" },
+      ])
+    },
+
     getMeta: async (key) => {
       const rows = await driver.exec("SELECT value FROM meta WHERE key = ?", [key])
       return rows.length > 0 && rows[0].value != null ? String(rows[0].value) : null
@@ -265,24 +111,6 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<SqlNoteStore>
           params: [key, value],
         },
       ])
-    },
-
-    counts: async () => {
-      const rows = await driver.exec(
-        // Read-time discard applies to counts too: a retained link into a
-        // tombstoned node is not part of the graph anyone can see, so counting
-        // it would make the local and remote figures disagree for no reason.
-        "SELECT (SELECT COUNT(*) FROM nodes WHERE deleted_at IS NULL AND type = 'page') AS pages, " +
-          "(SELECT COUNT(*) FROM nodes WHERE deleted_at IS NULL) AS nodes, " +
-          "(SELECT COUNT(*) FROM link WHERE deleted_at IS NULL " +
-          "AND source_id IN (SELECT id FROM nodes WHERE deleted_at IS NULL) " +
-          "AND destination_id IN (SELECT id FROM nodes WHERE deleted_at IS NULL)) AS links",
-      )
-      return {
-        pages: Number(rows[0]?.pages ?? 0),
-        nodes: Number(rows[0]?.nodes ?? 0),
-        links: Number(rows[0]?.links ?? 0),
-      }
     },
 
     close: () => driver.close(),
@@ -337,89 +165,10 @@ async function loadAllRows(driver: SqlDriver): Promise<{ nodes: NodeRow[]; links
   return { nodes: nodeRows.map(toNodeRow), links: linkRows.map(toLinkRow) }
 }
 
-const hasLink = (mem: MemGraph, source: string, destination: string) =>
-  mem.links.has(linkMapKey(source, destination, CHILD_KIND))
-
-/**
- * A node's child links, in sibling order (sort key, destination tiebreak).
- * Read-time discard: a link whose destination is no longer live is skipped —
- * retained in storage, absent from the walk.
- */
-function childLinksOf(mem: MemGraph, id: string): LinkRow[] {
-  const out: LinkRow[] = []
-  for (const link of mem.links.values()) {
-    if (link.kind !== CHILD_KIND || link.source_id !== id) continue
-    if (!mem.nodes.has(link.destination_id)) continue
-    out.push(link)
-  }
-  return out.sort((a, b) =>
-    a.sort_key < b.sort_key
-      ? -1
-      : a.sort_key > b.sort_key
-        ? 1
-        : a.destination_id < b.destination_id
-          ? -1
-          : 1,
-  )
-}
-
-/** Sources of the LIVE child links pointing at `id` (see `childLinksOf`). */
-function parentIdsOf(mem: MemGraph, id: string): string[] {
-  const out: string[] = []
-  for (const link of mem.links.values()) {
-    if (link.kind !== CHILD_KIND || link.destination_id !== id) continue
-    if (!mem.nodes.has(link.source_id)) continue
-    out.push(link.source_id)
-  }
-  return out
-}
-
-/** Is `target` reachable from `from` over child links? (Cycle check.) */
-function reaches(mem: MemGraph, from: string, target: string): boolean {
-  const seen = new Set<string>()
-  const queue = [from]
-  while (queue.length > 0) {
-    const id = queue.pop() as string
-    if (id === target) return true
-    if (seen.has(id)) continue
-    seen.add(id)
-    for (const link of childLinksOf(mem, id)) queue.push(link.destination_id)
-  }
-  return false
-}
-
-/** Every node reachable from `rootId` (inclusive) over child links. */
-function subtreeIds(mem: MemGraph, rootId: string): Set<string> {
-  const seen = new Set<string>()
-  if (!mem.nodes.has(rootId)) return seen
-  const queue = [rootId]
-  while (queue.length > 0) {
-    const id = queue.pop() as string
-    if (seen.has(id)) continue
-    seen.add(id)
-    for (const link of childLinksOf(mem, id)) queue.push(link.destination_id)
-  }
-  return seen
-}
-
-/** Nearest page node at or above `id` (breadth-first over inbound links). */
-function findPageRoot(mem: MemGraph, id: string): string | null {
-  const seen = new Set<string>()
-  const queue = [id]
-  while (queue.length > 0) {
-    const current = queue.shift() as string
-    if (seen.has(current)) continue
-    seen.add(current)
-    if (mem.nodes.get(current)?.type === PAGE_TYPE) return current
-    queue.push(...parentIdsOf(mem, current))
-  }
-  return null
-}
-
 /**
  * Accumulates row changes for one transaction: mutates the in-memory (live)
- * graph immediately, so later planning in the same batch sees earlier changes,
- * and records the final row state per key. Every change — including a
+ * graph immediately, so later ops in the same batch see earlier changes, and
+ * records the final row state per key. Every change — including a
  * tombstone — is an upsert of a whole row, so the emitted statements and the
  * emitted diff are the same thing said twice.
  *
@@ -515,72 +264,6 @@ function emitWrite(writer: GraphWriter): { statements: SqlStatement[]; diff: Gra
   return { statements, diff: { ...emptyGraphDiff(), nodes, links } }
 }
 
-/**
- * Write one note's doc as a diff against the current graph: nodes whose
- * type/text/props changed are upserted (fresh `updated_at`), sibling orders
- * are reconciled so unchanged links keep their sort keys, nodes that fell out
- * of the note and have no other parent are tombstoned, and children orphaned
- * by those deletions are rescued to the page root. The doc's blocks are
- * already typed and marker-free; a block the doc names under two parents is
- * one row with two links.
- */
-function planNoteWrite(writer: GraphWriter, noteId: NoteId, doc: BlockDoc) {
-  const { mem, now } = writer
-  // Every OTHER page's id is reserved: a block row claiming one (a stray
-  // `id::` line from an external edit) must be re-minted, never allowed to
-  // clobber that page's node row. `docToParts` also guards `noteId` itself.
-  const reserved = new Set<string>()
-  for (const node of mem.nodes.values()) {
-    if (node.type === PAGE_TYPE && node.id !== noteId) reserved.add(node.id)
-  }
-  const { nodes, childrenOf } = docToParts(noteId, doc, now, reserved)
-
-  // Cycle guard (belt-and-braces — reachable only through cross-note id
-  // collisions): drop any desired edge that would close a loop, preferring
-  // the never-lose-work outcome over rejecting the whole save.
-  dropCycleCreatingEdges(mem, noteId, childrenOf)
-
-  const oldSubtree = subtreeIds(mem, noteId)
-  const newIds = new Set(nodes.map((node) => node.id))
-
-  for (const node of nodes) {
-    const old = mem.nodes.get(node.id)
-    if (!old || old.type !== node.type || old.text !== node.text || old.props !== node.props) {
-      writer.upsertNode(node)
-    }
-  }
-
-  for (const [parentId, desired] of childrenOf) {
-    const existingLinks = childLinksOf(mem, parentId)
-    const keys = reconcileSortKeys(
-      existingLinks.map((link) => ({ id: link.destination_id, sortKey: link.sort_key })),
-      desired,
-    )
-    const desiredSet = new Set(desired)
-    for (const link of existingLinks) {
-      if (!desiredSet.has(link.destination_id)) {
-        writer.tombstoneLink(parentId, link.destination_id, CHILD_KIND)
-      }
-    }
-    for (const destinationId of desired) {
-      const key = keys.get(destinationId) as string
-      const existing = mem.links.get(linkMapKey(parentId, destinationId, CHILD_KIND))
-      if (!existing || existing.sort_key !== key) {
-        writer.upsertLink({
-          source_id: parentId,
-          destination_id: destinationId,
-          kind: CHILD_KIND,
-          sort_key: key,
-          updated_at: now,
-        })
-      }
-    }
-  }
-
-  const candidates = new Set([...oldSubtree].filter((id) => !newIds.has(id)))
-  cascadeOrphans(writer, candidates, noteId)
-}
-
 /** One op as row writes. A `set*` on a node the store does not hold is
  * dropped (it was deleted underneath); everything else is verbatim. */
 function planOp(writer: GraphWriter, op: Op) {
@@ -623,76 +306,4 @@ function planOp(writer: GraphWriter, op: Op) {
       writer.tombstoneNode(op.id)
       return
   }
-}
-
-/** Delete a page: the page node is tombstoned, and every node that is thereby
- * left without any inbound link cascades away (multi-homed nodes survive). */
-function planNoteDelete(writer: GraphWriter, noteId: NoteId) {
-  const { mem } = writer
-  if (!mem.nodes.has(noteId)) return
-  const children = childLinksOf(mem, noteId).map((link) => link.destination_id)
-  writer.tombstoneNode(noteId)
-  cascadeOrphans(writer, new Set(children), null)
-}
-
-/**
- * Delete-rescue (docs/graph-schema-v2.md), unchanged by soft deletes: process
- * `candidates` — nodes whose last known occurrence may just have been
- * unlinked. A candidate that still has a live inbound link lives on.
- * Otherwise its row is tombstoned; each child left with no live inbound link
- * is either itself a candidate (cascades) or, when `rescueRootId` is a live
- * page, re-parented there with trailing sort keys. With no rescue target
- * (page deletion) orphans cascade away entirely.
- */
-function cascadeOrphans(writer: GraphWriter, candidates: Set<string>, rescueRootId: string | null) {
-  const { mem, now } = writer
-  const queue = [...candidates]
-  while (queue.length > 0) {
-    const id = queue.shift() as string
-    if (!mem.nodes.has(id)) continue
-    if (parentIdsOf(mem, id).length > 0) continue
-    const childIds = childLinksOf(mem, id).map((link) => link.destination_id)
-    writer.tombstoneNode(id)
-    for (const childId of childIds) {
-      if (!mem.nodes.has(childId) || parentIdsOf(mem, childId).length > 0) continue
-      const rescue =
-        rescueRootId !== null && !candidates.has(childId) && mem.nodes.has(rescueRootId)
-      if (rescue) {
-        const siblings = childLinksOf(mem, rescueRootId as string)
-        writer.upsertLink({
-          source_id: rescueRootId as string,
-          destination_id: childId,
-          kind: CHILD_KIND,
-          sort_key: sortKeyBetween(
-            siblings.length > 0 ? siblings[siblings.length - 1].sort_key : null,
-            null,
-          ),
-          updated_at: now,
-        })
-      } else {
-        queue.push(childId)
-      }
-    }
-  }
-}
-
-/** Remove desired edges that would make the graph cyclic: DFS the prospective
- * graph from the page and cut any back-edge. */
-function dropCycleCreatingEdges(mem: MemGraph, pageId: string, childrenOf: Map<string, string[]>) {
-  const childrenFor = (id: string): string[] =>
-    childrenOf.get(id) ?? childLinksOf(mem, id).map((link) => link.destination_id)
-
-  const onPath = new Set<string>()
-  const done = new Set<string>()
-  const visit = (id: string) => {
-    if (done.has(id)) return
-    onPath.add(id)
-    const children = childrenFor(id)
-    const keep = children.filter((childId) => !onPath.has(childId))
-    if (keep.length !== children.length && childrenOf.has(id)) childrenOf.set(id, keep)
-    for (const childId of keep) visit(childId)
-    onPath.delete(id)
-    done.add(id)
-  }
-  visit(pageId)
 }

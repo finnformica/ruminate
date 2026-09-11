@@ -12,7 +12,7 @@ import { PAGE_TYPE, buildGraphSnapshot, type GraphSnapshot } from "./graph"
 import { applyOps, pagesTouchedBy, type Op } from "./ops"
 import { resetReplicaAccess } from "./replica-access"
 import type { ReplicaSyncHandle } from "./replica-sync"
-import type { SqlNoteStore } from "./sql-note-store"
+import type { NoteStore } from "./note-store"
 import {
   OFF_STORAGE_DIAGNOSTICS,
   storageDiagnosticsAtom,
@@ -153,7 +153,7 @@ export interface DatabaseModeOptions {
   owner?: string
   /** Injectable for tests; defaults to the wasm worker driver. */
   openStore?: () => Promise<{
-    store: SqlNoteStore
+    store: NoteStore
     persistence: "opfs" | "memory"
     /** Why persistence degraded to memory (e.g. another tab holds OPFS). */
     persistenceReason?: "another-tab" | "unavailable" | null
@@ -162,7 +162,7 @@ export interface DatabaseModeOptions {
    * null to run without pushing. */
   openReplicaSync?: (
     getNoteCount: () => number,
-    getAllRows: SqlNoteStore["getAllRows"],
+    getAllRows: NoteStore["getAllRows"],
   ) => Promise<ReplicaSyncHandle | null>
   /** Injectable for tests; defaults to the real authed fetch source. */
   source?: D1NoteSource
@@ -171,7 +171,7 @@ export interface DatabaseModeOptions {
 
 interface DatabaseModeRuntime {
   options: DatabaseModeOptions
-  store: SqlNoteStore | null
+  store: NoteStore | null
   replica: ReplicaSyncHandle | null
   source: D1NoteSource
   pullRetryTimer: ReturnType<typeof setTimeout> | null
@@ -245,7 +245,7 @@ async function defaultOpenStore() {
 
 async function defaultOpenReplicaSync(
   getNoteCount: () => number,
-  getAllRows: SqlNoteStore["getAllRows"],
+  getAllRows: NoteStore["getAllRows"],
 ) {
   const { startReplicaSync } = await import("./replica-sync")
   // Every tab pushes its own writes; concurrent tabs converge by per-row
@@ -308,7 +308,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
       // than migrated in place. Same wipe as the owner mismatch below; a store
       // that has never held anything loses nothing by it.
       if ((await opened.store.getMeta(CACHE_GENERATION_KEY)) !== CACHE_GENERATION) {
-        await opened.store.replaceAll({})
+        await opened.store.clear()
         await opened.store.setMeta(PULL_CURSOR_KEY, "")
         await opened.store.setMeta(CACHE_GENERATION_KEY, CACHE_GENERATION)
       }
@@ -322,7 +322,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
         const previous = await opened.store.getMeta(OWNER_KEY)
         if (previous !== options.owner) {
           if (previous !== null) {
-            await opened.store.replaceAll({})
+            await opened.store.clear()
             await opened.store.setMeta(PULL_CURSOR_KEY, "")
           }
           await opened.store.setMeta(OWNER_KEY, options.owner)
@@ -506,7 +506,7 @@ function scheduleRepair(activation: DatabaseModeRuntime) {
     activation.pendingOps = []
     activation.pendingPages = new Set()
     const graph = jotai().get(databaseGraphAtom)
-    await activation.store.replaceAll({})
+    await activation.store.clear()
     await activation.store.applyPull({
       nodes: [...graph.nodes.values()],
       links: [...graph.childLinks.values()].flat(),
