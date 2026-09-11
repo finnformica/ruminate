@@ -109,6 +109,27 @@ function serializedLines(getByTestId: (id: string) => HTMLElement): string[] {
 }
 
 describe("BlockEditor text wrapping", () => {
+  it("a fence inside a text block draws a wrapping panel, not a rigid <pre>", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a"],
+      blocks: {
+        a: {
+          id: "a",
+          type: "text",
+          text: "```\nconst reallyLongVariableName = someFunctionCall(anotherArgument)",
+          children: [],
+        },
+      },
+    }
+    const { container } = render(<Harness initialDoc={doc} />)
+    const pre = container.querySelector('[data-testid="block-body"] pre')!
+    expect(pre).not.toBeNull()
+    expect(pre.className).toContain("whitespace-pre-wrap")
+    expect(pre.className).toContain("[overflow-wrap:anywhere]")
+    expect(pre.textContent).toContain("reallyLongVariableName")
+  })
+
   it("a line beginning with a tab is text, not an indented code block", () => {
     // Markdown cannot express this (a leading tab would nest), so build it.
     const doc: BlockDoc = {

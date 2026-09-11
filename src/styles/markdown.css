@@ -64,6 +64,10 @@
 }
 
 .markdown pre {
+  /* Long lines wrap rather than scroll sideways (a phone has no room to
+   * scroll a code block); `anywhere` breaks an unbroken token too. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   overflow: auto;
   border-radius: var(--border-radius-lg);
   background-color: var(--color-bg-code-block);

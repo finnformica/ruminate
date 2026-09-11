@@ -38,6 +38,15 @@ export function BlockContent({ content }: { content: string }) {
             {children}
           </a>
         ),
+        // A fence inside a text block (notes written before fences became
+        // code blocks): the same panel as a code block, wrapping like it —
+        // never a <pre> that runs off a narrow screen. The chip styling the
+        // `code` component adds is undone for the code inside the panel.
+        pre: ({ children }) => (
+          <pre className="block-code my-0.5 whitespace-pre-wrap rounded-lg border border-border-secondary bg-[var(--color-bg-code-block)] px-3 py-2 font-mono text-[0.85em] [overflow-wrap:anywhere] [tab-size:2] [&>code]:rounded-none [&>code]:border-0 [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-[1em]">
+            {children}
+          </pre>
+        ),
         code: ({ children }) => (
           // The inline code chip: a bordered, tinted pill in the mono face,
           // a touch smaller than the text around it (the Linear / Notion
