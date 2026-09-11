@@ -200,7 +200,7 @@ export function BlockItem({
   // How this type looks (`block-kinds.tsx`): its marker, typography, any
   // panel, and the chrome around the content line.
   const kind = kindOf(type)
-  const typo = kind.typography(depth)
+  const typo = kind.typography(depth, block)
   // A panel (a code block's) carries the same classes on the rendered view
   // and the textarea, so editing never moves a character.
   const panel = kind.panel ?? null

@@ -12,11 +12,11 @@ and how to turn it off again).
 
 An image block is an ordinary node in the graph (docs/graph-schema-v2.md):
 
-| field   | holds                                                                                                                   |
-| ------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `type`  | `image`                                                                                                                 |
-| `text`  | the caption (may be empty)                                                                                              |
-| `props` | `{ image: "img_…" }` for an uploaded picture, `{ src: url }` for an external one; `width`/`height` in pixels when known |
+| field   | holds                                                                                                                                                              |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `type`  | `image`                                                                                                                                                            |
+| `text`  | the caption (may be empty)                                                                                                                                         |
+| `props` | `{ image: "img_…" }` for an uploaded picture, `{ src: url }` for an external one; `width`/`height` in pixels when known; `align` and `size` for its layout (below) |
 
 The picture's bytes are **not** in the graph. An uploaded picture lives in an
 R2 bucket, and the block keeps only its asset id. The graph stays small rows
@@ -35,6 +35,39 @@ straight from that address; an image in the middle of a sentence stays text.
 
 Search: `type:image` finds image blocks; the caption is what text queries
 match.
+
+## Layout
+
+A picture is, left to itself, its natural size: as wide as the row when it is
+wide enough, centred when it is not, and never taller than a screenful. Two
+props change how it sits in the row (`src/blocks/image.ts`), Notion-style:
+
+| prop    | holds                                                                                                                                                         |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `align` | `left` or `right`; absent means centred                                                                                                                       |
+| `size`  | the picture's width as a percentage of the row's, 10–100; absent means its natural size. A sized picture is exactly that wide, whatever that makes its height |
+
+Both are the row's layout only. The picture's bytes, its pixel size and the
+markdown line are the same whatever they say, so an aligned or resized
+picture copies and exports as `![caption](url)` and comes back at its
+natural size, centred. Copying blocks within the app carries the props.
+
+In the editor, hovering a picture (or selecting its row) reveals a slim
+handle at its side and a small toolbar in its corner. Dragging the handle
+resizes the picture live, as a fraction of the row so it holds on a narrower
+screen: a centred picture has a handle at each side and grows from both at
+once; one kept to the left or right has a handle at its free side only and
+grows away from the side it keeps to; a drag near the row's edge snaps to
+the full width, and nothing goes narrower than a tenth of the row. The toolbar's three buttons set the
+side. The row's context menu offers the same — **Align** (Left, Centre,
+Right) and, once a picture has been dragged, **Original size** — for a
+keyboard or a touch screen, where there is nothing to hover. Each change is
+one undo step.
+
+The caption is exactly as wide as the picture and goes wherever it goes:
+under a picture kept to the left it sits beneath that picture, set flush
+left; under a centred one it is centred. Read-only views (previews, search
+results) lay the picture out the same way, with no controls.
 
 ## Uploading and reading
 

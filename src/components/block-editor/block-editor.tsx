@@ -16,6 +16,7 @@ import {
   releasePendingImage,
   type UploadedImage,
 } from "../../data/images"
+import { imageAlignOf, imagePropsOf, withImageLayout, type ImageAlign } from "../../blocks/image"
 import { ImageLightbox } from "./image-lightbox"
 import {
   isHeading,
@@ -1095,6 +1096,10 @@ export function BlockEditor({
       hasChildren: row.hasChildren,
       collapsed: row.collapsed,
       places: parentCountOf ? Math.max(1, parentCountOf(row.id)) : 1,
+      image:
+        block.type === "image"
+          ? { align: imageAlignOf(block), sized: imagePropsOf(block).size !== undefined }
+          : undefined,
     })
     // Editing a different row would otherwise keep its textarea focused
     // under the menu; the menu's row becomes the selection.
@@ -1247,6 +1252,14 @@ export function BlockEditor({
     if (key) void insertImages(key, files)
   }
 
+  /** Write an image block's layout (`src/blocks/image.ts`) as one undo step. */
+  const setImageLayout = (id: string, layout: { align?: ImageAlign; size?: number | null }) => {
+    const block = doc.blocks[id]
+    if (!block || block.type !== "image") return
+    const next = updateBlock(doc, id, { props: withImageLayout(block, layout) })
+    if (next !== doc) history.commit(doc, next, { type: "structural" })
+  }
+
   const menuActions: BlockMenuActions = {
     edit: (key) => edit(key),
     openImage: (id) => setLightbox(id),
@@ -1258,6 +1271,8 @@ export function BlockEditor({
       const next = updateBlock(doc, id, { type })
       if (next !== doc) history.commit(doc, next, { type: "structural" })
     },
+    alignImage: (id, align) => setImageLayout(id, { align }),
+    resetImageSize: (id) => setImageLayout(id, { size: null }),
     duplicate: (key) => runOnRow("duplicateBelow", key),
     toggleCollapse: (key) => toggleCollapse(key),
     zoomInto: (id) => navigateZoom(id),

@@ -1,5 +1,6 @@
 import type React from "react"
 import type { ReactNode } from "react"
+import { imageAlignOf, type ImageAlign } from "../../blocks/image"
 import { BLOCK_TYPE_DEFS } from "../../blocks/registry"
 import type { Block, BlockType } from "../../blocks/types"
 import type { Occurrence } from "../../blocks/view"
@@ -44,8 +45,10 @@ export interface BlockKind {
    * replacing it (the checkbox keeps its own click). */
   readonly toggleBeside?: boolean
   /** Text size and weight, by outline depth — the same on the rendered view
-   * and the textarea, so switching never shifts a character. */
-  readonly typography: (depth: number) => string
+   * and the textarea, so switching never shifts a character. Given the block
+   * too, for a type whose text follows its props (an image's caption sits
+   * to the side its picture keeps to). */
+  readonly typography: (depth: number, block: Block) => string
   /** Extra space above the row, in px (headings breathe). */
   readonly topMargin?: (depth: number) => number
   /** A panel the text sits in — the same classes on view and textarea. */
@@ -183,17 +186,23 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     // No marker slot: the picture starts where the row does, not 15px in
     // from it as text would.
     slot: "none",
-    // The text is the caption: small, quiet and centred beneath the picture.
-    // `text-center` rides the shared typography so the view and the textarea
-    // agree — switching between them never shifts a character.
-    typography: () => "text-sm leading-relaxed text-text-secondary text-center",
+    // The text is the caption: small, quiet, beneath the picture, and set to
+    // the side the picture keeps to — centred under a centred picture, flush
+    // left under a left-aligned one. The alignment rides the shared
+    // typography so the view and the textarea agree — switching between
+    // them never shifts a character.
+    typography: (_depth, block) =>
+      cx("text-sm leading-relaxed text-text-secondary", CAPTION_ALIGN[imageAlignOf(block)]),
     placeholder: "Add a caption…",
     // The picture above its caption, which is the block's text: the caption
     // line is the ordinary body (view or textarea), so every keyboard and
-    // paste behaviour is the same as on any block. An uncaptioned picture
-    // drops the line entirely rather than leaving a blank one under it — the
-    // row is then just the picture. It comes back the moment the row is
-    // being edited, so a caption can still be typed.
+    // paste behaviour is the same as on any block. The figure (`ImageFigure`)
+    // holds both, so the caption is exactly as wide as the picture and sits
+    // wherever it does — under a picture dragged narrower and set to one
+    // side, the caption goes with it. An uncaptioned picture drops the line
+    // entirely rather than leaving a blank one under it — the row is then
+    // just the picture. It comes back the moment the row is being edited, so
+    // a caption can still be typed.
     //
     // The wrap is the block's own padding: the row's surface gives text 6px
     // at the sides and 2px above and below, and the wrap tops that up so the
@@ -216,17 +225,34 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
         // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
         <div
           data-testid="image-block"
-          className="flex min-w-0 flex-1 flex-col gap-1.5 px-1 py-2"
+          className="flex min-w-0 flex-1 flex-col px-1 py-2"
           {...pointer}
         >
-          <ImageFigure block={block} occurrence={occurrence} api={api} />
-          {editing || block.text.trim() !== "" ? (
-            <div className="flex min-w-0 flex-col">{content}</div>
-          ) : null}
+          <ImageFigure
+            block={block}
+            occurrence={occurrence}
+            api={api}
+            caption={
+              editing || block.text.trim() !== "" ? (
+                // A row, like the content line itself: the body's `flex-1`
+                // then fills the width, and the textarea keeps the height
+                // it measured for its lines (in a column it would collapse
+                // to one).
+                <div className="flex min-w-0">{content}</div>
+              ) : null
+            }
+          />
         </div>
       )
     },
   },
+}
+
+/** The caption's text alignment, by the picture's. */
+const CAPTION_ALIGN: Record<ImageAlign, string> = {
+  left: "text-left",
+  center: "text-center",
+  right: "text-right",
 }
 
 /** The presentation of a type; an unknown stored type draws as text. */

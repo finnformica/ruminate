@@ -552,6 +552,38 @@ export function OfflineIcon16(props: IconProps) {
   )
 }
 
+/** Three lines set to a side — how an image block sits in its row. The
+ * outer lines span the width; the middle one keeps to the named side. */
+export function AlignLeftIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <rect x="1" y="3" width="14" height="1.5" rx="0.75" />
+      <rect x="1" y="7.25" width="8" height="1.5" rx="0.75" />
+      <rect x="1" y="11.5" width="14" height="1.5" rx="0.75" />
+    </Icon>
+  )
+}
+
+export function AlignCenterIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <rect x="1" y="3" width="14" height="1.5" rx="0.75" />
+      <rect x="4" y="7.25" width="8" height="1.5" rx="0.75" />
+      <rect x="1" y="11.5" width="14" height="1.5" rx="0.75" />
+    </Icon>
+  )
+}
+
+export function AlignRightIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <rect x="1" y="3" width="14" height="1.5" rx="0.75" />
+      <rect x="7" y="7.25" width="8" height="1.5" rx="0.75" />
+      <rect x="1" y="11.5" width="14" height="1.5" rx="0.75" />
+    </Icon>
+  )
+}
+
 export function WidthFullIcon16(props: IconProps) {
   return (
     <Icon size={16} {...props}>
