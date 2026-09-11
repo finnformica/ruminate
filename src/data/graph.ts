@@ -14,8 +14,10 @@ import { emittedPageTitle } from "./page-identity"
  *   follow `child` links in sort-key order, and hand back a `BlockDoc` — the
  *   typed, marker-free slice of the graph the editor renders and edits. A
  *   node reached from two parents is in the doc once, named by both parents'
- *   `children` (that is the feature); a back-edge (a corrupted, cyclic graph
- *   from a bad sync) is dropped so the slice is always a DAG.
+ *   `children` (that is the feature), and so is a loop: a node's `children`
+ *   may name a node above it. Every walk over a doc guards by path
+ *   (`walkDoc`, src/blocks/view.ts), showing a loop where it closes and no
+ *   further.
  * - `rollup` — the markdown **projection** of one page: `serialize` over that
  *   page's doc. There is one walk and one emitter in the codebase.
  * - `docToParts` — the **write** direction: a doc's typed blocks become node
@@ -306,8 +308,9 @@ export function docFromGraph(rootIds: string[], graph: GraphSnapshot): BlockDoc 
   const visit = (id: string): boolean => {
     const node = graph.nodes.get(id)
     if (!node) return false
-    if (onPath.has(id)) return false // a back-edge: dropped
-    if (blocks[id]) return true // reached again by another path: already built
+    // Reached again — by another path, or by a loop back to a node above:
+    // already built (or being built), and named again where it is reached.
+    if (blocks[id]) return true
     onPath.add(id)
     const props = parseProps(node.props)
     // `props` only when there are any: a walked doc and a parsed one must be
@@ -320,7 +323,9 @@ export function docFromGraph(rootIds: string[], graph: GraphSnapshot): BlockDoc 
       children: [],
     }
     blocks[id] = block
-    block.children = childIdsOf(graph, id).filter((childId) => visit(childId))
+    // A node listed as its own child (a corrupted row; the write side never
+    // makes one) is skipped: that loop has no closing row to show.
+    block.children = childIdsOf(graph, id).filter((childId) => childId !== id && visit(childId))
     onPath.delete(id)
     return true
   }

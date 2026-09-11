@@ -236,14 +236,23 @@ export function remintCollidingIds(sub: BlockDoc, doc: BlockDoc): BlockDoc {
 }
 
 /** Deep-copy `id`'s subtree into `into` with fresh ids; returns the copy's root id. */
-function cloneSubtree(doc: BlockDoc, id: string, into: Record<string, Block>): string {
+function cloneSubtree(
+  doc: BlockDoc,
+  id: string,
+  into: Record<string, Block>,
+  cloned: Map<string, string> = new Map(),
+): string {
+  // One copy per block: a block two paths reach is one copy reached twice,
+  // and a loop is a loop among the copies — the shape is duplicated, not
+  // unrolled.
+  const known = cloned.get(id)
+  if (known !== undefined) return known
   const block = doc.blocks[id]
   const fresh = blockId()
-  into[fresh] = {
-    ...block,
-    id: fresh,
-    children: block.children.map((child) => cloneSubtree(doc, child, into)),
-  }
+  cloned.set(id, fresh)
+  const copy: Block = { ...block, id: fresh, children: [] }
+  into[fresh] = copy
+  copy.children = block.children.map((child) => cloneSubtree(doc, child, into, cloned))
   return fresh
 }
 
@@ -307,8 +316,12 @@ export function moveBlock(doc: BlockDoc, key: string, direction: "up" | "down"):
 
 /** `id` plus every descendant, depth-first (just `[id]` for a leaf). */
 export function subtreeIds(doc: BlockDoc, id: string): string[] {
+  // Each block once, however many paths reach it — and so a loop ends.
   const out: string[] = []
+  const seen = new Set<string>()
   const walk = (bid: string) => {
+    if (seen.has(bid)) return
+    seen.add(bid)
     out.push(bid)
     doc.blocks[bid]?.children.forEach(walk)
   }

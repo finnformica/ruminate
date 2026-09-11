@@ -649,7 +649,7 @@ describe("paste as link (Ruminate payload with ids)", () => {
     expect(docIds(getByTestId).filter((id) => id === idB)).toHaveLength(1)
   })
 
-  it("falls back to duplicating when the live subtree contains the paste target's ancestry (cycle)", () => {
+  it("links a block beneath its own ancestry: the loop shows where it closes", () => {
     const CycleHarness = () => {
       const [doc, setDoc] = useState<BlockDoc>(() => withStarter(parse("P\n  T")))
       const idP = doc.rootBlockIds[0]
@@ -658,7 +658,7 @@ describe("paste as link (Ruminate payload with ids)", () => {
           ids.map((id) => [
             id,
             // The live view of the pasted node contains P — linking it under
-            // P would close a loop.
+            // T closes a loop through P.
             `- X live\n  id:: ${id}\n  - P again\n    id:: ${idP}\n`,
           ]),
         )
@@ -676,12 +676,30 @@ describe("paste as link (Ruminate payload with ids)", () => {
     const formats = richClipboardFormats("- X\n  id:: blk_xcycle0000")
     paste(root, formats.plain, formats.html)
 
-    // The content lands as a plain duplicate under T: fresh ids throughout,
-    // P's id appears exactly once, and the original id was not linked in.
-    expect(serializedLines(getByTestId)).toEqual(["P", "  T", "    - X live", "      - P again"])
+    // X is linked under T with its live content — P included, which closes
+    // the loop: the serialization shows P once more beneath X and stops.
+    expect(serializedLines(getByTestId)).toEqual(["P", "  T", "    - X live", "      P"])
     const ids = docIds(getByTestId)
-    expect(ids).not.toContain("blk_xcycle0000")
-    expect(ids.filter((id) => id === idP)).toHaveLength(1)
+    expect(ids).toContain("blk_xcycle0000")
+    expect(ids.filter((id) => id === idP)).toHaveLength(2)
+  })
+
+  it("renders a loop's closing row once, marked, with nothing beneath it", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a"],
+      blocks: {
+        a: { id: "a", type: "ul", text: "A", children: ["b"] },
+        b: { id: "b", type: "ul", text: "B", children: ["a"] },
+      },
+    }
+    const { container, getByTestId } = render(<Harness initialDoc={doc} />)
+    expect(serializedLines(getByTestId)).toEqual(["- A", "  - B", "    - A"])
+    const rows = container.querySelectorAll("[data-occurrence]")
+    expect([...rows].map((r) => r.getAttribute("data-occurrence"))).toEqual(["a", "a/b", "a/b/a"])
+    expect(container.querySelectorAll('[data-testid="loop-marker"]')).toHaveLength(1)
+    // Nothing to fold on the closing row: no collapse toggle under it.
+    expect(rows[2].querySelector('[aria-label="Collapse"], [aria-label="Expand"]')).toBeNull()
   })
 
   it("keeps the same ids through a cut + paste (a true move)", () => {

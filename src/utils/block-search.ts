@@ -180,11 +180,13 @@ export function indexNoteBlocks(note: Note, snapshot: GraphSnapshot): NoteBlockI
   const childIds = new Map<string, string[]>()
   let fenceOpen = false
 
+  const path = new Set<string>()
   const walk = (ids: string[], ancestors: BlockAncestor[]) => {
     const numbers = olPositions(doc, ids)
     ids.forEach((id, index) => {
       const block = doc.blocks[id]
-      if (!block) return
+      // A loop's closing occurrence is indexed once, where it closes.
+      if (!block || path.has(id)) return
       const inFence = fenceOpen
       if (block.text.trimStart().startsWith("```")) fenceOpen = !fenceOpen
       const type = hitType(block.type, block.text, inFence)
@@ -200,7 +202,9 @@ export function indexNoteBlocks(note: Note, snapshot: GraphSnapshot): NoteBlockI
         note,
       })
       if (block.children.length > 0) childIds.set(id, block.children)
+      path.add(id)
       walk(block.children, [...ancestors, { id, text }])
+      path.delete(id)
     })
   }
   walk(doc.rootBlockIds, [])

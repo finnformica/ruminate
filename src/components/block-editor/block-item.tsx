@@ -867,6 +867,19 @@ export function BlockItem({
           {kind.before?.(rowContext)}
           {kind.wrap ? kind.wrap(content, rowContext) : content}
           {kind.after?.(rowContext)}
+          {occurrence.looped ? (
+            // This row closes a loop: the block is already above it. A quiet
+            // glyph says so; there is nothing beneath to fold (zoom in to go
+            // round again).
+            <span
+              data-testid="loop-marker"
+              title="Loops back to a block above"
+              aria-label="Loops back to a block above"
+              className="ml-2 shrink-0 select-none self-start font-sans text-sm leading-relaxed text-text-tertiary"
+            >
+              ↻
+            </span>
+          ) : null}
           {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
         </div>
         {api.debug?.showMetadata ? (

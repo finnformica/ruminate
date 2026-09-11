@@ -42,16 +42,19 @@ export type BlockRevealRequest =
  */
 export function buildOutline(doc: BlockDoc): OutlineItem[] {
   const items: OutlineItem[] = []
+  const path = new Set<string>()
   const walk = (ids: string[], depth: number) => {
     for (const id of ids) {
       const block = doc.blocks[id]
-      if (!block) continue
+      if (!block || path.has(id)) continue
       const heading = isHeading(block.type)
       if (heading) {
         const text = block.text.trim()
         if (text !== "") items.push({ id, text, depth })
       }
+      path.add(id)
       walk(block.children, depth + (heading ? 1 : 0))
+      path.delete(id)
     }
   }
   walk(doc.rootBlockIds, 0)

@@ -545,9 +545,9 @@ The rules, per pasted root (`embeddedPasteFragment` in `block-editor.tsx`):
   `(source, destination, kind)` primary key backstops the invariant.
 - **Self** (the root IS the paste target): refused with a toast — a block
   can't be put inside itself.
-- **Cycle** (the subtree to link contains the paste target or an ancestor):
-  fall back to duplicating that block; the store's save-time cycle-drop
-  remains the backstop.
+- **Loop** (the subtree to link contains the paste target or an ancestor):
+  link it — a loop is a shape the graph holds (graph-schema-v2.md, "Loops"),
+  shown where it closes and no further.
 - A node the linked subtree shares with the rest of the doc, or with another
   pasted root, is the same node in one more place — never reminted.
 

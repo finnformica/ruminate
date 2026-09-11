@@ -45,8 +45,7 @@ describe("the Unassigned basket", () => {
 
   it("shows a loop that nothing reaches, promoting one member as its root", () => {
     const snapshot = graphOf({ a: A })
-    // deeper → under: a loop below `one`. (The store drops loop-closing links
-    // on save today; this exercises the read side, which must never hang.)
+    // deeper → under: a loop below `one`.
     const looped = applyOps(
       snapshot,
       [{ op: "link", source: "blk_deeper0000", destination: "blk_under00000", sortKey: "a0" }],
