@@ -709,9 +709,7 @@ describe("paste as link (Ruminate payload with ids)", () => {
     // The closing row keeps a chevron — the block has children, above it —
     // pinned, inert and explained, never a working fold toggle.
     expect(rows[2].querySelector('[aria-label="Collapse"], [aria-label="Expand"]')).toBeNull()
-    const loop = rows[2].querySelector<HTMLButtonElement>(
-      '[aria-label="Loop detected"]',
-    )!
+    const loop = rows[2].querySelector<HTMLButtonElement>('[aria-label="Loop detected"]')!
     expect(loop).not.toBeNull()
     expect(loop.getAttribute("aria-disabled")).toBe("true")
     expect(loop.className).toContain("cursor-not-allowed")
