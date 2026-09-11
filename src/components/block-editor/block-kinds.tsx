@@ -31,8 +31,10 @@ export interface RowContext {
 export interface BlockKind {
   /** The key in the marker slot: a to-do's checkbox, a bullet's dot, a
    * heading's `#`, a numbered item's number, or a static glyph (none for a
-   * paragraph — the slot keeps its width so text stays in one column). */
-  readonly slot: "checkbox" | "dot" | "hash" | "number" | "glyph"
+   * paragraph — the slot keeps its width so text stays in one column).
+   * `none` drops the slot altogether (an image, which has no text column to
+   * keep); a parent still gets the slot back to host its chevron. */
+  readonly slot: "checkbox" | "dot" | "hash" | "number" | "glyph" | "none"
   /** The glyph for a `glyph` slot, or null for an empty slot. */
   readonly glyph?: string | null
   /** The empty/glyph slot's test id. */
@@ -177,9 +179,9 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     },
   },
   image: {
-    slot: "glyph",
-    glyph: null,
-    slotTestId: "paragraph-slot",
+    // No marker slot: the picture starts where the row does, not 15px in
+    // from it as text would.
+    slot: "none",
     // The text is the caption: small, quiet and centred beneath the picture.
     // `text-center` rides the shared typography so the view and the textarea
     // agree — switching between them never shifts a character.
@@ -189,8 +191,8 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     // line is the ordinary body (view or textarea), so every keyboard and
     // paste behaviour is the same as on any block. An uncaptioned picture
     // drops the line entirely rather than leaving a blank one under it — the
-    // row is then just the picture, evenly framed. It comes back the moment
-    // the row is being edited, so a caption can still be typed.
+    // row is then just the picture. It comes back the moment the row is
+    // being edited, so a caption can still be typed.
     wrap: (content, { block, occurrence, api, editing }) => (
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <ImageFigure block={block} occurrence={occurrence} api={api} />

@@ -454,7 +454,7 @@ export function BlockItem({
   // Whether this block owns a collapse toggle at all: parents only, and never
   // the zoom title (the editor renders its children itself, at depth 0).
   const hasToggle = hasChildren && !zoomTitle
-  // Every block type owns the 15px marker slot. Most carry a KEY there — a
+  // Every block type but an image owns the 15px marker slot. Most carry a KEY there — a
   // bullet dot, heading `#`, number, quote `>` — and the key is pure chrome,
   // so on a parent it SWAPS for the chevron: hover the slot and the key fades
   // out while the chevron fades in, in the same slot — nothing moves. A
@@ -603,8 +603,11 @@ export function BlockItem({
       {toggle}
     </span>
   )
+  // An image (`slot: "none"`) has no slot at all: the row's content starts at
+  // its edge. A parent still needs somewhere to put its chevron, so it falls
+  // through to the empty glyph slot.
   const marker =
-    kind.slot === "checkbox" ? (
+    kind.slot === "none" && !hasToggle ? null : kind.slot === "checkbox" ? (
       // The checkbox IS the todo's marker — a control in the key slot, which
       // is why a parent todo's chevron sits beside it (see `toggleBeside`).
       // Hovering the box also reveals that chevron (`.block-toggle-hint`,

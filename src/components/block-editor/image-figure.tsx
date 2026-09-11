@@ -11,11 +11,9 @@ import type { BlockEditorApi } from "./block-item"
 /**
  * An image block's picture: a click opens the lightbox.
  *
- * The frame hugs the picture with the same padding on all four sides, and
- * centres itself in the text column — so a picture wide enough to fill the
- * column starts exactly where the text does, and a narrow one sits in the
- * middle rather than hard against the left. Never wider than the column,
- * never taller than a screenful.
+ * No frame of its own: the row's padding is the picture's spacing. It fills
+ * the row's width when it is wide enough and centres itself when it is not,
+ * never wider than the row, never taller than a screenful.
  *
  * A picture that is still uploading draws from its local preview under a
  * spinner (`useImageSrc`), so pasting one is instant and the round trip
@@ -66,7 +64,7 @@ export function ImageFigure({
       aria-busy={uploading || undefined}
       onClick={open}
       className={cx(
-        "block max-w-full self-center overflow-hidden rounded-lg border border-border-secondary bg-bg-secondary p-2",
+        "block max-w-full self-center overflow-hidden rounded-lg",
         uploading ? "cursor-progress" : "cursor-zoom-in",
       )}
     >
@@ -78,7 +76,7 @@ export function ImageFigure({
             data-testid="block-image"
             onLoad={() => setLoaded(true)}
             className={cx(
-              "block h-auto max-h-80 w-auto max-w-full rounded object-contain",
+              "block h-auto max-h-80 w-auto max-w-full object-contain",
               "transition-opacity duration-300 ease-out",
               loaded ? "opacity-100" : "opacity-0",
             )}
@@ -87,7 +85,8 @@ export function ImageFigure({
             <span
               aria-hidden
               data-testid="block-image-uploading"
-              className="absolute inset-0 grid place-items-center rounded bg-bg-secondary"
+              // A translucent wash, so the preview shows through the spinner.
+              className="absolute inset-0 grid place-items-center bg-bg-overlay-backdrop"
             >
               <LoadingIcon16 className="text-text-secondary" />
             </span>
@@ -97,7 +96,7 @@ export function ImageFigure({
         <span
           aria-hidden
           data-testid="block-image-placeholder"
-          className="block max-h-80 w-64 max-w-full animate-pulse rounded bg-bg-tertiary"
+          className="block max-h-80 w-64 max-w-full animate-pulse bg-bg-tertiary"
           style={{ aspectRatio: width && height ? `${width} / ${height}` : "4 / 3" }}
         />
       )}

@@ -2177,6 +2177,25 @@ describe("BlockEditor images", () => {
     expect(serializedLines(getByTestId)).toEqual(["A", "B", "C"])
   })
 
+  it("an image row has no marker slot, so the picture starts at the row's edge", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a"],
+      blocks: {
+        a: {
+          id: "a",
+          type: "image",
+          text: "",
+          props: { src: "https://example.com/sunset.png" },
+          children: [],
+        },
+      },
+    }
+    const { container } = render(<Harness initialDoc={doc} />)
+    expect(container.querySelector('[data-testid="block-image"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="paragraph-slot"]')).toBeNull()
+  })
+
   it("hangs no caption line under an uncaptioned picture", () => {
     const withCaption = (text: string): BlockDoc => ({
       props: null,

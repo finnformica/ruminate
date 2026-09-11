@@ -5,7 +5,6 @@ import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
 import { DropdownMenu } from "../dropdown-menu"
-import { CopyIcon16, EditIcon16, TrashIcon16 } from "../icons"
 
 /**
  * The block's right-click menu: the standard actions on one row, the same
@@ -99,7 +98,7 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
   const image = target.type === "image"
   return (
     <>
-      <DropdownMenu.Item icon={<EditIcon16 />} shortcut={["↵"]} onClick={() => actions.edit(key)}>
+      <DropdownMenu.Item shortcut={["↵"]} onClick={() => actions.edit(key)}>
         {image ? "Edit caption" : "Edit"}
       </DropdownMenu.Item>
       {image && actions.openImage ? (
@@ -115,7 +114,6 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
         <Menu.SubmenuRoot>
           <Menu.SubmenuTrigger className="group flex h-8 cursor-pointer select-none items-center gap-3 rounded px-3 outline-hidden focus:bg-bg-hover data-[popup-open]:bg-bg-hover coarse:h-10">
             <div className="flex w-0 grow items-center gap-3">
-              <div className="flex w-4 text-text-secondary" />
               <span className="grow truncate">Turn into</span>
             </div>
             <span aria-hidden className="text-text-tertiary">
@@ -156,11 +154,7 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
       <DropdownMenu.Item shortcut={["F"]} onClick={() => actions.zoomInto(id)}>
         Zoom into
       </DropdownMenu.Item>
-      <DropdownMenu.Item
-        icon={<CopyIcon16 />}
-        shortcut={["⌘", "C"]}
-        onClick={() => actions.copy(key)}
-      >
+      <DropdownMenu.Item shortcut={["⌘", "C"]} onClick={() => actions.copy(key)}>
         Copy
       </DropdownMenu.Item>
       {actions.copyLink ? (
@@ -175,7 +169,6 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
             Unlink
           </DropdownMenu.Item>
           <DropdownMenu.Item
-            icon={<TrashIcon16 />}
             variant="danger"
             trailingVisual={
               <span className="text-sm text-text-secondary">{target.places} places</span>
@@ -186,12 +179,7 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
           </DropdownMenu.Item>
         </>
       ) : (
-        <DropdownMenu.Item
-          icon={<TrashIcon16 />}
-          variant="danger"
-          shortcut={["⌫"]}
-          onClick={() => actions.remove(key)}
-        >
+        <DropdownMenu.Item variant="danger" shortcut={["⌫"]} onClick={() => actions.remove(key)}>
           Delete
         </DropdownMenu.Item>
       )}
