@@ -1,7 +1,7 @@
 import { useAtomValue, useStore } from "jotai"
 import { useCallback, useMemo, useRef } from "react"
 import { isEmptyDoc } from "../blocks/ops"
-import type { BlockDoc } from "../blocks/types"
+import type { BlockDoc, ChangeHint } from "../blocks/types"
 import { basketDoc, basketToOps } from "../data/basket"
 import { pageDoc } from "../data/graph"
 import { docToOps } from "../data/ops"
@@ -51,7 +51,7 @@ export function useNoteDoc({
   if (exists) seenRef.current = true
 
   const setDoc = useCallback(
-    (next: BlockDoc) => {
+    (next: BlockDoc, hint?: ChangeHint) => {
       if (noteId === undefined) return
       // Diff against the graph as it is NOW (edits can outrun renders).
       const current = store.get(graphSnapshotAtom)
@@ -64,7 +64,7 @@ export function useNoteDoc({
         ...next,
         props: { ...(next.props ?? {}), updated_at: new Date().toISOString() },
       }
-      apply(docToOps(noteId, stamped, current))
+      apply(docToOps(noteId, stamped, current, hint?.discard))
     },
     [noteId, store, apply],
   )

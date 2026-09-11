@@ -19,7 +19,9 @@ import { DropdownMenu } from "../dropdown-menu"
  * **Delete**, which removes the block itself from every place it appears
  * (`deleteBlockOps`), with the place count beside it when there is more
  * than one. Where a row's removal is the delete — the basket, and editors
- * with no graph behind them — there is only **Delete** (⌫).
+ * with no graph behind them — there is only **Delete** (⌫); the basket adds
+ * **Delete with contents** on a block that holds something, since
+ * its plain Delete leaves what the block held as new basket roots.
  *
  * Structure moves (indent, outdent, move up/down) are keyboard-only: the
  * menu is for what a pointer cannot already do.
@@ -52,6 +54,9 @@ export interface BlockMenuActions {
   remove: (key: string) => void
   /** Delete the block from every place it appears. Absent standalone. */
   deleteEverywhere?: (id: string) => void
+  /** Delete the block and everything beneath it that nothing else holds
+   * (the basket's). Absent where a delete never cascades. */
+  deleteSubtree?: (id: string) => void
   /** Image rows: expand the picture, and save it to the device. */
   openImage?: (id: string) => void
   downloadImage?: (id: string) => void
@@ -232,9 +237,16 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
           </DropdownMenu.Item>
         </>
       ) : (
-        <DropdownMenu.Item variant="danger" shortcut={["⌫"]} onClick={() => actions.remove(key)}>
-          Delete
-        </DropdownMenu.Item>
+        <>
+          <DropdownMenu.Item variant="danger" shortcut={["⌫"]} onClick={() => actions.remove(key)}>
+            Delete
+          </DropdownMenu.Item>
+          {actions.deleteSubtree && target.hasChildren ? (
+            <DropdownMenu.Item variant="danger" onClick={() => actions.deleteSubtree?.(id)}>
+              Delete with contents
+            </DropdownMenu.Item>
+          ) : null}
+        </>
       )}
     </>
   )

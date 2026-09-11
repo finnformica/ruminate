@@ -235,6 +235,55 @@ export function deleteBlockOps(blockId: string, snapshot: GraphSnapshot): Op[] {
   return [...unlinks, { op: "delete", id: blockId }]
 }
 
+/**
+ * Delete a block and everything beneath it that nothing else holds: the
+ * block itself from every place it appears (as `deleteBlockOps`), and each
+ * block reachable from it that no page, and no other block outside the
+ * subtree, still reaches once it is gone. A block that also hangs from
+ * another note, or from another Unassigned root, is only unlinked from the
+ * subtree and survives. The basket's "Delete with contents".
+ */
+export function deleteSubtreeOps(blockId: string, snapshot: GraphSnapshot): Op[] {
+  const node = snapshot.nodes.get(blockId)
+  if (!node || node.type === PAGE_TYPE) return []
+  const below = reachableFrom(snapshot, [blockId])
+  below.delete(blockId)
+  // What the rest of the graph still reaches without going through the
+  // block: every page, and every parentless block (an Unassigned root of
+  // any note) other than this one, walked around the block.
+  const parentsOf = parentsIndex(snapshot)
+  const roots = pageIds(snapshot).filter((id) => id !== blockId)
+  for (const other of snapshot.nodes.values()) {
+    if (other.id === blockId || other.type === PAGE_TYPE) continue
+    if ((parentsOf.get(other.id)?.size ?? 0) === 0) roots.push(other.id)
+  }
+  const kept = new Set<string>()
+  const stack = [...roots]
+  while (stack.length > 0) {
+    const id = stack.pop() as string
+    for (const link of snapshot.childLinks.get(id) ?? []) {
+      const child = link.destination_id
+      if (child === blockId || kept.has(child)) continue
+      kept.add(child)
+      stack.push(child)
+    }
+  }
+  const doomed = new Set<string>([blockId])
+  for (const id of below) if (!kept.has(id)) doomed.add(id)
+  // Links into the doomed from outside are tombstoned so the removal
+  // replicates; links among the doomed are retained, as a delete's always are.
+  const unlinks: Op[] = []
+  for (const [source, list] of snapshot.childLinks) {
+    if (doomed.has(source)) continue
+    for (const link of list) {
+      if (doomed.has(link.destination_id)) {
+        unlinks.push({ op: "unlink", source, destination: link.destination_id })
+      }
+    }
+  }
+  return [...unlinks, ...[...doomed].map((id) => ({ op: "delete", id }) as Op)]
+}
+
 /** Cut any desired edge that would close a loop through the page: DFS the
  * prospective graph (the doc's orders over the snapshot's) and drop
  * back-edges. Reachable only through cross-page id collisions. */
@@ -280,10 +329,23 @@ function dropCycles(snapshot: GraphSnapshot, pageId: string, childrenOf: Map<str
  * whose walk of `pageId` is `doc` (modulo those two repairs); applying the
  * ops for that walk again yields nothing.
  */
-export function docToOps(pageId: NoteId, doc: BlockDoc, snapshot: GraphSnapshot): Op[] {
+export function docToOps(
+  pageId: NoteId,
+  doc: BlockDoc,
+  snapshot: GraphSnapshot,
+  discard?: Iterable<string>,
+): Op[] {
   const { nodes, childrenOf } = docToParts(pageId, doc, 0, reservedPageIds(snapshot, pageId))
   dropCycles(snapshot, pageId, childrenOf)
-  return partsToOps(pageId, nodes, childrenOf, snapshot, reachableFrom(snapshot, [pageId]), "keep")
+  return partsToOps(
+    pageId,
+    nodes,
+    childrenOf,
+    snapshot,
+    reachableFrom(snapshot, [pageId]),
+    "keep",
+    new Set(discard ?? []),
+  )
 }
 
 /**
@@ -322,8 +384,10 @@ export function reservedPageIds(snapshot: GraphSnapshot, pageId: string): Set<st
  * reconciled, is *dropped*, and `dropped` says what that means:
  *
  * - `"keep"` (the outline): the block stays, out of reach, for the note's
- *   Unassigned basket to show — unless it is blank (`isBlankNode`), which
- *   is deleted, so backing out of an empty line leaves nothing behind;
+ *   Unassigned basket to show — unless it is blank (`isBlankNode`), or named
+ *   in `discard` (an undo taking back the edit that created it —
+ *   `ChangeHint`), which is deleted, so backing out of an empty line or
+ *   undoing a duplicate leaves nothing behind;
  * - `"delete"` (the basket): the block is deleted. There is nothing to
  *   unlink it from, and the basket is where a block is deleted for good.
  *
@@ -336,6 +400,7 @@ export function partsToOps(
   snapshot: GraphSnapshot,
   reachedBefore: Set<string>,
   dropped: "keep" | "delete",
+  discard: ReadonlySet<string> = new Set(),
 ): Op[] {
   const creates: Op[] = []
   const sets: Op[] = []
@@ -398,7 +463,9 @@ export function partsToOps(
   const kept = new Set(nodes.map((node) => node.id))
   for (const id of reachedBefore) {
     if (kept.has(id) || !snapshot.nodes.has(id) || parents(id).size > 0) continue
-    if (dropped === "delete" || isBlankNode(snapshot, id)) deletes.push({ op: "delete", id })
+    if (dropped === "delete" || discard.has(id) || isBlankNode(snapshot, id)) {
+      deletes.push({ op: "delete", id })
+    }
   }
 
   return [...creates, ...sets, ...linkOps, ...deletes]

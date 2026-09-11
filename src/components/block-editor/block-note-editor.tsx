@@ -1,9 +1,9 @@
 import { useAtomValue, useSetAtom, useStore } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { emptyBlock } from "../../blocks/ops"
-import type { BlockDoc } from "../../blocks/types"
+import type { BlockDoc, ChangeHint } from "../../blocks/types"
 import { imagesEnabled, uploadImage } from "../../data/images"
-import { deleteBlockOps, parentCount } from "../../data/ops"
+import { deleteBlockOps, deleteSubtreeOps, parentCount } from "../../data/ops"
 import { useApplyOps } from "../../data/store"
 import { useCollapseState } from "../../data/view-state"
 import {
@@ -91,7 +91,7 @@ export function BlockNoteEditor({
   rowRemoval = "unlink",
 }: {
   doc: BlockDoc
-  onChange: (doc: BlockDoc) => void
+  onChange: (doc: BlockDoc, hint?: ChangeHint) => void
   /**
    * The note's id. When provided, the note's folds persist per-device in
    * localStorage (seeded on first open from the default-expansion policy);
@@ -159,14 +159,14 @@ export function BlockNoteEditor({
 
   const { collapsed, toggleCollapse } = useCollapseState(collapseKey ?? noteId, doc)
 
-  const handleChange = (next: BlockDoc) => {
+  const handleChange = (next: BlockDoc, hint?: ChangeHint) => {
     // While zoomed, the trailing-blank rule is suspended (a root-level blank
     // would be invisible below the zoomed subtree) — see `ensureZoomChild`.
     const withBlank =
       readOnly || !trailingBlank ? next : zoomBlockId ? next : ensureTrailingBlank(next)
     setDoc(withBlank)
     setLastDoc(withBlank)
-    onChange(withBlank)
+    onChange(withBlank, hint)
   }
 
   // Publish the live outline (heading blocks) for the command palette's ⌘P
@@ -215,6 +215,16 @@ export function BlockNoteEditor({
   const deleteEverywhere = useCallback(
     (id: string) => applyOps(deleteBlockOps(id, jotaiStore.get(graphSnapshotAtom))),
     [applyOps, jotaiStore],
+  )
+  const deleteSubtree = useCallback(
+    (id: string) => applyOps(deleteSubtreeOps(id, jotaiStore.get(graphSnapshotAtom))),
+    [applyOps, jotaiStore],
+  )
+  // Undo needs to tell a block an edit created from one it linked in: only
+  // the former is deleted when the edit is taken back.
+  const knownBlock = useCallback(
+    (id: string) => jotaiStore.get(graphSnapshotAtom).nodes.has(id),
+    [jotaiStore],
   )
 
   // Images (docs/images.md): pasted pictures upload to the Worker — only where
@@ -275,6 +285,8 @@ export function BlockNoteEditor({
       noteId={noteId}
       parentCountOf={noteId && rowRemoval === "unlink" ? parentCountOf : undefined}
       onDeleteEverywhere={noteId && rowRemoval === "unlink" ? deleteEverywhere : undefined}
+      onDeleteSubtree={noteId && rowRemoval === "delete" ? deleteSubtree : undefined}
+      knownBlock={noteId ? knownBlock : undefined}
       onImageUpload={onImageUpload}
     />
   )

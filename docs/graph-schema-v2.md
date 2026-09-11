@@ -184,10 +184,17 @@ Unlink — `docToOps`):
    of reach and shows in its note's basket (below) with everything beneath
    it still linked to it. The one exception is a **blank** X — no text but
    whitespace, nothing beneath it, no picture (`isBlankNode`) — which is
-   tombstoned, so backing out of an empty line leaves nothing behind.
+   tombstoned, so backing out of an empty line leaves nothing behind; and
+   an undo taking back the step that made X (a duplicate, a paste, a new
+   line — `ChangeHint.discard`, from the editor's history), which deletes
+   X rather than strand a copy in the basket.
 
 Deleting X (the menu's Delete, `deleteBlockOps`; or removing its row in the
-basket, `basketToOps`) tombstones every inbound link and X's row. X's own
+basket, `basketToOps`) tombstones every inbound link and X's row. The
+basket's **Delete with contents** (`deleteSubtreeOps`) also takes
+each block below X that no page, and no other root, still reaches without
+going through X — a block another note holds is only unlinked from the
+subtree. X's own
 outbound links are left alone — retained, not cascaded, because they describe
 the shape a restore would put back — and the walk skips them at read time, so
 X's children are now reached by nothing.

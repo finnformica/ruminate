@@ -5,7 +5,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import type React from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent } from "react"
 import { newBlockMarkerAtom } from "../../global-state"
-import type { Block, BlockDoc } from "../../blocks/types"
+import type { Block, BlockDoc, ChangeHint } from "../../blocks/types"
 import { blockId } from "../../blocks/id"
 import {
   beginPendingImage,
@@ -214,6 +214,15 @@ function subtreeDoc(doc: BlockDoc, id: string): BlockDoc {
  *
  * Each block's content is raw markdown, rendered per-block and edited in place.
  */
+/** The block editor whose container last took focus — where a page-level
+ * ⌘Z goes when nothing editable has it (see the window listener below). */
+let lastActiveEditor: HTMLElement | null = null
+
+/** Where a page-level ⌘Z is somebody else's: form fields, dialogs and menus,
+ * and any block editor (each handles its own on its container). */
+const UNDO_KEEPS_TO_ITSELF =
+  'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [data-block-editor]'
+
 export function BlockEditor({
   doc,
   onChange,
@@ -236,10 +245,13 @@ export function BlockEditor({
   noteId,
   parentCountOf,
   onDeleteEverywhere,
+  onDeleteSubtree,
+  knownBlock,
   onImageUpload,
 }: {
   doc: BlockDoc
-  onChange: (doc: BlockDoc) => void
+  /** The next doc, and what the change means beyond it (`ChangeHint`). */
+  onChange: (doc: BlockDoc, hint?: ChangeHint) => void
   /**
    * Upload a pasted/dropped picture and return what the image block should
    * hold (`src/data/images.ts`). Absent = images are switched off here: an
@@ -255,6 +267,13 @@ export function BlockEditor({
   /** Delete a block from every place it appears (the graph-level delete);
    * absent standalone, where the menu offers only the row's removal. */
   onDeleteEverywhere?: (id: string) => void
+  /** Delete a block and everything beneath it that nothing else holds
+   * (`deleteSubtreeOps`); the basket's menu offers it. Absent elsewhere. */
+  onDeleteSubtree?: (id: string) => void
+  /** Whether the graph already holds a block — what tells a block an edit
+   * created from one it linked in, for undo (`useBlockHistory`). Absent =
+   * nothing is known, so every block an edit brings in counts as created. */
+  knownBlock?: (id: string) => boolean
   /** Start with the first block in edit mode (e.g. a brand-new note). */
   startEditing?: boolean
   /** Highlight the block for this heading text on mount / when it changes. */
@@ -370,7 +389,7 @@ export function BlockEditor({
   const collapsed = collapsedProp ?? collapsedInternal
   // The other end of a multi-row selection (Shift+Arrow). null = single select.
   const [anchorKey, setAnchorKey] = useState<string | null>(null)
-  const history = useBlockHistory(onChange)
+  const history = useBlockHistory(onChange, knownBlock)
 
   // The view: the rows on screen, in order, indented by depth, folds applied
   // (`buildRows`). Zoomed, the zoomed block leads as the view's editable
@@ -414,6 +433,7 @@ export function BlockEditor({
   const handleContainerFocus = () => {
     cancelKeyboardIdleCheck()
     setKeyboardActive(true)
+    lastActiveEditor = containerRef.current
   }
   const scheduleKeyboardIdleCheck = () => {
     cancelKeyboardIdleCheck()
@@ -1282,6 +1302,7 @@ export function BlockEditor({
       : undefined,
     remove: (key) => runOnRow("deleteBlock", key),
     deleteEverywhere: onDeleteEverywhere,
+    deleteSubtree: onDeleteSubtree,
   }
 
   const api: BlockEditorApi = {
@@ -1356,6 +1377,34 @@ export function BlockEditor({
       escalateFrom([key], { selected: key, anchorKey: null })
     },
   }
+
+  // Undo and redo from anywhere on the page that is not itself editable — the
+  // basket's summary after an unlink, the sidebar, the empty space below the
+  // rows — reach the editor last focused, so glancing away does not strand
+  // the undo. Inside an input, a dialog, a menu or another block editor the
+  // keys are theirs.
+  const latestHistory = useRef({ undo, redo })
+  latestHistory.current = { undo, redo }
+  useEffect(() => {
+    if (readOnly) return
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.defaultPrevented) return
+      const key = event.key.toLowerCase()
+      const isUndo = key === "z" && !event.shiftKey
+      const isRedo = (key === "z" && event.shiftKey) || key === "y"
+      if (!isUndo && !isRedo) return
+      const root = containerRef.current
+      if (!root || lastActiveEditor !== root) return
+      const target = event.target
+      if (!(target instanceof Element) || root.contains(target)) return
+      if (target.closest(UNDO_KEEPS_TO_ITSELF)) return
+      if (isUndo ? latestHistory.current.undo() : latestHistory.current.redo()) {
+        event.preventDefault()
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [readOnly])
 
   // The container is the single keyboard target for select mode (see the focus
   // effect below). Edit mode is handled by the focused textarea inside the
@@ -1846,6 +1895,7 @@ export function BlockEditor({
           className="outline-none"
           ref={containerRef}
           tabIndex={-1}
+          data-block-editor=""
           onKeyDown={handleKeyDown}
           onFocus={handleContainerFocus}
           onBlur={handleContainerBlur}

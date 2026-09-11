@@ -8,6 +8,7 @@ import {
   applyOps,
   deleteBlockOps,
   deletePageOps,
+  deleteSubtreeOps,
   docToOps,
   pagesTouchedBy,
   parentCount,
@@ -132,6 +133,18 @@ describe("docToOps", () => {
     const next = applyOps(snapshot, ops, NOW)
     expect(next.nodes.has("blk_blank00000")).toBe(true)
     expect([...unassignedIds(next)].sort()).toEqual(["blk_blank00000", "blk_kid0000000"])
+  })
+
+  it("a dropped block named to discard (an undo of its creation) is deleted, not kept", () => {
+    const snapshot = withRoot("blk_copy000000", "a copy")
+    const ops = docToOps("a", parse(A), snapshot, ["blk_copy000000"])
+    expect(ops).toEqual([
+      { op: "unlink", source: "a", destination: "blk_copy000000" },
+      { op: "delete", id: "blk_copy000000" },
+    ])
+    // Only what this change removed: naming a block still in the doc, or one
+    // held elsewhere, changes nothing.
+    expect(kinds(docToOps("a", parse(A), graphOf({ a: A }), ["blk_one0000000"]))).toEqual([])
   })
 
   it("an image row with a picture is kept; a placeholder with none is deleted", () => {
@@ -370,6 +383,51 @@ describe("deleteBlockOps / parentCount", () => {
     // Pages are not blocks; unknown ids are nothing.
     expect(deleteBlockOps("a", linked)).toEqual([])
     expect(deleteBlockOps("nope", linked)).toEqual([])
+  })
+})
+
+describe("deleteSubtreeOps", () => {
+  const TREE =
+    "- top\n  id:: blk_top0000000\n  - mid\n    id:: blk_mid0000000\n    - leaf\n      id:: blk_leaf000000\n- other\n  id:: blk_other00000\n"
+
+  it("deletes the block and everything beneath it that nothing else holds", () => {
+    const snapshot = graphOf({ a: TREE })
+    const ops = deleteSubtreeOps("blk_top0000000", snapshot)
+    expect(ops).toEqual([
+      { op: "unlink", source: "a", destination: "blk_top0000000" },
+      { op: "delete", id: "blk_top0000000" },
+      { op: "delete", id: "blk_mid0000000" },
+      { op: "delete", id: "blk_leaf000000" },
+    ])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(walk(next, "a")).toBe("- other\n  id:: blk_other00000\n")
+    expect(next.nodes.has("blk_leaf000000")).toBe(false)
+  })
+
+  it("spares what another note, or another root, still reaches", () => {
+    // b holds `mid` too; `other` (a root of its own) holds `leaf`.
+    const snapshot = applyOps(
+      graphOf({ a: TREE, b: "- b\n  id:: blk_b000000000\n" }),
+      [
+        { op: "link", source: "blk_b000000000", destination: "blk_mid0000000", sortKey: "a0" },
+        { op: "link", source: "blk_other00000", destination: "blk_leaf000000", sortKey: "a0" },
+      ],
+      NOW,
+    )
+    const ops = deleteSubtreeOps("blk_top0000000", snapshot)
+    expect(ops).toEqual([
+      { op: "unlink", source: "a", destination: "blk_top0000000" },
+      { op: "delete", id: "blk_top0000000" },
+    ])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(walk(next, "b")).toContain("- mid")
+    expect(walk(next, "a")).toContain("  - leaf")
+  })
+
+  it("a page is never deleted this way; an unknown id is nothing", () => {
+    const snapshot = graphOf({ a: TREE })
+    expect(deleteSubtreeOps("a", snapshot)).toEqual([])
+    expect(deleteSubtreeOps("blk_nope000000", snapshot)).toEqual([])
   })
 })
 
