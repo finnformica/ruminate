@@ -7,9 +7,12 @@ import { newBlockMarkerAtom } from "../../global-state"
 import type { Block, BlockDoc } from "../../blocks/types"
 import { blockId } from "../../blocks/id"
 import {
+  beginPendingImage,
   downloadImage,
   imageFilesOf,
   ImageUploadError,
+  primeImageObjectUrl,
+  releasePendingImage,
   type UploadedImage,
 } from "../../data/images"
 import { ImageLightbox } from "./image-lightbox"
@@ -1110,54 +1113,116 @@ export function BlockEditor({
     },
     [],
   )
+  /**
+   * Put pictures in, then send them up.
+   *
+   * The rows land first, each drawing the file the reader already has
+   * (`beginPendingImage`), so a pasted screenshot is on screen at once
+   * instead of after the round trip. Nothing provisional reaches the graph:
+   * the block carries no image props until its asset id arrives, and the
+   * preview lives only in memory. When the upload lands the id is written
+   * WITHOUT a history step, so the picture is still one undo; when it fails
+   * the row is taken back out.
+   */
   const insertImages = async (key: string, files: File[]) => {
     if (!onImageUpload) return
     // Chained locally, so a second picture lands after the first even before
     // the host has re-rendered with the first one in.
     let current = docRef.current
+    const queued: { id: string; key: string; file: File; restore: Block | null }[] = []
     for (const file of files) {
+      const targetId = idOfKey(key)
+      const target = current.blocks[targetId]
+      if (!target) break
+      const row = rows.find((r) => r.key === key)
+      const blank =
+        !row?.zoomTitle &&
+        (target.type === "text" || target.type === "ul") &&
+        target.text === "" &&
+        target.children.length === 0
+      let next: BlockDoc
+      let nextKey: string
+      let imageId: string
+      let restore: Block | null
+      if (blank) {
+        // The picture takes the blank line over; failure puts it back.
+        imageId = targetId
+        restore = target
+        next = {
+          ...current,
+          blocks: {
+            ...current.blocks,
+            [targetId]: { ...target, type: "image", text: "", props: undefined },
+          },
+        }
+        nextKey = key
+      } else {
+        const image: Block = { id: blockId(), type: "image", text: "", children: [] }
+        imageId = image.id
+        restore = null
+        if (row?.zoomTitle) {
+          next = insertFirstChild(current, targetId, image)
+          nextKey = keyOf(key, image.id)
+        } else {
+          next = insertAfter(current, key, image)
+          nextKey = keyOf(parentKeyOf(key), image.id)
+        }
+      }
+      beginPendingImage(imageId, file)
+      history.commit(current, next, { type: "structural" })
+      current = next
+      docRef.current = next
+      setAnchorKey(null)
+      setFocus(null)
+      setSelected(nextKey)
+      key = nextKey
+      queued.push({ id: imageId, key: nextKey, file, restore })
+    }
+
+    for (const { id, key: rowKey, file, restore } of queued) {
       try {
         const asset = await onImageUpload(file)
-        const targetId = idOfKey(key)
-        const target = current.blocks[targetId]
-        if (!target) return
-        const props = {
-          image: asset.id,
-          ...(asset.width && asset.height ? { width: asset.width, height: asset.height } : {}),
+        // The bytes are already in hand — draw them rather than fetching the
+        // picture straight back down.
+        primeImageObjectUrl(asset.id, file)
+        const doc = docRef.current
+        const block = doc.blocks[id]
+        if (!block) continue
+        const next: BlockDoc = {
+          ...doc,
+          blocks: {
+            ...doc.blocks,
+            [id]: {
+              ...block,
+              props: {
+                image: asset.id,
+                ...(asset.width && asset.height
+                  ? { width: asset.width, height: asset.height }
+                  : {}),
+              },
+            },
+          },
         }
-        const row = rows.find((r) => r.key === key)
-        const blank =
-          !row?.zoomTitle &&
-          (target.type === "text" || target.type === "ul") &&
-          target.text === "" &&
-          target.children.length === 0
-        let next: BlockDoc
-        let nextKey: string
-        if (blank) {
-          next = {
-            ...current,
-            blocks: { ...current.blocks, [targetId]: { ...target, type: "image", props } },
-          }
-          nextKey = key
-        } else {
-          const image: Block = { id: blockId(), type: "image", text: "", props, children: [] }
-          if (row?.zoomTitle) {
-            next = insertFirstChild(current, targetId, image)
-            nextKey = keyOf(key, image.id)
-          } else {
-            next = insertAfter(current, key, image)
-            nextKey = keyOf(parentKeyOf(key), image.id)
-          }
-        }
-        history.commit(current, next, { type: "structural" })
-        current = next
+        // Not a history step: finishing the upload is the same edit as making
+        // the row, so one undo still takes the whole picture back out.
         docRef.current = next
-        setAnchorKey(null)
-        setFocus(null)
-        setSelected(nextKey)
-        key = nextKey
+        onChange(next)
       } catch (error) {
+        const doc = docRef.current
+        let next: BlockDoc | null = null
+        if (restore) {
+          const block = doc.blocks[id]
+          if (block) next = { ...doc, blocks: { ...doc.blocks, [id]: restore } }
+        } else if (doc.blocks[id] && idOfKey(rowKey) === id) {
+          next = removeBlock(doc, rowKey).doc
+        }
+        if (next) {
+          docRef.current = next
+          onChange(next)
+        }
         showNotice(error instanceof ImageUploadError ? error.message : "Image upload failed")
+      } finally {
+        releasePendingImage(id)
       }
     }
   }

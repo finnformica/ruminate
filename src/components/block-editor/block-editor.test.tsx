@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useState } from "react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { emptyBlock } from "../../blocks/ops"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
@@ -2127,6 +2127,76 @@ describe("BlockEditor images", () => {
   })
   const uploads = (id = "img_abcdefghijklmnop") =>
     vi.fn(async (): Promise<UploadedImage> => ({ id, width: 640, height: 480 }))
+
+  // jsdom has no object URLs; the preview a pasted picture draws is one.
+  beforeAll(() => {
+    const url = URL as unknown as Record<string, unknown>
+    url.createObjectURL = vi.fn(() => "blob:preview")
+    url.revokeObjectURL = vi.fn()
+  })
+
+  it("draws a pasted picture at once, under a spinner, and stays one undo", async () => {
+    let settle: (asset: UploadedImage) => void = () => {}
+    const onImageUpload = vi.fn(
+      () =>
+        new Promise<UploadedImage>((resolve) => {
+          settle = resolve
+        }),
+    )
+    const { container, getByTestId, queryByTestId } = render(
+      <Harness initial={"A\nB\nC"} onImageUpload={onImageUpload} />,
+    )
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
+    await act(async () => {
+      fireEvent.paste(root, imagePaste([pngFile()]))
+    })
+
+    // The row is already there, drawing the local file under a spinner — and
+    // the block holds no asset id, so nothing provisional can reach the graph.
+    const img = container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!
+    expect(img.src).toBe("blob:preview")
+    expect(queryByTestId("block-image-uploading")).not.toBeNull()
+    expect(getByTestId("serialized").textContent).not.toContain("img_")
+    expect(serializedLines(getByTestId)).toHaveLength(4)
+
+    await act(async () => {
+      settle({ id: "img_abcdefghijklmnop", width: 640, height: 480 })
+    })
+    expect(queryByTestId("block-image-uploading")).toBeNull()
+    expect(serializedLines(getByTestId)).toEqual([
+      "A",
+      "B",
+      "![](/api/images/img_abcdefghijklmnop)",
+      "C",
+    ])
+
+    // Landing the upload is the same edit as making the row: one undo.
+    fireEvent.keyDown(root, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "C"])
+  })
+
+  it("hangs no caption line under an uncaptioned picture", () => {
+    const withCaption = (text: string): BlockDoc => ({
+      props: null,
+      rootBlockIds: ["a"],
+      blocks: {
+        a: {
+          id: "a",
+          type: "image",
+          text,
+          props: { src: "https://example.com/sunset.png" },
+          children: [],
+        },
+      },
+    })
+    const bare = render(<Harness initialDoc={withCaption("")} />)
+    expect(bare.container.querySelector('[data-testid="block-body"]')).toBeNull()
+    bare.unmount()
+
+    const captioned = render(<Harness initialDoc={withCaption("A sunset")} />)
+    expect(captioned.container.querySelector('[data-testid="block-body"]')).not.toBeNull()
+  })
 
   it("draws an image block as its picture with the caption beneath", () => {
     const doc: BlockDoc = {

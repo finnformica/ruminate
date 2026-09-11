@@ -39,7 +39,7 @@ export function ImageLightbox({ block, onClose }: { block: Block | null; onClose
 }
 
 function LightboxImage({ block }: { block: Block }) {
-  const src = useImageSrc(block)
+  const { src } = useImageSrc(block)
   const caption = block.text.trim()
   return (
     <>

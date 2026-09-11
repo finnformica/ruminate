@@ -204,7 +204,7 @@ export function BlockItem({
   // A panel (a code block's) carries the same classes on the rendered view
   // and the textarea, so editing never moves a character.
   const panel = kind.panel ?? null
-  const rowContext: RowContext = { block, occurrence, api, depth }
+  const rowContext: RowContext = { block, occurrence, api, depth, editing }
 
   // Focus and place the caret when editing starts.
   useLayoutEffect(() => {

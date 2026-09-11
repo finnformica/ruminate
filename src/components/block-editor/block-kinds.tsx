@@ -22,6 +22,10 @@ export interface RowContext {
   occurrence: Occurrence
   api: BlockEditorApi
   depth: number
+  /** The row's text is a textarea right now, not rendered text. Chrome that
+   * hides an empty line (an image's caption) must keep it while it is being
+   * typed into. */
+  editing: boolean
 }
 
 export interface BlockKind {
@@ -176,16 +180,23 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     slot: "glyph",
     glyph: null,
     slotTestId: "paragraph-slot",
-    // The text is the caption: small and quiet beneath the picture.
-    typography: () => "text-sm leading-relaxed text-text-secondary",
+    // The text is the caption: small, quiet and centred beneath the picture.
+    // `text-center` rides the shared typography so the view and the textarea
+    // agree — switching between them never shifts a character.
+    typography: () => "text-sm leading-relaxed text-text-secondary text-center",
     placeholder: "Add a caption…",
     // The picture above its caption, which is the block's text: the caption
     // line is the ordinary body (view or textarea), so every keyboard and
-    // paste behaviour is the same as on any block.
-    wrap: (content, { block, occurrence, api }) => (
+    // paste behaviour is the same as on any block. An uncaptioned picture
+    // drops the line entirely rather than leaving a blank one under it — the
+    // row is then just the picture, evenly framed. It comes back the moment
+    // the row is being edited, so a caption can still be typed.
+    wrap: (content, { block, occurrence, api, editing }) => (
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <ImageFigure block={block} occurrence={occurrence} api={api} />
-        <div className="flex min-w-0">{content}</div>
+        {editing || block.text.trim() !== "" ? (
+          <div className="flex min-w-0 flex-col">{content}</div>
+        ) : null}
       </div>
     ),
   },
