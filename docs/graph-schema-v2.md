@@ -283,7 +283,6 @@ untouched on main's seed.
 - Page `props` are metadata entries (docs/metadata.md); frontmatter is neither
   read nor written. A row in the retired raw-blob `{"frontmatter": "…"}`
   shape reads as no properties. See graph-storage.md.
-  degenerate YAML and rows from older versions. See graph-storage.md.
 - Whether `((blk_x))` syntax survives in `text` as an authoring gesture that
   the editor converts into a child link, or disappears entirely.
 - Materialized reference edges (as new link `kind`s) — explicitly deferred;
