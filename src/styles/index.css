@@ -127,6 +127,37 @@ body:has([data-resizing="true"]) * {
   @apply h-10 gap-4 px-3;
 }
 
+/* App frame */
+
+/* The app fills the viewport exactly: its own columns scroll, the page never
+ * does. In a browser the SMALL viewport height is the honest one — the height
+ * left when the toolbars are showing — so the phone nav bar sits above
+ * Safari's bar rather than under it. Installed to the home screen there are
+ * no toolbars, and there iOS gets `svh`/`dvh` wrong: it sizes them as if
+ * Safari's bar were still present, so the frame stops short and the nav bar
+ * floats above dead space. Standalone, `100vh` is the true height. */
+.app-frame {
+  height: 100vh;
+}
+
+@supports (height: 100svh) {
+  .app-frame {
+    height: 100svh;
+  }
+}
+
+@media (display-mode: standalone) {
+  .app-frame {
+    height: 100vh;
+  }
+}
+
+@media print {
+  .app-frame {
+    height: auto;
+  }
+}
+
 /* Scroll mask */
 
 @property --mask-height {
