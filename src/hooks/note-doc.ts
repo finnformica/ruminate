@@ -2,6 +2,7 @@ import { useAtomValue, useStore } from "jotai"
 import { useCallback, useMemo, useRef } from "react"
 import { isEmptyDoc } from "../blocks/ops"
 import type { BlockDoc } from "../blocks/types"
+import { basketDoc, basketToOps } from "../data/basket"
 import { pageDoc } from "../data/graph"
 import { docToOps } from "../data/ops"
 import { useApplyOps } from "../data/store"
@@ -69,4 +70,32 @@ export function useNoteDoc({
   )
 
   return { doc: stored ?? defaultDoc, exists, setDoc }
+}
+
+/**
+ * A note's Unassigned basket (`src/data/basket.ts`): the blocks written in
+ * the note that nothing reaches, as a doc, and the way back — the same shape as
+ * `useNoteDoc`, over `basketToOps` instead of `docToOps`, so the basket's
+ * rows edit exactly like the outline's. Empty (no roots) when every block
+ * of the note is reached.
+ */
+export function useBasketDoc(noteId: NoteId | undefined) {
+  const snapshot = useAtomValue(graphSnapshotAtom)
+  const store = useStore()
+  const apply = useApplyOps()
+
+  const doc = useMemo(
+    () => (noteId === undefined ? null : basketDoc(noteId, snapshot)),
+    [noteId, snapshot],
+  )
+
+  const setDoc = useCallback(
+    (next: BlockDoc) => {
+      if (noteId === undefined) return
+      apply(basketToOps(noteId, next, store.get(graphSnapshotAtom)))
+    },
+    [noteId, store, apply],
+  )
+
+  return { doc, count: doc?.rootBlockIds.length ?? 0, setDoc }
 }

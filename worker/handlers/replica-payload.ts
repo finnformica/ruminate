@@ -13,6 +13,8 @@
 // (worker/tenancy-db.ts) binds to the verified GitHub id. No caller can supply
 // a tenant; the planner cannot even express one.
 
+import type { NoteId } from "../../src/schema"
+
 /** One row of the `nodes` table. */
 export interface NodeRow {
   id: string
@@ -38,6 +40,14 @@ export interface NodeRow {
    * replica may assign one — `planReplicaPut` never reads this field.
    */
   seq?: number
+  /**
+   * The note the block was written in (migrations/0006) — where it shows in
+   * the **Unassigned** basket once nothing links to it. Set at creation,
+   * never changed by linking; pages have none. Absent = no note (a page, or
+   * a row older than the backfill), which keeps every older client and
+   * fixture valid.
+   */
+  notes_id?: NoteId
 }
 
 /** One row of the `link` table — containment (`kind: "child"`) today. */
@@ -87,6 +97,7 @@ export function toNodeRow(row: Record<string, unknown>): NodeRow {
     node.deleted_at = Number(row.deleted_at)
   }
   if (row.seq !== null && row.seq !== undefined) node.seq = Number(row.seq)
+  if (row.notes_id !== null && row.notes_id !== undefined) node.notes_id = String(row.notes_id)
   return node
 }
 
@@ -221,7 +232,8 @@ function parseNodeRow(x: unknown): NodeRow | null {
     !isString(row.text) ||
     !(row.props === null || isString(row.props)) ||
     typeof row.updated_at !== "number" ||
-    deletedAt === false
+    deletedAt === false ||
+    !(row.notes_id === undefined || row.notes_id === null || isString(row.notes_id))
   ) {
     return null
   }
@@ -233,6 +245,7 @@ function parseNodeRow(x: unknown): NodeRow | null {
     updated_at: row.updated_at,
   }
   if (deletedAt !== undefined) node.deleted_at = deletedAt
+  if (isString(row.notes_id)) node.notes_id = row.notes_id
   return node
 }
 
@@ -372,13 +385,25 @@ export function planReplicaPut(payload: ReplicaPutPayload, now: number): SqlStat
   for (const node of payload.nodes) {
     statements.push({
       sql:
-        "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at, seq) " +
-        "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6, (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */))) " +
+        "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at, notes_id, seq) " +
+        "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */))) " +
         "ON CONFLICT (user_id, id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
         "props = excluded.props, updated_at = excluded.updated_at, " +
-        "deleted_at = excluded.deleted_at, seq = (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */)) " +
+        "deleted_at = excluded.deleted_at, " +
+        // A note id is set once; a push from a client that predates it (no
+        // `notes_id` on its rows) must not clear the one the replica holds.
+        "notes_id = COALESCE(excluded.notes_id, nodes.notes_id), " +
+        "seq = (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */)) " +
         "WHERE excluded.updated_at >= nodes.updated_at",
-      params: [node.id, node.type, node.text, node.props, node.updated_at, node.deleted_at ?? null],
+      params: [
+        node.id,
+        node.type,
+        node.text,
+        node.props,
+        node.updated_at,
+        node.deleted_at ?? null,
+        node.notes_id ?? null,
+      ],
     })
   }
   for (const link of payload.links) {

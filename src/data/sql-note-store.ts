@@ -133,7 +133,9 @@ const linkMapKey = (source: string, destination: string, kind: string) =>
 /** The LIVE graph — the working copy every read and write plans against. */
 async function loadMemGraph(driver: SqlDriver): Promise<MemGraph> {
   const [nodeRows, linkRows] = await Promise.all([
-    driver.exec("SELECT id, type, text, props, updated_at FROM nodes WHERE deleted_at IS NULL"),
+    driver.exec(
+      "SELECT id, type, text, props, updated_at, notes_id FROM nodes WHERE deleted_at IS NULL",
+    ),
     driver.exec(
       "SELECT source_id, destination_id, kind, sort_key, updated_at FROM link " +
         "WHERE deleted_at IS NULL",
@@ -153,7 +155,7 @@ async function loadMemGraph(driver: SqlDriver): Promise<MemGraph> {
 async function loadAllRows(driver: SqlDriver): Promise<{ nodes: NodeRow[]; links: LinkRow[] }> {
   const [nodeRows, linkRows] = await Promise.all([
     driver.exec(
-      "SELECT id, type, text, props, updated_at, deleted_at FROM nodes " +
+      "SELECT id, type, text, props, updated_at, deleted_at, notes_id FROM nodes " +
         "/* includes-deleted: the full-push source; a delete only reaches other " +
         "devices if its tombstone travels */",
     ),
@@ -228,10 +230,21 @@ function createGraphWriter(mem: MemGraph): GraphWriter {
 
 const upsertNodeStatement = (node: NodeRow): SqlStatement => ({
   sql:
-    "INSERT INTO nodes (id, type, text, props, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?) " +
+    "INSERT INTO nodes (id, type, text, props, updated_at, deleted_at, notes_id) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?) " +
     "ON CONFLICT (id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
-    "props = excluded.props, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at",
-  params: [node.id, node.type, node.text, node.props, node.updated_at, node.deleted_at ?? null],
+    "props = excluded.props, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, " +
+    // A note id is set once and never cleared by a row that carries none.
+    "notes_id = COALESCE(excluded.notes_id, nodes.notes_id)",
+  params: [
+    node.id,
+    node.type,
+    node.text,
+    node.props,
+    node.updated_at,
+    node.deleted_at ?? null,
+    node.notes_id ?? null,
+  ],
 })
 
 const upsertLinkStatement = (link: LinkRow): SqlStatement => ({
@@ -276,6 +289,7 @@ function planOp(writer: GraphWriter, op: Op) {
         text: op.text,
         props: op.props,
         updated_at: now,
+        ...(op.notesId ? { notes_id: op.notesId } : {}),
       })
       return
     case "setText":

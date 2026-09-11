@@ -85,6 +85,9 @@ export function BlockNoteEditor({
   zoomBlockId = null,
   onZoomNavigate,
   noteTitle,
+  collapseKey,
+  publishOutline = true,
+  trailingBlank = true,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc) => void
@@ -116,12 +119,22 @@ export function BlockNoteEditor({
   onZoomNavigate?: (id: string | null) => void
   /** The note's title, shown as the breadcrumb's first crumb while zoomed. */
   noteTitle?: string
+  /** Where this editor's folds are kept, when not under the note's own id —
+   * a second editor on the page (the Unassigned basket) keeps its own. */
+  collapseKey?: string
+  /** Whether this editor's headings feed the command palette's outline.
+   * Off for a second editor on the page, which would otherwise overwrite the
+   * note's. */
+  publishOutline?: boolean
+  /** Whether an editable doc always ends with a blank block to type into. Off
+   * for the basket: a blank there would be a new unassigned block. */
+  trailingBlank?: boolean
 }) {
   // Read-only history views are shown verbatim; only editable notes get the
   // always-present trailing blank.
   const seedDoc = (incoming: BlockDoc) => {
     const seeded = withStarterBlock(incoming)
-    return readOnly ? seeded : ensureTrailingBlank(seeded)
+    return readOnly || !trailingBlank ? seeded : ensureTrailingBlank(seeded)
   }
 
   const [doc, setDoc] = useState<BlockDoc>(() => seedDoc(incoming))
@@ -137,12 +150,13 @@ export function BlockNoteEditor({
     setDoc(seedDoc(incoming))
   }
 
-  const { collapsed, toggleCollapse } = useCollapseState(noteId, doc)
+  const { collapsed, toggleCollapse } = useCollapseState(collapseKey ?? noteId, doc)
 
   const handleChange = (next: BlockDoc) => {
     // While zoomed, the trailing-blank rule is suspended (a root-level blank
     // would be invisible below the zoomed subtree) — see `ensureZoomChild`.
-    const withBlank = readOnly ? next : zoomBlockId ? next : ensureTrailingBlank(next)
+    const withBlank =
+      readOnly || !trailingBlank ? next : zoomBlockId ? next : ensureTrailingBlank(next)
     setDoc(withBlank)
     setLastDoc(withBlank)
     onChange(withBlank)
@@ -156,9 +170,9 @@ export function BlockNoteEditor({
   // never publish.
   const setOutline = useSetAtom(noteOutlineAtom)
   useEffect(() => {
-    if (readOnly || !noteId) return
+    if (readOnly || !noteId || !publishOutline) return
     setOutline({ noteId, items: buildOutline(doc) })
-  }, [doc, noteId, readOnly, setOutline])
+  }, [doc, noteId, readOnly, setOutline, publishOutline])
   // Clear on unmount so a stale outline never outlives its note. (React runs
   // this cleanup before the next note's publish effect, so switching notes is
   // safe.)

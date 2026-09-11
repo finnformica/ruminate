@@ -13,6 +13,7 @@ import type { BlockDoc } from "../blocks/types"
 import { BlockNoteEditor } from "../components/block-editor/block-note-editor"
 import { NoteTitle } from "../components/block-editor/note-title"
 import { NoteActionsMenu } from "../components/note-actions-menu"
+import { UnassignedBasket } from "../components/unassigned-basket"
 import { NoteFavicon } from "../components/note-favicon"
 import { PageLayout } from "../components/page-layout"
 import { isSyncingAtom } from "../components/sync-status"
@@ -295,6 +296,7 @@ function NotePage() {
                   }
                   noteTitle={note?.displayName ?? ""}
                 />
+                {noteId && pageExists ? <UnassignedBasket noteId={noteId} /> : null}
               </div>
             ) : (
               // The database stores current state only, so there is no
