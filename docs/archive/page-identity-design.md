@@ -1,14 +1,14 @@
 # Page identity: minted ids vs title-keyed pages
 
 > **Status (2026-09-10):** a design record. The bridge it describes has been
-> retired — see [graph-native-app.md](./graph-native-app.md) for what was
+> retired — see [graph-native-app.md](../graph-native-app.md) for what was
 > built; code references below may no longer exist.
 
 Status: **implemented** (2026-08-31) as option (a), under the Amendments at the
 end of this document — ordinary `blk_` ids, no wikilink machinery. Extends
 [graph-schema-v2.md](./graph-schema-v2.md) and
-[graph-storage.md](./graph-storage.md); mirrors the migration discipline of
-[multi-tenant-design.md](./multi-tenant-design.md) §6.
+[graph-storage.md](../graph-storage.md); mirrors the migration discipline of
+[multi-tenant-design.md](../multi-tenant-design.md) §6.
 
 Sections §3 (wikilink semantics) and the parts of §4–§5 that depend on it are
 kept for the record but describe machinery that was **never built**: wikilinks

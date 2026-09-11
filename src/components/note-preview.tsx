@@ -12,7 +12,7 @@ import {
   isValidDateString,
 } from "../utils/date"
 import { BlockEditor } from "./block-editor/block-editor"
-import { GlobeIcon12, TagIcon12 } from "./icons"
+import { TagIcon12 } from "./icons"
 import { Label } from "./label"
 import { useLinkHighlight } from "./link-highlight-provider"
 import { withOrdinalSuffix } from "../utils/pluralize"
@@ -147,9 +147,6 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
       </div>
       {!hideProperties ? (
         <div className="flex flex-wrap gap-x-1.5 gap-y-2 pr-10 font-content empty:hidden coarse:pr-12">
-          {resolvedFrontmatter?.gist_id ? (
-            <Label icon={<GlobeIcon12 className="text-border-focus" />}>Published</Label>
-          ) : null}
           {birthdayLabel ? (
             <Label icon="🎂" className="bg-bg-highlight text-text-highlight">
               {birthdayLabel}
