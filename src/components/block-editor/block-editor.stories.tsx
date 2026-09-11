@@ -20,15 +20,18 @@ function withStarterBlock(doc: BlockDoc): BlockDoc {
  */
 function Harness({
   initial,
+  initialDoc,
   startEditing,
   zoomRootId,
 }: {
   initial: string
+  /** A doc built by hand, for what markdown cannot say (an image's layout). */
+  initialDoc?: BlockDoc
   startEditing?: boolean
   /** Start zoomed into this block (transient local zoom — no router). */
   zoomRootId?: string | null
 }) {
-  const [doc, setDoc] = useState<BlockDoc>(() => withStarterBlock(parse(initial)))
+  const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarterBlock(parse(initial)))
   return (
     <div style={{ maxWidth: 640, padding: 24 }}>
       <BlockEditor
@@ -75,6 +78,63 @@ export const Mixed: Story = {
 
 export const Empty: Story = {
   args: { initial: "" },
+}
+
+/** A picture drawn in place, so the story needs no network and no upload. */
+const PICTURE = (fill: string, w: number, h: number) =>
+  "data:image/svg+xml," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+      `<rect width="${w}" height="${h}" fill="${fill}"/>` +
+      `<circle cx="${w * 0.7}" cy="${h * 0.3}" r="${h * 0.12}" fill="#fff" opacity="0.8"/>` +
+      `<path d="M0 ${h} L${w * 0.35} ${h * 0.55} L${w * 0.55} ${h * 0.75} L${w * 0.7} ${h * 0.6} L${w} ${h} Z" fill="#000" opacity="0.25"/>` +
+      `</svg>`,
+  )
+
+/**
+ * Image blocks and their layout: a picture at its natural size, one dragged
+ * narrower and kept to the left with its caption beside it, one to the
+ * right. Hover a picture for the handles at its sides and the alignment
+ * toolbar in its corner; right-click a row for the same in its menu.
+ */
+export const Images: Story = {
+  args: {
+    initial: "",
+    initialDoc: {
+      props: null,
+      rootBlockIds: ["blk_i1", "blk_i2", "blk_p1", "blk_i3", "blk_p2"],
+      blocks: {
+        blk_i1: {
+          id: "blk_i1",
+          type: "image",
+          text: "A picture at its natural size, centred",
+          props: { src: PICTURE("#5b8def", 1200, 500) },
+          children: [],
+        },
+        blk_i2: {
+          id: "blk_i2",
+          type: "image",
+          text: "Kept to the left, at a third of the row",
+          props: { src: PICTURE("#e0a458", 800, 600), align: "left", size: 33 },
+          children: [],
+        },
+        blk_p1: {
+          id: "blk_p1",
+          type: "text",
+          text: "Text between the pictures reads as a document: the figures sit in it rather than across it.",
+          children: [],
+        },
+        blk_i3: {
+          id: "blk_i3",
+          type: "image",
+          text: "To the right, at half the row",
+          props: { src: PICTURE("#6aa36f", 800, 800), align: "right", size: 50 },
+          children: [],
+        },
+        blk_p2: { id: "blk_p2", type: "text", text: "", children: [] },
+      },
+    },
+  },
 }
 
 /** A todo that also has children — both shortcut hints stack when selected. */

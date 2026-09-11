@@ -72,6 +72,14 @@ function Harness({
         onImageUpload={onImageUpload}
       />
       <pre data-testid="serialized">{serialize(doc)}</pre>
+      {/* Markdown carries no layout, so image props are shown as themselves. */}
+      <pre data-testid="image-props">
+        {JSON.stringify(
+          Object.values(doc.blocks)
+            .filter((block) => block.type === "image")
+            .map((block) => block.props ?? null),
+        )}
+      </pre>
     </>
   )
 }
@@ -2385,6 +2393,173 @@ describe("BlockEditor images", () => {
     expect(menu.textContent).toContain("Open image")
     expect(menu.textContent).toContain("Download image")
     expect(menu.textContent).not.toContain("Turn into")
+  })
+
+  /** A doc of one image block with the given props. */
+  const imageDoc = (props: Record<string, unknown>, text = ""): BlockDoc => ({
+    props: null,
+    rootBlockIds: ["a"],
+    blocks: {
+      a: { id: "a", type: "image", text, props, children: [] },
+    },
+  })
+  const imageProps = (getByTestId: (id: string) => HTMLElement) =>
+    JSON.parse(getByTestId("image-props").textContent ?? "[]") as unknown[]
+  /** Give the figure and its row a laid-out width (jsdom has none). */
+  const layOut = (container: HTMLElement, rowWidth: number, figureWidth: number) => {
+    const figure = container.querySelector<HTMLElement>('[data-testid="image-figure"]')!
+    const row = figure.parentElement!
+    row.getBoundingClientRect = () => ({ width: rowWidth }) as DOMRect
+    figure.getBoundingClientRect = () => ({ width: figureWidth }) as DOMRect
+    return figure
+  }
+  const SRC = "https://example.com/sunset.png"
+
+  it("lays a picture out by its props: the side it keeps to, its width, and its caption with it", () => {
+    const { container, unmount } = render(
+      <Harness initialDoc={imageDoc({ src: SRC, align: "right", size: 40 }, "A sunset")} />,
+    )
+    const figure = container.querySelector<HTMLElement>('[data-testid="image-figure"]')!
+    expect(figure.dataset.align).toBe("right")
+    expect(figure.className).toContain("self-end")
+    expect(figure.style.width).toBe("40%")
+    // The caption is inside the figure — as wide as the picture, wherever it
+    // is — and set to the picture's side.
+    const caption = figure.querySelector('[data-testid="block-body"]')!
+    expect(caption.textContent).toBe("A sunset")
+    expect(caption.className).toContain("text-right")
+
+    // Left alone, a picture is its natural size, centred, its caption centred.
+    unmount()
+    const bare = render(<Harness initialDoc={imageDoc({ src: SRC }, "A sunset")} />)
+    const plain = bare.container.querySelector<HTMLElement>('[data-testid="image-figure"]')!
+    expect(plain.dataset.align).toBe("center")
+    expect(plain.className).toContain("self-center")
+    expect(plain.style.width).toBe("")
+    expect(plain.querySelector('[data-testid="block-body"]')!.className).toContain("text-center")
+  })
+
+  it("the figure's toolbar sets the side the picture keeps to, as one undo step", () => {
+    const { container, getByTestId } = render(<Harness initialDoc={imageDoc({ src: SRC })} />)
+    const toolbar = getByTestId("image-toolbar")
+    const left = toolbar.querySelector<HTMLButtonElement>('[aria-label="Align left"]')!
+    expect(toolbar.querySelector('[aria-label="Align centre"]')!.getAttribute("aria-pressed")).toBe(
+      "true",
+    )
+    fireEvent.click(left)
+    expect(imageProps(getByTestId)).toEqual([{ src: SRC, align: "left" }])
+    expect(getByTestId("image-figure").dataset.align).toBe("left")
+    expect(left.getAttribute("aria-pressed")).toBe("true")
+    // The picture's click (the lightbox) is not the button's.
+    expect(screen.queryByTestId("image-lightbox")).toBeNull()
+
+    // Back to centre is stored as nothing at all.
+    fireEvent.click(toolbar.querySelector('[aria-label="Align centre"]')!)
+    expect(imageProps(getByTestId)).toEqual([{ src: SRC }])
+
+    // Each choice was one step.
+    fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
+    expect(imageProps(getByTestId)).toEqual([{ src: SRC, align: "left" }])
+    fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
+    expect(imageProps(getByTestId)).toEqual([{ src: SRC }])
+  })
+
+  it("dragging a handle resizes the picture as a fraction of the row, written when the pointer lets go", () => {
+    const { container, getByTestId } = render(<Harness initialDoc={imageDoc({ src: SRC })} />)
+    const figure = layOut(container, 600, 600)
+    const handle = getByTestId("image-resize-right")
+    fireEvent.pointerDown(handle, { clientX: 600, pointerId: 1 })
+    // A centred picture grows from both sides: 150px of travel is 300px of
+    // width, so the picture is now half the row — live, before the block
+    // is written.
+    fireEvent.pointerMove(window, { clientX: 450, pointerId: 1 })
+    expect(figure.style.width).toBe("50%")
+    expect(imageProps(getByTestId)).toEqual([{ src: SRC }])
+    fireEvent.pointerUp(window, { clientX: 450, pointerId: 1 })
+    expect(imageProps(getByTestId)).toEqual([{ src: SRC, size: 50 }])
+    expect(figure.style.width).toBe("50%")
+
+    // The whole drag was one undo step.
+    fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
+    expect(imageProps(getByTestId)).toEqual([{ src: SRC }])
+  })
+
+  it("a picture kept to a side grows away from it, never narrower than a tenth of the row, and snaps to the full row", () => {
+    const { container, getByTestId } = render(
+      <Harness initialDoc={imageDoc({ src: SRC, align: "left", size: 50 })} />,
+    )
+    layOut(container, 600, 300)
+    // Dragging the right handle of a left-aligned picture moves only that
+    // edge: 60px is a tenth of the row.
+    fireEvent.pointerDown(getByTestId("image-resize-right"), { clientX: 300, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 360, pointerId: 1 })
+    fireEvent.pointerUp(window, { clientX: 360, pointerId: 1 })
+    expect(imageProps(getByTestId)).toEqual([{ src: SRC, align: "left", size: 60 }])
+
+    // Dragged nearly to the row's edge, it snaps to the whole row…
+    layOut(container, 600, 360)
+    fireEvent.pointerDown(getByTestId("image-resize-right"), { clientX: 360, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 590, pointerId: 1 })
+    fireEvent.pointerUp(window, { clientX: 590, pointerId: 1 })
+    expect(imageProps(getByTestId)).toEqual([{ src: SRC, align: "left", size: 100 }])
+
+    // …and dragged past nothing, it stops at a tenth.
+    layOut(container, 600, 600)
+    fireEvent.pointerDown(getByTestId("image-resize-right"), { clientX: 600, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 0, pointerId: 1 })
+    fireEvent.pointerUp(window, { clientX: 0, pointerId: 1 })
+    expect(imageProps(getByTestId)).toEqual([{ src: SRC, align: "left", size: 10 }])
+  })
+
+  it("the context menu aligns a picture and returns a dragged one to its natural size", async () => {
+    const { container, getByTestId } = render(<Harness initialDoc={imageDoc({ src: SRC })} />)
+    const row = container.querySelector("[data-occurrence]")!
+    await act(async () => {
+      fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
+    })
+    let menu = screen.getByTestId("block-context-menu")
+    expect(menu.textContent).toContain("Align")
+    // Nothing to return to yet.
+    expect(menu.textContent).not.toContain("Original size")
+    await act(async () => {
+      fireEvent.click(screen.getByText("Align"))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByText("Right"))
+    })
+    expect(imageProps(getByTestId)).toEqual([{ src: SRC, align: "right" }])
+
+    // Once dragged, the menu offers the natural size back.
+    layOut(container, 600, 600)
+    fireEvent.pointerDown(getByTestId("image-resize-left"), { clientX: 0, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 300, pointerId: 1 })
+    fireEvent.pointerUp(window, { clientX: 300, pointerId: 1 })
+    expect(imageProps(getByTestId)).toEqual([{ src: SRC, align: "right", size: 50 }])
+    await act(async () => {
+      fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
+    })
+    menu = screen.getByTestId("block-context-menu")
+    expect(menu.textContent).toContain("Original size")
+    await act(async () => {
+      fireEvent.click(screen.getByText("Original size"))
+    })
+    expect(imageProps(getByTestId)).toEqual([{ src: SRC, align: "right" }])
+    expect(getByTestId("image-figure").style.width).toBe("")
+  })
+
+  it("a read-only view lays the picture out the same, with no controls", () => {
+    const { container } = render(
+      <BlockEditor
+        doc={imageDoc({ src: SRC, align: "left", size: 30 }, "A sunset")}
+        onChange={() => {}}
+        readOnly
+      />,
+    )
+    const figure = container.querySelector<HTMLElement>('[data-testid="image-figure"]')!
+    expect(figure.dataset.align).toBe("left")
+    expect(figure.style.width).toBe("30%")
+    expect(container.querySelector('[data-testid="image-toolbar"]')).toBeNull()
+    expect(container.querySelector('[data-testid="image-resize-left"]')).toBeNull()
   })
 
   it("clicking the picture opens it full size", async () => {

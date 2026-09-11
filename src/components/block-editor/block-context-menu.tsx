@@ -1,6 +1,7 @@
 import { ContextMenu } from "@base-ui/react/context-menu"
 import { Menu } from "@base-ui/react/menu"
 import React from "react"
+import { IMAGE_ALIGNS, type ImageAlign } from "../../blocks/image"
 import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
@@ -33,6 +34,9 @@ export interface BlockMenuTarget {
   collapsed: boolean
   /** How many places the block appears across the corpus (1 = only here). */
   places: number
+  /** An image row's layout (`src/blocks/image.ts`): the side its picture
+   * keeps to, and whether it has been dragged to a size of its own. */
+  image?: { align: ImageAlign; sized: boolean }
 }
 
 export interface BlockMenuActions {
@@ -51,6 +55,31 @@ export interface BlockMenuActions {
   /** Image rows: expand the picture, and save it to the device. */
   openImage?: (id: string) => void
   downloadImage?: (id: string) => void
+  /** Image rows: which side of the row the picture keeps to. */
+  alignImage?: (id: string, align: ImageAlign) => void
+  /** Image rows: return a dragged picture to its natural size. */
+  resetImageSize?: (id: string) => void
+}
+
+/** The Align submenu's items, in the order the figure's toolbar has them. */
+const ALIGN_LABELS: Record<ImageAlign, string> = {
+  left: "Left",
+  center: "Centre",
+  right: "Right",
+}
+
+/** A submenu trigger row: the same shape as an item, with a chevron. */
+function SubmenuTrigger({ children }: { children: React.ReactNode }) {
+  return (
+    <Menu.SubmenuTrigger className="group flex h-8 cursor-pointer select-none items-center gap-3 rounded px-3 outline-hidden focus:bg-bg-hover data-[popup-open]:bg-bg-hover coarse:h-10">
+      <div className="flex w-0 grow items-center gap-3">
+        <span className="grow truncate">{children}</span>
+      </div>
+      <span aria-hidden className="text-text-tertiary">
+        ›
+      </span>
+    </Menu.SubmenuTrigger>
+  )
 }
 
 /** The types a block can be turned into: the registry's, in its order. */
@@ -109,17 +138,39 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
           Download image
         </DropdownMenu.Item>
       ) : null}
+      {/* An image's layout: the side it keeps to (the figure's own toolbar
+          offers the same), and its natural size back after a drag. */}
+      {image && target.image && actions.alignImage ? (
+        <Menu.SubmenuRoot>
+          <SubmenuTrigger>Align</SubmenuTrigger>
+          <Menu.Portal>
+            <Menu.Positioner side="right" align="start" sideOffset={4}>
+              <Menu.Popup className={popupClass} style={{ width: 160 }}>
+                <div className="grid p-1" data-testid="image-align-menu">
+                  {IMAGE_ALIGNS.map((align) => (
+                    <DropdownMenu.Item
+                      key={align}
+                      selected={target.image?.align === align}
+                      onClick={() => actions.alignImage?.(id, align)}
+                    >
+                      {ALIGN_LABELS[align]}
+                    </DropdownMenu.Item>
+                  ))}
+                </div>
+              </Menu.Popup>
+            </Menu.Positioner>
+          </Menu.Portal>
+        </Menu.SubmenuRoot>
+      ) : null}
+      {image && target.image?.sized && actions.resetImageSize ? (
+        <DropdownMenu.Item onClick={() => actions.resetImageSize?.(id)}>
+          Original size
+        </DropdownMenu.Item>
+      ) : null}
       {/* An image is its picture: "turn into" would only keep the caption. */}
       {image ? null : (
         <Menu.SubmenuRoot>
-          <Menu.SubmenuTrigger className="group flex h-8 cursor-pointer select-none items-center gap-3 rounded px-3 outline-hidden focus:bg-bg-hover data-[popup-open]:bg-bg-hover coarse:h-10">
-            <div className="flex w-0 grow items-center gap-3">
-              <span className="grow truncate">Turn into</span>
-            </div>
-            <span aria-hidden className="text-text-tertiary">
-              ›
-            </span>
-          </Menu.SubmenuTrigger>
+          <SubmenuTrigger>Turn into</SubmenuTrigger>
           <Menu.Portal>
             <Menu.Positioner side="right" align="start" sideOffset={4}>
               <Menu.Popup className={popupClass} style={{ width: 200 }}>
