@@ -101,8 +101,6 @@ export const TURN_INTO_KEYS: Readonly<Record<string, BlockType>> = Object.fromEn
 
 export const isHeading = (type: BlockType): boolean => defOf(type).family === "heading"
 
-const isTodo = (type: BlockType): boolean => defOf(type).family === "todo"
-
 /** A list item: bullet, numbered, or a checkbox (Enter continues the list). */
 export const isListItem = (type: BlockType): boolean => defOf(type).listItem
 
