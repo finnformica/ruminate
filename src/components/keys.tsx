@@ -1,11 +1,22 @@
 import React from "react"
 import { cx } from "../utils/cx"
 
-export function Keys({ keys, className }: { keys: string[]; className?: string }) {
+export function Keys({
+  keys,
+  chord = false,
+  className,
+}: {
+  keys: string[]
+  /** The keys are pressed one after another (`g` then `s`), not together:
+   * they sit apart so the pair never reads as one key. */
+  chord?: boolean
+  className?: string
+}) {
   return (
     <span
       className={cx(
-        "inline-flex gap-px font-normal leading-none tracking-wider text-text-secondary",
+        "inline-flex font-normal leading-none tracking-wider text-text-secondary",
+        chord ? "gap-1" : "gap-px",
         className,
       )}
     >

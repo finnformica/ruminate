@@ -3,7 +3,7 @@ import { useAtomValue } from "jotai"
 import React from "react"
 import { createPortal } from "react-dom"
 import { accentAtom } from "../global-state"
-import { useThemeColor } from "../hooks/theme-color"
+import { useColorScheme } from "../hooks/color-scheme"
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -40,7 +40,7 @@ function useAccentColor() {
 }
 
 function RootComponent() {
-  useThemeColor()
+  useColorScheme()
   useAccentColor()
 
   return (

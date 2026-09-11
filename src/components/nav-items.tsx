@@ -6,6 +6,7 @@ import { requestDatabasePull } from "../data/database-mode"
 import { isBootingAtom, isHelpPanelOpenAtom, sortedNotesAtom } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
 import type { Note } from "../schema"
+import { APP_SHORTCUTS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
 import {
@@ -22,6 +23,7 @@ import {
   TagFillIcon16,
   TagIcon16,
 } from "./icons"
+import { Keys } from "./keys"
 import { NavListSkeleton } from "./skeleton"
 import { NoteActionsMenu } from "./note-actions-menu"
 import { NoteFavicon } from "./note-favicon"
@@ -65,6 +67,7 @@ export function NavItems({
                 search={{ query: undefined }}
                 activeIcon={<NoteFillIcon16 />}
                 icon={<NoteIcon16 />}
+                shortcut={formatCombo("g n")}
                 onNavigate={onNavigate}
               >
                 Notes
@@ -80,6 +83,7 @@ export function NavItems({
                 activeIcon={<CalendarDateFillIcon16 date={today.getDate()} />}
                 icon={<CalendarDateIcon16 date={today.getDate()} />}
                 forceActive={isCalendarActive}
+                shortcut={formatCombo("g d")}
                 onNavigate={onNavigate}
               >
                 Calendar
@@ -156,6 +160,7 @@ export function NavItems({
             activeIcon={<SettingsFillIcon16 />}
             icon={<SettingsIcon16 />}
             className="text-text-secondary"
+            shortcut={formatCombo("g s")}
             onNavigate={onNavigate}
           >
             Settings
@@ -164,6 +169,17 @@ export function NavItems({
         </div>
       </div>
     </SizeContext.Provider>
+  )
+}
+
+/** The keys that reach a nav item, shown at its far end: quiet chrome, never
+ * on a touch screen (where there are no keys to press). A chord (`g` then
+ * `s`) reads as its keys in press order, as in the `?` reference. */
+function NavShortcut({ keys, chord = false }: { keys: string[]; chord?: boolean }) {
+  return (
+    <span className="ml-auto shrink-0 pl-2 coarse:hidden">
+      <Keys keys={keys} chord={chord} className="text-text-tertiary" />
+    </span>
   )
 }
 
@@ -177,6 +193,7 @@ function NavLink({
   children,
   onClick,
   disabled = false,
+  shortcut,
   ...props
 }: LinkComponentProps<"a"> & {
   activeIcon?: React.ReactNode
@@ -187,6 +204,8 @@ function NavLink({
   children: React.ReactNode
   /** Render a non-interactive, greyed-out item (feature not ready yet). */
   disabled?: boolean
+  /** The keys that reach this destination (`formatCombo`), shown beside it. */
+  shortcut?: string[]
 }) {
   const size = useContext(SizeContext)
 
@@ -204,6 +223,7 @@ function NavLink({
         {icon}
       </span>
       <span className="truncate">{children}</span>
+      {shortcut ? <NavShortcut keys={shortcut} chord /> : null}
     </>
   )
 
@@ -289,6 +309,7 @@ function HelpNavItem({ size }: { size: "medium" | "large" }) {
     >
       {isOpen ? <CircleQuestionMarkFillIcon16 /> : <CircleQuestionMarkIcon16 />}
       Help
+      <NavShortcut keys={formatCombo(APP_SHORTCUTS.helpPanel)} />
     </button>
   )
 }

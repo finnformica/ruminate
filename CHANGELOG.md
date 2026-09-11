@@ -14,6 +14,9 @@
 
 ### Improved
 
+- Keyboard shortcuts show where the buttons are. The sidebar lists the keys beside Notes, Calendar, Settings and Help (<kbd>g</kbd> then <kbd>n</kbd>, <kbd>g</kbd> then <kbd>d</kbd>, <kbd>g</kbd> then <kbd>s</kbd>, <kbd>⌘</kbd> <kbd>/</kbd>), the command menu's Jump to items show the same chords, and the back and forward buttons' tooltips name <kbd>⌘</kbd> <kbd>[</kbd> and <kbd>⌘</kbd> <kbd>]</kbd>. Touch screens, which have no keys to press, show none of them.
+- The settings in the Editor section sit apart from each other rather than running together.
+
 - Pictures can be resized and set to a side, as in Notion. Hover a picture (or select its row) for a slim handle at its edge (one at each edge of a centred picture, one at the free edge of a picture set to a side): drag it to make the picture narrower or wider, and it stays that fraction of the row on any screen, snapping to the full width when you get close. A small toolbar in the picture's corner sets whether it sits to the left, in the centre or to the right, and the caption goes with it, as wide as the picture and set to the same side. The block's right-click menu offers the same choices, **Align** and **Original size**, for a keyboard or a touch screen. Each change is one undo step, and a picture you have not touched looks exactly as before.
 - Signing in, and opening the app on a device that has not pulled your notes yet, shows skeletons where the notes are about to be — a title bar and a few lines in the page, three rows in the sidebar — rather than an empty list or an "Untitled" note that fills in a moment later.
 - A pasted picture appears the instant you paste it. The row lands straight away showing the file from your own machine, with a small spinner over it while the bytes go up in the background, and the spinner clears when they land; a picture that had to be fetched fades in rather than snapping. Nothing half-made is written to the note: the block carries no reference until the upload succeeds, and a failed upload takes the row back out while a toast in the corner of the screen says why (it used to be a line under the editor that was easy to miss).
@@ -34,6 +37,8 @@
 - The help panel's formatting list is drawn by the note renderer itself, so each example shows exactly what a block will look like; the block markers (`#`, `-`, `1.`, `[ ]`, `>`, a code fence) are listed with the block they make.
 
 ### Added
+
+- Choose the app's theme. Settings → Appearance now has System, Light and Dark: pick one and Ruminate keeps it whatever the device is set to, or leave it on System to follow the device as before. The choice is remembered on this device and applied before the page draws, so a dark app never flashes light while it loads.
 
 - Maths in notes. Wrap a formula in double dollars, `$$E = mc^2$$`, and it is typeset in the block; a line that is only a formula is set on its own, centred, in display size. Single dollars stay plain text, so prices are never mistaken for maths. Maths had only ever rendered through the old page renderer, which blocks stopped using, so until now a formula in a note showed as its source.
 - Pictures in notes, behind a switch. Paste a screenshot, drop an image file onto the note, or type `/image` on a line, and the picture becomes a block of its own with an optional caption beneath it. Click the picture to see it full size; right-click it to open it, download it, or delete it like any block. The bytes go to an R2 bucket through the Worker and the note keeps only a small reference, so notes stay quick to sync. `type:image` finds image blocks in search.

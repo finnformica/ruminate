@@ -27,6 +27,8 @@ import {
   expandedLevelsAtom,
   githubUserAtom,
   newBlockMarkerAtom,
+  themeAtom,
+  type Theme,
 } from "../global-state"
 import { cx } from "../utils/cx"
 
@@ -90,10 +92,17 @@ function SettingsSection({ title, children }: { title: string; children: React.R
   return (
     <div className="flex flex-col gap-3">
       <h3 className="font-bold leading-4">{title}</h3>
-      <div className="card-1 p-4">{children}</div>
+      {/* Each child is one setting; the gap keeps them from reading as one. */}
+      <div className="card-1 flex flex-col gap-5 p-4">{children}</div>
     </div>
   )
 }
+
+const THEME_OPTIONS: Array<{ value: Theme; label: string }> = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+]
 
 /** Each option's swatch shows its ramp's solid step 9 (the checked-checkbox
  * color). The ramps themselves adapt to light/dark via radix-colors.css. */
@@ -106,10 +115,35 @@ const ACCENT_OPTIONS: Array<{ value: AccentColor; label: string; swatchColor: st
 ]
 
 function AppearanceSection() {
+  const [theme, setTheme] = useAtom(themeAtom)
   const [accent, setAccent] = useAtom(accentAtom)
 
   return (
     <SettingsSection title="Appearance">
+      <div className="flex flex-col gap-2">
+        <span id="theme-label" className="text-sm leading-4 text-text-secondary">
+          Theme
+        </span>
+        <div role="group" aria-labelledby="theme-label" className="flex flex-wrap gap-1">
+          {THEME_OPTIONS.map((option) => {
+            const isSelected = theme === option.value
+            return (
+              <Button
+                key={option.value}
+                size="small"
+                aria-pressed={isSelected}
+                onClick={() => setTheme(option.value)}
+                className={cx(isSelected && "ring-1 ring-inset ring-border-focus")}
+              >
+                {option.label}
+              </Button>
+            )
+          })}
+        </div>
+        <span className="text-sm leading-5 text-text-secondary">
+          {theme === "system" ? "Follows your device" : `Always ${theme}`}
+        </span>
+      </div>
       <div className="flex flex-col gap-2">
         <span id="accent-color-label" className="text-sm leading-4 text-text-secondary">
           Accent color
@@ -256,7 +290,7 @@ function StorageDiagnosticsPanel({
   const { status, persistence, notes, writeErrors, writeErrorCount } = diagnostics
 
   return (
-    <div className="mt-4 flex flex-col gap-2 border-t border-border-secondary pt-4 text-sm leading-5">
+    <div className="flex flex-col gap-2 border-t border-border-secondary pt-4 text-sm leading-5">
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-text-secondary [&>dd]:text-right [&>dd]:text-text">
         <dt>Status</dt>
         <dd>

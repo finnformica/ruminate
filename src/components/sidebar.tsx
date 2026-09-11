@@ -1,6 +1,7 @@
 import { useRouter } from "@tanstack/react-router"
 import { useSetAtom } from "jotai"
 import { sidebarAtom } from "../global-state"
+import { APP_SHORTCUTS, formatCombo } from "../shortcuts/registry"
 import { useIsScrolled } from "../hooks/is-scrolled"
 import { cx } from "../utils/cx"
 import { IconButton } from "./icon-button"
@@ -33,6 +34,7 @@ export function Sidebar() {
         <div className="flex items-center">
           <IconButton
             aria-label="Go back"
+            shortcut={formatCombo(APP_SHORTCUTS.historyBack)}
             size="small"
             onClick={() => router.history.back()}
             className="group"
@@ -41,6 +43,7 @@ export function Sidebar() {
           </IconButton>
           <IconButton
             aria-label="Go forward"
+            shortcut={formatCombo(APP_SHORTCUTS.historyForward)}
             size="small"
             className="group"
             onClick={() => router.history.forward()}

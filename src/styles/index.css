@@ -8,6 +8,10 @@
 
 @import "tailwindcss";
 
+/* `dark:` follows the scheme the app stamped on <html> (variables.css), not
+ * the system preference on its own. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 body {
   @apply bg-bg font-sans text-base font-normal text-text print:bg-[white];
 }
