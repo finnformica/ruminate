@@ -56,7 +56,7 @@ from a local object URL held in memory (`beginPendingImage`), under a
 spinner; the asset id is written only when the upload lands, and without a
 history step, so the whole picture is still one undo. A failed upload takes
 the row back out (restoring the blank line it took over, if it took one) and
-says why under the editor. Nothing provisional is ever written to the graph,
+says why in a toast (`src/components/toast.tsx`). Nothing provisional is ever written to the graph,
 so a note mid-upload syncs as an empty image block rather than a broken
 reference.
 

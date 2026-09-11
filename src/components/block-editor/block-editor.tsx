@@ -15,6 +15,7 @@ import {
   releasePendingImage,
   type UploadedImage,
 } from "../../data/images"
+import { toastError } from "../toast"
 import { ImageLightbox } from "./image-lightbox"
 import {
   isHeading,
@@ -1100,19 +1101,6 @@ export function BlockEditor({
   // an empty paragraph/bullet, so "/image" on a blank line puts the picture
   // on that line. Several files arrive in order, each its own undo step.
   const [lightbox, setLightbox] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const noticeTimer = useRef<number | null>(null)
-  const showNotice = (message: string) => {
-    setNotice(message)
-    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current)
-    noticeTimer.current = window.setTimeout(() => setNotice(null), 6000)
-  }
-  useEffect(
-    () => () => {
-      if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current)
-    },
-    [],
-  )
   /**
    * Put pictures in, then send them up.
    *
@@ -1122,7 +1110,7 @@ export function BlockEditor({
    * the block carries no image props until its asset id arrives, and the
    * preview lives only in memory. When the upload lands the id is written
    * WITHOUT a history step, so the picture is still one undo; when it fails
-   * the row is taken back out.
+   * the row is taken back out and a toast says why.
    */
   const insertImages = async (key: string, files: File[]) => {
     if (!onImageUpload) return
@@ -1220,7 +1208,7 @@ export function BlockEditor({
           docRef.current = next
           onChange(next)
         }
-        showNotice(error instanceof ImageUploadError ? error.message : "Image upload failed")
+        toastError(error instanceof ImageUploadError ? error.message : "Image upload failed")
       } finally {
         releasePendingImage(id)
       }
@@ -1854,11 +1842,6 @@ export function BlockEditor({
               />
             )
           })}
-          {notice ? (
-            <div role="status" className="mt-2 px-1 text-sm text-text-danger">
-              {notice}
-            </div>
-          ) : null}
         </div>
       </BlockContextMenu>
       {onImageUpload ? (

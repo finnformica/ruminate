@@ -267,6 +267,14 @@ Placement conventions:
   the content they concern, sharing the page column's width.
 - Notices never float, overlay, or animate in — they are part of the page,
   and they leave by re-render (dismiss), not by transition.
+- **Toasts** (`src/components/toast.tsx`, on Base UI's Toast) are the one
+  exception, for one job: telling the reader that something they have _just
+  done_ has failed — a picture that would not upload. A toast is a Notice card
+  that floats in the bottom corner (above the phone nav bar), fades in, and
+  leaves on its own after a few seconds or on Dismiss. It never carries state
+  the reader must come back to — anything that persists is a notice in the
+  page, not a toast — and never a success message: the picture landing is its
+  own confirmation.
 
 ## Empty-block placeholder
 

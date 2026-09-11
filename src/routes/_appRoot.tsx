@@ -3,6 +3,7 @@ import React from "react"
 import { AppLayout } from "../components/app-layout"
 import { CommandMenu } from "../components/command-menu"
 import { DevBar } from "../components/dev-bar"
+import { Toaster } from "../components/toast"
 import { useDatabaseMode } from "../data/use-database-mode"
 import { GlobalShortcuts } from "../shortcuts/global-shortcuts"
 
@@ -63,6 +64,7 @@ function RouteComponent() {
       <CommandMenu />
       <GlobalShortcuts />
       <DevBar />
+      <Toaster />
     </div>
   )
 }

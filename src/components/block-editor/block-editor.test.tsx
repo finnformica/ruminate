@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { emptyBlock } from "../../blocks/ops"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
+import { Toaster } from "../toast"
 import type { BlockDoc } from "../../blocks/types"
 import type { BlockRevealRequest } from "../../utils/note-outline"
 import { richClipboardFormats } from "../../utils/rich-clipboard"
@@ -2299,18 +2300,27 @@ describe("BlockEditor images", () => {
     expect(container.querySelector('[data-testid="image-input"]')).toBeNull()
   })
 
-  it("a failed upload leaves the note as it was and says why", async () => {
+  it("a failed upload leaves the note as it was and says why in a toast", async () => {
     const onImageUpload = vi.fn(async () => {
       throw new ImageUploadError("too_large", "Images must be under 10 MB")
     })
     const { container, getByTestId, getByRole } = render(
-      <Harness initial={"A\nB"} onImageUpload={onImageUpload} />,
+      <>
+        <Harness initial={"A\nB"} onImageUpload={onImageUpload} />
+        <Toaster />
+      </>,
     )
     await act(async () => {
       fireEvent.paste(editorRoot(container), imagePaste([pngFile()]))
     })
     expect(serializedLines(getByTestId)).toEqual(["A", "B"])
-    expect(getByRole("status").textContent).toBe("Images must be under 10 MB")
+    // Nothing is left under the editor; the message floats in a toast (hidden
+    // from the accessibility tree until it takes focus — the viewport's live
+    // region announces it).
+    expect(container.querySelector('[role="status"]')).toBeNull()
+    expect(getByRole("alertdialog", { hidden: true }).textContent).toContain(
+      "Images must be under 10 MB",
+    )
   })
 
   it("the context menu on an image offers to open and download it, not to turn it into text", async () => {
