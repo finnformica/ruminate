@@ -2441,6 +2441,9 @@ describe("BlockEditor images", () => {
 
   it("the figure's toolbar sets the side the picture keeps to, as one undo step", () => {
     const { container, getByTestId } = render(<Harness initialDoc={imageDoc({ src: SRC })} />)
+    // Centred: a handle at each side.
+    expect(container.querySelector('[data-testid="image-resize-left"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="image-resize-right"]')).not.toBeNull()
     const toolbar = getByTestId("image-toolbar")
     const left = toolbar.querySelector<HTMLButtonElement>('[aria-label="Align left"]')!
     expect(toolbar.querySelector('[aria-label="Align centre"]')!.getAttribute("aria-pressed")).toBe(
@@ -2450,6 +2453,9 @@ describe("BlockEditor images", () => {
     expect(imageProps(getByTestId)).toEqual([{ src: SRC, align: "left" }])
     expect(getByTestId("image-figure").dataset.align).toBe("left")
     expect(left.getAttribute("aria-pressed")).toBe("true")
+    // Kept to the left, the handle against that side goes.
+    expect(container.querySelector('[data-testid="image-resize-left"]')).toBeNull()
+    expect(container.querySelector('[data-testid="image-resize-right"]')).not.toBeNull()
     // The picture's click (the lightbox) is not the button's.
     expect(screen.queryByTestId("image-lightbox")).toBeNull()
 
@@ -2489,8 +2495,11 @@ describe("BlockEditor images", () => {
       <Harness initialDoc={imageDoc({ src: SRC, align: "left", size: 50 })} />,
     )
     layOut(container, 600, 300)
-    // Dragging the right handle of a left-aligned picture moves only that
-    // edge: 60px is a tenth of the row.
+    // A picture kept to the left grows away from it: only the right edge
+    // has a handle (one against the left would only fight the alignment).
+    expect(container.querySelector('[data-testid="image-resize-left"]')).toBeNull()
+    // Dragging the right handle moves only that edge: 60px is a tenth of
+    // the row.
     fireEvent.pointerDown(getByTestId("image-resize-right"), { clientX: 300, pointerId: 1 })
     fireEvent.pointerMove(window, { clientX: 360, pointerId: 1 })
     fireEvent.pointerUp(window, { clientX: 360, pointerId: 1 })

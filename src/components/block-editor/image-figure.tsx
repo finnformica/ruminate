@@ -38,6 +38,15 @@ const ALIGN_ICONS: Record<ImageAlign, React.ComponentType<{ className?: string }
   right: AlignRightIcon16,
 }
 
+/** The resize handles a picture shows, by the side it keeps to: a centred
+ * picture grows from both sides; one kept to a side grows away from it, so
+ * only the free side has a handle. */
+const HANDLES: Record<ImageAlign, readonly ("left" | "right")[]> = {
+  left: ["right"],
+  center: ["left", "right"],
+  right: ["left"],
+}
+
 /** A drag that lands within this much of the row's full width snaps to it,
  * so "as wide as the row" is easy to hit by hand. */
 const SNAP_TO_FULL = 3
@@ -57,10 +66,12 @@ const SNAP_TO_FULL = 3
  *
  * In an editable editor the figure carries its own controls, revealed on
  * hover or while the row is selected, and never in the way of reading:
- * a handle at each side of the picture drags it wider or narrower (a
- * centred picture grows from both sides at once, one kept to a side grows
- * away from it), and a small toolbar in the picture's corner sets which
- * side it keeps to. The same choices are in the row's context menu, for a
+ * a handle at the picture's side drags it wider or narrower — one at each
+ * side of a centred picture, which grows from both sides at once; only at
+ * the free side of a picture kept to the left or right, which grows away
+ * from the side it keeps to (a handle against that side would only fight
+ * it) — and a small toolbar in the picture's corner sets which side it
+ * keeps to. The same choices are in the row's context menu, for a
  * keyboard or a touch screen. A drag is one undo step, committed when the
  * pointer lets go.
  *
@@ -240,9 +251,9 @@ export function ImageFigure({
         {picture}
         {controls ? (
           <>
-            {(["left", "right"] as const).map((side) => (
-              // A pill at the picture's edge, on its vertical centre: light
-              // on a dark picture, outlined on a light one.
+            {HANDLES[align].map((side) => (
+              // A slim pill at the picture's edge, on its vertical centre:
+              // light on a dark picture, outlined on a light one.
               <button
                 key={side}
                 type="button"
@@ -260,8 +271,8 @@ export function ImageFigure({
                 <span
                   aria-hidden
                   className={cx(
-                    "absolute top-1/2 h-12 max-h-[60%] w-1.5 -translate-y-1/2 rounded-full bg-[#ffffffe6] shadow-[0_0_0_1px_#00000059]",
-                    side === "left" ? "left-1.5" : "right-1.5",
+                    "absolute top-1/2 h-8 max-h-[60%] w-1 -translate-y-1/2 rounded-full bg-[#ffffffe6] shadow-[0_0_0_1px_#00000040]",
+                    side === "left" ? "left-2" : "right-2",
                   )}
                 />
               </button>

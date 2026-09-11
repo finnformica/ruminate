@@ -52,12 +52,13 @@ markdown line are the same whatever they say, so an aligned or resized
 picture copies and exports as `![caption](url)` and comes back at its
 natural size, centred. Copying blocks within the app carries the props.
 
-In the editor, hovering a picture (or selecting its row) reveals a handle at
-each side and a small toolbar in its corner. Dragging a handle resizes the
-picture live, as a fraction of the row so it holds on a narrower screen: a
-centred picture grows from both sides at once, one kept to a side grows away
-from it, a drag near the row's edge snaps to the full width, and nothing
-goes narrower than a tenth of the row. The toolbar's three buttons set the
+In the editor, hovering a picture (or selecting its row) reveals a slim
+handle at its side and a small toolbar in its corner. Dragging the handle
+resizes the picture live, as a fraction of the row so it holds on a narrower
+screen: a centred picture has a handle at each side and grows from both at
+once; one kept to the left or right has a handle at its free side only and
+grows away from the side it keeps to; a drag near the row's edge snaps to
+the full width, and nothing goes narrower than a tenth of the row. The toolbar's three buttons set the
 side. The row's context menu offers the same — **Align** (Left, Centre,
 Right) and, once a picture has been dragged, **Original size** — for a
 keyboard or a touch screen, where there is nothing to hover. Each change is
