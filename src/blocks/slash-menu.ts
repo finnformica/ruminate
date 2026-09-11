@@ -1,6 +1,7 @@
 import { parse as chronoParse } from "chrono-node"
 import { addDays, addWeeks, startOfISOWeek } from "date-fns"
 import { formatDate, formatDateDistance, toDateString } from "../utils/date"
+import { BLOCK_TYPE_DEFS, type BlockTypeDef } from "./registry"
 import type { BlockType } from "./types"
 
 /**
@@ -108,25 +109,12 @@ const DATE_OPTIONS: DateOption[] = [
 
 // ── Block types ─────────────────────────────────────────────────────────────
 
-interface BlockOption {
-  type: BlockType
-  label: string
-  /** Extra words the row answers to (`/task` finds To-do). */
-  keywords: string[]
-}
-
-const BLOCK_OPTIONS: BlockOption[] = [
-  { type: "text", label: "Text", keywords: ["paragraph", "plain"] },
-  { type: "ul", label: "Bullet list", keywords: ["unordered", "ul", "bullet"] },
-  { type: "ol", label: "Numbered list", keywords: ["ordered", "ol", "numbered"] },
-  { type: "todo", label: "To-do", keywords: ["todo", "task", "checkbox"] },
-  { type: "h1", label: "Heading", keywords: ["header", "h1", "heading"] },
-  { type: "quote", label: "Quote", keywords: ["blockquote", "callout"] },
-  { type: "code", label: "Code", keywords: ["code", "snippet", "pre", "fence", "monospace"] },
-  // Offered only where images are switched on (`slashMenuItems` options); a
-  // pick opens the file picker rather than changing the type in place.
-  { type: "image", label: "Image", keywords: ["picture", "photo", "upload", "img"] },
-]
+/** The rows under "Turn into": every type the registry offers, in its
+ * order — the type changes, plus the ones that ask for something (an image
+ * asks for a file) where their context allows. */
+const BLOCK_OPTIONS: readonly BlockTypeDef[] = BLOCK_TYPE_DEFS.filter(
+  (def) => def.turnInto || def.slash,
+)
 
 // ── The menu model ──────────────────────────────────────────────────────────
 
@@ -196,15 +184,11 @@ export function slashMenuItems(
     }
   }
 
-  for (const option of BLOCK_OPTIONS) {
-    if (option.type === "image" && !options.images) continue
-    if (!matches(q, option.label, option.keywords)) continue
-    items.push({
-      kind: "block",
-      id: `block:${option.type}`,
-      label: option.label,
-      type: option.type,
-    })
+  const context = { images: options.images ?? false }
+  for (const def of BLOCK_OPTIONS) {
+    if (!def.turnInto && def.slash && !def.slash(context)) continue
+    if (!matches(q, def.label, [...def.keywords])) continue
+    items.push({ kind: "block", id: `block:${def.id}`, label: def.label, type: def.id })
   }
 
   return items

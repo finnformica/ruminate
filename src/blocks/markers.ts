@@ -1,42 +1,22 @@
-import { parseImageLine } from "./image"
 import { normalizeBlockText } from "./normalize-block-text"
+import { BLOCK_TYPE_DEFS, defOf } from "./registry"
 import type { BlockProps, BlockType } from "./types"
 
 /**
- * **Every marker spelling lives here.** A block's type is data
- * (`Block.type`); the markdown marker that *represents* a type — `# `, `- `,
- * `[ ] `, `> `, `1. ` — exists in exactly two places: the parser (import) and
- * the serializer (export), both of which read this table. The one other use
- * is the editor's typing shortcut (`leadingMarker`): a marker typed at the
- * start of a block is stripped and becomes the block's type, which is how
- * the app keeps the feel of markdown without storing any.
+ * The marker helpers, every one derived from the registry (`registry.ts`):
+ * a block's type is data (`Block.type`), and the markdown marker that
+ * represents it — `# `, `- `, `[ ] `, `> `, `1. ` — is spelled once, in its
+ * registry entry. The parser (import) and the serializer (export) read the
+ * marker through here; the editor's typing shortcut (`leadingMarker`) reads
+ * each entry's `typed` pattern, which is how the app keeps the feel of
+ * markdown without storing any.
  */
-
-/**
- * The type → marker map (docs/graph-schema-v2.md). `ol` is renumbered by run
- * position (`markerFor`), `code` is fenced, `image` is a whole-line
- * `![caption](url)` (`image.ts`), `page` is a note root: those are handled
- * structurally by the serializer.
- */
-const MARKER_OF_TYPE: Readonly<Record<BlockType, string>> = {
-  text: "",
-  h1: "# ",
-  h2: "## ",
-  h3: "### ",
-  todo: "[ ] ",
-  done: "[x] ",
-  ul: "- ",
-  ol: "1. ",
-  quote: "> ",
-  code: "",
-  image: "",
-  page: "",
-}
 
 /** The marker a block of `type` carries on export; an ordered item takes its
  * 1-based position in its run of consecutive ordered siblings. */
 export function markerFor(type: BlockType, olPosition = 1): string {
-  return type === "ol" ? `${olPosition}. ` : MARKER_OF_TYPE[type]
+  const marker = defOf(type).marker
+  return typeof marker === "function" ? marker(olPosition) : marker
 }
 
 /** Headings carry a single `#` on export regardless of how many were typed —
@@ -45,17 +25,15 @@ function normalizeHeadingMarker(line: string): string {
   return line.replace(/^#{2,6}(\s)/, "#$1")
 }
 
-const OL_RE = /^(0|[1-9]\d*)\. /
-
 /**
  * Classify one line of canonical markdown into `{ type, text }` — the import
- * half of the table above. `olPosition` is the 1-based position the line
- * would take in the current run of ordered siblings: an ordered marker is
- * only typed `ol` when its number matches, because the serializer renumbers
- * by run position and any other number must survive… as a near-miss, which
- * the normalization pass then folds into the run (see
- * `normalize-block-text.ts` for exactly which spellings are recognized and
- * which stay text). Inside a code fence nothing is a marker.
+ * half. Each registry entry is tried in order: its own reader (`fromLine`)
+ * where it has one, else its marker as a prefix. `olPosition` is the 1-based
+ * position the line would take in the current run of ordered siblings (an
+ * ordered marker is only typed `ol` when its number matches; any other
+ * number survives as a near-miss the normalization pass then folds into the
+ * run — see `normalize-block-text.ts`). Inside a code fence nothing is a
+ * marker.
  */
 export function classifyLine(
   line: string,
@@ -63,31 +41,22 @@ export function classifyLine(
   inFence: boolean,
 ): { type: BlockType; text: string; props?: BlockProps } {
   if (inFence) return { type: "text", text: line }
-  // A line that is nothing but a markdown image is an image block: the
-  // caption is its text and the URL its props.
-  const image = parseImageLine(line)
-  if (image) return { type: "image", text: image.text, props: image.props }
   const canonical = normalizeHeadingMarker(line)
-  for (const type of ["h1", "todo", "done", "ul", "quote"] as const) {
-    const marker = MARKER_OF_TYPE[type]
-    if (canonical.startsWith(marker)) return { type, text: canonical.slice(marker.length) }
-  }
-  const ordered = OL_RE.exec(canonical)
-  if (ordered && ordered[1] === String(olPosition)) {
-    return { type: "ol", text: canonical.slice(ordered[0].length) }
+  for (const def of BLOCK_TYPE_DEFS) {
+    if (def.fromLine) {
+      const read = def.fromLine(canonical, olPosition)
+      if (read)
+        return { type: def.id, text: read.text, ...(read.props ? { props: read.props } : {}) }
+      continue
+    }
+    if (typeof def.marker === "string" && def.marker !== "" && canonical.startsWith(def.marker)) {
+      return { type: def.id, text: canonical.slice(def.marker.length) }
+    }
   }
   const normalized = normalizeBlockText(canonical)
   if (normalized) return normalized
   return { type: "text", text: canonical }
 }
-
-const HEADING_RE = /^#{1,6}\s+/
-// Accepts `[ ]`, `[x]`, `[X]`, and the shorthand `[]`.
-const TODO_RE = /^\[([ xX]?)\]\s+/
-const QUOTE_RE = /^>\s+/
-const BULLET_RE = /^[-*]\s+/
-// An ordered-list item: `1. `, `2) `, etc.
-const ORDERED_RE = /^\d+[.)]\s+/
 
 /**
  * The editor's typing shortcut: a marker typed at the very start of a
@@ -97,21 +66,15 @@ const ORDERED_RE = /^\d+[.)]\s+/
  * needs its trailing space, so `#foo` (a tag) or a bare `-` never switches.
  */
 export function leadingMarker(text: string): { type: BlockType; text: string } | null {
-  const heading = HEADING_RE.exec(text)
-  if (heading) return { type: "h1", text: text.slice(heading[0].length) }
-  const todo = TODO_RE.exec(text)
-  if (todo) {
+  for (const def of BLOCK_TYPE_DEFS) {
+    if (!def.typed) continue
+    const match = def.typed.re.exec(text)
+    if (!match) continue
     return {
-      type: todo[1].toLowerCase() === "x" ? "done" : "todo",
-      text: text.slice(todo[0].length),
+      type: def.typed.type ? def.typed.type(match) : def.id,
+      text: text.slice(match[0].length),
     }
   }
-  const quote = QUOTE_RE.exec(text)
-  if (quote) return { type: "quote", text: text.slice(quote[0].length) }
-  const bullet = BULLET_RE.exec(text)
-  if (bullet) return { type: "ul", text: text.slice(bullet[0].length) }
-  const ordered = ORDERED_RE.exec(text)
-  if (ordered) return { type: "ol", text: text.slice(ordered[0].length) }
   return null
 }
 
@@ -124,7 +87,7 @@ export function typeOfMarker(marker: string): BlockType {
 /** What Enter makes a new block unless the user has chosen otherwise: a fresh
  * unordered list item — and the marker that preference is spelled with. */
 export const DEFAULT_NEW_BLOCK_TYPE: BlockType = "ul"
-export const DEFAULT_NEW_BLOCK_MARKER = MARKER_OF_TYPE[DEFAULT_NEW_BLOCK_TYPE]
+export const DEFAULT_NEW_BLOCK_MARKER = markerFor(DEFAULT_NEW_BLOCK_TYPE)
 
 /**
  * Select-mode "turn into" keys: the marker character → the type it toggles.
@@ -132,32 +95,20 @@ export const DEFAULT_NEW_BLOCK_MARKER = MARKER_OF_TYPE[DEFAULT_NEW_BLOCK_TYPE]
  * binds them to the `turnInto*` commands, and the multi-select handler applies
  * the same toggle across a selection.
  */
-export const TURN_INTO_KEYS: Readonly<Record<string, BlockType>> = {
-  "#": "h1",
-  "-": "ul",
-  "[": "todo",
-  ">": "quote",
-  "1": "ol",
-}
+export const TURN_INTO_KEYS: Readonly<Record<string, BlockType>> = Object.fromEntries(
+  BLOCK_TYPE_DEFS.filter((def) => def.turnIntoKey).map((def) => [def.turnIntoKey!, def.id]),
+)
 
-export const isHeading = (type: BlockType): boolean =>
-  type === "h1" || type === "h2" || type === "h3"
-
-export const isTodo = (type: BlockType): boolean => type === "todo" || type === "done"
+export const isHeading = (type: BlockType): boolean => defOf(type).family === "heading"
 
 /** A list item: bullet, numbered, or a checkbox (Enter continues the list). */
-export const isListItem = (type: BlockType): boolean =>
-  type === "ul" || type === "ol" || isTodo(type)
+export const isListItem = (type: BlockType): boolean => defOf(type).listItem
 
 /**
- * Toggle a block to `target`: already that type → back to plain text;
- * anything else → the target. A checked todo counts as "already a todo" (the
- * checkbox toggles the check), and every heading level counts as a heading.
+ * Toggle a block to `target`: already that type (or its family: a checked
+ * todo is "already a todo", every heading level is a heading) → back to
+ * plain text; anything else → the target.
  */
 export function toggleType(current: BlockType, target: BlockType): BlockType {
-  const same =
-    current === target ||
-    (isTodo(current) && isTodo(target)) ||
-    (isHeading(current) && isHeading(target))
-  return same ? "text" : target
+  return defOf(current).family === defOf(target).family ? "text" : target
 }

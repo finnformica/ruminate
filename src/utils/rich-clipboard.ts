@@ -1,6 +1,5 @@
 import { blockId } from "../blocks/id"
-import { imageUrlOfBlock } from "../blocks/image"
-import { isHeading, isTodo } from "../blocks/markers"
+import { defOf } from "../blocks/registry"
 import { parse, parseLine } from "../blocks/parse"
 import { blockLines } from "../blocks/serialize"
 import { toDisplayMarkdown } from "../blocks/to-display-markdown"
@@ -241,13 +240,12 @@ function renderBlocks(blocks: ClipboardBlock[]): string {
   let html = ""
   let i = 0
   while (i < blocks.length) {
-    const type = blocks[i].type
-    if (type === "ul" || type === "ol" || isTodo(type)) {
-      // Consecutive same-flavor list items share one list element.
-      const tag = type === "ol" ? "ol" : "ul"
-      const sameFlavor = (t: BlockType) => (tag === "ol" ? t === "ol" : t === "ul" || isTodo(t))
+    const def = defOf(blocks[i].type)
+    if (def.listItem && def.listTag) {
+      // Consecutive items of one list element share it.
+      const tag = def.listTag
       let items = ""
-      while (i < blocks.length && sameFlavor(blocks[i].type)) {
+      while (i < blocks.length && defOf(blocks[i].type).listTag === tag) {
         items += renderListItem(blocks[i])
         i += 1
       }
@@ -260,35 +258,22 @@ function renderBlocks(blocks: ClipboardBlock[]): string {
   return html
 }
 
+/** A block as its registry entry writes it: the type's own HTML given the
+ * inline-rendered text, or that text alone. */
+function ownHtml(block: ClipboardBlock, inline: string): string | null {
+  const html = defOf(block.type).html
+  return html ? html({ text: block.text, props: propsOf(block) ?? null }, inline) : null
+}
+
 function renderListItem(block: ClipboardBlock): string {
-  const checkbox = isTodo(block.type)
-    ? `<input type="checkbox"${block.type === "done" ? " checked" : ""} disabled> `
-    : ""
+  const inline = inlineHtml(block.text)
   const children = block.children.length > 0 ? renderBlocks(block.children) : ""
-  return `<li>${checkbox}${inlineHtml(block.text)}${children}</li>`
+  return `<li>${ownHtml(block, inline) ?? inline}${children}</li>`
 }
 
 function renderProse(block: ClipboardBlock): string {
   const body = inlineHtml(block.text)
-  let html: string
-  if (isHeading(block.type)) {
-    const level = block.type === "h2" ? 2 : block.type === "h3" ? 3 : 1
-    html = `<h${level}>${body}</h${level}>`
-  } else if (block.type === "quote") {
-    html = `<blockquote><p>${body}</p></blockquote>`
-  } else if (block.type === "image") {
-    // Same-origin asset paths are made absolute so the picture resolves
-    // wherever the html lands (another app; Ruminate reads the payload).
-    const url = imageUrlOfBlock(block)
-    const origin = typeof window !== "undefined" ? window.location.origin : ""
-    const src = url.startsWith("/") ? origin + url : url
-    html = `<img src="${escapeHtml(src)}" alt="${escapeHtml(block.text)}">`
-  } else if (block.type === "code") {
-    const cls = block.language ? ` class="language-${escapeHtml(block.language)}"` : ""
-    html = `<pre><code${cls}>${escapeHtml(block.text)}</code></pre>`
-  } else {
-    html = `<p>${body}</p>`
-  }
+  let html = ownHtml(block, body) ?? `<p>${body}</p>`
   // Prose children follow as siblings — the same flattening the plain
   // display-markdown flavor applies (the embedded payload keeps exact nesting).
   if (block.children.length > 0) html += renderBlocks(block.children)

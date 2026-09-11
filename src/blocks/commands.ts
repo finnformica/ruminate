@@ -1,5 +1,6 @@
 import type { BlockOp } from "./history"
-import { DEFAULT_NEW_BLOCK_TYPE, isHeading, isTodo, toggleType } from "./markers"
+import { DEFAULT_NEW_BLOCK_TYPE, isHeading, toggleType } from "./markers"
+import { defOf } from "./registry"
 import {
   duplicateBlocks,
   emptyBlock,
@@ -131,18 +132,14 @@ const isZoomTitle = ({ key, zoomRootId }: CommandInput) =>
  * default.
  */
 function continuationType(type: BlockType, input: CommandInput): BlockType {
-  if (isTodo(type)) return "todo"
-  if (type === "ol") return "ol"
-  return input.newBlockType ?? DEFAULT_NEW_BLOCK_TYPE
+  return defOf(type).continues ?? input.newBlockType ?? DEFAULT_NEW_BLOCK_TYPE
 }
 
 /** The type for a new block of the *same* type as `type` — used by Shift-Enter
  * so a heading splits into a heading, a quote into a quote, and so on. A
  * checked todo continues as an unchecked one; a page never continues. */
 function sameType(type: BlockType): BlockType {
-  if (isTodo(type)) return "todo"
-  if (type === "page" || type === "code" || type === "image") return "text"
-  return type
+  return defOf(type).splitsAs ?? type
 }
 
 /**

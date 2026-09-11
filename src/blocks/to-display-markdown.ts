@@ -1,6 +1,6 @@
 import { frontmatterTextOfProps } from "../data/frontmatter-props"
-import { imageLine } from "./image"
-import { isListItem, markerFor } from "./markers"
+import { isListItem } from "./markers"
+import { defOf } from "./registry"
 import { parse } from "./parse"
 import { blockLines } from "./serialize"
 import type { Block, BlockDoc } from "./types"
@@ -18,12 +18,9 @@ import type { Block, BlockDoc } from "./types"
  * prose blocks are separated by blank lines so they don't run together.
  */
 function displayLines(block: Block, olPosition: number): string[] {
-  // A code block is its fence, verbatim.
-  if (block.type === "code") return blockLines(block)
-  if (block.type === "image") return [imageLine(block)]
-  const marker = markerFor(block.type, olPosition)
-  // Todos are stored as `[ ] text`; GFM needs a list bullet in front.
-  return [(block.type === "todo" || block.type === "done" ? "- " : "") + marker + block.text]
+  // A type with its own display spelling (a todo needs GFM's list bullet in
+  // front of its box) says so; everything else is its export lines.
+  return defOf(block.type).displayLines?.(block, olPosition) ?? blockLines(block, olPosition)
 }
 
 export function toDisplayMarkdown(content: string): string {

@@ -156,7 +156,7 @@ Checked-as-type was a deliberate call: type transitions are already the native
 mutation (the marker turn-into keys), so toggling a checkbox is
 `turnInto(id, type === 'todo' ? 'done' : 'todo')` — one generic helper covers
 every type change, and the serializer stays a lookup table with no attribute
-branching. The registry extends by adding a row here + a marker mapping; the
+branching. The registry extends by adding a row here, an entry in `src/blocks/registry.ts` (the type's markdown line, its behaviour under Enter and Backspace, how search and the slash menu name it) and one in `src/components/block-editor/block-kinds.tsx` (how its row is drawn) — every generic module reads those tables, so nothing else changes; the
 `CHECK` constraint is intentionally omitted so new types don't need a
 migration.
 
