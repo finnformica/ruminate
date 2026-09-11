@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Ruminate is a simple note-taking web application built with React and TypeScript. It enables users to capture and organize their thoughts with features like wikilinks, tags, templates, and GitHub synchronization.
+Ruminate is a note-taking web application built with React and TypeScript. Notes are outlines of typed blocks (a Logseq-style block editor) held in a graph: nodes plus child links, stored in SQLite in the browser and replicated to Cloudflare D1 behind a Worker. GitHub is used for identity only. Features include tags, block search with a query language, daily and weekly notes, maths, and (behind a switch) images.
 
 ## Development Commands
 
@@ -12,18 +12,23 @@ Ruminate is a simple note-taking web application built with React and TypeScript
 
 - `npm run dev` - Start the Vite dev server (frontend only)
 - `npm run dev:worker` - Build and serve the full app + API via `wrangler dev`
-- `npm run build` - Build for production (includes TypeScript compilation)
+- `npm run build` - Build for production (includes TypeScript compilation; regenerates the route tree)
 - `npm run preview` - Preview production build locally
+- `npm run deploy` - Deploy the Worker
+- `npm run migrate:remote` - Apply D1 migrations remotely
 
 ### Testing
 
 - `npm test` - Run all tests once
 - `npm run test:watch` - Run tests in watch mode
+- `npm run test:vr` - Visual regression against the committed baselines (CI's platform is authoritative; see docs/visual-regression.md)
 
 ### Code Quality
 
 - `npm run lint` - Run ESLint on source files
 - `npm run format` - Format code with Prettier
+- `npm run knip` - Find unused files, dependencies and exports
+- `npm run check:queries` / `npm run check:worker` - Worker-side checks
 
 ### Storybook
 
@@ -32,64 +37,62 @@ Ruminate is a simple note-taking web application built with React and TypeScript
 - `npm run test:storybook` - Run Storybook tests
 - `npm run test:storybook:watch` - Run Storybook tests in watch mode
 
-### Other
-
-- `npm run benchmark` - Run performance benchmarks
-
 ## Architecture
 
-### State Management
+### Data
 
-- **Global State**: Jotai atoms (src/global-state.ts); the GitHub identity is resolved at boot by the auth atoms there
-- **File System**: Integrates with isomorphic-git for Git operations and uses lightning-fs for browser file system
-- **GitHub Integration**: Handles authentication, repository cloning, and synchronization
+- **The graph is truth** (docs/graph-schema-v2.md, docs/graph-storage.md): `nodes` (id, type, text, props) and `link` rows (source, destination, fractional sort key). A page is a node of type `page`; its title is its `text` and its metadata is its `props` (docs/metadata.md). There is no frontmatter: markdown is only an import/export format (`src/blocks/parse.ts`, `src/blocks/serialize.ts`).
+- **Store** (`src/data/note-store.ts`, `sql-note-store.ts`): eight methods — `getGraph`, `applyOps`, `getAllRows`, `applyPull`, `clear`, `getMeta`, `setMeta`, `close` — over a `SqlDriver` (sqlite-wasm with OPFS in the browser, `node:sqlite` in tests). The store never sees markdown.
+- **Ops** (`src/data/ops.ts`): every edit is a batch of ops (`create`, `setText`, `setType`, `setProps`, `link`, `unlink`, `delete`) applied to the in-memory `GraphSnapshot` and persisted verbatim. `docToOps` diffs an edited doc against the snapshot; `deleteBlockOps` / `deletePageOps` carry the delete-rescue rules.
+- **Runtime** (`src/data/database-mode.ts`): holds the live graph atom, coalesces pending ops, and pushes/pulls row diffs to the D1 replica through the Worker (`worker/handlers/replica.ts`).
+- **Notes as metadata** (`src/data/note-meta.ts`): `Note` objects (title, tags, dates, props) are derived from the graph for lists, search and the calendar.
 
-### Key Components
+### State
 
-- **Note System**: Notes are parsed from markdown files with frontmatter support
-- **Editor**: A custom block/outline editor (Logseq-style) that parses each note into blocks (`src/components/block-editor/`, `src/blocks/`)
-- **Routing**: Uses TanStack Router for file-based routing
-- **Templates**: Support for note templates with input variables
-- **Voice Assistant**: OpenAI integration for voice conversations
+- **Global state** is Jotai atoms (`src/global-state.ts`). The GitHub identity is resolved at boot by the auth atoms there (`signInAtom`, `signOutAtom`, `githubUserAtom`); signed out, the app serves the in-memory sample graph.
 
-### Data Flow
+### Editor
 
-1. Markdown files are stored in a Git repository (GitHub integration)
-2. Files are parsed into Note objects with extracted metadata (tags, links, dates)
-3. Notes are indexed and made searchable using fast-fuzzy
-4. UI components subscribe to state changes via Jotai atoms
-5. Changes are automatically synced back to GitHub
+- **Block editor** (`src/components/block-editor/`, `src/blocks/`): each note is a `BlockDoc` walked out of the graph (`pageDoc`). Block types are declared once in `src/blocks/registry.ts` (markers, markdown lines, slash-menu and search entries) with their presentation in `block-editor/block-kinds.tsx`. Block bodies render through `block-content.tsx`: inline markdown only (bold, italic, links, code spans, `$$…$$` maths), with the stored text otherwise shown as is.
+- **Search** (`src/utils/search.ts`, `block-search.ts`, `search-notes.ts`): the query language in docs/query-language.md, over notes and blocks, with the qualifier picker in `components/qualifier-picker.tsx`.
+
+### Routing and Worker
+
+- **Routing**: TanStack Router, file-based under `src/routes/` (`routeTree.gen.ts` is generated by the Vite plugin; never edit it by hand).
+- **Worker** (`worker/`): serves the SPA and the API routes — GitHub OAuth (`/github-auth`, `/github-refresh`), the replica (`/api/replica/*`), images (`/api/images`, R2, behind `VITE_IMAGES_ENABLED`) and a file proxy.
 
 ### Core Technologies
 
-- **Frontend**: React 18, TypeScript, Vite
-- **Styling**: Tailwind CSS with custom design system
-- **Editor**: Custom block/outline editor (`src/components/block-editor/`)
+- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS
 - **State**: Jotai
-- **Git**: isomorphic-git + lightning-fs
+- **Storage**: sqlite-wasm (OPFS) locally, Cloudflare D1 remotely, replicated per row with last-writer-wins
 - **Routing**: TanStack Router (file-based)
-- **UI Components**: Radix UI primitives + Base UI
-- **Markdown**: Unified/remark ecosystem
+- **UI**: Radix UI primitives + Base UI
+- **Markdown**: react-markdown with remark-gfm and remark-math/rehype-katex, inline-only, for block bodies
 
 ### File Structure
 
-- `src/components/` - React components with Storybook stories
-- `src/routes/` - TanStack Router route definitions
-- `src/hooks/` - Custom React hooks
-- `src/utils/` - Utility functions and helpers
+- `src/blocks/` - Block types (`registry.ts`), parse/serialize, doc operations, keymap and commands
 - `src/components/block-editor/` - The block/outline editor
-- `src/blocks/` - Block parsing, serialization, and operations
-- `src/remark-plugins/` - Custom remark plugins for markdown processing
+- `src/components/` - React components with Storybook stories
+- `src/data/` - Graph, ops, store, database runtime, note metadata
+- `src/hooks/` - Custom React hooks
+- `src/routes/` - TanStack Router route definitions
+- `src/shortcuts/` - The keyboard shortcut registry (docs/keyboard-shortcuts.md)
+- `src/utils/` - Utility functions and helpers
 - `src/styles/` - CSS files and styling
 - `worker/` - Cloudflare Worker (serves the SPA + API routes)
+- `migrations/` - D1 migrations, shared with the local store's schema ladder
+- `docs/` - Living design and reference docs; `docs/archive/` holds superseded designs
+- `e2e/` - Visual regression baselines and runner
 
 ## Development Notes
 
 ### Testing
 
-- Uses Vitest for unit tests
-- Storybook for component testing and documentation
-- Test files should be co-located with source files using `.test.ts` suffix
+- Uses Vitest for unit tests (jsdom where a test needs the DOM: `// @vitest-environment jsdom`)
+- Storybook for component testing and documentation; visual regression baselines come from CI
+- Test files should be co-located with source files using `.test.ts` / `.test.tsx` suffix
 
 ### Code Style
 
@@ -101,12 +104,7 @@ Ruminate is a simple note-taking web application built with React and TypeScript
 - Run `npm run format` to format code
 - Run `npm run lint` to check for errors
 - Run `npm run knip` to check for dead code (unused files, dependencies, exports)
-
-### Git Integration
-
-- The app operates on a Git repository stored in the browser's filesystem
-- Uses isomorphic-git for all Git operations
-- Automatic synchronization with GitHub repositories
+- Add user-facing changes to `CHANGELOG.md`
 
 ### Performance
 
