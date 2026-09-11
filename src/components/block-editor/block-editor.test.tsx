@@ -710,7 +710,7 @@ describe("paste as link (Ruminate payload with ids)", () => {
     // pinned, inert and explained, never a working fold toggle.
     expect(rows[2].querySelector('[aria-label="Collapse"], [aria-label="Expand"]')).toBeNull()
     const loop = rows[2].querySelector<HTMLButtonElement>(
-      '[aria-label="Loops back to a block above"]',
+      '[aria-label="Loop detected"]',
     )!
     expect(loop).not.toBeNull()
     expect(loop.getAttribute("aria-disabled")).toBe("true")
@@ -720,7 +720,7 @@ describe("paste as link (Ruminate payload with ids)", () => {
     expect(serializedLines(getByTestId)).toEqual(["- A", "  - B", "    - A"])
     // Ordinary parents are unchanged: a real toggle, no explanation.
     expect(rows[0].querySelector('[aria-label="Collapse"]')).not.toBeNull()
-    expect(container.querySelectorAll('[aria-label="Loops back to a block above"]')).toHaveLength(1)
+    expect(container.querySelectorAll('[aria-label="Loop detected"]')).toHaveLength(1)
   })
 
   it("keeps the same ids through a cut + paste (a true move)", () => {

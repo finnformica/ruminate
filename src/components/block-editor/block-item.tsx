@@ -498,7 +498,7 @@ export function BlockItem({
   // surface's left edge, its glyph tucked just outside it.
   const toggle = hasToggle ? (
     <IconButton
-      aria-label={looped ? "Loops back to a block above" : isCollapsed ? "Expand" : "Collapse"}
+      aria-label={looped ? "Loop detected" : isCollapsed ? "Expand" : "Collapse"}
       size="small"
       // A real toggle explains itself; the loop's needs the tooltip, so it
       // stays enabled for the pointer (a disabled button gets no hover) and
