@@ -1,3 +1,4 @@
+import copy from "copy-to-clipboard"
 import { useAtomValue } from "jotai"
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent } from "react"
@@ -14,6 +15,7 @@ import {
   runCommand,
   type CaretInput,
   type CommandInput,
+  type CommandName,
   type CommandResult,
   type FocusIntent,
   type Mode,
@@ -57,6 +59,7 @@ import {
   writeRichClipboard,
   type ClipboardBlock,
 } from "../../utils/rich-clipboard"
+import { BlockContextMenu, type BlockMenuActions, type BlockMenuTarget } from "./block-context-menu"
 import {
   BlockItem,
   type BlockDebugOptions,
@@ -212,9 +215,20 @@ export function BlockEditor({
   revealRequest = null,
   resolveBlocks,
   debug,
+  noteId,
+  parentCountOf,
+  onDeleteEverywhere,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc) => void
+  /** The note this doc is the page of — what "Copy link to block" links into. */
+  noteId?: string
+  /** How many places a block appears across the corpus (whether the context
+   * menu offers Unlink beside Delete). Absent = only here. */
+  parentCountOf?: (id: string) => number
+  /** Delete a block from every place it appears (the graph-level delete);
+   * absent standalone, where the menu offers only the row's removal. */
+  onDeleteEverywhere?: (id: string) => void
   /** Start with the first block in edit mode (e.g. a brand-new note). */
   startEditing?: boolean
   /** Highlight the block for this heading text on mount / when it changes. */
@@ -790,7 +804,7 @@ export function BlockEditor({
   // `id::` lines) so it round-trips through paste. The ids ride only in the
   // embedded clipboard payload — where they make paste-as-link (and cut+paste
   // as a true move) possible; both visible flavors drop them.
-  const selectionMarkdown = (): string => {
+  const markdownOfRows = (keys: string[]): string => {
     const lines: string[] = []
     const walk = (id: string, depth: number) => {
       const block = doc.blocks[id]
@@ -803,14 +817,14 @@ export function BlockEditor({
       lines.push(`${indent}  id:: ${block.id}`)
       for (const childId of block.children) walk(childId, depth + 1)
     }
-    for (const key of selectionRoots()) walk(idOfKey(key), 0)
+    for (const key of keys) walk(idOfKey(key), 0)
     return lines.join("\n")
   }
-  const copySelection = () => {
-    // Both flavors: clean display markdown as text/plain, plus text/html with
-    // the exact block tree embedded so Ruminate→Ruminate paste round-trips.
-    writeRichClipboard(richClipboardFormats(selectionMarkdown()))
-  }
+  // Both flavors: clean display markdown as text/plain, plus text/html with
+  // the exact block tree embedded so Ruminate→Ruminate paste round-trips.
+  const copyRows = (keys: string[]) =>
+    writeRichClipboard(richClipboardFormats(markdownOfRows(keys)))
+  const copySelection = () => copyRows(selectionRoots())
   const cutSelection = () => {
     copySelection()
     removeSelection()
@@ -1013,6 +1027,66 @@ export function BlockEditor({
     const result = runCommand(name, input)
     applyResult(result)
     return result.handled
+  }
+  // Run a command by name on a row — what the context menu does, so a menu
+  // item and its key do exactly the same thing.
+  const runOnRow = (name: CommandName, key: string) => {
+    if (readOnly) return
+    applyResult(
+      runCommand(name, {
+        doc,
+        key,
+        mode: "select",
+        visibleOrder,
+        zoomRootId,
+        zoomBackId,
+        newBlockType: typeOfMarker(newBlockMarker),
+      }),
+    )
+  }
+
+  // ── The context menu ──────────────────────────────────────────────────────
+  // A right-click on a row opens the block menu on that row (and selects it,
+  // so the keyboard follows). Empty space beneath the rows gets the browser's
+  // own menu: the event is stopped before the menu's trigger sees it.
+  const [menuTarget, setMenuTarget] = useState<BlockMenuTarget | null>(null)
+  const handleContextMenuCapture = (event: MouseEvent<HTMLDivElement>) => {
+    if (readOnly) return
+    const rowEl = (event.target as HTMLElement).closest<HTMLElement>("[data-occurrence]")
+    const key = rowEl?.dataset.occurrence
+    const row = key === undefined ? undefined : rows.find((r) => r.key === key)
+    const block = row ? doc.blocks[row.id] : undefined
+    if (!row || !block) {
+      event.stopPropagation()
+      return
+    }
+    setMenuTarget({
+      key: row.key,
+      id: row.id,
+      type: block.type,
+      hasChildren: row.hasChildren,
+      collapsed: row.collapsed,
+      places: parentCountOf ? Math.max(1, parentCountOf(row.id)) : 1,
+    })
+    // Editing a different row would otherwise keep its textarea focused
+    // under the menu; the menu's row becomes the selection.
+    if (!selectedSet.has(row.key)) select(row.key)
+  }
+  const menuActions: BlockMenuActions = {
+    edit: (key) => edit(key),
+    setType: (id, type) => {
+      const next = updateBlock(doc, id, { type })
+      if (next !== doc) history.commit(doc, next, { type: "structural" })
+    },
+    duplicate: (key) => runOnRow("duplicateBelow", key),
+    toggleCollapse: (key) => toggleCollapse(key),
+    zoomInto: (id) => navigateZoom(id),
+    copy: (key) => copyRows([key]),
+    copyLink: noteId
+      ? (id) => copy(`${window.location.origin}/notes/${noteId}?block=${id}`)
+      : undefined,
+    remove: (key) => runOnRow("deleteBlock", key),
+    deleteEverywhere: onDeleteEverywhere,
   }
 
   const api: BlockEditorApi = {
@@ -1544,41 +1618,44 @@ export function BlockEditor({
           </span>
         </nav>
       ) : null}
-      {/* The container holds keyboard focus for select mode (tabIndex -1 =
+      <BlockContextMenu target={readOnly ? null : menuTarget} actions={menuActions}>
+        {/* The container holds keyboard focus for select mode (tabIndex -1 =
           focusable only programmatically), so arrows/shortcuts work no matter
           which block is highlighted. outline-none hides the focus ring. */}
-      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
-      <div
-        className="outline-none"
-        ref={containerRef}
-        tabIndex={-1}
-        onKeyDown={handleKeyDown}
-        onFocus={handleContainerFocus}
-        onBlur={handleContainerBlur}
-        onCopy={handleCopy}
-        onPaste={handleContainerPaste}
-        onCut={handleCut}
-        onMouseOver={handleMouseOver}
-        onMouseLeave={() => setHotGuides(null)}
-      >
-        {/* The view is a flat list: one row per occurrence, indented by its
+        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+        <div
+          className="outline-none"
+          ref={containerRef}
+          tabIndex={-1}
+          onKeyDown={handleKeyDown}
+          onFocus={handleContainerFocus}
+          onBlur={handleContainerBlur}
+          onCopy={handleCopy}
+          onPaste={handleContainerPaste}
+          onCut={handleCut}
+          onMouseOver={handleMouseOver}
+          onMouseLeave={() => setHotGuides(null)}
+          onContextMenuCapture={handleContextMenuCapture}
+        >
+          {/* The view is a flat list: one row per occurrence, indented by its
             depth. Zoomed, the first row is the zoomed block as the view's
             editable title and its children follow at depth 0. */}
-        {rows.map((row) => {
-          const block = doc.blocks[row.id]
-          if (!block) return null
-          return (
-            <BlockItem
-              key={row.key}
-              doc={doc}
-              block={block}
-              occurrence={row}
-              api={api}
-              animateIn={justOpened !== null && row.guideKeys.includes(justOpened)}
-            />
-          )
-        })}
-      </div>
+          {rows.map((row) => {
+            const block = doc.blocks[row.id]
+            if (!block) return null
+            return (
+              <BlockItem
+                key={row.key}
+                doc={doc}
+                block={block}
+                occurrence={row}
+                api={api}
+                animateIn={justOpened !== null && row.guideKeys.includes(justOpened)}
+              />
+            )
+          })}
+        </div>
+      </BlockContextMenu>
     </>
   )
 }

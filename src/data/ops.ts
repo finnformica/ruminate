@@ -148,6 +148,40 @@ function parentsIndex(snapshot: GraphSnapshot): Map<string, Set<string>> {
 export function deletePageOps(pageId: NoteId, snapshot: GraphSnapshot): Op[] {
   const page = snapshot.nodes.get(pageId)
   if (!page || page.type !== PAGE_TYPE) return []
+  return deleteNodeOps(pageId, snapshot)
+}
+
+/** How many parents hold a block — the number of places it appears across
+ * the corpus (0 for an unknown or orphaned node). */
+export function parentCount(snapshot: GraphSnapshot, id: string): number {
+  let count = 0
+  for (const list of snapshot.childLinks.values()) {
+    for (const link of list) if (link.destination_id === id) count += 1
+  }
+  return count
+}
+
+/**
+ * Delete a block from every place it appears: unlink it from each parent,
+ * delete it, and cascade through what only it held. The graph-level
+ * counterpart of removing a row in the editor (which only unlinks the row's
+ * own occurrence and keeps a block still held elsewhere).
+ */
+export function deleteBlockOps(blockId: string, snapshot: GraphSnapshot): Op[] {
+  const node = snapshot.nodes.get(blockId)
+  if (!node || node.type === PAGE_TYPE) return []
+  const unlinks: Op[] = []
+  for (const [source, list] of snapshot.childLinks) {
+    if (list.some((link) => link.destination_id === blockId)) {
+      unlinks.push({ op: "unlink", source, destination: blockId })
+    }
+  }
+  return [...unlinks, ...deleteNodeOps(blockId, snapshot)]
+}
+
+/** The `delete` ops for a node and everything left without a parent once it
+ * is gone — the shared cascade of page and block deletion. */
+function deleteNodeOps(rootId: string, snapshot: GraphSnapshot): Op[] {
   const parentsOf = parentsIndex(snapshot)
   const parents = (id: string): Set<string> => {
     let set = parentsOf.get(id)
@@ -165,7 +199,7 @@ export function deletePageOps(pageId: NoteId, snapshot: GraphSnapshot): Op[] {
       if (parents(link.destination_id).size === 0) queue.push(link.destination_id)
     }
   }
-  remove(pageId)
+  remove(rootId)
   while (queue.length > 0) {
     const id = queue.shift() as string
     if (deleted.has(id) || !snapshot.nodes.has(id) || parents(id).size > 0) continue
