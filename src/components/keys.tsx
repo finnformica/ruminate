@@ -29,7 +29,9 @@ export function Keys({
         <kbd
           key={index}
           className={cx(
-            "inline-grid h-5 min-w-5 place-items-center rounded-sm bg-bg-secondary px-1 font-body text-xs leading-none text-text-secondary",
+            // Its own weight: inside a bold row (the sidebar's current item,
+            // a pressed Help) a key stays a key.
+            "inline-grid h-5 min-w-5 place-items-center rounded-sm bg-bg-secondary px-1 font-body text-xs font-normal leading-none text-text-secondary",
             // A keycap's lower edge: a hairline beneath in light, and in dark
             // a lit top edge with a soft drop.
             "shadow-[inset_0_-1px_0_var(--color-border-secondary)] dark:shadow-[inset_0_1px_0_var(--color-border-secondary),0_1px_2px_-1px_var(--color-bg)]",
