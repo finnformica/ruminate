@@ -151,14 +151,6 @@ export function writeCollapsedKeys(noteId: string, collapsed: ReadonlySet<string
   }
 }
 
-/** Forget every fold stored on this device; notes open as the policy says. */
-export function clearStoredFolds(): number {
-  if (typeof localStorage === "undefined") return 0
-  const ids = storedNoteIds()
-  for (const id of ids) localStorage.removeItem(storageKey(id))
-  return ids.length
-}
-
 /**
  * Is there anything worth seeding from yet? The note store opens
  * asynchronously, so a note is briefly nothing but the editor's starter blank

@@ -8,7 +8,6 @@ import type { ReactNode } from "react"
 import { expandedLevelsAtom } from "../global-state"
 import {
   MAX_STORED_NOTES,
-  clearStoredFolds,
   readCollapsedKeys,
   useCollapseState,
   writeCollapsedKeys,
@@ -155,15 +154,6 @@ describe("writeCollapsedKeys", () => {
     writeCollapsedKeys("fresher", new Set(), deep)
     expect(stored("n0")).toBe(null)
     expect(stored("n1")).not.toBe(null)
-  })
-
-  it("clearStoredFolds forgets every note's folds and nothing else", () => {
-    writeCollapsedKeys("a", new Set(["a/b"]), deep)
-    writeCollapsedKeys("b", new Set(), deep)
-    localStorage.setItem("accent", "cyan")
-    expect(clearStoredFolds()).toBe(2)
-    expect(stored("a")).toBe(null)
-    expect(localStorage.getItem("accent")).toBe("cyan")
   })
 })
 
