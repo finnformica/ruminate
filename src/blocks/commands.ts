@@ -141,7 +141,7 @@ function continuationType(type: BlockType, input: CommandInput): BlockType {
  * checked todo continues as an unchecked one; a page never continues. */
 function sameType(type: BlockType): BlockType {
   if (isTodo(type)) return "todo"
-  if (type === "page" || type === "code") return "text"
+  if (type === "page" || type === "code" || type === "image") return "text"
   return type
 }
 

@@ -1,7 +1,7 @@
 import { blockId } from "./id"
 import { pagePropsFromText } from "../data/frontmatter-props"
 import { classifyLine } from "./markers"
-import type { Block, BlockDoc, BlockType } from "./types"
+import type { Block, BlockDoc, BlockProps, BlockType } from "./types"
 
 /**
  * **Import.** Parse markdown into typed blocks.
@@ -170,9 +170,9 @@ export function parse(markdown: string): BlockDoc {
         if (node.code.language !== "") block.props = { language: node.code.language }
         olRun = 0
       } else {
-        const { type, text } = classifyLine(node.line, olRun + 1, false)
+        const { type, text, props } = classifyLine(node.line, olRun + 1, false)
         olRun = type === "ol" ? olRun + 1 : 0
-        block = { id, type, text, children: [] }
+        block = { id, type, text, ...(props ? { props } : {}), children: [] }
       }
       blocks[id] = block
       block.children = flatten(node.children)
@@ -187,7 +187,7 @@ export function parse(markdown: string): BlockDoc {
 
 /** A typed block from one line of markdown, outside any document — what the
  * clipboard and the "new block" preference use to read a marker. */
-export function parseLine(line: string): { type: BlockType; text: string } {
+export function parseLine(line: string): { type: BlockType; text: string; props?: BlockProps } {
   return classifyLine(line, 1, false)
 }
 

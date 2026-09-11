@@ -1,5 +1,6 @@
+import { parseImageLine } from "./image"
 import { normalizeBlockText } from "./normalize-block-text"
-import type { BlockType } from "./types"
+import type { BlockProps, BlockType } from "./types"
 
 /**
  * **Every marker spelling lives here.** A block's type is data
@@ -13,8 +14,9 @@ import type { BlockType } from "./types"
 
 /**
  * The type → marker map (docs/graph-schema-v2.md). `ol` is renumbered by run
- * position (`markerFor`), `code` is fenced, `page` is a note root: those three
- * are handled structurally by the serializer.
+ * position (`markerFor`), `code` is fenced, `image` is a whole-line
+ * `![caption](url)` (`image.ts`), `page` is a note root: those are handled
+ * structurally by the serializer.
  */
 const MARKER_OF_TYPE: Readonly<Record<BlockType, string>> = {
   text: "",
@@ -27,6 +29,7 @@ const MARKER_OF_TYPE: Readonly<Record<BlockType, string>> = {
   ol: "1. ",
   quote: "> ",
   code: "",
+  image: "",
   page: "",
 }
 
@@ -58,8 +61,12 @@ export function classifyLine(
   line: string,
   olPosition: number,
   inFence: boolean,
-): { type: BlockType; text: string } {
+): { type: BlockType; text: string; props?: BlockProps } {
   if (inFence) return { type: "text", text: line }
+  // A line that is nothing but a markdown image is an image block: the
+  // caption is its text and the URL its props.
+  const image = parseImageLine(line)
+  if (image) return { type: "image", text: image.text, props: image.props }
   const canonical = normalizeHeadingMarker(line)
   for (const type of ["h1", "todo", "done", "ul", "quote"] as const) {
     const marker = MARKER_OF_TYPE[type]

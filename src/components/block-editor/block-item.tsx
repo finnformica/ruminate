@@ -1,3 +1,4 @@
+import type React from "react"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent, ClipboardEvent, CSSProperties, KeyboardEvent } from "react"
 import { cx } from "../../utils/cx"
@@ -17,6 +18,8 @@ import {
 } from "../../blocks/slash-menu"
 import { htmlToMarkdown } from "../../utils/html-to-markdown"
 import { clipboardBlocksToMarkdown, extractClipboardBlocks } from "../../utils/rich-clipboard"
+import { imageFilesOf, useImageSrc } from "../../data/images"
+import { imagePropsOf } from "../../blocks/image"
 import { IconButton } from "../icon-button"
 import { BlockContent } from "./block-content"
 import { caretCoordinates, caretLineFlags } from "./caret"
@@ -78,6 +81,14 @@ export interface BlockEditorApi {
   dispatchKey: (mode: Mode, key: string, event: KeyLike, caret?: CaretInput) => boolean
   /** Zoom into a block: its subtree becomes the whole editor view. */
   zoomInto: (id: string) => void
+  /** Image files pasted or dropped on a row: upload them and add image blocks
+   * there. Absent where images are switched off (the paste is left alone). */
+  onImageFiles?: (key: string, files: File[]) => void
+  /** Open the file picker for an image to add at this row (the slash menu's
+   * "Image"). Absent where images are switched off. */
+  requestImage?: (key: string) => void
+  /** Expand an image block's picture (the lightbox). */
+  openImage?: (id: string) => void
   /**
    * Exit edit mode and take the first selection-ladder rung on this row
    * (Cmd/Ctrl+A pressed with the textarea's text already fully selected).
@@ -191,6 +202,8 @@ function typographyFor(type: BlockType, depth: number): string {
     }
   }
   if (type === "quote") return "text-base leading-relaxed text-text-secondary"
+  // An image's text is its caption: set small and quiet beneath the picture.
+  if (type === "image") return "text-sm leading-relaxed text-text-secondary"
   return "text-base leading-relaxed"
 }
 
@@ -236,8 +249,11 @@ export function BlockItem({
   const [slashStyle, setSlashStyle] = useState<CSSProperties>({})
   const slashQuery = slash?.trigger.query
   const slashItems = useMemo(
-    () => (slashQuery === undefined ? [] : slashMenuItems(slashQuery, new Date())),
-    [slashQuery],
+    () =>
+      slashQuery === undefined
+        ? []
+        : slashMenuItems(slashQuery, new Date(), { images: api.requestImage !== undefined }),
+    [slashQuery, api.requestImage],
   )
 
   // A row revealed by unfolding its parent rises in briefly. Captured at
@@ -348,6 +364,13 @@ export function BlockItem({
     pendingCaret.current = result.caret
     dismissedSlash.current = null
     setSlash(null)
+    if (result.type === "image") {
+      // "Image" asks for a file rather than changing the type in place: the
+      // `/phrase` goes, and the picker decides what (if anything) is added.
+      api.onBlockChange(block.id, { text: result.text }, "structural")
+      api.requestImage?.(occurrence.key)
+      return
+    }
     // Its own undo step, so Cmd/Ctrl+Z puts the typed `/phrase` back.
     api.onBlockChange(
       block.id,
@@ -444,6 +467,15 @@ export function BlockItem({
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const plain = plainPaste.current
     plainPaste.current = false
+    // A pasted picture (a screenshot, a copied image) becomes an image block
+    // beside this row — where images are on; otherwise the browser keeps the
+    // event, which in a textarea means nothing happens.
+    const files = imageFilesOf(event.clipboardData)
+    if (files.length > 0 && api.onImageFiles) {
+      event.preventDefault()
+      api.onImageFiles(occurrence.key, files)
+      return
+    }
     const text = event.clipboardData?.getData("text/plain") ?? ""
     const normalized = text.replace(/\r\n?/g, "\n")
     if (plain) {
@@ -737,6 +769,94 @@ export function BlockItem({
     ? 0
     : Math.max(headingTopMarginPx(type, depth), depth === 0 && occurrence.index > 0 ? ROOT_GAP : 0)
 
+  // The caption/body line: the textarea while editing, the rendered text
+  // otherwise (an image row hangs it beneath the picture).
+  const content = editing ? (
+    <>
+      <textarea
+        ref={textareaRef}
+        value={body}
+        rows={1}
+        spellCheck
+        // A quiet brand prompt in an empty block: a ghost at
+        // placeholder rank (tertiary — chrome, not ink) that the
+        // browser shows only while the textarea is empty, so it never
+        // appears in view mode or over content. The turn-into keys
+        // live in the `?` reference, not here.
+        // The zoom title is a page title, not a block — no ghost.
+        placeholder={zoomTitle ? undefined : type === "image" ? "Add a caption…" : "Ruminate…"}
+        onChange={handleTextareaChange}
+        onKeyDown={handleEditKeyDown}
+        // Caret moves that aren't edits (arrows, Home/End, a click)
+        // still decide whether the caret is inside a `/phrase`.
+        onKeyUp={(event) => {
+          if (/^(Arrow(Left|Right)|Home|End)$/.test(event.key)) {
+            syncSlash(event.currentTarget.value, event.currentTarget.selectionStart)
+          }
+        }}
+        onClick={(event) =>
+          syncSlash(event.currentTarget.value, event.currentTarget.selectionStart)
+        }
+        onPaste={handlePaste}
+        onBlur={() => api.setFocus(null)}
+        className={cx(
+          "min-w-0 flex-1 resize-none overflow-hidden font-content leading-relaxed text-text outline-none [overflow-wrap:anywhere] placeholder:text-text-tertiary",
+          // The panel supplies a code block's surface and padding.
+          codePanel ?? "border-none bg-transparent p-0",
+          typo,
+        )}
+      />
+      {slashOpen && slash ? (
+        <SlashMenu
+          items={slashItems}
+          activeIndex={Math.min(slash.index, slashItems.length - 1)}
+          style={slashStyle}
+          onHover={(index) => setSlash({ ...slash, index })}
+          onPick={pickSlashItem}
+        />
+      ) : null}
+    </>
+  ) : (
+    // Keyboard for select mode is handled by the editor container (it
+    // holds focus); this element only needs the pointer interactions.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+    <div
+      data-testid="block-body"
+      data-block-id={block.id}
+      className={cx(
+        // A long link or an unbroken word breaks rather than running
+        // off a narrow screen (the textarea wraps the same way).
+        // pre-wrap: the text shows exactly as stored (newlines, runs
+        // of spaces, a leading tab), as the textarea shows it.
+        "min-h-[1lh] min-w-0 flex-1 whitespace-pre-wrap outline-none [overflow-wrap:anywhere]",
+        !readOnly && "cursor-text",
+        readOnly && api.activate && "cursor-pointer",
+        typo,
+        codePanel,
+        // Checking a todo mutes its text; the fade marks the state
+        // change without delaying it.
+        isTodo(type) && "transition-colors duration-200",
+        type === "done" && "text-text-secondary line-through",
+      )}
+      {...(readOnly
+        ? api.activate
+          ? { onClick: () => api.activate?.(occurrence.key) }
+          : {}
+        : {
+            onClick: () => api.select(occurrence.key),
+            onDoubleClick: () => api.edit(occurrence.key),
+          })}
+    >
+      {type === "code" ? (
+        // Verbatim: a code block's text is not markdown. The panel's
+        // `whitespace-pre-wrap` keeps its lines and indentation.
+        body
+      ) : (
+        <BlockContent content={body} />
+      )}
+    </div>
+  )
+
   return (
     <div
       data-block-row={block.id}
@@ -841,90 +961,16 @@ export function BlockItem({
               className="w-0.5 shrink-0 self-stretch rounded-full bg-text-tertiary"
             />
           ) : null}
-          {editing ? (
-            <>
-              <textarea
-                ref={textareaRef}
-                value={body}
-                rows={1}
-                spellCheck
-                // A quiet brand prompt in an empty block: a ghost at
-                // placeholder rank (tertiary — chrome, not ink) that the
-                // browser shows only while the textarea is empty, so it never
-                // appears in view mode or over content. The turn-into keys
-                // live in the `?` reference, not here.
-                // The zoom title is a page title, not a block — no ghost.
-                placeholder={zoomTitle ? undefined : "Ruminate…"}
-                onChange={handleTextareaChange}
-                onKeyDown={handleEditKeyDown}
-                // Caret moves that aren't edits (arrows, Home/End, a click)
-                // still decide whether the caret is inside a `/phrase`.
-                onKeyUp={(event) => {
-                  if (/^(Arrow(Left|Right)|Home|End)$/.test(event.key)) {
-                    syncSlash(event.currentTarget.value, event.currentTarget.selectionStart)
-                  }
-                }}
-                onClick={(event) =>
-                  syncSlash(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
-                onPaste={handlePaste}
-                onBlur={() => api.setFocus(null)}
-                className={cx(
-                  "min-w-0 flex-1 resize-none overflow-hidden font-content leading-relaxed text-text outline-none [overflow-wrap:anywhere] placeholder:text-text-tertiary",
-                  // The panel supplies a code block's surface and padding.
-                  codePanel ?? "border-none bg-transparent p-0",
-                  typo,
-                )}
-              />
-              {slashOpen && slash ? (
-                <SlashMenu
-                  items={slashItems}
-                  activeIndex={Math.min(slash.index, slashItems.length - 1)}
-                  style={slashStyle}
-                  onHover={(index) => setSlash({ ...slash, index })}
-                  onPick={pickSlashItem}
-                />
-              ) : null}
-            </>
-          ) : (
-            // Keyboard for select mode is handled by the editor container (it
-            // holds focus); this element only needs the pointer interactions.
-            // eslint-disable-next-line jsx-a11y/no-static-element-interactions
-            <div
-              data-testid="block-body"
-              data-block-id={block.id}
-              className={cx(
-                // A long link or an unbroken word breaks rather than running
-                // off a narrow screen (the textarea wraps the same way).
-                // pre-wrap: the text shows exactly as stored (newlines, runs
-                // of spaces, a leading tab), as the textarea shows it.
-                "min-h-[1lh] min-w-0 flex-1 whitespace-pre-wrap outline-none [overflow-wrap:anywhere]",
-                !readOnly && "cursor-text",
-                readOnly && api.activate && "cursor-pointer",
-                typo,
-                codePanel,
-                // Checking a todo mutes its text; the fade marks the state
-                // change without delaying it.
-                isTodo(type) && "transition-colors duration-200",
-                type === "done" && "text-text-secondary line-through",
-              )}
-              {...(readOnly
-                ? api.activate
-                  ? { onClick: () => api.activate?.(occurrence.key) }
-                  : {}
-                : {
-                    onClick: () => api.select(occurrence.key),
-                    onDoubleClick: () => api.edit(occurrence.key),
-                  })}
-            >
-              {type === "code" ? (
-                // Verbatim: a code block's text is not markdown. The panel's
-                // `whitespace-pre-wrap` keeps its lines and indentation.
-                body
-              ) : (
-                <BlockContent content={body} />
-              )}
+          {type === "image" ? (
+            // The picture above its caption, which is the block's text: the
+            // caption line is the ordinary body (view or textarea), so every
+            // keyboard and paste behaviour is the same as on any block.
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <ImageFigure block={block} occurrence={occurrence} api={api} />
+              <div className="flex min-w-0">{content}</div>
             </div>
+          ) : (
+            content
           )}
           {codeLanguage ? (
             // The language, top-right of the panel — chrome, not content.
@@ -947,6 +993,68 @@ export function BlockItem({
         ) : null}
       </div>
     </div>
+  )
+}
+
+// ── Image rows ─────────────────────────────────────────────────────────────
+
+/** An image block's picture: the bytes once fetched (a quiet placeholder
+ * until then), a click opening the lightbox. Sized to the row — never wider
+ * than the text column, never taller than a screenful. */
+function ImageFigure({
+  block,
+  occurrence,
+  api,
+}: {
+  block: Block
+  occurrence: Occurrence
+  api: BlockEditorApi
+}) {
+  const src = useImageSrc(block)
+  const { width, height } = imagePropsOf(block)
+  const caption = block.text.trim()
+  const open = (event: React.MouseEvent) => {
+    event.stopPropagation()
+    if (api.openImage) {
+      if (!api.readOnly) api.select(occurrence.key)
+      api.openImage(block.id)
+    } else {
+      api.activate?.(occurrence.key)
+    }
+  }
+  if (src === "error") {
+    return (
+      <div
+        data-testid="block-image-missing"
+        className="self-start rounded-lg border border-dashed border-border-secondary px-3 py-2 text-sm text-text-tertiary"
+      >
+        Image unavailable
+      </div>
+    )
+  }
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-label={caption ? `Open image: ${caption}` : "Open image"}
+      onClick={open}
+      className="block max-w-full cursor-zoom-in self-start overflow-hidden rounded-lg border border-border-secondary bg-bg-secondary"
+    >
+      {src ? (
+        <img
+          src={src}
+          alt={caption}
+          data-testid="block-image"
+          className="block h-auto max-h-80 w-auto max-w-full object-contain"
+        />
+      ) : (
+        <div
+          aria-hidden
+          className="max-h-80 w-64 max-w-full animate-pulse"
+          style={{ aspectRatio: width && height ? `${width} / ${height}` : "4 / 3" }}
+        />
+      )}
+    </button>
   )
 }
 

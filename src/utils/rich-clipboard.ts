@@ -1,4 +1,5 @@
 import { blockId } from "../blocks/id"
+import { imageUrlOfBlock } from "../blocks/image"
 import { isHeading, isTodo } from "../blocks/markers"
 import { parse, parseLine } from "../blocks/parse"
 import { blockLines } from "../blocks/serialize"
@@ -39,6 +40,8 @@ export interface ClipboardBlock {
   id?: string
   type: BlockType
   text: string
+  /** Type-owned data (an image's location); absent for most blocks. */
+  props?: BlockProps
   /** A code block's language, when it has one. */
   language?: string
   children: ClipboardBlock[]
@@ -46,7 +49,7 @@ export interface ClipboardBlock {
 
 /** A block's props from a payload block (a code block's language). */
 const propsOf = (block: ClipboardBlock): BlockProps | undefined =>
-  block.language ? { language: block.language } : undefined
+  block.props ?? (block.language ? { language: block.language } : undefined)
 
 /** A payload block's language from a block's props. */
 const languageOf = (block: Block): string | undefined => {
@@ -88,6 +91,7 @@ function docToClipboardBlocks(doc: BlockDoc, declared: Set<string>): ClipboardBl
       type: block.type,
       text: block.text,
       ...(language ? { language } : {}),
+      ...(block.type === "image" && block.props ? { props: block.props } : {}),
       children: block.children.map(build).filter((b): b is ClipboardBlock => b !== null),
     }
   }
@@ -171,7 +175,14 @@ export function extractClipboardBlocks(html: string): ClipboardBlock[] | null {
 /** A payload block as written by this version (`type` + `text`) or by an
  * older one (`content`, a marker-prefixed line — read as an import). */
 type RawClipboardBlock =
-  | { id?: string; type: string; text: string; language?: string; children: RawClipboardBlock[] }
+  | {
+      id?: string
+      type: string
+      text: string
+      props?: unknown
+      language?: string
+      children: RawClipboardBlock[]
+    }
   | { id?: string; content: string; children: RawClipboardBlock[] }
 
 function isClipboardBlocks(value: unknown): value is RawClipboardBlock[] {
@@ -195,13 +206,24 @@ function isClipboardBlocks(value: unknown): value is RawClipboardBlock[] {
 function normalizeClipboardBlock(raw: RawClipboardBlock): ClipboardBlock {
   const children = raw.children.map(normalizeClipboardBlock)
   if ("content" in raw) {
-    const { type, text } = parseLine(raw.content)
-    return { ...(raw.id !== undefined ? { id: raw.id } : {}), type, text, children }
+    const { type, text, props } = parseLine(raw.content)
+    return {
+      ...(raw.id !== undefined ? { id: raw.id } : {}),
+      type,
+      text,
+      ...(props ? { props } : {}),
+      children,
+    }
   }
+  const props =
+    raw.props && typeof raw.props === "object" && !Array.isArray(raw.props)
+      ? (raw.props as BlockProps)
+      : undefined
   return {
     ...(raw.id !== undefined ? { id: raw.id } : {}),
     type: isBlockType(raw.type) ? raw.type : "text",
     text: raw.text,
+    ...(props ? { props } : {}),
     ...(raw.language ? { language: raw.language } : {}),
     children,
   }
@@ -254,6 +276,13 @@ function renderProse(block: ClipboardBlock): string {
     html = `<h${level}>${body}</h${level}>`
   } else if (block.type === "quote") {
     html = `<blockquote><p>${body}</p></blockquote>`
+  } else if (block.type === "image") {
+    // Same-origin asset paths are made absolute so the picture resolves
+    // wherever the html lands (another app; Ruminate reads the payload).
+    const url = imageUrlOfBlock(block)
+    const origin = typeof window !== "undefined" ? window.location.origin : ""
+    const src = url.startsWith("/") ? origin + url : url
+    html = `<img src="${escapeHtml(src)}" alt="${escapeHtml(block.text)}">`
   } else if (block.type === "code") {
     const cls = block.language ? ` class="language-${escapeHtml(block.language)}"` : ""
     html = `<pre><code${cls}>${escapeHtml(block.text)}</code></pre>`

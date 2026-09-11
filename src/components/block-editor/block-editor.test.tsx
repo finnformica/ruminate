@@ -8,6 +8,7 @@ import { serialize } from "../../blocks/serialize"
 import type { BlockDoc } from "../../blocks/types"
 import type { BlockRevealRequest } from "../../utils/note-outline"
 import { richClipboardFormats } from "../../utils/rich-clipboard"
+import { ImageUploadError, type UploadedImage } from "../../data/images"
 import { BlockEditor, type BlockDebugOptions } from "./block-editor"
 
 // The context menu (Base UI) measures its popup with a ResizeObserver and
@@ -40,6 +41,7 @@ function Harness({
   debug,
   parentCountOf,
   onDeleteEverywhere,
+  onImageUpload,
 }: {
   initial?: string
   /** A doc built by hand — for shapes markdown cannot express (a shared block). */
@@ -51,6 +53,7 @@ function Harness({
   debug?: BlockDebugOptions
   parentCountOf?: (id: string) => number
   onDeleteEverywhere?: (id: string) => void
+  onImageUpload?: (file: File) => Promise<UploadedImage>
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarter(parse(initial)))
   return (
@@ -65,6 +68,7 @@ function Harness({
         debug={debug}
         parentCountOf={parentCountOf}
         onDeleteEverywhere={onDeleteEverywhere}
+        onImageUpload={onImageUpload}
       />
       <pre data-testid="serialized">{serialize(doc)}</pre>
     </>
@@ -2112,5 +2116,178 @@ describe("BlockEditor context menu", () => {
       fireEvent.contextMenu(editorRoot(container), { clientX: 10, clientY: 500 })
     })
     expect(screen.queryByTestId("block-context-menu")).toBeNull()
+  })
+})
+
+describe("BlockEditor images", () => {
+  const pngFile = () => new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" })
+  /** A paste event carrying one image file (what a pasted screenshot is). */
+  const imagePaste = (files: File[]) => ({
+    clipboardData: { files, types: ["Files"], getData: () => "" },
+  })
+  const uploads = (id = "img_abcdefghijklmnop") =>
+    vi.fn(async (): Promise<UploadedImage> => ({ id, width: 640, height: 480 }))
+
+  it("draws an image block as its picture with the caption beneath", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a"],
+      blocks: {
+        a: {
+          id: "a",
+          type: "image",
+          text: "A sunset",
+          props: { src: "https://example.com/sunset.png" },
+          children: [],
+        },
+      },
+    }
+    const { container } = render(<Harness initialDoc={doc} />)
+    const img = container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!
+    expect(img.alt).toBe("A sunset")
+    expect(img.src).toContain("/file-proxy?url=")
+    expect(container.querySelector('[data-testid="block-body"]')!.textContent).toBe("A sunset")
+  })
+
+  it("a pasted picture uploads and becomes an image block after the highlighted row", async () => {
+    const onImageUpload = uploads()
+    const { container, getByTestId } = render(
+      <Harness initial={"A\nB\nC"} onImageUpload={onImageUpload} />,
+    )
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
+    await act(async () => {
+      fireEvent.paste(root, imagePaste([pngFile()]))
+    })
+    expect(onImageUpload).toHaveBeenCalledTimes(1)
+    expect(serializedLines(getByTestId)).toEqual([
+      "A",
+      "B",
+      "![](/api/images/img_abcdefghijklmnop)",
+      "C",
+    ])
+    // The new row is highlighted, and the size measured at upload is kept.
+    expect(
+      container.querySelector('.bg-bg-secondary [data-testid="block-image"], .bg-bg-secondary'),
+    ).not.toBeNull()
+    expect(getByTestId("serialized").textContent).toContain("img_abcdefghijklmnop")
+    // One structural step: undo removes the picture.
+    fireEvent.keyDown(root, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "C"])
+  })
+
+  it("a picture pasted onto an empty line takes that line", async () => {
+    const onImageUpload = uploads()
+    // Markdown cannot express an empty block, so build the doc by hand.
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a", "blank", "c"],
+      blocks: {
+        a: { id: "a", type: "text", text: "A", children: [] },
+        blank: { id: "blank", type: "text", text: "", children: [] },
+        c: { id: "c", type: "text", text: "C", children: [] },
+      },
+    }
+    const { container, getByTestId } = render(
+      <Harness initialDoc={doc} onImageUpload={onImageUpload} />,
+    )
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // the blank row
+    await act(async () => {
+      fireEvent.paste(root, imagePaste([pngFile()]))
+    })
+    expect(serializedLines(getByTestId)).toEqual([
+      "A",
+      "![](/api/images/img_abcdefghijklmnop)",
+      "C",
+    ])
+  })
+
+  it("pasting a picture while editing puts it after the block being edited", async () => {
+    const onImageUpload = uploads()
+    const { container, getByTestId } = render(
+      <Harness initial={"A\nB"} onImageUpload={onImageUpload} />,
+    )
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "Enter" }) // edit A
+    await act(async () => {
+      fireEvent.paste(container.querySelector("textarea")!, imagePaste([pngFile()]))
+    })
+    expect(serializedLines(getByTestId)).toEqual([
+      "A",
+      "![](/api/images/img_abcdefghijklmnop)",
+      "B",
+    ])
+  })
+
+  it("without an upload handler (images off) an image paste changes nothing", async () => {
+    const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
+    await act(async () => {
+      fireEvent.paste(editorRoot(container), imagePaste([pngFile()]))
+    })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B"])
+    expect(container.querySelector('[data-testid="image-input"]')).toBeNull()
+  })
+
+  it("a failed upload leaves the note as it was and says why", async () => {
+    const onImageUpload = vi.fn(async () => {
+      throw new ImageUploadError("too_large", "Images must be under 10 MB")
+    })
+    const { container, getByTestId, getByRole } = render(
+      <Harness initial={"A\nB"} onImageUpload={onImageUpload} />,
+    )
+    await act(async () => {
+      fireEvent.paste(editorRoot(container), imagePaste([pngFile()]))
+    })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B"])
+    expect(getByRole("status").textContent).toBe("Images must be under 10 MB")
+  })
+
+  it("the context menu on an image offers to open and download it, not to turn it into text", async () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a"],
+      blocks: {
+        a: {
+          id: "a",
+          type: "image",
+          text: "",
+          props: { src: "https://example.com/sunset.png" },
+          children: [],
+        },
+      },
+    }
+    const { container } = render(<Harness initialDoc={doc} />)
+    const row = container.querySelector("[data-occurrence]")!
+    await act(async () => {
+      fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
+    })
+    const menu = screen.getByTestId("block-context-menu")
+    expect(menu.textContent).toContain("Edit caption")
+    expect(menu.textContent).toContain("Open image")
+    expect(menu.textContent).toContain("Download image")
+    expect(menu.textContent).not.toContain("Turn into")
+  })
+
+  it("clicking the picture opens it full size", async () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a"],
+      blocks: {
+        a: {
+          id: "a",
+          type: "image",
+          text: "Wide",
+          props: { src: "https://example.com/wide.png" },
+          children: [],
+        },
+      },
+    }
+    const { container } = render(<Harness initialDoc={doc} />)
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="block-image"]')!)
+    })
+    const lightbox = screen.getByTestId("image-lightbox")
+    expect(lightbox.querySelector("img")!.alt).toBe("Wide")
   })
 })

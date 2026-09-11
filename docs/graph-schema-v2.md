@@ -139,17 +139,18 @@ Design notes, and why:
 `type` is stored, not derived from markers. `text` is marker-free; the
 serializer is a pure type→marker map.
 
-| type           | markdown marker    | notes                                     |
-| -------------- | ------------------ | ----------------------------------------- |
-| `page`         | — (file root)      | `text` = title; `props` = frontmatter     |
-| `text`         | `- `               | plain outline bullet                      |
-| `h1` `h2` `h3` | `# ` `## ` `### `  | always expanded by default                |
-| `todo`         | `- [ ] `           | checked state is a TYPE, not an attribute |
-| `done`         | `- [x] `           |                                           |
-| `ul`           | `- ` (styled)      |                                           |
-| `ol`           | `1. ` (renumbered) | renderer/serializer renumbers, as today   |
-| `quote`        | `> `               |                                           |
-| `code`         | fenced block       | `props.language`                          |
+| type           | markdown marker    | notes                                                                      |
+| -------------- | ------------------ | -------------------------------------------------------------------------- |
+| `page`         | — (file root)      | `text` = title; `props` = frontmatter                                      |
+| `text`         | `- `               | plain outline bullet                                                       |
+| `h1` `h2` `h3` | `# ` `## ` `### `  | always expanded by default                                                 |
+| `todo`         | `- [ ] `           | checked state is a TYPE, not an attribute                                  |
+| `done`         | `- [x] `           |                                                                            |
+| `ul`           | `- ` (styled)      |                                                                            |
+| `ol`           | `1. ` (renumbered) | renderer/serializer renumbers, as today                                    |
+| `quote`        | `> `               |                                                                            |
+| `code`         | fenced block       | `props.language`                                                           |
+| `image`        | `![caption](url)`  | `text` = caption; `props.image` (asset id) or `props.src` — docs/images.md |
 
 Checked-as-type was a deliberate call: type transitions are already the native
 mutation (the marker turn-into keys), so toggling a checkbox is

@@ -259,6 +259,12 @@ describe("edit mode Backspace (only special at the very start)", () => {
     const evt = key({ key: "Backspace" })
     expect(resolveKey("edit", evt, input("hello", "edit", caret("hello", 3)))).toBeNull()
   })
+
+  it("leaves an image's caption alone at its start (the picture is not a marker to strip)", () => {
+    const evt = key({ key: "Backspace" })
+    const image = "![cap](/api/images/img_abcdefghijklmnop)"
+    expect(resolveKey("edit", evt, input(image, "edit", caret("cap", 0)))).toBeNull()
+  })
 })
 
 describe("edit mode arrows leave only from the boundary line", () => {

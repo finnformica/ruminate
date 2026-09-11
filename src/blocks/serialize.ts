@@ -1,3 +1,4 @@
+import { imageLine } from "./image"
 import { markerFor } from "./markers"
 import { frontmatterTextOfProps } from "../data/frontmatter-props"
 import type { Block, BlockDoc } from "./types"
@@ -20,8 +21,9 @@ import type { Block, BlockDoc } from "./types"
  * Each block's marker comes from its type (`markerFor`: ordered items are
  * renumbered by run position, headings always carry one `#`), followed by an
  * `id::` line indented two spaces further. Nesting is two spaces of indent
- * per depth. A `code` block becomes a fence with its language; a multi-line
- * text keeps its continuation lines at the block's indent. A block reached
+ * per depth. A `code` block becomes a fence with its language, an `image`
+ * block one `![caption](url)` line; a multi-line text keeps its
+ * continuation lines at the block's indent. A block reached
  * from two parents is written out in both places — that is the feature.
  */
 
@@ -44,6 +46,7 @@ export function blockLines(block: Block, olPosition = 1): string[] {
   if (block.type === "code") {
     return [`\`\`\`${codeLanguage(block)}`, ...block.text.split("\n"), "```"]
   }
+  if (block.type === "image") return [imageLine(block)]
   const [first, ...rest] = block.text.split("\n")
   // The content line (empty text → just the marker, so depth is preserved).
   return [`${markerFor(block.type, olPosition)}${first}`, ...rest]
