@@ -1,5 +1,5 @@
 import { blockId } from "./id"
-import type { Block, BlockDoc, BlockType } from "./types"
+import type { Block, BlockDoc, BlockProps, BlockType } from "./types"
 import { hasOccurrence, idOfKey, keyOf, parentKeyOf } from "./view"
 
 /**
@@ -84,18 +84,24 @@ export function updateType(doc: BlockDoc, id: string, type: BlockType): BlockDoc
 export interface BlockPatch {
   text?: string
   type?: BlockType
+  /** The block's props (a code block's `language`); `null` clears them. */
+  props?: BlockProps | null
 }
 
-/** Apply a text and/or type change to one block; the doc is returned as-is
- * when nothing would change. */
+/** Apply a text, type and/or props change to one block; the doc is returned
+ * as-is when nothing would change. */
 export function updateBlock(doc: BlockDoc, id: string, patch: BlockPatch): BlockDoc {
   const block = doc.blocks[id]
   if (!block) return doc
   const text = patch.text ?? block.text
   const type = patch.type ?? block.type
-  if (text === block.text && type === block.type) return doc
+  const props = patch.props === undefined ? block.props : patch.props
+  if (text === block.text && type === block.type && props === block.props) return doc
   const next = clone(doc)
-  next.blocks[id] = { ...block, text, type }
+  const updated: Block = { ...block, text, type }
+  if (props) updated.props = props
+  else delete updated.props
+  next.blocks[id] = updated
   return next
 }
 

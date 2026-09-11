@@ -96,12 +96,54 @@ describe("block round-trip", () => {
       ["quote", "quote"],
       ["ul", "plain bullet"],
       ["ul", "- a dash in text"],
-      // A fence keeps its backticks as text (fences are not typed on import);
-      // the bullet that wrapped it is dropped like any other.
-      ["text", "```js"],
-      ["text", "x = 1"],
-      ["text", "```"],
+      // A bullet-wrapped fence is a code block like any other fence.
+      ["code", "x = 1"],
     ])
+    expect(doc.blocks[doc.rootBlockIds[6]].props).toEqual({ language: "js" })
+  })
+
+  it("round-trips a code block: fence, language, verbatim lines, and children after it", () => {
+    const stored = [
+      "- parent",
+      "  id:: blk_p",
+      "  ```ts",
+      "  const x = [ ] // not a todo",
+      "  # not a heading",
+      "  ```",
+      "    id:: blk_code",
+      "    - child of the code block",
+      "      id:: blk_c",
+      "plain",
+      "  id:: blk_q",
+      "",
+    ].join("\n")
+    const doc = parse(stored)
+    const code = doc.blocks["blk_code"]
+    expect(code.type).toBe("code")
+    expect(code.text).toBe("const x = [ ] // not a todo\n# not a heading")
+    expect(code.props).toEqual({ language: "ts" })
+    expect(code.children).toEqual(["blk_c"])
+    expect(doc.blocks["blk_p"].children).toEqual(["blk_code"])
+    expect(doc.rootBlockIds).toEqual(["blk_p", "blk_q"])
+    expect(serialize(doc)).toBe(stored)
+  })
+
+  it("a fence without a language has no props; an empty fence is an empty code block", () => {
+    const doc = parse("```\nx\n```\n  id:: blk_a\n```\n```\n  id:: blk_b\n")
+    expect(doc.blocks["blk_a"].props).toBeUndefined()
+    expect(doc.blocks["blk_a"].text).toBe("x")
+    expect(doc.blocks["blk_b"].type).toBe("code")
+    expect(doc.blocks["blk_b"].text).toBe("")
+    expect(serialize(parse(serialize(doc)))).toBe(serialize(doc))
+  })
+
+  it("an unclosed fence runs to the end of the text", () => {
+    const doc = parse("- a\n```js\nline one\n  line two\n")
+    const [a, code] = doc.rootBlockIds.map((id) => doc.blocks[id])
+    expect(a.text).toBe("a")
+    expect(code.type).toBe("code")
+    expect(code.text).toBe("line one\n  line two")
+    expect(code.props).toEqual({ language: "js" })
   })
 
   it("imports plain markdown lines as blocks", () => {

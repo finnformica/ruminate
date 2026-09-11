@@ -56,6 +56,20 @@ const atStartEmpty: Predicate = (input) =>
 const atFirstLine: Predicate = ({ caret }) => !!caret && caret.atFirstLine
 const atLastLine: Predicate = ({ caret }) => !!caret && caret.atLastLine
 
+/** Inside a code block, where Enter is a newline and only Shift/Mod+Enter
+ * leave (see the Enter bindings). */
+const inCode: Predicate = (input) => blockOf(input)?.type === "code"
+const notInCode: Predicate = (input) => !inCode(input)
+const both =
+  (a: Predicate, b: Predicate): Predicate =>
+  (input) =>
+    a(input) && b(input)
+
+/** The whole text is a fence opener — three backticks and an optional
+ * language — so Enter turns the block into a code block (`turnIntoCode`). */
+const isFenceOpener: Predicate = (input) =>
+  !inCode(input) && !!input.caret && /^```[ \t]*\S*\s*$/.test(input.caret.value)
+
 /**
  * The binding table. Order matters only among bindings that share a mode+combo:
  * the first whose predicate passes wins (so the guarded Enter / Backspace
@@ -147,15 +161,20 @@ export const KEYMAP: Binding[] = [
   { mode: "edit", combo: "Mod+Shift+ArrowDown", command: "moveBlockDown" },
   { mode: "edit", combo: "Alt+Shift+ArrowUp", command: "duplicateAbove" },
   { mode: "edit", combo: "Alt+Shift+ArrowDown", command: "duplicateBelow" },
+  // In a code block Enter is a newline (unbound: the textarea keeps it), and
+  // Shift-Enter leaves with a fresh block below, like Cmd/Ctrl+Enter.
+  { mode: "edit", combo: "Shift+Enter", when: inCode, command: "insertSiblingBelow" },
   // Shift-Enter splits at the caret into a new block of the same type.
   { mode: "edit", combo: "Shift+Enter", command: "splitPlain" },
   // Cmd/Ctrl+Enter forces a same-type block below, ignoring the caret.
   { mode: "edit", combo: "Mod+Enter", command: "insertSiblingBelow" },
+  // ```lang then Enter: the block becomes a code block.
+  { mode: "edit", combo: "Enter", when: isFenceOpener, command: "turnIntoCode" },
   // Enter: empty list item exits the list; caret-at-end appends a fresh block;
   // otherwise split the line at the caret (carrying the list style).
   { mode: "edit", combo: "Enter", when: isEmptyListItem, command: "exitList" },
-  { mode: "edit", combo: "Enter", when: caretAtEnd, command: "insertBelow" },
-  { mode: "edit", combo: "Enter", command: "splitContinuingList" },
+  { mode: "edit", combo: "Enter", when: both(notInCode, caretAtEnd), command: "insertBelow" },
+  { mode: "edit", combo: "Enter", when: notInCode, command: "splitContinuingList" },
   // Backspace only leaves the textarea's control at the very start of a block.
   { mode: "edit", combo: "Backspace", when: atStartWithMarker, command: "stripMarker" },
   { mode: "edit", combo: "Backspace", when: atStartEmpty, command: "backspaceEmpty" },

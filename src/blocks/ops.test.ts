@@ -15,6 +15,7 @@ import {
   siblingsOf,
   spliceBlocks,
   subtreeIds,
+  updateBlock,
   updateText,
 } from "./ops"
 import { parse } from "./parse"
@@ -129,6 +130,25 @@ describe("updateText", () => {
 
   it("carries the page props through", () => {
     expect(updateText(fixture(), "a", "A!").props).toEqual({ title: "t" })
+  })
+})
+
+describe("updateBlock", () => {
+  it("sets and clears a block's props alongside text and type", () => {
+    const doc = fixture()
+    const coded = updateBlock(doc, "a", { type: "code", text: "x = 1", props: { language: "js" } })
+    expect(coded.blocks["a"]).toEqual({
+      id: "a",
+      type: "code",
+      text: "x = 1",
+      props: { language: "js" },
+      children: [],
+    })
+    // Untouched props ride along; null clears them.
+    expect(updateBlock(coded, "a", { text: "y" }).blocks["a"].props).toEqual({ language: "js" })
+    expect(updateBlock(coded, "a", { props: null }).blocks["a"].props).toBeUndefined()
+    // Nothing to change: the same doc.
+    expect(updateBlock(coded, "a", { text: "x = 1" })).toBe(coded)
   })
 })
 

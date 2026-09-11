@@ -133,13 +133,46 @@ describe("type mapping", () => {
     ])
   })
 
-  test("fence delimiters and fenced lines are code, never todos or headings", () => {
+  test("a fence is one code block; nothing inside it is a todo or a heading", () => {
     expect(types(md("```js", "[ ] in a fence", "# also code", "```", "[ ] after"))).toEqual([
-      ["```js", "code"],
-      ["[ ] in a fence", "code"],
-      ["# also code", "code"],
-      ["```", "code"],
+      ["[ ] in a fence\n# also code", "code"],
       ["after", "todo"],
+    ])
+  })
+
+  test("fenced lines stored as text before code blocks existed still read as code", () => {
+    // Old notes hold the fence and its lines as text blocks; the index keeps
+    // typing them as code so `type:code` still finds them.
+    const note = makeNote({ id: "old" })
+    const row = (id: string, text: string) => ({
+      id,
+      type: "text",
+      text,
+      props: null,
+      updated_at: 1,
+    })
+    const link = (destination_id: string, sort_key: string) => ({
+      source_id: "old",
+      destination_id,
+      kind: "child",
+      sort_key,
+      updated_at: 1,
+    })
+    const snapshot = buildGraphSnapshot(
+      [
+        { id: "old", type: "page", text: "old", props: null, updated_at: 1 },
+        row("f", "```"),
+        row("l", "[ ] not a todo"),
+        row("g", "```"),
+        row("after", "after"),
+      ],
+      [link("f", "a0"), link("l", "a1"), link("g", "a2"), link("after", "a3")],
+    )
+    expect(indexNoteBlocks(note, snapshot).hits.map((hit) => [hit.blockId, hit.type])).toEqual([
+      ["f", "code"],
+      ["l", "code"],
+      ["g", "code"],
+      ["after", "text"],
     ])
   })
 })

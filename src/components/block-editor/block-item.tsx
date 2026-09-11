@@ -167,6 +167,9 @@ function headingScale(depth: number): string {
  * as a heading rather than a paragraph.
  */
 function typographyFor(type: BlockType, depth: number): string {
+  // A code block is set in the mono face, a touch smaller, inside its panel
+  // (`codePanel` below) — view and textarea alike, so nothing shifts on click.
+  if (type === "code") return "font-mono text-[0.9em] leading-relaxed"
   if (isHeading(type)) {
     // Headings tighten as they grow: large display sizes get a snugger
     // line-height and slightly negative tracking (see the type scale in
@@ -252,6 +255,14 @@ export function BlockItem({
   // heading a heading). Focus mode changes what is visible, never what a
   // block looks like.
   const typo = typographyFor(type, depth)
+  // The code block's panel: a tinted, bordered, padded surface the block's
+  // text sits in — the same classes on the rendered view and the textarea,
+  // so editing never moves a character. Whitespace is kept as typed.
+  const codePanel =
+    type === "code"
+      ? "block-code rounded-lg border border-border-secondary bg-[var(--color-bg-code-block)] px-3 py-2 whitespace-pre-wrap [overflow-wrap:anywhere] [tab-size:2]"
+      : null
+  const codeLanguage = type === "code" ? String(block.props?.language ?? "") : ""
 
   // Focus and place the caret when editing starts.
   useLayoutEffect(() => {
@@ -711,6 +722,9 @@ export function BlockItem({
     </span>
   ) : type === "quote" ? (
     glyphSlot(">", "quote-glyph")
+  ) : type === "code" ? (
+    // A code block keys on nothing, like a paragraph: the panel is its marker.
+    glyphSlot(null, "code-slot")
   ) : (
     glyphSlot(null, "paragraph-slot")
   )
@@ -856,7 +870,9 @@ export function BlockItem({
                 onPaste={handlePaste}
                 onBlur={() => api.setFocus(null)}
                 className={cx(
-                  "min-w-0 flex-1 resize-none overflow-hidden border-none bg-transparent p-0 font-content leading-relaxed text-text outline-none [overflow-wrap:anywhere] placeholder:text-text-tertiary",
+                  "min-w-0 flex-1 resize-none overflow-hidden font-content leading-relaxed text-text outline-none [overflow-wrap:anywhere] placeholder:text-text-tertiary",
+                  // The panel supplies a code block's surface and padding.
+                  codePanel ?? "border-none bg-transparent p-0",
                   typo,
                 )}
               />
@@ -884,6 +900,7 @@ export function BlockItem({
                 !readOnly && "cursor-text",
                 readOnly && api.activate && "cursor-pointer",
                 typo,
+                codePanel,
                 // Checking a todo mutes its text; the fade marks the state
                 // change without delaying it.
                 isTodo(type) && "transition-colors duration-200",
@@ -898,9 +915,25 @@ export function BlockItem({
                     onDoubleClick: () => api.edit(occurrence.key),
                   })}
             >
-              <BlockContent content={body} />
+              {type === "code" ? (
+                // Verbatim: a code block's text is not markdown. The panel's
+                // `whitespace-pre-wrap` keeps its lines and indentation.
+                body
+              ) : (
+                <BlockContent content={body} />
+              )}
             </div>
           )}
+          {codeLanguage ? (
+            // The language, top-right of the panel — chrome, not content.
+            <span
+              aria-hidden
+              data-testid="code-language"
+              className="pointer-events-none absolute right-2 top-1.5 select-none font-mono text-[11px] leading-4 text-text-tertiary"
+            >
+              {codeLanguage}
+            </span>
+          ) : null}
           {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
         </div>
         {api.debug?.showMetadata ? (
