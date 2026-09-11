@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- On a phone, a long link or an unbroken word in a block no longer runs off the edge of the screen and forces the page to scroll sideways; it wraps within the block, in both reading and editing, and so does a long note title. A block whose text begins with a tab or four spaces used to be drawn as a code chip that never wrapped either; it is now ordinary text, since in an outline indentation is structure, never markdown. Long lines of code wrap too: a code fence left inside an ordinary block (from before fences became code blocks) is drawn as the same wrapping panel as a real code block, and code in note previews wraps instead of scrolling sideways.
+- On a phone, a long link or an unbroken word in a block no longer runs off the edge of the screen and forces the page to scroll sideways; it wraps within the block, in both reading and editing, and so does a long note title. A block's text is now shown exactly as it is stored: a leading `-`, `#`, `>`, `1.`, a code fence or a tab that the markdown renderer used to swallow (or, for a tab, turn into a code chip that never wrapped) now stays visible, and only inline formatting — bold, italic, links, code spans — is applied, so a line that migrated badly can be spotted and put right. Code in note previews wraps instead of scrolling sideways.
 - Pasting an outline keeps every glyph. Markdown where each line is a bullet carrying another marker — `- # Heading`, `- > quote`, `- [ ] task`, the shape most outliners and rich-text apps export — used to keep the bullet and leave the `#` or `>` as literal text. The inner marker is now the block's type and the bullet is dropped, so a pasted heading is a heading and a pasted quote a quote.
 
 ### Improved

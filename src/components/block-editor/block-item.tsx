@@ -896,7 +896,9 @@ export function BlockItem({
               className={cx(
                 // A long link or an unbroken word breaks rather than running
                 // off a narrow screen (the textarea wraps the same way).
-                "min-h-[1lh] min-w-0 flex-1 outline-none [overflow-wrap:anywhere]",
+                // pre-wrap: the text shows exactly as stored (newlines, runs
+                // of spaces, a leading tab), as the textarea shows it.
+                "min-h-[1lh] min-w-0 flex-1 whitespace-pre-wrap outline-none [overflow-wrap:anywhere]",
                 !readOnly && "cursor-text",
                 readOnly && api.activate && "cursor-pointer",
                 typo,

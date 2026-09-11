@@ -1,64 +1,91 @@
+import { Fragment } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { Processor } from "unified"
 
 /**
- * Switch off markdown's indented-code rule for block bodies. A block is one
- * line of an outline: indentation is structure (the row's depth), never
- * syntax, so text that happens to begin with a tab or four spaces (pasted
- * from elsewhere, say) must read as text. Left on, such a line rendered as a
- * `<pre>` code chip that never wrapped, running off a narrow screen.
+ * Markdown's block-level rules, switched off for block bodies. A block is one
+ * line of an outline whose type is data, so its text is shown exactly as
+ * stored: a leading `- `, `# `, `> `, `1. `, a code fence, a tab — anything a
+ * document parser would swallow as structure — stays visible, which is how a
+ * line that migrated badly gets noticed and fixed. Only inline formatting
+ * (bold, italic, links, code spans, strikethrough) is interpreted.
  */
-function remarkNoIndentedCode(this: Processor) {
+const BLOCK_CONSTRUCTS = [
+  "codeIndented",
+  "codeFenced",
+  "blockQuote",
+  "list",
+  "headingAtx",
+  "setextUnderline",
+  "thematicBreak",
+  "htmlFlow",
+  "definition",
+  "table",
+  "gfmFootnoteDefinition",
+]
+
+function remarkInlineOnly(this: Processor) {
   const data = this.data() as { micromarkExtensions?: unknown[] }
   const extensions = (data.micromarkExtensions ??= [])
-  extensions.push({ disable: { null: ["codeIndented"] } })
+  extensions.push({ disable: { null: BLOCK_CONSTRUCTS } })
 }
 
-/** Renders a single block's content *inline* (bold/italic/links/code spans).
- * An empty block renders nothing: the row keeps its line height on its own,
- * and the editor's placeholder lives in the textarea. */
+const components = {
+  p: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  a: ({ children, href }: { children?: React.ReactNode; href?: string }) => (
+    <a
+      href={href}
+      className="link"
+      target="_blank"
+      rel="noreferrer"
+      onClick={(event) => event.stopPropagation()}
+    >
+      {children}
+    </a>
+  ),
+  code: ({ children }: { children?: React.ReactNode }) => (
+    // The inline code chip: a bordered, tinted pill in the mono face, a touch
+    // smaller than the text around it (the Linear / Notion idiom). py is a
+    // hairline so the chip never inflates the line box (which would break
+    // the pixel-identical view/edit swap).
+    <code className="rounded-md border border-border-secondary bg-[var(--color-bg-code-block)] box-decoration-clone px-1.5 py-px font-mono text-[0.85em]">
+      {children}
+    </code>
+  ),
+}
+
+const EDGE_WHITESPACE = /^([ \t]*)(.*?)([ \t]*)$/s
+
+/**
+ * Renders a single block's content with inline formatting only. An empty
+ * block renders nothing: the row keeps its line height on its own, and the
+ * editor's placeholder lives in the textarea.
+ *
+ * Each line of a multi-line text is rendered on its own (the body is
+ * `whitespace-pre-wrap`, so the newlines and any run of spaces show as
+ * typed), and a line's leading and trailing whitespace — which the markdown
+ * parser trims — is put back verbatim around it.
+ */
 export function BlockContent({ content }: { content: string }) {
   if (!content.trim()) return null
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkNoIndentedCode]}
-      components={{
-        p: ({ children }) => <>{children}</>,
-        ul: ({ children }) => <span>{children}</span>,
-        li: ({ children }) => <span>{children}</span>,
-        a: ({ children, href }) => (
-          <a
-            href={href}
-            className="link"
-            target="_blank"
-            rel="noreferrer"
-            onClick={(event) => event.stopPropagation()}
-          >
-            {children}
-          </a>
-        ),
-        // A fence inside a text block (notes written before fences became
-        // code blocks): the same panel as a code block, wrapping like it —
-        // never a <pre> that runs off a narrow screen. The chip styling the
-        // `code` component adds is undone for the code inside the panel.
-        pre: ({ children }) => (
-          <pre className="block-code my-0.5 whitespace-pre-wrap rounded-lg border border-border-secondary bg-[var(--color-bg-code-block)] px-3 py-2 font-mono text-[0.85em] [overflow-wrap:anywhere] [tab-size:2] [&>code]:rounded-none [&>code]:border-0 [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-[1em]">
-            {children}
-          </pre>
-        ),
-        code: ({ children }) => (
-          // The inline code chip: a bordered, tinted pill in the mono face,
-          // a touch smaller than the text around it (the Linear / Notion
-          // idiom). py is a hairline so the chip never inflates the line box
-          // (which would break the pixel-identical view/edit swap).
-          <code className="rounded-md border border-border-secondary bg-[var(--color-bg-code-block)] box-decoration-clone px-1.5 py-px font-mono text-[0.85em]">
-            {children}
-          </code>
-        ),
-      }}
-    >
-      {content}
-    </ReactMarkdown>
+    <>
+      {content.split("\n").map((line, index) => {
+        const [, lead, middle, trail] = EDGE_WHITESPACE.exec(line) ?? ["", "", line, ""]
+        return (
+          <Fragment key={index}>
+            {index > 0 ? "\n" : null}
+            {lead}
+            {middle ? (
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkInlineOnly]} components={components}>
+                {middle}
+              </ReactMarkdown>
+            ) : null}
+            {trail}
+          </Fragment>
+        )
+      })}
+    </>
   )
 }
