@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useState } from "react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { toast, Toaster } from "sonner"
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { emptyBlock } from "../../blocks/ops"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
@@ -2128,6 +2129,116 @@ describe("BlockEditor images", () => {
   const uploads = (id = "img_abcdefghijklmnop") =>
     vi.fn(async (): Promise<UploadedImage> => ({ id, width: 640, height: 480 }))
 
+  // jsdom has no object URLs; the preview a pasted picture draws is one.
+  beforeAll(() => {
+    const url = URL as unknown as Record<string, unknown>
+    url.createObjectURL = vi.fn(() => "blob:preview")
+    url.revokeObjectURL = vi.fn()
+  })
+
+  it("draws a pasted picture at once, under a spinner, and stays one undo", async () => {
+    let settle: (asset: UploadedImage) => void = () => {}
+    const onImageUpload = vi.fn(
+      () =>
+        new Promise<UploadedImage>((resolve) => {
+          settle = resolve
+        }),
+    )
+    const { container, getByTestId, queryByTestId } = render(
+      <Harness initial={"A\nB\nC"} onImageUpload={onImageUpload} />,
+    )
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
+    await act(async () => {
+      fireEvent.paste(root, imagePaste([pngFile()]))
+    })
+
+    // The row is already there, drawing the local file under a spinner — and
+    // the block holds no asset id, so nothing provisional can reach the graph.
+    const img = container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!
+    expect(img.src).toBe("blob:preview")
+    expect(queryByTestId("block-image-uploading")).not.toBeNull()
+    expect(getByTestId("serialized").textContent).not.toContain("img_")
+    expect(serializedLines(getByTestId)).toHaveLength(4)
+
+    await act(async () => {
+      settle({ id: "img_abcdefghijklmnop", width: 640, height: 480 })
+    })
+    expect(queryByTestId("block-image-uploading")).toBeNull()
+    expect(serializedLines(getByTestId)).toEqual([
+      "A",
+      "B",
+      "![](/api/images/img_abcdefghijklmnop)",
+      "C",
+    ])
+
+    // Landing the upload is the same edit as making the row: one undo.
+    fireEvent.keyDown(root, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "C"])
+  })
+
+  it("an image row has no marker slot, so the picture starts at the row's edge", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a"],
+      blocks: {
+        a: {
+          id: "a",
+          type: "image",
+          text: "",
+          props: { src: "https://example.com/sunset.png" },
+          children: [],
+        },
+      },
+    }
+    const { container } = render(<Harness initialDoc={doc} />)
+    expect(container.querySelector('[data-testid="block-image"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="paragraph-slot"]')).toBeNull()
+  })
+
+  it("a click on the empty space around a picture selects its row", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a", "b"],
+      blocks: {
+        a: { id: "a", type: "text", text: "A", children: [] },
+        b: {
+          id: "b",
+          type: "image",
+          text: "",
+          props: { src: "https://example.com/sunset.png" },
+          children: [],
+        },
+      },
+    }
+    const { container } = render(<Harness initialDoc={doc} />)
+    expect(container.querySelector('.bg-bg-secondary [data-testid="block-image"]')).toBeNull()
+    fireEvent.click(container.querySelector('[data-testid="image-block"]')!)
+    expect(container.querySelector('.bg-bg-secondary [data-testid="block-image"]')).not.toBeNull()
+  })
+
+  it("hangs no caption line under an uncaptioned picture", () => {
+    const withCaption = (text: string): BlockDoc => ({
+      props: null,
+      rootBlockIds: ["a"],
+      blocks: {
+        a: {
+          id: "a",
+          type: "image",
+          text,
+          props: { src: "https://example.com/sunset.png" },
+          children: [],
+        },
+      },
+    })
+    const bare = render(<Harness initialDoc={withCaption("")} />)
+    expect(bare.container.querySelector('[data-testid="block-body"]')).toBeNull()
+    bare.unmount()
+
+    const captioned = render(<Harness initialDoc={withCaption("A sunset")} />)
+    expect(captioned.container.querySelector('[data-testid="block-body"]')).not.toBeNull()
+  })
+
   it("draws an image block as its picture with the caption beneath", () => {
     const doc: BlockDoc = {
       props: null,
@@ -2229,18 +2340,26 @@ describe("BlockEditor images", () => {
     expect(container.querySelector('[data-testid="image-input"]')).toBeNull()
   })
 
-  it("a failed upload leaves the note as it was and says why", async () => {
+  it("a failed upload leaves the note as it was and says why in a toast", async () => {
     const onImageUpload = vi.fn(async () => {
       throw new ImageUploadError("too_large", "Images must be under 10 MB")
     })
-    const { container, getByTestId, getByRole } = render(
-      <Harness initial={"A\nB"} onImageUpload={onImageUpload} />,
+    const { container, getByTestId } = render(
+      <>
+        <Harness initial={"A\nB"} onImageUpload={onImageUpload} />
+        <Toaster />
+      </>,
     )
     await act(async () => {
       fireEvent.paste(editorRoot(container), imagePaste([pngFile()]))
     })
     expect(serializedLines(getByTestId)).toEqual(["A", "B"])
-    expect(getByRole("status").textContent).toBe("Images must be under 10 MB")
+    // Nothing is left under the editor; the message floats in a toast.
+    expect(editorRoot(container).querySelector('[role="status"]')).toBeNull()
+    expect(container.querySelector("[data-sonner-toast]")?.textContent).toContain(
+      "Images must be under 10 MB",
+    )
+    toast.dismiss()
   })
 
   it("the context menu on an image offers to open and download it, not to turn it into text", async () => {

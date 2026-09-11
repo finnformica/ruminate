@@ -1,3 +1,4 @@
+import type React from "react"
 import type { ReactNode } from "react"
 import { BLOCK_TYPE_DEFS } from "../../blocks/registry"
 import type { Block, BlockType } from "../../blocks/types"
@@ -22,13 +23,19 @@ export interface RowContext {
   occurrence: Occurrence
   api: BlockEditorApi
   depth: number
+  /** The row's text is a textarea right now, not rendered text. Chrome that
+   * hides an empty line (an image's caption) must keep it while it is being
+   * typed into. */
+  editing: boolean
 }
 
 export interface BlockKind {
   /** The key in the marker slot: a to-do's checkbox, a bullet's dot, a
    * heading's `#`, a numbered item's number, or a static glyph (none for a
-   * paragraph — the slot keeps its width so text stays in one column). */
-  readonly slot: "checkbox" | "dot" | "hash" | "number" | "glyph"
+   * paragraph — the slot keeps its width so text stays in one column).
+   * `none` drops the slot altogether (an image, which has no text column to
+   * keep); a parent still gets the slot back to host its chevron. */
+  readonly slot: "checkbox" | "dot" | "hash" | "number" | "glyph" | "none"
   /** The glyph for a `glyph` slot, or null for an empty slot. */
   readonly glyph?: string | null
   /** The empty/glyph slot's test id. */
@@ -173,21 +180,52 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     },
   },
   image: {
-    slot: "glyph",
-    glyph: null,
-    slotTestId: "paragraph-slot",
-    // The text is the caption: small and quiet beneath the picture.
-    typography: () => "text-sm leading-relaxed text-text-secondary",
+    // No marker slot: the picture starts where the row does, not 15px in
+    // from it as text would.
+    slot: "none",
+    // The text is the caption: small, quiet and centred beneath the picture.
+    // `text-center` rides the shared typography so the view and the textarea
+    // agree — switching between them never shifts a character.
+    typography: () => "text-sm leading-relaxed text-text-secondary text-center",
     placeholder: "Add a caption…",
     // The picture above its caption, which is the block's text: the caption
     // line is the ordinary body (view or textarea), so every keyboard and
-    // paste behaviour is the same as on any block.
-    wrap: (content, { block, occurrence, api }) => (
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <ImageFigure block={block} occurrence={occurrence} api={api} />
-        <div className="flex min-w-0">{content}</div>
-      </div>
-    ),
+    // paste behaviour is the same as on any block. An uncaptioned picture
+    // drops the line entirely rather than leaving a blank one under it — the
+    // row is then just the picture. It comes back the moment the row is
+    // being edited, so a caption can still be typed.
+    //
+    // The wrap is the block's own padding: the row's surface gives text 6px
+    // at the sides and 2px above and below, and the wrap tops that up so the
+    // picture sits 10px in from the surface's edge all round. Its empty
+    // space (beside a narrow picture, around the caption) is the block, so a
+    // click there selects the row and a double click edits the caption, as
+    // clicking text does — the picture itself keeps its own click (the
+    // lightbox) and stops it here.
+    wrap: (content, { block, occurrence, api, editing }) => {
+      const own = (event: React.MouseEvent) => event.target === event.currentTarget
+      const pointer = api.readOnly
+        ? api.activate
+          ? { onClick: (e: React.MouseEvent) => own(e) && api.activate?.(occurrence.key) }
+          : {}
+        : {
+            onClick: (e: React.MouseEvent) => own(e) && api.select(occurrence.key),
+            onDoubleClick: (e: React.MouseEvent) => own(e) && api.edit(occurrence.key),
+          }
+      return (
+        // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
+        <div
+          data-testid="image-block"
+          className="flex min-w-0 flex-1 flex-col gap-1.5 px-1 py-2"
+          {...pointer}
+        >
+          <ImageFigure block={block} occurrence={occurrence} api={api} />
+          {editing || block.text.trim() !== "" ? (
+            <div className="flex min-w-0 flex-col">{content}</div>
+          ) : null}
+        </div>
+      )
+    },
   },
 }
 

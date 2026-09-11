@@ -50,10 +50,22 @@ checks them before uploading): PNG, JPEG, GIF, WebP and AVIF; ten megabytes a
 picture. SVG is refused on purpose — served from the app's own origin it can
 run script when opened directly.
 
-The client (`src/data/images.ts`) uploads first and only then adds the block,
-so a failed upload changes nothing but shows a line under the editor. Reads
-go through `fetch` with the bearer token (an `<img src>` cannot carry one)
-and become object URLs, cached for the page's life.
+The client (`src/data/images.ts`) puts the row in FIRST and uploads behind
+it. The block starts with no image props at all and draws the pasted file
+from a local object URL held in memory (`beginPendingImage`), under a
+spinner; the asset id is written only when the upload lands, and without a
+history step, so the whole picture is still one undo. A failed upload takes
+the row back out (restoring the blank line it took over, if it took one) and
+says why in a toast ([sonner](https://sonner.emilkowal.ski), mounted in
+`src/routes/_appRoot.tsx`). Nothing provisional is ever written to the graph,
+so a note mid-upload syncs as an empty image block rather than a broken
+reference.
+
+On success the bytes already in hand seed the read cache
+(`primeImageObjectUrl`), so a picture just uploaded is never fetched straight
+back down. Other reads go through `fetch` with the bearer token (an
+`<img src>` cannot carry one) and become object URLs, cached for the page's
+life.
 
 ## Switching it on
 
