@@ -10,6 +10,7 @@ import {
   outdentBlock,
   removeBlock,
   siblingsOf,
+  updateBlock,
   updateText,
   updateType,
 } from "./ops"
@@ -319,6 +320,7 @@ export type CommandName =
   | "turnIntoTodo"
   | "turnIntoQuote"
   | "turnIntoOrdered"
+  | "turnIntoCode"
   | "toggleCollapse"
   | "insertBelow"
   | "insertSiblingBelow"
@@ -586,6 +588,27 @@ export const COMMANDS: Record<CommandName, Command> = {
   turnIntoTodo: turnInto("todo"),
   turnIntoQuote: turnInto("quote"),
   turnIntoOrdered: turnInto("ol"),
+
+  /**
+   * The fence shortcut: Enter on a block whose whole text is three backticks
+   * and an optional language (```` ```js ````) turns it into an empty code
+   * block of that language, editing. The keymap guards the shape
+   * (`isFenceOpener`); the language is whatever followed the backticks.
+   */
+  turnIntoCode: ({ doc, key, caret }) => {
+    const id = idOfKey(key)
+    const language = /^```[ \t]*(\S*)\s*$/.exec(caret?.value ?? "")?.[1] ?? ""
+    return {
+      handled: true,
+      doc: updateBlock(doc, id, {
+        type: "code",
+        text: "",
+        props: language ? { language } : null,
+      }),
+      op: STRUCTURAL,
+      focus: { mode: "edit", key, atStart: true },
+    }
+  },
 
   /** Collapse / expand a row with children; consumes Space regardless (so the
    * page never scrolls) but only toggles when there's something to fold. */

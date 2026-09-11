@@ -122,6 +122,7 @@ const BLOCK_OPTIONS: BlockOption[] = [
   { type: "todo", label: "To-do", keywords: ["todo", "task", "checkbox"] },
   { type: "h1", label: "Heading", keywords: ["header", "h1", "heading"] },
   { type: "quote", label: "Quote", keywords: ["blockquote", "callout"] },
+  { type: "code", label: "Code", keywords: ["code", "snippet", "pre", "fence", "monospace"] },
   // Offered only where images are switched on (`slashMenuItems` options); a
   // pick opens the file picker rather than changing the type in place.
   { type: "image", label: "Image", keywords: ["picture", "photo", "upload", "img"] },

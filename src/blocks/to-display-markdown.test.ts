@@ -29,6 +29,25 @@ describe("toDisplayMarkdown", () => {
     expect(md).toContain("  - child")
   })
 
+  it("writes a code block as its fence, language and lines verbatim", () => {
+    const stored = [
+      "```py",
+      "print(1)",
+      "  x",
+      "```",
+      "  id:: blk_a",
+      "- after",
+      "  id:: blk_b",
+    ].join("\n")
+    const md = toDisplayMarkdown(stored)
+    expect(md).toContain("```py\nprint(1)\n  x\n```")
+    expect(md).not.toContain("id::")
+    const back = parse(md)
+    const code = back.blocks[back.rootBlockIds[0]]
+    expect(code.type).toBe("code")
+    expect(code.props).toEqual({ language: "py" })
+  })
+
   it("separates prose blocks with a blank line", () => {
     const stored = ["First para", "  id:: blk_a", "Second para", "  id:: blk_b"].join("\n")
     expect(toDisplayMarkdown(stored)).toContain("First para\n\nSecond para")

@@ -2,7 +2,7 @@ import { blockId } from "../blocks/id"
 import { imageUrlOfBlock } from "../blocks/image"
 import { isHeading, isTodo } from "../blocks/markers"
 import { parse, parseLine } from "../blocks/parse"
-import { blockLine } from "../blocks/serialize"
+import { blockLines } from "../blocks/serialize"
 import { toDisplayMarkdown } from "../blocks/to-display-markdown"
 import {
   isBlockType,
@@ -42,7 +42,19 @@ export interface ClipboardBlock {
   text: string
   /** Type-owned data (an image's location); absent for most blocks. */
   props?: BlockProps
+  /** A code block's language, when it has one. */
+  language?: string
   children: ClipboardBlock[]
+}
+
+/** A block's props from a payload block (a code block's language). */
+const propsOf = (block: ClipboardBlock): BlockProps | undefined =>
+  block.props ?? (block.language ? { language: block.language } : undefined)
+
+/** A payload block's language from a block's props. */
+const languageOf = (block: Block): string | undefined => {
+  const language = block.props?.language
+  return typeof language === "string" && language !== "" ? language : undefined
 }
 
 const META_NAME = "x-ruminate-blocks"
@@ -73,11 +85,13 @@ function docToClipboardBlocks(doc: BlockDoc, declared: Set<string>): ClipboardBl
   const build = (id: string): ClipboardBlock | null => {
     const block = doc.blocks[id]
     if (!block) return null
+    const language = languageOf(block)
     return {
       ...(declared.has(id) ? { id } : {}),
       type: block.type,
       text: block.text,
-      ...(block.props ? { props: block.props } : {}),
+      ...(language ? { language } : {}),
+      ...(block.type === "image" && block.props ? { props: block.props } : {}),
       children: block.children.map(build).filter((b): b is ClipboardBlock => b !== null),
     }
   }
@@ -90,11 +104,12 @@ export function clipboardBlocksToDoc(blocks: ClipboardBlock[]): BlockDoc {
   const map: Record<string, Block> = {}
   const build = (block: ClipboardBlock): string => {
     const id = blockId()
+    const props = propsOf(block)
     map[id] = {
       id,
       type: block.type,
       text: block.text,
-      ...(block.props ? { props: block.props } : {}),
+      ...(props ? { props } : {}),
       children: block.children.map(build),
     }
     return id
@@ -115,13 +130,9 @@ export function clipboardBlocksToDocWithIds(blocks: ClipboardBlock[]): BlockDoc 
   const build = (block: ClipboardBlock): string => {
     let id = block.id ?? blockId()
     while (id in map) id = blockId()
-    const built: Block = {
-      id,
-      type: block.type,
-      text: block.text,
-      ...(block.props ? { props: block.props } : {}),
-      children: [],
-    }
+    const built: Block = { id, type: block.type, text: block.text, children: [] }
+    const props = propsOf(block)
+    if (props) built.props = props
     map[id] = built
     built.children = block.children.map(build)
     return id
@@ -134,7 +145,11 @@ export function clipboardBlocksToDocWithIds(blocks: ClipboardBlock[]): BlockDoc 
 export function clipboardBlocksToMarkdown(blocks: ClipboardBlock[]): string {
   const lines: string[] = []
   const walk = (block: ClipboardBlock, depth: number) => {
-    lines.push("  ".repeat(depth) + blockLine(block))
+    const indent = "  ".repeat(depth)
+    const props = propsOf(block)
+    const asBlock: Block = { id: "", type: block.type, text: block.text, children: [] }
+    if (props) asBlock.props = props
+    for (const line of blockLines(asBlock)) lines.push(indent + line)
     for (const child of block.children) walk(child, depth + 1)
   }
   for (const block of blocks) walk(block, 0)
@@ -160,7 +175,14 @@ export function extractClipboardBlocks(html: string): ClipboardBlock[] | null {
 /** A payload block as written by this version (`type` + `text`) or by an
  * older one (`content`, a marker-prefixed line — read as an import). */
 type RawClipboardBlock =
-  | { id?: string; type: string; text: string; props?: unknown; children: RawClipboardBlock[] }
+  | {
+      id?: string
+      type: string
+      text: string
+      props?: unknown
+      language?: string
+      children: RawClipboardBlock[]
+    }
   | { id?: string; content: string; children: RawClipboardBlock[] }
 
 function isClipboardBlocks(value: unknown): value is RawClipboardBlock[] {
@@ -174,6 +196,7 @@ function isClipboardBlocks(value: unknown): value is RawClipboardBlock[] {
       return (
         (typed || legacy) &&
         (raw.id === undefined || typeof raw.id === "string") &&
+        (raw.language === undefined || typeof raw.language === "string") &&
         isClipboardBlocks(raw.children)
       )
     })
@@ -201,6 +224,7 @@ function normalizeClipboardBlock(raw: RawClipboardBlock): ClipboardBlock {
     type: isBlockType(raw.type) ? raw.type : "text",
     text: raw.text,
     ...(props ? { props } : {}),
+    ...(raw.language ? { language: raw.language } : {}),
     children,
   }
 }
@@ -259,6 +283,9 @@ function renderProse(block: ClipboardBlock): string {
     const origin = typeof window !== "undefined" ? window.location.origin : ""
     const src = url.startsWith("/") ? origin + url : url
     html = `<img src="${escapeHtml(src)}" alt="${escapeHtml(block.text)}">`
+  } else if (block.type === "code") {
+    const cls = block.language ? ` class="language-${escapeHtml(block.language)}"` : ""
+    html = `<pre><code${cls}>${escapeHtml(block.text)}</code></pre>`
   } else {
     html = `<p>${body}</p>`
   }

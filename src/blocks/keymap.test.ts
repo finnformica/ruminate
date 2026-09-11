@@ -200,6 +200,50 @@ describe("edit mode Enter chain (caret-dependent)", () => {
   })
 })
 
+describe("edit mode Enter in and into a code block", () => {
+  /** A one-block doc of the given type and text. */
+  function typed(type: "code" | "text", text: string, c: CaretInput): CommandInput {
+    return {
+      doc: {
+        props: null,
+        rootBlockIds: ["x"],
+        blocks: { x: { id: "x", type, text, children: [] } },
+      },
+      key: "x",
+      mode: "edit",
+      visibleOrder: ["x"],
+      caret: c,
+    }
+  }
+
+  it("Enter in a code block is a newline — nothing is bound", () => {
+    const evt = key({ key: "Enter" })
+    expect(resolveKey("edit", evt, typed("code", "x = 1", caret("x = 1", 5)))).toBeNull()
+    expect(resolveKey("edit", evt, typed("code", "", caret("", 0)))).toBeNull()
+    expect(resolveKey("edit", evt, typed("code", "ab", caret("ab", 1)))).toBeNull()
+  })
+
+  it("Shift-Enter and Mod-Enter leave a code block with a fresh block below", () => {
+    expect(
+      resolveKey("edit", key({ key: "Enter", shiftKey: true }), typed("code", "x", caret("x", 1))),
+    ).toBe("insertSiblingBelow")
+    expect(
+      resolveKey("edit", key({ key: "Enter", metaKey: true }), typed("code", "x", caret("x", 1))),
+    ).toBe("insertSiblingBelow")
+  })
+
+  it("Enter on ```lang turns the block into a code block", () => {
+    const evt = key({ key: "Enter" })
+    expect(resolveKey("edit", evt, typed("text", "```", caret("```", 3)))).toBe("turnIntoCode")
+    expect(resolveKey("edit", evt, typed("text", "```ts", caret("```ts", 5)))).toBe("turnIntoCode")
+    // Not a fence opener: text after a space, or backticks mid-text.
+    expect(resolveKey("edit", evt, typed("text", "``` x y", caret("``` x y", 7)))).toBe(
+      "insertBelow",
+    )
+    expect(resolveKey("edit", evt, typed("text", "a ```", caret("a ```", 5)))).toBe("insertBelow")
+  })
+})
+
 describe("edit mode Backspace (only special at the very start)", () => {
   it("strips the marker at the start of a marked block", () => {
     const evt = key({ key: "Backspace" })

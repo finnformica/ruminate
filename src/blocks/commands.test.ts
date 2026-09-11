@@ -622,6 +622,35 @@ describe("turn into (select-mode marker keys)", () => {
   })
 })
 
+describe("turnIntoCode", () => {
+  it("makes an empty code block of the typed language, editing at its start", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["x"],
+      blocks: { x: { id: "x", type: "ul", text: "```ts", children: [] } },
+    }
+    const result = runCommand(
+      "turnIntoCode",
+      input(doc, "x", { mode: "edit", visibleOrder: ["x"], caret: caret("```ts", 5) }),
+    )
+    expect(result.doc!.blocks.x).toEqual({
+      id: "x",
+      type: "code",
+      text: "",
+      props: { language: "ts" },
+      children: [],
+    })
+    expect(result.focus).toEqual({ mode: "edit", key: "x", atStart: true })
+    expect(result.op).toEqual({ type: "structural" })
+    // No language: no props.
+    const bare = runCommand(
+      "turnIntoCode",
+      input(doc, "x", { mode: "edit", visibleOrder: ["x"], caret: caret("```", 3) }),
+    )
+    expect(bare.doc!.blocks.x.props).toBeUndefined()
+  })
+})
+
 describe("insertBelow", () => {
   it("adds an unordered-list continuation block by default", () => {
     const doc = fixture()

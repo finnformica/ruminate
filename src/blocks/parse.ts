@@ -16,7 +16,11 @@ import type { Block, BlockDoc, BlockProps, BlockType } from "./types"
  *   serialized form, with tab-indented and 4-space outlines (common in pasted
  *   content from other tools) normalized to the same levels (see
  *   `inferIndentUnit`).
- * - Inside a code fence nothing is a marker: a `- [ ]` in a fence is code.
+ * - A code fence (```` ``` ````, with an optional language after it) is one
+ *   `code` block: the lines up to the closing fence are its text, verbatim —
+ *   nothing inside is a marker, and a `- [ ]` in a fence is code — and the
+ *   language is its `props.language`. An unclosed fence runs to the end of
+ *   the text (CommonMark's rule).
  * - An `id::` line immediately after a block attaches its id to that block;
  *   blocks without one are minted a fresh id (so plain/imported markdown gains
  *   stable ids on the next save).
@@ -32,8 +36,15 @@ interface ParsedNode {
   line: string
   /** Id read from an `id::` line, if present. */
   fileId?: string
+  /** A fenced code block: its language (may be empty) and verbatim lines. */
+  code?: { language: string; lines: string[] }
   children: ParsedNode[]
 }
+
+/** The opening of a code fence, with its info string (the language). */
+const FENCE_OPEN_RE = /^```[ \t]*(\S*)/
+/** A closing fence: three backticks and nothing else but whitespace. */
+const FENCE_CLOSE_RE = /^```[ \t]*$/
 
 const ID_RE = /^\s*id::\s+(.+)$/
 
@@ -98,6 +109,31 @@ export function parse(markdown: string): BlockDoc {
     const content = line.slice(cut).replace(BULLET_WRAPPED_MARKER_RE, "")
     const node: ParsedNode = { line: content, children: [] }
 
+    // A code fence: everything up to the closing fence is the block's text,
+    // read verbatim (the fence's own indent stripped from each line where it
+    // is present). Unclosed, it runs to the end.
+    const fence = FENCE_OPEN_RE.exec(content)
+    if (fence) {
+      const indent = line.slice(0, cut)
+      const inner: string[] = []
+      let j = i + 1
+      while (j < lines.length && !FENCE_CLOSE_RE.test(lines[j].trim())) {
+        inner.push(lines[j].startsWith(indent) ? lines[j].slice(indent.length) : lines[j].trim())
+        j += 1
+      }
+      node.line = ""
+      node.code = { language: fence[1], lines: inner }
+      // Past the closing fence (if there was one).
+      i = Math.min(j + 1, lines.length)
+      const after = i < lines.length ? ID_RE.exec(lines[i]) : null
+      if (after) {
+        node.fileId = after[1].trim()
+        i += 1
+      }
+      insert(level, node)
+      continue
+    }
+
     // An `id::` line immediately after belongs to this block.
     const next = i + 1 < lines.length ? lines[i + 1] : undefined
     const nextId = next !== undefined ? ID_RE.exec(next) : null
@@ -119,10 +155,6 @@ export function parse(markdown: string): BlockDoc {
   // collision so every block keeps a distinct id; the fresh id persists on the
   // next save. (Also covers the rare case of a freshly minted id colliding.)
   const usedIds = new Set<string>()
-  // Code-fence state runs over the document in emission order (depth-first),
-  // which is also the order the lines were read in; a line inside an open
-  // fence must never be typed by its marker.
-  let fenceOpen = false
 
   const flatten = (nodes: ParsedNode[]): string[] => {
     const ids: string[] = []
@@ -132,11 +164,16 @@ export function parse(markdown: string): BlockDoc {
       let id = node.fileId ?? blockId()
       while (usedIds.has(id)) id = blockId()
       usedIds.add(id)
-      const inFence = fenceOpen
-      if (node.line.trimStart().startsWith("```")) fenceOpen = !fenceOpen
-      const { type, text, props } = classifyLine(node.line, olRun + 1, inFence)
-      olRun = type === "ol" ? olRun + 1 : 0
-      const block: Block = { id, type, text, ...(props ? { props } : {}), children: [] }
+      let block: Block
+      if (node.code) {
+        block = { id, type: "code", text: node.code.lines.join("\n"), children: [] }
+        if (node.code.language !== "") block.props = { language: node.code.language }
+        olRun = 0
+      } else {
+        const { type, text, props } = classifyLine(node.line, olRun + 1, false)
+        olRun = type === "ol" ? olRun + 1 : 0
+        block = { id, type, text, ...(props ? { props } : {}), children: [] }
+      }
       blocks[id] = block
       block.children = flatten(node.children)
       ids.push(id)

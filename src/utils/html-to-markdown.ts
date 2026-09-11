@@ -121,7 +121,10 @@ function renderNodes(nodes: Node[], depth: number): string[] {
       lines.push("")
     } else if (tag === "PRE") {
       const text = (el.textContent ?? "").replace(/\n$/, "")
-      lines.push("```", ...text.split("\n"), "```", "")
+      // The language, when the block says (`<code class="language-js">`).
+      const language =
+        /(?:^|\s)language-([\w+#.-]+)/.exec(el.querySelector("code")?.className ?? "")?.[1] ?? ""
+      lines.push("```" + language, ...text.split("\n"), "```", "")
     } else if (tag === "HR") {
       lines.push("")
     } else {

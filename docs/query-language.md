@@ -75,7 +75,7 @@ Keep typing to narrow the list, <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>↵<
 | `bullet` / `ul` | bullet list item                                          |
 | `ordered`/ `ol` | ordered list item                                         |
 | `quote`         | quote                                                     |
-| `code`          | code-fence delimiter or a line inside one                 |
+| `code`          | a code block (or a fenced line in old notes)              |
 | `image`         | an image block (docs/images.md); text matches its caption |
 | `text`          | plain paragraph                                           |
 
