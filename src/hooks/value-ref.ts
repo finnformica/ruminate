@@ -9,7 +9,10 @@ import React from "react"
  */
 export function useValueRef<T>(value: T) {
   const valueRef = React.useRef(value)
-  React.useEffect(() => {
+  // A layout effect, not a passive one: the ref is read by native listeners
+  // (a keydown on the search box, say) that can fire before React flushes
+  // passive effects, and a stale handler there drops the keystroke.
+  React.useLayoutEffect(() => {
     valueRef.current = value
   }, [value])
   return valueRef
