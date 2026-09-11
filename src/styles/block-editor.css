@@ -65,10 +65,8 @@
   color: inherit;
 }
 
-@media (prefers-color-scheme: dark) {
-  .block-highlight.block-highlight-inactive {
-    background-color: color-mix(in srgb, white 9%, var(--color-bg));
-  }
+:root[data-theme="dark"] .block-highlight.block-highlight-inactive {
+  background-color: color-mix(in srgb, white 9%, var(--color-bg));
 }
 
 /* ── Neutral hover ───────────────────────────────────────────────────────────

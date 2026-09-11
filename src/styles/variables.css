@@ -1,7 +1,13 @@
 @import "./radix-colors.css";
 
+/* The colour scheme is the app's choice, not only the system's: Settings →
+ * Appearance stores it (`themeAtom`), and `src/hooks/color-scheme.ts` stamps
+ * the resolved scheme on <html> as `data-theme="light" | "dark"` — "system"
+ * resolving through `prefers-color-scheme` there, so no stylesheet consults
+ * the media query itself. Every dark value in this file and radix-colors.css
+ * lives under `:root[data-theme="dark"]`; the bare `:root` is light. */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   /* Neutral color scale */
   --neutral-1: var(--sand-1);
@@ -164,46 +170,46 @@
   --height-nav-bar: 40px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* Background colors */
-    --color-bg: var(--neutral-1);
-    --color-bg-inset: black;
-    --color-bg-card: var(--neutral-2);
-    --color-bg-overlay: var(--neutral-3);
-    --color-bg-backdrop: #111111cc;
-    --color-bg-overlay-backdrop: #222222cc;
-    --color-bg-code-block: var(--neutral-a2);
+:root[data-theme="dark"] {
+  color-scheme: dark;
 
-    /* Selected colors: the same wash over a white-LIFTED background. The
-       lift does the "selected" work (a lightened row is unmistakable on a
-       dark page, and guaranteed lighter than any dark hover wash); the accent
-       only names the color. Hover/active on the current nav row lift further. */
-    --color-bg-selected: color-mix(
-      in srgb,
-      var(--accent-9) 8%,
-      color-mix(in srgb, white 18%, var(--color-bg))
-    );
-    --color-bg-selected-hover: color-mix(
-      in srgb,
-      var(--accent-9) 8%,
-      color-mix(in srgb, white 22%, var(--color-bg))
-    );
-    --color-bg-selected-active: color-mix(
-      in srgb,
-      var(--accent-9) 8%,
-      color-mix(in srgb, white 26%, var(--color-bg))
-    );
+  /* Background colors */
+  --color-bg: var(--neutral-1);
+  --color-bg-inset: black;
+  --color-bg-card: var(--neutral-2);
+  --color-bg-overlay: var(--neutral-3);
+  --color-bg-backdrop: #111111cc;
+  --color-bg-overlay-backdrop: #222222cc;
+  --color-bg-code-block: var(--neutral-a2);
 
-    /* Border colors */
-    --color-border-focus: var(--accent-11);
+  /* Selected colors: the same wash over a white-LIFTED background. The
+     lift does the "selected" work (a lightened row is unmistakable on a
+     dark page, and guaranteed lighter than any dark hover wash); the accent
+     only names the color. Hover/active on the current nav row lift further. */
+  --color-bg-selected: color-mix(
+    in srgb,
+    var(--accent-9) 8%,
+    color-mix(in srgb, white 18%, var(--color-bg))
+  );
+  --color-bg-selected-hover: color-mix(
+    in srgb,
+    var(--accent-9) 8%,
+    color-mix(in srgb, white 22%, var(--color-bg))
+  );
+  --color-bg-selected-active: color-mix(
+    in srgb,
+    var(--accent-9) 8%,
+    color-mix(in srgb, white 26%, var(--color-bg))
+  );
 
-    /* Syntax colors */
-    --color-syntax-cyan: var(--cyan-12);
-    --color-syntax-red: var(--red-12);
-    --color-syntax-purple: var(--purple-12);
-    --color-syntax-green: var(--green-12);
-  }
+  /* Border colors */
+  --color-border-focus: var(--accent-11);
+
+  /* Syntax colors */
+  --color-syntax-cyan: var(--cyan-12);
+  --color-syntax-red: var(--red-12);
+  --color-syntax-purple: var(--purple-12);
+  --color-syntax-green: var(--green-12);
 }
 
 @media (pointer: coarse) {
@@ -282,12 +288,10 @@
  * step of the neutral hover surfaces, so it deepens to 18% (hover/active
  * follow). Light-only — in dark the white lift already guarantees selection
  * sits clear of the (darker) hover wash. */
-@media (prefers-color-scheme: light) {
-  [data-accent="neutral"] {
-    --color-bg-selected: color-mix(in srgb, var(--accent-9) 18%, var(--color-bg));
-    --color-bg-selected-hover: color-mix(in srgb, var(--accent-9) 22%, var(--color-bg));
-    --color-bg-selected-active: color-mix(in srgb, var(--accent-9) 26%, var(--color-bg));
-  }
+:root:not([data-theme="dark"])[data-accent="neutral"] {
+  --color-bg-selected: color-mix(in srgb, var(--accent-9) 18%, var(--color-bg));
+  --color-bg-selected-hover: color-mix(in srgb, var(--accent-9) 22%, var(--color-bg));
+  --color-bg-selected-active: color-mix(in srgb, var(--accent-9) 26%, var(--color-bg));
 }
 
 [data-accent="green"] {

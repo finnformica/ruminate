@@ -355,6 +355,16 @@ export type AccentColor = "cyan" | "neutral" | "green" | "violet" | "amber"
 
 export const accentAtom = atomWithStorage<AccentColor>("accent", "cyan")
 
+/**
+ * The colour scheme: light, dark, or the device's own ("system"). Resolved
+ * and stamped on <html> as `data-theme` by `useColorScheme`
+ * (src/hooks/color-scheme.ts), which every stylesheet keys off; index.html
+ * does the same inline before first paint.
+ */
+export type Theme = "system" | "light" | "dark"
+
+export const themeAtom = atomWithStorage<Theme>("theme", "system")
+
 export const sidebarAtom = atomWithStorage<"expanded" | "collapsed">("sidebar", "expanded")
 
 /** Grid/list layout for note lists, persisted locally (not in the URL). */

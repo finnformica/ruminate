@@ -13,3 +13,17 @@ export const Default = {
     keys: ["⌘", "⏎"],
   },
 }
+
+/** Keys pressed one after another sit apart. */
+export const Chord = {
+  args: {
+    keys: ["G", "S"],
+    chord: true,
+  },
+}
+
+export const Single = {
+  args: {
+    keys: ["?"],
+  },
+}

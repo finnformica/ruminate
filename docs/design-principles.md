@@ -234,7 +234,11 @@ is the default and needs no attribute. Rules for a new accent:
 
 - Remap **only** the accent tokens; every accent role above then follows.
 - Both color schemes come free: the ramps themselves flip under
-  `prefers-color-scheme` in `radix-colors.css`.
+  `:root[data-theme="dark"]` in `radix-colors.css`. The scheme is the app's
+  choice (Settings → Appearance: system, light or dark; `themeAtom`), stamped
+  on `<html>` by `src/hooks/color-scheme.ts` — "system" resolving through
+  `prefers-color-scheme` there and nowhere else, so no stylesheet consults
+  the media query itself (Tailwind's `dark:` follows the attribute too).
 - Selection must stay distinct from hover. The neutral (grayscale) accent —
   the app's original pre-accent gray — would collide with the neutral hover
   surfaces, so its alpha steps are biased one step darker, and the selection

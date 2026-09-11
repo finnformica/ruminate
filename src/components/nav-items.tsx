@@ -6,6 +6,7 @@ import { requestDatabasePull } from "../data/database-mode"
 import { isBootingAtom, isHelpPanelOpenAtom, sortedNotesAtom } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
 import type { Note } from "../schema"
+import { APP_SHORTCUTS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
 import {
@@ -22,6 +23,7 @@ import {
   TagFillIcon16,
   TagIcon16,
 } from "./icons"
+import { Keys } from "./keys"
 import { NavListSkeleton } from "./skeleton"
 import { NoteActionsMenu } from "./note-actions-menu"
 import { NoteFavicon } from "./note-favicon"
@@ -65,6 +67,7 @@ export function NavItems({
                 search={{ query: undefined }}
                 activeIcon={<NoteFillIcon16 />}
                 icon={<NoteIcon16 />}
+                shortcut={formatCombo("g n")}
                 onNavigate={onNavigate}
               >
                 Notes
@@ -80,6 +83,7 @@ export function NavItems({
                 activeIcon={<CalendarDateFillIcon16 date={today.getDate()} />}
                 icon={<CalendarDateIcon16 date={today.getDate()} />}
                 forceActive={isCalendarActive}
+                shortcut={formatCombo("g d")}
                 onNavigate={onNavigate}
               >
                 Calendar
@@ -102,14 +106,27 @@ export function NavItems({
           {notes.length > 0 ? (
             <ul className="flex flex-col gap-1 border-t border-border-secondary pt-3">
               {notes.map((note) => (
-                <li key={note.id} className="group/note flex items-center">
-                  {/* The note fills the row; on hover the actions menu takes its
-                      own space to the right (a real flex sibling), so the note
-                      name truncates with an ellipsis to make room rather than
-                      sitting under the button. The menu stays visible while its
-                      dropdown is open. */}
-                  <NoteNavItem note={note} size={size} onNavigate={onNavigate} />
-                  <div className="hidden shrink-0 pl-0.5 group-hover/note:flex has-data-[popup-open]:flex">
+                <li key={note.id} className="note-row group/note relative">
+                  {/* The note fills the row. Its actions button is not there
+                      until the row is hovered (or its menu is open): then it
+                      sits INSIDE the row's surface at the far end — the same
+                      distance from the surface's edge on every side, as the
+                      collapse chevron sits in a block's row — and the row
+                      pads its end (`.note-row` in index.css) so the name
+                      truncates with an ellipsis to make room rather than
+                      running under the button. The button is the row's
+                      sibling, not its child (a button cannot live in a
+                      link), so the same rules keep the row's hover surface
+                      while the pointer is on it. */}
+                  <NoteNavItem note={note} size={size} onNavigate={onNavigate} className="w-full" />
+                  <div
+                    className={cx(
+                      "absolute inset-y-0 hidden items-center group-hover/note:flex has-data-[popup-open]:flex",
+                      // The 24px button in a 32px row (40px large) sits 4px
+                      // (8px) in from the top and bottom; the same from the end.
+                      size === "large" ? "right-2" : "right-1",
+                    )}
+                  >
                     <NoteActionsMenu noteId={note.id} pinned={note.pinned} />
                   </div>
                 </li>
@@ -156,6 +173,7 @@ export function NavItems({
             activeIcon={<SettingsFillIcon16 />}
             icon={<SettingsIcon16 />}
             className="text-text-secondary"
+            shortcut={formatCombo("g s")}
             onNavigate={onNavigate}
           >
             Settings
@@ -164,6 +182,17 @@ export function NavItems({
         </div>
       </div>
     </SizeContext.Provider>
+  )
+}
+
+/** The keys that reach a nav item, shown at its far end: quiet chrome, never
+ * on a touch screen (where there are no keys to press). A chord (`g` then
+ * `s`) reads as its keys in press order, as in the `?` reference. */
+function NavShortcut({ keys, chord = false }: { keys: string[]; chord?: boolean }) {
+  return (
+    <span className="ml-auto shrink-0 pl-2 coarse:hidden">
+      <Keys keys={keys} chord={chord} />
+    </span>
   )
 }
 
@@ -177,6 +206,7 @@ function NavLink({
   children,
   onClick,
   disabled = false,
+  shortcut,
   ...props
 }: LinkComponentProps<"a"> & {
   activeIcon?: React.ReactNode
@@ -187,6 +217,8 @@ function NavLink({
   children: React.ReactNode
   /** Render a non-interactive, greyed-out item (feature not ready yet). */
   disabled?: boolean
+  /** The keys that reach this destination (`formatCombo`), shown beside it. */
+  shortcut?: string[]
 }) {
   const size = useContext(SizeContext)
 
@@ -204,6 +236,7 @@ function NavLink({
         {icon}
       </span>
       <span className="truncate">{children}</span>
+      {shortcut ? <NavShortcut keys={shortcut} chord /> : null}
     </>
   )
 
@@ -259,7 +292,7 @@ function NoteNavItem({
       search={{ query: undefined }}
       activeOptions={{ exact: true, includeSearch: false }}
       data-size={size}
-      className={cx("nav-item w-0 flex-1", className)}
+      className={cx("nav-item", className)}
       onClick={(event) => {
         if (!event.defaultPrevented) onNavigate?.()
       }}
@@ -289,6 +322,7 @@ function HelpNavItem({ size }: { size: "medium" | "large" }) {
     >
       {isOpen ? <CircleQuestionMarkFillIcon16 /> : <CircleQuestionMarkIcon16 />}
       Help
+      <NavShortcut keys={formatCombo(APP_SHORTCUTS.helpPanel)} />
     </button>
   )
 }

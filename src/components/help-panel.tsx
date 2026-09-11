@@ -11,6 +11,7 @@ import {
 } from "../shortcuts/registry"
 import { IconButton } from "./icon-button"
 import { CircleQuestionMarkIcon16, XIcon16 } from "./icons"
+import { Keys } from "./keys"
 import { BlockContent } from "./block-editor/block-content"
 import { Details } from "./details"
 import { HoverCard } from "./hover-card"
@@ -35,21 +36,6 @@ function HelpItem({ children }: { children: React.ReactNode }) {
   )
 }
 
-function Keys({ keys }: { keys: string[] }) {
-  return (
-    <div className="flex items-center gap-0.5">
-      {keys.map((key) => (
-        <kbd
-          key={key}
-          className="min-w-[22px] font-[inherit] rounded-sm bg-bg-secondary p-1 text-center font-body leading-none text-text-secondary shadow-[inset_0_-1px_0_var(--color-border-secondary)] dark:shadow-[inset_0_1px_0_var(--color-border-secondary),0_1px_2px_-1px_var(--color-bg)]"
-        >
-          {key}
-        </kbd>
-      ))}
-    </div>
-  )
-}
-
 /** An entry's combos: the primary one, then alternates separated by "/". */
 function ShortcutKeys({ shortcut, isMac }: { shortcut: Shortcut; isMac: boolean }) {
   return (
@@ -57,11 +43,16 @@ function ShortcutKeys({ shortcut, isMac }: { shortcut: Shortcut; isMac: boolean 
       {shortcut.combos.map((combo, index) => (
         <Fragment key={combo}>
           {index > 0 ? <span className="text-text-tertiary text-sm">/</span> : null}
-          <Keys keys={formatCombo(combo, isMac)} />
+          <Keys keys={formatCombo(combo, isMac)} chord={isChord(combo)} />
         </Fragment>
       ))}
     </div>
   )
+}
+
+/** A two-key chord (`"g d"`: press g, then d) rather than keys held together. */
+function isChord(combo: string): boolean {
+  return combo.length > 1 && combo.includes(" ")
 }
 
 /**

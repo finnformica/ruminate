@@ -3,7 +3,7 @@ import { useAtom } from "jotai"
 import { useHotkeys } from "react-hotkeys-hook"
 import { sidebarAtom } from "../global-state"
 import { useCreateNewNote } from "../hooks/create-new-note"
-import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
+import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { IconButton } from "./icon-button"
 import { ArrowLeftIcon16, ArrowRightIcon16, SidebarCollapsedIcon16 } from "./icons"
@@ -48,6 +48,7 @@ export function PageHeader({ title, icon, className, actions }: PageHeaderProps)
             </IconButton>
             <IconButton
               aria-label="Go back"
+              shortcut={formatCombo(APP_SHORTCUTS.historyBack)}
               size="small"
               // TODO: Disable if you can't go back
               // https://stackoverflow.com/questions/3588315/how-to-check-if-the-user-can-go-back-in-browser-history-or-not
@@ -58,6 +59,7 @@ export function PageHeader({ title, icon, className, actions }: PageHeaderProps)
             </IconButton>
             <IconButton
               aria-label="Go forward"
+              shortcut={formatCombo(APP_SHORTCUTS.historyForward)}
               size="small"
               className="group"
               onClick={() => router.history.forward()}

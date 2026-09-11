@@ -12,24 +12,26 @@ export const parameters = {
   },
 }
 
+// The colour scheme, as the app stamps it on <html> (src/hooks/color-scheme.ts):
+// the stylesheets key off `data-theme`, so a story is dark only when told.
 export const globalTypes = {
   theme: {
     toolbar: {
       icon: "mirror",
-      items: ["default", "eink"],
+      items: ["light", "dark"],
       dynamicTitle: true,
     },
   },
 }
 
 export const initialGlobals = {
-  theme: "default",
+  theme: "light",
 }
 
 export const decorators = [
   (Story, context) => {
     React.useEffect(() => {
-      document.documentElement.setAttribute("data-theme", context.globals.theme || "default")
+      document.documentElement.setAttribute("data-theme", context.globals.theme || "light")
     }, [context.globals.theme])
 
     return (
