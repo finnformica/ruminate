@@ -1,6 +1,6 @@
 import { useSetAtom } from "jotai"
 import urlcat from "urlcat"
-import { globalStateMachineAtom } from "../global-state"
+import { signInAtom, signOutAtom } from "../global-state"
 import { Button, ButtonProps } from "./button"
 import { GitHubIcon16 } from "./icons"
 
@@ -32,7 +32,7 @@ export function beginGitHubSignIn() {
 }
 
 export function SignInButton(props: ButtonProps) {
-  const send = useSetAtom(globalStateMachineAtom)
+  const signIn = useSetAtom(signInAtom)
   return (
     <Button
       variant="primary"
@@ -43,7 +43,7 @@ export function SignInButton(props: ButtonProps) {
           try {
             const token = import.meta.env.VITE_GITHUB_PAT
             const { login, name, email } = await getUser(token)
-            send({ type: "SIGN_IN", githubUser: { token, login, name, email } })
+            signIn({ token, login, name, email })
           } catch (error) {
             console.error(error)
           }
@@ -61,11 +61,7 @@ export function SignInButton(props: ButtonProps) {
 }
 
 export function useSignOut() {
-  const send = useSetAtom(globalStateMachineAtom)
-
-  return () => {
-    send({ type: "SIGN_OUT" })
-  }
+  return useSetAtom(signOutAtom)
 }
 
 async function getUser(token: string) {

@@ -1,8 +1,6 @@
 import { Searcher } from "fast-fuzzy"
 import { atom } from "jotai"
-import { atomWithMachine } from "jotai-xstate"
-import { atomWithStorage, selectAtom } from "jotai/utils"
-import { assign, createMachine } from "xstate"
+import { atomWithStorage } from "jotai/utils"
 import { GitHubUser, NoteId, githubUserSchema } from "./schema"
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
@@ -17,186 +15,140 @@ import type { BlockRevealRequest, OutlineItem } from "./utils/note-outline"
 import { parseQuery, type Query } from "./utils/search"
 
 // -----------------------------------------------------------------------------
-// State machine
+// Auth
 // -----------------------------------------------------------------------------
 
 /**
- * The auth machine: resolve the GitHub identity at boot, handle sign-in and
- * sign-out, and serve the signed-out sample notes. GitHub is identity only —
- * the note corpus itself lives in the database (docs/graph-storage.md): the
- * local SQL store is the runtime store and D1 behind the Worker is the
- * authoritative cross-device copy, mounted by `useDatabaseMode` whenever a
- * user is signed in.
+ * The GitHub identity: resolved once at boot, then changed only by sign-in
+ * and sign-out. GitHub is identity only — the note corpus itself lives in the
+ * database (docs/graph-storage.md): the local SQL store is the runtime store
+ * and D1 behind the Worker is the authoritative cross-device copy, mounted by
+ * `useDatabaseMode` whenever a user is signed in. Signed out, the sample
+ * notes render instead.
+ *
+ * `undefined` is "still resolving" — the moment between the store mounting
+ * and the stored session being read, which is synchronous, so nothing renders
+ * in it; `null` is signed out.
  */
+const githubUserStateAtom = atom<GitHubUser | null | undefined>(undefined)
 
-type Context = {
-  githubUser: GitHubUser | null
+/** Resolve the identity when the atom is first mounted: the OAuth redirect's
+ * URL params win, then the stored session, else signed out. A resolved user
+ * is remembered exactly as a sign-in is, so the live token session is seeded
+ * on every boot. */
+githubUserStateAtom.onMount = (set) => {
+  const user = resolveStoredUser()
+  if (user) rememberUser(user)
+  else forgetUser()
+  set(user)
 }
 
-type Event = { type: "SIGN_IN"; githubUser: GitHubUser } | { type: "SIGN_OUT" }
-
-function createGlobalStateMachine() {
-  return createMachine(
-    {
-      id: "global",
-      tsTypes: {} as import("./global-state.typegen").Typegen0,
-      schema: {} as {
-        context: Context
-        events: Event
-        services: {
-          resolveUser: {
-            data: { githubUser: GitHubUser }
-          }
-        }
-      },
-      predictableActionArguments: true,
-      initial: "resolvingUser",
-      context: {
-        githubUser: null,
-      },
-      states: {
-        resolvingUser: {
-          invoke: {
-            src: "resolveUser",
-            onDone: {
-              target: "signedIn",
-              actions: ["setGitHubUser", "setGitHubUserLocalStorage"],
-            },
-            onError: "signedOut",
-          },
-        },
-        signedOut: {
-          entry: ["clearGitHubUser", "clearGitHubUserLocalStorage"],
-          on: {
-            SIGN_IN: {
-              target: "signedIn",
-              actions: ["setGitHubUser", "setGitHubUserLocalStorage"],
-            },
-          },
-        },
-        signedIn: {
-          on: {
-            SIGN_OUT: "signedOut",
-          },
-        },
-      },
-    },
-    {
-      services: {
-        resolveUser: async () => {
-          // First, check URL params for user metadata
-          const searchParams = new URLSearchParams(window.location.search)
-          const token = searchParams.get("user_token")
-          const id = searchParams.get("user_id")
-          const login = searchParams.get("user_login")
-          const name = searchParams.get("user_name")
-          const email = searchParams.get("user_email")
-          // Only treat these as set when actually present and finite (a missing
-          // param is null → Number(null) is 0, which would look like "expired").
-          const toEpoch = (raw: string | null) => {
-            const n = raw != null ? Number(raw) : NaN
-            return Number.isFinite(n) ? n : undefined
-          }
-          const accessExpires = toEpoch(searchParams.get("access_expires"))
-          const refreshExpires = toEpoch(searchParams.get("refresh_expires"))
-
-          if (token && login && name && email) {
-            const idNumberRaw = id ? Number(id) : undefined
-            const idNumber = Number.isFinite(idNumberRaw) ? idNumberRaw : undefined
-
-            // Remove the auth metadata from the URL without a full reload
-            // (window.location.replace would reload and race the localStorage
-            // write below). replaceState keeps the SPA state intact.
-            searchParams.delete("user_token")
-            searchParams.delete("user_id")
-            searchParams.delete("user_login")
-            searchParams.delete("user_name")
-            searchParams.delete("user_email")
-            searchParams.delete("access_expires")
-            searchParams.delete("refresh_expires")
-
-            window.history.replaceState(
-              null,
-              "",
-              `${window.location.pathname}${
-                searchParams.toString() ? `?${searchParams.toString()}` : ""
-              }`,
-            )
-
-            return {
-              githubUser: {
-                token,
-                id: idNumber,
-                login,
-                name,
-                email,
-                accessTokenExpiresAt: accessExpires,
-                refreshTokenExpiresAt: refreshExpires,
-              },
-            }
-          }
-
-          // Next, check localStorage for user metadata. A session stored under
-          // GitHub's noreply alias (pre-primary-email sign-ins) is repaired
-          // from the account's primary address; the done action below then
-          // persists whatever comes back (`utils/github-email.ts`).
-          const githubUser = JSON.parse(localStorage.getItem(GITHUB_USER_STORAGE_KEY) ?? "null")
-          return { githubUser: await backfillPrimaryEmail(githubUserSchema.parse(githubUser)) }
-        },
-      },
-      actions: {
-        setGitHubUser: assign({
-          githubUser: (_, event) => {
-            switch (event.type) {
-              case "SIGN_IN":
-                return event.githubUser
-              case "done.invoke.global.resolvingUser:invocation[0]":
-                return event.data.githubUser
-              default:
-                return null
-            }
-          },
-        }),
-        setGitHubUserLocalStorage: (_, event) => {
-          switch (event.type) {
-            case "SIGN_IN":
-              localStorage.setItem(GITHUB_USER_STORAGE_KEY, JSON.stringify(event.githubUser))
-              // Seed the live token session used for Worker API auth + refresh.
-              seedSession(event.githubUser)
-              break
-            case "done.invoke.global.resolvingUser:invocation[0]":
-              localStorage.setItem(GITHUB_USER_STORAGE_KEY, JSON.stringify(event.data.githubUser))
-              seedSession(event.data.githubUser)
-              break
-          }
-        },
-        clearGitHubUser: assign({
-          githubUser: null,
-        }),
-        clearGitHubUserLocalStorage: () => {
-          localStorage.removeItem(GITHUB_USER_STORAGE_KEY)
-          clearSession()
-        },
-      },
-    },
-  )
+/** Persist the user for the next boot and seed the live token session the
+ * Worker API auth and refresh run on. */
+function rememberUser(user: GitHubUser) {
+  localStorage.setItem(GITHUB_USER_STORAGE_KEY, JSON.stringify(user))
+  seedSession(user)
 }
 
-export const globalStateMachineAtom = atomWithMachine(createGlobalStateMachine)
+/** Forget the stored user and the live session. */
+function forgetUser() {
+  localStorage.removeItem(GITHUB_USER_STORAGE_KEY)
+  clearSession()
+}
 
-const machineGithubUserAtom = selectAtom(
-  globalStateMachineAtom,
-  (state) => state.context.githubUser,
-)
+/**
+ * The identity to boot with. The OAuth callback hands the user over as URL
+ * params (consumed and scrubbed from the address bar here); otherwise the
+ * last sign-in is read back from localStorage. Anything unreadable — no
+ * session, a stale shape — is signed out.
+ */
+function resolveStoredUser(): GitHubUser | null {
+  const searchParams = new URLSearchParams(window.location.search)
+  const token = searchParams.get("user_token")
+  const id = searchParams.get("user_id")
+  const login = searchParams.get("user_login")
+  const name = searchParams.get("user_name")
+  const email = searchParams.get("user_email")
+  // Only treat these as set when actually present and finite (a missing
+  // param is null → Number(null) is 0, which would look like "expired").
+  const toEpoch = (raw: string | null) => {
+    const n = raw != null ? Number(raw) : NaN
+    return Number.isFinite(n) ? n : undefined
+  }
+  const accessExpires = toEpoch(searchParams.get("access_expires"))
+  const refreshExpires = toEpoch(searchParams.get("refresh_expires"))
+
+  if (token && login && name && email) {
+    const idNumberRaw = id ? Number(id) : undefined
+    const idNumber = Number.isFinite(idNumberRaw) ? idNumberRaw : undefined
+
+    // Remove the auth metadata from the URL without a full reload
+    // (window.location.replace would reload and race the localStorage
+    // write below). replaceState keeps the SPA state intact.
+    for (const key of [
+      "user_token",
+      "user_id",
+      "user_login",
+      "user_name",
+      "user_email",
+      "access_expires",
+      "refresh_expires",
+    ]) {
+      searchParams.delete(key)
+    }
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`,
+    )
+
+    return {
+      token,
+      id: idNumber,
+      login,
+      name,
+      email,
+      accessTokenExpiresAt: accessExpires,
+      refreshTokenExpiresAt: refreshExpires,
+    }
+  }
+
+  try {
+    const stored = JSON.parse(localStorage.getItem(GITHUB_USER_STORAGE_KEY) ?? "null")
+    return githubUserSchema.parse(stored)
+  } catch {
+    return null
+  }
+}
+
+/** Sign in with a resolved GitHub user. */
+export const signInAtom = atom(null, (_get, set, githubUser: GitHubUser) => {
+  rememberUser(githubUser)
+  set(githubUserStateAtom, githubUser)
+})
+
+/** Sign out. */
+export const signOutAtom = atom(null, (_get, set) => {
+  forgetUser()
+  set(githubUserStateAtom, null)
+})
+
+export const githubUserAtom = atom((get) => get(githubUserStateAtom) ?? null)
+
+/** Where the identity stands, for the dev bar. */
+export const authStateAtom = atom((get) => {
+  const user = get(githubUserStateAtom)
+  return user === undefined ? "resolvingUser" : user === null ? "signedOut" : "signedIn"
+})
 
 /**
  * Signed in — the database-backed note corpus is the active experience: the
  * local SQL store serves the notes and D1 syncs them across devices
- * (docs/graph-storage.md). Signed out, the machine's sample notes render
- * instead. This is also the "notes are ready" gate: the store serves local
- * contents immediately, so there is no loading screen to wait behind.
+ * (docs/graph-storage.md). Signed out, the sample notes render instead. This
+ * is also the "notes are ready" gate: the store serves local contents
+ * immediately, so there is no loading screen to wait behind.
  */
-export const isDatabaseModeAtom = atom((get) => get(machineGithubUserAtom) !== null)
+export const isDatabaseModeAtom = atom((get) => get(githubUserAtom) !== null)
 
 /**
  * The signed-out graph: the hard-coded sample blocks (`src/data/sample-graph.ts`),
@@ -215,15 +167,7 @@ export const graphSnapshotAtom = atom((get) =>
   get(isDatabaseModeAtom) ? get(databaseGraphAtom) : get(sampleGraphAtom),
 )
 
-export const isSignedOutAtom = selectAtom(globalStateMachineAtom, (state) =>
-  state.matches("signedOut"),
-)
-
-// -----------------------------------------------------------------------------
-// GitHub
-// -----------------------------------------------------------------------------
-
-export const githubUserAtom = machineGithubUserAtom
+export const isSignedOutAtom = atom((get) => get(githubUserStateAtom) === null)
 
 // -----------------------------------------------------------------------------
 // Notes

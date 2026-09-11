@@ -51,7 +51,6 @@
     "fast-fuzzy": "^1.11.2",
     "fractional-indexing": "^4.0.0",
     "jotai": "^2.0.3",
-    "jotai-xstate": "^0.3.0",
     "mdast-util-from-markdown": "^1.2.0",
     "micromark": "^3.0.10",
     "micromark-util-normalize-identifier": "^1.1.0",
@@ -76,7 +75,6 @@
     "use-debounce": "^10.0.4",
     "use-resize-observer": "^9.1.0",
     "vaul": "^1.1.1",
-    "xstate": "^4.38.3",
     "yamljs": "^0.3.0",
     "zod": "^4.3.5"
   },

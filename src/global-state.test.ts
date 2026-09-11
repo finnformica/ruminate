@@ -7,7 +7,8 @@ import { serialize } from "./blocks/serialize"
 import { applyOps } from "./data/ops"
 import {
   blockIndexAtom,
-  globalStateMachineAtom,
+  githubUserAtom,
+  signInAtom,
   graphSnapshotAtom,
   isSignedOutAtom,
   notesAtom,
@@ -16,7 +17,7 @@ import {
 } from "./global-state"
 
 /**
- * The unchecked-boxes flow end-to-end at the atom level: sign the machine in,
+ * The unchecked-boxes flow end-to-end at the atom level: sign in,
  * feed the database graph atom a corpus, and `type:todo` resolves to block
  * hits through `graphSnapshotAtom` → `notesAtom` → `blockIndexAtom` →
  * `searchBlocksAtom` — the exact derivation chain the app runs.
@@ -51,17 +52,13 @@ const FILES = {
 
 async function signedInStore(files: Record<string, string>) {
   const store = createStore()
-  // Keep the machine mounted so its resolve-user service runs and events land.
-  const unsubscribe = store.sub(globalStateMachineAtom, () => {})
-  // No stored identity in the test environment → the machine settles signed
-  // out, from where SIGN_IN is accepted.
+  // Mounting the identity atom resolves the stored session.
+  const unsubscribe = store.sub(githubUserAtom, () => {})
+  // No stored identity in the test environment → signed out.
   await vi.waitFor(() => {
     expect(store.get(isSignedOutAtom)).toBe(true)
   })
-  store.set(globalStateMachineAtom, {
-    type: "SIGN_IN",
-    githubUser: { token: "t", login: "finn", name: "Finn", email: "finn@example.com" },
-  })
+  store.set(signInAtom, { token: "t", login: "finn", name: "Finn", email: "finn@example.com" })
   store.set(databaseGraphAtom, graphOf(files))
   return { store, unsubscribe }
 }
@@ -85,7 +82,7 @@ describe("graphSnapshotAtom", () => {
 
   it("signed out, serves the sample graph, and notes derive from it", async () => {
     const store = createStore()
-    const unsubscribe = store.sub(globalStateMachineAtom, () => {})
+    const unsubscribe = store.sub(githubUserAtom, () => {})
     await vi.waitFor(() => {
       expect(store.get(isSignedOutAtom)).toBe(true)
     })

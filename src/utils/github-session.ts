@@ -1,4 +1,4 @@
-// The live GitHub access-token session, kept outside the XState machine so the
+// The live GitHub access-token session, kept outside the identity atoms so the
 // refresh flow needs no changes to the machine (and its generated typegen).
 //
 // - `git.ts` reads the current access token from here via `getAccessToken`.
@@ -23,7 +23,7 @@ import {
 export type SessionStatus = "active" | "expiring" | "expired"
 
 /** Where the signed-in user (including the access token + expiries) persists
- * across reloads. Written on sign-in by the state machine and kept fresh here
+ * across reloads. Written on sign-in by the auth atoms and kept fresh here
  * after every successful token refresh. */
 export const GITHUB_USER_STORAGE_KEY = "github_user"
 

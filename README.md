@@ -9,7 +9,7 @@ contributors (MIT). It began as a fork and has since diverged substantially:
 - **From Lumen:** the design system (Tailwind theme, Radix / Base UI component
   layer, typography, icons), the markdown/remark pipeline, the app shell and
   routing, the calendar, command menu, tags and templates, and GitHub OAuth
-  login. State stays in **Jotai** + **XState**; schemas in **Zod**.
+  login. State stays in **Jotai**; schemas in **Zod**.
 - **Rewritten since:** the storage layer, the block/outline editor, and sync are
   Ruminate's own work — Lumen's git-backed markdown files gave way to a local
   database that replicates to Cloudflare D1.
@@ -22,7 +22,7 @@ contributors (MIT). It began as a fork and has since diverged substantially:
 - Tailwind CSS v4 + Radix / Base UI, `motion`
 - Custom block/outline editor (Logseq-style, `src/components/block-editor/`)
 - TanStack Router (file-based; `routeTree.gen.ts` is generated)
-- Jotai (+ jotai-xstate) and XState for the sync state machine
+- Jotai for state
 - Zod for schema validation
 - `isomorphic-git` + LightningFS for GitHub-backed storage
 - **Cloudflare Workers** (Static Assets) for hosting + API routes
