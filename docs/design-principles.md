@@ -270,7 +270,8 @@ Placement conventions:
 - **Toasts** ([sonner](https://sonner.emilkowal.ski), its `Toaster` mounted
   once in `src/routes/_appRoot.tsx`; raise one with `toast.error(message)`)
   are the one exception, for one job: telling the reader that something they
-  have _just done_ has failed — a picture that would not upload. A toast
+  have _just done_ has failed, or did nothing — a picture that would not
+  upload, a paste of a block already under the target. A toast
   floats in the bottom corner (above the phone nav bar), follows the system
   theme, and leaves on its own after a few seconds or on its close button.
   It never carries state the reader must come back to — anything that

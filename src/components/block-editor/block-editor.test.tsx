@@ -575,7 +575,7 @@ describe("paste as link (Ruminate payload with ids)", () => {
     expect(docIds(getByTestId)).toContain("blk_xgone00000")
   })
 
-  it("duplicates with fresh ids when the pasted id already lives in this doc", () => {
+  it("links a block into a second place in the same note: one node, two rows, one text", () => {
     const { container, getByTestId } = render(<Harness initial={"A\n  B\nC"} />)
     const idB = getByTestId("serialized").textContent!.match(/B\n\s*id:: (\S+)/)![1]
     const formats = richClipboardFormats(`B\n  id:: ${idB}`)
@@ -585,25 +585,61 @@ describe("paste as link (Ruminate payload with ids)", () => {
     fireEvent.keyDown(root, { key: "ArrowDown" })
     paste(root, formats.plain, formats.html)
 
-    // Same-note paste stays a duplicate: the original keeps its id; the copy
-    // is a fresh block (same-note mirroring is phase 2's occurrence form).
-    // The copy lands as C's child, not as C's sibling.
+    // The same node now hangs under C too — its id appears in both places,
+    // and nothing was reminted.
     expect(serializedLines(getByTestId)).toEqual(["A", "  B", "C", "  B"])
-    expect(docIds(getByTestId).filter((id) => id === idB)).toHaveLength(1)
+    expect(docIds(getByTestId).filter((id) => id === idB)).toHaveLength(2)
+
+    // Both rows are the one block: editing the pasted row changes the text
+    // everywhere it shows.
+    fireEvent.keyDown(root, { key: "Enter" }) // edit the pasted row (selected)
+    const textarea = container.querySelector("textarea")!
+    fireEvent.change(textarea, { target: { value: "B edited" } })
+    expect(serializedLines(getByTestId)).toEqual(["A", "  B edited", "C", "  B edited"])
   })
 
-  it("skips a block already a direct child of the paste target (twin), keeping its siblings", () => {
+  it("refuses to put a block inside itself, and says so", async () => {
+    const { container, getByTestId } = render(
+      <>
+        <Harness initial={"A\nB"} />
+        <Toaster />
+      </>,
+    )
+    const before = getByTestId("serialized").textContent!
+    const idA = before.match(/A\n\s*id:: (\S+)/)![1]
+    const root = editorRoot(container) // A is selected on mount
+    const formats = richClipboardFormats(`A\n  id:: ${idA}`)
+    await act(async () => {
+      paste(root, formats.plain, formats.html)
+    })
+    expect(getByTestId("serialized").textContent).toBe(before)
+    expect(await screen.findByText("A block can't be put inside itself")).not.toBeNull()
+    toast.dismiss()
+  })
+
+  it("skips a block already a direct child of the paste target (twin), keeping its siblings", async () => {
     // The target IS the insertion parent now, so the twin scope is its own
     // children: B already hangs off A.
-    const { container, getByTestId } = render(<Harness initial={"A\n  B"} />)
+    const { container, getByTestId } = render(
+      <>
+        <Harness initial={"A\n  B"} />
+        <Toaster />
+      </>,
+    )
     const before = getByTestId("serialized").textContent!
     const idB = before.match(/B\n\s*id:: (\S+)/)![1]
     const root = editorRoot(container) // A is selected on mount
 
-    // B alone: the whole paste is a no-op — it's already there.
+    // B alone: the whole paste is a no-op — it's already there — and a toast
+    // says so, since a paste that does nothing would look broken.
     const twinOnly = richClipboardFormats(`B\n  id:: ${idB}`)
-    paste(root, twinOnly.plain, twinOnly.html)
+    await act(async () => {
+      paste(root, twinOnly.plain, twinOnly.html)
+    })
     expect(getByTestId("serialized").textContent).toBe(before)
+    // sonner mounts a toast on a deferred tick.
+    expect(await screen.findByText("That block is already here")).not.toBeNull()
+    toast.dismiss()
 
     // B + an unknown sibling: B is skipped, the sibling still lands under A.
     const mixed = richClipboardFormats(`B\n  id:: ${idB}\nZ new\n  id:: blk_znew000000`)
@@ -1370,6 +1406,33 @@ describe("code blocks", () => {
     fireEvent.keyDown(textarea, { key: "Enter" })
     expect(serializedLines(getByTestId)).toEqual(["```py", "```"])
     expect(container.querySelector('[data-testid="code-language"]')?.textContent).toBe("py")
+  })
+})
+
+describe("splitting a shared block", () => {
+  it("refuses Enter mid-text on a block held in several places, but allows it at the end", async () => {
+    const { container, getByTestId } = render(
+      <>
+        <Harness initial={"AB\nC"} parentCountOf={() => 2} startEditing />
+        <Toaster />
+      </>,
+    )
+    const textarea = container.querySelector("textarea")!
+    // Caret between A and B: the split would cut the block's text everywhere.
+    textarea.setSelectionRange(1, 1)
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Enter" })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["AB", "C"])
+    expect(
+      await screen.findByText("This block is in 2 places, so it can't be split"),
+    ).not.toBeNull()
+    toast.dismiss()
+
+    // Caret at the end: nothing comes off the text, so a block is added below.
+    textarea.setSelectionRange(2, 2)
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    expect(serializedLines(getByTestId)).toEqual(["AB", "- ", "C"])
   })
 })
 

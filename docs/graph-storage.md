@@ -530,17 +530,27 @@ The rules, per pasted root (`embeddedPasteFragment` in `block-editor.tsx`):
   exists anywhere falls back to the clipboard-embedded content, still under
   its original ids — that fallback is what makes cut+paste a robust move
   regardless of flush timing.
-- **Same-doc** (an id already lives in this doc): duplicate with fresh ids —
-  the graph can hold a block under two parents of one page and the view
-  renders it as two rows, but selection and the commands still address a
-  block by id, so same-note mirroring waits for that re-keying
-  .
+- **Same-doc** (an id already lives in this doc): link too — the node goes
+  under the target as well, mirrored from the doc's own copy. The note then
+  holds it in two places; the view renders one row per place, keyed by
+  occurrence, so each row selects and edits on its own while the text is
+  shared. (Until the editor addressed rows by occurrence this case had to
+  duplicate.)
 - **Twin** (the id is already a direct child of the insertion parent): skip
   that block — no duplicate, no error, it's already there. The DB's
   `(source, destination, kind)` primary key backstops the invariant.
-- **Cycle** (the live subtree contains the paste target or an ancestor):
+- **Self** (the root IS the paste target): refused with a toast — a block
+  can't be put inside itself.
+- **Cycle** (the subtree to link contains the paste target or an ancestor):
   fall back to duplicating that block; the store's save-time cycle-drop
   remains the backstop.
+- A node the linked subtree shares with the rest of the doc, or with another
+  pasted root, is the same node in one more place — never reminted.
+
+A block held in more than one place can't be split: Enter with text after
+the caret is refused with a toast, since cutting the text here would cut it
+everywhere it shows (the tail landing only here). Enter at its end still adds
+a block below — the text is untouched.
 
 Edit-mode (textarea) paste is unchanged — a caret splice is textual. On the
 store side, `docToOps` has the required property (pinned in `ops.test.ts`): a

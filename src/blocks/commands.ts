@@ -79,6 +79,12 @@ export interface CommandInput {
    * type (`todo`, `quote`). Absent = the default.
    */
   newBlockType?: BlockType
+  /**
+   * How many places a block appears across the corpus (its parents in the
+   * graph, this note's included) — what tells a command the block is shared
+   * and an edit to its text would show everywhere. Absent = one place.
+   */
+  placesOf?: (id: string) => number
 }
 
 /** Where selection / edit focus should land after a command runs (a row). */
@@ -110,6 +116,8 @@ export interface CommandResult {
   /** Requested zoom change: `{ id: null }` exits zoom, `{ id }` zooms into a
    * block. Absent = no change. The editor navigates (URL state) accordingly. */
   zoom?: { id: string | null }
+  /** Why the command did nothing, for the reader (a toast). */
+  notice?: string
 }
 
 type Command = (input: CommandInput) => CommandResult
@@ -228,6 +236,17 @@ function splitAtCaret(typeFor: (type: BlockType, input: CommandInput) => BlockTy
     const type = doc.blocks[id]?.type ?? "text"
     const before = caret.value.slice(0, caret.start)
     const after = caret.value.slice(caret.end)
+    // A block held in more than one place is one block: cutting its text here
+    // would cut it everywhere it shows, with the tail landing only here. So
+    // a split that would take text off it is refused — Enter at its end still
+    // adds a block below, since that leaves the text alone.
+    const places = input.placesOf?.(id) ?? 1
+    if (after !== "" && places > 1) {
+      return {
+        handled: true,
+        notice: `This block is in ${places} places, so it can't be split`,
+      }
+    }
     const updated = updateText(doc, id, before)
     const fresh = emptyBlock(typeFor(type, input), after)
     // Splitting the zoomed title makes the tail its FIRST child (title + body
