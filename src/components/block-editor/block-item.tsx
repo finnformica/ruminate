@@ -145,6 +145,7 @@ export function BlockItem({
   occurrence,
   api,
   animateIn = false,
+  folding = false,
 }: {
   doc: BlockDoc
   block: Block
@@ -153,8 +154,13 @@ export function BlockItem({
    * (promoted typography, no toggle; its children follow it at depth 0). */
   occurrence: Occurrence
   api: BlockEditorApi
-  /** Mounting as a just-revealed row: play the brief entrance. */
+  /** Mounting as a just-revealed row: unfold beneath the parent. */
   animateIn?: boolean
+  /** A row on its way out — its parent just folded — kept for the length
+   * of the fold animation only. Inert: no selection, no pointer, no row
+   * identity (`data-block-row` / `data-occurrence`), so nothing addresses
+   * it as a live row. */
+  folding?: boolean
 }) {
   const { depth, zoomTitle, olNumber, hasChildren, collapsed: isCollapsed } = occurrence
   const readOnly = api.readOnly ?? false
@@ -188,9 +194,10 @@ export function BlockItem({
     [slashQuery, api.requestImage],
   )
 
-  // A row revealed by unfolding its parent rises in briefly. Captured at
+  // A row revealed by unfolding its parent unfolds beneath it. Captured at
   // mount so the class stays for the row's lifetime — an animation that is
-  // never cut short by a re-render, and never replayed.
+  // never cut short by a re-render, and never replayed. A fold the other way
+  // (`folding`) takes precedence: a row can be sent away mid-unfold.
   const [entrance] = useState(animateIn)
 
   const type = block.type
@@ -534,7 +541,9 @@ export function BlockItem({
         viewBox="0 0 8 8"
         aria-hidden
         className={cx(
-          "transition-transform duration-200 ease-[var(--ease-out-strong)] motion-reduce:transition-none",
+          // A quarter turn with a small overshoot that settles — the spring
+          // (variables.css) — long enough to read as a turn, not a swap.
+          "transition-transform duration-300 ease-[var(--ease-spring)] motion-reduce:transition-none",
           isCollapsed || looped ? "rotate-0" : "rotate-90",
         )}
       >
@@ -796,9 +805,16 @@ export function BlockItem({
 
   return (
     <div
-      data-block-row={block.id}
-      data-occurrence={occurrence.key}
-      className={cx("relative", zoomTitle && "mb-3", entrance && "block-expand")}
+      data-block-row={folding ? undefined : block.id}
+      data-occurrence={folding ? undefined : occurrence.key}
+      data-folding={folding || undefined}
+      aria-hidden={folding || undefined}
+      className={cx(
+        "relative",
+        zoomTitle && "mb-3",
+        // The fold (block-editor.css): the row's own height runs 0 ↔ full.
+        folding ? "block-fold-close" : entrance && "block-fold-open",
+      )}
       style={{ paddingLeft: depth * INDENT, marginTop }}
     >
       {occurrence.guideKeys.map((guideKey, level) => (
@@ -810,7 +826,7 @@ export function BlockItem({
           style={{ left: GUIDE_X + level * INDENT, top: -marginTop }}
         />
       ))}
-      <div className="relative min-w-0 py-0.5 font-content leading-relaxed">
+      <div className="block-row-body relative min-w-0 py-0.5 font-content leading-relaxed">
         <div
           // The visible content line (carries the highlight). Scroll-into-view
           // targets this, not the row wrapper, so a heading's top margin can't

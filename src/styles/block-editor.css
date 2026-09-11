@@ -263,31 +263,78 @@
   }
 }
 
-/* ── Expand ──────────────────────────────────────────────────────────────────
- * Applied only on the collapsed → open transition (never on initial mount):
- * the revealed children rise in briefly, tying them to their parent. Collapse
- * itself unmounts instantly — it is a high-frequency keyboard action. */
-@keyframes block-expand {
+/* ── Fold ────────────────────────────────────────────────────────────────────
+ * Unfolding and folding animate each affected row's OWN height: the view is
+ * a flat list, so there is no subtree box to animate, but every row can run
+ * its height 0 ↔ full at once. The row root becomes a one-row grid whose
+ * track runs 0fr ↔ 1fr (interpolable), its body clipped meanwhile, so the
+ * children concertina open beneath their parent, or fold up into it, and
+ * the rows below follow in the flow. Opening plays only on the collapsed →
+ * open transition, never on initial mount; folding keeps the rows mounted
+ * for the animation's length only (`folding` in block-editor.tsx), inert —
+ * the editor's state changed at once, so keyboard travel, the row order and
+ * the selection never wait for the motion. Reduced motion keeps the
+ * comprehension-aiding fade and drops the height. */
+@keyframes block-fold-open {
   from {
+    grid-template-rows: 0fr;
     opacity: 0;
-    transform: translateY(-2px);
+  }
+  to {
+    grid-template-rows: 1fr;
+    opacity: 1;
   }
 }
 
-@keyframes block-expand-fade {
+@keyframes block-fold-close {
+  from {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+  to {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+@keyframes block-fold-fade-in {
   from {
     opacity: 0;
   }
 }
 
-.block-expand {
-  animation: block-expand 160ms var(--ease-out-strong);
+@keyframes block-fold-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.block-fold-open,
+.block-fold-close {
+  display: grid;
+}
+
+.block-fold-open > .block-row-body,
+.block-fold-close > .block-row-body {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.block-fold-open {
+  animation: block-fold-open 200ms var(--ease-out-strong);
+}
+
+.block-fold-close {
+  animation: block-fold-close 160ms ease-in forwards;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .block-expand {
-    /* Keep the comprehension-aiding fade; drop the movement. */
-    animation: block-expand-fade 120ms ease;
+  .block-fold-open {
+    animation: block-fold-fade-in 120ms ease;
+  }
+  .block-fold-close {
+    animation: block-fold-fade-out 120ms ease forwards;
   }
 }
 

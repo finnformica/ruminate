@@ -401,9 +401,10 @@ describe("select-mode paste", () => {
   /** Texts of the blocks actually rendered (collapsed children are unmounted).
    * Scoped to block bodies so the harness's serialized <pre> doesn't match. */
   const renderedBlocks = (container: HTMLElement): string[] =>
-    Array.from(container.querySelectorAll('[data-testid="block-body"]')).map(
-      (el) => el.textContent ?? "",
-    )
+    Array.from(container.querySelectorAll('[data-testid="block-body"]'))
+      // Rows folding away linger for their animation; they are not rows.
+      .filter((el) => !el.closest("[data-folding]"))
+      .map((el) => el.textContent ?? "")
 
   it("pastes parsed blocks INTO the selected block, without entering edit mode", () => {
     const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
@@ -1350,6 +1351,51 @@ describe("collapse toggle", () => {
     expect(toggleOf(container, "blk_bp")!.className).not.toContain("block-toggle-pinned")
   })
 
+  it("a fold keeps the hidden rows for the animation, inert, then lets them go", () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(<Harness initial={OUTLINE} />)
+      fireEvent.click(toggleOf(container, "blk_bp")!)
+      // Gone as a row at once…
+      expect(container.querySelector('[data-block-row="blk_bc"]')).toBeNull()
+      // …but still on screen, folding away: no row identity, hidden from
+      // assistive tech, and playing the fold.
+      const ghosts = container.querySelectorAll("[data-folding]")
+      expect(ghosts.length).toBeGreaterThan(0)
+      for (const ghost of ghosts) {
+        expect(ghost.getAttribute("aria-hidden")).toBe("true")
+        expect(ghost.hasAttribute("data-occurrence")).toBe(false)
+        expect(ghost.className).toContain("block-fold-close")
+      }
+      act(() => {
+        vi.advanceTimersByTime(250)
+      })
+      expect(container.querySelectorAll("[data-folding]").length).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("unfolding again mid-fold drops the departing rows at once, and the returning rows unfold", () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(<Harness initial={OUTLINE} />)
+      fireEvent.click(toggleOf(container, "blk_bp")!)
+      expect(container.querySelectorAll("[data-folding]").length).toBeGreaterThan(0)
+      fireEvent.click(toggleOf(container, "blk_bp")!)
+      expect(container.querySelectorAll("[data-folding]").length).toBe(0)
+      const back = container.querySelector('[data-block-row="blk_bc"]')!
+      expect(back).not.toBeNull()
+      expect(back.className).toContain("block-fold-open")
+      act(() => {
+        vi.advanceTimersByTime(250)
+      })
+      expect(container.querySelectorAll("[data-folding]").length).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("hangs the guide line from the key of every block type", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
     // Under the 15px slot's centre — every block type has a key there — and
@@ -1752,9 +1798,10 @@ describe("wasd tree navigation (select mode)", () => {
   /** Texts of the blocks actually rendered (collapsed children are unmounted).
    * Scoped to block bodies so the harness's serialized <pre> doesn't match. */
   const renderedBlocks = (container: HTMLElement): string[] =>
-    Array.from(container.querySelectorAll('[data-testid="block-body"]')).map(
-      (el) => el.textContent ?? "",
-    )
+    Array.from(container.querySelectorAll('[data-testid="block-body"]'))
+      // Rows folding away linger for their animation; they are not rows.
+      .filter((el) => !el.closest("[data-folding]"))
+      .map((el) => el.textContent ?? "")
   it("w/s traverse siblings, skipping descendants, no-oping only at the tree's ends", () => {
     const { container } = render(<Harness initial={NESTED} />)
     const root = editorRoot(container)
@@ -1849,9 +1896,10 @@ describe("arrow-key folding (select mode)", () => {
   // NESTED: A, B (> C (> D), E), F
 
   const renderedBlocks = (container: HTMLElement): string[] =>
-    Array.from(container.querySelectorAll('[data-testid="block-body"]')).map(
-      (el) => el.textContent ?? "",
-    )
+    Array.from(container.querySelectorAll('[data-testid="block-body"]'))
+      // Rows folding away linger for their animation; they are not rows.
+      .filter((el) => !el.closest("[data-folding]"))
+      .map((el) => el.textContent ?? "")
 
   it("← collapses (children unmount), → expands, → again steps into the first child", () => {
     const { container } = render(<Harness initial={NESTED} />)

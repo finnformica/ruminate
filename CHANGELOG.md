@@ -14,6 +14,8 @@
 
 ### Improved
 
+- Folding and unfolding a block is animated. Its children now fold up into it or unfold beneath it, with the rows below following, rather than vanishing and reappearing in a blink, and the collapse arrow turns with a small spring rather than a flat quarter-turn. The keyboard never waits for the motion: pressing <kbd>Space</kbd> repeatedly is as quick as before. With reduced motion switched on, the rows fade instead.
+
 - A selected block's marker now takes a tint of the accent too, a shade deeper than its usual grey, so a heading's `#`, a bullet's dot, a list number and a quote's mark and bar sit with the highlighted text rather than beside it in plain grey. Checkboxes and collapse arrows keep their own colours. In the sidebar, the open note's icon is filled in and takes the row's tint like its title, as the Notes and Calendar links already do.
 - A heading's highlight now reaches a little further left at the larger sizes, so the collapse arrow (and the `#` it stands in for) sits the same distance from the left edge as from the top and bottom; the text itself does not move.
 - The picture alignment toolbar's corners now follow its buttons' corners, so the ends no longer look squeezed.

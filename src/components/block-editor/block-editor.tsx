@@ -42,6 +42,7 @@ import {
   buildRows,
   firstOccurrenceKey,
   hasOccurrence,
+  type Occurrence,
   idOfKey,
   isWithin,
   keyOf,
@@ -49,6 +50,11 @@ import {
   parentKeyOf,
   zoomRootKey,
 } from "../../blocks/view"
+
+/** How long a folded subtree's rows stay for their fold animation
+ * (`.block-fold-close`, block-editor.css): the animation's length, and no
+ * longer — they are inert the whole time. */
+const FOLD_MS = 200
 import {
   duplicateBlocks,
   emptyBlock,
@@ -1000,8 +1006,38 @@ export function BlockEditor({
     if (justOpened !== null) setJustOpened(null)
   }, [justOpened])
 
+  // The rows a fold just hid, kept on screen — inert, folding away
+  // (`folding` in block-item.tsx) — for the animation's length only. The
+  // state itself changed at once: `rows`, the keyboard's order and the
+  // selection never wait for the motion. Each entry is the folded parent's
+  // key and the rows that were beneath it; unfolding that parent again
+  // drops its entry at once, so the returning rows never meet their ghosts.
+  const [folding, setFolding] = useState<{ id: number; key: string; rows: Occurrence[] }[]>([])
+  const foldSerial = useRef(0)
+  const foldTimers = useRef<number[]>([])
+  useEffect(() => {
+    const timers = foldTimers.current
+    return () => timers.forEach((t) => window.clearTimeout(t))
+  }, [])
+  const beginFold = (key: string) => {
+    const hidden = rows.filter((row) => row.guideKeys.includes(key))
+    if (hidden.length === 0) return
+    const id = ++foldSerial.current
+    setFolding((prev) => [...prev.filter((f) => f.key !== key), { id, key, rows: hidden }])
+    foldTimers.current.push(
+      window.setTimeout(() => setFolding((prev) => prev.filter((f) => f.id !== id)), FOLD_MS),
+    )
+  }
+
   const toggleCollapse = (key: string) => {
-    if (collapsed.has(key)) setJustOpened(key)
+    if (collapsed.has(key)) {
+      setJustOpened(key)
+      setFolding((prev) =>
+        prev.some((f) => f.key === key) ? prev.filter((f) => f.key !== key) : prev,
+      )
+    } else {
+      beginFold(key)
+    }
     if (onToggleCollapse) {
       onToggleCollapse(key)
       return
@@ -1919,15 +1955,39 @@ export function BlockEditor({
           {rows.map((row) => {
             const block = doc.blocks[row.id]
             if (!block) return null
+            // Every row sits in its own keyed fragment, always — the shape
+            // never changes when a fold comes or goes, so the row itself is
+            // never remounted (its chevron's turn, its textarea's focus).
+            // The rows a fold on this row just hid follow it in the
+            // fragment, folding away.
+            const fold = folding.filter((f) => f.key === row.key)
+            const live = fold.length > 0 ? new Set(visibleOrder) : null
             return (
-              <BlockItem
-                key={row.key}
-                doc={doc}
-                block={block}
-                occurrence={row}
-                api={api}
-                animateIn={justOpened !== null && row.guideKeys.includes(justOpened)}
-              />
+              <Fragment key={row.key}>
+                <BlockItem
+                  doc={doc}
+                  block={block}
+                  occurrence={row}
+                  api={api}
+                  animateIn={justOpened !== null && row.guideKeys.includes(justOpened)}
+                />
+                {fold.flatMap((f) =>
+                  f.rows.map((ghost) => {
+                    const ghostBlock = doc.blocks[ghost.id]
+                    if (!ghostBlock || live?.has(ghost.key)) return null
+                    return (
+                      <BlockItem
+                        key={ghost.key}
+                        doc={doc}
+                        block={ghostBlock}
+                        occurrence={ghost}
+                        api={api}
+                        folding
+                      />
+                    )
+                  }),
+                )}
+              </Fragment>
             )
           })}
         </div>

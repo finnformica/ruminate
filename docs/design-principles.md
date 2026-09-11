@@ -320,30 +320,38 @@ growing the row.
 
 Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`):
 
-| What                                    | How                                    |
-| --------------------------------------- | -------------------------------------- |
-| Hover affordances                       | opacity 150ms ease-out                 |
-| Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease            |
-| Block line hover (neutral)              | background-color 100ms ease            |
-| Selection highlight                     | background-color + color 100ms ease    |
-| Chevron rotation                        | transform 200ms strong ease-out        |
-| Expand (collapsed → open)               | children fade/rise in, 160ms ease-out  |
-| Todo check → text mutes                 | color 200ms ease                       |
-| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms |
+| What                                    | How                                                                          |
+| --------------------------------------- | ---------------------------------------------------------------------------- |
+| Hover affordances                       | opacity 150ms ease-out                                                       |
+| Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease                                                  |
+| Block line hover (neutral)              | background-color 100ms ease                                                  |
+| Selection highlight                     | background-color + color 100ms ease                                          |
+| Chevron rotation                        | transform 300ms spring (small overshoot)                                     |
+| Unfold (collapsed → open)               | each child's height 0 → full + fade, 200ms strong ease-out                   |
+| Fold (open → collapsed)                 | each child's height full → 0 + fade, 160ms ease-in; rows linger inert for it |
+| Todo check → text mutes                 | color 200ms ease                                                             |
+| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms                                       |
 
 Press feedback lives on the **control**, never the content: collapsing a
-subtree gives the chevron a pressed scale and hover surface, but the content
-itself unmounts instantly (see below). Pressed scale is removed under
-`prefers-reduced-motion`.
+subtree gives the chevron a pressed scale and hover surface. Pressed scale is
+removed under `prefers-reduced-motion`.
+
+**The fold is the one layout animation.** Folding and unfolding run each
+affected row's own height (a one-row grid track, `0fr ↔ 1fr`; the view is a
+flat list, so there is no subtree box), so children concertina beneath their
+parent and the rows below follow. It never holds the editor up: the state
+changes at once, and the rows a fold hid stay only as inert ghosts for the
+animation's length (`folding`, block-editor.tsx), so `Space` on repeat is as
+quick as ever. Reduced motion keeps the fade and drops the height.
 
 **What never animates:**
 
 - Anything keyboard-initiated that repeats constantly: moving the selection with
-  arrows gets only the 100ms color fade (perceptually instant), collapse via
-  `Space` unmounts instantly, zoom (`F`) swaps views instantly, the command
-  palette opens with no entrance animation.
-- Layout. Only `opacity`, `transform`, and colors transition — never width,
-  height, margin, or padding.
+  arrows gets only the 100ms color fade (perceptually instant), zoom (`F`)
+  swaps views instantly, the command palette opens with no entrance
+  animation.
+- Layout, apart from the fold above. Only `opacity`, `transform`, and colors
+  transition — never width, margin, or padding.
 
 `prefers-reduced-motion`: color/opacity fades stay (they aid comprehension);
 transform-based motion (chevron rotation, expand rise) is removed.
