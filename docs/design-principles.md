@@ -277,6 +277,20 @@ Placement conventions:
   persists is a notice in the page, not a toast — and never a success
   message: the picture landing is its own confirmation.
 
+## Loading
+
+While the notes are still on their way — the identity resolving at boot, the
+signed-in store opening, a new device's first pull — the page and the
+sidebar's note rows stand in as **skeletons** (`src/components/skeleton.tsx`,
+gated by `isBootingAtom`): pulsing bars at chrome rank
+(`--color-bg-tertiary`), sized and placed like the content they wait for, so
+the page settles rather than jumping when it lands. They carry no words; one
+live region names the state for screen readers. Nothing spins: a spinner
+says "wait" without saying for what, and the app's one spinner (the "Saving…"
+trace in a note's header) marks an action in flight, not a page. Skeletons
+never stand in for an empty corpus that is really empty — that state says
+what it is (the offline notice, an empty list).
+
 ## Empty-block placeholder
 
 An empty block **being edited** carries a ghost placeholder — “Ruminate…” —

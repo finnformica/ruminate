@@ -144,6 +144,28 @@ body:has([data-resizing="true"]) * {
     animation-range: 0 32px;
   }
 
+  /* The same fade for a scroll column whose CONTENT may blur its backdrop
+   * (the page column: the slash menu opens inside it). A mask on an ancestor
+   * makes it the backdrop root and browsers then drop the descendant's
+   * backdrop-filter altogether — the menu turned see-through. So instead of
+   * masking the content, a sticky pseudo-element paints the page background
+   * over its top edge: same look, no mask. The element sits first in flow
+   * with its own height cancelled by a negative margin, so nothing moves. */
+  .scroll-fade::before {
+    content: "";
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: block;
+    height: var(--mask-height);
+    margin-bottom: calc(-1 * var(--mask-height));
+    pointer-events: none;
+    background: linear-gradient(to bottom, var(--color-bg), transparent);
+    animation: mask-height-grow forwards;
+    animation-timeline: scroll(nearest);
+    animation-range: 0 32px;
+  }
+
   @keyframes mask-height-grow {
     from {
       --mask-height: 0px;

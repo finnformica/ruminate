@@ -151,7 +151,7 @@ describe("block ids in the payload (paste as link)", () => {
     const withIds = richClipboardFormats(WITH_IDS)
     const withoutIds = richClipboardFormats(WITHOUT_IDS)
     // The plain flavor, pinned to the exact bytes external apps receive.
-    expect(withIds.plain).toBe("# Head\n\n- bullet\n  - [ ] task")
+    expect(withIds.plain).toBe("# Head\n- bullet\n  - [ ] task")
     expect(withIds.plain).toBe(withoutIds.plain)
     // The visible html (everything but the private meta payload) too.
     const visible = (html: string) => html.replace(/<meta[^>]*>/g, "")
