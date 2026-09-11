@@ -94,15 +94,15 @@ describe("docToOps", () => {
     expect([...unassignedIds(next)]).toEqual(["blk_deep000000"])
   })
 
-  it("a created block is homed to the page; the page itself has no home", () => {
+  it("a created block carries the page as its notes_id; the page itself has none", () => {
     const snapshot = graphOf({})
     const ops = docToOps("a", parse("- one\n  id:: blk_one0000000\n"), snapshot)
     expect(ops[0]).toMatchObject({ op: "create", id: "a", type: "page" })
-    expect("home" in ops[0]).toBe(false)
-    expect(ops[1]).toMatchObject({ op: "create", id: "blk_one0000000", home: "a" })
+    expect("notesId" in ops[0]).toBe(false)
+    expect(ops[1]).toMatchObject({ op: "create", id: "blk_one0000000", notesId: "a" })
     const next = applyOps(snapshot, ops, NOW)
-    expect(next.nodes.get("blk_one0000000")?.home_id).toBe("a")
-    expect(next.nodes.get("a")?.home_id).toBeUndefined()
+    expect(next.nodes.get("blk_one0000000")?.notes_id).toBe("a")
+    expect(next.nodes.get("a")?.notes_id).toBeUndefined()
   })
 
   it("a block another page holds is unlinked here but never deleted", () => {
@@ -332,12 +332,19 @@ describe("deletePageOps", () => {
       a: "- mine\n  id:: blk_mine000000\n  - deep\n    id:: blk_deep000000\n- shared\n  id:: blk_shared0000\n",
       b: "- b\n  id:: blk_b000000000\n",
     })
-    // b holds `shared` too; `stray` is homed to a but reached by nothing.
+    // b holds `shared` too; `stray` was written in a but is reached by nothing.
     const snapshot = applyOps(
       snapshot0,
       [
         { op: "link", source: "b", destination: "blk_shared0000", sortKey: "a1" },
-        { op: "create", id: "blk_stray00000", type: "text", text: "stray", props: null, home: "a" },
+        {
+          op: "create",
+          id: "blk_stray00000",
+          type: "text",
+          text: "stray",
+          props: null,
+          notesId: "a",
+        },
       ],
       NOW,
     )

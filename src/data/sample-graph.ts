@@ -86,7 +86,7 @@ function sampleRows(now = 0): { nodes: NodeRow[]; links: LinkRow[] } {
         text: block.text,
         props: null,
         updated_at: now,
-        home_id: pageId,
+        notes_id: pageId,
       })
       links.push({
         source_id: parentId,

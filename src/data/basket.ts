@@ -8,11 +8,11 @@ import { pageIds, parentsIndex, partsToOps, reachableFrom, reservedPageIds, type
  *
  * A block belongs to a note by being reachable from its page node; a block
  * that nothing reaches any more — its parent was deleted, or its last link
- * removed — would otherwise be invisible. Every block also has a **home**
- * (`home_id`: the note it was written in, set once at creation), and a
- * homed block no page reaches shows in its home note's basket, beneath the
- * outline, where it can be edited, pasted back into the outline (which links
- * it, and so takes it out of the basket) or deleted for good.
+ * removed — would otherwise be invisible. Every block also carries a note id
+ * (`notes_id`: the note it was written in, set once at creation), and a
+ * block no page reaches shows in that note's basket, beneath the outline,
+ * where it can be edited, pasted back into the outline (which links it, and
+ * so takes it out of the basket) or deleted for good.
  *
  * "No page reaches it" — not "it has no parent": two blocks that hold each
  * other and have lost their link to the page both have a parent, yet neither
@@ -38,16 +38,16 @@ export function unassignedIds(snapshot: GraphSnapshot): Set<string> {
  */
 export function basketRootIds(pageId: NoteId, snapshot: GraphSnapshot): string[] {
   const unassigned = unassignedIds(snapshot)
-  const homed = new Set<string>()
-  for (const id of unassigned) if (snapshot.nodes.get(id)?.home_id === pageId) homed.add(id)
-  if (homed.size === 0) return []
+  const ofNote = new Set<string>()
+  for (const id of unassigned) if (snapshot.nodes.get(id)?.notes_id === pageId) ofNote.add(id)
+  if (ofNote.size === 0) return []
   const parentsOf = parentsIndex(snapshot)
-  const roots = [...homed].filter(
-    (id) => ![...(parentsOf.get(id) ?? [])].some((parent) => homed.has(parent)),
+  const roots = [...ofNote].filter(
+    (id) => ![...(parentsOf.get(id) ?? [])].some((parent) => ofNote.has(parent)),
   )
   // Promote a member of any loop the roots do not reach.
   let covered = reachableFrom(snapshot, roots)
-  const stranded = () => [...homed].filter((id) => !covered.has(id) && !roots.includes(id)).sort()
+  const stranded = () => [...ofNote].filter((id) => !covered.has(id) && !roots.includes(id)).sort()
   for (let left = stranded(); left.length > 0; left = stranded()) {
     roots.push(left[0])
     covered = reachableFrom(snapshot, roots)

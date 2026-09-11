@@ -93,9 +93,9 @@ const OWNER_KEY = "store_owner"
  * device's cache forever, invisible to every future pull. One clean re-pull
  * settles it.
  *
- * Generation `4` is `home_id` (migrations/0006): the replica backfilled every
- * block's home note; a cache from before carries none, and the local ladder
- * adds the column without a backfill, so one re-pull brings the homes down.
+ * Generation `4` is `notes_id` (migrations/0006): the replica backfilled every
+ * block's note id; a cache from before carries none, and the local ladder
+ * adds the column without a backfill, so one re-pull brings the ids down.
  *
  * This is why the constant is bumped rather than merely re-documented: every
  * device that already booted on generation `2` has `"2"` stamped in its meta,

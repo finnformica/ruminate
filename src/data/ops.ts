@@ -17,7 +17,7 @@ import { CHILD_KIND, PAGE_TYPE, docToParts, reconcileSortKeys, type GraphSnapsho
  * creating a block is one `create` and one `link`, typing is one `setText`,
  * a reorder is the links whose keys had to move, and a block the doc no longer
  * names is unlinked and, if nothing else holds it, deleted — its own children
- * are not: they keep their home (`home_id`) and turn up in that note's
+ * are not: they keep their note (`notes_id`) and turn up in that note's
  * Unassigned basket (`basket.ts`). Deletes never cascade.
  */
 export type Op =
@@ -27,8 +27,8 @@ export type Op =
       type: string
       text: string
       props: string | null
-      /** The note the block is written in (`home_id`); absent for a page. */
-      home?: string
+      /** The note the block is written in (the `notes_id` column); absent for a page. */
+      notesId?: NoteId
     }
   | { op: "setText"; id: string; text: string }
   | { op: "setType"; id: string; type: string }
@@ -85,7 +85,7 @@ export function applyOps(snapshot: GraphSnapshot, ops: readonly Op[], now: numbe
           text: op.text,
           props: op.props,
           updated_at: now,
-          ...(op.home ? { home_id: op.home } : {}),
+          ...(op.notesId ? { notes_id: op.notesId } : {}),
         })
         break
       case "setText":
@@ -176,7 +176,7 @@ export function pageIds(snapshot: GraphSnapshot): string[] {
 
 /**
  * Delete a page: its node, and its content — every block the page reaches
- * that no other page reaches, plus the blocks homed to it that nothing
+ * that no other page reaches, plus the blocks written in it that nothing
  * reaches at all (its Unassigned basket). A block another page also holds
  * survives (the page's link to it is simply gone).
  */
@@ -190,7 +190,7 @@ export function deletePageOps(pageId: NoteId, snapshot: GraphSnapshot): Op[] {
   const doomed = new Set<string>([pageId])
   for (const id of reachableFrom(snapshot, [pageId])) if (!others.has(id)) doomed.add(id)
   for (const node of snapshot.nodes.values()) {
-    if (node.home_id === pageId && !others.has(node.id)) doomed.add(node.id)
+    if (node.notes_id === pageId && !others.has(node.id)) doomed.add(node.id)
   }
   return [...doomed].map((id) => ({ op: "delete", id }))
 }
@@ -207,7 +207,7 @@ export function parentCount(snapshot: GraphSnapshot, id: string): number {
 
 /**
  * Delete a block from every place it appears: unlink it from each parent and
- * delete it — and nothing more. Its children keep their home and, no longer
+ * delete it — and nothing more. Its children keep their note and, no longer
  * reached, show in that note's Unassigned basket. The graph-level counterpart
  * of removing a row in the editor (which only unlinks the row's own
  * occurrence and keeps a block still held elsewhere).
@@ -249,8 +249,8 @@ function dropCycles(snapshot: GraphSnapshot, pageId: string, childrenOf: Map<str
  * The batch that makes the graph hold `doc` as page `pageId`'s content:
  *
  * - the page node created or retitled/re-propped;
- * - every block the doc holds created if the graph lacks it — homed to this
- *   page — else its text, type or props set where they differ; a block the
+ * - every block the doc holds created if the graph lacks it — with this page
+ *   as its `notes_id` — else its text, type or props set where they differ; a block the
  *   graph already has (pasted as a link from elsewhere) is simply linked, one
  *   node, two links;
  * - each parent's child order reconciled against its current links, so an
@@ -258,7 +258,7 @@ function dropCycles(snapshot: GraphSnapshot, pageId: string, childrenOf: Map<str
  *   key between its neighbours, a removal one `unlink`;
  * - a block the page reached before but the doc no longer names, that nothing
  *   holds any more, is deleted. Its children are NOT: a delete never
- *   cascades. They keep their home and, no longer reached, show in that
+ *   cascades. They keep their note and, no longer reached, show in that
  *   note's Unassigned basket (`basket.ts`). A block another page also holds
  *   survives untouched.
  *
@@ -311,7 +311,7 @@ export function partsToOps(
         type: node.type,
         text: node.text,
         props: node.props,
-        ...(node.type === PAGE_TYPE ? {} : { home: pageId }),
+        ...(node.type === PAGE_TYPE ? {} : { notesId: pageId }),
       })
       continue
     }
@@ -353,7 +353,7 @@ export function partsToOps(
 
   // What was reached before, is no longer named, and nothing holds: deleted.
   // No cascade — a deleted block's children keep their links from it (the
-  // store retains them, the walk skips them) and their home, and turn up in
+  // store retains them, the walk skips them) and their note, and turn up in
   // the basket.
   const kept = new Set(nodes.map((node) => node.id))
   for (const id of reachedBefore) {

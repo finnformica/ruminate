@@ -73,8 +73,8 @@ export function useNoteDoc({
 }
 
 /**
- * A note's Unassigned basket (`src/data/basket.ts`): the blocks homed to the
- * note that nothing reaches, as a doc, and the way back — the same shape as
+ * A note's Unassigned basket (`src/data/basket.ts`): the blocks written in
+ * the note that nothing reaches, as a doc, and the way back — the same shape as
  * `useNoteDoc`, over `basketToOps` instead of `docToOps`, so the basket's
  * rows edit exactly like the outline's. Empty (no roots) when every block
  * of the note is reached.
