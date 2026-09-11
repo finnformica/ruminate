@@ -12,6 +12,7 @@ import migration0001 from "../../migrations/0001_init.sql?raw"
 import migration0002 from "../../migrations/0002_nodes.sql?raw"
 import migration0004 from "../../migrations/0004_tenant_columns.sql?raw"
 import migration0005 from "../../migrations/0005_row_seq.sql?raw"
+import migration0006 from "../../migrations/0006_home.sql?raw"
 import { ensureCorpusSchema } from "../../src/data/corpus-schema"
 import type { SqlDriver, SqlValue } from "../../src/data/sql-driver"
 
@@ -77,6 +78,7 @@ export async function createTenantTestDriver(): Promise<SqlDriver> {
       nodes: migration0002,
       tenantColumns: migration0004,
       rowSeq: migration0005,
+      home: migration0006,
     },
     "columns",
   )

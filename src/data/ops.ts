@@ -15,11 +15,21 @@ import { CHILD_KIND, PAGE_TYPE, docToParts, reconcileSortKeys, type GraphSnapsho
  * The editor still edits a doc (the walk of its page); `docToOps` turns the
  * doc it hands back into the batch that makes the graph agree with it —
  * creating a block is one `create` and one `link`, typing is one `setText`,
- * a reorder is the links whose keys had to move, and what the doc no longer
- * reaches is unlinked and, if nothing else holds it, deleted.
+ * a reorder is the links whose keys had to move, and a block the doc no longer
+ * names is unlinked and, if nothing else holds it, deleted — its own children
+ * are not: they keep their home (`home_id`) and turn up in that note's
+ * Unassigned basket (`basket.ts`). Deletes never cascade.
  */
 export type Op =
-  | { op: "create"; id: string; type: string; text: string; props: string | null }
+  | {
+      op: "create"
+      id: string
+      type: string
+      text: string
+      props: string | null
+      /** The note the block is written in (`home_id`); absent for a page. */
+      home?: string
+    }
   | { op: "setText"; id: string; text: string }
   | { op: "setType"; id: string; type: string }
   | { op: "setProps"; id: string; props: string | null }
@@ -75,6 +85,7 @@ export function applyOps(snapshot: GraphSnapshot, ops: readonly Op[], now: numbe
           text: op.text,
           props: op.props,
           updated_at: now,
+          ...(op.home ? { home_id: op.home } : {}),
         })
         break
       case "setText":
@@ -128,7 +139,7 @@ export function applyOps(snapshot: GraphSnapshot, ops: readonly Op[], now: numbe
 }
 
 /** Every node's parents (sources of the child links into it). */
-function parentsIndex(snapshot: GraphSnapshot): Map<string, Set<string>> {
+export function parentsIndex(snapshot: GraphSnapshot): Map<string, Set<string>> {
   const parentsOf = new Map<string, Set<string>>()
   for (const [source, list] of snapshot.childLinks) {
     for (const link of list) {
@@ -140,15 +151,48 @@ function parentsIndex(snapshot: GraphSnapshot): Map<string, Set<string>> {
   return parentsOf
 }
 
+/** Ids reachable from `rootIds` through child links (the roots excluded
+ * unless reached again). Path-safe: a node is visited once. */
+export function reachableFrom(snapshot: GraphSnapshot, rootIds: Iterable<string>): Set<string> {
+  const seen = new Set<string>()
+  const stack = [...rootIds]
+  while (stack.length > 0) {
+    const id = stack.pop() as string
+    for (const link of snapshot.childLinks.get(id) ?? []) {
+      if (seen.has(link.destination_id)) continue
+      seen.add(link.destination_id)
+      stack.push(link.destination_id)
+    }
+  }
+  return seen
+}
+
+/** Every page node's id. */
+export function pageIds(snapshot: GraphSnapshot): string[] {
+  const ids: string[] = []
+  for (const node of snapshot.nodes.values()) if (node.type === PAGE_TYPE) ids.push(node.id)
+  return ids
+}
+
 /**
- * Delete a page: its node, and every node left without a parent by that —
- * cascading down through children that thereby lose theirs. A block another
- * page holds survives (the page's link to it is simply gone).
+ * Delete a page: its node, and its content — every block the page reaches
+ * that no other page reaches, plus the blocks homed to it that nothing
+ * reaches at all (its Unassigned basket). A block another page also holds
+ * survives (the page's link to it is simply gone).
  */
 export function deletePageOps(pageId: NoteId, snapshot: GraphSnapshot): Op[] {
   const page = snapshot.nodes.get(pageId)
   if (!page || page.type !== PAGE_TYPE) return []
-  return deleteNodeOps(pageId, snapshot)
+  const others = reachableFrom(
+    snapshot,
+    pageIds(snapshot).filter((id) => id !== pageId),
+  )
+  const doomed = new Set<string>([pageId])
+  for (const id of reachableFrom(snapshot, [pageId])) if (!others.has(id)) doomed.add(id)
+  for (const node of snapshot.nodes.values()) {
+    if (node.home_id === pageId && !others.has(node.id)) doomed.add(node.id)
+  }
+  return [...doomed].map((id) => ({ op: "delete", id }))
 }
 
 /** How many parents hold a block — the number of places it appears across
@@ -162,10 +206,11 @@ export function parentCount(snapshot: GraphSnapshot, id: string): number {
 }
 
 /**
- * Delete a block from every place it appears: unlink it from each parent,
- * delete it, and cascade through what only it held. The graph-level
- * counterpart of removing a row in the editor (which only unlinks the row's
- * own occurrence and keeps a block still held elsewhere).
+ * Delete a block from every place it appears: unlink it from each parent and
+ * delete it — and nothing more. Its children keep their home and, no longer
+ * reached, show in that note's Unassigned basket. The graph-level counterpart
+ * of removing a row in the editor (which only unlinks the row's own
+ * occurrence and keeps a block still held elsewhere).
  */
 export function deleteBlockOps(blockId: string, snapshot: GraphSnapshot): Op[] {
   const node = snapshot.nodes.get(blockId)
@@ -176,51 +221,7 @@ export function deleteBlockOps(blockId: string, snapshot: GraphSnapshot): Op[] {
       unlinks.push({ op: "unlink", source, destination: blockId })
     }
   }
-  return [...unlinks, ...deleteNodeOps(blockId, snapshot)]
-}
-
-/** The `delete` ops for a node and everything left without a parent once it
- * is gone — the shared cascade of page and block deletion. */
-function deleteNodeOps(rootId: string, snapshot: GraphSnapshot): Op[] {
-  const parentsOf = parentsIndex(snapshot)
-  const parents = (id: string): Set<string> => {
-    let set = parentsOf.get(id)
-    if (!set) parentsOf.set(id, (set = new Set()))
-    return set
-  }
-  const ops: Op[] = []
-  const deleted = new Set<string>()
-  const queue: string[] = []
-  const remove = (id: string) => {
-    deleted.add(id)
-    ops.push({ op: "delete", id })
-    for (const link of snapshot.childLinks.get(id) ?? []) {
-      parents(link.destination_id).delete(id)
-      if (parents(link.destination_id).size === 0) queue.push(link.destination_id)
-    }
-  }
-  remove(rootId)
-  while (queue.length > 0) {
-    const id = queue.shift() as string
-    if (deleted.has(id) || !snapshot.nodes.has(id) || parents(id).size > 0) continue
-    remove(id)
-  }
-  return ops
-}
-
-/** Ids reachable from `rootId` through child links, the root excluded. */
-function descendantsOf(snapshot: GraphSnapshot, rootId: string): Set<string> {
-  const seen = new Set<string>()
-  const stack = [rootId]
-  while (stack.length > 0) {
-    const id = stack.pop() as string
-    for (const link of snapshot.childLinks.get(id) ?? []) {
-      if (seen.has(link.destination_id)) continue
-      seen.add(link.destination_id)
-      stack.push(link.destination_id)
-    }
-  }
-  return seen
+  return [...unlinks, { op: "delete", id: blockId }]
 }
 
 /** Cut any desired edge that would close a loop through the page: DFS the
@@ -248,15 +249,18 @@ function dropCycles(snapshot: GraphSnapshot, pageId: string, childrenOf: Map<str
  * The batch that makes the graph hold `doc` as page `pageId`'s content:
  *
  * - the page node created or retitled/re-propped;
- * - every block the doc holds created if the graph lacks it, else its text,
- *   type or props set where they differ — a block the graph already has
- *   (pasted as a link from elsewhere) is simply linked, one node, two links;
+ * - every block the doc holds created if the graph lacks it — homed to this
+ *   page — else its text, type or props set where they differ; a block the
+ *   graph already has (pasted as a link from elsewhere) is simply linked, one
+ *   node, two links;
  * - each parent's child order reconciled against its current links, so an
  *   unchanged sibling produces nothing, an insert produces one `link` with a
  *   key between its neighbours, a removal one `unlink`;
- * - what the page reached before but no longer does, and nothing else
- *   holds, is deleted — cascading down through children that thereby lose
- *   their last parent. A block another page also holds survives untouched.
+ * - a block the page reached before but the doc no longer names, that nothing
+ *   holds any more, is deleted. Its children are NOT: a delete never
+ *   cascades. They keep their home and, no longer reached, show in that
+ *   note's Unassigned basket (`basket.ts`). A block another page also holds
+ *   survives untouched.
  *
  * Block ids that collide with a page id are re-minted (`docToParts`), and a
  * desired edge that would close a loop is dropped: never-lose-work over
@@ -265,13 +269,34 @@ function dropCycles(snapshot: GraphSnapshot, pageId: string, childrenOf: Map<str
  * ops for that walk again yields nothing.
  */
 export function docToOps(pageId: NoteId, doc: BlockDoc, snapshot: GraphSnapshot): Op[] {
+  const { nodes, childrenOf } = docToParts(pageId, doc, 0, reservedPageIds(snapshot, pageId))
+  dropCycles(snapshot, pageId, childrenOf)
+  return partsToOps(pageId, nodes, childrenOf, snapshot, reachableFrom(snapshot, [pageId]))
+}
+
+/** Every other page's id — ids a block row must never take (`docToParts`). */
+export function reservedPageIds(snapshot: GraphSnapshot, pageId: string): Set<string> {
   const reserved = new Set<string>()
   for (const node of snapshot.nodes.values()) {
     if (node.type === PAGE_TYPE && node.id !== pageId) reserved.add(node.id)
   }
-  const { nodes, childrenOf } = docToParts(pageId, doc, 0, reserved)
-  dropCycles(snapshot, pageId, childrenOf)
+  return reserved
+}
 
+/**
+ * The shared core of `docToOps` and the basket's `basketToOps`: node rows
+ * and per-parent child orders, diffed against the snapshot. `reachedBefore`
+ * is what the edited region held before this batch — a node in it that
+ * `nodes` no longer names, and that no parent holds once the links are
+ * reconciled, is deleted (and only it).
+ */
+export function partsToOps(
+  pageId: NoteId,
+  nodes: NodeRow[],
+  childrenOf: Map<string, string[]>,
+  snapshot: GraphSnapshot,
+  reachedBefore: Set<string>,
+): Op[] {
   const creates: Op[] = []
   const sets: Op[] = []
   const linkOps: Op[] = []
@@ -286,6 +311,7 @@ export function docToOps(pageId: NoteId, doc: BlockDoc, snapshot: GraphSnapshot)
         type: node.type,
         text: node.text,
         props: node.props,
+        ...(node.type === PAGE_TYPE ? {} : { home: pageId }),
       })
       continue
     }
@@ -295,7 +321,7 @@ export function docToOps(pageId: NoteId, doc: BlockDoc, snapshot: GraphSnapshot)
   }
 
   // Parents after this batch: the snapshot's links, minus what is unlinked
-  // here, plus what is linked — the cascade below decides on these.
+  // here, plus what is linked — what decides the deletes below.
   const parentsOf = parentsIndex(snapshot)
   const parents = (id: string): Set<string> => {
     let set = parentsOf.get(id)
@@ -325,21 +351,14 @@ export function docToOps(pageId: NoteId, doc: BlockDoc, snapshot: GraphSnapshot)
     }
   }
 
-  // Cascade: what the page reached but the doc no longer names, and that
-  // nothing holds any more — down through children left without a parent.
+  // What was reached before, is no longer named, and nothing holds: deleted.
+  // No cascade — a deleted block's children keep their links from it (the
+  // store retains them, the walk skips them) and their home, and turn up in
+  // the basket.
   const kept = new Set(nodes.map((node) => node.id))
-  const queue = [...descendantsOf(snapshot, pageId)].filter((id) => !kept.has(id))
-  const deleted = new Set<string>()
-  while (queue.length > 0) {
-    const id = queue.shift() as string
-    if (deleted.has(id) || !snapshot.nodes.has(id) || parents(id).size > 0) continue
-    deleted.add(id)
+  for (const id of reachedBefore) {
+    if (kept.has(id) || !snapshot.nodes.has(id) || parents(id).size > 0) continue
     deletes.push({ op: "delete", id })
-    for (const link of snapshot.childLinks.get(id) ?? []) {
-      const child = link.destination_id
-      parents(child).delete(id)
-      if (parents(child).size === 0 && !kept.has(child)) queue.push(child)
-    }
   }
 
   return [...creates, ...sets, ...linkOps, ...deletes]

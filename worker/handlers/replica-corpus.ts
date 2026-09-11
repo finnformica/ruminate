@@ -60,7 +60,7 @@ export async function corpusPullFull(tenant: TenantDb): Promise<ReplicaCorpusBod
   const all = tenant.includingDeleted()
   const nodes = (
     await all.exec(
-      "SELECT id, type, text, props, updated_at, deleted_at, seq FROM nodes " +
+      "SELECT id, type, text, props, updated_at, deleted_at, home_id, seq FROM nodes " +
         "WHERE user_id = :tenant /* includes-deleted: replication carries tombstones */",
     )
   ).map(toNodeRow)
@@ -101,7 +101,7 @@ export async function corpusPullSince(
   const all = tenant.includingDeleted()
   const nodes = (
     await all.exec(
-      "SELECT id, type, text, props, updated_at, deleted_at, seq FROM nodes " +
+      "SELECT id, type, text, props, updated_at, deleted_at, home_id, seq FROM nodes " +
         "WHERE user_id = :tenant AND seq > ?1 " +
         "/* includes-deleted: a tombstoned row IS the change being pulled */",
       [since],

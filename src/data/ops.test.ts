@@ -4,7 +4,16 @@ import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
 import { buildGraphSnapshot, docToGraph, pageDoc, type GraphSnapshot } from "./graph"
-import { applyOps, deleteBlockOps, docToOps, pagesTouchedBy, parentCount, type Op } from "./ops"
+import {
+  applyOps,
+  deleteBlockOps,
+  deletePageOps,
+  docToOps,
+  pagesTouchedBy,
+  parentCount,
+  type Op,
+} from "./ops"
+import { unassignedIds } from "./basket"
 
 const NOW = 1000
 
@@ -68,19 +77,32 @@ describe("docToOps", () => {
     expect(keys).toEqual(["blk_one0000000", fresh.id, "blk_two0000000"])
   })
 
-  it("removing a block unlinks it and deletes it with its exclusive subtree", () => {
+  it("removing a block unlinks and deletes it — and no more: its children fall out of reach", () => {
     const snapshot = graphOf({ a: A })
     const doc = parse("- one\n  id:: blk_one0000000\n")
     const ops = docToOps("a", doc, snapshot)
     expect(ops).toEqual([
       { op: "unlink", source: "a", destination: "blk_two0000000" },
       { op: "delete", id: "blk_two0000000" },
-      { op: "delete", id: "blk_deep000000" },
     ])
     const next = applyOps(snapshot, ops, NOW)
     expect(walk(next, "a")).toBe(serialize(doc))
-    expect(next.nodes.has("blk_deep000000")).toBe(false)
+    // `deep` is not deleted: it is simply unreachable now (the basket's
+    // business — basket.test.ts).
+    expect(next.nodes.has("blk_deep000000")).toBe(true)
     expect(next.childLinks.has("blk_two0000000")).toBe(false)
+    expect([...unassignedIds(next)]).toEqual(["blk_deep000000"])
+  })
+
+  it("a created block is homed to the page; the page itself has no home", () => {
+    const snapshot = graphOf({})
+    const ops = docToOps("a", parse("- one\n  id:: blk_one0000000\n"), snapshot)
+    expect(ops[0]).toMatchObject({ op: "create", id: "a", type: "page" })
+    expect("home" in ops[0]).toBe(false)
+    expect(ops[1]).toMatchObject({ op: "create", id: "blk_one0000000", home: "a" })
+    const next = applyOps(snapshot, ops, NOW)
+    expect(next.nodes.get("blk_one0000000")?.home_id).toBe("a")
+    expect(next.nodes.get("a")?.home_id).toBeUndefined()
   })
 
   it("a block another page holds is unlinked here but never deleted", () => {
@@ -265,7 +287,7 @@ describe("pagesTouchedBy", () => {
 })
 
 describe("deleteBlockOps / parentCount", () => {
-  it("unlinks a block from every parent and cascades through what only it held", () => {
+  it("unlinks a block from every parent and deletes it — what it held stays, out of reach", () => {
     const snapshot = graphOf({
       a: "- shared\n  id:: blk_shared0000\n  - under shared\n    id:: blk_under00000\n- only a\n  id:: blk_onlya00000\n",
       b: "- b\n  id:: blk_b000000000\n",
@@ -289,16 +311,42 @@ describe("deleteBlockOps / parentCount", () => {
     ).toEqual(["a", "b"])
     expect(ops.filter((op) => op.op === "delete").map((op) => (op as { id: string }).id)).toEqual([
       "blk_shared0000",
-      "blk_under00000",
     ])
     const next = applyOps(linked, ops, 3)
     expect(next.nodes.has("blk_shared0000")).toBe(false)
-    expect(next.nodes.has("blk_under00000")).toBe(false)
+    // No cascade: `under` survives, reached by nothing.
+    expect(next.nodes.has("blk_under00000")).toBe(true)
+    expect([...unassignedIds(next)]).toEqual(["blk_under00000"])
     expect(next.nodes.has("blk_onlya00000")).toBe(true)
     expect(next.childLinks.get("a")?.map((l) => l.destination_id)).toEqual(["blk_onlya00000"])
     expect(next.childLinks.get("b")?.map((l) => l.destination_id)).toEqual(["blk_b000000000"])
     // Pages are not blocks; unknown ids are nothing.
     expect(deleteBlockOps("a", linked)).toEqual([])
     expect(deleteBlockOps("nope", linked)).toEqual([])
+  })
+})
+
+describe("deletePageOps", () => {
+  it("deletes the page, its exclusive content and its basket; a shared block survives", () => {
+    const snapshot0 = graphOf({
+      a: "- mine\n  id:: blk_mine000000\n  - deep\n    id:: blk_deep000000\n- shared\n  id:: blk_shared0000\n",
+      b: "- b\n  id:: blk_b000000000\n",
+    })
+    // b holds `shared` too; `stray` is homed to a but reached by nothing.
+    const snapshot = applyOps(
+      snapshot0,
+      [
+        { op: "link", source: "b", destination: "blk_shared0000", sortKey: "a1" },
+        { op: "create", id: "blk_stray00000", type: "text", text: "stray", props: null, home: "a" },
+      ],
+      NOW,
+    )
+    const ids = deletePageOps("a", snapshot)
+      .map((op) => (op as { id: string }).id)
+      .sort()
+    expect(ids).toEqual(["a", "blk_deep000000", "blk_mine000000", "blk_stray00000"])
+    const next = applyOps(snapshot, deletePageOps("a", snapshot), NOW)
+    expect(next.nodes.has("blk_shared0000")).toBe(true)
+    expect(walk(next, "b")).toContain("- shared")
   })
 })

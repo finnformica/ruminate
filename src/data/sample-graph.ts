@@ -77,10 +77,17 @@ const PAGES: SamplePage[] = [
 function sampleRows(now = 0): { nodes: NodeRow[]; links: LinkRow[] } {
   const nodes: NodeRow[] = []
   const links: LinkRow[] = []
-  const walk = (parentId: string, blocks: SampleBlock[]) => {
+  const walk = (pageId: string, parentId: string, blocks: SampleBlock[]) => {
     const keys = generateNKeysBetween(null, null, blocks.length)
     blocks.forEach((block, i) => {
-      nodes.push({ id: block.id, type: block.type, text: block.text, props: null, updated_at: now })
+      nodes.push({
+        id: block.id,
+        type: block.type,
+        text: block.text,
+        props: null,
+        updated_at: now,
+        home_id: pageId,
+      })
       links.push({
         source_id: parentId,
         destination_id: block.id,
@@ -88,7 +95,7 @@ function sampleRows(now = 0): { nodes: NodeRow[]; links: LinkRow[] } {
         sort_key: keys[i],
         updated_at: now,
       })
-      walk(block.id, block.children ?? [])
+      walk(pageId, block.id, block.children ?? [])
     })
   }
   for (const page of PAGES) {
@@ -99,7 +106,7 @@ function sampleRows(now = 0): { nodes: NodeRow[]; links: LinkRow[] } {
       props: propsJson(page.props ?? null),
       updated_at: now,
     })
-    walk(page.id, page.blocks)
+    walk(page.id, page.id, page.blocks)
   }
   return { nodes, links }
 }

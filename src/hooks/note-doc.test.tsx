@@ -7,8 +7,9 @@ import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import { emptyBlock, insertAfter, updateText } from "../blocks/ops"
 import { buildGraphSnapshot, docToGraph, pageDoc } from "../data/graph"
+import { applyOps, deleteBlockOps } from "../data/ops"
 import { githubUserAtom, isSignedOutAtom, sampleGraphAtom } from "../global-state"
-import { useNoteDoc } from "./note-doc"
+import { useBasketDoc, useNoteDoc } from "./note-doc"
 
 /**
  * The note page's doc, over the signed-out sample graph: the walk in, ops
@@ -117,6 +118,38 @@ describe("useNoteDoc", () => {
     const after = store.get(sampleGraphAtom)
     expect(after.nodes.get("blk_one0000000")).toBe(before.nodes.get("blk_one0000000"))
     expect(after.childLinks.get("n")).toBe(before.childLinks.get("n"))
+    unsubscribe()
+  })
+})
+
+describe("useBasketDoc", () => {
+  const OUTLINE =
+    "- one\n  id:: blk_one0000000\n  - under\n    id:: blk_under00000\n- two\n  id:: blk_two0000000\n"
+
+  it("is empty until a block falls out of reach, then edits it like the outline", async () => {
+    const { store, wrapper, unsubscribe } = await signedOutStore({ n: OUTLINE })
+    // `graphOf`-style seeding carries no homes; home `under` to n by hand.
+    const homed = store.get(sampleGraphAtom)
+    homed.nodes.set("blk_under00000", { ...homed.nodes.get("blk_under00000")!, home_id: "n" })
+    store.set(sampleGraphAtom, { ...homed })
+    const { result } = renderHook(() => useBasketDoc("n"), { wrapper })
+    expect(result.current.count).toBe(0)
+
+    act(() => {
+      const graph = store.get(sampleGraphAtom)
+      store.set(sampleGraphAtom, applyOps(graph, deleteBlockOps("blk_one0000000", graph), 5))
+    })
+    expect(result.current.count).toBe(1)
+    expect(body(serialize(result.current.doc!))).toBe("- under\n")
+
+    // Editing the basket row is a setText on the block; the outline is untouched.
+    act(() => result.current.setDoc(updateText(result.current.doc!, "blk_under00000", "kept")))
+    expect(store.get(sampleGraphAtom).nodes.get("blk_under00000")?.text).toBe("kept")
+    expect(body(serialize(pageDoc("n", store.get(sampleGraphAtom))!))).toBe("- two\n")
+    // Deleting it from the basket deletes it for good.
+    act(() => result.current.setDoc(parse("")))
+    expect(result.current.count).toBe(0)
+    expect(store.get(sampleGraphAtom).nodes.has("blk_under00000")).toBe(false)
     unsubscribe()
   })
 })

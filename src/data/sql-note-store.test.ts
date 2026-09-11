@@ -176,7 +176,7 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect((await store.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "3" },
+      { value: "4" },
     ])
     expect(
       await driver.exec("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"),
@@ -199,12 +199,50 @@ describe("openSqlNoteStore", () => {
     // columns, it never rewrites rows.
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "3" },
+      { value: "4" },
     ])
     // The row is live: a nullable column means NULL = never deleted.
     expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = ?", ["a"])).toEqual([
       { deleted_at: null },
     ])
+  })
+
+  it("adds home_id to a v3 database in place, keeping its rows", async () => {
+    const driver = createNodeSqlDriver()
+    // A v3 store: the real ladder, stopped one step short.
+    await driver.execScript(migration0001 + "\n" + migration0002)
+    await driver.execScript(
+      "ALTER TABLE nodes ADD COLUMN deleted_at INTEGER;" +
+        "ALTER TABLE link ADD COLUMN deleted_at INTEGER;" +
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '3');",
+    )
+    await driver.batch([
+      {
+        sql: "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?, ?, ?, ?, ?)",
+        params: ["a", "page", "a", null, 100],
+      },
+    ])
+    const store = await openSqlNoteStore(driver)
+    expect(await noteOf(store, "a")).toBe("\n")
+    expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
+      { value: "4" },
+    ])
+    // Unhomed until a pull brings the replica's backfill down.
+    expect(await driver.exec("SELECT home_id FROM nodes WHERE id = ?", ["a"])).toEqual([
+      { home_id: null },
+    ])
+  })
+
+  it("persists a created block's home and reads it back", async () => {
+    const { store } = await makeStoreWithDriver()
+    await seed(store, "a", "- one\n  id:: blk_one0000000\n")
+    const graph = await store.getGraph()
+    expect(graph.nodes.get("blk_one0000000")?.home_id).toBe("a")
+    expect(graph.nodes.get("a")?.home_id).toBeUndefined()
+    // A row pushed without a home (an older client) never clears one.
+    const rows = await store.getAllRows()
+    const one = rows.nodes.find((row) => row.id === "blk_one0000000")!
+    expect(one.home_id).toBe("a")
   })
 
   it("resets and re-migrates a database with an unknown schema_version", async () => {
@@ -215,7 +253,7 @@ describe("openSqlNoteStore", () => {
     const reopened = await openSqlNoteStore(driver)
     expect((await reopened.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "3" },
+      { value: "4" },
     ])
   })
 
