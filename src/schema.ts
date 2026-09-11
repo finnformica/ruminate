@@ -78,10 +78,6 @@ export type GitHubUser = z.infer<typeof githubUserSchema>
 
 export const fontSchema = z.enum(["sans", "serif", "handwriting"])
 
-export type TaskWithNote = Task & {
-  note: Note
-}
-
 export const widthSchema = z.enum(["fixed", "full"])
 
 export type Width = z.infer<typeof widthSchema>
