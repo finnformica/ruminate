@@ -234,9 +234,9 @@ describe("docToOps", () => {
     expect(walk(next, "a")).toContain("- stray")
   })
 
-  it("drops a desired edge that would close a loop", () => {
+  it("keeps a desired edge that closes a loop, and drops only a block under itself", () => {
     const snapshot = graphOf({ a: A })
-    // `deep` claiming `two` (its own ancestor) as a child.
+    // `deep` claiming `two` (its own ancestor) as a child: a loop, kept.
     const doc = pageDoc("a", snapshot)!
     const cyclic: BlockDoc = {
       ...doc,
@@ -246,7 +246,20 @@ describe("docToOps", () => {
       },
     }
     const ops = docToOps("a", cyclic, snapshot)
-    expect(ops).toEqual([])
+    expect(ops).toEqual([
+      { op: "link", source: "blk_deep000000", destination: "blk_two0000000", sortKey: "a0" },
+    ])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(pageDoc("a", next)!.blocks.blk_deep000000.children).toEqual(["blk_two0000000"])
+    // `deep` claiming itself: refused, nothing to save.
+    const selfish: BlockDoc = {
+      ...doc,
+      blocks: {
+        ...doc.blocks,
+        blk_deep000000: { ...doc.blocks.blk_deep000000, children: ["blk_deep000000"] },
+      },
+    }
+    expect(docToOps("a", selfish, snapshot)).toEqual([])
   })
 
   it("applying the ops of a walk again is the identity (property)", () => {

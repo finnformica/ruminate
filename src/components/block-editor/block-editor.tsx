@@ -133,11 +133,12 @@ function findReappeared(current: BlockDoc, restored: BlockDoc): string | null {
  *   (deleted since copy — the cut side of cut+paste) falls back to the
  *   clipboard content, still under its original ids, which is what makes
  *   cut+paste a true move.
- * - **Cycle**: the subtree to link contains the paste target or one of its
- *   ancestors — linking would close a loop, so that block falls back to a
- *   plain duplicate with fresh ids (the store's save-time cycle-drop remains
- *   the backstop).
  * - **No id** (an older payload): duplicate with fresh ids.
+ *
+ * Linking a block beneath one of its own descendants closes a loop, and a
+ * loop is a shape the graph holds (docs/graph-schema-v2.md, "Loops"): the
+ * outline shows it where it closes and no further. Only a block under
+ * itself is refused (the paste handler drops that root).
  *
  * A node the linked subtree shares with the rest of the doc, or with another
  * pasted root, is simply the same node in one more place — never reminted.
@@ -154,8 +155,6 @@ function embeddedPasteFragment(
   const target = idOfKey(targetKey)
   // Direct children of the insertion parent (the twin check's scope).
   const parentChildren = doc.blocks[target]?.children ?? []
-  // The row's own path: linking any of these beneath it would close a cycle.
-  const forbidden = new Set([target, ...ancestorKeys(targetKey).map(idOfKey)])
 
   const roots = embedded.filter(
     (block) => !(block.id !== undefined && parentChildren.includes(block.id)),
@@ -179,11 +178,10 @@ function embeddedPasteFragment(
     } else {
       const live = (resolved as Record<string, string | null>)[block.id] ?? null
       sub = live !== null ? parse(live) : clipboardBlocksToDocWithIds([block])
-    }
-    if (block.id !== undefined && Object.keys(sub.blocks).some((id) => forbidden.has(id))) {
-      // Cycle fallback: every id of `sub` collides with itself, so this is
-      // a full remint — a plain duplicate of the fragment's content.
-      sub = remintCollidingIds(sub, sub)
+      // A block the doc already holds keeps the doc's copy — the live subtree
+      // only supplies what this doc has not seen (a loop back into the doc
+      // names the doc's own block, and must not overwrite it).
+      for (const id of Object.keys(sub.blocks)) if (id in doc.blocks) delete sub.blocks[id]
     }
     out = {
       props: null,
@@ -852,6 +850,7 @@ export function BlockEditor({
   // as a true move) possible; both visible flavors drop them.
   const markdownOfRows = (keys: string[]): string => {
     const lines: string[] = []
+    const path = new Set<string>()
     const walk = (id: string, depth: number) => {
       const block = doc.blocks[id]
       if (!block) return
@@ -859,9 +858,15 @@ export function BlockEditor({
       // Markers are export-only: an ordered item is written `1.` here and
       // renumbered wherever it lands (the parse side reads runs by position);
       // a code block goes as its fence.
+      // A copy is a tree: a loop's closing occurrence is the block already
+      // above it in the copy, so it is left out (markdown would re-mint its
+      // repeated `id::` into a stray copy).
+      if (path.has(id)) return
       for (const line of blockLines(block)) lines.push(indent + line)
       lines.push(`${indent}  id:: ${block.id}`)
+      path.add(id)
       for (const childId of block.children) walk(childId, depth + 1)
+      path.delete(id)
     }
     for (const key of keys) walk(idOfKey(key), 0)
     return lines.join("\n")

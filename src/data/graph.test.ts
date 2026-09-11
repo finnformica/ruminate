@@ -406,7 +406,7 @@ describe("rollup (graph-side behavior)", () => {
     expect(rollup("p", snapshot)).toBe("a\n  id:: blk_a\nb\n  id:: blk_b\n")
   })
 
-  it("drops the back-edge of a corrupted (cyclic) graph so nothing can hang on it", () => {
+  it("rolls up a loop to where it closes, and nothing can hang on it", () => {
     const nodes = [row("p", "page", "p"), row("blk_x", "text", "x"), row("blk_y", "text", "y")]
     const links = [
       edge("p", "blk_x", "a0"),
@@ -414,10 +414,9 @@ describe("rollup (graph-side behavior)", () => {
       edge("blk_y", "blk_x", "a0"),
     ]
     const markdown = rollup("p", buildGraphSnapshot(nodes, links)) as string
-    // The walk keeps the first path to each node and drops the edge that
-    // would close the loop: every node renders once, the doc is a DAG, and
-    // every walk over it (export, render, navigation) terminates.
-    expect(markdown).toBe("x\n  id:: blk_x\n  y\n    id:: blk_y\n")
+    // The walk keeps the loop (y holds x) and the serializer writes x once
+    // more where the loop closes, as a leaf — then stops.
+    expect(markdown).toBe("x\n  id:: blk_x\n  y\n    id:: blk_y\n    x\n      id:: blk_x\n")
     // And deterministically: row input order does not change the output.
     const shuffled = buildGraphSnapshot([...nodes].reverse(), [...links].reverse())
     expect(rollup("p", shuffled)).toBe(markdown)
@@ -616,7 +615,7 @@ describe("docFromGraph (the walk, N roots)", () => {
     expect(docFromGraph(["blk_a"], dangling).blocks.blk_a.children).toEqual([])
   })
 
-  it("holds a node reached by two paths once, and never a back-edge", () => {
+  it("holds a node reached by two paths once, and a loop as a loop", () => {
     const doc = docFromGraph(["home", "other"], graph())
     expect(doc.blocks.blk_s.children).toEqual(["blk_t"])
     expect(doc.blocks.other.children).toEqual(["blk_s"])
@@ -624,9 +623,11 @@ describe("docFromGraph (the walk, N roots)", () => {
       [row("blk_a", "text", "a"), row("blk_b", "text", "b")],
       [edge("blk_a", "blk_b", "a0"), edge("blk_b", "blk_a", "a0")],
     )
-    const dag = docFromGraph(["blk_a"], cyclic)
-    expect(dag.blocks.blk_a.children).toEqual(["blk_b"])
-    expect(dag.blocks.blk_b.children).toEqual([])
+    // Each node once; b names a as its child — the loop is the doc's shape,
+    // and every walk over the doc ends where it closes (view.test.ts).
+    const looped = docFromGraph(["blk_a"], cyclic)
+    expect(looped.blocks.blk_a.children).toEqual(["blk_b"])
+    expect(looped.blocks.blk_b.children).toEqual(["blk_a"])
   })
 
   it("reads props into the block and unknown types as text", () => {

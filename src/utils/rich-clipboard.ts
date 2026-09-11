@@ -81,17 +81,24 @@ export function richClipboardFormats(blockMarkdown: string): { plain: string; ht
 /** The copied subtree as a plain tree; a block keeps its id only when the
  * source markdown declared it (parse-minted ids are meaningless elsewhere). */
 function docToClipboardBlocks(doc: BlockDoc, declared: Set<string>): ClipboardBlock[] {
+  // The payload is a tree: a loop's closing occurrence is the block already
+  // above it in the payload, so it is left out — the copy ends where the
+  // loop closes.
+  const path = new Set<string>()
   const build = (id: string): ClipboardBlock | null => {
     const block = doc.blocks[id]
-    if (!block) return null
+    if (!block || path.has(id)) return null
     const language = languageOf(block)
+    path.add(id)
+    const children = block.children.map(build).filter((b): b is ClipboardBlock => b !== null)
+    path.delete(id)
     return {
       ...(declared.has(id) ? { id } : {}),
       type: block.type,
       text: block.text,
       ...(language ? { language } : {}),
       ...(block.type === "image" && block.props ? { props: block.props } : {}),
-      children: block.children.map(build).filter((b): b is ClipboardBlock => b !== null),
+      children,
     }
   }
   return doc.rootBlockIds.map(build).filter((b): b is ClipboardBlock => b !== null)

@@ -61,6 +61,7 @@ function displayMarkdownOf(doc: BlockDoc): string {
   // prose has no markdown shape of its own and follows as a sibling at the
   // parent's depth — indenting it further would only merge it into the
   // paragraph above, or read as code.
+  const path = new Set<string>()
   const walk = (ids: string[], listDepth: number) => {
     let olRun = 0
     for (const id of ids) {
@@ -72,7 +73,11 @@ function displayMarkdownOf(doc: BlockDoc): string {
       const indent = "  ".repeat(listDepth)
       for (const line of displayLines(block, olRun)) lines.push(indent + line)
       previous = block
+      // A loop is written where it closes and no further.
+      if (path.has(id)) continue
+      path.add(id)
       walk(block.children, listItem ? listDepth + 1 : listDepth)
+      path.delete(id)
     }
   }
 

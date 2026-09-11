@@ -283,28 +283,6 @@ export function deleteSubtreeOps(blockId: string, snapshot: GraphSnapshot): Op[]
   }
   return [...unlinks, ...[...doomed].map((id) => ({ op: "delete", id }) as Op)]
 }
-
-/** Cut any desired edge that would close a loop through the page: DFS the
- * prospective graph (the doc's orders over the snapshot's) and drop
- * back-edges. Reachable only through cross-page id collisions. */
-function dropCycles(snapshot: GraphSnapshot, pageId: string, childrenOf: Map<string, string[]>) {
-  const childrenFor = (id: string): string[] =>
-    childrenOf.get(id) ?? (snapshot.childLinks.get(id) ?? []).map((link) => link.destination_id)
-  const onPath = new Set<string>()
-  const done = new Set<string>()
-  const visit = (id: string) => {
-    if (done.has(id)) return
-    onPath.add(id)
-    const children = childrenFor(id)
-    const keep = children.filter((childId) => !onPath.has(childId))
-    if (keep.length !== children.length && childrenOf.has(id)) childrenOf.set(id, keep)
-    for (const childId of keep) visit(childId)
-    onPath.delete(id)
-    done.add(id)
-  }
-  visit(pageId)
-}
-
 /**
  * The batch that makes the graph hold `doc` as page `pageId`'s content:
  *
@@ -324,10 +302,10 @@ function dropCycles(snapshot: GraphSnapshot, pageId: string, childrenOf: Map<str
  *   nothing behind. A block another page also holds survives untouched.
  *
  * Block ids that collide with a page id are re-minted (`docToParts`), and a
- * desired edge that would close a loop is dropped: never-lose-work over
- * rejecting the change. Applying the result to `snapshot` yields a graph
- * whose walk of `pageId` is `doc` (modulo those two repairs); applying the
- * ops for that walk again yields nothing.
+ * block is never linked under itself; any other loop is a shape the graph
+ * holds (docs/graph-schema-v2.md, "Loops"). Applying the result to
+ * `snapshot` yields a graph whose walk of `pageId` is `doc` (modulo those
+ * two repairs); applying the ops for that walk again yields nothing.
  */
 export function docToOps(
   pageId: NoteId,
@@ -336,7 +314,6 @@ export function docToOps(
   discard?: Iterable<string>,
 ): Op[] {
   const { nodes, childrenOf } = docToParts(pageId, doc, 0, reservedPageIds(snapshot, pageId))
-  dropCycles(snapshot, pageId, childrenOf)
   return partsToOps(
     pageId,
     nodes,
@@ -434,7 +411,10 @@ export function partsToOps(
     return set
   }
 
-  for (const [parentId, desired] of childrenOf) {
+  for (const [parentId, wanted] of childrenOf) {
+    // A block under itself is the one loop refused: it has no closing row to
+    // show. Every other loop is kept.
+    const desired = wanted.filter((id) => id !== parentId)
     const existing = snapshot.childLinks.get(parentId) ?? []
     const keys = reconcileSortKeys(
       existing.map((link) => ({ id: link.destination_id, sortKey: link.sort_key })),

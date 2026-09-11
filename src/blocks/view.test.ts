@@ -92,7 +92,7 @@ describe("occurrence keys", () => {
     expect(firstOccurrenceKey(shared, "nope")).toBeNull()
   })
 
-  it("never loop on a cyclic doc", () => {
+  it("show a loop where it closes, once, and never descend it", () => {
     const cyclic: BlockDoc = {
       props: null,
       rootBlockIds: ["x"],
@@ -101,8 +101,12 @@ describe("occurrence keys", () => {
         y: { id: "y", type: "ul", text: "y", children: ["x"] },
       },
     }
-    expect(occurrenceKeys(cyclic)).toEqual(["x", "x/y"])
-    expect(summary(buildRows(cyclic, { folds: NONE }))).toEqual(["x", "  x/y"])
+    expect(occurrenceKeys(cyclic)).toEqual(["x", "x/y", "x/y/x"])
+    const rows = buildRows(cyclic, { folds: NONE })
+    expect(summary(rows)).toEqual(["x", "  x/y", "    x/y/x"])
+    // The closing row is a leaf: no children to fold, marked as the loop.
+    expect(rows[2]).toMatchObject({ hasChildren: false, looped: true })
+    expect(rows[0].looped).toBeUndefined()
   })
 })
 

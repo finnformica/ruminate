@@ -21,11 +21,15 @@ import type { Block, BlockDoc } from "./types"
  * per depth. A type that writes its own lines (a code fence, an image's
  * `![caption](url)`) does so through its registry entry; a multi-line text
  * keeps its continuation lines at the block's indent. A block reached
- * from two parents is written out in both places — that is the feature.
+ * from two parents is written out in both places — that is the feature. A
+ * loop is written where it closes and no further: the block already on the
+ * path above is emitted once more, as a leaf (markdown is a tree; `parse`
+ * reads that second `id::` as a collision and re-mints it, so a loop does not
+ * survive a markdown round trip — the graph, not the markdown, holds it).
  */
 
-/** Walk depth cap — belt-and-braces so even a corrupted (cyclic) doc from a
- * bad sync can never hang the export. Mirrors the rollup's historic cap. */
+/** Walk depth cap — belt-and-braces so even a corrupted doc can never hang
+ * the export. Mirrors the rollup's historic cap. */
 const MAX_SERIALIZE_DEPTH = 64
 
 /**
@@ -44,6 +48,7 @@ export function blockLines(block: Block, olPosition = 1): string[] {
 
 export function serialize(doc: BlockDoc): string {
   const lines: string[] = []
+  const path = new Set<string>()
 
   const emitBlock = (id: string, depth: number, olPosition: number) => {
     const block: Block | undefined = doc.blocks[id]
@@ -53,8 +58,10 @@ export function serialize(doc: BlockDoc): string {
     for (const line of blockLines(block, olPosition)) lines.push(`${indent}${line}`)
     lines.push(`${indent}  id:: ${block.id}`)
 
-    if (depth + 1 >= MAX_SERIALIZE_DEPTH) return
+    if (path.has(id) || depth + 1 >= MAX_SERIALIZE_DEPTH) return
+    path.add(id)
     emitChildren(block.children, depth + 1)
+    path.delete(id)
   }
 
   const emitChildren = (ids: string[], depth: number) => {

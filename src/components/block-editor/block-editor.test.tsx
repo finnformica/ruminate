@@ -658,7 +658,7 @@ describe("paste as link (Ruminate payload with ids)", () => {
     expect(docIds(getByTestId).filter((id) => id === idB)).toHaveLength(1)
   })
 
-  it("falls back to duplicating when the live subtree contains the paste target's ancestry (cycle)", () => {
+  it("links a block beneath its own ancestry: the loop shows where it closes", () => {
     const CycleHarness = () => {
       const [doc, setDoc] = useState<BlockDoc>(() => withStarter(parse("P\n  T")))
       const idP = doc.rootBlockIds[0]
@@ -667,7 +667,7 @@ describe("paste as link (Ruminate payload with ids)", () => {
           ids.map((id) => [
             id,
             // The live view of the pasted node contains P — linking it under
-            // P would close a loop.
+            // T closes a loop through P.
             `- X live\n  id:: ${id}\n  - P again\n    id:: ${idP}\n`,
           ]),
         )
@@ -685,12 +685,40 @@ describe("paste as link (Ruminate payload with ids)", () => {
     const formats = richClipboardFormats("- X\n  id:: blk_xcycle0000")
     paste(root, formats.plain, formats.html)
 
-    // The content lands as a plain duplicate under T: fresh ids throughout,
-    // P's id appears exactly once, and the original id was not linked in.
-    expect(serializedLines(getByTestId)).toEqual(["P", "  T", "    - X live", "      - P again"])
+    // X is linked under T with its live content — P included, which closes
+    // the loop: the serialization shows P once more beneath X and stops.
+    expect(serializedLines(getByTestId)).toEqual(["P", "  T", "    - X live", "      P"])
     const ids = docIds(getByTestId)
-    expect(ids).not.toContain("blk_xcycle0000")
-    expect(ids.filter((id) => id === idP)).toHaveLength(1)
+    expect(ids).toContain("blk_xcycle0000")
+    expect(ids.filter((id) => id === idP)).toHaveLength(2)
+  })
+
+  it("renders a loop's closing row once, with an inert chevron and nothing beneath it", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a"],
+      blocks: {
+        a: { id: "a", type: "ul", text: "A", children: ["b"] },
+        b: { id: "b", type: "ul", text: "B", children: ["a"] },
+      },
+    }
+    const { container, getByTestId } = render(<Harness initialDoc={doc} />)
+    expect(serializedLines(getByTestId)).toEqual(["- A", "  - B", "    - A"])
+    const rows = container.querySelectorAll("[data-occurrence]")
+    expect([...rows].map((r) => r.getAttribute("data-occurrence"))).toEqual(["a", "a/b", "a/b/a"])
+    // The closing row keeps a chevron — the block has children, above it —
+    // pinned, inert and explained, never a working fold toggle.
+    expect(rows[2].querySelector('[aria-label="Collapse"], [aria-label="Expand"]')).toBeNull()
+    const loop = rows[2].querySelector<HTMLButtonElement>('[aria-label="Loop detected"]')!
+    expect(loop).not.toBeNull()
+    expect(loop.getAttribute("aria-disabled")).toBe("true")
+    expect(loop.className).toContain("cursor-not-allowed")
+    expect(loop.className).toContain("block-toggle-pinned")
+    fireEvent.click(loop)
+    expect(serializedLines(getByTestId)).toEqual(["- A", "  - B", "    - A"])
+    // Ordinary parents are unchanged: a real toggle, no explanation.
+    expect(rows[0].querySelector('[aria-label="Collapse"]')).not.toBeNull()
+    expect(container.querySelectorAll('[aria-label="Loop detected"]')).toHaveLength(1)
   })
 
   it("keeps the same ids through a cut + paste (a true move)", () => {

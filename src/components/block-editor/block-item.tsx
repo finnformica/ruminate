@@ -457,8 +457,13 @@ export function BlockItem({
   }
 
   // Whether this block owns a collapse toggle at all: parents only, and never
-  // the zoom title (the editor renders its children itself, at depth 0).
-  const hasToggle = hasChildren && !zoomTitle
+  // the zoom title (the editor renders its children itself, at depth 0). The
+  // row that closes a loop keeps its chevron too — the block has children,
+  // they are simply above it — pinned, greyed and inert, with the reason in
+  // its tooltip (zoom in to go round again).
+  const looped = !!occurrence.looped
+  const hasToggle = (hasChildren || looped) && !zoomTitle
+  const pinned = isCollapsed || looped
   // Every block type but an image owns the 15px marker slot. Most carry a KEY there — a
   // bullet dot, heading `#`, number, quote `>` — and the key is pure chrome,
   // so on a parent it SWAPS for the chevron: hover the slot and the key fades
@@ -493,13 +498,21 @@ export function BlockItem({
   // surface's left edge, its glyph tucked just outside it.
   const toggle = hasToggle ? (
     <IconButton
-      aria-label={isCollapsed ? "Expand" : "Collapse"}
+      aria-label={looped ? "Loop detected" : isCollapsed ? "Expand" : "Collapse"}
       size="small"
-      disableTooltip
+      // A real toggle explains itself; the loop's needs the tooltip, so it
+      // stays enabled for the pointer (a disabled button gets no hover) and
+      // is inert by hand: `aria-disabled`, no-op click, not-allowed cursor.
+      disableTooltip={!looped}
+      tooltipSide="top"
+      aria-disabled={looped || undefined}
       tabIndex={-1}
-      onClick={() => api.toggleCollapse(occurrence.key)}
+      onClick={looped ? undefined : () => api.toggleCollapse(occurrence.key)}
       className={cx(
-        "block-toggle absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150 active:scale-[0.92] motion-reduce:active:scale-100",
+        "block-toggle absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150",
+        looped
+          ? "cursor-not-allowed enabled:hover:bg-transparent enabled:active:bg-transparent"
+          : "active:scale-[0.92] motion-reduce:active:scale-100",
         // IconButton's default radius is the 8px base — on a 20px square that
         // reads as a pill. The small radius (4px) keeps it a square.
         "rounded-sm",
@@ -512,7 +525,7 @@ export function BlockItem({
         // the chevron's own fade-in is the whole reveal. It stays 20px wide
         // on coarse pointers too: 28px would reach the checkbox.
         toggleBeside && "enabled:hover:bg-transparent enabled:active:bg-transparent coarse:w-5",
-        isCollapsed && "block-toggle-pinned",
+        pinned && "block-toggle-pinned",
       )}
     >
       <svg
@@ -522,7 +535,7 @@ export function BlockItem({
         aria-hidden
         className={cx(
           "transition-transform duration-200 ease-[var(--ease-out-strong)] motion-reduce:transition-none",
-          isCollapsed ? "rotate-0" : "rotate-90",
+          isCollapsed || looped ? "rotate-0" : "rotate-90",
         )}
       >
         {/* A filled triangle with softened corners: the fill plus a round-
@@ -539,7 +552,7 @@ export function BlockItem({
   ) : null
   // The key of a swapping parent: fades out as the chevron fades in, and is
   // hidden outright while collapsed (the pinned chevron stands in for it).
-  const keyClass = hasToggle ? cx("block-key", isCollapsed && "block-key-hidden") : undefined
+  const keyClass = hasToggle ? cx("block-key", pinned && "block-key-hidden") : undefined
   // The slot of a swapping parent is the chevron's hover area (see
   // `.block-toggle-slot` in block-editor.css). Not a todo's: its chevron is
   // beside, and hovering the checkbox must mean the checkbox.

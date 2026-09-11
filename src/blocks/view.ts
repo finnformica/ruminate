@@ -1,4 +1,4 @@
-import type { BlockDoc } from "./types"
+import type { Block, BlockDoc } from "./types"
 
 /**
  * The view: the flat list of rows a document renders as.
@@ -33,6 +33,53 @@ export interface Occurrence {
   guideKeys: string[]
   /** The zoomed block, rendered as the view's title (no toggle, no guides). */
   zoomTitle: boolean
+  /**
+   * This occurrence closes a loop: the block is already on the path above it
+   * (`a/b/a`). It is shown once here, as a leaf — nothing beneath it is
+   * walked, so the outline ends where the loop closes. Zooming into it starts
+   * a fresh path, which is how a reader descends deliberately.
+   */
+  looped?: boolean
+}
+
+/** One step of `walkDoc`. */
+export interface DocWalkStep {
+  block: Block
+  key: string
+  parentKey: string | null
+  depth: number
+  index: number
+  /** The block is already on the current path: shown here, not descended. */
+  looped: boolean
+}
+
+/**
+ * Depth-first over a doc's occurrences from `ids`: every path from a root
+ * to a block, a block reached by two paths visited twice. The one rule every
+ * walk over a doc shares: a block already on the current path is visited
+ * once more as a leaf (`looped`) and never descended, so a doc holding a
+ * loop (docs/graph-schema-v2.md, "Loops") ends where the loop closes rather
+ * than hanging. Return `false` from `visit` to skip a block's children.
+ */
+export function walkDoc(
+  doc: BlockDoc,
+  ids: string[],
+  visit: (step: DocWalkStep) => boolean | void,
+  parentKey: string | null = null,
+  depth = 0,
+  path: Set<string> = new Set(),
+): void {
+  ids.forEach((id, index) => {
+    const block = doc.blocks[id]
+    if (!block) return
+    const looped = path.has(id)
+    const key = keyOf(parentKey, id)
+    const descend = visit({ block, key, parentKey, depth, index, looped })
+    if (looped || descend === false) return
+    path.add(id)
+    walkDoc(doc, block.children, visit, key, depth + 1, path)
+    path.delete(id)
+  })
 }
 
 /** The key of `id` occurring under `parentKey` (null = a root). */
@@ -80,25 +127,14 @@ export function hasOccurrence(doc: BlockDoc, key: string): boolean {
 
 /**
  * Every occurrence key of the document, depth-first, folds ignored. A block
- * reachable twice yields two keys. Guards against a cycle (a doc built by
- * hand — the graph walk never produces one) by not re-entering an id already
- * on the current path.
+ * reachable twice yields two keys; a loop's closing occurrence is one key
+ * (`walkDoc`).
  */
 export function occurrenceKeys(doc: BlockDoc): string[] {
   const keys: string[] = []
-  const path = new Set<string>()
-  const walk = (ids: string[], parentKey: string | null) => {
-    for (const id of ids) {
-      const block = doc.blocks[id]
-      if (!block || path.has(id)) continue
-      const key = keyOf(parentKey, id)
-      keys.push(key)
-      path.add(id)
-      walk(block.children, key)
-      path.delete(id)
-    }
-  }
-  walk(doc.rootBlockIds, null)
+  walkDoc(doc, doc.rootBlockIds, ({ key }) => {
+    keys.push(key)
+  })
   return keys
 }
 
@@ -150,9 +186,13 @@ export function buildRows(
     const numbers = olPositions(doc, ids)
     ids.forEach((id, index) => {
       const block = doc.blocks[id]
-      if (!block || path.has(id)) return
+      if (!block) return
+      // The block is already on the path above: this row closes a loop. It is
+      // a leaf here — no toggle, nothing beneath — so the outline ends where
+      // the loop closes (zoom into it to go round again).
+      const looped = path.has(id)
       const key = keyOf(parentKey, id)
-      const hasChildren = block.children.length > 0
+      const hasChildren = !looped && block.children.length > 0
       const collapsed = hasChildren && folds.has(key)
       rows.push({
         key,
@@ -165,6 +205,7 @@ export function buildRows(
         collapsed,
         guideKeys,
         zoomTitle: false,
+        ...(looped ? { looped: true } : {}),
       })
       if (hasChildren && !collapsed) {
         path.add(id)

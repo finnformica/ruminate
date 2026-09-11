@@ -169,11 +169,20 @@ links ordered by `sort_key`, depth-first, serialize each node by type. A node
 reached from two parents renders fully in both places — that is the feature,
 not a bug.
 
-**Cycles: forbidden at write.** Adding a link P→C is rejected if P is
-reachable from C (ancestor check over the in-memory adjacency map — cheap at
-this scale). The renderer additionally enforces a hard depth cap as
-belt-and-braces, so even a corrupted graph (bad sync merge) cannot hang the
-walk.
+**Loops: allowed, shown where they close.** A block may hold a block above
+it — the graph is a graph. The only link refused is a block under itself
+(`docToOps` drops it; paste refuses it), because that loop has no closing
+row to show. Every walk guards by **path**, not by visited set: a block
+already on the path from the root is visited once more where the loop
+closes, as a leaf — no toggle, nothing beneath — and never descended
+(`walkDoc`, src/blocks/view.ts, and the same rule inline in the serializer,
+the display markdown, the outline, the search index, the clipboard payload
+and the copy). A block reached by two _different_ paths is still two rows,
+as before. Zooming into the closing row starts a fresh path, which is how a
+reader descends deliberately. The renderer keeps a hard depth cap as
+belt-and-braces. Markdown is a tree, so a loop is written to where it closes
+and no further, and does not survive a markdown round trip (`parse` re-mints
+the repeated `id::`): the graph, not the markdown, holds it.
 
 **Remove = unlink; delete is explicit; nothing cascades.** Removing node X
 from the outline in the context of parent P (⌫ on the row, Cut, the menu's
@@ -223,8 +232,8 @@ first time a note is opened on a device it fills in that note's collapsed set
 in localStorage (one set of node ids — collapsed means folded, everything else
 is open), and it is never consulted again. Afterwards a toggle simply adds or
 removes an id, nodes added later start expanded, and a device that loses its
-localStorage re-seeds. The depth cap from the cycle policy doubles as the
-guard against pathologically deep transclusion chains.
+localStorage re-seeds. The renderer's depth cap doubles as the guard against
+pathologically deep transclusion chains.
 
 ## Rollup test plan
 
