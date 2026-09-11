@@ -870,7 +870,7 @@ export function BlockItem({
                 onPaste={handlePaste}
                 onBlur={() => api.setFocus(null)}
                 className={cx(
-                  "min-w-0 flex-1 resize-none overflow-hidden font-content leading-relaxed text-text outline-none placeholder:text-text-tertiary",
+                  "min-w-0 flex-1 resize-none overflow-hidden font-content leading-relaxed text-text outline-none [overflow-wrap:anywhere] placeholder:text-text-tertiary",
                   // The panel supplies a code block's surface and padding.
                   codePanel ?? "border-none bg-transparent p-0",
                   typo,
@@ -894,7 +894,11 @@ export function BlockItem({
               data-testid="block-body"
               data-block-id={block.id}
               className={cx(
-                "min-h-[1lh] min-w-0 flex-1 outline-none",
+                // A long link or an unbroken word breaks rather than running
+                // off a narrow screen (the textarea wraps the same way).
+                // pre-wrap: the text shows exactly as stored (newlines, runs
+                // of spaces, a leading tab), as the textarea shows it.
+                "min-h-[1lh] min-w-0 flex-1 whitespace-pre-wrap outline-none [overflow-wrap:anywhere]",
                 !readOnly && "cursor-text",
                 readOnly && api.activate && "cursor-pointer",
                 typo,

@@ -96,7 +96,7 @@ export function NoteTitle({
     // heading's does — right-aligned, overflowing left when the 3xl glyph
     // outgrows 15px — so the title reads as the outline's top heading. (27px
     // is arbitrary-valued — the spacing scale has no 6.75 step.)
-    <h1 className="relative font-content text-3xl font-bold leading-tight tracking-[-0.02em]">
+    <h1 className="relative font-content text-3xl font-bold leading-tight tracking-[-0.02em] [overflow-wrap:anywhere]">
       {/* The hanging # inherits the h1's full typography — same size as the title. */}
       <Hash className="pointer-events-none absolute left-1 top-0 flex w-[15px] justify-end" />
       {editing ? (

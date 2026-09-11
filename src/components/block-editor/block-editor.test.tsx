@@ -123,6 +123,59 @@ function serializedLines(getByTestId: (id: string) => HTMLElement): string[] {
     .filter((l) => !l.includes("id::") && l.trim() !== "")
 }
 
+describe("BlockEditor text wrapping", () => {
+  /** A one-block doc with exactly this text (markdown cannot express these). */
+  const docWith = (text: string): BlockDoc => ({
+    props: null,
+    rootBlockIds: ["a"],
+    blocks: { a: { id: "a", type: "text", text, children: [] } },
+  })
+  const bodyOf = (container: HTMLElement) =>
+    container.querySelector<HTMLElement>('[data-testid="block-body"]')!
+
+  it("shows a block's text as stored: leading markers and tabs stay visible", () => {
+    for (const text of ["- not a bullet", "# not a heading", "> not a quote", "1. not a list"]) {
+      const { container, unmount } = render(<Harness initialDoc={docWith(text)} />)
+      const body = bodyOf(container)
+      expect(body.textContent).toBe(text)
+      expect(body.querySelector("ul, ol, li, h1, blockquote")).toBeNull()
+      unmount()
+    }
+    const { container } = render(<Harness initialDoc={docWith("\tTabbed prose that must wrap")} />)
+    expect(bodyOf(container).textContent).toBe("\tTabbed prose that must wrap")
+    expect(bodyOf(container).className).toContain("whitespace-pre-wrap")
+  })
+
+  it("a fence inside a text block stays a visible fence, wrapping as text", () => {
+    const text = "```\nconst reallyLongVariableName = someFunctionCall(anotherArgument)"
+    const { container } = render(<Harness initialDoc={docWith(text)} />)
+    const body = bodyOf(container)
+    expect(body.querySelector("pre")).toBeNull()
+    expect(body.textContent).toBe(text)
+  })
+
+  it("still applies inline formatting", () => {
+    const { container } = render(
+      <Harness initialDoc={docWith("**bold** and `code` and [a link](https://example.com)")} />,
+    )
+    const body = bodyOf(container)
+    expect(body.querySelector("strong")!.textContent).toBe("bold")
+    expect(body.querySelector("code")!.textContent).toBe("code")
+    expect(body.querySelector("a")!.getAttribute("href")).toBe("https://example.com")
+  })
+
+  it("lets a long unbroken word (a URL) break instead of overflowing the row", () => {
+    const { container } = render(
+      <Harness initial={"https://example.com/a/very/long/path/that/never/breaks"} />,
+    )
+    const body = container.querySelector('[data-testid="block-body"]')!
+    expect(body.className).toContain("[overflow-wrap:anywhere]")
+    // The edit textarea wraps the same way, so switching modes never reflows.
+    fireEvent.doubleClick(body)
+    expect(container.querySelector("textarea")!.className).toContain("[overflow-wrap:anywhere]")
+  })
+})
+
 describe("BlockEditor focus + keyboard", () => {
   it("starts a new note in edit mode with the textarea focused", () => {
     const { container } = render(<Harness initial="" startEditing />)
