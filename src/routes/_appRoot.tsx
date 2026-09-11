@@ -55,7 +55,7 @@ function RouteComponent() {
   return (
     <div
       ref={rootRef}
-      className="flex h-screen w-screen flex-col bg-bg pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] print:h-auto print:w-full [@supports(height:100svh)]:h-[100svh]"
+      className="app-frame flex w-screen flex-col bg-bg pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] print:w-full"
       data-vaul-drawer-wrapper=""
     >
       <AppLayout>
