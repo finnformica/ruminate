@@ -83,7 +83,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 - `src/styles/` - CSS files and styling
 - `worker/` - Cloudflare Worker (serves the SPA + API routes)
 - `migrations/` - D1 migrations, shared with the local store's schema ladder
-- `docs/` - Living design and reference docs; `docs/archive/` holds superseded designs
+- `docs/` - Living design and reference docs
 - `e2e/` - Visual regression baselines and runner
 
 ## Development Notes
