@@ -223,8 +223,8 @@ export function BlockEditor({
   onChange: (doc: BlockDoc) => void
   /** The note this doc is the page of — what "Copy link to block" links into. */
   noteId?: string
-  /** How many places a block appears across the corpus (the context menu's
-   * "Delete" / "Remove from here" wording). Absent = only here. */
+  /** How many places a block appears across the corpus (whether the context
+   * menu offers Unlink beside Delete). Absent = only here. */
   parentCountOf?: (id: string) => number
   /** Delete a block from every place it appears (the graph-level delete);
    * absent standalone, where the menu offers only the row's removal. */
@@ -1077,10 +1077,6 @@ export function BlockEditor({
       const next = updateBlock(doc, id, { type })
       if (next !== doc) history.commit(doc, next, { type: "structural" })
     },
-    indent: (key) => runOnRow("indent", key),
-    outdent: (key) => runOnRow("outdent", key),
-    moveUp: (key) => runOnRow("moveBlockUp", key),
-    moveDown: (key) => runOnRow("moveBlockDown", key),
     duplicate: (key) => runOnRow("duplicateBelow", key),
     toggleCollapse: (key) => toggleCollapse(key),
     zoomInto: (id) => navigateZoom(id),

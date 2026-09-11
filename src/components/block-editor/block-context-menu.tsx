@@ -12,11 +12,16 @@ import { CopyIcon16, EditIcon16, TrashIcon16 } from "../icons"
  * by the editor on any row it owns (never in read-only views); the editor
  * supplies the row (`target`) and the actions, this file the menu.
  *
- * Deleting is graph-aware. A row is one place a block appears: **Delete**
- * removes the row, and a block still held elsewhere survives there. When the
- * block appears in more than one place the menu says so — **Remove from
- * here** for the row, and **Delete everywhere** for the block itself, which
- * unlinks it from every parent across the corpus (`deleteBlockOps`).
+ * Deleting is graph-aware. A row is one place a block appears. On a block
+ * held only here, **Delete** removes the row (the editor's undoable
+ * delete). On a block held in more than one place the menu offers
+ * **Unlink**, which takes it out of this place and leaves it everywhere
+ * else, and **Delete**, which removes the block itself from every place it
+ * appears (`deleteBlockOps`), with the place count beside it so the reach
+ * is clear.
+ *
+ * Structure moves (indent, outdent, move up/down) are keyboard-only: the
+ * menu is for what a pointer cannot already do.
  */
 
 /** The row the menu was opened on. */
@@ -33,10 +38,6 @@ export interface BlockMenuTarget {
 export interface BlockMenuActions {
   edit: (key: string) => void
   setType: (id: string, type: BlockType) => void
-  indent: (key: string) => void
-  outdent: (key: string) => void
-  moveUp: (key: string) => void
-  moveDown: (key: string) => void
   duplicate: (key: string) => void
   toggleCollapse: (key: string) => void
   zoomInto: (id: string) => void
@@ -140,18 +141,6 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
         </Menu.Portal>
       </Menu.SubmenuRoot>
       <DropdownMenu.Separator />
-      <DropdownMenu.Item shortcut={["Tab"]} onClick={() => actions.indent(key)}>
-        Indent
-      </DropdownMenu.Item>
-      <DropdownMenu.Item shortcut={["⇧", "Tab"]} onClick={() => actions.outdent(key)}>
-        Outdent
-      </DropdownMenu.Item>
-      <DropdownMenu.Item shortcut={["⌥", "↑"]} onClick={() => actions.moveUp(key)}>
-        Move up
-      </DropdownMenu.Item>
-      <DropdownMenu.Item shortcut={["⌥", "↓"]} onClick={() => actions.moveDown(key)}>
-        Move down
-      </DropdownMenu.Item>
       <DropdownMenu.Item shortcut={["⌥", "⇧", "↓"]} onClick={() => actions.duplicate(key)}>
         Duplicate
       </DropdownMenu.Item>
@@ -177,26 +166,32 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
         </DropdownMenu.Item>
       ) : null}
       <DropdownMenu.Separator />
-      <DropdownMenu.Item
-        icon={<TrashIcon16 />}
-        variant="danger"
-        shortcut={["⌫"]}
-        onClick={() => actions.remove(key)}
-      >
-        {shared ? "Remove from here" : "Delete"}
-      </DropdownMenu.Item>
       {shared && actions.deleteEverywhere ? (
+        <>
+          <DropdownMenu.Item shortcut={["⌫"]} onClick={() => actions.remove(key)}>
+            Unlink
+          </DropdownMenu.Item>
+          <DropdownMenu.Item
+            icon={<TrashIcon16 />}
+            variant="danger"
+            trailingVisual={
+              <span className="text-sm text-text-secondary">{target.places} places</span>
+            }
+            onClick={() => actions.deleteEverywhere?.(id)}
+          >
+            Delete
+          </DropdownMenu.Item>
+        </>
+      ) : (
         <DropdownMenu.Item
           icon={<TrashIcon16 />}
           variant="danger"
-          trailingVisual={
-            <span className="text-sm text-text-secondary">{target.places} places</span>
-          }
-          onClick={() => actions.deleteEverywhere?.(id)}
+          shortcut={["⌫"]}
+          onClick={() => actions.remove(key)}
         >
-          Delete everywhere
+          Delete
         </DropdownMenu.Item>
-      ) : null}
+      )}
     </>
   )
 }

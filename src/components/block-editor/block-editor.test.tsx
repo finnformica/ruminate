@@ -1938,25 +1938,18 @@ describe("BlockEditor context menu", () => {
   it("opens on a row with the standard actions, and selects that row", async () => {
     const { container } = render(<Harness initial={"A\nB\nC"} />)
     const menu = await openMenuOn(container, 1)
-    for (const label of [
-      "Edit",
-      "Turn into",
-      "Indent",
-      "Outdent",
-      "Move up",
-      "Move down",
-      "Duplicate",
-      "Zoom into",
-      "Copy",
-      "Delete",
-    ]) {
+    for (const label of ["Edit", "Turn into", "Duplicate", "Zoom into", "Copy", "Delete"]) {
       expect(menu.textContent).toContain(label)
     }
     // The row under the pointer becomes the selection (and the menu's target).
     expect(highlightedText(container)).toBe("B")
-    // Not shared: the plain "Delete" wording, no corpus-wide delete.
-    expect(menu.textContent).not.toContain("Remove from here")
-    expect(menu.textContent).not.toContain("Delete everywhere")
+    // Not shared: Delete alone, nothing to unlink from.
+    expect(menu.textContent).not.toContain("Unlink")
+    expect(menu.textContent).not.toContain("places")
+    // Structure moves stay on the keyboard.
+    for (const label of ["Indent", "Outdent", "Move up", "Move down"]) {
+      expect(menu.textContent).not.toContain(label)
+    }
   })
 
   it("Delete removes the row (an undoable edit)", async () => {
@@ -1978,36 +1971,29 @@ describe("BlockEditor context menu", () => {
     expect(serializedLines(getByTestId)).toEqual(["# A", "B"])
   })
 
-  it("Indent moves the row under the one above", async () => {
-    const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
-    await openMenuOn(container, 1)
-    await pick("Indent")
-    expect(serializedLines(getByTestId)).toEqual(["A", "  B"])
-  })
-
-  it("a block held in more than one place offers Remove from here and Delete everywhere", async () => {
+  it("a block held in more than one place offers Unlink, and Delete reaches every place", async () => {
     const deleteEverywhere = vi.fn()
     const { container, getByTestId } = render(
       <Harness initial={"A\nB"} parentCountOf={() => 2} onDeleteEverywhere={deleteEverywhere} />,
     )
     const menu = await openMenuOn(container, 1)
-    expect(menu.textContent).toContain("Remove from here")
-    expect(menu.textContent).toContain("Delete everywhere")
+    expect(menu.textContent).toContain("Unlink")
+    expect(menu.textContent).toContain("Delete")
     expect(menu.textContent).toContain("2 places")
     const id = getByTestId("serialized").textContent!.match(/id:: (\S+)\n?$/)![1]
-    await pick("Delete everywhere")
+    await pick("Delete")
     expect(deleteEverywhere).toHaveBeenCalledWith(id)
     // The graph-level delete is the host's; the row is left for the snapshot
     // to drop, so nothing was removed by the editor itself.
     expect(serializedLines(getByTestId)).toEqual(["A", "B"])
   })
 
-  it("Remove from here drops only this row", async () => {
+  it("Unlink drops only this row", async () => {
     const { container, getByTestId } = render(
       <Harness initial={"A\nB"} parentCountOf={() => 2} onDeleteEverywhere={() => {}} />,
     )
     await openMenuOn(container, 1)
-    await pick("Remove from here")
+    await pick("Unlink")
     expect(serializedLines(getByTestId)).toEqual(["A"])
   })
 
