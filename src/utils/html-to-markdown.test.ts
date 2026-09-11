@@ -99,3 +99,12 @@ describe("htmlToMarkdown", () => {
     expect(htmlToMarkdown(html)).toBe("- item\n  detail")
   })
 })
+
+describe("code block language", () => {
+  it('reads the language off a <code class="language-…"> inside <pre>', () => {
+    expect(htmlToMarkdown('<pre><code class="hljs language-rust">fn main() {}</code></pre>')).toBe(
+      "```rust\nfn main() {}\n```",
+    )
+    expect(htmlToMarkdown("<pre>plain</pre>")).toBe("```\nplain\n```")
+  })
+})

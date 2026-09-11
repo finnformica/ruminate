@@ -150,34 +150,24 @@ describe("rollup equivalence (named cases)", () => {
     expect(page?.props).toBe(JSON.stringify({ updated_at: "2026-08-31T09:30:00.000Z" }))
   })
 
-  it("does not type fake markers inside code fences (every marker kind)", () => {
+  it("a code fence is one code block; nothing inside it is a marker", () => {
     const markdown =
       "```js\n- [ ] not a todo\n[x] not done\n# not a heading\n1. not a list\n> not a quote\n- not a bullet\n```\nafter\n"
     expectEquivalent(markdown)
-    // (parse itself rewrites the GFM `- [ ]` spelling to the bare `[ ]` marker
-    // before ingest sees it; the fence guard keeps it a text node either way.)
+    // The fence's lines are the block's text, verbatim — the GFM `- [ ]`
+    // spelling included, since nothing inside a fence is read as a marker.
     expect(types(markdown)).toEqual([
-      "text:```js",
-      "text:[ ] not a todo",
-      "text:[x] not done",
-      "text:# not a heading",
-      "text:1. not a list",
-      "text:> not a quote",
-      "text:- not a bullet",
-      "text:```",
+      "code:- [ ] not a todo\n[x] not done\n# not a heading\n1. not a list\n> not a quote\n- not a bullet",
       "text:after",
     ])
   })
 
-  it("an unclosed code fence keeps the rest of the note verbatim", () => {
+  it("an unclosed code fence keeps the rest of the note verbatim, as one code block", () => {
     const markdown = "before\n```\n# still code\n[ ] still code\n1. still code\n"
     expectEquivalent(markdown)
     expect(types(markdown)).toEqual([
       "text:before",
-      "text:```",
-      "text:# still code",
-      "text:[ ] still code",
-      "text:1. still code",
+      "code:# still code\n[ ] still code\n1. still code",
     ])
   })
 

@@ -107,6 +107,7 @@ describe("slashMenuItems", () => {
       "To-do",
       "Heading",
       "Quote",
+      "Code",
     ])
   })
 
@@ -193,5 +194,14 @@ describe("applySlashItem", () => {
   test("Text turns the block back into a paragraph", () => {
     const result = applySlashItem("/text", { start: 0, query: "text" }, text)
     expect(result).toEqual({ text: "", type: "text", caret: 0 })
+  })
+})
+
+describe("code in the turn-into list", () => {
+  test("offers Code for /code and /snippet", () => {
+    for (const q of ["code", "snip", "fence"]) {
+      const items = slashMenuItems(q, new Date("2026-01-01"))
+      expect(items.some((item) => item.kind === "block" && item.type === "code")).toBe(true)
+    }
   })
 })
