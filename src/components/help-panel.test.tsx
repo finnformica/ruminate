@@ -2,16 +2,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-// The panel needs only the open/closed atom; the markdown renderer (used by
-// the formatting examples) is far too heavy for jsdom.
+// The panel needs only the open/closed atom.
 vi.mock("../global-state", async () => {
   const { atom } = await import("jotai")
   return { isHelpPanelOpenAtom: atom(true) }
 })
-
-vi.mock("./markdown", () => ({
-  Markdown: ({ children }: { children: string }) => <span>{children}</span>,
-}))
 
 import { GROUP_ORDER } from "../shortcuts/registry"
 import { HelpSidebar } from "./help-panel"

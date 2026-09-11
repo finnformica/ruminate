@@ -2,7 +2,7 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "project": ["src/**/*.{ts,tsx}", "worker/**/*.ts"],
   "ignore": ["**/*.typegen.ts"],
-  "ignoreDependencies": ["buffer", "mdast", "unist"],
+  "ignoreDependencies": ["mdast", "unist"],
   "storybook": {
     "config": [".storybook/{main,preview}.{js,cjs,mjs,ts}"]
   }

@@ -25,7 +25,7 @@ export type Task = {
 export type Note = {
   /**
    * The note's stable, opaque identity — a minted `blk_` id
-   * (docs/page-identity-design.md). It never changes, so links and URLs to a
+   * (docs/archive/page-identity-design.md). It never changes, so links and URLs to a
    * note survive every rename. Daily and weekly notes are the exception and
    * keep their date ids (`2026-08-31`, `2026-W35`), where the date IS the
    * identity. Not a name: use `displayName` to show a note to a human.

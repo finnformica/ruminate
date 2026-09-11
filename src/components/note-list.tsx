@@ -15,7 +15,6 @@ import { Dice } from "./dice"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
 import {
-  GlobeIcon16,
   GridIcon16,
   ListIcon16,
   PinFillIcon12,
@@ -419,13 +418,10 @@ export function NoteList({
                       {note.pinned ? (
                         <PinFillIcon12 className="mr-2 coarse:mr-3 shrink-0 text-text-pinned" />
                       ) : null}
-                      {note?.props?.gist_id ? (
-                        <GlobeIcon16 className="mr-2 coarse:mr-3 shrink-0 text-border-focus" />
-                      ) : null}
                       <span className="truncate text-text-secondary">
                         {/* Show the note's name, matching the page header and
                             sidebar — ids are opaque now, so that is the title
-                            (docs/page-identity-design.md). */}
+                            (docs/archive/page-identity-design.md). */}
                         <span className="text-text">{note.displayName}</span>
                       </span>
                     </Link>

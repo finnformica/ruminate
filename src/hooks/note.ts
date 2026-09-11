@@ -6,9 +6,8 @@ import { pagePropsOps } from "../data/note-meta"
 import { deletePageOps, type Op } from "../data/ops"
 import { emittedPageTitle } from "../data/page-identity"
 import { useApplyOps } from "../data/store"
-import { dateMentionsAtom, githubUserAtom, graphSnapshotAtom, notesAtom } from "../global-state"
+import { dateMentionsAtom, graphSnapshotAtom, notesAtom } from "../global-state"
 import type { NoteId } from "../schema"
-import { deleteGist } from "../utils/gist"
 
 const EMPTY_MENTIONS: NoteId[] = []
 
@@ -63,7 +62,7 @@ export function useSetPageProps() {
 
 /**
  * Rename a note — which, since ids are minted and opaque
- * (docs/page-identity-design.md), is simply **setting the page node's
+ * (docs/archive/page-identity-design.md), is simply **setting the page node's
  * text**. Nothing else moves: the id, the URL, every deep link and every
  * block row are untouched, and exactly one row changes, so a rename cannot
  * clobber a concurrent edit under per-row LWW. An emptied title puts the
@@ -122,21 +121,13 @@ export function useCreateNote() {
   )
 }
 
-/** Delete a page and everything only it held (`deletePageOps`); a published
- * gist goes with it. */
+/** Delete a page and everything only it held (`deletePageOps`). */
 export function useDeleteNote() {
   const store = useStore()
   const apply = useApplyOps()
-  const githubUser = useAtomValue(githubUserAtom)
 
   return React.useCallback(
-    async (id: NoteId) => {
-      const note = store.get(notesAtom).get(id)
-      if (typeof note?.props.gist_id === "string" && githubUser?.token) {
-        await deleteGist({ githubToken: githubUser.token, gistId: note.props.gist_id })
-      }
-      apply(deletePageOps(id, store.get(graphSnapshotAtom)))
-    },
-    [store, apply, githubUser],
+    (id: NoteId) => apply(deletePageOps(id, store.get(graphSnapshotAtom))),
+    [store, apply],
   )
 }

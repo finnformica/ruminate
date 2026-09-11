@@ -1,13 +1,13 @@
 # Editor on the graph: retiring the markdown bridge
 
 > **Status (2026-09-10):** a design record. The bridge it describes has been
-> retired — see [graph-native-app.md](./graph-native-app.md) for what was
+> retired — see [graph-native-app.md](../graph-native-app.md) for what was
 > built; code references below may no longer exist.
 
 An assessment of what it takes for the app to operate on nodes and links
 directly, with markdown reduced to import and export. Written against the
-code as of the developer-mode branch; extends [graph-storage.md](./graph-storage.md)
-and [block-editor-architecture.md](./block-editor-architecture.md).
+code as of the developer-mode branch; extends [graph-storage.md](../graph-storage.md)
+and [block-editor-architecture.md](../block-editor-architecture.md).
 
 ## The problem in one paragraph
 

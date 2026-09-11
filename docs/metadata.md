@@ -1,29 +1,31 @@
 # Metadata
 
-You can include metadata, in the form of key-value pairs ([YAML](https://yaml.org/)), at the top of any note, enclosed within `---` delimiters. We refer to this as your note's "frontmatter".
+A note's metadata is a small JSON object of properties on its page node — the `props` column of the graph (docs/graph-schema-v2.md). It is data, not text: nothing in the note body carries it, and it never renders as part of the note.
 
-## Example
+## Properties the app sets
 
-In the following note, we've included two pieces of metadata in the frontmatter: the book's ISBN and whether or not we've read it.
+| Key          | Set by                                   |
+| :----------- | :--------------------------------------- |
+| `title`      | Renaming the note (the page node's text) |
+| `pinned`     | Pin / unpin                              |
+| `font`       | The note's font choice                   |
+| `width`      | The note's width choice                  |
+| `updated_at` | Every save                               |
 
-```
----
-isbn: 978-1542866507
-read: true
----
+## Properties the app reads when present
 
-# How to Take Smart Notes
+These are recognised on notes that carry them (imported notes, or older notes written when frontmatter was editable):
 
-...
-```
+| Key        | Effect                                                                                                                           |
+| :--------- | :------------------------------------------------------------------------------------------------------------------------------- |
+| `tags`     | List of tag names — added to the note's tags alongside `#tag` in the body (see [markdown-syntax.md](./markdown-syntax.md#tags)). |
+| `alias`    | An alternative name the note is found by in search.                                                                              |
+| `url`      | A link the note stands for; its favicon becomes the note's icon.                                                                 |
+| `github`   | A GitHub login; the avatar becomes the note's icon.                                                                              |
+| `birthday` | `YYYY-MM-DD` or `MM-DD`; the note shows the next birthday, and the date appears on the calendar.                                 |
 
-## Recognized keys
+Date-valued properties in general put the note on the calendar for that date.
 
-Frontmatter can contain any valid YAML key-value pairs. However, there are a few keys that Ruminate recognizes and uses to enhance the user interface:
+## Frontmatter
 
-| Key        | Description                        | Enhancements                                                                                                                                                                            |
-| :--------- | :--------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tags`     | List of tag names                  | Adds the given tags to the note. This is an alternative to using [`#tag` syntax](/docs/markdown-syntax.md#note-links) in the note body.                                                 |
-| `image`    | Image URL or markdown image syntax | Used as the Open Graph image when sharing the note. Can be a URL (e.g., `https://example.com/image.jpg`) or markdown image syntax (e.g., `![alt text](https://example.com/image.jpg)`). |
-| `isbn`     | Book ISBN-10 or ISBN-13            | Adds an image of the book cover and an [Open Library](https://openlibrary.org/) link to the top of the note.                                                                            |
-| `birthday` | Birthday (`YYYY-MM-DD` or `MM-DD`) | Displays time until the next birthday.                                                                                                                                                  |
+Markdown pasted or imported with a leading `---` YAML block has that block read into the page's properties; `title:` becomes the note's name. Notes copied out as markdown carry the properties back as frontmatter. Within the app the properties are never shown or edited as YAML.

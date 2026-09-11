@@ -85,7 +85,7 @@ const OWNER_KEY = "store_owner"
  * with every server-side data migration and each device discards its copy and
  * rebuilds it from a full pull. A few lines, no per-row logic.
  *
- * Generation `2` was the minted-page-id corpus (docs/page-identity-design.md).
+ * Generation `2` was the minted-page-id corpus (docs/archive/page-identity-design.md).
  *
  * Generation `3` retires deletion-by-absence. Pulls no longer carry the full
  * key list of each table, so a row HARD-deleted at the replica before soft

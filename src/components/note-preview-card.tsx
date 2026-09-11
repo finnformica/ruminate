@@ -2,7 +2,6 @@ import { Link } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
 import { useAtomValue, useStore } from "jotai"
 import React from "react"
-import { useNetworkState } from "react-use"
 import { rollup } from "../data/graph"
 import { graphSnapshotAtom, isSignedOutAtom } from "../global-state"
 import { useDeleteNote, useNoteById, useSetPageProps } from "../hooks/note"
@@ -11,9 +10,8 @@ import { copyAsMarkdown } from "../utils/copy-markdown"
 import { cx } from "../utils/cx"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
-import { CopyIcon16, MoreIcon16, PinFillIcon16, PinIcon16, ShareIcon16, TrashIcon16 } from "./icons"
+import { CopyIcon16, MoreIcon16, PinFillIcon16, PinIcon16, TrashIcon16 } from "./icons"
 import { NotePreview } from "./note-preview"
-import { ShareDialog } from "./share-dialog"
 
 type NoteCardProps = {
   id: NoteId
@@ -22,12 +20,10 @@ type NoteCardProps = {
 export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProps) {
   const note = useNoteById(id)
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  const { online } = useNetworkState()
   const setPageProps = useSetPageProps()
   const jotaiStore = useStore()
   const deleteNote = useDeleteNote()
   const [isDropdownOpen, setIsDropdownOpen] = React.useState(false)
-  const [isShareDialogOpen, setIsShareDialogOpen] = React.useState(false)
 
   if (!note) return null
 
@@ -100,14 +96,6 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
               </DropdownMenu.Item>
               <DropdownMenu.Separator />
               <DropdownMenu.Item
-                icon={<ShareIcon16 />}
-                disabled={isSignedOut || !online}
-                onClick={() => setIsShareDialogOpen(true)}
-              >
-                Share
-              </DropdownMenu.Item>
-              <DropdownMenu.Separator />
-              <DropdownMenu.Item
                 variant="danger"
                 icon={<TrashIcon16 />}
                 disabled={isSignedOut}
@@ -117,17 +105,6 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu>
-          <ShareDialog
-            open={isShareDialogOpen}
-            note={note}
-            onPublish={(gistId) => {
-              setPageProps(id, { gist_id: gistId })
-            }}
-            onUnpublish={() => {
-              setPageProps(id, { gist_id: null })
-            }}
-            onOpenChange={setIsShareDialogOpen}
-          />
         </div>
       ) : null}
     </div>

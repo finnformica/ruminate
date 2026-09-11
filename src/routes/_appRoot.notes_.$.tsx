@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useAtomValue } from "jotai"
 import React, { useEffect, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
-import { useNetworkState } from "react-use"
 import useResizeObserver from "use-resize-observer"
 import { Calendar } from "../components/calendar"
 import { CalendarHeader } from "../components/calendar-header"
@@ -16,7 +15,6 @@ import { NoteTitle } from "../components/block-editor/note-title"
 import { NoteActionsMenu } from "../components/note-actions-menu"
 import { NoteFavicon } from "../components/note-favicon"
 import { PageLayout } from "../components/page-layout"
-import { ShareDialog } from "../components/share-dialog"
 import { isSyncingAtom } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
@@ -81,7 +79,6 @@ function NotePage() {
   const isSignedOut = useAtomValue(isSignedOutAtom)
   const isSyncing = useAtomValue(isSyncingAtom)
   const databaseStatus = useAtomValue(databaseModeStatusAtom)
-  const { online } = useNetworkState()
   // While the local store is still opening, a missing note means "not loaded
   // yet", not "new note" — starting an empty editor there shows a blank page
   // over content that is about to arrive.
@@ -154,7 +151,6 @@ function NotePage() {
 
   // Layout
   const { ref: containerRef, width: containerWidth = 0 } = useResizeObserver()
-  const [isShareDialogOpen, setIsShareDialogOpen] = React.useState(false)
 
   // Keyboard flow between the note title and the block editor: the editor bumps
   // titleFocusSignal to select the title (arrow up past the first block); the
@@ -241,23 +237,9 @@ function NotePage() {
                 showWidth: containerWidth > 800,
                 width: resolvedWidth,
                 onWidth: updateWidth,
-                onShare: () => setIsShareDialogOpen(true),
-                canShare: !isSignedOut && !!note && !!online,
                 onDeleted: () => navigate({ to: "/", search: { query: undefined }, replace: true }),
               }}
             />
-            {note ? (
-              <ShareDialog
-                note={note}
-                onPublish={(gistId) => setProp({ gist_id: gistId })}
-                onUnpublish={() => {
-                  setProp({ gist_id: null })
-                  setIsShareDialogOpen(false)
-                }}
-                open={isShareDialogOpen}
-                onOpenChange={setIsShareDialogOpen}
-              />
-            ) : null}
           </div>
         </div>
       }

@@ -12,7 +12,6 @@ import { githubRefresh } from "./handlers/github-refresh"
 import { fileProxy } from "./handlers/file-proxy"
 import { images } from "./handlers/images"
 import { replica } from "./handlers/replica"
-import { share } from "./handlers/share"
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -21,7 +20,6 @@ export default {
     if (pathname === "/github-auth") return githubAuth(request, env)
     if (pathname === "/github-refresh") return githubRefresh(request, env)
     if (pathname === "/file-proxy") return fileProxy(request)
-    if (pathname.startsWith("/share/")) return share(request, env)
     if (pathname.startsWith("/api/replica/")) return replica(request, env)
     if (pathname === "/api/images" || pathname.startsWith("/api/images/")) {
       return images(request, env)

@@ -141,7 +141,7 @@ Open questions / why deferred (a genuine data-model fork, needs a decision):
 - **Does the slug replace the filename/id, or sit beside it?** Today the note id
   _is_ the filename _is_ the URL. Slugging the filename means renaming files as
   titles change and re-slugging on collisions — and, since page ids are minted
-  now (docs/page-identity-design.md), giving back the property that makes a
+  now (docs/archive/page-identity-design.md), giving back the property that makes a
   rename free: nothing tracks a page's former addresses, so a slug rename would
   leave the old URL dead.
 - **Alternatively**, keep the stable id as the filename and add a slug purely for

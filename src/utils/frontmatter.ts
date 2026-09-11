@@ -1,30 +1,5 @@
 import yaml from "yamljs"
 
-/** Reserved frontmatter keys that are not displayed to users. `title` is
- * projection-owned (src/data/page-identity.ts): it carries the page's name
- * through the `<id>.md` seam and is shown AS the title, never as a property. */
-const RESERVED_FRONTMATTER_KEYS = ["pinned", "gist_id", "font", "width", "updated_at", "title"]
-
-/** Checks if a frontmatter entry is visible to users */
-function isVisibleFrontmatterEntry([key, value]: [string, unknown]): boolean {
-  if (RESERVED_FRONTMATTER_KEYS.includes(key)) return false
-  if (Array.isArray(value) && value.length === 0) return false
-  if (value === undefined || value === null) return false
-  return true
-}
-
-/** Filters frontmatter to only include user-visible properties */
-export function getVisibleFrontmatter(
-  frontmatter: Record<string, unknown>,
-): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(frontmatter).filter(isVisibleFrontmatterEntry))
-}
-
-/** Checks if frontmatter has any user-visible properties (short-circuits on first match) */
-export function hasVisibleFrontmatter(frontmatter: Record<string, unknown>): boolean {
-  return Object.entries(frontmatter).some(isVisibleFrontmatterEntry)
-}
-
 /** Parses frontmatter from a markdown string */
 export function parseFrontmatter(markdown: string): {
   frontmatter: Record<string, unknown>

@@ -11,7 +11,7 @@ import {
 } from "../shortcuts/registry"
 import { IconButton } from "./icon-button"
 import { CircleQuestionMarkIcon16, XIcon16 } from "./icons"
-import { Markdown } from "./markdown"
+import { BlockContent } from "./block-editor/block-content"
 import { Details } from "./details"
 import { HoverCard } from "./hover-card"
 import { SearchInput } from "./search-input"
@@ -110,11 +110,22 @@ function HelpLink({ href, children }: { href: string; children: React.ReactNode 
   )
 }
 
-function MarkdownSyntaxItem({ syntax }: { syntax: string }) {
+/**
+ * One formatting example: the syntax as typed, then what it becomes. Inline
+ * formatting is shown by the block renderer itself; a block marker names the
+ * block it makes (the row's marker is drawn by the editor, not by markdown).
+ */
+function FormattingItem({ syntax, makes }: { syntax: string; makes?: string }) {
   return (
     <li className="flex flex-col gap-1 py-2">
       <code className="text-text-secondary">{syntax}</code>
-      <Markdown>{syntax}</Markdown>
+      {makes ? (
+        <span className="text-text-secondary">{makes}</span>
+      ) : (
+        <span className="font-content">
+          <BlockContent content={syntax} />
+        </span>
+      )}
     </li>
   )
 }
@@ -158,21 +169,19 @@ function HelpContent({
           <ShortcutReference />
 
           <HelpSection title="Formatting">
-            <MarkdownSyntaxItem syntax="# Heading 1" />
-            <MarkdownSyntaxItem syntax="## Heading 2" />
-            <MarkdownSyntaxItem syntax="_Italic_" />
-            <MarkdownSyntaxItem syntax="**Bold**" />
-            <MarkdownSyntaxItem syntax="~~Strikethrough~~" />
-            <MarkdownSyntaxItem syntax="`Code`" />
-            <MarkdownSyntaxItem syntax="[Link](https://example.com)" />
-            <MarkdownSyntaxItem syntax="- Unordered list" />
-            <MarkdownSyntaxItem syntax="1. Ordered list" />
-            <MarkdownSyntaxItem syntax="- [ ] Unchecked" />
-            <MarkdownSyntaxItem syntax="- [x] Checked" />
-            <MarkdownSyntaxItem syntax="> Blockquote" />
-            <MarkdownSyntaxItem syntax="$$LaTeX^{math}$$" />
-            <MarkdownSyntaxItem syntax="---" />
-            <MarkdownSyntaxItem syntax="#tag" />
+            <FormattingItem syntax="_Italic_" />
+            <FormattingItem syntax="**Bold**" />
+            <FormattingItem syntax="~~Strikethrough~~" />
+            <FormattingItem syntax="`Code`" />
+            <FormattingItem syntax="[Link](https://example.com)" />
+            <FormattingItem syntax="$$LaTeX^{math}$$" />
+            <FormattingItem syntax="#tag" makes="Tag" />
+            <FormattingItem syntax="# Heading" makes="Heading block (## and ### for smaller)" />
+            <FormattingItem syntax="- Item" makes="Bullet list block" />
+            <FormattingItem syntax="1. Item" makes="Numbered list block" />
+            <FormattingItem syntax="[ ] Task" makes="To-do block ([x] when done)" />
+            <FormattingItem syntax="> Quote" makes="Quote block" />
+            <FormattingItem syntax="```lang" makes="Code block" />
           </HelpSection>
         </div>
       </div>

@@ -72,13 +72,12 @@ Then point your GitHub OAuth app's **Authorization callback URL** at
 
 The Worker (`worker/index.ts`) serves the built SPA from `dist/` and handles:
 
-| Route           | Purpose                                                     |
-| --------------- | ----------------------------------------------------------- |
-| `/cors-proxy/*` | Relays git-over-http so the browser can talk to GitHub      |
-| `/github-auth`  | OAuth `code` → access-token exchange                        |
-| `/file-proxy`   | Proxies binary files (Git LFS blobs)                        |
-| `/git-lfs-file` | Resolves/uploads Git LFS objects                            |
-| `/share/*`      | OG meta tags for shared-note link previews (SPA for humans) |
+| Route           | Purpose                                                |
+| --------------- | ------------------------------------------------------ |
+| `/cors-proxy/*` | Relays git-over-http so the browser can talk to GitHub |
+| `/github-auth`  | OAuth `code` → access-token exchange                   |
+| `/file-proxy`   | Proxies binary files (Git LFS blobs)                   |
+| `/git-lfs-file` | Resolves/uploads Git LFS objects                       |
 
 ## Scripts
 

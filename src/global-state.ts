@@ -11,7 +11,6 @@ import type { GraphSnapshot } from "./data/graph"
 import { createNotesBuilder } from "./data/note-meta"
 import { sampleGraph } from "./data/sample-graph"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
-import { backfillPrimaryEmail } from "./utils/github-email"
 import { createBlockIndexer, searchBlocks } from "./utils/block-search"
 import type { BlockRevealRequest, OutlineItem } from "./utils/note-outline"
 import { parseQuery, type Query } from "./utils/search"
@@ -136,12 +135,9 @@ function createGlobalStateMachine() {
             }
           }
 
-          // Next, check localStorage for user metadata. A session stored under
-          // GitHub's noreply alias (pre-primary-email sign-ins) is repaired
-          // from the account's primary address; the done action below then
-          // persists whatever comes back (`utils/github-email.ts`).
+          // Next, check localStorage for user metadata.
           const githubUser = JSON.parse(localStorage.getItem(GITHUB_USER_STORAGE_KEY) ?? "null")
-          return { githubUser: await backfillPrimaryEmail(githubUserSchema.parse(githubUser)) }
+          return { githubUser: githubUserSchema.parse(githubUser) }
         },
       },
       actions: {
@@ -302,7 +298,7 @@ export const noteSearcherAtom = atom((get) => {
   const sortedNotes = get(sortedNotesAtom)
   return new Searcher(sortedNotes, {
     // `note.id` is deliberately NOT a fuzzy key: minted ids are opaque
-    // (docs/page-identity-design.md), so matching them would only add noise —
+    // (docs/archive/page-identity-design.md), so matching them would only add noise —
     // every note would half-match a query containing "blk". The `id:` filter
     // still matches ids exactly (src/utils/search-notes.ts).
     keySelector: (note) => [note.title, note.displayName, note.text, note.alias || ""],
