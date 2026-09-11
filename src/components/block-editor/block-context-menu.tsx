@@ -1,6 +1,7 @@
 import { ContextMenu } from "@base-ui/react/context-menu"
 import { Menu } from "@base-ui/react/menu"
 import React from "react"
+import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
 import { DropdownMenu } from "../dropdown-menu"
@@ -53,23 +54,8 @@ export interface BlockMenuActions {
   downloadImage?: (id: string) => void
 }
 
-/** The types a block can be turned into, in the slash menu's order. */
-const TYPES: Array<{ type: BlockType; label: string }> = [
-  { type: "text", label: "Text" },
-  { type: "ul", label: "Bullet list" },
-  { type: "ol", label: "Numbered list" },
-  { type: "todo", label: "To-do" },
-  { type: "h1", label: "Heading" },
-  { type: "quote", label: "Quote" },
-  { type: "code", label: "Code" },
-]
-
-/** A checked todo is a to-do for the tick; every heading is a heading. */
-function currentType(type: BlockType): BlockType {
-  if (type === "done") return "todo"
-  if (type === "h2" || type === "h3") return "h1"
-  return type
-}
+/** The types a block can be turned into: the registry's, in its order. */
+const TYPES = BLOCK_TYPE_DEFS.filter((def) => def.turnInto)
 
 const popupClass = cx(
   "card-2 z-20 grid place-items-stretch overflow-hidden rounded-lg print:hidden outline-hidden",
@@ -140,13 +126,15 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
             <Menu.Positioner side="right" align="start" sideOffset={4}>
               <Menu.Popup className={popupClass} style={{ width: 200 }}>
                 <div className="grid p-1">
-                  {TYPES.map((option) => (
+                  {TYPES.map((def) => (
                     <DropdownMenu.Item
-                      key={option.type}
-                      selected={currentType(target.type) === option.type}
-                      onClick={() => actions.setType(id, option.type)}
+                      key={def.id}
+                      // A checked todo is a to-do for the tick; every heading
+                      // level is a heading.
+                      selected={canonicalOf(target.type) === def.id}
+                      onClick={() => actions.setType(id, def.id)}
                     >
-                      {option.label}
+                      {def.label}
                     </DropdownMenu.Item>
                   ))}
                 </div>

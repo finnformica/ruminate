@@ -1,5 +1,5 @@
-import { imageLine } from "./image"
 import { markerFor } from "./markers"
+import { defOf } from "./registry"
 import { frontmatterTextOfProps } from "../data/frontmatter-props"
 import type { Block, BlockDoc } from "./types"
 
@@ -21,20 +21,15 @@ import type { Block, BlockDoc } from "./types"
  * Each block's marker comes from its type (`markerFor`: ordered items are
  * renumbered by run position, headings always carry one `#`), followed by an
  * `id::` line indented two spaces further. Nesting is two spaces of indent
- * per depth. A `code` block becomes a fence with its language, an `image`
- * block one `![caption](url)` line; a multi-line text keeps its
- * continuation lines at the block's indent. A block reached
+ * per depth. A type that writes its own lines (a code fence, an image's
+ * `![caption](url)`) does so through its registry entry; a multi-line text
+ * keeps its continuation lines at the block's indent. A block reached
  * from two parents is written out in both places — that is the feature.
  */
 
 /** Walk depth cap — belt-and-braces so even a corrupted (cyclic) doc from a
  * bad sync can never hang the export. Mirrors the rollup's historic cap. */
 const MAX_SERIALIZE_DEPTH = 64
-
-const codeLanguage = (block: Block): string => {
-  const language = block.props?.language
-  return typeof language === "string" ? language : ""
-}
 
 /**
  * A block's own content lines, unindented: the marker plus its text, with a
@@ -43,10 +38,8 @@ const codeLanguage = (block: Block): string => {
  * what copy writes for a selection.
  */
 export function blockLines(block: Block, olPosition = 1): string[] {
-  if (block.type === "code") {
-    return [`\`\`\`${codeLanguage(block)}`, ...block.text.split("\n"), "```"]
-  }
-  if (block.type === "image") return [imageLine(block)]
+  const own = defOf(block.type).toLines
+  if (own) return own(block, olPosition)
   const [first, ...rest] = block.text.split("\n")
   // The content line (empty text → just the marker, so depth is preserved).
   return [`${markerFor(block.type, olPosition)}${first}`, ...rest]

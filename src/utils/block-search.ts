@@ -1,4 +1,5 @@
 import { Searcher, type FullOptions } from "fast-fuzzy"
+import { searchTypeValues } from "../blocks/registry"
 import type { BlockType } from "../blocks/types"
 import { olPositions } from "../blocks/view"
 import { pageDoc, type GraphSnapshot } from "../data/graph"
@@ -57,24 +58,7 @@ import { compareNotes, matchesNoteScope, testNoteFilters } from "./search-notes"
  * search-notes.ts), unchanged from before. Mixed into a block-scoped comma
  * list (`type:todo,zzz`) an unknown value simply matches no blocks.
  */
-const BLOCK_TYPE_VALUES: Record<string, readonly BlockType[]> = {
-  todo: ["todo"],
-  done: ["done"],
-  task: ["todo", "done"],
-  heading: ["h1", "h2", "h3"],
-  h1: ["h1"],
-  h2: ["h2"],
-  h3: ["h3"],
-  list: ["ul", "ol"],
-  bullet: ["ul"],
-  ul: ["ul"],
-  ordered: ["ol"],
-  ol: ["ol"],
-  quote: ["quote"],
-  code: ["code"],
-  image: ["image"],
-  text: ["text"],
-}
+const BLOCK_TYPE_VALUES: Record<string, readonly BlockType[]> = searchTypeValues()
 
 /** Is this a `type:` filter carrying at least one block-type value? Such a
  * filter matches blocks; any other filter (including `type:daily`) keeps its

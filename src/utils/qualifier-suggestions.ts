@@ -1,3 +1,4 @@
+import { searchTypeOptions } from "../blocks/registry"
 /**
  * **Value suggestions for qualifiers.** Typing `type:`, `in:`, `tag:` — any
  * key whose values come from a known set — opens a picker over the search
@@ -122,20 +123,7 @@ export function filterQualifierOptions(
  */
 export const STATIC_QUALIFIER_OPTIONS: Readonly<Record<string, readonly QualifierOption[]>> = {
   type: [
-    { value: "todo", description: "unchecked to-do" },
-    { value: "done", description: "checked to-do" },
-    { value: "task", description: "any to-do" },
-    { value: "heading", description: "any heading" },
-    { value: "h1", description: "heading level 1" },
-    { value: "h2", description: "heading level 2" },
-    { value: "h3", description: "heading level 3" },
-    { value: "list", description: "bullet or numbered item" },
-    { value: "bullet", description: "bullet item" },
-    { value: "ordered", description: "numbered item" },
-    { value: "quote", description: "quote" },
-    { value: "code", description: "code" },
-    { value: "image", description: "image" },
-    { value: "text", description: "paragraph" },
+    ...searchTypeOptions(),
     { value: "note", description: "notes: plain notes" },
     { value: "daily", description: "notes: daily" },
     { value: "weekly", description: "notes: weekly" },

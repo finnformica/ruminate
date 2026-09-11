@@ -1,5 +1,6 @@
 import type { CommandInput, CommandName, Mode } from "./commands"
 import { isListItem } from "./markers"
+import { defOf } from "./registry"
 import { idOfKey } from "./view"
 
 /**
@@ -44,13 +45,9 @@ const caretAtEnd: Predicate = ({ caret }) =>
 
 const caretAtStart: Predicate = ({ caret }) => !!caret && caret.start === 0 && caret.end === 0
 
-/** The block has a type of its own — anything but a plain paragraph. */
-// An image's marker is the picture itself — Backspace at the start of its
-// caption must not quietly turn it into a paragraph (delete the row instead).
-const hasMarker: Predicate = (input) => {
-  const type = blockOf(input)?.type ?? "text"
-  return type !== "text" && type !== "image"
-}
+/** The block has a marker Backspace can strip (the registry's `marked`):
+ * anything but a paragraph — or an image, whose marker is the picture. */
+const hasMarker: Predicate = (input) => defOf(blockOf(input)?.type ?? "text").marked
 
 const atStartWithMarker: Predicate = (input) => caretAtStart(input) && hasMarker(input)
 
@@ -63,7 +60,7 @@ const atLastLine: Predicate = ({ caret }) => !!caret && caret.atLastLine
 
 /** Inside a code block, where Enter is a newline and only Shift/Mod+Enter
  * leave (see the Enter bindings). */
-const inCode: Predicate = (input) => blockOf(input)?.type === "code"
+const inCode: Predicate = (input) => defOf(blockOf(input)?.type ?? "text").family === "code"
 const notInCode: Predicate = (input) => !inCode(input)
 const both =
   (a: Predicate, b: Predicate): Predicate =>
