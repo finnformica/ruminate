@@ -121,6 +121,13 @@ body:has([data-resizing="true"]) * {
   background-color: var(--color-bg-selected-active);
 }
 
+/* The current note's icon leans with its label: the favicon and its wrapper
+ * set the secondary ink explicitly, so the row's selected colour has to be
+ * handed down to them. A nav link's filled icon inherits it already. */
+.nav-item[aria-current] :is(.nav-item-icon, .nav-item-icon *) {
+  color: inherit;
+}
+
 /* Toggled-open panels (e.g. Help) are a state, not a place — they keep the
  * neutral pressed surface so accent stays reserved for "current". */
 .nav-item[aria-pressed="true"] {

@@ -109,6 +109,17 @@
      (accent-12 is the ramp's contrast-safe ink, so legibility never suffers):
      the whole line reads slightly "lit" by the selection. */
   --color-text-selected: color-mix(in srgb, var(--accent-12) 50%, var(--color-text));
+  /* The selected row's CHROME — its marker glyphs (a heading's #, a bullet's
+     dot, a number, a quote's > and bar) — leans the same way, more quietly:
+     the accent's text step over the secondary ink, a shade more present than
+     the glyphs' tertiary rest and well short of the text's half-accent.
+     Controls (the checkbox, the collapse chevron) keep their own. One value
+     serves both schemes, as the text tint does. */
+  --color-text-selected-chrome: color-mix(
+    in srgb,
+    var(--accent-11) 40%,
+    var(--color-text-secondary)
+  );
 
   /* Border colors */
   --color-border: var(--neutral-a7);

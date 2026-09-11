@@ -152,7 +152,10 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     // the same family as the `>` beside it. It stretches the line's full
     // height so a wrapped quote reads as one block.
     before: () => (
-      <span aria-hidden className="w-0.5 shrink-0 self-stretch rounded-full bg-text-tertiary" />
+      <span
+        aria-hidden
+        className="block-glyph-fill w-0.5 shrink-0 self-stretch rounded-full bg-text-tertiary"
+      />
     ),
   },
   code: {
