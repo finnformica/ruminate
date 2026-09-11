@@ -40,8 +40,7 @@ back into row diffs by `docToGraph`/`docToGraphParts`
 (`src/data/graph.ts`). The round trip is a **one-step convergence**: a single
 ingest+rollup pass may deliberately normalize the bytes (see "Data quality"
 below), and its output is a strict byte-for-byte fixpoint of any further pass
-— the most heavily tested invariant in the app (`src/data/graph.test.ts`,
-plus `scripts/rollup-equivalence.ts` for checking a real corpus directory).
+— the most heavily tested invariant in the app (`src/data/graph.test.ts`).
 Markdown already in normalized form round-trips byte-identically.
 
 ```
