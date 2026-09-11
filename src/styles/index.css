@@ -130,29 +130,26 @@ body:has([data-resizing="true"]) * {
 /* App frame */
 
 /* The app fills the viewport exactly: its own columns scroll, the page never
- * does. In a browser the SMALL viewport height is the honest one — the height
- * left when the toolbars are showing — so the phone nav bar sits above
- * Safari's bar rather than under it. Installed to the home screen there are
- * no toolbars, and there iOS gets `svh`/`dvh` wrong: it sizes them as if
- * Safari's bar were still present, so the frame stops short and the nav bar
- * floats above dead space. Standalone, `100vh` is the true height. */
+ * does. It takes its height from the document, not from viewport units: the
+ * initial containing block is the honest layout viewport everywhere. In a
+ * browser tab it is the height left when the toolbars are showing, so the
+ * phone nav bar sits above Safari's bar rather than under it. Installed to
+ * an iPhone's home screen it is the web view — below the opaque status bar,
+ * above the home indicator — where iOS gets every viewport unit wrong: `svh`
+ * and `dvh` are cut down as if Safari's toolbars were still there (the nav
+ * bar floats above dead space) and `vh` is the whole screen, status bar
+ * included (the nav bar hangs off the bottom). */
+html,
+body,
+#root,
 .app-frame {
-  height: 100vh;
-}
-
-@supports (height: 100svh) {
-  .app-frame {
-    height: 100svh;
-  }
-}
-
-@media (display-mode: standalone) {
-  .app-frame {
-    height: 100vh;
-  }
+  height: 100%;
 }
 
 @media print {
+  html,
+  body,
+  #root,
   .app-frame {
     height: auto;
   }
