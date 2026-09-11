@@ -88,6 +88,7 @@ export function BlockNoteEditor({
   collapseKey,
   publishOutline = true,
   trailingBlank = true,
+  rowRemoval = "unlink",
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc) => void
@@ -129,6 +130,12 @@ export function BlockNoteEditor({
   /** Whether an editable doc always ends with a blank block to type into. Off
    * for the basket: a blank there would be a new unassigned block. */
   trailingBlank?: boolean
+  /** What removing a row (⌫, Cut, the menu) does to the block. `"unlink"` —
+   * the outline: the block stays, in the note's Unassigned basket if nothing
+   * else holds it, and the menu offers Delete beside Unlink. `"delete"` —
+   * the basket (`basketToOps`): the removal is the delete, so the menu
+   * offers only that. */
+  rowRemoval?: "unlink" | "delete"
 }) {
   // Read-only history views are shown verbatim; only editable notes get the
   // always-present trailing blank.
@@ -266,8 +273,8 @@ export function BlockNoteEditor({
       resolveBlocks={resolveBlocks}
       debug={debug}
       noteId={noteId}
-      parentCountOf={noteId ? parentCountOf : undefined}
-      onDeleteEverywhere={noteId ? deleteEverywhere : undefined}
+      parentCountOf={noteId && rowRemoval === "unlink" ? parentCountOf : undefined}
+      onDeleteEverywhere={noteId && rowRemoval === "unlink" ? deleteEverywhere : undefined}
       onImageUpload={onImageUpload}
     />
   )

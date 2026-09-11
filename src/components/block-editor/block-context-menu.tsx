@@ -13,13 +13,13 @@ import { DropdownMenu } from "../dropdown-menu"
  * by the editor on any row it owns (never in read-only views); the editor
  * supplies the row (`target`) and the actions, this file the menu.
  *
- * Deleting is graph-aware. A row is one place a block appears. On a block
- * held only here, **Delete** removes the row (the editor's undoable
- * delete). On a block held in more than one place the menu offers
- * **Unlink**, which takes it out of this place and leaves it everywhere
- * else, and **Delete**, which removes the block itself from every place it
- * appears (`deleteBlockOps`), with the place count beside it so the reach
- * is clear.
+ * Removing is graph-aware. A row is one place a block appears. In a note's
+ * outline the menu offers **Unlink** (what ⌫ does: the row goes, the block
+ * stays — held wherever else it is, or in the note's Unassigned basket) and
+ * **Delete**, which removes the block itself from every place it appears
+ * (`deleteBlockOps`), with the place count beside it when there is more
+ * than one. Where a row's removal is the delete — the basket, and editors
+ * with no graph behind them — there is only **Delete** (⌫).
  *
  * Structure moves (indent, outdent, move up/down) are keyboard-only: the
  * menu is for what a pointer cannot already do.
@@ -214,7 +214,7 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
         </DropdownMenu.Item>
       ) : null}
       <DropdownMenu.Separator />
-      {shared && actions.deleteEverywhere ? (
+      {actions.deleteEverywhere ? (
         <>
           <DropdownMenu.Item shortcut={["⌫"]} onClick={() => actions.remove(key)}>
             Unlink
@@ -222,7 +222,9 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
           <DropdownMenu.Item
             variant="danger"
             trailingVisual={
-              <span className="text-sm text-text-secondary">{target.places} places</span>
+              shared ? (
+                <span className="text-sm text-text-secondary">{target.places} places</span>
+              ) : undefined
             }
             onClick={() => actions.deleteEverywhere?.(id)}
           >

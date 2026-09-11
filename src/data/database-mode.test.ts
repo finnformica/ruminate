@@ -8,7 +8,7 @@ import type {
 import type { NoteId } from "../schema"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
-import { deletePageOps, docToOps } from "./ops"
+import { deleteBlockOps, deletePageOps, docToOps } from "./ops"
 import {
   CACHE_GENERATION,
   EMPTY_GRAPH,
@@ -345,12 +345,12 @@ describe("database mode saves", () => {
     expect(walked("note-b")).toBe(NOTE_B)
   })
 
-  it("removing a page's last block through ops tombstones the rows", async () => {
+  it("deleting a page's last block through ops tombstones the rows", async () => {
     const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
 
-    databaseApplyOps(docToOps("note-a", parse(""), graph()))
+    databaseApplyOps(deleteBlockOps("blk_a000000000", graph()))
     expect(walked("note-a")).toBe(serialize(parse("")))
     await flushDatabaseMode()
 

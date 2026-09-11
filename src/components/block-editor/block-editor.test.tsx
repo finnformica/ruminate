@@ -2127,7 +2127,8 @@ describe("BlockEditor context menu", () => {
     }
     // The row under the pointer becomes the selection (and the menu's target).
     expect(highlightedText(container)).toBe("B")
-    // Not shared: Delete alone, nothing to unlink from.
+    // No graph behind this editor: removing the row is the delete, so Delete
+    // alone, with nothing to unlink from.
     expect(menu.textContent).not.toContain("Unlink")
     expect(menu.textContent).not.toContain("places")
     // Structure moves stay on the keyboard.
@@ -2153,6 +2154,22 @@ describe("BlockEditor context menu", () => {
     })
     await pick("Heading")
     expect(serializedLines(getByTestId)).toEqual(["# A", "B"])
+  })
+
+  it("in a note, a block held only here offers Unlink (the row) and Delete (the block)", async () => {
+    const deleteEverywhere = vi.fn()
+    const { container, getByTestId } = render(
+      <Harness initial={"A\nB"} parentCountOf={() => 1} onDeleteEverywhere={deleteEverywhere} />,
+    )
+    const menu = await openMenuOn(container, 1)
+    expect(menu.textContent).toContain("Unlink")
+    expect(menu.textContent).toContain("Delete")
+    // One place: no count to show.
+    expect(menu.textContent).not.toContain("places")
+    const id = getByTestId("serialized").textContent!.match(/id:: (\S+)\n?$/)![1]
+    await pick("Delete")
+    expect(deleteEverywhere).toHaveBeenCalledWith(id)
+    expect(serializedLines(getByTestId)).toEqual(["A", "B"])
   })
 
   it("a block held in more than one place offers Unlink, and Delete reaches every place", async () => {

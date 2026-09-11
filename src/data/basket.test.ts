@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import type { BlockDoc } from "../blocks/types"
 import { updateText } from "../blocks/ops"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
@@ -135,6 +136,23 @@ describe("basketToOps", () => {
     const next = applyOps(snapshot, ops, NOW + 2)
     expect(next.nodes.has("blk_deeper0000")).toBe(true)
     expect(basketRootIds("a", next)).toEqual(["blk_deeper0000"])
+  })
+
+  it("removing a nested row in the basket deletes it too: there is nothing to unlink it into", () => {
+    const snapshot = basketed()
+    const before = basketDoc("a", snapshot)
+    const under = before.blocks["blk_under00000"]
+    const doc: BlockDoc = {
+      ...before,
+      blocks: { ...before.blocks, blk_under00000: { ...under, children: [] } },
+    }
+    delete doc.blocks["blk_deeper0000"]
+    const ops = basketToOps("a", doc, snapshot)
+    expect(ops).toEqual([
+      { op: "unlink", source: "blk_under00000", destination: "blk_deeper0000" },
+      { op: "delete", id: "blk_deeper0000" },
+    ])
+    expect(applyOps(snapshot, ops, NOW + 2).nodes.has("blk_deeper0000")).toBe(false)
   })
 
   it("a block written in the basket is created with the page as its note, hanging from nothing", () => {

@@ -1,7 +1,15 @@
 import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import type { BlockDoc } from "../blocks/types"
 import type { NoteId } from "../schema"
-import { CHILD_KIND, PAGE_TYPE, docToParts, reconcileSortKeys, type GraphSnapshot } from "./graph"
+import { imagePropsOf } from "../blocks/image"
+import {
+  CHILD_KIND,
+  PAGE_TYPE,
+  docToParts,
+  parseProps,
+  reconcileSortKeys,
+  type GraphSnapshot,
+} from "./graph"
 
 /**
  * Graph ops: the one vocabulary every change
@@ -16,9 +24,12 @@ import { CHILD_KIND, PAGE_TYPE, docToParts, reconcileSortKeys, type GraphSnapsho
  * doc it hands back into the batch that makes the graph agree with it —
  * creating a block is one `create` and one `link`, typing is one `setText`,
  * a reorder is the links whose keys had to move, and a block the doc no longer
- * names is unlinked and, if nothing else holds it, deleted — its own children
- * are not: they keep their note (`notes_id`) and turn up in that note's
- * Unassigned basket (`basket.ts`). Deletes never cascade.
+ * names is unlinked — and kept: it keeps its note (`notes_id`) and turns up
+ * in that note's Unassigned basket (`basket.ts`) with everything beneath it,
+ * unless it is blank (no text but whitespace, nothing beneath it, no
+ * picture), which is deleted. Only the basket (`basketToOps`), the context
+ * menu's Delete (`deleteBlockOps`) and deleting the note (`deletePageOps`)
+ * delete a block that has something in it, and no delete ever cascades.
  */
 export type Op =
   | {
@@ -257,10 +268,11 @@ function dropCycles(snapshot: GraphSnapshot, pageId: string, childrenOf: Map<str
  *   unchanged sibling produces nothing, an insert produces one `link` with a
  *   key between its neighbours, a removal one `unlink`;
  * - a block the page reached before but the doc no longer names, that nothing
- *   holds any more, is deleted. Its children are NOT: a delete never
- *   cascades. They keep their note and, no longer reached, show in that
- *   note's Unassigned basket (`basket.ts`). A block another page also holds
- *   survives untouched.
+ *   holds any more, is kept, out of reach: it and everything beneath it show
+ *   in the note's Unassigned basket (`basket.ts`), from which a paste links
+ *   it back. Removing a row is an unlink, never a delete — except a blank
+ *   block (`isBlankNode`), which is deleted so an abandoned empty line leaves
+ *   nothing behind. A block another page also holds survives untouched.
  *
  * Block ids that collide with a page id are re-minted (`docToParts`), and a
  * desired edge that would close a loop is dropped: never-lose-work over
@@ -271,7 +283,26 @@ function dropCycles(snapshot: GraphSnapshot, pageId: string, childrenOf: Map<str
 export function docToOps(pageId: NoteId, doc: BlockDoc, snapshot: GraphSnapshot): Op[] {
   const { nodes, childrenOf } = docToParts(pageId, doc, 0, reservedPageIds(snapshot, pageId))
   dropCycles(snapshot, pageId, childrenOf)
-  return partsToOps(pageId, nodes, childrenOf, snapshot, reachableFrom(snapshot, [pageId]))
+  return partsToOps(pageId, nodes, childrenOf, snapshot, reachableFrom(snapshot, [pageId]), "keep")
+}
+
+/**
+ * A block with nothing in it: no text but whitespace, nothing beneath it, and
+ * no picture (an image row's text is its caption; its picture is in its
+ * props, and a placeholder whose upload failed has none). Blank blocks are
+ * what backing out of an empty line leaves behind, so the outline deletes
+ * them rather than parking them in the basket.
+ */
+function isBlankNode(snapshot: GraphSnapshot, id: string): boolean {
+  const node = snapshot.nodes.get(id)
+  if (!node) return true
+  if (node.text.trim() !== "") return false
+  if ((snapshot.childLinks.get(id)?.length ?? 0) > 0) return false
+  if (node.type === "image") {
+    const image = imagePropsOf({ props: parseProps(node.props) })
+    if (image.image || image.src) return false
+  }
+  return true
 }
 
 /** Every other page's id — ids a block row must never take (`docToParts`). */
@@ -286,9 +317,17 @@ export function reservedPageIds(snapshot: GraphSnapshot, pageId: string): Set<st
 /**
  * The shared core of `docToOps` and the basket's `basketToOps`: node rows
  * and per-parent child orders, diffed against the snapshot. `reachedBefore`
- * is what the edited region held before this batch — a node in it that
+ * is what the edited region held before this batch; a node in it that
  * `nodes` no longer names, and that no parent holds once the links are
- * reconciled, is deleted (and only it).
+ * reconciled, is *dropped*, and `dropped` says what that means:
+ *
+ * - `"keep"` (the outline): the block stays, out of reach, for the note's
+ *   Unassigned basket to show — unless it is blank (`isBlankNode`), which
+ *   is deleted, so backing out of an empty line leaves nothing behind;
+ * - `"delete"` (the basket): the block is deleted. There is nothing to
+ *   unlink it from, and the basket is where a block is deleted for good.
+ *
+ * Either way only that block is touched: never what it holds.
  */
 export function partsToOps(
   pageId: NoteId,
@@ -296,6 +335,7 @@ export function partsToOps(
   childrenOf: Map<string, string[]>,
   snapshot: GraphSnapshot,
   reachedBefore: Set<string>,
+  dropped: "keep" | "delete",
 ): Op[] {
   const creates: Op[] = []
   const sets: Op[] = []
@@ -351,14 +391,14 @@ export function partsToOps(
     }
   }
 
-  // What was reached before, is no longer named, and nothing holds: deleted.
+  // What was reached before, is no longer named, and nothing holds: dropped.
   // No cascade — a deleted block's children keep their links from it (the
   // store retains them, the walk skips them) and their note, and turn up in
   // the basket.
   const kept = new Set(nodes.map((node) => node.id))
   for (const id of reachedBefore) {
     if (kept.has(id) || !snapshot.nodes.has(id) || parents(id).size > 0) continue
-    deletes.push({ op: "delete", id })
+    if (dropped === "delete" || isBlankNode(snapshot, id)) deletes.push({ op: "delete", id })
   }
 
   return [...creates, ...sets, ...linkOps, ...deletes]
