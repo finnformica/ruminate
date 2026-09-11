@@ -18,10 +18,10 @@ import type { Block, BlockProps, BlockType } from "./types"
 
 /** A family groups types that toggle into each other and continue alike:
  * the heading levels are one family, an open and a checked to-do another. */
-export type BlockFamily =
+type BlockFamily =
   "text" | "bullet" | "ordered" | "todo" | "heading" | "quote" | "code" | "image" | "page"
 
-export interface SlashContext {
+interface SlashContext {
   /** Whether image uploads are switched on here. */
   images: boolean
 }
@@ -295,12 +295,12 @@ export function canonicalOf(type: BlockType): BlockType {
 
 /** The `type:` search vocabulary: value → the types it matches, with the
  * family groups (`task`, `heading`, `list`) alongside each type's own names. */
-export interface SearchGroup {
+interface SearchGroup {
   readonly value: string
   readonly description: string
   readonly families: readonly BlockFamily[]
 }
-export const SEARCH_GROUPS: readonly SearchGroup[] = [
+const SEARCH_GROUPS: readonly SearchGroup[] = [
   { value: "task", description: "any to-do", families: ["todo"] },
   { value: "heading", description: "any heading", families: ["heading"] },
   { value: "list", description: "bullet or numbered item", families: ["bullet", "ordered"] },

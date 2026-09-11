@@ -70,7 +70,7 @@ This alone fixes within-note multi-parent. Everything else can trail.
    change is to allow one id in several `children` arrays and to build the
    doc from `mem` rather than from `parse(rollup)`. The per-node text is
    `marker(type) + text`, which `graph.ts` already knows how to produce
-   (`MARKER_OF_TYPE`, `classifyLine`); `docFromGraph(pageId)` is the rollup
+   (the registry's markers, `classifyLine`); `docFromGraph(pageId)` is the rollup
    walk minus the string emission. New code, roughly 80 lines. The store
    exposes a graph snapshot atom (nodes and links maps, updated on write and
    pull) that both this and the markdown projection derive from.

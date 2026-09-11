@@ -3,8 +3,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent, ClipboardEvent, CSSProperties, KeyboardEvent } from "react"
 import { cx } from "../../utils/cx"
 import type { Block, BlockDoc } from "../../blocks/types"
-import { isHeading, isTodo, leadingMarker } from "../../blocks/markers"
-import type { BlockType } from "../../blocks/types"
+import { leadingMarker } from "../../blocks/markers"
+import { defOf } from "../../blocks/registry"
 import type { BlockPatch } from "../../blocks/ops"
 import type { Occurrence } from "../../blocks/view"
 import type { CaretInput, Mode } from "../../blocks/commands"
@@ -18,10 +18,10 @@ import {
 } from "../../blocks/slash-menu"
 import { htmlToMarkdown } from "../../utils/html-to-markdown"
 import { clipboardBlocksToMarkdown, extractClipboardBlocks } from "../../utils/rich-clipboard"
-import { imageFilesOf, useImageSrc } from "../../data/images"
-import { imagePropsOf } from "../../blocks/image"
+import { imageFilesOf } from "../../data/images"
 import { IconButton } from "../icon-button"
 import { BlockContent } from "./block-content"
+import { headingScale, kindOf, type RowContext } from "./block-kinds"
 import { caretCoordinates, caretLineFlags } from "./caret"
 import { Hash } from "./hash"
 import { SLASH_MENU_WIDTH, SlashMenu } from "./slash-menu"
@@ -123,24 +123,6 @@ export interface BlockDebugOptions {
   upstreamOf?: (id: string) => readonly string[]
 }
 
-/** Extra space above a heading, proportional to its size (i.e. its outline
- * depth), so sections breathe. Applied to the block's outer wrapper (shared by
- * view and edit) so switching modes never shifts the text. In px, because the
- * row's guide lines reach back up through it (see the wrapper below). */
-function headingTopMarginPx(type: BlockType, depth: number): number {
-  if (!isHeading(type)) return 0
-  switch (depth) {
-    case 0:
-      return 20
-    case 1:
-      return 16
-    case 2:
-      return 10
-    default:
-      return 6
-  }
-}
-
 /** Row geometry, in px. Each level indents by `INDENT`: the guide line hangs
  * from the parent's key — a 1px rule under the centre of the 15px marker
  * slot, which starts 4px into the content column (the highlight surface's
@@ -151,61 +133,6 @@ const GUIDE_X = 11
 /** Root rows sit 2px further apart than nested ones (which meet at their
  * 2px + 2px vertical padding). */
 const ROOT_GAP = 2
-
-/** A heading's font size + line-height by outline depth. Shared by the full
- * typography (`typographyFor`) and the heading's `#` marker slot, whose
- * `h-[1lh]` must resolve against the same first-line height to centre on it. */
-function headingScale(depth: number): string {
-  switch (depth) {
-    case 0:
-      return "text-2xl leading-tight"
-    case 1:
-      return "text-xl leading-tight"
-    case 2:
-      return "text-lg leading-snug"
-    default:
-      return "text-base leading-relaxed"
-  }
-}
-
-/**
- * Typography shared by a block's rendered view and its edit textarea, so
- * switching between them never changes the text's size or weight.
- *
- * Headings are sized by how deeply they're nested in the outline — not by how
- * many `#`s were typed (the marker is normalised to a single `#` on save). The
- * deepest level floors at body size, kept bold and underlined so it still reads
- * as a heading rather than a paragraph.
- */
-function typographyFor(type: BlockType, depth: number): string {
-  // A code block is set in the mono face, a touch smaller, inside its panel
-  // (`codePanel` below) — view and textarea alike, so nothing shifts on click.
-  if (type === "code") return "font-mono text-[0.9em] leading-relaxed"
-  if (isHeading(type)) {
-    // Headings tighten as they grow: large display sizes get a snugger
-    // line-height and slightly negative tracking (see the type scale in
-    // docs/design-principles.md).
-    switch (depth) {
-      case 0:
-        return cx(headingScale(0), "font-bold tracking-[-0.015em]")
-      case 1:
-        return cx(headingScale(1), "font-bold tracking-[-0.01em]")
-      case 2:
-        return cx(headingScale(2), "font-bold")
-      default:
-        // Floors at body size; a soft offset underline keeps it reading as a
-        // heading without the weight of a full text-color rule.
-        return cx(
-          headingScale(depth),
-          "font-bold underline decoration-[color:var(--neutral-a6)] decoration-2 underline-offset-4",
-        )
-    }
-  }
-  if (type === "quote") return "text-base leading-relaxed text-text-secondary"
-  // An image's text is its caption: set small and quiet beneath the picture.
-  if (type === "image") return "text-sm leading-relaxed text-text-secondary"
-  return "text-base leading-relaxed"
-}
 
 export function BlockItem({
   doc,
@@ -270,15 +197,14 @@ export function BlockItem({
   // same marker as anywhere else in the outline (a bullet stays a bullet, a
   // heading a heading). Focus mode changes what is visible, never what a
   // block looks like.
-  const typo = typographyFor(type, depth)
-  // The code block's panel: a tinted, bordered, padded surface the block's
-  // text sits in — the same classes on the rendered view and the textarea,
-  // so editing never moves a character. Whitespace is kept as typed.
-  const codePanel =
-    type === "code"
-      ? "block-code rounded-lg border border-border-secondary bg-[var(--color-bg-code-block)] px-3 py-2 whitespace-pre-wrap [overflow-wrap:anywhere] [tab-size:2]"
-      : null
-  const codeLanguage = type === "code" ? String(block.props?.language ?? "") : ""
+  // How this type looks (`block-kinds.tsx`): its marker, typography, any
+  // panel, and the chrome around the content line.
+  const kind = kindOf(type)
+  const typo = kind.typography(depth)
+  // A panel (a code block's) carries the same classes on the rendered view
+  // and the textarea, so editing never moves a character.
+  const panel = kind.panel ?? null
+  const rowContext: RowContext = { block, occurrence, api, depth }
 
   // Focus and place the caret when editing starts.
   useLayoutEffect(() => {
@@ -364,8 +290,8 @@ export function BlockItem({
     pendingCaret.current = result.caret
     dismissedSlash.current = null
     setSlash(null)
-    if (result.type === "image") {
-      // "Image" asks for a file rather than changing the type in place: the
+    if (result.type !== undefined && !defOf(result.type).turnInto) {
+      // A row that is not a type change (an image asks for a file): the
       // `/phrase` goes, and the picker decides what (if anything) is added.
       api.onBlockChange(block.id, { text: result.text }, "structural")
       api.requestImage?.(occurrence.key)
@@ -537,7 +463,7 @@ export function BlockItem({
   // would leave a parent todo un-tickable) — so a parent todo's chevron sits
   // BESIDE the slot instead, in the gutter just outside the highlight
   // surface: same reveal (hover its own square), same pin while collapsed.
-  const toggleBeside = hasToggle && isTodo(type)
+  const toggleBeside = hasToggle && !!kind.toggleBeside
 
   // The chevron. `.block-toggle` (block-editor.css) keeps it invisible until
   // its own square — the key slot, or the gutter square beside a todo; never
@@ -677,89 +603,85 @@ export function BlockItem({
       {toggle}
     </span>
   )
-  const marker = isTodo(type) ? (
-    // The checkbox IS the todo's marker — a control in the key slot, which
-    // is why a parent todo's chevron sits beside it (see `toggleBeside`).
-    // Hovering the box also reveals that chevron (`.block-toggle-hint`,
-    // block-editor.css) — the marker is where people look for the fold
-    // control — without the box ever giving up its own click. On coarse
-    // pointers the box grows its own tap area (`.block-checkbox::before`).
-    <span
-      className={cx(
-        "flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
-        toggleBeside && "block-toggle-hint",
-      )}
-    >
-      <input
-        type="checkbox"
-        checked={type === "done"}
-        disabled={readOnly}
-        onClick={(event) => event.stopPropagation()}
-        // Checked is a TYPE (docs/graph-schema-v2.md): ticking is `todo` ↔ `done`.
-        onChange={() => api.onBlockChange(block.id, { type: type === "done" ? "todo" : "done" })}
-        className={cx("block-checkbox", readOnly ? "cursor-default" : "cursor-pointer")}
-      />
-    </span>
-  ) : type === "ul" ? (
-    dotSlot
-  ) : isHeading(type) ? (
-    // Headings hang the same grey `#` as the note / zoom titles — the shared
-    // `Hash`, at the heading's own scale: the slot carries the heading's
-    // size + weight (headingScale + bold, no underline — that lives in
-    // `typo`) and the glyph inherits it, so the hash always matches the text
-    // beside it, at every depth. The slot stays the shared 15px column
-    // (heading text aligns with every other marked block); the hash
-    // right-aligns in it and, when a large scale outgrows the slot,
-    // overflows LEFT, past the surface's edge — the text column never
-    // moves. The slot's `h-[1lh]` (resolved at the heading's scale) centres
-    // the glyph on the heading's first line. A static glyph, like the note
-    // title's — never a zoom button (zoom stays on F / Cmd+. and
-    // bullet/number clicks); on a parent it swaps for the collapse chevron.
-    <span
-      data-testid="heading-hash"
-      className={cx(
-        "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-end font-bold",
-        headingScale(depth),
-        slotClass,
-      )}
-    >
-      <Hash className={keyClass} />
-      {toggle}
-    </span>
-  ) : type === "ol" ? (
-    // Numbers are read (they carry order), so they sit one step up the ramp
-    // from the dot — muted, not faint — and right-align to the slot edge.
-    <span
-      className={cx(
-        "relative flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary",
-        slotClass,
-      )}
-    >
-      {zoomable ? (
-        <button
-          type="button"
-          aria-label="Zoom into block"
-          tabIndex={-1}
-          onClick={() => api.zoomInto(block.id)}
-          className="-mx-0.5 cursor-pointer rounded-sm px-0.5 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-95 motion-reduce:active:scale-100"
-        >
-          {olNumber}.
-        </button>
-      ) : (
-        <span aria-hidden className={keyClass}>
-          {olNumber}.
-        </span>
-      )}
-      {toggle}
-    </span>
-  ) : type === "quote" ? (
-    glyphSlot(">", "quote-glyph")
-  ) : type === "code" ? (
-    // A code block keys on nothing, like a paragraph: the panel is its marker.
-    glyphSlot(null, "code-slot")
-  ) : (
-    glyphSlot(null, "paragraph-slot")
-  )
+  const marker =
+    kind.slot === "checkbox" ? (
+      // The checkbox IS the todo's marker — a control in the key slot, which
+      // is why a parent todo's chevron sits beside it (see `toggleBeside`).
+      // Hovering the box also reveals that chevron (`.block-toggle-hint`,
+      // block-editor.css) — the marker is where people look for the fold
+      // control — without the box ever giving up its own click. On coarse
+      // pointers the box grows its own tap area (`.block-checkbox::before`).
+      <span
+        className={cx(
+          "flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
+          toggleBeside && "block-toggle-hint",
+        )}
+      >
+        <input
+          type="checkbox"
+          checked={type === "done"}
+          disabled={readOnly}
+          onClick={(event) => event.stopPropagation()}
+          // Checked is a TYPE (docs/graph-schema-v2.md): ticking is `todo` ↔ `done`.
+          onChange={() => api.onBlockChange(block.id, { type: type === "done" ? "todo" : "done" })}
+          className={cx("block-checkbox", readOnly ? "cursor-default" : "cursor-pointer")}
+        />
+      </span>
+    ) : kind.slot === "dot" ? (
+      dotSlot
+    ) : kind.slot === "hash" ? (
+      // Headings hang the same grey `#` as the note / zoom titles — the shared
+      // `Hash`, at the heading's own scale: the slot carries the heading's
+      // size + weight (headingScale + bold, no underline — that lives in
+      // `typo`) and the glyph inherits it, so the hash always matches the text
+      // beside it, at every depth. The slot stays the shared 15px column
+      // (heading text aligns with every other marked block); the hash
+      // right-aligns in it and, when a large scale outgrows the slot,
+      // overflows LEFT, past the surface's edge — the text column never
+      // moves. The slot's `h-[1lh]` (resolved at the heading's scale) centres
+      // the glyph on the heading's first line. A static glyph, like the note
+      // title's — never a zoom button (zoom stays on F / Cmd+. and
+      // bullet/number clicks); on a parent it swaps for the collapse chevron.
+      <span
+        data-testid="heading-hash"
+        className={cx(
+          "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-end font-bold",
+          headingScale(depth),
+          slotClass,
+        )}
+      >
+        <Hash className={keyClass} />
+        {toggle}
+      </span>
+    ) : kind.slot === "number" ? (
+      // Numbers are read (they carry order), so they sit one step up the ramp
+      // from the dot — muted, not faint — and right-align to the slot edge.
+      <span
+        className={cx(
+          "relative flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary",
+          slotClass,
+        )}
+      >
+        {zoomable ? (
+          <button
+            type="button"
+            aria-label="Zoom into block"
+            tabIndex={-1}
+            onClick={() => api.zoomInto(block.id)}
+            className="-mx-0.5 cursor-pointer rounded-sm px-0.5 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-95 motion-reduce:active:scale-100"
+          >
+            {olNumber}.
+          </button>
+        ) : (
+          <span aria-hidden className={keyClass}>
+            {olNumber}.
+          </span>
+        )}
+        {toggle}
+      </span>
+    ) : (
+      glyphSlot(kind.glyph ?? null, kind.slotTestId ?? "paragraph-slot")
+    )
 
   // The wrapper: indented by depth, carrying the guide lines of every row it
   // sits under. A heading's breathing room is a margin, so the highlight
@@ -767,7 +689,7 @@ export function BlockItem({
   // parent's line runs unbroken beside its subtree.
   const marginTop = zoomTitle
     ? 0
-    : Math.max(headingTopMarginPx(type, depth), depth === 0 && occurrence.index > 0 ? ROOT_GAP : 0)
+    : Math.max(kind.topMargin?.(depth) ?? 0, depth === 0 && occurrence.index > 0 ? ROOT_GAP : 0)
 
   // The caption/body line: the textarea while editing, the rendered text
   // otherwise (an image row hangs it beneath the picture).
@@ -784,7 +706,7 @@ export function BlockItem({
         // appears in view mode or over content. The turn-into keys
         // live in the `?` reference, not here.
         // The zoom title is a page title, not a block — no ghost.
-        placeholder={zoomTitle ? undefined : type === "image" ? "Add a caption…" : "Ruminate…"}
+        placeholder={zoomTitle ? undefined : (kind.placeholder ?? "Ruminate…")}
         onChange={handleTextareaChange}
         onKeyDown={handleEditKeyDown}
         // Caret moves that aren't edits (arrows, Home/End, a click)
@@ -802,7 +724,7 @@ export function BlockItem({
         className={cx(
           "min-w-0 flex-1 resize-none overflow-hidden font-content leading-relaxed text-text outline-none [overflow-wrap:anywhere] placeholder:text-text-tertiary",
           // The panel supplies a code block's surface and padding.
-          codePanel ?? "border-none bg-transparent p-0",
+          panel ?? "border-none bg-transparent p-0",
           typo,
         )}
       />
@@ -832,11 +754,8 @@ export function BlockItem({
         !readOnly && "cursor-text",
         readOnly && api.activate && "cursor-pointer",
         typo,
-        codePanel,
-        // Checking a todo mutes its text; the fade marks the state
-        // change without delaying it.
-        isTodo(type) && "transition-colors duration-200",
-        type === "done" && "text-text-secondary line-through",
+        panel,
+        kind.bodyClass,
       )}
       {...(readOnly
         ? api.activate
@@ -847,13 +766,7 @@ export function BlockItem({
             onDoubleClick: () => api.edit(occurrence.key),
           })}
     >
-      {type === "code" ? (
-        // Verbatim: a code block's text is not markdown. The panel's
-        // `whitespace-pre-wrap` keeps its lines and indentation.
-        body
-      ) : (
-        <BlockContent content={body} />
-      )}
+      {kind.verbatim ? body : <BlockContent content={body} />}
     </div>
   )
 
@@ -948,40 +861,9 @@ export function BlockItem({
               {toggle}
             </span>
           ) : null}
-          {type === "quote" ? (
-            // The quote's bar stands at the text column — where every other
-            // block's text begins — and pushes the quote's text 10px in (bar
-            // 2px + the 8px gap): a quote is set in from the rest, the way it
-            // is on the page. Rounded ends and the glyph ink (tertiary), so
-            // it reads as chrome of the same family as the `>` beside it. It
-            // stretches the line's full height so a wrapped quote reads as
-            // one block.
-            <span
-              aria-hidden
-              className="w-0.5 shrink-0 self-stretch rounded-full bg-text-tertiary"
-            />
-          ) : null}
-          {type === "image" ? (
-            // The picture above its caption, which is the block's text: the
-            // caption line is the ordinary body (view or textarea), so every
-            // keyboard and paste behaviour is the same as on any block.
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <ImageFigure block={block} occurrence={occurrence} api={api} />
-              <div className="flex min-w-0">{content}</div>
-            </div>
-          ) : (
-            content
-          )}
-          {codeLanguage ? (
-            // The language, top-right of the panel — chrome, not content.
-            <span
-              aria-hidden
-              data-testid="code-language"
-              className="pointer-events-none absolute right-2 top-1.5 select-none font-mono text-[11px] leading-4 text-text-tertiary"
-            >
-              {codeLanguage}
-            </span>
-          ) : null}
+          {kind.before?.(rowContext)}
+          {kind.wrap ? kind.wrap(content, rowContext) : content}
+          {kind.after?.(rowContext)}
           {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
         </div>
         {api.debug?.showMetadata ? (
@@ -993,68 +875,6 @@ export function BlockItem({
         ) : null}
       </div>
     </div>
-  )
-}
-
-// ── Image rows ─────────────────────────────────────────────────────────────
-
-/** An image block's picture: the bytes once fetched (a quiet placeholder
- * until then), a click opening the lightbox. Sized to the row — never wider
- * than the text column, never taller than a screenful. */
-function ImageFigure({
-  block,
-  occurrence,
-  api,
-}: {
-  block: Block
-  occurrence: Occurrence
-  api: BlockEditorApi
-}) {
-  const src = useImageSrc(block)
-  const { width, height } = imagePropsOf(block)
-  const caption = block.text.trim()
-  const open = (event: React.MouseEvent) => {
-    event.stopPropagation()
-    if (api.openImage) {
-      if (!api.readOnly) api.select(occurrence.key)
-      api.openImage(block.id)
-    } else {
-      api.activate?.(occurrence.key)
-    }
-  }
-  if (src === "error") {
-    return (
-      <div
-        data-testid="block-image-missing"
-        className="self-start rounded-lg border border-dashed border-border-secondary px-3 py-2 text-sm text-text-tertiary"
-      >
-        Image unavailable
-      </div>
-    )
-  }
-  return (
-    <button
-      type="button"
-      tabIndex={-1}
-      aria-label={caption ? `Open image: ${caption}` : "Open image"}
-      onClick={open}
-      className="block max-w-full cursor-zoom-in self-start overflow-hidden rounded-lg border border-border-secondary bg-bg-secondary"
-    >
-      {src ? (
-        <img
-          src={src}
-          alt={caption}
-          data-testid="block-image"
-          className="block h-auto max-h-80 w-auto max-w-full object-contain"
-        />
-      ) : (
-        <div
-          aria-hidden
-          className="max-h-80 w-64 max-w-full animate-pulse"
-          style={{ aspectRatio: width && height ? `${width} / ${height}` : "4 / 3" }}
-        />
-      )}
-    </button>
   )
 }
 
