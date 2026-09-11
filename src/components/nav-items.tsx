@@ -2,9 +2,9 @@ import { Link, LinkComponentProps, useLocation } from "@tanstack/react-router"
 import { useAtom, useAtomValue } from "jotai"
 import { createContext, useContext } from "react"
 import { useNetworkState } from "react-use"
-import { useRegisterSW } from "virtual:pwa-register/react"
 import { requestDatabasePull } from "../data/database-mode"
 import { isHelpPanelOpenAtom, sortedNotesAtom } from "../global-state"
+import { appUpdateAtom } from "../hooks/app-update"
 import type { Note } from "../schema"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
@@ -49,28 +49,8 @@ export function NavItems({
   const noteId = pathname.startsWith("/notes/") ? pathname.slice(7) : ""
   const isCalendarActive = isValidDateString(noteId) || isValidWeekString(noteId)
 
-  // Reference: https://vite-pwa-org.netlify.app/frameworks/react.html#prompt-for-update
-  const {
-    needRefresh: [needRefresh],
-    updateServiceWorker,
-  } = useRegisterSW({
-    onRegistered(registration) {
-      console.log("SW registered: " + registration)
-
-      if (registration) {
-        // Check for updates every hour
-        setInterval(
-          () => {
-            registration.update()
-          },
-          60 * 60 * 1000,
-        )
-      }
-    },
-    onRegisterError(error) {
-      console.error("SW registration error", error)
-    },
-  })
+  // Registered once by the app layout (src/hooks/app-update.ts).
+  const { needRefresh, apply: applyUpdate } = useAtomValue(appUpdateAtom)
 
   return (
     <SizeContext.Provider value={size}>
@@ -137,17 +117,7 @@ export function NavItems({
         </div>
         <div className="flex flex-col gap-1">
           {needRefresh ? (
-            <button
-              className="nav-item"
-              data-size={size}
-              onClick={() => {
-                // Apply the waiting service worker and reload to the new
-                // version. Fall back to a hard reload if the worker never
-                // takes over (so the button always refreshes the app).
-                void updateServiceWorker(true)
-                window.setTimeout(() => window.location.reload(), 3000)
-              }}
-            >
+            <button className="nav-item" data-size={size} onClick={applyUpdate}>
               <div className="grid size-4 place-items-center [&>*]:row-span-full [&>*]:col-span-full">
                 <div className="size-3 rounded-full bg-border-focus opacity-50 animate-ping" />
                 <div className="size-2 rounded-full bg-border-focus" />

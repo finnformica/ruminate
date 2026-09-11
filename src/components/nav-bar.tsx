@@ -1,7 +1,8 @@
 import { useNavigate, useRouter } from "@tanstack/react-router"
-import { useSetAtom } from "jotai"
+import { useAtomValue, useSetAtom } from "jotai"
 import { forwardRef, useState } from "react"
 import { Drawer } from "vaul"
+import { appUpdateAtom } from "../hooks/app-update"
 import { cx } from "../utils/cx"
 import { generateNoteId } from "../utils/note-id"
 import { isCommandMenuOpenAtom } from "./command-menu"
@@ -9,12 +10,29 @@ import { IconButton, IconButtonProps } from "./icon-button"
 import { ArrowLeftIcon16, ArrowRightIcon16, MenuIcon16, ComposeIcon16, SearchIcon16 } from "./icons"
 import { NavItems } from "./nav-items"
 import { SignInBanner } from "./sign-in-banner"
+import { useAttentionTone } from "./sync-status"
 
 export function NavBar() {
   const router = useRouter()
   const navigate = useNavigate()
   const setIsCommandMenuOpen = useSetAtom(isCommandMenuOpenAtom)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
+  // The drawer holds the sync status and the "Update Ruminate" item, so while
+  // it is closed nothing on a phone says the app needs attention. The menu
+  // button wears a dot instead: red for a failed sync or a dead sign-in,
+  // amber for a sign-in about to expire, accent for a waiting update. Sync
+  // trouble outranks an update, since it is what the reader must act on.
+  const attention = useAttentionTone()
+  const { needRefresh } = useAtomValue(appUpdateAtom)
+  const badge = attention ?? (needRefresh ? "update" : null)
+  const badgeLabel =
+    badge === "danger"
+      ? "needs attention"
+      : badge === "pending"
+        ? "sign in soon"
+        : badge === "update"
+          ? "update available"
+          : null
 
   return (
     <div className="border-t border-border-secondary">
@@ -26,8 +44,27 @@ export function NavBar() {
           shouldScaleBackground={false}
         >
           <Drawer.Trigger asChild>
-            <NavButton aria-label="Open navigation menu">
-              <MenuIcon16 />
+            <NavButton
+              aria-label={
+                badgeLabel ? `Open navigation menu (${badgeLabel})` : "Open navigation menu"
+              }
+            >
+              <span className="relative flex">
+                <MenuIcon16 />
+                {badge ? (
+                  <span
+                    data-testid="nav-badge"
+                    data-tone={badge}
+                    aria-hidden
+                    className={cx(
+                      "absolute -right-1.5 -top-1.5 size-2.5 rounded-full ring-2 ring-bg",
+                      badge === "danger" && "bg-text-danger",
+                      badge === "pending" && "bg-text-pending",
+                      badge === "update" && "bg-border-focus",
+                    )}
+                  />
+                ) : null}
+              </span>
             </NavButton>
           </Drawer.Trigger>
           <Drawer.Portal>

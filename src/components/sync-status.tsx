@@ -29,6 +29,41 @@ const isSyncErrorAtom = atom((get) => {
   return status.pull === "error" || (replica?.lastError ?? null) !== null
 })
 
+/** What the sync status needs the reader to notice, if anything: `danger`
+ * (signed out, or the last sync failed) or `pending` (sign-in expiring soon).
+ * Pure, so the nav-bar badge and its tests share one reading of the state. */
+export function attentionTone(state: {
+  isDatabaseMode: boolean
+  online: boolean
+  session: "active" | "expiring" | "expired" | string
+  isSyncing: boolean
+  isSyncError: boolean
+}): "danger" | "pending" | null {
+  if (!state.isDatabaseMode || !state.online) return null
+  if (state.session === "expired") return "danger"
+  // A sync in flight hides a stale error — it either clears or comes back.
+  if (state.isSyncing) return null
+  if (state.session === "expiring") return "pending"
+  if (state.isSyncError) return "danger"
+  return null
+}
+
+/** The sync status' attention tone, live (see `attentionTone`). */
+export function useAttentionTone(): "danger" | "pending" | null {
+  const isSyncing = useAtomValue(isSyncingAtom)
+  const isSyncError = useAtomValue(isSyncErrorAtom)
+  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
+  const session = useAtomValue(sessionStatusAtom)
+  const { online } = useNetworkState()
+  return attentionTone({
+    isDatabaseMode,
+    online: online !== false,
+    session,
+    isSyncing,
+    isSyncError,
+  })
+}
+
 /**
  * Bottom-left status. GitHub session state (expired / expiring) is layered over
  * the sync state, because a dead sign-in is what the user must act on first.

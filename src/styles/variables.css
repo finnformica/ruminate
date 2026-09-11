@@ -137,6 +137,9 @@
   --font-size-2xl: 30px;
   --font-size-3xl: 36px;
 
+  /* Block text leading (Tailwind's `leading-relaxed`, every block row). */
+  --line-height-relaxed: 1.65;
+
   /* Font weights */
   --font-weight-normal: 400;
   --font-weight-bold: 600;
@@ -205,9 +208,19 @@
 
 @media (pointer: coarse) {
   :root {
-    /* Font sizes */
+    /* Font sizes. Body text grows a step for reading at arm's length; the
+     * display sizes shrink instead — a 30px heading on a 390px screen is a
+     * third of the line — so more of a note fits on a phone. */
     --font-size-sm: 13px;
     --font-size-base: 15px;
+    --font-size-lg: 17px;
+    --font-size-xl: 21px;
+    --font-size-2xl: 25px;
+    --font-size-3xl: 28px;
+
+    /* Block text leading: 1.5 instead of 1.65, so a wrapped paragraph takes
+     * fewer lines without losing the rhythm between rows. */
+    --line-height-relaxed: 1.5;
 
     /* Font weights */
     --font-weight-normal: 450;
