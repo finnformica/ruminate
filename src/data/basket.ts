@@ -12,7 +12,9 @@ import { pageIds, parentsIndex, partsToOps, reachableFrom, reservedPageIds, type
  * (`notes_id`: the note it was written in, set once at creation), and a
  * block no page reaches shows in that note's basket, beneath the outline,
  * where it can be edited, pasted back into the outline (which links it, and
- * so takes it out of the basket) or deleted for good.
+ * so takes it out of the basket) or deleted for good. Removing a row in the
+ * outline is how a block gets here (`docToOps` unlinks, never deletes);
+ * removing a row here is the delete.
  *
  * "No page reaches it" — not "it has no parent": two blocks that hold each
  * other and have lost their link to the page both have a parent, yet neither
@@ -75,5 +77,14 @@ export function basketToOps(pageId: NoteId, doc: BlockDoc, snapshot: GraphSnapsh
   // basket's: drop them so the diff touches only the basket's blocks.
   const blocks = nodes.filter((node) => node.id !== pageId)
   childrenOf.delete(pageId)
-  return partsToOps(pageId, blocks, childrenOf, snapshot, new Set(Object.keys(before.blocks)))
+  // A row removed here is deleted: there is nothing to unlink it from, and
+  // the basket is where a block is deleted for good.
+  return partsToOps(
+    pageId,
+    blocks,
+    childrenOf,
+    snapshot,
+    new Set(Object.keys(before.blocks)),
+    "delete",
+  )
 }

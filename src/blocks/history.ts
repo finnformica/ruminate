@@ -16,11 +16,20 @@ import type { BlockDoc } from "./types"
 /** Describes the change being recorded, used to decide coalescing. */
 export type BlockOp = { type: "text"; blockId: string } | { type: "structural" }
 
+/** One step: the doc to restore, and the blocks the step being stepped over
+ * brought into being (new to the graph, not merely linked in). Undoing that
+ * step takes them back out for good — an undone creation is not an unlink
+ * (`ChangeHint.discard`, types.ts). */
+type HistoryEntry = {
+  doc: BlockDoc
+  created: string[]
+}
+
 export type History = {
-  /** Snapshots to restore on undo, oldest first; the last is the most recent. */
-  past: BlockDoc[]
-  /** Snapshots to restore on redo, oldest first. */
-  future: BlockDoc[]
+  /** Steps to restore on undo, oldest first; the last is the most recent. */
+  past: HistoryEntry[]
+  /** Steps to restore on redo, oldest first. */
+  future: HistoryEntry[]
   /** The last recorded op, for coalescing runs of edits to one block. */
   lastOp: BlockOp | null
 }
@@ -34,15 +43,32 @@ export function emptyHistory(): History {
 
 /**
  * Record a change about to be applied. `current` is the document *before* the
- * change. Returns the new history (the caller then applies the next doc).
+ * change; `created` names the blocks the change brings into being. Returns
+ * the new history (the caller then applies the next doc).
  */
-export function record(history: History, current: BlockDoc, op: BlockOp): History {
+export function record(
+  history: History,
+  current: BlockDoc,
+  op: BlockOp,
+  created: string[] = [],
+): History {
   const coalesce =
     op.type === "text" && history.lastOp?.type === "text" && history.lastOp.blockId === op.blockId
 
+  let past: HistoryEntry[]
+  if (coalesce && history.past.length > 0) {
+    // A coalesced edit keeps the snapshot taken at the start of the run, and
+    // owns everything the run created.
+    const last = history.past[history.past.length - 1]
+    past = [
+      ...history.past.slice(0, -1),
+      created.length > 0 ? { ...last, created: [...last.created, ...created] } : last,
+    ]
+  } else {
+    past = [...history.past, { doc: current, created }].slice(-LIMIT)
+  }
   return {
-    // A coalesced edit keeps the snapshot taken at the start of the run.
-    past: coalesce ? history.past : [...history.past, current].slice(-LIMIT),
+    past,
     // Any fresh change invalidates the redo stack.
     future: [],
     lastOp: op,
@@ -51,19 +77,23 @@ export function record(history: History, current: BlockDoc, op: BlockOp): Histor
 
 /**
  * Undo one step. `current` is the live document (pushed onto the redo stack).
- * Returns the doc to restore and the new history, or `null` if nothing to undo.
+ * Returns the doc to restore, the blocks the undone step had created (for the
+ * save to discard rather than unlink), and the new history — or `null` if
+ * there is nothing to undo.
  */
 export function undo(
   history: History,
   current: BlockDoc,
-): { history: History; doc: BlockDoc } | null {
+): { history: History; doc: BlockDoc; created: string[] } | null {
   if (history.past.length === 0) return null
-  const doc = history.past[history.past.length - 1]
+  const entry = history.past[history.past.length - 1]
   return {
-    doc,
+    doc: entry.doc,
+    created: entry.created,
     history: {
       past: history.past.slice(0, -1),
-      future: [...history.future, current],
+      // Redoing this step re-applies `current`, creating the same blocks again.
+      future: [...history.future, { doc: current, created: entry.created }],
       lastOp: null,
     },
   }
@@ -75,11 +105,11 @@ export function redo(
   current: BlockDoc,
 ): { history: History; doc: BlockDoc } | null {
   if (history.future.length === 0) return null
-  const doc = history.future[history.future.length - 1]
+  const entry = history.future[history.future.length - 1]
   return {
-    doc,
+    doc: entry.doc,
     history: {
-      past: [...history.past, current],
+      past: [...history.past, { doc: current, created: entry.created }],
       future: history.future.slice(0, -1),
       lastOp: null,
     },

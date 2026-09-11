@@ -67,6 +67,18 @@ export interface Block {
   children: string[]
 }
 
+/**
+ * What a doc change means beyond the doc itself, for the save to act on.
+ * `discard`: blocks the change takes out of the doc that should be deleted
+ * rather than kept — an undo taking back the step that created them (a
+ * duplicate, a paste, a new line), where an unlink would strand the copies
+ * in the note's Unassigned basket. Ids not in the doc's own removal are
+ * ignored, so the hint can only ever name what this change removed.
+ */
+export interface ChangeHint {
+  discard?: string[]
+}
+
 export interface BlockDoc {
   /**
    * The page's props — its metadata (`title`, `pinned`, `tags`, `updated_at`…)

@@ -7,7 +7,7 @@ import { parse } from "../blocks/parse"
 import type { BlockProps } from "../blocks/types"
 import { rollup } from "./graph"
 import type { NoteStore } from "./note-store"
-import { deletePageOps, docToOps } from "./ops"
+import { deleteBlockOps, deletePageOps, docToOps } from "./ops"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { openSqlNoteStore } from "./sql-note-store"
 
@@ -101,10 +101,28 @@ describe("openSqlNoteStore", () => {
     expect(diff).toEqual({ nodes: [], links: [], deleteNodes: [], deleteLinks: [] })
   })
 
-  it("removing a block from a note tombstones its node and link rows (diffed)", async () => {
+  it("removing a block from a note tombstones its link row and keeps its node (diffed)", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "a", "- keep\n  id:: blk_aaaaaaaaaa\n- drop\n  id:: blk_bbbbbbbbbb\n")
     const diff = await seed(store, "a", "- keep\n  id:: blk_aaaaaaaaaa\n")
+    // An unlink, not a delete: the block is out of reach (the basket's), its
+    // row live, and only the tombstoned link travels.
+    expect(diff.deleteNodes).toEqual([])
+    expect(diff.deleteLinks).toEqual([])
+    expect(diff.nodes).toEqual([])
+    expect(diff.links).toEqual([
+      expect.objectContaining({ destination_id: "blk_bbbbbbbbbb", deleted_at: expect.any(Number) }),
+    ])
+    expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = 'blk_bbbbbbbbbb'")).toEqual([
+      { deleted_at: null },
+    ])
+    expect(await noteOf(store, "a")).toBe("- keep\n  id:: blk_aaaaaaaaaa\n")
+  })
+
+  it("deleting a block tombstones its node and link rows (diffed)", async () => {
+    const { driver, store } = await makeStoreWithDriver()
+    await seed(store, "a", "- keep\n  id:: blk_aaaaaaaaaa\n- drop\n  id:: blk_bbbbbbbbbb\n")
+    const diff = await store.applyOps(deleteBlockOps("blk_bbbbbbbbbb", await store.getGraph()))
     // Nothing is removed: the diff carries the tombstoned rows, so the delete
     // replicates like any other change.
     expect(diff.deleteNodes).toEqual([])
@@ -341,7 +359,7 @@ describe("openSqlNoteStore", () => {
   it("getAllRows carries tombstones — a delete only replicates if it travels", async () => {
     const { store } = await makeStoreWithDriver()
     await seed(store, "a", "- x\n  id:: blk_aaaaaaaaaa\n")
-    await seed(store, "a", "\n")
+    await store.applyOps(deleteBlockOps("blk_aaaaaaaaaa", await store.getGraph()))
     const { nodes } = await store.getAllRows()
     expect(nodes.find((node) => node.id === "blk_aaaaaaaaaa")?.deleted_at).toEqual(
       expect.any(Number),
@@ -384,9 +402,9 @@ describe("soft deletes", () => {
   it("a tombstoned node never renders, and neither does a link into it", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "a", OUTLINE)
-    await seed(store, "a", "- parent\n  id:: blk_parent0000\n")
+    await store.applyOps(deleteBlockOps("blk_child00000", await store.getGraph()))
 
-    // The child was unlinked and had no other parent: gone from every read…
+    // The child was deleted: gone from every read…
     expect(await noteOf(store, "a")).toBe("- parent\n  id:: blk_parent0000\n")
     const graph = await store.getGraph()
     expect(graph.nodes.has("blk_child00000")).toBe(false)
