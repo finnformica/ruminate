@@ -1613,7 +1613,14 @@ export function BlockEditor({
         // fragment arrives with its ids already settled, so it bypasses the
         // remint below (reminting would undo the link).
         const fragment = embeddedPasteFragment(embedded, doc, target, resolveBlocks)
-        if (!fragment) return // every pasted block is already a child here
+        if (!fragment) {
+          // Every pasted block already hangs directly under the target: nothing
+          // to do, but say so — a paste that does nothing looks broken.
+          toast(
+            embedded.length > 1 ? "Those blocks are already here" : "That block is already here",
+          )
+          return
+        }
         const linked = insertBlocksAsFirstChildren(doc, targetId, fragment)
         if (!linked) return
         settleAfterPaste(fragment.rootBlockIds, linked.doc)

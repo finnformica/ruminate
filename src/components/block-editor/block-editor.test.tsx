@@ -590,18 +590,29 @@ describe("paste as link (Ruminate payload with ids)", () => {
     expect(serializedLines(getByTestId)).toEqual(["A", "  B edited", "C", "  B edited"])
   })
 
-  it("skips a block already a direct child of the paste target (twin), keeping its siblings", () => {
+  it("skips a block already a direct child of the paste target (twin), keeping its siblings", async () => {
     // The target IS the insertion parent now, so the twin scope is its own
     // children: B already hangs off A.
-    const { container, getByTestId } = render(<Harness initial={"A\n  B"} />)
+    const { container, getByTestId } = render(
+      <>
+        <Harness initial={"A\n  B"} />
+        <Toaster />
+      </>,
+    )
     const before = getByTestId("serialized").textContent!
     const idB = before.match(/B\n\s*id:: (\S+)/)![1]
     const root = editorRoot(container) // A is selected on mount
 
-    // B alone: the whole paste is a no-op — it's already there.
+    // B alone: the whole paste is a no-op — it's already there — and a toast
+    // says so, since a paste that does nothing would look broken.
     const twinOnly = richClipboardFormats(`B\n  id:: ${idB}`)
-    paste(root, twinOnly.plain, twinOnly.html)
+    await act(async () => {
+      paste(root, twinOnly.plain, twinOnly.html)
+    })
     expect(getByTestId("serialized").textContent).toBe(before)
+    // sonner mounts a toast on a deferred tick.
+    expect(await screen.findByText("That block is already here")).not.toBeNull()
+    toast.dismiss()
 
     // B + an unknown sibling: B is skipped, the sibling still lands under A.
     const mixed = richClipboardFormats(`B\n  id:: ${idB}\nZ new\n  id:: blk_znew000000`)
