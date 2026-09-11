@@ -113,7 +113,12 @@ async function capture(scheme, id, waitFor) {
       "*, *::before, *::after { transition: none !important; animation: none !important; caret-color: transparent !important; }"
     document.addEventListener("DOMContentLoaded", () => document.head.appendChild(style))
   })
-  await page.goto(`${BASE}?id=${id}&viewMode=story`, { waitUntil: "domcontentloaded" })
+  // The scheme is Storybook's `theme` global (.storybook/preview.tsx), which
+  // stamps `data-theme` on <html> as the app does: the stylesheets key off
+  // that attribute, not the emulated system preference on its own.
+  await page.goto(`${BASE}?id=${id}&viewMode=story&globals=theme:${scheme}`, {
+    waitUntil: "domcontentloaded",
+  })
   await page.locator(waitFor).first().waitFor({ timeout: 15000 })
   await page.waitForLoadState("networkidle")
   await page.evaluate(() => document.fonts.ready)

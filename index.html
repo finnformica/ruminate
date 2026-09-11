@@ -9,13 +9,26 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon-512.png" />
     <meta name="theme-color" content="" />
     <script>
-      // Apply the persisted accent color before first paint (see accentAtom).
+      // Apply the persisted accent color and colour scheme before first paint
+      // (see accentAtom and themeAtom; src/hooks/color-scheme.ts takes over
+      // once the app mounts). The scheme is always stamped: the stylesheets
+      // read it from <html>, never from the media query themselves.
       try {
         var accent = JSON.parse(localStorage.getItem("accent"))
         if (accent && accent !== "cyan") document.documentElement.dataset.accent = accent
       } catch (e) {
         // Ignore malformed storage — the default accent applies.
       }
+      var theme = null
+      try {
+        theme = JSON.parse(localStorage.getItem("theme"))
+      } catch (e) {
+        // Ignore malformed storage — the system scheme applies.
+      }
+      if (theme !== "light" && theme !== "dark") {
+        theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+      }
+      document.documentElement.dataset.theme = theme
     </script>
   </head>
   <body>

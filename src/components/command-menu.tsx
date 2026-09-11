@@ -16,7 +16,7 @@ import {
 import { useBlockResultTree, type ResultRow } from "../hooks/block-result-tree"
 import { useCreateNote, useNoteById } from "../hooks/note"
 import { useBlockSearchSource, useSearchResults } from "../hooks/search-results"
-import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
+import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/registry"
 import { rollup } from "../data/graph"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { useSearchNotes } from "../hooks/search-notes"
@@ -37,6 +37,7 @@ import {
   SettingsIcon16,
   TagIcon16,
 } from "./icons"
+import { Keys } from "./keys"
 import { NoteFavicon } from "./note-favicon"
 import {
   QualifierSuggestions,
@@ -270,6 +271,7 @@ export function CommandMenu() {
     return [
       {
         label: "Notes",
+        shortcut: formatCombo("g n"),
         icon: <NoteIcon16 />,
         onSelect: () => {
           navigate({
@@ -282,6 +284,7 @@ export function CommandMenu() {
       },
       {
         label: "Calendar",
+        shortcut: formatCombo("g d"),
         icon: <CalendarDateIcon16 date={new Date().getDate()} />,
         onSelect: () => {
           navigate({
@@ -297,6 +300,7 @@ export function CommandMenu() {
       },
       {
         label: "Tags",
+        shortcut: formatCombo("g t"),
         icon: <TagIcon16 />,
         onSelect: () => {
           navigate({
@@ -310,6 +314,7 @@ export function CommandMenu() {
       },
       {
         label: "Settings",
+        shortcut: formatCombo("g s"),
         icon: <SettingsIcon16 />,
         onSelect: () => {
           navigate({
@@ -666,6 +671,7 @@ export function CommandMenu() {
                     <CommandItem
                       key={item.label}
                       icon={item.icon}
+                      shortcut={item.shortcut}
                       onSelect={handleSelect(item.onSelect)}
                     >
                       {item.label}
@@ -819,6 +825,8 @@ type CommandItemProps = {
   value?: string
   icon?: React.ReactNode
   description?: string
+  /** The keys that run this command outside the palette (`formatCombo`). */
+  shortcut?: string[]
   className?: string
   style?: React.CSSProperties
   onSelect?: () => void
@@ -829,6 +837,7 @@ function CommandItem({
   value,
   icon,
   description,
+  shortcut,
   className,
   style,
   onSelect,
@@ -839,6 +848,11 @@ function CommandItem({
         <div className="grid h-4 w-4 place-items-center text-text-secondary">{icon}</div>
         <div className="grow truncate">{children}</div>
         {description ? <span className="shrink-0 text-text-secondary">{description}</span> : null}
+        {shortcut ? (
+          <span className="shrink-0 coarse:hidden">
+            <Keys keys={shortcut} chord />
+          </span>
+        ) : null}
         <span className="hidden leading-none text-text-secondary in-aria-selected:inline">⏎</span>
       </div>
     </Command.Item>
