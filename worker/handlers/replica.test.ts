@@ -76,6 +76,14 @@ describe("parseReplicaPayload", () => {
 
   it("rejects non-objects and missing row arrays", () => {
     expect(parseReplicaPayload(null)).toBeNull()
+    // A note id rides along when present and is optional otherwise; anything
+    // that is not a string is malformed.
+    expect(
+      parseReplicaPayload({ nodes: [{ ...node, notes_id: "note1" }], links: [] })?.nodes[0]
+        .notes_id,
+    ).toBe("note1")
+    expect(parseReplicaPayload({ nodes: [{ ...node, notes_id: null }], links: [] })).not.toBeNull()
+    expect(parseReplicaPayload({ nodes: [{ ...node, notes_id: 7 }], links: [] })).toBeNull()
     expect(parseReplicaPayload("hi")).toBeNull()
     expect(parseReplicaPayload({})).toBeNull()
     expect(parseReplicaPayload({ nodes: [] })).toBeNull()
@@ -122,7 +130,7 @@ describe("planReplicaPut", () => {
       "INSERT INTO link",
       "INSERT INTO meta",
     ])
-    expect(statements[2].params).toEqual(["blk_aaaaaaaaaa", "ul", "Hi", null, 123, null])
+    expect(statements[2].params).toEqual(["blk_aaaaaaaaaa", "ul", "Hi", null, 123, null, null])
     expect(statements[3].params).toEqual([
       "blk_noteaaaaaa",
       "blk_aaaaaaaaaa",

@@ -191,12 +191,16 @@ projection is `rollup` over the snapshot. `src/data/sql-note-store.test.ts`
 pins the row-level behaviour — diffs, one timestamp per delete, tombstones
 that render as absent but travel on push, the migration ladder.
 
-## Schema (`migrations/0001` → `0002` → `0004`)
+## Schema (`migrations/0001` → `0002` → `0004` → `0006`)
 
 Wrangler d1 migration files, written in strictly shared SQLite dialect.
 `0001` created the v1 markdown-as-truth tables; `0002` creates the v2 graph
 and drops them; `0004` is v3 — soft deletes on both engines, plus the tenant
-column on D1. Full DDL and rationale in
+column on D1; `0006` is v4 — `notes_id` on nodes, the note a block was written
+in (the Unassigned basket's key; graph-schema-v2.md, "Delete"), backfilled on
+D1 by a recursive walk from every page and, on the browser store, added as a
+bare column and filled by the re-pull `CACHE_GENERATION` 4 forces. Full DDL
+and rationale in
 [graph-schema-v2.md](./graph-schema-v2.md); in brief:
 
 ### One dialect, two shapes
@@ -555,7 +559,9 @@ a block below — the text is untouched.
 Edit-mode (textarea) paste is unchanged — a caret splice is textual. On the
 store side, `docToOps` has the required property (pinned in `ops.test.ts`): a
 save whose diff drops a node that is still linked from another note only
-unlinks it — the node row and the other note's link survive.
+unlinks it — the node row and the other note's link survive. And a delete
+never cascades: what a deleted block held keeps its note id and shows in that
+note's Unassigned basket (`basket.ts`), from which a paste links it back.
 
 ## History: the git era, and schema v1
 

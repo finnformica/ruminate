@@ -45,12 +45,26 @@ export interface CorpusMigrations {
    * store has no `seq`: the sequence is assigned by the replica, and a cache
    * has no ordering of its own to keep. */
   rowSeq?: string
+  /** migrations/0006_notes_id.sql — required in `"columns"` mode. The local store
+   * gains the column without the backfill (`LOCAL_V4_SQL`): a cache re-pulls
+   * the note ids the replica computed. */
+  notesId?: string
 }
 
 /** Which v3 shape the ladder should produce (see the module header). */
 export type CorpusTenancy = "single" | "columns"
 
-const CORPUS_SCHEMA_VERSION = "3"
+const CORPUS_SCHEMA_VERSION = "4"
+
+/**
+ * The single-tenant v4 step: `notes_id` on nodes (migrations/0006) and nothing
+ * else — no backfill, because the local store is a cache and re-pulls the
+ * note ids the replica computed (`CACHE_GENERATION`, database-mode.ts).
+ */
+const LOCAL_V4_SQL = `
+ALTER TABLE nodes ADD COLUMN notes_id TEXT;
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '4');
+`
 
 /**
  * The single-tenant v3 step: soft-delete columns, and nothing else. Adding a
@@ -94,9 +108,24 @@ async function applyV3(
   await driver.execScript(migrations.rowSeq)
 }
 
+async function applyV4(
+  driver: SqlDriver,
+  migrations: CorpusMigrations,
+  tenancy: CorpusTenancy,
+): Promise<void> {
+  if (tenancy === "single") {
+    await driver.execScript(LOCAL_V4_SQL)
+    return
+  }
+  if (!migrations.notesId) {
+    throw new Error('ensureCorpusSchema: "columns" tenancy needs migrations.notesId (0006)')
+  }
+  await driver.execScript(migrations.notesId)
+}
+
 /**
  * Bring `driver`'s database to the current corpus schema: apply the full
- * migration ladder when empty, migrate a v1/v2 database in place, and
+ * migration ladder when empty, migrate a v1/v2/v3 database in place, and
  * reset-and-rebuild anything unrecognized.
  *
  * **DDL only.** This ladder creates tables; it never rewrites rows. Data
@@ -117,6 +146,7 @@ export async function ensureCorpusSchema(
   if (tables.length === 0) {
     await driver.execScript(full)
     await applyV3(driver, migrations, tenancy)
+    await applyV4(driver, migrations, tenancy)
   } else {
     // In "columns" mode `meta` is keyed by (user_id, key), so this can see more
     // than one row — every tenant shares one DDL version, so any of them
@@ -126,11 +156,16 @@ export async function ensureCorpusSchema(
     if (version === "1") {
       await driver.execScript(migrations.nodes)
       await applyV3(driver, migrations, tenancy)
+      await applyV4(driver, migrations, tenancy)
     } else if (version === "2") {
       await applyV3(driver, migrations, tenancy)
+      await applyV4(driver, migrations, tenancy)
+    } else if (version === "3") {
+      await applyV4(driver, migrations, tenancy)
     } else if (version !== CORPUS_SCHEMA_VERSION) {
       await driver.execScript(RESET_SQL + full)
       await applyV3(driver, migrations, tenancy)
+      await applyV4(driver, migrations, tenancy)
     }
   }
 }
