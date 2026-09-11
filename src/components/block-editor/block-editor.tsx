@@ -1022,6 +1022,7 @@ export function BlockEditor({
     // Zoom changes navigate (URL state); the zoom-change effect then places the
     // selection (first child on zoom-in, the block zoomed out from on zoom-out).
     if (result.zoom !== undefined) navigateZoom(result.zoom.id)
+    if (result.notice) toast(result.notice)
     if (result.exitTop) {
       // Leaving the top clears the block highlight so nothing stays selected
       // below while focus moves up to the title.
@@ -1046,6 +1047,7 @@ export function BlockEditor({
       zoomRootId,
       zoomBackId,
       newBlockType: typeOfMarker(newBlockMarker),
+      placesOf: parentCountOf,
     }
     const name = resolveKey(mode, event, input)
     if (!name) return false
@@ -1066,6 +1068,7 @@ export function BlockEditor({
         zoomRootId,
         zoomBackId,
         newBlockType: typeOfMarker(newBlockMarker),
+        placesOf: parentCountOf,
       }),
     )
   }
@@ -1609,16 +1612,21 @@ export function BlockEditor({
     if (html.trim() !== "") {
       const embedded = extractClipboardBlocks(html)
       if (embedded && embedded.length > 0) {
+        // A block can't be put inside itself: that root is dropped, and when
+        // it was the whole paste a toast says so.
+        const others = embedded.filter((block) => block.id !== targetId)
+        if (others.length === 0) {
+          toast("A block can't be put inside itself")
+          return
+        }
         // A Ruminate payload: link, duplicate, or skip per block — the
         // fragment arrives with its ids already settled, so it bypasses the
         // remint below (reminting would undo the link).
-        const fragment = embeddedPasteFragment(embedded, doc, target, resolveBlocks)
+        const fragment = embeddedPasteFragment(others, doc, target, resolveBlocks)
         if (!fragment) {
           // Every pasted block already hangs directly under the target: nothing
           // to do, but say so — a paste that does nothing looks broken.
-          toast(
-            embedded.length > 1 ? "Those blocks are already here" : "That block is already here",
-          )
+          toast(others.length > 1 ? "Those blocks are already here" : "That block is already here")
           return
         }
         const linked = insertBlocksAsFirstChildren(doc, targetId, fragment)

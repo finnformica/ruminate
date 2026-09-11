@@ -590,6 +590,25 @@ describe("paste as link (Ruminate payload with ids)", () => {
     expect(serializedLines(getByTestId)).toEqual(["A", "  B edited", "C", "  B edited"])
   })
 
+  it("refuses to put a block inside itself, and says so", async () => {
+    const { container, getByTestId } = render(
+      <>
+        <Harness initial={"A\nB"} />
+        <Toaster />
+      </>,
+    )
+    const before = getByTestId("serialized").textContent!
+    const idA = before.match(/A\n\s*id:: (\S+)/)![1]
+    const root = editorRoot(container) // A is selected on mount
+    const formats = richClipboardFormats(`A\n  id:: ${idA}`)
+    await act(async () => {
+      paste(root, formats.plain, formats.html)
+    })
+    expect(getByTestId("serialized").textContent).toBe(before)
+    expect(await screen.findByText("A block can't be put inside itself")).not.toBeNull()
+    toast.dismiss()
+  })
+
   it("skips a block already a direct child of the paste target (twin), keeping its siblings", async () => {
     // The target IS the insertion parent now, so the twin scope is its own
     // children: B already hangs off A.
@@ -1379,6 +1398,33 @@ describe("code blocks", () => {
     fireEvent.keyDown(textarea, { key: "Enter" })
     expect(serializedLines(getByTestId)).toEqual(["```py", "```"])
     expect(container.querySelector('[data-testid="code-language"]')?.textContent).toBe("py")
+  })
+})
+
+describe("splitting a shared block", () => {
+  it("refuses Enter mid-text on a block held in several places, but allows it at the end", async () => {
+    const { container, getByTestId } = render(
+      <>
+        <Harness initial={"AB\nC"} parentCountOf={() => 2} startEditing />
+        <Toaster />
+      </>,
+    )
+    const textarea = container.querySelector("textarea")!
+    // Caret between A and B: the split would cut the block's text everywhere.
+    textarea.setSelectionRange(1, 1)
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Enter" })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["AB", "C"])
+    expect(
+      await screen.findByText("This block is in 2 places, so it can't be split"),
+    ).not.toBeNull()
+    toast.dismiss()
+
+    // Caret at the end: nothing comes off the text, so a block is added below.
+    textarea.setSelectionRange(2, 2)
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    expect(serializedLines(getByTestId)).toEqual(["AB", "- ", "C"])
   })
 })
 
