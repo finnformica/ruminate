@@ -662,9 +662,8 @@ describe("paste as link (Ruminate payload with ids)", () => {
 
       fireEvent.keyDown(root, { key: "x", metaKey: true }) // cut A
       expect(serializedLines(getByTestId)).toEqual(["B"])
-      // The visible flavor stays clean markdown (a prose block ends with its
-      // separating blank line, as before); ids ride only in the payload.
-      expect(captured["text/plain"]).toBe("A\n")
+      // The visible flavor stays clean markdown; ids ride only in the payload.
+      expect(captured["text/plain"]).toBe("A")
       expect(captured["text/html"]).toContain("x-ruminate-blocks")
 
       // Paste onto B: no resolver (the node is gone everywhere) — the

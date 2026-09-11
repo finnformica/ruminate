@@ -53,6 +53,34 @@ describe("toDisplayMarkdown", () => {
     const stored = ["First para", "  id:: blk_a", "Second para", "  id:: blk_b"].join("\n")
     expect(toDisplayMarkdown(stored)).toContain("First para\n\nSecond para")
   })
+
+  it("puts a blank line only where markdown would otherwise merge two blocks", () => {
+    // Quote, bullet, todo, numbered, heading, code: none of these run into the
+    // one before, so the copy is as tight as the outline — and nothing trails.
+    const stored = ["> quote", "- bullet", "[ ] todo", "1. ordered", "# heading", "```", "x", "```"]
+    expect(toDisplayMarkdown(stored.join("\n"))).toBe(
+      ["> quote", "- bullet", "- [ ] todo", "1. ordered", "# heading", "```", "x", "```"].join(
+        "\n",
+      ),
+    )
+    // A paragraph would lazily continue a quote or a list item; a quote would
+    // continue a quote.
+    expect(toDisplayMarkdown("> quote\npara")).toBe("> quote\n\npara")
+    expect(toDisplayMarkdown("- item\npara")).toBe("- item\n\npara")
+    expect(toDisplayMarkdown("> one\n> two")).toBe("> one\n\n> two")
+    // A heading is one line: what follows it needs no gap.
+    expect(toDisplayMarkdown("# heading\npara")).toBe("# heading\npara")
+  })
+
+  it("keeps prose under the list item it sits in", () => {
+    const stored = ["- parent", "  # heading", "  [ ] task", "  para"].join("\n")
+    expect(toDisplayMarkdown(stored)).toBe(
+      ["- parent", "  # heading", "  - [ ] task", "", "  para"].join("\n"),
+    )
+    // …but prose under prose has no shape of its own: it follows at the same
+    // depth rather than indenting into a merged paragraph.
+    expect(toDisplayMarkdown("para\n  child para")).toBe("para\n\nchild para")
+  })
 })
 
 describe("copy → paste round-trip preserves block types", () => {
