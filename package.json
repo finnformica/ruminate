@@ -48,7 +48,6 @@
     "fast-fuzzy": "^1.11.2",
     "fractional-indexing": "^4.0.0",
     "jotai": "^2.0.3",
-    "jotai-xstate": "^0.3.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hotkeys-hook": "^4.5.0",
@@ -65,7 +64,6 @@
     "use-debounce": "^10.0.4",
     "use-resize-observer": "^9.1.0",
     "vaul": "^1.1.1",
-    "xstate": "^4.38.3",
     "yamljs": "^0.3.0",
     "zod": "^4.3.5"
   },
