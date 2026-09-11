@@ -1,9 +1,8 @@
 # Graph storage
 
-The database-backed storage architecture Ruminate runs on. This document
-extends [architecture-notes.md](./archive/architecture-notes.md); the principles there
-(stable `blk_` ids, multi-homing by reference, the `src/data` seam, view state
-as UI state) are load-bearing here and are not restated in full. The schema
+The database-backed storage architecture Ruminate runs on, and the principles
+it rests on: stable `blk_` ids, multi-homing by reference, the `src/data`
+seam, and view state kept as UI state. The schema
 itself — and the reasoning behind it — is
 [graph-schema-v2.md](./graph-schema-v2.md); this document describes how the
 app runs on it.
@@ -75,7 +74,7 @@ writers edit in memory. The write seam (`src/data/store.ts`) is one hook,
 `useApplyOps`: every writer — the editor's diff (`docToOps`), rename, page
 props, create, delete, tag rename — hands it a batch of graph ops
 (`src/data/ops.ts`), routed to `databaseApplyOps` signed in and to the sample
-atom signed out (docs/graph-native-app.md).
+atom signed out.
 
 ### Boot, saves, and sync
 
@@ -235,7 +234,7 @@ node survives as the position a restore would put it back into.
 
 One row per node. `id` is a minted TEXT id — `blk_…` for blocks **and** pages
 alike, since a page is just a node whose `type` is `page`
-(docs/archive/page-identity-design.md); daily and weekly pages are the one exception
+(docs/graph-storage.md); daily and weekly pages are the one exception
 and keep their date key (`2026-08-31`, `2026-W35`), where the date is the
 identity. A page's _name_ is not its id but its `text`: the title, which
 rides the page's doc as `props.title` between the walk and the write
@@ -313,7 +312,7 @@ clean, instead of merging stale rows with migrated ones.
 The ladder currently has two rungs, and they compose in one pass and one
 write: **version 1** normalizes near-miss markers and upgrades legacy raw
 frontmatter props; **version 2** mints page ids
-(docs/archive/page-identity-design.md) — re-keying every page still named by its
+(docs/graph-storage.md) — re-keying every page still named by its
 title, moving that name into `text` (its `props` carry over unchanged), and
 re-pointing every link row that named it. The old id is not preserved as an
 address: a pre-migration `/notes/<title>` URL no longer resolves and falls
@@ -535,7 +534,7 @@ The rules, per pasted root (`embeddedPasteFragment` in `block-editor.tsx`):
   the graph can hold a block under two parents of one page and the view
   renders it as two rows, but selection and the commands still address a
   block by id, so same-note mirroring waits for that re-keying
-  (docs/graph-native-app.md, step 4).
+  .
 - **Twin** (the id is already a direct child of the insertion parent): skip
   that block — no duplicate, no error, it's already there. The DB's
   `(source, destination, kind)` primary key backstops the invariant.
@@ -554,8 +553,7 @@ Until this architecture landed, Ruminate was a git app: notes were markdown
 files in a GitHub repository cloned into the browser (isomorphic-git +
 lightning-fs), synced by a pull/commit/push state machine, with version
 history, merge drivers, conflicted-copy notes, and a repo-selection screen.
-That architecture is recorded in [architecture-notes.md](./archive/architecture-notes.md)
-and in git history (`main` holds the git app until this branch merges). The
+That architecture survives only in git history (`main` holds the git app until this branch merges). The
 database architecture was built alongside it in phases — the `NoteStore`
 contract and shared schema first, then the local
 sqlite-wasm store validated by a dual-write/shadow-read mirror while git

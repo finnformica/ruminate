@@ -17,8 +17,6 @@ const NOTE: Note = {
   displayName: "research",
   props: {},
   title: "research",
-  url: null,
-  alias: null,
   pinned: false,
   updatedAt: null,
   dates: [],

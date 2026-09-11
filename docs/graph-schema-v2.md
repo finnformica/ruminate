@@ -20,8 +20,8 @@ appear in multiple places in the graph and renders fully in each.
 What this buys: block-level sync granularity (v1 LWW is per-note), real
 multi-parent blocks (today's `((blk_x))` transclusion becomes structural),
 typed blocks queryable without parsing, and a data model that maps one-to-one
-onto the op vocabulary in `event-sourcing-design.md` — each node is an
-aggregate; every mutation is a text edit, a type change, or a link-row change.
+onto the op vocabulary (`src/data/ops.ts`) — each node is an aggregate; every
+mutation is a text edit, a type change, or a link-row change.
 
 What it costs: markdown flips from _preserved bytes_ to _canonical
 serialization_. The rollup is deterministic and stable (the editor's
@@ -252,9 +252,9 @@ insert-link (two rows), so it is not atomic under plain LWW: a badly timed
 race can briefly double-list or drop a listing. At current scale (single
 user, one active device at a time, the flush-on-hide + repull-on-focus
 tweaks) this is acceptable; the delete-rescue rule means a dropped listing
-resurfaces at the page root rather than disappearing. The real fix is the op
-log (`event-sourcing-design.md`), where `move` is a single atomic event — this
-schema was shaped so that migration is additive, not another rewrite.
+resurfaces at the page root rather than disappearing. The real fix would be
+an op log, where `move` is a single atomic event — this schema was shaped so
+that migration would be additive, not another rewrite.
 
 ## Migration
 

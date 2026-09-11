@@ -1,7 +1,7 @@
 import { isValidDateString, isValidWeekString } from "../utils/date"
 
 /**
- * Page identity (docs/archive/page-identity-design.md) — what names a page, and where
+ * Page identity (docs/graph-storage.md) — what names a page, and where
  * its title lives.
  *
  * A page used to *be* its title: the node id, the `<id>.md` key, the route

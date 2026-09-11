@@ -1,7 +1,7 @@
 import { blockId } from "../blocks/id"
 
 /**
- * A note's id is minted and opaque (docs/archive/page-identity-design.md): a page is a
+ * A note's id is minted and opaque (docs/graph-storage.md): a page is a
  * node like any other, so it takes an ordinary `blk_` id from the one minting
  * path every node uses. The note's *name* is its title — data on the page node,
  * free of the filename charset and of any uniqueness requirement.

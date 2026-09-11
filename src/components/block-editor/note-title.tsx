@@ -14,7 +14,7 @@ import { Hash } from "./hash"
  * - Arrow-down returns focus to the editor (`onArrowDown`).
  *
  * The field edits the note's **title** — data on the page node, not its id
- * (docs/archive/page-identity-design.md) — so committing one changes a single property
+ * (docs/graph-storage.md) — so committing one changes a single property
  * and can neither break a link nor collide with another note.
  *
  * `onRename` returns whether the title actually changed, so the field can

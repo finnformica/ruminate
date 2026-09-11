@@ -1,12 +1,7 @@
 import React from "react"
-import { useNetworkState } from "react-use"
 import { Note } from "../schema"
 import { cx } from "../utils/cx"
-import { getLeadingEmoji } from "../utils/emoji"
-import { EmojiFavicon } from "./emoji-favicon"
-import { GitHubAvatar } from "./github-avatar"
 import { CalendarDateIcon16, CalendarIcon16, NoteIcon16 } from "./icons"
-import { WebsiteFavicon } from "./website-favicon"
 
 type NoteFaviconProps = React.ComponentPropsWithoutRef<"span"> & {
   note: Note
@@ -15,38 +10,20 @@ type NoteFaviconProps = React.ComponentPropsWithoutRef<"span"> & {
 
 const _defaultFavicon = <NoteIcon16 data-testid="favicon-default" className="h-full w-full" />
 
+/** A note's icon: the day for a daily note, a calendar for a weekly one, the
+ * note icon otherwise. */
 export const NoteFavicon = React.memo(
   ({ note, className, defaultFavicon = _defaultFavicon, ...props }: NoteFaviconProps) => {
-    const { online } = useNetworkState()
-
     let icon = defaultFavicon
 
-    // Emoji
-    const leadingEmoji = getLeadingEmoji(note.title)
-    if (leadingEmoji) {
-      icon = <EmojiFavicon emoji={leadingEmoji} />
-    }
-
-    // Daily note
     if (note.type === "daily") {
       icon = (
         <CalendarDateIcon16 data-testid="favicon-daily" date={new Date(note.id).getUTCDate()} />
       )
     }
 
-    // Weekly note
     if (note.type === "weekly") {
       icon = <CalendarIcon16 data-testid="favicon-weekly" />
-    }
-
-    // GitHub
-    if (typeof note.props.github === "string" && online) {
-      icon = <GitHubAvatar data-testid="favicon-github" login={note.props.github} size={16} />
-    }
-
-    // URL
-    if (note.url && online) {
-      icon = <WebsiteFavicon data-testid="favicon-url" url={note.url} />
     }
 
     if (!icon) {

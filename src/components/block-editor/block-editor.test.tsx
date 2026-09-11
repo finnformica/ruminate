@@ -2145,7 +2145,7 @@ describe("BlockEditor images", () => {
     const { container } = render(<Harness initialDoc={doc} />)
     const img = container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!
     expect(img.alt).toBe("A sunset")
-    expect(img.src).toContain("/file-proxy?url=")
+    expect(img.src).toBe("https://example.com/sunset.png")
     expect(container.querySelector('[data-testid="block-body"]')!.textContent).toBe("A sunset")
   })
 

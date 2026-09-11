@@ -1,21 +1,13 @@
-import { useMatch } from "@tanstack/react-router"
 import { useAtomValue } from "jotai"
 import { useMemo } from "react"
 import { pageDoc } from "../data/graph"
 import { graphSnapshotAtom } from "../global-state"
 import { Note, fontSchema } from "../schema"
 import { cx } from "../utils/cx"
-import {
-  formatDate,
-  formatDateDistance,
-  formatWeekDistance,
-  isValidDateString,
-} from "../utils/date"
+import { formatDate, formatDateDistance, formatWeekDistance } from "../utils/date"
 import { BlockEditor } from "./block-editor/block-editor"
 import { TagIcon12 } from "./icons"
 import { Label } from "./label"
-import { useLinkHighlight } from "./link-highlight-provider"
-import { withOrdinalSuffix } from "../utils/pluralize"
 
 const NUM_VISIBLE_TAGS = 3
 const noop = () => {}
@@ -27,8 +19,6 @@ type NotePreviewProps = {
 }
 
 export function NotePreview({ note, className, hideProperties }: NotePreviewProps) {
-  const highlightedHrefs = useLinkHighlight()
-
   const props = note.props
 
   // The preview is the page's view, read-only: the same rows the note page
@@ -48,68 +38,6 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
       ? (props.tags as string[])
       : []
   }, [props?.tags])
-
-  // Get current route's note ID
-  const noteMatch = useMatch({ from: "/_appRoot/notes_/$", shouldThrow: false })
-  const currentNoteId = noteMatch?.params._splat
-
-  // Compute birthday label
-  const birthdayLabel = useMemo(() => {
-    // Only show when viewing a daily note
-    if (!currentNoteId || !isValidDateString(currentNoteId)) {
-      return null
-    }
-
-    const birthday = props?.birthday
-
-    // Validate birthday format: Date, "MM-DD" string, or "YYYY-MM-DD" string
-    const isDate = birthday instanceof Date
-    const isMonthDayString = typeof birthday === "string" && /^\d{2}-\d{2}$/.test(birthday)
-    const isDateString = typeof birthday === "string" && isValidDateString(birthday)
-
-    if (!(isDate || isMonthDayString || isDateString)) {
-      return null
-    }
-
-    // Extract month, day, and optionally year from birthday
-    let birthYear: number | null = null
-    let birthMonth: number
-    let birthDay: number
-
-    if (isDate) {
-      birthYear = birthday.getUTCFullYear()
-      birthMonth = birthday.getUTCMonth() + 1
-      birthDay = birthday.getUTCDate()
-    } else if (isDateString) {
-      const [y, m, d] = (birthday as string).split("-").map(Number)
-      birthYear = y
-      birthMonth = m
-      birthDay = d
-    } else {
-      // MM-DD format
-      const [m, d] = (birthday as string).split("-").map(Number)
-      birthMonth = m
-      birthDay = d
-    }
-
-    // Extract month and day from current daily note
-    const [currentYear, currentMonth, currentDay] = currentNoteId.split("-").map(Number)
-
-    // Check if month/day matches
-    if (birthMonth !== currentMonth || birthDay !== currentDay) {
-      return null
-    }
-
-    // Calculate age if birth year is available
-    if (birthYear !== null) {
-      const age = currentYear - birthYear
-      if (age > 0) {
-        return `${withOrdinalSuffix(age)} birthday`
-      }
-    }
-
-    return "Birthday"
-  }, [currentNoteId, props?.birthday])
 
   return (
     <div
@@ -146,11 +74,6 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
       </div>
       {!hideProperties ? (
         <div className="flex flex-wrap gap-x-1.5 gap-y-2 pr-10 font-content empty:hidden coarse:pr-12">
-          {birthdayLabel ? (
-            <Label icon="🎂" className="bg-bg-highlight text-text-highlight">
-              {birthdayLabel}
-            </Label>
-          ) : null}
           {/*{note.tasks.length > 0 ? (
             <Label
               icon={
@@ -165,19 +88,7 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
             </Label>
           ) : null}*/}
           {propTags.slice(0, NUM_VISIBLE_TAGS).map((tag) => (
-            <Label
-              key={tag}
-              icon={<TagIcon12 />}
-              className={
-                highlightedHrefs.some((href) => {
-                  if (!href.startsWith("/tags/")) return false
-                  const highlightedTag = href.slice(6)
-                  return tag === highlightedTag || tag.startsWith(`${highlightedTag}/`)
-                })
-                  ? "bg-bg-highlight text-text-highlight"
-                  : undefined
-              }
-            >
+            <Label key={tag} icon={<TagIcon12 />}>
               {tag}
             </Label>
           ))}

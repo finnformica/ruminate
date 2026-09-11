@@ -22,8 +22,6 @@ function note(id: string, text: string): Note {
     displayName: id,
     props: {},
     title: id,
-    url: null,
-    alias: null,
     pinned: false,
     updatedAt: null,
     dates: [],

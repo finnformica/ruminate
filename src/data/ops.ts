@@ -4,7 +4,7 @@ import type { NoteId } from "../schema"
 import { CHILD_KIND, PAGE_TYPE, docToParts, reconcileSortKeys, type GraphSnapshot } from "./graph"
 
 /**
- * Graph ops (docs/graph-native-app.md §3.3): the one vocabulary every change
+ * Graph ops: the one vocabulary every change
  * to the graph is expressed in. An op is a row mutation — a node created or
  * changed, a child link put in place (with its sort key) or taken away, a
  * node tombstoned — so the same batch applies identically to the in-memory

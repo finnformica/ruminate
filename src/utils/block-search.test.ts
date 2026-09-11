@@ -27,8 +27,6 @@ function makeNote(overrides: Partial<Fixture> = {}): Fixture {
     displayName: "",
     props: {},
     title: "",
-    url: null,
-    alias: null,
     pinned: false,
     updatedAt: null,
     dates: [],
