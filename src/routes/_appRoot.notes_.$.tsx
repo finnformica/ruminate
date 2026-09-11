@@ -9,7 +9,7 @@ import { DaysOfWeek } from "../components/days-of-week"
 import { Details } from "../components/details"
 import { LoadingIcon16, NoteIcon16 } from "../components/icons"
 import { parse } from "../blocks/parse"
-import type { BlockDoc } from "../blocks/types"
+import type { BlockDoc, ChangeHint } from "../blocks/types"
 import { BlockNoteEditor } from "../components/block-editor/block-note-editor"
 import { NoteTitle } from "../components/block-editor/note-title"
 import { NoteActionsMenu } from "../components/note-actions-menu"
@@ -118,12 +118,12 @@ function NotePage() {
     defaultDoc,
   })
   const setEditorDoc = React.useCallback(
-    (next: BlockDoc) => {
+    (next: BlockDoc, hint?: ChangeHint) => {
       if (!isSignedOut) {
         setPendingSave(true)
         window.setTimeout(() => setPendingSave(false), 4000)
       }
-      setDoc(next)
+      setDoc(next, hint)
     },
     [isSignedOut, setDoc],
   )

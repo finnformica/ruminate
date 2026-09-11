@@ -6,7 +6,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { emptyBlock } from "../../blocks/ops"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
-import type { BlockDoc } from "../../blocks/types"
+import type { BlockDoc, ChangeHint } from "../../blocks/types"
 import type { BlockRevealRequest } from "../../utils/note-outline"
 import { richClipboardFormats } from "../../utils/rich-clipboard"
 import { ImageUploadError, type UploadedImage } from "../../data/images"
@@ -43,6 +43,8 @@ function Harness({
   parentCountOf,
   onDeleteEverywhere,
   onImageUpload,
+  onHint,
+  knownBlock,
 }: {
   initial?: string
   /** A doc built by hand — for shapes markdown cannot express (a shared block). */
@@ -55,13 +57,20 @@ function Harness({
   parentCountOf?: (id: string) => number
   onDeleteEverywhere?: (id: string) => void
   onImageUpload?: (file: File) => Promise<UploadedImage>
+  /** Sees every change's hint (undefined when there is none). */
+  onHint?: (hint: ChangeHint | undefined) => void
+  knownBlock?: (id: string) => boolean
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarter(parse(initial)))
   return (
     <>
       <BlockEditor
         doc={doc}
-        onChange={setDoc}
+        onChange={(next, hint) => {
+          onHint?.(hint)
+          setDoc(next)
+        }}
+        knownBlock={knownBlock}
         startEditing={startEditing}
         zoomRootId={zoomRootId}
         refocusSignal={refocusSignal}
@@ -1619,6 +1628,76 @@ describe("reveal requests (outline palette)", () => {
   })
 })
 
+describe("undo and what it discards", () => {
+  it("undoing a duplicate hands the save the copies to discard, not to strand", () => {
+    const hints: (ChangeHint | undefined)[] = []
+    const { container, getByTestId } = render(
+      <Harness initial={"A\nB"} onHint={(h) => hints.push(h)} />,
+    )
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true, altKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "A", "B"])
+    const ids = getByTestId("serialized").textContent!.match(/id:: (\S+)/g)!
+    const copy = ids[1].replace("id:: ", "")
+    fireEvent.keyDown(root, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B"])
+    // The duplicate's copy was new to the graph, so the undo names it and
+    // nothing else.
+    expect(hints).toEqual([undefined, { discard: [copy] }])
+  })
+
+  it("a block the graph already knew (linked in, not made) is never discarded by undo", () => {
+    const hints: (ChangeHint | undefined)[] = []
+    const { container, getByTestId } = render(
+      <Harness initial={"A\nB"} onHint={(h) => hints.push(h)} knownBlock={() => true} />,
+    )
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true, altKey: true })
+    fireEvent.keyDown(root, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B"])
+    expect(hints).toEqual([undefined, undefined])
+  })
+
+  it("undoing the removal of a block the graph knew names nothing to discard", () => {
+    const hints: (ChangeHint | undefined)[] = []
+    const { container, getByTestId } = render(
+      <Harness initial={"A\nB"} onHint={(h) => hints.push(h)} />,
+    )
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "Backspace" })
+    expect(serializedLines(getByTestId)).toEqual(["B"])
+    fireEvent.keyDown(root, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B"])
+    expect(hints).toEqual([undefined, undefined])
+  })
+
+  it("⌘Z reaches the editor last focused from anywhere on the page that is not editable", () => {
+    const { container, getByTestId } = render(
+      <>
+        <Harness initial={"A\nB"} />
+        <button type="button">elsewhere</button>
+        <input aria-label="field" />
+      </>,
+    )
+    const root = editorRoot(container)
+    fireEvent.focus(root)
+    fireEvent.keyDown(root, { key: "Backspace" })
+    expect(serializedLines(getByTestId)).toEqual(["B"])
+    // A key in a field is the field's own.
+    const field = screen.getByLabelText("field")
+    field.focus()
+    fireEvent.keyDown(field, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["B"])
+    // From a plain button, or nothing focused at all, it reaches the editor.
+    const button = screen.getByText("elsewhere")
+    button.focus()
+    fireEvent.keyDown(button, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B"])
+    fireEvent.keyDown(button, { key: "z", metaKey: true, shiftKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["B"])
+  })
+})
+
 describe("duplicate + move via keyboard", () => {
   it("Shift+Alt+ArrowDown duplicates the selected block below", () => {
     const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
@@ -2145,7 +2224,8 @@ describe("BlockEditor context menu", () => {
     }
     // The row under the pointer becomes the selection (and the menu's target).
     expect(highlightedText(container)).toBe("B")
-    // Not shared: Delete alone, nothing to unlink from.
+    // No graph behind this editor: removing the row is the delete, so Delete
+    // alone, with nothing to unlink from.
     expect(menu.textContent).not.toContain("Unlink")
     expect(menu.textContent).not.toContain("places")
     // Structure moves stay on the keyboard.
@@ -2171,6 +2251,22 @@ describe("BlockEditor context menu", () => {
     })
     await pick("Heading")
     expect(serializedLines(getByTestId)).toEqual(["# A", "B"])
+  })
+
+  it("in a note, a block held only here offers Unlink (the row) and Delete (the block)", async () => {
+    const deleteEverywhere = vi.fn()
+    const { container, getByTestId } = render(
+      <Harness initial={"A\nB"} parentCountOf={() => 1} onDeleteEverywhere={deleteEverywhere} />,
+    )
+    const menu = await openMenuOn(container, 1)
+    expect(menu.textContent).toContain("Unlink")
+    expect(menu.textContent).toContain("Delete")
+    // One place: no count to show.
+    expect(menu.textContent).not.toContain("places")
+    const id = getByTestId("serialized").textContent!.match(/id:: (\S+)\n?$/)![1]
+    await pick("Delete")
+    expect(deleteEverywhere).toHaveBeenCalledWith(id)
+    expect(serializedLines(getByTestId)).toEqual(["A", "B"])
   })
 
   it("a block held in more than one place offers Unlink, and Delete reaches every place", async () => {

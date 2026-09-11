@@ -123,6 +123,11 @@ export interface BlockDebugOptions {
   upstreamOf?: (id: string) => readonly string[]
 }
 
+/** The scale names the stylesheet keys a heading's surface reach off, by
+ * outline depth — the same steps as `headingScale`; deeper headings are at
+ * body scale and keep the ordinary surface. */
+const HEADING_SCALE_NAMES: Record<number, "2xl" | "xl" | "lg"> = { 0: "2xl", 1: "xl", 2: "lg" }
+
 /** Row geometry, in px. Each level indents by `INDENT`: the guide line hangs
  * from the parent's key — a 1px rule under the centre of the 15px marker
  * slot, which starts 4px into the content column (the highlight surface's
@@ -570,10 +575,13 @@ export function BlockItem({
           className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-90 motion-reduce:active:scale-100"
         >
           {/* Faint, like the chevron — pure chrome; content leads. */}
-          <span aria-hidden className="size-1.5 rounded-full bg-text-tertiary" />
+          <span aria-hidden className="block-glyph-fill size-1.5 rounded-full bg-text-tertiary" />
         </button>
       ) : (
-        <span aria-hidden className={cx("size-1.5 rounded-full bg-text-tertiary", keyClass)} />
+        <span
+          aria-hidden
+          className={cx("block-glyph-fill size-1.5 rounded-full bg-text-tertiary", keyClass)}
+        />
       )}
       {toggle}
     </span>
@@ -596,7 +604,7 @@ export function BlockItem({
       )}
     >
       {glyph ? (
-        <span aria-hidden className={cx("select-none text-text-tertiary", keyClass)}>
+        <span aria-hidden className={cx("block-glyph select-none text-text-tertiary", keyClass)}>
           {glyph}
         </span>
       ) : null}
@@ -661,7 +669,7 @@ export function BlockItem({
       // from the dot — muted, not faint — and right-align to the slot edge.
       <span
         className={cx(
-          "relative flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary",
+          "block-glyph relative flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary",
           slotClass,
         )}
       >
@@ -795,6 +803,10 @@ export function BlockItem({
           // targets this, not the row wrapper, so a heading's top margin can't
           // distort where the highlight lands.
           data-block-line
+          // A heading's surface reaches further left at the larger scales
+          // (`[data-heading-scale]` in block-editor.css), so its chevron and
+          // `#` sit as far from the left edge as from the top and bottom.
+          data-heading-scale={kind.slot === "hash" ? HEADING_SCALE_NAMES[depth] : undefined}
           className={cx(
             // Negative margin + padding pairs grow the highlight surface
             // while the text (and every marker) stays exactly where it was —

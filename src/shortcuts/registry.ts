@@ -101,7 +101,7 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   moveBlockDown: "Move the block down (with its subtree)",
   duplicateAbove: "Duplicate the block above",
   duplicateBelow: "Duplicate the block below",
-  deleteBlock: "Delete the block",
+  deleteBlock: "Remove the block from here (it keeps its place elsewhere, or goes to Unassigned)",
   toggleTodo: "Toggle the checkbox (todo blocks)",
   toggleCollapse: "Collapse / expand children",
   insertBelow: "New block below (caret at end of block)",
@@ -259,7 +259,7 @@ const MULTI_SELECT_ENTRIES: Shortcut[] = [
   {
     combos: ["Backspace", "Delete"],
     scope: "select",
-    description: "Delete the selected blocks",
+    description: "Remove the selected blocks from here",
     group: "Multi-select",
   },
   {

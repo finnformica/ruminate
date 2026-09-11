@@ -184,27 +184,42 @@ belt-and-braces. Markdown is a tree, so a loop is written to where it closes
 and no further, and does not survive a markdown round trip (`parse` re-mints
 the repeated `id::`): the graph, not the markdown, holds it.
 
-**Delete = unlink, and never cascade.** Deleting node X in the context of
-parent P:
+**Remove = unlink; delete is explicit; nothing cascades.** Removing node X
+from the outline in the context of parent P (⌫ on the row, Cut, the menu's
+Unlink — `docToOps`):
 
 1. Tombstone the link row P→X (`deleted_at`).
-2. If X still has another live inbound `child` link, stop — X lives on there.
-3. Otherwise X's row is tombstoned. X's own outbound links are left alone —
-   retained, not cascaded, because they describe the shape a restore would
-   put back — and the walk skips them at read time, so X's children are now
-   reached by nothing.
+2. X's row stays. Held elsewhere, it lives on there; held nowhere, it is out
+   of reach and shows in its note's basket (below) with everything beneath
+   it still linked to it. The one exception is a **blank** X — no text but
+   whitespace, nothing beneath it, no picture (`isBlankNode`) — which is
+   tombstoned, so backing out of an empty line leaves nothing behind; and
+   an undo taking back the step that made X (a duplicate, a paste, a new
+   line — `ChangeHint.discard`, from the editor's history), which deletes
+   X rather than strand a copy in the basket.
 
-Nothing below X is deleted. Every block carries a **note id** (`notes_id`, the
-note it was written in — set once by `docToOps` at creation, never changed by
-linking the block elsewhere; pages have none), and a block no page reaches
-shows in that note's **Unassigned** basket beneath the outline
-(`src/data/basket.ts`, `src/components/unassigned-basket.tsx`): editable
-there, pasted back into the outline as a link (which takes it out of the
-basket), or deleted deliberately. "No page reaches it" is the test — not "it
-has no parent": two blocks that hold each other and have lost their link to
-the page both have a parent, yet neither can be seen, and reachability from
-the pages catches both. Deleting a whole note is the one deletion that takes
-content with it: the page, every block it alone reaches, and its basket.
+Deleting X (the menu's Delete, `deleteBlockOps`; or removing its row in the
+basket, `basketToOps`) tombstones every inbound link and X's row. The
+basket's **Delete with contents** (`deleteSubtreeOps`) also takes
+each block below X that no page, and no other root, still reaches without
+going through X — a block another note holds is only unlinked from the
+subtree. X's own
+outbound links are left alone — retained, not cascaded, because they describe
+the shape a restore would put back — and the walk skips them at read time, so
+X's children are now reached by nothing.
+
+Nothing below X is ever deleted. Every block carries a **note id**
+(`notes_id`, the note it was written in — set once by `docToOps` at creation,
+never changed by linking the block elsewhere; pages have none), and a block
+no page reaches shows in that note's **Unassigned** basket beneath the
+outline (`src/data/basket.ts`, `src/components/unassigned-basket.tsx`):
+editable there, pasted back into the outline as a link (which takes it out of
+the basket), or removed there, which is the delete. "No page reaches it" is
+the test — not "it has no parent": two blocks that hold each other and have
+lost their link to the page both have a parent, yet neither can be seen, and
+reachability from the pages catches both. Deleting a whole note is the one
+deletion that takes content with it: the page, every block it alone reaches,
+and its basket.
 
 Consequence: nothing is ever collected implicitly, and no orphan is ever
 invisible — each has a basket to be shown in. A block whose note is later

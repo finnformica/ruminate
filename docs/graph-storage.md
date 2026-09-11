@@ -348,16 +348,17 @@ written notes fall off past a cap, Settings can forget every fold on the
 device, and losing localStorage simply re-seeds from the policy. The rollup's
 hard depth cap doubles as the render guard against corrupted (cyclic) graphs.
 
-## Delete = unlink + rescue (and, underneath, a tombstone)
+## Remove = unlink, delete is explicit (and, underneath, a tombstone)
 
-Deleting node X in the context of parent P retires the link row P→X; if X has
-another inbound child link it lives on there; otherwise X's row is retired and
-each of X's children left with no inbound link is re-parented to the **page
-root** with trailing sort keys. No orphan state exists — deleting a container
-visibly demotes its contents instead of vanishing them. Whole-note saves
-apply the same rule: a node that fell out of the note and has no other parent
-is retired; children it strands are rescued. Deleting a _note_ retires the
-page and cascades everything not multi-homed elsewhere.
+Removing node X from the outline in the context of parent P retires the link
+row P→X and nothing else: X lives on wherever else it is held, or, held
+nowhere, in its note's Unassigned basket with everything beneath it
+(graph-schema-v2.md, "Remove = unlink"). Only a blank X — whitespace for
+text, nothing beneath it, no picture — is retired with its link. Deleting X
+(the context menu's Delete; removing its row in the basket) retires X's row
+and every link into it; what it held is left linked from it, out of reach,
+for the basket. Deleting a _note_ retires the page, everything it alone
+reaches, and its basket.
 
 **"Retired" means tombstoned, not removed** — that is the only thing schema v3
 changed here, and it is invisible from outside:
@@ -559,9 +560,11 @@ a block below — the text is untouched.
 Edit-mode (textarea) paste is unchanged — a caret splice is textual. On the
 store side, `docToOps` has the required property (pinned in `ops.test.ts`): a
 save whose diff drops a node that is still linked from another note only
-unlinks it — the node row and the other note's link survive. And a delete
-never cascades: what a deleted block held keeps its note id and shows in that
-note's Unassigned basket (`basket.ts`), from which a paste links it back.
+unlinks it — the node row and the other note's link survive; and a node
+that fell out of the note with no other parent is unlinked, not deleted,
+unless it is blank. Nothing cascades: a removed block, and what a deleted
+block held, keep their note id and show in that note's Unassigned basket
+(`basket.ts`), from which a paste links them back.
 
 ## History: the git era, and schema v1
 

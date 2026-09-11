@@ -6,13 +6,15 @@ import type { NoteId } from "../schema"
 /**
  * The note's **Unassigned** basket (docs/graph-schema-v2.md, "Delete"):
  * beneath the outline, every block written in this note that nothing reaches
- * any more — what a deleted block held. Folded by default, and absent while
- * there is nothing in it.
+ * any more — a row removed from the outline (⌫, Cut, Unlink) with everything
+ * beneath it, or what a deleted block held. Folded by default, and absent
+ * while there is nothing in it.
  *
  * The rows are the editor's own: type in them, copy one and paste it onto a
  * block in the outline to link it back (which takes it out of the basket),
- * or delete it for good. Folds are kept apart from the outline's, and the
- * basket never feeds the outline in the command palette.
+ * or remove it, which here is the delete for good (`rowRemoval`). Folds are
+ * kept apart from the outline's, and the basket never feeds the outline in
+ * the command palette.
  */
 export function UnassignedBasket({ noteId }: { noteId: NoteId }) {
   const { doc, count, setDoc } = useBasketDoc(noteId)
@@ -30,6 +32,7 @@ export function UnassignedBasket({ noteId }: { noteId: NoteId }) {
           noteTitle="Unassigned"
           publishOutline={false}
           trailingBlank={false}
+          rowRemoval="delete"
         />
       </Details>
     </div>

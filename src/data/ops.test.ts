@@ -8,6 +8,7 @@ import {
   applyOps,
   deleteBlockOps,
   deletePageOps,
+  deleteSubtreeOps,
   docToOps,
   pagesTouchedBy,
   parentCount,
@@ -77,21 +78,80 @@ describe("docToOps", () => {
     expect(keys).toEqual(["blk_one0000000", fresh.id, "blk_two0000000"])
   })
 
-  it("removing a block unlinks and deletes it — and no more: its children fall out of reach", () => {
+  it("removing a block unlinks it — and no more: it keeps what it holds, out of reach", () => {
     const snapshot = graphOf({ a: A })
     const doc = parse("- one\n  id:: blk_one0000000\n")
     const ops = docToOps("a", doc, snapshot)
-    expect(ops).toEqual([
-      { op: "unlink", source: "a", destination: "blk_two0000000" },
-      { op: "delete", id: "blk_two0000000" },
-    ])
+    expect(ops).toEqual([{ op: "unlink", source: "a", destination: "blk_two0000000" }])
     const next = applyOps(snapshot, ops, NOW)
     expect(walk(next, "a")).toBe(serialize(doc))
-    // `deep` is not deleted: it is simply unreachable now (the basket's
-    // business — basket.test.ts).
-    expect(next.nodes.has("blk_deep000000")).toBe(true)
-    expect(next.childLinks.has("blk_two0000000")).toBe(false)
-    expect([...unassignedIds(next)]).toEqual(["blk_deep000000"])
+    // `two` is not deleted, and still holds `deep`: both are simply out of
+    // reach now (the basket's business — basket.test.ts).
+    expect(next.nodes.has("blk_two0000000")).toBe(true)
+    expect(next.childLinks.get("blk_two0000000")?.map((l) => l.destination_id)).toEqual([
+      "blk_deep000000",
+    ])
+    expect([...unassignedIds(next)].sort()).toEqual(["blk_deep000000", "blk_two0000000"])
+  })
+
+  /** `A` plus one more root block under the page, as given. */
+  const withRoot = (
+    id: string,
+    text: string,
+    type = "text",
+    props: string | null = null,
+    children: string[] = [],
+  ) => {
+    const snapshot = graphOf({ a: A })
+    const ops: Op[] = [
+      { op: "create", id, type, text, props, notesId: "a" },
+      { op: "link", source: "a", destination: id, sortKey: "zz" },
+    ]
+    for (const [i, child] of children.entries()) {
+      ops.push({ op: "create", id: child, type: "text", text: "kid", props: null, notesId: "a" })
+      ops.push({ op: "link", source: id, destination: child, sortKey: `a${i}` })
+    }
+    return applyOps(snapshot, ops, NOW)
+  }
+
+  it("removing a blank block deletes it: nothing to keep", () => {
+    for (const text of ["", "   ", "\t\n "]) {
+      const snapshot = withRoot("blk_blank00000", text)
+      const ops = docToOps("a", parse(A), snapshot)
+      expect(ops).toEqual([
+        { op: "unlink", source: "a", destination: "blk_blank00000" },
+        { op: "delete", id: "blk_blank00000" },
+      ])
+      expect(applyOps(snapshot, ops, NOW).nodes.has("blk_blank00000")).toBe(false)
+    }
+  })
+
+  it("a blank block that holds something is kept, with what it holds", () => {
+    const snapshot = withRoot("blk_blank00000", "", "text", null, ["blk_kid0000000"])
+    const ops = docToOps("a", parse(A), snapshot)
+    expect(ops).toEqual([{ op: "unlink", source: "a", destination: "blk_blank00000" }])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(next.nodes.has("blk_blank00000")).toBe(true)
+    expect([...unassignedIds(next)].sort()).toEqual(["blk_blank00000", "blk_kid0000000"])
+  })
+
+  it("a dropped block named to discard (an undo of its creation) is deleted, not kept", () => {
+    const snapshot = withRoot("blk_copy000000", "a copy")
+    const ops = docToOps("a", parse(A), snapshot, ["blk_copy000000"])
+    expect(ops).toEqual([
+      { op: "unlink", source: "a", destination: "blk_copy000000" },
+      { op: "delete", id: "blk_copy000000" },
+    ])
+    // Only what this change removed: naming a block still in the doc, or one
+    // held elsewhere, changes nothing.
+    expect(kinds(docToOps("a", parse(A), graphOf({ a: A }), ["blk_one0000000"]))).toEqual([])
+  })
+
+  it("an image row with a picture is kept; a placeholder with none is deleted", () => {
+    const withPicture = withRoot("blk_pic0000000", "", "image", JSON.stringify({ image: "img_x" }))
+    expect(kinds(docToOps("a", parse(A), withPicture))).toEqual(["unlink"])
+    const placeholder = withRoot("blk_pic0000000", "", "image", null)
+    expect(kinds(docToOps("a", parse(A), placeholder))).toEqual(["unlink", "delete"])
   })
 
   it("a created block carries the page as its notes_id; the page itself has none", () => {
@@ -336,6 +396,51 @@ describe("deleteBlockOps / parentCount", () => {
     // Pages are not blocks; unknown ids are nothing.
     expect(deleteBlockOps("a", linked)).toEqual([])
     expect(deleteBlockOps("nope", linked)).toEqual([])
+  })
+})
+
+describe("deleteSubtreeOps", () => {
+  const TREE =
+    "- top\n  id:: blk_top0000000\n  - mid\n    id:: blk_mid0000000\n    - leaf\n      id:: blk_leaf000000\n- other\n  id:: blk_other00000\n"
+
+  it("deletes the block and everything beneath it that nothing else holds", () => {
+    const snapshot = graphOf({ a: TREE })
+    const ops = deleteSubtreeOps("blk_top0000000", snapshot)
+    expect(ops).toEqual([
+      { op: "unlink", source: "a", destination: "blk_top0000000" },
+      { op: "delete", id: "blk_top0000000" },
+      { op: "delete", id: "blk_mid0000000" },
+      { op: "delete", id: "blk_leaf000000" },
+    ])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(walk(next, "a")).toBe("- other\n  id:: blk_other00000\n")
+    expect(next.nodes.has("blk_leaf000000")).toBe(false)
+  })
+
+  it("spares what another note, or another root, still reaches", () => {
+    // b holds `mid` too; `other` (a root of its own) holds `leaf`.
+    const snapshot = applyOps(
+      graphOf({ a: TREE, b: "- b\n  id:: blk_b000000000\n" }),
+      [
+        { op: "link", source: "blk_b000000000", destination: "blk_mid0000000", sortKey: "a0" },
+        { op: "link", source: "blk_other00000", destination: "blk_leaf000000", sortKey: "a0" },
+      ],
+      NOW,
+    )
+    const ops = deleteSubtreeOps("blk_top0000000", snapshot)
+    expect(ops).toEqual([
+      { op: "unlink", source: "a", destination: "blk_top0000000" },
+      { op: "delete", id: "blk_top0000000" },
+    ])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(walk(next, "b")).toContain("- mid")
+    expect(walk(next, "a")).toContain("  - leaf")
+  })
+
+  it("a page is never deleted this way; an unknown id is nothing", () => {
+    const snapshot = graphOf({ a: TREE })
+    expect(deleteSubtreeOps("a", snapshot)).toEqual([])
+    expect(deleteSubtreeOps("blk_nope000000", snapshot)).toEqual([])
   })
 })
 

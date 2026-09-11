@@ -69,6 +69,66 @@
   background-color: color-mix(in srgb, white 9%, var(--color-bg));
 }
 
+/* ── Selected row's marker glyphs ────────────────────────────────────────────
+ * A marker glyph has an ink of its own (tertiary; a number's secondary), so
+ * the selection's text tint (above) never reaches it, and a large heading's
+ * `#` sat beside the lit heading as a grey stranger. Selected, every
+ * TYPOGRAPHIC marker — the `#`, the bullet's dot, the number, the quote's
+ * `>` and its bar — takes the quieter chrome tint (`--color-text-selected-
+ * chrome`, variables.css) so the row's chrome leans with its text. Controls
+ * carry no class and keep their own ink: the checkbox has states of its own
+ * and the chevron's job is to appear. `.block-glyph` tints ink,
+ * `.block-glyph-fill` a painted shape (the dot, the bar). The inactive
+ * selection hands each glyph back to its own utility colour (`revert-layer`:
+ * these rules are unlayered, the utilities are not), as it drains the text. */
+.block-highlight .block-glyph {
+  color: var(--color-text-selected-chrome);
+}
+
+.block-highlight .block-glyph-fill {
+  background-color: var(--color-text-selected-chrome);
+}
+
+.block-highlight.block-highlight-inactive .block-glyph {
+  color: revert-layer;
+}
+
+.block-highlight.block-highlight-inactive .block-glyph-fill {
+  background-color: revert-layer;
+}
+
+/* ── Heading surface reach ───────────────────────────────────────────────────
+ * A heading's line is taller than a paragraph's, so the collapse chevron's
+ * 20px square, centred on the marker slot, sits well inside the surface's
+ * top and bottom edges at the larger scales (~11px at the top scale) but only
+ * 3.5px inside its left edge (measured: the slot starts 4px in and the
+ * square, centred on it, outgrows it by 2.5px a side, less a 2px lean of the
+ * heading's slot). The surface reaches further left on such a heading —
+ * by exactly that difference — so the chevron, and the `#` it swaps with,
+ * sit the same distance from every edge. A negative margin paired with
+ * padding, as every other reach of the surface: the text column never
+ * moves. The reach is the scale's own line box (font size × leading, as
+ * `headingScale` sets them) plus the surface's 2px above and below, less the
+ * 20px square, halved, less the 3.5px the square already has — so it follows
+ * the touch-screen type scale too. Unlayered, so it wins over the line's
+ * `-ml-0.5 pl-1.5` utilities. */
+[data-block-line][data-heading-scale] {
+  margin-left: calc(-2px - var(--heading-reach));
+  padding-left: calc(6px + var(--heading-reach));
+}
+
+[data-block-line][data-heading-scale="2xl"] {
+  --heading-reach: calc((var(--font-size-2xl) * 1.25 - 23px) / 2);
+}
+
+[data-block-line][data-heading-scale="xl"] {
+  --heading-reach: calc((var(--font-size-xl) * 1.25 - 23px) / 2);
+}
+
+[data-block-line][data-heading-scale="lg"] {
+  --heading-reach: calc((var(--font-size-lg) * 1.4 - 23px) / 2);
+}
+
 /* ── Neutral hover ───────────────────────────────────────────────────────────
  * Non-selected lines in an editable editor get a whisper of neutral on hover —
  * enough to say "this row is interactive", one clear step below selection.
