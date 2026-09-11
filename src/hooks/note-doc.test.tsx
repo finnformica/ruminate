@@ -7,7 +7,7 @@ import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import { emptyBlock, insertAfter, updateText } from "../blocks/ops"
 import { buildGraphSnapshot, docToGraph, pageDoc } from "../data/graph"
-import { globalStateMachineAtom, isSignedOutAtom, sampleGraphAtom } from "../global-state"
+import { githubUserAtom, isSignedOutAtom, sampleGraphAtom } from "../global-state"
 import { useNoteDoc } from "./note-doc"
 
 /**
@@ -27,7 +27,7 @@ const body = (markdown: string) =>
 
 async function signedOutStore(pages: Record<string, string>) {
   const store = createStore()
-  const unsubscribe = store.sub(globalStateMachineAtom, () => {})
+  const unsubscribe = store.sub(githubUserAtom, () => {})
   await vi.waitFor(() => {
     expect(store.get(isSignedOutAtom)).toBe(true)
   })

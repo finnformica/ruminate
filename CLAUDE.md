@@ -40,7 +40,7 @@ Ruminate is a simple note-taking web application built with React and TypeScript
 
 ### State Management
 
-- **Global State**: Uses XState state machines with Jotai for global state management (src/global-state.ts)
+- **Global State**: Jotai atoms (src/global-state.ts); the GitHub identity is resolved at boot by the auth atoms there
 - **File System**: Integrates with isomorphic-git for Git operations and uses lightning-fs for browser file system
 - **GitHub Integration**: Handles authentication, repository cloning, and synchronization
 
@@ -65,7 +65,7 @@ Ruminate is a simple note-taking web application built with React and TypeScript
 - **Frontend**: React 18, TypeScript, Vite
 - **Styling**: Tailwind CSS with custom design system
 - **Editor**: Custom block/outline editor (`src/components/block-editor/`)
-- **State**: XState + Jotai
+- **State**: Jotai
 - **Git**: isomorphic-git + lightning-fs
 - **Routing**: TanStack Router (file-based)
 - **UI Components**: Radix UI primitives + Base UI

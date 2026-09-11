@@ -48,7 +48,6 @@
     "fast-fuzzy": "^1.11.2",
     "fractional-indexing": "^4.0.0",
     "jotai": "^2.0.3",
-    "jotai-xstate": "^0.3.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hotkeys-hook": "^4.5.0",
@@ -65,7 +64,6 @@
     "use-debounce": "^10.0.4",
     "use-resize-observer": "^9.1.0",
     "vaul": "^1.1.1",
-    "xstate": "^4.38.3",
     "zod": "^4.3.5"
   },
   "devDependencies": {
@@ -86,6 +84,7 @@
     "@types/node": "^25.0.3",
     "@types/react": "^18.2.79",
     "@types/react-dom": "^18.0.6",
+    "@types/yamljs": "^0.2.31",
     "@typescript-eslint/eslint-plugin": "^8.69.0",
     "@typescript-eslint/parser": "^8.69.0",
     "@vitejs/plugin-react": "^4.3.4",
