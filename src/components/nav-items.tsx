@@ -3,7 +3,7 @@ import { useAtom, useAtomValue } from "jotai"
 import { createContext, useContext } from "react"
 import { useNetworkState } from "react-use"
 import { requestDatabasePull } from "../data/database-mode"
-import { isHelpPanelOpenAtom, sortedNotesAtom } from "../global-state"
+import { isBootingAtom, isHelpPanelOpenAtom, sortedNotesAtom } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
 import type { Note } from "../schema"
 import { cx } from "../utils/cx"
@@ -22,6 +22,7 @@ import {
   TagFillIcon16,
   TagIcon16,
 } from "./icons"
+import { NavListSkeleton } from "./skeleton"
 import { NoteActionsMenu } from "./note-actions-menu"
 import { NoteFavicon } from "./note-favicon"
 import { beginGitHubSignIn } from "./github-auth"
@@ -37,6 +38,7 @@ export function NavItems({
   onNavigate?: () => void
 }) {
   const notes = useAtomValue(sortedNotesAtom)
+  const booting = useAtomValue(isBootingAtom)
   const syncText = useSyncStatusText()
   const syncMeta = useSyncStatusMeta()
   const { online } = useNetworkState()
@@ -113,6 +115,8 @@ export function NavItems({
                 </li>
               ))}
             </ul>
+          ) : booting ? (
+            <NavListSkeleton />
           ) : null}
         </div>
         <div className="flex flex-col gap-1">

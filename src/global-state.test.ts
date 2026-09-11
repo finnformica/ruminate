@@ -1,14 +1,16 @@
 // @vitest-environment jsdom
 import { createStore } from "jotai"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { databaseGraphAtom } from "./data/database-mode"
+import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
 import { buildGraphSnapshot, docToGraph, pageDoc, rollup } from "./data/graph"
 import { serialize } from "./blocks/serialize"
 import { applyOps } from "./data/ops"
 import {
   blockIndexAtom,
   githubUserAtom,
+  isBootingAtom,
   signInAtom,
+  signOutAtom,
   graphSnapshotAtom,
   isSignedOutAtom,
   notesAtom,
@@ -179,5 +181,46 @@ describe("block search atoms", () => {
     expect(byId.get("blk_bullet")).toBe("ul")
 
     unsubscribe()
+  })
+})
+
+describe("isBootingAtom", () => {
+  const status = (patch: Partial<Parameters<typeof databaseModeStatusAtom.write>[2]>) => ({
+    status: "ready" as const,
+    pull: "idle" as const,
+    lastPullAt: null,
+    lastPullError: null,
+    emptyOffline: false,
+    ...patch,
+  })
+
+  it("is true only while the notes are still on their way", () => {
+    const store = createStore()
+    // Identity unresolved: booting.
+    expect(store.get(isBootingAtom)).toBe(true)
+    // Signed out: the sample notes are always there.
+    store.set(signOutAtom)
+    expect(store.get(isBootingAtom)).toBe(false)
+    // Signed in, store not started / opening: booting.
+    store.set(signInAtom, { token: "t", login: "finn", name: "Finn", email: "finn@example.com" })
+    expect(store.get(isBootingAtom)).toBe(true)
+    store.set(databaseModeStatusAtom, status({ status: "opening" }))
+    expect(store.get(isBootingAtom)).toBe(true)
+    // Ready with nothing local while the first pull is in flight: booting.
+    store.set(databaseModeStatusAtom, status({ pull: "pulling" }))
+    expect(store.get(isBootingAtom)).toBe(true)
+    // …until notes land.
+    store.set(databaseGraphAtom, graphOf({ "a.md": md("# A", "hello") }))
+    expect(store.get(isBootingAtom)).toBe(false)
+    // A device that has pulled before shows what it has, even while pulling.
+    store.set(databaseGraphAtom, graphOf({}))
+    store.set(databaseModeStatusAtom, status({ pull: "pulling", lastPullAt: 1 }))
+    expect(store.get(isBootingAtom)).toBe(false)
+    // A failed store, or a first pull that could not reach the replica, says
+    // what it is rather than waiting.
+    store.set(databaseModeStatusAtom, status({ status: "error" }))
+    expect(store.get(isBootingAtom)).toBe(false)
+    store.set(databaseModeStatusAtom, status({ pull: "error", emptyOffline: true }))
+    expect(store.get(isBootingAtom)).toBe(false)
   })
 })

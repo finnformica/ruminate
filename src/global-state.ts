@@ -4,7 +4,7 @@ import { atomWithStorage } from "jotai/utils"
 import { GitHubUser, NoteId, githubUserSchema } from "./schema"
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
-import { databaseGraphAtom } from "./data/database-mode"
+import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
 import type { GraphSnapshot } from "./data/graph"
 import { createNotesBuilder } from "./data/note-meta"
 import { sampleGraph } from "./data/sample-graph"
@@ -204,6 +204,28 @@ export const dateMentionsAtom = atom((get) => {
   }
 
   return index
+})
+
+/**
+ * Are the notes still on their way? True while the identity is being resolved
+ * at boot, while the signed-in store is opening, and on a device with nothing
+ * local yet, while the first pull is in flight — the moments the page and the
+ * sidebar show skeletons instead of an empty corpus that is about to fill
+ * (docs/design-principles.md, "Loading"). Never true signed out (the sample
+ * notes are always there), after a first pull has landed, or once the store
+ * has failed — those states say what they are.
+ */
+export const isBootingAtom = atom((get) => {
+  if (get(githubUserStateAtom) === undefined) return true
+  if (!get(isDatabaseModeAtom)) return false
+  const status = get(databaseModeStatusAtom)
+  if (status.status === "off" || status.status === "opening") return true
+  return (
+    status.pull === "pulling" &&
+    status.lastPullAt === null &&
+    !status.emptyOffline &&
+    get(notesAtom).size === 0
+  )
 })
 
 export const sortedNotesAtom = atom((get) => {

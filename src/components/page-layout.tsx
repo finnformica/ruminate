@@ -2,12 +2,13 @@ import { useAtomValue } from "jotai"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { replicaAccessDeniedAtom } from "../data/replica-access"
 import { storageDiagnosticsAtom } from "../data/storage-diagnostics"
-import { isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
+import { isBootingAtom, isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
 import { cx } from "../utils/cx"
 import { Button } from "./button"
 import { PageHeader, PageHeaderProps } from "./page-header"
 import { HoverCard } from "./hover-card"
 import { Notice } from "./notice"
+import { PageSkeleton, Skeleton } from "./skeleton"
 
 type PageLayoutProps = PageHeaderProps & {
   className?: string
@@ -43,17 +44,23 @@ export function PageLayout({
   // the sample notes render. The only gated moment is the brief auth
   // resolution at boot.
   const showContent = isDatabaseMode || isSignedOut || disableGuard
+  // The notes are still on their way (boot, store opening, a new device's
+  // first pull): the page and its title stand in as skeletons rather than an
+  // empty corpus that is about to fill. Guard-free pages (Settings) are their
+  // own content and never wait.
+  const booting = useAtomValue(isBootingAtom) && !disableGuard
 
   return (
     <HoverCard.Provider>
       <div className={cx("grid grid-rows-[auto_1fr] overflow-hidden", className)}>
         <PageHeader
           {...props}
-          actions={showContent ? actions : undefined}
+          title={booting ? <Skeleton className="h-4 w-40" /> : props.title}
+          actions={showContent && !booting ? actions : undefined}
           className="print:hidden"
         />
         <div className="relative grid overflow-hidden">
-          <main className="relative isolate overflow-auto [scrollbar-gutter:stable] scroll-mask">
+          <main className="relative isolate overflow-auto [scrollbar-gutter:stable] scroll-fade">
             {otherTabHasDatabase && !disableGuard ? (
               <div className="p-4">
                 <Notice
@@ -83,7 +90,7 @@ export function PageLayout({
                 </Notice>
               </div>
             ) : null}
-            {showContent ? children : null}
+            {booting ? <PageSkeleton /> : showContent ? children : null}
           </main>
 
           <div className="absolute bottom-3 right-3 flex items-center gap-2 coarse:gap-3">
