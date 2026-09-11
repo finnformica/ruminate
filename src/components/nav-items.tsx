@@ -297,9 +297,14 @@ function NoteNavItem({
         if (!event.defaultPrevented) onNavigate?.()
       }}
     >
-      {/* Current, the icon takes the row's tint (`.nav-item-icon`, index.css),
-          as a nav link's filled icon does by inheriting. */}
-      <span className="nav-item-icon flex shrink-0 text-text-secondary">
+      {/* Current, the row shows the filled icon in its own tint
+          (`.nav-item-icon`, index.css), exactly as a nav link swaps to its
+          filled icon: both variants are rendered and the row's
+          `aria-current` picks one. */}
+      <span className="nav-item-icon hidden shrink-0 [[aria-current=page]>&]:flex">
+        <NoteFavicon note={note} filled />
+      </span>
+      <span className="nav-item-icon flex shrink-0 text-text-secondary [[aria-current=page]>&]:hidden">
         <NoteFavicon note={note} />
       </span>
       <span className="flex min-w-0 items-center gap-1.5">

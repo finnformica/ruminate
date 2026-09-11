@@ -14,7 +14,7 @@
 
 ### Improved
 
-- A selected block's marker now takes a tint of the accent too, a shade deeper than its usual grey, so a heading's `#`, a bullet's dot, a list number and a quote's mark and bar sit with the highlighted text rather than beside it in plain grey. Checkboxes and collapse arrows keep their own colours. In the sidebar, the open note's icon takes the row's tint like its title.
+- A selected block's marker now takes a tint of the accent too, a shade deeper than its usual grey, so a heading's `#`, a bullet's dot, a list number and a quote's mark and bar sit with the highlighted text rather than beside it in plain grey. Checkboxes and collapse arrows keep their own colours. In the sidebar, the open note's icon is filled in and takes the row's tint like its title, as the Notes and Calendar links already do.
 - A heading's highlight now reaches a little further left at the larger sizes, so the collapse arrow (and the `#` it stands in for) sits the same distance from the left edge as from the top and bottom; the text itself does not move.
 - The picture alignment toolbar's corners now follow its buttons' corners, so the ends no longer look squeezed.
 
