@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useState } from "react"
+import { toast, Toaster } from "sonner"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { emptyBlock } from "../../blocks/ops"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
-import { Toaster } from "../toast"
 import type { BlockDoc } from "../../blocks/types"
 import type { BlockRevealRequest } from "../../utils/note-outline"
 import { richClipboardFormats } from "../../utils/rich-clipboard"
@@ -2304,7 +2304,7 @@ describe("BlockEditor images", () => {
     const onImageUpload = vi.fn(async () => {
       throw new ImageUploadError("too_large", "Images must be under 10 MB")
     })
-    const { container, getByTestId, getByRole } = render(
+    const { container, getByTestId } = render(
       <>
         <Harness initial={"A\nB"} onImageUpload={onImageUpload} />
         <Toaster />
@@ -2314,13 +2314,12 @@ describe("BlockEditor images", () => {
       fireEvent.paste(editorRoot(container), imagePaste([pngFile()]))
     })
     expect(serializedLines(getByTestId)).toEqual(["A", "B"])
-    // Nothing is left under the editor; the message floats in a toast (hidden
-    // from the accessibility tree until it takes focus — the viewport's live
-    // region announces it).
-    expect(container.querySelector('[role="status"]')).toBeNull()
-    expect(getByRole("alertdialog", { hidden: true }).textContent).toContain(
+    // Nothing is left under the editor; the message floats in a toast.
+    expect(editorRoot(container).querySelector('[role="status"]')).toBeNull()
+    expect(container.querySelector("[data-sonner-toast]")?.textContent).toContain(
       "Images must be under 10 MB",
     )
+    toast.dismiss()
   })
 
   it("the context menu on an image offers to open and download it, not to turn it into text", async () => {

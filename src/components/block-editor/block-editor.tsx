@@ -1,5 +1,6 @@
 import copy from "copy-to-clipboard"
 import { useAtomValue } from "jotai"
+import { toast } from "sonner"
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type React from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent } from "react"
@@ -15,7 +16,6 @@ import {
   releasePendingImage,
   type UploadedImage,
 } from "../../data/images"
-import { toastError } from "../toast"
 import { ImageLightbox } from "./image-lightbox"
 import {
   isHeading,
@@ -1208,7 +1208,7 @@ export function BlockEditor({
           docRef.current = next
           onChange(next)
         }
-        toastError(error instanceof ImageUploadError ? error.message : "Image upload failed")
+        toast.error(error instanceof ImageUploadError ? error.message : "Image upload failed")
       } finally {
         releasePendingImage(id)
       }
