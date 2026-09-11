@@ -73,7 +73,7 @@ export function NoteActionsMenu({
 
   const togglePin = () => setPageProps(noteId, { pinned: pinned ? null : true })
 
-  // Renaming sets the note's title (docs/archive/page-identity-design.md). The id and
+  // Renaming sets the note's title (docs/graph-storage.md). The id and
   // the URL are untouched, so there is nothing to navigate to afterwards and
   // no name to reject: any text is a valid title.
   const rename = () => {

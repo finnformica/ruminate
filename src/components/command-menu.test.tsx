@@ -245,8 +245,6 @@ function makeNote(id: string) {
     displayName: id,
     props: {},
     title: id,
-    url: null,
-    alias: null,
     pinned: false,
     updatedAt: null,
     dates: [],

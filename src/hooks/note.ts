@@ -62,7 +62,7 @@ export function useSetPageProps() {
 
 /**
  * Rename a note — which, since ids are minted and opaque
- * (docs/archive/page-identity-design.md), is simply **setting the page node's
+ * (docs/graph-storage.md), is simply **setting the page node's
  * text**. Nothing else moves: the id, the URL, every deep link and every
  * block row are untouched, and exactly one row changes, so a rename cannot
  * clobber a concurrent edit under per-row LWW. An emptied title puts the

@@ -784,7 +784,7 @@ export function CommandMenu() {
                     icon={<PlusIcon16 />}
                     onSelect={handleSelect(() => {
                       // The typed text becomes the note's TITLE; the id is
-                      // minted and opaque (docs/archive/page-identity-design.md). Any
+                      // minted and opaque (docs/graph-storage.md). Any
                       // text works — there is no filename charset to sanitize
                       // against and no name collision to avoid, so a fresh
                       // note is always a fresh note.

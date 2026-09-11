@@ -16,6 +16,8 @@
 
 ### Removed
 
+- Four holdovers from the app's origins: the dice button that opened a random note; a note's icon being taken from a `url` or `github` property or a leading emoji in its title (every note now shows the note icon, and daily and weekly notes their calendar icons); the `birthday` property, which put a person's next birthday on the calendar and a cake label on their note; and `!!1` `!!2` `!!3` priority markers, which nothing had displayed for some time. Tag labels on previews are no longer highlighted to match the tag page you are on.
+- External pictures in notes load straight from their own address rather than through the app's server, which used to relay any URL it was given.
 - Frontmatter. A note's metadata (its title, pin, font, width, tags, `updated_at`) lives on the note itself, never as a `---` YAML block in its text: copying a note as markdown now gives you its blocks only, and pasting markdown that starts with a YAML block drops that block instead of turning its lines into blocks. A note created from a tag page still starts with that tag.
 - Sharing a note as a GitHub gist. The **Share** item, the publish dialog, the public `/share/…` page and the "published" globe on shared notes are gone; gists you already published stay on your GitHub account, but their share links no longer render. Signing in now asks GitHub for your email only, not gist access.
 - The help panel's formatting list is drawn by the note renderer itself, so each example shows exactly what a block will look like; the block markers (`#`, `-`, `1.`, `[ ]`, `>`, a code fence) are listed with the block they make.

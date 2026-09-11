@@ -245,10 +245,10 @@ export const noteSearcherAtom = atom((get) => {
   const sortedNotes = get(sortedNotesAtom)
   return new Searcher(sortedNotes, {
     // `note.id` is deliberately NOT a fuzzy key: minted ids are opaque
-    // (docs/page-identity-design.md), so matching them would only add noise —
+    // (docs/graph-storage.md), so matching them would only add noise —
     // every note would half-match a query containing "blk". The `id:` filter
     // still matches ids exactly (src/utils/search-notes.ts).
-    keySelector: (note) => [note.title, note.displayName, note.text, note.alias || ""],
+    keySelector: (note) => [note.title, note.displayName, note.text],
     threshold: 0.8,
   })
 })

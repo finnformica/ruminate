@@ -13,8 +13,6 @@ vi.mock("../global-state", async () => {
     displayName,
     props: {},
     title: displayName,
-    url: null,
-    alias: null,
     pinned: false,
     updatedAt: null,
     dates: [],

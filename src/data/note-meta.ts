@@ -4,18 +4,16 @@ import type { Block, BlockDoc } from "../blocks/types"
 import {
   formatDate,
   formatWeek,
-  getNextBirthday,
   isValidDateString,
   isValidWeekString,
   toDateStringUtc,
 } from "../utils/date"
-import { removeLeadingEmoji } from "../utils/emoji"
 import { PAGE_TYPE, pageDoc, parseProps, propsJson, type GraphSnapshot } from "./graph"
 import type { Op } from "./ops"
 import { emittedPageTitle, isMintedNoteId } from "./page-identity"
 
 /**
- * Note metadata from the graph (docs/graph-native-app.md §3.4): everything
+ * Note metadata from the graph: everything
  * the notes list, the sidebar, search and the calendar know about a page is
  * read off the page node's `text` and `props` and the blocks it reaches. No
  * markdown is parsed on the way — a `#tag` is found in a block's text, a
@@ -24,13 +22,11 @@ import { emittedPageTitle, isMintedNoteId } from "./page-identity"
  */
 
 /**
- * A `#tag` in block text, as the inline syntax defines it (see
- * `src/remark-plugins/tag.ts`): `#` at the start or after whitespace, then a
- * letter, then letters, digits, `_`, `-` or `/`.
+ * A `#tag` in block text, as the syntax defines it (docs/markdown-syntax.md):
+ * `#` at the start or after whitespace, then a letter, then letters, digits,
+ * `_`, `-` or `/`.
  */
 const TAG_RE = /(?:^|(?<=\s))#(\p{L}[\p{L}\p{N}_\-/]*)/gu
-/** A `!!1`/`!!2`/`!!3` priority marker (`src/remark-plugins/priority.ts`). */
-const PRIORITY_RE = /!!([123])/g
 const TAGS_SCHEMA_RE = /^[\p{L}][\p{L}\p{N}_\-/]*$/u
 
 /** A tag and every parent of it: `a/b/c` → `a`, `a/b`, `a/b/c`. */
@@ -44,13 +40,6 @@ export function tagsInText(text: string): string[] {
   const tags = new Set<string>()
   for (const match of text.matchAll(TAG_RE)) expandTag(match[1], tags)
   return [...tags]
-}
-
-/** The last priority marker in a text, or null. */
-export function priorityInText(text: string): 1 | 2 | 3 | null {
-  let priority: 1 | 2 | 3 | null = null
-  for (const match of text.matchAll(PRIORITY_RE)) priority = Number(match[1]) as 1 | 2 | 3
-  return priority
 }
 
 /**
@@ -137,15 +126,6 @@ export function noteFromPage(id: NoteId, snapshot: GraphSnapshot): Note | null {
     const heading = blocks.find(({ block }) => isHeading(block.type))
     if (heading) title = heading.block.text.trim()
   }
-  // A title that is a single link: the text is the title, the link the url.
-  let url: string | null = null
-  const linkTitle = title.match(/^\[(.*?)\]\((https?:\/\/[^)]+)\)$/)
-  if (linkTitle) {
-    title = linkTitle[1]
-    url = linkTitle[2]
-  }
-  if (typeof props.url === "string") url = props.url
-
   const tags = new Set<string>()
   const tagList = Array.isArray(props.tags)
     ? props.tags.filter((tag): tag is string => typeof tag === "string" && TAGS_SCHEMA_RE.test(tag))
@@ -166,7 +146,6 @@ export function noteFromPage(id: NoteId, snapshot: GraphSnapshot): Note | null {
         completed: block.type === "done",
         text: block.text.trim(),
         tags: tagsInText(block.text),
-        priority: priorityInText(block.text),
       })
     }
   }
@@ -177,18 +156,6 @@ export function noteFromPage(id: NoteId, snapshot: GraphSnapshot): Note | null {
     const date = dateOf(value)
     if (date) dates.add(date)
   }
-  // A birthday — `MM-DD`, or a full date — also names its next occurrence.
-  if (typeof props.birthday === "string") {
-    const birthday = /^\d{2}-\d{2}$/.test(props.birthday)
-      ? new Date(`0000-${props.birthday}`)
-      : /^\d{4}-\d{2}-\d{2}/.test(props.birthday)
-        ? new Date(props.birthday)
-        : null
-    if (birthday && !Number.isNaN(birthday.getTime())) {
-      dates.add(toDateStringUtc(getNextBirthday(birthday)))
-    }
-  }
-
   const type = isValidDateString(id) ? "daily" : isValidWeekString(id) ? "weekly" : "note"
   if (type === "daily") dates.add(id)
 
@@ -196,13 +163,13 @@ export function noteFromPage(id: NoteId, snapshot: GraphSnapshot): Note | null {
   let displayName = ""
   switch (type) {
     case "daily":
-      displayName = title ? removeLeadingEmoji(title) : formatDate(id)
+      displayName = title || formatDate(id)
       break
     case "weekly":
-      displayName = title ? removeLeadingEmoji(title) : formatWeek(id)
+      displayName = title || formatWeek(id)
       break
     case "note":
-      if (title) displayName = removeLeadingEmoji(title)
+      if (title) displayName = title
       // An id a human wrote is a name; a minted one is opaque and never is.
       else if (id && !/^\d+$/.test(id) && !isMintedNoteId(id)) displayName = id
       else {
@@ -225,8 +192,6 @@ export function noteFromPage(id: NoteId, snapshot: GraphSnapshot): Note | null {
     displayName,
     props,
     title,
-    url,
-    alias: typeof props.alias === "string" ? props.alias : null,
     pinned: props.pinned === true,
     updatedAt,
     dates: [...dates],

@@ -13,7 +13,6 @@ export type Task = {
   completed: boolean
   text: string
   tags: string[]
-  priority: 1 | 2 | 3 | null
 }
 
 /**
@@ -25,7 +24,7 @@ export type Task = {
 export type Note = {
   /**
    * The note's stable, opaque identity — a minted `blk_` id
-   * (docs/archive/page-identity-design.md). It never changes, so links and URLs to a
+   * (docs/graph-storage.md). It never changes, so links and URLs to a
    * note survive every rename. Daily and weekly notes are the exception and
    * keep their date ids (`2026-08-31`, `2026-W35`), where the date IS the
    * identity. Not a name: use `displayName` to show a note to a human.
@@ -36,14 +35,10 @@ export type Note = {
   /** Depending on the type, either the title or the date */
   displayName: string
   /** The page node's props — the note's metadata (pinned, width, font,
-   * gist_id, updated_at, tags, dates…), with dates as `Date`s. */
+   * updated_at, tags, dates…). */
   props: Record<string, unknown>
   /** The page node's text, falling back to the first heading block. */
   title: string
-  /** The `url` prop, or the link when the title is one (`[title](url)`). */
-  url: string | null
-  /** The alias to use when linking to this note, from the `alias` prop */
-  alias: string | null
   /** If the note is pinned */
   pinned: boolean
   /** When the note was last updated (the `updated_at` prop), null if not set */

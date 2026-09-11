@@ -11,20 +11,9 @@ A note's metadata is a small JSON object of properties on its page node — the 
 | `font`       | The note's font choice                   |
 | `width`      | The note's width choice                  |
 | `updated_at` | Every save                               |
+| `tags`       | Creating a note from a tag page          |
 
-## Properties the app reads when present
-
-These are recognised on notes that carry them (imported notes, or older notes written when frontmatter was editable):
-
-| Key        | Effect                                                                                                                           |
-| :--------- | :------------------------------------------------------------------------------------------------------------------------------- |
-| `tags`     | List of tag names — added to the note's tags alongside `#tag` in the body (see [markdown-syntax.md](./markdown-syntax.md#tags)). |
-| `alias`    | An alternative name the note is found by in search.                                                                              |
-| `url`      | A link the note stands for; its favicon becomes the note's icon.                                                                 |
-| `github`   | A GitHub login; the avatar becomes the note's icon.                                                                              |
-| `birthday` | `YYYY-MM-DD` or `MM-DD`; the note shows the next birthday, and the date appears on the calendar.                                 |
-
-Date-valued properties in general put the note on the calendar for that date.
+`tags` are added to the note's tags alongside any `#tag` in the body (see [markdown-syntax.md](./markdown-syntax.md#tags)). Date-valued properties put the note on the calendar for that date. Any property can be searched with `has:`, `no:`, `key:value` and `sort:` (see [query-language.md](./query-language.md)).
 
 ## No frontmatter
 

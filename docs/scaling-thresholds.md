@@ -145,6 +145,6 @@ than it looks, because the current sync protocol assumes a full replica:
 ## Related
 
 - `graph-storage.md` — the current replication and sync design.
-- `event-sourcing-design.md` — the op log makes pulls O(changes) rather than
+- An op log (a design explored and shelved) — it would make pulls O(changes) rather than
   O(corpus), which raises these thresholds without abandoning full
   replication. Worth weighing before committing to partial replication.

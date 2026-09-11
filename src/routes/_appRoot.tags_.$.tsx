@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router"
 import { DropdownMenu } from "../components/dropdown-menu"
 import { IconButton } from "../components/icon-button"
 import { EditIcon16, MoreIcon16, TagIcon16, TrashIcon16 } from "../components/icons"
-import { LinkHighlightProvider } from "../components/link-highlight-provider"
 import { NoteList } from "../components/note-list"
 import { PageLayout } from "../components/page-layout"
 import { useDeleteTag, useRenameTag } from "../hooks/tag"
@@ -93,19 +92,17 @@ function RouteComponent() {
       }
     >
       <div className="px-4 pt-0 pb-[50vh]">
-        <LinkHighlightProvider href={`/tags/${tag}`}>
-          <NoteList
-            key={tag}
-            baseQuery={`tag:${tag}`}
-            query={query ?? ""}
-            onQueryChange={(query) =>
-              navigate({
-                search: (prev) => ({ ...prev, query }),
-                replace: true,
-              })
-            }
-          />
-        </LinkHighlightProvider>
+        <NoteList
+          key={tag}
+          baseQuery={`tag:${tag}`}
+          query={query ?? ""}
+          onQueryChange={(query) =>
+            navigate({
+              search: (prev) => ({ ...prev, query }),
+              replace: true,
+            })
+          }
+        />
       </div>
     </PageLayout>
   )

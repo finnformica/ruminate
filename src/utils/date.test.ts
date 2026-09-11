@@ -3,7 +3,6 @@ import { describe, expect, test } from "vitest"
 import {
   formatDate,
   formatDateDistance,
-  getNextBirthday,
   isValidDateString,
   isValidUnixTimestamp,
   isValidWeekString,
@@ -80,13 +79,6 @@ describe("toDateString", () => {
     expect(toDateString(new Date(2021, 6, 11))).toBe("2021-07-11")
     expect(toDateString(new Date(1998, 6, 11))).toBe("1998-07-11")
     expect(toDateString(new Date(0, 0, 1))).toBe("1900-01-01")
-  })
-})
-
-describe("getNextBirthday", () => {
-  test("returns the next birthday for a given date", () => {
-    const today = new Date()
-    expect(getNextBirthday(new Date(1998, 6, 11))).greaterThan(today)
   })
 })
 

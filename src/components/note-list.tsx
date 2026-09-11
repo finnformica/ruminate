@@ -11,7 +11,6 @@ import { cx } from "../utils/cx"
 import { parseQuery, removeQualifier } from "../utils/search"
 import { formatNumber, pluralize } from "../utils/pluralize"
 import { Button } from "./button"
-import { Dice } from "./dice"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
 import {
@@ -23,7 +22,6 @@ import {
   TagIcon16,
   XIcon12,
 } from "./icons"
-import { LinkHighlightProvider } from "./link-highlight-provider"
 import { NoteFavicon } from "./note-favicon"
 import { NotePreviewCard } from "./note-preview-card"
 import { PillButton } from "./pill-button"
@@ -183,25 +181,8 @@ export function NoteList({
     return filters.filter((filter) => filter.key === "in")
   }, [filters])
 
-  const highlightPaths = React.useMemo(() => {
-    return filters
-      .filter((filter) => !filter.exclude)
-      .flatMap((filter) => {
-        switch (filter.key) {
-          case "tag":
-            return filter.values.map((value) => `/tags/${value}`)
-          case "link":
-            return filter.values.map((value) => `/${value}`)
-          case "date":
-            return filter.values.map((value) => `/${value}`)
-          default:
-            return []
-        }
-      })
-  }, [filters])
-
   return (
-    <LinkHighlightProvider href={highlightPaths}>
+    <>
       <div ref={containerRef}>
         <div className="flex flex-col gap-4">
           <div className="flex gap-2">
@@ -217,14 +198,6 @@ export function NoteList({
 
                 // Reset the number of visible notes when the user starts typing
                 setNumVisibleItems(initialVisibleItems)
-              }}
-            />
-            <DiceButton
-              disabled={noteResults.length === 0}
-              onClick={() => {
-                const resultsCount = noteResults.length
-                const randomIndex = Math.floor(Math.random() * resultsCount)
-                navigate({ to: `/notes/${noteResults[randomIndex].id}` })
               }}
             />
             {/* Grid/list is how the note LISTING is laid out; block results
@@ -421,7 +394,7 @@ export function NoteList({
                       <span className="truncate text-text-secondary">
                         {/* Show the note's name, matching the page header and
                             sidebar — ids are opaque now, so that is the title
-                            (docs/archive/page-identity-design.md). */}
+                            (docs/graph-storage.md). */}
                         <span className="text-text">{note.displayName}</span>
                       </span>
                     </Link>
@@ -438,26 +411,6 @@ export function NoteList({
           </Button>
         ) : null}
       </div>
-    </LinkHighlightProvider>
-  )
-}
-
-function DiceButton({ disabled = false, onClick }: { disabled?: boolean; onClick?: () => void }) {
-  const [number, setNumber] = React.useState(() => Math.floor(Math.random() * 6) + 1)
-  return (
-    <IconButton
-      disabled={disabled}
-      aria-label="Roll the dice"
-      className="group/dice h-10 w-10 shrink-0 rounded-lg bg-bg-secondary hover:bg-bg-secondary-hover! active:bg-bg-secondary-active! coarse:h-12 coarse:w-12"
-      onClick={() => {
-        setNumber(Math.floor(Math.random() * 6) + 1)
-        onClick?.()
-      }}
-    >
-      <Dice
-        number={number}
-        className="group-hover/dice:rotate-[20deg] group-active/dice:rotate-[100deg] group-hover/dice:-translate-y-0.5"
-      />
-    </IconButton>
+    </>
   )
 }

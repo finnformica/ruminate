@@ -175,7 +175,7 @@ export function useImageSrc(block: Pick<Block, "props">): string | null | "error
       live = false
     }
   }, [image])
-  if (src) return src.startsWith("http") ? `/file-proxy?url=${encodeURIComponent(src)}` : src
+  if (src) return src
   if (!image) return "error"
   return state
 }

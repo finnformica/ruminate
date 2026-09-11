@@ -8,7 +8,7 @@ import type { NoteId } from "../schema"
 import { emittedPageTitle } from "./page-identity"
 
 /**
- * The graph ↔ doc seam (docs/graph-schema-v2.md, docs/graph-native-app.md).
+ * The graph ↔ doc seam (docs/graph-schema-v2.md).
  *
  * - `docFromGraph` / `pageDoc` — the **walk**: start at some root nodes,
  *   follow `child` links in sort-key order, and hand back a `BlockDoc` — the

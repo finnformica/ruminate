@@ -44,7 +44,6 @@
     "cmdk": "^0.2.0",
     "copy-to-clipboard": "^4.0.2",
     "date-fns": "^4.1.0",
-    "emoji-regex": "^10.4.0",
     "fast-fuzzy": "^1.11.2",
     "fractional-indexing": "^4.0.0",
     "jotai": "^2.0.3",

@@ -191,20 +191,3 @@ export function toWeekString(date: Date) {
   const weekNumber = getISOWeek(date).toString().padStart(2, "0")
   return `${year}-W${weekNumber}`
 }
-
-export function getNextBirthday(birthday: Date): Date {
-  const today = new Date()
-  const currentYear = today.getFullYear()
-  const birthMonth = birthday.getUTCMonth()
-  const birthDay = birthday.getUTCDate()
-  const nextBirthday = new Date(currentYear, birthMonth, birthDay)
-
-  // Reset the time to 00:00:00
-  today.setHours(0, 0, 0, 0)
-
-  if (nextBirthday.valueOf() < today.valueOf()) {
-    nextBirthday.setFullYear(currentYear + 1)
-  }
-
-  return nextBirthday
-}

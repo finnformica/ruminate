@@ -7,7 +7,6 @@ import {
   noteFromPage,
   pagePropsEntries,
   pagePropsOps,
-  priorityInText,
   tagsInText,
 } from "./note-meta"
 import { applyOps } from "./ops"
@@ -31,14 +30,10 @@ function graphOf(pages: Record<string, Page>): GraphSnapshot {
 const note = (id: string, markdown: string, props?: Record<string, unknown>) =>
   noteFromPage(id, graphOf({ [id]: props ? { markdown, props } : markdown }))!
 
-describe("tagsInText / priorityInText", () => {
+describe("tagsInText", () => {
   it("find inline tags as the syntax defines them, parents included", () => {
     expect(tagsInText("a #foo/bar b #x_1 not#this #-no")).toEqual(["foo", "foo/bar", "x_1"])
     expect(tagsInText("#Ünïcode #中文")).toEqual(["Ünïcode", "中文"])
-  })
-  it("take the last priority marker", () => {
-    expect(priorityInText("!!1 then !!3")).toBe(3)
-    expect(priorityInText("no marker !!4")).toBeNull()
   })
 })
 
@@ -58,7 +53,6 @@ describe("noteFromPage", () => {
         tags: ["work/q3"],
         pinned: true,
         due: "2026-03-04T00:00:00.000Z",
-        birthday: "05-06",
         updated_at: "2026-01-02T03:04:05.000Z",
       },
     )
@@ -68,16 +62,14 @@ describe("noteFromPage", () => {
     expect(n.props.pinned).toBe(true)
     expect(n.tags).toEqual(["work", "work/q3", "inline", "home", "tag", "tag/child"])
     expect(n.dates).toContain("2026-03-04")
-    expect(n.dates.some((d) => d.endsWith("-05-06"))).toBe(true)
     expect(n.updatedAt).toBe(Date.parse("2026-01-02T03:04:05.000Z"))
     expect(n.tasks).toEqual([
       expect.objectContaining({
         completed: false,
         text: "buy milk !!2 #home",
-        priority: 2,
         tags: ["home"],
       }),
-      expect.objectContaining({ completed: true, text: "ship it", priority: null }),
+      expect.objectContaining({ completed: true, text: "ship it" }),
     ])
     expect(n.tasks[0].blockId).toMatch(/^blk_/)
     expect(n.headings).toEqual([
@@ -88,11 +80,9 @@ describe("noteFromPage", () => {
     expect(n.type).toBe("note")
   })
 
-  it("falls back to the first heading for the title, and a link title yields the url", () => {
-    const n = note("blk_p", "# [Google](https://google.com)\n- x\n")
+  it("falls back to the first heading for the title", () => {
+    const n = note("blk_p", "# Google\n- x\n")
     expect(n.title).toBe("Google")
-    expect(n.url).toBe("https://google.com")
-    expect(note("blk_p", "# T\n", { url: "https://a.b" }).url).toBe("https://a.b")
   })
 
   it("names an untitled note by its first words, and a daily note by its date", () => {
