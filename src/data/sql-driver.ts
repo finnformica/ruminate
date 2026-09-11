@@ -1,17 +1,17 @@
 /**
- * The thin seam between `SqlNoteStore` and an actual SQLite engine.
+ * The thin seam between the SQL `NoteStore` and an actual SQLite engine.
  *
  * Two implementations exist:
  * - `sql-driver-browser.ts` — the official `@sqlite.org/sqlite-wasm` build
  *   running in a dedicated Web Worker with the OPFS `opfs-sahpool` VFS
  *   (persistent, no COOP/COEP headers required), falling back to an in-memory
  *   database when OPFS is unavailable.
- * - the node driver in `sql-note-store.test.ts` — `node:sqlite`'s
- *   `DatabaseSync`, so the conformance suite runs the exact same SQL without a
- *   native devDependency or wasm loading in vitest.
+ * - `sql-node-test-driver.ts` — `node:sqlite`'s `DatabaseSync`, so the store
+ *   tests run the exact same SQL without a native devDependency or wasm
+ *   loading in vitest.
  *
  * Keeping the seam this small (exec / batch / script / close) is what lets the
- * same `SqlNoteStore` pass the conformance suite on both engines.
+ * same store run unchanged on both engines.
  */
 
 export type SqlValue = string | number | null
