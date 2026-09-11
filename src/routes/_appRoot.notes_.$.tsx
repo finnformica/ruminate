@@ -28,7 +28,8 @@ import { isValidDateString, isValidWeekString, toDateString } from "../utils/dat
 
 type RouteSearch = {
   query: string | undefined
-  content?: string
+  /** Comma-separated tags a new note starts with (from `useCreateNewNote`). */
+  tags?: string
   /** Heading text to highlight in the block editor on landing (from Cmd-K). */
   heading?: string
   /** Block id the editor is zoomed into ("focus mode"); absent = un-zoomed. */
@@ -39,7 +40,7 @@ export const Route = createFileRoute("/_appRoot/notes_/$")({
   validateSearch: (search: Record<string, unknown>): RouteSearch => {
     return {
       query: typeof search.query === "string" ? search.query : undefined,
-      content: typeof search.content === "string" ? search.content : undefined,
+      tags: typeof search.tags === "string" ? search.tags : undefined,
       heading: typeof search.heading === "string" ? search.heading : undefined,
       block: typeof search.block === "string" ? search.block : undefined,
     }
@@ -68,11 +69,7 @@ function RouteComponent() {
 function NotePage() {
   // Router
   const { _splat: noteId } = Route.useParams()
-  const {
-    content: defaultContent,
-    heading: highlightHeading,
-    block: zoomBlockId,
-  } = Route.useSearch()
+  const { tags: defaultTags, heading: highlightHeading, block: zoomBlockId } = Route.useSearch()
   const navigate = Route.useNavigate()
 
   // Global state
@@ -102,9 +99,12 @@ function NotePage() {
   // short fallback, in case no sync was needed).
   const [pendingSave, setPendingSave] = useState(false)
 
-  // What a note that is not in the graph yet starts as: the `?content=`
-  // search param (markdown, imported here once), or nothing.
-  const defaultDoc = React.useMemo(() => parse(defaultContent ?? ""), [defaultContent])
+  // What a note that is not in the graph yet starts as: empty, with the
+  // `?tags=` search param (a note created from a tag page) as its props.
+  const defaultDoc = React.useMemo(() => {
+    const tags = defaultTags?.split(",").filter(Boolean) ?? []
+    return { ...parse(""), props: tags.length > 0 ? { tags } : null }
+  }, [defaultTags])
 
   // The doc is the walk of the page over the live graph; every change the
   // editor hands back becomes ops applied to the graph — see useNoteDoc.

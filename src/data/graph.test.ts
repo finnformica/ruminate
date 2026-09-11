@@ -20,9 +20,9 @@ import {
  * bytes as the source of exported markdown, so the load-bearing invariant is
  * pinned from every direction: `rollup(docToGraph(md))` is the NORMALIZED
  * form of `md` — ingest deliberately canonicalizes near-miss marker spellings
- * and frontmatter (see graph.ts) — and that normalized form is a strict
- * fixpoint of the round trip. For markdown already in normalized form the
- * round trip reproduces it byte-for-byte, frontmatter included.
+ * and drops a leading frontmatter block (see graph.ts) — and that normalized
+ * form is a strict fixpoint of the round trip. For markdown already in
+ * normalized form the round trip reproduces it byte-for-byte.
  */
 
 const canonical = (markdown: string) => serialize(parse(markdown))
@@ -101,53 +101,19 @@ describe("rollup equivalence (named cases)", () => {
     ])
   })
 
-  it("stores frontmatter as parsed entries and rolls up canonical YAML", () => {
-    const markdown =
-      "---\ntitle: Weird   spacing\ntags: [a, b]\nnested:\n  - x\n  - 'y: z'\n---\n- body\n"
+  it("drops a leading frontmatter block at import: metadata is props, never markdown", () => {
+    const markdown = "---\ntitle: Weird   spacing\ntags: [a, b]\n---\n- body\n"
     const { nodes } = docToGraph("note", markdown, 0)
     const page = nodes.find((node) => node.type === "page")
-    // Individual parsed entries, not the legacy {"frontmatter": raw} blob —
-    // and WITHOUT `title`, which the projection owns: it is lifted into the
-    // page node's `text` so it is never stored in two places.
-    expect(page?.props).toBe(JSON.stringify({ tags: ["a", "b"], nested: ["x", "y: z"] }))
-    expect(page?.text).toBe("Weird   spacing")
-    // Canonicalization changes bytes (the block-style list becomes flow), and
-    // the canonical form is a strict fixpoint.
+    expect(page?.props).toBe(null)
+    expect(page?.text).toBe("note")
     const normalized = expectConverges(markdown)
-    expect(normalized).toContain(
-      '---\ntitle: Weird   spacing\ntags: [a, b]\nnested: [x, "y: z"]\n---',
-    )
+    expect(normalized.startsWith("- body\n")).toBe(true)
+    expect(normalized).not.toContain("---")
   })
 
-  it("frontmatter that already reads canonically round-trips byte-for-byte", () => {
-    expectEquivalent(
-      "---\npinned: true\nupdated_at: 2026-01-02T03:04:05.000Z\ngist_id: abc123\n---\n- body\n",
-    )
-  })
-
-  it("keeps degenerate frontmatter verbatim (comments cannot survive parsing)", () => {
-    // A comment line has no parsed-entries representation — the legacy raw
-    // props shape keeps the bytes (and the comment) intact.
-    const markdown = "---\ndescription: |\n  - not a bullet\n  # not a heading\n---\nhello\n"
-    expectEquivalent(markdown)
-    const { nodes } = docToGraph("note", markdown, 0)
-    const page = nodes.find((node) => node.type === "page")
-    expect(JSON.parse(page?.props ?? "{}")).toHaveProperty("frontmatter")
-  })
-
-  it("handles an empty page and a frontmatter-only page", () => {
+  it("handles an empty page", () => {
     expectEquivalent("")
-    expectEquivalent("---\ntitle: empty\n---\n")
-  })
-
-  it("stamps every save's frontmatter shape: updated_at survives unquoted", () => {
-    // The exact line `updateFrontmatterValue` writes on every save must be a
-    // byte-stable round trip, or save → pull would flip bytes forever.
-    const markdown = "---\nupdated_at: 2026-08-31T09:30:00.000Z\n---\n- body\n"
-    expectEquivalent(markdown)
-    const { nodes } = docToGraph("note", markdown, 0)
-    const page = nodes.find((node) => node.type === "page")
-    expect(page?.props).toBe(JSON.stringify({ updated_at: "2026-08-31T09:30:00.000Z" }))
   })
 
   it("a code fence is one code block; nothing inside it is a marker", () => {
@@ -361,56 +327,54 @@ describe("rollup equivalence (named cases)", () => {
   })
 })
 
-describe("the title's round trip through the <id>.md seam", () => {
-  it("lifts a title into the page node and rolls it back out", () => {
-    const markdown = "---\ntitle: Flow Engineering\n---\nbody\n  id:: blk_aaaaaaaaaa\n"
-    const { nodes, links } = docToGraph("blk_page00000", markdown, 0)
+describe("the title's ride through a page's doc", () => {
+  const body = "body\n  id:: blk_aaaaaaaaaa\n"
+
+  it("lifts a title into the page node and walks it back out as doc props", () => {
+    const { nodes, links } = docToGraph("blk_page00000", body, 0, { title: "Flow Engineering" })
     const page = nodes.find((node) => node.type === "page") as NodeRow
     // Stored once, in `text` — not duplicated into props.
     expect(page.text).toBe("Flow Engineering")
     expect(page.props).toBe(null)
-    expect(rollup("blk_page00000", buildGraphSnapshot(nodes, links))).toBe(markdown)
+    const snapshot = buildGraphSnapshot(nodes, links)
+    expect(pageDoc("blk_page00000", snapshot)?.props).toEqual({ title: "Flow Engineering" })
+    // The rollup is the blocks alone: metadata never touches markdown.
+    expect(rollup("blk_page00000", snapshot)).toBe(body)
   })
 
-  it("is a strict fixpoint for a titled page, with and without other frontmatter", () => {
-    expectConverges("---\ntitle: Flow Engineering\n---\nbody\n", "blk_page00000")
-    expectConverges("---\ntitle: Flow Engineering\npinned: true\n---\nbody\n", "blk_page00000")
+  it("keeps the other props beside the title", () => {
+    const { nodes, links } = docToGraph("blk_page00000", body, 0, { title: "Flow", pinned: true })
+    const page = nodes.find((node) => node.type === "page") as NodeRow
+    expect(page.props).toBe(JSON.stringify({ pinned: true }))
+    expect(pageDoc("blk_page00000", buildGraphSnapshot(nodes, links))?.props).toEqual({
+      title: "Flow",
+      pinned: true,
+    })
   })
 
   it("survives titles the filename charset used to forbid", () => {
     // The point of separating identity from name: a title is just text now.
     for (const title of ["Q3: the plan", "What? [draft]", "a|b", "100%", "-- dashes"]) {
-      const normalized = expectConverges(
-        `---\ntitle: ${JSON.stringify(title)}\n---\nbody\n`,
-        "blk_page00000",
-      )
-      const { nodes } = docToGraph("blk_page00000", normalized, 0)
+      const { nodes, links } = docToGraph("blk_page00000", body, 0, { title })
       expect((nodes.find((node) => node.type === "page") as NodeRow).text).toBe(title)
+      expect(pageDoc("blk_page00000", buildGraphSnapshot(nodes, links))?.props).toEqual({ title })
     }
   })
 
-  it("emits no title for a date page, whose id IS its name", () => {
-    // Byte-identical to the pre-minting world — the carve-out, end to end.
+  it("carries no title for a date page, whose id IS its name", () => {
     const markdown = "today\n  id:: blk_aaaaaaaaaa\n"
     const { nodes, links } = docToGraph("2026-08-31", markdown, 0)
+    const snapshot = buildGraphSnapshot(nodes, links)
     expect((nodes.find((node) => node.type === "page") as NodeRow).text).toBe("2026-08-31")
-    expect(rollup("2026-08-31", buildGraphSnapshot(nodes, links))).toBe(markdown)
+    expect(pageDoc("2026-08-31", snapshot)?.props).toBeNull()
+    expect(rollup("2026-08-31", snapshot)).toBe(markdown)
   })
 
-  it("emits no title for an untitled page", () => {
-    const markdown = "body\n  id:: blk_aaaaaaaaaa\n"
-    const { nodes, links } = docToGraph("blk_page00000", markdown, 0)
-    expect(rollup("blk_page00000", buildGraphSnapshot(nodes, links))).toBe(markdown)
-  })
-
-  it("moves a mid-document title key to the front, then holds still", () => {
-    // The projection owns the key's position, so the first pass normalizes it
-    // (a convergence, like the near-miss markers) and the second is a fixpoint.
-    const normalized = expectConverges(
-      "---\npinned: true\ntitle: Flow\n---\nbody\n",
-      "blk_page00000",
-    )
-    expect(normalized).toContain("---\ntitle: Flow\npinned: true\n---\n")
+  it("carries no title for an untitled page", () => {
+    const { nodes, links } = docToGraph("blk_page00000", body, 0)
+    const snapshot = buildGraphSnapshot(nodes, links)
+    expect(pageDoc("blk_page00000", snapshot)?.props).toBeNull()
+    expect(rollup("blk_page00000", snapshot)).toBe(body)
   })
 })
 
@@ -476,7 +440,7 @@ describe("rollup (graph-side behavior)", () => {
     expect(rollup("blk_a", snapshot)).toBeNull()
   })
 
-  it("tolerates malformed page props (renders without frontmatter)", () => {
+  it("tolerates malformed page props (renders its blocks, of which there are none)", () => {
     const snapshot = buildGraphSnapshot([row("p", "page", "p", "{not json")], [])
     expect(rollup("p", snapshot)).toBe("\n")
   })
@@ -679,7 +643,7 @@ describe("docFromGraph (the walk, N roots)", () => {
     expect(doc.blocks.blk_f.props).toBeUndefined()
   })
 
-  it("pageDoc is the page's children with its frontmatter, and rollup is its serialization", () => {
+  it("pageDoc is the page's children with its props, and rollup is its serialization", () => {
     const snapshot = buildGraphSnapshot(
       [row("p", "page", "Titled", JSON.stringify({ tags: ["x"] })), row("blk_a", "ul", "a")],
       [edge("p", "blk_a", "a0")],
@@ -775,8 +739,8 @@ describe("property: generated documents round-trip", () => {
       const fixed = canonical(markdown)
       const normalized = viaGraph(fixed) as string
       expect(normalized, `seed doc ${i}:\n${markdown}`).not.toBeNull()
-      // The deliberate normalization pass (near-miss markers, canonical
-      // frontmatter) converges in one step — never a byte flip-flop.
+      // The deliberate normalization pass (near-miss markers, a dropped
+      // frontmatter block) converges in one step — never a byte flip-flop.
       expect(viaGraph(normalized), `seed doc ${i}:\n${markdown}`).toBe(normalized)
     }
   })

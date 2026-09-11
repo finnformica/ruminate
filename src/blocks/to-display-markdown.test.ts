@@ -13,7 +13,7 @@ describe("toDisplayMarkdown", () => {
     expect(md).toContain("- [x] Spider diagram")
   })
 
-  it("keeps frontmatter and preserves list nesting", () => {
+  it("drops frontmatter and preserves list nesting", () => {
     const stored = [
       "---",
       "title: t",
@@ -24,7 +24,8 @@ describe("toDisplayMarkdown", () => {
       "    id:: blk_b",
     ].join("\n")
     const md = toDisplayMarkdown(stored)
-    expect(md.startsWith("---\ntitle: t\n---")).toBe(true)
+    expect(md).not.toContain("---")
+    expect(md).not.toContain("title")
     expect(md).toContain("- parent")
     expect(md).toContain("  - child")
   })

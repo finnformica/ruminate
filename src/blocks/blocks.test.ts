@@ -5,10 +5,7 @@ import { serialize } from "./serialize"
 // Content is written verbatim: a heading keeps `# `, a bullet its single `- `,
 // a paragraph has no marker. Nesting is two-space indentation; each block's id
 // sits on the line below, indented two more.
-const CANONICAL = `---
-title: My note
----
-# A heading
+const CANONICAL = `# A heading
   id:: blk_aaa
   - A nested bullet
     id:: blk_bbb
@@ -25,7 +22,7 @@ describe("block round-trip", () => {
 
   it("parses the structure and ids", () => {
     const doc = parse(CANONICAL)
-    expect(doc.props).toEqual({ title: "My note" })
+    expect(doc.props).toBeNull()
     expect(doc.rootBlockIds).toEqual(["blk_aaa", "blk_ccc", "blk_ddd"])
     expect(doc.blocks["blk_aaa"].type).toBe("h1")
     expect(doc.blocks["blk_aaa"].text).toBe("A heading")
@@ -182,44 +179,28 @@ describe("duplicate ids", () => {
   })
 })
 
-describe("frontmatter handling (the markdown edge)", () => {
-  it("returns null props when there is no frontmatter", () => {
+describe("frontmatter (dropped at the markdown edge)", () => {
+  it("returns null props: metadata is never read from markdown", () => {
     const doc = parse(`just a block\n  id:: blk_x\n`)
     expect(doc.props).toBeNull()
     expect(serialize(doc)).toBe(`just a block\n  id:: blk_x\n`)
   })
 
-  it("imports multi-line YAML as entries (lines that look like blocks included) and converges", () => {
-    const md = `---
-title: My note
-tags:
-  - foo
-  - bar
-date: 2026-08-20
----
-A block
-  id:: blk_x
-`
+  it("drops a leading YAML block rather than turning its lines into blocks", () => {
+    const md = `---\ntitle: My note\ntags:\n  - foo\n  - bar\n---\nA block\n  id:: blk_x\n`
     const doc = parse(md)
-    expect(doc.props).toEqual({
-      title: "My note",
-      tags: ["foo", "bar"],
-      date: "2026-08-20T00:00:00.000Z",
-    })
+    expect(doc.props).toBeNull()
     expect(doc.rootBlockIds).toEqual(["blk_x"])
-    // Non-canonical YAML converges to the canonical form in one step.
-    const once = serialize(doc)
-    expect(once).toBe(
-      "---\ntitle: My note\ntags: [foo, bar]\ndate: 2026-08-20T00:00:00.000Z\n---\nA block\n  id:: blk_x\n",
-    )
-    expect(serialize(parse(once))).toBe(once)
+    expect(serialize(doc)).toBe("A block\n  id:: blk_x\n")
   })
 
-  it("keeps an empty frontmatter block distinct from none", () => {
-    const md = `---\n\n---\nA block\n  id:: blk_x\n`
-    const doc = parse(md)
-    expect(doc.props).toEqual({})
-    expect(serialize(doc)).toBe(md)
+  it("drops an empty frontmatter block too", () => {
+    expect(serialize(parse(`---\n\n---\nA block\n  id:: blk_x\n`))).toBe("A block\n  id:: blk_x\n")
+  })
+
+  it("never writes a page's props out", () => {
+    const doc = { ...parse("A block\n  id:: blk_x\n"), props: { title: "T", pinned: true } }
+    expect(serialize(doc)).toBe("A block\n  id:: blk_x\n")
   })
 })
 
@@ -323,15 +304,12 @@ describe("content preservation", () => {
 
 describe("whitespace and line endings", () => {
   it("normalizes CRLF so ids and content never carry a stray \\r", () => {
-    const md = `---\r\ntitle: t\r\n---\r\na block\r\n  id:: blk_a\r\n  child\r\n    id:: blk_b\r\n`
+    const md = `a block\r\n  id:: blk_a\r\n  child\r\n    id:: blk_b\r\n`
     const doc = parse(md)
-    expect(doc.props).toEqual({ title: "t" })
     expect(doc.blocks["blk_a"].text).toBe("a block")
     expect(doc.blocks["blk_a"].children).toEqual(["blk_b"])
     expect(doc.blocks["blk_b"].text).toBe("child")
-    expect(serialize(doc)).toBe(
-      `---\ntitle: t\n---\na block\n  id:: blk_a\n  child\n    id:: blk_b\n`,
-    )
+    expect(serialize(doc)).toBe(`a block\n  id:: blk_a\n  child\n    id:: blk_b\n`)
   })
 
   it("parses an empty document to an empty doc", () => {

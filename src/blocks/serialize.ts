@@ -1,16 +1,13 @@
 import { markerFor } from "./markers"
 import { defOf } from "./registry"
-import { frontmatterTextOfProps } from "../data/frontmatter-props"
 import type { Block, BlockDoc } from "./types"
 
 /**
  * **Export.** Serialize typed blocks to markdown — the canonical `<id>.md`
  * form, the *same bytes* the store's rollup produces for a page (the rollup
  * IS this function over a doc built from the graph, `src/data/graph.ts`).
+ * Only the blocks: a page's props (its metadata) are never written out.
  *
- *   ---
- *   title: My note
- *   ---
  *   # A heading
  *     id:: blk_abc
  *   - A bullet
@@ -47,13 +44,6 @@ export function blockLines(block: Block, olPosition = 1): string[] {
 
 export function serialize(doc: BlockDoc): string {
   const lines: string[] = []
-
-  const frontmatter = frontmatterTextOfProps(doc.props)
-  if (frontmatter !== null) {
-    lines.push("---")
-    lines.push(frontmatter)
-    lines.push("---")
-  }
 
   const emitBlock = (id: string, depth: number, olPosition: number) => {
     const block: Block | undefined = doc.blocks[id]

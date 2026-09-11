@@ -20,7 +20,7 @@ export interface NodeRow {
   type: string
   /** Marker-free content; for pages, the title. */
   text: string
-  /** JSON or null. Pages carry `{frontmatter}` verbatim; code carries `{language}`. */
+  /** JSON or null. Pages carry their metadata entries; code carries `{language}`. */
   props: string | null
   /** ms epoch — per-row LWW + since-cursor pulls. */
   updated_at: number

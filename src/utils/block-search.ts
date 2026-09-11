@@ -24,7 +24,7 @@ import { compareNotes, matchesNoteScope, testNoteFilters } from "./search-notes"
  * Query semantics (all composable with the existing `parseQuery` vocabulary):
  * - `type:` filters with block-type values (the table below) match the block
  *   itself; `in:` scopes to what is downstream of a note or a block (see
- *   `testScopeFilter`); every other qualifier (`tag:`, `date:`, frontmatter,
+ *   `testScopeFilter`); every other qualifier (`tag:`, `date:`, a property,
  *   `has:`/`no:`, …) filters by the containing note, exactly as note search
  *   does.
  * - Fuzzy text matches the block's own text (fast-fuzzy, same threshold as
@@ -364,7 +364,7 @@ function compareBlockHits(a: BlockHit, b: BlockHit, sorts: Sort[]): number {
  * note. Fuzzy text ranks by relevance over block text; without it,
  * hits keep index order (document order grouped by note). `sort:` keys:
  * `text` (block text), `updated`/`updated_at` (note fallback, see above), and
- * any note-level key (`title`, frontmatter, …) applied via the containing
+ * any note-level key (`title`, a property, …) applied via the containing
  * note.
  */
 export function searchBlocks(query: Query, index: BlockIndex): BlockHit[] {

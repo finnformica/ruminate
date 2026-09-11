@@ -6,8 +6,12 @@ import { noteFromPage } from "../data/note-meta"
 import type { Note } from "../schema"
 
 /** A note from markdown, exactly as the app derives one for a page. */
-function parseNote(id: string, markdown: string): Note {
-  const { nodes, links } = docToGraph(id, markdown, 0)
+function parseNote(
+  id: string,
+  markdown: string,
+  props: Record<string, unknown> | null = null,
+): Note {
+  const { nodes, links } = docToGraph(id, markdown, 0, props)
   return noteFromPage(id, buildGraphSnapshot(nodes, links)) as Note
 }
 
@@ -51,14 +55,7 @@ export const HasUrl: Story = {
 
 export const HasGithub: Story = {
   args: {
-    note: parseNote(
-      "1",
-      `---
-github: colebemis
----
-
-# Cole Bemis`,
-    ),
+    note: parseNote("1", "# Cole Bemis", { github: "colebemis" }),
   },
   play: async ({ canvasElement }) => expectFavicon(canvasElement, "favicon-github"),
 }

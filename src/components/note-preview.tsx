@@ -29,26 +29,25 @@ type NotePreviewProps = {
 export function NotePreview({ note, className, hideProperties }: NotePreviewProps) {
   const highlightedHrefs = useLinkHighlight()
 
-  const resolvedFrontmatter = note.props
+  const props = note.props
 
   // The preview is the page's view, read-only: the same rows the note page
   // renders, walked out of the live graph.
   const snapshot = useAtomValue(graphSnapshotAtom)
   const doc = useMemo(() => pageDoc(note.id, snapshot), [note.id, snapshot])
 
-  // Resolve note font (frontmatter font or the sans default)
+  // Resolve note font (the page's font prop or the sans default)
   const resolvedFont = useMemo(() => {
-    const frontmatterFont = resolvedFrontmatter?.font as unknown
-    const parseResult = fontSchema.safeParse(frontmatterFont)
+    const parseResult = fontSchema.safeParse(props?.font as unknown)
     return parseResult.success ? parseResult.data : "sans"
-  }, [resolvedFrontmatter?.font])
+  }, [props?.font])
 
-  const frontmatterTags = useMemo(() => {
-    return Array.isArray(resolvedFrontmatter?.tags) &&
-      (resolvedFrontmatter.tags as unknown[]).every((tag) => typeof tag === "string")
-      ? (resolvedFrontmatter.tags as string[])
+  const propTags = useMemo(() => {
+    return Array.isArray(props?.tags) &&
+      (props.tags as unknown[]).every((tag) => typeof tag === "string")
+      ? (props.tags as string[])
       : []
-  }, [resolvedFrontmatter?.tags])
+  }, [props?.tags])
 
   // Get current route's note ID
   const noteMatch = useMatch({ from: "/_appRoot/notes_/$", shouldThrow: false })
@@ -61,7 +60,7 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
       return null
     }
 
-    const birthday = resolvedFrontmatter?.birthday
+    const birthday = props?.birthday
 
     // Validate birthday format: Date, "MM-DD" string, or "YYYY-MM-DD" string
     const isDate = birthday instanceof Date
@@ -110,7 +109,7 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
     }
 
     return "Birthday"
-  }, [currentNoteId, resolvedFrontmatter?.birthday])
+  }, [currentNoteId, props?.birthday])
 
   return (
     <div
@@ -165,7 +164,7 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
               {note.tasks.filter((t) => t.completed).length}/{note.tasks.length}
             </Label>
           ) : null}*/}
-          {frontmatterTags.slice(0, NUM_VISIBLE_TAGS).map((tag) => (
+          {propTags.slice(0, NUM_VISIBLE_TAGS).map((tag) => (
             <Label
               key={tag}
               icon={<TagIcon12 />}
@@ -182,8 +181,8 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
               {tag}
             </Label>
           ))}
-          {frontmatterTags.length > NUM_VISIBLE_TAGS ? (
-            <Label icon={<TagIcon12 />}>+{frontmatterTags.length - NUM_VISIBLE_TAGS}</Label>
+          {propTags.length > NUM_VISIBLE_TAGS ? (
+            <Label icon={<TagIcon12 />}>+{propTags.length - NUM_VISIBLE_TAGS}</Label>
           ) : null}
         </div>
       ) : null}

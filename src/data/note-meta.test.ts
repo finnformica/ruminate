@@ -12,18 +12,24 @@ import {
 } from "./note-meta"
 import { applyOps } from "./ops"
 
-function graphOf(pages: Record<string, string>): GraphSnapshot {
+/** A page fixture: its markdown body, with its metadata as props (never as
+ * frontmatter — metadata does not travel in markdown). */
+type Page = string | { markdown: string; props: Record<string, unknown> }
+
+function graphOf(pages: Record<string, Page>): GraphSnapshot {
   const nodes = []
   const links = []
-  for (const [id, markdown] of Object.entries(pages)) {
-    const g = docToGraph(id, serialize(parse(markdown)), 1)
+  for (const [id, page] of Object.entries(pages)) {
+    const { markdown, props } = typeof page === "string" ? { markdown: page, props: null } : page
+    const g = docToGraph(id, serialize(parse(markdown)), 1, props)
     nodes.push(...g.nodes)
     links.push(...g.links)
   }
   return buildGraphSnapshot(nodes, links)
 }
 
-const note = (id: string, markdown: string) => noteFromPage(id, graphOf({ [id]: markdown }))!
+const note = (id: string, markdown: string, props?: Record<string, unknown>) =>
+  noteFromPage(id, graphOf({ [id]: props ? { markdown, props } : markdown }))!
 
 describe("tagsInText / priorityInText", () => {
   it("find inline tags as the syntax defines them, parents included", () => {
@@ -41,20 +47,20 @@ describe("noteFromPage", () => {
     const n = note(
       "blk_p",
       [
-        "---",
-        "title: Plan",
-        "tags: [work/q3]",
-        "pinned: true",
-        "due: 2026-03-04",
-        "birthday: 05-06",
-        "updated_at: 2026-01-02T03:04:05.000Z",
-        "---",
         "# Heading one #inline",
         "  [ ] buy milk !!2 #home",
         "  [x] ship it",
         "  ## Sub",
         "- plain #tag/child",
       ].join("\n"),
+      {
+        title: "Plan",
+        tags: ["work/q3"],
+        pinned: true,
+        due: "2026-03-04T00:00:00.000Z",
+        birthday: "05-06",
+        updated_at: "2026-01-02T03:04:05.000Z",
+      },
     )
     expect(n.title).toBe("Plan")
     expect(n.displayName).toBe("Plan")
@@ -86,7 +92,7 @@ describe("noteFromPage", () => {
     const n = note("blk_p", "# [Google](https://google.com)\n- x\n")
     expect(n.title).toBe("Google")
     expect(n.url).toBe("https://google.com")
-    expect(note("blk_p", "---\nurl: https://a.b\n---\n# T\n").url).toBe("https://a.b")
+    expect(note("blk_p", "# T\n", { url: "https://a.b" }).url).toBe("https://a.b")
   })
 
   it("names an untitled note by its first words, and a daily note by its date", () => {
@@ -107,17 +113,14 @@ describe("noteFromPage", () => {
 })
 
 describe("page props", () => {
-  it("pagePropsEntries reads the entries shape and the legacy raw shape alike", () => {
+  it("pagePropsEntries reads the entries shape; the retired raw-YAML shape reads as none", () => {
     expect(pagePropsEntries('{"pinned":true}')).toEqual({ pinned: true })
-    expect(pagePropsEntries('{"frontmatter":"pinned: true\\nx: 1"}')).toEqual({
-      pinned: true,
-      x: 1,
-    })
+    expect(pagePropsEntries('{"frontmatter":"pinned: true\\nx: 1"}')).toEqual({})
     expect(pagePropsEntries(null)).toEqual({})
   })
 
   it("pagePropsOps merges, removes null keys, and stamps updated_at", () => {
-    const snapshot = graphOf({ p: "---\npinned: true\nwidth: full\n---\n- x\n" })
+    const snapshot = graphOf({ p: { markdown: "- x\n", props: { pinned: true, width: "full" } } })
     const ops = pagePropsOps("p", { pinned: null, font: "serif" }, snapshot)
     expect(ops).toHaveLength(1)
     const next = applyOps(snapshot, ops, 5)

@@ -27,8 +27,8 @@ the removed `src/codemirror-extensions/` for the original implementations).
 - **File attach at the cursor** (`hooks/attach-file.ts`): drag/paste an image and
   insert the markdown link at the caret. Needs a block-aware insertion point.
 - **Frontmatter editing affordances** (`frontmatter` extension, `@codemirror/lang-yaml`):
-  the block editor preserves frontmatter verbatim but doesn't surface it for
-  editing inline (property editing lives separately in `property-value.tsx`).
+  gone with frontmatter itself — metadata is props on the page node
+  (docs/metadata.md), never YAML in the note.
 - **Markdown source niceties**: syntax highlighting of raw markdown, `priority`,
   `ellipsis`, and `indented-line-wrap` display extensions. Mostly N/A by design —
   the block editor renders _rendered_ content per block rather than highlighted

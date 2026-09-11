@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 import migration0001 from "../../migrations/0001_init.sql?raw"
 import migration0002 from "../../migrations/0002_nodes.sql?raw"
 import { parse } from "../blocks/parse"
+import type { BlockProps } from "../blocks/types"
 import { rollup } from "./graph"
 import type { NoteStore } from "./note-store"
 import { deletePageOps, docToOps } from "./ops"
@@ -18,8 +19,13 @@ async function makeStoreWithDriver() {
 
 /** Save a page as the app does: diff the doc against the live graph into ops,
  * apply them. Markdown is only the fixture's spelling. */
-async function seed(store: NoteStore, id: string, markdown: string) {
-  return store.applyOps(docToOps(id, parse(markdown), await store.getGraph()))
+async function seed(
+  store: NoteStore,
+  id: string,
+  markdown: string,
+  props: BlockProps | null = null,
+) {
+  return store.applyOps(docToOps(id, { ...parse(markdown), props }, await store.getGraph()))
 }
 
 /** A page's markdown projection off the live graph, or null when absent. */
@@ -135,14 +141,10 @@ describe("openSqlNoteStore", () => {
   it("retitling a note rewrites exactly one row — the page's", async () => {
     const { driver, store } = await makeStoreWithDriver()
     const id = "blk_page00000"
-    await seed(store, id, "---\ntitle: Old Name\n---\nkeep me\n  id:: blk_aaaaaaaaaa\n")
+    await seed(store, id, "keep me\n  id:: blk_aaaaaaaaaa\n", { title: "Old Name" })
     const before = await driver.exec("SELECT id, text, updated_at FROM nodes ORDER BY id")
 
-    const diff = await seed(
-      store,
-      id,
-      "---\ntitle: New Name\n---\nkeep me\n  id:: blk_aaaaaaaaaa\n",
-    )
+    const diff = await seed(store, id, "keep me\n  id:: blk_aaaaaaaaaa\n", { title: "New Name" })
 
     // ONE node row, no link rows: a rename can no longer bump `updated_at` on
     // blocks the user never touched, so it cannot clobber a concurrent edit
@@ -157,7 +159,7 @@ describe("openSqlNoteStore", () => {
     expect(after.find((row) => row.id === "blk_aaaaaaaaaa")).toEqual(
       before.find((row) => row.id === "blk_aaaaaaaaaa"),
     )
-    expect(await noteOf(store, id)).toContain("title: New Name")
+    expect((await store.getGraph()).nodes.get(id)?.text).toBe("New Name")
   })
 
   it("migrates a v1 database in place via 0002 (v1 tables dropped)", async () => {

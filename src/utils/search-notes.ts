@@ -14,7 +14,7 @@ export function testNoteFilters(filters: Filter[], note: Note) {
 }
 
 function testNoteFilter(filter: Filter, note: Note) {
-  const frontmatter = note.props
+  const props = note.props
 
   let value = false
 
@@ -59,7 +59,7 @@ function testNoteFilter(filter: Filter, note: Note) {
           case "title":
             return !note.title
           default:
-            return !(value in frontmatter)
+            return !(value in props)
         }
       })
       break
@@ -78,7 +78,7 @@ function testNoteFilter(filter: Filter, note: Note) {
           case "title":
             return Boolean(note.title)
           default:
-            return value in frontmatter
+            return value in props
         }
       })
       break
@@ -92,8 +92,8 @@ function testNoteFilter(filter: Filter, note: Note) {
       value = filter.values.some((scope) => matchesNoteScope(scope, note))
       break
     default:
-      if (filter.key in frontmatter) {
-        value = filter.values.includes(String(frontmatter[filter.key]))
+      if (filter.key in props) {
+        value = filter.values.includes(String(props[filter.key]))
       }
       break
   }
@@ -148,7 +148,7 @@ export function compareNotes(a: Note, b: Note, sorts: Sort[]) {
         break
       }
       default: {
-        // Sort by arbitrary frontmatter key
+        // Sort by arbitrary property key
         const aValue = a.props[sort.key]
         const bValue = b.props[sort.key]
 
