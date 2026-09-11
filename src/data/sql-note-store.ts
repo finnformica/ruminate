@@ -134,7 +134,7 @@ const linkMapKey = (source: string, destination: string, kind: string) =>
 async function loadMemGraph(driver: SqlDriver): Promise<MemGraph> {
   const [nodeRows, linkRows] = await Promise.all([
     driver.exec(
-      "SELECT id, type, text, props, updated_at, home_id FROM nodes WHERE deleted_at IS NULL",
+      "SELECT id, type, text, props, updated_at, notes_id FROM nodes WHERE deleted_at IS NULL",
     ),
     driver.exec(
       "SELECT source_id, destination_id, kind, sort_key, updated_at FROM link " +
@@ -155,7 +155,7 @@ async function loadMemGraph(driver: SqlDriver): Promise<MemGraph> {
 async function loadAllRows(driver: SqlDriver): Promise<{ nodes: NodeRow[]; links: LinkRow[] }> {
   const [nodeRows, linkRows] = await Promise.all([
     driver.exec(
-      "SELECT id, type, text, props, updated_at, deleted_at, home_id FROM nodes " +
+      "SELECT id, type, text, props, updated_at, deleted_at, notes_id FROM nodes " +
         "/* includes-deleted: the full-push source; a delete only reaches other " +
         "devices if its tombstone travels */",
     ),
@@ -230,12 +230,12 @@ function createGraphWriter(mem: MemGraph): GraphWriter {
 
 const upsertNodeStatement = (node: NodeRow): SqlStatement => ({
   sql:
-    "INSERT INTO nodes (id, type, text, props, updated_at, deleted_at, home_id) " +
+    "INSERT INTO nodes (id, type, text, props, updated_at, deleted_at, notes_id) " +
     "VALUES (?, ?, ?, ?, ?, ?, ?) " +
     "ON CONFLICT (id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
     "props = excluded.props, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, " +
-    // A home is set once and never cleared by a row that carries none.
-    "home_id = COALESCE(excluded.home_id, nodes.home_id)",
+    // A note id is set once and never cleared by a row that carries none.
+    "notes_id = COALESCE(excluded.notes_id, nodes.notes_id)",
   params: [
     node.id,
     node.type,
@@ -243,7 +243,7 @@ const upsertNodeStatement = (node: NodeRow): SqlStatement => ({
     node.props,
     node.updated_at,
     node.deleted_at ?? null,
-    node.home_id ?? null,
+    node.notes_id ?? null,
   ],
 })
 
@@ -289,7 +289,7 @@ function planOp(writer: GraphWriter, op: Op) {
         text: op.text,
         props: op.props,
         updated_at: now,
-        ...(op.home ? { home_id: op.home } : {}),
+        ...(op.notesId ? { notes_id: op.notesId } : {}),
       })
       return
     case "setText":

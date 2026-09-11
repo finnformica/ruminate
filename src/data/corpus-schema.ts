@@ -45,10 +45,10 @@ export interface CorpusMigrations {
    * store has no `seq`: the sequence is assigned by the replica, and a cache
    * has no ordering of its own to keep. */
   rowSeq?: string
-  /** migrations/0006_home.sql — required in `"columns"` mode. The local store
+  /** migrations/0006_notes_id.sql — required in `"columns"` mode. The local store
    * gains the column without the backfill (`LOCAL_V4_SQL`): a cache re-pulls
-   * the homes the replica computed. */
-  home?: string
+   * the note ids the replica computed. */
+  notesId?: string
 }
 
 /** Which v3 shape the ladder should produce (see the module header). */
@@ -57,12 +57,12 @@ export type CorpusTenancy = "single" | "columns"
 const CORPUS_SCHEMA_VERSION = "4"
 
 /**
- * The single-tenant v4 step: `home_id` on nodes (migrations/0006) and nothing
+ * The single-tenant v4 step: `notes_id` on nodes (migrations/0006) and nothing
  * else — no backfill, because the local store is a cache and re-pulls the
- * homes the replica computed (`CACHE_GENERATION`, database-mode.ts).
+ * note ids the replica computed (`CACHE_GENERATION`, database-mode.ts).
  */
 const LOCAL_V4_SQL = `
-ALTER TABLE nodes ADD COLUMN home_id TEXT;
+ALTER TABLE nodes ADD COLUMN notes_id TEXT;
 INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '4');
 `
 
@@ -117,10 +117,10 @@ async function applyV4(
     await driver.execScript(LOCAL_V4_SQL)
     return
   }
-  if (!migrations.home) {
-    throw new Error('ensureCorpusSchema: "columns" tenancy needs migrations.home (0006)')
+  if (!migrations.notesId) {
+    throw new Error('ensureCorpusSchema: "columns" tenancy needs migrations.notesId (0006)')
   }
-  await driver.execScript(migrations.home)
+  await driver.execScript(migrations.notesId)
 }
 
 /**

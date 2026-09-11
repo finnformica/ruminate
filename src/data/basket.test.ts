@@ -9,7 +9,7 @@ import { applyOps, deleteBlockOps, docToOps } from "./ops"
 const NOW = 1000
 
 /** A graph built the way the app builds one — through `docToOps`, so every
- * block is homed to its page. */
+ * block carries its page's id as `notes_id`. */
 function graphOf(pages: Record<string, string>): GraphSnapshot {
   let snapshot = buildGraphSnapshot([], [])
   for (const [id, markdown] of Object.entries(pages)) {
@@ -28,7 +28,7 @@ describe("the Unassigned basket", () => {
     expect(basketRootIds("a", snapshot)).toEqual([])
   })
 
-  it("holds what a deleted block held, nested as it was, homed to the page", () => {
+  it("holds what a deleted block held, nested as it was, keyed by its notes_id", () => {
     const snapshot = graphOf({ a: A, b: "- b\n  id:: blk_b000000000\n" })
     const next = applyOps(snapshot, deleteBlockOps("blk_one0000000", snapshot), NOW + 1)
     expect([...unassignedIds(next)].sort()).toEqual(["blk_deeper0000", "blk_under00000"])
@@ -37,7 +37,7 @@ describe("the Unassigned basket", () => {
     expect(serialize(basketDoc("a", next))).toBe(
       "- under one\n  id:: blk_under00000\n  - deeper\n    id:: blk_deeper0000\n",
     )
-    // It is a's basket, not b's: home decides.
+    // It is a's basket, not b's: `notes_id` decides.
     expect(basketRootIds("b", next)).toEqual([])
     // The outline is untouched.
     expect(serialize(pageDoc("a", next)!)).toBe("- two\n  id:: blk_two0000000\n")
@@ -63,12 +63,30 @@ describe("the Unassigned basket", () => {
     const snapshot = graphOf({ a: A })
     const next = applyOps(
       snapshot,
-      [{ op: "create", id: "blk_old0000000", type: "text", text: "old", props: null, home: "a" }],
+      [
+        {
+          op: "create",
+          id: "blk_old0000000",
+          type: "text",
+          text: "old",
+          props: null,
+          notesId: "a",
+        },
+      ],
       NOW - 10,
     )
     const later = applyOps(
       next,
-      [{ op: "create", id: "blk_new0000000", type: "text", text: "new", props: null, home: "a" }],
+      [
+        {
+          op: "create",
+          id: "blk_new0000000",
+          type: "text",
+          text: "new",
+          props: null,
+          notesId: "a",
+        },
+      ],
       NOW + 10,
     )
     expect(basketRootIds("a", later)).toEqual(["blk_new0000000", "blk_old0000000"])
@@ -118,12 +136,12 @@ describe("basketToOps", () => {
     expect(basketRootIds("a", next)).toEqual(["blk_deeper0000"])
   })
 
-  it("a block written in the basket is created homed to the page, hanging from nothing", () => {
+  it("a block written in the basket is created with the page as its note, hanging from nothing", () => {
     const snapshot = basketed()
     const doc = parse(serialize(basketDoc("a", snapshot)) + "- fresh\n  id:: blk_fresh00000\n")
     const ops = basketToOps("a", doc, snapshot)
     expect(ops).toEqual([
-      { op: "create", id: "blk_fresh00000", type: "ul", text: "fresh", props: null, home: "a" },
+      { op: "create", id: "blk_fresh00000", type: "ul", text: "fresh", props: null, notesId: "a" },
     ])
     const next = applyOps(snapshot, ops, NOW + 2)
     expect(basketRootIds("a", next).sort()).toEqual(["blk_fresh00000", "blk_under00000"])

@@ -49,13 +49,13 @@ CREATE TABLE nodes (
   props TEXT,                -- JSON or NULL; pages: metadata entries; code: language
   updated_at INTEGER NOT NULL, -- ms epoch, drives LWW + since-cursor pulls
   deleted_at INTEGER,        -- NULL = live; a tombstoned node never renders
-  home_id TEXT,              -- the note the block was written in (0006); pages: NULL
+  notes_id TEXT,              -- the note the block was written in (0006); pages: NULL
   PRIMARY KEY (user_id, id)
 );
 
 CREATE INDEX nodes_tenant_type ON nodes (user_id, type);        -- "my pages", "my todos"
 CREATE INDEX nodes_tenant_updated ON nodes (user_id, updated_at); -- since-cursor pulls
-CREATE INDEX nodes_tenant_home ON nodes (user_id, home_id);     -- a note's Unassigned basket
+CREATE INDEX nodes_tenant_notes ON nodes (user_id, notes_id);     -- a note's Unassigned basket
 
 CREATE TABLE link (
   user_id INTEGER NOT NULL,
@@ -194,10 +194,10 @@ parent P:
    put back — and the walk skips them at read time, so X's children are now
    reached by nothing.
 
-Nothing below X is deleted. Every block carries a **home** (`home_id`, the
+Nothing below X is deleted. Every block carries a **note id** (`notes_id`, the
 note it was written in — set once by `docToOps` at creation, never changed by
 linking the block elsewhere; pages have none), and a block no page reaches
-shows in its home note's **Unassigned** basket beneath the outline
+shows in that note's **Unassigned** basket beneath the outline
 (`src/data/basket.ts`, `src/components/unassigned-basket.tsx`): editable
 there, pasted back into the outline as a link (which takes it out of the
 basket), or deleted deliberately. "No page reaches it" is the test — not "it
@@ -207,9 +207,9 @@ the pages catches both. Deleting a whole note is the one deletion that takes
 content with it: the page, every block it alone reaches, and its basket.
 
 Consequence: nothing is ever collected implicitly, and no orphan is ever
-invisible — each has a basket to be shown in. A block whose home note is
-later deleted, but that another note holds, keeps a dead home; it only
-matters if it is later orphaned, which a global "unhomed" view can cover.
+invisible — each has a basket to be shown in. A block whose note is later
+deleted, but that another note holds, keeps a dead `notes_id`; it only
+matters if it is later orphaned, which a global "no note" view can cover.
 
 **Default expansion.** Headers (`h1`–`h3`) always expanded; below any header,
 expand **n=2** levels by default. That policy is a **seed, not a layer**: the

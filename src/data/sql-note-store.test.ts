@@ -207,7 +207,7 @@ describe("openSqlNoteStore", () => {
     ])
   })
 
-  it("adds home_id to a v3 database in place, keeping its rows", async () => {
+  it("adds notes_id to a v3 database in place, keeping its rows", async () => {
     const driver = createNodeSqlDriver()
     // A v3 store: the real ladder, stopped one step short.
     await driver.execScript(migration0001 + "\n" + migration0002)
@@ -227,22 +227,22 @@ describe("openSqlNoteStore", () => {
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
       { value: "4" },
     ])
-    // Unhomed until a pull brings the replica's backfill down.
-    expect(await driver.exec("SELECT home_id FROM nodes WHERE id = ?", ["a"])).toEqual([
-      { home_id: null },
+    // No note id until a pull brings the replica's backfill down.
+    expect(await driver.exec("SELECT notes_id FROM nodes WHERE id = ?", ["a"])).toEqual([
+      { notes_id: null },
     ])
   })
 
-  it("persists a created block's home and reads it back", async () => {
+  it("persists a created block's notes_id and reads it back", async () => {
     const { store } = await makeStoreWithDriver()
     await seed(store, "a", "- one\n  id:: blk_one0000000\n")
     const graph = await store.getGraph()
-    expect(graph.nodes.get("blk_one0000000")?.home_id).toBe("a")
-    expect(graph.nodes.get("a")?.home_id).toBeUndefined()
-    // A row pushed without a home (an older client) never clears one.
+    expect(graph.nodes.get("blk_one0000000")?.notes_id).toBe("a")
+    expect(graph.nodes.get("a")?.notes_id).toBeUndefined()
+    // A row pushed without a notes_id (an older client) never clears one.
     const rows = await store.getAllRows()
     const one = rows.nodes.find((row) => row.id === "blk_one0000000")!
-    expect(one.home_id).toBe("a")
+    expect(one.notes_id).toBe("a")
   })
 
   it("resets and re-migrates a database with an unknown schema_version", async () => {

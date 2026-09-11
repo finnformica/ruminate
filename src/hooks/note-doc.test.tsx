@@ -128,10 +128,10 @@ describe("useBasketDoc", () => {
 
   it("is empty until a block falls out of reach, then edits it like the outline", async () => {
     const { store, wrapper, unsubscribe } = await signedOutStore({ n: OUTLINE })
-    // `graphOf`-style seeding carries no homes; home `under` to n by hand.
-    const homed = store.get(sampleGraphAtom)
-    homed.nodes.set("blk_under00000", { ...homed.nodes.get("blk_under00000")!, home_id: "n" })
-    store.set(sampleGraphAtom, { ...homed })
+    // `graphOf`-style seeding carries no note ids; give `under` n's by hand.
+    const graph = store.get(sampleGraphAtom)
+    graph.nodes.set("blk_under00000", { ...graph.nodes.get("blk_under00000")!, notes_id: "n" })
+    store.set(sampleGraphAtom, { ...graph })
     const { result } = renderHook(() => useBasketDoc("n"), { wrapper })
     expect(result.current.count).toBe(0)
 
