@@ -238,3 +238,39 @@ describe("writeRichClipboard", () => {
     expect(writeText).toHaveBeenCalledWith("plain text")
   })
 })
+
+describe("code blocks on the clipboard", () => {
+  const CODE = ["```ts", "const a = 1", "  const b = 2", "```", "  id:: blk_code"].join("\n")
+
+  it("keep their language and lines through the embedded payload", () => {
+    const { plain, html } = richClipboardFormats(CODE)
+    expect(plain.trimEnd()).toBe("```ts\nconst a = 1\n  const b = 2\n```")
+    const blocks = extractClipboardBlocks(html)!
+    expect(blocks).toEqual([
+      {
+        id: "blk_code",
+        type: "code",
+        text: "const a = 1\n  const b = 2",
+        language: "ts",
+        children: [],
+      },
+    ])
+    const doc = clipboardBlocksToDocWithIds(blocks)
+    expect(doc.blocks["blk_code"].props).toEqual({ language: "ts" })
+    const fresh = clipboardBlocksToDoc(blocks)
+    expect(fresh.blocks[fresh.rootBlockIds[0]].props).toEqual({ language: "ts" })
+    // The edit-mode splice writes the fence back.
+    expect(clipboardBlocksToMarkdown(blocks)).toBe("```ts\nconst a = 1\n  const b = 2\n```")
+  })
+
+  it("render as <pre><code> for other apps, and read back from one", () => {
+    const { html } = richClipboardFormats(CODE)
+    expect(html).toContain('<pre><code class="language-ts">const a = 1\n  const b = 2</code></pre>')
+    const md = htmlToMarkdown(html.replace(/<meta[^>]*>/, ""))
+    const doc = parse(md)
+    const code = doc.blocks[doc.rootBlockIds[0]]
+    expect(code.type).toBe("code")
+    expect(code.props).toEqual({ language: "ts" })
+    expect(code.text).toBe("const a = 1\n  const b = 2")
+  })
+})

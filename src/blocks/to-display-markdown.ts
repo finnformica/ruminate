@@ -1,6 +1,7 @@
 import { frontmatterTextOfProps } from "../data/frontmatter-props"
 import { isListItem, markerFor } from "./markers"
 import { parse } from "./parse"
+import { blockLines } from "./serialize"
 import type { Block, BlockDoc } from "./types"
 
 /**
@@ -15,10 +16,12 @@ import type { Block, BlockDoc } from "./types"
  * become GFM task-list items, list nesting is preserved via indentation, and
  * prose blocks are separated by blank lines so they don't run together.
  */
-function displayLine(block: Block, olPosition: number): string {
+function displayLines(block: Block, olPosition: number): string[] {
+  // A code block is its fence, verbatim.
+  if (block.type === "code") return blockLines(block)
   const marker = markerFor(block.type, olPosition)
   // Todos are stored as `[ ] text`; GFM needs a list bullet in front.
-  return (block.type === "todo" || block.type === "done" ? "- " : "") + marker + block.text
+  return [(block.type === "todo" || block.type === "done" ? "- " : "") + marker + block.text]
 }
 
 export function toDisplayMarkdown(content: string): string {
@@ -44,7 +47,7 @@ function displayMarkdownOf(doc: BlockDoc): string {
       // Indent list items so nesting renders; keep prose at the margin so headings
       // and paragraphs render as themselves rather than as indented code.
       const indent = listItem ? "  ".repeat(depth) : ""
-      lines.push(indent + displayLine(block, olRun))
+      for (const line of displayLines(block, olRun)) lines.push(indent + line)
       // A blank line after prose keeps consecutive paragraphs/headings distinct;
       // list items stay tight.
       if (!listItem) lines.push("")

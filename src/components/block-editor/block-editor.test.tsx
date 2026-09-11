@@ -1252,6 +1252,62 @@ describe("collapse toggle", () => {
   })
 })
 
+describe("code blocks", () => {
+  const CODE = [
+    "```ts",
+    "const a = 1",
+    "  b()",
+    "```",
+    "  id:: blk_code",
+    "- after",
+    "  id:: blk_after",
+  ].join("\n")
+
+  it("renders verbatim in a mono panel with its language, no marker key", () => {
+    const { container } = render(<Harness initial={CODE} />)
+    const body = container.querySelector<HTMLElement>('[data-block-id="blk_code"]')!
+    expect(body.textContent).toBe("const a = 1\n  b()")
+    expect(body.className).toContain("font-mono")
+    expect(body.className).toContain("whitespace-pre-wrap")
+    expect(container.querySelector('[data-testid="code-language"]')?.textContent).toBe("ts")
+    const row = container.querySelector('[data-block-row="blk_code"]')!
+    expect(row.querySelector('[data-testid="code-slot"]')).not.toBeNull()
+    expect(row.querySelector(".block-key")).toBeNull()
+  })
+
+  it("Enter while editing stays in the block; Shift+Enter leaves with a block below", () => {
+    const { container, getByTestId } = render(<Harness initial={CODE} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "Enter" }) // edit blk_code
+    const textarea = container.querySelector("textarea")!
+    expect(textarea.className).toContain("font-mono")
+    // Enter is left to the textarea (a newline), so the doc is untouched.
+    const enter = fireEvent.keyDown(textarea, { key: "Enter" })
+    expect(enter).toBe(true)
+    expect(serializedLines(getByTestId)).toEqual([
+      "```ts",
+      "const a = 1",
+      "  b()",
+      "```",
+      "- after",
+    ])
+    expect(container.querySelectorAll("[data-block-row]")).toHaveLength(2)
+    // Shift+Enter: a fresh (plain) block below, now being edited.
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })
+    expect(container.querySelectorAll("[data-block-row]")).toHaveLength(3)
+    expect(container.querySelector("textarea")?.className).not.toContain("font-mono")
+  })
+
+  it("typing ``` then Enter turns a block into a code block", () => {
+    const { container, getByTestId } = render(<Harness initial={"- a"} startEditing />)
+    const textarea = container.querySelector("textarea")!
+    fireEvent.change(textarea, { target: { value: "```py" } })
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    expect(serializedLines(getByTestId)).toEqual(["```py", "```"])
+    expect(container.querySelector('[data-testid="code-language"]')?.textContent).toBe("py")
+  })
+})
+
 describe("rows of a shared block (selection by occurrence)", () => {
   /** `blk_s` hangs under both `blk_p` and `blk_q`: one block, two rows. */
   const shared = (): BlockDoc => ({

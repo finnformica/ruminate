@@ -7,7 +7,6 @@ import type { BlockDoc } from "../../blocks/types"
 import {
   isHeading,
   leadingMarker,
-  markerFor,
   toggleType,
   TURN_INTO_KEYS,
   typeOfMarker,
@@ -23,6 +22,7 @@ import {
 } from "../../blocks/commands"
 import { resolveKey, type KeyLike } from "../../blocks/keymap"
 import { parse } from "../../blocks/parse"
+import { blockLines } from "../../blocks/serialize"
 import {
   ancestorKeys,
   buildRows,
@@ -811,8 +811,9 @@ export function BlockEditor({
       if (!block) return
       const indent = "  ".repeat(depth)
       // Markers are export-only: an ordered item is written `1.` here and
-      // renumbered wherever it lands (the parse side reads runs by position).
-      lines.push(indent + markerFor(block.type) + block.text)
+      // renumbered wherever it lands (the parse side reads runs by position);
+      // a code block goes as its fence.
+      for (const line of blockLines(block)) lines.push(indent + line)
       lines.push(`${indent}  id:: ${block.id}`)
       for (const childId of block.children) walk(childId, depth + 1)
     }
@@ -1472,7 +1473,11 @@ export function BlockEditor({
       // Zoomed, the title's body rows read one level beneath it.
       const depth = row.zoomTitle ? 0 : row.depth + (zoomRoot ? 1 : 0)
       const indent = "  ".repeat(depth)
-      picked.push(`${indent}${markerFor(block.type)}${block.text}\n${indent}  id:: ${block.id}`)
+      picked.push(
+        [...blockLines(block).map((line) => indent + line), `${indent}  id:: ${block.id}`].join(
+          "\n",
+        ),
+      )
       keys.push(row.key)
     }
     return { picked, keys, partial }
