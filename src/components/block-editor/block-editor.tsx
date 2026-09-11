@@ -62,6 +62,7 @@ import {
   spliceBlocks,
   updateBlock,
   updateType,
+  subtreeIds,
 } from "../../blocks/ops"
 import { htmlToMarkdown } from "../../utils/html-to-markdown"
 import type { BlockRevealRequest } from "../../utils/note-outline"
@@ -111,28 +112,34 @@ function findReappeared(current: BlockDoc, restored: BlockDoc): string | null {
 }
 
 /**
- * Build the insertion fragment for a Ruminate-payload paste — "paste as link"
- * (docs/graph-storage.md): within the app, paste means "put this block here",
- * so ids the corpus knows are LINKED (the same node then lives in both
- * places), not duplicated. Per copied root, in order:
+ * The fragment a Ruminate clipboard payload lands as, under the selected row.
+ *
+ * Within Ruminate, paste means "put this block here": the copied node itself
+ * goes downstream of the target, not a copy of its content. Per pasted root:
  *
  * - **Twin**: its id is already a direct child of the insertion parent — skip
  *   it (no duplicate, no error; it's already there). The DB's
  *   `(source, destination, kind)` primary key backstops this.
- * - **Same-doc**: any of its payload ids exists elsewhere in this doc —
- *   duplicate with fresh ids, exactly the pre-link behavior. Same-note
- *   mirroring is deliberately out of scope until the `((blk_x))` occurrence
- *   form: the markdown bridge re-mints a duplicate `id::` and would fork it.
- * - **Link**: ids unknown here — insert the node itself, original ids
- *   preserved, using its LIVE content from the corpus (`resolveBlocks`), never
- *   the clipboard bytes (a stale clipboard must not clobber the live node on
- *   save). A node that no longer exists anywhere (deleted since copy — the cut
- *   side of cut+paste) falls back to the clipboard content, still under its
- *   original ids, which is what makes cut+paste a true move. If the live
- *   subtree contains the paste target or any of its ancestors, linking would
- *   close a cycle — that block falls back to duplicating (the store's
- *   save-time cycle-drop remains the backstop); any other id the live subtree
- *   shares with this doc is reminted so the doc never holds one id twice.
+ * - **Link, same note**: its id lives elsewhere in this doc — mirror it: the
+ *   node goes under the target as well, taken from the doc's own copy (the
+ *   live one), so the note holds it in two places and both rows are the one
+ *   block. The view keys rows by occurrence, so each row selects and edits
+ *   on its own while the text is shared.
+ * - **Link, another note**: its id is unknown here — insert the node itself,
+ *   original ids preserved, using its LIVE content from the corpus
+ *   (`resolveBlocks`), never the clipboard bytes (a stale clipboard must not
+ *   clobber the live node on save). A node that no longer exists anywhere
+ *   (deleted since copy — the cut side of cut+paste) falls back to the
+ *   clipboard content, still under its original ids, which is what makes
+ *   cut+paste a true move.
+ * - **Cycle**: the subtree to link contains the paste target or one of its
+ *   ancestors — linking would close a loop, so that block falls back to a
+ *   plain duplicate with fresh ids (the store's save-time cycle-drop remains
+ *   the backstop).
+ * - **No id** (an older payload): duplicate with fresh ids.
+ *
+ * A node the linked subtree shares with the rest of the doc, or with another
+ * pasted root, is simply the same node in one more place — never reminted.
  *
  * Returns null when every root was a twin (nothing to insert).
  */
@@ -149,45 +156,34 @@ function embeddedPasteFragment(
   // The row's own path: linking any of these beneath it would close a cycle.
   const forbidden = new Set([target, ...ancestorKeys(targetKey).map(idOfKey)])
 
-  const payloadIds = (block: ClipboardBlock): string[] => {
-    const ids: string[] = []
-    const walk = (b: ClipboardBlock) => {
-      if (b.id !== undefined) ids.push(b.id)
-      b.children.forEach(walk)
-    }
-    walk(block)
-    return ids
-  }
-
   const roots = embedded.filter(
     (block) => !(block.id !== undefined && parentChildren.includes(block.id)),
   )
   if (roots.length === 0) return null
 
-  const linkable = (block: ClipboardBlock) =>
-    block.id !== undefined && !payloadIds(block).some((id) => id in doc.blocks)
-  const linkableIds = roots.filter(linkable).map((block) => block.id as string)
+  const inDoc = (block: ClipboardBlock) => block.id !== undefined && block.id in doc.blocks
+  const linkableIds = roots
+    .filter((block) => block.id !== undefined && !inDoc(block))
+    .map((block) => block.id as string)
   const resolved =
     resolveBlocks && linkableIds.length > 0 ? resolveBlocks(linkableIds) : ({} as const)
 
   let out: BlockDoc = { props: null, rootBlockIds: [], blocks: {} }
   for (const block of roots) {
     let sub: BlockDoc
-    if (!linkable(block)) {
+    if (block.id === undefined) {
       sub = clipboardBlocksToDoc([block])
+    } else if (inDoc(block)) {
+      sub = subtreeDoc(doc, block.id)
     } else {
-      const live = (resolved as Record<string, string | null>)[block.id as string] ?? null
+      const live = (resolved as Record<string, string | null>)[block.id] ?? null
       sub = live !== null ? parse(live) : clipboardBlocksToDocWithIds([block])
-      if (Object.keys(sub.blocks).some((id) => forbidden.has(id))) {
-        // Cycle fallback: every id of `sub` collides with itself, so this is
-        // a full remint — a plain duplicate of the live fragment's content.
-        sub = remintCollidingIds(sub, sub)
-      }
-      sub = remintCollidingIds(sub, doc)
     }
-    // A descendant shared across two pasted roots (multi-parent in the live
-    // graph) would put one id in this doc twice; remint the later occurrence.
-    sub = remintCollidingIds(sub, out)
+    if (block.id !== undefined && Object.keys(sub.blocks).some((id) => forbidden.has(id))) {
+      // Cycle fallback: every id of `sub` collides with itself, so this is
+      // a full remint — a plain duplicate of the fragment's content.
+      sub = remintCollidingIds(sub, sub)
+    }
     out = {
       props: null,
       rootBlockIds: [...out.rootBlockIds, ...sub.rootBlockIds],
@@ -195,6 +191,13 @@ function embeddedPasteFragment(
     }
   }
   return out
+}
+
+/** The subtree under `id` as this doc holds it, as a fragment rooted there. */
+function subtreeDoc(doc: BlockDoc, id: string): BlockDoc {
+  const blocks: Record<string, Block> = {}
+  for (const sid of subtreeIds(doc, id)) blocks[sid] = doc.blocks[sid]
+  return { props: null, rootBlockIds: [id], blocks }
 }
 
 /**

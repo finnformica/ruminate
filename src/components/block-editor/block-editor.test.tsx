@@ -567,7 +567,7 @@ describe("paste as link (Ruminate payload with ids)", () => {
     expect(docIds(getByTestId)).toContain("blk_xgone00000")
   })
 
-  it("duplicates with fresh ids when the pasted id already lives in this doc", () => {
+  it("links a block into a second place in the same note: one node, two rows, one text", () => {
     const { container, getByTestId } = render(<Harness initial={"A\n  B\nC"} />)
     const idB = getByTestId("serialized").textContent!.match(/B\n\s*id:: (\S+)/)![1]
     const formats = richClipboardFormats(`B\n  id:: ${idB}`)
@@ -577,11 +577,17 @@ describe("paste as link (Ruminate payload with ids)", () => {
     fireEvent.keyDown(root, { key: "ArrowDown" })
     paste(root, formats.plain, formats.html)
 
-    // Same-note paste stays a duplicate: the original keeps its id; the copy
-    // is a fresh block (same-note mirroring is phase 2's occurrence form).
-    // The copy lands as C's child, not as C's sibling.
+    // The same node now hangs under C too — its id appears in both places,
+    // and nothing was reminted.
     expect(serializedLines(getByTestId)).toEqual(["A", "  B", "C", "  B"])
-    expect(docIds(getByTestId).filter((id) => id === idB)).toHaveLength(1)
+    expect(docIds(getByTestId).filter((id) => id === idB)).toHaveLength(2)
+
+    // Both rows are the one block: editing the pasted row changes the text
+    // everywhere it shows.
+    fireEvent.keyDown(root, { key: "Enter" }) // edit the pasted row (selected)
+    const textarea = container.querySelector("textarea")!
+    fireEvent.change(textarea, { target: { value: "B edited" } })
+    expect(serializedLines(getByTestId)).toEqual(["A", "  B edited", "C", "  B edited"])
   })
 
   it("skips a block already a direct child of the paste target (twin), keeping its siblings", () => {
