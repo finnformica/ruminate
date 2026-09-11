@@ -69,20 +69,32 @@
   background-color: color-mix(in srgb, white 9%, var(--color-bg));
 }
 
-/* ── Selected heading's `#` ──────────────────────────────────────────────────
- * The hash is chrome with an ink of its own, so the selection's text tint
- * (above) never reaches it, and it sat beside the lit heading as a grey
- * stranger. Selected, it takes a quieter tint of its own: the accent's text
- * step over the SECONDARY ink — a shade more present than its tertiary rest,
- * well short of the text's half-accent — so it reads as part of the selected
- * row without competing with the words. The inactive selection drains it
- * back to its rest, as it drains the text. */
-.block-highlight .block-hash {
-  color: color-mix(in srgb, var(--accent-11) 40%, var(--color-text-secondary));
+/* ── Selected row's marker glyphs ────────────────────────────────────────────
+ * A marker glyph has an ink of its own (tertiary; a number's secondary), so
+ * the selection's text tint (above) never reaches it, and a large heading's
+ * `#` sat beside the lit heading as a grey stranger. Selected, every
+ * TYPOGRAPHIC marker — the `#`, the bullet's dot, the number, the quote's
+ * `>` and its bar — takes the quieter chrome tint (`--color-text-selected-
+ * chrome`, variables.css) so the row's chrome leans with its text. Controls
+ * carry no class and keep their own ink: the checkbox has states of its own
+ * and the chevron's job is to appear. `.block-glyph` tints ink,
+ * `.block-glyph-fill` a painted shape (the dot, the bar). The inactive
+ * selection hands each glyph back to its own utility colour (`revert-layer`:
+ * these rules are unlayered, the utilities are not), as it drains the text. */
+.block-highlight .block-glyph {
+  color: var(--color-text-selected-chrome);
 }
 
-.block-highlight.block-highlight-inactive .block-hash {
-  color: var(--color-text-tertiary);
+.block-highlight .block-glyph-fill {
+  background-color: var(--color-text-selected-chrome);
+}
+
+.block-highlight.block-highlight-inactive .block-glyph {
+  color: revert-layer;
+}
+
+.block-highlight.block-highlight-inactive .block-glyph-fill {
+  background-color: revert-layer;
 }
 
 /* ── Heading surface reach ───────────────────────────────────────────────────

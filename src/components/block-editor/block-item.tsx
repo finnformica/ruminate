@@ -575,10 +575,13 @@ export function BlockItem({
           className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-90 motion-reduce:active:scale-100"
         >
           {/* Faint, like the chevron — pure chrome; content leads. */}
-          <span aria-hidden className="size-1.5 rounded-full bg-text-tertiary" />
+          <span aria-hidden className="block-glyph-fill size-1.5 rounded-full bg-text-tertiary" />
         </button>
       ) : (
-        <span aria-hidden className={cx("size-1.5 rounded-full bg-text-tertiary", keyClass)} />
+        <span
+          aria-hidden
+          className={cx("block-glyph-fill size-1.5 rounded-full bg-text-tertiary", keyClass)}
+        />
       )}
       {toggle}
     </span>
@@ -601,7 +604,7 @@ export function BlockItem({
       )}
     >
       {glyph ? (
-        <span aria-hidden className={cx("select-none text-text-tertiary", keyClass)}>
+        <span aria-hidden className={cx("block-glyph select-none text-text-tertiary", keyClass)}>
           {glyph}
         </span>
       ) : null}
@@ -666,7 +669,7 @@ export function BlockItem({
       // from the dot — muted, not faint — and right-align to the slot edge.
       <span
         className={cx(
-          "relative flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary",
+          "block-glyph relative flex h-[1lh] min-w-[15px] shrink-0 items-center justify-end tabular-nums text-text-secondary",
           slotClass,
         )}
       >

@@ -297,7 +297,9 @@ function NoteNavItem({
         if (!event.defaultPrevented) onNavigate?.()
       }}
     >
-      <span className="flex shrink-0 text-text-secondary">
+      {/* Current, the icon takes the row's tint (`.nav-item-icon`, index.css),
+          as a nav link's filled icon does by inheriting. */}
+      <span className="nav-item-icon flex shrink-0 text-text-secondary">
         <NoteFavicon note={note} />
       </span>
       <span className="flex min-w-0 items-center gap-1.5">
