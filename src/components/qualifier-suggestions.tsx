@@ -284,13 +284,13 @@ export function QualifierSuggestions({
         {/* The keys are the box's — say so, since nothing here takes focus. */}
         <span aria-hidden className="ml-auto flex shrink-0 items-center gap-2 text-xs">
           <span className="flex items-center gap-1">
-            <Keys keys={["↑", "↓"]} className="text-text-tertiary" /> move
+            <Keys keys={["↑", "↓"]} /> move
           </span>
           <span className="flex items-center gap-1">
-            <Keys keys={["↵"]} className="text-text-tertiary" /> pick
+            <Keys keys={["↵"]} /> pick
           </span>
           <span className="flex items-center gap-1">
-            <Keys keys={["esc"]} className="text-text-tertiary" /> close
+            <Keys keys={["esc"]} /> close
           </span>
         </span>
       </div>

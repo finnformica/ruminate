@@ -140,9 +140,6 @@ function AppearanceSection() {
             )
           })}
         </div>
-        <span className="text-sm leading-5 text-text-secondary">
-          {theme === "system" ? "Follows your device" : `Always ${theme}`}
-        </span>
       </div>
       <div className="flex flex-col gap-2">
         <span id="accent-color-label" className="text-sm leading-4 text-text-secondary">

@@ -106,14 +106,27 @@ export function NavItems({
           {notes.length > 0 ? (
             <ul className="flex flex-col gap-1 border-t border-border-secondary pt-3">
               {notes.map((note) => (
-                <li key={note.id} className="group/note flex items-center">
-                  {/* The note fills the row; on hover the actions menu takes its
-                      own space to the right (a real flex sibling), so the note
-                      name truncates with an ellipsis to make room rather than
-                      sitting under the button. The menu stays visible while its
-                      dropdown is open. */}
-                  <NoteNavItem note={note} size={size} onNavigate={onNavigate} />
-                  <div className="hidden shrink-0 pl-0.5 group-hover/note:flex has-data-[popup-open]:flex">
+                <li key={note.id} className="note-row group/note relative">
+                  {/* The note fills the row. Its actions button is not there
+                      until the row is hovered (or its menu is open): then it
+                      sits INSIDE the row's surface at the far end — the same
+                      distance from the surface's edge on every side, as the
+                      collapse chevron sits in a block's row — and the row
+                      pads its end (`.note-row` in index.css) so the name
+                      truncates with an ellipsis to make room rather than
+                      running under the button. The button is the row's
+                      sibling, not its child (a button cannot live in a
+                      link), so the same rules keep the row's hover surface
+                      while the pointer is on it. */}
+                  <NoteNavItem note={note} size={size} onNavigate={onNavigate} className="w-full" />
+                  <div
+                    className={cx(
+                      "absolute inset-y-0 hidden items-center group-hover/note:flex has-data-[popup-open]:flex",
+                      // The 24px button in a 32px row (40px large) sits 4px
+                      // (8px) in from the top and bottom; the same from the end.
+                      size === "large" ? "right-2" : "right-1",
+                    )}
+                  >
                     <NoteActionsMenu noteId={note.id} pinned={note.pinned} />
                   </div>
                 </li>
@@ -178,7 +191,7 @@ export function NavItems({
 function NavShortcut({ keys, chord = false }: { keys: string[]; chord?: boolean }) {
   return (
     <span className="ml-auto shrink-0 pl-2 coarse:hidden">
-      <Keys keys={keys} chord={chord} className="text-text-tertiary" />
+      <Keys keys={keys} chord={chord} />
     </span>
   )
 }
@@ -279,7 +292,7 @@ function NoteNavItem({
       search={{ query: undefined }}
       activeOptions={{ exact: true, includeSearch: false }}
       data-size={size}
-      className={cx("nav-item w-0 flex-1", className)}
+      className={cx("nav-item", className)}
       onClick={(event) => {
         if (!event.defaultPrevented) onNavigate?.()
       }}

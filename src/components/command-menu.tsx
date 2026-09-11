@@ -850,7 +850,7 @@ function CommandItem({
         {description ? <span className="shrink-0 text-text-secondary">{description}</span> : null}
         {shortcut ? (
           <span className="shrink-0 coarse:hidden">
-            <Keys keys={shortcut} chord className="text-text-tertiary" />
+            <Keys keys={shortcut} chord />
           </span>
         ) : null}
         <span className="hidden leading-none text-text-secondary in-aria-selected:inline">⏎</span>

@@ -131,6 +131,32 @@ body:has([data-resizing="true"]) * {
   @apply h-10 gap-4 px-3;
 }
 
+/* A note row's actions button floats over the row's surface as the row's
+ * sibling (nav-items.tsx). While it is there — the row hovered, or its menu
+ * open — the row pads its end so the name truncates clear of the button
+ * (the padding lives here, not as a utility: `.nav-item` above is unlayered
+ * and its `px-2` would beat one). And with the pointer on the button the row
+ * itself is no longer hovered, so the row's hover surface follows the row
+ * instead, with the same step for the current note; a press keeps its own
+ * surface. */
+@media (hover: hover) {
+  .note-row:hover > .nav-item {
+    padding-right: 40px;
+  }
+
+  .note-row:hover > .nav-item:is(a, button):not(:active) {
+    background-color: var(--color-bg-hover);
+  }
+
+  .note-row:hover > .nav-item[aria-current]:not(:active) {
+    background-color: var(--color-bg-selected-hover);
+  }
+}
+
+.note-row:has([data-popup-open]) > .nav-item {
+  padding-right: 40px;
+}
+
 /* App frame */
 
 /* The app fills the viewport exactly: its own columns scroll, the page never
