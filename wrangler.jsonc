@@ -58,13 +58,16 @@
     { "tag": "v1", "new_sqlite_classes": ["UserCorpus"] },
     { "tag": "v2", "deleted_classes": ["UserCorpus"] },
   ],
-  // Image uploads (docs/images.md) are OFF until both of these are in place:
-  // the bucket binding below and VITE_IMAGES_ENABLED=true in `vars` (and in
-  // the build environment, so the client bundle switches on too). Create the
-  // bucket first — `npx wrangler r2 bucket create ruminate-images` — or the
-  // deploy fails on a binding that names nothing.
+  // Image uploads (docs/images.md). ON: the bucket exists, this binding names
+  // it, and VITE_IMAGES_ENABLED is "true" both here (the Worker reads it at
+  // runtime) and in .env.production (Vite inlines it into the client bundle at
+  // build time). Both halves must agree — with the client half off, pasting a
+  // picture does nothing; with the Worker half off, an upload is refused.
   //
-  // "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "ruminate-images" }],
+  // The bucket must exist before a deploy carries this binding, or the deploy
+  // fails on a binding that names nothing: `npx wrangler r2 bucket create
+  // ruminate-images`.
+  "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "ruminate-images" }],
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": true },
@@ -92,7 +95,8 @@
     // its access — closing signups is not a revocation. Revoking is
     // `UPDATE users SET status = 'blocked'`, deliberately a separate act.
     "SIGNUP_MODE": "allowlist",
-    // Image uploads: "true" to switch on (with the IMAGES binding above).
-    "VITE_IMAGES_ENABLED": "false",
+    // Image uploads: the Worker's half of the switch (the client's half is the
+    // same variable in .env.production). Both are "true"; see the binding above.
+    "VITE_IMAGES_ENABLED": "true",
   },
 }

@@ -5,7 +5,8 @@ line, and the picture becomes an **image block** — a row like any other, with
 an optional caption beneath it. Click the picture to see it full size; right-
 click it to open, download, or delete it.
 
-Off by default. Nothing here runs until the feature is switched on (below).
+Switched on since 2026-W37 (see "Switching it on" below for the two halves
+and how to turn it off again).
 
 ## The block
 
@@ -29,8 +30,8 @@ In markdown (the note rollup, copy/paste, export) the block is one line:
 ```
 
 which the parser reads straight back into the same props. A whole-line image
-with any other URL parses as an external picture (`props.src`) and is drawn
-through the file proxy; an image in the middle of a sentence stays text.
+with any other URL parses as an external picture (`props.src`) and loads
+straight from that address; an image in the middle of a sentence stays text.
 
 Search: `type:image` finds image blocks; the caption is what text queries
 match.
@@ -56,22 +57,27 @@ and become object URLs, cached for the page's life.
 
 ## Switching it on
 
-Two things, both off in the repository:
+Two halves, both now in place:
 
-1. **A bucket.** `npx wrangler r2 bucket create ruminate-images`, then
-   uncomment the `r2_buckets` binding in `wrangler.jsonc`. Deploying with a
-   binding that names a bucket that does not exist fails the deploy, so the
-   bucket comes first.
-2. **The variable.** `VITE_IMAGES_ENABLED=true` in `wrangler.jsonc` `vars`
-   (the Worker reads it at runtime and answers `501 images_disabled`
-   otherwise) **and** in the build environment (Workers Builds → settings →
-   variables, or `.env` locally), because Vite inlines it into the client
-   bundle at build time. With the client half off, pasting an image does
-   nothing and the slash menu has no "Image"; with the Worker half off, an
-   upload is refused with a clear message.
+1. **A bucket.** `ruminate-images`, created with `npx wrangler r2 bucket create
+ruminate-images` and named by the `r2_buckets` binding in `wrangler.jsonc`.
+   Deploying with a binding that names a bucket that does not exist fails the
+   deploy, so the bucket comes first. R2 itself must be activated on the
+   account once, in the dashboard — the CLI cannot do it.
+2. **The variable.** `VITE_IMAGES_ENABLED=true` in `wrangler.jsonc` `vars`,
+   which the Worker reads at runtime (it answers `501 images_disabled`
+   otherwise), **and** in `.env.production`, which is what Vite inlines into
+   the client bundle when Workers Builds runs the build. With the client half
+   off, pasting a picture does nothing and the slash menu has no "Image"; with
+   the Worker half off, an upload is refused with a clear message.
 
-`.dev.vars` carries the same variable for `wrangler dev`; `wrangler dev`
-serves a local R2 bucket automatically once the binding exists.
+To turn it off again, set either half to anything but `true`; the bucket and
+its bytes are untouched.
+
+For local development `.env` and `.dev.vars` carry the same variable (both are
+git-ignored; copy them from the `.example` files). `wrangler dev` serves a
+local R2 bucket automatically once the binding exists, so nothing you upload
+locally reaches the real one.
 
 ## Cost
 
