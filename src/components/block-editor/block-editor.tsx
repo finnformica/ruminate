@@ -67,6 +67,7 @@ import {
 } from "../../blocks/ops"
 import { htmlToMarkdown } from "../../utils/html-to-markdown"
 import type { BlockRevealRequest } from "../../utils/note-outline"
+import { haptic } from "../../utils/haptic"
 import {
   clipboardBlocksToDoc,
   clipboardBlocksToDocWithIds,
@@ -1154,6 +1155,8 @@ export function BlockEditor({
     if (target) {
       if (target.key !== menuTarget?.key) openMenuOn(target)
       heldOpen.current = event?.type.startsWith("touch") ?? false
+      // The hold took: say so to the finger (where the phone allows it).
+      if (heldOpen.current) haptic()
     } else if (pressed) {
       setMenuTarget(null)
     }

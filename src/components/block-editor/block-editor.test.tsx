@@ -2234,11 +2234,16 @@ describe("BlockEditor context menu", () => {
     )
     const row = container.querySelectorAll("[data-occurrence]")[1]!
     const body = row.querySelector('[data-testid="block-body"]')!
+    const vibrate = vi.fn(() => true)
+    Object.defineProperty(navigator, "vibrate", { value: vibrate, configurable: true })
     await act(async () => {
       fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 20 }] })
       await new Promise((resolve) => setTimeout(resolve, 600))
     })
     const menu = await screen.findByTestId("block-context-menu")
+    // The hold taking is told to the finger, once.
+    expect(vibrate).toHaveBeenCalledTimes(1)
+    Object.defineProperty(navigator, "vibrate", { value: undefined, configurable: true })
     expect(menu.textContent).toContain("Unlink")
     expect(menu.textContent).toContain("Delete")
     expect(highlightedText(container)).toBe("B")
