@@ -245,12 +245,25 @@ function cancelBox(el: HTMLElement): void {
   boxMotion.delete(el)
 }
 
+/** Take an inline property off, and the attribute with it once empty, so
+ * an element at rest carries no trace of the sweep. */
+function unset(el: HTMLElement, property: "clipPath" | "pointerEvents"): void {
+  el.style[property] = ""
+  if (!el.getAttribute("style")) el.removeAttribute("style")
+}
+
 /**
  * Sweep a box's bottom edge: `from` to `to` are how much of the box is
  * covered, in pixels. The box slides up by that and its body down by the
  * same, so the rows hold still under the moving cut; the clip is worn for
  * the sweep and taken off after (a box at rest is never clipped), unless
  * it is held (`fill`), as a ghost is until it goes.
+ *
+ * While it moves, the box itself is nothing to the pointer: slid up by the
+ * covered height, its clipped area lies over the rows above it — over the
+ * chevron that was just clicked — and would take the hover from them, so
+ * the chevron fades out and the key fades in until the browser looks
+ * again. Its body, which stays where the rows are, keeps the pointer.
  */
 function sweep(el: HTMLElement, from: number, to: number, fill: FillMode | undefined): void {
   const body = el.firstElementChild
@@ -258,6 +271,8 @@ function sweep(el: HTMLElement, from: number, to: number, fill: FillMode | undef
   cancelBox(el)
   const options = { id: BOX_ID, duration: FOLD_MS, easing: easing(), fill }
   el.style.clipPath = BOX_CLIP
+  el.style.pointerEvents = "none"
+  body.style.pointerEvents = "auto"
   const anim = el.animate(
     [{ transform: `translateY(${-from}px)` }, { transform: `translateY(${-to}px)` }],
     options,
@@ -272,8 +287,9 @@ function sweep(el: HTMLElement, from: number, to: number, fill: FillMode | undef
     if (boxMotion.get(el) !== running) return
     boxMotion.delete(el)
     if (fill) return
-    el.style.clipPath = ""
-    if (!el.getAttribute("style")) el.removeAttribute("style")
+    unset(el, "clipPath")
+    unset(el, "pointerEvents")
+    unset(body, "pointerEvents")
   }
   anim.onfinish = done
   anim.oncancel = done

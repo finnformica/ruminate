@@ -196,8 +196,13 @@ describe("fold motion", () => {
     expect(open.options.fill).toBeUndefined()
     // The clip is worn for the sweep (the sides and top slack), then taken off.
     expect(box.style.clipPath).toBe("inset(-64px -64px 0 -64px)")
+    // Slid over the rows above, the box is nothing to the pointer; its body,
+    // where the rows are, keeps it.
+    expect(box.style.pointerEvents).toBe("none")
+    expect(body.style.pointerEvents).toBe("auto")
     animations.get(box)![0].onfinish?.()
     expect(box.hasAttribute("style")).toBe(false)
+    expect(body.hasAttribute("style")).toBe(false)
   })
 
   it("a ghost keeps its cover until it goes", () => {
