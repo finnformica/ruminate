@@ -2226,6 +2226,31 @@ describe("BlockEditor context menu", () => {
     })
   }
 
+  it("opens on a touch press-and-hold, on the row under the finger", async () => {
+    // A phone sends no `contextmenu`: the menu's trigger opens itself after a
+    // 500ms hold and the editor resolves the row from the press.
+    const { container, getByTestId } = render(
+      <Harness initial={"A\nB\nC"} parentCountOf={() => 1} onDeleteEverywhere={() => {}} />,
+    )
+    const row = container.querySelectorAll("[data-occurrence]")[1]!
+    const body = row.querySelector('[data-testid="block-body"]')!
+    await act(async () => {
+      fireEvent.touchStart(body, { touches: [{ clientX: 20, clientY: 20 }] })
+      await new Promise((resolve) => setTimeout(resolve, 600))
+    })
+    const menu = await screen.findByTestId("block-context-menu")
+    expect(menu.textContent).toContain("Unlink")
+    expect(menu.textContent).toContain("Delete")
+    expect(highlightedText(container)).toBe("B")
+    // The finger lifts: that touchend is consumed, so iOS sends no click
+    // onto whatever menu item now sits under the finger. Once only.
+    const lifted = fireEvent.touchEnd(body, { changedTouches: [{ clientX: 20, clientY: 20 }] })
+    expect(lifted).toBe(false)
+    expect(fireEvent.touchEnd(body, { changedTouches: [{ clientX: 20, clientY: 20 }] })).toBe(true)
+    await pick("Unlink")
+    expect(serializedLines(getByTestId)).toEqual(["A", "C"])
+  })
+
   it("opens on a row with the standard actions, and selects that row", async () => {
     const { container } = render(<Harness initial={"A\nB\nC"} />)
     const menu = await openMenuOn(container, 1)
