@@ -201,6 +201,24 @@ function MintedToken({
   )
 }
 
+/**
+ * "12/09/2026 at 12:01" — the date a token was last used, and the time of
+ * day with it.
+ *
+ * The time is the point: `last_used_at` is what a person checks when they
+ * are deciding whether an agent is still running, or which of two tokens a
+ * call came from, and a bare date cannot answer either. It is refreshed at
+ * most hourly (worker/mcp/tokens.ts), so the minutes are honest to within
+ * that and no finer.
+ */
+const formatUsedAt = (at: number): string => {
+  const when = new Date(at)
+  return `${when.toLocaleDateString()} at ${when.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`
+}
+
 function TokenList({
   tokens,
   onRevoke,
@@ -245,7 +263,7 @@ function TokenList({
               <span className="text-sm leading-5 text-text-tertiary">
                 {token.lastUsedAt === null
                   ? "Never used"
-                  : `Last used ${new Date(token.lastUsedAt).toLocaleDateString()}`}
+                  : `Last used ${formatUsedAt(token.lastUsedAt)}`}
                 {token.expiresAt === null
                   ? ""
                   : ` · Expires ${new Date(token.expiresAt).toLocaleDateString()}`}
