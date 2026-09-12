@@ -87,7 +87,7 @@ describe("useNoteDoc", () => {
         ),
       ),
     )
-    expect(store.get(sampleGraphAtom).nodes.get("fresh")?.type).toBe("page")
+    expect(store.get(sampleGraphAtom).nodes.get("fresh")?.type).toBe("note")
     expect(result.current.exists).toBe(true)
     expect(body(serialize(result.current.doc))).toContain("- typed")
     unsubscribe()

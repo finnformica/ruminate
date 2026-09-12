@@ -93,7 +93,7 @@ describe("denial plumbing through the real fetch paths", () => {
     })
     try {
       handle.notifyGraphChange(["a"], {
-        nodes: [{ id: "a", type: "page", text: "a", props: null, updated_at: 1 }],
+        nodes: [{ id: "a", type: "note", text: "a", props: null, updated_at: 1 }],
         links: [],
         deleteNodes: [],
         deleteLinks: [],

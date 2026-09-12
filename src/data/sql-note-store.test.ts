@@ -38,7 +38,7 @@ describe("openSqlNoteStore", () => {
 
     const nodes = await driver.exec("SELECT id, type, text FROM nodes ORDER BY id")
     expect(nodes).toEqual([
-      { id: "a", type: "page", text: "a" },
+      { id: "a", type: "note", text: "a" },
       { id: "blk_aaaaaaaaaa", type: "h1", text: "Hello" },
       { id: "blk_bbbbbbbbbb", type: "todo", text: "task" },
     ])
@@ -208,7 +208,7 @@ describe("openSqlNoteStore", () => {
     await driver.batch([
       {
         sql: "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?, ?, ?, ?, ?)",
-        params: ["a", "page", "a", null, 100],
+        params: ["a", "note", "a", null, 100],
       },
     ])
 
@@ -237,7 +237,7 @@ describe("openSqlNoteStore", () => {
     await driver.batch([
       {
         sql: "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?, ?, ?, ?, ?)",
-        params: ["a", "page", "a", null, 100],
+        params: ["a", "note", "a", null, 100],
       },
     ])
     const store = await openSqlNoteStore(driver)
@@ -309,7 +309,7 @@ describe("openSqlNoteStore", () => {
     // Byte-identical: a date note's text IS its id, so no title is emitted.
     expect(await noteOf(reopened, "2026-08-31")).toBe("today\n  id:: blk_aaaaaaaaaa\n")
     expect(await noteOf(reopened, "2026-W35")).toBe("this week\n  id:: blk_bbbbbbbbbb\n")
-    expect(await driver.exec("SELECT id FROM nodes WHERE type = 'page' ORDER BY id")).toEqual([
+    expect(await driver.exec("SELECT id FROM nodes WHERE type = 'note' ORDER BY id")).toEqual([
       { id: "2026-08-31" },
       { id: "2026-W35" },
     ])

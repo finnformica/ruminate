@@ -203,6 +203,22 @@ bare column and filled by the re-pull `CACHE_GENERATION` 4 forces. Full DDL
 and rationale in
 [graph-schema-v2.md](./graph-schema-v2.md); in brief:
 
+`0008` is outside that ladder, like the control-plane `0003`: it is not DDL at
+all but a one-off **data** rewrite on D1, the stored note-root `type` value
+from `page` to `note`. The browser store does not migrate data — it is a cache
+— so the rewrite reaches it the way every other change does, by advancing each
+rewritten row's `seq` so the ordinary since-pull carries it (one row per
+note). `updated_at` is deliberately left alone: 0005 separated delivery from
+last-writer-wins intent, and stamping intent here would let a migration beat a
+real edit a device wrote before the deploy and has not pushed yet.
+`CACHE_GENERATION` 5 rides along as belt-and-braces — a store is served into
+the atoms at boot before the first pull lands, and stale `page` rows in that
+window would read as an empty corpus rather than a loading state. A client too
+old to understand `note` roots is refused outright by the replica protocol gate
+(`REPLICA_PROTOCOL` 2). The gate has to be closed first —
+`MIN_REPLICA_PROTOCOL` raised in the dashboard — because `npm run deploy`
+applies migrations before it uploads the bundle.
+
 ### One dialect, two shapes
 
 The identical files no longer produce identical tables, and that divergence is
@@ -237,13 +253,13 @@ node survives as the position a restore would put it back into.
 ### `nodes` (id TEXT, type, text, props, updated_at, deleted_at)
 
 One row per node. `id` is a minted TEXT id — `blk_…` for blocks **and** pages
-alike, since a page is just a node whose `type` is `page`
+alike, since a page is just a node whose `type` is `note`
 (docs/graph-storage.md); daily and weekly pages are the one exception
 and keep their date key (`2026-08-31`, `2026-W35`), where the date is the
 identity. A page's _name_ is not its id but its `text`: the title, which
 rides the page's doc as `props.title` between the walk and the write
 (`note-identity.ts`). `type` is stored, not derived — the registry in the
-schema doc (`page`, `text`, `h1`–`h3`, `todo`, `done`, `ul`, `ol`, `quote`,
+schema doc (`note`, `text`, `h1`–`h3`, `todo`, `done`, `ul`, `ol`, `quote`,
 `code`); checked state is a type (`todo` ↔ `done`), so a checkbox toggle is a
 generic type transition. `text` is marker-free. `props` is JSON: a page node
 carries its metadata as **individual entries** (e.g.

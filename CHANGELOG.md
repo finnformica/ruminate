@@ -2,6 +2,10 @@
 
 ## 2026-W37
 
+### Changed
+
+- Ruminate asks you to update once, and each device fetches a fresh copy of your notes afterwards. A note's root is now stored under the name the app has always used for it — `note`, rather than the historical `page` it was still written as in the database — and a copy of Ruminate from before that change cannot read the new rows. Older versions are therefore refused by the server and show the **Update Ruminate** notice instead of quietly showing you nothing; once updated, the device throws its local copy away and pulls your notes down again. Nothing that has reached the server is lost, but anything written offline and never synced goes with the old copy, so sync before you update.
+
 ### Fixed
 
 - On a phone, press and hold a block to open its menu. The menu opened on a right-click and on a long press alike, but on a phone it came up empty: a long press never tells the page which block was pressed the way a right-click does, so the editor had no row to build the menu for. It now works out the row from where the finger is, and while the finger is held the row's text no longer starts a text selection underneath it.

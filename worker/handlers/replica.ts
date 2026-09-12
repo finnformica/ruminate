@@ -130,12 +130,19 @@ async function readyTenant(tenant: TenantDb): Promise<void> {
  * overrides it so a client that turns out to be harmful can be shut out from
  * the dashboard without a deploy.
  *
- * `0` admits every client shipped before the header existed. That is
- * deliberate today: those clients are served correctly (`replicaPull` handles
- * the one thing they get wrong), and refusing them would turn a working app
- * into silent push failures — they predate the notice as well as the header.
+ * `2` is the stored note-root type value (migrations/0008). It is the first
+ * time this default has been anything but `0`: until now every older client
+ * was served correctly, so admitting it cost nothing. A client below 2 reads
+ * `type = 'page'` roots that the migration has rewritten to `'note'`, finds no
+ * notes at all, and has no way of knowing why — so it is refused instead, and
+ * says so.
+ *
+ * The var still overrides this, and on the note-type rollout it has to be
+ * raised in the dashboard BEFORE the migration runs: `npm run deploy` applies
+ * migrations first, so between the rewrite and the upload the old Worker —
+ * this default's old value — is the one answering.
  */
-const MIN_REPLICA_PROTOCOL = 0
+const MIN_REPLICA_PROTOCOL = 2
 
 function minProtocol(env: Env): number {
   const raw = env.MIN_REPLICA_PROTOCOL

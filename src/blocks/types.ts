@@ -17,12 +17,12 @@
 
 /**
  * The type registry (docs/graph-schema-v2.md). Stored as-is; the serializer
- * is a pure type → marker map. `page` — the stored type value — is a note's
+ * is a pure type → marker map. `note` — the stored type value — is a note's
  * root node: its `text` is the title and its `props` the metadata. It appears
  * in a doc only when a view is built with a note root among its blocks.
  */
 export type BlockType =
-  "text" | "h1" | "h2" | "h3" | "todo" | "done" | "ul" | "ol" | "quote" | "code" | "image" | "page"
+  "text" | "h1" | "h2" | "h3" | "todo" | "done" | "ul" | "ol" | "quote" | "code" | "image" | "note"
 
 const BLOCK_TYPES: readonly BlockType[] = [
   "text",
@@ -36,7 +36,7 @@ const BLOCK_TYPES: readonly BlockType[] = [
   "quote",
   "code",
   "image",
-  "page",
+  "note",
 ]
 
 const BLOCK_TYPE_SET: ReadonlySet<string> = new Set(BLOCK_TYPES)

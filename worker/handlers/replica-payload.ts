@@ -18,7 +18,7 @@ import type { NoteId } from "../../src/schema"
 /** One row of the `nodes` table. */
 export interface NodeRow {
   id: string
-  /** Type registry in docs/graph-schema-v2.md (`page`, `text`, `h1`…). */
+  /** Type registry in docs/graph-schema-v2.md (`note`, `text`, `h1`…). */
   type: string
   /** Marker-free content; for notes, the title. */
   text: string
@@ -201,8 +201,8 @@ export type ReplicaChangesBody = ReplicaCorpusBody
 /** The body of `GET /api/replica/status`. */
 export interface ReplicaStatusBody {
   /** LIVE rows only — tombstones are not part of "how big is my corpus".
-   * `pages` is the note count: the wire name is frozen, like the stored
-   * `page` type value it counts. */
+   * `pages` is the note count. The wire name is frozen; the type value it
+   * counts is not — migrations/0008 rewrote it from `page` to `note`. */
   counts: { nodes: number; links: number; pages: number }
   schema_version: string | null
   replica_cursor: string | null
@@ -451,8 +451,14 @@ export function planReplicaPut(payload: ReplicaPutPayload, now: number): SqlStat
  * silently, which is what a stale cached bundle did after 0005 (below).
  *
  * `0` is every client shipped before this header existed.
+ *
+ * `2` is the stored note-root type value (migrations/0008): the rows a note is
+ * built from say `type = 'note'` where they used to say `'page'`. A protocol-1
+ * client asks the graph for `page` roots, finds none, and shows an empty
+ * corpus with every block still sitting in its store — the exact silent drift
+ * this header exists to prevent, so the minimum goes to 2 with it.
  */
-const REPLICA_PROTOCOL = 1
+const REPLICA_PROTOCOL = 2
 export const REPLICA_PROTOCOL_HEADER = "X-Replica-Protocol"
 /** Spread into every replica request's headers. */
 export const REPLICA_PROTOCOL_HEADERS = { [REPLICA_PROTOCOL_HEADER]: String(REPLICA_PROTOCOL) }

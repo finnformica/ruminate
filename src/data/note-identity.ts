@@ -12,7 +12,7 @@ import { isValidDateString, isValidWeekString } from "../utils/date"
  * ## One id space
  *
  * Notes mint ordinary `blk_` ids (`src/blocks/id.ts`), not a second prefix: a
- * note is a node whose stored `type` is `page`, and the type column already carries
+ * note is a node whose stored `type` is `note`, and the type column already carries
  * that distinction (design doc, amendment 1). One minting path, one id space —
  * which is also why the ingest's note-id reservation guard still means
  * something: note and block ids live in the same table.
