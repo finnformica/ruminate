@@ -87,6 +87,14 @@ const OWNER_KEY = "store_owner"
  * block's note id; a cache from before carries none, and the local ladder
  * adds the column without a backfill, so one re-pull brings the ids down.
  *
+ * Generation `5` is the stored note-root type value (migrations/0008): every
+ * cache holds `type = 'page'` note rows, and the code now looks for `'note'`
+ * (`NOTE_TYPE`), so a cache left in place would render a corpus with no notes
+ * in it. A since-pull cannot correct it either — the migration rewrites the
+ * rows without advancing any `seq` (migrations/0005 assigns that on write), so
+ * nothing about them looks new. Discarding the cache and pulling the corpus in
+ * full is the only thing that brings the rewritten rows down.
+ *
  * This is why the constant is bumped rather than merely re-documented: every
  * device that already booted on generation `2` has `"2"` stamped in its meta,
  * so folding a new change into the old number is a wipe that never fires.
@@ -97,7 +105,7 @@ const OWNER_KEY = "store_owner"
  * when the tab hides, so the window is small — but it is real, and it is why
  * this is bumped deliberately rather than routinely.
  */
-export const CACHE_GENERATION = "4"
+export const CACHE_GENERATION = "5"
 const CACHE_GENERATION_KEY = "cache_generation"
 const PULL_RETRY_MS = 60_000
 /** How long a run of ops coalesces before it is written: a typed word is one

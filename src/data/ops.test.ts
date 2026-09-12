@@ -46,7 +46,7 @@ describe("docToOps", () => {
     const empty = buildGraphSnapshot([], [])
     const ops = docToOps("a", parse(A), empty)
     expect(kinds(ops)).toEqual(["create", "create", "create", "create", "link", "link", "link"])
-    expect(ops[0]).toMatchObject({ op: "create", id: "a", type: "page", text: "a" })
+    expect(ops[0]).toMatchObject({ op: "create", id: "a", type: "note", text: "a" })
     const next = applyOps(empty, ops, NOW)
     expect(walk(next, "a")).toBe(A)
   })
@@ -157,7 +157,7 @@ describe("docToOps", () => {
   it("a created block carries the note as its notes_id; the note itself has none", () => {
     const snapshot = graphOf({})
     const ops = docToOps("a", parse("- one\n  id:: blk_one0000000\n"), snapshot)
-    expect(ops[0]).toMatchObject({ op: "create", id: "a", type: "page" })
+    expect(ops[0]).toMatchObject({ op: "create", id: "a", type: "note" })
     expect("notesId" in ops[0]).toBe(false)
     expect(ops[1]).toMatchObject({ op: "create", id: "blk_one0000000", notesId: "a" })
     const next = applyOps(snapshot, ops, NOW)
@@ -230,7 +230,7 @@ describe("docToOps", () => {
     expect(created).toBeDefined()
     expect((created as { id: string }).id).not.toBe("b")
     const next = applyOps(snapshot, ops, NOW)
-    expect(next.nodes.get("b")?.type).toBe("page")
+    expect(next.nodes.get("b")?.type).toBe("note")
     expect(walk(next, "a")).toContain("- stray")
   })
 

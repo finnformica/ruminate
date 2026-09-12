@@ -53,7 +53,7 @@ describe("markerFor (export)", () => {
     expect(markerFor("quote")).toBe("> ")
     expect(markerFor("ol", 3)).toBe("3. ")
     expect(markerFor("text")).toBe("")
-    expect(markerFor("page")).toBe("")
+    expect(markerFor("note")).toBe("")
   })
 })
 

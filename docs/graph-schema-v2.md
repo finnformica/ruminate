@@ -143,7 +143,7 @@ serializer is a pure type→marker map.
 
 | type           | markdown marker    | notes                                                                                                     |
 | -------------- | ------------------ | --------------------------------------------------------------------------------------------------------- |
-| `page`         | — (file root)      | `text` = title; `props` = metadata entries                                                                |
+| `note`         | — (file root)      | `text` = title; `props` = metadata entries (stored as `page` until migrations/0008)                       |
 | `text`         | `- `               | plain outline bullet                                                                                      |
 | `h1` `h2` `h3` | `# ` `## ` `### `  | always expanded by default                                                                                |
 | `todo`         | `- [ ] `           | checked state is a TYPE, not an attribute                                                                 |

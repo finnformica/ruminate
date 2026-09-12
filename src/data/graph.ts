@@ -37,7 +37,7 @@ import { emittedNoteTitle } from "./note-identity"
  */
 
 export const CHILD_KIND = "child"
-export const NOTE_TYPE = "page"
+export const NOTE_TYPE = "note"
 
 interface GraphParts {
   nodes: NodeRow[]
@@ -299,7 +299,7 @@ export function parseProps(props: string | null): BlockProps | null {
  *
  * The note node itself is not part of a note's doc (see `noteDoc`); pass a
  * note id as a root and it walks like any node — a note linked under a block
- * renders as a `page` block (the stored type value is unchanged).
+ * renders as a `note` block.
  */
 export function docFromGraph(rootIds: string[], graph: GraphSnapshot): BlockDoc {
   const blocks: Record<string, Block> = {}

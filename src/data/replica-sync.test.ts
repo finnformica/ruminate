@@ -33,7 +33,7 @@ interface RecordedRequest {
 
 const node = (id: string, text = id): NodeRow => ({
   id,
-  type: id.startsWith("blk_") ? "text" : "page",
+  type: id.startsWith("blk_") ? "text" : "note",
   text,
   props: null,
   updated_at: 1,
@@ -103,7 +103,7 @@ function createTestServer() {
 
     if (url === "/api/replica/status" && method === "GET") {
       requests.push(record)
-      const pages = [...remoteNodes.values()].filter((row) => row.type === "page").length
+      const pages = [...remoteNodes.values()].filter((row) => row.type === "note").length
       return new Response(
         JSON.stringify({
           counts: { nodes: remoteNodes.size, links: remoteLinks.size, pages },

@@ -1,0 +1,62 @@
+-- Migration number: 0008    2026-09-12
+--
+-- The stored note-root type value: `page` → `note`.
+--
+-- A note's root node has carried `type = 'page'` since before notes were
+-- notes. The identifiers around it moved to "note" already (`NOTE_TYPE`,
+-- `noteDoc`, `noteIds`…), deliberately leaving the stored value alone because
+-- it is sitting in production D1 and in every device's local SQLite. This
+-- migration finishes the job: the value itself becomes `note`, so the column
+-- reads the way the code and the docs do and there is no last piece of the old
+-- vocabulary left to explain.
+--
+-- Unlike 0001/0002/0004/0005/0006 this file is D1-only: it is NOT part of the
+-- corpus ladder the browser store and the worker test driver apply
+-- (src/data/corpus-schema.ts), which is DDL only and never rewrites rows. The
+-- local store is a cache of this corpus, so it does not migrate — it discards
+-- and re-pulls (`CACHE_GENERATION`, bumped to "5" in
+-- src/data/database-mode.ts, in the same change as this file).
+--
+-- ## What is dangerous about it
+--
+-- 1. **It is a one-way rewrite of live rows.** There is no `page` left
+--    afterwards to tell a `note` that used to be one from a `note` that was
+--    minted as one. Take a D1 export first if you want a way back; the inverse
+--    (`UPDATE nodes SET type = 'page' WHERE type = 'note'`) is only correct
+--    while no client has written a genuine `note` row.
+--
+-- 2. **An old client cannot survive it.** A bundle that still asks for
+--    `type = 'page'` pulls these rows, matches nothing, and shows ZERO notes
+--    while its blocks sit in the store unreachable. That is what the replica
+--    protocol gate is for: `REPLICA_PROTOCOL` goes to 2 and the Worker's
+--    minimum with it, so an old client is refused with `409 client_too_old`,
+--    stops syncing and says so, instead of drifting silently.
+--
+--    The gate only helps if it is CLOSED FIRST. `npm run deploy` applies
+--    migrations before it uploads the bundle, so running this migration as
+--    part of a deploy leaves a window in which the data has changed and the
+--    old Worker — the one without the raised minimum — is still serving. Raise
+--    `MIN_REPLICA_PROTOCOL` to 2 in the Cloudflare dashboard (it is a var so
+--    that it can be raised without a deploy), THEN apply this, THEN deploy.
+--
+-- 3. **It moves no cursor.** `seq` is assigned by the replica on write
+--    (migrations/0005), not by a trigger, so rewriting the type here does not
+--    advance any row's sequence and a since-pull will not carry the change. A
+--    device only learns about it by pulling the corpus in full, which is
+--    exactly what the `CACHE_GENERATION` bump makes every device do once.
+--
+-- 4. **`updated_at` is deliberately left alone.** It carries last-writer-wins
+--    intent ("whose edit is newer"), and this is not an edit anybody made;
+--    stamping it now would let this migration win a conflict against a real
+--    edit that has not been pushed yet.
+--
+-- Tombstoned rows are rewritten too (no `deleted_at IS NULL` filter): a
+-- restore must bring a note back as a note, and a tombstone replicates like
+-- any other row.
+--
+-- Migrations are history. The earlier files keep saying `page` — 0006's
+-- backfill in particular reads `WHERE p.type = 'page'`, and on a fresh
+-- database it replays BEFORE this file, so it has to describe the world as it
+-- was.
+
+UPDATE nodes SET type = 'note' WHERE type = 'page';

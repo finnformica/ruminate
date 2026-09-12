@@ -166,7 +166,7 @@ export async function corpusStatus(tenant: TenantDb): Promise<ReplicaStatusBody>
       "AND dst.deleted_at IS NULL " +
       "WHERE link.user_id = :tenant AND link.deleted_at IS NULL) AS links, " +
       "(SELECT COUNT(*) FROM nodes WHERE user_id = :tenant AND deleted_at IS NULL " +
-      "AND type = 'page') AS pages, " +
+      "AND type = 'note') AS pages, " +
       "(SELECT value FROM meta WHERE user_id = :tenant AND key = 'schema_version') " +
       "AS schema_version, " +
       "(SELECT value FROM meta WHERE user_id = :tenant AND key = 'replica_cursor') " +

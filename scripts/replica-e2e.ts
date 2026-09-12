@@ -23,12 +23,13 @@ import { parse } from "../src/blocks/parse"
 import { serialize } from "../src/blocks/serialize"
 import { buildGraphSnapshot, docToGraph, rollup } from "../src/data/graph"
 import { replica } from "../worker/handlers/replica"
-import type {
-  LinkRow,
-  NodeRow,
-  ReplicaChangesBody,
-  ReplicaCorpusBody,
-  ReplicaStatusBody,
+import {
+  REPLICA_PROTOCOL_HEADERS,
+  type LinkRow,
+  type NodeRow,
+  type ReplicaChangesBody,
+  type ReplicaCorpusBody,
+  type ReplicaStatusBody,
 } from "../worker/handlers/replica-payload"
 import type { Env } from "../worker/types"
 
@@ -58,6 +59,9 @@ const authHeaders = (token: string) => ({
   Cookie: "gh_refresh=e2e-session",
   Authorization: `Bearer ${token}`,
   "Content-Type": "application/json",
+  // The protocol gate now has a non-zero code default (2): a request without
+  // this header is a pre-header client and is refused with 409.
+  ...REPLICA_PROTOCOL_HEADERS,
 })
 
 const e2eNodes = (rows: NodeRow[]) => rows.filter((row) => row.id.includes("e2e"))
@@ -296,7 +300,7 @@ async function main() {
             nodes: [
               {
                 id: "blk_e2eguest00",
-                type: "page",
+                type: "note",
                 text: "blk_e2eguest00",
                 props: null,
                 updated_at: T0,

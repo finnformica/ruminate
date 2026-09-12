@@ -158,7 +158,7 @@ describe("type mapping", () => {
     })
     const snapshot = buildGraphSnapshot(
       [
-        { id: "old", type: "page", text: "old", props: null, updated_at: 1 },
+        { id: "old", type: "note", text: "old", props: null, updated_at: 1 },
         row("f", "```"),
         row("l", "[ ] not a todo"),
         row("g", "```"),

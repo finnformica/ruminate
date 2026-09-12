@@ -35,7 +35,7 @@ const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringif
 
 const node = (id: string, updated_at = 0, text = id): NodeRow => ({
   id,
-  type: id.startsWith("blk_") ? "text" : "page",
+  type: id.startsWith("blk_") ? "text" : "note",
   text,
   props: null,
   updated_at,

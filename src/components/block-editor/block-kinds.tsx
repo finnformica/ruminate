@@ -132,7 +132,7 @@ const heading: BlockKind = {
 
 export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
   text,
-  page: text,
+  note: text,
   ul: { slot: "dot", typography: () => BODY },
   ol: { slot: "number", typography: () => BODY },
   todo,

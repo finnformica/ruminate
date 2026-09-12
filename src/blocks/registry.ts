@@ -13,13 +13,13 @@ import type { Block, BlockProps, BlockType } from "./types"
  * `src/components/block-editor/block-kinds.tsx`).
  *
  * Entries are ordered as the slash menu and "Turn into" offer them; siblings
- * that are never offered (`done`, `h2`, `h3`, `page`) follow their family.
+ * that are never offered (`done`, `h2`, `h3`, `note`) follow their family.
  */
 
 /** A family groups types that toggle into each other and continue alike:
  * the heading levels are one family, an open and a checked to-do another. */
 type BlockFamily =
-  "text" | "bullet" | "ordered" | "todo" | "heading" | "quote" | "code" | "image" | "page"
+  "text" | "bullet" | "ordered" | "todo" | "heading" | "quote" | "code" | "image" | "note"
 
 interface SlashContext {
   /** Whether image uploads are switched on here. */
@@ -76,7 +76,7 @@ export interface BlockTypeDef {
   readonly slash?: (context: SlashContext) => boolean
   /** How search names this type: the `type:` value people type, its
    * aliases, and the description the qualifier picker shows. Null for a
-   * type that is never a search result (`page`). */
+   * type that is never a search result (`note`). */
   readonly search: {
     readonly value: string
     readonly aliases?: readonly string[]
@@ -266,9 +266,9 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     search: { value: "image", description: "image" },
   },
   {
-    id: "page",
-    family: "page",
-    label: "Page",
+    id: "note",
+    family: "note",
+    label: "Note",
     keywords: [],
     marker: "",
     listItem: false,
