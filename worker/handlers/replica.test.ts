@@ -261,7 +261,7 @@ describe("corpus operations over the real D1 schema", () => {
     )
 
     const body = await corpusPullSince(tenant, Number(cursor))
-    // Exhaustive: the unchanged page and link must not ride along in any shape.
+    // Exhaustive: the unchanged note and link must not ride along in any shape.
     expect(body).toEqual({
       nodes: [withSeq({ ...nodes[1], text: "A2", updated_at: 301 }, 4)],
       links: [],

@@ -11,8 +11,8 @@ import {
   planPullApplication,
   type D1NoteSource,
 } from "./d1-note-source"
-import { PAGE_TYPE, buildGraphSnapshot, type GraphSnapshot } from "./graph"
-import { applyOps, pagesTouchedBy, type Op } from "./ops"
+import { NOTE_TYPE, buildGraphSnapshot, type GraphSnapshot } from "./graph"
+import { applyOps, notesTouchedBy, type Op } from "./ops"
 import { resetReplicaAccess } from "./replica-access"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import type { NoteStore } from "./note-store"
@@ -75,7 +75,7 @@ const OWNER_KEY = "store_owner"
  * with every server-side data migration and each device discards its copy and
  * rebuilds it from a full pull. A few lines, no per-row logic.
  *
- * Generation `2` was the minted-page-id corpus (docs/graph-storage.md).
+ * Generation `2` was the minted-note-id corpus (docs/graph-storage.md).
  *
  * Generation `3` retires deletion-by-absence. Pulls no longer carry the full
  * key list of each table, so a row HARD-deleted at the replica before soft
@@ -114,7 +114,7 @@ export const EMPTY_GRAPH: GraphSnapshot = buildGraphSnapshot([], [])
  * The live graph (every node and child link the local store holds, indexed
  * for walking) served as `graphSnapshotAtom` while database mode is active.
  * The editor walks its note out of this; the files atom above is the same
- * data rolled up per page for the consumers that still read markdown.
+ * data rolled up per note for the consumers that still read markdown.
  * Written only by this module: optimistically on a doc write, and from the
  * store after every ingest, repair and pull.
  */
@@ -177,8 +177,8 @@ interface DatabaseModeRuntime {
   generation: number
   /** Ops applied to the graph atom and not yet written to the store. */
   pendingOps: Op[]
-  /** Pages those ops touched — whose rollups the flush refreshes. */
-  pendingPages: Set<NoteId>
+  /** Notes those ops touched — whose rollups the flush refreshes. */
+  pendingNoteIds: Set<NoteId>
   opsFlushTimer: ReturnType<typeof setTimeout> | null
 }
 
@@ -247,10 +247,10 @@ async function defaultOpenReplicaSync(
   return startReplicaSync({ getNoteCount, getAllRows })
 }
 
-/** How many pages the graph holds (the diagnostics' note count). */
-function pageCount(graph: GraphSnapshot): number {
+/** How many notes the graph holds (the diagnostics' note count). */
+function noteCount(graph: GraphSnapshot): number {
   let count = 0
-  for (const node of graph.nodes.values()) if (node.type === PAGE_TYPE) count += 1
+  for (const node of graph.nodes.values()) if (node.type === NOTE_TYPE) count += 1
   return count
 }
 
@@ -269,7 +269,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     lastRepairAt: 0,
     generation,
     pendingOps: [],
-    pendingPages: new Set(),
+    pendingNoteIds: new Set(),
     opsFlushTimer: null,
   }
   runtime = activation
@@ -328,13 +328,13 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
       if (runtime !== activation) return
       jotai().set(databaseGraphAtom, graph)
       patchStatus({ status: "ready" })
-      patchDiagnostics({ status: "ready", notes: pageCount(graph) })
+      patchDiagnostics({ status: "ready", notes: noteCount(graph) })
 
       // Start the push loop before the first pull, so the pull can consult
       // `pendingNoteIds` (edits made while the pull is in flight are safe).
       try {
         const replica = await (options.openReplicaSync ?? defaultOpenReplicaSync)(
-          () => pageCount(jotai().get(databaseGraphAtom)),
+          () => noteCount(jotai().get(databaseGraphAtom)),
           () => {
             const store = activation.store
             if (!store) return Promise.resolve({ nodes: [], links: [] })
@@ -413,9 +413,9 @@ export function databaseApplyOps(ops: readonly Op[]) {
   const before = store.get(databaseGraphAtom)
   const after = applyOps(before, ops, Date.now())
   store.set(databaseGraphAtom, after)
-  // Pages that reached a touched node before (an unlink) or after (a link).
-  for (const page of pagesTouchedBy(before, ops)) activation.pendingPages.add(page)
-  for (const page of pagesTouchedBy(after, ops)) activation.pendingPages.add(page)
+  // Notes that reached a touched node before (an unlink) or after (a link).
+  for (const note of notesTouchedBy(before, ops)) activation.pendingNoteIds.add(note)
+  for (const note of notesTouchedBy(after, ops)) activation.pendingNoteIds.add(note)
   activation.pendingOps.push(...ops)
   patchStatus({ emptyOffline: false })
 
@@ -450,14 +450,14 @@ function onPageHidden() {
 async function flushOps(activation: DatabaseModeRuntime) {
   if (runtime !== activation || !activation.store) return
   const ops = activation.pendingOps
-  const pages = [...activation.pendingPages]
+  const notes = [...activation.pendingNoteIds]
   if (ops.length === 0) return
   activation.pendingOps = []
-  activation.pendingPages = new Set()
+  activation.pendingNoteIds = new Set()
   try {
     const diff = await activation.store.applyOps(ops)
-    activation.replica?.notifyGraphChange(pages, diff)
-    patchDiagnostics({ notes: pageCount(jotai().get(databaseGraphAtom)) })
+    activation.replica?.notifyGraphChange(notes, diff)
+    patchDiagnostics({ notes: noteCount(jotai().get(databaseGraphAtom)) })
   } catch (error) {
     recordWriteError(error)
     scheduleRepair(activation)
@@ -498,7 +498,7 @@ function scheduleRepair(activation: DatabaseModeRuntime) {
     // rows (the pending ops are in it already, so they are dropped here and
     // land through the rebuild).
     activation.pendingOps = []
-    activation.pendingPages = new Set()
+    activation.pendingNoteIds = new Set()
     const graph = jotai().get(databaseGraphAtom)
     await activation.store.clear()
     await activation.store.applyPull({
@@ -625,7 +625,7 @@ function runPull(activation: DatabaseModeRuntime) {
         lastPullError: null,
         emptyOffline: false,
       })
-      patchDiagnostics({ notes: pageCount(jotai().get(databaseGraphAtom)) })
+      patchDiagnostics({ notes: noteCount(jotai().get(databaseGraphAtom)) })
     } catch (error) {
       if (runtime !== activation) return
       const message = error instanceof Error ? error.message : String(error)
@@ -633,7 +633,7 @@ function runPull(activation: DatabaseModeRuntime) {
       // in the console as well as the status atom. Without this the only
       // symptom is an empty note list with no explanation anywhere.
       console.error("[ruminate] pull failed:", error)
-      const localCount = pageCount(jotai().get(databaseGraphAtom))
+      const localCount = noteCount(jotai().get(databaseGraphAtom))
       patchStatus({
         pull: "error",
         lastPullError: message,

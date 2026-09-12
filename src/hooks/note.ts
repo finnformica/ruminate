@@ -1,10 +1,10 @@
 import { useAtomValue, useStore } from "jotai"
 import { selectAtom } from "jotai/utils"
 import React from "react"
-import { PAGE_TYPE, propsJson } from "../data/graph"
-import { pagePropsOps } from "../data/note-meta"
-import { deletePageOps, type Op } from "../data/ops"
-import { emittedPageTitle } from "../data/page-identity"
+import { NOTE_TYPE, propsJson } from "../data/graph"
+import { notePropsOps } from "../data/note-meta"
+import { deleteNoteOps, type Op } from "../data/ops"
+import { emittedNoteTitle } from "../data/note-identity"
 import { useApplyOps } from "../data/store"
 import { dateMentionsAtom, graphSnapshotAtom, notesAtom } from "../global-state"
 import type { NoteId } from "../schema"
@@ -45,16 +45,16 @@ export function useDateMentions(id: NoteId | undefined) {
 }
 
 /**
- * Set props on a page (pin, width, font, gist id, tags…): the current props
+ * Set props on a note (pin, width, font, gist id, tags…): the current props
  * with the patch applied — a `null` value removes the key — and
  * `updated_at` stamped, as one `setProps` op.
  */
-export function useSetPageProps() {
+export function useSetNoteProps() {
   const store = useStore()
   const apply = useApplyOps()
   return React.useCallback(
     (id: NoteId, patch: Record<string, unknown>) => {
-      apply(pagePropsOps(id, patch, store.get(graphSnapshotAtom)))
+      apply(notePropsOps(id, patch, store.get(graphSnapshotAtom)))
     },
     [store, apply],
   )
@@ -62,11 +62,11 @@ export function useSetPageProps() {
 
 /**
  * Rename a note — which, since ids are minted and opaque
- * (docs/graph-storage.md), is simply **setting the page node's
+ * (docs/graph-storage.md), is simply **setting the note node's
  * text**. Nothing else moves: the id, the URL, every deep link and every
  * block row are untouched, and exactly one row changes, so a rename cannot
  * clobber a concurrent edit under per-row LWW. An emptied title puts the
- * page back to untitled (its text is its id), so it falls back to its content
+ * note back to untitled (its text is its id), so it falls back to its content
  * preview like any untitled note. Returns whether anything changed.
  */
 export function useRenameNote() {
@@ -78,16 +78,16 @@ export function useRenameNote() {
       const { noteId, newTitle } = params
       if (!noteId) return false
       const snapshot = store.get(graphSnapshotAtom)
-      const page = snapshot.nodes.get(noteId)
-      if (!page || page.type !== PAGE_TYPE) return false
+      const note = snapshot.nodes.get(noteId)
+      if (!note || note.type !== NOTE_TYPE) return false
 
       const title = newTitle.trim()
-      const current = emittedPageTitle(noteId, page.text) ?? ""
+      const current = emittedNoteTitle(noteId, note.text) ?? ""
       if (title === current) return false
 
       apply([
         { op: "setText", id: noteId, text: title || noteId },
-        ...pagePropsOps(noteId, {}, snapshot),
+        ...notePropsOps(noteId, {}, snapshot),
       ])
       return true
     },
@@ -96,7 +96,7 @@ export function useRenameNote() {
 }
 
 /**
- * Create a page: one node (its title, its props, `updated_at` stamped). The
+ * Create a note: one node (its title, its props, `updated_at` stamped). The
  * blocks come with the first edit (`useNoteDoc`).
  */
 export function useCreateNote() {
@@ -111,7 +111,7 @@ export function useCreateNote() {
       const op: Op = {
         op: "create",
         id,
-        type: PAGE_TYPE,
+        type: NOTE_TYPE,
         text: title.trim() || id,
         props: propsJson({ ...props, updated_at: new Date().toISOString() }),
       }
@@ -121,13 +121,13 @@ export function useCreateNote() {
   )
 }
 
-/** Delete a page and everything only it held (`deletePageOps`). */
+/** Delete a note and everything only it held (`deleteNoteOps`). */
 export function useDeleteNote() {
   const store = useStore()
   const apply = useApplyOps()
 
   return React.useCallback(
-    (id: NoteId) => apply(deletePageOps(id, store.get(graphSnapshotAtom))),
+    (id: NoteId) => apply(deleteNoteOps(id, store.get(graphSnapshotAtom))),
     [store, apply],
   )
 }

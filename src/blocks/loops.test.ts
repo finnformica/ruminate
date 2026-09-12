@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest"
 import { basketDoc, basketRootIds } from "../data/basket"
-import { buildGraphSnapshot, docFromGraph, pageDoc, rollup } from "../data/graph"
+import { buildGraphSnapshot, docFromGraph, noteDoc, rollup } from "../data/graph"
 import { applyOps, docToOps } from "../data/ops"
 import { indexNoteBlocks } from "../utils/block-search"
 import { buildOutline } from "../utils/note-outline"
@@ -31,7 +31,7 @@ const looped = (): BlockDoc => ({
   },
 })
 
-/** A page whose graph holds the same loop, built through the app's own path. */
+/** A note whose graph holds the same loop, built through the app's own path. */
 function loopedGraph() {
   let snapshot = buildGraphSnapshot([], [])
   snapshot = applyOps(
@@ -103,7 +103,7 @@ describe("a doc that holds a loop", () => {
 describe("a graph that holds a loop", () => {
   it("is kept on save, walked to where it closes, and rolled up", () => {
     const snapshot = loopedGraph()
-    const doc = pageDoc("n", snapshot)!
+    const doc = noteDoc("n", snapshot)!
     expect(doc.blocks.b.children).toEqual(["a"])
     expect(rollup("n", snapshot)).toBe(
       "# A\n  id:: a\n  - B\n    id:: b\n    # A\n      id:: a\n  C\n    id:: c\n",
@@ -115,12 +115,12 @@ describe("a graph that holds a loop", () => {
 
   it("refuses only a block under itself", () => {
     const snapshot = loopedGraph()
-    const doc = pageDoc("n", snapshot)!
+    const doc = noteDoc("n", snapshot)!
     const selfish = { ...doc, blocks: { ...doc.blocks, c: { ...doc.blocks.c, children: ["c"] } } }
     expect(docToOps("n", selfish, snapshot)).toEqual([])
   })
 
-  it("indexes each block of the page once, the loop's closing occurrence skipped", () => {
+  it("indexes each block of the note once, the loop's closing occurrence skipped", () => {
     const snapshot = loopedGraph()
     const note = { id: "n" } as Parameters<typeof indexNoteBlocks>[0]
     const { hits } = indexNoteBlocks(note, snapshot)

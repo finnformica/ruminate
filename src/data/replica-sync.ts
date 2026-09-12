@@ -93,8 +93,8 @@ interface ReplicaAuth {
 export interface ReplicaSyncOptions {
   /** The current files map (path → content) — local corpus size for the
    * drastically-behind check. */
-  /** How many pages the local graph holds — compared against the replica's
-   * page count to notice a replica left drastically behind. */
+  /** How many notes the local graph holds — compared against the replica's
+   * note count to notice a replica left drastically behind. */
   getNoteCount: () => number
   /** Every current row of both tables — the full-push source (the store). */
   getAllRows: () => Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
@@ -133,13 +133,13 @@ export interface ReplicaSyncHandle {
   flush(): Promise<void>
 }
 
-/** Is the replica missing enough pages that only a full push can be trusted to
+/** Is the replica missing enough notes that only a full push can be trusted to
  * catch it up? (Empty while notes exist locally, or missing more than ~10% of
  * the corpus — lost pushes rather than ordinary write-behind lag.) */
-export function isReplicaDrasticallyBehind(localNotes: number, remotePages: number): boolean {
+export function isReplicaDrasticallyBehind(localNotes: number, remoteNotes: number): boolean {
   if (localNotes === 0) return false
-  if (remotePages <= 0) return true
-  return localNotes - remotePages > Math.max(3, Math.ceil(localNotes * 0.1))
+  if (remoteNotes <= 0) return true
+  return localNotes - remoteNotes > Math.max(3, Math.ceil(localNotes * 0.1))
 }
 
 const linkKeyString = (key: LinkKey) => key.join("\x1f")

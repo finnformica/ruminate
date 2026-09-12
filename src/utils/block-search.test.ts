@@ -16,7 +16,7 @@ import {
 import type { BlockType } from "../blocks/types"
 import { parseQuery } from "./search"
 
-/** A note plus the markdown its page holds — the graph the tests index. */
+/** A note plus the markdown its note holds — the graph the tests index. */
 type Fixture = Note & { content: string }
 
 function makeNote(overrides: Partial<Fixture> = {}): Fixture {
@@ -38,7 +38,7 @@ function makeNote(overrides: Partial<Fixture> = {}): Fixture {
   }
 }
 
-/** The graph holding every fixture's page. */
+/** The graph holding every fixture's note. */
 function snapshotFor(notes: Fixture[]): GraphSnapshot {
   const nodes = []
   const links = []
@@ -307,9 +307,9 @@ describe("lazy child resolution", () => {
     expect(index.getChildren(head)).toBe(index.getChildren(head))
   })
 
-  test("a block reached from two pages is one node: both hits resolve the same children", () => {
-    // In the graph an id names ONE block; a second page naming it links the
-    // same node, so every child it has is there from either page.
+  test("a block reached from two notes is one node: both hits resolve the same children", () => {
+    // In the graph an id names ONE block; a second note naming it links the
+    // same node, so every child it has is there from either note.
     const a = makeNote({
       id: "a",
       content: md("# Shared", "  id:: blk_dup", "  - only in a", "    id:: blk_a1"),
@@ -467,7 +467,7 @@ describe("createBlockIndexer", () => {
     expect(calls).toEqual(["tasks", "misc"])
 
     // One note changed (a new Note object — `createNotesBuilder` keeps the
-    // object while a page's rows are unchanged): only it is re-walked.
+    // object while a note's rows are unchanged): only it is re-walked.
     const changed = makeNote({ id: "misc", content: md("[ ] new todo", "  id:: blk_new") })
     const index = build([TASKS_NOTE, changed], snapshotFor([TASKS_NOTE, changed]))
     expect(calls).toEqual(["tasks", "misc", "misc"])

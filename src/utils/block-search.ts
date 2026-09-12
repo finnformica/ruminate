@@ -2,7 +2,7 @@ import { Searcher, type FullOptions } from "fast-fuzzy"
 import { searchTypeValues } from "../blocks/registry"
 import type { BlockType } from "../blocks/types"
 import { olPositions } from "../blocks/view"
-import { pageDoc, type GraphSnapshot } from "../data/graph"
+import { noteDoc, type GraphSnapshot } from "../data/graph"
 import type { Note, NoteId } from "../schema"
 import type { Filter, Query, Sort } from "./search"
 import { compareNotes, matchesNoteScope, testNoteFilters } from "./search-notes"
@@ -169,13 +169,13 @@ function hitType(type: BlockType, text: string, inFence: boolean): BlockType {
 }
 
 /**
- * Walk one note's page into its block hits, in document order (the
+ * Walk one note's doc into its block hits, in document order (the
  * depth-first walk the serializer emits — which is also how the fence state
  * must be tracked), plus the parent → child-ids edges. This is the per-note
  * step the indexer memoizes.
  */
 export function indexNoteBlocks(note: Note, snapshot: GraphSnapshot): NoteBlockIndex {
-  const doc = pageDoc(note.id, snapshot) ?? { props: null, rootBlockIds: [], blocks: {} }
+  const doc = noteDoc(note.id, snapshot) ?? { props: null, rootBlockIds: [], blocks: {} }
   const hits: BlockHit[] = []
   const childIds = new Map<string, string[]>()
   let fenceOpen = false
@@ -235,7 +235,7 @@ export interface BlockIndex {
 /**
  * A memoizing index builder: call the returned function with the current note
  * list and the graph, and only notes whose `Note` changed are re-walked — a
- * `Note` object is kept as long as the rows its page reaches are unchanged
+ * `Note` object is kept as long as the rows the note reaches are unchanged
  * (`createNotesBuilder`), so an untouched note reuses its block entries.
  * Notes that disappear are evicted.
  */
@@ -310,10 +310,10 @@ function isScopeFilter(filter: Filter): boolean {
  * scope, read off the row's own ancestry. A value names either a note (by
  * id, or by its name, case-insensitively — `in:"Reading list"`) or a block
  * (by id): a row is in scope when it lives in that note, or when that block
- * is on its path from the page — so a block reachable by two paths is in
+ * is on its path from the note — so a block reachable by two paths is in
  * scope through the one that passes the scope block. The scoping block
  * itself is not in its own scope — `in:` is "inside", the way a zoomed
- * view's title is not one of the page's blocks. `-in:` excludes, comma lists
+ * view's title is not one of the note's blocks. `-in:` excludes, comma lists
  * OR, like any qualifier.
  *
  * The same `in:` on a NOTE query (`src/utils/search-notes.ts`) matches the

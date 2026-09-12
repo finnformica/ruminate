@@ -128,7 +128,7 @@ describe("updateText", () => {
     expect(updateText(doc, "nope", "x")).toBe(doc)
   })
 
-  it("carries the page props through", () => {
+  it("carries the note props through", () => {
     expect(updateText(fixture(), "a", "A!").props).toEqual({ title: "t" })
   })
 })

@@ -63,7 +63,7 @@ signed in. `notesAtom` is derived from it per page (`src/data/note-meta.ts`:
 title, props, tags and priorities from block text, tasks, headings, memoized
 by the page's row identities), search and the block index read those notes,
 and the open note's editor walks its page straight off the snapshot
-(`pageDoc` via `useNoteDoc`). Markdown is a projection at the edges only —
+(`noteDoc` via `useNoteDoc`). Markdown is a projection at the edges only —
 the rollup for copy, share and export, `parse` for pasted or imported text.
 
 A small XState machine (`src/global-state.ts`) handles the rest: auth
@@ -242,7 +242,7 @@ alike, since a page is just a node whose `type` is `page`
 and keep their date key (`2026-08-31`, `2026-W35`), where the date is the
 identity. A page's _name_ is not its id but its `text`: the title, which
 rides the page's doc as `props.title` between the walk and the write
-(`page-identity.ts`). `type` is stored, not derived — the registry in the
+(`note-identity.ts`). `type` is stored, not derived — the registry in the
 schema doc (`page`, `text`, `h1`–`h3`, `todo`, `done`, `ul`, `ol`, `quote`,
 `code`); checked state is a type (`todo` ↔ `done`), so a checkbox toggle is a
 generic type transition. `text` is marker-free. `props` is JSON: a page node

@@ -30,7 +30,7 @@ export function useCreateNewNote() {
     const noteId = generateNoteId()
 
     // A note created from a tag page or a tag-filtered list starts with
-    // those tags (as page props, applied when the note is first saved).
+    // those tags (as note props, applied when the note is first saved).
     navigate({
       to: "/notes/$",
       params: { _splat: noteId },

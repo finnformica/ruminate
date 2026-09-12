@@ -198,7 +198,7 @@ describe("frontmatter (dropped at the markdown edge)", () => {
     expect(serialize(parse(`---\n\n---\nA block\n  id:: blk_x\n`))).toBe("A block\n  id:: blk_x\n")
   })
 
-  it("never writes a page's props out", () => {
+  it("never writes a note's props out", () => {
     const doc = { ...parse("A block\n  id:: blk_x\n"), props: { title: "T", pinned: true } }
     expect(serialize(doc)).toBe("A block\n  id:: blk_x\n")
   })

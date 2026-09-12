@@ -17,9 +17,9 @@
 
 /**
  * The type registry (docs/graph-schema-v2.md). Stored as-is; the serializer
- * is a pure type → marker map. `page` is a note's root node — its `text` is
- * the title and its `props` the metadata — and appears in a doc only when
- * a view is built with a page among its blocks.
+ * is a pure type → marker map. `page` — the stored type value — is a note's
+ * root node: its `text` is the title and its `props` the metadata. It appears
+ * in a doc only when a view is built with a note root among its blocks.
  */
 export type BlockType =
   "text" | "h1" | "h2" | "h3" | "todo" | "done" | "ul" | "ol" | "quote" | "code" | "image" | "page"
@@ -60,7 +60,7 @@ export interface Block {
   /** Marker-free content. Inline markdown (bold, links, code spans) is
    * content and renders as such; a leading marker never is. */
   text: string
-  /** Pages: metadata entries; code: `{ language }`; images: where the
+  /** Notes: metadata entries; code: `{ language }`; images: where the
    * picture is (`src/blocks/image.ts`). Absent for most. */
   props?: BlockProps | null
   /** Ordered ids of child blocks. */
@@ -81,11 +81,11 @@ export interface ChangeHint {
 
 export interface BlockDoc {
   /**
-   * The page's props — its metadata (`title`, `pinned`, `tags`, `updated_at`…)
-   * as the entries the page node holds — or null for a doc that is not a
-   * page's (a clipboard fragment, a subtree, anything parsed from text).
+   * The note's props — its metadata (`title`, `pinned`, `tags`, `updated_at`…)
+   * as the entries the note node holds — or null for a doc that is not a
+   * note's (a clipboard fragment, a subtree, anything parsed from text).
    * There is no frontmatter: `parse` drops a leading YAML block and
-   * `serialize` writes none; metadata lives on the page node only.
+   * `serialize` writes none; metadata lives on the note node only.
    */
   props: BlockProps | null
   /** Top-level block ids, in order. */

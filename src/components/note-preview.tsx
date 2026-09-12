@@ -1,6 +1,6 @@
 import { useAtomValue } from "jotai"
 import { useMemo } from "react"
-import { pageDoc } from "../data/graph"
+import { noteDoc } from "../data/graph"
 import { graphSnapshotAtom } from "../global-state"
 import { Note, fontSchema } from "../schema"
 import { cx } from "../utils/cx"
@@ -21,12 +21,12 @@ type NotePreviewProps = {
 export function NotePreview({ note, className, hideProperties }: NotePreviewProps) {
   const props = note.props
 
-  // The preview is the page's view, read-only: the same rows the note page
+  // The preview is the note's view, read-only: the same rows the note page
   // renders, walked out of the live graph.
   const snapshot = useAtomValue(graphSnapshotAtom)
-  const doc = useMemo(() => pageDoc(note.id, snapshot), [note.id, snapshot])
+  const doc = useMemo(() => noteDoc(note.id, snapshot), [note.id, snapshot])
 
-  // Resolve note font (the page's font prop or the sans default)
+  // Resolve note font (the note's font prop or the sans default)
   const resolvedFont = useMemo(() => {
     const parseResult = fontSchema.safeParse(props?.font as unknown)
     return parseResult.success ? parseResult.data : "sans"

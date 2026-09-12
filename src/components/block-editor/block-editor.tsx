@@ -325,7 +325,7 @@ export function BlockEditor({
    * "Image".
    */
   onImageUpload?: (file: File) => Promise<UploadedImage>
-  /** The note this doc is the page of — what "Copy link to block" links into. */
+  /** The note this doc belongs to — what "Copy link to block" links into. */
   noteId?: string
   /** How many places a block appears across the corpus (whether the context
    * menu offers Unlink beside Delete). Absent = only here. */
