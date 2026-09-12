@@ -6,14 +6,17 @@ type Call = { keyframes: Keyframe[]; options: KeyframeAnimationOptions }
 
 /** jsdom has no Web Animations API: stand one in that records its calls and
  * hands back cancellable animations. */
+type Stub = { id: string; cancel: () => void; onfinish?: () => void; oncancel?: () => void }
+
 function stubAnimations() {
   const calls = new Map<Element, Call[]>()
-  const running = new Map<Element, { id: string; cancel: () => void }[]>()
+  const running = new Map<Element, Stub[]>()
+  const animations = new Map<Element, Stub[]>()
   Element.prototype.animate = function (this: Element, keyframes, options) {
     const list = calls.get(this) ?? []
     list.push({ keyframes: keyframes as Keyframe[], options: options as KeyframeAnimationOptions })
     calls.set(this, list)
-    const anim = {
+    const anim: Stub = {
       id: (options as KeyframeAnimationOptions).id ?? "",
       cancel: () =>
         running.set(
@@ -22,12 +25,13 @@ function stubAnimations() {
         ),
     }
     running.set(this, [...(running.get(this) ?? []), anim])
+    animations.set(this, [...(animations.get(this) ?? []), anim])
     return anim as unknown as Animation
   }
   Element.prototype.getAnimations = function (this: Element) {
     return (running.get(this) ?? []) as unknown as Animation[]
   }
-  return { calls, running }
+  return { calls, running, animations }
 }
 
 /** A row at a given top, whose place can be moved between measurements. */
@@ -121,20 +125,78 @@ describe("fold motion", () => {
     expect(running.get(row.el)!.length).toBe(1)
   })
 
-  it("reveals a box from the top and covers it from the bottom, only the bottom edge ever cutting", () => {
-    const { calls } = stubAnimations()
+  it("sweeps a box's edge with two transforms under one static clip: nothing that lays out or paints", () => {
+    const { calls, animations } = stubAnimations()
     const box = document.createElement("div")
+    const body = document.createElement("div")
+    box.appendChild(body)
+    box.getBoundingClientRect = () => ({ height: 200 }) as DOMRect
     unfoldBox(box)
-    foldBox(box)
-    const [open, close] = calls.get(box)!
-    expect(open.keyframes[0]).toEqual({ clipPath: "inset(-64px -64px 100% -64px)" })
-    expect(open.keyframes[1]).toEqual({ clipPath: "inset(-64px -64px 0% -64px)" })
-    expect(open.options.fill).toBeUndefined()
-    expect(close.keyframes[0]).toEqual({ clipPath: "inset(-64px -64px 0% -64px)" })
-    expect(close.keyframes[1]).toEqual({ clipPath: "inset(-64px -64px 100% -64px)" })
-    // A ghost stays covered until it goes.
-    expect(close.options.fill).toBe("forwards")
+    const [open] = calls.get(box)!
+    const [openBody] = calls.get(body)!
+    // The box slides up by the covered height and its body down by the
+    // same, so the rows hold still under the moving cut.
+    expect(open.keyframes).toEqual([
+      { transform: "translateY(-200px)" },
+      { transform: "translateY(0px)" },
+    ])
+    expect(openBody.keyframes).toEqual([
+      { transform: "translateY(200px)" },
+      { transform: "translateY(0px)" },
+    ])
     expect(open.options.duration).toBe(FOLD_MS)
+    expect(open.options.fill).toBeUndefined()
+    // The clip is worn for the sweep (the sides and top slack), then taken off.
+    expect(box.style.clipPath).toBe("inset(-64px -64px 0 -64px)")
+    animations.get(box)![0].onfinish?.()
+    expect(box.hasAttribute("style")).toBe(false)
+  })
+
+  it("a ghost keeps its cover until it goes", () => {
+    const { calls, animations } = stubAnimations()
+    const box = document.createElement("div")
+    box.appendChild(document.createElement("div"))
+    box.getBoundingClientRect = () => ({ height: 120 }) as DOMRect
+    foldBox(box)
+    const [close] = calls.get(box)!
+    expect(close.keyframes).toEqual([
+      { transform: "translateY(0px)" },
+      { transform: "translateY(-120px)" },
+    ])
+    expect(close.options.fill).toBe("forwards")
+    animations.get(box)![0].onfinish?.()
+    expect(box.style.clipPath).toBe("inset(-64px -64px 0 -64px)")
+  })
+
+  it("a sweep cut short by its successor never tidies up after it", () => {
+    const { animations } = stubAnimations()
+    const box = document.createElement("div")
+    box.appendChild(document.createElement("div"))
+    box.getBoundingClientRect = () => ({ height: 120 }) as DOMRect
+    foldBox(box)
+    const first = animations.get(box)![0]
+    unfoldBox(box)
+    // The fold was cancelled by the unfold; its late cancel event must not
+    // strip the clip the unfold is wearing.
+    first.oncancel?.()
+    expect(box.style.clipPath).toBe("inset(-64px -64px 0 -64px)")
+  })
+
+  it("slides what follows the editor on the page along with the rows", () => {
+    const { calls } = stubAnimations()
+    const page = document.createElement("div")
+    document.body.appendChild(page)
+    const container = document.createElement("div")
+    page.appendChild(container)
+    const basket = document.createElement("section")
+    basket.getBoundingClientRect = () => ({ top: 900 }) as DOMRect
+    page.appendChild(basket)
+    const before = measureRows(container)!
+    expect(before.get("after:0")).toBe(900)
+    basket.getBoundingClientRect = () => ({ top: 300 }) as DOMRect
+    slideRows(container, before)
+    expect(calls.get(basket)![0].keyframes[0]).toEqual({ transform: "translateY(600px)" })
+    page.remove()
   })
 
   it("with reduced motion swaps the motion for a fade on the box and drops the slide", () => {

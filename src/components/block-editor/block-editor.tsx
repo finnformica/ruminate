@@ -80,7 +80,9 @@ function childrenByParent(list: readonly Occurrence[]): Map<string | null, Occur
  * (`.block-subtree-ghost`, block-editor.css), inert, covered from the bottom
  * up as the rows below slide up over it. Between, it is a plain wrapper:
  * nothing clips it at rest, so a to-do's chevron beside its checkbox and a
- * heading's hash, both of which reach beyond their row, always show.
+ * heading's hash, both of which reach beyond their row, always show. The
+ * inner div is the body the sweep slides against the box; it is always
+ * there, so the rows never remount for it.
  */
 function Subtree({
   parentKey,
@@ -112,7 +114,8 @@ function Subtree({
       className={closing ? "block-subtree-ghost" : undefined}
       style={closing && size ? { width: size.width, height: size.height } : undefined}
     >
-      {children}
+      {/* The body the sweep slides against the box (fold-motion.ts). */}
+      <div>{children}</div>
     </div>
   )
 }

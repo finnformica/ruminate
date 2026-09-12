@@ -321,17 +321,17 @@ growing the row.
 Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`,
 `--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1)`):
 
-| What                                    | How                                                                                                                              |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Hover affordances                       | opacity 150ms ease-out                                                                                                           |
-| Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease                                                                                                      |
-| Block line hover (neutral)              | background-color 100ms ease                                                                                                      |
-| Selection highlight                     | background-color + color 100ms ease                                                                                              |
-| Chevron rotation                        | transform 300ms ease-in-out, in step with the fold                                                                               |
-| Unfold (collapsed → open)               | the subtree's box revealed top-down (clip-path), the rows below slide down (transform), 300ms ease-in-out, no fade: an accordion |
-| Fold (open → collapsed)                 | the box, out of the flow, covered bottom-up as the rows below slide up over it, 300ms ease-in-out; its rows linger inert for it  |
-| Todo check → text mutes                 | color 200ms ease                                                                                                                 |
-| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms                                                                                           |
+| What                                    | How                                                                                                                                            |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hover affordances                       | opacity 150ms ease-out                                                                                                                         |
+| Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease                                                                                                                    |
+| Block line hover (neutral)              | background-color 100ms ease                                                                                                                    |
+| Selection highlight                     | background-color + color 100ms ease                                                                                                            |
+| Chevron rotation                        | transform 300ms ease-in-out, in step with the fold                                                                                             |
+| Unfold (collapsed → open)               | the subtree's box's bottom edge sweeps down to reveal it, the rows below slide down, all transforms, 300ms ease-in-out, no fade: an accordion  |
+| Fold (open → collapsed)                 | the box, out of the flow, its edge sweeping up to cover it as the rows below slide up over it, 300ms ease-in-out; its rows linger inert for it |
+| Todo check → text mutes                 | color 200ms ease                                                                                                                               |
+| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms                                                                                                         |
 
 Press feedback lives on the **control**, never the content: collapsing a
 subtree gives the chevron a pressed scale and hover surface. Pressed scale is
@@ -343,11 +343,17 @@ state change afterwards (fold-motion.ts, the FLIP technique on the Web
 Animations API): the editor is laid out once, in its final shape, then the
 rows that moved slide from where they were on a `transform`, and the
 parent's children — one box, its rows full size throughout — are revealed
-or covered by a `clip-path`: the edge alone, no fade, the way an accordion
-opens and shuts, at an accordion's pace. A folding box leaves the flow
-first, so the rows below are in their final places at once and the sweep is
-them sliding up over it. Everything runs on the compositor, so nothing
-jitters, and it never holds the editor up: the state changes at once, and
+or covered by the box's own bottom edge: the edge alone, no fade, the way
+an accordion opens and shuts, at an accordion's pace. The edge is two
+transforms under one clip that never animates (the box slides up by the
+covered height, its body down by the same, so the rows hold still while
+the cut moves), because every moving part must be the same kind of
+animation on the same thread: an animated `clip-path` runs on the main
+thread in some browsers and falls behind the rows, letting the departing
+text show through them. A folding box leaves the flow first, so the rows
+below — and whatever follows the editor on the page — are in their final
+places at once and slide up over it. Everything is a transform on the
+compositor, so nothing jitters, and it never holds the editor up: the state changes at once, and
 the rows a fold hid stay only as inert ghosts in the box for the
 animation's length (`folding`), so `Space` on repeat is as quick as ever.
 Nothing clips at rest, so a to-do's chevron beside its checkbox and a
@@ -360,8 +366,8 @@ swaps the motion for a short fade.
   arrows gets only the 100ms color fade (perceptually instant), zoom (`F`)
   swaps views instantly, the command palette opens with no entrance
   animation.
-- Layout. Only `opacity`, `transform`, `clip-path` and colors transition —
-  never height, width, margin, or padding. The fold is the test case: it
+- Layout. Only `opacity`, `transform` and colors transition — never
+  height, width, margin, padding, or a clip. The fold is the test case: it
   reads as a height change and is built without one.
 
 `prefers-reduced-motion`: color/opacity fades stay (they aid comprehension);
