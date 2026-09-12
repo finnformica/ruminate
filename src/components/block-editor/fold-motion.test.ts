@@ -127,17 +127,17 @@ describe("fold motion", () => {
     unfoldBox(box)
     foldBox(box)
     const [open, close] = calls.get(box)!
-    expect(open.keyframes[0]).toEqual({ clipPath: "inset(-64px -64px 100% -64px)", opacity: 0 })
-    expect(open.keyframes[1]).toEqual({ clipPath: "inset(-64px -64px 0% -64px)", opacity: 1 })
+    expect(open.keyframes[0]).toEqual({ clipPath: "inset(-64px -64px 100% -64px)" })
+    expect(open.keyframes[1]).toEqual({ clipPath: "inset(-64px -64px 0% -64px)" })
     expect(open.options.fill).toBeUndefined()
-    expect(close.keyframes[0]).toEqual({ clipPath: "inset(-64px -64px 0% -64px)", opacity: 1 })
-    expect(close.keyframes[1]).toEqual({ clipPath: "inset(-64px -64px 100% -64px)", opacity: 0 })
+    expect(close.keyframes[0]).toEqual({ clipPath: "inset(-64px -64px 0% -64px)" })
+    expect(close.keyframes[1]).toEqual({ clipPath: "inset(-64px -64px 100% -64px)" })
     // A ghost stays covered until it goes.
     expect(close.options.fill).toBe("forwards")
     expect(open.options.duration).toBe(FOLD_MS)
   })
 
-  it("with reduced motion keeps a fade on the box and drops the slide", () => {
+  it("with reduced motion swaps the motion for a fade on the box and drops the slide", () => {
     window.matchMedia = vi.fn().mockReturnValue({ matches: true }) as unknown as typeof matchMedia
     const { calls } = stubAnimations()
     const container = document.createElement("div")

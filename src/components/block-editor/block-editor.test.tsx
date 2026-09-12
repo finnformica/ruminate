@@ -1369,7 +1369,7 @@ describe("collapse toggle", () => {
       expect(box.querySelectorAll('[data-testid="block-body"]').length).toBeGreaterThan(0)
       expect(box.querySelectorAll("[data-occurrence], [data-block-row]").length).toBe(0)
       act(() => {
-        vi.advanceTimersByTime(250)
+        vi.advanceTimersByTime(350)
       })
       expect(container.querySelectorAll("[data-folding]").length).toBe(0)
     } finally {
@@ -1391,7 +1391,7 @@ describe("collapse toggle", () => {
       expect(back.closest("[data-folding]")).toBeNull()
       expect(back.closest('[data-subtree="blk_bp"]')).not.toBeNull()
       act(() => {
-        vi.advanceTimersByTime(250)
+        vi.advanceTimersByTime(350)
       })
       expect(container.querySelectorAll("[data-folding]").length).toBe(0)
     } finally {

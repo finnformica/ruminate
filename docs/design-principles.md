@@ -318,19 +318,20 @@ growing the row.
 
 ## Motion
 
-Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`):
+Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`,
+`--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1)`):
 
-| What                                    | How                                                                                                                                        |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Hover affordances                       | opacity 150ms ease-out                                                                                                                     |
-| Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease                                                                                                                |
-| Block line hover (neutral)              | background-color 100ms ease                                                                                                                |
-| Selection highlight                     | background-color + color 100ms ease                                                                                                        |
-| Chevron rotation                        | transform 300ms strong ease-out                                                                                                            |
-| Unfold (collapsed → open)               | the subtree's box revealed top-down (clip-path) + fade, the rows below slide down (transform), 200ms strong ease-out                       |
-| Fold (open → collapsed)                 | the box, out of the flow, covered bottom-up + fade as the rows below slide up over it, 200ms strong ease-out; its rows linger inert for it |
-| Todo check → text mutes                 | color 200ms ease                                                                                                                           |
-| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms                                                                                                     |
+| What                                    | How                                                                                                                              |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Hover affordances                       | opacity 150ms ease-out                                                                                                           |
+| Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease                                                                                                      |
+| Block line hover (neutral)              | background-color 100ms ease                                                                                                      |
+| Selection highlight                     | background-color + color 100ms ease                                                                                              |
+| Chevron rotation                        | transform 300ms ease-in-out, in step with the fold                                                                               |
+| Unfold (collapsed → open)               | the subtree's box revealed top-down (clip-path), the rows below slide down (transform), 300ms ease-in-out, no fade: an accordion |
+| Fold (open → collapsed)                 | the box, out of the flow, covered bottom-up as the rows below slide up over it, 300ms ease-in-out; its rows linger inert for it  |
+| Todo check → text mutes                 | color 200ms ease                                                                                                                 |
+| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms                                                                                           |
 
 Press feedback lives on the **control**, never the content: collapsing a
 subtree gives the chevron a pressed scale and hover surface. Pressed scale is
@@ -342,7 +343,8 @@ state change afterwards (fold-motion.ts, the FLIP technique on the Web
 Animations API): the editor is laid out once, in its final shape, then the
 rows that moved slide from where they were on a `transform`, and the
 parent's children — one box, its rows full size throughout — are revealed
-or covered by a `clip-path` with a fade. A folding box leaves the flow
+or covered by a `clip-path`: the edge alone, no fade, the way an accordion
+opens and shuts, at an accordion's pace. A folding box leaves the flow
 first, so the rows below are in their final places at once and the sweep is
 them sliding up over it. Everything runs on the compositor, so nothing
 jitters, and it never holds the editor up: the state changes at once, and
@@ -350,7 +352,7 @@ the rows a fold hid stay only as inert ghosts in the box for the
 animation's length (`folding`), so `Space` on repeat is as quick as ever.
 Nothing clips at rest, so a to-do's chevron beside its checkbox and a
 heading's hash, which reach beyond their row, always show. Reduced motion
-keeps the fade and drops the slide and the sweep.
+swaps the motion for a short fade.
 
 **What never animates:**
 

@@ -8,29 +8,32 @@
  * every frame, and each row lands on a fresh subpixel boundary as it goes,
  * which is the jitter. Here nothing lays out twice: the rows that moved
  * slide from where they were to where they are on a `transform`, and the
- * subtree's box is revealed or covered by a `clip-path` with a fade, all of
- * which the compositor runs off the main thread (the FLIP technique, on the
- * Web Animations API). A folding box leaves the flow first
+ * subtree's box is revealed or covered by a `clip-path` — the edge alone,
+ * no fade, the way an accordion's panel opens and shuts — all of which the
+ * compositor runs off the main thread (the FLIP technique, on the Web
+ * Animations API). A folding box leaves the flow first
  * (`.block-subtree-ghost`, block-editor.css), so the rows below are already
  * in their final places and the sweep over the departing rows is the rows
  * below sliding up — the clip keeps the departing rows exactly under them.
  *
  * Where the Web Animations API is missing (tests) nothing animates, and the
- * state change simply shows. Reduced motion keeps a short fade on the box
- * (it aids comprehension) and drops the slide and the sweep.
+ * state change simply shows. Reduced motion swaps the motion for a short
+ * fade on the box (it aids comprehension) and drops the slide.
  */
 
 /** The fold's length: how long its ghosts stay, and how long the rows
- * slide. One figure for everything, so the sweep and the slide agree. */
-export const FOLD_MS = 200
+ * slide. One figure for everything, so the sweep and the slide agree, and
+ * the chevron's turn (block-item.tsx) is the same length. An accordion's
+ * pace: unhurried enough to follow the edge. */
+export const FOLD_MS = 300
 
 /** The fade a reduced-motion fold keeps. */
 const FADE_MS = 120
 
-/** The motion's easing, `--ease-out-strong` (variables.css), read from the
- * page so the token stays the one source; this is its value, as a
- * fallback. */
-const EASE_OUT_STRONG = "cubic-bezier(0.23, 1, 0.32, 1)"
+/** The motion's easing, `--ease-in-out` (variables.css) — an accordion's
+ * curve, gathering pace then settling — read from the page so the token
+ * stays the one source; this is its value, as a fallback. */
+const EASE_IN_OUT = "cubic-bezier(0.65, 0, 0.35, 1)"
 
 /** How far a `clip-path` reaches beyond the box's sides and top, so a to-do's
  * chevron beside its checkbox (in the row's margin) or a heading's hash,
@@ -62,8 +65,8 @@ function prefersReducedMotion(): boolean {
 }
 
 function easing(): string {
-  const token = getComputedStyle(document.documentElement).getPropertyValue("--ease-out-strong")
-  return token.trim() || EASE_OUT_STRONG
+  const token = getComputedStyle(document.documentElement).getPropertyValue("--ease-in-out")
+  return token.trim() || EASE_IN_OUT
 }
 
 /** The key a measured element is filed under: a row's occurrence, or a
@@ -136,9 +139,8 @@ function cancelBox(el: HTMLElement): void {
 
 /**
  * Unfold a subtree's box that has just appeared: revealed from its top
- * down, fading in, while the rows below slide down out of its way
- * (`slideRows`). The rows inside are full size from the first frame —
- * only the edge moves.
+ * down while the rows below slide down out of its way (`slideRows`). The
+ * rows inside are full size from the first frame — only the edge moves.
  */
 export function unfoldBox(el: HTMLElement): void {
   if (!hasWebAnimations()) return
@@ -147,19 +149,17 @@ export function unfoldBox(el: HTMLElement): void {
     el.animate([{ opacity: 0 }, { opacity: 1 }], { id: BOX_ID, duration: FADE_MS, easing: "ease" })
     return
   }
-  el.animate(
-    [
-      { clipPath: clip("100%"), opacity: 0 },
-      { clipPath: clip("0%"), opacity: 1 },
-    ],
-    { id: BOX_ID, duration: FOLD_MS, easing: easing() },
-  )
+  el.animate([{ clipPath: clip("100%") }, { clipPath: clip("0%") }], {
+    id: BOX_ID,
+    duration: FOLD_MS,
+    easing: easing(),
+  })
 }
 
 /**
  * Fold a subtree's box that has just left the flow (a ghost): covered from
- * its bottom up, fading out, at exactly the pace the rows below slide up
- * over it, and held covered until the ghost goes (`fill: forwards`).
+ * its bottom up at exactly the pace the rows below slide up over it, and
+ * held covered until the ghost goes (`fill: forwards`).
  */
 export function foldBox(el: HTMLElement): void {
   if (!hasWebAnimations()) return
@@ -173,11 +173,10 @@ export function foldBox(el: HTMLElement): void {
     })
     return
   }
-  el.animate(
-    [
-      { clipPath: clip("0%"), opacity: 1 },
-      { clipPath: clip("100%"), opacity: 0 },
-    ],
-    { id: BOX_ID, duration: FOLD_MS, easing: easing(), fill: "forwards" },
-  )
+  el.animate([{ clipPath: clip("0%") }, { clipPath: clip("100%") }], {
+    id: BOX_ID,
+    duration: FOLD_MS,
+    easing: easing(),
+    fill: "forwards",
+  })
 }

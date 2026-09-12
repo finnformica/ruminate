@@ -534,7 +534,7 @@ export function BlockItem({
         className={cx(
           // A quarter turn, long enough to read as a turn rather than a
           // swap, easing out to rest with no overshoot.
-          "transition-transform duration-300 ease-[var(--ease-out-strong)] motion-reduce:transition-none",
+          "transition-transform duration-300 ease-[var(--ease-in-out)] motion-reduce:transition-none",
           isCollapsed || looped ? "rotate-0" : "rotate-90",
         )}
       >

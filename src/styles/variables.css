@@ -172,6 +172,9 @@
 
   /* Motion */
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  /* An accordion's curve: gathers pace, then settles. The fold and its
+     chevron share it, so they move as one. */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
 
   /* Icons */
   --icon-size: 16px;
