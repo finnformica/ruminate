@@ -7,6 +7,7 @@ import { ensureTenantMeta, forTenant, type TenantDb } from "../tenancy-db"
 import type { Env } from "../types"
 import { corpusPullFull, corpusPullSince, corpusPut, corpusStatus } from "./replica-corpus"
 import {
+  REPLICA_PROTOCOL_HEADERS,
   parseReplicaPayload,
   parseSinceCursor,
   planReplicaPut,
@@ -621,6 +622,44 @@ describe("tenant scoping — the adversarial suite", () => {
     expect(response.status).toBe(200)
     const owners = await driver.exec("SELECT DISTINCT user_id FROM nodes ORDER BY user_id")
     expect(owners).toEqual([{ user_id: 111 }])
+  })
+
+  it("a pre-0005 timestamp cursor is served as a full pull, not an empty one", async () => {
+    const { env } = await seededEnv()
+    // What a client on a cached pre-0005 bundle still sends: the ms-timestamp
+    // cursor it stored, which it has no guard against. `seq > 1.7e12` matches
+    // nothing, and that client would never pull again, silently.
+    const body = (await (
+      await get(env, "alice-token", "/api/replica/notes?since=1788891492616")
+    ).json()) as ReplicaCorpusBody
+    expect(body.nodes).toHaveLength(aliceRows.nodes.length)
+    // …and it leaves with a sequence cursor, so the next pull is exact.
+    expect(Number(body.cursor)).toBeLessThan(1e12)
+  })
+
+  it("a client below the minimum protocol is refused with 409", async () => {
+    const { env } = await seededEnv()
+    const strict = { ...env, MIN_REPLICA_PROTOCOL: "1" }
+    // No header at all: a pre-header client.
+    const old = await get(strict, "alice-token", "/api/replica/notes")
+    expect(old.status).toBe(409)
+    expect(await old.json()).toEqual({ error: "client_too_old", minimum: 1 })
+    // The current build.
+    const current = await replica(
+      new Request("https://example.com/api/replica/notes", {
+        headers: { ...authHeaders("alice-token"), ...REPLICA_PROTOCOL_HEADERS },
+      }),
+      strict,
+      github,
+    )
+    expect(current.status).toBe(200)
+  })
+
+  it("the protocol gate sits behind auth: no session, no verdict", async () => {
+    const { env } = await seededEnv()
+    const strict = { ...env, MIN_REPLICA_PROTOCOL: "1" }
+    const res = await replica(new Request("https://example.com/api/replica/notes"), strict, github)
+    expect(res.status).toBe(401)
   })
 
   it("B's full pull contains none of A's rows", async () => {

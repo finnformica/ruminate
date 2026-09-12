@@ -77,7 +77,9 @@ export function PageLayout({
                 <Notice tone="warning">
                   {accessDenied === "blocked"
                     ? "This account has been blocked from syncing. Notes you write stay on this device only."
-                    : "Ruminate is invite-only — your sign-in isn't enabled yet. Notes you write stay on this device and will sync automatically if you're admitted."}
+                    : accessDenied === "client_too_old"
+                      ? "This version of Ruminate is too old to sync. Reload to update — notes you write stay on this device and will sync once you have."
+                      : "Ruminate is invite-only — your sign-in isn't enabled yet. Notes you write stay on this device and will sync automatically if you're admitted."}
                 </Notice>
               </div>
             ) : null}

@@ -1,5 +1,8 @@
 import { atom, getDefaultStore } from "jotai"
-import type { ReplicaChangesBody } from "../../worker/handlers/replica-payload"
+import {
+  LEGACY_TIMESTAMP_CURSOR_FLOOR,
+  type ReplicaChangesBody,
+} from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { SessionExpiredError } from "../utils/github-token"
 import {
@@ -55,19 +58,6 @@ import {
  */
 
 const PULL_CURSOR_KEY = "d1_pull_cursor"
-/**
- * Cursors at or above this are pre-0005 millisecond timestamps, not row
- * sequences, and mean nothing to a server that now compares `seq > ?`.
- *
- * A device that stored one before the cutover would otherwise ask for
- * `seq > 1788891492616`, match nothing, and never pull again — silently, and
- * forever. Treating it as "no cursor" costs that device one full pull and
- * leaves it on a sequence cursor from then on.
- *
- * The two spaces cannot collide in practice: sequences count writes from 1 and
- * this floor is a trillion, which the corpus would reach roughly never.
- */
-const LEGACY_TIMESTAMP_CURSOR_FLOOR = 1e12
 /** The identity (GitHub id, or login for pre-id sessions) whose notes the
  * local database holds. The server is owner-locked, but the OPFS cache
  * follows the browser profile — on a shared machine a different signed-in

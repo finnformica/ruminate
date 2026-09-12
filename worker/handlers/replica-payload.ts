@@ -440,9 +440,42 @@ export function planReplicaPut(payload: ReplicaPutPayload, now: number): SqlStat
 }
 
 /**
- * Parse the `since` query param: the cursor is a ms-timestamp string (minted
- * by the client at push time, echoed back by pulls). Returns the numeric
- * timestamp, or null when malformed — the caller answers 400.
+ * The replica wire protocol this build speaks. Every client request carries it
+ * as `X-Replica-Protocol`; the Worker refuses anything below its minimum with
+ * `409 client_too_old` (replica.ts). Bump it with any change an OLD client
+ * cannot survive — a cursor whose meaning changed, a row shape it would
+ * misread — and raise the minimum in the same change. A refused client keeps
+ * working locally and shows a notice; what it can no longer do is drift
+ * silently, which is what a stale cached bundle did after 0005 (below).
+ *
+ * `0` is every client shipped before this header existed.
+ */
+const REPLICA_PROTOCOL = 1
+export const REPLICA_PROTOCOL_HEADER = "X-Replica-Protocol"
+/** Spread into every replica request's headers. */
+export const REPLICA_PROTOCOL_HEADERS = { [REPLICA_PROTOCOL_HEADER]: String(REPLICA_PROTOCOL) }
+
+/**
+ * Cursors at or above this are pre-0005 millisecond timestamps, not row
+ * sequences, and mean nothing to a server that compares `seq > ?`.
+ *
+ * A client that stored one before the cutover would otherwise ask for
+ * `seq > 1788891492616`, match nothing, and never pull again — silently, and
+ * forever. Both sides treat such a cursor as "no cursor": the client
+ * (database-mode.ts) so it never sends one, and the Worker (replica.ts) for
+ * the client on a cached bundle that predates that guard and has no way to
+ * be told. One full pull, then a sequence cursor from there on.
+ *
+ * The two spaces cannot collide: sequences count writes from 1 and this floor
+ * is a trillion, which the corpus would reach roughly never.
+ */
+export const LEGACY_TIMESTAMP_CURSOR_FLOOR = 1e12
+
+/**
+ * Parse the `since` query param: a row sequence (migrations/0005), as the
+ * digits the last pull answered with. Returns the number, or null when
+ * malformed — the caller answers 400. Whether it is a *legacy* cursor is the
+ * caller's question (`LEGACY_TIMESTAMP_CURSOR_FLOOR`), not a parse failure.
  */
 export function parseSinceCursor(raw: string): number | null {
   return /^\d{1,15}$/.test(raw) ? Number(raw) : null
