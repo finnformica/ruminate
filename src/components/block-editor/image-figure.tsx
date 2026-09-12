@@ -277,7 +277,12 @@ export function ImageFigure({
                 <span
                   aria-hidden
                   className={cx(
-                    "absolute top-1/2 h-8 max-h-[60%] w-1 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_1px_#00000073,0_1px_4px_#0000004d]",
+                    // `bg-[#fff]`, not `bg-white`: the theme replaces
+                    // Tailwind's palette wholesale (tailwind.config.cjs sets
+                    // `colors` outside `extend`), so there is no `white` and
+                    // `bg-white` emits nothing at all — the core came out
+                    // transparent and only the ring showed.
+                    "absolute top-1/2 h-8 max-h-[60%] w-1 -translate-y-1/2 rounded-full bg-[#fff] shadow-[0_0_0_1px_#00000073,0_1px_4px_#0000004d]",
                     side === "left" ? "left-2" : "right-2",
                   )}
                 />
