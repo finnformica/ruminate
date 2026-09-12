@@ -12,6 +12,7 @@
 
 import migration0003 from "../../migrations/0003_control_plane.sql?raw"
 import migration0007 from "../../migrations/0007_mcp_tokens.sql?raw"
+import migration0009 from "../../migrations/0009_mcp_token_usage.sql?raw"
 import { docToGraph } from "../../src/data/graph"
 import type { SqlDriver } from "../../src/data/sql-driver"
 import { corpusPut } from "../handlers/replica-corpus"
@@ -56,6 +57,7 @@ export async function createMcpTestEnv(): Promise<McpTestEnv> {
   const driver = await createTenantTestDriver()
   await driver.execScript(migration0003)
   await driver.execScript(migration0007)
+  await driver.execScript(migration0009)
 
   const db = asFakeD1(driver)
   const env = {

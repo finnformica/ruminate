@@ -15,6 +15,8 @@
  *   uploads (worker/handlers/images.ts, docs/images.md). Both optional: with
  *   either missing the image routes answer 501 and the feature is a no-op.
  */
+import type { RateLimiter } from "./mcp/rate-limit"
+
 export interface Env {
   ASSETS: Fetcher
   DB: D1Database
@@ -33,4 +35,12 @@ export interface Env {
   /** "true" switches the image routes on; the same variable, at build time,
    * switches the client's upload paths on. Anything else = off. */
   VITE_IMAGES_ENABLED?: string
+  /**
+   * The burst half of the MCP rate limit (docs/mcp-rate-limiting.md) —
+   * Cloudflare's rate-limiting binding, keyed by token id, configured in
+   * wrangler.jsonc. Optional: a deployment without it is still limited daily,
+   * just more slowly, which is the right reading of a binding that has not
+   * been rolled out yet.
+   */
+  MCP_BURST?: RateLimiter
 }

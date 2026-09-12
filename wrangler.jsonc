@@ -74,6 +74,22 @@
   // fails on a binding that names nothing: `npx wrangler r2 bucket create
   // ruminate-images`.
   "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "ruminate-images" }],
+  // The burst half of the MCP rate limit (docs/mcp-rate-limiting.md), keyed by
+  // token id. Here rather than in D1 because this is the check a runaway agent
+  // trips over and over, and refusing has to be cheaper than answering — this
+  // binding costs no database round trip at all. The daily half is a counter on
+  // the token's own row, where the write is bounded by the limit it enforces.
+  //
+  // `namespace_id` is an arbitrary number that names the counter; changing it
+  // resets everyone's window, so it does not change. `period` may only be 10 or
+  // 60 seconds.
+  "ratelimits": [
+    {
+      "name": "MCP_BURST",
+      "namespace_id": "1",
+      "simple": { "limit": 120, "period": 60 },
+    },
+  ],
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": true },

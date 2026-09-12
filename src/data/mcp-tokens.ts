@@ -24,6 +24,10 @@ export interface McpTokenSummary {
   expiresAt: number | null
   lastUsedAt: number | null
   revokedAt: number | null
+  /** Calls made today, and the cap. A limit nobody can see is a limit nobody
+   * can debug (docs/mcp-rate-limiting.md). */
+  callsToday: number
+  dailyLimit: number
 }
 
 export interface MintRequest {

@@ -275,9 +275,24 @@ pays for a batch.
 
 ---
 
-## 5. Bounds
+## 5. Bounds and limits
 
-A tool call's cost is now bounded on the way IN; the response is bounded on the way out.
+Three separate things are bounded: how many calls a token may make, what one call
+costs, and how much one response may contain.
+
+### How many calls
+
+Per **token**, because the token is the thing a person minted and can revoke. A **burst**
+limit of 120 calls a minute (Cloudflare's rate-limiting binding, no database round trip)
+catches a runaway loop within a minute; a **daily** limit of 5,000 catches the slow steady
+drain a burst limit is blind to. Over either, the answer is `429` with `Retry-After` and —
+for a tool call — a tool-execution error saying to wait and for how long, because the call
+was well formed and rephrasing it will not help. Settings → MCP access shows what each
+token has spent today. The design and its reasoning are in docs/mcp-rate-limiting.md.
+
+### What one response contains
+
+A tool call's cost is bounded on the way IN (§4); the response is bounded on the way out.
 Every collection has a `limit`, and every collection an agent could legitimately want the
 rest of has a `cursor`:
 
@@ -381,13 +396,12 @@ worth paying.
 
 ## 8. Not built yet
 
-Three follow-ups have their designs written down rather than their code:
+Two follow-ups have their designs written down rather than their code (rate limiting was the third, and is built — §5 and docs/mcp-rate-limiting.md):
 
-|                           |                                                                                                                                |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| docs/mcp-rate-limiting.md | No rate limiting exists. Its first half — not reading the whole corpus per call — is done (§4); the limits themselves are not. |
-| docs/mcp-search.md        | One search surface for the person and the agent, lexical then hybrid-semantic.                                                 |
-| docs/mcp-provenance.md    | Marking agent writes, and accepting or discarding them.                                                                        |
+|                        |                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| docs/mcp-search.md     | One search surface for the person and the agent, lexical then hybrid-semantic. |
+| docs/mcp-provenance.md | Marking agent writes, and accepting or discarding them.                        |
 
 ## 9. Files
 
@@ -400,7 +414,9 @@ Three follow-ups have their designs written down rather than their code:
 | `worker/mcp/tokens.ts`                  | Token storage, hashing, lookup                     |
 | `worker/mcp/graph-access.ts`            | The scoped view of the corpus, and the write path  |
 | `worker/mcp/graph-load.ts`              | Which rows a view reads — loaders only, no answers |
+| `worker/mcp/rate-limit.ts`              | How much an agent may ask for, and what it is told |
 | `worker/mcp/tools.ts`                   | Every tool, and the refusals before them           |
 | `src/data/ops-rows.ts`                  | Ops → rows, shared with the browser store's rule   |
 | `src/components/mcp-tokens-section.tsx` | The Settings panel                                 |
 | `migrations/0007_mcp_tokens.sql`        | The grants table                                   |
+| `migrations/0009_mcp_token_usage.sql`   | What a token has spent today                       |

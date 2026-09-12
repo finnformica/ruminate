@@ -36,11 +36,12 @@ export function createTestSqlDriver(): SqlDriver {
   return {
     exec: (sql, params = []) => {
       const statement = db.prepare(sql)
-      // `WITH` as well as `SELECT`: a recursive CTE is a query, and reading it
-      // with `.run()` hands back `[]` rather than rows. D1 does not care which
-      // verb a statement opens with, so a CTE that works in production would
-      // silently return nothing here — the worst way for a test to lie.
-      if (/^\s*(?:select|with)\b/i.test(sql)) {
+      // What returns rows, not what a statement opens with. `WITH RECURSIVE …
+      // SELECT` is a query, and so is `UPDATE … RETURNING`; reading either
+      // with `.run()` hands back `[]` rather than rows. D1 does not care, so a
+      // statement that works in production would silently return nothing here
+      // — the worst way for a test to lie.
+      if (/^\s*(?:select|with)\b/i.test(sql) || /\breturning\b/i.test(sql)) {
         return Promise.resolve(statement.all(...params) as Record<string, SqlValue>[])
       }
       statement.run(...params)
