@@ -120,6 +120,16 @@
     var(--accent-11) 40%,
     var(--color-text-secondary)
   );
+  /* The block editor's selection is drawn as a RING, not a fill (design
+     principles §3): a 1px hairline of the accent around the line, over a
+     wash far fainter than the nav row's. The app draws structure with
+     hairlines and small brightness steps everywhere else (cards, inputs,
+     the indent guides), so an outlined block reads as "this element,
+     selected" where a painted one read as a nav row dropped into the prose.
+     Both are computed-solid — the ring is mixed over the faint wash it sits
+     on — so a multi-select run's overlapping side edges never double up. */
+  --color-bg-selected-faint: color-mix(in srgb, var(--accent-9) 7%, var(--color-bg));
+  --color-border-selected: color-mix(in srgb, var(--accent-9) 45%, var(--color-bg-selected-faint));
 
   /* Border colors */
   --color-border: var(--neutral-a7);
@@ -212,6 +222,11 @@
     var(--accent-9) 8%,
     color-mix(in srgb, white 26%, var(--color-bg))
   );
+  /* The block ring on a dark page: a 4% white lift under it (an accent wash
+     this faint is invisible on near-black), and the hairline a shade
+     stronger than light's, since a dark ground eats a thin line. */
+  --color-bg-selected-faint: color-mix(in srgb, white 4%, var(--color-bg));
+  --color-border-selected: color-mix(in srgb, var(--accent-9) 55%, var(--color-bg-selected-faint));
 
   /* Border colors */
   --color-border-focus: var(--accent-11);
@@ -303,6 +318,9 @@
   --color-bg-selected: color-mix(in srgb, var(--accent-9) 18%, var(--color-bg));
   --color-bg-selected-hover: color-mix(in srgb, var(--accent-9) 22%, var(--color-bg));
   --color-bg-selected-active: color-mix(in srgb, var(--accent-9) 26%, var(--color-bg));
+  /* The block ring deepens with the same bias: a 45% sand-9 hairline would
+     sit within a step of the hover ring (`--color-border-secondary`). */
+  --color-border-selected: color-mix(in srgb, var(--accent-9) 60%, var(--color-bg-selected-faint));
 }
 
 [data-accent="green"] {
@@ -423,6 +441,8 @@
     --color-border-secondary: var(--color-text);
     --color-border-table: var(--color-text);
     --color-border-focus: var(--color-text);
+    --color-border-selected: var(--color-text);
+    --color-bg-selected-faint: var(--color-bg);
 
     /* Syntax colors */
     --color-syntax-cyan: var(--color-text);

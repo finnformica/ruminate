@@ -21,26 +21,32 @@ asks for it.
    _collapsed_ block keeps its chevron visible (the key stays hidden for the
    duration), so hidden content is never a secret. Without a hovering pointer
    (touch) the chevron simply stands in for a parent's key.
-3. **Selection has its own color.** Hover is neutral; selection is accent. A
-   block line hovers at a whisper (`--neutral-a2`, editable editors only —
-   never read-only views, the row being edited, or a selected row) and selects
-   with the app-wide **selected tokens** (`--color-bg-selected` /
-   `--color-text-selected`, `src/styles/variables.css`): a **luminous wash** —
-   a small accent contribution color-mixed over the app background — pale,
-   light, slightly tinted — rather than a solid accent step that reads as a
-   color band. Light scheme:
-   `color-mix(in srgb, var(--accent-9) 13%, var(--color-bg))`. Dark scheme:
-   the same wash over a **white-lifted** base —
-   `color-mix(in srgb, var(--accent-9) 8%, color-mix(in srgb, white 18%, var(--color-bg)))`
-   — so the lift does the "selected" work (a lightened row is unmistakable on
-   a dark page, and guaranteed lighter than any dark hover wash) and the
-   accent only names the color. A white lift is invisible on a light page, so
-   light gets none; its 13% wash is judged by eye to match the dark version's
-   weight. A highlighted block must read as "selected", not "hovered", and
+3. **Selection has its own color, and is drawn as a ring.** Hover is neutral;
+   selection is accent. Both are **hairlines, not fills**: the app draws
+   structure with 1px borders and small brightness steps everywhere else
+   (cards, inputs, the indent guides), so a block line is outlined, never
+   painted like a nav row. A block line hovers with a 1px inset ring in
+   `--color-border-secondary` and no fill (editable editors only — never
+   read-only views, the row being edited, or a selected row) and selects with
+   the **block selection tokens** (`--color-border-selected` /
+   `--color-bg-selected-faint` / `--color-text-selected`,
+   `src/styles/variables.css`): a 1px inset ring of the accent over a faint
+   wash. Light scheme: the ring is
+   `color-mix(in srgb, var(--accent-9) 45%, <wash>)` over a 7% accent-9 wash.
+   Dark scheme: the ring is 55% accent-9 (a dark ground eats a thin line)
+   over a 4% white lift (an accent wash that faint is invisible on
+   near-black). The Neutral accent's light ring deepens to 60%, as its wash
+   does, so it stays clear of the hover ring. Hover and selection therefore
+   differ in **kind** — a neutral line against an accent one — not merely in
+   weight; a highlighted block must read as "selected", not "hovered", and
    selection always wins visually.
-   `color-mix` of opaque inputs is **computed-solid**, keeping the two virtues
-   of the old solid step: no alpha muddying over the warm sand background, and
-   adjacent selected lines merge seamlessly where their surfaces overlap.
+   The ring is four inset box-shadows, one per edge, so a multi-select run
+   drops the edges that sit mid-run (`.block-run-top` / `.block-run-bottom`,
+   from the run-edge pairs in `block-item.tsx`) and reads as one outlined
+   surface. Ring and wash are `color-mix` of opaque inputs — the ring is mixed
+   over the wash it sits on — so both are **computed-solid**: no alpha
+   muddying over the warm sand background, and where adjacent selected lines
+   overlap on their run sides neither the fill nor the side lines double up.
    **The row's ink leans toward the accent** (the Notion-overlay effect): the
    selected line sets an inherited
    `color: color-mix(in srgb, var(--accent-12) 50%, var(--color-text))` (same
@@ -49,29 +55,31 @@ asks for it.
    selection, while elements with explicit colors (quote/done-todo secondary
    ink, tertiary markers, code, links) keep theirs.
    The structural class `bg-bg-secondary` stays on the line (tests and tooling
-   select on it); `.block-highlight` paints the wash on top.
-   **Selection follows the keyboard.** The accent surface is a promise that
+   select on it); `.block-highlight` draws the ring and wash on top.
+   **Selection follows the keyboard.** The accent ring is a promise that
    arrows work here, so it only shows while the editor actually owns the
    keyboard (focus inside its container). Whenever focus is elsewhere — the
    sidebar, a dialog, the `?` reference, the ⌘P palette mid-preview — the
-   selection demotes to the same wash language with the accent removed (the
+   selection demotes to the same ring language with the accent removed (the
    additive `.block-highlight-inactive` class), Finder/VS Code-style: still
-   visibly the selection, no longer claiming the keys. Light: a 10%
-   `--neutral-9` wash (≈ the old `--neutral-3` surface) — grayer than the
-   accent wash, a clear step above the hover whisper; dark: a 9% white lift
-   only — active's lift language minus the accent and two points of light,
-   landing between the hover wash and the active surface. The text tint
-   resets to plain inherited ink, so
-   demotion also drains the color from the text. Accent-independent, so all
-   five accents share one inactive surface per scheme, keeping the weight
-   order active > inactive > hover everywhere. Restoration rides the same
-   100ms fade — perceptually instant.
-   The same tokens mark "current" outside the editor: the sidebar's active
-   nav row / open note (`.nav-item[aria-current]`, with `-hover`/`-active`
-   steps of the same wash) and the notes/tags list keyboard highlight
-   (`.list-highlight`) use `--color-bg-selected` / `--color-text-selected`
-   verbatim — one color always means "you are here / keys act here", and
-   changing the selection color is a one-place edit in `variables.css`.
+   visibly the selection, no longer claiming the keys. The ring goes neutral,
+   at the hover ring's weight (light: 22% `--neutral-9` over the fill; dark:
+   a 14% white lift), and keeps a faint neutral fill under it (light: 4%
+   `--neutral-9`; dark: 4% white). The three states form one ladder — hover
+   is a neutral ring alone, inactive a neutral ring over a fill, active an
+   accent ring over a fill — keeping the order active > inactive > hover
+   everywhere. The text tint resets to plain inherited ink, so demotion also
+   drains the color from the text. Accent-independent, so all five accents
+   share one inactive treatment per scheme. Restoration rides the same 100ms
+   fades — perceptually instant.
+   Outside the editor "current" is still a **wash**: the sidebar's active nav
+   row / open note (`.nav-item[aria-current]`, with `-hover`/`-active` steps)
+   and the notes/tags list keyboard highlight (`.list-highlight`) use
+   `--color-bg-selected` / `--color-text-selected` verbatim — a list row is a
+   nav row and paints like one. Every one of these tokens is mixed from the
+   same `--accent-9`, so one color always means "you are here / keys act
+   here", and changing the selection color is a one-place edit in
+   `variables.css`.
 4. **View and edit are pixel-identical.** Every typographic property (size,
    weight, line-height, tracking) lives in `typographyFor` and is applied to both
    the rendered body _and_ the textarea. Nothing may style one branch only.
@@ -186,8 +194,10 @@ _is_ the page — keeping a full step between it and its depth-0 children.
   edge-to-edge, never overlap. A side that sits **mid-run** in a multi-select
   (this row and the adjacent visible row are both selected and their surfaces
   touch) gets the full 4px (`-mt-1 pt-1` / `-mb-1 pb-1`), deliberately
-  overlapping the neighbour's identical computed-solid wash (`color-mix` of
-  opaque inputs is opaque, so the overlap can't double up). Every pair keeps
+  overlapping the neighbour's identical computed-solid wash and ring side
+  lines (`color-mix` of opaque inputs is opaque, so the overlap can't double
+  up), and drops its own ring edge on that side so the run is outlined only
+  around its outside. Every pair keeps
   negative margin equal to padding, on both the view and edit branches, so
   baselines are identical in every state (the pixel-parity e2e enforces it).
 - **Multi-select reads as one surface.** The full 4px growth on run sides
@@ -217,20 +227,20 @@ full-width highlight.)
 
 ## Color roles
 
-| Role         | Light / dark token         | Used for                                                                               |
-| ------------ | -------------------------- | -------------------------------------------------------------------------------------- |
-| Ink          | `--color-text` (sand-12)   | body, headings, checked-off text ink                                                   |
-| Muted        | `--color-text-secondary`   | quotes, done todos, ordered numbers, crumbs                                            |
-| Faint        | `--color-text-tertiary`    | bullet dots, chevron, placeholders, `#`                                                |
-| Guide        | `--color-border-secondary` | indent guide lines (rest state)                                                        |
-| Structure    | `--color-border` (a7)      | quote bar, unchecked checkbox border                                                   |
-| Hover        | `--neutral-a2` tint        | non-selected block lines under the pointer                                             |
-| Selection    | `--color-bg-selected`      | selected block(s), list highlight — accent-9 wash: 13% light; dark 8% over an 18% lift |
-| Selected ink | `--color-text-selected`    | ink on a selected row — 50% toward accent-12                                           |
-| Inactive sel | neutral wash (see §3)      | the selection while the editor lacks focus — 10% neutral-9 light / 9% white lift dark  |
-| Current      | `--color-bg-selected`      | sidebar active route / open note row (same tokens as Selection)                        |
-| Accent solid | `--accent-9`               | checked checkbox fill                                                                  |
-| Transclusion | `--accent-a2` tint         | `((ref))` embeds — quietly "live" content                                              |
+| Role         | Light / dark token                                              | Used for                                                                                                                                                                       |
+| ------------ | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Ink          | `--color-text` (sand-12)                                        | body, headings, checked-off text ink                                                                                                                                           |
+| Muted        | `--color-text-secondary`                                        | quotes, done todos, ordered numbers, crumbs                                                                                                                                    |
+| Faint        | `--color-text-tertiary`                                         | bullet dots, chevron, placeholders, `#`                                                                                                                                        |
+| Guide        | `--color-border-secondary`                                      | indent guide lines (rest state)                                                                                                                                                |
+| Structure    | `--color-border` (a7)                                           | quote bar, unchecked checkbox border                                                                                                                                           |
+| Hover        | `--color-border-secondary` ring                                 | non-selected block lines under the pointer — 1px inset ring, no fill                                                                                                           |
+| Selection    | `--color-border-selected` ring over `--color-bg-selected-faint` | selected block(s) — 1px accent-9 ring (45% light / 55% dark) over a faint wash (7% accent light / 4% white lift dark); the list highlight keeps the `--color-bg-selected` wash |
+| Selected ink | `--color-text-selected`                                         | ink on a selected row — 50% toward accent-12                                                                                                                                   |
+| Inactive sel | neutral ring + fill (see §3)                                    | the selection while the editor lacks focus — 22% neutral-9 ring over a 4% fill light / 14% white ring over a 4% lift dark                                                      |
+| Current      | `--color-bg-selected`                                           | sidebar active route / open note row (same tokens as Selection)                                                                                                                |
+| Accent solid | `--accent-9`                                                    | checked checkbox fill                                                                                                                                                          |
+| Transclusion | `--accent-a2` tint                                              | `((ref))` embeds — quietly "live" content                                                                                                                                      |
 
 All roles are Radix alpha/step tokens, so both color schemes (and print, which
 remaps the semantic tokens) resolve automatically. Never hardcode a hex.
@@ -320,16 +330,16 @@ growing the row.
 
 Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`):
 
-| What                                    | How                                    |
-| --------------------------------------- | -------------------------------------- |
-| Hover affordances                       | opacity 150ms ease-out                 |
-| Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease            |
-| Block line hover (neutral)              | background-color 100ms ease            |
-| Selection highlight                     | background-color + color 100ms ease    |
-| Chevron rotation                        | transform 200ms strong ease-out        |
-| Expand (collapsed → open)               | children fade/rise in, 160ms ease-out  |
-| Todo check → text mutes                 | color 200ms ease                       |
-| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms |
+| What                                    | How                                              |
+| --------------------------------------- | ------------------------------------------------ |
+| Hover affordances                       | opacity 150ms ease-out                           |
+| Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease                      |
+| Block line hover (neutral)              | background-color 100ms ease                      |
+| Selection highlight                     | background-color + color + box-shadow 100ms ease |
+| Chevron rotation                        | transform 200ms strong ease-out                  |
+| Expand (collapsed → open)               | children fade/rise in, 160ms ease-out            |
+| Todo check → text mutes                 | color 200ms ease                                 |
+| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms           |
 
 Press feedback lives on the **control**, never the content: collapsing a
 subtree gives the chevron a pressed scale and hover surface, but the content

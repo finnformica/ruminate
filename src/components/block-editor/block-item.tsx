@@ -842,16 +842,19 @@ export function BlockItem({
             // and the block rhythm gains nothing.
             "relative -ml-0.5 -mr-0.5 flex items-start gap-2 rounded pl-1.5 pr-1.5",
             // Per-side vertical pairs. Mid-run sides also square their
-            // corners so the run reads as ONE surface rounded only at its
-            // ends (the editor computes which neighbours actually touch —
-            // heading top margins break a run). Nested rows sit 4px apart:
-            // 4+4 overlaps seamlessly (same solid); root rows sit 6px
-            // apart: 4+4 still overlaps 2px, so runs merge at every level.
-            runEdges?.top ? "-mt-1 pt-1 rounded-t-none" : "-mt-0.5 pt-0.5",
-            runEdges?.bottom ? "-mb-1 pb-1 rounded-b-none" : "-mb-0.5 pb-0.5",
+            // corners and drop that edge of the selection ring
+            // (`.block-run-*`, block-editor.css) so the run reads as ONE
+            // outlined surface, rounded and closed only at its ends (the
+            // editor computes which neighbours actually touch — heading top
+            // margins break a run). Nested rows sit 4px apart: 4+4 overlaps
+            // seamlessly (same solid fill, same solid side lines); root rows
+            // sit 6px apart: 4+4 still overlaps 2px, so runs merge at every
+            // level.
+            runEdges?.top ? "-mt-1 pt-1 rounded-t-none block-run-top" : "-mt-0.5 pt-0.5",
+            runEdges?.bottom ? "-mb-1 pb-1 rounded-b-none block-run-bottom" : "-mb-0.5 pb-0.5",
             // bg-bg-secondary is the structural "selected" hook (tests query
-            // it); .block-highlight paints the solid accent surface over it
-            // so selection reads as selected, not hovered.
+            // it); .block-highlight draws the accent ring and faint wash over
+            // it so selection reads as selected, not hovered.
             selected && "bg-bg-secondary block-highlight",
             // When the editor doesn't own the keyboard (focus is in the
             // sidebar, a dialog, the ⌘P palette mid-preview), the selection
