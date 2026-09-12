@@ -51,11 +51,12 @@ export interface BlockEditorApi {
   /** Display-only: no editing, selection, or mutation (collapse still works). */
   readOnly?: boolean
   /**
-   * Whether the editor owns the keyboard (focus is inside its container).
-   * While false, selected rows demote to the quiet inactive-selection surface
-   * (`.block-highlight-inactive`) so the highlight never claims a keyboard it
-   * doesn't have. Always true in read-only views (their highlight is display
-   * state, not a keyboard cursor).
+   * Whether the editor owns the keyboard: focus is inside its container and
+   * the user's last act was not a click on blank space (a key press hands it
+   * back). While false, selected rows demote to the quiet inactive-selection
+   * ring (`.block-highlight-inactive`) so the highlight never claims a
+   * keyboard it doesn't have. Always true in read-only views (their
+   * highlight is display state, not a keyboard cursor).
    */
   keyboardActive: boolean
   /** Highlight a row (leaves edit mode, collapses any multi-selection). */

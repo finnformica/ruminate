@@ -2006,6 +2006,40 @@ describe("keyboard ownership (inactive-selection dimming)", () => {
     expect(container.querySelector(".block-highlight-inactive")).toBeNull()
   })
 
+  it("demotes on a click on blank space and restores on the next key press", async () => {
+    const { container } = render(
+      <>
+        <Harness initial={"A\nB"} />
+        <div data-testid="blank" />
+      </>,
+    )
+    const root = editorRoot(container)
+    expect(document.activeElement).toBe(root)
+    expect(container.querySelector(".block-highlight-inactive")).toBeNull()
+
+    // Pointer-down on nothing in particular (neither a row nor a control):
+    // the selection demotes even though the editor keeps the keyboard.
+    fireEvent.pointerDown(container.querySelector('[data-testid="blank"]')!)
+    await settleFocus()
+    expect(document.activeElement).toBe(root)
+    expect(container.querySelector(".block-highlight-inactive")).not.toBeNull()
+    expect(container.querySelector(".block-highlight")).not.toBeNull()
+
+    // A bare modifier is not "using the keyboard"; an arrow key is, and the
+    // arrow still moves the selection.
+    fireEvent.keyDown(root, { key: "Shift" })
+    expect(container.querySelector(".block-highlight-inactive")).not.toBeNull()
+    fireEvent.keyDown(root, { key: "ArrowDown" })
+    expect(container.querySelector(".block-highlight-inactive")).toBeNull()
+    expect(container.querySelector(".block-highlight")!.textContent).toContain("B")
+
+    // A click on a row is a deliberate selection: active straight away.
+    fireEvent.pointerDown(container.querySelector('[data-testid="blank"]')!)
+    expect(container.querySelector(".block-highlight-inactive")).not.toBeNull()
+    fireEvent.pointerDown(container.querySelector("[data-block-line]")!)
+    expect(container.querySelector(".block-highlight-inactive")).toBeNull()
+  })
+
   it("stays active across internal focus moves (select → edit → select)", async () => {
     const { container } = render(<Harness initial={"A\nB"} />)
     const root = editorRoot(container)
