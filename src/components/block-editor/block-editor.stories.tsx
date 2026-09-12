@@ -124,7 +124,7 @@ export const Images: Story = {
     initial: "",
     initialDoc: {
       props: null,
-      rootBlockIds: ["blk_i1", "blk_i2", "blk_p1", "blk_i3", "blk_p2"],
+      rootBlockIds: ["blk_i1", "blk_i2", "blk_p1", "blk_i3", "blk_i4", "blk_p2"],
       blocks: {
         blk_i1: {
           id: "blk_i1",
@@ -151,6 +151,15 @@ export const Images: Story = {
           type: "image",
           text: "To the right, at half the row",
           props: { src: PICTURE("#6aa36f", 800, 800), align: "right", size: 50 },
+          children: [],
+        },
+        // A near-white picture: the case the resize handles and the toolbar
+        // have to survive, since both float over whatever the picture is.
+        blk_i4: {
+          id: "blk_i4",
+          type: "image",
+          text: "A pale picture, where the handles have nothing to contrast with",
+          props: { src: PICTURE("#f4f2ee", 1200, 400) },
           children: [],
         },
         blk_p2: { id: "blk_p2", type: "text", text: "", children: [] },

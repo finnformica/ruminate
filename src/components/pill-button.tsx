@@ -16,13 +16,19 @@ export const PillButton = React.forwardRef<HTMLButtonElement, PillButtonProps>(
       <Component
         ref={ref}
         className={cx(
-          "inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-full border bg-clip-border px-2 font-sans focus-visible:border-solid focus-visible:border-border-focus focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-border-focus",
+          // `focus-ring` is the app-wide focus treatment (a 2px inset accent
+          // ring); the border also goes solid so a dashed pill reads as focused
+          // at its edge too.
+          "focus-ring inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-full border bg-clip-border px-2 font-sans focus-visible:border-solid focus-visible:border-border-focus",
           "coarse:h-8 coarse:px-3 coarse:gap-2",
           variant === "dashed" &&
             "border-dashed border-border bg-transparent text-text-secondary hover:bg-bg-hover active:bg-bg-active",
           variant === "secondary" &&
             "border-transparent bg-bg-secondary hover:bg-bg-secondary-hover active:bg-bg-secondary-active",
-          variant === "primary" && "border-transparent bg-text text-bg",
+          // The inverted pill answers the pointer like every other control:
+          // it had no hover or press at all, so an applied tag filter was inert.
+          variant === "primary" &&
+            "border-transparent bg-text text-bg hover:bg-text-secondary active:bg-text-tertiary",
           className,
         )}
         {...props}

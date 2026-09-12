@@ -133,7 +133,7 @@ function AppearanceSection() {
                 size="small"
                 aria-pressed={isSelected}
                 onClick={() => setTheme(option.value)}
-                className={cx(isSelected && "ring-1 ring-inset ring-border-focus")}
+                selected={isSelected}
               >
                 {option.label}
               </Button>
@@ -158,6 +158,11 @@ function AppearanceSection() {
                 onClick={() => setAccent(option.value)}
                 className="focus-ring flex h-8 w-8 items-center justify-center rounded hover:bg-bg-hover active:bg-bg-active coarse:h-10 coarse:w-10"
               >
+                {/* The documented exception to "chosen is a fill": a swatch IS
+                  a fill, so the choice has to be drawn around it. The ring is
+                  ink, not accent — an accent ring on an accent swatch would
+                  vanish, and it keeps the button's own accent focus ring
+                  legible concentric with it. */}
                 <span
                   aria-hidden="true"
                   className={cx(
@@ -235,7 +240,7 @@ function EditorSection() {
                 size="small"
                 aria-pressed={isSelected}
                 onClick={() => setNewBlockMarker(preset.value)}
-                className={cx(isSelected && "ring-1 ring-inset ring-border-focus")}
+                selected={isSelected}
               >
                 {preset.label}
                 {preset.value ? (
