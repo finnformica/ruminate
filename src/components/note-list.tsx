@@ -358,10 +358,13 @@ export function NoteList({
                   key={id}
                   data-list-index={index}
                   className={cx(
-                    // The keyboard highlight on a card is a ring in the same
-                    // accent (the card's own surface must stay readable).
+                    // The keyboard highlight on a card is a ring: the card's
+                    // own surface must stay readable, so it can't be filled.
+                    // The ring is the SELECTED border, never the focus one —
+                    // the card inside is focusable, and a selected ring in the
+                    // focus colour was indistinguishable from focus itself.
                     activeIndex === index &&
-                      "rounded-[calc(var(--border-radius-base)+6px)] ring-2 ring-[color:var(--color-border-focus)]",
+                      "rounded-[calc(var(--border-radius-base)+6px)] ring-2 ring-border-selected",
                   )}
                 >
                   <NotePreviewCard id={id} />

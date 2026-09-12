@@ -328,8 +328,14 @@ function CalendarItem({
       }}
       aria-label={ariaLabel}
       className={cx(
-        "focus-ring relative flex w-full cursor-pointer justify-center rounded p-4 leading-4 text-text @container hover:bg-bg-hover active:bg-bg-active",
-        isActive && "font-bold bg-bg-secondary text-text",
+        "focus-ring relative flex w-full cursor-pointer justify-center rounded p-4 leading-4 text-text @container",
+        !isActive && "hover:bg-bg-hover active:bg-bg-active",
+        // The day you are looking at is a place, like the sidebar's current
+        // note, so it takes the app-wide selected surface and ink. It used to
+        // take `bg-bg-secondary`, the very value a cell hovers to, so the
+        // current day and a hovered day were the same colour.
+        isActive &&
+          "font-bold bg-bg-selected text-text-selected hover:bg-bg-selected-hover active:bg-bg-selected-active",
         // Show a dot if the date has notes
         hasNotes &&
           "after:pointer-events-none after:absolute after:bottom-1 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:content-['']",
@@ -475,8 +481,9 @@ function MonthWeekRow({
       aria-label={label}
       className={cx(
         "focus-ring relative flex h-12 items-center justify-center text-text-secondary -m-px",
-        !isWeekActive && "hover:bg-[var(--neutral-a2)] active:bg-[var(--neutral-a3)]",
-        isWeekActive && "font-bold bg-[var(--neutral-a3)] text-text",
+        !isWeekActive && "hover:bg-bg-hover active:bg-bg-active",
+        isWeekActive &&
+          "font-bold bg-bg-selected text-text-selected hover:bg-bg-selected-hover active:bg-bg-selected-active",
         hasWeekNotes &&
           "after:pointer-events-none after:absolute after:bottom-2 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:content-['']",
         hasWeekNotes && isWeekActive && "after:bg-text-secondary",
@@ -577,8 +584,9 @@ function MonthDateCell({
       className={cx(
         "focus-ring relative flex h-12 items-center justify-center -m-px",
         isOutsideMonth && !isActive ? "text-text-tertiary" : "text-text",
-        !isActive && "hover:bg-[var(--neutral-a2)] active:bg-[var(--neutral-a3)]",
-        isActive && "font-bold bg-[var(--neutral-a3)]",
+        !isActive && "hover:bg-bg-hover active:bg-bg-active",
+        isActive &&
+          "font-bold bg-bg-selected text-text-selected hover:bg-bg-selected-hover active:bg-bg-selected-active",
         hasNotes &&
           "after:pointer-events-none after:absolute after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:content-['']",
         hasNotes && isToday && "after:bottom-[6px]",

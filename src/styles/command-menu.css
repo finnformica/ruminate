@@ -38,6 +38,12 @@
   @apply cursor-default rounded px-3 py-2.5 leading-4;
 }
 
+/* The highlighted row. In the palette the pointer and the keyboard share one
+ * highlight — moving the mouse moves the cursor — so there is no separate
+ * hover to tell it apart from, and the hover surface is the right one to use.
+ * Named `bg-bg-hover` (not `bg-bg-secondary`, the identical rest surface) so
+ * the token says which job it is doing; the slash menu and the qualifier list
+ * work the same way and already use it. */
 [cmdk-dialog] [cmdk-item][aria-selected] {
-  @apply bg-bg-secondary;
+  @apply bg-bg-hover;
 }

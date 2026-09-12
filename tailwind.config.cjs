@@ -62,12 +62,16 @@ module.exports = {
         highlight: "var(--color-bg-highlight)",
         selection: "var(--color-bg-selection)",
         selected: "var(--color-bg-selected)",
+        "selected-hover": "var(--color-bg-selected-hover)",
+        "selected-active": "var(--color-bg-selected-active)",
+        "selected-faint": "var(--color-bg-selected-faint)",
       },
       border: {
         DEFAULT: "var(--color-border)",
         secondary: "var(--color-border-secondary)",
         table: "var(--color-border-table)",
         focus: "var(--color-border-focus)",
+        selected: "var(--color-border-selected)",
       },
     },
     borderRadius: {

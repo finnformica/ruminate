@@ -580,7 +580,7 @@ export function BlockItem({
           aria-label="Zoom into block"
           tabIndex={-1}
           onClick={() => api.zoomInto(block.id)}
-          className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-90 motion-reduce:active:scale-100"
+          className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-[background-color,transform] duration-150 hover:bg-bg-hover active:scale-90 motion-reduce:active:scale-100"
         >
           {/* Faint, like the chevron — pure chrome; content leads. */}
           <span aria-hidden className="block-glyph-fill size-1.5 rounded-full bg-text-tertiary" />
@@ -687,7 +687,7 @@ export function BlockItem({
             aria-label="Zoom into block"
             tabIndex={-1}
             onClick={() => api.zoomInto(block.id)}
-            className="-mx-0.5 cursor-pointer rounded-sm px-0.5 transition-[background-color,transform] duration-150 hover:bg-bg-secondary active:scale-95 motion-reduce:active:scale-100"
+            className="-mx-0.5 cursor-pointer rounded-sm px-0.5 transition-[background-color,transform] duration-150 hover:bg-bg-hover active:scale-95 motion-reduce:active:scale-100"
           >
             {olNumber}.
           </button>
@@ -923,7 +923,7 @@ function BlockIdBadge({ id }: { id: string }) {
         event.stopPropagation()
         void navigator.clipboard?.writeText(id).catch(() => {})
       }}
-      className="ml-auto shrink-0 select-none self-start rounded px-1 font-mono text-[11px] leading-relaxed text-text-tertiary hover:bg-bg-secondary hover:text-text-secondary"
+      className="ml-auto shrink-0 select-none self-start rounded px-1 font-mono text-[11px] leading-relaxed text-text-tertiary hover:bg-bg-hover hover:text-text-secondary"
     >
       {id}
     </button>
