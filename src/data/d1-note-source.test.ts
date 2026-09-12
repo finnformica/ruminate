@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
-import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
+import {
+  REPLICA_PROTOCOL_HEADERS,
+  type LinkRow,
+  type NodeRow,
+} from "../../worker/handlers/replica-payload"
 import { createD1NoteSource, expandPendingNodeIds, planPullApplication } from "./d1-note-source"
 
 /** Fake auth mirroring the real helpers: `withAuthRetry` refreshes once and
@@ -56,7 +60,7 @@ describe("createD1NoteSource", () => {
     expect(fetchImpl).toHaveBeenCalledWith("/api/replica/notes", {
       method: "GET",
       credentials: "same-origin",
-      headers: { Authorization: "Bearer tok-1" },
+      headers: { ...REPLICA_PROTOCOL_HEADERS, Authorization: "Bearer tok-1" },
     })
   })
 

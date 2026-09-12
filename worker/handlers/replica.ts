@@ -43,7 +43,12 @@ import {
 } from "../tenancy-db"
 import type { Env } from "../types"
 import { corpusPullFull, corpusPullSince, corpusPut, corpusStatus } from "./replica-corpus"
-import { parseReplicaPayload, parseSinceCursor } from "./replica-payload"
+import {
+  LEGACY_TIMESTAMP_CURSOR_FLOOR,
+  REPLICA_PROTOCOL_HEADER,
+  parseReplicaPayload,
+  parseSinceCursor,
+} from "./replica-payload"
 import { resolveTenancy, type VerifiedIdentity } from "./tenancy"
 
 /** Reject bodies larger than this (the whole row corpus is a few MB today). */
@@ -118,6 +123,31 @@ async function readyTenant(tenant: TenantDb): Promise<void> {
   if (rows.length < READY_KEYS.length) await ensureTenantMeta(tenant)
 }
 
+/**
+ * The oldest client protocol this Worker serves (`REPLICA_PROTOCOL` in
+ * replica-payload.ts is what the current build sends). Raise the code default
+ * in the same change that bumps the protocol; the `MIN_REPLICA_PROTOCOL` var
+ * overrides it so a client that turns out to be harmful can be shut out from
+ * the dashboard without a deploy.
+ *
+ * `0` admits every client shipped before the header existed. That is
+ * deliberate today: those clients are served correctly (`replicaPull` handles
+ * the one thing they get wrong), and refusing them would turn a working app
+ * into silent push failures — they predate the notice as well as the header.
+ */
+const MIN_REPLICA_PROTOCOL = 0
+
+function minProtocol(env: Env): number {
+  const raw = env.MIN_REPLICA_PROTOCOL
+  return raw !== undefined && /^\d{1,6}$/.test(raw) ? Number(raw) : MIN_REPLICA_PROTOCOL
+}
+
+/** Absent or unreadable both mean "predates the header", i.e. 0. */
+function clientProtocol(request: Request): number {
+  const raw = request.headers.get(REPLICA_PROTOCOL_HEADER)
+  return raw !== null && /^\d{1,6}$/.test(raw) ? Number(raw) : 0
+}
+
 /** Route /api/replica/* requests. Every route is session-guarded. */
 export async function replica(
   request: Request,
@@ -126,6 +156,14 @@ export async function replica(
 ): Promise<Response> {
   const session = await requireSession(request, env, fetchImpl)
   if (session instanceof Response) return session
+
+  // The protocol gate: after auth, so an unauthenticated caller learns
+  // nothing about the wire format; before any tenant work, so a refused
+  // client costs one control-plane read and nothing else.
+  const minimum = minProtocol(env)
+  if (clientProtocol(request) < minimum) {
+    return jsonResponse({ error: "client_too_old", minimum }, 409)
+  }
 
   const { pathname } = new URL(request.url)
   const method = request.method
@@ -151,15 +189,21 @@ export async function replica(
  * - `GET /api/replica/notes` → `{ nodes, links, cursor }`, every row of both
  *   tables, tombstones included.
  * - `GET /api/replica/notes?since=<cursor>` → the same shape with only the
- *   rows whose `updated_at > since`; because the comparison can miss (clock
- *   skew) the client pulls with an overlap window. A delete travels as an
- *   ordinary changed row carrying `deleted_at` — which is why this response no
- *   longer carries the corpus-wide key lists (see `replica-corpus.ts`).
+ *   rows whose `seq > since` — exact, because `seq` is assigned by the
+ *   database (migrations/0005), so no clock is compared and no overlap window
+ *   is needed. A delete travels as an ordinary changed row carrying
+ *   `deleted_at` — which is why this response carries nothing but rows (see
+ *   `replica-corpus.ts`).
  */
 async function replicaPull(request: Request, tenant: TenantDb): Promise<Response> {
   const sinceRaw = new URL(request.url).searchParams.get("since")
-  const since = sinceRaw === null ? null : parseSinceCursor(sinceRaw)
-  if (sinceRaw !== null && since === null) return jsonResponse({ error: "invalid_since" }, 400)
+  const parsed = sinceRaw === null ? null : parseSinceCursor(sinceRaw)
+  if (sinceRaw !== null && parsed === null) return jsonResponse({ error: "invalid_since" }, 400)
+  // A pre-0005 timestamp cursor, from a client on a cached bundle that
+  // predates the guard in database-mode.ts. `seq > 1.7e12` would match
+  // nothing, forever, and that client has no way to learn why: serve the
+  // corpus, and it leaves with a sequence cursor.
+  const since = parsed !== null && parsed >= LEGACY_TIMESTAMP_CURSOR_FLOOR ? null : parsed
 
   return jsonResponse(
     since === null ? await corpusPullFull(tenant) : await corpusPullSince(tenant, since),
