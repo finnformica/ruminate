@@ -35,7 +35,7 @@ const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringif
 
 const node = (id: string, updated_at = 0, text = id): NodeRow => ({
   id,
-  type: id.startsWith("blk_") ? "text" : "page",
+  type: id.startsWith("blk_") ? "text" : "note",
   text,
   props: null,
   updated_at,
@@ -126,7 +126,7 @@ describe("expandPendingNodeIds", () => {
     expect(expandPendingNodeIds(new Set(["a"]), links)).toEqual(new Set(["a", "blk_a1", "blk_a2"]))
   })
 
-  it("includes pending pages that have no local rows yet", () => {
+  it("includes pending notes that have no local rows yet", () => {
     expect(expandPendingNodeIds(new Set(["created"]), [])).toEqual(new Set(["created"]))
   })
 })

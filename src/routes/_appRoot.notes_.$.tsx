@@ -20,7 +20,7 @@ import { isSyncingAtom } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
 import { isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
-import { useNoteById, useRenameNote, useSetPageProps } from "../hooks/note"
+import { useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
 import { useNoteDoc } from "../hooks/note-doc"
 import { Width, fontSchema, widthSchema } from "../schema"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
@@ -107,11 +107,11 @@ function NotePage() {
     return { ...parse(""), props: tags.length > 0 ? { tags } : null }
   }, [defaultTags])
 
-  // The doc is the walk of the page over the live graph; every change the
+  // The doc is the walk of the note over the live graph; every change the
   // editor hands back becomes ops applied to the graph — see useNoteDoc.
   const {
     doc: editorDoc,
-    exists: pageExists,
+    exists: noteExists,
     setDoc,
   } = useNoteDoc({
     noteId,
@@ -127,7 +127,7 @@ function NotePage() {
     },
     [isSignedOut, setDoc],
   )
-  const setPageProps = useSetPageProps()
+  const setNoteProps = useSetNoteProps()
 
   // Resolve font (the `font` prop or default)
   const parseResult = fontSchema.safeParse(note?.props.font)
@@ -179,14 +179,14 @@ function NotePage() {
 
   const isSaving = pendingSave || isSyncing
 
-  // Page props (width, gist) are one `setProps` op, written at once.
+  // Note props (width, gist) are one `setProps` op, written at once.
   const setProp = React.useCallback(
     (patch: Record<string, unknown>) => {
       if (!noteId) return
-      setPageProps(noteId, patch)
+      setNoteProps(noteId, patch)
       requestDatabaseFlush()
     },
-    [noteId, setPageProps],
+    [noteId, setNoteProps],
   )
 
   const updateWidth = React.useCallback(
@@ -282,7 +282,7 @@ function NotePage() {
                   noteId={noteId}
                   doc={editorDoc}
                   onChange={setEditorDoc}
-                  startEditing={!pageExists && notesLoaded}
+                  startEditing={!noteExists && notesLoaded}
                   highlightHeading={highlightHeading}
                   onExitTop={() => setTitleFocusSignal((n) => n + 1)}
                   focusFirstSignal={focusFirstSignal}
@@ -296,7 +296,7 @@ function NotePage() {
                   }
                   noteTitle={note?.displayName ?? ""}
                 />
-                {noteId && pageExists ? <UnassignedBasket noteId={noteId} /> : null}
+                {noteId && noteExists ? <UnassignedBasket noteId={noteId} /> : null}
               </div>
             ) : (
               // The database stores current state only, so there is no

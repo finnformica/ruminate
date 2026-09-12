@@ -7,7 +7,7 @@ import { parse } from "../blocks/parse"
 import type { BlockProps } from "../blocks/types"
 import { rollup } from "./graph"
 import type { NoteStore } from "./note-store"
-import { deleteBlockOps, deletePageOps, docToOps } from "./ops"
+import { deleteBlockOps, deleteNoteOps, docToOps } from "./ops"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import { openSqlNoteStore } from "./sql-note-store"
 
@@ -17,7 +17,7 @@ async function makeStoreWithDriver() {
   return { driver, store }
 }
 
-/** Save a page as the app does: diff the doc against the live graph into ops,
+/** Save a note as the app does: diff the doc against the live graph into ops,
  * apply them. Markdown is only the fixture's spelling. */
 async function seed(
   store: NoteStore,
@@ -28,17 +28,17 @@ async function seed(
   return store.applyOps(docToOps(id, { ...parse(markdown), props }, await store.getGraph()))
 }
 
-/** A page's markdown projection off the live graph, or null when absent. */
+/** A note's markdown projection off the live graph, or null when absent. */
 const noteOf = async (store: NoteStore, id: string) => rollup(id, await store.getGraph())
 
 describe("openSqlNoteStore", () => {
-  it("lands a saved page as typed node and link rows", async () => {
+  it("lands a saved note as typed node and link rows", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "a", "# Hello\n  id:: blk_aaaaaaaaaa\n[ ] task\n  id:: blk_bbbbbbbbbb\n")
 
     const nodes = await driver.exec("SELECT id, type, text FROM nodes ORDER BY id")
     expect(nodes).toEqual([
-      { id: "a", type: "page", text: "a" },
+      { id: "a", type: "note", text: "a" },
       { id: "blk_aaaaaaaaaa", type: "h1", text: "Hello" },
       { id: "blk_bbbbbbbbbb", type: "todo", text: "task" },
     ])
@@ -138,10 +138,10 @@ describe("openSqlNoteStore", () => {
     expect(await noteOf(store, "a")).toBe("- keep\n  id:: blk_aaaaaaaaaa\n")
   })
 
-  it("tombstones a page's rows on delete and reports the diff", async () => {
+  it("tombstones a note's rows on delete and reports the diff", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "a", "# A note\n  id:: blk_aaaaaaaaaa\n")
-    const diff = await store.applyOps(deletePageOps("a", await store.getGraph()))
+    const diff = await store.applyOps(deleteNoteOps("a", await store.getGraph()))
 
     expect(diff.deleteNodes).toEqual([])
     expect(diff.nodes.map((node) => node.id).sort()).toEqual(["a", "blk_aaaaaaaaaa"])
@@ -150,15 +150,15 @@ describe("openSqlNoteStore", () => {
     expect(new Set(diff.nodes.map((node) => node.deleted_at)).size).toBe(1)
     expect(await noteOf(store, "a")).toBeNull()
     expect((await store.getGraph()).nodes.size).toBe(0)
-    // The rows — and the link that positions the block under the page — are
+    // The rows — and the link that positions the block under the note — are
     // still there, which is what makes a restore possible at all.
     expect(await driver.exec("SELECT COUNT(*) AS n FROM nodes")).toEqual([{ n: 2 }])
     expect(await driver.exec("SELECT COUNT(*) AS n FROM link")).toEqual([{ n: 1 }])
   })
 
-  it("retitling a note rewrites exactly one row — the page's", async () => {
+  it("retitling a note rewrites exactly one row — the note's", async () => {
     const { driver, store } = await makeStoreWithDriver()
-    const id = "blk_page00000"
+    const id = "blk_note00000"
     await seed(store, id, "keep me\n  id:: blk_aaaaaaaaaa\n", { title: "Old Name" })
     const before = await driver.exec("SELECT id, text, updated_at FROM nodes ORDER BY id")
 
@@ -208,7 +208,7 @@ describe("openSqlNoteStore", () => {
     await driver.batch([
       {
         sql: "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?, ?, ?, ?, ?)",
-        params: ["a", "page", "a", null, 100],
+        params: ["a", "note", "a", null, 100],
       },
     ])
 
@@ -237,7 +237,7 @@ describe("openSqlNoteStore", () => {
     await driver.batch([
       {
         sql: "INSERT INTO nodes (id, type, text, props, updated_at) VALUES (?, ?, ?, ?, ?)",
-        params: ["a", "page", "a", null, 100],
+        params: ["a", "note", "a", null, 100],
       },
     ])
     const store = await openSqlNoteStore(driver)
@@ -277,12 +277,12 @@ describe("openSqlNoteStore", () => {
 
   it("keeps existing data when reopening a database with the current schema", async () => {
     const { driver, store } = await makeStoreWithDriver()
-    await seed(store, "blk_page0000", "keep me\n  id:: blk_aaaaaaaaaa\n")
+    await seed(store, "blk_note0000", "keep me\n  id:: blk_aaaaaaaaaa\n")
     const reopened = await openSqlNoteStore(driver)
-    expect(await noteOf(reopened, "blk_page0000")).toBe("keep me\n  id:: blk_aaaaaaaaaa\n")
+    expect(await noteOf(reopened, "blk_note0000")).toBe("keep me\n  id:: blk_aaaaaaaaaa\n")
   })
 
-  it("never rewrites rows on open — a title-shaped page id is left alone", async () => {
+  it("never rewrites rows on open — a title-shaped note id is left alone", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "Flow Engineering", "body\n  id:: blk_aaaaaaaaaa\n")
     const before = await driver.exec("SELECT id, type, text, updated_at FROM nodes ORDER BY id")
@@ -300,16 +300,16 @@ describe("openSqlNoteStore", () => {
     )
   })
 
-  it("leaves daily and weekly pages on their date ids (the natural-key carve-out)", async () => {
+  it("leaves daily and weekly notes on their date ids (the natural-key carve-out)", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "2026-08-31", "today\n  id:: blk_aaaaaaaaaa\n")
     await seed(store, "2026-W35", "this week\n  id:: blk_bbbbbbbbbb\n")
 
     const reopened = await openSqlNoteStore(driver)
-    // Byte-identical: a date page's text IS its id, so no title is emitted.
+    // Byte-identical: a date note's text IS its id, so no title is emitted.
     expect(await noteOf(reopened, "2026-08-31")).toBe("today\n  id:: blk_aaaaaaaaaa\n")
     expect(await noteOf(reopened, "2026-W35")).toBe("this week\n  id:: blk_bbbbbbbbbb\n")
-    expect(await driver.exec("SELECT id FROM nodes WHERE type = 'page' ORDER BY id")).toEqual([
+    expect(await driver.exec("SELECT id FROM nodes WHERE type = 'note' ORDER BY id")).toEqual([
       { id: "2026-08-31" },
       { id: "2026-W35" },
     ])
@@ -388,12 +388,12 @@ describe("soft deletes", () => {
   it("stamps every row one delete retires with ONE timestamp", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "a", OUTLINE)
-    await store.applyOps(deletePageOps("a", await store.getGraph()))
+    await store.applyOps(deleteNoteOps("a", await store.getGraph()))
 
     const stamps = await driver.exec(
       "SELECT deleted_at FROM nodes UNION ALL SELECT deleted_at FROM link",
     )
-    expect(stamps).toHaveLength(5) // page + 2 blocks + 2 retained links
+    expect(stamps).toHaveLength(5) // note + 2 blocks + 2 retained links
     const tombstones = stamps.map((row) => row.deleted_at).filter((value) => value !== null)
     expect(tombstones).toHaveLength(3) // the three nodes; links are retained
     expect(new Set(tombstones).size).toBe(1)
@@ -416,10 +416,10 @@ describe("soft deletes", () => {
   it("keeps the link to a deleted node — the position a restore would use", async () => {
     const { driver, store } = await makeStoreWithDriver()
     await seed(store, "a", OUTLINE)
-    // Delete the page: the whole subtree is retired, but EVERY containment row
+    // Delete the note: the whole subtree is retired, but EVERY containment row
     // that describes its shape is retained, not cascaded — including the
-    // page's own link to the block that was directly under it.
-    await store.applyOps(deletePageOps("a", await store.getGraph()))
+    // note's own link to the block that was directly under it.
+    await store.applyOps(deleteNoteOps("a", await store.getGraph()))
 
     expect(
       await driver.exec(

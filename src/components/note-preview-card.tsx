@@ -4,7 +4,7 @@ import { useAtomValue, useStore } from "jotai"
 import React from "react"
 import { rollup } from "../data/graph"
 import { graphSnapshotAtom, isSignedOutAtom } from "../global-state"
-import { useDeleteNote, useNoteById, useSetPageProps } from "../hooks/note"
+import { useDeleteNote, useNoteById, useSetNoteProps } from "../hooks/note"
 import { NoteId } from "../schema"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { cx } from "../utils/cx"
@@ -20,7 +20,7 @@ type NoteCardProps = {
 export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProps) {
   const note = useNoteById(id)
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  const setPageProps = useSetPageProps()
+  const setNoteProps = useSetNoteProps()
   const jotaiStore = useStore()
   const deleteNote = useDeleteNote()
   const [isDropdownOpen, setIsDropdownOpen] = React.useState(false)
@@ -63,7 +63,7 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
           disabled={isSignedOut}
           onClick={() => {
             if (isSignedOut) return
-            setPageProps(id, { pinned: note.pinned ? null : true })
+            setNoteProps(id, { pinned: note.pinned ? null : true })
           }}
         >
           {note.pinned ? <PinFillIcon16 className="text-text-pinned" /> : <PinIcon16 />}

@@ -19,7 +19,7 @@ import type { Op } from "./ops"
  */
 export interface NoteStore {
   /** The live graph — every non-tombstoned node and child link — indexed for
-   * walking (`docFromGraph`, `pageDoc`). What the app renders from. */
+   * walking (`docFromGraph`, `noteDoc`). What the app renders from. */
   getGraph(): Promise<GraphSnapshot>
   /**
    * Apply a batch of graph ops as row writes, in one transaction:

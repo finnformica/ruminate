@@ -2,6 +2,7 @@
 // tombstones included) on purpose: that is how it proves the scoping works.
 import { describe, expect, it } from "vitest"
 import migration0003 from "../../migrations/0003_control_plane.sql?raw"
+import migration0008 from "../../migrations/0008_note_type.sql?raw"
 import type { SqlDriver } from "../../src/data/sql-driver"
 import { ensureTenantMeta, forTenant, type TenantDb } from "../tenancy-db"
 import type { Env } from "../types"
@@ -223,7 +224,7 @@ const withSeq = <T>(row: T, seq: number): T & { seq: number } => ({ ...row, seq 
 
 describe("corpus operations over the real D1 schema", () => {
   const nodes: NodeRow[] = [
-    { id: "blk_noteaaaaaa", type: "page", text: "blk_noteaaaaaa", props: null, updated_at: 100 },
+    { id: "blk_noteaaaaaa", type: "note", text: "blk_noteaaaaaa", props: null, updated_at: 100 },
     { id: "blk_a000000000", type: "text", text: "A", props: null, updated_at: 300 },
   ]
   const links: LinkRow[] = [
@@ -261,7 +262,7 @@ describe("corpus operations over the real D1 schema", () => {
     )
 
     const body = await corpusPullSince(tenant, Number(cursor))
-    // Exhaustive: the unchanged page and link must not ride along in any shape.
+    // Exhaustive: the unchanged note and link must not ride along in any shape.
     expect(body).toEqual({
       nodes: [withSeq({ ...nodes[1], text: "A2", updated_at: 301 }, 4)],
       links: [],
@@ -392,7 +393,7 @@ describe("corpus operations over the real D1 schema", () => {
 describe("soft deletes at the replica", () => {
   const rows = {
     nodes: [
-      { id: "blk_noteaaaaaa", type: "page", text: "blk_noteaaaaaa", props: null, updated_at: 100 },
+      { id: "blk_noteaaaaaa", type: "note", text: "blk_noteaaaaaa", props: null, updated_at: 100 },
       { id: "blk_a000000000", type: "text", text: "A", props: null, updated_at: 100 },
     ],
     links: [
@@ -574,7 +575,7 @@ describe("tenant scoping — the adversarial suite", () => {
   })
   const aliceRows = {
     nodes: [
-      { id: "blk_noteaaaaaa", type: "page", text: "alice's note", props: null, updated_at: 100 },
+      { id: "blk_noteaaaaaa", type: "note", text: "alice's note", props: null, updated_at: 100 },
       { id: "blk_secret0001", type: "text", text: "alice's secret", props: null, updated_at: 100 },
     ],
     links: [
@@ -588,18 +589,26 @@ describe("tenant scoping — the adversarial suite", () => {
     ],
   }
 
+  // Every request here is a CURRENT client: the protocol gate's code default
+  // is 2 (migrations/0008), so a request without the header is refused before
+  // any of the scoping these tests are about is reached.
+  const clientHeaders = (token: string) => ({ ...authHeaders(token), ...REPLICA_PROTOCOL_HEADERS })
   const push = (env: Env, token: string, body: unknown, query = "") =>
     replica(
       new Request(`https://example.com/api/replica/notes${query}`, {
         method: "PUT",
-        headers: authHeaders(token),
+        headers: clientHeaders(token),
         body: JSON.stringify(body),
       }),
       env,
       github,
     )
   const get = (env: Env, token: string, path: string) =>
-    replica(new Request(`https://example.com${path}`, { headers: authHeaders(token) }), env, github)
+    replica(
+      new Request(`https://example.com${path}`, { headers: clientHeaders(token) }),
+      env,
+      github,
+    )
 
   async function seededEnv(): Promise<{ env: Env; driver: SqlDriver }> {
     const made = await testEnv()
@@ -613,7 +622,7 @@ describe("tenant scoping — the adversarial suite", () => {
     const response = await replica(
       new Request("https://example.com/api/replica/notes?github_id=222&tenant=222&user_id=222", {
         method: "PUT",
-        headers: { ...authHeaders("alice-token"), "X-GitHub-Id": "222", "X-Tenant": "222" },
+        headers: { ...clientHeaders("alice-token"), "X-GitHub-Id": "222", "X-Tenant": "222" },
         body: JSON.stringify({ ...aliceRows, user_id: 222, tenant: 222, cursor: "c1" }),
       }),
       env,
@@ -639,25 +648,44 @@ describe("tenant scoping — the adversarial suite", () => {
 
   it("a client below the minimum protocol is refused with 409", async () => {
     const { env } = await seededEnv()
-    const strict = { ...env, MIN_REPLICA_PROTOCOL: "1" }
-    // No header at all: a pre-header client.
-    const old = await get(strict, "alice-token", "/api/replica/notes")
-    expect(old.status).toBe(409)
-    expect(await old.json()).toEqual({ error: "client_too_old", minimum: 1 })
-    // The current build.
-    const current = await replica(
+    // No header at all: a pre-header client, against the CODE default — which
+    // is 2 since the note-type rewrite (migrations/0008).
+    const old = await replica(
       new Request("https://example.com/api/replica/notes", {
-        headers: { ...authHeaders("alice-token"), ...REPLICA_PROTOCOL_HEADERS },
+        headers: authHeaders("alice-token"),
       }),
-      strict,
+      env,
       github,
     )
-    expect(current.status).toBe(200)
+    expect(old.status).toBe(409)
+    expect(await old.json()).toEqual({ error: "client_too_old", minimum: 2 })
+    // The current build.
+    expect((await get(env, "alice-token", "/api/replica/notes")).status).toBe(200)
+  })
+
+  it("the MIN_REPLICA_PROTOCOL var overrides the code default, either way", async () => {
+    const { env } = await seededEnv()
+    // Lowered: a pre-header client is let back in without a deploy.
+    const lax = { ...env, MIN_REPLICA_PROTOCOL: "0" }
+    const old = await replica(
+      new Request("https://example.com/api/replica/notes", {
+        headers: authHeaders("alice-token"),
+      }),
+      lax,
+      github,
+    )
+    expect(old.status).toBe(200)
+    // Raised above what this build speaks: even the current client is shut out
+    // — the dashboard lever the note-type rollout pulls BEFORE the migration.
+    const strict = { ...env, MIN_REPLICA_PROTOCOL: "3" }
+    const current = await get(strict, "alice-token", "/api/replica/notes")
+    expect(current.status).toBe(409)
+    expect(await current.json()).toEqual({ error: "client_too_old", minimum: 3 })
   })
 
   it("the protocol gate sits behind auth: no session, no verdict", async () => {
     const { env } = await seededEnv()
-    const strict = { ...env, MIN_REPLICA_PROTOCOL: "1" }
+    const strict = { ...env, MIN_REPLICA_PROTOCOL: "3" }
     const res = await replica(new Request("https://example.com/api/replica/notes"), strict, github)
     expect(res.status).toBe(401)
   })
@@ -692,7 +720,7 @@ describe("tenant scoping — the adversarial suite", () => {
       nodes: [
         {
           id: "blk_noteaaaaaa",
-          type: "page",
+          type: "note",
           text: "bob's overwrite",
           props: null,
           updated_at: 999999,
@@ -788,12 +816,119 @@ describe("the control plane is not tenant data", () => {
       SIGNUP_MODE: "open",
     } as unknown as Env
     const response = await replica(
-      new Request("https://example.com/api/replica/status", { headers: authHeaders("new-token") }),
+      new Request("https://example.com/api/replica/status", {
+        headers: { ...authHeaders("new-token"), ...REPLICA_PROTOCOL_HEADERS },
+      }),
       env,
       github,
     )
     expect(response.status).toBe(200)
     expect(await driver.exec("SELECT github_id FROM users")).toEqual([{ github_id: 4242 }])
+  })
+})
+
+describe("migrations/0008 — the stored note-root type value", () => {
+  // 0008 is a DATA migration, so it is deliberately not in the corpus ladder
+  // (src/data/corpus-schema.ts is DDL only). It still has to be valid SQL
+  // against the real D1 shape, and it still has to rewrite the right rows and
+  // move the right columns — which is what running the real file against the
+  // real schema proves.
+  const seedNode = (driver: SqlDriver, tenant: number, id: string, type: string, seq: number) =>
+    driver.exec(
+      "INSERT INTO nodes (user_id, id, type, text, props, updated_at, seq) " +
+        "VALUES (?1, ?2, ?3, ?2, NULL, 100, ?4)",
+      [tenant, id, type, seq],
+    )
+  const seedLink = (driver: SqlDriver, tenant: number, source: string, seq: number) =>
+    driver.exec(
+      "INSERT INTO link (user_id, source_id, destination_id, kind, sort_key, updated_at, seq) " +
+        "VALUES (?1, ?2, 'blk_child00000', 'child', 'a0', 100, ?3)",
+      [tenant, source, seq],
+    )
+
+  it("rewrites every page row — tombstones included — and nothing else", async () => {
+    const driver = await createTenantTestDriver()
+    await seedNode(driver, 111, "blk_noteaaaaaa", "page", 1)
+    await seedNode(driver, 111, "blk_blockaaaaa", "text", 2)
+    await seedNode(driver, 111, "blk_futureaaaa", "note", 3)
+    await driver.exec(
+      "INSERT INTO nodes (user_id, id, type, text, updated_at, seq, deleted_at) " +
+        "VALUES (111, 'blk_notedeadaa', 'page', 'x', 100, 4, 500)",
+    )
+    await driver.execScript(migration0008)
+    expect(await driver.exec("SELECT id, type FROM nodes ORDER BY id")).toEqual([
+      { id: "blk_blockaaaaa", type: "text" },
+      { id: "blk_futureaaaa", type: "note" },
+      { id: "blk_noteaaaaaa", type: "note" },
+      { id: "blk_notedeadaa", type: "note" },
+    ])
+    // No `page` left anywhere, which is what makes the rewrite one-way.
+    expect(await driver.exec("SELECT COUNT(*) AS n FROM nodes WHERE type = 'page'")).toEqual([
+      { n: 0 },
+    ])
+    // …and the scratch table it uses for the sequence arithmetic is gone.
+    expect(
+      await driver.exec("SELECT name FROM sqlite_master WHERE name = 'note_type_seq_base'"),
+    ).toEqual([])
+  })
+
+  it("lifts every rewritten row's `seq` above any cursor a client could hold", async () => {
+    // A client's cursor is the highest `seq` it has pulled, across BOTH tables
+    // (corpusPullFull/corpusPullSince). Every rewritten row must land above it,
+    // or the since-pull that is meant to deliver this change skips it.
+    const driver = await createTenantTestDriver()
+    await seedNode(driver, 111, "blk_noteaaaaaa", "page", 1)
+    await seedNode(driver, 111, "blk_notebbbbbb", "page", 2)
+    await seedNode(driver, 111, "blk_blockaaaaa", "text", 3)
+    await seedLink(driver, 111, "blk_noteaaaaaa", 9) // the tenant's true high-water mark
+    await driver.execScript(migration0008)
+
+    const cursor = 9
+    const rewritten = (await driver.exec(
+      "SELECT id, seq FROM nodes WHERE user_id = 111 AND type = 'note' ORDER BY seq",
+    )) as { id: string; seq: number }[]
+    expect(rewritten.map((row) => row.id)).toEqual(["blk_noteaaaaaa", "blk_notebbbbbb"])
+    for (const row of rewritten) expect(row.seq).toBeGreaterThan(cursor)
+    // Distinct, so neither shadows the other in the pull's ordering.
+    expect(new Set(rewritten.map((row) => row.seq)).size).toBe(rewritten.length)
+    // The untouched block keeps its place in the sequence.
+    expect(await driver.exec("SELECT seq FROM nodes WHERE id = 'blk_blockaaaaa'")).toEqual([
+      { seq: 3 },
+    ])
+  })
+
+  it("leaves `updated_at` alone, so it cannot beat an unpushed local edit", async () => {
+    // 0005 split delivery (`seq`) from last-writer-wins intent (`updated_at`).
+    // This rewrite is the former and must not pretend to be the latter.
+    const driver = await createTenantTestDriver()
+    await seedNode(driver, 111, "blk_noteaaaaaa", "page", 1)
+    await driver.execScript(migration0008)
+    expect(await driver.exec("SELECT updated_at FROM nodes WHERE id = 'blk_noteaaaaaa'")).toEqual([
+      { updated_at: 100 },
+    ])
+  })
+
+  it("takes each tenant's OWN high-water mark, not the database's", async () => {
+    // `seq` is scoped by user_id and is not globally unique: a busy tenant's
+    // sequence must not push a quiet tenant's rows into a range its own cursor
+    // has already passed, and must not leave them below its own maximum either.
+    const driver = await createTenantTestDriver()
+    await seedNode(driver, 111, "blk_noisyaaaaa", "text", 5000)
+    await seedNode(driver, 111, "blk_noisynote0", "page", 5001)
+    await seedNode(driver, 222, "blk_quietaaaaa", "text", 2)
+    await seedNode(driver, 222, "blk_quietnote0", "page", 3)
+    await driver.execScript(migration0008)
+
+    const [noisy] = (await driver.exec("SELECT seq FROM nodes WHERE id = 'blk_noisynote0'")) as {
+      seq: number
+    }[]
+    const [quiet] = (await driver.exec("SELECT seq FROM nodes WHERE id = 'blk_quietnote0'")) as {
+      seq: number
+    }[]
+    expect(noisy.seq).toBeGreaterThan(5001)
+    expect(quiet.seq).toBeGreaterThan(3)
+    // The quiet tenant is not dragged up to the noisy one's range.
+    expect(quiet.seq).toBeLessThan(5000)
   })
 })
 

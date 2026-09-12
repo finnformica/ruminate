@@ -172,7 +172,7 @@ export function olPositions(doc: BlockDoc, ids: string[]): number[] {
  * with folds applied — a collapsed occurrence's children are not rows.
  *
  * Zoomed, the zoom root leads as the view's title and its children start
- * again at depth 0, so the zoomed subtree reads as a page of its own. The
+ * again at depth 0, so the zoomed subtree reads as a note of its own. The
  * root's key is its first occurrence in the document, so a fold made while
  * zoomed is the same fold un-zoomed.
  */
@@ -226,7 +226,7 @@ export function buildRows(
       index: 0,
       olNumber: 1,
       hasChildren: zoomRoot.children.length > 0,
-      // The title is always open — its children are the page.
+      // The title is always open — its children are the note.
       collapsed: false,
       guideKeys: [],
       zoomTitle: true,

@@ -9,7 +9,7 @@ import {
   docFromGraph,
   docToGraph,
   docToParts,
-  pageDoc,
+  noteDoc,
   reconcileSortKeys,
   rollup,
   sortKeyBetween,
@@ -69,7 +69,7 @@ const edge = (source: string, destination: string, sortKey: string, kind = "chil
 
 const types = (markdown: string) => {
   const { nodes } = docToGraph("note", canonical(markdown), 0)
-  return nodes.filter((node) => node.type !== "page").map((node) => `${node.type}:${node.text}`)
+  return nodes.filter((node) => node.type !== "note").map((node) => `${node.type}:${node.text}`)
 }
 
 describe("rollup equivalence (named cases)", () => {
@@ -104,15 +104,15 @@ describe("rollup equivalence (named cases)", () => {
   it("drops a leading frontmatter block at import: metadata is props, never markdown", () => {
     const markdown = "---\ntitle: Weird   spacing\ntags: [a, b]\n---\n- body\n"
     const { nodes } = docToGraph("note", markdown, 0)
-    const page = nodes.find((node) => node.type === "page")
-    expect(page?.props).toBe(null)
-    expect(page?.text).toBe("note")
+    const note = nodes.find((node) => node.type === "note")
+    expect(note?.props).toBe(null)
+    expect(note?.text).toBe("note")
     const normalized = expectConverges(markdown)
     expect(normalized.startsWith("- body\n")).toBe(true)
     expect(normalized).not.toContain("---")
   })
 
-  it("handles an empty page", () => {
+  it("handles an empty note", () => {
     expectEquivalent("")
   })
 
@@ -209,7 +209,7 @@ describe("rollup equivalence (named cases)", () => {
   it("round-trips the sample graph shipped to signed-out users", () => {
     const graph = sampleGraph()
     for (const node of graph.nodes.values()) {
-      if (node.type !== "page") continue
+      if (node.type !== "note") continue
       const markdown = rollup(node.id, graph)
       expect(markdown).not.toBeNull()
       expectEquivalent(markdown as string, node.id)
@@ -265,11 +265,11 @@ describe("rollup equivalence (named cases)", () => {
     expect(types(markdown)).toEqual(["ul:café combining", "ul:שלום rtl", "ul:a​b‌‍ zero-width"])
   })
 
-  it("supports unicode note ids (emoji, zero-width) as page-node keys", () => {
+  it("supports unicode note ids (emoji, zero-width) as note-node keys", () => {
     for (const noteId of ["\u{1f9e0} thoughts", "café​"]) {
       expectEquivalent("- body\n", noteId)
       const { nodes } = docToGraph(noteId, canonical("- body\n"), 0)
-      expect(nodes.find((node) => node.type === "page")).toMatchObject({ id: noteId, text: noteId })
+      expect(nodes.find((node) => node.type === "note")).toMatchObject({ id: noteId, text: noteId })
     }
   })
 
@@ -289,18 +289,18 @@ describe("rollup equivalence (named cases)", () => {
     const markdown = "- first copy\n  id:: blk_dup0000000\n- second copy\n  id:: blk_dup0000000\n"
     expectEquivalent(markdown)
     const { nodes, links } = docToGraph("note", markdown, 0)
-    const blocks = nodes.filter((node) => node.type !== "page")
+    const blocks = nodes.filter((node) => node.type !== "note")
     expect(blocks).toHaveLength(2)
     expect(new Set(blocks.map((node) => node.id)).size).toBe(2)
     expect(blocks.map((node) => node.text)).toEqual(["first copy", "second copy"])
     expect(links.filter((link) => link.source_id === "note")).toHaveLength(2)
   })
 
-  it("re-mints a block id that collides with the note id (page keeps rolling up)", () => {
-    // Block ids and page ids share the nodes table: without the re-mint, the
-    // block row clobbered the page row and the note stopped rolling up at all.
+  it("re-mints a block id that collides with the note id (note keeps rolling up)", () => {
+    // Block ids and note ids share the nodes table: without the re-mint, the
+    // block row clobbered the note row and the note stopped rolling up at all.
     const { nodes, links } = docToGraph("note", "- hello\n  id:: note\n", 0)
-    expect(nodes.map((node) => node.type).sort()).toEqual(["page", "ul"])
+    expect(nodes.map((node) => node.type).sort()).toEqual(["note", "ul"])
     const block = nodes.find((node) => node.type === "ul")
     expect(block?.id).not.toBe("note")
     expect(links).toEqual([
@@ -327,26 +327,26 @@ describe("rollup equivalence (named cases)", () => {
   })
 })
 
-describe("the title's ride through a page's doc", () => {
+describe("the title's ride through a note's doc", () => {
   const body = "body\n  id:: blk_aaaaaaaaaa\n"
 
-  it("lifts a title into the page node and walks it back out as doc props", () => {
-    const { nodes, links } = docToGraph("blk_page00000", body, 0, { title: "Flow Engineering" })
-    const page = nodes.find((node) => node.type === "page") as NodeRow
+  it("lifts a title into the note node and walks it back out as doc props", () => {
+    const { nodes, links } = docToGraph("blk_note00000", body, 0, { title: "Flow Engineering" })
+    const note = nodes.find((node) => node.type === "note") as NodeRow
     // Stored once, in `text` — not duplicated into props.
-    expect(page.text).toBe("Flow Engineering")
-    expect(page.props).toBe(null)
+    expect(note.text).toBe("Flow Engineering")
+    expect(note.props).toBe(null)
     const snapshot = buildGraphSnapshot(nodes, links)
-    expect(pageDoc("blk_page00000", snapshot)?.props).toEqual({ title: "Flow Engineering" })
+    expect(noteDoc("blk_note00000", snapshot)?.props).toEqual({ title: "Flow Engineering" })
     // The rollup is the blocks alone: metadata never touches markdown.
-    expect(rollup("blk_page00000", snapshot)).toBe(body)
+    expect(rollup("blk_note00000", snapshot)).toBe(body)
   })
 
   it("keeps the other props beside the title", () => {
-    const { nodes, links } = docToGraph("blk_page00000", body, 0, { title: "Flow", pinned: true })
-    const page = nodes.find((node) => node.type === "page") as NodeRow
-    expect(page.props).toBe(JSON.stringify({ pinned: true }))
-    expect(pageDoc("blk_page00000", buildGraphSnapshot(nodes, links))?.props).toEqual({
+    const { nodes, links } = docToGraph("blk_note00000", body, 0, { title: "Flow", pinned: true })
+    const note = nodes.find((node) => node.type === "note") as NodeRow
+    expect(note.props).toBe(JSON.stringify({ pinned: true }))
+    expect(noteDoc("blk_note00000", buildGraphSnapshot(nodes, links))?.props).toEqual({
       title: "Flow",
       pinned: true,
     })
@@ -355,26 +355,26 @@ describe("the title's ride through a page's doc", () => {
   it("survives titles the filename charset used to forbid", () => {
     // The point of separating identity from name: a title is just text now.
     for (const title of ["Q3: the plan", "What? [draft]", "a|b", "100%", "-- dashes"]) {
-      const { nodes, links } = docToGraph("blk_page00000", body, 0, { title })
-      expect((nodes.find((node) => node.type === "page") as NodeRow).text).toBe(title)
-      expect(pageDoc("blk_page00000", buildGraphSnapshot(nodes, links))?.props).toEqual({ title })
+      const { nodes, links } = docToGraph("blk_note00000", body, 0, { title })
+      expect((nodes.find((node) => node.type === "note") as NodeRow).text).toBe(title)
+      expect(noteDoc("blk_note00000", buildGraphSnapshot(nodes, links))?.props).toEqual({ title })
     }
   })
 
-  it("carries no title for a date page, whose id IS its name", () => {
+  it("carries no title for a date note, whose id IS its name", () => {
     const markdown = "today\n  id:: blk_aaaaaaaaaa\n"
     const { nodes, links } = docToGraph("2026-08-31", markdown, 0)
     const snapshot = buildGraphSnapshot(nodes, links)
-    expect((nodes.find((node) => node.type === "page") as NodeRow).text).toBe("2026-08-31")
-    expect(pageDoc("2026-08-31", snapshot)?.props).toBeNull()
+    expect((nodes.find((node) => node.type === "note") as NodeRow).text).toBe("2026-08-31")
+    expect(noteDoc("2026-08-31", snapshot)?.props).toBeNull()
     expect(rollup("2026-08-31", snapshot)).toBe(markdown)
   })
 
-  it("carries no title for an untitled page", () => {
-    const { nodes, links } = docToGraph("blk_page00000", body, 0)
+  it("carries no title for an untitled note", () => {
+    const { nodes, links } = docToGraph("blk_note00000", body, 0)
     const snapshot = buildGraphSnapshot(nodes, links)
-    expect(pageDoc("blk_page00000", snapshot)?.props).toBeNull()
-    expect(rollup("blk_page00000", snapshot)).toBe(body)
+    expect(noteDoc("blk_note00000", snapshot)?.props).toBeNull()
+    expect(rollup("blk_note00000", snapshot)).toBe(body)
   })
 })
 
@@ -382,32 +382,32 @@ describe("rollup (graph-side behavior)", () => {
   it("renders a multi-parent node fully in every location", () => {
     const snapshot = buildGraphSnapshot(
       [
-        row("page-a", "page", "page-a"),
-        row("page-b", "page", "page-b"),
+        row("note-a", "note", "note-a"),
+        row("note-b", "note", "note-b"),
         row("blk_shared", "ul", "shared"),
         row("blk_child", "text", "under shared"),
       ],
       [
-        edge("page-a", "blk_shared", "a0"),
-        edge("page-b", "blk_shared", "a0"),
+        edge("note-a", "blk_shared", "a0"),
+        edge("note-b", "blk_shared", "a0"),
         edge("blk_shared", "blk_child", "a0"),
       ],
     )
     const expected = "- shared\n  id:: blk_shared\n  under shared\n    id:: blk_child\n"
-    expect(rollup("page-a", snapshot)).toBe(expected)
-    expect(rollup("page-b", snapshot)).toBe(expected)
+    expect(rollup("note-a", snapshot)).toBe(expected)
+    expect(rollup("note-b", snapshot)).toBe(expected)
   })
 
   it("breaks sort-key collisions deterministically by destination id", () => {
     const snapshot = buildGraphSnapshot(
-      [row("p", "page", "p"), row("blk_b", "text", "b"), row("blk_a", "text", "a")],
+      [row("p", "note", "p"), row("blk_b", "text", "b"), row("blk_a", "text", "a")],
       [edge("p", "blk_b", "a0"), edge("p", "blk_a", "a0")],
     )
     expect(rollup("p", snapshot)).toBe("a\n  id:: blk_a\nb\n  id:: blk_b\n")
   })
 
   it("rolls up a loop to where it closes, and nothing can hang on it", () => {
-    const nodes = [row("p", "page", "p"), row("blk_x", "text", "x"), row("blk_y", "text", "y")]
+    const nodes = [row("p", "note", "p"), row("blk_x", "text", "x"), row("blk_y", "text", "y")]
     const links = [
       edge("p", "blk_x", "a0"),
       edge("blk_x", "blk_y", "a0"),
@@ -425,7 +425,7 @@ describe("rollup (graph-side behavior)", () => {
   it("renders code nodes as fenced blocks with the props language", () => {
     const snapshot = buildGraphSnapshot(
       [
-        row("p", "page", "p"),
+        row("p", "note", "p"),
         row("blk_c", "code", "const x = 1\nconst y = 2", JSON.stringify({ language: "js" })),
       ],
       [edge("p", "blk_c", "a0")],
@@ -433,14 +433,14 @@ describe("rollup (graph-side behavior)", () => {
     expect(rollup("p", snapshot)).toBe("```js\nconst x = 1\nconst y = 2\n```\n  id:: blk_c\n")
   })
 
-  it("returns null for a missing or non-page node", () => {
+  it("returns null for a missing or non-note node", () => {
     const snapshot = buildGraphSnapshot([row("blk_a", "text", "a")], [])
     expect(rollup("missing", snapshot)).toBeNull()
     expect(rollup("blk_a", snapshot)).toBeNull()
   })
 
-  it("tolerates malformed page props (renders its blocks, of which there are none)", () => {
-    const snapshot = buildGraphSnapshot([row("p", "page", "p", "{not json")], [])
+  it("tolerates malformed note props (renders its blocks, of which there are none)", () => {
+    const snapshot = buildGraphSnapshot([row("p", "note", "p", "{not json")], [])
     expect(rollup("p", snapshot)).toBe("\n")
   })
 })
@@ -453,7 +453,7 @@ describe("rollup (graph-side behavior)", () => {
 describe("rollup from adversarial row sets (bad syncs)", () => {
   it("skips a dangling link (destination row missing) and keeps rendering", () => {
     const snapshot = buildGraphSnapshot(
-      [row("p", "page", "p"), row("blk_a", "text", "a")],
+      [row("p", "note", "p"), row("blk_a", "text", "a")],
       [edge("p", "blk_missing", "a0"), edge("p", "blk_a", "a1")],
     )
     expect(rollup("p", snapshot)).toBe("a\n  id:: blk_a\n")
@@ -461,7 +461,7 @@ describe("rollup from adversarial row sets (bad syncs)", () => {
 
   it("a dangling link between ordered siblings resets the numbering run", () => {
     const snapshot = buildGraphSnapshot(
-      [row("p", "page", "p"), row("blk_a", "ol", "a"), row("blk_b", "ol", "b")],
+      [row("p", "note", "p"), row("blk_a", "ol", "a"), row("blk_b", "ol", "b")],
       [edge("p", "blk_a", "a0"), edge("p", "blk_ghost", "a1"), edge("p", "blk_b", "a2")],
     )
     // The ghost is dropped from the doc entirely, so the run it would have
@@ -472,7 +472,7 @@ describe("rollup from adversarial row sets (bad syncs)", () => {
 
   it("excludes orphan node rows (no inbound link) without crashing", () => {
     const snapshot = buildGraphSnapshot(
-      [row("p", "page", "p"), row("blk_orphan", "text", "orphan")],
+      [row("p", "note", "p"), row("blk_orphan", "text", "orphan")],
       [],
     )
     expect(rollup("p", snapshot)).toBe("\n")
@@ -480,16 +480,16 @@ describe("rollup from adversarial row sets (bad syncs)", () => {
 
   it("ignores a link whose source row is missing", () => {
     const snapshot = buildGraphSnapshot(
-      [row("p", "page", "p"), row("blk_a", "text", "a")],
+      [row("p", "note", "p"), row("blk_a", "text", "a")],
       [edge("ghost", "blk_a", "a0")],
     )
-    // blk_a is only reachable through the ghost — not from the page.
+    // blk_a is only reachable through the ghost — not from the note.
     expect(rollup("p", snapshot)).toBe("\n")
   })
 
   it("ignores non-child link kinds for containment", () => {
     const snapshot = buildGraphSnapshot(
-      [row("p", "page", "p"), row("blk_a", "text", "a")],
+      [row("p", "note", "p"), row("blk_a", "text", "a")],
       [edge("p", "blk_a", "a0", "ref")],
     )
     expect(rollup("p", snapshot)).toBe("\n")
@@ -499,7 +499,7 @@ describe("rollup from adversarial row sets (bad syncs)", () => {
     // The type registry has no CHECK constraint by design: rows minted by a
     // NEWER app version must degrade to plain text here, never crash.
     const snapshot = buildGraphSnapshot(
-      [row("p", "page", "p"), row("blk_f", "hologram", "future content")],
+      [row("p", "note", "p"), row("blk_f", "hologram", "future content")],
       [edge("p", "blk_f", "a0")],
     )
     expect(rollup("p", snapshot)).toBe("future content\n  id:: blk_f\n")
@@ -507,19 +507,19 @@ describe("rollup from adversarial row sets (bad syncs)", () => {
 
   it("tolerates malformed code-node props (bare fence, no language)", () => {
     const snapshot = buildGraphSnapshot(
-      [row("p", "page", "p"), row("blk_c", "code", "x = 1", "{not json")],
+      [row("p", "note", "p"), row("blk_c", "code", "x = 1", "{not json")],
       [edge("p", "blk_c", "a0")],
     )
     expect(rollup("p", snapshot)).toBe("```\nx = 1\n```\n  id:: blk_c\n")
   })
 
-  it("renders a node reachable twice from the SAME page in both places", () => {
+  it("renders a node reachable twice from the SAME note in both places", () => {
     // Within one note this shape is a sync artifact (the store's ingest keeps
-    // a page's reachable set a tree), but the walk must treat it exactly like
-    // cross-page multi-parenting: render fully at each occurrence, terminate.
+    // a note's reachable set a tree), but the walk must treat it exactly like
+    // cross-note multi-parenting: render fully at each occurrence, terminate.
     const snapshot = buildGraphSnapshot(
       [
-        row("p", "page", "p"),
+        row("p", "note", "p"),
         row("blk_a", "ul", "a"),
         row("blk_b", "ul", "b"),
         row("blk_s", "text", "shared"),
@@ -548,7 +548,7 @@ describe("rollup from adversarial row sets (bad syncs)", () => {
 
   it("terminates on a self-link (node listed as its own child)", () => {
     const snapshot = buildGraphSnapshot(
-      [row("p", "page", "p"), row("blk_a", "text", "a")],
+      [row("p", "note", "p"), row("blk_a", "text", "a")],
       [edge("p", "blk_a", "a0"), edge("blk_a", "blk_a", "a0")],
     )
     expect(rollup("p", snapshot)).toBe("a\n  id:: blk_a\n")
@@ -564,8 +564,8 @@ describe("docFromGraph (the walk, N roots)", () => {
   const graph = () =>
     buildGraphSnapshot(
       [
-        row("home", "page", "Home"),
-        row("other", "page", "Other"),
+        row("home", "note", "Home"),
+        row("other", "note", "Other"),
         row("blk_a", "ul", "a"),
         row("blk_b", "text", "b"),
         row("blk_c", "todo", "c"),
@@ -603,9 +603,9 @@ describe("docFromGraph (the walk, N roots)", () => {
     expect(Object.keys(doc.blocks).sort()).toEqual(["blk_a", "blk_b", "blk_c", "blk_s", "blk_t"])
   })
 
-  it("a page is a block like any other when it is a root", () => {
+  it("a note is a block like any other when it is a root", () => {
     const doc = docFromGraph(["other"], graph())
-    expect(shape(doc, "other")).toEqual(["page", "Other", ["blk_s"]])
+    expect(shape(doc, "other")).toEqual(["note", "Other", ["blk_s"]])
   })
 
   it("skips missing roots and dangling children", () => {
@@ -644,22 +644,22 @@ describe("docFromGraph (the walk, N roots)", () => {
     expect(doc.blocks.blk_f.props).toBeUndefined()
   })
 
-  it("pageDoc is the page's children with its props, and rollup is its serialization", () => {
+  it("noteDoc is the note's children with its props, and rollup is its serialization", () => {
     const snapshot = buildGraphSnapshot(
-      [row("p", "page", "Titled", JSON.stringify({ tags: ["x"] })), row("blk_a", "ul", "a")],
+      [row("p", "note", "Titled", JSON.stringify({ tags: ["x"] })), row("blk_a", "ul", "a")],
       [edge("p", "blk_a", "a0")],
     )
-    const doc = pageDoc("p", snapshot)!
+    const doc = noteDoc("p", snapshot)!
     expect(doc.rootBlockIds).toEqual(["blk_a"])
     expect(doc.props).toEqual({ title: "Titled", tags: ["x"] })
     expect(serialize(doc)).toBe(rollup("p", snapshot))
-    expect(pageDoc("blk_a", snapshot)).toBeNull()
+    expect(noteDoc("blk_a", snapshot)).toBeNull()
   })
 
   it("docToParts of a walked doc reproduces the rows it was walked from (no markdown between)", () => {
     const md = canonical("# Head\n  - [ ] child\n  - 1. one\n  - 2. two\nplain\n")
     const { nodes, links } = docToGraph("note", md, 1)
-    const doc = pageDoc("note", buildGraphSnapshot(nodes, links))!
+    const doc = noteDoc("note", buildGraphSnapshot(nodes, links))!
     const parts = docToParts("note", doc, 1)
     const rows = (list: typeof nodes) =>
       list
@@ -754,7 +754,7 @@ describe("property: generated documents round-trip", () => {
     for (let i = 0; i < 200; i += 1) {
       const fixed = canonical(generateDocument(rand))
       const { nodes, links } = docToGraph("note", fixed, 1)
-      const walked = pageDoc("note", buildGraphSnapshot(nodes, links))
+      const walked = noteDoc("note", buildGraphSnapshot(nodes, links))
       const parsed = parse(rollup("note", buildGraphSnapshot(nodes, links)) as string)
       expect(walked, `seed doc ${i}`).toEqual(parsed)
     }
@@ -793,7 +793,7 @@ describe("property: generated documents round-trip", () => {
   it("randomly mutated (valid, acyclic) row graphs roll up to a graph fixpoint", () => {
     // Start from real ingested rows, then mutate the LINK rows the way saves
     // and merges do — unlink subtrees, reorder siblings, re-attach unlinked
-    // subtrees elsewhere — while keeping the page's reachable set a tree with
+    // subtrees elsewhere — while keeping the note's reachable set a tree with
     // no cycles (the store's invariants). Whatever shape results, the rollup
     // must be canonical markdown: re-ingesting it must reproduce it exactly.
     const rand = mulberry32(9090)
@@ -802,7 +802,7 @@ describe("property: generated documents round-trip", () => {
     for (let i = 0; i < 40; i += 1) {
       const fixed = canonical(generateDocument(rand))
       const { nodes, links } = docToGraph("note", fixed, 1)
-      const nonPage = nodes.filter((node) => node.type !== "page").map((node) => node.id)
+      const nonNote = nodes.filter((node) => node.type !== "note").map((node) => node.id)
 
       const reachableFrom = (start: string): Set<string> => {
         const seen = new Set<string>()
@@ -830,12 +830,12 @@ describe("property: generated documents round-trip", () => {
             .map((link) => link.sort_key)
             .sort()
           moved.sort_key = sortKeyBetween(null, siblingKeys[0])
-        } else if (nonPage.length > 0) {
-          // Re-attach: link a subtree that fell out of the page (its root has
+        } else if (nonNote.length > 0) {
+          // Re-attach: link a subtree that fell out of the note (its root has
           // no inbound link left) back under a reachable parent — never
-          // creating a cycle or a second in-page path to any node.
+          // creating a cycle or a second in-note path to any node.
           const reachable = reachableFrom("note")
-          const loose = nonPage.filter(
+          const loose = nonNote.filter(
             (id) => !reachable.has(id) && !links.some((link) => link.destination_id === id),
           )
           if (loose.length === 0) continue

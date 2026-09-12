@@ -8,7 +8,7 @@ import type {
 import type { NoteId } from "../schema"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
-import { deleteBlockOps, deletePageOps, docToOps } from "./ops"
+import { deleteBlockOps, deleteNoteOps, docToOps } from "./ops"
 import {
   CACHE_GENERATION,
   EMPTY_GRAPH,
@@ -23,7 +23,7 @@ import {
   stopDatabaseMode,
 } from "./database-mode"
 import type { D1NoteSource } from "./d1-note-source"
-import { PAGE_TYPE, docToGraph, pageDoc, rollup } from "./graph"
+import { NOTE_TYPE, docToGraph, noteDoc, rollup } from "./graph"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import type { NoteStore } from "./note-store"
@@ -128,13 +128,13 @@ async function boot(options: {
 }
 
 const jotai = getDefaultStore()
-/** Every page's rollup, keyed `<id>.md` — the shape the old files map had,
+/** Every note's rollup, keyed `<id>.md` — the shape the old files map had,
  * derived from the graph atom for the assertions below. */
 const files = () => {
   const out: Record<string, string> = {}
   const snapshot = jotai.get(databaseGraphAtom)
   for (const node of snapshot.nodes.values()) {
-    if (node.type === PAGE_TYPE) out[`${node.id}.md`] = rollup(node.id, snapshot) as string
+    if (node.type === NOTE_TYPE) out[`${node.id}.md`] = rollup(node.id, snapshot) as string
   }
   return out
 }
@@ -144,7 +144,7 @@ const writeNote = (id: string, markdown: string) =>
 const graph = () => jotai.get(databaseGraphAtom)
 /** The note's doc as the graph atom holds it, as bytes (or null). */
 const walked = (id: string) => {
-  const doc = pageDoc(id, graph())
+  const doc = noteDoc(id, graph())
   return doc ? serialize(doc) : null
 }
 const status = () => jotai.get(databaseModeStatusAtom)
@@ -158,7 +158,7 @@ afterEach(async () => {
 const NOTE_A = "- A\n  id:: blk_a000000000\n"
 const NOTE_B = "- B\n  id:: blk_b000000000\n"
 
-/** Save pages as the app does: each doc diffed against the live graph into
+/** Save notes as the app does: each doc diffed against the live graph into
  * ops, applied in turn. Markdown is only the fixture's spelling. */
 async function seedNotes(store: NoteStore, notes: Record<string, string>) {
   for (const [id, markdown] of Object.entries(notes)) {
@@ -166,15 +166,15 @@ async function seedNotes(store: NoteStore, notes: Record<string, string>) {
   }
 }
 
-/** A page's markdown projection off the store's live graph, or null. */
+/** A note's markdown projection off the store's live graph, or null. */
 const noteOf = async (store: NoteStore, id: string) => rollup(id, await store.getGraph())
 
-/** Every page's markdown projection, keyed by id — what the store holds. */
+/** Every note's markdown projection, keyed by id — what the store holds. */
 async function notesOf(store: NoteStore): Promise<Record<string, string>> {
   const graph = await store.getGraph()
   const notes: Record<string, string> = {}
   for (const node of graph.nodes.values()) {
-    if (node.type !== PAGE_TYPE) continue
+    if (node.type !== NOTE_TYPE) continue
     const markdown = rollup(node.id, graph)
     if (markdown !== null) notes[node.id] = markdown
   }
@@ -245,7 +245,7 @@ describe("database mode boot", () => {
 })
 
 describe("database mode saves", () => {
-  it("a new page's ops write the SQL store, update the atom, and hand their diff to the push queue", async () => {
+  it("a new note's ops write the SQL store, update the atom, and hand their diff to the push queue", async () => {
     const { source } = stubSource({})
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
@@ -268,7 +268,7 @@ describe("database mode saves", () => {
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })
 
-    databaseApplyOps(deletePageOps("note-a", jotai.get(databaseGraphAtom)))
+    databaseApplyOps(deleteNoteOps("note-a", jotai.get(databaseGraphAtom)))
     await flushDatabaseMode()
 
     expect(await noteOf(store, "note-a")).toBeNull()
@@ -345,7 +345,7 @@ describe("database mode saves", () => {
     expect(walked("note-b")).toBe(NOTE_B)
   })
 
-  it("deleting a page's last block through ops tombstones the rows", async () => {
+  it("deleting a note's last block through ops tombstones the rows", async () => {
     const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
     const { handle, calls } = stubReplica()
     const store = await boot({ source, replica: handle })

@@ -5,7 +5,7 @@ import { graphSnapshotAtom, isSignedOutAtom } from "../global-state"
 import { rollup } from "../data/graph"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
-import { useDeleteNote, useNoteById, useRenameNote, useSetPageProps } from "../hooks/note"
+import { useDeleteNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
 import type { Width } from "../schema"
 import { cx } from "../utils/cx"
 import { DropdownMenu } from "./dropdown-menu"
@@ -53,7 +53,7 @@ export function NoteActionsMenu({
   const navigate = useNavigate()
   const location = useLocation()
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  const setPageProps = useSetPageProps()
+  const setNoteProps = useSetNoteProps()
   const note = useNoteById(noteId)
   const jotaiStore = useStore()
   const renameNote = useRenameNote()
@@ -71,7 +71,7 @@ export function NoteActionsMenu({
     : ""
   const isViewing = openNoteId === noteId
 
-  const togglePin = () => setPageProps(noteId, { pinned: pinned ? null : true })
+  const togglePin = () => setNoteProps(noteId, { pinned: pinned ? null : true })
 
   // Renaming sets the note's title (docs/graph-storage.md). The id and
   // the URL are untouched, so there is nothing to navigate to afterwards and

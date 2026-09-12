@@ -4,7 +4,7 @@ import type { NoteId } from "../schema"
 import { imagePropsOf } from "../blocks/image"
 import {
   CHILD_KIND,
-  PAGE_TYPE,
+  NOTE_TYPE,
   docToParts,
   parseProps,
   reconcileSortKeys,
@@ -20,7 +20,7 @@ import {
  * store (`NoteStore.applyOps`, the rows that persist and replicate). Nothing
  * in here is markdown.
  *
- * The editor still edits a doc (the walk of its page); `docToOps` turns the
+ * The editor still edits a doc (the walk of its note); `docToOps` turns the
  * doc it hands back into the batch that makes the graph agree with it —
  * creating a block is one `create` and one `link`, typing is one `setText`,
  * a reorder is the links whose keys had to move, and a block the doc no longer
@@ -28,7 +28,7 @@ import {
  * in that note's Unassigned basket (`basket.ts`) with everything beneath it,
  * unless it is blank (no text but whitespace, nothing beneath it, no
  * picture), which is deleted. Only the basket (`basketToOps`), the context
- * menu's Delete (`deleteBlockOps`) and deleting the note (`deletePageOps`)
+ * menu's Delete (`deleteBlockOps`) and deleting the note (`deleteNoteOps`)
  * delete a block that has something in it, and no delete ever cascades.
  */
 export type Op =
@@ -38,7 +38,7 @@ export type Op =
       type: string
       text: string
       props: string | null
-      /** The note the block is written in (the `notes_id` column); absent for a page. */
+      /** The note the block is written in (the `notes_id` column); absent for a note root. */
       notesId?: NoteId
     }
   | { op: "setText"; id: string; text: string }
@@ -178,30 +178,30 @@ export function reachableFrom(snapshot: GraphSnapshot, rootIds: Iterable<string>
   return seen
 }
 
-/** Every page node's id. */
-export function pageIds(snapshot: GraphSnapshot): string[] {
+/** Every note node's id. */
+export function noteIds(snapshot: GraphSnapshot): string[] {
   const ids: string[] = []
-  for (const node of snapshot.nodes.values()) if (node.type === PAGE_TYPE) ids.push(node.id)
+  for (const node of snapshot.nodes.values()) if (node.type === NOTE_TYPE) ids.push(node.id)
   return ids
 }
 
 /**
- * Delete a page: its node, and its content — every block the page reaches
- * that no other page reaches, plus the blocks written in it that nothing
- * reaches at all (its Unassigned basket). A block another page also holds
- * survives (the page's link to it is simply gone).
+ * Delete a note: its node, and its content — every block the note reaches
+ * that no other note reaches, plus the blocks written in it that nothing
+ * reaches at all (its Unassigned basket). A block another note also holds
+ * survives (the note's link to it is simply gone).
  */
-export function deletePageOps(pageId: NoteId, snapshot: GraphSnapshot): Op[] {
-  const page = snapshot.nodes.get(pageId)
-  if (!page || page.type !== PAGE_TYPE) return []
+export function deleteNoteOps(noteId: NoteId, snapshot: GraphSnapshot): Op[] {
+  const note = snapshot.nodes.get(noteId)
+  if (!note || note.type !== NOTE_TYPE) return []
   const others = reachableFrom(
     snapshot,
-    pageIds(snapshot).filter((id) => id !== pageId),
+    noteIds(snapshot).filter((id) => id !== noteId),
   )
-  const doomed = new Set<string>([pageId])
-  for (const id of reachableFrom(snapshot, [pageId])) if (!others.has(id)) doomed.add(id)
+  const doomed = new Set<string>([noteId])
+  for (const id of reachableFrom(snapshot, [noteId])) if (!others.has(id)) doomed.add(id)
   for (const node of snapshot.nodes.values()) {
-    if (node.notes_id === pageId && !others.has(node.id)) doomed.add(node.id)
+    if (node.notes_id === noteId && !others.has(node.id)) doomed.add(node.id)
   }
   return [...doomed].map((id) => ({ op: "delete", id }))
 }
@@ -225,7 +225,7 @@ export function parentCount(snapshot: GraphSnapshot, id: string): number {
  */
 export function deleteBlockOps(blockId: string, snapshot: GraphSnapshot): Op[] {
   const node = snapshot.nodes.get(blockId)
-  if (!node || node.type === PAGE_TYPE) return []
+  if (!node || node.type === NOTE_TYPE) return []
   const unlinks: Op[] = []
   for (const [source, list] of snapshot.childLinks) {
     if (list.some((link) => link.destination_id === blockId)) {
@@ -238,23 +238,23 @@ export function deleteBlockOps(blockId: string, snapshot: GraphSnapshot): Op[] {
 /**
  * Delete a block and everything beneath it that nothing else holds: the
  * block itself from every place it appears (as `deleteBlockOps`), and each
- * block reachable from it that no page, and no other block outside the
+ * block reachable from it that no note, and no other block outside the
  * subtree, still reaches once it is gone. A block that also hangs from
  * another note, or from another Unassigned root, is only unlinked from the
  * subtree and survives. The basket's "Delete with contents".
  */
 export function deleteSubtreeOps(blockId: string, snapshot: GraphSnapshot): Op[] {
   const node = snapshot.nodes.get(blockId)
-  if (!node || node.type === PAGE_TYPE) return []
+  if (!node || node.type === NOTE_TYPE) return []
   const below = reachableFrom(snapshot, [blockId])
   below.delete(blockId)
   // What the rest of the graph still reaches without going through the
-  // block: every page, and every parentless block (an Unassigned root of
+  // block: every note, and every parentless block (an Unassigned root of
   // any note) other than this one, walked around the block.
   const parentsOf = parentsIndex(snapshot)
-  const roots = pageIds(snapshot).filter((id) => id !== blockId)
+  const roots = noteIds(snapshot).filter((id) => id !== blockId)
   for (const other of snapshot.nodes.values()) {
-    if (other.id === blockId || other.type === PAGE_TYPE) continue
+    if (other.id === blockId || other.type === NOTE_TYPE) continue
     if ((parentsOf.get(other.id)?.size ?? 0) === 0) roots.push(other.id)
   }
   const kept = new Set<string>()
@@ -284,42 +284,42 @@ export function deleteSubtreeOps(blockId: string, snapshot: GraphSnapshot): Op[]
   return [...unlinks, ...[...doomed].map((id) => ({ op: "delete", id }) as Op)]
 }
 /**
- * The batch that makes the graph hold `doc` as page `pageId`'s content:
+ * The batch that makes the graph hold `doc` as note `noteId`'s content:
  *
- * - the page node created or retitled/re-propped;
- * - every block the doc holds created if the graph lacks it — with this page
+ * - the note node created or retitled/re-propped;
+ * - every block the doc holds created if the graph lacks it — with this note
  *   as its `notes_id` — else its text, type or props set where they differ; a block the
  *   graph already has (pasted as a link from elsewhere) is simply linked, one
  *   node, two links;
  * - each parent's child order reconciled against its current links, so an
  *   unchanged sibling produces nothing, an insert produces one `link` with a
  *   key between its neighbours, a removal one `unlink`;
- * - a block the page reached before but the doc no longer names, that nothing
+ * - a block the note reached before but the doc no longer names, that nothing
  *   holds any more, is kept, out of reach: it and everything beneath it show
  *   in the note's Unassigned basket (`basket.ts`), from which a paste links
  *   it back. Removing a row is an unlink, never a delete — except a blank
  *   block (`isBlankNode`), which is deleted so an abandoned empty line leaves
- *   nothing behind. A block another page also holds survives untouched.
+ *   nothing behind. A block another note also holds survives untouched.
  *
- * Block ids that collide with a page id are re-minted (`docToParts`), and a
+ * Block ids that collide with a note id are re-minted (`docToParts`), and a
  * block is never linked under itself; any other loop is a shape the graph
  * holds (docs/graph-schema-v2.md, "Loops"). Applying the result to
- * `snapshot` yields a graph whose walk of `pageId` is `doc` (modulo those
+ * `snapshot` yields a graph whose walk of `noteId` is `doc` (modulo those
  * two repairs); applying the ops for that walk again yields nothing.
  */
 export function docToOps(
-  pageId: NoteId,
+  noteId: NoteId,
   doc: BlockDoc,
   snapshot: GraphSnapshot,
   discard?: Iterable<string>,
 ): Op[] {
-  const { nodes, childrenOf } = docToParts(pageId, doc, 0, reservedPageIds(snapshot, pageId))
+  const { nodes, childrenOf } = docToParts(noteId, doc, 0, reservedNoteIds(snapshot, noteId))
   return partsToOps(
-    pageId,
+    noteId,
     nodes,
     childrenOf,
     snapshot,
-    reachableFrom(snapshot, [pageId]),
+    reachableFrom(snapshot, [noteId]),
     "keep",
     new Set(discard ?? []),
   )
@@ -344,11 +344,11 @@ function isBlankNode(snapshot: GraphSnapshot, id: string): boolean {
   return true
 }
 
-/** Every other page's id — ids a block row must never take (`docToParts`). */
-export function reservedPageIds(snapshot: GraphSnapshot, pageId: string): Set<string> {
+/** Every other note's id — ids a block row must never take (`docToParts`). */
+export function reservedNoteIds(snapshot: GraphSnapshot, noteId: string): Set<string> {
   const reserved = new Set<string>()
   for (const node of snapshot.nodes.values()) {
-    if (node.type === PAGE_TYPE && node.id !== pageId) reserved.add(node.id)
+    if (node.type === NOTE_TYPE && node.id !== noteId) reserved.add(node.id)
   }
   return reserved
 }
@@ -371,7 +371,7 @@ export function reservedPageIds(snapshot: GraphSnapshot, pageId: string): Set<st
  * Either way only that block is touched: never what it holds.
  */
 export function partsToOps(
-  pageId: NoteId,
+  noteId: NoteId,
   nodes: NodeRow[],
   childrenOf: Map<string, string[]>,
   snapshot: GraphSnapshot,
@@ -393,7 +393,7 @@ export function partsToOps(
         type: node.type,
         text: node.text,
         props: node.props,
-        ...(node.type === PAGE_TYPE ? {} : { notesId: pageId }),
+        ...(node.type === NOTE_TYPE ? {} : { notesId: noteId }),
       })
       continue
     }
@@ -451,9 +451,9 @@ export function partsToOps(
   return [...creates, ...sets, ...linkOps, ...deletes]
 }
 
-/** The page ids a batch touches — the pages whose rollups changed (every
- * page that reaches a node the batch names). */
-export function pagesTouchedBy(snapshot: GraphSnapshot, ops: readonly Op[]): Set<NoteId> {
+/** The note ids a batch touches — the notes whose rollups changed (every
+ * note that reaches a node the batch names). */
+export function notesTouchedBy(snapshot: GraphSnapshot, ops: readonly Op[]): Set<NoteId> {
   const ids = new Set<string>()
   for (const op of ops) {
     if (op.op === "link" || op.op === "unlink") {
@@ -469,15 +469,15 @@ export function pagesTouchedBy(snapshot: GraphSnapshot, ops: readonly Op[]): Set
       else parentsOf.set(link.destination_id, [source])
     }
   }
-  const pages = new Set<NoteId>()
+  const notes = new Set<NoteId>()
   const seen = new Set<string>()
   const stack = [...ids]
   while (stack.length > 0) {
     const id = stack.pop() as string
     if (seen.has(id)) continue
     seen.add(id)
-    if (snapshot.nodes.get(id)?.type === PAGE_TYPE) pages.add(id)
+    if (snapshot.nodes.get(id)?.type === NOTE_TYPE) notes.add(id)
     for (const parent of parentsOf.get(id) ?? []) stack.push(parent)
   }
-  return pages
+  return notes
 }

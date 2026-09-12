@@ -3,10 +3,10 @@ import { buildGraphSnapshot, docToGraph } from "../data/graph"
 import { applyOps } from "../data/ops"
 import { buildUpstreamIndex } from "./block-upstream"
 
-function graphOf(pages: Record<string, string>) {
+function graphOf(notes: Record<string, string>) {
   const nodes = []
   const links = []
-  for (const [id, markdown] of Object.entries(pages)) {
+  for (const [id, markdown] of Object.entries(notes)) {
     const g = docToGraph(id, markdown, 1)
     nodes.push(...g.nodes)
     links.push(...g.links)
@@ -15,12 +15,12 @@ function graphOf(pages: Record<string, string>) {
 }
 
 describe("buildUpstreamIndex", () => {
-  it("maps each block to the pages that reach it, sorted by page", () => {
+  it("maps each block to the notes that reach it, sorted by note", () => {
     const base = graphOf({
       blk_noteb: "- only in b\n  id:: blk_onlyb00000\n",
       blk_notea: "- shared\n  id:: blk_shared0000\n  - child\n    id:: blk_child00000\n",
     })
-    // b links a's shared block too — one node, two pages upstream.
+    // b links a's shared block too — one node, two notes upstream.
     const snapshot = applyOps(
       base,
       [{ op: "link", source: "blk_noteb", destination: "blk_shared0000", sortKey: "a1" }],
@@ -33,7 +33,7 @@ describe("buildUpstreamIndex", () => {
     expect(index.has("blk_notea")).toBe(false)
   })
 
-  it("counts a page once even when it reaches a block by two paths", () => {
+  it("counts a note once even when it reaches a block by two paths", () => {
     const base = graphOf({
       blk_notea: "- a\n  id:: blk_a000000000\n- b\n  id:: blk_b000000000\n",
     })

@@ -172,12 +172,12 @@ export const isSignedOutAtom = atom((get) => get(githubUserStateAtom) === null)
 // Notes
 // -----------------------------------------------------------------------------
 
-// The builder's per-page memo lives in the module closure: on each graph
-// change only pages whose reachable rows changed are re-derived; the rest
+// The builder's per-note memo lives in the module closure: on each graph
+// change only notes whose reachable rows changed are re-derived; the rest
 // keep their `Note` object.
 const buildNotes = createNotesBuilder()
 
-/** Every page as a `Note` (src/data/note-meta.ts), read off the graph. */
+/** Every note node as a `Note` (src/data/note-meta.ts), read off the graph. */
 export const notesAtom = atom((get) => buildNotes(get(graphSnapshotAtom)))
 
 /**

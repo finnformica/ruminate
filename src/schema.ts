@@ -16,8 +16,8 @@ export type Task = {
 }
 
 /**
- * What the app knows about a page, read off the graph
- * (`src/data/note-meta.ts`): the page node's text and props, and the blocks
+ * What the app knows about a note, read off the graph
+ * (`src/data/note-meta.ts`): the note node's text and props, and the blocks
  * it reaches. Never markdown — the rollup is an export (`rollup`), not a
  * field.
  */
@@ -34,10 +34,10 @@ export type Note = {
   type: NoteType
   /** Depending on the type, either the title or the date */
   displayName: string
-  /** The page node's props — the note's metadata (pinned, width, font,
+  /** The note node's props — the note's metadata (pinned, width, font,
    * updated_at, tags, dates…). */
   props: Record<string, unknown>
-  /** The page node's text, falling back to the first heading block. */
+  /** The note node's text, falling back to the first heading block. */
   title: string
   /** If the note is pinned */
   pinned: boolean

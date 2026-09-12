@@ -103,7 +103,7 @@ const linkKeyString = (key: LinkKey) => key.join("\x1f")
 
 /**
  * The node ids "owned" by a set of notes with unpushed local changes: each
- * pending page id plus everything reachable from it over local child links. A
+ * pending note id plus everything reachable from it over local child links. A
  * pull must not touch these rows in either direction — last-writer-wins is
  * decided by push order at the replica, not by pull timing.
  */
@@ -152,7 +152,7 @@ export function planPullApplication(params: {
   localLinks: LinkRow[]
   remoteNodes: NodeRow[]
   remoteLinks: LinkRow[]
-  /** Node ids with unpushed local changes (pages + their subtrees). */
+  /** Node ids with unpushed local changes (notes + their subtrees). */
   pendingNodeIds: Set<string>
 }): GraphDiff {
   const { localNodes, localLinks, remoteNodes, remoteLinks, pendingNodeIds } = params
