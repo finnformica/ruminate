@@ -16,9 +16,14 @@
 //    empty, `noteIds` is a set that admits only what it names, and every
 //    check is a positive test. A malformed row yields a grant that can do
 //    nothing rather than a grant that can do everything.
-// 3. **The checks are narrow and greppable.** Three functions —
-//    `allows`, `coversNote`, `mayCreateNotes` — and every call site is a
-//    tool in `tools.ts`, pinned by the adversarial tests in `grant.test.ts`.
+// 3. **The checks are narrow and greppable.** `allows` is the whole
+//    permission check, and the NOTE check is deliberately not here: a grant
+//    names notes, but what an agent may touch is NODES, so that question is
+//    answered once by `visibleNodes` (graph-access.ts) from the grant's note
+//    ids and the graph. A `coversNote(grant, noteId)` helper used to sit here
+//    and was removed when it turned out nothing called it — a tested function
+//    with no call site, named like the security boundary, is worse than none:
+//    it invites a reader auditing the boundary to conclude they have found it.
 //
 // The note boundary is stated in terms the user recognizes: a grant names
 // *notes*, because a note is what the user picked in Settings. What that
@@ -144,32 +149,12 @@ export function grantFromRow(row: McpTokenRow, now: number = Date.now()): GrantD
 }
 
 // -----------------------------------------------------------------------------
-// The three checks
+// The check
 // -----------------------------------------------------------------------------
 
 /** Does this grant permit `permission`? The only permission test there is. */
 export const allows = (grant: Grant, permission: Permission): boolean =>
   grant.permissions.has(permission)
-
-/**
- * May this grant touch this note? True for every note when the grant names
- * none (`noteIds === null`), and otherwise only for the ids it names.
- */
-export const coversNote = (grant: Grant, noteId: string): boolean =>
-  grant.noteIds === null || grant.noteIds.has(noteId)
-
-/**
- * May this grant create notes?
- *
- * Only an unrestricted grant may. A note-scoped grant names notes that
- * already exist; a note it creates could not have been named, so allowing
- * creation would let a grant over one note grow into a grant over a corpus
- * of its own making — precisely the widening the note scope exists to
- * prevent. `write` on a scoped grant means "edit these notes", and says so
- * in the tool description.
- */
-export const mayCreateNotes = (grant: Grant): boolean =>
-  allows(grant, "write") && grant.noteIds === null
 
 /** A one-line description of the grant, for `server/discover` instructions
  * and for the audit line each call writes. Names no secret. */

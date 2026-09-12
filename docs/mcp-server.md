@@ -63,12 +63,11 @@ Two deliberate readings of a broken scope, both in the safe direction:
 - A `note_ids` column that does not parse means **no notes**, never every note.
 - A scope naming a note that has since been deleted means **no notes**, not every note.
 
-### Creating notes
+### An agent cannot create notes
 
-`create_note` requires an **unrestricted** token. A scoped token names notes that already
-exist; a note it created could not have been named, so allowing creation would let a
-grant over one note grow into a corpus of its own making. `write` on a scoped token means
-"edit these notes", and the tool description says so.
+There is no `create_note`. `write` means "edit the notes this token was given", and a
+token that cannot mint a note cannot grow a corpus of its own — which is what a note scope
+would otherwise have to keep chasing.
 
 ### An MCP token cannot mint an MCP token
 
@@ -91,18 +90,19 @@ tokens exist.
 
 Reads need `read`; the writers need `write`; the two deleting verbs need `delete`.
 
+An agent works in the notes you already have: there is no tool to create one.
+
 | Tool             | Perm   | What it does                                                                                          |
 | ---------------- | ------ | ----------------------------------------------------------------------------------------------------- |
-| `list_notes`     | read   | Notes the token can reach, newest first. Filter by `query`, `tag`, `type`; page with `cursor`.        |
+| `list_notes`     | read   | Notes the token can reach, newest first. Filter by `tag` or `type`; page with `cursor`.               |
 | `search`         | read   | Blocks whose text contains a substring, each naming the notes it appears in.                          |
 | `read_note`      | read   | A note's blocks **as stored rows** — top 2 levels by default (`depth: 0` for all), plus `unassigned`. |
 | `get_block`      | read   | One block by id: type, text, props, children, parents, the notes it is in.                            |
 | `list_children`  | read   | The blocks beneath one, `depth` levels deep — walking **down**.                                       |
 | `list_parents`   | read   | The blocks that hold one, and the notes it appears in — walking **up**.                               |
 | `list_tags`      | read   | Tags across the reachable notes, with note counts.                                                    |
-| `create_note`    | write¹ | A new note from markdown.                                                                             |
-| `append_to_note` | write  | Add to the end of a note, leaving the rest untouched.                                                 |
-| `update_note`    | write  | **Replace** a note's whole body. The blunt instrument — see below.                                    |
+| `create_blocks`  | write  | Add blocks under a parent, nesting with `children`. Purely additive.                                  |
+| `set_note_title` | write  | Set or clear a note's title.                                                                          |
 | `update_block`   | write  | Change one block's text, type or metadata, in place.                                                  |
 | `link_block`     | write  | Put an existing block under a parent, at an index.                                                    |
 | `unlink_block`   | write  | Take a block out of one place. Kept, not deleted.                                                     |
@@ -110,22 +110,24 @@ Reads need `read`; the writers need `write`; the two deleting verbs need `delete
 | `delete_block`   | delete | Delete a block everywhere, optionally with its contents.                                              |
 | `delete_note`    | delete | Delete a note and the blocks only it holds.                                                           |
 
-¹ `create_note` also requires an **unrestricted** token — see §1.
-
-### Reads are rows, not markdown
+### There is no markdown
 
 `read_note`, `get_block` and the traversal tools hand back **the stored row**: id, `type`
 (`ul`, `h1`, `todo`…), marker-free `text`, the `props` object, `childIds`, `updatedAt`.
-No markdown, no `id::` lines — the id is a field.
+The writers take the same shape — `create_blocks` takes `{ text, type?, props?, children? }`,
+`update_block` takes fields.
 
-Markdown is an **input** format in this API and never an output one. `create_note` and
-`append_to_note` parse it; nothing returns it. That is what makes the write side safe:
-an agent changes a block by naming it and setting a field, rather than round-tripping a
-document and hoping the diff lands where it meant.
+Markdown appears nowhere in this API, in either direction. That matches the app, where
+the graph is truth and markdown is an import/export format at the edges
+(CLAUDE.md, docs/graph-storage.md); an earlier version of this server reintroduced it in
+the middle, and that was a mistake. What it bought was the ability to read a note as a
+document and write the document back — and what that cost was the ability to do it
+_wrongly_: send back markdown missing a block and the diff quietly moves the rest of the
+note into Unassigned.
 
-It also makes partial reads safe, which matters more than it sounds — because **a row is
-heavier than the markdown line it replaced**, roughly 60 characters against 36. Measured
-over the wire against a real 281-block note:
+With rows in and rows out, that move does not exist. An agent changes a block by naming
+it. Which in turn makes partial reads safe, and partial reads are where the real saving
+is — measured over the wire against a real 281-block note:
 
 | `read_note`             | Blocks returned                      | Payload        |
 | ----------------------- | ------------------------------------ | -------------- |
@@ -133,45 +135,24 @@ over the wire against a real 281-block note:
 | default (`depth: 2`)    | 17, with 11 marked `hasMoreChildren` | ~1,100 tokens  |
 | `depth: 1`              | 5, with 4 marked                     | ~390 tokens    |
 
-So `read_note` returns the top two levels **by default**. Reading such a note whole now
+A row is heavier than the markdown line it replaced — roughly 60 characters against 36 —
+so `read_note` returns the top two levels **by default**. Reading such a note whole now
 costs more than the markdown form did, and an agent given the choice takes the dump every
-time — the default is what makes this change a saving rather than a cost.
-
-Nothing is hidden by it: `blockCount` is always the note's true size, `truncated` says
-whether you got all of it, and every block whose children were cut carries
-`hasMoreChildren`, so an agent knows precisely what it has not seen and where to ask.
-`depth: 0` still reads everything. And there is no partial _document_ it could hand back
-to a whole-note write and silently gut the note with, because there is no document.
+time; the default is what makes this a saving rather than a cost. Nothing is hidden by
+it: `blockCount` is always the note's true size, `truncated` says whether you got all of
+it, and every block whose children were cut carries `hasMoreChildren`. `depth: 0` still
+reads everything.
 
 Empty fields are omitted for the same reason — `"props":null,"childIds":[]` on 281 blocks
 is pure context spent saying nothing.
 
 ### Editing: name the block, not the note
 
-`update_note` replaces a note's **whole body**. Every block it does not recreate stops
-being part of the note and moves to Unassigned. Nothing is lost, but the note is emptied
-of it, so it is for rewriting a note wholesale and nothing else.
-
-For everything else there is a verb that touches one block and leaves the rest alone:
-`update_block` to change it, `move_block` to relocate it, `link_block`/`unlink_block` to
-add or remove one of its appearances, `append_to_note` to add to the end. Changing one
-bullet with `update_block` costs a couple of hundred tokens; doing it through
-`read_note` + `update_note` on that same 281-block note costs about twelve thousand.
-
-### A block can be in several notes at once
-
-Linking a block under a second parent does not copy it — the same block now appears in
-both places, and editing it either place changes both. That is the app's own behaviour,
-and it has a consequence for scoped tokens:
-
-> A **note-scoped** token may only write a block every one of whose notes it names.
-
-Otherwise editing a shared block would put a write where the grant does not reach, and
-neither the agent nor anyone reading the grant would see it happen. The refusal says a
-note the token cannot see holds the block, and deliberately **not which one** — the check
-must not become a way to enumerate the notes the grant excludes. Unrestricted tokens are
-never limited this way. `notesReachingUnscoped` is the one read in `graph-access.ts` that
-deliberately ignores the scope, and it exists only for this.
+There is no whole-note write. `create_blocks` adds, `update_block` changes one block,
+`move_block` relocates one, `link_block`/`unlink_block` add or remove one of its
+appearances, `set_note_title` retitles. Changing one bullet costs a couple of hundred
+tokens; the old read-note-then-replace-note round trip on that 281-block note cost about
+twenty-six thousand.
 
 ### The Unassigned section
 
@@ -295,7 +276,17 @@ worth paying.
 
 ---
 
-## 7. Files
+## 7. Not built yet
+
+Three follow-ups have their designs written down rather than their code:
+
+|                           |                                                                                           |
+| ------------------------- | ----------------------------------------------------------------------------------------- |
+| docs/mcp-rate-limiting.md | No rate limiting exists, and every tool call reads the whole corpus. The most urgent gap. |
+| docs/mcp-search.md        | One search surface for the person and the agent, lexical then hybrid-semantic.            |
+| docs/mcp-provenance.md    | Marking agent writes, and accepting or discarding them.                                   |
+
+## 8. Files
 
 |                                         |                                                   |
 | --------------------------------------- | ------------------------------------------------- |
@@ -305,7 +296,7 @@ worth paying.
 | `worker/mcp/grant.ts`                   | What a token may do — pure, and fail-closed       |
 | `worker/mcp/tokens.ts`                  | Token storage, hashing, lookup                    |
 | `worker/mcp/graph-access.ts`            | The scoped view of the corpus, and the write path |
-| `worker/mcp/tools.ts`                   | The sixteen tools, and the refusals before them   |
+| `worker/mcp/tools.ts`                   | Every tool, and the refusals before them          |
 | `src/data/ops-rows.ts`                  | Ops → rows, shared with the browser store's rule  |
 | `src/components/mcp-tokens-section.tsx` | The Settings panel                                |
 | `migrations/0007_mcp_tokens.sql`        | The grants table                                  |

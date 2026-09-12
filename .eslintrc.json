@@ -12,7 +12,14 @@
     "plugin:@typescript-eslint/recommended",
     "plugin:storybook/recommended"
   ],
-  "overrides": [],
+  "overrides": [
+    {
+      "files": ["**/*.test.ts", "**/*.test.tsx"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off"
+      }
+    }
+  ],
   "parser": "@typescript-eslint/parser",
   "parserOptions": {
     "ecmaVersion": "latest",

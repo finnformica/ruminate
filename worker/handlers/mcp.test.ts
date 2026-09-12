@@ -404,7 +404,10 @@ describe("tools/call", () => {
     await send(
       mcpRequest(
         "tools/call",
-        { name: "append_to_note", arguments: { note_id: NOTE, markdown: "- from an agent\n" } },
+        {
+          name: "create_blocks",
+          arguments: { parent_id: NOTE, blocks: [{ text: "from an agent" }] },
+        },
         { token: secret },
       ),
     )

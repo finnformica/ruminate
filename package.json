@@ -16,7 +16,7 @@
     "check:queries": "vite-node scripts/check-queries.ts",
     "knip": "knip --no-config-hints",
     "format": "prettier --write .",
-    "lint": "eslint --ext .js,.ts,.tsx src",
+    "lint": "eslint --ext .js,.ts,.tsx src worker scripts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:storybook": "test-storybook",

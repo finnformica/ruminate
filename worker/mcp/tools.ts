@@ -8,11 +8,12 @@
 // three refusals so no `run` can forget them:
 //
 //   1. the grant must hold the tool's `permission`;
-//   2. `create_note` additionally needs an unrestricted grant
-//      (`mayCreateNotes` — see grant.ts for why);
-//   3. every `note_id` / `block_id` argument must be inside the grant's view,
-//      which is enforced by the accessors in `graph-access.ts` returning null
-//      for anything outside it.
+//   2. every `note_id` / `block_id` argument must name something inside the
+//      grant's view — enforced by the accessors in `graph-access.ts`, which
+//      return null for anything outside it, so a `run` that forgets to check
+//      gets null rather than another tenant's row;
+//   3. a block a note outside the scope also holds may not be WRITTEN
+//      (`sharedOutsideScope`), since the edit would land in that note too.
 //
 // A tool the grant cannot use is not merely refused — it is not LISTED
 // (`toolsFor`), which the spec explicitly allows: the tool set "MAY vary by
@@ -37,26 +38,17 @@
 // conforming to it forever, which is not a promise worth making for shapes
 // this young.
 
+import { BLOCK_TYPES, isBlockType, type BlockProps } from "../../src/blocks/types"
+import { generateNKeysBetween } from "fractional-indexing"
 import { blockId } from "../../src/blocks/id"
-import { parse } from "../../src/blocks/parse"
-import { isBlockType, type BlockDoc, type BlockProps } from "../../src/blocks/types"
 import { PAGE_TYPE, propsJson, sortKeyBetween } from "../../src/data/graph"
-import {
-  deleteBlockOps,
-  deletePageOps,
-  deleteSubtreeOps,
-  docToOps,
-  type Op,
-} from "../../src/data/ops"
-import { isDatePageId } from "../../src/data/page-identity"
+import { deleteBlockOps, deletePageOps, deleteSubtreeOps, type Op } from "../../src/data/ops"
 import type { TenantDb } from "../tenancy-db"
-import { allows, mayCreateNotes, type Grant, type Permission } from "./grant"
+import { allows, type Grant, type Permission } from "./grant"
 import {
   applyOpsToReplica,
   childLinksOf,
   childrenOf,
-  docOf,
-  markdownOf,
   nodeOf,
   noteOf,
   notesReaching,
@@ -86,8 +78,6 @@ export interface ToolDef {
   title: string
   description: string
   permission: Permission
-  /** Only an unrestricted grant may run this tool (see `mayCreateNotes`). */
-  needsAllNotes?: boolean
   inputSchema: Record<string, unknown>
   annotations: {
     readOnlyHint: boolean
@@ -108,10 +98,6 @@ const MAX_LIMIT = 200
 /** Levels `read_note` returns when `depth` is not given — see `optionalDepth`
  * for why this is not "all of them". */
 const DEFAULT_NOTE_DEPTH = 2
-/** Refuse a markdown body larger than this. A note is prose, and a megabyte
- * of it from an agent is a mistake, not a note. */
-const MAX_MARKDOWN_BYTES = 256 * 1024
-
 class BadArgument extends Error {}
 
 const requireString = (args: Record<string, unknown>, key: string): string => {
@@ -126,14 +112,6 @@ const optionalString = (args: Record<string, unknown>, key: string): string | un
   const value = args[key]
   if (value === undefined || value === null) return undefined
   if (typeof value !== "string") throw new BadArgument(`\`${key}\` must be a string.`)
-  return value
-}
-
-const optionalMarkdown = (args: Record<string, unknown>, key: string): string | undefined => {
-  const value = optionalString(args, key)
-  if (value !== undefined && new TextEncoder().encode(value).length > MAX_MARKDOWN_BYTES) {
-    throw new BadArgument(`\`${key}\` is larger than the ${MAX_MARKDOWN_BYTES / 1024}KB limit.`)
-  }
   return value
 }
 
@@ -208,6 +186,64 @@ const BLOCK_OUT_OF_SCOPE =
 const preview = (text: string, words = 20): string => {
   const parts = text.trim().split(/\s+/).filter(Boolean)
   return parts.length > words ? `${parts.slice(0, words).join(" ")}…` : parts.join(" ")
+}
+
+/** One block to create, as `create_blocks` takes it. */
+interface NewBlock {
+  text: string
+  type?: string
+  props?: BlockProps
+  children: NewBlock[]
+}
+
+/** How many blocks one `create_blocks` call may add, counting nested ones. A
+ * note is written, not generated; a thousand blocks in one call is a runaway
+ * loop rather than an intention. */
+const MAX_NEW_BLOCKS = 200
+
+/**
+ * Validate the `blocks` argument: a tree of `{ text, type?, props?,
+ * children? }`. Hand-rolled like every other reader here, and strict — an
+ * unknown block type or a missing `text` is refused with a message naming the
+ * path, so a model can fix the one field it got wrong rather than guessing at
+ * the whole shape.
+ */
+function parseNewBlocks(
+  value: unknown,
+  path: string,
+  budget = { left: MAX_NEW_BLOCKS },
+): NewBlock[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new BadArgument(`\`${path}\` must be a non-empty array of blocks.`)
+  }
+  return value.map((entry, i) => {
+    const where = `${path}[${i}]`
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new BadArgument(`\`${where}\` must be an object.`)
+    }
+    if ((budget.left -= 1) < 0) {
+      throw new BadArgument(`More than ${MAX_NEW_BLOCKS} blocks in one call.`)
+    }
+    const block = entry as Record<string, unknown>
+    if (typeof block.text !== "string") {
+      throw new BadArgument(`\`${where}.text\` is required and must be a string.`)
+    }
+    const type = optionalString(block, "type")
+    if (type !== undefined && (!isBlockType(type) || type === PAGE_TYPE)) {
+      throw new BadArgument(`\`${where}.type\`: unknown block type "${type}".`)
+    }
+    return {
+      text: block.text,
+      ...(type === undefined ? {} : { type }),
+      ...(block.props === undefined || block.props === null
+        ? {}
+        : { props: optionalProps(block, "props") }),
+      children:
+        block.children === undefined || block.children === null
+          ? []
+          : parseNewBlocks(block.children, `${where}.children`, budget),
+    }
+  })
 }
 
 /** A metadata object argument: an object, or nothing. */
@@ -292,7 +328,7 @@ function keyAt(
  * as stored, and `props` is the row's own metadata object.
  *
  * Nothing here is markdown. Markdown is an INPUT format in this API —
- * `create_note` and `append_to_note` parse it — and never an output one. A
+ * `append_to_note` and `update_note` parse it — and never an output one. A
  * block read is a row, so an agent editing one names the block by id and
  * changes a field, rather than round-tripping a document and hoping the
  * diff lands where it meant.
@@ -395,36 +431,6 @@ const byRecency = (
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
 }
 
-/** Apply a doc edit to a page and persist it. The shared tail of every write
- * tool: one op batch, one atomic push, one summary. */
-async function writeDoc(
-  context: ToolContext,
-  noteId: string,
-  doc: BlockDoc,
-  verb: string,
-): Promise<ToolOutcome> {
-  const ops = docToOps(noteId, doc, context.graph.snapshot)
-  const written = await applyOpsToReplica(context.tenant, context.graph.snapshot, ops, context.now)
-  return {
-    ok: true,
-    data: { noteId, ops: ops.length, rowsWritten: written.nodes + written.links },
-    text: `${verb} note ${noteId} (${ops.length} change${ops.length === 1 ? "" : "s"}).`,
-  }
-}
-
-/** The page's props with `title` set, cleared, or left alone. Keeps `null`
- * as `null` so an untitled note with no metadata does not gain an empty
- * props object just by being edited. */
-function withTitle(props: BlockProps | null, title: string | undefined): BlockProps | null {
-  if (title === undefined) return props
-  if (title === "") {
-    if (props === null) return null
-    const { title: _dropped, ...rest } = props
-    return Object.keys(rest).length > 0 ? rest : null
-  }
-  return { ...(props ?? {}), title }
-}
-
 // -----------------------------------------------------------------------------
 // The tools
 // -----------------------------------------------------------------------------
@@ -461,16 +467,16 @@ export const TOOLS: ToolDef[] = [
     name: "list_notes",
     title: "List notes",
     description:
-      "List the notes this token can reach, most recently updated first. " +
-      "Optionally filter by a word in the title or body (`query`), by `tag`, " +
-      "or by `type` (`note`, `daily`, `weekly`). Returns note ids — pass one " +
-      "to `read_note`. Page with `cursor` when `nextCursor` comes back.",
+      "List the notes this token can reach, most recently updated first, with " +
+      "each note's tags and task counts. Filter by `tag` or by `type` " +
+      "(`note`, `daily`, `weekly`); page with `cursor` when `nextCursor` comes " +
+      "back. This ENUMERATES notes — to find notes by their content, use " +
+      "`search`, which looks at every block rather than a note's opening lines.",
     permission: "read",
     annotations: readOnly,
     inputSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "Match notes whose title or body contains this." },
         tag: {
           type: "string",
           description: "Only notes carrying this tag. Without the leading '#'. Matches sub-tags.",
@@ -486,7 +492,6 @@ export const TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
     run(args, { graph }) {
-      const query = optionalString(args, "query")?.toLowerCase()
       const tag = optionalString(args, "tag")?.replace(/^#/, "").toLowerCase()
       const type = optionalString(args, "type")
       const limit = limitOf(args)
@@ -498,12 +503,6 @@ export const TOOLS: ToolDef[] = [
         .filter((note): note is NonNullable<typeof note> => note !== null)
         .filter((note) => type === undefined || note.type === type)
         .filter((note) => tag === undefined || note.tags.some((t) => t.toLowerCase() === tag))
-        .filter((note) => {
-          if (query === undefined) return true
-          return (
-            note.title.toLowerCase().includes(query) || note.preview.toLowerCase().includes(query)
-          )
-        })
         .sort(byRecency)
 
       const page = matches.slice(offset, offset + limit)
@@ -627,8 +626,7 @@ export const TOOLS: ToolDef[] = [
       // The whole note's size, whatever `depth` returned — so an agent that
       // truncated knows how much it has not seen.
       const blockCount = blocksOfNote(graph, rootBlockIds, 0).blocks.length
-      const basket = unassignedOf(graph, noteId)
-      const unassigned = blocksOfNote(graph, basket?.roots ?? [], depth).blocks
+      const unassigned = blocksOfNote(graph, unassignedOf(graph, noteId) ?? [], depth).blocks
 
       return {
         ok: true,
@@ -827,144 +825,170 @@ export const TOOLS: ToolDef[] = [
   },
 
   {
-    name: "create_note",
-    title: "Create a note",
+    name: "create_blocks",
+    title: "Add blocks to a note",
     description:
-      "Make a new note from markdown. `markdown` is an outline: two spaces of " +
-      "indent per level, `#` for a heading, `-` for a bullet, `- [ ]` for a " +
-      "task. Returns the new note's id. Pass `note_id` as a date " +
-      "(`2026-09-12`) or an ISO week (`2026-W37`) to create that day's or " +
-      "week's note; otherwise an id is minted.",
+      "Add new blocks under a parent, at `index` (0-based; omit for the end). " +
+      "Pass a note id as the parent for top-level rows. Each block is " +
+      "`{ text, type?, props?, children? }`, and `children` nests — so a " +
+      "heading with bullets under it is one call. Purely additive: nothing " +
+      "already in the note is touched.",
     permission: "write",
-    needsAllNotes: true,
     annotations: writes,
     inputSchema: {
       type: "object",
       properties: {
-        title: { type: "string", description: "The note's title. Optional." },
-        markdown: { type: "string", description: "The note's body as a markdown outline." },
-        note_id: {
-          type: "string",
-          description: "Only for a daily (`YYYY-MM-DD`) or weekly (`YYYY-Www`) note.",
+        parent_id: { type: "string", description: "A block id, or a note id for top-level rows." },
+        blocks: {
+          type: "array",
+          minItems: 1,
+          description: "The blocks to add, in order.",
+          items: { $ref: "#/$defs/newBlock" },
+        },
+        index: { type: "integer", minimum: 0, description: "0-based. Omit to append at the end." },
+      },
+      required: ["parent_id", "blocks"],
+      additionalProperties: false,
+      $defs: {
+        newBlock: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "The block's text, with no markdown marker." },
+            type: {
+              type: "string",
+              enum: [...BLOCK_TYPES].filter((entry) => entry !== PAGE_TYPE),
+              description: "Defaults to `text`.",
+            },
+            props: { type: "object", description: "Optional metadata for the block." },
+            children: {
+              type: "array",
+              description: "Blocks nested beneath this one.",
+              items: { $ref: "#/$defs/newBlock" },
+            },
+          },
+          required: ["text"],
+          additionalProperties: false,
         },
       },
-      additionalProperties: false,
     },
     async run(args, context) {
       const { graph } = context
-      const title = optionalString(args, "title")
-      const markdown = optionalMarkdown(args, "markdown") ?? ""
-      const requested = optionalString(args, "note_id")
+      const parentId = requireString(args, "parent_id")
+      const index = optionalIndex(args)
+      const specs = parseNewBlocks(args.blocks, "blocks")
 
-      if (requested !== undefined && !isDatePageId(requested)) {
+      const parent = nodeOf(graph, parentId)
+      if (!parent) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
+      if (parent.type !== PAGE_TYPE) {
+        const refusal = sharedOutsideScope(context, parentId)
+        if (refusal) return refusal
+      }
+
+      // The note a new block is "written in" (`notes_id`, migration 0006) —
+      // where it shows if it ever falls out of the outline. A block added
+      // under a note belongs to that note; one added under a block inherits
+      // the note that block was written in, which is what the editor does
+      // when you press Enter.
+      const notesId = parent.type === PAGE_TYPE ? parent.id : parent.notes_id
+      if (notesId === undefined) {
         return {
           ok: false,
           message:
-            "`note_id` may only be given for a daily (`YYYY-MM-DD`) or weekly " +
-            "(`YYYY-Www`) note. Leave it out and an id will be minted.",
-        }
-      }
-      const noteId = requested ?? blockId()
-      if (graph.snapshot.nodes.has(noteId)) {
-        return {
-          ok: false,
-          message: `${noteId} already exists — use \`update_note\` or \`append_to_note\`.`,
+            `${parentId} does not belong to a note, so a block added under it ` +
+            `would have nowhere to live.`,
         }
       }
 
-      const parsed = parse(markdown)
-      const doc: BlockDoc = {
-        props: title !== undefined && title !== "" ? { title } : null,
-        rootBlockIds: parsed.rootBlockIds,
-        blocks: parsed.blocks,
+      const ops: Op[] = []
+      const created: string[] = []
+
+      const emit = (into: string, blocks: NewBlock[], at: number | undefined) => {
+        // Fractional keys for the whole run at once, strictly between the two
+        // siblings it lands between — so the existing rows either side keep
+        // the keys they have and nothing else is written.
+        const siblings = childLinksOf(graph, into).map((link) => link.sort_key)
+        const position = at === undefined ? siblings.length : Math.min(at, siblings.length)
+        const keys = generateNKeysBetween(
+          position > 0 ? siblings[position - 1] : null,
+          position < siblings.length ? siblings[position] : null,
+          blocks.length,
+        )
+        blocks.forEach((block, i) => {
+          const id = blockId()
+          created.push(id)
+          ops.push({
+            op: "create",
+            id,
+            type: block.type ?? "text",
+            text: block.text,
+            props: propsJson(block.props ?? null),
+            notesId,
+          })
+          ops.push({ op: "link", source: into, destination: id, sortKey: keys[i] })
+          if (block.children.length > 0) emit(id, block.children, undefined)
+        })
       }
-      const outcome = await writeDoc(context, noteId, doc, "Created")
-      return outcome.ok
-        ? {
-            ...outcome,
-            data: { ...(outcome.data as object), noteId },
-            text: `Created note ${noteId}.`,
-          }
-        : outcome
+      emit(parentId, specs, index)
+
+      const written = await applyOpsToReplica(context.tenant, graph.snapshot, ops, context.now)
+      return {
+        ok: true,
+        data: {
+          parentId,
+          blockIds: created,
+          created: created.length,
+          rowsWritten: written.nodes + written.links,
+        },
+        text: `Added ${created.length} block(s) under ${parentId}.`,
+      }
     },
   },
 
   {
-    name: "update_note",
-    title: "Replace a note's content",
+    name: "set_note_title",
+    title: "Retitle a note",
     description:
-      "REPLACE a note's whole body with fresh markdown, and optionally retitle " +
-      "it. Every block currently in the note that this markdown does not " +
-      "recreate stops being part of it and moves to the note's Unassigned " +
-      "section (nothing is deleted, but the note is emptied of it). Reach for " +
-      "this only to rewrite a note wholesale. To change a block, use " +
-      "`update_block`; to restructure, `move_block`; to add, `append_to_note`. " +
-      "Those name blocks by id and leave the rest of the note alone.",
+      "Set a note's title. Pass an empty string to clear it, leaving the note " +
+      "untitled — the app then shows its first words instead.",
     permission: "write",
-    annotations: writes,
+    annotations: edits,
     inputSchema: {
       type: "object",
       properties: {
         note_id: { type: "string" },
-        markdown: { type: "string", description: "The note's new body." },
-        title: { type: "string", description: "A new title. Omit to keep it; '' to clear it." },
+        title: { type: "string", description: "The new title; '' to clear it." },
       },
-      required: ["note_id", "markdown"],
+      required: ["note_id", "title"],
       additionalProperties: false,
     },
     async run(args, context) {
       const noteId = requireString(args, "note_id")
-      const markdown = optionalMarkdown(args, "markdown") ?? ""
-      const title = optionalString(args, "title")
+      const title = optionalString(args, "title") ?? ""
 
-      const existing = docOf(context.graph, noteId)
-      if (existing === null) return { ok: false, message: OUT_OF_SCOPE }
+      const note = pageOf(context.graph, noteId)
+      if (!note) return { ok: false, message: OUT_OF_SCOPE }
 
-      const parsed = parse(markdown)
-      const doc: BlockDoc = {
-        props: withTitle(existing.props, title),
-        rootBlockIds: parsed.rootBlockIds,
-        blocks: parsed.blocks,
+      // A note's title IS its node's text, and an untitled note's text is its
+      // own id (`emittedPageTitle`) — so clearing a title is not writing an
+      // empty string, it is putting the id back.
+      const text = title.trim() === "" ? noteId : title
+      const ops: Op[] = text === note.text ? [] : [{ op: "setText", id: noteId, text }]
+      const written = await applyOpsToReplica(
+        context.tenant,
+        context.graph.snapshot,
+        ops,
+        context.now,
+      )
+      return {
+        ok: true,
+        data: {
+          noteId,
+          title: text === noteId ? null : text,
+          changed: ops.length,
+          rowsWritten: written.nodes + written.links,
+        },
+        text: ops.length === 0 ? "Already titled that." : `Retitled ${noteId}.`,
       }
-      return writeDoc(context, noteId, doc, "Updated")
-    },
-  },
-
-  {
-    name: "append_to_note",
-    title: "Append to a note",
-    description:
-      "Add `markdown` to the end of a note, leaving everything already in it " +
-      "untouched. The safe way to add to a note — nothing existing can be lost, " +
-      "and you do not have to read the note first.",
-    permission: "write",
-    annotations: { ...writes, idempotentHint: false },
-    inputSchema: {
-      type: "object",
-      properties: {
-        note_id: { type: "string" },
-        markdown: { type: "string", description: "The blocks to add, as a markdown outline." },
-      },
-      required: ["note_id", "markdown"],
-      additionalProperties: false,
-    },
-    async run(args, context) {
-      const noteId = requireString(args, "note_id")
-      const markdown = optionalMarkdown(args, "markdown") ?? ""
-
-      const existing = docOf(context.graph, noteId)
-      if (existing === null) return { ok: false, message: OUT_OF_SCOPE }
-      if (markdown.trim() === "") {
-        return { ok: false, message: "`markdown` is empty — there is nothing to append." }
-      }
-
-      const added = parse(markdown)
-      const doc: BlockDoc = {
-        props: existing.props,
-        rootBlockIds: [...existing.rootBlockIds, ...added.rootBlockIds],
-        blocks: { ...existing.blocks, ...added.blocks },
-      }
-      return writeDoc(context, noteId, doc, "Appended to")
     },
   },
 
@@ -1327,8 +1351,7 @@ export const TOOLS: ToolDef[] = [
 /** Can this grant use this tool at all? The single predicate behind both
  * `toolsFor` (what is listed) and `callTool` (what runs), so the two can
  * never disagree about which tools exist. */
-const grantHasTool = (grant: Grant, tool: ToolDef): boolean =>
-  tool.needsAllNotes === true ? mayCreateNotes(grant) : allows(grant, tool.permission)
+const grantHasTool = (grant: Grant, tool: ToolDef): boolean => allows(grant, tool.permission)
 
 /** The tools this grant may use, in declaration order (deterministic, as the
  * spec asks, so clients and prompt caches can rely on it). */
@@ -1359,11 +1382,12 @@ export async function callTool(
   if (!grantHasTool(grant, tool)) {
     // Deliberately specific: the agent cannot fix this, but the PERSON
     // reading the transcript can — by minting a token that allows it.
-    const why =
-      tool.needsAllNotes === true && allows(grant, tool.permission)
-        ? "this token is scoped to specific notes, and creating a note is not one of them"
-        : `this token does not have the '${tool.permission}' permission`
-    return { kind: "unknown_tool", message: `Tool '${name}' is not available: ${why}.` }
+    return {
+      kind: "unknown_tool",
+      message:
+        `Tool '${name}' is not available: this token does not have the ` +
+        `'${tool.permission}' permission.`,
+    }
   }
 
   const graph = await scopedGraph(tenant, grant)

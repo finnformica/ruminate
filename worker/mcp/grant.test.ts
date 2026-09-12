@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
   allows,
-  coversNote,
   describeGrant,
   grantFromRow,
-  mayCreateNotes,
   parseNoteIds,
   parsePermissions,
   serializePermissions,
@@ -17,9 +15,13 @@ import {
  *
  * Every case here is a way a grant could accidentally be WIDER than the user
  * asked for — a malformed column read as "everything", an expired row that
- * still works, a scoped grant that can reach outside its notes. A grant that
- * is too narrow is a bug report; a grant that is too wide is the thing this
- * whole feature exists to prevent, so those are the tests.
+ * still works, a permission set that admits a verb nobody granted. A grant
+ * that is too narrow is a bug report; a grant that is too wide is the thing
+ * this whole feature exists to prevent, so those are the tests.
+ *
+ * What a grant means for the GRAPH — which blocks a note scope actually
+ * reaches — is not testable here, because it depends on the graph. It is
+ * pinned in `tools.test.ts` ("note scope"), against a real corpus.
  */
 
 const row = (overrides: Partial<McpTokenRow> = {}): McpTokenRow => ({
@@ -122,44 +124,6 @@ describe("allows", () => {
     expect(allows(grant, "read")).toBe(false)
     expect(allows(grant, "write")).toBe(false)
     expect(allows(grant, "delete")).toBe(false)
-  })
-})
-
-describe("coversNote", () => {
-  it("covers every note when the grant names none", () => {
-    const grant = grantOf({ note_ids: null })
-    expect(coversNote(grant, "anything")).toBe(true)
-    expect(coversNote(grant, "blk_zzz")).toBe(true)
-  })
-
-  it("covers only the notes it names", () => {
-    const grant = grantOf({ note_ids: '["blk_a","blk_b"]' })
-    expect(coversNote(grant, "blk_a")).toBe(true)
-    expect(coversNote(grant, "blk_b")).toBe(true)
-    expect(coversNote(grant, "blk_c")).toBe(false)
-  })
-
-  it("covers NOTHING when the stored scope was malformed", () => {
-    const grant = grantOf({ note_ids: "corrupted" })
-    expect(coversNote(grant, "blk_a")).toBe(false)
-  })
-})
-
-describe("mayCreateNotes", () => {
-  it("needs write AND an unrestricted scope", () => {
-    expect(mayCreateNotes(grantOf({ permissions: "read,write", note_ids: null }))).toBe(true)
-    expect(mayCreateNotes(grantOf({ permissions: "read", note_ids: null }))).toBe(false)
-    expect(mayCreateNotes(grantOf({ permissions: "read,write", note_ids: '["blk_a"]' }))).toBe(
-      false,
-    )
-  })
-
-  it("refuses a note-scoped grant even though it may write its own notes", () => {
-    // The widening this prevents: a grant over one note must not be able to
-    // manufacture a corpus of notes it also controls.
-    const grant = grantOf({ permissions: "read,write,delete", note_ids: '["blk_a"]' })
-    expect(allows(grant, "write")).toBe(true)
-    expect(mayCreateNotes(grant)).toBe(false)
   })
 })
 
