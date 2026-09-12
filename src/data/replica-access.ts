@@ -1,7 +1,7 @@
 import { atom, getDefaultStore } from "jotai"
 
 /**
- * Sticky "the server refused this account" status for the replica API —
+ * Sticky "the server refused this client" status for the replica API —
  * the honest-refusal counterpart of `sessionExpiredAtom`
  * (src/utils/github-session.ts).
  *
@@ -15,12 +15,18 @@ import { atom, getDefaultStore } from "jotai"
  * request starting to succeed). The page layout renders it as a full-width
  * notice.
  *
+ * The same channel carries the protocol refusal (409 `client_too_old`,
+ * worker/handlers/replica.ts): this build is older than the Worker will
+ * serve. It is a refusal of the CLIENT rather than the account, but the right
+ * response is identical — keep the app usable, stop pretending to sync, say
+ * so — and a reload is the whole cure.
+ *
  * Editing stays fully allowed — the app is local-first, and the push queue's
- * retry loop means everything written while refused syncs automatically if
- * the account is admitted later.
+ * retry loop means everything written while refused syncs automatically once
+ * the account is admitted or the bundle is current.
  */
 
-export type ReplicaAccessDenial = "signup_closed" | "blocked" | "forbidden"
+export type ReplicaAccessDenial = "signup_closed" | "blocked" | "forbidden" | "client_too_old"
 
 /** Null = no known denial. Sticky across retries until a replica request
  * succeeds (or the runtime resets it on sign-out). */
@@ -31,6 +37,7 @@ const DENIALS: Record<string, ReplicaAccessDenial> = {
   blocked: "blocked",
   forbidden: "forbidden",
   owner_not_configured: "forbidden",
+  client_too_old: "client_too_old",
 }
 
 export function resetReplicaAccess() {
@@ -48,7 +55,7 @@ export async function trackReplicaAccess(response: Response): Promise<void> {
     if (store.get(replicaAccessDeniedAtom) !== null) store.set(replicaAccessDeniedAtom, null)
     return
   }
-  if (response.status !== 403) return
+  if (response.status !== 403 && response.status !== 409) return
   let error: unknown
   try {
     error = ((await response.clone().json()) as { error?: unknown } | null)?.error

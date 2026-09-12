@@ -769,7 +769,10 @@ export function BlockItem({
         // pre-wrap: the text shows exactly as stored (newlines, runs
         // of spaces, a leading tab), as the textarea shows it.
         "min-h-[1lh] min-w-0 flex-1 whitespace-pre-wrap outline-none [overflow-wrap:anywhere]",
-        !readOnly && "cursor-text",
+        // On a touch screen a press-and-hold opens the block's menu, so the
+        // row's text must not start a selection under the finger (double-tap
+        // still edits, where the textarea's own selection applies).
+        !readOnly && "cursor-text coarse:select-none",
         readOnly && api.activate && "cursor-pointer",
         typo,
         panel,

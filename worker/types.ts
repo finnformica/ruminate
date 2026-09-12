@@ -25,6 +25,8 @@ export interface Env {
   /** Signup gate: "allowlist" | "open"; absent/unknown = bootstrap owner only
    * (fail closed). See worker/handlers/tenancy.ts. */
   SIGNUP_MODE?: string
+  /** Overrides the code default in replica.ts — raise to shut out old clients. */
+  MIN_REPLICA_PROTOCOL?: string
   GITHUB_CLIENT_SECRET: string
   /** Image bytes (docs/images.md). Absent until the bucket is bound. */
   IMAGES?: R2Bucket

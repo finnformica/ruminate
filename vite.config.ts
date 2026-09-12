@@ -25,7 +25,13 @@ export default defineConfig({
     tailwindcss(),
     TanStackRouterVite(),
     react({ babel: { plugins: [jotaiDebugLabel, jotaiReactRefresh] } }),
-    visualizer({ filename: "dist/stats.html" }) as unknown as PluginOption,
+    // The bundle treemap is a local diagnostic, so it is written to the repo
+    // root (gitignored) rather than `dist/`: anything in `dist/` is deployed
+    // as a Worker asset, matched by the precache `globPatterns` below, and —
+    // being revisioned rather than content-hashed — re-downloaded by every
+    // service worker install, which is ~700KB of the wait before
+    // "Update Ruminate" can appear.
+    visualizer({ filename: "stats.html" }) as unknown as PluginOption,
     VitePWA({
       strategies: "generateSW",
       registerType: "prompt",
