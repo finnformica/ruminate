@@ -292,32 +292,18 @@
   }
 }
 
-/* ── Expand ──────────────────────────────────────────────────────────────────
- * Applied only on the collapsed → open transition (never on initial mount):
- * the revealed children rise in briefly, tying them to their parent. Collapse
- * itself unmounts instantly — it is a high-frequency keyboard action. */
-@keyframes block-expand {
-  from {
-    opacity: 0;
-    transform: translateY(-2px);
-  }
-}
-
-@keyframes block-expand-fade {
-  from {
-    opacity: 0;
-  }
-}
-
-.block-expand {
-  animation: block-expand 160ms var(--ease-out-strong);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .block-expand {
-    /* Keep the comprehension-aiding fade; drop the movement. */
-    animation: block-expand-fade 120ms ease;
-  }
+/* ── Fold ────────────────────────────────────────────────────────────────────
+ * The fold's motion is run by fold-motion.ts on the compositor: the rows
+ * that moved slide on a transform, and the subtree's box is revealed or
+ * covered by a clip-path — nothing lays out per frame. All the stylesheet
+ * holds is the ghost: the box a fold just emptied, kept for the animation's
+ * length with the rows it hid, inert. It leaves the flow (at its static
+ * position, so it stays exactly where it was), so the rows below are in
+ * their final places at once and slide up over it; its size is set inline,
+ * as the fold found it, so nothing inside reflows. */
+.block-subtree-ghost {
+  position: absolute;
+  pointer-events: none;
 }
 
 /* The guide lines under the pointer's subtree brighten (the editor toggles

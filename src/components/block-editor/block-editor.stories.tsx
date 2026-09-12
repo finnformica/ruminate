@@ -23,6 +23,7 @@ function Harness({
   initialDoc,
   startEditing,
   zoomRootId,
+  deferCollapse,
 }: {
   initial: string
   /** A doc built by hand, for what markdown cannot say (an image's layout). */
@@ -30,8 +31,15 @@ function Harness({
   startEditing?: boolean
   /** Start zoomed into this block (transient local zoom — no router). */
   zoomRootId?: string | null
+  /** Control the folds and commit each toggle this many milliseconds after
+   * the click, the way the app's store-backed folds land a render or two
+   * later: the fold's motion must wait for the change, not run ahead of it
+   * (e2e/fold-motion.e2e.mjs). */
+  deferCollapse?: number
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarterBlock(parse(initial)))
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
+  const deferred = deferCollapse !== undefined
   return (
     <div style={{ maxWidth: 640, padding: 24 }}>
       <BlockEditor
@@ -40,6 +48,20 @@ function Harness({
         startEditing={startEditing}
         zoomRootId={zoomRootId}
         noteTitle="My note"
+        collapsed={deferred ? collapsed : undefined}
+        onToggleCollapse={
+          deferred
+            ? (key) =>
+                window.setTimeout(() => {
+                  setCollapsed((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(key)) next.delete(key)
+                    else next.add(key)
+                    return next
+                  })
+                }, deferCollapse)
+            : undefined
+        }
       />
       <pre data-testid="serialized" style={{ position: "fixed", left: -9999, top: 0 }} aria-hidden>
         {serialize(doc)}
@@ -138,6 +160,33 @@ export const Images: Story = {
 }
 
 /** A todo that also has children — both shortcut hints stack when selected. */
+/** A long note with a large nest, for the fold's end-to-end tests
+ * (e2e/fold-motion.e2e.mjs): rows above and below it, a nested bullet
+ * below with rows of its own, and enough of everything to scroll. */
+function foldMotionSample(): string {
+  const lines: string[] = []
+  for (let i = 0; i < 30; i++) lines.push(`- Above ${i}`, `  id:: blk_fa${i}`)
+  lines.push("# The big nest", "  id:: blk_fn")
+  for (let i = 0; i < 24; i++) {
+    lines.push(`  - Child ${i} of the big nest`, `    id:: blk_fc${i}`)
+    lines.push(`    - Grandchild of child ${i}`, `      id:: blk_fg${i}`)
+  }
+  lines.push("- Sibling nest", "  id:: blk_fs")
+  for (let i = 0; i < 4; i++) lines.push(`  - Inside the sibling nest ${i}`, `    id:: blk_fi${i}`)
+  for (let i = 0; i < 6; i++) lines.push(`- Below ${i}`, `  id:: blk_fb${i}`)
+  return lines.join("\n") + "\n"
+}
+
+export const FoldMotion: Story = {
+  args: { initial: foldMotionSample() },
+}
+
+/** The same note with each fold committed 150ms after the click, as the
+ * app's store-backed folds do on a long note. */
+export const FoldMotionDeferred: Story = {
+  args: { initial: foldMotionSample(), deferCollapse: 150 },
+}
+
 export const NestedTodo: Story = {
   args: { initial: "[ ] Parent todo\n  id:: blk_pt\n  - child bullet\n    id:: blk_pc\n" },
 }
