@@ -804,6 +804,26 @@ describe("replication", () => {
 // Argument handling
 // -----------------------------------------------------------------------------
 
+describe("the published schemas", () => {
+  it("gives every tool an object schema, generated from the tool's own zod schema", () => {
+    for (const tool of TOOLS) {
+      expect(tool.inputSchema.type).toBe("object")
+      // Generated, not hand-written: the dialect line zod emits is stripped,
+      // and nothing declares properties it does not parse.
+      expect(tool.inputSchema).not.toHaveProperty("$schema")
+    }
+  })
+
+  it("keeps `create_blocks` recursive: a block's children are blocks", () => {
+    const schema = TOOLS.find((tool) => tool.name === "create_blocks")!.inputSchema as any
+
+    expect(schema.properties.blocks.items.$ref).toBe("#/$defs/newBlock")
+    expect(schema.$defs.newBlock.properties.children.items.$ref).toBe("#/$defs/newBlock")
+    // And an agent is never offered the one type it may not create.
+    expect(schema.$defs.newBlock.properties.type.enum).not.toContain("note")
+  })
+})
+
 describe("arguments", () => {
   it("refuses a missing required argument as a tool error, so a model can retry", async () => {
     expect(await refuse(harness, grantOf({}), "read_note", {})).toMatch(/`note_id` is required/)
@@ -818,6 +838,16 @@ describe("arguments", () => {
   it("caps an over-large limit rather than refusing it", async () => {
     const data = await run(harness, grantOf({}), "list_notes", { limit: 10_000 })
     expect(data.notes.length).toBeLessThanOrEqual(200)
+  })
+
+  it("refuses a block type the published schema does not list", async () => {
+    // The enum an agent reads and the values a tool accepts are the same
+    // list, so `note` — which the schema has never offered — cannot be set
+    // on a block either.
+    const bullet = (await run(harness, grantOf({}), "read_note", { note_id: BETA })).blocks[0]
+    expect(
+      await refuse(harness, grantOf({}), "update_block", { block_id: bullet.id, type: "note" }),
+    ).toMatch(/unknown block type/)
   })
 
   it("reports an unknown tool name", async () => {

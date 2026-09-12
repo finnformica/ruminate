@@ -4,8 +4,13 @@
 // ## Shape
 //
 // Every tool is one `ToolDef`: its schema, the permission it needs, and a
-// `run` that receives already-scoped inputs. Dispatch (`callTool`) does the
-// three refusals so no `run` can forget them:
+// `run` that receives already-scoped, already-PARSED inputs. The schema is a
+// zod schema and it is the only statement of the tool's contract: the JSON
+// Schema an agent reads is derived from it (`z.toJSONSchema`), and the
+// arguments a `run` receives are what that same schema returned. There is no
+// second, hand-written copy of the shape to drift from the first.
+//
+// Dispatch (`callTool`) does the three refusals so no `run` can forget them:
 //
 //   1. the grant must hold the tool's `permission`;
 //   2. every `note_id` / `block_id` argument must name something inside the
@@ -26,9 +31,12 @@
 // - A tool that does not exist for this grant is a JSON-RPC error
 //   (`-32602`): the model cannot fix it by retrying with other arguments.
 // - A tool that exists but cannot do what was asked — no such note, the note
-//   is outside the grant, the markdown was empty — is a TOOL EXECUTION error
-//   (`isError: true` with a plain-language message), because that is exactly
-//   the case the spec says to hand back to the model so it can self-correct.
+//   is outside the grant, an argument that does not fit the schema — is a
+//   TOOL EXECUTION error (`isError: true` with a plain-language message),
+//   because that is exactly the case the spec says to hand back to the model
+//   so it can self-correct. An argument failure names the field's path
+//   (`blocks[1].text`), so a model can fix the one field it got wrong and
+//   call again rather than being told the whole call was malformed.
 //
 // ## Results
 //
@@ -38,7 +46,8 @@
 // conforming to it forever, which is not a promise worth making for shapes
 // this young.
 
-import { BLOCK_TYPES, isBlockType, type BlockProps } from "../../src/blocks/types"
+import * as z from "zod/mini"
+import { BLOCK_TYPES } from "../../src/blocks/types"
 import { generateNKeysBetween } from "fractional-indexing"
 import { blockId } from "../../src/blocks/id"
 import { NOTE_TYPE, propsJson, sortKeyBetween } from "../../src/data/graph"
@@ -73,60 +82,92 @@ interface ToolContext {
   now: number
 }
 
+interface ToolAnnotations {
+  readOnlyHint: boolean
+  destructiveHint: boolean
+  idempotentHint: boolean
+  openWorldHint: boolean
+}
+
 export interface ToolDef {
   name: string
   title: string
   description: string
   permission: Permission
+  /** Derived from the tool's zod schema — never written by hand. */
   inputSchema: Record<string, unknown>
-  annotations: {
-    readOnlyHint: boolean
-    destructiveHint: boolean
-    idempotentHint: boolean
-    openWorldHint: boolean
-  }
-  run(args: Record<string, unknown>, context: ToolContext): Promise<ToolOutcome> | ToolOutcome
+  annotations: ToolAnnotations
+  /** Parse the arguments against the tool's schema, then run it. A schema
+   * failure is a tool-execution error, not a thrown one. */
+  invoke(args: Record<string, unknown>, context: ToolContext): Promise<ToolOutcome>
 }
 
 // -----------------------------------------------------------------------------
-// Argument reading — hand-rolled, like `parseReplicaPayload`, to keep the
-// Worker bundle free of a schema library.
+// Arguments
 // -----------------------------------------------------------------------------
+//
+// One zod schema per tool, and both halves of the contract come out of it:
+// the JSON Schema an agent is shown (`jsonSchemaOf`) and the typed arguments
+// a `run` receives (`tool`). `zod/mini` rather than `zod`: measured on this
+// Worker, the same schemas cost +15 KiB gzipped against +30 KiB for full zod,
+// on a bundle that is deliberately kept small
+// (`worker/handlers/replica-payload.ts` parses the replica's hot path by hand
+// for the same reason, and still does — this change is the tool layer only).
 
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 200
-/** Levels `read_note` returns when `depth` is not given — see `optionalDepth`
- * for why this is not "all of them". */
+/** Levels `read_note` returns when `depth` is not given — see `depthArg` for
+ * why this is not "all of them". */
 const DEFAULT_NOTE_DEPTH = 2
-class BadArgument extends Error {}
 
-const requireString = (args: Record<string, unknown>, key: string): string => {
-  const value = args[key]
-  if (typeof value !== "string" || value.length === 0) {
-    throw new BadArgument(`\`${key}\` is required and must be a non-empty string.`)
-  }
-  return value
-}
+/** A required, non-empty string: an id, or `search`'s query. */
+const requiredArg = (description: string) =>
+  z
+    .string("is required and must be a non-empty string.")
+    .check(z.minLength(1, "is required and must be a non-empty string."))
+    .register(z.globalRegistry, { description })
 
-const optionalString = (args: Record<string, unknown>, key: string): string | undefined => {
-  const value = args[key]
-  if (value === undefined || value === null) return undefined
-  if (typeof value !== "string") throw new BadArgument(`\`${key}\` must be a string.`)
-  return value
-}
-
-const limitOf = (args: Record<string, unknown>): number => {
-  const value = args.limit
-  if (value === undefined || value === null) return DEFAULT_LIMIT
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
-    throw new BadArgument("`limit` must be a positive integer.")
-  }
-  return Math.min(value, MAX_LIMIT)
-}
+/** One optional string. */
+const textArg = (description: string) =>
+  z.optional(z.string("must be a string.").register(z.globalRegistry, { description }))
 
 /**
- * How many outline levels to return. `0` means unlimited; omitted means
- * `fallback`.
+ * A page size. Over-large values are CAPPED rather than refused — a model
+ * that asks for everything gets `MAX_LIMIT` and a `nextCursor`, which is a
+ * better answer than an error it has to guess its way out of. The cap is part
+ * of the schema (the pipe clamps; the published `maximum` says so), not a
+ * line in some tool's body.
+ */
+const limitArg = () =>
+  z
+    .pipe(
+      z._default(
+        z.int("must be a positive integer.").check(z.gte(1, "must be a positive integer.")),
+        DEFAULT_LIMIT,
+      ),
+      z.transform((value) => Math.min(value, MAX_LIMIT)),
+    )
+    .register(z.globalRegistry, {
+      description: `Default ${DEFAULT_LIMIT}; a larger value is capped at ${MAX_LIMIT}.`,
+      maximum: MAX_LIMIT,
+    })
+
+/** The cursor is the offset into the deterministic order the list is in — an
+ * opaque digit string, refused rather than guessed at if it is anything else. */
+const cursorArg = () =>
+  z.optional(
+    z
+      .string("must be a cursor returned by a previous call.")
+      .check(z.regex(/^\d{1,9}$/, "must be a cursor returned by a previous call."))
+      .register(z.globalRegistry, { description: "`nextCursor` from a previous call." }),
+  )
+
+/** The offset a cursor names, or the start of the list. */
+const offsetOf = (cursor: string | undefined): number => (cursor === undefined ? 0 : Number(cursor))
+
+/**
+ * How many outline levels to return, with `fallback` when it is not given
+ * (and, where `least` is 0, `0` meaning unlimited).
  *
  * `read_note` defaults to `DEFAULT_NOTE_DEPTH` rather than the whole note,
  * and that default is the difference between this API being cheap and being
@@ -142,35 +183,30 @@ const limitOf = (args: Record<string, unknown>): number => {
  * `hasMoreChildren`, so the agent knows precisely what it has not seen and
  * where to ask. `depth: 0` still reads everything.
  */
-const optionalDepth = (args: Record<string, unknown>, fallback = 0): number => {
-  const value = args.depth
-  if (value === undefined || value === null) return fallback
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new BadArgument("`depth` must be a whole number, 0 or more (0 = the whole note).")
-  }
-  return value
+const depthArg = (least: 0 | 1, fallback: number, description: string) => {
+  const wrong = `must be a whole number, ${least} or more.`
+  return z
+    ._default(z.int(wrong).check(z.gte(least, wrong)), fallback)
+    .register(z.globalRegistry, { description })
 }
 
 /** A 0-based position among a parent's children. Omitted = the end. */
-const optionalIndex = (args: Record<string, unknown>, key = "index"): number | undefined => {
-  const value = args[key]
-  if (value === undefined || value === null) return undefined
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new BadArgument(`\`${key}\` must be a whole number, 0 or more.`)
-  }
-  return value
-}
+const indexArg = () =>
+  z.optional(
+    z
+      .int("must be a whole number, 0 or more.")
+      .check(z.gte(0, "must be a whole number, 0 or more."))
+      .register(z.globalRegistry, {
+        description: "0-based. Omit to append at the end.",
+      }),
+  )
 
-/** The cursor is the offset into the deterministic order the list is in — an
- * opaque digit string, refused rather than guessed at if it is anything else. */
-const offsetOf = (args: Record<string, unknown>): number => {
-  const value = args.cursor
-  if (value === undefined || value === null) return 0
-  if (typeof value !== "string" || !/^\d{1,9}$/.test(value)) {
-    throw new BadArgument("`cursor` must be a cursor returned by a previous call.")
-  }
-  return Number(value)
-}
+/** A metadata object argument: whatever keys the caller wants, kept as given
+ * (this is the block's own `props`, not something this layer interprets). */
+const propsArg = (description: string) =>
+  z.optional(
+    z.looseObject({}, { error: "must be an object." }).register(z.globalRegistry, { description }),
+  )
 
 // -----------------------------------------------------------------------------
 // Shared shapes
@@ -188,72 +224,166 @@ const preview = (text: string, words = 20): string => {
   return parts.length > words ? `${parts.slice(0, words).join(" ")}…` : parts.join(" ")
 }
 
-/** One block to create, as `create_blocks` takes it. */
+/** The block types a tool may write. `note` is not one of them: a note is
+ * made by a person, never by an agent (docs/mcp-server.md), so no tool can
+ * mint one by naming the type. */
+const WRITABLE_TYPES = BLOCK_TYPES.filter((type) => type !== NOTE_TYPE)
+
+const blockTypeArg = (description: string) =>
+  z.optional(
+    z
+      .enum(WRITABLE_TYPES, {
+        error: (issue) => `has an unknown block type ${JSON.stringify(issue.input)}.`,
+      })
+      .register(z.globalRegistry, { description }),
+  )
+
+/**
+ * One block to create, as `create_blocks` takes it: `{ text, type?, props?,
+ * children? }`, where `children` is the same shape again.
+ *
+ * The recursion is the getter — zod resolves `children` lazily, so the schema
+ * can name itself — and it survives into the JSON Schema an agent reads as a
+ * `$ref` back to this `$defs` entry, which is exactly what the hand-written
+ * schema said before.
+ */
 interface NewBlock {
   text: string
-  type?: string
-  props?: BlockProps
-  children: NewBlock[]
+  type?: (typeof WRITABLE_TYPES)[number]
+  props?: Record<string, unknown>
+  children?: NewBlock[]
 }
+
+const NewBlockSchema: z.ZodMiniType<NewBlock, NewBlock> = z
+  .object(
+    {
+      text: z
+        .string("is required and must be a string.")
+        .register(z.globalRegistry, { description: "The block's text, with no markdown marker." }),
+      type: blockTypeArg("Defaults to `text`."),
+      props: propsArg("Optional metadata for the block."),
+      get children() {
+        return z.optional(
+          z
+            .array(NewBlockSchema, "must be an array of blocks.")
+            .register(z.globalRegistry, { description: "Blocks nested beneath this one." }),
+        )
+      },
+    },
+    { error: "must be an object." },
+  )
+  .register(z.globalRegistry, { id: "newBlock" })
 
 /** How many blocks one `create_blocks` call may add, counting nested ones. A
  * note is written, not generated; a thousand blocks in one call is a runaway
  * loop rather than an intention. */
 const MAX_NEW_BLOCKS = 200
 
+const countBlocks = (blocks: NewBlock[]): number =>
+  blocks.reduce((total, block) => total + 1 + countBlocks(block.children ?? []), 0)
+
+// -----------------------------------------------------------------------------
+// From one schema to both halves of the contract
+// -----------------------------------------------------------------------------
+
 /**
- * Validate the `blocks` argument: a tree of `{ text, type?, props?,
- * children? }`. Hand-rolled like every other reader here, and strict — an
- * unknown block type or a missing `text` is refused with a message naming the
- * path, so a model can fix the one field it got wrong rather than guessing at
- * the whole shape.
+ * The JSON Schema an agent reads, from the schema the tool parses with.
+ *
+ * `io: "input"` because `inputSchema` describes what a client SENDS: the
+ * unclamped `limit` it may pass, not the clamped number a `run` sees.
  */
-function parseNewBlocks(
-  value: unknown,
-  path: string,
-  budget = { left: MAX_NEW_BLOCKS },
-): NewBlock[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new BadArgument(`\`${path}\` must be a non-empty array of blocks.`)
-  }
-  return value.map((entry, i) => {
-    const where = `${path}[${i}]`
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      throw new BadArgument(`\`${where}\` must be an object.`)
-    }
-    if ((budget.left -= 1) < 0) {
-      throw new BadArgument(`More than ${MAX_NEW_BLOCKS} blocks in one call.`)
-    }
-    const block = entry as Record<string, unknown>
-    if (typeof block.text !== "string") {
-      throw new BadArgument(`\`${where}.text\` is required and must be a string.`)
-    }
-    const type = optionalString(block, "type")
-    if (type !== undefined && (!isBlockType(type) || type === NOTE_TYPE)) {
-      throw new BadArgument(`\`${where}.type\`: unknown block type "${type}".`)
-    }
-    return {
-      text: block.text,
-      ...(type === undefined ? {} : { type }),
-      ...(block.props === undefined || block.props === null
-        ? {}
-        : { props: optionalProps(block, "props") }),
-      children:
-        block.children === undefined || block.children === null
-          ? []
-          : parseNewBlocks(block.children, `${where}.children`, budget),
-    }
-  })
+const jsonSchemaOf = (schema: z.ZodMiniType): Record<string, unknown> => {
+  const json = z.toJSONSchema(schema, {
+    io: "input",
+    override: ({ jsonSchema }) => {
+      // `z.int()` carries JavaScript's safe-integer bound. True, and noise in
+      // every integer argument of every tool, on every `tools/list`.
+      if (jsonSchema.maximum === Number.MAX_SAFE_INTEGER) delete jsonSchema.maximum
+      // Input-mode objects say nothing about extra properties, because
+      // parsing STRIPS them rather than refusing. Telling an agent not to
+      // invent arguments is still right — and is what these schemas have
+      // always said — so put it back; the leniency is the server's, not the
+      // contract's.
+      if (jsonSchema.type === "object" && jsonSchema.additionalProperties === undefined) {
+        jsonSchema.additionalProperties = false
+      }
+    },
+  }) as Record<string, unknown>
+  // The dialect is fixed by the spec; every tool repeating it is bytes on the
+  // wire an agent pays for.
+  delete json.$schema
+  return json
 }
 
-/** A metadata object argument: an object, or nothing. */
-const optionalProps = (args: Record<string, unknown>, key: string): BlockProps | undefined => {
-  const value = args[key]
-  if (value === undefined || value === null) return undefined
-  if (typeof value !== "object" || Array.isArray(value)) {
-    throw new BadArgument(`\`${key}\` must be an object.`)
+/**
+ * A validation failure as a model will read it: the path of the field that is
+ * wrong, then what is wrong with it — `` `blocks[1].text` is required and
+ * must be a string. `` — so it can fix the one field and call again rather
+ * than be told the whole call was malformed.
+ *
+ * Only the first issue is reported: the messages are written to fit after a
+ * path, and a model repairs one field at a time anyway. An issue with no path
+ * is a rule about the whole call (the block budget), and speaks for itself.
+ */
+const messageOf = (error: z.core.$ZodError): string => {
+  const issue = error.issues[0]
+  const path = issue.path.reduce<string>(
+    (out, segment) =>
+      typeof segment === "number"
+        ? `${out}[${segment}]`
+        : out === ""
+          ? String(segment)
+          : `${out}.${String(segment)}`,
+    "",
+  )
+  return path === "" ? issue.message : `\`${path}\` ${issue.message}`
+}
+
+/**
+ * JSON-RPC clients routinely send `null` for an argument they mean to omit,
+ * and every reader this schema layer replaces read the two the same way. So
+ * drop null-valued keys before parsing — except inside `props`, which is the
+ * caller's own metadata object, where a null is a value rather than an
+ * absence.
+ */
+const withoutNulls = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(withoutNulls)
+  if (typeof value !== "object" || value === null) return value
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, entry]) => entry !== null)
+      .map(([key, entry]) => [key, key === "props" ? entry : withoutNulls(entry)]),
+  )
+}
+
+/**
+ * One tool, from one schema: the JSON Schema is generated from it, and `run`
+ * is handed what it parsed. A schema failure never reaches `run` — it comes
+ * back as a tool-execution error, which is what lets an agent call, read the
+ * refusal, and retry with the field fixed.
+ */
+function tool<S extends z.ZodMiniType>(def: {
+  name: string
+  title: string
+  description: string
+  permission: Permission
+  annotations: ToolAnnotations
+  schema: S
+  run(args: z.infer<S>, context: ToolContext): Promise<ToolOutcome> | ToolOutcome
+}): ToolDef {
+  return {
+    name: def.name,
+    title: def.title,
+    description: def.description,
+    permission: def.permission,
+    annotations: def.annotations,
+    inputSchema: jsonSchemaOf(def.schema),
+    async invoke(args, context) {
+      const parsed = def.schema.safeParse(withoutNulls(args))
+      if (!parsed.success) return { ok: false, message: messageOf(parsed.error) }
+      return def.run(parsed.data, context)
+    },
   }
-  return value as BlockProps
 }
 
 /**
@@ -463,7 +593,7 @@ const writes = {
 const edits = { ...writes, idempotentHint: true } as const
 
 export const TOOLS: ToolDef[] = [
-  {
+  tool({
     name: "list_notes",
     title: "List notes",
     description:
@@ -474,28 +604,24 @@ export const TOOLS: ToolDef[] = [
       "`search`, which looks at every block rather than a note's opening lines.",
     permission: "read",
     annotations: readOnly,
-    inputSchema: {
-      type: "object",
-      properties: {
-        tag: {
-          type: "string",
-          description: "Only notes carrying this tag. Without the leading '#'. Matches sub-tags.",
-        },
-        type: {
-          type: "string",
-          enum: ["note", "daily", "weekly"],
-          description: "Only notes of this kind.",
-        },
-        limit: { type: "integer", minimum: 1, maximum: MAX_LIMIT, description: "Default 50." },
-        cursor: { type: "string", description: "`nextCursor` from a previous call." },
-      },
-      additionalProperties: false,
-    },
+    schema: z.object({
+      tag: textArg("Only notes carrying this tag. Without the leading '#'. Matches sub-tags."),
+      type: z.optional(
+        z
+          .enum(["note", "daily", "weekly"], {
+            error: (issue) =>
+              `must be one of note, daily or weekly (got ${JSON.stringify(issue.input)}).`,
+          })
+          .register(z.globalRegistry, { description: "Only notes of this kind." }),
+      ),
+      limit: limitArg(),
+      cursor: cursorArg(),
+    }),
     run(args, { graph }) {
-      const tag = optionalString(args, "tag")?.replace(/^#/, "").toLowerCase()
-      const type = optionalString(args, "type")
-      const limit = limitOf(args)
-      const offset = offsetOf(args)
+      const tag = args.tag?.replace(/^#/, "").toLowerCase()
+      const type = args.type
+      const limit = args.limit
+      const offset = offsetOf(args.cursor)
 
       const matches = graph
         .notes()
@@ -518,9 +644,9 @@ export const TOOLS: ToolDef[] = [
               (nextCursor ? `\n\n${matches.length - offset - page.length} more.` : ""),
       }
     },
-  },
+  }),
 
-  {
+  tool({
     name: "search",
     title: "Search blocks",
     description:
@@ -529,18 +655,13 @@ export const TOOLS: ToolDef[] = [
       "appears in, so it is the way to get from a phrase to a note or a block id.",
     permission: "read",
     annotations: readOnly,
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "The text to look for." },
-        limit: { type: "integer", minimum: 1, maximum: MAX_LIMIT, description: "Default 50." },
-      },
-      required: ["query"],
-      additionalProperties: false,
-    },
+    schema: z.object({
+      query: requiredArg("The text to look for."),
+      limit: limitArg(),
+    }),
     run(args, { graph }) {
-      const query = requireString(args, "query").toLowerCase()
-      const limit = limitOf(args)
+      const query = args.query.toLowerCase()
+      const limit = args.limit
 
       const hits: {
         id: string
@@ -581,9 +702,9 @@ export const TOOLS: ToolDef[] = [
                 .join("\n"),
       }
     },
-  },
+  }),
 
-  {
+  tool({
     name: "read_note",
     title: "Read a note",
     description:
@@ -600,26 +721,20 @@ export const TOOLS: ToolDef[] = [
       "which the app shows in a section at the foot of the note.",
     permission: "read",
     annotations: readOnly,
-    inputSchema: {
-      type: "object",
-      properties: {
-        note_id: { type: "string", description: "From `list_notes` or `search`." },
-        depth: {
-          type: "integer",
-          minimum: 0,
-          description:
-            `How many levels of the outline to return. Defaults to ${DEFAULT_NOTE_DEPTH}; ` +
-            "use 0 for the whole note, which on a large one is expensive.",
-        },
-      },
-      required: ["note_id"],
-      additionalProperties: false,
-    },
+    schema: z.object({
+      note_id: requiredArg("From `list_notes` or `search`."),
+      depth: depthArg(
+        0,
+        DEFAULT_NOTE_DEPTH,
+        `How many levels of the outline to return. Defaults to ${DEFAULT_NOTE_DEPTH}; ` +
+          "use 0 for the whole note, which on a large one is expensive.",
+      ),
+    }),
     run(args, { graph }) {
-      const noteId = requireString(args, "note_id")
+      const noteId = args.note_id
       const note = noteOf(graph, noteId)
       if (!note) return { ok: false, message: OUT_OF_SCOPE }
-      const depth = optionalDepth(args, DEFAULT_NOTE_DEPTH)
+      const depth = args.depth
 
       const rootBlockIds = childrenOf(graph, noteId)
       const { blocks, truncated } = blocksOfNote(graph, rootBlockIds, depth)
@@ -649,9 +764,9 @@ export const TOOLS: ToolDef[] = [
           (unassigned.length > 0 ? `, ${unassigned.length} unassigned` : ""),
       }
     },
-  },
+  }),
 
-  {
+  tool({
     name: "get_block",
     title: "Get a block",
     description:
@@ -661,14 +776,9 @@ export const TOOLS: ToolDef[] = [
       "the graph with `list_children` and `list_parents`.",
     permission: "read",
     annotations: readOnly,
-    inputSchema: {
-      type: "object",
-      properties: { block_id: { type: "string", description: "A block id, or a note id." } },
-      required: ["block_id"],
-      additionalProperties: false,
-    },
+    schema: z.object({ block_id: requiredArg("A block id, or a note id.") }),
     run(args, { graph }) {
-      const id = requireString(args, "block_id")
+      const id = args.block_id
       const block = blockOut(graph, id)
       if (!block) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
 
@@ -689,9 +799,9 @@ export const TOOLS: ToolDef[] = [
           `in notes: ${data.noteIds.join(", ") || "none"}`,
       }
     },
-  },
+  }),
 
-  {
+  tool({
     name: "list_children",
     title: "List a block's children",
     description:
@@ -703,24 +813,15 @@ export const TOOLS: ToolDef[] = [
       "way costs far less than `read_note` on the whole thing.",
     permission: "read",
     annotations: readOnly,
-    inputSchema: {
-      type: "object",
-      properties: {
-        block_id: { type: "string", description: "A block id, or a note id." },
-        depth: {
-          type: "integer",
-          minimum: 1,
-          description: "Levels to return. 1 (the default) is the direct children only.",
-        },
-        limit: { type: "integer", minimum: 1, maximum: MAX_LIMIT, description: "Default 50." },
-      },
-      required: ["block_id"],
-      additionalProperties: false,
-    },
+    schema: z.object({
+      block_id: requiredArg("A block id, or a note id."),
+      depth: depthArg(1, 1, "Levels to return. 1 (the default) is the direct children only."),
+      limit: limitArg(),
+    }),
     run(args, { graph }) {
-      const id = requireString(args, "block_id")
-      const limit = limitOf(args)
-      const depth = optionalDepth(args) || 1
+      const id = args.block_id
+      const limit = args.limit
+      const depth = args.depth
       if (nodeOf(graph, id) === null) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
 
       const direct = childrenOf(graph, id)
@@ -748,9 +849,9 @@ export const TOOLS: ToolDef[] = [
                 .join("\n"),
       }
     },
-  },
+  }),
 
-  {
+  tool({
     name: "list_parents",
     title: "List a block's parents",
     description:
@@ -759,14 +860,9 @@ export const TOOLS: ToolDef[] = [
       "more than one note. Walk up by calling this again with a parent's id.",
     permission: "read",
     annotations: readOnly,
-    inputSchema: {
-      type: "object",
-      properties: { block_id: { type: "string", description: "A block id or a note id." } },
-      required: ["block_id"],
-      additionalProperties: false,
-    },
+    schema: z.object({ block_id: requiredArg("A block id or a note id.") }),
     run(args, { graph }) {
-      const id = requireString(args, "block_id")
+      const id = args.block_id
       if (nodeOf(graph, id) === null) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
 
       const parents = parentsOf(graph, id)
@@ -793,9 +889,9 @@ export const TOOLS: ToolDef[] = [
                 .join("\n"),
       }
     },
-  },
+  }),
 
-  {
+  tool({
     name: "list_tags",
     title: "List tags",
     description:
@@ -803,7 +899,7 @@ export const TOOLS: ToolDef[] = [
       "carry it. Pass one to `list_notes` as `tag` to see them.",
     permission: "read",
     annotations: readOnly,
-    inputSchema: { type: "object", additionalProperties: false },
+    schema: z.object({}),
     run(_args, { graph }) {
       const counts = new Map<string, number>()
       for (const noteId of graph.notes()) {
@@ -824,60 +920,45 @@ export const TOOLS: ToolDef[] = [
             : tags.map((entry) => `#${entry.tag}  ${entry.noteCount}`).join("\n"),
       }
     },
-  },
+  }),
 
-  {
+  tool({
     name: "create_blocks",
     title: "Add blocks to a note",
     description:
       "Add new blocks under a parent, at `index` (0-based; omit for the end). " +
       "Pass a note id as the parent for top-level rows. Each block is " +
       "`{ text, type?, props?, children? }`, and `children` nests — so a " +
-      "heading with bullets under it is one call. Purely additive: nothing " +
-      "already in the note is touched.",
+      "heading with bullets under it is one call. At most " +
+      `${MAX_NEW_BLOCKS} blocks in one call, counting nested ones. Purely ` +
+      "additive: nothing already in the note is touched.",
     permission: "write",
     annotations: writes,
-    inputSchema: {
-      type: "object",
-      properties: {
-        parent_id: { type: "string", description: "A block id, or a note id for top-level rows." },
-        blocks: {
-          type: "array",
-          minItems: 1,
-          description: "The blocks to add, in order.",
-          items: { $ref: "#/$defs/newBlock" },
-        },
-        index: { type: "integer", minimum: 0, description: "0-based. Omit to append at the end." },
-      },
-      required: ["parent_id", "blocks"],
-      additionalProperties: false,
-      $defs: {
-        newBlock: {
-          type: "object",
-          properties: {
-            text: { type: "string", description: "The block's text, with no markdown marker." },
-            type: {
-              type: "string",
-              enum: [...BLOCK_TYPES].filter((entry) => entry !== NOTE_TYPE),
-              description: "Defaults to `text`.",
-            },
-            props: { type: "object", description: "Optional metadata for the block." },
-            children: {
-              type: "array",
-              description: "Blocks nested beneath this one.",
-              items: { $ref: "#/$defs/newBlock" },
-            },
-          },
-          required: ["text"],
-          additionalProperties: false,
-        },
-      },
-    },
+    schema: z
+      .object({
+        parent_id: requiredArg("A block id, or a note id for top-level rows."),
+        blocks: z
+          .array(NewBlockSchema, "must be a non-empty array of blocks.")
+          .check(z.minLength(1, "must be a non-empty array of blocks."))
+          .register(z.globalRegistry, { description: "The blocks to add, in order." }),
+        index: indexArg(),
+      })
+      // The budget is a rule about the whole call, not about one field: it
+      // counts nested blocks too, so `blocks[3].children[9]` is what puts the
+      // call over. JSON Schema cannot say "200 nodes in this tree" — `maxItems`
+      // would only bound the top level — so it is a check here, and the
+      // description says it.
+      .check(
+        z.refine((args) => countBlocks(args.blocks) <= MAX_NEW_BLOCKS, {
+          error: `More than ${MAX_NEW_BLOCKS} blocks in one call.`,
+          abort: true,
+        }),
+      ),
     async run(args, context) {
       const { graph } = context
-      const parentId = requireString(args, "parent_id")
-      const index = optionalIndex(args)
-      const specs = parseNewBlocks(args.blocks, "blocks")
+      const parentId = args.parent_id
+      const index = args.index
+      const specs = args.blocks
 
       const parent = nodeOf(graph, parentId)
       if (!parent) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
@@ -927,7 +1008,8 @@ export const TOOLS: ToolDef[] = [
             notesId,
           })
           ops.push({ op: "link", source: into, destination: id, sortKey: keys[i] })
-          if (block.children.length > 0) emit(id, block.children, undefined)
+          const children = block.children ?? []
+          if (children.length > 0) emit(id, children, undefined)
         })
       }
       emit(parentId, specs, index)
@@ -944,9 +1026,9 @@ export const TOOLS: ToolDef[] = [
         text: `Added ${created.length} block(s) under ${parentId}.`,
       }
     },
-  },
+  }),
 
-  {
+  tool({
     name: "set_note_title",
     title: "Retitle a note",
     description:
@@ -954,18 +1036,17 @@ export const TOOLS: ToolDef[] = [
       "untitled — the app then shows its first words instead.",
     permission: "write",
     annotations: edits,
-    inputSchema: {
-      type: "object",
-      properties: {
-        note_id: { type: "string" },
-        title: { type: "string", description: "The new title; '' to clear it." },
-      },
-      required: ["note_id", "title"],
-      additionalProperties: false,
-    },
+    schema: z.object({
+      note_id: requiredArg("The note to retitle."),
+      // Required, and allowed to be empty: '' is how a title is CLEARED, so
+      // the empty string is a value here rather than a missing argument.
+      title: z
+        .string("is required and must be a string.")
+        .register(z.globalRegistry, { description: "The new title; '' to clear it." }),
+    }),
     async run(args, context) {
-      const noteId = requireString(args, "note_id")
-      const title = optionalString(args, "title") ?? ""
+      const noteId = args.note_id
+      const title = args.title
 
       const note = noteNodeOf(context.graph, noteId)
       if (!note) return { ok: false, message: OUT_OF_SCOPE }
@@ -992,9 +1073,9 @@ export const TOOLS: ToolDef[] = [
         text: ops.length === 0 ? "Already titled that." : `Retitled ${noteId}.`,
       }
     },
-  },
+  }),
 
-  {
+  tool({
     name: "update_block",
     title: "Edit a block",
     description:
@@ -1005,30 +1086,16 @@ export const TOOLS: ToolDef[] = [
       "Types: text, h1, h2, h3, todo, done, ul, ol, quote, code, image.",
     permission: "write",
     annotations: edits,
-    inputSchema: {
-      type: "object",
-      properties: {
-        block_id: { type: "string" },
-        text: { type: "string", description: "The block's new text, without any markdown marker." },
-        type: {
-          type: "string",
-          enum: ["text", "h1", "h2", "h3", "todo", "done", "ul", "ol", "quote", "code", "image"],
-          description: "Tick a to-do by setting `done`; untick it with `todo`.",
-        },
-        props: {
-          type: "object",
-          description: "Replaces the block's metadata object outright. Omit to leave it alone.",
-        },
-      },
-      required: ["block_id"],
-      additionalProperties: false,
-    },
+    schema: z.object({
+      block_id: requiredArg("The block to change."),
+      text: textArg("The block's new text, without any markdown marker."),
+      type: blockTypeArg("Tick a to-do by setting `done`; untick it with `todo`."),
+      props: propsArg("Replaces the block's metadata object outright. Omit to leave it alone."),
+    }),
     async run(args, context) {
       const { graph } = context
-      const id = requireString(args, "block_id")
-      const text = optionalString(args, "text")
-      const type = optionalString(args, "type")
-      const props = optionalProps(args, "props")
+      const id = args.block_id
+      const { text, type, props } = args
 
       const row = nodeOf(graph, id)
       if (!row) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
@@ -1038,11 +1105,12 @@ export const TOOLS: ToolDef[] = [
           message: `${id} is a note, not a block. Retitle it with \`update_note\`.`,
         }
       }
+      // "Something to change" is a rule about the call, and could live in the
+      // schema — but it is kept here so that a call naming a block this token
+      // cannot reach is refused for THAT reason first, rather than being told
+      // about its empty field list.
       if (text === undefined && type === undefined && props === undefined) {
         return { ok: false, message: "Give at least one of `text`, `type` or `props` to change." }
-      }
-      if (type !== undefined && !isBlockType(type)) {
-        return { ok: false, message: `Unknown block type: ${type}.` }
       }
       const refusal = sharedOutsideScope(context, id)
       if (refusal) return refusal
@@ -1061,9 +1129,9 @@ export const TOOLS: ToolDef[] = [
         text: ops.length === 0 ? `${id} already said that.` : `Updated ${id}.`,
       }
     },
-  },
+  }),
 
-  {
+  tool({
     name: "link_block",
     title: "Put a block under another",
     description:
@@ -1074,20 +1142,15 @@ export const TOOLS: ToolDef[] = [
       "notes. Use `move_block` to relocate one rather than linking then unlinking.",
     permission: "write",
     annotations: edits,
-    inputSchema: {
-      type: "object",
-      properties: {
-        parent_id: { type: "string", description: "A block id, or a note id for a top-level row." },
-        block_id: { type: "string", description: "The block to put there." },
-        index: { type: "integer", minimum: 0, description: "0-based. Omit to append at the end." },
-      },
-      required: ["parent_id", "block_id"],
-      additionalProperties: false,
-    },
+    schema: z.object({
+      parent_id: requiredArg("A block id, or a note id for a top-level row."),
+      block_id: requiredArg("The block to put there."),
+      index: indexArg(),
+    }),
     async run(args, context) {
-      const parentId = requireString(args, "parent_id")
-      const blockId = requireString(args, "block_id")
-      const index = optionalIndex(args)
+      const parentId = args.parent_id
+      const blockId = args.block_id
+      const index = args.index
 
       const refusal = linkable(context, parentId, blockId)
       if (refusal) return refusal
@@ -1112,9 +1175,9 @@ export const TOOLS: ToolDef[] = [
         text: `Linked ${blockId} under ${parentId}.`,
       }
     },
-  },
+  }),
 
-  {
+  tool({
     name: "unlink_block",
     title: "Take a block out of one place",
     description:
@@ -1125,18 +1188,13 @@ export const TOOLS: ToolDef[] = [
       "block for good, use `delete_block`.",
     permission: "write",
     annotations: edits,
-    inputSchema: {
-      type: "object",
-      properties: {
-        parent_id: { type: "string", description: "The block or note it is currently under." },
-        block_id: { type: "string" },
-      },
-      required: ["parent_id", "block_id"],
-      additionalProperties: false,
-    },
+    schema: z.object({
+      parent_id: requiredArg("The block or note it is currently under."),
+      block_id: requiredArg("The block to take out of that place."),
+    }),
     async run(args, context) {
-      const parentId = requireString(args, "parent_id")
-      const blockId = requireString(args, "block_id")
+      const parentId = args.parent_id
+      const blockId = args.block_id
 
       if (nodeOf(context.graph, parentId) === null || nodeOf(context.graph, blockId) === null) {
         return { ok: false, message: BLOCK_OUT_OF_SCOPE }
@@ -1163,9 +1221,9 @@ export const TOOLS: ToolDef[] = [
           : `Unlinked ${blockId} from ${parentId}; it still appears elsewhere.`,
       }
     },
-  },
+  }),
 
-  {
+  tool({
     name: "move_block",
     title: "Move a block",
     description:
@@ -1174,25 +1232,17 @@ export const TOOLS: ToolDef[] = [
       "appears in more than one place, so it is clear which occurrence moves.",
     permission: "write",
     annotations: edits,
-    inputSchema: {
-      type: "object",
-      properties: {
-        block_id: { type: "string" },
-        to_parent_id: { type: "string", description: "A block id, or a note id." },
-        from_parent_id: {
-          type: "string",
-          description: "Required only when the block appears under more than one parent.",
-        },
-        index: { type: "integer", minimum: 0, description: "0-based. Omit to append at the end." },
-      },
-      required: ["block_id", "to_parent_id"],
-      additionalProperties: false,
-    },
+    schema: z.object({
+      block_id: requiredArg("The block to move."),
+      to_parent_id: requiredArg("A block id, or a note id."),
+      from_parent_id: textArg("Required only when the block appears under more than one parent."),
+      index: indexArg(),
+    }),
     async run(args, context) {
-      const blockId = requireString(args, "block_id")
-      const toParent = requireString(args, "to_parent_id")
-      const fromArg = optionalString(args, "from_parent_id")
-      const index = optionalIndex(args)
+      const blockId = args.block_id
+      const toParent = args.to_parent_id
+      const fromArg = args.from_parent_id
+      const index = args.index
 
       const refusal = linkable(context, toParent, blockId)
       if (refusal) return refusal
@@ -1241,9 +1291,9 @@ export const TOOLS: ToolDef[] = [
         text: `Moved ${blockId} to ${toParent}.`,
       }
     },
-  },
+  }),
 
-  {
+  tool({
     name: "delete_block",
     title: "Delete a block",
     description:
@@ -1259,21 +1309,17 @@ export const TOOLS: ToolDef[] = [
       idempotentHint: true,
       openWorldHint: false,
     },
-    inputSchema: {
-      type: "object",
-      properties: {
-        block_id: { type: "string" },
-        with_contents: {
-          type: "boolean",
+    schema: z.object({
+      block_id: requiredArg("The block to delete."),
+      with_contents: z
+        ._default(z.boolean("must be true or false."), false)
+        .register(z.globalRegistry, {
           description: "Also delete everything beneath it that nothing else holds.",
-        },
-      },
-      required: ["block_id"],
-      additionalProperties: false,
-    },
+        }),
+    }),
     async run(args, context) {
-      const blockId = requireString(args, "block_id")
-      const withContents = args.with_contents === true
+      const blockId = args.block_id
+      const withContents = args.with_contents
 
       const row = nodeOf(context.graph, blockId)
       if (!row) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
@@ -1302,9 +1348,9 @@ export const TOOLS: ToolDef[] = [
             : `Deleted ${blockId} and ${deleted - 1} block(s) beneath it.`,
       }
     },
-  },
+  }),
 
-  {
+  tool({
     name: "delete_note",
     title: "Delete a note",
     description:
@@ -1319,14 +1365,9 @@ export const TOOLS: ToolDef[] = [
       idempotentHint: true,
       openWorldHint: false,
     },
-    inputSchema: {
-      type: "object",
-      properties: { note_id: { type: "string" } },
-      required: ["note_id"],
-      additionalProperties: false,
-    },
+    schema: z.object({ note_id: requiredArg("The note to delete.") }),
     async run(args, context) {
-      const noteId = requireString(args, "note_id")
+      const noteId = args.note_id
       if (noteNodeOf(context.graph, noteId) === null) return { ok: false, message: OUT_OF_SCOPE }
 
       const title = noteOf(context.graph, noteId)?.displayName ?? noteId
@@ -1343,7 +1384,7 @@ export const TOOLS: ToolDef[] = [
         text: `Deleted note ${noteId} ("${title}") and ${ops.length - 1} block(s).`,
       }
     },
-  },
+  }),
 ]
 
 // -----------------------------------------------------------------------------
@@ -1393,11 +1434,5 @@ export async function callTool(
   }
 
   const graph = await scopedGraph(tenant, grant)
-  try {
-    return { kind: "result", outcome: await tool.run(args, { grant, tenant, graph, now }) }
-  } catch (error) {
-    if (error instanceof BadArgument)
-      return { kind: "result", outcome: { ok: false, message: error.message } }
-    throw error
-  }
+  return { kind: "result", outcome: await tool.invoke(args, { grant, tenant, graph, now }) }
 }
