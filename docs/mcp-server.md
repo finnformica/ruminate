@@ -50,8 +50,8 @@ A token either reaches **every note**, or exactly the notes the user ticked. The
 stated in notes because a note is what the user recognizes; what it means for the graph
 beneath is derived, never sent:
 
-> A node is visible when it is a granted page, when it is reachable from one through live
-> child links, or when it was written in one (`notes_id` — the note's Unassigned basket,
+> A node is visible when it is a granted note, when it is reachable from one through live
+> child links, or when it was written in one (`notes_id` — the note's Unassigned section,
 > which the person can see, so the agent can too).
 
 Everything follows from that one definition. A scoped token cannot list, search, read,

@@ -41,8 +41,8 @@
 import { BLOCK_TYPES, isBlockType, type BlockProps } from "../../src/blocks/types"
 import { generateNKeysBetween } from "fractional-indexing"
 import { blockId } from "../../src/blocks/id"
-import { PAGE_TYPE, propsJson, sortKeyBetween } from "../../src/data/graph"
-import { deleteBlockOps, deletePageOps, deleteSubtreeOps, type Op } from "../../src/data/ops"
+import { NOTE_TYPE, propsJson, sortKeyBetween } from "../../src/data/graph"
+import { deleteBlockOps, deleteNoteOps, deleteSubtreeOps, type Op } from "../../src/data/ops"
 import type { TenantDb } from "../tenancy-db"
 import { allows, type Grant, type Permission } from "./grant"
 import {
@@ -53,7 +53,7 @@ import {
   noteOf,
   notesReaching,
   notesReachingUnscoped,
-  pageOf,
+  noteNodeOf,
   parentsOf,
   propsOf,
   scopedGraph,
@@ -229,7 +229,7 @@ function parseNewBlocks(
       throw new BadArgument(`\`${where}.text\` is required and must be a string.`)
     }
     const type = optionalString(block, "type")
-    if (type !== undefined && (!isBlockType(type) || type === PAGE_TYPE)) {
+    if (type !== undefined && (!isBlockType(type) || type === NOTE_TYPE)) {
       throw new BadArgument(`\`${where}.type\`: unknown block type "${type}".`)
     }
     return {
@@ -293,7 +293,7 @@ function linkable(context: ToolContext, parentId: string, blockId: string): Tool
   if (parentId === blockId) {
     return { ok: false, message: "A block cannot be put under itself." }
   }
-  if (nodeOf(graph, blockId)?.type === PAGE_TYPE) {
+  if (nodeOf(graph, blockId)?.type === NOTE_TYPE) {
     return { ok: false, message: `${blockId} is a note; a note cannot be linked under a block.` }
   }
   return sharedOutsideScope(context, blockId)
@@ -351,7 +351,7 @@ const blockOut = (graph: ScopedGraph, id: string, extra: Record<string, unknown>
     ...(props && Object.keys(props).length > 0 ? { props } : {}),
     ...(childIds.length > 0 ? { childIds } : {}),
     // The note the block was written in — where it shows if nothing links to
-    // it any more. Absent for pages and for rows older than migration 0006.
+    // it any more. Absent for notes and for rows older than migration 0006.
     ...(row.notes_id === undefined ? {} : { writtenInNoteId: row.notes_id }),
     updatedAt: row.updated_at,
     ...extra,
@@ -498,7 +498,7 @@ export const TOOLS: ToolDef[] = [
       const offset = offsetOf(args)
 
       const matches = graph
-        .pages()
+        .notes()
         .map((id) => noteSummary(graph, id))
         .filter((note): note is NonNullable<typeof note> => note !== null)
         .filter((note) => type === undefined || note.type === type)
@@ -554,7 +554,7 @@ export const TOOLS: ToolDef[] = [
       const ids = [...graph.snapshot.nodes.keys()].filter((id) => sees(graph, id)).sort()
       for (const id of ids) {
         const row = graph.snapshot.nodes.get(id)
-        if (!row || row.type === PAGE_TYPE) continue
+        if (!row || row.type === NOTE_TYPE) continue
         if (!row.text.toLowerCase().includes(query)) continue
         const noteIds = notesReaching(graph, id)
         hits.push({
@@ -657,7 +657,7 @@ export const TOOLS: ToolDef[] = [
     description:
       "One block by id, as stored: type, text, metadata, its children, the " +
       "blocks that hold it, and the notes it appears in. A note id works too " +
-      "(a note is a block whose type is `page`). The starting point for walking " +
+      "(a note is a block whose type is `note`). The starting point for walking " +
       "the graph with `list_children` and `list_parents`.",
     permission: "read",
     annotations: readOnly,
@@ -675,8 +675,10 @@ export const TOOLS: ToolDef[] = [
       const data = {
         ...block,
         parentIds: parentsOf(graph, id),
+        // Which notes this block appears in. A block that IS a note lists
+        // itself; `type` already says which it is, so there is no separate
+        // flag saying the same thing twice.
         noteIds: notesReaching(graph, id),
-        isNote: block.type === PAGE_TYPE,
       }
       return {
         ok: true,
@@ -804,8 +806,8 @@ export const TOOLS: ToolDef[] = [
     inputSchema: { type: "object", additionalProperties: false },
     run(_args, { graph }) {
       const counts = new Map<string, number>()
-      for (const pageId of graph.pages()) {
-        for (const tag of noteOf(graph, pageId)?.tags ?? []) {
+      for (const noteId of graph.notes()) {
+        for (const tag of noteOf(graph, noteId)?.tags ?? []) {
           counts.set(tag, (counts.get(tag) ?? 0) + 1)
         }
       }
@@ -856,7 +858,7 @@ export const TOOLS: ToolDef[] = [
             text: { type: "string", description: "The block's text, with no markdown marker." },
             type: {
               type: "string",
-              enum: [...BLOCK_TYPES].filter((entry) => entry !== PAGE_TYPE),
+              enum: [...BLOCK_TYPES].filter((entry) => entry !== NOTE_TYPE),
               description: "Defaults to `text`.",
             },
             props: { type: "object", description: "Optional metadata for the block." },
@@ -879,7 +881,7 @@ export const TOOLS: ToolDef[] = [
 
       const parent = nodeOf(graph, parentId)
       if (!parent) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
-      if (parent.type !== PAGE_TYPE) {
+      if (parent.type !== NOTE_TYPE) {
         const refusal = sharedOutsideScope(context, parentId)
         if (refusal) return refusal
       }
@@ -889,7 +891,7 @@ export const TOOLS: ToolDef[] = [
       // under a note belongs to that note; one added under a block inherits
       // the note that block was written in, which is what the editor does
       // when you press Enter.
-      const notesId = parent.type === PAGE_TYPE ? parent.id : parent.notes_id
+      const notesId = parent.type === NOTE_TYPE ? parent.id : parent.notes_id
       if (notesId === undefined) {
         return {
           ok: false,
@@ -965,11 +967,11 @@ export const TOOLS: ToolDef[] = [
       const noteId = requireString(args, "note_id")
       const title = optionalString(args, "title") ?? ""
 
-      const note = pageOf(context.graph, noteId)
+      const note = noteNodeOf(context.graph, noteId)
       if (!note) return { ok: false, message: OUT_OF_SCOPE }
 
       // A note's title IS its node's text, and an untitled note's text is its
-      // own id (`emittedPageTitle`) — so clearing a title is not writing an
+      // own id (`emittedNoteTitle`) — so clearing a title is not writing an
       // empty string, it is putting the id back.
       const text = title.trim() === "" ? noteId : title
       const ops: Op[] = text === note.text ? [] : [{ op: "setText", id: noteId, text }]
@@ -1030,7 +1032,7 @@ export const TOOLS: ToolDef[] = [
 
       const row = nodeOf(graph, id)
       if (!row) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
-      if (row.type === PAGE_TYPE) {
+      if (row.type === NOTE_TYPE) {
         return {
           ok: false,
           message: `${id} is a note, not a block. Retitle it with \`update_note\`.`,
@@ -1275,7 +1277,7 @@ export const TOOLS: ToolDef[] = [
 
       const row = nodeOf(context.graph, blockId)
       if (!row) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
-      if (row.type === PAGE_TYPE) {
+      if (row.type === NOTE_TYPE) {
         return { ok: false, message: `${blockId} is a note. Delete it with \`delete_note\`.` }
       }
       const refusal = sharedOutsideScope(context, blockId)
@@ -1325,10 +1327,10 @@ export const TOOLS: ToolDef[] = [
     },
     async run(args, context) {
       const noteId = requireString(args, "note_id")
-      if (pageOf(context.graph, noteId) === null) return { ok: false, message: OUT_OF_SCOPE }
+      if (noteNodeOf(context.graph, noteId) === null) return { ok: false, message: OUT_OF_SCOPE }
 
       const title = noteOf(context.graph, noteId)?.displayName ?? noteId
-      const ops = deletePageOps(noteId, context.graph.snapshot)
+      const ops = deleteNoteOps(noteId, context.graph.snapshot)
       const written = await applyOpsToReplica(
         context.tenant,
         context.graph.snapshot,

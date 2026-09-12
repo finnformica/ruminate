@@ -5,7 +5,7 @@
 //
 // Every read tool here answers a question the APP already answers from a
 // `GraphSnapshot` in memory — what a note's markdown is (`rollup`), what it
-// is called and tagged (`noteFromPage`), what a node's children are, which
+// is called and tagged (`noteFromNode`), what a node's children are, which
 // notes reach a block. So rather than re-implement each of those as SQL — a
 // second, drifting definition of "what the user can see" — this module loads
 // the tenant's live rows once per request and then calls the app's own pure
@@ -24,7 +24,7 @@
 //
 // `visibleNodes` turns the grant's NOTE ids into the NODE ids an agent may
 // see, and it is the only definition of that. A node is visible when it is a
-// granted page, when it is reachable from one through live child links, or
+// granted note, when it is reachable from one through live child links, or
 // when it was written in one (`notes_id` — the Unassigned basket, which the
 // person can see, so the agent can too). Derived from the grant and the
 // graph; never from anything the agent sends.
@@ -37,10 +37,10 @@
 // it never touches the snapshot directly.
 
 import { basketRootIds } from "../../src/data/basket"
-import { PAGE_TYPE, buildGraphSnapshot, parseProps, type GraphSnapshot } from "../../src/data/graph"
-import { noteFromPage } from "../../src/data/note-meta"
+import { NOTE_TYPE, buildGraphSnapshot, parseProps, type GraphSnapshot } from "../../src/data/graph"
+import { noteFromNode } from "../../src/data/note-meta"
 import { opsToRows } from "../../src/data/ops-rows"
-import { pageIds, parentsIndex, reachableFrom, type Op } from "../../src/data/ops"
+import { noteIds, parentsIndex, reachableFrom, type Op } from "../../src/data/ops"
 import type { Note } from "../../src/schema"
 import { planReplicaPut, toLinkRow, toNodeRow } from "../handlers/replica-payload"
 import type { TenantDb } from "../tenancy-db"
@@ -68,9 +68,9 @@ export async function loadSnapshot(tenant: TenantDb): Promise<GraphSnapshot> {
 /**
  * The node ids this grant may see, or `null` for "every node".
  *
- * Three sources, all derived (see the module header): the granted pages
+ * Three sources, all derived (see the module header): the granted notes
  * themselves, everything reachable from them over live child links, and every
- * node written in one of them. A granted page id that names no live page
+ * node written in one of them. A granted note id that names no live page
  * contributes nothing — a grant over a deleted note is a grant over nothing,
  * never a grant over everything.
  */
@@ -79,10 +79,10 @@ function visibleNodes(grant: Grant, snapshot: GraphSnapshot): Set<string> | null
 
   const granted = new Set<string>()
   for (const id of grant.noteIds) {
-    if (snapshot.nodes.get(id)?.type === PAGE_TYPE) granted.add(id)
+    if (snapshot.nodes.get(id)?.type === NOTE_TYPE) granted.add(id)
   }
 
-  // The seeds: the granted pages, and every block written in one. The second
+  // The seeds: the granted notes, and every block written in one. The second
   // group is the notes' Unassigned baskets — blocks nothing links to any more,
   // which the person still sees at the foot of the note.
   const seeds = [...granted]
@@ -109,9 +109,9 @@ export interface ScopedGraph {
   readonly snapshot: GraphSnapshot
   /** null = unrestricted. */
   readonly visible: Set<string> | null
-  /** Visible page ids, sorted. */
-  pages(): string[]
-  /** Node id → the visible pages that reach it (a page reaches itself). */
+  /** Visible note ids, sorted. */
+  notes(): string[]
+  /** Node id → the visible notes that reach it (a note reaches itself). */
   noteIndex(): Map<string, string[]>
   /** Node id → its visible parents, sorted. */
   parentIndex(): Map<string, string[]>
@@ -120,36 +120,35 @@ export interface ScopedGraph {
 function makeScopedGraph(snapshot: GraphSnapshot, visible: Set<string> | null): ScopedGraph {
   const sees = (id: string) => visible === null || visible.has(id)
 
-  let pages: string[] | undefined
-  let notes: Map<string, string[]> | undefined
+  let noteList: string[] | undefined
+  let noteIndex: Map<string, string[]> | undefined
   let parents: Map<string, string[]> | undefined
 
   const graph: ScopedGraph = {
     snapshot,
     visible,
-    pages() {
+    notes() {
       // Sorted by id so a paged list is repeatable — the spec asks list
       // results to come back in a deterministic order.
-      if (!pages) pages = pageIds(snapshot).filter(sees).sort()
-      return pages
+      if (!noteList) noteList = noteIds(snapshot).filter(sees).sort()
+      return noteList
     },
     noteIndex() {
-      if (notes) return notes
-      notes = new Map()
-      const add = (nodeId: string, pageId: string) => {
-        const list = notes as Map<string, string[]>
-        const existing = list.get(nodeId)
-        if (existing) existing.push(pageId)
-        else list.set(nodeId, [pageId])
+      if (noteIndex) return noteIndex
+      const index = (noteIndex = new Map<string, string[]>())
+      const add = (nodeId: string, noteId: string) => {
+        const existing = index.get(nodeId)
+        if (existing) existing.push(noteId)
+        else index.set(nodeId, [noteId])
       }
-      // One subtree walk per page: O(links) in total, not O(pages × nodes).
-      for (const pageId of graph.pages()) {
-        add(pageId, pageId)
-        for (const reached of reachableFrom(snapshot, [pageId])) {
-          if (sees(reached)) add(reached, pageId)
+      // One subtree walk per note: O(links) in total, not O(notes × nodes).
+      for (const noteId of graph.notes()) {
+        add(noteId, noteId)
+        for (const reached of reachableFrom(snapshot, [noteId])) {
+          if (sees(reached)) add(reached, noteId)
         }
       }
-      return notes
+      return index
     },
     parentIndex() {
       if (parents) return parents
@@ -181,16 +180,16 @@ export const sees = (graph: ScopedGraph, id: string): boolean =>
 export const nodeOf = (graph: ScopedGraph, id: string) =>
   sees(graph, id) ? (graph.snapshot.nodes.get(id) ?? null) : null
 
-/** A visible PAGE node, or null — what every note-addressed tool starts with. */
-export function pageOf(graph: ScopedGraph, id: string) {
+/** A visible NOTE node, or null — what every note-addressed tool starts with. */
+export function noteNodeOf(graph: ScopedGraph, id: string) {
   const row = nodeOf(graph, id)
-  return row !== null && row.type === PAGE_TYPE ? row : null
+  return row !== null && row.type === NOTE_TYPE ? row : null
 }
 
-/** A page's `Note` — title, tags, tasks, headings, preview text — exactly as
- * the app derives it. Null when the id is not a visible page. */
+/** A note's `Note` — title, tags, tasks, headings, preview text — exactly as
+ * the app derives it. Null when the id is not a visible note. */
 export function noteOf(graph: ScopedGraph, id: string): Note | null {
-  return pageOf(graph, id) === null ? null : noteFromPage(id, graph.snapshot)
+  return noteNodeOf(graph, id) === null ? null : noteFromNode(id, graph.snapshot)
 }
 
 /**
@@ -213,7 +212,7 @@ export function noteOf(graph: ScopedGraph, id: string): Note | null {
  * Unassigned subtree obeys the same `depth` as the outline.
  */
 export function unassignedOf(graph: ScopedGraph, noteId: string): string[] | null {
-  if (pageOf(graph, noteId) === null) return null
+  if (noteNodeOf(graph, noteId) === null) return null
   return basketRootIds(noteId, graph.snapshot).filter((id) => sees(graph, id))
 }
 
@@ -229,12 +228,12 @@ export function childrenOf(graph: ScopedGraph, id: string): string[] {
 export const parentsOf = (graph: ScopedGraph, id: string): string[] =>
   sees(graph, id) ? (graph.parentIndex().get(id) ?? []) : []
 
-/** Which visible pages reach this node — "what notes is this block in?". */
+/** Which visible notes reach this node — "what notes is this block in?". */
 export const notesReaching = (graph: ScopedGraph, id: string): string[] =>
   sees(graph, id) ? (graph.noteIndex().get(id) ?? []) : []
 
 /**
- * Every page in the corpus that reaches this node, **with the grant's filter
+ * Every note in the corpus that reaches this node, **with the grant's filter
  * deliberately not applied**.
  *
  * The one read in this module that ignores the scope, and it exists for the
@@ -250,8 +249,8 @@ export const notesReaching = (graph: ScopedGraph, id: string): string[] =>
  */
 export function notesReachingUnscoped(graph: ScopedGraph, id: string): string[] {
   const reaching: string[] = []
-  for (const pageId of pageIds(graph.snapshot)) {
-    if (pageId === id || reachableFrom(graph.snapshot, [pageId]).has(id)) reaching.push(pageId)
+  for (const noteId of noteIds(graph.snapshot)) {
+    if (noteId === id || reachableFrom(graph.snapshot, [noteId]).has(id)) reaching.push(noteId)
   }
   return reaching.sort()
 }

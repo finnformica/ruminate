@@ -107,7 +107,7 @@ async function ownPageIds(env: Env, userId: number, ids: string[]): Promise<Set<
   const placeholders = ids.map((_, index) => `?${index + 1}`).join(", ")
   const rows = await tenant.exec(
     `SELECT id FROM nodes WHERE user_id = :tenant AND deleted_at IS NULL ` +
-      `AND type = 'page' AND id IN (${placeholders})`,
+      `AND type = 'note' AND id IN (${placeholders})`,
     ids,
   )
   return new Set(rows.map((row) => String(row.id)))

@@ -311,12 +311,13 @@ describe("traversal", () => {
     expect(block.parentIds).toEqual([ALPHA])
     expect(block.noteIds).toEqual([ALPHA])
     expect(block.writtenInNoteId).toBe(ALPHA)
-    expect(block.isNote).toBe(false)
+    // `type` says what it is; there is no second flag saying the same thing.
+    expect(block.type).not.toBe("note")
   })
 
   it("treats a note as a block too", async () => {
     const block = await run(harness, grantOf({}), "get_block", { block_id: ALPHA })
-    expect(block.isNote).toBe(true)
+    expect(block.type).toBe("note")
     expect(block.text).toBe("Alpha")
   })
 })
@@ -329,9 +330,9 @@ describe("search and tags", () => {
     expect(data.hits[0].noteTitles).toEqual(["Alpha"])
   })
 
-  it("is case-insensitive and never matches a page node", async () => {
+  it("is case-insensitive and never matches a note node", async () => {
     expect((await run(harness, grantOf({}), "search", { query: "BULLET" })).hits).toHaveLength(1)
-    // "Alpha" is the page's text, and pages are not blocks.
+    // "Alpha" is the note's own text, and a note is not a block hit.
     expect((await run(harness, grantOf({}), "search", { query: "Alpha" })).hits).toHaveLength(0)
   })
 
@@ -670,7 +671,7 @@ describe("create_blocks", () => {
     expect(
       await refuse(harness, grantOf({}), "create_blocks", {
         parent_id: BETA,
-        blocks: [{ text: "sneaky", type: "page" }],
+        blocks: [{ text: "sneaky", type: "note" }],
       }),
     ).toMatch(/unknown block type/)
   })
