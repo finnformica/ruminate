@@ -1,4 +1,5 @@
 import {
+  REPLICA_PROTOCOL_HEADERS,
   emptyGraphDiff,
   linkKeyOf,
   type GraphDiff,
@@ -67,7 +68,7 @@ export function createD1NoteSource(options: D1NoteSourceOptions = {}): D1NoteSou
       const res = await fetchImpl(url, {
         method: "GET",
         credentials: "same-origin",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { ...REPLICA_PROTOCOL_HEADERS, Authorization: `Bearer ${token}` },
       })
       if (res.status === 401) {
         // Shaped so `isAuthError` recognizes it → one refresh + retry.

@@ -17,6 +17,15 @@ const stubAuth = {
 beforeEach(() => resetReplicaAccess())
 
 describe("trackReplicaAccess", () => {
+  it("maps the protocol refusal (409 client_too_old) to a sticky denial", async () => {
+    await trackReplicaAccess(jsonResponse({ error: "client_too_old", minimum: 1 }, 409))
+    expect(store.get(replicaAccessDeniedAtom)).toBe("client_too_old")
+    // Any success clears it — a reload that brings a current bundle is exactly
+    // a request starting to succeed.
+    await trackReplicaAccess(jsonResponse({ ok: true }))
+    expect(store.get(replicaAccessDeniedAtom)).toBeNull()
+  })
+
   it("sets the sticky denial for the tenancy 403s and maps legacy denials to forbidden", async () => {
     for (const [error, expected] of [
       ["signup_closed", "signup_closed"],

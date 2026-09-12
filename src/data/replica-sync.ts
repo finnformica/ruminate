@@ -1,5 +1,6 @@
 import { getDefaultStore } from "jotai"
 import {
+  REPLICA_PROTOCOL_HEADERS,
   isEmptyGraphDiff,
   isTombstoned,
   linkKeyOf,
@@ -319,7 +320,11 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       fetchImpl("/api/replica/notes", {
         method: "PUT",
         credentials: "same-origin",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: {
+          ...REPLICA_PROTOCOL_HEADERS,
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body,
         ...(keepalive && body.length <= KEEPALIVE_BODY_LIMIT ? { keepalive: true } : {}),
       }),
@@ -334,7 +339,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       fetchImpl("/api/replica/status", {
         method: "GET",
         credentials: "same-origin",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { ...REPLICA_PROTOCOL_HEADERS, Authorization: `Bearer ${token}` },
       }),
     )
     const body = (await response.json()) as ReplicaStatusBody
