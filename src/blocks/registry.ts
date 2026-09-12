@@ -249,8 +249,14 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     html: (block) => {
       // Same-origin asset paths are made absolute so the picture resolves
       // wherever the html lands (another app; Ruminate reads the payload).
+      //
+      // Read off `globalThis` rather than `window`: the registry is now
+      // imported by the Worker too (the MCP server parses and serializes
+      // markdown, worker/mcp/tools.ts), and `worker/tsconfig.json` has no DOM
+      // lib, so a bare `window` is a type error there. Identical in a browser;
+      // an empty origin off it, where no clipboard is reading this anyway.
       const url = imageUrlOfBlock(block)
-      const origin = typeof window !== "undefined" ? window.location.origin : ""
+      const origin = (globalThis as { location?: { origin?: string } }).location?.origin ?? ""
       const src = url.startsWith("/") ? origin + url : url
       return `<img src="${escapeHtml(src)}" alt="${escapeHtml(block.text)}">`
     },

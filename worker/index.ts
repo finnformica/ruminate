@@ -10,6 +10,8 @@ import type { Env } from "./types"
 import { githubAuth } from "./handlers/github-auth"
 import { githubRefresh } from "./handlers/github-refresh"
 import { images } from "./handlers/images"
+import { mcp, MCP_PATH } from "./handlers/mcp"
+import { mcpTokens, MCP_TOKENS_PREFIX } from "./handlers/mcp-tokens"
 import { replica } from "./handlers/replica"
 
 export default {
@@ -19,6 +21,10 @@ export default {
     if (pathname === "/github-auth") return githubAuth(request, env)
     if (pathname === "/github-refresh") return githubRefresh(request, env)
     if (pathname.startsWith("/api/replica/")) return replica(request, env)
+    if (pathname === MCP_PATH) return mcp(request, env)
+    if (pathname === MCP_TOKENS_PREFIX || pathname.startsWith(`${MCP_TOKENS_PREFIX}/`)) {
+      return mcpTokens(request, env)
+    }
     if (pathname === "/api/images" || pathname.startsWith("/api/images/")) {
       return images(request, env)
     }

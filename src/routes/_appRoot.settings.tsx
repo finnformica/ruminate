@@ -7,6 +7,7 @@ import { Button } from "../components/button"
 import { useSignOut } from "../components/github-auth"
 import { GitHubAvatar } from "../components/github-avatar"
 import { SettingsIcon16 } from "../components/icons"
+import { McpTokensSection } from "../components/mcp-tokens-section"
 import { PageLayout } from "../components/page-layout"
 import { TextInput } from "../components/text-input"
 import {
@@ -47,6 +48,7 @@ function RouteComponent() {
           <AppearanceSection />
           <EditorSection />
           <StorageSection />
+          <McpTokensSection />
           <GitHubSection />
           <div className="flex flex-col items-center gap-1 self-center p-5 text-center text-text-tertiary">
             <span className="text-sm">

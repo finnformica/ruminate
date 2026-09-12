@@ -25,7 +25,6 @@ import {
   planReplicaPut,
   toLinkRow,
   toNodeRow,
-  type LinkKey,
   type LinkRow,
   type NodeRow,
   type ReplicaChangesBody,

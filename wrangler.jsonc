@@ -15,6 +15,12 @@
       "/api/replica/*",
       "/api/images",
       "/api/images/*",
+      // The MCP endpoint agents POST to, and the session-authed routes the
+      // settings page mints and revokes their tokens through
+      // (docs/mcp-server.md).
+      "/mcp",
+      "/api/mcp/tokens",
+      "/api/mcp/tokens/*",
     ],
   },
   // The one database: the control plane (users + allowlist,
