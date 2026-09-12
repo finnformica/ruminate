@@ -144,7 +144,6 @@ export function BlockItem({
   block,
   occurrence,
   api,
-  animateIn = false,
 }: {
   doc: BlockDoc
   block: Block
@@ -153,8 +152,6 @@ export function BlockItem({
    * (promoted typography, no toggle; its children follow it at depth 0). */
   occurrence: Occurrence
   api: BlockEditorApi
-  /** Mounting as a just-revealed row: play the brief entrance. */
-  animateIn?: boolean
 }) {
   const { depth, zoomTitle, olNumber, hasChildren, collapsed: isCollapsed } = occurrence
   const readOnly = api.readOnly ?? false
@@ -187,11 +184,6 @@ export function BlockItem({
         : slashMenuItems(slashQuery, new Date(), { images: api.requestImage !== undefined }),
     [slashQuery, api.requestImage],
   )
-
-  // A row revealed by unfolding its parent rises in briefly. Captured at
-  // mount so the class stays for the row's lifetime — an animation that is
-  // never cut short by a re-render, and never replayed.
-  const [entrance] = useState(animateIn)
 
   const type = block.type
   // The block's text is marker-free by construction: its type is drawn as a
@@ -534,7 +526,9 @@ export function BlockItem({
         viewBox="0 0 8 8"
         aria-hidden
         className={cx(
-          "transition-transform duration-200 ease-[var(--ease-out-strong)] motion-reduce:transition-none",
+          // A quarter turn, long enough to read as a turn rather than a
+          // swap, easing out to rest with no overshoot.
+          "transition-transform duration-300 ease-[var(--ease-in-out)] motion-reduce:transition-none",
           isCollapsed || looped ? "rotate-0" : "rotate-90",
         )}
       >
@@ -801,7 +795,7 @@ export function BlockItem({
     <div
       data-block-row={block.id}
       data-occurrence={occurrence.key}
-      className={cx("relative", zoomTitle && "mb-3", entrance && "block-expand")}
+      className={cx("relative", zoomTitle && "mb-3")}
       style={{ paddingLeft: depth * INDENT, marginTop }}
     >
       {occurrence.guideKeys.map((guideKey, level) => (

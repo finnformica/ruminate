@@ -42,6 +42,7 @@ import {
   buildRows,
   firstOccurrenceKey,
   hasOccurrence,
+  type Occurrence,
   idOfKey,
   isWithin,
   keyOf,
@@ -49,6 +50,58 @@ import {
   parentKeyOf,
   zoomRootKey,
 } from "../../blocks/view"
+import {
+  dropGhost,
+  ghostFold,
+  measureRows,
+  settleFold,
+  unfoldBox,
+  type RowPositions,
+} from "./fold-motion"
+
+/** The rows of a list grouped under their parent's key, in order. */
+function childrenByParent(list: readonly Occurrence[]): Map<string | null, Occurrence[]> {
+  const map = new Map<string | null, Occurrence[]>()
+  for (const row of list) {
+    const parent = parentKeyOf(row.key)
+    const siblings = map.get(parent)
+    if (siblings) siblings.push(row)
+    else map.set(parent, [row])
+  }
+  return map
+}
+
+/**
+ * A row's children, as one box beneath it: the box the fold animates
+ * (fold-motion.ts). It unfolds when its parent has just been opened
+ * (`opening`) — its edge sweeping down to reveal it while the rows below
+ * slide out of its way. A fold does not touch it: its ghost, a clone of
+ * its DOM, is covered in its place while it goes with the state change
+ * (`ghostFold`). At rest it is a plain wrapper, nothing clipped, so a
+ * to-do's chevron beside its checkbox and a heading's hash, both of which
+ * reach beyond their row, always show. The inner div is the body the
+ * sweep slides against the box.
+ */
+function Subtree({
+  parentKey,
+  opening,
+  children,
+}: {
+  parentKey: string
+  opening: boolean
+  children: React.ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (ref.current && opening) unfoldBox(ref.current)
+  }, [opening])
+  return (
+    <div ref={ref} data-subtree={parentKey}>
+      <div>{children}</div>
+    </div>
+  )
+}
+
 import {
   duplicateBlocks,
   emptyBlock,
@@ -990,18 +1043,51 @@ export function BlockEditor({
     return true
   }
 
-  // The occurrence just unfolded, for the render that reveals its rows: those
-  // rows mount with their brief entrance (see `animateIn` in block-item.tsx).
-  // Cleared right after — the rows keep the class for their lifetime, so the
-  // animation is never cut short, and later rows under the same key never
-  // replay it.
-  const [justOpened, setJustOpened] = useState<string | null>(null)
+  // The occurrence just unfolded, for the render that reveals its rows:
+  // that subtree's box unfolds (`Subtree`). A ref, not state, so clearing
+  // it after that render costs no render of its own — on a long note every
+  // render is every row. Cleared after each commit, so later rows under the
+  // same key never replay it.
+  const justOpened = useRef<string | null>(null)
   useEffect(() => {
-    if (justOpened !== null) setJustOpened(null)
-  }, [justOpened])
+    justOpened.current = null
+  })
 
+  // The rows grouped by parent, for rendering them as nested subtrees.
+  const childrenOf = useMemo(() => childrenByParent(rows), [rows])
+  const rowKeys = useMemo(() => new Set(visibleOrder), [visibleOrder])
+
+  // A toggle waiting to be settled (fold-motion.ts), with where every row
+  // was before it: set here, spent by the layout effect below once the
+  // change has been laid out, before it is painted. The positions are
+  // null when nothing slides (reduced motion); the toggle still settles,
+  // so its ghost fades and goes.
+  const pendingToggle = useRef<{ before: RowPositions | null } | null>(null)
+  useLayoutEffect(() => {
+    const pending = pendingToggle.current
+    if (!pending) return
+    pendingToggle.current = null
+    if (containerRef.current) settleFold(containerRef.current, pending.before)
+  })
+
+  /**
+   * Fold or unfold `key`. The state changes at once — `rows`, the
+   * keyboard's order and the selection never wait for the motion — and the
+   * motion is laid over it (fold-motion.ts): a fold leaves a ghost of the
+   * subtree's box behind to be covered, an unfold reveals the returning
+   * box, and the rows that moved slide. Unfolding mid-fold drops the ghost
+   * at once, so the returning rows never meet it.
+   */
   const toggleCollapse = (key: string) => {
-    if (collapsed.has(key)) setJustOpened(key)
+    const container = containerRef.current
+    if (container) pendingToggle.current = { before: measureRows(container) }
+    if (collapsed.has(key)) {
+      justOpened.current = key
+      if (container) dropGhost(container, key)
+    } else if (container) {
+      const box = container.querySelector<HTMLElement>(`[data-subtree="${key}"]`)
+      if (box) ghostFold(box)
+    }
     if (onToggleCollapse) {
       onToggleCollapse(key)
       return
@@ -1347,6 +1433,28 @@ export function BlockEditor({
     deleteEverywhere: onDeleteEverywhere,
     deleteSubtree: onDeleteSubtree,
   }
+
+  /**
+   * The view, as nested subtrees: each row, then — when it has rows beneath
+   * it — its `Subtree` holding them, rendered the same way. The DOM order
+   * is the flat view's (depth first).
+   */
+  const renderRows = (list: readonly Occurrence[]): React.ReactNode =>
+    list.map((row) => {
+      const block = doc.blocks[row.id]
+      if (!block) return null
+      const kids = childrenOf.get(row.key)
+      return (
+        <Fragment key={row.key}>
+          <BlockItem doc={doc} block={block} occurrence={row} api={api} />
+          {kids && kids.length > 0 ? (
+            <Subtree parentKey={row.key} opening={justOpened.current === row.key}>
+              {renderRows(kids)}
+            </Subtree>
+          ) : null}
+        </Fragment>
+      )
+    })
 
   const api: BlockEditorApi = {
     debug,
@@ -1960,20 +2068,12 @@ export function BlockEditor({
           {/* The view is a flat list: one row per occurrence, indented by its
             depth. Zoomed, the first row is the zoomed block as the view's
             editable title and its children follow at depth 0. */}
-          {rows.map((row) => {
-            const block = doc.blocks[row.id]
-            if (!block) return null
-            return (
-              <BlockItem
-                key={row.key}
-                doc={doc}
-                block={block}
-                occurrence={row}
-                api={api}
-                animateIn={justOpened !== null && row.guideKeys.includes(justOpened)}
-              />
-            )
-          })}
+          {renderRows(
+            rows.filter((row) => {
+              const parent = parentKeyOf(row.key)
+              return parent === null || !rowKeys.has(parent)
+            }),
+          )}
         </div>
       </BlockContextMenu>
       {onImageUpload ? (
