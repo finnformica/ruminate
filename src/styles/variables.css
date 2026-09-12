@@ -222,16 +222,19 @@
     var(--accent-9) 8%,
     color-mix(in srgb, white 26%, var(--color-bg))
   );
-  /* The block ring on a dark page: the same accent wash as light, laid over
-     a 4% white lift — the lift alone read as plain grey, and the tint is
-     what says which accent is selecting — and the hairline a shade stronger
-     than light's, since a dark ground eats a thin line. */
+  /* The block ring on a dark page is pastel, to match light's pale tint
+     rather than sink into the ground: the accent's LIGHT step (accent-11,
+     the dark scheme's text/focus step) washed over a 14% white lift — the
+     lift keeps it a clear step up from the page, the light step keeps the
+     tint airy where accent-9 went muddy — and the hairline in the same
+     step, a shade stronger than light's since a dark ground eats a thin
+     line. Well short of the old wash's 18% lift, which read as a slab. */
   --color-bg-selected-faint: color-mix(
     in srgb,
-    var(--accent-9) 10%,
-    color-mix(in srgb, white 4%, var(--color-bg))
+    var(--accent-11) 12%,
+    color-mix(in srgb, white 14%, var(--color-bg))
   );
-  --color-border-selected: color-mix(in srgb, var(--accent-9) 55%, var(--color-bg-selected-faint));
+  --color-border-selected: color-mix(in srgb, var(--accent-11) 55%, var(--color-bg-selected-faint));
 
   /* Border colors */
   --color-border-focus: var(--accent-11);
