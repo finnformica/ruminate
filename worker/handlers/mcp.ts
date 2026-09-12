@@ -254,7 +254,7 @@ async function dispatch(
         inputSchema: tool.inputSchema,
         annotations: tool.annotations,
       }))
-      // No `nextCursor`: eleven tools is one page, and paginating a list this
+      // No `nextCursor`: twelve tools is one page, and paginating a list this
       // size would be a promise to keep rather than a feature.
       return json(result(id, { tools, ...CACHE_HINT }))
     }

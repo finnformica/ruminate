@@ -36,6 +36,8 @@
 // a tool reads a node — so a tool cannot forget to apply the filter, because
 // it never touches the snapshot directly.
 
+import { serialize } from "../../src/blocks/serialize"
+import { basketDoc, basketRootIds } from "../../src/data/basket"
 import {
   PAGE_TYPE,
   buildGraphSnapshot,
@@ -209,6 +211,32 @@ export function noteOf(graph: ScopedGraph, id: string): Note | null {
  */
 export function markdownOf(graph: ScopedGraph, id: string): string | null {
   return pageOf(graph, id) === null ? null : rollup(id, graph.snapshot)
+}
+
+/**
+ * A page's **Unassigned basket**: the blocks written in it that no page
+ * reaches any more, as the app shows them (`basketRootIds` / `basketDoc`,
+ * src/data/basket.ts) — the roots in the order they appear, and the whole
+ * basket as markdown with its `id::` lines.
+ *
+ * Reusing the app's own definition matters more here than anywhere else,
+ * because "unassigned" is a subtle predicate: it is *no page reaches it*, not
+ * *it has no parent* — two orphaned blocks holding each other both have a
+ * parent and neither can be seen — and a loop with no root at all still has
+ * to be shown. Restating any of that here would be a second definition to
+ * get wrong.
+ *
+ * Reachability is computed over the WHOLE corpus, not the grant's slice: a
+ * block some non-granted note still holds is not unassigned, and must not be
+ * reported as though it were. The grant filters the answer, not the question.
+ */
+export function unassignedOf(
+  graph: ScopedGraph,
+  pageId: string,
+): { roots: string[]; markdown: string } | null {
+  if (pageOf(graph, pageId) === null) return null
+  const roots = basketRootIds(pageId, graph.snapshot).filter((id) => sees(graph, id))
+  return { roots, markdown: roots.length === 0 ? "" : serialize(basketDoc(pageId, graph.snapshot)) }
 }
 
 /** A node's ordered, visible children. */

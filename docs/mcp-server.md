@@ -91,19 +91,20 @@ tokens exist.
 
 Reads need `read`; the three writers need `write`; `delete_note` needs `delete`.
 
-| Tool             | What it does                                                                                   |
-| ---------------- | ---------------------------------------------------------------------------------------------- |
-| `list_notes`     | Notes the token can reach, newest first. Filter by `query`, `tag`, `type`; page with `cursor`. |
-| `search`         | Blocks whose text contains a substring, each naming the notes it appears in.                   |
-| `read_note`      | A note in full: title, tags, props, tasks, headings, and its markdown.                         |
-| `get_node`       | One block or page: type, text, props, child count, parents, the notes it is in.                |
-| `list_children`  | The blocks directly beneath one — walking **down**.                                            |
-| `list_parents`   | The blocks that hold one, and the notes it appears in — walking **up**.                        |
-| `list_tags`      | Tags across the reachable notes, with note counts.                                             |
-| `create_note`    | A new note from markdown. Unrestricted tokens only.                                            |
-| `update_note`    | Replace a note's body; optionally retitle.                                                     |
-| `append_to_note` | Add to the end of a note, leaving the rest untouched.                                          |
-| `delete_note`    | Delete a note and the blocks only it holds.                                                    |
+| Tool              | What it does                                                                                   |
+| ----------------- | ---------------------------------------------------------------------------------------------- |
+| `list_notes`      | Notes the token can reach, newest first. Filter by `query`, `tag`, `type`; page with `cursor`. |
+| `search`          | Blocks whose text contains a substring, each naming the notes it appears in.                   |
+| `read_note`       | A note in full: title, tags, props, tasks, headings, and its markdown.                         |
+| `get_node`        | One block or page: type, text, props, child count, parents, the notes it is in.                |
+| `list_children`   | The blocks directly beneath one — walking **down**.                                            |
+| `list_parents`    | The blocks that hold one, and the notes it appears in — walking **up**.                        |
+| `list_tags`       | Tags across the reachable notes, with note counts.                                             |
+| `list_unassigned` | A note's **Unassigned** blocks — written in it, but nothing links to them any more.            |
+| `create_note`     | A new note from markdown. Unrestricted tokens only.                                            |
+| `update_note`     | Replace a note's body; optionally retitle.                                                     |
+| `append_to_note`  | Add to the end of a note, leaving the rest untouched.                                          |
+| `delete_note`     | Delete a note and the blocks only it holds.                                                    |
 
 ### `id::` lines are the round trip
 
@@ -117,6 +118,26 @@ land in the note's Unassigned basket rather than being deleted (the app's own
 never-lose-work rule, `docToOps`). Nothing is lost either way, but the note gains a
 basket full of duplicates. `append_to_note` avoids the question entirely and is the right
 tool for "add this to my notes".
+
+### The Unassigned basket
+
+A block belongs to a note by being reachable from its page node. Remove the row holding
+it and the block is **kept, not deleted** — it still carries the note it was written in
+(`notes_id`), and shows in that note's **Unassigned** section beneath the outline, with
+everything under it. That is the app's never-lose-work rule, and it means a note has two
+parts an agent has to know about:
+
+- `read_note` gives the **outline** — and an `unassignedCount`, so an agent that has
+  never heard of the basket still finds out there is something there;
+- `list_unassigned` gives the **basket**, as markdown with `id::` lines.
+
+Pasting one back is an ordinary `update_note`: put the basket's markdown (ids and all)
+where you want it in the outline, and linking it there is what takes it out of the
+basket. There is no separate "restore" verb, because there is no separate operation.
+
+Deliberately read-only: the basket is where the app deletes a block for good, and that is
+a decision worth leaving to the person whose notes they are. `delete_note` still removes
+a note's basket along with the note, as the app does.
 
 ### Two kinds of failure
 
@@ -239,7 +260,7 @@ worth paying.
 | `worker/mcp/grant.ts`                   | What a token may do — pure, and fail-closed          |
 | `worker/mcp/tokens.ts`                  | Token storage, hashing, lookup                       |
 | `worker/mcp/graph-access.ts`            | The scoped view of the corpus, and the write path    |
-| `worker/mcp/tools.ts`                   | The eleven tools, and the three refusals before them |
+| `worker/mcp/tools.ts`                   | The twelve tools, and the three refusals before them |
 | `src/data/ops-rows.ts`                  | Ops → rows, shared with the browser store's rule     |
 | `src/components/mcp-tokens-section.tsx` | The Settings panel                                   |
 | `migrations/0007_mcp_tokens.sql`        | The grants table                                     |

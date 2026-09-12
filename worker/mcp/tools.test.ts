@@ -251,6 +251,97 @@ describe("search and tags", () => {
 })
 
 // -----------------------------------------------------------------------------
+// The Unassigned basket
+// -----------------------------------------------------------------------------
+
+describe("list_unassigned", () => {
+  /** Drop ALPHA's outline, which parks the heading and its children in the
+   * note's basket — the app's own never-lose-work rule, not a special case. */
+  async function orphanAlpha() {
+    const heading = (await run(harness, grantOf({}), "list_children", { node_id: ALPHA }))
+      .children[0]
+    await run(harness, grantOf({}), "update_note", {
+      note_id: ALPHA,
+      markdown: "- something else\n",
+    })
+    return heading
+  }
+
+  it("is empty for a note whose blocks are all in its outline", async () => {
+    const data = await run(harness, grantOf({}), "list_unassigned", { note_id: ALPHA })
+    expect(data.roots).toEqual([])
+    expect(data.markdown).toBe("")
+  })
+
+  it("returns a block that fell out of the outline, with its `id::` line", async () => {
+    const heading = await orphanAlpha()
+    const data = await run(harness, grantOf({}), "list_unassigned", { note_id: ALPHA })
+
+    expect(data.roots.map((root: any) => root.id)).toEqual([heading.id])
+    expect(data.roots[0].text).toBe("Heading")
+    expect(data.markdown).toContain(`id:: ${heading.id}`)
+  })
+
+  it("carries what the orphaned block still holds", async () => {
+    await orphanAlpha()
+    const data = await run(harness, grantOf({}), "list_unassigned", { note_id: ALPHA })
+
+    // The heading is one root; the bullet and task beneath it ride along in
+    // the markdown rather than being listed as roots of their own.
+    expect(data.roots).toHaveLength(1)
+    expect(data.markdown).toContain("a bullet")
+    expect(data.markdown).toContain("a task #work")
+  })
+
+  it("does not put them in read_note's outline, but does say they exist", async () => {
+    await orphanAlpha()
+    const note = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+
+    expect(note.markdown).not.toContain("a bullet")
+    expect(note.unassignedCount).toBe(1)
+  })
+
+  it("reports nothing for another note", async () => {
+    await orphanAlpha()
+    expect((await run(harness, grantOf({}), "list_unassigned", { note_id: BETA })).roots).toEqual(
+      [],
+    )
+  })
+
+  it("stops reporting a block once it is pasted back into the outline", async () => {
+    const heading = await orphanAlpha()
+    const basket = await run(harness, grantOf({}), "list_unassigned", { note_id: ALPHA })
+
+    await run(harness, grantOf({}), "update_note", {
+      note_id: ALPHA,
+      markdown: `- something else\n  id:: ${
+        (await run(harness, grantOf({}), "read_note", { note_id: ALPHA })).rootBlockIds[0]
+      }\n${basket.markdown}`,
+    })
+
+    expect((await run(harness, grantOf({}), "list_unassigned", { note_id: ALPHA })).roots).toEqual(
+      [],
+    )
+    const note = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    expect(note.markdown).toContain(`id:: ${heading.id}`)
+    expect(note.markdown).toContain("a bullet")
+  })
+
+  it("is refused for a note outside the grant", async () => {
+    const scoped = grantOf({ note_ids: `["${ALPHA}"]` })
+    expect(await refuse(harness, scoped, "list_unassigned", { note_id: BETA })).toMatch(
+      /No such note/,
+    )
+  })
+
+  it("needs only `read`", async () => {
+    expect(toolsFor(grantOf({ permissions: "read" })).map((tool) => tool.name)).toContain(
+      "list_unassigned",
+    )
+  })
+})
+
+// -----------------------------------------------------------------------------
 // The wall: a note-scoped grant
 // -----------------------------------------------------------------------------
 

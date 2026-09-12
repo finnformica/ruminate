@@ -58,6 +58,7 @@ import {
   propsOf,
   scopedGraph,
   sees,
+  unassignedOf,
   type ScopedGraph,
 } from "./graph-access"
 
@@ -405,6 +406,7 @@ export const TOOLS: ToolDef[] = [
       const note = noteOf(graph, noteId)
       const markdown = markdownOf(graph, noteId)
       if (!note || markdown === null) return { ok: false, message: OUT_OF_SCOPE }
+      const unassigned = unassignedOf(graph, noteId)
 
       return {
         ok: true,
@@ -419,8 +421,57 @@ export const TOOLS: ToolDef[] = [
           tasks: note.tasks,
           markdown,
           rootBlockIds: childrenOf(graph, noteId),
+          // A count rather than the blocks: the basket is a separate part of
+          // the note, and an agent that does not know it is there would never
+          // think to ask. One number is enough to make it ask.
+          unassignedCount: unassigned?.roots.length ?? 0,
         },
-        text: `# ${note.displayName}\n\n${markdown}`,
+        text:
+          `# ${note.displayName}\n\n${markdown}` +
+          (unassigned && unassigned.roots.length > 0
+            ? `\n\n(${unassigned.roots.length} unassigned block(s) in this note — ` +
+              `call \`list_unassigned\` to see them.)`
+            : ""),
+      }
+    },
+  },
+
+  {
+    name: "list_unassigned",
+    title: "List a note's unassigned blocks",
+    description:
+      "The note's **Unassigned** blocks: blocks written in it that nothing " +
+      "links to any more, which the app shows in a section at the foot of the " +
+      "note. A block lands here when the row holding it was removed — it is " +
+      "kept, not deleted, so nothing is ever lost. They are not part of the " +
+      "note's outline and `read_note` does not include them, so this is the " +
+      "only way to see them. Returns them as markdown with `id::` lines, and " +
+      "their root ids; paste one back into the outline with `update_note` to " +
+      "take it out of the basket.",
+    permission: "read",
+    annotations: readOnly,
+    inputSchema: {
+      type: "object",
+      properties: { note_id: { type: "string", description: "From `list_notes` or `search`." } },
+      required: ["note_id"],
+      additionalProperties: false,
+    },
+    run(args, { graph }) {
+      const noteId = requireString(args, "note_id")
+      const basket = unassignedOf(graph, noteId)
+      if (basket === null) return { ok: false, message: OUT_OF_SCOPE }
+
+      const roots = basket.roots
+        .map((id) => describeNode(graph, id))
+        .filter((root): root is NonNullable<typeof root> => root !== null)
+
+      return {
+        ok: true,
+        data: { noteId, roots, total: roots.length, markdown: basket.markdown },
+        text:
+          roots.length === 0
+            ? "Nothing unassigned in this note."
+            : `${roots.length} unassigned block(s):\n\n${basket.markdown}`,
       }
     },
   },
