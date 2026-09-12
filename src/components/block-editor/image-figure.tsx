@@ -306,9 +306,14 @@ export function ImageFigure({
                     }}
                     // The small radius: on a 24px button the 8px base reads
                     // as a pill, and the toolbar's corners follow this one.
+                    // The chosen alignment takes the app-wide selected surface
+                    // and ink; it used to take `bg-bg-secondary`, which is the
+                    // same value as this button's own hover, so the chosen one
+                    // and the hovered one were the same pixel colour.
                     className={cx(
                       "rounded-sm px-1.5",
-                      option === align && "bg-bg-secondary text-text",
+                      option === align &&
+                        "bg-bg-selected text-text-selected hover:bg-bg-selected-hover! active:bg-bg-selected-active!",
                     )}
                   >
                     <Icon />

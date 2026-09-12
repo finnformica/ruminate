@@ -2059,8 +2059,10 @@ export function BlockEditor({
     const text = (doc.blocks[id]?.text ?? "").trim()
     return text === "" ? "…" : text
   }
+  // `focus-ring`: a crumb is a real button and had no focus style at all, so
+  // a keyboard user walking the zoom trail could not see where they were.
   const crumbClass =
-    "min-w-0 max-w-48 cursor-pointer truncate rounded-sm px-1 transition-colors duration-150 hover:bg-bg-secondary hover:text-text"
+    "focus-ring min-w-0 max-w-48 cursor-pointer truncate rounded-sm px-1 transition-colors duration-150 hover:bg-bg-hover hover:text-text"
 
   // ── Guide lines ───────────────────────────────────────────────────────────
   // Every row draws the guide lines of the rows it is indented under (one per

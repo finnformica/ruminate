@@ -206,10 +206,11 @@ function RouteComponent() {
                 data-list-index={index}
                 className={cx(
                   "rounded-full",
-                  // The keyboard highlight on a pill is an accent ring (the
-                  // pill keeps its own surface) — same accent as the editor's
-                  // selection family.
-                  activeTag === tag && "ring-2 ring-[color:var(--color-border-focus)]",
+                  // The keyboard highlight on a pill is an accent ring: the
+                  // pill keeps its own surface. It takes the SELECTED border,
+                  // not the focus one, so a highlighted pill and a focused
+                  // pill stay tellable apart.
+                  activeTag === tag && "ring-2 ring-border-selected",
                 )}
               >
                 <PillButton asChild>
@@ -336,8 +337,9 @@ function TagTreeItem({
           data-list-index={indexByTag?.get(fullPath)}
           className={cx(
             "rounded-full",
-            // The keyboard highlight — an accent ring around the row's pill.
-            activeTag === fullPath && "ring-2 ring-[color:var(--color-border-focus)]",
+            // The keyboard highlight — the selected ring around the row's
+            // pill, never the focus ring (see the grid above).
+            activeTag === fullPath && "ring-2 ring-border-selected",
           )}
         >
           <PillButton asChild>
