@@ -50,11 +50,14 @@ import {
   parentKeyOf,
   zoomRootKey,
 } from "../../blocks/view"
-
-/** How long a folded subtree's rows stay for their fold animation
- * (`.block-subtree-close`, block-editor.css): the animation's length, and no
- * longer — they are inert the whole time. */
-const FOLD_MS = 200
+import {
+  FOLD_MS,
+  foldBox,
+  measureRows,
+  slideRows,
+  unfoldBox,
+  type RowPositions,
+} from "./fold-motion"
 
 /** The rows of a list grouped under their parent's key, in order. */
 function childrenByParent(list: readonly Occurrence[]): Map<string | null, Occurrence[]> {
@@ -70,41 +73,50 @@ function childrenByParent(list: readonly Occurrence[]): Map<string | null, Occur
 
 /**
  * A row's children, as one box beneath it: the box the fold animates
- * (block-editor.css). It unfolds when its parent has just been opened
- * (`opening`, true for that one render; kept until the animation ends so a
- * re-render never cuts it short) and folds away while it holds the rows a
- * fold just hid (`closing`), inert for the duration. Between, it is a plain
- * wrapper — the class that clips it (needed for the height to read) goes the
- * moment the animation ends, so nothing that reaches beyond a row (a to-do's
- * chevron beside its checkbox, a heading's hash) is ever clipped at rest.
+ * (fold-motion.ts). It unfolds when its parent has just been opened
+ * (`opening`) — revealed from the top down while the rows below slide out
+ * of its way — and folds away while it holds the rows a fold just hid
+ * (`closing`): a ghost, out of the flow at the size it had
+ * (`.block-subtree-ghost`, block-editor.css), inert, covered from the bottom
+ * up as the rows below slide up over it. Between, it is a plain wrapper:
+ * nothing clips it at rest, so a to-do's chevron beside its checkbox and a
+ * heading's hash, both of which reach beyond their row, always show.
  */
 function Subtree({
+  parentKey,
   opening,
   closing,
+  size,
   children,
 }: {
+  parentKey: string
   opening: boolean
   closing: boolean
+  /** The box's size as the fold found it, held while it is a ghost. */
+  size: { width: number; height: number } | undefined
   children: React.ReactNode
 }) {
-  const [entrance, setEntrance] = useState(opening)
-  useEffect(() => {
-    if (opening) setEntrance(true)
-  }, [opening])
-  const open = !closing && (opening || entrance)
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (ref.current && opening && !closing) unfoldBox(ref.current)
+  }, [opening, closing])
+  useLayoutEffect(() => {
+    if (ref.current && closing) foldBox(ref.current)
+  }, [closing])
   return (
     <div
+      ref={ref}
+      data-subtree={parentKey}
       data-folding={closing || undefined}
       aria-hidden={closing || undefined}
-      className={closing ? "block-subtree-close" : open ? "block-subtree-open" : undefined}
-      onAnimationEnd={(event) => {
-        if (event.target === event.currentTarget) setEntrance(false)
-      }}
+      className={closing ? "block-subtree-ghost" : undefined}
+      style={closing && size ? { width: size.width, height: size.height } : undefined}
     >
-      <div className="block-subtree-body">{children}</div>
+      {children}
     </div>
   )
 }
+
 import {
   duplicateBlocks,
   emptyBlock,
@@ -1047,10 +1059,8 @@ export function BlockEditor({
   }
 
   // The occurrence just unfolded, for the render that reveals its rows: those
-  // rows mount with their brief entrance (see `animateIn` in block-item.tsx).
-  // Cleared right after — the rows keep the class for their lifetime, so the
-  // animation is never cut short, and later rows under the same key never
-  // replay it.
+  // subtree's box unfolds (`Subtree`). Cleared right after, so later rows
+  // under the same key never replay it.
   const [justOpened, setJustOpened] = useState<string | null>(null)
   useEffect(() => {
     if (justOpened !== null) setJustOpened(null)
@@ -1066,7 +1076,13 @@ export function BlockEditor({
   const childrenOf = useMemo(() => childrenByParent(rows), [rows])
   const rowKeys = useMemo(() => new Set(visibleOrder), [visibleOrder])
   const [folding, setFolding] = useState<
-    { id: number; key: string; rows: Occurrence[]; children: Map<string | null, Occurrence[]> }[]
+    {
+      id: number
+      key: string
+      rows: Occurrence[]
+      children: Map<string | null, Occurrence[]>
+      size: { width: number; height: number } | undefined
+    }[]
   >([])
   const foldSerial = useRef(0)
   const foldTimers = useRef<number[]>([])
@@ -1078,14 +1094,30 @@ export function BlockEditor({
     const hidden = rows.filter((row) => row.guideKeys.includes(key))
     if (hidden.length === 0) return
     const id = ++foldSerial.current
-    const entry = { id, key, rows: hidden, children: childrenByParent(hidden) }
+    // The box's size now, for the ghost to keep once it is out of the flow.
+    const box = containerRef.current?.querySelector<HTMLElement>(`[data-subtree="${key}"]`)
+    const rect = box?.getBoundingClientRect()
+    const size = rect && rect.height > 0 ? { width: rect.width, height: rect.height } : undefined
+    const entry = { id, key, rows: hidden, children: childrenByParent(hidden), size }
     setFolding((prev) => [...prev.filter((f) => f.key !== key), entry])
     foldTimers.current.push(
       window.setTimeout(() => setFolding((prev) => prev.filter((f) => f.id !== id)), FOLD_MS),
     )
   }
 
+  // Where every row is before a toggle, for the slide after it (FLIP,
+  // fold-motion.ts): set here, spent by the layout effect below once the
+  // change has been laid out, before it is painted.
+  const rowsBeforeToggle = useRef<RowPositions | null>(null)
+  useLayoutEffect(() => {
+    const before = rowsBeforeToggle.current
+    if (!before) return
+    rowsBeforeToggle.current = null
+    if (containerRef.current) slideRows(containerRef.current, before)
+  })
+
   const toggleCollapse = (key: string) => {
+    if (containerRef.current) rowsBeforeToggle.current = measureRows(containerRef.current)
     if (collapsed.has(key)) {
       setJustOpened(key)
       setFolding((prev) =>
@@ -1408,7 +1440,7 @@ export function BlockEditor({
    * way. The DOM order is the flat view's (depth first), and every row keeps
    * its place across a fold: the rows a fold hid render inside the same
    * subtree they were in, with the same keys, so React keeps their instances
-   * and the box folds over them as they are.
+   * and the box is covered over them as they are.
    */
   const renderRows = (list: readonly Occurrence[], ghost: boolean): React.ReactNode =>
     list.map((row) => {
@@ -1426,7 +1458,12 @@ export function BlockEditor({
         <Fragment key={row.key}>
           <BlockItem doc={doc} block={block} occurrence={row} api={api} folding={ghost} />
           {kids && kids.length > 0 ? (
-            <Subtree opening={!ghost && justOpened === row.key} closing={closing}>
+            <Subtree
+              parentKey={row.key}
+              opening={!ghost && justOpened === row.key}
+              closing={closing}
+              size={fold?.size}
+            >
               {renderRows(kids, ghost || closing)}
             </Subtree>
           ) : null}
