@@ -103,11 +103,15 @@ export function BlockContextMenu({
 }: {
   target: BlockMenuTarget | null
   actions: BlockMenuActions
-  onOpenChange?: (open: boolean) => void
+  /** Open or closed, and the event that did it (a `contextmenu` for a
+   * right-click; the `touchstart` of a press-and-hold, Base UI's own 500ms
+   * one, which never yields a `contextmenu` on a phone). The editor reads
+   * the row from its target, and whether a finger is still down. */
+  onOpenChange?: (open: boolean, event: Event | undefined) => void
   children: React.ReactNode
 }) {
   return (
-    <ContextMenu.Root onOpenChange={onOpenChange}>
+    <ContextMenu.Root onOpenChange={(open, details) => onOpenChange?.(open, details.event)}>
       <ContextMenu.Trigger>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Positioner className="outline-none">
@@ -116,7 +120,10 @@ export function BlockContextMenu({
             className={popupClass}
             style={{ width: 240 }}
           >
-            <div className="grid max-h-[45svh] scroll-py-1 overflow-auto p-1">
+            {/* A pointer's menu keeps to a modest height; a phone's, with 40px
+                rows, would otherwise hide the last items (Unlink, Delete) in a
+                scroll no one finds — it may take most of the screen instead. */}
+            <div className="grid max-h-[45svh] scroll-py-1 overflow-auto p-1 coarse:max-h-[80svh]">
               {target ? <Items target={target} actions={actions} /> : null}
             </div>
           </ContextMenu.Popup>
