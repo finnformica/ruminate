@@ -85,7 +85,14 @@ export async function createMcpTestEnv(): Promise<McpTestEnv> {
           ? { updated_at: new Date(updatedAt).toISOString() }
           : { title: note.title, updated_at: new Date(updatedAt).toISOString() },
       )
-      await corpusPut(tenant(userId), { nodes, links }, updatedAt)
+      // `docToGraph` is the markdown IMPORT path and leaves `notes_id` unset;
+      // the app's own saves set it on every block it creates (`docToOps` →
+      // `create`, migrations/0006), and migration 0006 backfilled the rest. So
+      // stamp it here, or the fixture would hold rows the app never produces —
+      // blocks with no note, which is exactly the state the Unassigned basket
+      // is defined against.
+      const stamped = nodes.map((row) => (row.id === note.id ? row : { ...row, notes_id: note.id }))
+      await corpusPut(tenant(userId), { nodes: stamped, links }, updatedAt)
       return note.id
     },
   }

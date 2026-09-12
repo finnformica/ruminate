@@ -83,16 +83,25 @@ export async function loadSnapshot(tenant: TenantDb): Promise<GraphSnapshot> {
 function visibleNodes(grant: Grant, snapshot: GraphSnapshot): Set<string> | null {
   if (grant.noteIds === null) return null
 
-  const roots: string[] = []
+  const granted = new Set<string>()
   for (const id of grant.noteIds) {
-    if (snapshot.nodes.get(id)?.type === PAGE_TYPE) roots.push(id)
+    if (snapshot.nodes.get(id)?.type === PAGE_TYPE) granted.add(id)
   }
-  const visible = new Set<string>(roots)
-  for (const id of reachableFrom(snapshot, roots)) visible.add(id)
-  const granted = new Set(roots)
+
+  // The seeds: the granted pages, and every block written in one. The second
+  // group is the notes' Unassigned baskets — blocks nothing links to any more,
+  // which the person still sees at the foot of the note.
+  const seeds = [...granted]
   for (const node of snapshot.nodes.values()) {
-    if (node.notes_id !== undefined && granted.has(node.notes_id)) visible.add(node.id)
+    if (node.notes_id !== undefined && granted.has(node.notes_id)) seeds.push(node.id)
   }
+
+  // One walk from all of them. Walking from the basket roots too is what makes
+  // a scoped agent see what the PERSON sees: the basket shows an unreached
+  // block with everything beneath it, so hiding those children would make the
+  // agent's view of the note quietly different from the one on screen.
+  const visible = new Set<string>(seeds)
+  for (const id of reachableFrom(snapshot, seeds)) visible.add(id)
   return visible
 }
 

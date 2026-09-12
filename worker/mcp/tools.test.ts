@@ -218,7 +218,9 @@ describe("traversal", () => {
     expect(node.childCount).toBe(2)
     expect(node.parentIds).toEqual([ALPHA])
     expect(node.noteIds).toEqual([ALPHA])
-    expect(node.writtenInNoteId).toBeNull()
+    // The note it was written in — which is where it would show if nothing
+    // linked to it any more.
+    expect(node.writtenInNoteId).toBe(ALPHA)
   })
 
   it("treats a note as a node too", async () => {
@@ -305,6 +307,34 @@ describe("note scope", () => {
     // And the note is genuinely untouched.
     const beta = await run(harness, grantOf({}), "read_note", { note_id: BETA })
     expect(beta.markdown).toContain("beta content")
+  })
+
+  it("sees an Unassigned block of its note, AND what hangs beneath it", async () => {
+    // Make one: remove the heading from the outline, which leaves it and its
+    // children out of reach but still written in ALPHA — the note's basket,
+    // which the person still sees at the foot of the note.
+    const heading = (await run(harness, grantOf({}), "list_children", { node_id: ALPHA }))
+      .children[0]
+    const beneath = (await run(harness, grantOf({}), "list_children", { node_id: heading.id }))
+      .children[0]
+    await run(harness, grantOf({}), "update_note", {
+      note_id: ALPHA,
+      markdown: "- something else\n",
+    })
+
+    // The basket root, and the block under it, are both still reachable.
+    expect((await run(harness, scoped(), "get_node", { node_id: heading.id })).text).toBe("Heading")
+    expect((await run(harness, scoped(), "get_node", { node_id: beneath.id })).id).toBe(beneath.id)
+  })
+
+  it("does not let the basket widen the scope to another note", async () => {
+    const outside = (await run(harness, grantOf({}), "list_children", { node_id: BETA }))
+      .children[0]
+    await run(harness, grantOf({}), "update_note", { note_id: ALPHA, markdown: "- x\n" })
+
+    expect(await refuse(harness, scoped(), "get_node", { node_id: outside.id })).toMatch(
+      /No such block/,
+    )
   })
 
   it("cannot create a note to escape its own scope", async () => {
