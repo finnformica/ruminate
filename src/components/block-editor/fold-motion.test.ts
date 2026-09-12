@@ -107,6 +107,46 @@ describe("fold motion", () => {
     expect(calls.has(far.el)).toBe(false)
   })
 
+  it("slides a nest below the change as one, and walks into the box that holds the change", () => {
+    const { calls } = stubAnimations()
+    const container = document.createElement("div")
+    // The box that held the fold: walked into, its rows and the ghost slide.
+    const holder = document.createElement("div")
+    holder.setAttribute("data-subtree", "p")
+    holder.getBoundingClientRect = () => ({ top: 0, bottom: 900, height: 900 }) as DOMRect
+    container.appendChild(holder)
+    const ghost = document.createElement("div")
+    ghost.setAttribute("data-subtree", "p/a")
+    ghost.setAttribute("data-folding", "true")
+    ghost.getBoundingClientRect = () => ({ top: 40, bottom: 640, height: 600 }) as DOMRect
+    const sibling = rowAt(holder, "p/b", 700)
+    // An unrelated nest below: a rigid box, its rows left to it.
+    const nest = document.createElement("div")
+    nest.setAttribute("data-subtree", "p/b")
+    nest.getBoundingClientRect = () => ({ top: 724, bottom: 800, height: 76 }) as DOMRect
+    holder.appendChild(nest)
+    const inner = rowAt(nest, "p/b/c", 724)
+    const before = new Map([
+      ["box:p", 0],
+      ["box:p/a", 40],
+      ["row:p/b", 700],
+      ["box:p/b", 724],
+      ["row:p/b/c", 724],
+    ])
+    holder.appendChild(ghost)
+    holder.insertBefore(ghost, sibling.el)
+    sibling.moveTo(100)
+    nest.getBoundingClientRect = () => ({ top: 124, bottom: 200, height: 76 }) as DOMRect
+    inner.moveTo(124)
+    slideRows(container, before)
+    expect(calls.has(holder)).toBe(false)
+    expect(calls.get(ghost)).toBeUndefined() // it did not move
+    expect(calls.get(sibling.el)![0].keyframes[0]).toEqual({ transform: "translateY(600px)" })
+    expect(calls.get(nest)![0].keyframes[0]).toEqual({ transform: "translateY(600px)" })
+    // The nest carries its rows: sliding them too would double the distance.
+    expect(calls.has(inner.el)).toBe(false)
+  })
+
   it("a ghost box slides with its parent, by the box's own key", () => {
     const { calls } = stubAnimations()
     const container = document.createElement("div")

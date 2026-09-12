@@ -97,20 +97,21 @@ function easing(): string {
   return cachedEasing
 }
 
+/** The key an element is measured under: a row's occurrence, or a
+ * subtree box's parent occurrence. */
+function keyOf(el: HTMLElement): string {
+  const row = el.getAttribute("data-occurrence")
+  return row !== null ? `row:${row}` : `box:${el.getAttribute("data-subtree")}`
+}
+
 /**
- * Everything that can move when the editor changes height, with a key to
- * match it up again after: its live rows, its subtree boxes, and whatever
- * follows the editor on the page (each later sibling of the editor and of
- * its ancestors, up to the body — an Unassigned basket beneath a note,
- * say), so a fold near the foot of a note never has the page below jump
- * up over the departing rows.
+ * Whatever follows the editor on the page — each later sibling of the
+ * editor and of its ancestors, up to the body (an Unassigned basket
+ * beneath a note, say) — so a fold near the foot of a note never has the
+ * page below jump up over the departing rows.
  */
-function movable(container: HTMLElement): [string, HTMLElement][] {
+function followers(container: HTMLElement): [string, HTMLElement][] {
   const out: [string, HTMLElement][] = []
-  for (const el of container.querySelectorAll<HTMLElement>("[data-occurrence], [data-subtree]")) {
-    const row = el.getAttribute("data-occurrence")
-    out.push(row !== null ? [`row:${row}`, el] : [`box:${el.getAttribute("data-subtree")}`, el])
-  }
   let node: HTMLElement | null = container
   let index = 0
   while (node && node !== document.body) {
@@ -120,6 +121,54 @@ function movable(container: HTMLElement): [string, HTMLElement][] {
     node = node.parentElement
   }
   return out
+}
+
+/**
+ * Everything that can move when the editor changes height, with a key to
+ * match it up again after: every live row, every subtree box, and the
+ * page below the editor. Measured before a change, when it is not yet
+ * known which of them will slide as one.
+ */
+function movable(container: HTMLElement): [string, HTMLElement][] {
+  const out: [string, HTMLElement][] = []
+  for (const el of container.querySelectorAll<HTMLElement>("[data-occurrence], [data-subtree]")) {
+    out.push([keyOf(el), el])
+  }
+  return out.concat(followers(container))
+}
+
+/**
+ * What slides after a change, each once: the units. A subtree box that
+ * was there before and does not hold the change — the folded box's ghost,
+ * or the box just unfolded — moves rigidly, so it is one unit and its rows
+ * are left to it; a box that holds the change is walked into, and its
+ * rows, its boxes and the ghost are the units. Sliding a box and the rows
+ * inside it both would carry those rows twice the distance: an unrelated
+ * nest below the fold would set off from the top of the screen.
+ */
+function units(container: HTMLElement, before: RowPositions): [string, HTMLElement][] {
+  const changed = Array.from(container.querySelectorAll<HTMLElement>("[data-subtree]")).filter(
+    (box) => box.hasAttribute("data-folding") || !before.has(keyOf(box)),
+  )
+  const out: [string, HTMLElement][] = []
+  const walk = (el: Element) => {
+    for (const child of el.children) {
+      if (!(child instanceof HTMLElement)) continue
+      if (child.hasAttribute("data-occurrence")) {
+        out.push([keyOf(child), child])
+      } else if (child.hasAttribute("data-subtree")) {
+        const rigid =
+          child.hasAttribute("data-folding") ||
+          (before.has(keyOf(child)) && !changed.some((box) => child.contains(box)))
+        if (rigid) out.push([keyOf(child), child])
+        else walk(child)
+      } else {
+        walk(child)
+      }
+    }
+  }
+  walk(container)
+  return out.concat(followers(container))
 }
 
 /**
@@ -139,10 +188,11 @@ export function measureRows(container: HTMLElement): RowPositions | null {
 let slides: Animation[] = []
 
 /**
- * FLIP, after the change: everything movable that is somewhere else now —
- * a live row, a box folding away, the page below the editor — slides from
- * where it was, on a `transform` the compositor runs, to rest where it is.
- * What is off screen both before and after just lands. A slide still
+ * FLIP, after the change: every unit (`units`) that is somewhere else now —
+ * a live row, a nest that moved as one, the folded box's ghost, the page
+ * below the editor — slides from where it was, on a `transform` the
+ * compositor runs, to rest where it is. What is off screen both before and
+ * after just lands. A slide still
  * running from an earlier toggle is dropped first, so the fresh
  * measurement is the element's true place.
  *
@@ -158,13 +208,17 @@ export function slideRows(container: HTMLElement, before: RowPositions): void {
   const lower = -SLIDE_MARGIN_VIEWPORTS * viewport
   const upper = (1 + SLIDE_MARGIN_VIEWPORTS) * viewport
   const moves: [HTMLElement, number][] = []
-  for (const [key, el] of movable(container)) {
+  for (const [key, el] of units(container, before)) {
     const was = before.get(key)
     if (was === undefined) continue
-    const now = el.getBoundingClientRect().top
-    const delta = was - now
+    const rect = el.getBoundingClientRect()
+    const delta = was - rect.top
     if (Math.abs(delta) < 0.5) continue
-    if ((was < lower || was > upper) && (now < lower || now > upper)) continue
+    // Off screen both before and after, top to bottom (a tall nest can
+    // start a long way above what it shows): it just lands.
+    const offBefore = was + rect.height < lower || was > upper
+    const offAfter = rect.bottom < lower || rect.top > upper
+    if (offBefore && offAfter) continue
     moves.push([el, delta])
   }
   const ease = easing()
