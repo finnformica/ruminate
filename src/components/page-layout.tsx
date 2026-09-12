@@ -3,6 +3,7 @@ import { databaseModeStatusAtom } from "../data/database-mode"
 import { replicaAccessDeniedAtom } from "../data/replica-access"
 import { storageDiagnosticsAtom } from "../data/storage-diagnostics"
 import { isBootingAtom, isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
+import { appUpdateAtom } from "../hooks/app-update"
 import { cx } from "../utils/cx"
 import { Button } from "./button"
 import { PageHeader, PageHeaderProps } from "./page-header"
@@ -34,6 +35,10 @@ export function PageLayout({
   // Editing stays allowed — local-first, and the push queue retries after
   // admission (src/data/replica-access.ts).
   const accessDenied = useAtomValue(replicaAccessDeniedAtom)
+  // The too-old notice offers the same action as the sidebar's "Update
+  // Ruminate" item: apply the waiting service worker and reload (`apply`
+  // falls back to a plain reload when no update is waiting yet).
+  const { apply: applyUpdate } = useAtomValue(appUpdateAtom)
   // A second Ruminate tab holds the persistent local database — this tab fell
   // back to a temporary in-memory copy and must say so (defect: it used to
   // silently show an empty corpus).
@@ -74,11 +79,18 @@ export function PageLayout({
             ) : null}
             {accessDenied !== null && !isSignedOut && !disableGuard ? (
               <div className="p-4">
-                <Notice tone="warning">
+                <Notice
+                  tone="warning"
+                  actions={
+                    accessDenied === "client_too_old" ? (
+                      <Button onClick={applyUpdate}>Update Ruminate</Button>
+                    ) : undefined
+                  }
+                >
                   {accessDenied === "blocked"
                     ? "This account has been blocked from syncing. Notes you write stay on this device only."
                     : accessDenied === "client_too_old"
-                      ? "This version of Ruminate is too old to sync. Reload to update — notes you write stay on this device and will sync once you have."
+                      ? "This version of Ruminate is too old to sync. Update to keep syncing — notes you write stay on this device and will sync once you have."
                       : "Ruminate is invite-only — your sign-in isn't enabled yet. Notes you write stay on this device and will sync automatically if you're admitted."}
                 </Notice>
               </div>
