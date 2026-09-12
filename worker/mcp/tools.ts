@@ -56,6 +56,7 @@ import type { TenantDb } from "../tenancy-db"
 import { allows, type Grant, type Permission } from "./grant"
 import {
   applyOpsToReplica,
+  blockView,
   childLinksOf,
   childrenOf,
   nodeOf,
@@ -63,10 +64,14 @@ import {
   notesReaching,
   notesReachingUnscoped,
   noteNodeOf,
+  noteView,
   parentsOf,
+  parentsView,
   propsOf,
+  notesView,
   scopedGraph,
   sees,
+  subtreeView,
   unassignedOf,
   type ScopedGraph,
 } from "./graph-access"
@@ -74,12 +79,17 @@ import {
 /** What a tool hands back. `ok: false` becomes `isError: true`. */
 type ToolOutcome = { ok: true; data: unknown; text: string } | { ok: false; message: string }
 
+/** What a call knows before any rows are read. */
 interface ToolContext {
   grant: Grant
   tenant: TenantDb
+  now: number
+}
+
+/** The same, once the call's rows are loaded. A `run` only ever sees this. */
+interface ToolRunContext extends ToolContext {
   /** The scoped graph, loaded once per call. */
   graph: ScopedGraph
-  now: number
 }
 
 interface ToolAnnotations {
@@ -97,9 +107,19 @@ export interface ToolDef {
   /** Derived from the tool's zod schema — never written by hand. */
   inputSchema: Record<string, unknown>
   annotations: ToolAnnotations
-  /** Parse the arguments against the tool's schema, then run it. A schema
-   * failure is a tool-execution error, not a thrown one. */
+  /** Parse the arguments against the tool's schema, load the rows the call
+   * needs, then run it. A schema failure is a tool-execution error, not a
+   * thrown one — and it happens before any row is read. */
   invoke(args: Record<string, unknown>, context: ToolContext): Promise<ToolOutcome>
+  /**
+   * The same, against a graph the CALLER loaded.
+   *
+   * This is the seam the equivalence tests use: every targeted tool is run
+   * through it over the whole-corpus snapshot and compared with what `invoke`
+   * answered from its bounded slice. `invoke` is this function plus a load, so
+   * the two cannot take different paths through a `run`.
+   */
+  invokeWith(args: Record<string, unknown>, context: ToolRunContext): Promise<ToolOutcome>
 }
 
 // -----------------------------------------------------------------------------
@@ -119,6 +139,18 @@ const MAX_LIMIT = 200
 /** Levels `read_note` returns when `depth` is not given — see `depthArg` for
  * why this is not "all of them". */
 const DEFAULT_NOTE_DEPTH = 2
+/** The deepest `depth` any tool will walk. See `depthArg`. */
+const MAX_DEPTH = 32
+/**
+ * How many ids a block row embeds before it says "there are more".
+ *
+ * Every collection this server returns has a bound, and a list of ids inside
+ * an object is still a collection: a note with a thousand top-level rows would
+ * otherwise make `get_block` on it an unbounded response. Cut ones are never
+ * silent — the row carries `childCount` and `hasMoreChildren`, and
+ * `list_children` pages through the rest.
+ */
+const MAX_EMBEDDED_IDS = 50
 
 /** A required, non-empty string: an id, or `search`'s query. */
 const requiredArg = (description: string) =>
@@ -166,6 +198,26 @@ const cursorArg = () =>
 const offsetOf = (cursor: string | undefined): number => (cursor === undefined ? 0 : Number(cursor))
 
 /**
+ * One page of a deterministic list, and the cursor that continues it.
+ *
+ * The one paging convention in this server: an offset into an order that is
+ * the same for the same corpus and the same arguments, handed back as an
+ * opaque digit string that `cursorArg` refuses if it was not issued here. An
+ * agent learns it once and it works on every tool that can return a
+ * collection — which is every tool that can return a collection, because a
+ * result an agent is told is incomplete and given no way to complete is worse
+ * than either paging it or not cutting it.
+ */
+function pageOf<T>(items: readonly T[], offset: number, limit: number) {
+  const end = offset + limit
+  return {
+    page: items.slice(offset, end),
+    total: items.length,
+    nextCursor: end < items.length ? String(end) : null,
+  }
+}
+
+/**
  * How many outline levels to return, with `fallback` when it is not given
  * (and, where `least` is 0, `0` meaning unlimited).
  *
@@ -186,8 +238,16 @@ const offsetOf = (cursor: string | undefined): number => (cursor === undefined ?
 const depthArg = (least: 0 | 1, fallback: number, description: string) => {
   const wrong = `must be a whole number, ${least} or more.`
   return z
-    ._default(z.int(wrong).check(z.gte(least, wrong)), fallback)
-    .register(z.globalRegistry, { description })
+    .pipe(
+      z._default(z.int(wrong).check(z.gte(least, wrong)), fallback),
+      // Capped, like `limit`, and for a harder reason: a depth-bounded read is
+      // a recursive walk whose work is O(nodes × depth) on a graph with a loop
+      // in it, so an agent asking for a million levels would be asking the
+      // database for a million passes. 32 is far deeper than any outline a
+      // person writes, and `0` (unlimited, `read_note` only) is not a depth.
+      z.transform((value) => (value === 0 ? 0 : Math.min(value, MAX_DEPTH))),
+    )
+    .register(z.globalRegistry, { description, maximum: MAX_DEPTH })
 }
 
 /** A 0-based position among a parent's children. Omitted = the end. */
@@ -369,8 +429,17 @@ function tool<S extends z.ZodMiniType>(def: {
   permission: Permission
   annotations: ToolAnnotations
   schema: S
-  run(args: z.infer<S>, context: ToolContext): Promise<ToolOutcome> | ToolOutcome
+  /**
+   * The rows this call needs, from its already-parsed arguments. A tool that
+   * says nothing gets the whole live corpus — which is still the right answer
+   * for the two corpus-wide reads and for every writer, whose op planners
+   * (`deleteNoteOps`, `opsToRows`) ask questions of the whole graph.
+   */
+  load?(args: z.infer<S>, context: ToolContext): Promise<ScopedGraph>
+  run(args: z.infer<S>, context: ToolRunContext): Promise<ToolOutcome> | ToolOutcome
 }): ToolDef {
+  const load = def.load ?? ((_args, context) => scopedGraph(context.tenant, context.grant))
+  const parse = (args: Record<string, unknown>) => def.schema.safeParse(withoutNulls(args))
   return {
     name: def.name,
     title: def.title,
@@ -379,7 +448,13 @@ function tool<S extends z.ZodMiniType>(def: {
     annotations: def.annotations,
     inputSchema: jsonSchemaOf(def.schema),
     async invoke(args, context) {
-      const parsed = def.schema.safeParse(withoutNulls(args))
+      const parsed = parse(args)
+      if (!parsed.success) return { ok: false, message: messageOf(parsed.error) }
+      const graph = await load(parsed.data, context)
+      return def.run(parsed.data, { ...context, graph })
+    },
+    async invokeWith(args, context) {
+      const parsed = parse(args)
       if (!parsed.success) return { ok: false, message: messageOf(parsed.error) }
       return def.run(parsed.data, context)
     },
@@ -399,7 +474,7 @@ function tool<S extends z.ZodMiniType>(def: {
  * The refusal says a note it cannot see holds the block, and not which one —
  * the check must not become a way to enumerate notes the grant excludes.
  */
-function sharedOutsideScope(context: ToolContext, blockId: string): ToolOutcome | null {
+function sharedOutsideScope(context: ToolRunContext, blockId: string): ToolOutcome | null {
   const scope = context.grant.noteIds
   if (scope === null) return null
   const outside = notesReachingUnscoped(context.graph, blockId).filter((id) => !scope.has(id))
@@ -415,7 +490,7 @@ function sharedOutsideScope(context: ToolContext, blockId: string): ToolOutcome 
 
 /** The checks `link_block` and `move_block` share: both ends visible, not a
  * self-link, and the block writable under this grant. */
-function linkable(context: ToolContext, parentId: string, blockId: string): ToolOutcome | null {
+function linkable(context: ToolRunContext, parentId: string, blockId: string): ToolOutcome | null {
   const { graph } = context
   if (nodeOf(graph, parentId) === null || nodeOf(graph, blockId) === null) {
     return { ok: false, message: BLOCK_OUT_OF_SCOPE }
@@ -468,18 +543,26 @@ function keyAt(
  * it replaces (~60 chars against ~36 once the id is a field rather than an
  * `id::` line), and `"props":null,"childIds":[]` on 281 blocks is pure
  * context spent saying nothing.
+ *
+ * `childIds` is CAPPED. A block with a thousand children would otherwise put a
+ * thousand ids inside what every caller reads as a single row, which is an
+ * unbounded response hiding inside a point read. When it is cut the block says
+ * so (`hasMoreChildren`), and `list_children` — which pages — is where the
+ * rest is.
  */
 const blockOut = (graph: ScopedGraph, id: string, extra: Record<string, unknown> = {}) => {
   const row = nodeOf(graph, id)
   if (!row) return null
   const props = propsOf(graph, id)
-  const childIds = childrenOf(graph, id)
+  const all = childrenOf(graph, id)
+  const childIds = all.slice(0, MAX_EMBEDDED_IDS)
   return {
     id: row.id,
     type: row.type,
     text: row.text,
     ...(props && Object.keys(props).length > 0 ? { props } : {}),
     ...(childIds.length > 0 ? { childIds } : {}),
+    ...(all.length > childIds.length ? { childCount: all.length, hasMoreChildren: true } : {}),
     // The note the block was written in — where it shows if nothing links to
     // it any more. Absent for notes and for rows older than migration 0006.
     ...(row.notes_id === undefined ? {} : { writtenInNoteId: row.notes_id }),
@@ -544,6 +627,44 @@ const noteSummary = (graph: ScopedGraph, id: string) => {
     openTaskCount: note.tasks.filter((task) => !task.completed).length,
     preview: preview(note.text),
   }
+}
+
+/** What `list_notes` was asked for, once parsed. */
+interface NoteQuery {
+  tag?: string
+  type?: "note" | "daily" | "weekly"
+  limit: number
+  cursor?: string
+}
+
+/**
+ * The page of notes a `list_notes` call returns, in order.
+ *
+ * Called TWICE per request, and that is the point. `list_notes` derives a
+ * `Note` per note, and deriving one walks that note's whole subtree — so
+ * summarising every note the token can reach is a corpus scan on the tool an
+ * agent calls first. But the ORDER and the page are decided by facts that live
+ * on the note's own row: `updatedAt` is its `updated_at` prop, `type` is read
+ * off its id. So the loader (`notesView`, graph-access.ts) runs this over a
+ * snapshot of the note rows ALONE to find out which notes the page names, and
+ * fetches only those notes' blocks; `run` then runs the same function over the
+ * result.
+ *
+ * Sharing the function is what makes that safe: the two calls see the same
+ * note rows, so they cannot choose different pages. The one thing they could
+ * disagree about is `tag` — a note's tags come from its blocks, not its row —
+ * which is why a tag filter loads the corpus instead.
+ */
+function notePage(graph: ScopedGraph, query: NoteQuery) {
+  const tag = query.tag?.replace(/^#/, "").toLowerCase()
+  const matches = graph
+    .notes()
+    .map((id) => noteSummary(graph, id))
+    .filter((note): note is NonNullable<typeof note> => note !== null)
+    .filter((note) => query.type === undefined || note.type === query.type)
+    .filter((note) => tag === undefined || note.tags.some((t) => t.toLowerCase() === tag))
+    .sort(byRecency)
+  return pageOf(matches, offsetOf(query.cursor), query.limit)
 }
 
 /** Notes sorted the way a person would expect a note list: most recently
@@ -617,31 +738,25 @@ export const TOOLS: ToolDef[] = [
       limit: limitArg(),
       cursor: cursorArg(),
     }),
+    // A tag lives in a note's BLOCKS, so filtering by one is a question about
+    // every block of every note — genuinely corpus-wide, and loaded as such.
+    // Without a tag filter the page is decided by the note rows alone, so only
+    // the notes on the page are read (`notePage`).
+    load: (args, { tenant, grant }) =>
+      args.tag === undefined
+        ? notesView(tenant, grant, (notes) => notePage(notes, args).page.map((note) => note.id))
+        : scopedGraph(tenant, grant),
     run(args, { graph }) {
-      const tag = args.tag?.replace(/^#/, "").toLowerCase()
-      const type = args.type
-      const limit = args.limit
-      const offset = offsetOf(args.cursor)
-
-      const matches = graph
-        .notes()
-        .map((id) => noteSummary(graph, id))
-        .filter((note): note is NonNullable<typeof note> => note !== null)
-        .filter((note) => type === undefined || note.type === type)
-        .filter((note) => tag === undefined || note.tags.some((t) => t.toLowerCase() === tag))
-        .sort(byRecency)
-
-      const page = matches.slice(offset, offset + limit)
-      const nextCursor = offset + limit < matches.length ? String(offset + limit) : null
+      const { page, total, nextCursor } = notePage(graph, args)
 
       return {
         ok: true,
-        data: { notes: page, total: matches.length, nextCursor },
+        data: { notes: page, total, nextCursor },
         text:
           page.length === 0
             ? "No notes matched."
             : page.map((note) => `${note.id}  ${note.title}`).join("\n") +
-              (nextCursor ? `\n\n${matches.length - offset - page.length} more.` : ""),
+              (nextCursor ? `\n\n${total - offsetOf(args.cursor) - page.length} more.` : ""),
       }
     },
   }),
@@ -652,16 +767,18 @@ export const TOOLS: ToolDef[] = [
     description:
       "Find blocks whose text contains `query` (case-insensitive substring, not " +
       "the app's query language). Each hit names the block and the notes it " +
-      "appears in, so it is the way to get from a phrase to a note or a block id.",
+      "appears in, so it is the way to get from a phrase to a note or a block id. " +
+      "Page with `cursor` when `nextCursor` comes back.",
     permission: "read",
     annotations: readOnly,
     schema: z.object({
       query: requiredArg("The text to look for."),
       limit: limitArg(),
+      cursor: cursorArg(),
     }),
     run(args, { graph }) {
       const query = args.query.toLowerCase()
-      const limit = args.limit
+      const offset = offsetOf(args.cursor)
 
       const hits: {
         id: string
@@ -670,13 +787,18 @@ export const TOOLS: ToolDef[] = [
         noteIds: string[]
         noteTitles: string[]
       }[] = []
-      // Sorted ids so the result — and therefore any truncation — is the same
-      // for the same corpus and query.
+      // Sorted ids so the order — and therefore the cursor — is the same for
+      // the same corpus and query. One hit past the page is collected, which is
+      // all it takes to answer `nextCursor` without deriving a `Note` for every
+      // match in the corpus.
       const ids = [...graph.snapshot.nodes.keys()].filter((id) => sees(graph, id)).sort()
+      let found = 0
       for (const id of ids) {
         const row = graph.snapshot.nodes.get(id)
         if (!row || row.type === NOTE_TYPE) continue
         if (!row.text.toLowerCase().includes(query)) continue
+        found += 1
+        if (found <= offset) continue
         const noteIds = notesReaching(graph, id)
         hits.push({
           id,
@@ -685,12 +807,15 @@ export const TOOLS: ToolDef[] = [
           noteIds,
           noteTitles: noteIds.map((noteId) => noteOf(graph, noteId)?.displayName ?? noteId),
         })
-        if (hits.length >= limit) break
+        if (hits.length > args.limit) break
       }
+      const more = hits.length > args.limit
+      if (more) hits.pop()
+      const nextCursor = more ? String(offset + args.limit) : null
 
       return {
         ok: true,
-        data: { hits, truncated: hits.length >= limit },
+        data: { hits, nextCursor, truncated: more },
         text:
           hits.length === 0
             ? `Nothing matched "${query}".`
@@ -716,9 +841,13 @@ export const TOOLS: ToolDef[] = [
       "to read whole: `blockCount` is always the note's true size, `truncated` " +
       "says whether you got all of it, and a block whose children were cut off " +
       "is marked `hasMoreChildren` so you know where to walk in with " +
-      "`list_children`. Pass `depth: 0` for the whole note. Also returns the note's " +
-      "`unassigned` blocks: ones written in it that nothing links to any more, " +
-      "which the app shows in a section at the foot of the note.",
+      "`list_children`. Pass `depth: 0` for the whole note, and page with " +
+      "`cursor` when `nextCursor` comes back — `depth` bounds how DEEP the " +
+      "outline goes and `limit` how MANY rows come back, so a wide note is " +
+      "bounded as well as a tall one. Also returns the note's `unassigned` " +
+      "blocks: ones written in it that nothing links to any more, which the app " +
+      "shows in a section at the foot of the note; they follow the outline in " +
+      "the same paged sequence.",
     permission: "read",
     annotations: readOnly,
     schema: z.object({
@@ -729,19 +858,33 @@ export const TOOLS: ToolDef[] = [
         `How many levels of the outline to return. Defaults to ${DEFAULT_NOTE_DEPTH}; ` +
           "use 0 for the whole note, which on a large one is expensive.",
       ),
+      limit: limitArg(),
+      cursor: cursorArg(),
     }),
+    load: (args, { tenant, grant }) => noteView(tenant, grant, args.note_id, args.depth),
     run(args, { graph }) {
       const noteId = args.note_id
       const note = noteOf(graph, noteId)
       if (!note) return { ok: false, message: OUT_OF_SCOPE }
       const depth = args.depth
+      const offset = offsetOf(args.cursor)
 
       const rootBlockIds = childrenOf(graph, noteId)
-      const { blocks, truncated } = blocksOfNote(graph, rootBlockIds, depth)
-      // The whole note's size, whatever `depth` returned — so an agent that
-      // truncated knows how much it has not seen.
+      const outline = blocksOfNote(graph, rootBlockIds, depth)
+      const loose = blocksOfNote(graph, unassignedOf(graph, noteId) ?? [], depth).blocks
+      // The whole note's size, whatever `depth` and `limit` returned — so an
+      // agent that was cut off knows how much it has not seen.
       const blockCount = blocksOfNote(graph, rootBlockIds, 0).blocks.length
-      const unassigned = blocksOfNote(graph, unassignedOf(graph, noteId) ?? [], depth).blocks
+
+      // `depth` bounds the outline's SHAPE; a note 500 rows wide is still
+      // enormous one level down. So the outline and the Unassigned section are
+      // paged as one sequence — outline first, in document order — and a page
+      // is a window into it. Two lists, one cursor, so an agent pages a note
+      // the way it pages everything else here.
+      const { page, total, nextCursor } = pageOf([...outline.blocks, ...loose], offset, args.limit)
+      const outlineEnd = outline.blocks.length
+      const blocks = page.slice(0, Math.max(0, Math.min(outlineEnd - offset, page.length)))
+      const unassigned = page.slice(blocks.length)
 
       return {
         ok: true,
@@ -755,13 +898,17 @@ export const TOOLS: ToolDef[] = [
           rootBlockIds,
           blocks,
           blockCount,
-          truncated,
+          unassignedCount: loose.length,
+          truncated: outline.truncated || nextCursor !== null,
+          nextCursor,
           unassigned,
         },
         text:
           `${note.displayName} — ${blockCount} block(s)` +
-          (truncated ? ` (showing ${blocks.length} to depth ${depth})` : "") +
-          (unassigned.length > 0 ? `, ${unassigned.length} unassigned` : ""),
+          (outline.truncated || nextCursor !== null
+            ? ` (showing ${page.length} of ${total} to depth ${depth})`
+            : "") +
+          (loose.length > 0 ? `, ${loose.length} unassigned` : ""),
       }
     },
   }),
@@ -773,30 +920,50 @@ export const TOOLS: ToolDef[] = [
       "One block by id, as stored: type, text, metadata, its children, the " +
       "blocks that hold it, and the notes it appears in. A note id works too " +
       "(a note is a block whose type is `note`). The starting point for walking " +
-      "the graph with `list_children` and `list_parents`.",
+      "the graph with `list_children` and `list_parents`. This is a point read, " +
+      "so the id lists it embeds are capped at " +
+      `${MAX_EMBEDDED_IDS}: when there are more, the counts say so and ` +
+      "`list_children` / `list_parents` page through the rest.",
     permission: "read",
     annotations: readOnly,
     schema: z.object({ block_id: requiredArg("A block id, or a note id.") }),
+    load: (args, { tenant, grant }) => blockView(tenant, grant, args.block_id),
     run(args, { graph }) {
       const id = args.block_id
       const block = blockOut(graph, id)
       if (!block) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
 
+      // A block can hang under many parents and appear in many notes, so both
+      // of these are collections and both are capped. A point read never
+      // truncates silently: the counts are the true sizes, and the tools that
+      // PAGE these lists are named in the description and in the text below.
+      const allParents = parentsOf(graph, id)
+      const allNotes = notesReaching(graph, id)
+      const parentIds = allParents.slice(0, MAX_EMBEDDED_IDS)
+      const noteIds = allNotes.slice(0, MAX_EMBEDDED_IDS)
+
       const data = {
         ...block,
-        parentIds: parentsOf(graph, id),
+        parentIds,
+        parentCount: allParents.length,
+        ...(allParents.length > parentIds.length ? { hasMoreParents: true } : {}),
         // Which notes this block appears in. A block that IS a note lists
         // itself; `type` already says which it is, so there is no separate
         // flag saying the same thing twice.
-        noteIds: notesReaching(graph, id),
+        noteIds,
+        noteCount: allNotes.length,
+        ...(allNotes.length > noteIds.length ? { hasMoreNotes: true } : {}),
       }
+      const cut = data.hasMoreChildren === true || allParents.length > parentIds.length
       return {
         ok: true,
         data,
         text:
           `${data.id} (${data.type})\n${data.text}\n\n` +
-          `children: ${block.childIds?.length ?? 0}, parents: ${data.parentIds.length}, ` +
-          `in notes: ${data.noteIds.join(", ") || "none"}`,
+          `children: ${data.childCount ?? block.childIds?.length ?? 0}, ` +
+          `parents: ${allParents.length}, ` +
+          `in notes: ${noteIds.join(", ") || "none"}` +
+          (cut ? "\n\nSome lists were cut: use `list_children` / `list_parents` for all." : ""),
       }
     },
   }),
@@ -809,44 +976,50 @@ export const TOOLS: ToolDef[] = [
       "a note id for the note's top-level blocks. Walk down by calling this " +
       "again with a child's id, or pass `depth` to pull several levels at once " +
       "(each block carries its `depth`, and one whose children were cut off is " +
-      "marked `hasMoreChildren`). Reading a big note a branch at a time this " +
-      "way costs far less than `read_note` on the whole thing.",
+      "marked `hasMoreChildren`). Page with `cursor` when `nextCursor` comes " +
+      "back. Reading a big note a branch at a time this way costs far less " +
+      "than `read_note` on the whole thing.",
     permission: "read",
     annotations: readOnly,
     schema: z.object({
       block_id: requiredArg("A block id, or a note id."),
       depth: depthArg(1, 1, "Levels to return. 1 (the default) is the direct children only."),
       limit: limitArg(),
+      cursor: cursorArg(),
     }),
+    load: (args, { tenant, grant }) => subtreeView(tenant, grant, args.block_id, args.depth),
     run(args, { graph }) {
       const id = args.block_id
-      const limit = args.limit
       const depth = args.depth
       if (nodeOf(graph, id) === null) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
 
       const direct = childrenOf(graph, id)
       const walked = blocksOfNote(graph, direct, depth)
-      const children = walked.blocks.slice(0, limit)
+      const { page, total, nextCursor } = pageOf(walked.blocks, offsetOf(args.cursor), args.limit)
 
       return {
         ok: true,
         data: {
           blockId: id,
-          children,
-          total: walked.blocks.length,
+          children: page,
+          total,
           directChildCount: direct.length,
-          truncated: walked.truncated || walked.blocks.length > limit,
+          nextCursor,
+          // Two different cuts, and an agent can act on each: `nextCursor`
+          // continues this list, `hasMoreChildren` on a block says to walk
+          // into it (or ask for more `depth`).
+          truncated: walked.truncated || nextCursor !== null,
         },
         text:
-          children.length === 0
+          page.length === 0
             ? "No children."
-            : children
+            : page
                 .map(
                   (child) =>
                     `${"  ".repeat(Number(child.depth) || 0)}${child.id} (${child.type})  ` +
                     preview(String(child.text), 14),
                 )
-                .join("\n"),
+                .join("\n") + (nextCursor ? `\n\n${total - page.length} more.` : ""),
       }
     },
   }),
@@ -857,36 +1030,54 @@ export const TOOLS: ToolDef[] = [
     description:
       "The blocks that hold this one, and the notes it appears in. A block can " +
       "sit under several parents at once — that is how the same block shows in " +
-      "more than one note. Walk up by calling this again with a parent's id.",
+      "more than one note. Walk up by calling this again with a parent's id; " +
+      "page with `cursor` when `nextCursor` comes back.",
     permission: "read",
     annotations: readOnly,
-    schema: z.object({ block_id: requiredArg("A block id or a note id.") }),
+    schema: z.object({
+      block_id: requiredArg("A block id or a note id."),
+      limit: limitArg(),
+      cursor: cursorArg(),
+    }),
+    load: (args, { tenant, grant }) => parentsView(tenant, grant, args.block_id),
     run(args, { graph }) {
       const id = args.block_id
       if (nodeOf(graph, id) === null) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
 
-      const parents = parentsOf(graph, id)
+      const allParents = parentsOf(graph, id)
         .map((parentId) => blockOut(graph, parentId))
         .filter((parent): parent is NonNullable<typeof parent> => parent !== null)
-      const noteIds = notesReaching(graph, id)
+      const allNotes = notesReaching(graph, id)
+
+      // Both lists are bounded, and one cursor moves both: a page of this tool
+      // is a window on a block's surroundings, and a block with a thousand
+      // parents is in a thousand notes for the same reason.
+      const offset = offsetOf(args.cursor)
+      const parents = pageOf(allParents, offset, args.limit)
+      const notes = pageOf(allNotes, offset, args.limit)
+      const nextCursor = parents.nextCursor ?? notes.nextCursor
 
       return {
         ok: true,
         data: {
           nodeId: id,
-          parents,
-          noteIds,
-          notes: noteIds.map((noteId) => ({
+          parents: parents.page,
+          parentCount: parents.total,
+          noteIds: notes.page,
+          noteCount: notes.total,
+          notes: notes.page.map((noteId) => ({
             id: noteId,
             title: noteOf(graph, noteId)?.displayName ?? noteId,
           })),
+          nextCursor,
         },
         text:
-          parents.length === 0
+          parents.total === 0
             ? `Nothing holds ${id}. It shows in its note's Unassigned basket.`
-            : parents
+            : parents.page
                 .map((parent) => `${parent.id} (${parent.type})  ${preview(parent.text, 14)}`)
-                .join("\n"),
+                .join("\n") +
+              (nextCursor ? `\n\n${parents.total - parents.page.length} more.` : ""),
       }
     },
   }),
@@ -896,28 +1087,33 @@ export const TOOLS: ToolDef[] = [
     title: "List tags",
     description:
       "Every tag across the notes this token can reach, with how many notes " +
-      "carry it. Pass one to `list_notes` as `tag` to see them.",
+      "carry it, commonest first. Pass one to `list_notes` as `tag` to see " +
+      "them; page with `cursor` when `nextCursor` comes back.",
     permission: "read",
     annotations: readOnly,
-    schema: z.object({}),
-    run(_args, { graph }) {
+    schema: z.object({ limit: limitArg(), cursor: cursorArg() }),
+    run(args, { graph }) {
       const counts = new Map<string, number>()
       for (const noteId of graph.notes()) {
         for (const tag of noteOf(graph, noteId)?.tags ?? []) {
           counts.set(tag, (counts.get(tag) ?? 0) + 1)
         }
       }
-      const tags = [...counts.entries()]
+      // Commonest first, the tag itself breaking every tie — so the order, and
+      // therefore the cursor, is the same for the same corpus.
+      const all = [...counts.entries()]
         .map(([tag, noteCount]) => ({ tag, noteCount }))
         .sort((a, b) => b.noteCount - a.noteCount || (a.tag < b.tag ? -1 : 1))
+      const { page, total, nextCursor } = pageOf(all, offsetOf(args.cursor), args.limit)
 
       return {
         ok: true,
-        data: { tags },
+        data: { tags: page, total, nextCursor },
         text:
-          tags.length === 0
+          page.length === 0
             ? "No tags."
-            : tags.map((entry) => `#${entry.tag}  ${entry.noteCount}`).join("\n"),
+            : page.map((entry) => `#${entry.tag}  ${entry.noteCount}`).join("\n") +
+              (nextCursor ? `\n\n${total - page.length} more.` : ""),
       }
     },
   }),
@@ -1407,10 +1603,14 @@ export type CallResult =
   | { kind: "unknown_tool"; message: string }
 
 /**
- * Run one tool call. The graph is loaded here, once, and handed to the tool
- * already scoped — a tool never sees the tenant's raw snapshot, and never
- * sees the grant's note list either, so there is nothing in a `run` to get
- * the scope check wrong with.
+ * Run one tool call.
+ *
+ * The refusals happen here, before a row is read: an unknown tool and a
+ * missing permission never reach the database at all. The graph is then loaded
+ * by the tool itself — each says which rows its question needs
+ * (`graph-access.ts`) — and handed to its `run` already scoped, so a `run`
+ * never sees the tenant's raw snapshot and never sees the grant's note list
+ * either. There is nothing in a `run` to get the scope check wrong with.
  */
 export async function callTool(
   grant: Grant,
@@ -1433,6 +1633,5 @@ export async function callTool(
     }
   }
 
-  const graph = await scopedGraph(tenant, grant)
-  return { kind: "result", outcome: await tool.invoke(args, { grant, tenant, graph, now }) }
+  return { kind: "result", outcome: await tool.invoke(args, { grant, tenant, now }) }
 }

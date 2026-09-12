@@ -92,23 +92,23 @@ Reads need `read`; the writers need `write`; the two deleting verbs need `delete
 
 An agent works in the notes you already have: there is no tool to create one.
 
-| Tool             | Perm   | What it does                                                                                          |
-| ---------------- | ------ | ----------------------------------------------------------------------------------------------------- |
-| `list_notes`     | read   | Notes the token can reach, newest first. Filter by `tag` or `type`; page with `cursor`.               |
-| `search`         | read   | Blocks whose text contains a substring, each naming the notes it appears in.                          |
-| `read_note`      | read   | A note's blocks **as stored rows** — top 2 levels by default (`depth: 0` for all), plus `unassigned`. |
-| `get_block`      | read   | One block by id: type, text, props, children, parents, the notes it is in.                            |
-| `list_children`  | read   | The blocks beneath one, `depth` levels deep — walking **down**.                                       |
-| `list_parents`   | read   | The blocks that hold one, and the notes it appears in — walking **up**.                               |
-| `list_tags`      | read   | Tags across the reachable notes, with note counts.                                                    |
-| `create_blocks`  | write  | Add blocks under a parent, nesting with `children`. Purely additive.                                  |
-| `set_note_title` | write  | Set or clear a note's title.                                                                          |
-| `update_block`   | write  | Change one block's text, type or metadata, in place.                                                  |
-| `link_block`     | write  | Put an existing block under a parent, at an index.                                                    |
-| `unlink_block`   | write  | Take a block out of one place. Kept, not deleted.                                                     |
-| `move_block`     | write  | Re-parent or reorder a block in one step.                                                             |
-| `delete_block`   | delete | Delete a block everywhere, optionally with its contents.                                              |
-| `delete_note`    | delete | Delete a note and the blocks only it holds.                                                           |
+| Tool             | Perm   | What it does                                                                                                                                      |
+| ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_notes`     | read   | Notes the token can reach, newest first. Filter by `tag` or `type`; page with `cursor`.                                                           |
+| `search`         | read   | Blocks whose text contains a substring, each naming the notes it appears in. Page with `cursor`.                                                  |
+| `read_note`      | read   | A note's blocks **as stored rows** — top 2 levels by default (`depth: 0` for all), plus `unassigned`. Bounded by `limit` too; page with `cursor`. |
+| `get_block`      | read   | One block by id: type, text, props, children, parents, the notes it is in. Its id lists are capped.                                               |
+| `list_children`  | read   | The blocks beneath one, `depth` levels deep — walking **down**. Page with `cursor`.                                                               |
+| `list_parents`   | read   | The blocks that hold one, and the notes it appears in — walking **up**. Page with `cursor`.                                                       |
+| `list_tags`      | read   | Tags across the reachable notes, with note counts. Page with `cursor`.                                                                            |
+| `create_blocks`  | write  | Add blocks under a parent, nesting with `children`. Purely additive.                                                                              |
+| `set_note_title` | write  | Set or clear a note's title.                                                                                                                      |
+| `update_block`   | write  | Change one block's text, type or metadata, in place.                                                                                              |
+| `link_block`     | write  | Put an existing block under a parent, at an index.                                                                                                |
+| `unlink_block`   | write  | Take a block out of one place. Kept, not deleted.                                                                                                 |
+| `move_block`     | write  | Re-parent or reorder a block in one step.                                                                                                         |
+| `delete_block`   | delete | Delete a block everywhere, optionally with its contents.                                                                                          |
+| `delete_note`    | delete | Delete a note and the blocks only it holds.                                                                                                       |
 
 ### There is no markdown
 
@@ -201,21 +201,117 @@ Two things the write path deliberately does not do:
 
 ## 4. Cost
 
-Each tool call loads the tenant's live rows once — two indexed queries — and then answers
-from an in-memory `GraphSnapshot` using the app's own pure functions (`rollup`,
-`noteFromPage`, `reachableFrom`). That fidelity is the point: an agent traversing the
-graph sees what the person would see, because it is the same code, rather than a second
-SQL definition of "what the user can see" that drifts.
+Every tool call answers from an in-memory `GraphSnapshot`, using the app's own pure
+functions (`noteFromNode`, `basketRootIds`, `reachableFrom`, `noteDoc`). That fidelity is
+the point: an agent traversing the graph sees what the person would see, because it is
+the same code, rather than a second SQL definition of "what the user can see" that
+drifts.
 
-The cost is the same read a replica full pull makes — measured at ~540 rows
-(`worker/d1-sql-driver.ts`), an order of magnitude under the audit threshold there — and
-it is bounded by the corpus, not by how hard an agent pushes. If a corpus outgrows it,
-the fix is a note-scoped load; the seam is `loadSnapshot`, and nothing above it changes.
-See docs/scaling-thresholds.md.
+What changed in 2026-09 is only **which rows that snapshot is built from**. It used to be
+all of them — two queries, every live `nodes` and `link` row the tenant has, on every
+call. That is O(corpus) per call with nothing bounding how many calls an agent makes, and
+at ~1,700 rows a call D1's 5M-rows-per-day free tier is gone in about 3,000 calls. This
+project has been burned by exactly that shape before (docs/scaling-thresholds.md: one
+corpus-scaling query on an ambient browser event, 97% of a day's read volume).
+
+So each tool now says which rows its question needs, and the same pure functions run over
+that slice. Measured on a 20-note, 800-block fixture — 1,620 rows, roughly the owner's
+corpus (`worker/mcp/graph-load.test.ts`):
+
+| Call                              | Before | After |
+| --------------------------------- | -----: | ----: |
+| `get_block` (a leaf)              |  1,620 |     4 |
+| `list_children` (1 level)         |  1,620 |    17 |
+| `list_children` (2 levels)        |  1,620 |    41 |
+| `list_parents` (a leaf)           |  1,620 |    46 |
+| `read_note` (any depth)           |  1,620 |    81 |
+| `list_notes` (default page of 50) |  1,620 |   820 |
+| `list_notes` (page of 5)          |  1,620 |   220 |
+| `get_block`, note-scoped token    |  1,620 |    45 |
+| `search`, `list_tags`             |  1,620 | 1,620 |
+
+The traversal tools are now bounded by the question rather than by the corpus. `search`
+and `list_tags` are not, and are not pretended to be: one reads every block's text and
+the other every note's tags, which is what they are for.
+
+Four things worth knowing about the table:
+
+- **`read_note` is O(note), not O(depth).** `blockCount` is the note's true size and the
+  title, tags, tasks and preview are derived from every block in it, so `depth` bounds
+  what comes BACK, never what is read. One note of twenty is still the saving.
+- **`list_parents` is O(the notes holding the block)**, because it names those notes and
+  an untitled note's display name is derived from its outline. Reading them is the price
+  of that name being the one on screen rather than a second guess at it.
+- **`list_notes` reads the note rows, then only the notes on the page.** Which notes a
+  page names, and in what order, is decided by facts on each note's own row — its
+  `updated_at` prop, and its id, which says whether it is a daily or a weekly. Its tags,
+  task counts and preview are not, so those are read for the page alone. A `tag` filter
+  is a question about every block of every note, so it loads the corpus and says so.
+- **A note-scoped grant pays for its scope.** The visible-node set is a walk seeded at the
+  granted notes rather than a pass over a loaded corpus — cheaper, and the same set.
+
+### Why this is safe
+
+Targeted SQL is exactly how a second, drifting definition of "what the user can see" gets
+built, so none of it answers a question. The loaders (`worker/mcp/graph-load.ts`) only
+fetch rows; every answer still comes from the app's pure functions. What each view has to
+guarantee is that its slice is **closed** under the questions its tool asks — the upward
+closure of a block makes "which notes is this in?" exact, a subtree to depth _d_+1 makes a
+_d_-level outline exact, and the basket needs every candidate either visibly reached or
+carrying its full ancestry. Those invariants are written out at the top of
+`worker/mcp/graph-access.ts`.
+
+And they are tested rather than argued: `loadSnapshot` remains as the reference
+implementation, and `graph-load.test.ts` runs every read, for every node of a graph built
+out of the awkward shapes (a block in two notes, an Unassigned subtree, an untitled note,
+a loop, a tombstone in the middle of an outline), through both paths and demands identical
+results — for an unrestricted grant and a note-scoped one. A view that loads too few rows
+cannot survive that; a view that loads too many only costs.
+
+Writes still load the whole corpus. Their op planners (`deleteNoteOps`, `opsToRows`) ask
+questions of the whole graph — what else holds this block, what would be orphaned — and a
+bounded slice has no honest answer to those. A write is also rarer than a read and already
+pays for a batch.
 
 ---
 
-## 5. Connecting a client
+## 5. Bounds
+
+A tool call's cost is now bounded on the way IN; the response is bounded on the way out.
+Every collection has a `limit`, and every collection an agent could legitimately want the
+rest of has a `cursor`:
+
+| Tool            | Bounded by                                                              |
+| --------------- | ----------------------------------------------------------------------- |
+| `list_notes`    | `limit` + `cursor`                                                      |
+| `search`        | `limit` + `cursor`                                                      |
+| `list_children` | `depth`, then `limit` + `cursor` over the flattened walk                |
+| `list_parents`  | `limit` + `cursor`, over the parents and the notes alike                |
+| `list_tags`     | `limit` + `cursor`                                                      |
+| `read_note`     | `depth`, then `limit` + `cursor` over the outline and Unassigned as one |
+| `get_block`     | its embedded id lists are capped; the counts and the flags say so       |
+
+Three rules behind that table.
+
+**One cursor convention.** A cursor is an opaque digit string naming an offset into an
+order that is the same for the same corpus and arguments, and a cursor this server did
+not issue is refused rather than guessed at. It is the same on every tool, so an agent
+learns paging once.
+
+**Never truncate without recourse.** `list_children` used to answer `truncated: true` with
+a `total` and no way to get the rest — the agent was told its answer was incomplete and
+given nothing to do about it, which is worse than either paging or not cutting. Where a
+cursor genuinely does not fit, the response says what to call instead: `get_block` is a
+point read, so its `childIds` / `parentIds` are capped with `childCount`, `parentCount`
+and a line naming `list_children` / `list_parents`.
+
+**A structural bound is not a cardinal one.** `depth` bounds how DEEP a read goes, and a
+note 500 rows wide at `depth: 1` is still enormous — so `read_note` and `list_children`
+carry a `limit` as well, and `blockCount` goes on reporting the note's true size through
+both. `depth` itself is capped at 32: a depth-bounded read is a recursive walk, the graph
+can hold loops, and the work is O(nodes × depth).
+
+## 6. Connecting a client
 
 1. Open **Settings → MCP access**.
 2. **New token.** Name it, tick the permissions, choose every note or pick specific ones,
@@ -255,7 +351,7 @@ curl -sX POST https://<your-host>/mcp \
 
 ---
 
-## 6. Why not OAuth
+## 7. Why not OAuth
 
 The spec makes authorization **optional** and says HTTP servers _should_ conform when
 they do it. Ruminate does not: it takes an opaque bearer token it minted itself, and
@@ -283,27 +379,28 @@ worth paying.
 
 ---
 
-## 7. Not built yet
+## 8. Not built yet
 
 Three follow-ups have their designs written down rather than their code:
 
-|                           |                                                                                           |
-| ------------------------- | ----------------------------------------------------------------------------------------- |
-| docs/mcp-rate-limiting.md | No rate limiting exists, and every tool call reads the whole corpus. The most urgent gap. |
-| docs/mcp-search.md        | One search surface for the person and the agent, lexical then hybrid-semantic.            |
-| docs/mcp-provenance.md    | Marking agent writes, and accepting or discarding them.                                   |
+|                           |                                                                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| docs/mcp-rate-limiting.md | No rate limiting exists. Its first half — not reading the whole corpus per call — is done (§4); the limits themselves are not. |
+| docs/mcp-search.md        | One search surface for the person and the agent, lexical then hybrid-semantic.                                                 |
+| docs/mcp-provenance.md    | Marking agent writes, and accepting or discarding them.                                                                        |
 
-## 8. Files
+## 9. Files
 
-|                                         |                                                   |
-| --------------------------------------- | ------------------------------------------------- |
-| `worker/handlers/mcp.ts`                | The endpoint: transport rules, auth, dispatch     |
-| `worker/handlers/mcp-tokens.ts`         | Mint / list / revoke, session-authed              |
-| `worker/mcp/protocol.ts`                | The 2026-07-28 wire format — pure                 |
-| `worker/mcp/grant.ts`                   | What a token may do — pure, and fail-closed       |
-| `worker/mcp/tokens.ts`                  | Token storage, hashing, lookup                    |
-| `worker/mcp/graph-access.ts`            | The scoped view of the corpus, and the write path |
-| `worker/mcp/tools.ts`                   | Every tool, and the refusals before them          |
-| `src/data/ops-rows.ts`                  | Ops → rows, shared with the browser store's rule  |
-| `src/components/mcp-tokens-section.tsx` | The Settings panel                                |
-| `migrations/0007_mcp_tokens.sql`        | The grants table                                  |
+|                                         |                                                    |
+| --------------------------------------- | -------------------------------------------------- |
+| `worker/handlers/mcp.ts`                | The endpoint: transport rules, auth, dispatch      |
+| `worker/handlers/mcp-tokens.ts`         | Mint / list / revoke, session-authed               |
+| `worker/mcp/protocol.ts`                | The 2026-07-28 wire format — pure                  |
+| `worker/mcp/grant.ts`                   | What a token may do — pure, and fail-closed        |
+| `worker/mcp/tokens.ts`                  | Token storage, hashing, lookup                     |
+| `worker/mcp/graph-access.ts`            | The scoped view of the corpus, and the write path  |
+| `worker/mcp/graph-load.ts`              | Which rows a view reads — loaders only, no answers |
+| `worker/mcp/tools.ts`                   | Every tool, and the refusals before them           |
+| `src/data/ops-rows.ts`                  | Ops → rows, shared with the browser store's rule   |
+| `src/components/mcp-tokens-section.tsx` | The Settings panel                                 |
+| `migrations/0007_mcp_tokens.sql`        | The grants table                                   |

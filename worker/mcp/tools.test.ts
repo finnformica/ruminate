@@ -343,6 +343,175 @@ describe("search and tags", () => {
 })
 
 // -----------------------------------------------------------------------------
+// Bounds
+// -----------------------------------------------------------------------------
+
+/**
+ * Nothing this server returns is unbounded, and nothing it cuts is cut
+ * silently: every collection has a `limit`, and every one an agent could
+ * legitimately want the rest of has a `cursor` — the same opaque digit-string
+ * offset on every tool, refused if it was not issued by a previous call. The
+ * one place a cursor would make no sense (a point read's embedded id lists)
+ * says which tool to call instead.
+ */
+describe("every collection is bounded", () => {
+  /** A block with more children than any one response will embed. */
+  async function wideBlock(count: number): Promise<string> {
+    const blocks = Array.from({ length: count }, (_, at) => ({ text: `row ${at}` }))
+    await run(harness, grantOf({}), "create_blocks", { parent_id: BETA, blocks })
+    return BETA
+  }
+
+  it("pages `search` with a cursor", async () => {
+    const grant = grantOf({})
+    const first = await run(harness, grant, "search", { query: "a", limit: 1 })
+    expect(first.hits).toHaveLength(1)
+    expect(first.truncated).toBe(true)
+    expect(first.nextCursor).toBe("1")
+
+    const second = await run(harness, grant, "search", {
+      query: "a",
+      limit: 1,
+      cursor: first.nextCursor,
+    })
+    expect(second.hits[0].id).not.toBe(first.hits[0].id)
+  })
+
+  it("pages `list_children` with a cursor rather than cutting with no recourse", async () => {
+    const grant = grantOf({})
+    const first = await run(harness, grant, "list_children", {
+      block_id: ALPHA,
+      depth: 2,
+      limit: 1,
+    })
+    expect(first.children).toHaveLength(1)
+    expect(first.total).toBe(3)
+    expect(first.truncated).toBe(true)
+    expect(first.nextCursor).toBe("1")
+
+    const rest = await run(harness, grant, "list_children", {
+      block_id: ALPHA,
+      depth: 2,
+      limit: 50,
+      cursor: first.nextCursor,
+    })
+    expect(rest.children).toHaveLength(2)
+    expect(rest.nextCursor).toBeNull()
+  })
+
+  it("bounds and pages `list_parents`", async () => {
+    const grant = grantOf({})
+    const heading = (await run(harness, grant, "list_children", { block_id: ALPHA })).children[0]
+    const data = await run(harness, grant, "list_parents", { block_id: heading.id, limit: 1 })
+    expect(data.parents).toHaveLength(1)
+    expect(data.parentCount).toBe(1)
+    expect(data.noteCount).toBe(1)
+    expect(data.nextCursor).toBeNull()
+  })
+
+  it("bounds and pages `list_tags`", async () => {
+    const grant = grantOf({})
+    const first = await run(harness, grant, "list_tags", { limit: 1 })
+    expect(first.tags).toHaveLength(1)
+    expect(first.total).toBe(2)
+    expect(first.nextCursor).toBe("1")
+
+    const second = await run(harness, grant, "list_tags", { limit: 1, cursor: first.nextCursor })
+    expect(second.tags[0].tag).not.toBe(first.tags[0].tag)
+    expect(second.nextCursor).toBeNull()
+  })
+
+  it("caps the ids a `get_block` embeds, and says where the rest are", async () => {
+    // A point read has no cursor, so it must steer instead of cutting
+    // silently: the counts are true and the text names the tool that pages.
+    const id = await wideBlock(60)
+    const called = await callTool(grantOf({}), harness.tenant(USER), "get_block", { block_id: id })
+    if (called.kind !== "result" || !called.outcome.ok) throw new Error("get_block failed")
+    const data = called.outcome.data as any
+
+    expect(data.childIds).toHaveLength(50)
+    expect(data.childCount).toBe(61)
+    expect(data.hasMoreChildren).toBe(true)
+    expect(called.outcome.text).toMatch(/list_children/)
+
+    // And the tool it points at really does return the rest.
+    const rest = await run(harness, grantOf({}), "list_children", {
+      block_id: id,
+      limit: 200,
+      cursor: "50",
+    })
+    expect(rest.children).toHaveLength(11)
+  })
+
+  it("bounds `read_note` by count as well as by depth", async () => {
+    // `depth` is a structural bound: a note 500 rows WIDE is still enormous
+    // one level down, so there is a cardinal bound too — and `blockCount`
+    // keeps reporting the note's true size through both.
+    const id = await wideBlock(60)
+    const first = await run(harness, grantOf({}), "read_note", { note_id: id, depth: 0, limit: 10 })
+    expect(first.blocks).toHaveLength(10)
+    expect(first.blockCount).toBe(61)
+    expect(first.truncated).toBe(true)
+    expect(first.nextCursor).toBe("10")
+
+    const later = await run(harness, grantOf({}), "read_note", {
+      note_id: id,
+      depth: 0,
+      limit: 200,
+      cursor: first.nextCursor,
+    })
+    expect(later.blocks).toHaveLength(51)
+    expect(later.nextCursor).toBeNull()
+  })
+
+  it("pages a note's Unassigned section in the same sequence as its outline", async () => {
+    await orphanAlphaOutline()
+    const whole = await run(harness, grantOf({}), "read_note", { note_id: ALPHA, depth: 0 })
+    expect(whole.blocks).toEqual([])
+    expect(whole.unassignedCount).toBe(3)
+
+    const first = await run(harness, grantOf({}), "read_note", {
+      note_id: ALPHA,
+      depth: 0,
+      limit: 1,
+    })
+    expect(first.unassigned).toHaveLength(1)
+    expect(first.nextCursor).toBe("1")
+
+    const rest = await run(harness, grantOf({}), "read_note", {
+      note_id: ALPHA,
+      depth: 0,
+      limit: 50,
+      cursor: first.nextCursor,
+    })
+    expect(rest.unassigned).toHaveLength(2)
+    expect(rest.nextCursor).toBeNull()
+  })
+
+  it("refuses a cursor it did not issue, on every tool that takes one", async () => {
+    const grant = grantOf({})
+    const calls: [string, Record<string, unknown>][] = [
+      ["list_notes", { cursor: "../../etc" }],
+      ["search", { query: "a", cursor: "../../etc" }],
+      ["list_children", { block_id: ALPHA, cursor: "../../etc" }],
+      ["list_parents", { block_id: ALPHA, cursor: "../../etc" }],
+      ["list_tags", { cursor: "../../etc" }],
+      ["read_note", { note_id: ALPHA, cursor: "../../etc" }],
+    ]
+    for (const [name, args] of calls) {
+      expect(await refuse(harness, grant, name, args), name).toMatch(/cursor/)
+    }
+  })
+
+  it("caps `depth` rather than walking however deep it is asked to", async () => {
+    // A depth-bounded read is a recursive walk, and the graph can hold a loop.
+    const tool = TOOLS.find((entry) => entry.name === "list_children")
+    const schema = tool?.inputSchema as { properties: { depth: { maximum: number } } }
+    expect(schema.properties.depth.maximum).toBe(32)
+  })
+})
+
+// -----------------------------------------------------------------------------
 // The Unassigned basket
 // -----------------------------------------------------------------------------
 

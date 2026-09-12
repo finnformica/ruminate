@@ -29,6 +29,20 @@ export interface McpTestEnv {
   addUser(userId: number, status?: "active" | "blocked"): Promise<void>
   /** Write a note through the production push path. Returns its id. */
   seedNote(userId: number, note: SeedNote): Promise<string>
+  /**
+   * Rows every statement has RETURNED through a tenant handle since the last
+   * `measure()`, and how many statements returned them.
+   *
+   * A stand-in for D1's `rows_read`, and a close one for the statements this
+   * server issues: each is either an index seek whose scan is its result
+   * (`nodes` by primary key, `link` by `link_tenant_source` /
+   * `link_tenant_destination`, `nodes` by `nodes_tenant_notes`) or a walk made
+   * of those, so rows returned and rows scanned differ by a constant. The
+   * whole-corpus path's two queries scan the tenant's partition and return all
+   * of it, so they are counted honestly too — which is the comparison that
+   * matters.
+   */
+  measure<T>(run: () => Promise<T>): Promise<{ value: T; rows: number; statements: number }>
 }
 
 interface SeedNote {
@@ -53,10 +67,21 @@ export async function createMcpTestEnv(): Promise<McpTestEnv> {
     SIGNUP_MODE: "allowlist",
   } satisfies Env
 
+  let rows = 0
+  let statements = 0
+
   const tenant = (userId: number) =>
     forTenant(
       {
-        exec: driver.exec,
+        // Counting here rather than around `driver` means only the tenant data
+        // path is measured: seeding a fixture and reading the control plane do
+        // not show up in a tool call's bill.
+        exec: async (sql, params) => {
+          const result = await driver.exec(sql, params)
+          statements += 1
+          rows += result.length
+          return result
+        },
         batch: driver.batch,
         execScript: driver.execScript,
         close: driver.close,
@@ -94,6 +119,12 @@ export async function createMcpTestEnv(): Promise<McpTestEnv> {
       const stamped = nodes.map((row) => (row.id === note.id ? row : { ...row, notes_id: note.id }))
       await corpusPut(tenant(userId), { nodes: stamped, links }, updatedAt)
       return note.id
+    },
+    async measure(run) {
+      rows = 0
+      statements = 0
+      const value = await run()
+      return { value, rows, statements }
     },
   }
 }

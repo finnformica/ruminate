@@ -93,6 +93,20 @@ describe("checkStatement — soft deletes", () => {
     )
   })
 
+  it("asks a CTE about tombstones too — a recursive read traverses", () => {
+    // A statement opening with `WITH` used to read as "other" and escape the
+    // rule entirely, which would let a graph walk follow a link into a
+    // deleted block.
+    const walk =
+      "WITH RECURSIVE below (id) AS ( SELECT id FROM nodes WHERE user_id = :tenant" +
+      " AND id = ?1 UNION SELECT l.destination_id FROM below b" +
+      " JOIN link l ON l.user_id = :tenant AND l.source_id = b.id ) SELECT id FROM below"
+    expect(checkStatement(walk, tenant)).toEqual(["missing-deleted-at-predicate"])
+    expect(checkStatement(walk.replace("AND id = ?1", "AND deleted_at IS NULL"), tenant)).toEqual(
+      [],
+    )
+  })
+
   it("reports every broken rule, not just the first", () => {
     expect(checkStatement("SELECT id FROM nodes", tenant).sort()).toEqual([
       "missing-deleted-at-predicate",

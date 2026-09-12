@@ -1,8 +1,10 @@
 # MCP rate limiting — planned
 
-**Status: not built.** This is the design for a follow-up PR. The MCP endpoint
-(docs/mcp-server.md) currently has **no rate limiting at all**, which is both a spec
-violation and the most likely way this feature breaks something that matters.
+**Status: half built.** Step 1 below — reducing the per-call cost so that the limits have
+less to protect against — is done, and the measurements are in docs/mcp-server.md §4.
+Steps 2 and 3, the limits themselves, are not: the MCP endpoint still has **no rate
+limiting at all**, which is a spec violation and the most likely way this feature breaks
+something that matters.
 
 ## Why this is the first thing to fix
 
@@ -11,14 +13,17 @@ Two facts multiply badly.
 **1. The spec requires it.** The 2026-07-28 tools specification lists, under Security
 Considerations, that servers **MUST** "rate limit tool invocations". We do not.
 
-**2. Every tool call reads the whole corpus.** `loadSnapshot` (worker/mcp/graph-access.ts)
-issues two queries and reads every live `nodes` and `link` row the tenant has — about
-1,700 rows today. That is O(corpus) per call, and nothing bounds how many calls an agent
-makes.
+**2. Every tool call read the whole corpus** — `loadSnapshot`
+(worker/mcp/graph-access.ts) issued two queries and read every live `nodes` and `link` row
+the tenant has, about 1,700 rows. At 1,700 rows a call, D1's 5M-rows-per-day free-tier
+budget is gone in roughly **3,000 tool calls**: not an abusive figure, just one agent in
+an unlucky loop for an afternoon.
 
-At 1,700 rows a call, D1's 5M-rows-per-day free-tier budget is gone in roughly **3,000
-tool calls**. That is not an abusive figure; it is one agent in an unlucky loop for an
-afternoon.
+That half is now fixed (see step 1), and a traversal call costs single or double digits
+of rows. It changes the arithmetic — the same 5M budget is now millions of calls, not
+three thousand — but it does not remove the need for a limit. An unbounded call rate is
+still an unbounded bill, `search` is still corpus-wide by nature, and the spec still says
+MUST.
 
 This project has already been burned by exactly this shape. From
 docs/scaling-thresholds.md: one diagnostics query that scaled with the corpus, running on
@@ -29,10 +34,19 @@ than anyone modelled. An MCP endpoint is that, with the call frequency handed to
 
 ## What to build
 
-### 1. Reduce the per-call cost first
+### 1. Reduce the per-call cost first — **done (2026-09)**
 
 Rate limiting caps the damage; not reading the whole corpus removes most of it. Do this
 first, because it changes what the limits need to be.
+
+Built as described below, with two departures worth recording. `read_note` turned out to
+be O(**note**) rather than O(depth) — `blockCount` and a note's tags are whole-note facts,
+so `depth` bounds what comes back rather than what is read — and `list_parents` is
+O(the notes holding the block), because it names those notes and an untitled note's name
+is derived from its outline. `list_notes`, which this table did not cover, reads the note
+rows and then only the notes on the page. The measured before/after table is in
+docs/mcp-server.md §4, and the equivalence argument and its tests are in §4's
+"Why this is safe".
 
 `loadSnapshot` is the seam. The tools split cleanly:
 
