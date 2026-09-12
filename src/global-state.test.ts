@@ -2,7 +2,7 @@
 import { createStore } from "jotai"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
-import { buildGraphSnapshot, docToGraph, pageDoc, rollup } from "./data/graph"
+import { buildGraphSnapshot, docToGraph, noteDoc, rollup } from "./data/graph"
 import { serialize } from "./blocks/serialize"
 import { applyOps } from "./data/ops"
 import {
@@ -77,7 +77,7 @@ describe("graphSnapshotAtom", () => {
     store.set(databaseGraphAtom, snapshot)
 
     expect(store.get(graphSnapshotAtom)).toBe(snapshot)
-    expect(serialize(pageDoc("tasks", store.get(graphSnapshotAtom))!)).toBe(FILES["tasks.md"])
+    expect(serialize(noteDoc("tasks", store.get(graphSnapshotAtom))!)).toBe(FILES["tasks.md"])
 
     unsubscribe()
   })
@@ -93,11 +93,11 @@ describe("graphSnapshotAtom", () => {
     expect(snapshot).toBe(store.get(sampleGraphAtom))
     const notes = store.get(notesAtom)
     const readme = notes.get("readme")!
-    // The readme's title and props come from the page node, not markdown.
+    // The readme's title and props come from the note node, not markdown.
     expect(readme.title).toBe("👋 Welcome to Ruminate")
     expect(readme.pinned).toBe(true)
     expect(readme.tags).toEqual(["ruminate", "ruminate/welcome"])
-    expect(rollup("readme", snapshot)).toBe(serialize(pageDoc("readme", snapshot)!))
+    expect(rollup("readme", snapshot)).toBe(serialize(noteDoc("readme", snapshot)!))
 
     // An edit signed out applies to the sample graph in memory, and the
     // note follows.

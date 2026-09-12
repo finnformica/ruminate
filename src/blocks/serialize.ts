@@ -4,9 +4,9 @@ import type { Block, BlockDoc } from "./types"
 
 /**
  * **Export.** Serialize typed blocks to markdown — the canonical `<id>.md`
- * form, the *same bytes* the store's rollup produces for a page (the rollup
+ * form, the *same bytes* the store's rollup produces for a note (the rollup
  * IS this function over a doc built from the graph, `src/data/graph.ts`).
- * Only the blocks: a page's props (its metadata) are never written out.
+ * Only the blocks: a note's props (its metadata) are never written out.
  *
  *   # A heading
  *     id:: blk_abc

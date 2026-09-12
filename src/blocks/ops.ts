@@ -4,7 +4,7 @@ import { hasOccurrence, idOfKey, keyOf, parentKeyOf } from "./view"
 
 /**
  * Immutable operations on a BlockDoc. Each returns a new doc; the original is
- * untouched. Page props are carried through unchanged. Collapse state is a
+ * untouched. Note props are carried through unchanged. Collapse state is a
  * UI-only concern and lives in the editor component, not here.
  *
  * A block's own fields (text, type) are addressed by **id**: they belong to
@@ -19,7 +19,7 @@ export function emptyBlock(type: BlockType = "text", text = ""): Block {
   return { id: blockId(), type, text, children: [] }
 }
 
-/** Nothing worth saving: no page props and no block carrying any text. */
+/** Nothing worth saving: no note props and no block carrying any text. */
 export function isEmptyDoc(doc: BlockDoc): boolean {
   if (doc.props !== null && Object.keys(doc.props).length > 0) return false
   return Object.values(doc.blocks).every(

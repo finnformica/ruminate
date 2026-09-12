@@ -8,14 +8,14 @@ import {
   isValidWeekString,
   toDateStringUtc,
 } from "../utils/date"
-import { PAGE_TYPE, pageDoc, parseProps, propsJson, type GraphSnapshot } from "./graph"
+import { NOTE_TYPE, noteDoc, parseProps, propsJson, type GraphSnapshot } from "./graph"
 import type { Op } from "./ops"
-import { emittedPageTitle, isMintedNoteId } from "./page-identity"
+import { emittedNoteTitle, isMintedNoteId } from "./note-identity"
 
 /**
  * Note metadata from the graph: everything
- * the notes list, the sidebar, search and the calendar know about a page is
- * read off the page node's `text` and `props` and the blocks it reaches. No
+ * the notes list, the sidebar, search and the calendar know about a note is
+ * read off the note node's `text` and `props` and the blocks it reaches. No
  * markdown is parsed on the way — a `#tag` is found in a block's text, a
  * task is a `todo`/`done` block, the preview of an untitled note is its first
  * words.
@@ -43,13 +43,13 @@ export function tagsInText(text: string): string[] {
 }
 
 /**
- * The page's props as JSON-safe entries — the shape the `props` column holds
+ * The note's props as JSON-safe entries — the shape the `props` column holds
  * and `setProps` writes (dates as ISO strings). A row still in the retired
  * raw-YAML shape (`{"frontmatter": "…"}`, written by app versions before
  * parsed entries) reads as no properties: the text is kept on the row, but
  * nothing parses YAML any more.
  */
-export function pagePropsEntries(props: string | null): Record<string, unknown> {
+export function notePropsEntries(props: string | null): Record<string, unknown> {
   const parsed = parseProps(props)
   if (!parsed) return {}
   if (Object.keys(parsed).length === 1 && typeof parsed.frontmatter === "string") return {}
@@ -57,24 +57,24 @@ export function pagePropsEntries(props: string | null): Record<string, unknown> 
 }
 
 /**
- * The op that sets page props: the current entries with `patch` applied (a
+ * The op that sets note props: the current entries with `patch` applied (a
  * `null` value removes the key) and `updated_at` stamped. Nothing when the
- * page is not in the graph.
+ * note is not in the graph.
  */
-export function pagePropsOps(
-  pageId: NoteId,
+export function notePropsOps(
+  noteId: NoteId,
   patch: Record<string, unknown>,
   snapshot: GraphSnapshot,
 ): Op[] {
-  const page = snapshot.nodes.get(pageId)
-  if (!page || page.type !== PAGE_TYPE) return []
-  const entries = pagePropsEntries(page.props)
+  const note = snapshot.nodes.get(noteId)
+  if (!note || note.type !== NOTE_TYPE) return []
+  const entries = notePropsEntries(note.props)
   for (const [key, value] of Object.entries(patch)) {
     if (value === null || value === undefined) delete entries[key]
     else entries[key] = value instanceof Date ? value.toISOString() : value
   }
   entries.updated_at = new Date().toISOString()
-  return [{ op: "setProps", id: pageId, props: propsJson(entries) }]
+  return [{ op: "setProps", id: noteId, props: propsJson(entries) }]
 }
 
 /** Blocks in document order with their depth (a block reached twice is
@@ -109,19 +109,19 @@ function dateOf(value: unknown): string | null {
 const PREVIEW_WORDS = 8
 
 /**
- * The `Note` for a page node, or null when `id` is not a page. Pure over the
- * snapshot; `notesAtom` memoizes it per page.
+ * The `Note` for a note node, or null when `id` is not one. Pure over the
+ * snapshot; `notesAtom` memoizes it per note.
  */
-export function noteFromPage(id: NoteId, snapshot: GraphSnapshot): Note | null {
-  const page = snapshot.nodes.get(id)
-  if (!page || page.type !== PAGE_TYPE) return null
-  const doc = pageDoc(id, snapshot) as BlockDoc
+export function noteFromNode(id: NoteId, snapshot: GraphSnapshot): Note | null {
+  const note = snapshot.nodes.get(id)
+  if (!note || note.type !== NOTE_TYPE) return null
+  const doc = noteDoc(id, snapshot) as BlockDoc
   const blocks = blocksInOrder(doc)
-  const props = pagePropsEntries(page.props)
+  const props = notePropsEntries(note.props)
 
-  // Title: the page node's text (the id when untitled), else the first
+  // Title: the note node's text (the id when untitled), else the first
   // heading block — the old markdown convention, still honoured for imports.
-  let title = emittedPageTitle(id, page.text) ?? ""
+  let title = emittedNoteTitle(id, note.text) ?? ""
   if (!title) {
     const heading = blocks.find(({ block }) => isHeading(block.type))
     if (heading) title = heading.block.text.trim()
@@ -203,12 +203,12 @@ export function noteFromPage(id: NoteId, snapshot: GraphSnapshot): Note | null {
 }
 
 /**
- * A cheap identity for everything a page's `Note` depends on: the page row
+ * A cheap identity for everything a note's `Note` depends on: the note row
  * and every row it reaches. Row objects are replaced when they change
  * (`applyOps`, a pull), so identities are the fingerprint — no content is
  * compared.
  */
-function pageFingerprint(id: NoteId, snapshot: GraphSnapshot): object[] {
+function noteFingerprint(id: NoteId, snapshot: GraphSnapshot): object[] {
   const rows: object[] = [snapshot.nodes.get(id) as object]
   const seen = new Set<string>([id])
   const stack = [id]
@@ -231,8 +231,8 @@ const sameRows = (a: object[], b: object[]) =>
 
 /**
  * A memoizing builder for the notes map: call it with each snapshot and only
- * pages whose reachable rows changed are re-derived; the rest keep their
- * `Note` object (so downstream memos and React keys stay stable). Pages that
+ * notes whose reachable rows changed are re-derived; the rest keep their
+ * `Note` object (so downstream memos and React keys stay stable). Notes that
  * disappear are evicted.
  */
 export function createNotesBuilder() {
@@ -240,14 +240,14 @@ export function createNotesBuilder() {
   return function buildNotes(snapshot: GraphSnapshot): Map<NoteId, Note> {
     const notes = new Map<NoteId, Note>()
     for (const node of snapshot.nodes.values()) {
-      if (node.type !== PAGE_TYPE) continue
-      const rows = pageFingerprint(node.id, snapshot)
+      if (node.type !== NOTE_TYPE) continue
+      const rows = noteFingerprint(node.id, snapshot)
       const cached = cache.get(node.id)
       if (cached && sameRows(cached.rows, rows)) {
         notes.set(node.id, cached.note)
         continue
       }
-      const note = noteFromPage(node.id, snapshot)
+      const note = noteFromNode(node.id, snapshot)
       if (!note) continue
       cache.set(node.id, { rows, note })
       notes.set(node.id, note)

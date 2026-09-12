@@ -1,7 +1,7 @@
 import { useStore } from "jotai"
 import React from "react"
-import { PAGE_TYPE } from "../data/graph"
-import { pagePropsEntries, pagePropsOps } from "../data/note-meta"
+import { NOTE_TYPE } from "../data/graph"
+import { notePropsEntries, notePropsOps } from "../data/note-meta"
 import type { Op } from "../data/ops"
 import { useApplyOps } from "../data/store"
 import { graphSnapshotAtom } from "../global-state"
@@ -13,7 +13,7 @@ function renameTagInText(text: string, oldName: string, newName: string | null):
 
 /**
  * Rename a tag everywhere it occurs: in every block's text (`setText`) and
- * in every page's `tags` prop (`setProps`). One batch; nothing else moves.
+ * in every note's `tags` prop (`setProps`). One batch; nothing else moves.
  */
 export function useRenameTag() {
   const store = useStore()
@@ -24,12 +24,12 @@ export function useRenameTag() {
       const snapshot = store.get(graphSnapshotAtom)
       const ops: Op[] = []
       for (const node of snapshot.nodes.values()) {
-        if (node.type === PAGE_TYPE) {
-          const tags = pagePropsEntries(node.props).tags
+        if (node.type === NOTE_TYPE) {
+          const tags = notePropsEntries(node.props).tags
           if (!Array.isArray(tags) || !tags.includes(oldName)) continue
           const renamed = tags.map((tag) => (tag === oldName ? newName : tag)).filter(Boolean)
           ops.push(
-            ...pagePropsOps(node.id, { tags: renamed.length > 0 ? renamed : null }, snapshot),
+            ...notePropsOps(node.id, { tags: renamed.length > 0 ? renamed : null }, snapshot),
           )
           continue
         }

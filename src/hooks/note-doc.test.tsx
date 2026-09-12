@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import { emptyBlock, insertAfter, updateText } from "../blocks/ops"
-import { buildGraphSnapshot, docToGraph, pageDoc } from "../data/graph"
+import { buildGraphSnapshot, docToGraph, noteDoc } from "../data/graph"
 import { applyOps, deleteBlockOps } from "../data/ops"
 import { githubUserAtom, isSignedOutAtom, sampleGraphAtom } from "../global-state"
 import { useBasketDoc, useNoteDoc } from "./note-doc"
@@ -26,7 +26,7 @@ const body = (markdown: string) =>
     .filter((line) => !line.trim().startsWith("id::"))
     .join("\n")
 
-async function signedOutStore(pages: Record<string, string>) {
+async function signedOutStore(notes: Record<string, string>) {
   const store = createStore()
   const unsubscribe = store.sub(githubUserAtom, () => {})
   await vi.waitFor(() => {
@@ -34,7 +34,7 @@ async function signedOutStore(pages: Record<string, string>) {
   })
   const nodes = []
   const links = []
-  for (const [id, markdown] of Object.entries(pages)) {
+  for (const [id, markdown] of Object.entries(notes)) {
     const g = docToGraph(id, serialize(parse(markdown)), 1)
     nodes.push(...g.nodes)
     links.push(...g.links)
@@ -47,7 +47,7 @@ async function signedOutStore(pages: Record<string, string>) {
 }
 
 describe("useNoteDoc", () => {
-  it("walks the page out of the graph, and a change becomes ops applied to it", async () => {
+  it("walks the note out of the graph, and a change becomes ops applied to it", async () => {
     const { store, wrapper, unsubscribe } = await signedOutStore({ n: NOTE })
     const { result } = renderHook(() => useNoteDoc({ noteId: "n", defaultDoc: parse("") }), {
       wrapper,
@@ -56,16 +56,16 @@ describe("useNoteDoc", () => {
     expect(body(serialize(result.current.doc))).toBe(body(NOTE))
 
     act(() => result.current.setDoc(updateText(result.current.doc, "blk_one0000000", "edited")))
-    const stored = pageDoc("n", store.get(sampleGraphAtom))!
+    const stored = noteDoc("n", store.get(sampleGraphAtom))!
     expect(body(serialize(stored))).toBe(body(NOTE.replace("- one", "- edited")))
     // The hook re-walks: what it holds IS the graph.
     expect(serialize(result.current.doc)).toBe(serialize(stored))
-    // Every change stamps the page's updated_at.
+    // Every change stamps the note's updated_at.
     expect(typeof stored.props?.updated_at).toBe("string")
     unsubscribe()
   })
 
-  it("a new page starts from the default doc and is created by its first real edit", async () => {
+  it("a new note starts from the default doc and is created by its first real edit", async () => {
     const { store, wrapper, unsubscribe } = await signedOutStore({})
     const { result } = renderHook(
       () => useNoteDoc({ noteId: "fresh", defaultDoc: parse("- from ?content=\n") }),
@@ -74,7 +74,7 @@ describe("useNoteDoc", () => {
     expect(result.current.exists).toBe(false)
     expect(body(serialize(result.current.doc))).toBe("- from ?content=\n")
 
-    // An empty doc is not worth a page.
+    // An empty doc is not worth a note.
     act(() => result.current.setDoc(parse("")))
     expect(store.get(sampleGraphAtom).nodes.has("fresh")).toBe(false)
 
@@ -93,7 +93,7 @@ describe("useNoteDoc", () => {
     unsubscribe()
   })
 
-  it("a page deleted while open stays deleted — a trailing change never resurrects it", async () => {
+  it("a note deleted while open stays deleted — a trailing change never resurrects it", async () => {
     const { store, wrapper, unsubscribe } = await signedOutStore({ n: NOTE })
     const { result } = renderHook(() => useNoteDoc({ noteId: "n", defaultDoc: parse("") }), {
       wrapper,
@@ -114,7 +114,7 @@ describe("useNoteDoc", () => {
       wrapper,
     })
     act(() => result.current.setDoc(result.current.doc))
-    // Only the stamp differs — and only the page row carries it.
+    // Only the stamp differs — and only the note row carries it.
     const after = store.get(sampleGraphAtom)
     expect(after.nodes.get("blk_one0000000")).toBe(before.nodes.get("blk_one0000000"))
     expect(after.childLinks.get("n")).toBe(before.childLinks.get("n"))
@@ -145,7 +145,7 @@ describe("useBasketDoc", () => {
     // Editing the basket row is a setText on the block; the outline is untouched.
     act(() => result.current.setDoc(updateText(result.current.doc!, "blk_under00000", "kept")))
     expect(store.get(sampleGraphAtom).nodes.get("blk_under00000")?.text).toBe("kept")
-    expect(body(serialize(pageDoc("n", store.get(sampleGraphAtom))!))).toBe("- two\n")
+    expect(body(serialize(noteDoc("n", store.get(sampleGraphAtom))!))).toBe("- two\n")
     // Deleting it from the basket deletes it for good.
     act(() => result.current.setDoc(parse("")))
     expect(result.current.count).toBe(0)

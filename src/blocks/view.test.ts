@@ -189,17 +189,17 @@ describe("buildRows", () => {
     expect(summary(rows)).toEqual(["a/b", "a/b/c"])
     expect(rows[0]).toMatchObject({ zoomTitle: true, depth: 0, collapsed: false, guideKeys: [] })
     expect(rows[1]).toMatchObject({ zoomTitle: false, depth: 0, parentKey: "a/b", guideKeys: [] })
-    // Deeper rows count their guides from the zoom root's children, not the page.
+    // Deeper rows count their guides from the zoom root's children, not the note.
     const deep = buildRows(outline, { zoomRootId: "a", folds: NONE })
     expect(deep.find((row) => row.key === "a/b/c")).toMatchObject({ depth: 1, guideKeys: ["a/b"] })
   })
 
-  it("zoomed: the title is always open, and folds made here are the page's folds", () => {
+  it("zoomed: the title is always open, and folds made here are the note's folds", () => {
     const rows = buildRows(outline, { zoomRootId: "a", folds: new Set(["a", "a/b"]) })
     expect(summary(rows)).toEqual(["a", "a/b ▸", "a/d", "a/e"])
   })
 
-  it("zoomed into an unknown block: the whole page", () => {
+  it("zoomed into an unknown block: the whole note", () => {
     expect(buildRows(outline, { zoomRootId: "nope", folds: NONE })).toHaveLength(6)
   })
 })

@@ -13,7 +13,7 @@ import { Hash } from "./hash"
  * - Enter (or a click) edits it; Escape / Enter / blur commit or revert.
  * - Arrow-down returns focus to the editor (`onArrowDown`).
  *
- * The field edits the note's **title** — data on the page node, not its id
+ * The field edits the note's **title** — data on the note node, not its id
  * (docs/graph-storage.md) — so committing one changes a single property
  * and can neither break a link nor collide with another note.
  *

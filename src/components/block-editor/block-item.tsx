@@ -116,7 +116,7 @@ export interface BlockDebugOptions {
   /** Show each block's metadata beneath it: type, depth, downstream, upstream. */
   showMetadata?: boolean
   /**
-   * The notes upstream of the block — the pages that reach it through child
+   * The notes upstream of the block — the notes that reach it through child
    * links (a linked block has several; a duplicated one has one, under a
    * fresh id). Absent when no corpus is available; the readout then omits
    * the upstream line.
@@ -554,7 +554,7 @@ export function BlockItem({
   const slotClass = hasToggle && !toggleBeside ? "block-toggle-slot" : undefined
 
   // List markers double as zoom targets (Logseq-style: click the bullet to
-  // make this block the page) — on leaves. A parent's key is its collapse
+  // make this block the note) — on leaves. A parent's key is its collapse
   // toggle, so zoom stays on F / Cmd+. there. The negative-margin padding
   // enlarges the hit area without shifting the marker's layout size.
   const zoomable = !readOnly && !zoomTitle && !hasToggle
@@ -724,7 +724,7 @@ export function BlockItem({
         // browser shows only while the textarea is empty, so it never
         // appears in view mode or over content. The turn-into keys
         // live in the `?` reference, not here.
-        // The zoom title is a page title, not a block — no ghost.
+        // The zoom title is a note title, not a block — no ghost.
         placeholder={zoomTitle ? undefined : (kind.placeholder ?? "Ruminate…")}
         onChange={handleTextareaChange}
         onKeyDown={handleEditKeyDown}

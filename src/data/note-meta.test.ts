@@ -4,22 +4,22 @@ import { serialize } from "../blocks/serialize"
 import { buildGraphSnapshot, docToGraph, type GraphSnapshot } from "./graph"
 import {
   createNotesBuilder,
-  noteFromPage,
-  pagePropsEntries,
-  pagePropsOps,
+  noteFromNode,
+  notePropsEntries,
+  notePropsOps,
   tagsInText,
 } from "./note-meta"
 import { applyOps } from "./ops"
 
-/** A page fixture: its markdown body, with its metadata as props (never as
+/** A note fixture: its markdown body, with its metadata as props (never as
  * frontmatter — metadata does not travel in markdown). */
-type Page = string | { markdown: string; props: Record<string, unknown> }
+type Note = string | { markdown: string; props: Record<string, unknown> }
 
-function graphOf(pages: Record<string, Page>): GraphSnapshot {
+function graphOf(notes: Record<string, Note>): GraphSnapshot {
   const nodes = []
   const links = []
-  for (const [id, page] of Object.entries(pages)) {
-    const { markdown, props } = typeof page === "string" ? { markdown: page, props: null } : page
+  for (const [id, note] of Object.entries(notes)) {
+    const { markdown, props } = typeof note === "string" ? { markdown: note, props: null } : note
     const g = docToGraph(id, serialize(parse(markdown)), 1, props)
     nodes.push(...g.nodes)
     links.push(...g.links)
@@ -28,7 +28,7 @@ function graphOf(pages: Record<string, Page>): GraphSnapshot {
 }
 
 const note = (id: string, markdown: string, props?: Record<string, unknown>) =>
-  noteFromPage(id, graphOf({ [id]: props ? { markdown, props } : markdown }))!
+  noteFromNode(id, graphOf({ [id]: props ? { markdown, props } : markdown }))!
 
 describe("tagsInText", () => {
   it("find inline tags as the syntax defines them, parents included", () => {
@@ -37,7 +37,7 @@ describe("tagsInText", () => {
   })
 })
 
-describe("noteFromPage", () => {
+describe("noteFromNode", () => {
   it("reads title, props, tags, dates, tasks, headings and text off the graph", () => {
     const n = note(
       "blk_p",
@@ -98,32 +98,32 @@ describe("noteFromPage", () => {
 
   it("is null for a block id", () => {
     const snapshot = graphOf({ p: "- b\n  id:: blk_b000000000\n" })
-    expect(noteFromPage("blk_b000000000", snapshot)).toBeNull()
+    expect(noteFromNode("blk_b000000000", snapshot)).toBeNull()
   })
 })
 
-describe("page props", () => {
-  it("pagePropsEntries reads the entries shape; the retired raw-YAML shape reads as none", () => {
-    expect(pagePropsEntries('{"pinned":true}')).toEqual({ pinned: true })
-    expect(pagePropsEntries('{"frontmatter":"pinned: true\\nx: 1"}')).toEqual({})
-    expect(pagePropsEntries(null)).toEqual({})
+describe("note props", () => {
+  it("notePropsEntries reads the entries shape; the retired raw-YAML shape reads as none", () => {
+    expect(notePropsEntries('{"pinned":true}')).toEqual({ pinned: true })
+    expect(notePropsEntries('{"frontmatter":"pinned: true\\nx: 1"}')).toEqual({})
+    expect(notePropsEntries(null)).toEqual({})
   })
 
-  it("pagePropsOps merges, removes null keys, and stamps updated_at", () => {
+  it("notePropsOps merges, removes null keys, and stamps updated_at", () => {
     const snapshot = graphOf({ p: { markdown: "- x\n", props: { pinned: true, width: "full" } } })
-    const ops = pagePropsOps("p", { pinned: null, font: "serif" }, snapshot)
+    const ops = notePropsOps("p", { pinned: null, font: "serif" }, snapshot)
     expect(ops).toHaveLength(1)
     const next = applyOps(snapshot, ops, 5)
-    const entries = pagePropsEntries(next.nodes.get("p")!.props)
+    const entries = notePropsEntries(next.nodes.get("p")!.props)
     expect(entries.pinned).toBeUndefined()
     expect(entries).toMatchObject({ width: "full", font: "serif" })
     expect(typeof entries.updated_at).toBe("string")
-    expect(pagePropsOps("nope", {}, snapshot)).toEqual([])
+    expect(notePropsOps("nope", {}, snapshot)).toEqual([])
   })
 })
 
 describe("createNotesBuilder", () => {
-  it("keeps a Note object while its page's rows are unchanged, re-derives when they change", () => {
+  it("keeps a Note object while its note's rows are unchanged, re-derives when they change", () => {
     const build = createNotesBuilder()
     const snapshot = graphOf({
       a: "- a\n  id:: blk_a000000000\n",
@@ -135,7 +135,7 @@ describe("createNotesBuilder", () => {
     expect(second.get("b")).toBe(first.get("b"))
     expect(second.get("a")).not.toBe(first.get("a"))
     expect(second.get("a")?.text).toBe("a!")
-    // A deleted page is evicted.
+    // A deleted note is evicted.
     const gone = build(applyOps(edited, [{ op: "delete", id: "a" }], 3))
     expect(gone.has("a")).toBe(false)
     expect(gone.get("b")).toBe(first.get("b"))

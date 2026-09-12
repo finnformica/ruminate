@@ -1,11 +1,11 @@
 import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import { generateNKeysBetween } from "fractional-indexing"
 import type { BlockType } from "../blocks/types"
-import { CHILD_KIND, PAGE_TYPE, buildGraphSnapshot, propsJson, type GraphSnapshot } from "./graph"
+import { CHILD_KIND, NOTE_TYPE, buildGraphSnapshot, propsJson, type GraphSnapshot } from "./graph"
 
 /**
  * The signed-out corpus: a handful of typed blocks, hard-coded — the graph
- * the app shows before anyone signs in. No markdown, no parse: pages and
+ * the app shows before anyone signs in. No markdown, no parse: notes and
  * blocks are written here as the rows they are, and `sampleGraph()` builds
  * the snapshot the signed-out `graphSnapshotAtom` serves (edits apply to it
  * in memory and are gone on reload).
@@ -18,7 +18,7 @@ interface SampleBlock {
   children?: SampleBlock[]
 }
 
-interface SamplePage {
+interface SampleNote {
   id: string
   title: string
   props?: Record<string, unknown>
@@ -32,7 +32,7 @@ const b = (
   children: SampleBlock[] = [],
 ): SampleBlock => ({ id, type, text, children })
 
-const PAGES: SamplePage[] = [
+const NOTES: SampleNote[] = [
   {
     id: "readme",
     title: "👋 Welcome to Ruminate",
@@ -77,7 +77,7 @@ const PAGES: SamplePage[] = [
 function sampleRows(now = 0): { nodes: NodeRow[]; links: LinkRow[] } {
   const nodes: NodeRow[] = []
   const links: LinkRow[] = []
-  const walk = (pageId: string, parentId: string, blocks: SampleBlock[]) => {
+  const walk = (noteId: string, parentId: string, blocks: SampleBlock[]) => {
     const keys = generateNKeysBetween(null, null, blocks.length)
     blocks.forEach((block, i) => {
       nodes.push({
@@ -86,7 +86,7 @@ function sampleRows(now = 0): { nodes: NodeRow[]; links: LinkRow[] } {
         text: block.text,
         props: null,
         updated_at: now,
-        notes_id: pageId,
+        notes_id: noteId,
       })
       links.push({
         source_id: parentId,
@@ -95,18 +95,18 @@ function sampleRows(now = 0): { nodes: NodeRow[]; links: LinkRow[] } {
         sort_key: keys[i],
         updated_at: now,
       })
-      walk(pageId, block.id, block.children ?? [])
+      walk(noteId, block.id, block.children ?? [])
     })
   }
-  for (const page of PAGES) {
+  for (const note of NOTES) {
     nodes.push({
-      id: page.id,
-      type: PAGE_TYPE,
-      text: page.title,
-      props: propsJson(page.props ?? null),
+      id: note.id,
+      type: NOTE_TYPE,
+      text: note.title,
+      props: propsJson(note.props ?? null),
       updated_at: now,
     })
-    walk(page.id, page.id, page.blocks)
+    walk(note.id, note.id, note.blocks)
   }
   return { nodes, links }
 }

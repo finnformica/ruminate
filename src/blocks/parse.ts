@@ -6,7 +6,7 @@ import type { Block, BlockDoc, BlockProps, BlockType } from "./types"
  * **Import.** Parse markdown into typed blocks.
  *
  * - A leading `---` … `---` block (frontmatter from another tool) is dropped:
- *   metadata is the page node's props, never markdown, so a doc parsed from
+ *   metadata is the note node's props, never markdown, so a doc parsed from
  *   text has `props: null`.
  * - Every non-blank, non-`id::` line is a block: its leading marker decides
  *   the type and is dropped from the text (`classifyLine`, which also folds

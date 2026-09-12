@@ -5,12 +5,12 @@ import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import { asBlockType, type Block, type BlockDoc, type BlockProps } from "../blocks/types"
 import type { NoteId } from "../schema"
-import { emittedPageTitle } from "./page-identity"
+import { emittedNoteTitle } from "./note-identity"
 
 /**
  * The graph ↔ doc seam (docs/graph-schema-v2.md).
  *
- * - `docFromGraph` / `pageDoc` — the **walk**: start at some root nodes,
+ * - `docFromGraph` / `noteDoc` — the **walk**: start at some root nodes,
  *   follow `child` links in sort-key order, and hand back a `BlockDoc` — the
  *   typed, marker-free slice of the graph the editor renders and edits. A
  *   node reached from two parents is in the doc once, named by both parents'
@@ -18,8 +18,8 @@ import { emittedPageTitle } from "./page-identity"
  *   may name a node above it. Every walk over a doc guards by path
  *   (`walkDoc`, src/blocks/view.ts), showing a loop where it closes and no
  *   further.
- * - `rollup` — the markdown **projection** of one page: `serialize` over that
- *   page's doc. There is one walk and one emitter in the codebase.
+ * - `rollup` — the markdown **projection** of one note: `serialize` over that
+ *   note's doc. There is one walk and one emitter in the codebase.
  * - `docToParts` — the **write** direction: a doc's typed blocks become node
  *   rows and per-parent child orders, with no markdown in between. `docToOps`
  *   diffs those against the snapshot into ops, which the store applies
@@ -33,15 +33,15 @@ import { emittedPageTitle } from "./page-identity"
  * the round trip is a *convergence*, not always an identity —
  * docs/graph-storage.md): near-miss marker spellings are typed
  * (`src/blocks/normalize-block-text.ts`), and a leading frontmatter block is
- * dropped — metadata is the page node's props, never markdown.
+ * dropped — metadata is the note node's props, never markdown.
  */
 
 export const CHILD_KIND = "child"
-export const PAGE_TYPE = "page"
+export const NOTE_TYPE = "page"
 
 interface GraphParts {
   nodes: NodeRow[]
-  /** Ordered child ids per parent; the page id keys the root list. */
+  /** Ordered child ids per parent; the note id keys the root list. */
   childrenOf: Map<string, string[]>
 }
 
@@ -55,9 +55,9 @@ export const propsJson = (props: BlockProps | null | undefined): string | null =
  * markdown: the doc's blocks are already typed and marker-free.
  *
  * `reservedIds` are ids a block row must never take (the store passes every
- * other page's id): block ids and page ids share the `nodes` table, so a block
- * declaring `id:: <noteId>` — or the id of another existing page — would
- * clobber that page's node row and the page would stop rolling up entirely.
+ * other note's id): block ids and note ids share the `nodes` table, so a block
+ * declaring `id:: <noteId>` — or the id of another existing note — would
+ * clobber that note's node row and the note would stop rolling up entirely.
  * Such ids are re-minted here: content survives (never-lose-work), and the
  * fresh id persists on the next save.
  */
@@ -78,19 +78,19 @@ export function docToParts(
   }
   const safeId = (id: string) => rename.get(id) ?? id
 
-  // The title is data: the page node's `text`. It rides the doc's props as
-  // `title` (`page-identity.ts`) and is lifted out here, so it is never stored
+  // The title is data: the note node's `text`. It rides the doc's props as
+  // `title` (`note-identity.ts`) and is lifted out here, so it is never stored
   // twice and the walk re-emits it from the one place that owns it.
   const { title, ...rest } = doc.props ?? {}
   const titled = typeof title === "string"
   const nodes: NodeRow[] = [
     {
       id: noteId,
-      type: PAGE_TYPE,
-      // No title means an untitled page (or a date page, whose id IS its
+      type: NOTE_TYPE,
+      // No title means an untitled note (or a date note, whose id IS its
       // name) — `text` stays the id, exactly as it was before minting.
       text: titled ? title : noteId,
-      // A page whose only prop was its title holds none; an empty props
+      // A note whose only prop was its title holds none; an empty props
       // object is kept distinct from null, as the rows keep it.
       props:
         doc.props === null || (titled && Object.keys(rest).length === 0)
@@ -129,7 +129,7 @@ export function docToParts(
 /**
  * Ingest one note: markdown → typed blocks (`parse`) → node + link rows, with
  * fresh evenly-spaced sort keys per parent (which doubles as the rebalancing
- * mechanism — see the schema doc). `props` are the page's metadata, which
+ * mechanism — see the schema doc). `props` are the note's metadata, which
  * markdown never carries. The app's own saves use `docToOps` instead, so
  * unchanged rows stay untouched.
  */
@@ -297,9 +297,9 @@ export function parseProps(props: string | null): BlockProps | null {
  *   DAG that every walk over it (export, render, navigation) can finish.
  * - Unknown node types (a newer client's) become `text`, marker-free.
  *
- * The page node itself is not part of a page's doc (see `pageDoc`); pass a
- * page id as a root and it walks like any node — a page linked under a block
- * renders as a `page` block.
+ * The note node itself is not part of a note's doc (see `noteDoc`); pass a
+ * note id as a root and it walks like any node — a note linked under a block
+ * renders as a `page` block (the stored type value is unchanged).
  */
 export function docFromGraph(rootIds: string[], graph: GraphSnapshot): BlockDoc {
   const blocks: Record<string, Block> = {}
@@ -335,25 +335,25 @@ export function docFromGraph(rootIds: string[], graph: GraphSnapshot): BlockDoc 
 }
 
 /**
- * A page's doc — what the note page edits: the page's children as the roots,
- * and the page's props (with `title` put back from the page node's `text` —
- * `page-identity.ts`) as the doc's props, so `docToParts` of this doc is the
- * page's rows and `serialize` of it is the page's rollup. Null when the page
+ * A note's doc — what the note page edits: the note's children as the roots,
+ * and the note's props (with `title` put back from the note node's `text` —
+ * `note-identity.ts`) as the doc's props, so `docToParts` of this doc is the
+ * note's rows and `serialize` of it is the note's rollup. Null when the note
  * node does not exist.
  */
-export function pageDoc(pageId: string, graph: GraphSnapshot): BlockDoc | null {
-  const page = graph.nodes.get(pageId)
-  if (!page || page.type !== PAGE_TYPE) return null
-  const entries = pageEntries(page.props)
-  const title = emittedPageTitle(page.id, page.text)
+export function noteDoc(noteId: string, graph: GraphSnapshot): BlockDoc | null {
+  const note = graph.nodes.get(noteId)
+  if (!note || note.type !== NOTE_TYPE) return null
+  const entries = noteEntries(note.props)
+  const title = emittedNoteTitle(note.id, note.text)
   const props = title !== null ? { title, ...(entries ?? {}) } : entries
-  const doc = docFromGraph(childIdsOf(graph, pageId), graph)
+  const doc = docFromGraph(childIdsOf(graph, noteId), graph)
   return { ...doc, props }
 }
 
-/** A page row's props as entries — an object even when empty, null for none
+/** A note row's props as entries — an object even when empty, null for none
  * or malformed. */
-function pageEntries(props: string | null): BlockProps | null {
+function noteEntries(props: string | null): BlockProps | null {
   if (props === null) return null
   try {
     const parsed: unknown = JSON.parse(props)
@@ -365,13 +365,13 @@ function pageEntries(props: string | null): BlockProps | null {
 }
 
 /**
- * Render one page node to markdown — the canonical serialization, exactly the
+ * Render one note node to markdown — the canonical serialization, exactly the
  * bytes the editor's `serialize` would produce for the same outline, because
- * it IS that: the page's doc, serialized. A node reached from two parents
+ * it IS that: the note's doc, serialized. A node reached from two parents
  * renders fully in both places (that is the feature). Returns null when the
- * page node does not exist.
+ * note node does not exist.
  */
-export function rollup(pageId: string, graph: GraphSnapshot): string | null {
-  const doc = pageDoc(pageId, graph)
+export function rollup(noteId: string, graph: GraphSnapshot): string | null {
+  const doc = noteDoc(noteId, graph)
   return doc ? serialize(doc) : null
 }

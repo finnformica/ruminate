@@ -59,7 +59,7 @@ function ensureZoomChild(doc: BlockDoc, zoomId: string): BlockDoc {
 }
 
 /**
- * Adapts the block editor to the note page's doc model. The note's doc (walked
+ * Adapts the block editor to the note's doc model. The note's doc (walked
  * from the graph) is seeded on mount; each edit calls `onChange` with the next
  * doc, so the surrounding page keeps its save logic. Remount (via a `key`) to
  * load a different note.

@@ -3,10 +3,10 @@ import { parse } from "../blocks/parse"
 import { buildGraphSnapshot, docToGraph } from "../data/graph"
 import { resolveBlockSubtrees } from "./resolve-blocks"
 
-function graphOf(pages: Record<string, string>) {
+function graphOf(notes: Record<string, string>) {
   const nodes = []
   const links = []
-  for (const [id, markdown] of Object.entries(pages)) {
+  for (const [id, markdown] of Object.entries(notes)) {
     const g = docToGraph(id, markdown, 1)
     nodes.push(...g.nodes)
     links.push(...g.links)

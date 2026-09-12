@@ -8,6 +8,7 @@ import { atom } from "jotai"
 
 /** The D1 replica's row counts + cursor, from `GET /api/replica/status`. */
 interface ReplicaRemoteStatus {
+  /** Note count. Wire name kept as `pages` — see `ReplicaStatusBody`. */
   pages: number
   nodes: number
   links: number

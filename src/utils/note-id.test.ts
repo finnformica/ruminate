@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { isMintedNoteId } from "../data/page-identity"
+import { isMintedNoteId } from "../data/note-identity"
 import { generateNoteId } from "./note-id"
 
 describe("generateNoteId", () => {
   it("mints an ordinary opaque block id", () => {
-    // A page is a node like any other (docs/graph-storage.md): one
+    // A note is a node like any other (docs/graph-storage.md): one
     // minting path, one id space, no `pg_` sibling scheme.
     const id = generateNoteId()
     expect(id).toMatch(/^blk_[0-9a-z]{10}$/)

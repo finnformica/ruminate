@@ -3,14 +3,14 @@ import { emptyBlock, insertAfter, updateText } from "../blocks/ops"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
-import { buildGraphSnapshot, docToGraph, pageDoc, type GraphSnapshot } from "./graph"
+import { buildGraphSnapshot, docToGraph, noteDoc, type GraphSnapshot } from "./graph"
 import {
   applyOps,
   deleteBlockOps,
-  deletePageOps,
+  deleteNoteOps,
   deleteSubtreeOps,
   docToOps,
-  pagesTouchedBy,
+  notesTouchedBy,
   parentCount,
   type Op,
 } from "./ops"
@@ -18,11 +18,11 @@ import { unassignedIds } from "./basket"
 
 const NOW = 1000
 
-/** A graph holding these pages, from canonical markdown. */
-function graphOf(pages: Record<string, string>): GraphSnapshot {
+/** A graph holding these notes, from canonical markdown. */
+function graphOf(notes: Record<string, string>): GraphSnapshot {
   const nodes = []
   const links = []
-  for (const [id, markdown] of Object.entries(pages)) {
+  for (const [id, markdown] of Object.entries(notes)) {
     const g = docToGraph(id, serialize(parse(markdown)), 1)
     nodes.push(...g.nodes)
     links.push(...g.links)
@@ -30,9 +30,9 @@ function graphOf(pages: Record<string, string>): GraphSnapshot {
   return buildGraphSnapshot(nodes, links)
 }
 
-/** The page's doc as bytes — what the editor holds. */
+/** The note's doc as bytes — what the editor holds. */
 const walk = (snapshot: GraphSnapshot, id: string) => {
-  const doc = pageDoc(id, snapshot)
+  const doc = noteDoc(id, snapshot)
   return doc ? serialize(doc) : null
 }
 
@@ -42,7 +42,7 @@ const A =
   "- one\n  id:: blk_one0000000\n- two\n  id:: blk_two0000000\n  - deep\n    id:: blk_deep000000\n"
 
 describe("docToOps", () => {
-  it("a page the graph lacks: create the page and every block, link them in order", () => {
+  it("a note the graph lacks: create the note and every block, link them in order", () => {
     const empty = buildGraphSnapshot([], [])
     const ops = docToOps("a", parse(A), empty)
     expect(kinds(ops)).toEqual(["create", "create", "create", "create", "link", "link", "link"])
@@ -53,12 +53,12 @@ describe("docToOps", () => {
 
   it("an unchanged doc is no ops at all", () => {
     const snapshot = graphOf({ a: A })
-    expect(docToOps("a", pageDoc("a", snapshot)!, snapshot)).toEqual([])
+    expect(docToOps("a", noteDoc("a", snapshot)!, snapshot)).toEqual([])
   })
 
   it("typing is one setText; nothing else moves", () => {
     const snapshot = graphOf({ a: A })
-    const doc = updateText(pageDoc("a", snapshot)!, "blk_one0000000", "one edited")
+    const doc = updateText(noteDoc("a", snapshot)!, "blk_one0000000", "one edited")
     const ops = docToOps("a", doc, snapshot)
     expect(ops).toEqual([{ op: "setText", id: "blk_one0000000", text: "one edited" }])
     expect(walk(applyOps(snapshot, ops, NOW), "a")).toBe(serialize(doc))
@@ -67,7 +67,7 @@ describe("docToOps", () => {
   it("creating a block is one create and one link, between its neighbours", () => {
     const snapshot = graphOf({ a: A })
     const fresh = emptyBlock("ul", "between")
-    const doc = insertAfter(pageDoc("a", snapshot)!, "blk_one0000000", fresh)
+    const doc = insertAfter(noteDoc("a", snapshot)!, "blk_one0000000", fresh)
     const ops = docToOps("a", doc, snapshot)
     expect(kinds(ops)).toEqual(["create", "link"])
     expect(ops[1]).toMatchObject({ op: "link", source: "a", destination: fresh.id })
@@ -94,7 +94,7 @@ describe("docToOps", () => {
     expect([...unassignedIds(next)].sort()).toEqual(["blk_deep000000", "blk_two0000000"])
   })
 
-  /** `A` plus one more root block under the page, as given. */
+  /** `A` plus one more root block under the note, as given. */
   const withRoot = (
     id: string,
     text: string,
@@ -154,7 +154,7 @@ describe("docToOps", () => {
     expect(kinds(docToOps("a", parse(A), placeholder))).toEqual(["unlink", "delete"])
   })
 
-  it("a created block carries the page as its notes_id; the page itself has none", () => {
+  it("a created block carries the note as its notes_id; the note itself has none", () => {
     const snapshot = graphOf({})
     const ops = docToOps("a", parse("- one\n  id:: blk_one0000000\n"), snapshot)
     expect(ops[0]).toMatchObject({ op: "create", id: "a", type: "page" })
@@ -165,7 +165,7 @@ describe("docToOps", () => {
     expect(next.nodes.get("a")?.notes_id).toBeUndefined()
   })
 
-  it("a block another page holds is unlinked here but never deleted", () => {
+  it("a block another note holds is unlinked here but never deleted", () => {
     const snapshot0 = graphOf({ a: A, b: "- b's own\n  id:: blk_bown000000\n" })
     // Link `two` (and so `deep`) under b as well.
     const linked = applyOps(
@@ -204,16 +204,16 @@ describe("docToOps", () => {
 
   it("a reorder touches only the links whose keys had to move", () => {
     const snapshot = graphOf({ a: A })
-    const doc = pageDoc("a", snapshot)!
+    const doc = noteDoc("a", snapshot)!
     const reordered: BlockDoc = { ...doc, rootBlockIds: ["blk_two0000000", "blk_one0000000"] }
     const ops = docToOps("a", reordered, snapshot)
     expect(kinds(ops)).toEqual(["link"])
     expect(walk(applyOps(snapshot, ops, NOW), "a")).toBe(serialize(reordered))
   })
 
-  it("retitling and re-propping the page are sets on the page node", () => {
+  it("retitling and re-propping the note are sets on the note node", () => {
     const snapshot = graphOf({ a: A })
-    const doc: BlockDoc = { ...pageDoc("a", snapshot)!, props: { title: "Alpha", pinned: true } }
+    const doc: BlockDoc = { ...noteDoc("a", snapshot)!, props: { title: "Alpha", pinned: true } }
     const ops = docToOps("a", doc, snapshot)
     expect(ops).toEqual([
       { op: "setText", id: "a", text: "Alpha" },
@@ -222,7 +222,7 @@ describe("docToOps", () => {
     expect(walk(applyOps(snapshot, ops, NOW), "a")).toBe(serialize(doc))
   })
 
-  it("re-mints a block id that collides with another page's id", () => {
+  it("re-mints a block id that collides with another note's id", () => {
     const snapshot = graphOf({ a: A, b: "- b\n  id:: blk_b000000000\n" })
     const doc = parse("- stray\n  id:: b\n")
     const ops = docToOps("a", doc, snapshot)
@@ -237,7 +237,7 @@ describe("docToOps", () => {
   it("keeps a desired edge that closes a loop, and drops only a block under itself", () => {
     const snapshot = graphOf({ a: A })
     // `deep` claiming `two` (its own ancestor) as a child: a loop, kept.
-    const doc = pageDoc("a", snapshot)!
+    const doc = noteDoc("a", snapshot)!
     const cyclic: BlockDoc = {
       ...doc,
       blocks: {
@@ -250,7 +250,7 @@ describe("docToOps", () => {
       { op: "link", source: "blk_deep000000", destination: "blk_two0000000", sortKey: "a0" },
     ])
     const next = applyOps(snapshot, ops, NOW)
-    expect(pageDoc("a", next)!.blocks.blk_deep000000.children).toEqual(["blk_two0000000"])
+    expect(noteDoc("a", next)!.blocks.blk_deep000000.children).toEqual(["blk_two0000000"])
     // `deep` claiming itself: refused, nothing to save.
     const selfish: BlockDoc = {
       ...doc,
@@ -274,7 +274,7 @@ describe("docToOps", () => {
       const doc = parse(markdown)
       const next = applyOps(empty, docToOps("p", doc, empty), NOW)
       expect(walk(next, "p")).toBe(serialize(doc))
-      expect(docToOps("p", pageDoc("p", next)!, next)).toEqual([])
+      expect(docToOps("p", noteDoc("p", next)!, next)).toEqual([])
     }
   })
 })
@@ -340,21 +340,21 @@ describe("applyOps", () => {
   })
 })
 
-describe("pagesTouchedBy", () => {
-  it("names every page that reaches a node the batch names", () => {
+describe("notesTouchedBy", () => {
+  it("names every note that reaches a node the batch names", () => {
     const snapshot = applyOps(
       graphOf({ a: A, b: "- b\n  id:: blk_b000000000\n", c: "- c\n  id:: blk_c000000000\n" }),
       [{ op: "link", source: "blk_b000000000", destination: "blk_two0000000", sortKey: "a0" }],
       NOW,
     )
     expect(
-      [...pagesTouchedBy(snapshot, [{ op: "setText", id: "blk_deep000000", text: "x" }])].sort(),
+      [...notesTouchedBy(snapshot, [{ op: "setText", id: "blk_deep000000", text: "x" }])].sort(),
     ).toEqual(["a", "b"])
     expect([
-      ...pagesTouchedBy(snapshot, [{ op: "setText", id: "blk_c000000000", text: "x" }]),
+      ...notesTouchedBy(snapshot, [{ op: "setText", id: "blk_c000000000", text: "x" }]),
     ]).toEqual(["c"])
     expect([
-      ...pagesTouchedBy(snapshot, [{ op: "create", id: "new", type: "ul", text: "", props: null }]),
+      ...notesTouchedBy(snapshot, [{ op: "create", id: "new", type: "ul", text: "", props: null }]),
     ]).toEqual([])
   })
 })
@@ -393,7 +393,7 @@ describe("deleteBlockOps / parentCount", () => {
     expect(next.nodes.has("blk_onlya00000")).toBe(true)
     expect(next.childLinks.get("a")?.map((l) => l.destination_id)).toEqual(["blk_onlya00000"])
     expect(next.childLinks.get("b")?.map((l) => l.destination_id)).toEqual(["blk_b000000000"])
-    // Pages are not blocks; unknown ids are nothing.
+    // Notes are not blocks; unknown ids are nothing.
     expect(deleteBlockOps("a", linked)).toEqual([])
     expect(deleteBlockOps("nope", linked)).toEqual([])
   })
@@ -437,15 +437,15 @@ describe("deleteSubtreeOps", () => {
     expect(walk(next, "a")).toContain("  - leaf")
   })
 
-  it("a page is never deleted this way; an unknown id is nothing", () => {
+  it("a note is never deleted this way; an unknown id is nothing", () => {
     const snapshot = graphOf({ a: TREE })
     expect(deleteSubtreeOps("a", snapshot)).toEqual([])
     expect(deleteSubtreeOps("blk_nope000000", snapshot)).toEqual([])
   })
 })
 
-describe("deletePageOps", () => {
-  it("deletes the page, its exclusive content and its basket; a shared block survives", () => {
+describe("deleteNoteOps", () => {
+  it("deletes the note, its exclusive content and its basket; a shared block survives", () => {
     const snapshot0 = graphOf({
       a: "- mine\n  id:: blk_mine000000\n  - deep\n    id:: blk_deep000000\n- shared\n  id:: blk_shared0000\n",
       b: "- b\n  id:: blk_b000000000\n",
@@ -466,11 +466,11 @@ describe("deletePageOps", () => {
       ],
       NOW,
     )
-    const ids = deletePageOps("a", snapshot)
+    const ids = deleteNoteOps("a", snapshot)
       .map((op) => (op as { id: string }).id)
       .sort()
     expect(ids).toEqual(["a", "blk_deep000000", "blk_mine000000", "blk_stray00000"])
-    const next = applyOps(snapshot, deletePageOps("a", snapshot), NOW)
+    const next = applyOps(snapshot, deleteNoteOps("a", snapshot), NOW)
     expect(next.nodes.has("blk_shared0000")).toBe(true)
     expect(walk(next, "b")).toContain("- shared")
   })

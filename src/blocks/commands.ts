@@ -145,7 +145,7 @@ function continuationType(type: BlockType, input: CommandInput): BlockType {
 
 /** The type for a new block of the *same* type as `type` — used by Shift-Enter
  * so a heading splits into a heading, a quote into a quote, and so on. A
- * checked todo continues as an unchecked one; a page never continues. */
+ * checked todo continues as an unchecked one; a note root never continues. */
 function sameType(type: BlockType): BlockType {
   return defOf(type).splitsAs ?? type
 }
@@ -503,7 +503,7 @@ export const COMMANDS: Record<CommandName, Command> = {
   },
 
   /** Jump to the top of the current level (its first sibling); if already there,
-   * step up to the parent. Walks up levels rather than to the page top. */
+   * step up to the parent. Walks up levels rather than to the note top. */
   jumpLevelTop: (input) => {
     const { doc, key, mode } = input
     // The zoom root's own level lives outside the zoomed view — clamp there.
@@ -630,7 +630,7 @@ export const COMMANDS: Record<CommandName, Command> = {
    * page never scrolls) but only toggles when there's something to fold. */
   toggleCollapse: (input) => {
     // The zoomed title's children are the whole view — collapsing it would
-    // blank the page, so it's pinned open while zoomed.
+    // blank the view, so it's pinned open while zoomed.
     if (isZoomTitle(input)) return { handled: true }
     const hasChildren = (blockOf(input)?.children.length ?? 0) > 0
     if (!hasChildren) return { handled: true }

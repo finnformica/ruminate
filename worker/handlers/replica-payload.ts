@@ -20,9 +20,9 @@ export interface NodeRow {
   id: string
   /** Type registry in docs/graph-schema-v2.md (`page`, `text`, `h1`…). */
   type: string
-  /** Marker-free content; for pages, the title. */
+  /** Marker-free content; for notes, the title. */
   text: string
-  /** JSON or null. Pages carry their metadata entries; code carries `{language}`. */
+  /** JSON or null. Notes carry their metadata entries; code carries `{language}`. */
   props: string | null
   /** ms epoch — per-row LWW + since-cursor pulls. */
   updated_at: number
@@ -43,7 +43,7 @@ export interface NodeRow {
   /**
    * The note the block was written in (migrations/0006) — where it shows in
    * the **Unassigned** basket once nothing links to it. Set at creation,
-   * never changed by linking; pages have none. Absent = no note (a page, or
+   * never changed by linking; note roots have none. Absent = no note (a note root, or
    * a row older than the backfill), which keeps every older client and
    * fixture valid.
    */
@@ -200,7 +200,9 @@ export type ReplicaChangesBody = ReplicaCorpusBody
 
 /** The body of `GET /api/replica/status`. */
 export interface ReplicaStatusBody {
-  /** LIVE rows only — tombstones are not part of "how big is my corpus". */
+  /** LIVE rows only — tombstones are not part of "how big is my corpus".
+   * `pages` is the note count: the wire name is frozen, like the stored
+   * `page` type value it counts. */
   counts: { nodes: number; links: number; pages: number }
   schema_version: string | null
   replica_cursor: string | null

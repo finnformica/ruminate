@@ -4,7 +4,7 @@ import { keyOf } from "./view"
 
 /**
  * The default-expansion policy (docs/graph-schema-v2.md): headings are always
- * expanded, and below any heading (or the page root) the outline starts with
+ * expanded, and below any heading (or the note root) the outline starts with
  * `levels` levels visible — a block that many levels down that has children
  * starts collapsed. The number is a preference (Settings → Editor,
  * `expandedLevelsAtom`; two by default). This is a seed, not a standing rule:
@@ -28,7 +28,7 @@ export function defaultCollapsedKeys(doc: BlockDoc, levels = DEFAULT_EXPANDED_LE
   const expanded = clampExpandedLevels(levels)
   const collapsed: string[] = []
 
-  // `level` = distance below the nearest heading ancestor (or the page root):
+  // `level` = distance below the nearest heading ancestor (or the note root):
   // direct children are level 1. A heading resets the count for its subtree.
   const path = new Set<string>()
   const walk = (ids: string[], parentKey: string | null, level: number) => {
