@@ -103,11 +103,17 @@ export function BlockContextMenu({
 }: {
   target: BlockMenuTarget | null
   actions: BlockMenuActions
-  onOpenChange?: (open: boolean) => void
+  /** Open or closed, and the element the opening press landed on. A
+   * right-click reaches the editor as a `contextmenu` event first; a touch
+   * long-press (Base UI's own, 500ms) never does — this is how the editor
+   * learns which row a finger held. */
+  onOpenChange?: (open: boolean, pressed: EventTarget | null) => void
   children: React.ReactNode
 }) {
   return (
-    <ContextMenu.Root onOpenChange={onOpenChange}>
+    <ContextMenu.Root
+      onOpenChange={(open, details) => onOpenChange?.(open, details.event?.target ?? null)}
+    >
       <ContextMenu.Trigger>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Positioner className="outline-none">
@@ -116,7 +122,10 @@ export function BlockContextMenu({
             className={popupClass}
             style={{ width: 240 }}
           >
-            <div className="grid max-h-[45svh] scroll-py-1 overflow-auto p-1">
+            {/* A pointer's menu keeps to a modest height; a phone's, with 40px
+                rows, would otherwise hide the last items (Unlink, Delete) in a
+                scroll no one finds — it may take most of the screen instead. */}
+            <div className="grid max-h-[45svh] scroll-py-1 overflow-auto p-1 coarse:max-h-[80svh]">
               {target ? <Items target={target} actions={actions} /> : null}
             </div>
           </ContextMenu.Popup>

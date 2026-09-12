@@ -1104,17 +1104,14 @@ export function BlockEditor({
   // so the keyboard follows). Empty space beneath the rows gets the browser's
   // own menu: the event is stopped before the menu's trigger sees it.
   const [menuTarget, setMenuTarget] = useState<BlockMenuTarget | null>(null)
-  const handleContextMenuCapture = (event: MouseEvent<HTMLDivElement>) => {
-    if (readOnly) return
-    const rowEl = (event.target as HTMLElement).closest<HTMLElement>("[data-occurrence]")
-    const key = rowEl?.dataset.occurrence
+  /** The menu target for the row an element sits in, or null off the rows. */
+  const menuTargetAt = (el: EventTarget | null): BlockMenuTarget | null => {
+    if (!(el instanceof Element)) return null
+    const key = el.closest<HTMLElement>("[data-occurrence]")?.dataset.occurrence
     const row = key === undefined ? undefined : rows.find((r) => r.key === key)
     const block = row ? doc.blocks[row.id] : undefined
-    if (!row || !block) {
-      event.stopPropagation()
-      return
-    }
-    setMenuTarget({
+    if (!row || !block) return null
+    return {
       key: row.key,
       id: row.id,
       type: block.type,
@@ -1125,10 +1122,35 @@ export function BlockEditor({
         block.type === "image"
           ? { align: imageAlignOf(block), sized: imagePropsOf(block).size !== undefined }
           : undefined,
-    })
+    }
+  }
+  const openMenuOn = (target: BlockMenuTarget) => {
+    setMenuTarget(target)
     // Editing a different row would otherwise keep its textarea focused
     // under the menu; the menu's row becomes the selection.
-    if (!selectedSet.has(row.key)) select(row.key)
+    if (!selectedSet.has(target.key)) select(target.key)
+  }
+  // A right-click: the `contextmenu` event reaches here (capture) before the
+  // menu's trigger opens on it, so the target is set by the time it shows.
+  const handleContextMenuCapture = (event: MouseEvent<HTMLDivElement>) => {
+    if (readOnly) return
+    const target = menuTargetAt(event.target)
+    if (!target) {
+      event.stopPropagation()
+      return
+    }
+    openMenuOn(target)
+  }
+  // A touch long-press: the menu opens itself (no `contextmenu` event on a
+  // phone), and says what was pressed; a press off the rows opens nothing.
+  const handleMenuOpenChange = (open: boolean, pressed: EventTarget | null) => {
+    if (!open || readOnly) return
+    const target = menuTargetAt(pressed)
+    if (target) {
+      if (target.key !== menuTarget?.key) openMenuOn(target)
+    } else if (pressed) {
+      setMenuTarget(null)
+    }
   }
   // ── Images ────────────────────────────────────────────────────────────────
   // A pasted, dropped or picked picture is uploaded first and only then
@@ -1891,7 +1913,11 @@ export function BlockEditor({
           </span>
         </nav>
       ) : null}
-      <BlockContextMenu target={readOnly ? null : menuTarget} actions={menuActions}>
+      <BlockContextMenu
+        target={readOnly ? null : menuTarget}
+        actions={menuActions}
+        onOpenChange={handleMenuOpenChange}
+      >
         {/* The container holds keyboard focus for select mode (tabIndex -1 =
           focusable only programmatically), so arrows/shortcuts work no matter
           which block is highlighted. outline-none hides the focus ring. */}
