@@ -252,8 +252,14 @@ export function ImageFigure({
         {controls ? (
           <>
             {HANDLES[align].map((side) => (
-              // A slim pill at the picture's edge, on its vertical centre:
-              // light on a dark picture, outlined on a light one.
+              // A slim pill at the picture's edge, on its vertical centre. It
+              // has to read against a picture of ANY colour, so it carries its
+              // own contrast rather than relying on the image: an opaque white
+              // core (translucent, a pale picture bled through and washed it
+              // out), a dark hairline that draws the edge where white meets
+              // white, and a soft shadow under that to lift it off. On a dark
+              // picture the white core does the work and the shadow is
+              // invisible; on a pale one the hairline and shadow do.
               <button
                 key={side}
                 type="button"
@@ -271,7 +277,7 @@ export function ImageFigure({
                 <span
                   aria-hidden
                   className={cx(
-                    "absolute top-1/2 h-8 max-h-[60%] w-1 -translate-y-1/2 rounded-full bg-[#ffffffe6] shadow-[0_0_0_1px_#00000040]",
+                    "absolute top-1/2 h-8 max-h-[60%] w-1 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_1px_#00000073,0_1px_4px_#0000004d]",
                     side === "left" ? "left-2" : "right-2",
                   )}
                 />
@@ -306,14 +312,19 @@ export function ImageFigure({
                     }}
                     // The small radius: on a 24px button the 8px base reads
                     // as a pill, and the toolbar's corners follow this one.
-                    // The chosen alignment takes the app-wide selected surface
-                    // and ink; it used to take `bg-bg-secondary`, which is the
-                    // same value as this button's own hover, so the chosen one
-                    // and the hovered one were the same pixel colour.
+                    // The chosen alignment stays NEUTRAL, on the same ladder
+                    // as the sidebar's toggled panel: this toolbar floats over
+                    // a picture, so an accent tint would land on whatever
+                    // colour happens to be under it, and an alignment is a
+                    // tool's state rather than a place you are or a value the
+                    // app remembers about you. It only has to clear the
+                    // button's own hover, which `bg-bg-secondary` did not —
+                    // that is the very surface this button hovers to, so the
+                    // chosen one and the hovered one were the same colour.
                     className={cx(
                       "rounded-sm px-1.5",
                       option === align &&
-                        "bg-bg-selected text-text-selected hover:bg-bg-selected-hover! active:bg-bg-selected-active!",
+                        "bg-bg-secondary-hover text-text hover:bg-bg-secondary-active! active:bg-[var(--neutral-a6)]!",
                     )}
                   >
                     <Icon />

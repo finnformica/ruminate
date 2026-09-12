@@ -82,9 +82,9 @@ asks for it.
    Outside the editor "chosen" and "current" are a **wash**: the sidebar's
    active nav row / open note (`.nav-item[aria-current]`, with
    `-hover`/`-active` steps), the notes/tags list keyboard highlight
-   (`.list-highlight`), the calendar's current day and week, the image
-   toolbar's alignment and the settings pickers (`<Button selected>`) all use
-   `--color-bg-selected` / `--color-text-selected` verbatim. Every one of
+   (`.list-highlight`), the calendar's current day and week, and the settings
+   pickers (`<Button selected>`) all use `--color-bg-selected` /
+   `--color-text-selected` verbatim. Every one of
    these tokens is mixed from the same `--accent-9`, so one color always means
    "you are here / keys act here", and changing the selection color is a
    one-place edit in `variables.css`.
@@ -103,8 +103,20 @@ asks for it.
    `--color-bg-hover` are the same value by design (hovering a ghost control
    makes it look like a filled one), so a chosen/toggled surface must sit
    clear of them: the selected wash, or a step further up the neutral ladder
-   for a toggled panel (`.nav-item[aria-pressed]`, at
-   `--color-bg-secondary-hover` with `-active` and `--neutral-a6` above it).
+   (`--color-bg-secondary-hover`, with `-active` and `--neutral-a6` above it).
+   **Accent is for the app's own surfaces.** Two controls take that neutral
+   ladder rather than the wash, because accent would be wrong there, not
+   merely loud: the sidebar's toggled panel (`.nav-item[aria-pressed]`), since
+   a panel you opened is a state and not a place; and the image toolbar's
+   alignment, since it floats over a picture, so an accent tint would land on
+   whatever colour the picture happens to be, and an alignment is a tool's
+   state rather than something the app remembers about you.
+   **Controls over a picture carry their own contrast.** The toolbar and the
+   resize handles float over an image of unknown colour, so neither may rely
+   on it: the toolbar is a blurred card with a hairline, and each handle is an
+   opaque white pill with a dark hairline and a soft shadow (`image-figure.tsx`)
+   — on a dark picture the white core carries it, on a pale one the hairline
+   and shadow do.
 4. **View and edit are pixel-identical.** Every typographic property (size,
    weight, line-height, tracking) lives in `typographyFor` and is applied to both
    the rendered body _and_ the textarea. Nothing may style one branch only.
