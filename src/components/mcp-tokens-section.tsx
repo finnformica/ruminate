@@ -89,8 +89,7 @@ export function McpTokensSection() {
           >
             Model Context Protocol
           </a>
-          . Each token decides for itself what an agent may do and which notes it may touch — an
-          agent can never widen its own access, and revoking a token stops it at once.
+          .
         </p>
         <EndpointRow />
       </div>
@@ -189,8 +188,7 @@ function MintedToken({
     <div className="flex flex-col gap-2 rounded border border-border-focus p-3">
       <span className="font-bold leading-4">Copy “{name}” now</span>
       <span className="leading-5 text-text-secondary">
-        This is the only time this token is shown. Ruminate stores only a hash of it, so it cannot
-        be shown again — if you lose it, revoke it and mint another.
+        This is the only time this token is shown.
       </span>
       <code className="select-all break-all rounded bg-bg-secondary p-2 font-mono text-sm">
         {token}

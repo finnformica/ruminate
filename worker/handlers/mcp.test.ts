@@ -334,7 +334,10 @@ describe("tools/list", () => {
     const destructive = body.result.tools
       .filter((tool: any) => tool.annotations.destructiveHint)
       .map((tool: any) => tool.name)
-    expect(destructive).toEqual(["delete_note"])
+      .sort()
+    // Only the two deleting verbs; everything else either reads or is
+    // additive/reversible.
+    expect(destructive).toEqual(["delete_block", "delete_note"])
   })
 })
 
@@ -415,7 +418,9 @@ describe("tools/call", () => {
         ),
       ),
     )
-    expect(read.result.structuredContent.markdown).toContain("from an agent")
+    expect(read.result.structuredContent.blocks.map((block: any) => block.text)).toContain(
+      "from an agent",
+    )
   })
 
   it("stamps last_used_at after the call", async () => {

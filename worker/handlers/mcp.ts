@@ -223,11 +223,13 @@ function discoverResult(id: JsonRpcId, grant: Grant | null): Record<string, unkn
     capabilities: { tools: {} },
     instructions:
       "Ruminate is an outliner: a note is a tree of typed blocks, and the same " +
-      "block can appear in more than one note. Start with `list_notes` or " +
-      "`search`, then `read_note` for a note's markdown, or `get_node` / " +
-      "`list_children` / `list_parents` to walk the graph a block at a time. " +
-      "When writing a note back with `update_note`, keep the `id::` lines you " +
-      "were given — they are what keeps a block the same block. " +
+      "block can appear in more than one note. Blocks are returned as stored " +
+      "rows, never as markdown. Start with `list_notes` or `search`, then " +
+      "`read_note`, or walk the graph with `get_block` / `list_children` / " +
+      "`list_parents` — a big note is far cheaper walked than read whole, and " +
+      "`read_note` takes a `depth`. To change something, name the block: " +
+      "`update_block`, `move_block`, `link_block`. `update_note` replaces a " +
+      "note's ENTIRE body and is rarely what you want. " +
       (grant === null
         ? "Authenticate with an MCP token from Ruminate's settings page."
         : `This token has ${describeGrant(grant)}.`),
@@ -254,7 +256,7 @@ async function dispatch(
         inputSchema: tool.inputSchema,
         annotations: tool.annotations,
       }))
-      // No `nextCursor`: twelve tools is one page, and paginating a list this
+      // No `nextCursor`: sixteen tools is one page, and paginating a list this
       // size would be a promise to keep rather than a feature.
       return json(result(id, { tools, ...CACHE_HINT }))
     }

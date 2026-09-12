@@ -10,7 +10,7 @@
 //   1. the grant must hold the tool's `permission`;
 //   2. `create_note` additionally needs an unrestricted grant
 //      (`mayCreateNotes` — see grant.ts for why);
-//   3. every `note_id` / `node_id` argument must be inside the grant's view,
+//   3. every `note_id` / `block_id` argument must be inside the grant's view,
 //      which is enforced by the accessors in `graph-access.ts` returning null
 //      for anything outside it.
 //
@@ -39,20 +39,28 @@
 
 import { blockId } from "../../src/blocks/id"
 import { parse } from "../../src/blocks/parse"
-import type { BlockDoc, BlockProps } from "../../src/blocks/types"
-import { PAGE_TYPE } from "../../src/data/graph"
-import { deletePageOps, docToOps } from "../../src/data/ops"
+import { isBlockType, type BlockDoc, type BlockProps } from "../../src/blocks/types"
+import { PAGE_TYPE, propsJson, sortKeyBetween } from "../../src/data/graph"
+import {
+  deleteBlockOps,
+  deletePageOps,
+  deleteSubtreeOps,
+  docToOps,
+  type Op,
+} from "../../src/data/ops"
 import { isDatePageId } from "../../src/data/page-identity"
 import type { TenantDb } from "../tenancy-db"
 import { allows, mayCreateNotes, type Grant, type Permission } from "./grant"
 import {
   applyOpsToReplica,
+  childLinksOf,
   childrenOf,
   docOf,
   markdownOf,
   nodeOf,
   noteOf,
   notesReaching,
+  notesReachingUnscoped,
   pageOf,
   parentsOf,
   propsOf,
@@ -135,6 +143,27 @@ const limitOf = (args: Record<string, unknown>): number => {
   return Math.min(value, MAX_LIMIT)
 }
 
+/** `depth`: how many outline levels to return. 0 = unlimited, which is what
+ * an omitted value means to `blocksOfNote`. */
+const optionalDepth = (args: Record<string, unknown>): number => {
+  const value = args.depth
+  if (value === undefined || value === null) return 0
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new BadArgument("`depth` must be a positive integer.")
+  }
+  return value
+}
+
+/** A 0-based position among a parent's children. Omitted = the end. */
+const optionalIndex = (args: Record<string, unknown>, key = "index"): number | undefined => {
+  const value = args[key]
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new BadArgument(`\`${key}\` must be a whole number, 0 or more.`)
+  }
+  return value
+}
+
 /** The cursor is the offset into the deterministic order the list is in — an
  * opaque digit string, refused rather than guessed at if it is anything else. */
 const offsetOf = (args: Record<string, unknown>): number => {
@@ -153,7 +182,7 @@ const offsetOf = (args: Record<string, unknown>): number => {
 const OUT_OF_SCOPE =
   "No such note, or this token is not scoped to it. Call `list_notes` to see what it can reach."
 
-const NODE_OUT_OF_SCOPE =
+const BLOCK_OUT_OF_SCOPE =
   "No such block, or this token is not scoped to the note it belongs to. " +
   "Call `list_notes`, then `read_note`, to find block ids this token can reach."
 
@@ -162,20 +191,159 @@ const preview = (text: string, words = 20): string => {
   return parts.length > words ? `${parts.slice(0, words).join(" ")}…` : parts.join(" ")
 }
 
-/** A block, as the traversal tools describe one. */
-const describeNode = (graph: ScopedGraph, id: string) => {
+/** A metadata object argument: an object, or nothing. */
+const optionalProps = (args: Record<string, unknown>, key: string): BlockProps | undefined => {
+  const value = args[key]
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new BadArgument(`\`${key}\` must be an object.`)
+  }
+  return value as BlockProps
+}
+
+/**
+ * The fourth refusal, and the one only the write tools need.
+ *
+ * The same block can hang in several notes, so changing it changes what each
+ * of them shows. For an unrestricted grant that is simply the feature. For a
+ * NOTE-SCOPED grant it is a way out: editing a block that a note outside the
+ * scope also holds would put a write where the grant does not reach, and
+ * neither the agent nor the person reading the grant would see it happen.
+ *
+ * So a scoped grant may only write a block every one of whose notes it names.
+ * The refusal says a note it cannot see holds the block, and not which one —
+ * the check must not become a way to enumerate notes the grant excludes.
+ */
+function sharedOutsideScope(context: ToolContext, blockId: string): ToolOutcome | null {
+  const scope = context.grant.noteIds
+  if (scope === null) return null
+  const outside = notesReachingUnscoped(context.graph, blockId).filter((id) => !scope.has(id))
+  if (outside.length === 0) return null
+  return {
+    ok: false,
+    message:
+      `${blockId} also appears in a note this token is not scoped to, so changing ` +
+      `it would change that note too. Ask for a token covering both notes, or edit a ` +
+      `block that only this note holds.`,
+  }
+}
+
+/** The checks `link_block` and `move_block` share: both ends visible, not a
+ * self-link, and the block writable under this grant. */
+function linkable(context: ToolContext, parentId: string, blockId: string): ToolOutcome | null {
+  const { graph } = context
+  if (nodeOf(graph, parentId) === null || nodeOf(graph, blockId) === null) {
+    return { ok: false, message: BLOCK_OUT_OF_SCOPE }
+  }
+  if (parentId === blockId) {
+    return { ok: false, message: "A block cannot be put under itself." }
+  }
+  if (nodeOf(graph, blockId)?.type === PAGE_TYPE) {
+    return { ok: false, message: `${blockId} is a note; a note cannot be linked under a block.` }
+  }
+  return sharedOutsideScope(context, blockId)
+}
+
+/**
+ * The sort key for inserting at `index` among a parent's children — a
+ * fractional index strictly between its new neighbours, so the siblings
+ * either side keep the keys they have and no other row is written.
+ *
+ * `moving` is excluded from the neighbour calculation: when a block is being
+ * repositioned under a parent it already sits under, its own current key must
+ * not become one of the bounds, or the "between" would be between the block
+ * and itself.
+ */
+function keyAt(
+  graph: ScopedGraph,
+  parentId: string,
+  index: number | undefined,
+  moving: string,
+): string {
+  const siblings = childLinksOf(graph, parentId).filter((link) => link.destination_id !== moving)
+  const at = index === undefined ? siblings.length : Math.min(index, siblings.length)
+  const before = at > 0 ? siblings[at - 1].sort_key : null
+  const after = at < siblings.length ? siblings[at].sort_key : null
+  return sortKeyBetween(before, after)
+}
+
+/**
+ * One block, as the API hands it out: **the stored row**, not a rendering of
+ * it. `type` is the stored type (`ul`, `h1`, `todo`…), `text` is marker-free
+ * as stored, and `props` is the row's own metadata object.
+ *
+ * Nothing here is markdown. Markdown is an INPUT format in this API —
+ * `create_note` and `append_to_note` parse it — and never an output one. A
+ * block read is a row, so an agent editing one names the block by id and
+ * changes a field, rather than round-tripping a document and hoping the
+ * diff lands where it meant.
+ *
+ * Empty fields are omitted rather than sent as `null`/`[]`. That is not
+ * tidiness: a JSON row is already heavier per block than the markdown line
+ * it replaces (~60 chars against ~36 once the id is a field rather than an
+ * `id::` line), and `"props":null,"childIds":[]` on 281 blocks is pure
+ * context spent saying nothing.
+ */
+const blockOut = (graph: ScopedGraph, id: string, extra: Record<string, unknown> = {}) => {
   const row = nodeOf(graph, id)
   if (!row) return null
+  const props = propsOf(graph, id)
+  const childIds = childrenOf(graph, id)
   return {
     id: row.id,
     type: row.type,
     text: row.text,
-    props: propsOf(graph, id),
-    /** The note the block was written in — where it shows if nothing links
-     * to it any more. Absent for pages and for pre-`notes_id` rows. */
-    writtenInNoteId: row.notes_id ?? null,
-    childCount: childrenOf(graph, id).length,
+    ...(props && Object.keys(props).length > 0 ? { props } : {}),
+    ...(childIds.length > 0 ? { childIds } : {}),
+    // The note the block was written in — where it shows if nothing links to
+    // it any more. Absent for pages and for rows older than migration 0006.
+    ...(row.notes_id === undefined ? {} : { writtenInNoteId: row.notes_id }),
+    updatedAt: row.updated_at,
+    ...extra,
   }
+}
+
+/**
+ * A note's blocks in document order, each carrying its `depth`, down to
+ * `maxDepth` levels (0 = unlimited).
+ *
+ * A block whose children were cut off is marked `hasMoreChildren`, so the
+ * agent knows exactly where to call `list_children` and never has to guess
+ * whether it has the whole picture. Depth-limiting is safe here only because
+ * reads are rows: there is no partial *document* an agent could hand back to
+ * a whole-note write and silently orphan the rest of the note with.
+ *
+ * A block reached twice (the same block under two parents, which the graph
+ * allows) is listed once, at its first depth, and named again in the other
+ * parent's `childIds`.
+ */
+function blocksOfNote(
+  graph: ScopedGraph,
+  rootIds: string[],
+  maxDepth: number,
+): { blocks: Record<string, unknown>[]; truncated: boolean } {
+  const blocks: Record<string, unknown>[] = []
+  const seen = new Set<string>()
+  let truncated = false
+
+  const walk = (ids: string[], depth: number) => {
+    for (const id of ids) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      const children = childrenOf(graph, id)
+      const cut = maxDepth > 0 && depth + 1 >= maxDepth && children.length > 0
+      if (cut) truncated = true
+      const block = blockOut(graph, id, {
+        depth,
+        ...(cut ? { hasMoreChildren: true } : {}),
+      })
+      if (!block) continue
+      blocks.push(block)
+      if (!cut) walk(children, depth + 1)
+    }
+  }
+  walk(rootIds, 0)
+  return { blocks, truncated }
 }
 
 const noteSummary = (graph: ScopedGraph, id: string) => {
@@ -388,25 +556,43 @@ export const TOOLS: ToolDef[] = [
     name: "read_note",
     title: "Read a note",
     description:
-      "A note in full: its title, tags, metadata, tasks, headings, and its " +
-      "markdown. The markdown carries an `id::` line under every block — KEEP " +
-      "THEM if you intend to write the note back with `update_note`, because " +
-      "they are what lets an edited block stay the same block instead of " +
-      "becoming a new one.",
+      "A note and its blocks, as stored: every block's id, type, text, metadata " +
+      "and children, in outline order with its depth. NOT markdown — this is the " +
+      "row data, so to change a block you name it by id with `update_block` " +
+      "rather than rewriting the note. Large notes are expensive to read whole: " +
+      "`blockCount` tells you how big it is, and `depth` reads only the top " +
+      "levels (a block whose children were cut off is marked `hasMoreChildren`, " +
+      "so walk into it with `list_children`). Also returns the note's " +
+      "`unassigned` blocks: ones written in it that nothing links to any more, " +
+      "which the app shows in a section at the foot of the note.",
     permission: "read",
     annotations: readOnly,
     inputSchema: {
       type: "object",
-      properties: { note_id: { type: "string", description: "From `list_notes` or `search`." } },
+      properties: {
+        note_id: { type: "string", description: "From `list_notes` or `search`." },
+        depth: {
+          type: "integer",
+          minimum: 1,
+          description: "How many levels of the outline to return. Omit for the whole note.",
+        },
+      },
       required: ["note_id"],
       additionalProperties: false,
     },
     run(args, { graph }) {
       const noteId = requireString(args, "note_id")
       const note = noteOf(graph, noteId)
-      const markdown = markdownOf(graph, noteId)
-      if (!note || markdown === null) return { ok: false, message: OUT_OF_SCOPE }
-      const unassigned = unassignedOf(graph, noteId)
+      if (!note) return { ok: false, message: OUT_OF_SCOPE }
+      const depth = optionalDepth(args)
+
+      const rootBlockIds = childrenOf(graph, noteId)
+      const { blocks, truncated } = blocksOfNote(graph, rootBlockIds, depth)
+      // The whole note's size, whatever `depth` returned — so an agent that
+      // truncated knows how much it has not seen.
+      const blockCount = blocksOfNote(graph, rootBlockIds, 0).blocks.length
+      const basket = unassignedOf(graph, noteId)
+      const unassigned = blocksOfNote(graph, basket?.roots ?? [], depth).blocks
 
       return {
         ok: true,
@@ -417,97 +603,53 @@ export const TOOLS: ToolDef[] = [
           tags: note.tags,
           props: note.props,
           updatedAt: note.updatedAt,
-          headings: note.headings,
-          tasks: note.tasks,
-          markdown,
-          rootBlockIds: childrenOf(graph, noteId),
-          // A count rather than the blocks: the basket is a separate part of
-          // the note, and an agent that does not know it is there would never
-          // think to ask. One number is enough to make it ask.
-          unassignedCount: unassigned?.roots.length ?? 0,
+          rootBlockIds,
+          blocks,
+          blockCount,
+          truncated,
+          unassigned,
         },
         text:
-          `# ${note.displayName}\n\n${markdown}` +
-          (unassigned && unassigned.roots.length > 0
-            ? `\n\n(${unassigned.roots.length} unassigned block(s) in this note — ` +
-              `call \`list_unassigned\` to see them.)`
-            : ""),
+          `${note.displayName} — ${blockCount} block(s)` +
+          (truncated ? ` (showing ${blocks.length} to depth ${depth})` : "") +
+          (unassigned.length > 0 ? `, ${unassigned.length} unassigned` : ""),
       }
     },
   },
 
   {
-    name: "list_unassigned",
-    title: "List a note's unassigned blocks",
-    description:
-      "The note's **Unassigned** blocks: blocks written in it that nothing " +
-      "links to any more, which the app shows in a section at the foot of the " +
-      "note. A block lands here when the row holding it was removed — it is " +
-      "kept, not deleted, so nothing is ever lost. They are not part of the " +
-      "note's outline and `read_note` does not include them, so this is the " +
-      "only way to see them. Returns them as markdown with `id::` lines, and " +
-      "their root ids; paste one back into the outline with `update_note` to " +
-      "take it out of the basket.",
-    permission: "read",
-    annotations: readOnly,
-    inputSchema: {
-      type: "object",
-      properties: { note_id: { type: "string", description: "From `list_notes` or `search`." } },
-      required: ["note_id"],
-      additionalProperties: false,
-    },
-    run(args, { graph }) {
-      const noteId = requireString(args, "note_id")
-      const basket = unassignedOf(graph, noteId)
-      if (basket === null) return { ok: false, message: OUT_OF_SCOPE }
-
-      const roots = basket.roots
-        .map((id) => describeNode(graph, id))
-        .filter((root): root is NonNullable<typeof root> => root !== null)
-
-      return {
-        ok: true,
-        data: { noteId, roots, total: roots.length, markdown: basket.markdown },
-        text:
-          roots.length === 0
-            ? "Nothing unassigned in this note."
-            : `${roots.length} unassigned block(s):\n\n${basket.markdown}`,
-      }
-    },
-  },
-
-  {
-    name: "get_node",
+    name: "get_block",
     title: "Get a block",
     description:
-      "One block (or page) by id: its type, text, metadata, how many children " +
-      "it has, which blocks hold it, and which notes it appears in. The " +
-      "starting point for walking the graph with `list_children` and `list_parents`.",
+      "One block by id, as stored: type, text, metadata, its children, the " +
+      "blocks that hold it, and the notes it appears in. A note id works too " +
+      "(a note is a block whose type is `page`). The starting point for walking " +
+      "the graph with `list_children` and `list_parents`.",
     permission: "read",
     annotations: readOnly,
     inputSchema: {
       type: "object",
-      properties: { node_id: { type: "string", description: "A block id or a note id." } },
-      required: ["node_id"],
+      properties: { block_id: { type: "string", description: "A block id, or a note id." } },
+      required: ["block_id"],
       additionalProperties: false,
     },
     run(args, { graph }) {
-      const id = requireString(args, "node_id")
-      const described = describeNode(graph, id)
-      if (!described) return { ok: false, message: NODE_OUT_OF_SCOPE }
+      const id = requireString(args, "block_id")
+      const block = blockOut(graph, id)
+      if (!block) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
 
       const data = {
-        ...described,
+        ...block,
         parentIds: parentsOf(graph, id),
         noteIds: notesReaching(graph, id),
-        isPage: described.type === PAGE_TYPE,
+        isNote: block.type === PAGE_TYPE,
       }
       return {
         ok: true,
         data,
         text:
           `${data.id} (${data.type})\n${data.text}\n\n` +
-          `children: ${data.childCount}, parents: ${data.parentIds.length}, ` +
+          `children: ${block.childIds?.length ?? 0}, parents: ${data.parentIds.length}, ` +
           `in notes: ${data.noteIds.join(", ") || "none"}`,
       }
     },
@@ -517,39 +659,56 @@ export const TOOLS: ToolDef[] = [
     name: "list_children",
     title: "List a block's children",
     description:
-      "The blocks directly beneath this one, in outline order. Pass a note id " +
-      "to get the note's top-level blocks. Walk down by calling this again " +
-      "with a child's id.",
+      "The blocks directly beneath this one, in outline order, as stored. Pass " +
+      "a note id for the note's top-level blocks. Walk down by calling this " +
+      "again with a child's id, or pass `depth` to pull several levels at once " +
+      "(each block carries its `depth`, and one whose children were cut off is " +
+      "marked `hasMoreChildren`). Reading a big note a branch at a time this " +
+      "way costs far less than `read_note` on the whole thing.",
     permission: "read",
     annotations: readOnly,
     inputSchema: {
       type: "object",
       properties: {
-        node_id: { type: "string", description: "A block id or a note id." },
+        block_id: { type: "string", description: "A block id, or a note id." },
+        depth: {
+          type: "integer",
+          minimum: 1,
+          description: "Levels to return. 1 (the default) is the direct children only.",
+        },
         limit: { type: "integer", minimum: 1, maximum: MAX_LIMIT, description: "Default 50." },
       },
-      required: ["node_id"],
+      required: ["block_id"],
       additionalProperties: false,
     },
     run(args, { graph }) {
-      const id = requireString(args, "node_id")
+      const id = requireString(args, "block_id")
       const limit = limitOf(args)
-      if (nodeOf(graph, id) === null) return { ok: false, message: NODE_OUT_OF_SCOPE }
+      const depth = optionalDepth(args) || 1
+      if (nodeOf(graph, id) === null) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
 
-      const all = childrenOf(graph, id)
-      const children = all
-        .slice(0, limit)
-        .map((childId) => describeNode(graph, childId))
-        .filter((child): child is NonNullable<typeof child> => child !== null)
+      const direct = childrenOf(graph, id)
+      const walked = blocksOfNote(graph, direct, depth)
+      const children = walked.blocks.slice(0, limit)
 
       return {
         ok: true,
-        data: { nodeId: id, children, total: all.length },
+        data: {
+          blockId: id,
+          children,
+          total: walked.blocks.length,
+          directChildCount: direct.length,
+          truncated: walked.truncated || walked.blocks.length > limit,
+        },
         text:
           children.length === 0
             ? "No children."
             : children
-                .map((child) => `${child.id} (${child.type})  ${preview(child.text, 14)}`)
+                .map(
+                  (child) =>
+                    `${"  ".repeat(Number(child.depth) || 0)}${child.id} (${child.type})  ` +
+                    preview(String(child.text), 14),
+                )
                 .join("\n"),
       }
     },
@@ -566,16 +725,16 @@ export const TOOLS: ToolDef[] = [
     annotations: readOnly,
     inputSchema: {
       type: "object",
-      properties: { node_id: { type: "string", description: "A block id or a note id." } },
-      required: ["node_id"],
+      properties: { block_id: { type: "string", description: "A block id or a note id." } },
+      required: ["block_id"],
       additionalProperties: false,
     },
     run(args, { graph }) {
-      const id = requireString(args, "node_id")
-      if (nodeOf(graph, id) === null) return { ok: false, message: NODE_OUT_OF_SCOPE }
+      const id = requireString(args, "block_id")
+      if (nodeOf(graph, id) === null) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
 
       const parents = parentsOf(graph, id)
-        .map((parentId) => describeNode(graph, parentId))
+        .map((parentId) => blockOut(graph, parentId))
         .filter((parent): parent is NonNullable<typeof parent> => parent !== null)
       const noteIds = notesReaching(graph, id)
 
@@ -698,12 +857,13 @@ export const TOOLS: ToolDef[] = [
     name: "update_note",
     title: "Replace a note's content",
     description:
-      "Replace a note's body with `markdown`, and optionally retitle it. " +
-      "Read the note first and send its markdown back WITH the `id::` lines " +
-      "intact: a block whose id you keep is edited in place, and a block whose " +
-      "id you drop becomes a new block while the original — if it still holds " +
-      "anything — moves to the note's Unassigned basket rather than being " +
-      "deleted. To add to a note without rewriting it, use `append_to_note`.",
+      "REPLACE a note's whole body with fresh markdown, and optionally retitle " +
+      "it. Every block currently in the note that this markdown does not " +
+      "recreate stops being part of it and moves to the note's Unassigned " +
+      "section (nothing is deleted, but the note is emptied of it). Reach for " +
+      "this only to rewrite a note wholesale. To change a block, use " +
+      "`update_block`; to restructure, `move_block`; to add, `append_to_note`. " +
+      "Those name blocks by id and leave the rest of the note alone.",
     permission: "write",
     annotations: writes,
     inputSchema: {
@@ -769,6 +929,316 @@ export const TOOLS: ToolDef[] = [
         blocks: { ...existing.blocks, ...added.blocks },
       }
       return writeDoc(context, noteId, doc, "Appended to")
+    },
+  },
+
+  {
+    name: "update_block",
+    title: "Edit a block",
+    description:
+      "Change one block's text, type or metadata, in place. The cheap way to " +
+      "edit: name the block by id and send only what changes, instead of " +
+      "rewriting the whole note. The block keeps its id and stays in every note " +
+      "that holds it — which also means an edit shows up in all of them. " +
+      "Types: text, h1, h2, h3, todo, done, ul, ol, quote, code, image.",
+    permission: "write",
+    annotations: writes,
+    inputSchema: {
+      type: "object",
+      properties: {
+        block_id: { type: "string" },
+        text: { type: "string", description: "The block's new text, without any markdown marker." },
+        type: {
+          type: "string",
+          enum: ["text", "h1", "h2", "h3", "todo", "done", "ul", "ol", "quote", "code", "image"],
+          description: "Tick a to-do by setting `done`; untick it with `todo`.",
+        },
+        props: {
+          type: "object",
+          description: "Replaces the block's metadata object outright. Omit to leave it alone.",
+        },
+      },
+      required: ["block_id"],
+      additionalProperties: false,
+    },
+    async run(args, context) {
+      const { graph } = context
+      const id = requireString(args, "block_id")
+      const text = optionalString(args, "text")
+      const type = optionalString(args, "type")
+      const props = optionalProps(args, "props")
+
+      const row = nodeOf(graph, id)
+      if (!row) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
+      if (row.type === PAGE_TYPE) {
+        return {
+          ok: false,
+          message: `${id} is a note, not a block. Retitle it with \`update_note\`.`,
+        }
+      }
+      if (text === undefined && type === undefined && props === undefined) {
+        return { ok: false, message: "Give at least one of `text`, `type` or `props` to change." }
+      }
+      if (type !== undefined && !isBlockType(type)) {
+        return { ok: false, message: `Unknown block type: ${type}.` }
+      }
+      const refusal = sharedOutsideScope(context, id)
+      if (refusal) return refusal
+
+      const ops: Op[] = []
+      if (text !== undefined && text !== row.text) ops.push({ op: "setText", id, text })
+      if (type !== undefined && type !== row.type) ops.push({ op: "setType", id, type })
+      if (props !== undefined) {
+        const next = propsJson(props)
+        if (next !== row.props) ops.push({ op: "setProps", id, props: next })
+      }
+      const written = await applyOpsToReplica(context.tenant, graph.snapshot, ops, context.now)
+      return {
+        ok: true,
+        data: { blockId: id, changed: ops.length, rowsWritten: written.nodes + written.links },
+        text: ops.length === 0 ? `${id} already said that.` : `Updated ${id}.`,
+      }
+    },
+  },
+
+  {
+    name: "link_block",
+    title: "Put a block under another",
+    description:
+      "Link an existing block beneath a parent, at `index` (0-based; omit for " +
+      "the end). Pass a note id as the parent for a top-level row. This does " +
+      "not copy the block: it makes the SAME block appear in a second place, so " +
+      "editing it either place changes both. That is how a block ends up in two " +
+      "notes. Use `move_block` to relocate one rather than linking then unlinking.",
+    permission: "write",
+    annotations: writes,
+    inputSchema: {
+      type: "object",
+      properties: {
+        parent_id: { type: "string", description: "A block id, or a note id for a top-level row." },
+        block_id: { type: "string", description: "The block to put there." },
+        index: { type: "integer", minimum: 0, description: "0-based. Omit to append at the end." },
+      },
+      required: ["parent_id", "block_id"],
+      additionalProperties: false,
+    },
+    async run(args, context) {
+      const parentId = requireString(args, "parent_id")
+      const blockId = requireString(args, "block_id")
+      const index = optionalIndex(args)
+
+      const refusal = linkable(context, parentId, blockId)
+      if (refusal) return refusal
+
+      const ops: Op[] = [
+        {
+          op: "link",
+          source: parentId,
+          destination: blockId,
+          sortKey: keyAt(context.graph, parentId, index, blockId),
+        },
+      ]
+      const written = await applyOpsToReplica(
+        context.tenant,
+        context.graph.snapshot,
+        ops,
+        context.now,
+      )
+      return {
+        ok: true,
+        data: { parentId, blockId, rowsWritten: written.nodes + written.links },
+        text: `Linked ${blockId} under ${parentId}.`,
+      }
+    },
+  },
+
+  {
+    name: "unlink_block",
+    title: "Take a block out of one place",
+    description:
+      "Remove a block from under one parent. The block is NOT deleted: if that " +
+      "was the only place it appeared, it goes to its note's Unassigned section " +
+      "(see `read_note`), with everything beneath it, where it can be linked " +
+      "back. If it also appears elsewhere, it simply stays there. To delete a " +
+      "block for good, use `delete_block`.",
+    permission: "write",
+    annotations: writes,
+    inputSchema: {
+      type: "object",
+      properties: {
+        parent_id: { type: "string", description: "The block or note it is currently under." },
+        block_id: { type: "string" },
+      },
+      required: ["parent_id", "block_id"],
+      additionalProperties: false,
+    },
+    async run(args, context) {
+      const parentId = requireString(args, "parent_id")
+      const blockId = requireString(args, "block_id")
+
+      if (nodeOf(context.graph, parentId) === null || nodeOf(context.graph, blockId) === null) {
+        return { ok: false, message: BLOCK_OUT_OF_SCOPE }
+      }
+      if (!childrenOf(context.graph, parentId).includes(blockId)) {
+        return { ok: false, message: `${blockId} is not directly under ${parentId}.` }
+      }
+      const refusal = sharedOutsideScope(context, blockId)
+      if (refusal) return refusal
+
+      const ops: Op[] = [{ op: "unlink", source: parentId, destination: blockId }]
+      const written = await applyOpsToReplica(
+        context.tenant,
+        context.graph.snapshot,
+        ops,
+        context.now,
+      )
+      const orphaned = parentsOf(context.graph, blockId).length <= 1
+      return {
+        ok: true,
+        data: { parentId, blockId, orphaned, rowsWritten: written.nodes + written.links },
+        text: orphaned
+          ? `Unlinked ${blockId}; it is now in its note's Unassigned section.`
+          : `Unlinked ${blockId} from ${parentId}; it still appears elsewhere.`,
+      }
+    },
+  },
+
+  {
+    name: "move_block",
+    title: "Move a block",
+    description:
+      "Move a block from one parent to another, or to a different position " +
+      "under the same parent, in one step. Give `from_parent_id` when the block " +
+      "appears in more than one place, so it is clear which occurrence moves.",
+    permission: "write",
+    annotations: writes,
+    inputSchema: {
+      type: "object",
+      properties: {
+        block_id: { type: "string" },
+        to_parent_id: { type: "string", description: "A block id, or a note id." },
+        from_parent_id: {
+          type: "string",
+          description: "Required only when the block appears under more than one parent.",
+        },
+        index: { type: "integer", minimum: 0, description: "0-based. Omit to append at the end." },
+      },
+      required: ["block_id", "to_parent_id"],
+      additionalProperties: false,
+    },
+    async run(args, context) {
+      const blockId = requireString(args, "block_id")
+      const toParent = requireString(args, "to_parent_id")
+      const fromArg = optionalString(args, "from_parent_id")
+      const index = optionalIndex(args)
+
+      const refusal = linkable(context, toParent, blockId)
+      if (refusal) return refusal
+
+      const parents = parentsOf(context.graph, blockId)
+      let fromParent = fromArg
+      if (fromParent === undefined) {
+        if (parents.length > 1) {
+          return {
+            ok: false,
+            message:
+              `${blockId} appears under ${parents.length} parents ` +
+              `(${parents.join(", ")}). Say which one to move with \`from_parent_id\`.`,
+          }
+        }
+        fromParent = parents[0]
+      }
+      if (fromParent !== undefined && !parents.includes(fromParent)) {
+        return { ok: false, message: `${blockId} is not directly under ${fromParent}.` }
+      }
+
+      const ops: Op[] = []
+      if (fromParent !== undefined && fromParent !== toParent) {
+        ops.push({ op: "unlink", source: fromParent, destination: blockId })
+      }
+      ops.push({
+        op: "link",
+        source: toParent,
+        destination: blockId,
+        sortKey: keyAt(context.graph, toParent, index, blockId),
+      })
+      const written = await applyOpsToReplica(
+        context.tenant,
+        context.graph.snapshot,
+        ops,
+        context.now,
+      )
+      return {
+        ok: true,
+        data: {
+          blockId,
+          fromParentId: fromParent ?? null,
+          toParentId: toParent,
+          rowsWritten: written.nodes + written.links,
+        },
+        text: `Moved ${blockId} to ${toParent}.`,
+      }
+    },
+  },
+
+  {
+    name: "delete_block",
+    title: "Delete a block",
+    description:
+      "Delete a block from everywhere it appears. By default what it held " +
+      "survives: its children keep their note and turn up in that note's " +
+      "Unassigned section. Pass `with_contents: true` to delete the block and " +
+      "everything beneath it that nothing else still holds. To take a block out " +
+      "of one place without deleting it, use `unlink_block`.",
+    permission: "delete",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        block_id: { type: "string" },
+        with_contents: {
+          type: "boolean",
+          description: "Also delete everything beneath it that nothing else holds.",
+        },
+      },
+      required: ["block_id"],
+      additionalProperties: false,
+    },
+    async run(args, context) {
+      const blockId = requireString(args, "block_id")
+      const withContents = args.with_contents === true
+
+      const row = nodeOf(context.graph, blockId)
+      if (!row) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
+      if (row.type === PAGE_TYPE) {
+        return { ok: false, message: `${blockId} is a note. Delete it with \`delete_note\`.` }
+      }
+      const refusal = sharedOutsideScope(context, blockId)
+      if (refusal) return refusal
+
+      const ops = withContents
+        ? deleteSubtreeOps(blockId, context.graph.snapshot)
+        : deleteBlockOps(blockId, context.graph.snapshot)
+      const deleted = ops.filter((op) => op.op === "delete").length
+      const written = await applyOpsToReplica(
+        context.tenant,
+        context.graph.snapshot,
+        ops,
+        context.now,
+      )
+      return {
+        ok: true,
+        data: { blockId, deleted, rowsWritten: written.nodes + written.links },
+        text:
+          deleted <= 1
+            ? `Deleted ${blockId}.`
+            : `Deleted ${blockId} and ${deleted - 1} block(s) beneath it.`,
+      }
     },
   },
 

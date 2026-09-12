@@ -255,6 +255,34 @@ export const parentsOf = (graph: ScopedGraph, id: string): string[] =>
 export const notesReaching = (graph: ScopedGraph, id: string): string[] =>
   sees(graph, id) ? (graph.noteIndex().get(id) ?? []) : []
 
+/**
+ * Every page in the corpus that reaches this node, **with the grant's filter
+ * deliberately not applied**.
+ *
+ * The one read in this module that ignores the scope, and it exists for the
+ * write path. The same block can hang in several notes, so editing it changes
+ * what each of them shows. A token scoped to note A editing a block that note
+ * B also holds would be a write landing outside its grant — invisible to it,
+ * and to anyone reading the grant. `sharedOutsideScope` (tools.ts) asks this
+ * question before every block write and refuses when the answer includes a
+ * note the grant does not name.
+ *
+ * It reveals nothing: the caller learns only that *some* note it cannot see
+ * holds the block, which is why the refusal message says that and not which.
+ */
+export function notesReachingUnscoped(graph: ScopedGraph, id: string): string[] {
+  const reaching: string[] = []
+  for (const pageId of pageIds(graph.snapshot)) {
+    if (pageId === id || reachableFrom(graph.snapshot, [pageId]).has(id)) reaching.push(pageId)
+  }
+  return reaching.sort()
+}
+
+/** A node's child links, in order — the write path needs their sort keys, not
+ * just the ids `childrenOf` gives. */
+export const childLinksOf = (graph: ScopedGraph, id: string) =>
+  sees(graph, id) ? (graph.snapshot.childLinks.get(id) ?? []) : []
+
 /** A node's props as an object, or null. */
 export const propsOf = (graph: ScopedGraph, id: string): Record<string, unknown> | null => {
   const row = nodeOf(graph, id)

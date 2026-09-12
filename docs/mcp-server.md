@@ -89,55 +89,90 @@ tokens exist.
 
 ## 2. The tools
 
-Reads need `read`; the three writers need `write`; `delete_note` needs `delete`.
+Reads need `read`; the writers need `write`; the two deleting verbs need `delete`.
 
-| Tool              | What it does                                                                                   |
-| ----------------- | ---------------------------------------------------------------------------------------------- |
-| `list_notes`      | Notes the token can reach, newest first. Filter by `query`, `tag`, `type`; page with `cursor`. |
-| `search`          | Blocks whose text contains a substring, each naming the notes it appears in.                   |
-| `read_note`       | A note in full: title, tags, props, tasks, headings, and its markdown.                         |
-| `get_node`        | One block or page: type, text, props, child count, parents, the notes it is in.                |
-| `list_children`   | The blocks directly beneath one — walking **down**.                                            |
-| `list_parents`    | The blocks that hold one, and the notes it appears in — walking **up**.                        |
-| `list_tags`       | Tags across the reachable notes, with note counts.                                             |
-| `list_unassigned` | A note's **Unassigned** blocks — written in it, but nothing links to them any more.            |
-| `create_note`     | A new note from markdown. Unrestricted tokens only.                                            |
-| `update_note`     | Replace a note's body; optionally retitle.                                                     |
-| `append_to_note`  | Add to the end of a note, leaving the rest untouched.                                          |
-| `delete_note`     | Delete a note and the blocks only it holds.                                                    |
+| Tool             | Perm   | What it does                                                                                   |
+| ---------------- | ------ | ---------------------------------------------------------------------------------------------- |
+| `list_notes`     | read   | Notes the token can reach, newest first. Filter by `query`, `tag`, `type`; page with `cursor`. |
+| `search`         | read   | Blocks whose text contains a substring, each naming the notes it appears in.                   |
+| `read_note`      | read   | A note's blocks **as stored rows**, with `depth`, `blockCount`, and its `unassigned` blocks.   |
+| `get_block`      | read   | One block by id: type, text, props, children, parents, the notes it is in.                     |
+| `list_children`  | read   | The blocks beneath one, `depth` levels deep — walking **down**.                                |
+| `list_parents`   | read   | The blocks that hold one, and the notes it appears in — walking **up**.                        |
+| `list_tags`      | read   | Tags across the reachable notes, with note counts.                                             |
+| `create_note`    | write¹ | A new note from markdown.                                                                      |
+| `append_to_note` | write  | Add to the end of a note, leaving the rest untouched.                                          |
+| `update_note`    | write  | **Replace** a note's whole body. The blunt instrument — see below.                             |
+| `update_block`   | write  | Change one block's text, type or metadata, in place.                                           |
+| `link_block`     | write  | Put an existing block under a parent, at an index.                                             |
+| `unlink_block`   | write  | Take a block out of one place. Kept, not deleted.                                              |
+| `move_block`     | write  | Re-parent or reorder a block in one step.                                                      |
+| `delete_block`   | delete | Delete a block everywhere, optionally with its contents.                                       |
+| `delete_note`    | delete | Delete a note and the blocks only it holds.                                                    |
 
-### `id::` lines are the round trip
+¹ `create_note` also requires an **unrestricted** token — see §1.
 
-`read_note` returns the canonical rollup, which carries an `id::` line under every block.
-An agent that edits that markdown and sends it back through `update_note` **keeps those
-lines**, and every block it did not touch stays the same block — same id, same links,
-same appearances in other notes.
+### Reads are rows, not markdown
 
-Drop them and each block becomes a new one; the originals, if they still hold anything,
-land in the note's Unassigned basket rather than being deleted (the app's own
-never-lose-work rule, `docToOps`). Nothing is lost either way, but the note gains a
-basket full of duplicates. `append_to_note` avoids the question entirely and is the right
-tool for "add this to my notes".
+`read_note`, `get_block` and the traversal tools hand back **the stored row**: id, `type`
+(`ul`, `h1`, `todo`…), marker-free `text`, the `props` object, `childIds`, `updatedAt`.
+No markdown, no `id::` lines — the id is a field.
 
-### The Unassigned basket
+Markdown is an **input** format in this API and never an output one. `create_note` and
+`append_to_note` parse it; nothing returns it. That is what makes the write side safe:
+an agent changes a block by naming it and setting a field, rather than round-tripping a
+document and hoping the diff lands where it meant.
+
+It also makes partial reads safe, which matters more than it sounds. Measured against a
+real corpus, one `read_note` on a 281-block note is **~5,800 tokens** — and that note has
+five root blocks, so `depth: 1` describes it in about 300. A block whose children were
+cut off is marked `hasMoreChildren`, and `blockCount` always reports the real size, so an
+agent knows exactly what it has not seen and where to look. There is no partial
+_document_ it could hand back to a whole-note write and silently gut the note with,
+because there is no document.
+
+One cost to know: a JSON row is heavier per block than the markdown line it replaces
+(~60 characters against ~36). Empty fields are omitted for that reason — `"props":null,
+"childIds":[]` on 281 blocks is pure context spent saying nothing — and reading a big
+note whole is still expensive. Traverse it.
+
+### Editing: name the block, not the note
+
+`update_note` replaces a note's **whole body**. Every block it does not recreate stops
+being part of the note and moves to Unassigned. Nothing is lost, but the note is emptied
+of it, so it is for rewriting a note wholesale and nothing else.
+
+For everything else there is a verb that touches one block and leaves the rest alone:
+`update_block` to change it, `move_block` to relocate it, `link_block`/`unlink_block` to
+add or remove one of its appearances, `append_to_note` to add to the end. Changing one
+bullet with `update_block` costs a couple of hundred tokens; doing it through
+`read_note` + `update_note` on that same 281-block note costs about twelve thousand.
+
+### A block can be in several notes at once
+
+Linking a block under a second parent does not copy it — the same block now appears in
+both places, and editing it either place changes both. That is the app's own behaviour,
+and it has a consequence for scoped tokens:
+
+> A **note-scoped** token may only write a block every one of whose notes it names.
+
+Otherwise editing a shared block would put a write where the grant does not reach, and
+neither the agent nor anyone reading the grant would see it happen. The refusal says a
+note the token cannot see holds the block, and deliberately **not which one** — the check
+must not become a way to enumerate the notes the grant excludes. Unrestricted tokens are
+never limited this way. `notesReachingUnscoped` is the one read in `graph-access.ts` that
+deliberately ignores the scope, and it exists only for this.
+
+### The Unassigned section
 
 A block belongs to a note by being reachable from its page node. Remove the row holding
 it and the block is **kept, not deleted** — it still carries the note it was written in
-(`notes_id`), and shows in that note's **Unassigned** section beneath the outline, with
-everything under it. That is the app's never-lose-work rule, and it means a note has two
-parts an agent has to know about:
+(`notes_id`), and shows in that note's Unassigned section beneath the outline, with
+everything under it. `read_note` returns it as `unassigned`, alongside the outline, so
+it needs no tool of its own. Linking it back with `link_block` takes it out again.
 
-- `read_note` gives the **outline** — and an `unassignedCount`, so an agent that has
-  never heard of the basket still finds out there is something there;
-- `list_unassigned` gives the **basket**, as markdown with `id::` lines.
-
-Pasting one back is an ordinary `update_note`: put the basket's markdown (ids and all)
-where you want it in the outline, and linking it there is what takes it out of the
-basket. There is no separate "restore" verb, because there is no separate operation.
-
-Deliberately read-only: the basket is where the app deletes a block for good, and that is
-a decision worth leaving to the person whose notes they are. `delete_note` still removes
-a note's basket along with the note, as the app does.
+`delete_note` still removes a note's Unassigned blocks along with the note, as the app
+does.
 
 ### Two kinds of failure
 
@@ -252,15 +287,15 @@ worth paying.
 
 ## 7. Files
 
-|                                         |                                                      |
-| --------------------------------------- | ---------------------------------------------------- |
-| `worker/handlers/mcp.ts`                | The endpoint: transport rules, auth, dispatch        |
-| `worker/handlers/mcp-tokens.ts`         | Mint / list / revoke, session-authed                 |
-| `worker/mcp/protocol.ts`                | The 2026-07-28 wire format — pure                    |
-| `worker/mcp/grant.ts`                   | What a token may do — pure, and fail-closed          |
-| `worker/mcp/tokens.ts`                  | Token storage, hashing, lookup                       |
-| `worker/mcp/graph-access.ts`            | The scoped view of the corpus, and the write path    |
-| `worker/mcp/tools.ts`                   | The twelve tools, and the three refusals before them |
-| `src/data/ops-rows.ts`                  | Ops → rows, shared with the browser store's rule     |
-| `src/components/mcp-tokens-section.tsx` | The Settings panel                                   |
-| `migrations/0007_mcp_tokens.sql`        | The grants table                                     |
+|                                         |                                                   |
+| --------------------------------------- | ------------------------------------------------- |
+| `worker/handlers/mcp.ts`                | The endpoint: transport rules, auth, dispatch     |
+| `worker/handlers/mcp-tokens.ts`         | Mint / list / revoke, session-authed              |
+| `worker/mcp/protocol.ts`                | The 2026-07-28 wire format — pure                 |
+| `worker/mcp/grant.ts`                   | What a token may do — pure, and fail-closed       |
+| `worker/mcp/tokens.ts`                  | Token storage, hashing, lookup                    |
+| `worker/mcp/graph-access.ts`            | The scoped view of the corpus, and the write path |
+| `worker/mcp/tools.ts`                   | The sixteen tools, and the refusals before them   |
+| `src/data/ops-rows.ts`                  | Ops → rows, shared with the browser store's rule  |
+| `src/components/mcp-tokens-section.tsx` | The Settings panel                                |
+| `migrations/0007_mcp_tokens.sql`        | The grants table                                  |

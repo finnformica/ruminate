@@ -60,6 +60,12 @@ async function refuse(
   return called.outcome.message
 }
 
+/** The texts of a note's outline blocks, in order. */
+async function textsOf(grant: Grant, noteId: string): Promise<string[]> {
+  const data = await run(harness, grant, "read_note", { note_id: noteId })
+  return data.blocks.map((block: any) => block.text)
+}
+
 let harness: McpTestEnv
 const ALPHA = "blk_alpha"
 const BETA = "blk_beta"
@@ -161,13 +167,53 @@ describe("list_notes", () => {
 })
 
 describe("read_note", () => {
-  it("returns markdown carrying the `id::` lines that keep block identity", async () => {
+  it("returns the note's blocks as stored rows, not markdown", async () => {
     const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
-    expect(data.markdown).toContain("id:: ")
-    expect(data.markdown).toContain("a bullet")
+
+    expect(data).not.toHaveProperty("markdown")
     expect(data.title).toBe("Alpha")
-    expect(data.headings[0].text).toBe("Heading")
-    expect(data.tasks[0].completed).toBe(false)
+    expect(data.blockCount).toBe(3)
+
+    const heading = data.blocks.find((block: any) => block.type === "h1")
+    expect(heading.text).toBe("Heading")
+    expect(heading.depth).toBe(0)
+    expect(heading.childIds).toHaveLength(2)
+    expect(heading.updatedAt).toBeGreaterThan(0)
+  })
+
+  it("carries each block's stored type and metadata", async () => {
+    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    const types = data.blocks.map((block: any) => block.type)
+
+    // The stored types, not rendered markers.
+    expect(types).toContain("h1")
+    expect(types).toContain("ul")
+    expect(types).toContain("todo")
+  })
+
+  it("omits empty fields rather than sending null", async () => {
+    const data = await run(harness, grantOf({}), "read_note", { note_id: BETA })
+    const block = data.blocks[0]
+
+    expect(block).not.toHaveProperty("props")
+    expect(block).not.toHaveProperty("childIds")
+    expect(block.writtenInNoteId).toBe(BETA)
+  })
+
+  it("reads only the top levels when asked, and says where it stopped", async () => {
+    const shallow = await run(harness, grantOf({}), "read_note", { note_id: ALPHA, depth: 1 })
+
+    expect(shallow.blocks).toHaveLength(1)
+    expect(shallow.blocks[0].hasMoreChildren).toBe(true)
+    expect(shallow.truncated).toBe(true)
+    // The full size is still reported, so the agent knows what it has not seen.
+    expect(shallow.blockCount).toBe(3)
+  })
+
+  it("is not truncated when the depth covers the whole note", async () => {
+    const full = await run(harness, grantOf({}), "read_note", { note_id: ALPHA, depth: 5 })
+    expect(full.truncated).toBe(false)
+    expect(full.blocks).toHaveLength(3)
   })
 
   it("refuses a note that does not exist", async () => {
@@ -177,56 +223,64 @@ describe("read_note", () => {
   })
 
   it("refuses a note id that is really a block id", async () => {
-    const children = await run(harness, grantOf({}), "list_children", { node_id: ALPHA })
-    const blockId = children.children[0].id
-    expect(await refuse(harness, grantOf({}), "read_note", { note_id: blockId })).toMatch(
-      /No such note/,
-    )
+    const children = await run(harness, grantOf({}), "list_children", { block_id: ALPHA })
+    expect(
+      await refuse(harness, grantOf({}), "read_note", { note_id: children.children[0].id }),
+    ).toMatch(/No such note/)
   })
 })
 
 describe("traversal", () => {
   it("walks down from a note through list_children", async () => {
     const grant = grantOf({})
-    const roots = await run(harness, grant, "list_children", { node_id: ALPHA })
+    const roots = await run(harness, grant, "list_children", { block_id: ALPHA })
     expect(roots.children.map((child: any) => child.type)).toEqual(["h1"])
 
     const heading = roots.children[0]
-    expect(heading.childCount).toBe(2)
-    const beneath = await run(harness, grant, "list_children", { node_id: heading.id })
+    const beneath = await run(harness, grant, "list_children", { block_id: heading.id })
     expect(beneath.children.map((child: any) => child.text)).toEqual(["a bullet", "a task #work"])
+  })
+
+  it("pulls several levels at once with depth, tagging each block's level", async () => {
+    const data = await run(harness, grantOf({}), "list_children", { block_id: ALPHA, depth: 2 })
+
+    expect(data.children).toHaveLength(3)
+    expect(data.children[0].depth).toBe(0)
+    expect(data.children[1].depth).toBe(1)
+    expect(data.directChildCount).toBe(1)
+    expect(data.truncated).toBe(false)
   })
 
   it("walks up from a block through list_parents, back to its note", async () => {
     const grant = grantOf({})
-    const heading = (await run(harness, grant, "list_children", { node_id: ALPHA })).children[0]
-    const bullet = (await run(harness, grant, "list_children", { node_id: heading.id })).children[0]
+    const heading = (await run(harness, grant, "list_children", { block_id: ALPHA })).children[0]
+    const bullet = (await run(harness, grant, "list_children", { block_id: heading.id }))
+      .children[0]
 
-    const parents = await run(harness, grant, "list_parents", { node_id: bullet.id })
+    const parents = await run(harness, grant, "list_parents", { block_id: bullet.id })
     expect(parents.parents.map((parent: any) => parent.id)).toEqual([heading.id])
     expect(parents.noteIds).toEqual([ALPHA])
     expect(parents.notes[0].title).toBe("Alpha")
   })
 
-  it("describes a single node with get_node", async () => {
+  it("describes a single block with get_block", async () => {
     const grant = grantOf({})
-    const heading = (await run(harness, grant, "list_children", { node_id: ALPHA })).children[0]
+    const heading = (await run(harness, grant, "list_children", { block_id: ALPHA })).children[0]
 
-    const node = await run(harness, grant, "get_node", { node_id: heading.id })
-    expect(node.type).toBe("h1")
-    expect(node.text).toBe("Heading")
-    expect(node.childCount).toBe(2)
-    expect(node.parentIds).toEqual([ALPHA])
-    expect(node.noteIds).toEqual([ALPHA])
-    // The note it was written in — which is where it would show if nothing
-    // linked to it any more.
-    expect(node.writtenInNoteId).toBe(ALPHA)
+    const block = await run(harness, grant, "get_block", { block_id: heading.id })
+    expect(block.type).toBe("h1")
+    expect(block.text).toBe("Heading")
+    expect(block.childIds).toHaveLength(2)
+    expect(block.parentIds).toEqual([ALPHA])
+    expect(block.noteIds).toEqual([ALPHA])
+    expect(block.writtenInNoteId).toBe(ALPHA)
+    expect(block.isNote).toBe(false)
   })
 
-  it("treats a note as a node too", async () => {
-    const node = await run(harness, grantOf({}), "get_node", { node_id: ALPHA })
-    expect(node.isPage).toBe(true)
-    expect(node.text).toBe("Alpha")
+  it("treats a note as a block too", async () => {
+    const block = await run(harness, grantOf({}), "get_block", { block_id: ALPHA })
+    expect(block.isNote).toBe(true)
+    expect(block.text).toBe("Alpha")
   })
 })
 
@@ -254,11 +308,11 @@ describe("search and tags", () => {
 // The Unassigned basket
 // -----------------------------------------------------------------------------
 
-describe("list_unassigned", () => {
+describe("unassigned blocks", () => {
   /** Drop ALPHA's outline, which parks the heading and its children in the
-   * note's basket — the app's own never-lose-work rule, not a special case. */
+   * note's Unassigned section — the app's own never-lose-work rule. */
   async function orphanAlpha() {
-    const heading = (await run(harness, grantOf({}), "list_children", { node_id: ALPHA }))
+    const heading = (await run(harness, grantOf({}), "list_children", { block_id: ALPHA }))
       .children[0]
     await run(harness, grantOf({}), "update_note", {
       note_id: ALPHA,
@@ -268,82 +322,48 @@ describe("list_unassigned", () => {
   }
 
   it("is empty for a note whose blocks are all in its outline", async () => {
-    const data = await run(harness, grantOf({}), "list_unassigned", { note_id: ALPHA })
-    expect(data.roots).toEqual([])
-    expect(data.markdown).toBe("")
+    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    expect(data.unassigned).toEqual([])
   })
 
-  it("returns a block that fell out of the outline, with its `id::` line", async () => {
+  it("reports a block that fell out of the outline, as a row", async () => {
     const heading = await orphanAlpha()
-    const data = await run(harness, grantOf({}), "list_unassigned", { note_id: ALPHA })
+    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
 
-    expect(data.roots.map((root: any) => root.id)).toEqual([heading.id])
-    expect(data.roots[0].text).toBe("Heading")
-    expect(data.markdown).toContain(`id:: ${heading.id}`)
+    expect(data.unassigned.map((block: any) => block.id)).toContain(heading.id)
+    expect(data.unassigned[0].text).toBe("Heading")
   })
 
   it("carries what the orphaned block still holds", async () => {
     await orphanAlpha()
-    const data = await run(harness, grantOf({}), "list_unassigned", { note_id: ALPHA })
+    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    const texts = data.unassigned.map((block: any) => block.text)
 
-    // The heading is one root; the bullet and task beneath it ride along in
-    // the markdown rather than being listed as roots of their own.
-    expect(data.roots).toHaveLength(1)
-    expect(data.markdown).toContain("a bullet")
-    expect(data.markdown).toContain("a task #work")
+    expect(texts).toContain("a bullet")
+    expect(texts).toContain("a task #work")
   })
 
-  it("does not put them in read_note's outline, but does say they exist", async () => {
+  it("keeps them out of the note's outline", async () => {
     await orphanAlpha()
-    const note = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
 
-    expect(note.markdown).not.toContain("a bullet")
-    expect(note.unassignedCount).toBe(1)
+    expect(data.blocks.map((block: any) => block.text)).toEqual(["something else"])
   })
 
   it("reports nothing for another note", async () => {
     await orphanAlpha()
-    expect((await run(harness, grantOf({}), "list_unassigned", { note_id: BETA })).roots).toEqual(
-      [],
-    )
+    expect((await run(harness, grantOf({}), "read_note", { note_id: BETA })).unassigned).toEqual([])
   })
 
-  it("stops reporting a block once it is pasted back into the outline", async () => {
+  it("stops reporting a block once it is linked back into the outline", async () => {
     const heading = await orphanAlpha()
-    const basket = await run(harness, grantOf({}), "list_unassigned", { note_id: ALPHA })
+    await run(harness, grantOf({}), "link_block", { parent_id: ALPHA, block_id: heading.id })
 
-    await run(harness, grantOf({}), "update_note", {
-      note_id: ALPHA,
-      markdown: `- something else\n  id:: ${
-        (await run(harness, grantOf({}), "read_note", { note_id: ALPHA })).rootBlockIds[0]
-      }\n${basket.markdown}`,
-    })
-
-    expect((await run(harness, grantOf({}), "list_unassigned", { note_id: ALPHA })).roots).toEqual(
-      [],
-    )
-    const note = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
-    expect(note.markdown).toContain(`id:: ${heading.id}`)
-    expect(note.markdown).toContain("a bullet")
-  })
-
-  it("is refused for a note outside the grant", async () => {
-    const scoped = grantOf({ note_ids: `["${ALPHA}"]` })
-    expect(await refuse(harness, scoped, "list_unassigned", { note_id: BETA })).toMatch(
-      /No such note/,
-    )
-  })
-
-  it("needs only `read`", async () => {
-    expect(toolsFor(grantOf({ permissions: "read" })).map((tool) => tool.name)).toContain(
-      "list_unassigned",
-    )
+    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    expect(data.unassigned).toEqual([])
+    expect(data.blocks.map((block: any) => block.id)).toContain(heading.id)
   })
 })
-
-// -----------------------------------------------------------------------------
-// The wall: a note-scoped grant
-// -----------------------------------------------------------------------------
 
 describe("note scope", () => {
   const scoped = () => grantOf({ note_ids: `["${ALPHA}"]` })
@@ -370,16 +390,16 @@ describe("note scope", () => {
   it("cannot traverse into a block of a note outside the scope", async () => {
     // Find a real block id from the unrestricted view, then present it to the
     // scoped grant — the exact move a prompt-injected agent would make.
-    const outside = (await run(harness, grantOf({}), "list_children", { node_id: BETA }))
+    const outside = (await run(harness, grantOf({}), "list_children", { block_id: BETA }))
       .children[0]
 
-    expect(await refuse(harness, scoped(), "get_node", { node_id: outside.id })).toMatch(
+    expect(await refuse(harness, scoped(), "get_block", { block_id: outside.id })).toMatch(
       /No such block/,
     )
-    expect(await refuse(harness, scoped(), "list_children", { node_id: outside.id })).toMatch(
+    expect(await refuse(harness, scoped(), "list_children", { block_id: outside.id })).toMatch(
       /No such block/,
     )
-    expect(await refuse(harness, scoped(), "list_parents", { node_id: outside.id })).toMatch(
+    expect(await refuse(harness, scoped(), "list_parents", { block_id: outside.id })).toMatch(
       /No such block/,
     )
   })
@@ -396,17 +416,16 @@ describe("note scope", () => {
     )
 
     // And the note is genuinely untouched.
-    const beta = await run(harness, grantOf({}), "read_note", { note_id: BETA })
-    expect(beta.markdown).toContain("beta content")
+    expect(await textsOf(grantOf({}), BETA)).toContain("beta content #home")
   })
 
   it("sees an Unassigned block of its note, AND what hangs beneath it", async () => {
     // Make one: remove the heading from the outline, which leaves it and its
     // children out of reach but still written in ALPHA — the note's basket,
     // which the person still sees at the foot of the note.
-    const heading = (await run(harness, grantOf({}), "list_children", { node_id: ALPHA }))
+    const heading = (await run(harness, grantOf({}), "list_children", { block_id: ALPHA }))
       .children[0]
-    const beneath = (await run(harness, grantOf({}), "list_children", { node_id: heading.id }))
+    const beneath = (await run(harness, grantOf({}), "list_children", { block_id: heading.id }))
       .children[0]
     await run(harness, grantOf({}), "update_note", {
       note_id: ALPHA,
@@ -414,16 +433,20 @@ describe("note scope", () => {
     })
 
     // The basket root, and the block under it, are both still reachable.
-    expect((await run(harness, scoped(), "get_node", { node_id: heading.id })).text).toBe("Heading")
-    expect((await run(harness, scoped(), "get_node", { node_id: beneath.id })).id).toBe(beneath.id)
+    expect((await run(harness, scoped(), "get_block", { block_id: heading.id })).text).toBe(
+      "Heading",
+    )
+    expect((await run(harness, scoped(), "get_block", { block_id: beneath.id })).id).toBe(
+      beneath.id,
+    )
   })
 
   it("does not let the basket widen the scope to another note", async () => {
-    const outside = (await run(harness, grantOf({}), "list_children", { node_id: BETA }))
+    const outside = (await run(harness, grantOf({}), "list_children", { block_id: BETA }))
       .children[0]
     await run(harness, grantOf({}), "update_note", { note_id: ALPHA, markdown: "- x\n" })
 
-    expect(await refuse(harness, scoped(), "get_node", { node_id: outside.id })).toMatch(
+    expect(await refuse(harness, scoped(), "get_block", { block_id: outside.id })).toMatch(
       /No such block/,
     )
   })
@@ -477,8 +500,7 @@ describe("permissions", () => {
       note_id: ALPHA,
       markdown: "- rewritten",
     })
-    const alpha = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
-    expect(alpha.markdown).toContain("a bullet")
+    expect(await textsOf(grantOf({}), ALPHA)).toContain("a bullet")
   })
 
   it("refuses even reads to a grant with no permissions", async () => {
@@ -522,8 +544,7 @@ describe("create_note", () => {
     })
     const read = await run(harness, grantOf({}), "read_note", { note_id: created.noteId })
     expect(read.title).toBe("Fresh")
-    expect(read.markdown).toContain("one")
-    expect(read.markdown).toContain("two")
+    expect(read.blocks.map((block: any) => block.text)).toEqual(["one", "two"])
   })
 
   it("accepts a date id for a daily note", async () => {
@@ -554,10 +575,7 @@ describe("create_note", () => {
 describe("append_to_note", () => {
   it("adds to the end and leaves what was there alone", async () => {
     await run(harness, grantOf({}), "append_to_note", { note_id: BETA, markdown: "- appended\n" })
-    const read = await run(harness, grantOf({}), "read_note", { note_id: BETA })
-    expect(read.markdown).toContain("beta content")
-    expect(read.markdown).toContain("appended")
-    expect(read.markdown.indexOf("beta content")).toBeLessThan(read.markdown.indexOf("appended"))
+    expect(await textsOf(grantOf({}), BETA)).toEqual(["beta content #home", "appended"])
   })
 
   it("keeps every existing block id", async () => {
@@ -578,20 +596,17 @@ describe("append_to_note", () => {
 describe("update_note", () => {
   it("replaces the body", async () => {
     await run(harness, grantOf({}), "update_note", { note_id: BETA, markdown: "- replaced\n" })
-    const read = await run(harness, grantOf({}), "read_note", { note_id: BETA })
-    expect(read.markdown).toContain("replaced")
-    expect(read.markdown).not.toContain("beta content")
+    expect(await textsOf(grantOf({}), BETA)).toEqual(["replaced"])
   })
 
-  it("keeps a block's identity when its `id::` line is sent back", async () => {
+  it("moves every block it does not recreate into Unassigned", async () => {
     const before = await run(harness, grantOf({}), "read_note", { note_id: BETA })
-    const edited = before.markdown.replace("beta content #home", "beta content, edited #home")
+    await run(harness, grantOf({}), "update_note", { note_id: BETA, markdown: "- brand new\n" })
 
-    await run(harness, grantOf({}), "update_note", { note_id: BETA, markdown: edited })
     const after = await run(harness, grantOf({}), "read_note", { note_id: BETA })
-
-    expect(after.rootBlockIds).toEqual(before.rootBlockIds)
-    expect(after.markdown).toContain("beta content, edited")
+    expect(after.blocks.map((block: any) => block.text)).toEqual(["brand new"])
+    // Nothing is lost: the old block is in the note's Unassigned section.
+    expect(after.unassigned.map((block: any) => block.id)).toEqual(before.rootBlockIds)
   })
 
   it("retitles when asked, and keeps the title when not", async () => {
@@ -611,6 +626,264 @@ describe("update_note", () => {
     expect(
       await refuse(harness, grantOf({}), "update_note", { note_id: BETA, markdown: huge }),
     ).toMatch(/limit/)
+  })
+})
+
+// -----------------------------------------------------------------------------
+// Block-level writes
+// -----------------------------------------------------------------------------
+
+/** ALPHA's heading, and the bullet and task beneath it. */
+async function alphaBlocks() {
+  const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+  const heading = data.blocks.find((block: any) => block.type === "h1")
+  const bullet = data.blocks.find((block: any) => block.type === "ul")
+  const task = data.blocks.find((block: any) => block.type === "todo")
+  return { heading, bullet, task }
+}
+
+describe("update_block", () => {
+  it("changes a block's text in place, keeping its id", async () => {
+    const { bullet } = await alphaBlocks()
+    await run(harness, grantOf({}), "update_block", { block_id: bullet.id, text: "edited" })
+
+    const after = await run(harness, grantOf({}), "get_block", { block_id: bullet.id })
+    expect(after.text).toBe("edited")
+    expect(after.id).toBe(bullet.id)
+  })
+
+  it("changes a block's type — ticking a to-do", async () => {
+    const { task } = await alphaBlocks()
+    await run(harness, grantOf({}), "update_block", { block_id: task.id, type: "done" })
+
+    expect((await run(harness, grantOf({}), "get_block", { block_id: task.id })).type).toBe("done")
+  })
+
+  it("replaces a block's metadata", async () => {
+    const { bullet } = await alphaBlocks()
+    await run(harness, grantOf({}), "update_block", {
+      block_id: bullet.id,
+      props: { language: "ts" },
+    })
+
+    expect((await run(harness, grantOf({}), "get_block", { block_id: bullet.id })).props).toEqual({
+      language: "ts",
+    })
+  })
+
+  it("leaves the rest of the note completely alone", async () => {
+    const { bullet } = await alphaBlocks()
+    const before = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    await run(harness, grantOf({}), "update_block", { block_id: bullet.id, text: "edited" })
+    const after = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+
+    expect(after.blocks.map((b: any) => b.id)).toEqual(before.blocks.map((b: any) => b.id))
+    expect(after.unassigned).toEqual([])
+  })
+
+  it("writes nothing when the value already matches", async () => {
+    const { bullet } = await alphaBlocks()
+    const data = await run(harness, grantOf({}), "update_block", {
+      block_id: bullet.id,
+      text: "a bullet",
+    })
+    expect(data.changed).toBe(0)
+    expect(data.rowsWritten).toBe(0)
+  })
+
+  it("refuses an unknown type, an empty change, and a note", async () => {
+    const { bullet } = await alphaBlocks()
+    expect(
+      await refuse(harness, grantOf({}), "update_block", { block_id: bullet.id, type: "banana" }),
+    ).toMatch(/Unknown block type/)
+    expect(await refuse(harness, grantOf({}), "update_block", { block_id: bullet.id })).toMatch(
+      /at least one/,
+    )
+    expect(
+      await refuse(harness, grantOf({}), "update_block", { block_id: ALPHA, text: "x" }),
+    ).toMatch(/is a note/)
+  })
+})
+
+describe("link_block and unlink_block", () => {
+  it("links an existing block under another parent, in both places at once", async () => {
+    const { bullet } = await alphaBlocks()
+    await run(harness, grantOf({}), "link_block", { parent_id: BETA, block_id: bullet.id })
+
+    const block = await run(harness, grantOf({}), "get_block", { block_id: bullet.id })
+    expect(block.noteIds.sort()).toEqual([ALPHA, BETA].sort())
+    expect(await textsOf(grantOf({}), BETA)).toContain("a bullet")
+    // Still in ALPHA too — a link is not a move.
+    expect(await textsOf(grantOf({}), ALPHA)).toContain("a bullet")
+  })
+
+  it("respects index, and appends when it is omitted", async () => {
+    const { bullet } = await alphaBlocks()
+    await run(harness, grantOf({}), "link_block", {
+      parent_id: BETA,
+      block_id: bullet.id,
+      index: 0,
+    })
+    expect(await textsOf(grantOf({}), BETA)).toEqual(["a bullet", "beta content #home"])
+  })
+
+  it("unlinks without deleting, sending an orphan to Unassigned", async () => {
+    const { bullet } = await alphaBlocks()
+    const { heading } = await alphaBlocks()
+    const data = await run(harness, grantOf({}), "unlink_block", {
+      parent_id: heading.id,
+      block_id: bullet.id,
+    })
+
+    expect(data.orphaned).toBe(true)
+    const note = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    expect(note.blocks.map((b: any) => b.text)).not.toContain("a bullet")
+    expect(note.unassigned.map((b: any) => b.text)).toContain("a bullet")
+  })
+
+  it("unlinking one occurrence leaves the other standing", async () => {
+    const { bullet, heading } = await alphaBlocks()
+    await run(harness, grantOf({}), "link_block", { parent_id: BETA, block_id: bullet.id })
+
+    const data = await run(harness, grantOf({}), "unlink_block", {
+      parent_id: heading.id,
+      block_id: bullet.id,
+    })
+    expect(data.orphaned).toBe(false)
+    expect(await textsOf(grantOf({}), BETA)).toContain("a bullet")
+  })
+
+  it("refuses a self-link and a link that is not there", async () => {
+    const { bullet, heading } = await alphaBlocks()
+    expect(
+      await refuse(harness, grantOf({}), "link_block", {
+        parent_id: bullet.id,
+        block_id: bullet.id,
+      }),
+    ).toMatch(/under itself/)
+    expect(
+      await refuse(harness, grantOf({}), "unlink_block", { parent_id: BETA, block_id: heading.id }),
+    ).toMatch(/not directly under/)
+  })
+})
+
+describe("move_block", () => {
+  it("moves a block to another parent in one step", async () => {
+    const { bullet } = await alphaBlocks()
+    await run(harness, grantOf({}), "move_block", { block_id: bullet.id, to_parent_id: BETA })
+
+    expect(await textsOf(grantOf({}), BETA)).toContain("a bullet")
+    expect(await textsOf(grantOf({}), ALPHA)).not.toContain("a bullet")
+    // A move is not a delete: nothing lands in Unassigned.
+    const alpha = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    expect(alpha.unassigned).toEqual([])
+  })
+
+  it("reorders under the same parent", async () => {
+    const { heading, task } = await alphaBlocks()
+    await run(harness, grantOf({}), "move_block", {
+      block_id: task.id,
+      to_parent_id: heading.id,
+      index: 0,
+    })
+
+    const children = await run(harness, grantOf({}), "list_children", { block_id: heading.id })
+    expect(children.children.map((c: any) => c.text)).toEqual(["a task #work", "a bullet"])
+  })
+
+  it("asks which occurrence when the block has several parents", async () => {
+    const { bullet } = await alphaBlocks()
+    await run(harness, grantOf({}), "link_block", { parent_id: BETA, block_id: bullet.id })
+
+    expect(
+      await refuse(harness, grantOf({}), "move_block", {
+        block_id: bullet.id,
+        to_parent_id: ALPHA,
+      }),
+    ).toMatch(/from_parent_id/)
+  })
+})
+
+describe("delete_block", () => {
+  it("deletes a block and leaves what it held in Unassigned", async () => {
+    const { heading } = await alphaBlocks()
+    await run(harness, grantOf({}), "delete_block", { block_id: heading.id })
+
+    const note = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    expect(note.blocks).toEqual([])
+    expect(note.unassigned.map((b: any) => b.text).sort()).toEqual(["a bullet", "a task #work"])
+  })
+
+  it("takes the contents too when asked", async () => {
+    const { heading } = await alphaBlocks()
+    await run(harness, grantOf({}), "delete_block", { block_id: heading.id, with_contents: true })
+
+    const note = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    expect(note.blocks).toEqual([])
+    expect(note.unassigned).toEqual([])
+  })
+
+  it("needs the delete permission, and refuses a note", async () => {
+    const { bullet } = await alphaBlocks()
+    const called = await callTool(
+      grantOf({ permissions: "read,write" }),
+      harness.tenant(USER),
+      "delete_block",
+      { block_id: bullet.id },
+    )
+    expect(called.kind).toBe("unknown_tool")
+    expect(await refuse(harness, grantOf({}), "delete_block", { block_id: ALPHA })).toMatch(
+      /is a note/,
+    )
+  })
+})
+
+describe("block writes and note scope", () => {
+  it("refuses to edit a block a note outside the scope also holds", async () => {
+    // Put ALPHA's bullet into BETA as well, then scope a token to ALPHA only.
+    const { bullet } = await alphaBlocks()
+    await run(harness, grantOf({}), "link_block", { parent_id: BETA, block_id: bullet.id })
+    const scoped = grantOf({ note_ids: `["${ALPHA}"]` })
+
+    const message = await refuse(harness, scoped, "update_block", {
+      block_id: bullet.id,
+      text: "reached out of scope",
+    })
+    expect(message).toMatch(/not scoped to/)
+    // And it does not name the note it could not see.
+    expect(message).not.toContain(BETA)
+
+    expect(await textsOf(grantOf({}), BETA)).toContain("a bullet")
+  })
+
+  it("refuses to unlink, move or delete such a block too", async () => {
+    const { bullet, heading } = await alphaBlocks()
+    await run(harness, grantOf({}), "link_block", { parent_id: BETA, block_id: bullet.id })
+    const scoped = grantOf({ note_ids: `["${ALPHA}"]` })
+
+    for (const [name, args] of [
+      ["unlink_block", { parent_id: heading.id, block_id: bullet.id }],
+      ["move_block", { block_id: bullet.id, to_parent_id: ALPHA }],
+      ["delete_block", { block_id: bullet.id }],
+    ] as const) {
+      expect(await refuse(harness, scoped, name, args)).toMatch(/not scoped to/)
+    }
+  })
+
+  it("allows editing a block only its own notes hold", async () => {
+    const { bullet } = await alphaBlocks()
+    const scoped = grantOf({ note_ids: `["${ALPHA}"]` })
+
+    await run(harness, scoped, "update_block", { block_id: bullet.id, text: "fine" })
+    expect(await textsOf(grantOf({}), ALPHA)).toContain("fine")
+  })
+
+  it("never restricts an unrestricted grant this way", async () => {
+    const { bullet } = await alphaBlocks()
+    await run(harness, grantOf({}), "link_block", { parent_id: BETA, block_id: bullet.id })
+
+    await run(harness, grantOf({}), "update_block", { block_id: bullet.id, text: "allowed" })
+    expect(await textsOf(grantOf({}), BETA)).toContain("allowed")
   })
 })
 
@@ -645,9 +918,7 @@ describe("delete_note", () => {
 
   it("leaves the other note alone", async () => {
     await run(harness, grantOf({}), "delete_note", { note_id: BETA })
-    expect((await run(harness, grantOf({}), "read_note", { note_id: ALPHA })).markdown).toContain(
-      "a bullet",
-    )
+    expect(await textsOf(grantOf({}), ALPHA)).toContain("a bullet")
   })
 })
 
