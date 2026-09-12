@@ -21,27 +21,28 @@ asks for it.
    _collapsed_ block keeps its chevron visible (the key stays hidden for the
    duration), so hidden content is never a secret. Without a hovering pointer
    (touch) the chevron simply stands in for a parent's key.
-3. **Selection has its own color, and is drawn as a ring.** Hover is neutral;
-   selection is accent. Both are **hairlines, not fills**: the app draws
-   structure with 1px borders and small brightness steps everywhere else
-   (cards, inputs, the indent guides), so a block line is outlined, never
-   painted like a nav row. A block line hovers with a 1px inset ring in
-   `--color-border-secondary` and no fill (editable editors only — never
-   read-only views, the row being edited, or a selected row) and selects with
-   the **block selection tokens** (`--color-border-selected` /
-   `--color-bg-selected-faint` / `--color-text-selected`,
-   `src/styles/variables.css`): a 1px inset ring of the accent over a faint
-   wash. Light scheme: the ring is
+3. **Selection has its own color, and is drawn as a ring.** Hover is a neutral
+   **fill**; selection is an accent **ring**. The two differ in _kind_, not in
+   weight, and the difference says something true: a ring draws a boundary,
+   and a boundary claims an extent — a selection has one (it can run over
+   several blocks), the pointer does not. A block line hovers at a whisper
+   (`--neutral-a2`, editable editors only — never read-only views, the row
+   being edited, or a selected row) and selects with the **block selection
+   tokens** (`--color-border-selected` / `--color-bg-selected-faint` /
+   `--color-text-selected`, `src/styles/variables.css`): a 1px inset ring of
+   the accent over a faint wash. The ring, not a painted slab, is what keeps
+   the block a line of a document rather than a row of a nav list — the app
+   draws structure with 1px borders and small brightness steps everywhere
+   else (cards, inputs, the indent guides). Light scheme: the ring is
    `color-mix(in srgb, var(--accent-9) 45%, <wash>)` over a 7% accent-9 wash.
    Dark scheme: pastel — the ring is 55% accent-11 (the dark scheme's light
    step; a dark ground eats a thin line) over a 12% accent-11 wash laid on a
    14% white lift, so the tint stays airy where accent-9 went muddy, and the
    lift keeps it a clear step above the page without the old wash's 18%
-   slab. The Neutral accent's light ring deepens to 60%, as its wash
-   does, so it stays clear of the hover ring. Hover and selection therefore
-   differ in **kind** — a neutral line against an accent one — not merely in
-   weight; a highlighted block must read as "selected", not "hovered", and
-   selection always wins visually.
+   slab. The Neutral accent's light ring deepens to 60%, as its wash does, so
+   an accent-9 that _is_ the gray ramp still outranks the inactive
+   selection's neutral ring. A highlighted block must read as "selected", not
+   "hovered", and selection always wins visually.
    The ring is four inset box-shadows, one per edge, so a multi-select run
    drops the edges that sit mid-run (`.block-run-top` / `.block-run-bottom`,
    from the run-edge pairs in `block-item.tsx`) and reads as one outlined
@@ -68,13 +69,13 @@ asks for it.
    was just clicked, the
    selection demotes to the same ring language with the accent removed (the
    additive `.block-highlight-inactive` class), Finder/VS Code-style: still
-   visibly the selection, no longer claiming the keys. The ring goes neutral,
-   at the hover ring's weight (light: 22% `--neutral-9` over the fill; dark:
-   a 14% white lift), and keeps a faint neutral fill under it (light: 4%
-   `--neutral-9`; dark: 4% white). The three states form one ladder — hover
-   is a neutral ring alone, inactive a neutral ring over a fill, active an
-   accent ring over a fill — keeping the order active > inactive > hover
-   everywhere. The text tint resets to plain inherited ink, so demotion also
+   visibly the selection, no longer claiming the keys. The ring goes neutral
+   (light: 22% `--neutral-9` over the fill; dark: a 14% white lift), and
+   keeps a faint neutral fill under it (light: 4% `--neutral-9`; dark: 4%
+   white). The three states form one ladder, each rung **adding** to the one
+   below — hover is a fill alone, inactive that fill plus a neutral ring,
+   active that fill plus an accent ring — keeping the order
+   active > inactive > hover everywhere. The text tint resets to plain inherited ink, so demotion also
    drains the color from the text. Accent-independent, so all five accents
    share one inactive treatment per scheme. Restoration rides the same 100ms
    fades — perceptually instant.
@@ -233,20 +234,20 @@ full-width highlight.)
 
 ## Color roles
 
-| Role         | Light / dark token                                              | Used for                                                                                                                                                                                       |
-| ------------ | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Ink          | `--color-text` (sand-12)                                        | body, headings, checked-off text ink                                                                                                                                                           |
-| Muted        | `--color-text-secondary`                                        | quotes, done todos, ordered numbers, crumbs                                                                                                                                                    |
-| Faint        | `--color-text-tertiary`                                         | bullet dots, chevron, placeholders, `#`                                                                                                                                                        |
-| Guide        | `--color-border-secondary`                                      | indent guide lines (rest state)                                                                                                                                                                |
-| Structure    | `--color-border` (a7)                                           | quote bar, unchecked checkbox border                                                                                                                                                           |
-| Hover        | `--color-border-secondary` ring                                 | non-selected block lines under the pointer — 1px inset ring, no fill                                                                                                                           |
-| Selection    | `--color-border-selected` ring over `--color-bg-selected-faint` | selected block(s) — 1px accent-9 ring (45% light / 55% dark) over a faint wash (7% accent-9 light / 12% accent-11 on a 14% lift dark); the list highlight keeps the `--color-bg-selected` wash |
-| Selected ink | `--color-text-selected`                                         | ink on a selected row — 50% toward accent-12                                                                                                                                                   |
-| Inactive sel | neutral ring + fill (see §3)                                    | the selection while the editor lacks focus or blank space was clicked — 22% neutral-9 ring over a 4% fill light / 14% white ring over a 4% lift dark                                           |
-| Current      | `--color-bg-selected`                                           | sidebar active route / open note row (same tokens as Selection)                                                                                                                                |
-| Accent solid | `--accent-9`                                                    | checked checkbox fill                                                                                                                                                                          |
-| Transclusion | `--accent-a2` tint                                              | `((ref))` embeds — quietly "live" content                                                                                                                                                      |
+| Role         | Light / dark token                                              | Used for                                                                                                                                                                                                        |
+| ------------ | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ink          | `--color-text` (sand-12)                                        | body, headings, checked-off text ink                                                                                                                                                                            |
+| Muted        | `--color-text-secondary`                                        | quotes, done todos, ordered numbers, crumbs                                                                                                                                                                     |
+| Faint        | `--color-text-tertiary`                                         | bullet dots, chevron, placeholders, `#`                                                                                                                                                                         |
+| Guide        | `--color-border-secondary`                                      | indent guide lines (rest state)                                                                                                                                                                                 |
+| Structure    | `--color-border` (a7)                                           | quote bar, unchecked checkbox border                                                                                                                                                                            |
+| Hover        | `--neutral-a2` fill                                             | non-selected block lines under the pointer — a whisper of fill, no ring                                                                                                                                         |
+| Selection    | `--color-border-selected` ring over `--color-bg-selected-faint` | selected block(s) — 1px accent ring (45% accent-9 light / 55% accent-11 dark) over a faint wash (7% accent-9 light / 12% accent-11 on a 14% lift dark); the list highlight keeps the `--color-bg-selected` wash |
+| Selected ink | `--color-text-selected`                                         | ink on a selected row — 50% toward accent-12                                                                                                                                                                    |
+| Inactive sel | neutral ring + fill (see §3)                                    | the selection while the editor lacks focus or blank space was clicked — 22% neutral-9 ring over a 4% fill light / 14% white ring over a 4% lift dark                                                            |
+| Current      | `--color-bg-selected`                                           | sidebar active route / open note row (same tokens as Selection)                                                                                                                                                 |
+| Accent solid | `--accent-9`                                                    | checked checkbox fill                                                                                                                                                                                           |
+| Transclusion | `--accent-a2` tint                                              | `((ref))` embeds — quietly "live" content                                                                                                                                                                       |
 
 All roles are Radix alpha/step tokens, so both color schemes (and print, which
 remaps the semantic tokens) resolve automatically. Never hardcode a hex.
@@ -341,7 +342,7 @@ Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`,
 | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | Hover affordances                       | opacity 150ms ease-out                                                                                                                         |
 | Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease                                                                                                                    |
-| Block line hover (neutral)              | box-shadow 100ms ease                                                                                                                          |
+| Block line hover (neutral)              | background-color 100ms ease                                                                                                                    |
 | Selection highlight                     | background-color + color + box-shadow 100ms ease                                                                                               |
 | Chevron rotation                        | transform 300ms ease-in-out, in step with the fold                                                                                             |
 | Unfold (collapsed → open)               | the subtree's box's bottom edge sweeps down to reveal it, the rows below slide down, all transforms, 300ms ease-in-out, no fade: an accordion  |
