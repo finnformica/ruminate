@@ -108,6 +108,6 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 
 ### Performance
 
-- Bundle analysis available via `npm run build` (generates dist/stats.html)
+- Bundle analysis available via `npm run build` (generates stats.html in the repo root — kept out of `dist/` so it is never deployed or precached)
 - PWA configuration for offline functionality
 - Lazy loading and code splitting implemented
