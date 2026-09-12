@@ -2242,6 +2242,11 @@ describe("BlockEditor context menu", () => {
     expect(menu.textContent).toContain("Unlink")
     expect(menu.textContent).toContain("Delete")
     expect(highlightedText(container)).toBe("B")
+    // The finger lifts: that touchend is consumed, so iOS sends no click
+    // onto whatever menu item now sits under the finger. Once only.
+    const lifted = fireEvent.touchEnd(body, { changedTouches: [{ clientX: 20, clientY: 20 }] })
+    expect(lifted).toBe(false)
+    expect(fireEvent.touchEnd(body, { changedTouches: [{ clientX: 20, clientY: 20 }] })).toBe(true)
     await pick("Unlink")
     expect(serializedLines(getByTestId)).toEqual(["A", "C"])
   })

@@ -103,17 +103,15 @@ export function BlockContextMenu({
 }: {
   target: BlockMenuTarget | null
   actions: BlockMenuActions
-  /** Open or closed, and the element the opening press landed on. A
-   * right-click reaches the editor as a `contextmenu` event first; a touch
-   * long-press (Base UI's own, 500ms) never does — this is how the editor
-   * learns which row a finger held. */
-  onOpenChange?: (open: boolean, pressed: EventTarget | null) => void
+  /** Open or closed, and the event that did it (a `contextmenu` for a
+   * right-click; the `touchstart` of a press-and-hold, Base UI's own 500ms
+   * one, which never yields a `contextmenu` on a phone). The editor reads
+   * the row from its target, and whether a finger is still down. */
+  onOpenChange?: (open: boolean, event: Event | undefined) => void
   children: React.ReactNode
 }) {
   return (
-    <ContextMenu.Root
-      onOpenChange={(open, details) => onOpenChange?.(open, details.event?.target ?? null)}
-    >
+    <ContextMenu.Root onOpenChange={(open, details) => onOpenChange?.(open, details.event)}>
       <ContextMenu.Trigger>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Positioner className="outline-none">

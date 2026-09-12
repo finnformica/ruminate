@@ -3,7 +3,7 @@ import { useAtomValue } from "jotai"
 import { toast } from "sonner"
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type React from "react"
-import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent } from "react"
+import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent, TouchEvent } from "react"
 import { newBlockMarkerAtom } from "../../global-state"
 import type { Block, BlockDoc, ChangeHint } from "../../blocks/types"
 import { blockId } from "../../blocks/id"
@@ -1143,14 +1143,30 @@ export function BlockEditor({
   }
   // A touch long-press: the menu opens itself (no `contextmenu` event on a
   // phone), and says what was pressed; a press off the rows opens nothing.
-  const handleMenuOpenChange = (open: boolean, pressed: EventTarget | null) => {
-    if (!open || readOnly) return
+  const handleMenuOpenChange = (open: boolean, event: Event | undefined) => {
+    if (!open) {
+      heldOpen.current = false
+      return
+    }
+    if (readOnly) return
+    const pressed = event?.target ?? null
     const target = menuTargetAt(pressed)
     if (target) {
       if (target.key !== menuTarget?.key) openMenuOn(target)
+      heldOpen.current = event?.type.startsWith("touch") ?? false
     } else if (pressed) {
       setMenuTarget(null)
     }
+  }
+  // A phone's press-and-hold opens the menu while the finger is still down.
+  // When it lifts, iOS fires the click it owed the row — onto whatever is
+  // under the finger by then, which may well be a menu item. Consuming that
+  // `touchend` is the one thing that withholds the click.
+  const heldOpen = useRef(false)
+  const handleTouchEndCapture = (event: TouchEvent<HTMLDivElement>) => {
+    if (!heldOpen.current) return
+    heldOpen.current = false
+    if (event.cancelable) event.preventDefault()
   }
   // ── Images ────────────────────────────────────────────────────────────────
   // A pasted, dropped or picked picture is uploaded first and only then
@@ -1936,6 +1952,8 @@ export function BlockEditor({
           onMouseOver={handleMouseOver}
           onMouseLeave={() => setHotGuides(null)}
           onContextMenuCapture={handleContextMenuCapture}
+          onTouchEndCapture={handleTouchEndCapture}
+          onTouchCancelCapture={handleTouchEndCapture}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
