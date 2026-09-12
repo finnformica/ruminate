@@ -6,7 +6,7 @@ import {
   foldBox,
   ghostFold,
   measureRows,
-  slideRows,
+  settleFold,
   unfoldBox,
 } from "./fold-motion"
 
@@ -73,7 +73,7 @@ describe("fold motion", () => {
     rowAt(container, "a", 10)
     expect(measureRows(container)).toBeNull()
     expect(() => unfoldBox(container)).not.toThrow()
-    expect(() => foldBox(container)).not.toThrow()
+    expect(() => foldBox(container, 100)).not.toThrow()
   })
 
   it("slides the rows that moved from where they were to where they are, and no other", () => {
@@ -88,7 +88,7 @@ describe("fold motion", () => {
     fresh.setAttribute("data-occurrence", "c")
     fresh.getBoundingClientRect = () => ({ top: 124 }) as DOMRect
     container.appendChild(fresh)
-    slideRows(container, before)
+    settleFold(container, before)
     expect(calls.has(still.el)).toBe(false)
     // A row that was not there before has nowhere to slide from.
     expect(calls.has(fresh)).toBe(false)
@@ -103,7 +103,7 @@ describe("fold motion", () => {
     const far = rowAt(container, "a", 5000)
     const before = measureRows(container)!
     far.moveTo(4400)
-    slideRows(container, before)
+    settleFold(container, before)
     expect(calls.has(far.el)).toBe(false)
   })
 
@@ -138,7 +138,7 @@ describe("fold motion", () => {
     sibling.moveTo(100)
     nest.getBoundingClientRect = () => ({ top: 124, bottom: 200, height: 76 }) as DOMRect
     inner.moveTo(124)
-    slideRows(container, before)
+    settleFold(container, before)
     expect(calls.has(holder)).toBe(false)
     expect(calls.get(ghost)).toBeUndefined() // it did not move
     expect(calls.get(sibling.el)![0].keyframes[0]).toEqual({ transform: "translateY(600px)" })
@@ -147,16 +147,78 @@ describe("fold motion", () => {
     expect(calls.has(inner.el)).toBe(false)
   })
 
-  it("a ghost box slides with its parent, by the box's own key", () => {
-    const { calls } = stubAnimations()
-    const container = document.createElement("div")
-    const box = rowAt(container, "p", 300, "data-subtree")
-    const before = measureRows(container)!
-    expect(before.get("box:p")).toBe(300)
-    box.el.setAttribute("data-folding", "true")
-    box.moveTo(250)
-    slideRows(container, before)
-    expect(calls.get(box.el)![0].keyframes[0]).toEqual({ transform: "translateY(50px)" })
+  it("a ghost is no unit: its sweep carries its own shift, a slide would replace the sweep", () => {
+    vi.useFakeTimers()
+    try {
+      const { calls } = stubAnimations()
+      const container = document.createElement("div")
+      const box = document.createElement("div")
+      box.setAttribute("data-subtree", "p")
+      box.innerHTML = "<div><div>rows</div></div>"
+      box.getBoundingClientRect = () => ({ top: 300, height: 120 }) as DOMRect
+      container.appendChild(box)
+      const before = measureRows(container)!
+      expect(before.get("box:p")).toBe(300)
+      ghostFold(box)
+      const ghost = box.nextElementSibling as HTMLElement
+      box.remove()
+      // Nothing moves until the change has landed.
+      expect(calls.has(ghost)).toBe(false)
+      // Out of the flow, the ghost's place is 50px lower than the box was
+      // (a margin that no longer collapses through it); the parent has not
+      // moved, so the rows must neither set off nor end up anywhere else.
+      ghost.getBoundingClientRect = () => ({ top: 350, height: 120 }) as DOMRect
+      settleFold(container, before)
+      const [sweepBox] = calls.get(ghost)!
+      const [sweepBody] = calls.get(ghost.firstElementChild!)!
+      // One animation on the ghost, the sweep, keeping the rows where the box
+      // was as it covers them; its body carries the rows without the shift.
+      expect(calls.get(ghost)!.length).toBe(1)
+      expect(sweepBox.keyframes).toEqual([
+        { transform: "translateY(-50px)" },
+        { transform: "translateY(-170px)" },
+      ])
+      expect(sweepBody.keyframes).toEqual([
+        { transform: "translateY(0px)" },
+        { transform: "translateY(120px)" },
+      ])
+      expect(sweepBox.options.fill).toBe("forwards")
+      vi.advanceTimersByTime(FOLD_MS + 100)
+      expect(ghost.parentElement).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("a ghost's rows end up under their parent, wherever it has gone", () => {
+    vi.useFakeTimers()
+    try {
+      const { calls } = stubAnimations()
+      const container = document.createElement("div")
+      const parent = rowAt(container, "p", 280)
+      const box = document.createElement("div")
+      box.setAttribute("data-subtree", "p")
+      box.innerHTML = "<div><div>rows</div></div>"
+      box.getBoundingClientRect = () => ({ top: 300, height: 120 }) as DOMRect
+      container.appendChild(box)
+      const before = measureRows(container)!
+      ghostFold(box)
+      const ghost = box.nextElementSibling as HTMLElement
+      box.remove()
+      // The page shortened and the scroll clamped: everything is 50px lower,
+      // the parent included. Its rows set off where the box was and follow
+      // it down as they are covered.
+      parent.moveTo(330)
+      ghost.getBoundingClientRect = () => ({ top: 350, height: 120 }) as DOMRect
+      settleFold(container, before)
+      expect(calls.get(parent.el)![0].keyframes[0]).toEqual({ transform: "translateY(-50px)" })
+      expect(calls.get(ghost)![0].keyframes).toEqual([
+        { transform: "translateY(-50px)" },
+        { transform: "translateY(-120px)" },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("drops a slide still running before measuring again", () => {
@@ -165,10 +227,10 @@ describe("fold motion", () => {
     const row = rowAt(container, "a", 500)
     const before = measureRows(container)!
     row.moveTo(100)
-    slideRows(container, before)
+    settleFold(container, before)
     expect(running.get(row.el)!.length).toBe(1)
     row.moveTo(500)
-    slideRows(container, new Map([["row:a", 100]]))
+    settleFold(container, new Map([["row:a", 100]]))
     // The first slide was cancelled; only the new one runs.
     expect(running.get(row.el)!.length).toBe(1)
   })
@@ -209,8 +271,7 @@ describe("fold motion", () => {
     const { calls, animations } = stubAnimations()
     const box = document.createElement("div")
     box.appendChild(document.createElement("div"))
-    box.getBoundingClientRect = () => ({ height: 120 }) as DOMRect
-    foldBox(box)
+    foldBox(box, 120)
     const [close] = calls.get(box)!
     expect(close.keyframes).toEqual([
       { transform: "translateY(0px)" },
@@ -226,7 +287,7 @@ describe("fold motion", () => {
     const box = document.createElement("div")
     box.appendChild(document.createElement("div"))
     box.getBoundingClientRect = () => ({ height: 120 }) as DOMRect
-    foldBox(box)
+    foldBox(box, 120)
     const first = animations.get(box)![0]
     unfoldBox(box)
     // The fold was cancelled by the unfold; its late cancel event must not
@@ -247,7 +308,7 @@ describe("fold motion", () => {
     const before = measureRows(container)!
     expect(before.get("after:0")).toBe(900)
     basket.getBoundingClientRect = () => ({ top: 300 }) as DOMRect
-    slideRows(container, before)
+    settleFold(container, before)
     expect(calls.get(basket)![0].keyframes[0]).toEqual({ transform: "translateY(600px)" })
     page.remove()
   })
@@ -260,7 +321,7 @@ describe("fold motion", () => {
       box.setAttribute("data-subtree", "p")
       box.getBoundingClientRect = () => ({ width: 300, height: 120 }) as DOMRect
       box.innerHTML =
-        '<div><div data-occurrence="p/c" data-block-row="c" id="row-c">child</div>' +
+        '<div><div data-occurrence="p/c" data-block-row="c" id="row-c" style="margin-top: 24px">child</div>' +
         '<div data-subtree="p/c"><div><div data-occurrence="p/c/g" data-block-row="g">grandchild</div></div></div>' +
         '<div data-folding="true">an older ghost</div></div>'
       container.appendChild(box)
@@ -277,10 +338,20 @@ describe("fold motion", () => {
       expect(
         ghost.querySelectorAll("[data-occurrence], [data-block-row], [data-subtree], [id]").length,
       ).toBe(0)
+      // A heading's top margin collapsed through the box in the flow; out of
+      // it, it would push the ghost's rows down. The ghost's copy has none.
+      expect((ghost.firstElementChild!.firstElementChild as HTMLElement).style.marginTop).toBe(
+        "0px",
+      )
+      expect((box.firstElementChild!.firstElementChild as HTMLElement).style.marginTop).toBe("24px")
       // The live box is untouched.
       expect(box.querySelectorAll("[data-occurrence]").length).toBe(2)
+      // It stays until the toggle settles, then sweeps and goes.
       vi.advanceTimersByTime(FOLD_MS + 100)
-      expect(ghost.isConnected).toBe(false)
+      expect(ghost.parentElement).not.toBeNull()
+      settleFold(container, null)
+      vi.advanceTimersByTime(FOLD_MS + 100)
+      expect(ghost.parentElement).toBeNull()
     } finally {
       vi.useRealTimers()
     }
@@ -306,6 +377,25 @@ describe("fold motion", () => {
     }
   })
 
+  it("a ghost whose toggle never settles is taken down anyway", () => {
+    vi.useFakeTimers()
+    try {
+      const container = document.createElement("div")
+      const box = document.createElement("div")
+      box.setAttribute("data-subtree", "p")
+      box.innerHTML = "<div>rows</div>"
+      container.appendChild(box)
+      ghostFold(box)
+      const ghost = box.nextElementSibling!
+      vi.advanceTimersByTime(2999)
+      expect(ghost.parentElement).not.toBeNull()
+      vi.advanceTimersByTime(2)
+      expect(ghost.parentElement).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("with reduced motion swaps the motion for a fade on the box and drops the slide", () => {
     window.matchMedia = vi.fn().mockReturnValue({ matches: true }) as unknown as typeof matchMedia
     const { calls } = stubAnimations()
@@ -314,7 +404,7 @@ describe("fold motion", () => {
     expect(measureRows(container)).toBeNull()
     const box = document.createElement("div")
     unfoldBox(box)
-    foldBox(box)
+    foldBox(box, 100)
     const [open, close] = calls.get(box)!
     expect(open.keyframes).toEqual([{ opacity: 0 }, { opacity: 1 }])
     expect(close.keyframes).toEqual([{ opacity: 1 }, { opacity: 0 }])

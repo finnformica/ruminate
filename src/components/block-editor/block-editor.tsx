@@ -54,7 +54,7 @@ import {
   dropGhost,
   ghostFold,
   measureRows,
-  slideRows,
+  settleFold,
   unfoldBox,
   type RowPositions,
 } from "./fold-motion"
@@ -1057,15 +1057,17 @@ export function BlockEditor({
   const childrenOf = useMemo(() => childrenByParent(rows), [rows])
   const rowKeys = useMemo(() => new Set(visibleOrder), [visibleOrder])
 
-  // Where every row is before a toggle, for the slide after it (FLIP,
-  // fold-motion.ts): set here, spent by the layout effect below once the
-  // change has been laid out, before it is painted.
-  const rowsBeforeToggle = useRef<RowPositions | null>(null)
+  // A toggle waiting to be settled (fold-motion.ts), with where every row
+  // was before it: set here, spent by the layout effect below once the
+  // change has been laid out, before it is painted. The positions are
+  // null when nothing slides (reduced motion); the toggle still settles,
+  // so its ghost fades and goes.
+  const pendingToggle = useRef<{ before: RowPositions | null } | null>(null)
   useLayoutEffect(() => {
-    const before = rowsBeforeToggle.current
-    if (!before) return
-    rowsBeforeToggle.current = null
-    if (containerRef.current) slideRows(containerRef.current, before)
+    const pending = pendingToggle.current
+    if (!pending) return
+    pendingToggle.current = null
+    if (containerRef.current) settleFold(containerRef.current, pending.before)
   })
 
   /**
@@ -1078,7 +1080,7 @@ export function BlockEditor({
    */
   const toggleCollapse = (key: string) => {
     const container = containerRef.current
-    if (container) rowsBeforeToggle.current = measureRows(container)
+    if (container) pendingToggle.current = { before: measureRows(container) }
     if (collapsed.has(key)) {
       justOpened.current = key
       if (container) dropGhost(container, key)

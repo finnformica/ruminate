@@ -355,7 +355,12 @@ outside React, out of the flow in the box's place, inert, and gone when
 the fold is over — so a fold costs one render, the same as any click,
 never a render of every hidden row into a ghost and out again; and every
 measurement comes before every animation starts, so a long note is laid
-out once, not once per row. The rows below — and whatever follows the
+out once, not once per row. Nothing moves until the change has landed:
+the ghost's sweep starts with the slides, after the commit, however long
+the store takes to deliver it (a sweep started at the click would be half
+done before the rows below so much as moved, then measured mid-sweep and
+slid back down over them). `e2e/fold-motion.e2e.mjs` (`npm run test:fold`)
+watches all of this frame by frame in a real browser. The rows below — and whatever follows the
 editor on the page — are in their final places at once and slide up over
 the ghost. Everything is a transform on the compositor, so nothing
 jitters, and it never holds the editor up: the state changes at once, so
