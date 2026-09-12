@@ -8,36 +8,63 @@
  * The structural class `bg-bg-secondary` stays on the selected line (tests and
  * tooling select on it); `.block-highlight` layers the visual on top so
  * selection reads as *selected* (accent) rather than *hovered* (neutral). The
- * color fade lives on the line itself so it plays in both directions; at 100ms
- * it is perceptually instant on keyboard repeat.
+ * fades live on the line itself so they play in both directions; at 100ms
+ * they are perceptually instant on keyboard repeat.
  *
- * The colors are the app-wide selected tokens (`--color-bg-selected` /
- * `--color-text-selected`, variables.css): a luminous accent wash over the app
- * background — in dark over a white-lifted one — shared verbatim with the
- * sidebar's current row, so one color means "selected" everywhere and follows
- * the user's accent choice. The wash is computed-solid (opaque inputs), which
- * keeps the two properties the old solid step had: no alpha muddying over the
- * warm sand background, and seamless multi-select runs where adjacent selected
- * surfaces deliberately overlap (the run-edge sides carry a full
- * -mt-1/pt-1-style 4px extension; see the runEdges pairs in block-item.tsx).
- * Every other side extends only 2px, so differently-painted neighbours (a
- * hover beside a selection) can never overlap. */
+ * Selection is a RING, not a fill: a 1px accent hairline drawn inside the
+ * line's surface (`--color-border-selected`) over a faint wash
+ * (`--color-bg-selected-faint`, variables.css) — the app's card and input
+ * language, so the block reads as outlined rather than painted, and hover
+ * (a neutral ring, below) differs from it in kind, not only in weight. The
+ * accent still names "selected": the ring is mixed from the same accent-9
+ * the sidebar's current row and the list highlight wash with.
+ *
+ * The ring is four inset shadows, one per edge, so a multi-select run can
+ * drop the edges that sit mid-run (`.block-run-top` / `.block-run-bottom`,
+ * set from the runEdges pairs in block-item.tsx) and read as ONE outlined
+ * surface. Ring and wash are both computed-solid (opaque inputs), so where
+ * the run-edge sides' full 4px extension makes adjacent selected surfaces
+ * overlap, neither the fill nor the side lines double up. Every other side
+ * extends only 2px, so differently-painted neighbours (a hover beside a
+ * selection) can never overlap. */
 [data-block-line] {
   transition:
     background-color 100ms ease,
-    color 100ms ease;
+    color 100ms ease,
+    box-shadow 100ms ease;
 }
 
-/* `.list-highlight` is the same selected-row surface outside the editor: the
- * notes/tags list keyboard highlight shares the selection tokens exactly (see
- * "Selection has its own color" in docs/design-principles.md).
- *
- * The `color` is the Notion-overlay text tint: the selected row's inherited
+/* The `color` is the Notion-overlay text tint: the selected row's inherited
  * ink leans toward the accent, so the whole line — body text and anything
  * else that inherits — reads slightly "lit" by the selection. Elements that
  * set an explicit color (quote/done-todo secondary ink, tertiary markers,
  * code, links) naturally keep theirs. */
-.block-highlight,
+.block-highlight {
+  --block-ring: var(--color-border-selected);
+  --block-ring-top: var(--block-ring);
+  --block-ring-bottom: var(--block-ring);
+  background-color: var(--color-bg-selected-faint);
+  color: var(--color-text-selected);
+  box-shadow:
+    inset 0 1px 0 var(--block-ring-top),
+    inset 0 -1px 0 var(--block-ring-bottom),
+    inset 1px 0 0 var(--block-ring),
+    inset -1px 0 0 var(--block-ring);
+}
+
+.block-highlight.block-run-top {
+  --block-ring-top: transparent;
+}
+
+.block-highlight.block-run-bottom {
+  --block-ring-bottom: transparent;
+}
+
+/* `.list-highlight` is the selected-row surface outside the editor: the
+ * notes/tags list keyboard highlight keeps the app-wide selected WASH, shared
+ * verbatim with the sidebar's current row (see "Selection has its own color"
+ * in docs/design-principles.md) — a list row is a nav row, and paints like
+ * one. */
 .list-highlight {
   background-color: var(--color-bg-selected);
   color: var(--color-text-selected);
@@ -46,27 +73,28 @@
 /* ── Inactive selection ──────────────────────────────────────────────────────
  * When the editor doesn't own the keyboard (focus is in the sidebar, a dialog,
  * the page — including the ⌘P palette's live previews), the selection demotes
- * to the same wash language with the accent removed, Finder/VS Code-style:
+ * to the same ring language with the accent removed, Finder/VS Code-style:
  * still clearly a selection, but no longer claiming "arrows go here". The
  * class is additive on top of `.block-highlight` (the structural
  * `bg-bg-secondary` hook is untouched) and the compound selector outranks
- * every accent/dark override above. Light: a 10% neutral-9 wash (≈ the old
- * neutral-3 surface) — grayer than the accent wash and a clear step above the
- * `--neutral-a2` hover. Dark: a 9% white lift only — active's lift language
- * minus the accent and two points of light, landing between the hover wash
- * (~3.5% lift) and the active surface. The text tint resets to plain
- * inherited ink (`color: inherit`), so demotion also drains the color from
- * the text. Computed-solid, so multi-select runs keep merging seamlessly.
- * One accent-independent pair covers all five accents; for the Neutral
- * accent light it sits at just over half the strength of its 18% active wash
- * (variables.css). Restore rides the 100ms fade on [data-block-line] — perceptually instant. */
+ * every accent/dark override above. The ring goes neutral and keeps a faint
+ * neutral fill under it, so the three states form one ladder, each rung
+ * adding to the one below: hover is a fill alone, inactive that fill plus a
+ * neutral ring, active that fill plus an accent ring. The text tint resets
+ * to plain inherited ink (`color: inherit`), so demotion also drains the
+ * color from the text. Both values are computed-solid (the ring mixed over
+ * the fill it sits on), so multi-select runs keep merging seamlessly; one
+ * accent-independent pair per scheme covers all five accents. Restore rides
+ * the 100ms fades on [data-block-line] — perceptually instant. */
 .block-highlight.block-highlight-inactive {
-  background-color: color-mix(in srgb, var(--neutral-9) 10%, var(--color-bg));
+  --block-ring: color-mix(in srgb, var(--neutral-9) 22%, var(--color-bg));
+  background-color: color-mix(in srgb, var(--neutral-9) 4%, var(--color-bg));
   color: inherit;
 }
 
 :root[data-theme="dark"] .block-highlight.block-highlight-inactive {
-  background-color: color-mix(in srgb, white 9%, var(--color-bg));
+  --block-ring: color-mix(in srgb, white 14%, var(--color-bg));
+  background-color: color-mix(in srgb, white 4%, var(--color-bg));
 }
 
 /* ── Selected row's marker glyphs ────────────────────────────────────────────
@@ -130,8 +158,15 @@
 }
 
 /* ── Neutral hover ───────────────────────────────────────────────────────────
- * Non-selected lines in an editable editor get a whisper of neutral on hover —
- * enough to say "this row is interactive", one clear step below selection.
+ * Non-selected lines in an editable editor get a whisper of neutral FILL on
+ * hover (`--neutral-a2`) — no ring. A ring draws a boundary, and a boundary
+ * says "this thing has an extent"; a selection does (it can run over several
+ * blocks), the pointer does not. So the two states differ in kind — fill for
+ * where the pointer is, ring for what the keyboard holds — and each rung of
+ * the ladder ADDS to the one below: hover is a fill, the inactive selection
+ * that fill plus a neutral ring, the active selection that fill plus an
+ * accent ring. It also spares a list of rows the edge-flicker of outlining
+ * each one in turn as the pointer runs down it.
  * The class is only applied to rows that can take it (never read-only
  * editors, the row being edited, or a selected row — selection always wins),
  * and the pointer gate keeps touch taps from leaving a stuck hover. The fade

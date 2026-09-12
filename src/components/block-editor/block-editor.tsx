@@ -274,6 +274,21 @@ let lastActiveEditor: HTMLElement | null = null
 const UNDO_KEEPS_TO_ITSELF =
   'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [data-block-editor]'
 
+/** Where an Up/Down arrow is somebody else's: everything ⌘Z leaves alone,
+ * plus the widgets that walk their options with the arrows (a listbox, a
+ * combobox, a tab list, a radio group, a tree or grid). A plain button or
+ * link uses them for nothing, so the editor takes them back. */
+const ARROWS_KEEP_TO_THEMSELVES = `${UNDO_KEEPS_TO_ITSELF}, [role="listbox"], [role="combobox"], [role="tablist"], [role="radiogroup"], [role="tree"], [role="grid"], [role="slider"]`
+
+/** What a pointer-down may land on and NOT count as a click on blank space
+ * (see `pointerIdle`): any real control. The editor container is tabindex -1
+ * and is deliberately absent, so a click in its gaps is blank. */
+const BLANK_CLICK_EXCLUDES =
+  'a[href], button, input, textarea, select, [contenteditable="true"], [tabindex]:not([tabindex="-1"])'
+
+/** Keys that are only modifiers: pressing one alone is not "using the keyboard". */
+const MODIFIER_KEYS = new Set(["Shift", "Meta", "Control", "Alt", "CapsLock"])
+
 export function BlockEditor({
   doc,
   onChange,
@@ -473,7 +488,32 @@ export function BlockEditor({
   // (they bubble, i.e. focusin/focusout); the blur side settles on a rAF so
   // internal focus moves (container ↔ textarea, the blur-regrab below) never
   // flicker — both the check and any re-grab run before the next paint.
+  //
+  // Focus alone over-claims, though: a click on blank space (the page margin,
+  // the gap between rows) leaves the container focused — or re-grabs it, see
+  // handleContainerBlur — so the keys still work, yet the user just pointed
+  // at nothing. `pointerIdle` records that: set by a pointer-down that lands
+  // on neither a row nor a focusable control, cleared by the next key press
+  // in the editor or a click on a row. While it is set the selection shows
+  // as inactive even with focus in hand, and the first arrow key lights it
+  // up again — the :focus-visible idea, applied to the selection.
   const [keyboardActive, setKeyboardActive] = useState(false)
+  const [pointerIdle, setPointerIdle] = useState(false)
+  useEffect(() => {
+    const onPointerDown = (event: Event) => {
+      const target = event.target instanceof Element ? event.target : null
+      if (!target) return
+      if (target.closest("[data-block-line]")) {
+        setPointerIdle(false)
+        return
+      }
+      // The container itself is tabindex -1, so a click in its gaps counts
+      // as blank; any real control (a nav link, an input, a dialog) does not.
+      if (!target.closest(BLANK_CLICK_EXCLUDES)) setPointerIdle(true)
+    }
+    document.addEventListener("pointerdown", onPointerDown, true)
+    return () => document.removeEventListener("pointerdown", onPointerDown, true)
+  }, [])
   const keyboardIdleRaf = useRef<number | null>(null)
   const cancelKeyboardIdleCheck = () => {
     if (keyboardIdleRaf.current !== null) {
@@ -1468,8 +1508,10 @@ export function BlockEditor({
     selectionRunEdges,
     readOnly,
     // Read-only views never take keyboard focus, but their highlights are
-    // plain display state — never demote them to "inactive".
-    keyboardActive: readOnly || keyboardActive,
+    // plain display state — never demote them to "inactive". Editable ones
+    // own the keyboard when focus is inside AND the last thing the user did
+    // was not click on blank space (`pointerIdle`).
+    keyboardActive: readOnly || (keyboardActive && !pointerIdle),
     select,
     edit,
     toggleCollapse,
@@ -1557,10 +1599,49 @@ export function BlockEditor({
     return () => window.removeEventListener("keydown", onKey)
   }, [readOnly])
 
+  // The arrow keys always come back to the editor. A click on a button or a
+  // nav link leaves focus there, where Up/Down mean nothing, and the user's
+  // selection is still sitting in the editor waiting for them; so an Up or
+  // Down (plain or with Shift) pressed on such a control refocuses the
+  // container and is replayed there, so the same keystroke also moves the
+  // selection from where it was — or, with nothing selected, lands on the
+  // first/last block as the container's own handler does. The same
+  // exclusions as ⌘Z: anything that uses arrows itself (form fields, dialogs,
+  // menus, lists, other editors) keeps them. The replay is a fresh event on
+  // the container; the original is cancelled so the control never sees it.
+  useEffect(() => {
+    if (readOnly) return
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return
+      if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return
+      const root = containerRef.current
+      if (!root || lastActiveEditor !== root) return
+      const target = event.target
+      if (!(target instanceof Element) || root.contains(target)) return
+      if (target.closest(ARROWS_KEEP_TO_THEMSELVES)) return
+      event.preventDefault()
+      root.focus({ preventScroll: true })
+      root.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: event.key,
+          shiftKey: event.shiftKey,
+          bubbles: true,
+          cancelable: true,
+        }),
+      )
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [readOnly])
+
   // The container is the single keyboard target for select mode (see the focus
   // effect below). Edit mode is handled by the focused textarea inside the
   // block; those events also bubble here, so we bail while editing.
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // Any real key (not a bare modifier) hands the selection back to the
+    // keyboard after a click on blank space — see `pointerIdle`.
+    if (!MODIFIER_KEYS.has(event.key)) setPointerIdle(false)
+
     // Cmd/Ctrl+Z undoes, Cmd/Ctrl+Shift+Z (or Ctrl+Y) redoes — at the document
     // level, so a single keystroke can walk back changes across many blocks.
     if (event.metaKey || event.ctrlKey) {
