@@ -144,7 +144,6 @@ export function BlockItem({
   block,
   occurrence,
   api,
-  folding = false,
 }: {
   doc: BlockDoc
   block: Block
@@ -153,11 +152,6 @@ export function BlockItem({
    * (promoted typography, no toggle; its children follow it at depth 0). */
   occurrence: Occurrence
   api: BlockEditorApi
-  /** A row on its way out — its parent just folded — kept, inside the
-   * folding subtree (`Subtree` in block-editor.tsx), for the length of the
-   * fold animation only. It carries no row identity (`data-block-row` /
-   * `data-occurrence`), so nothing addresses it as a live row. */
-  folding?: boolean
 }) {
   const { depth, zoomTitle, olNumber, hasChildren, collapsed: isCollapsed } = occurrence
   const readOnly = api.readOnly ?? false
@@ -796,8 +790,8 @@ export function BlockItem({
 
   return (
     <div
-      data-block-row={folding ? undefined : block.id}
-      data-occurrence={folding ? undefined : occurrence.key}
+      data-block-row={block.id}
+      data-occurrence={occurrence.key}
       className={cx("relative", zoomTitle && "mb-3")}
       style={{ paddingLeft: depth * INDENT, marginTop }}
     >

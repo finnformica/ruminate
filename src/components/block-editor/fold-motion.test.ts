@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { FOLD_MS, foldBox, measureRows, slideRows, unfoldBox } from "./fold-motion"
+import {
+  FOLD_MS,
+  dropGhost,
+  foldBox,
+  ghostFold,
+  measureRows,
+  slideRows,
+  unfoldBox,
+} from "./fold-motion"
 
 type Call = { keyframes: Keyframe[]; options: KeyframeAnimationOptions }
 
@@ -197,6 +205,60 @@ describe("fold motion", () => {
     slideRows(container, before)
     expect(calls.get(basket)![0].keyframes[0]).toEqual({ transform: "translateY(600px)" })
     page.remove()
+  })
+
+  it("a fold's ghost is a clone of the box, out of the flow and inert, with no row identity, gone after the fold", () => {
+    vi.useFakeTimers()
+    try {
+      const container = document.createElement("div")
+      const box = document.createElement("div")
+      box.setAttribute("data-subtree", "p")
+      box.getBoundingClientRect = () => ({ width: 300, height: 120 }) as DOMRect
+      box.innerHTML =
+        '<div><div data-occurrence="p/c" data-block-row="c" id="row-c">child</div>' +
+        '<div data-subtree="p/c"><div><div data-occurrence="p/c/g" data-block-row="g">grandchild</div></div></div>' +
+        '<div data-folding="true">an older ghost</div></div>'
+      container.appendChild(box)
+      ghostFold(box)
+      const ghost = box.nextElementSibling!
+      expect(ghost.getAttribute("data-folding")).toBe("true")
+      expect(ghost.className).toBe("block-subtree-ghost")
+      expect(ghost.getAttribute("data-subtree")).toBe("p")
+      expect(ghost.getAttribute("aria-hidden")).toBe("true")
+      expect(ghost.hasAttribute("inert")).toBe(true)
+      expect((ghost as HTMLElement).style.width).toBe("300px")
+      expect((ghost as HTMLElement).style.height).toBe("120px")
+      expect(ghost.textContent).toBe("childgrandchild")
+      expect(
+        ghost.querySelectorAll("[data-occurrence], [data-block-row], [data-subtree], [id]").length,
+      ).toBe(0)
+      // The live box is untouched.
+      expect(box.querySelectorAll("[data-occurrence]").length).toBe(2)
+      vi.advanceTimersByTime(FOLD_MS + 100)
+      expect(ghost.isConnected).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("dropGhost takes down the ghost of one subtree only", () => {
+    vi.useFakeTimers()
+    try {
+      const container = document.createElement("div")
+      for (const key of ["a", "b"]) {
+        const box = document.createElement("div")
+        box.setAttribute("data-subtree", key)
+        box.innerHTML = "<div>rows</div>"
+        container.appendChild(box)
+        ghostFold(box)
+      }
+      expect(container.querySelectorAll("[data-folding]").length).toBe(2)
+      dropGhost(container, "a")
+      expect(container.querySelectorAll("[data-folding]").length).toBe(1)
+      expect(container.querySelector("[data-folding]")!.getAttribute("data-subtree")).toBe("b")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("with reduced motion swaps the motion for a fade on the box and drops the slide", () => {

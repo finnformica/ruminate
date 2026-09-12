@@ -1358,18 +1358,22 @@ describe("collapse toggle", () => {
       fireEvent.click(toggleOf(container, "blk_bp")!)
       // Gone as a row at once…
       expect(container.querySelector('[data-block-row="blk_bc"]')).toBeNull()
-      // …but still on screen, in its subtree's box folding away: a ghost
-      // out of the flow, hidden from assistive tech, its rows without row
-      // identity.
+      // …but still on screen, as a ghost of its subtree's box: a clone out of
+      // the flow, inert and hidden from assistive tech, its rows without
+      // row identity or a subtree of their own.
       const boxes = container.querySelectorAll("[data-folding]")
       expect(boxes.length).toBe(1)
       const box = boxes[0]
       expect(box.getAttribute("aria-hidden")).toBe("true")
+      expect(box.hasAttribute("inert")).toBe(true)
       expect(box.className).toContain("block-subtree-ghost")
+      expect(box.getAttribute("data-subtree")).toBe("blk_bp")
       expect(box.querySelectorAll('[data-testid="block-body"]').length).toBeGreaterThan(0)
-      expect(box.querySelectorAll("[data-occurrence], [data-block-row]").length).toBe(0)
+      expect(
+        box.querySelectorAll("[data-occurrence], [data-block-row], [data-subtree]").length,
+      ).toBe(0)
       act(() => {
-        vi.advanceTimersByTime(350)
+        vi.advanceTimersByTime(400)
       })
       expect(container.querySelectorAll("[data-folding]").length).toBe(0)
     } finally {
@@ -1377,21 +1381,19 @@ describe("collapse toggle", () => {
     }
   })
 
-  it("unfolding again mid-fold drops the departing rows at once, and the returning rows are live", () => {
+  it("unfolding again mid-fold drops the ghost at once, and the returning rows are live", () => {
     vi.useFakeTimers()
     try {
       const { container } = render(<Harness initial={OUTLINE} />)
       fireEvent.click(toggleOf(container, "blk_bp")!)
-      expect(container.querySelectorAll("[data-folding]").length).toBeGreaterThan(0)
+      expect(container.querySelectorAll("[data-folding]").length).toBe(1)
       fireEvent.click(toggleOf(container, "blk_bp")!)
       expect(container.querySelectorAll("[data-folding]").length).toBe(0)
       const back = container.querySelector('[data-block-row="blk_bc"]')!
       expect(back).not.toBeNull()
-      // Back in its parent's live box, not a ghost.
-      expect(back.closest("[data-folding]")).toBeNull()
       expect(back.closest('[data-subtree="blk_bp"]')).not.toBeNull()
       act(() => {
-        vi.advanceTimersByTime(350)
+        vi.advanceTimersByTime(400)
       })
       expect(container.querySelectorAll("[data-folding]").length).toBe(0)
     } finally {

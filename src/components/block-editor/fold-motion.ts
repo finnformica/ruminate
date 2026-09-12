@@ -39,6 +39,11 @@
  * pace: unhurried enough to follow the edge. */
 export const FOLD_MS = 300
 
+/** How long past the fold a ghost stays before it is taken down: the sweep
+ * has covered it by then and holds (`fill: forwards`), so the removal, a
+ * DOM change that lays out, never lands mid-motion. */
+const GHOST_GRACE_MS = 50
+
 /** The fade a reduced-motion fold keeps. */
 const FADE_MS = 120
 
@@ -79,9 +84,17 @@ function prefersReducedMotion(): boolean {
   )
 }
 
+/** The token's value, read once: reading a computed style forces a style
+ * pass over everything dirty, which right after a ghost is added is the
+ * ghost's every row. `measureRows` warms it while the page is still clean. */
+let cachedEasing: string | null = null
+
 function easing(): string {
-  const token = getComputedStyle(document.documentElement).getPropertyValue("--ease-in-out")
-  return token.trim() || EASE_IN_OUT
+  if (cachedEasing === null) {
+    const token = getComputedStyle(document.documentElement).getPropertyValue("--ease-in-out")
+    cachedEasing = token.trim() || EASE_IN_OUT
+  }
+  return cachedEasing
 }
 
 /**
@@ -116,10 +129,14 @@ function movable(container: HTMLElement): [string, HTMLElement][] {
  */
 export function measureRows(container: HTMLElement): RowPositions | null {
   if (!hasWebAnimations() || prefersReducedMotion()) return null
+  easing()
   const positions: RowPositions = new Map()
   for (const [key, el] of movable(container)) positions.set(key, el.getBoundingClientRect().top)
   return positions
 }
+
+/** The slides the last toggle started, to drop before measuring again. */
+let slides: Animation[] = []
 
 /**
  * FLIP, after the change: everything movable that is somewhere else now —
@@ -128,39 +145,50 @@ export function measureRows(container: HTMLElement): RowPositions | null {
  * What is off screen both before and after just lands. A slide still
  * running from an earlier toggle is dropped first, so the fresh
  * measurement is the element's true place.
+ *
+ * Every read comes before every write: starting an animation dirties its
+ * element's style, and a measurement after that lays the page out again —
+ * once per row, on a long note, which is the difference between a few
+ * milliseconds and a frozen frame.
  */
 export function slideRows(container: HTMLElement, before: RowPositions): void {
-  const elements = movable(container)
-  for (const [, el] of elements) {
-    for (const anim of el.getAnimations()) if (anim.id === SLIDE_ID) anim.cancel()
-  }
+  for (const anim of slides) anim.cancel()
+  slides = []
   const viewport = window.innerHeight || document.documentElement.clientHeight
   const lower = -SLIDE_MARGIN_VIEWPORTS * viewport
   const upper = (1 + SLIDE_MARGIN_VIEWPORTS) * viewport
-  const ease = easing()
-  for (const [key, el] of elements) {
+  const moves: [HTMLElement, number][] = []
+  for (const [key, el] of movable(container)) {
     const was = before.get(key)
     if (was === undefined) continue
     const now = el.getBoundingClientRect().top
     const delta = was - now
     if (Math.abs(delta) < 0.5) continue
     if ((was < lower || was > upper) && (now < lower || now > upper)) continue
-    el.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], {
-      id: SLIDE_ID,
-      duration: FOLD_MS,
-      easing: ease,
-    })
+    moves.push([el, delta])
+  }
+  const ease = easing()
+  for (const [el, delta] of moves) {
+    slides.push(
+      el.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], {
+        id: SLIDE_ID,
+        duration: FOLD_MS,
+        easing: ease,
+      }),
+    )
   }
 }
 
-/** The box animation each box is running, so a finished or cancelled one
- * only tidies up after itself, never after its successor. */
-const boxMotion = new WeakMap<HTMLElement, Animation>()
+/** The animations each box is running (its own and its body's), so a
+ * later sweep can drop them without asking the DOM — `getAnimations` on a
+ * ghost just added to the page would lay the whole page out for it there
+ * and then — and so a finished or cancelled sweep only tidies up after
+ * itself, never after its successor. */
+const boxMotion = new WeakMap<HTMLElement, Animation[]>()
 
 function cancelBox(el: HTMLElement): void {
-  for (const anim of el.getAnimations()) if (anim.id === BOX_ID) anim.cancel()
-  const body = el.firstElementChild
-  if (body) for (const anim of body.getAnimations()) if (anim.id === BOX_ID) anim.cancel()
+  for (const anim of boxMotion.get(el) ?? []) anim.cancel()
+  boxMotion.delete(el)
 }
 
 /**
@@ -180,13 +208,14 @@ function sweep(el: HTMLElement, from: number, to: number, fill: FillMode | undef
     [{ transform: `translateY(${-from}px)` }, { transform: `translateY(${-to}px)` }],
     options,
   )
-  body.animate(
+  const bodyAnim = body.animate(
     [{ transform: `translateY(${from}px)` }, { transform: `translateY(${to}px)` }],
     options,
   )
-  boxMotion.set(el, anim)
+  const running = [anim, bodyAnim]
+  boxMotion.set(el, running)
   const done = () => {
-    if (boxMotion.get(el) !== anim) return
+    if (boxMotion.get(el) !== running) return
     boxMotion.delete(el)
     if (fill) return
     el.style.clipPath = ""
@@ -206,7 +235,13 @@ export function unfoldBox(el: HTMLElement): void {
   if (!hasWebAnimations()) return
   if (prefersReducedMotion()) {
     cancelBox(el)
-    el.animate([{ opacity: 0 }, { opacity: 1 }], { id: BOX_ID, duration: FADE_MS, easing: "ease" })
+    boxMotion.set(el, [
+      el.animate([{ opacity: 0 }, { opacity: 1 }], {
+        id: BOX_ID,
+        duration: FADE_MS,
+        easing: "ease",
+      }),
+    ])
     return
   }
   sweep(el, el.getBoundingClientRect().height, 0, undefined)
@@ -215,19 +250,66 @@ export function unfoldBox(el: HTMLElement): void {
 /**
  * Fold a subtree's box that has just left the flow (a ghost): its edge
  * sweeps up from its bottom to cover it, at exactly the pace the rows
- * below slide up over it, and holds until the ghost goes.
+ * below slide up over it, and holds until the ghost goes. `height` is the
+ * box's, when the caller knows it: measuring a ghost just added to the
+ * page would lay the whole page out for it there and then.
  */
-export function foldBox(el: HTMLElement): void {
+export function foldBox(el: HTMLElement, height = el.getBoundingClientRect().height): void {
   if (!hasWebAnimations()) return
   if (prefersReducedMotion()) {
     cancelBox(el)
-    el.animate([{ opacity: 1 }, { opacity: 0 }], {
-      id: BOX_ID,
-      duration: FADE_MS,
-      easing: "ease",
-      fill: "forwards",
-    })
+    boxMotion.set(el, [
+      el.animate([{ opacity: 1 }, { opacity: 0 }], {
+        id: BOX_ID,
+        duration: FADE_MS,
+        easing: "ease",
+        fill: "forwards",
+      }),
+    ])
     return
   }
-  sweep(el, 0, el.getBoundingClientRect().height, "forwards")
+  sweep(el, 0, height, "forwards")
+}
+
+/**
+ * Fold a subtree's box away, without a render: a ghost of it — a plain
+ * clone of its DOM, outside React — takes its place, out of the flow at
+ * the box's size (`.block-subtree-ghost`, block-editor.css), inert, and is
+ * covered by the sweep (`foldBox`) while the live box goes with the state
+ * change. Cloning is cheap next to rendering the rows again, twice (into a
+ * ghost, then out), which for a large nest was most of the fold's cost.
+ * Nothing in the ghost is a row: it carries no row identity, no ids, and
+ * no subtree of its own, so nothing addresses or measures it but the
+ * ghost itself, which keeps the box's key to slide with its parent
+ * (`slideRows`). The ghost goes when the fold is over.
+ */
+export function ghostFold(box: HTMLElement): void {
+  const rect = box.getBoundingClientRect()
+  const ghost = box.cloneNode(true) as HTMLElement
+  for (const el of ghost.querySelectorAll("[data-folding]")) el.remove()
+  for (const el of ghost.querySelectorAll(
+    "[data-occurrence], [data-block-row], [data-subtree], [id]",
+  )) {
+    el.removeAttribute("data-occurrence")
+    el.removeAttribute("data-block-row")
+    el.removeAttribute("data-subtree")
+    el.removeAttribute("id")
+  }
+  ghost.setAttribute("data-folding", "true")
+  ghost.setAttribute("aria-hidden", "true")
+  ghost.setAttribute("inert", "")
+  ghost.className = "block-subtree-ghost"
+  if (rect.height > 0) {
+    ghost.style.width = `${rect.width}px`
+    ghost.style.height = `${rect.height}px`
+  }
+  box.after(ghost)
+  foldBox(ghost, rect.height)
+  window.setTimeout(() => ghost.remove(), FOLD_MS + GHOST_GRACE_MS)
+}
+
+/** Take down the ghost of a subtree that is unfolding again mid-fold, so
+ * the returning rows never meet it. */
+export function dropGhost(container: HTMLElement, parentKey: string): void {
+  container.querySelector(`[data-folding][data-subtree="${parentKey}"]`)?.remove()
 }

@@ -350,15 +350,18 @@ covered height, its body down by the same, so the rows hold still while
 the cut moves), because every moving part must be the same kind of
 animation on the same thread: an animated `clip-path` runs on the main
 thread in some browsers and falls behind the rows, letting the departing
-text show through them. A folding box leaves the flow first, so the rows
-below — and whatever follows the editor on the page — are in their final
-places at once and slide up over it. Everything is a transform on the
-compositor, so nothing jitters, and it never holds the editor up: the state changes at once, and
-the rows a fold hid stay only as inert ghosts in the box for the
-animation's length (`folding`), so `Space` on repeat is as quick as ever.
-Nothing clips at rest, so a to-do's chevron beside its checkbox and a
-heading's hash, which reach beyond their row, always show. Reduced motion
-swaps the motion for a short fade.
+text show through them. A fold's ghost is a clone of the box's DOM,
+outside React, out of the flow in the box's place, inert, and gone when
+the fold is over — so a fold costs one render, the same as any click,
+never a render of every hidden row into a ghost and out again; and every
+measurement comes before every animation starts, so a long note is laid
+out once, not once per row. The rows below — and whatever follows the
+editor on the page — are in their final places at once and slide up over
+the ghost. Everything is a transform on the compositor, so nothing
+jitters, and it never holds the editor up: the state changes at once, so
+`Space` on repeat is as quick as ever. Nothing clips at rest, so a to-do's
+chevron beside its checkbox and a heading's hash, which reach beyond their
+row, always show. Reduced motion swaps the motion for a short fade.
 
 **What never animates:**
 
