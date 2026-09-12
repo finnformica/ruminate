@@ -91,24 +91,24 @@ tokens exist.
 
 Reads need `read`; the writers need `write`; the two deleting verbs need `delete`.
 
-| Tool             | Perm   | What it does                                                                                   |
-| ---------------- | ------ | ---------------------------------------------------------------------------------------------- |
-| `list_notes`     | read   | Notes the token can reach, newest first. Filter by `query`, `tag`, `type`; page with `cursor`. |
-| `search`         | read   | Blocks whose text contains a substring, each naming the notes it appears in.                   |
-| `read_note`      | read   | A note's blocks **as stored rows**, with `depth`, `blockCount`, and its `unassigned` blocks.   |
-| `get_block`      | read   | One block by id: type, text, props, children, parents, the notes it is in.                     |
-| `list_children`  | read   | The blocks beneath one, `depth` levels deep — walking **down**.                                |
-| `list_parents`   | read   | The blocks that hold one, and the notes it appears in — walking **up**.                        |
-| `list_tags`      | read   | Tags across the reachable notes, with note counts.                                             |
-| `create_note`    | write¹ | A new note from markdown.                                                                      |
-| `append_to_note` | write  | Add to the end of a note, leaving the rest untouched.                                          |
-| `update_note`    | write  | **Replace** a note's whole body. The blunt instrument — see below.                             |
-| `update_block`   | write  | Change one block's text, type or metadata, in place.                                           |
-| `link_block`     | write  | Put an existing block under a parent, at an index.                                             |
-| `unlink_block`   | write  | Take a block out of one place. Kept, not deleted.                                              |
-| `move_block`     | write  | Re-parent or reorder a block in one step.                                                      |
-| `delete_block`   | delete | Delete a block everywhere, optionally with its contents.                                       |
-| `delete_note`    | delete | Delete a note and the blocks only it holds.                                                    |
+| Tool             | Perm   | What it does                                                                                          |
+| ---------------- | ------ | ----------------------------------------------------------------------------------------------------- |
+| `list_notes`     | read   | Notes the token can reach, newest first. Filter by `query`, `tag`, `type`; page with `cursor`.        |
+| `search`         | read   | Blocks whose text contains a substring, each naming the notes it appears in.                          |
+| `read_note`      | read   | A note's blocks **as stored rows** — top 2 levels by default (`depth: 0` for all), plus `unassigned`. |
+| `get_block`      | read   | One block by id: type, text, props, children, parents, the notes it is in.                            |
+| `list_children`  | read   | The blocks beneath one, `depth` levels deep — walking **down**.                                       |
+| `list_parents`   | read   | The blocks that hold one, and the notes it appears in — walking **up**.                               |
+| `list_tags`      | read   | Tags across the reachable notes, with note counts.                                                    |
+| `create_note`    | write¹ | A new note from markdown.                                                                             |
+| `append_to_note` | write  | Add to the end of a note, leaving the rest untouched.                                                 |
+| `update_note`    | write  | **Replace** a note's whole body. The blunt instrument — see below.                                    |
+| `update_block`   | write  | Change one block's text, type or metadata, in place.                                                  |
+| `link_block`     | write  | Put an existing block under a parent, at an index.                                                    |
+| `unlink_block`   | write  | Take a block out of one place. Kept, not deleted.                                                     |
+| `move_block`     | write  | Re-parent or reorder a block in one step.                                                             |
+| `delete_block`   | delete | Delete a block everywhere, optionally with its contents.                                              |
+| `delete_note`    | delete | Delete a note and the blocks only it holds.                                                           |
 
 ¹ `create_note` also requires an **unrestricted** token — see §1.
 
@@ -123,18 +123,28 @@ Markdown is an **input** format in this API and never an output one. `create_not
 an agent changes a block by naming it and setting a field, rather than round-tripping a
 document and hoping the diff lands where it meant.
 
-It also makes partial reads safe, which matters more than it sounds. Measured against a
-real corpus, one `read_note` on a 281-block note is **~5,800 tokens** — and that note has
-five root blocks, so `depth: 1` describes it in about 300. A block whose children were
-cut off is marked `hasMoreChildren`, and `blockCount` always reports the real size, so an
-agent knows exactly what it has not seen and where to look. There is no partial
-_document_ it could hand back to a whole-note write and silently gut the note with,
-because there is no document.
+It also makes partial reads safe, which matters more than it sounds — because **a row is
+heavier than the markdown line it replaced**, roughly 60 characters against 36. Measured
+over the wire against a real 281-block note:
 
-One cost to know: a JSON row is heavier per block than the markdown line it replaces
-(~60 characters against ~36). Empty fields are omitted for that reason — `"props":null,
-"childIds":[]` on 281 blocks is pure context spent saying nothing — and reading a big
-note whole is still expensive. Traverse it.
+| `read_note`             | Blocks returned                      | Payload        |
+| ----------------------- | ------------------------------------ | -------------- |
+| `depth: 0` (everything) | 281                                  | ~13,000 tokens |
+| default (`depth: 2`)    | 17, with 11 marked `hasMoreChildren` | ~1,100 tokens  |
+| `depth: 1`              | 5, with 4 marked                     | ~390 tokens    |
+
+So `read_note` returns the top two levels **by default**. Reading such a note whole now
+costs more than the markdown form did, and an agent given the choice takes the dump every
+time — the default is what makes this change a saving rather than a cost.
+
+Nothing is hidden by it: `blockCount` is always the note's true size, `truncated` says
+whether you got all of it, and every block whose children were cut carries
+`hasMoreChildren`, so an agent knows precisely what it has not seen and where to ask.
+`depth: 0` still reads everything. And there is no partial _document_ it could hand back
+to a whole-note write and silently gut the note with, because there is no document.
+
+Empty fields are omitted for the same reason — `"props":null,"childIds":[]` on 281 blocks
+is pure context spent saying nothing.
 
 ### Editing: name the block, not the note
 

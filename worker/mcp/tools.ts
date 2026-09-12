@@ -105,6 +105,9 @@ export interface ToolDef {
 
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 200
+/** Levels `read_note` returns when `depth` is not given — see `optionalDepth`
+ * for why this is not "all of them". */
+const DEFAULT_NOTE_DEPTH = 2
 /** Refuse a markdown body larger than this. A note is prose, and a megabyte
  * of it from an agent is a mistake, not a note. */
 const MAX_MARKDOWN_BYTES = 256 * 1024
@@ -143,13 +146,29 @@ const limitOf = (args: Record<string, unknown>): number => {
   return Math.min(value, MAX_LIMIT)
 }
 
-/** `depth`: how many outline levels to return. 0 = unlimited, which is what
- * an omitted value means to `blocksOfNote`. */
-const optionalDepth = (args: Record<string, unknown>): number => {
+/**
+ * How many outline levels to return. `0` means unlimited; omitted means
+ * `fallback`.
+ *
+ * `read_note` defaults to `DEFAULT_NOTE_DEPTH` rather than the whole note,
+ * and that default is the difference between this API being cheap and being
+ * expensive. Measured against a real 281-block note: the whole thing is
+ * ~13,000 tokens (a row is heavier than the markdown line it replaced — ~60
+ * characters against ~36), two levels is ~1,100, and one is ~390. An agent
+ * that wanted to know what is in a note pays 3% of the corpus it used to.
+ *
+ * Truncating is safe to do by default only because reads are rows: there is
+ * no partial *document* to hand back to a whole-note write. And it is never
+ * silent — `blockCount` is always the note's true size, `truncated` says it
+ * happened, and every block whose children were cut carries
+ * `hasMoreChildren`, so the agent knows precisely what it has not seen and
+ * where to ask. `depth: 0` still reads everything.
+ */
+const optionalDepth = (args: Record<string, unknown>, fallback = 0): number => {
   const value = args.depth
-  if (value === undefined || value === null) return 0
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
-    throw new BadArgument("`depth` must be a positive integer.")
+  if (value === undefined || value === null) return fallback
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new BadArgument("`depth` must be a whole number, 0 or more (0 = the whole note).")
   }
   return value
 }
@@ -417,12 +436,25 @@ const readOnly = {
   openWorldHint: false,
 } as const
 
+/** A write whose repeat is a DIFFERENT outcome: calling it twice adds a
+ * second note, or a second copy of the appended blocks. */
 const writes = {
   readOnlyHint: false,
   destructiveHint: false,
   idempotentHint: false,
   openWorldHint: false,
 } as const
+
+/**
+ * A write whose repeat is the SAME outcome: setting a block's text to X
+ * twice leaves it saying X, linking a block where it already sits moves
+ * nothing, unlinking an absent link is refused.
+ *
+ * Worth distinguishing because clients read `idempotentHint` to decide
+ * whether a call that failed mid-flight is safe to retry — and for these it
+ * is, which is exactly the guarantee an agent needs on a flaky connection.
+ */
+const edits = { ...writes, idempotentHint: true } as const
 
 export const TOOLS: ToolDef[] = [
   {
@@ -559,10 +591,12 @@ export const TOOLS: ToolDef[] = [
       "A note and its blocks, as stored: every block's id, type, text, metadata " +
       "and children, in outline order with its depth. NOT markdown — this is the " +
       "row data, so to change a block you name it by id with `update_block` " +
-      "rather than rewriting the note. Large notes are expensive to read whole: " +
-      "`blockCount` tells you how big it is, and `depth` reads only the top " +
-      "levels (a block whose children were cut off is marked `hasMoreChildren`, " +
-      "so walk into it with `list_children`). Also returns the note's " +
+      "rather than rewriting the note. Returns the top " +
+      `${DEFAULT_NOTE_DEPTH} levels by default, because a large note is expensive ` +
+      "to read whole: `blockCount` is always the note's true size, `truncated` " +
+      "says whether you got all of it, and a block whose children were cut off " +
+      "is marked `hasMoreChildren` so you know where to walk in with " +
+      "`list_children`. Pass `depth: 0` for the whole note. Also returns the note's " +
       "`unassigned` blocks: ones written in it that nothing links to any more, " +
       "which the app shows in a section at the foot of the note.",
     permission: "read",
@@ -573,8 +607,10 @@ export const TOOLS: ToolDef[] = [
         note_id: { type: "string", description: "From `list_notes` or `search`." },
         depth: {
           type: "integer",
-          minimum: 1,
-          description: "How many levels of the outline to return. Omit for the whole note.",
+          minimum: 0,
+          description:
+            `How many levels of the outline to return. Defaults to ${DEFAULT_NOTE_DEPTH}; ` +
+            "use 0 for the whole note, which on a large one is expensive.",
         },
       },
       required: ["note_id"],
@@ -584,7 +620,7 @@ export const TOOLS: ToolDef[] = [
       const noteId = requireString(args, "note_id")
       const note = noteOf(graph, noteId)
       if (!note) return { ok: false, message: OUT_OF_SCOPE }
-      const depth = optionalDepth(args)
+      const depth = optionalDepth(args, DEFAULT_NOTE_DEPTH)
 
       const rootBlockIds = childrenOf(graph, noteId)
       const { blocks, truncated } = blocksOfNote(graph, rootBlockIds, depth)
@@ -942,7 +978,7 @@ export const TOOLS: ToolDef[] = [
       "that holds it — which also means an edit shows up in all of them. " +
       "Types: text, h1, h2, h3, todo, done, ul, ol, quote, code, image.",
     permission: "write",
-    annotations: writes,
+    annotations: edits,
     inputSchema: {
       type: "object",
       properties: {
@@ -1011,7 +1047,7 @@ export const TOOLS: ToolDef[] = [
       "editing it either place changes both. That is how a block ends up in two " +
       "notes. Use `move_block` to relocate one rather than linking then unlinking.",
     permission: "write",
-    annotations: writes,
+    annotations: edits,
     inputSchema: {
       type: "object",
       properties: {
@@ -1062,7 +1098,7 @@ export const TOOLS: ToolDef[] = [
       "back. If it also appears elsewhere, it simply stays there. To delete a " +
       "block for good, use `delete_block`.",
     permission: "write",
-    annotations: writes,
+    annotations: edits,
     inputSchema: {
       type: "object",
       properties: {
@@ -1111,7 +1147,7 @@ export const TOOLS: ToolDef[] = [
       "under the same parent, in one step. Give `from_parent_id` when the block " +
       "appears in more than one place, so it is clear which occurrence moves.",
     permission: "write",
-    annotations: writes,
+    annotations: edits,
     inputSchema: {
       type: "object",
       properties: {

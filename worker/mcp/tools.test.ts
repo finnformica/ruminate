@@ -210,6 +210,32 @@ describe("read_note", () => {
     expect(shallow.blockCount).toBe(3)
   })
 
+  it("defaults to the top levels, not the whole note", async () => {
+    // A note three levels deep, which the default depth cannot cover.
+    await run(harness, grantOf({}), "create_note", {
+      note_id: "2026-09-30",
+      markdown: "# One\n  - two\n    - three\n",
+    })
+
+    const shallow = await run(harness, grantOf({}), "read_note", { note_id: "2026-09-30" })
+    expect(shallow.blocks).toHaveLength(2)
+    expect(shallow.truncated).toBe(true)
+    expect(shallow.blockCount).toBe(3)
+    // And it says exactly where the rest is.
+    expect(shallow.blocks[1].hasMoreChildren).toBe(true)
+  })
+
+  it("reads the whole note when asked with depth 0", async () => {
+    await run(harness, grantOf({}), "create_note", {
+      note_id: "2026-09-30",
+      markdown: "# One\n  - two\n    - three\n",
+    })
+
+    const full = await run(harness, grantOf({}), "read_note", { note_id: "2026-09-30", depth: 0 })
+    expect(full.blocks).toHaveLength(3)
+    expect(full.truncated).toBe(false)
+  })
+
   it("is not truncated when the depth covers the whole note", async () => {
     const full = await run(harness, grantOf({}), "read_note", { note_id: ALPHA, depth: 5 })
     expect(full.truncated).toBe(false)
