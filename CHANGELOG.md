@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Ruminate asks you to update once, and each device fetches a fresh copy of your notes afterwards. A note's root is now stored under the name the app has always used for it — `note`, rather than the historical `page` it was still written as in the database — and a copy of Ruminate from before that change cannot read the new rows. Older versions are therefore refused by the server and show the **Update Ruminate** notice instead of quietly showing you nothing; once updated, the device throws its local copy away and pulls your notes down again. Nothing you have written is lost, but anything written offline and not yet synced should be synced before you update.
+- Ruminate asks you to update once, and each device fetches a fresh copy of your notes afterwards. A note's root is now stored under the name the app has always used for it — `note`, rather than the historical `page` it was still written as in the database — and a copy of Ruminate from before that change cannot read the new rows. Older versions are therefore refused by the server and show the **Update Ruminate** notice instead of quietly showing you nothing; once updated, the device throws its local copy away and pulls your notes down again. Nothing that has reached the server is lost, but anything written offline and never synced goes with the old copy, so sync before you update.
 
 ### Fixed
 

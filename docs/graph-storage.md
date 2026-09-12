@@ -206,10 +206,16 @@ and rationale in
 `0008` is outside that ladder, like the control-plane `0003`: it is not DDL at
 all but a one-off **data** rewrite on D1, the stored note-root `type` value
 from `page` to `note`. The browser store does not migrate data — it is a cache
-— so it learns of the rewrite the only way it can, by discarding its copy and
-re-pulling (`CACHE_GENERATION` 5), and a client too old to understand `note`
-roots is refused by the replica protocol gate (`REPLICA_PROTOCOL` 2) rather
-than left showing an empty corpus. The gate has to be closed first —
+— so the rewrite reaches it the way every other change does, by advancing each
+rewritten row's `seq` so the ordinary since-pull carries it (one row per
+note). `updated_at` is deliberately left alone: 0005 separated delivery from
+last-writer-wins intent, and stamping intent here would let a migration beat a
+real edit a device wrote before the deploy and has not pushed yet.
+`CACHE_GENERATION` 5 rides along as belt-and-braces — a store is served into
+the atoms at boot before the first pull lands, and stale `page` rows in that
+window would read as an empty corpus rather than a loading state. A client too
+old to understand `note` roots is refused outright by the replica protocol gate
+(`REPLICA_PROTOCOL` 2). The gate has to be closed first —
 `MIN_REPLICA_PROTOCOL` raised in the dashboard — because `npm run deploy`
 applies migrations before it uploads the bundle.
 

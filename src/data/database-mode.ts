@@ -89,11 +89,15 @@ const OWNER_KEY = "store_owner"
  *
  * Generation `5` is the stored note-root type value (migrations/0008): every
  * cache holds `type = 'page'` note rows, and the code now looks for `'note'`
- * (`NOTE_TYPE`), so a cache left in place would render a corpus with no notes
- * in it. A since-pull cannot correct it either — the migration rewrites the
- * rows without advancing any `seq` (migrations/0005 assigns that on write), so
- * nothing about them looks new. Discarding the cache and pulling the corpus in
- * full is the only thing that brings the rewritten rows down.
+ * (`NOTE_TYPE`), so a cache left in place renders a corpus with no notes in
+ * it. Unlike the generations above, though, the wipe is NOT the delivery
+ * channel here: 0008 advances each rewritten row's `seq`, so the ordinary
+ * since-pull carries it — one row per note — and a cache converges on its own.
+ * The bump is kept as the belt to that pair of braces, for the gap the pull
+ * cannot cover: a store is served into the atoms at boot BEFORE the first pull
+ * lands, and stale `page` rows in that window are an empty corpus on screen
+ * rather than the loading state a cleared store shows. Discarding once also
+ * settles a device whose cursor is somehow ahead of the rewrite.
  *
  * This is why the constant is bumped rather than merely re-documented: every
  * device that already booted on generation `2` has `"2"` stamped in its meta,
