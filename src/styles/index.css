@@ -128,10 +128,22 @@ body:has([data-resizing="true"]) * {
   color: inherit;
 }
 
-/* Toggled-open panels (e.g. Help) are a state, not a place — they keep the
- * neutral pressed surface so accent stays reserved for "current". */
+/* Toggled-open panels (e.g. Help) are a state, not a place — they keep a
+ * NEUTRAL surface so accent stays reserved for "current". It sits one step
+ * above the row hover, on the same three-step ladder a filled button uses:
+ * at `--color-bg-secondary` it was the very value an ordinary row hovers to,
+ * so a toggled-open Help row and a hovered Notes row were the same colour. */
 .nav-item[aria-pressed="true"] {
-  @apply bg-bg-secondary font-bold text-text;
+  @apply font-bold text-text;
+  background-color: var(--color-bg-secondary-hover);
+}
+
+.nav-item[aria-pressed="true"]:hover {
+  background-color: var(--color-bg-secondary-active);
+}
+
+.nav-item[aria-pressed="true"]:active {
+  background-color: var(--neutral-a6);
 }
 
 .nav-item[data-size="large"] {

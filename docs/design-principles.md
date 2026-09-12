@@ -79,14 +79,44 @@ asks for it.
    drains the color from the text. Accent-independent, so all five accents
    share one inactive treatment per scheme. Restoration rides the same 100ms
    fades — perceptually instant.
-   Outside the editor "current" is still a **wash**: the sidebar's active nav
-   row / open note (`.nav-item[aria-current]`, with `-hover`/`-active` steps)
-   and the notes/tags list keyboard highlight (`.list-highlight`) use
-   `--color-bg-selected` / `--color-text-selected` verbatim — a list row is a
-   nav row and paints like one. Every one of these tokens is mixed from the
-   same `--accent-9`, so one color always means "you are here / keys act
-   here", and changing the selection color is a one-place edit in
-   `variables.css`.
+   Outside the editor "chosen" and "current" are a **wash**: the sidebar's
+   active nav row / open note (`.nav-item[aria-current]`, with
+   `-hover`/`-active` steps), the notes/tags list keyboard highlight
+   (`.list-highlight`), the calendar's current day and week, and the settings
+   pickers (`<Button selected>`) all use `--color-bg-selected` /
+   `--color-text-selected` verbatim. Every one of
+   these tokens is mixed from the same `--accent-9`, so one color always means
+   "you are here / keys act here", and changing the selection color is a
+   one-place edit in `variables.css`.
+   **A ring only where focus doesn't already own it.** `focus-ring` is a 2px
+   inset ring in `--color-border-focus`, so on anything focusable an accent
+   ring already means "focused" — a second accent ring meaning "chosen" is
+   unreadable, whatever its width. Block rows are the one row type that is
+   never focusable (the editor container holds the keyboard, `tabIndex={-1}`),
+   which is exactly why the ring is free there. Everywhere else "chosen" is a
+   fill. Two deliberate exceptions, both surfaces a fill would destroy: a
+   note card in grid view and a tag pill take `--color-border-selected` (never
+   `--color-border-focus`, so highlight and focus stay tellable apart), and
+   the accent swatch takes an INK ring, since an accent ring on an accent
+   swatch would vanish.
+   **A fill can never be its own hover.** `--color-bg-secondary` and
+   `--color-bg-hover` are the same value by design (hovering a ghost control
+   makes it look like a filled one), so a chosen/toggled surface must sit
+   clear of them: the selected wash, or a step further up the neutral ladder
+   (`--color-bg-secondary-hover`, with `-active` and `--neutral-a6` above it).
+   **Accent is for the app's own surfaces.** Two controls take that neutral
+   ladder rather than the wash, because accent would be wrong there, not
+   merely loud: the sidebar's toggled panel (`.nav-item[aria-pressed]`), since
+   a panel you opened is a state and not a place; and the image toolbar's
+   alignment, since it floats over a picture, so an accent tint would land on
+   whatever colour the picture happens to be, and an alignment is a tool's
+   state rather than something the app remembers about you.
+   **Controls over a picture carry their own contrast.** The toolbar and the
+   resize handles float over an image of unknown colour, so neither may rely
+   on it: the toolbar is a blurred card with a hairline, and each handle is an
+   opaque white pill with a dark hairline and a soft shadow (`image-figure.tsx`)
+   — on a dark picture the white core carries it, on a pale one the hairline
+   and shadow do.
 4. **View and edit are pixel-identical.** Every typographic property (size,
    weight, line-height, tracking) lives in `typographyFor` and is applied to both
    the rendered body _and_ the textarea. Nothing may style one branch only.
