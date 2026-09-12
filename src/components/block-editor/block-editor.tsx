@@ -221,6 +221,12 @@ let lastActiveEditor: HTMLElement | null = null
 const UNDO_KEEPS_TO_ITSELF =
   'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [data-block-editor]'
 
+/** Where an Up/Down arrow is somebody else's: everything ⌘Z leaves alone,
+ * plus the widgets that walk their options with the arrows (a listbox, a
+ * combobox, a tab list, a radio group, a tree or grid). A plain button or
+ * link uses them for nothing, so the editor takes them back. */
+const ARROWS_KEEP_TO_THEMSELVES = `${UNDO_KEEPS_TO_ITSELF}, [role="listbox"], [role="combobox"], [role="tablist"], [role="radiogroup"], [role="tree"], [role="grid"], [role="slider"]`
+
 /** What a pointer-down may land on and NOT count as a click on blank space
  * (see `pointerIdle`): any real control. The editor container is tabindex -1
  * and is deliberately absent, so a click in its gaps is blank. */
@@ -1480,6 +1486,41 @@ export function BlockEditor({
       if (isUndo ? latestHistory.current.undo() : latestHistory.current.redo()) {
         event.preventDefault()
       }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [readOnly])
+
+  // The arrow keys always come back to the editor. A click on a button or a
+  // nav link leaves focus there, where Up/Down mean nothing, and the user's
+  // selection is still sitting in the editor waiting for them; so an Up or
+  // Down (plain or with Shift) pressed on such a control refocuses the
+  // container and is replayed there, so the same keystroke also moves the
+  // selection from where it was — or, with nothing selected, lands on the
+  // first/last block as the container's own handler does. The same
+  // exclusions as ⌘Z: anything that uses arrows itself (form fields, dialogs,
+  // menus, lists, other editors) keeps them. The replay is a fresh event on
+  // the container; the original is cancelled so the control never sees it.
+  useEffect(() => {
+    if (readOnly) return
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return
+      if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return
+      const root = containerRef.current
+      if (!root || lastActiveEditor !== root) return
+      const target = event.target
+      if (!(target instanceof Element) || root.contains(target)) return
+      if (target.closest(ARROWS_KEEP_TO_THEMSELVES)) return
+      event.preventDefault()
+      root.focus({ preventScroll: true })
+      root.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: event.key,
+          shiftKey: event.shiftKey,
+          bubbles: true,
+          cancelable: true,
+        }),
+      )
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)

@@ -2040,6 +2040,45 @@ describe("keyboard ownership (inactive-selection dimming)", () => {
     expect(container.querySelector(".block-highlight-inactive")).toBeNull()
   })
 
+  it("an arrow key on a focused button comes back to the editor and moves the selection", async () => {
+    const { container } = render(
+      <>
+        <Harness initial={"A\nB\nC"} />
+        <button data-testid="btn">Elsewhere</button>
+        <input data-testid="field" />
+      </>,
+    )
+    const root = editorRoot(container)
+    const btn = container.querySelector<HTMLButtonElement>('[data-testid="btn"]')!
+    expect(container.querySelector(".block-highlight")!.textContent).toContain("A")
+
+    // Focus a button (as a click would): the selection demotes…
+    act(() => btn.focus())
+    await settleFocus()
+    expect(document.activeElement).toBe(btn)
+    expect(container.querySelector(".block-highlight-inactive")).not.toBeNull()
+
+    // …and ArrowDown pressed there refocuses the editor and moves A → B in
+    // the same keystroke, active again.
+    fireEvent.keyDown(btn, { key: "ArrowDown" })
+    expect(document.activeElement).toBe(root)
+    expect(container.querySelector(".block-highlight")!.textContent).toContain("B")
+    expect(container.querySelector(".block-highlight-inactive")).toBeNull()
+
+    // Shift+ArrowDown from a button extends the run the same way.
+    act(() => btn.focus())
+    fireEvent.keyDown(btn, { key: "ArrowDown", shiftKey: true })
+    expect(document.activeElement).toBe(root)
+    expect(container.querySelectorAll(".block-highlight").length).toBe(2)
+
+    // A text field keeps its arrows: nothing moves, focus stays put.
+    const field = container.querySelector<HTMLInputElement>('[data-testid="field"]')!
+    act(() => field.focus())
+    fireEvent.keyDown(field, { key: "ArrowUp" })
+    expect(document.activeElement).toBe(field)
+    expect(container.querySelectorAll(".block-highlight").length).toBe(2)
+  })
+
   it("stays active across internal focus moves (select → edit → select)", async () => {
     const { container } = render(<Harness initial={"A\nB"} />)
     const root = editorRoot(container)

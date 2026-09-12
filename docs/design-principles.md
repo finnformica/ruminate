@@ -33,9 +33,11 @@ asks for it.
    `src/styles/variables.css`): a 1px inset ring of the accent over a faint
    wash. Light scheme: the ring is
    `color-mix(in srgb, var(--accent-9) 45%, <wash>)` over a 7% accent-9 wash.
-   Dark scheme: the ring is 55% accent-9 (a dark ground eats a thin line)
-   over a 10% accent-9 wash laid on a 4% white lift — the lift alone read as
-   plain grey; the tint is what names the accent. The Neutral accent's light ring deepens to 60%, as its wash
+   Dark scheme: pastel — the ring is 55% accent-11 (the dark scheme's light
+   step; a dark ground eats a thin line) over a 12% accent-11 wash laid on a
+   14% white lift, so the tint stays airy where accent-9 went muddy, and the
+   lift keeps it a clear step above the page without the old wash's 18%
+   slab. The Neutral accent's light ring deepens to 60%, as its wash
    does, so it stays clear of the hover ring. Hover and selection therefore
    differ in **kind** — a neutral line against an accent one — not merely in
    weight; a highlighted block must read as "selected", not "hovered", and
@@ -231,20 +233,20 @@ full-width highlight.)
 
 ## Color roles
 
-| Role         | Light / dark token                                              | Used for                                                                                                                                                                       |
-| ------------ | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Ink          | `--color-text` (sand-12)                                        | body, headings, checked-off text ink                                                                                                                                           |
-| Muted        | `--color-text-secondary`                                        | quotes, done todos, ordered numbers, crumbs                                                                                                                                    |
-| Faint        | `--color-text-tertiary`                                         | bullet dots, chevron, placeholders, `#`                                                                                                                                        |
-| Guide        | `--color-border-secondary`                                      | indent guide lines (rest state)                                                                                                                                                |
-| Structure    | `--color-border` (a7)                                           | quote bar, unchecked checkbox border                                                                                                                                           |
-| Hover        | `--color-border-secondary` ring                                 | non-selected block lines under the pointer — 1px inset ring, no fill                                                                                                           |
-| Selection    | `--color-border-selected` ring over `--color-bg-selected-faint` | selected block(s) — 1px accent-9 ring (45% light / 55% dark) over a faint wash (7% accent light / 4% white lift dark); the list highlight keeps the `--color-bg-selected` wash |
-| Selected ink | `--color-text-selected`                                         | ink on a selected row — 50% toward accent-12                                                                                                                                   |
-| Inactive sel | neutral ring + fill (see §3)                                    | the selection while the editor lacks focus or blank space was clicked — 22% neutral-9 ring over a 4% fill light / 14% white ring over a 4% lift dark                           |
-| Current      | `--color-bg-selected`                                           | sidebar active route / open note row (same tokens as Selection)                                                                                                                |
-| Accent solid | `--accent-9`                                                    | checked checkbox fill                                                                                                                                                          |
-| Transclusion | `--accent-a2` tint                                              | `((ref))` embeds — quietly "live" content                                                                                                                                      |
+| Role         | Light / dark token                                              | Used for                                                                                                                                                                                       |
+| ------------ | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ink          | `--color-text` (sand-12)                                        | body, headings, checked-off text ink                                                                                                                                                           |
+| Muted        | `--color-text-secondary`                                        | quotes, done todos, ordered numbers, crumbs                                                                                                                                                    |
+| Faint        | `--color-text-tertiary`                                         | bullet dots, chevron, placeholders, `#`                                                                                                                                                        |
+| Guide        | `--color-border-secondary`                                      | indent guide lines (rest state)                                                                                                                                                                |
+| Structure    | `--color-border` (a7)                                           | quote bar, unchecked checkbox border                                                                                                                                                           |
+| Hover        | `--color-border-secondary` ring                                 | non-selected block lines under the pointer — 1px inset ring, no fill                                                                                                                           |
+| Selection    | `--color-border-selected` ring over `--color-bg-selected-faint` | selected block(s) — 1px accent-9 ring (45% light / 55% dark) over a faint wash (7% accent-9 light / 12% accent-11 on a 14% lift dark); the list highlight keeps the `--color-bg-selected` wash |
+| Selected ink | `--color-text-selected`                                         | ink on a selected row — 50% toward accent-12                                                                                                                                                   |
+| Inactive sel | neutral ring + fill (see §3)                                    | the selection while the editor lacks focus or blank space was clicked — 22% neutral-9 ring over a 4% fill light / 14% white ring over a 4% lift dark                                           |
+| Current      | `--color-bg-selected`                                           | sidebar active route / open note row (same tokens as Selection)                                                                                                                                |
+| Accent solid | `--accent-9`                                                    | checked checkbox fill                                                                                                                                                                          |
+| Transclusion | `--accent-a2` tint                                              | `((ref))` embeds — quietly "live" content                                                                                                                                                      |
 
 All roles are Radix alpha/step tokens, so both color schemes (and print, which
 remaps the semantic tokens) resolve automatically. Never hardcode a hex.
