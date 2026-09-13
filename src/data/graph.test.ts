@@ -160,7 +160,7 @@ describe("rollup equivalence (named cases)", () => {
   })
 
   it("keeps genuinely ambiguous near-misses verbatim as text nodes", () => {
-    // #nospace is the tag syntax; [link] is prose; tight markers and bare []
+    // #nospace is prose; [link] is prose; tight markers and bare []
     // have no clear intent; 4+ digit "ordered" markers are prose years.
     const markdown =
       "#nospace\n##alsonospace\n[link] text\n[x]tight\n[]\n1990. that was the year\n**bold** start\n+1 to that\n"
@@ -646,12 +646,12 @@ describe("docFromGraph (the walk, N roots)", () => {
 
   it("noteDoc is the note's children with its props, and rollup is its serialization", () => {
     const snapshot = buildGraphSnapshot(
-      [row("p", "note", "Titled", JSON.stringify({ tags: ["x"] })), row("blk_a", "ul", "a")],
+      [row("p", "note", "Titled", JSON.stringify({ pinned: true })), row("blk_a", "ul", "a")],
       [edge("p", "blk_a", "a0")],
     )
     const doc = noteDoc("p", snapshot)!
     expect(doc.rootBlockIds).toEqual(["blk_a"])
-    expect(doc.props).toEqual({ title: "Titled", tags: ["x"] })
+    expect(doc.props).toEqual({ title: "Titled", pinned: true })
     expect(serialize(doc)).toBe(rollup("p", snapshot))
     expect(noteDoc("blk_a", snapshot)).toBeNull()
   })
@@ -711,7 +711,7 @@ describe("property: generated documents round-trip", () => {
     "x  y",
     "((blk_ref))",
     "[[wiki]]",
-    "#tag",
+    "#word",
     "```",
     "---",
   ]

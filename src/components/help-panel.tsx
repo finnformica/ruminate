@@ -166,7 +166,6 @@ function HelpContent({
             <FormattingItem syntax="`Code`" />
             <FormattingItem syntax="[Link](https://example.com)" />
             <FormattingItem syntax="$$LaTeX^{math}$$" />
-            <FormattingItem syntax="#tag" makes="Tag" />
             <FormattingItem syntax="# Heading" makes="Heading block (## and ### for smaller)" />
             <FormattingItem syntax="- Item" makes="Bullet list block" />
             <FormattingItem syntax="1. Item" makes="Numbered list block" />

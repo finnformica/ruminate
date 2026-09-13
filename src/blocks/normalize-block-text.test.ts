@@ -63,9 +63,9 @@ describe("normalizeBlockText — documented refusals (ambiguous stays text)", ()
     expect(normalizeBlockText("2)tight")).toBeNull()
   })
 
-  it("#heading without a space — indistinguishable from the app's #tag syntax", () => {
+  it("#heading without a space — indistinguishable from a #word in prose", () => {
     expect(normalizeBlockText("#Heading")).toBeNull()
-    expect(normalizeBlockText("#tag and prose")).toBeNull()
+    expect(normalizeBlockText("#word and prose")).toBeNull()
     expect(normalizeBlockText("##nospace")).toBeNull()
   })
 

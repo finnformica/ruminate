@@ -11,9 +11,8 @@ A note's metadata is a small JSON object of properties on its page node — the 
 | `font`       | The note's font choice                   |
 | `width`      | The note's width choice                  |
 | `updated_at` | Every save                               |
-| `tags`       | Creating a note from a tag page          |
 
-`tags` are added to the note's tags alongside any `#tag` in the body (see [markdown-syntax.md](./markdown-syntax.md#tags)). Date-valued properties put the note on the calendar for that date. Any property can be searched with `has:`, `no:`, `key:value` and `sort:` (see [query-language.md](./query-language.md)).
+Date-valued properties put the note on the calendar for that date. Any property can be searched with `has:`, `no:`, `key:value` and `sort:` (see [query-language.md](./query-language.md)).
 
 ## No frontmatter
 

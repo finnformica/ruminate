@@ -2,13 +2,7 @@ import { describe, expect, it } from "vitest"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import { buildGraphSnapshot, docToGraph, type GraphSnapshot } from "./graph"
-import {
-  createNotesBuilder,
-  noteFromNode,
-  notePropsEntries,
-  notePropsOps,
-  tagsInText,
-} from "./note-meta"
+import { createNotesBuilder, noteFromNode, notePropsEntries, notePropsOps } from "./note-meta"
 import { applyOps } from "./ops"
 
 /** A note fixture: its markdown body, with its metadata as props (never as
@@ -30,27 +24,13 @@ function graphOf(notes: Record<string, Note>): GraphSnapshot {
 const note = (id: string, markdown: string, props?: Record<string, unknown>) =>
   noteFromNode(id, graphOf({ [id]: props ? { markdown, props } : markdown }))!
 
-describe("tagsInText", () => {
-  it("find inline tags as the syntax defines them, parents included", () => {
-    expect(tagsInText("a #foo/bar b #x_1 not#this #-no")).toEqual(["foo", "foo/bar", "x_1"])
-    expect(tagsInText("#Ünïcode #中文")).toEqual(["Ünïcode", "中文"])
-  })
-})
-
 describe("noteFromNode", () => {
-  it("reads title, props, tags, dates, tasks, headings and text off the graph", () => {
+  it("reads title, props, dates, tasks, headings and text off the graph", () => {
     const n = note(
       "blk_p",
-      [
-        "# Heading one #inline",
-        "  [ ] buy milk !!2 #home",
-        "  [x] ship it",
-        "  ## Sub",
-        "- plain #tag/child",
-      ].join("\n"),
+      ["# Heading one", "  [ ] buy milk !!2", "  [x] ship it", "  ## Sub", "- plain"].join("\n"),
       {
         title: "Plan",
-        tags: ["work/q3"],
         pinned: true,
         due: "2026-03-04T00:00:00.000Z",
         updated_at: "2026-01-02T03:04:05.000Z",
@@ -60,20 +40,15 @@ describe("noteFromNode", () => {
     expect(n.displayName).toBe("Plan")
     expect(n.pinned).toBe(true)
     expect(n.props.pinned).toBe(true)
-    expect(n.tags).toEqual(["work", "work/q3", "inline", "home", "tag", "tag/child"])
     expect(n.dates).toContain("2026-03-04")
     expect(n.updatedAt).toBe(Date.parse("2026-01-02T03:04:05.000Z"))
     expect(n.tasks).toEqual([
-      expect.objectContaining({
-        completed: false,
-        text: "buy milk !!2 #home",
-        tags: ["home"],
-      }),
+      expect.objectContaining({ completed: false, text: "buy milk !!2" }),
       expect.objectContaining({ completed: true, text: "ship it" }),
     ])
     expect(n.tasks[0].blockId).toMatch(/^blk_/)
     expect(n.headings).toEqual([
-      { level: 1, text: "Heading one #inline" },
+      { level: 1, text: "Heading one" },
       { level: 2, text: "Sub" },
     ])
     expect(n.text).toContain("buy milk")

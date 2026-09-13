@@ -26,7 +26,7 @@ export const PillButton = React.forwardRef<HTMLButtonElement, PillButtonProps>(
           variant === "secondary" &&
             "border-transparent bg-bg-secondary hover:bg-bg-secondary-hover active:bg-bg-secondary-active",
           // The inverted pill answers the pointer like every other control:
-          // it had no hover or press at all, so an applied tag filter was inert.
+          // it had no hover or press at all, so an applied scope pill was inert.
           variant === "primary" &&
             "border-transparent bg-text text-bg hover:bg-text-secondary active:bg-text-tertiary",
           className,

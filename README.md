@@ -1,6 +1,6 @@
 # Ruminate
 
-A note-taking app built around an outline of blocks. Every note is a tree of typed blocks (text, headings, bullets, to-dos, quotes, code, images) held in a graph of nodes and links, stored in SQLite in your browser and replicated to Cloudflare D1 behind a Worker. Search runs over blocks as well as notes, with a small query language; daily and weekly notes sit on a calendar; tags, maths and (behind a switch) pictures round it out.
+A note-taking app built around an outline of blocks. Every note is a tree of typed blocks (text, headings, bullets, to-dos, quotes, code, images) held in a graph of nodes and links, stored in SQLite in your browser and replicated to Cloudflare D1 behind a Worker. Search runs over blocks as well as notes, with a small query language; daily and weekly notes sit on a calendar; maths and (behind a switch) pictures round it out.
 
 Ruminate is built by [Finn Formica](https://github.com/finnformica). It began as a fork of [Lumen](https://github.com/lumen-notes/lumen) by Cole Bemis & contributors (MIT) and has since been rewritten: the storage, sync, editor, search and state layers are Ruminate's own, and Lumen's git-backed markdown files, markdown renderer and note conventions are gone. What remains from Lumen is the design system (Tailwind theme, Radix / Base UI component layer, typography, icons), the app shell and routing, and the calendar.
 

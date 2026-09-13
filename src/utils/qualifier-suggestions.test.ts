@@ -67,10 +67,10 @@ describe("applyQualifierOption", () => {
   })
 
   test("keeps the exclusion, the comma prefix, and the text after the token", () => {
-    const value = "-type:todo,do tag:work"
+    const value = "-type:todo,do in:work"
     const trigger = findQualifierTrigger(value, 13)!
     expect(applyQualifierOption(value, trigger, { value: "done" })).toEqual({
-      value: "-type:todo,done tag:work",
+      value: "-type:todo,done in:work",
       caret: 16,
     })
   })

@@ -118,10 +118,10 @@ describe("useCreateNote", () => {
   it("creates a titled note node, once", async () => {
     const { store, wrapper, unsubscribe } = await signedOutStore({})
     const { result } = renderHook(() => useCreateNote(), { wrapper })
-    act(() => result.current("blk_fresh00000", { title: "Fresh", props: { tags: ["a"] } }))
+    act(() => result.current("blk_fresh00000", { title: "Fresh", props: { pinned: true } }))
     const note = store.get(notesAtom).get("blk_fresh00000")!
     expect(note.title).toBe("Fresh")
-    expect(note.tags).toEqual(["a"])
+    expect(note.pinned).toBe(true)
     expect(note.updatedAt).not.toBeNull()
     // A second create of the same id is a no-op.
     act(() => result.current("blk_fresh00000", { title: "Again" }))
