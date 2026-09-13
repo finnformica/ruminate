@@ -15,13 +15,13 @@ import { ResultsEditor } from "./results-editor"
  * block editor over the matched blocks or notes (`ResultsEditor`) — and,
  * where the surface wants it, a way to the rest.
  *
- * The rows are the roots the results name. A query with text resolves to
- * blocks; one that only names notes lists notes; with no query at all the
- * surface says what to browse (`browseNotes`: the palette's pinned notes;
- * the page leaves it to the empty query, every note). The palette also
- * lists the notes whose TITLE
- * matched ahead of the blocks (`leading`) — a note is a node whose children
- * are its blocks, so it is a root row like any other.
+ * The rows are the roots the results name (`results.rows`): a query with
+ * text resolves to blocks — and the notes whose title matched, ranked among
+ * them purely by score (`rankResultRows`; a note is a node whose children
+ * are its blocks, so it is a root row like any other); one that only names
+ * notes lists notes; with no query at all the surface says what to browse
+ * (`browseNotes`: the palette's recent notes; the page leaves it to the
+ * empty query, every note).
  *
  * Only `limit` rows are drawn at first. `more` adds a **Load more** button
  * beneath, which also fires as it scrolls into view; a new query starts
@@ -30,7 +30,6 @@ import { ResultsEditor } from "./results-editor"
 export function ResultsList({
   query,
   results,
-  leading = NO_NOTES,
   browseNotes,
   limit,
   more = false,
@@ -43,9 +42,7 @@ export function ResultsList({
   /** The full query the results are for — empty when browsing. */
   query: string
   results: SearchResults
-  /** Notes to list ahead of the hits (title matches); capped at `limit`. */
-  leading?: readonly Note[]
-  /** What to list with no query at all (the palette's pinned notes); left
+  /** What to list with no query at all (the palette's recent notes); left
    * out, every note the empty query resolved to. */
   browseNotes?: readonly Note[]
   /** How many rows to draw before **Load more**. */
@@ -64,7 +61,7 @@ export function ResultsList({
   /** ↑ past the first row hands focus back (to the query box). */
   onExitTop?: () => void
 }) {
-  const { mode, hits, notes } = results
+  const { mode, hits, notes, titleMatches, rows: ranked } = results
   const showBlocks = mode === "blocks"
   const browsing = query === ""
 
@@ -77,21 +74,18 @@ export function ResultsList({
     if (visible !== limit) setVisible(limit)
   }
 
-  // The matched rows: blocks, or notes. Everything else listed (the title
-  // matches, the browse roots) is context, and never in the count. With no
-  // query and nothing said to browse, the listing is every note the empty
-  // query resolved to.
+  // The rows: the ranked results, or what the surface browses with no
+  // query — and nothing said to browse is every note the empty query
+  // resolved to.
   const browseList = browseNotes ?? notes
-  const total = browsing ? browseList.length : showBlocks ? hits.length : notes.length
-  const roots = React.useMemo<ResultRoot[]>(() => {
-    if (browsing)
-      return browseList.slice(0, visible).map((note) => ({ id: note.id, noteId: note.id }))
-    const lead = leading.slice(0, limit).map((note) => ({ id: note.id, noteId: note.id }))
-    const matched = showBlocks
-      ? hits.slice(0, visible).map((hit) => ({ id: hit.blockId, noteId: hit.noteId }))
-      : notes.slice(0, visible).map((note) => ({ id: note.id, noteId: note.id }))
-    return [...lead, ...matched]
-  }, [browsing, browseList, leading, limit, showBlocks, hits, notes, visible])
+  const total = browsing ? browseList.length : ranked.length
+  const roots = React.useMemo<ResultRoot[]>(
+    () =>
+      browsing
+        ? browseList.slice(0, visible).map((note) => ({ id: note.id, noteId: note.id }))
+        : ranked.slice(0, visible).map((row) => ({ id: row.id, noteId: row.noteId })),
+    [browsing, browseList, ranked, visible],
+  )
 
   const loadMore = React.useCallback(() => {
     setVisible((count) => Math.min(count + limit, total))
@@ -101,15 +95,16 @@ export function ResultsList({
     if (more && bottomInView) loadMore()
   }, [more, bottomInView, loadMore])
 
-  // Counts the MATCHED blocks. Children revealed by expanding a result are
-  // context, not matches, so they never inflate it — which is what makes
-  // the number checkable.
+  // Counts the MATCHED blocks, and the notes whose title matched. Children
+  // revealed by expanding a result are context, not matches, so they never
+  // inflate it — which is what makes the number checkable.
+  const byTitle = titleMatches.length ? `, ${pluralize(titleMatches.length, "note")} by title` : ""
   const count = browsing
     ? null
     : showBlocks
-      ? hits.length === 0
+      ? hits.length === 0 && titleMatches.length === 0
         ? "No matching blocks"
-        : `${pluralize(hits.length, "matching block")} in ${pluralize(notes.length, "note")}`
+        : `${pluralize(hits.length, "matching block")} in ${pluralize(notes.length, "note")}${byTitle}`
       : notes.length === 0
         ? "No matching notes"
         : pluralize(notes.length, "result")
@@ -147,5 +142,3 @@ export function ResultsList({
     </div>
   )
 }
-
-const NO_NOTES: readonly Note[] = []

@@ -76,9 +76,11 @@ The tags page keeps its own Linear-style list keys (<kbd>↑</kbd> / <kbd>↓</k
 
 ## ⌘K results
 
-The palette's results — the notes whose title matched, then the matching
-**blocks** at any depth, or the pinned notes with no query — are the same
-block editor, browsed, under the same count line as the notes page. The
+The palette's results — the matching **blocks** at any depth and the notes
+whose title matched, ranked together by score; or, with nothing typed, the
+**Recent** notes (pinned first, then the five most recently edited, read
+off the graph and stored nowhere) — are the same block editor, browsed,
+under the same count line as the notes page. The
 palette's own items (the jump-to and note actions) come first and take
 cmdk's <kbd>↑</kbd> / <kbd>↓</kbd>; nothing is highlighted until you arrow,
 so <kbd>↵</kbd> straight after typing is the query's and opens the full

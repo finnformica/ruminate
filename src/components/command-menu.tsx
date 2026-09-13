@@ -10,14 +10,13 @@ import {
   blockRevealAtom,
   graphSnapshotAtom,
   noteOutlineAtom,
-  pinnedNotesAtom,
+  sortedNotesAtom,
 } from "../global-state"
 import { useCreateNote, useNoteById } from "../hooks/note"
 import { useSearchResults } from "../hooks/search-results"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/registry"
 import { rollup } from "../data/graph"
 import { copyAsMarkdown } from "../utils/copy-markdown"
-import { useSearchNotes } from "../hooks/search-notes"
 import { formatDate, formatDateDistance, toDateString } from "../utils/date"
 import { generateNoteId } from "../utils/note-id"
 import { filterOutline } from "../utils/note-outline"
@@ -63,19 +62,25 @@ function hasHighlightedItem(root: HTMLElement): boolean {
   return root.querySelector('[cmdk-item][aria-selected="true"]') !== null
 }
 
-/** How many rows of each kind (title matches, then blocks) the palette
- * lists. */
+/** How many result rows the palette lists. */
 const NUM_VISIBLE_RESULTS = 6
+
+/** How many notes the palette offers with nothing typed: the most recently
+ * edited or created, read off the graph (`sortedNotesAtom` — pinned notes
+ * first, then by `updatedAt`), so nothing is stored anywhere. */
+const RECENT_NOTES = 5
 
 /** The keys cmdk walks its items with (plus ctrl+n / ctrl+p). */
 const NAVIGATION_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End"])
 
 export function CommandMenu() {
   const navigate = useNavigate()
-  const searchNotes = useSearchNotes()
   const createNote = useCreateNote()
   const jotaiStore = useStore()
-  const pinnedNotes = useAtomValue(pinnedNotesAtom)
+  // With nothing typed: the recent notes — pinned ones first, then the most
+  // recently edited or created, to `RECENT_NOTES` in all.
+  const sortedNotes = useAtomValue(sortedNotesAtom)
+  const recentNotes = useMemo(() => sortedNotes.slice(0, RECENT_NOTES), [sortedNotes])
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
 
   // Get the current note if we're on a note page.
@@ -341,12 +346,6 @@ export function CommandMenu() {
     return toDateString(date)
   }, [deferredQuery])
 
-  // The notes whose title matched: listed ahead of the blocks.
-  const noteResults = useMemo(
-    () => (deferredQuery ? searchNotes(deferredQuery) : []),
-    [searchNotes, deferredQuery],
-  )
-
   // The scope in force for a query: the zoomed block, else the open note —
   // unless the reader took it off or wrote an `in:` of their own.
   const scopeFor = useCallback(
@@ -375,12 +374,10 @@ export function CommandMenu() {
   const scopedQuery = withScope(deferredQuery)
 
   // Search BLOCKS — the palette's primary results. A nested heading or a todo
-  // is a first-class row here, not a note it happens to live in.
+  // is a first-class row here, not a note it happens to live in; a note
+  // whose title matched is a row among them, by score.
   const results = useSearchResults(scopedQuery)
-  const hasRows = deferredQuery
-    ? noteResults.length > 0 ||
-      (results.mode === "blocks" ? results.hits.length > 0 : results.notes.length > 0)
-    : pinnedNotes.length > 0
+  const hasRows = deferredQuery ? results.rows.length > 0 : recentNotes.length > 0
 
   // Bumped to hand the keyboard to the results (↓ past the last item).
   const [focusFirstSignal, setFocusFirstSignal] = useState(0)
@@ -693,8 +690,8 @@ export function CommandMenu() {
                     </CommandItem>
                   </Command.Group>
                 ) : null}
-                {deferredQuery || pinnedNotes.length > 0 ? (
-                  <Command.Group heading={deferredQuery ? "Results" : "Pinned notes"}>
+                {deferredQuery || recentNotes.length > 0 ? (
+                  <Command.Group heading={deferredQuery ? "Results" : "Recent"}>
                     {/* The results block — the count and the rows — as the
                         notes page draws it. ↓ past the last item hands the
                         keyboard to the rows; ↵ straight after typing commits
@@ -703,8 +700,7 @@ export function CommandMenu() {
                       variant="palette"
                       query={scopedQuery}
                       results={results}
-                      leading={noteResults}
-                      browseNotes={pinnedNotes}
+                      browseNotes={recentNotes}
                       limit={NUM_VISIBLE_RESULTS}
                       readOnly
                       onOpen={openResult}

@@ -97,6 +97,11 @@ export interface BlockHit {
   ancestors: BlockAncestor[]
   /** The containing note — metadata for note-level qualifiers and rendering. */
   note: Note
+  /** How well the block's text matched the query's text (fast-fuzzy's 0–1),
+   * on a hit a text search returned; absent on a hit a bare `type:` listed.
+   * The one scale the notes' title matches are scored on too, so a results
+   * list can rank the two together (`rankResultRows`). */
+  score?: number
 }
 
 /** One note's blocks: its hits in document order. */
@@ -293,7 +298,13 @@ export function searchBlocks(query: Query, index: BlockIndex): BlockHit[] {
     (filter) => !isBlockTypeFilter(filter) && !isScopeFilter(filter),
   )
 
-  const candidates = query.fuzzy ? index.searcher.search(query.fuzzy) : index.hits
+  // A text search scores each hit (best first); a bare filter lists the
+  // index in document order, unscored.
+  const candidates = query.fuzzy
+    ? index.searcher
+        .search(query.fuzzy, { returnMatchData: true })
+        .map((match) => ({ ...match.item, score: match.score }))
+    : index.hits
   const results = candidates.filter(
     (hit) =>
       blockFilters.every((filter) => testBlockTypeFilter(filter, hit)) &&

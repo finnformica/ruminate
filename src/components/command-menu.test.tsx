@@ -15,12 +15,13 @@ const mocks = vi.hoisted(() => ({
     { params: { _splat: string }; search?: { block?: string } } | undefined,
   // What the query resolves to, injected at `useSearchResults`; the rows
   // themselves are walked out of the mocked graph (see the global-state mock).
-  results: { mode: "notes", hits: [], notes: [] } as {
+  results: { mode: "notes", hits: [], notes: [], titleMatches: [], rows: [] } as {
     mode: "blocks" | "notes"
     hits: unknown[]
     notes: unknown[]
+    titleMatches: unknown[]
+    rows: { id: string; noteId: string; kind: "note" | "block"; score?: number }[]
   },
-  noteResults: [] as unknown[],
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -31,10 +32,6 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("../hooks/note", () => ({
   useNoteById: () => undefined,
   useCreateNote: () => vi.fn(),
-}))
-
-vi.mock("../hooks/search-notes", () => ({
-  useSearchNotes: () => () => mocks.noteResults,
 }))
 
 vi.mock("../hooks/search-results", () => ({
@@ -86,7 +83,6 @@ vi.mock("../global-state", async (importOriginal) => {
     sampleGraphAtom: atom(graph),
     isDatabaseModeAtom: atom(false),
     notesAtom: atom(new Map()),
-    pinnedNotesAtom: atom([]),
     sortedNotesAtom: atom([]),
     noteOutlineAtom: atom(null),
     blockRevealAtom: atom(null),
@@ -95,7 +91,7 @@ vi.mock("../global-state", async (importOriginal) => {
   }
 })
 
-import { blockRevealAtom, noteOutlineAtom } from "../global-state"
+import { blockRevealAtom, noteOutlineAtom, sortedNotesAtom } from "../global-state"
 import type { BlockRevealRequest } from "../utils/note-outline"
 import { CommandMenu, isCommandMenuOpenAtom } from "./command-menu"
 
@@ -112,8 +108,7 @@ afterEach(cleanup)
 beforeEach(() => {
   mocks.match = { params: { _splat: "note-1" } }
   mocks.navigate.mockClear()
-  mocks.results = { mode: "notes", hits: [], notes: [] }
-  mocks.noteResults = []
+  mocks.results = { mode: "notes", hits: [], notes: [], titleMatches: [], rows: [] }
 })
 
 const OUTLINE = {
@@ -128,9 +123,13 @@ const OUTLINE = {
 function renderMenu({
   outline = OUTLINE,
   open = false,
-}: { outline?: typeof OUTLINE | null; open?: boolean } = {}) {
+  notes = [],
+}: { outline?: typeof OUTLINE | null; open?: boolean; notes?: unknown[] } = {}) {
   const store = createStore()
   store.set(noteOutlineAtom, outline)
+  // The corpus's notes, most recent first (the palette's recents are a
+  // slice of them). The atom is the mock's plain, writable one.
+  store.set(sortedNotesAtom as never, notes as never)
   if (open) store.set(isCommandMenuOpenAtom, true)
   render(
     <Provider store={store}>
@@ -295,8 +294,12 @@ const TODO_MILK = hit("blk_milk", "buy milk", "todo")
 const TODO_SHIP = hit("blk_ship", "ship it", "todo", JOURNAL)
 const ELSEWHERE = hit("blk_else", "in another note", "text", JOURNAL)
 
-async function openWithBlocks(hits: unknown[], notes: unknown[] = [RESEARCH]) {
-  mocks.results = { mode: "blocks", hits, notes }
+/** The rows `useSearchResults` would rank: the hits, in the order given. */
+const rowsOf = (hits: ReturnType<typeof hit>[]) =>
+  hits.map((h) => ({ id: h.blockId, noteId: h.noteId, kind: "block" as const }))
+
+async function openWithBlocks(hits: ReturnType<typeof hit>[], notes: unknown[] = [RESEARCH]) {
+  mocks.results = { mode: "blocks", hits, notes, titleMatches: [], rows: rowsOf(hits) }
   const rendered = renderMenu({ open: true })
   const input = commandsInput()
   fireEvent.change(input, { target: { value: "nvidia" } })
@@ -358,7 +361,13 @@ describe("block results", () => {
   })
 
   it("typing never hands the keyboard to the rows", async () => {
-    mocks.results = { mode: "blocks", hits: [NVIDIA, TODO_MILK], notes: [RESEARCH] }
+    mocks.results = {
+      mode: "blocks",
+      hits: [NVIDIA, TODO_MILK],
+      notes: [RESEARCH],
+      titleMatches: [],
+      rows: rowsOf([NVIDIA, TODO_MILK]),
+    }
     renderMenu({ open: true })
     const input = commandsInput()
     input.focus()
@@ -528,14 +537,27 @@ describe("block results", () => {
 })
 
 // ── Note results ────────────────────────────────────────────────────────────
-// A note is a node whose children are its blocks, so a note result is a root
-// row of the same editor as a block result — in the same list, ahead of the
-// blocks — and opens exactly as one.
+// A note is a node whose children are its blocks, so a note result (its
+// title matched) is a root row of the same editor as a block result — in the
+// same list, ranked by score among the blocks — and opens exactly as one.
 
 describe("note results", () => {
-  async function openWithNotes(notes: unknown[], hits: unknown[] = []) {
-    mocks.results = { mode: hits.length > 0 ? "blocks" : "notes", hits, notes: [] }
-    mocks.noteResults = notes
+  /** Open with the ranked rows `useSearchResults` would hand over: notes
+   * and hits in the order given. */
+  async function openWithRows(rows: (ReturnType<typeof makeNote> | ReturnType<typeof hit>)[]) {
+    const hits = rows.filter((row): row is ReturnType<typeof hit> => "blockId" in row)
+    const titleMatches = rows.filter((row) => !("blockId" in row))
+    mocks.results = {
+      mode: "blocks",
+      hits,
+      notes: [RESEARCH],
+      titleMatches,
+      rows: rows.map((row) =>
+        "blockId" in row
+          ? { id: row.blockId, noteId: row.noteId, kind: "block" as const }
+          : { id: row.id, noteId: row.id, kind: "note" as const },
+      ),
+    }
     const rendered = renderMenu({ open: true })
     const input = commandsInput()
     fireEvent.change(input, { target: { value: "research" } })
@@ -545,6 +567,7 @@ describe("note results", () => {
     })
     return rendered
   }
+  const openWithNotes = (notes: ReturnType<typeof makeNote>[]) => openWithRows(notes)
 
   it("draws a note as an editor row, keyed by its favicon", async () => {
     await openWithNotes([RESEARCH])
@@ -553,9 +576,28 @@ describe("note results", () => {
     expect(row?.querySelector('[data-testid="note-favicon-slot"]')).not.toBeNull()
   })
 
-  it("lists notes and blocks as one list, the notes first", async () => {
-    await openWithNotes([RESEARCH], [TODO_SHIP])
-    expect(rowIds()).toEqual(["research", "blk_ship"])
+  it("lists notes and blocks as one list, in the ranked order — a block above a note", async () => {
+    await openWithRows([TODO_SHIP, RESEARCH])
+    expect(rowIds()).toEqual(["blk_ship", "research"])
+    expect(screen.getByTestId("result-count").textContent).toBe(
+      "1 matching block in 1 note, 1 note by title",
+    )
+  })
+
+  it("with nothing typed, lists the recent notes — at most five, most recent first", () => {
+    const recent = ["journal", "research", "n3", "n4", "n5", "n6"].map(makeNote)
+    renderMenu({ open: true, notes: recent })
+    expect(screen.getByText("Recent")).toBeTruthy()
+    // The rows are walked out of the corpus, which holds two of the six;
+    // both are within the first five, in the order given.
+    expect(rowIds()).toEqual(["journal", "research"])
+    expect(screen.queryByTestId("result-count")).toBeNull()
+  })
+
+  it("a note beyond the fifth is not recent", () => {
+    const recent = ["n1", "n2", "n3", "n4", "journal", "research"].map(makeNote)
+    renderMenu({ open: true, notes: recent })
+    expect(rowIds()).toEqual(["journal"])
   })
 
   it("expands a note in the palette to its top-level blocks", async () => {

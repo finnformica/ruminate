@@ -1,10 +1,12 @@
 import { useAtomValue } from "jotai"
 import React from "react"
-import { blockIndexAtom } from "../global-state"
+import { blockIndexAtom, noteTitleSearcherAtom } from "../global-state"
 import type { Note } from "../schema"
 import { hasBlockTypeFilter, notesFromBlockHits, type BlockHit } from "../utils/block-search"
 import { inMemoryBlockSearchSource, type BlockSearchSource } from "../utils/block-search-source"
+import { rankResultRows, type ResultRow, type ScoredNote } from "../utils/rank-results"
 import { parseQuery } from "../utils/search"
+import { filterNotes, sortNotes } from "../utils/search-notes"
 import { useSearchNotes } from "./search-notes"
 
 /**
@@ -61,14 +63,49 @@ function useAwaited<T>(result: T | Promise<T>, empty: T): T {
 
 export interface SearchResults {
   mode: "blocks" | "notes"
-  /** The matching blocks, in result order. Empty in "notes" mode. */
+  /** The matching blocks, best first. Empty in "notes" mode. */
   hits: BlockHit[]
   /** The notes to list ("notes"), or the notes the hits live in ("blocks") —
    * either way what the result count is computed from. */
   notes: Note[]
+  /** "blocks" mode: the notes whose TITLE matched the query's text, each a
+   * row among the hits. Empty when the query asks for blocks of a type or
+   * scopes with `in:` (a note is neither), and in "notes" mode. */
+  titleMatches: Note[]
+  /** The rows to draw, in order: "blocks" mode ranks the title matches and
+   * the hits together by score (`rankResultRows`); "notes" mode lists the
+   * notes. */
+  rows: ResultRow[]
 }
 
 const NO_HITS: BlockHit[] = []
+const NO_NOTES: Note[] = []
+
+/**
+ * The notes whose title matches the query's text, scored, and filtered by
+ * whatever note-level qualifiers the query carries (a date, a property).
+ * None when the query names a block type or an `in:` scope: it asks for
+ * blocks, and a note row would not be one.
+ */
+function useTitleMatches(query: string, showBlocks: boolean): ScoredNote[] {
+  const searcher = useAtomValue(noteTitleSearcherAtom)
+  return React.useMemo(() => {
+    if (!showBlocks) return []
+    const parsed = parseQuery(query)
+    const text = parsed.fuzzy.trim()
+    if (!text) return []
+    if (hasBlockTypeFilter(parsed.filters)) return []
+    if (parsed.filters.some((filter) => filter.key === "in")) return []
+    const matches = searcher.search(text, { returnMatchData: true })
+    const scores = new Map(matches.map((match) => [match.item.id, match.score]))
+    let notes = filterNotes(
+      matches.map((match) => match.item),
+      parsed.filters,
+    )
+    if (parsed.sorts.length) notes = sortNotes(notes, parsed.sorts)
+    return notes.map((note) => ({ note, score: scores.get(note.id) ?? 0 }))
+  }, [searcher, query, showBlocks])
+}
 
 /** Resolve a query to result rows — blocks when it discriminates blocks, notes
  * otherwise (see `resolvesToBlocks`). */
@@ -76,6 +113,7 @@ export function useSearchResults(query: string): SearchResults {
   const searchNotes = useSearchNotes()
   const source = useBlockSearchSource()
   const showBlocks = resolvesToBlocks(query)
+  const titleMatches = useTitleMatches(query, showBlocks)
 
   // Memoized so an async source is asked once per query, not once per render.
   const result = React.useMemo(
@@ -85,7 +123,23 @@ export function useSearchResults(query: string): SearchResults {
   const hits = useAwaited(result, NO_HITS)
 
   return React.useMemo(() => {
-    if (!showBlocks) return { mode: "notes", hits: NO_HITS, notes: searchNotes(query) }
-    return { mode: "blocks", hits, notes: notesFromBlockHits(hits) }
-  }, [showBlocks, hits, query, searchNotes])
+    if (!showBlocks) {
+      const notes = searchNotes(query)
+      return {
+        mode: "notes",
+        hits: NO_HITS,
+        notes,
+        titleMatches: NO_NOTES,
+        rows: notes.map((note) => ({ id: note.id, noteId: note.id, kind: "note" })),
+      }
+    }
+    const sorted = parseQuery(query).sorts.length > 0
+    return {
+      mode: "blocks",
+      hits,
+      notes: notesFromBlockHits(hits),
+      titleMatches: titleMatches.map((match) => match.note),
+      rows: rankResultRows(titleMatches, hits, sorted),
+    }
+  }, [showBlocks, hits, query, searchNotes, titleMatches])
 }

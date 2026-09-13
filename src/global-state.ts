@@ -258,11 +258,6 @@ export const sortedNotesAtom = atom((get) => {
   })
 })
 
-export const pinnedNotesAtom = atom((get) => {
-  const sortedNotes = get(sortedNotesAtom)
-  return sortedNotes.filter((note) => note.pinned)
-})
-
 export const noteSearcherAtom = atom((get) => {
   const sortedNotes = get(sortedNotesAtom)
   return new Searcher(sortedNotes, {
@@ -271,6 +266,20 @@ export const noteSearcherAtom = atom((get) => {
     // every note would half-match a query containing "blk". The `id:` filter
     // still matches ids exactly (src/utils/search-notes.ts).
     keySelector: (note) => [note.title, note.displayName, note.text],
+    threshold: 0.8,
+  })
+})
+
+/**
+ * The notes by TITLE only, for a results list: a note whose title matches
+ * the text is a row among the matching blocks (`useSearchResults`), ranked
+ * on the same 0–1 scale as the blocks, since both are fast-fuzzy at the one
+ * threshold. A note whose body matched is not — its matching blocks are.
+ */
+export const noteTitleSearcherAtom = atom((get) => {
+  const sortedNotes = get(sortedNotesAtom)
+  return new Searcher(sortedNotes, {
+    keySelector: (note) => [note.title, note.displayName],
     threshold: 0.8,
   })
 })

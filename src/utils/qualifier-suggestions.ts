@@ -1,6 +1,5 @@
 import { searchTypeOptions } from "../blocks/registry"
-import { formatDate } from "./date"
-import { resolveRelativeDate } from "./search"
+import { dateShortcuts } from "../blocks/slash-menu"
 /**
  * **Value suggestions for qualifiers.** Typing `type:`, `in:`, `has:` — any
  * key whose values come from a known set — opens a picker over the search
@@ -154,22 +153,16 @@ export const STATIC_QUALIFIER_OPTIONS: Readonly<Record<string, readonly Qualifie
   ],
 }
 
-/** The relative dates `date:` offers — the words the query language reads
- * (`resolveRelativeDate`), kept as words so a saved query stays relative. A
- * phrase is spelled with `+` (`next+week`), as the grammar wants it. */
-const DATE_SHORTCUTS: readonly string[] = [
-  "today",
-  "yesterday",
-  "tomorrow",
-  "last+week",
-  "next+week",
-]
-
-/** The `date:` rows: each shortcut with the date it means right now. */
-export function dateQualifierOptions(): QualifierOption[] {
-  return DATE_SHORTCUTS.map((value) => ({
-    value,
-    description: formatDate(resolveRelativeDate(value)),
+/** The `date:` rows: the slash menu's date shortcuts (Today, Tomorrow, …
+ * — `dateShortcuts`, the one source for both), each resolved to the day it
+ * means right now. The day is what lands in the query, as the slash menu
+ * writes a day into a note; the row reads as the word, glossed with the
+ * date. */
+export function dateQualifierOptions(now: Date = new Date()): QualifierOption[] {
+  return dateShortcuts(now).map((shortcut) => ({
+    value: shortcut.date,
+    label: shortcut.label,
+    description: shortcut.detail,
   }))
 }
 

@@ -107,12 +107,19 @@ describe("the qualifier popover", () => {
     type(input, "sort:updated_at:")
     expect(options().map((row) => row.getAttribute("data-suggestion"))).toEqual(["updated_at:asc"])
     type(input, "date:")
+    // The slash menu's shortcuts, each resolved to a day: the row reads as
+    // the word, glossed with the date, and the day is what lands.
+    const words = ["Today", "Tomorrow", "Yesterday", "Next week", "Last week"]
+    const labels = options().map((row) => row.textContent?.replace(/^:\s*/, "") ?? "")
+    expect(labels.map((label) => words.find((word) => label.startsWith(word)))).toEqual(words)
     const dates = options().map((row) => row.getAttribute("data-suggestion"))
-    expect(dates).toEqual(["today", "yesterday", "tomorrow", "last+week", "next+week"])
-    // Each row says which day the word means.
-    expect(options()[0].textContent).toMatch(/\d/)
+    for (const date of dates) expect(date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     fireEvent.keyDown(input, { key: "Tab" })
-    expect(input.value).toBe("date:today ")
+    expect(input.value).toBe(`date:${dates[0]} `)
+    // `tom` finds Tomorrow by its label.
+    type(input, "date:tom")
+    expect(options()).toHaveLength(1)
+    expect(options()[0].textContent).toContain("Tomorrow")
   })
 
   it("clicking a row picks it", () => {
