@@ -78,13 +78,16 @@ The tags page keeps its own Linear-style list keys (<kbd>↑</kbd> / <kbd>↓</k
 
 The palette's results — the notes whose title matched, then the matching
 **blocks** at any depth, or the pinned notes with no query — are the same
-block editor, browsed. The palette's own items ("See all…", the jump-to and note
-actions) come first and take cmdk's <kbd>↑</kbd> /
-<kbd>↓</kbd>; <kbd>↓</kbd> past the last of them hands the keyboard to the
+block editor, browsed, under the same count line as the notes page. The
+palette's own items (the jump-to and note actions) come first and take
+cmdk's <kbd>↑</kbd> / <kbd>↓</kbd>; nothing is highlighted until you arrow,
+so <kbd>↵</kbd> straight after typing is the query's and opens the full
+results view. <kbd>↓</kbd> past the last item hands the keyboard to the
 rows, whose keys are then the editor's (fold with <kbd>space</kbd> /
 <kbd>→</kbd> / <kbd>←</kbd>, walk with <kbd>w</kbd> <kbd>s</kbd> <kbd>a</kbd>
 <kbd>d</kbd>, open with <kbd>↵</kbd> or <kbd>f</kbd>). <kbd>↑</kbd> from the
-first row, or <kbd>Esc</kbd>, returns to the query.
+first row, or <kbd>Esc</kbd>, returns to the query. Typing never moves the
+keyboard: the rows change under the query, and the query keeps it.
 
 | Action                                    | Shortcut                                 |
 | ----------------------------------------- | ---------------------------------------- |
@@ -92,7 +95,8 @@ first row, or <kbd>Esc</kbd>, returns to the query.
 | Past the last item: into the result rows  | <kbd>↓</kbd>                             |
 | From the first row: back to the query     | <kbd>↑</kbd> / <kbd>Esc</kbd>            |
 | Open the highlighted result (note + zoom) | <kbd>↵</kbd>                             |
-| See all results for the query             | <kbd>↵</kbd> straight after typing       |
+| See all results for the query             | <kbd>↵</kbd> with no item highlighted    |
+| Pick the highlighted item                 | <kbd>↵</kbd>                             |
 | Create a note titled with the query       | <kbd>⌘</kbd> <kbd>↵</kbd>, or the footer |
 
 Opening a row loads only that row's blocks; a child opens the next level the

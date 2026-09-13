@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest"
+import { formatDate, toDateString } from "./date"
 import {
   STATIC_QUALIFIER_OPTIONS,
+  SUGGESTED_QUALIFIER_KEYS,
   applyQualifierOption,
+  dateQualifierOptions,
   filterQualifierOptions,
   findQualifierTrigger,
 } from "./qualifier-suggestions"
@@ -107,5 +110,42 @@ describe("filterQualifierOptions", () => {
     const values = STATIC_QUALIFIER_OPTIONS.type.map((o) => o.value)
     expect(values.slice(0, 3)).toEqual(["todo", "done", "task"])
     expect(values).toContain("daily")
+  })
+})
+
+describe("sort: and date: vocabularies", () => {
+  test("sort: lists each key with its other direction, and `title:` narrows to it", () => {
+    const options = STATIC_QUALIFIER_OPTIONS.sort
+    expect(options.map((option) => option.value)).toEqual([
+      "title",
+      "title:desc",
+      "updated_at",
+      "updated_at:asc",
+      "id",
+      "id:desc",
+    ])
+    // The direction suffix is part of the value the picker filters on.
+    const trigger = atEnd("sort:title:")
+    expect(trigger?.key).toBe("sort")
+    expect(trigger?.partial).toBe("title:")
+    expect(filterQualifierOptions(options, "title:").map((o) => o.value)).toEqual(["title:desc"])
+    expect(applyQualifierOption("sort:title:", trigger!, options[1])).toEqual({
+      value: "sort:title:desc ",
+      caret: 16,
+    })
+  })
+
+  test("date: offers relative words, each glossed with the day it means", () => {
+    const options = dateQualifierOptions()
+    expect(options.map((option) => option.value)).toEqual([
+      "today",
+      "yesterday",
+      "tomorrow",
+      "last+week",
+      "next+week",
+    ])
+    expect(options[0].description).toBe(formatDate(toDateString(new Date())))
+    expect(SUGGESTED_QUALIFIER_KEYS).toContain("date")
+    expect(SUGGESTED_QUALIFIER_KEYS).toContain("sort")
   })
 })

@@ -3,7 +3,7 @@ import { parseDate } from "chrono-node"
 import { Command } from "cmdk"
 import copy from "copy-to-clipboard"
 import { atom, useAtom, useAtomValue, useSetAtom, useStore } from "jotai"
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
 import {
@@ -12,7 +12,6 @@ import {
   noteOutlineAtom,
   pinnedNotesAtom,
 } from "../global-state"
-import type { ResultRoot } from "../hooks/results-doc"
 import { useCreateNote, useNoteById } from "../hooks/note"
 import { useSearchResults } from "../hooks/search-results"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/registry"
@@ -22,7 +21,6 @@ import { useSearchNotes } from "../hooks/search-notes"
 import { formatDate, formatDateDistance, toDateString } from "../utils/date"
 import { generateNoteId } from "../utils/note-id"
 import { filterOutline } from "../utils/note-outline"
-import { pluralize } from "../utils/pluralize"
 import { parseQuery } from "../utils/search"
 import {
   CalendarDateIcon16,
@@ -30,17 +28,12 @@ import {
   NoteIcon16,
   PlusIcon16,
   PrinterIcon16,
-  SearchIcon16,
   SettingsIcon16,
 } from "./icons"
 import { Keys } from "./keys"
-import {
-  QualifierSuggestions,
-  useComboboxAria,
-  useQualifierSuggestions,
-} from "./qualifier-suggestions"
-import { ScopePill } from "./scope-pill"
-import { ResultsEditor } from "./results-editor"
+import { QUERY_DEBOUNCE_MS } from "./note-list"
+import { QueryBox } from "./query-box"
+import { ResultsList } from "./results-list"
 
 export const isCommandMenuOpenAtom = atom(false)
 
@@ -51,6 +44,11 @@ export const isCommandMenuOpenAtom = atom(false)
  */
 type PaletteMode = "commands" | "outline"
 
+/** The cmdk root the palette's input sits in. */
+function paletteRoot(input: HTMLInputElement | null): HTMLElement | null {
+  return input?.closest<HTMLElement>("[cmdk-root]") ?? null
+}
+
 /** Is cmdk's highlight on the last item (or is there no item to be on)? The
  * point past which ↓ hands the keyboard to the results beneath. */
 function highlightIsLastItem(root: HTMLElement): boolean {
@@ -59,10 +57,18 @@ function highlightIsLastItem(root: HTMLElement): boolean {
   return items[items.length - 1].getAttribute("aria-selected") === "true"
 }
 
-/** How many block results the palette lists before "see all". */
-const NUM_VISIBLE_BLOCKS = 6
-/** How many note results the palette lists. */
-const NUM_VISIBLE_NOTES = 6
+/** Is any of cmdk's items highlighted? Read off the DOM — cmdk's own
+ * source of truth for what ↵ picks. */
+function hasHighlightedItem(root: HTMLElement): boolean {
+  return root.querySelector('[cmdk-item][aria-selected="true"]') !== null
+}
+
+/** How many rows of each kind (title matches, then blocks) the palette
+ * lists. */
+const NUM_VISIBLE_RESULTS = 6
+
+/** The keys cmdk walks its items with (plus ctrl+n / ctrl+p). */
+const NAVIGATION_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End"])
 
 export function CommandMenu() {
   const navigate = useNavigate()
@@ -83,10 +89,14 @@ export function CommandMenu() {
 
   // Refs
   const prevActiveElement = useRef<HTMLElement>()
+  const inputRef = useRef<HTMLInputElement>(null)
+  // The popover's host: the dialog's body, outside the card that clips its
+  // corners, so the qualifier popover can hang over the list.
+  const bodyRef = useRef<HTMLDivElement>(null)
 
   // Local state
   const [query, setQuery] = useState("")
-  const [deferredQuery] = useDebounce(query, 150)
+  const [deferredQuery] = useDebounce(query, QUERY_DEBOUNCE_MS)
   const [mode, setMode] = useState<PaletteMode>("commands")
   // Inside a note the palette searches THAT note by default — its blocks,
   // or the zoomed subtree — as an `in:` scope the reader can take off (the
@@ -94,43 +104,33 @@ export function CommandMenu() {
   // on each open: a fresh palette is a fresh view.
   const [scopeRemoved, setScopeRemoved] = useState(false)
 
-  // The qualifier picker: `type:`, `in:`, `has:` … typed into the query open
-  // a list of values (see qualifier-suggestions.tsx). It follows the caret,
-  // read off the input on every change and caret move.
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [caret, setCaret] = useState<number | null>(null)
-  const syncCaret = useCallback(() => setCaret(inputRef.current?.selectionStart ?? null), [])
-  const suggestions = useQualifierSuggestions({
-    value: query,
-    caret: mode === "commands" ? caret : null,
-    currentNoteId: noteId,
-  })
-  useComboboxAria(inputRef, suggestions)
-  // A pick moves the caret past the token; the DOM is told after the render
-  // that writes the new value.
-  const pendingCaret = useRef<number | null>(null)
-  useLayoutEffect(() => {
-    if (pendingCaret.current === null) return
-    const at = pendingCaret.current
-    pendingCaret.current = null
-    inputRef.current?.setSelectionRange(at, at)
-  })
-  const applyPick = useCallback((next: { value: string; caret: number }) => {
-    setQuery(next.value)
-    setCaret(next.caret)
-    pendingCaret.current = next.caret
-  }, [])
   // The cmdk-highlighted item's value, controlled: cmdk only reports highlight
   // changes (the outline preview trigger) through onValueChange when `value`
-  // is a controlled prop.
+  // is a controlled prop. In the commands palette nothing is highlighted
+  // until the reader arrows or points at an item: the query is a search,
+  // and ↵ commits it (`submit`) rather than picking whatever item happened
+  // to be first. cmdk itself highlights the first item whenever its items
+  // change (a keystroke filters them); such a pick arrives here with no
+  // interaction behind it (`interactingRef`) and is refused — by handing
+  // cmdk a value no item has, fresh each time so it takes it up.
   const [highlightedValue, setHighlightedValue] = useState("")
+  const interactingRef = useRef(false)
+  const noHighlightRef = useRef(0)
+  const noHighlight = () => `none:${++noHighlightRef.current}`
+  const noteInteraction = () => {
+    interactingRef.current = true
+    queueMicrotask(() => {
+      interactingRef.current = false
+    })
+  }
 
   // How outline mode was entered: via the "@" prefix (Backspace on an empty
   // query returns to the commands palette it came from) or via ⌘P (Backspace
   // on empty stays put — there is no ⌘K state to go "back" to).
   const outlineEntryRef = useRef<"prefix" | "hotkey">("hotkey")
-  // cmdk auto-highlights the first item whenever the outline list (re)appears;
-  // that initial event isn't the user arrowing, so it must not scroll the doc.
+  // The first heading is highlighted whenever the outline list (re)appears;
+  // that initial highlight isn't the user arrowing, so it must not scroll
+  // the doc.
   const skipAutoPreviewRef = useRef(false)
   // Whether any preview was sent since outline mode was entered — i.e. the
   // editor holds a restore snapshot that a close-without-commit must release.
@@ -160,8 +160,8 @@ export function CommandMenu() {
     outlineEntryRef.current = entry
     skipAutoPreviewRef.current = true
     setMode("outline")
-    // Drop the previous highlight so cmdk re-selects the first heading (and
-    // reports it — which the skip flag above then swallows).
+    // Drop the previous highlight so the first heading is highlighted afresh
+    // (and reported — which the skip flag above then swallows).
     setHighlightedValue("")
   }, [])
 
@@ -236,12 +236,11 @@ export function CommandMenu() {
 
   // The query change handler owns the "@" prefix grammar: typed as the first
   // character of the commands palette, it switches to outline mode and is
-  // stripped from the query (like VS Code's Go to Symbol).
+  // stripped from the query (like VS Code's Go to Symbol). Typing also takes
+  // the highlight off whatever item had it: a fresh query is a search.
   const handleQueryChange = useCallback(
     (value: string) => {
-      // cmdk reports the new value before React commits it; the caret is
-      // where the browser already put it.
-      syncCaret()
+      setHighlightedValue("")
       if (mode === "commands" && query === "" && value.startsWith("@")) {
         enterOutlineMode("prefix")
         setQuery(value.slice(1))
@@ -249,7 +248,7 @@ export function CommandMenu() {
       }
       setQuery(value)
     },
-    [mode, query, enterOutlineMode, syncCaret],
+    [mode, query, enterOutlineMode],
   )
 
   const navItems = useMemo(() => {
@@ -342,56 +341,64 @@ export function CommandMenu() {
     return toDateString(date)
   }, [deferredQuery])
 
-  // Search notes
-  const noteResults = useMemo(() => {
-    return searchNotes(deferredQuery)
-  }, [searchNotes, deferredQuery])
-
-  // The scope in force: the zoomed block, else the open note — unless the
-  // reader took it off or wrote an `in:` of their own.
-  const explicitScope = useMemo(
-    () => parseQuery(deferredQuery).filters.some((filter) => filter.key === "in"),
-    [deferredQuery],
+  // The notes whose title matched: listed ahead of the blocks.
+  const noteResults = useMemo(
+    () => (deferredQuery ? searchNotes(deferredQuery) : []),
+    [searchNotes, deferredQuery],
   )
-  const scope =
-    noteId && mode === "commands" && !scopeRemoved && !explicitScope
-      ? (zoomBlockId ?? noteId)
-      : null
+
+  // The scope in force for a query: the zoomed block, else the open note —
+  // unless the reader took it off or wrote an `in:` of their own.
+  const scopeFor = useCallback(
+    (q: string) =>
+      noteId &&
+      mode === "commands" &&
+      !scopeRemoved &&
+      !parseQuery(q).filters.some((filter) => filter.key === "in")
+        ? (zoomBlockId ?? noteId)
+        : null,
+    [noteId, mode, scopeRemoved, zoomBlockId],
+  )
   // What the block search (and the results view) actually run: the scope is
   // spelled out as a qualifier, so the URL the palette hands off to says it.
-  const scopedQuery = scope ? `in:${scope} ${deferredQuery}`.trim() : deferredQuery
+  // With nothing typed there is nothing to scope — the palette browses.
+  const withScope = useCallback(
+    (q: string) => {
+      const typed = q.trim()
+      if (!typed) return ""
+      const scope = scopeFor(typed)
+      return scope ? `in:${scope} ${typed}` : typed
+    },
+    [scopeFor],
+  )
+  const scope = deferredQuery ? scopeFor(deferredQuery) : null
+  const scopedQuery = withScope(deferredQuery)
 
   // Search BLOCKS — the palette's primary results. A nested heading or a todo
   // is a first-class row here, not a note it happens to live in.
-  const { mode: resultMode, hits, notes: hitNotes } = useSearchResults(scopedQuery)
-  const showBlocks = resultMode === "blocks"
+  const results = useSearchResults(scopedQuery)
+  const hasRows = deferredQuery
+    ? noteResults.length > 0 ||
+      (results.mode === "blocks" ? results.hits.length > 0 : results.notes.length > 0)
+    : pinnedNotes.length > 0
 
-  // The results are the block editor, browsed (`ResultsEditor`) — the same
-  // rows, keys and folds as the notes page. Notes and blocks are one list: a
-  // note is a node whose children are its blocks (docs/graph-schema-v2.md),
-  // so a note whose title matched and a block whose text matched are both
-  // roots — the notes first. With no query the roots are the pinned notes.
-  const resultRoots = useMemo<ResultRoot[]>(() => {
-    if (!deferredQuery) return pinnedNotes.map((note) => ({ id: note.id, noteId: note.id }))
-    const notes = noteResults
-      .slice(0, NUM_VISIBLE_NOTES)
-      .map((note) => ({ id: note.id, noteId: note.id }))
-    const blocks = showBlocks
-      ? hits.slice(0, NUM_VISIBLE_BLOCKS).map((hit) => ({ id: hit.blockId, noteId: hit.noteId }))
-      : []
-    return [...notes, ...blocks]
-  }, [deferredQuery, pinnedNotes, noteResults, showBlocks, hits])
   // Bumped to hand the keyboard to the results (↓ past the last item).
   const [focusFirstSignal, setFocusFirstSignal] = useState(0)
-  /** Hand the keyboard to the result rows: the editor takes focus (cmdk's
-   * highlight stays on the last item, dimmed — command-menu.css — and marks
-   * where ↑ returns to). */
-  const handOffToRows = useCallback(() => setFocusFirstSignal((n) => n + 1), [])
+  /** ↓ in the query with cmdk's highlight on the last item (or no items at
+   * all) hands the keyboard to the result rows: the editor takes focus
+   * (cmdk's highlight stays on the last item, dimmed — command-menu.css —
+   * and marks where ↑ returns to). */
+  const handOff = useCallback(() => {
+    const root = paletteRoot(inputRef.current)
+    if (mode !== "commands" || !root || !hasRows || !highlightIsLastItem(root)) return false
+    setFocusFirstSignal((n) => n + 1)
+    return true
+  }, [mode, hasRows])
   /** Take the keyboard back from the rows: the query has focus again, with
    * cmdk's highlight on the last item — the one ↓ left from. */
   const takeBackFromRows = useCallback(() => {
     inputRef.current?.focus()
-    const items = document.querySelectorAll("[cmdk-root] [cmdk-item]")
+    const items = paletteRoot(inputRef.current)?.querySelectorAll("[cmdk-item]") ?? []
     const last = items[items.length - 1]
     setHighlightedValue(last?.getAttribute("data-value") ?? "")
   }, [])
@@ -413,13 +420,23 @@ export function CommandMenu() {
 
   // Commit the typed query to the full results view — the URL-addressable
   // `/?query=` the notes route already owns, so filter views are bookmarkable
-  // and back/forward just work.
+  // and back/forward just work. The query as typed, not as last searched:
+  // ↵ can land inside the debounce.
   const openResultsView = useCallback(() => {
     setIsOpen(false)
     setQuery("")
     setMode("commands")
-    navigate({ to: "/", search: { query: scopedQuery } })
-  }, [setIsOpen, navigate, scopedQuery])
+    navigate({ to: "/", search: { query: withScope(query) } })
+  }, [setIsOpen, navigate, withScope, query])
+  /** ↵ in the query: with a query typed and no item highlighted, it is a
+   * search, and the results view opens. With an item highlighted, ↵ is
+   * cmdk's and picks the item. */
+  const submit = useCallback(() => {
+    const root = paletteRoot(inputRef.current)
+    if (mode !== "commands" || !query.trim() || !root || hasHighlightedItem(root)) return false
+    openResultsView()
+    return true
+  }, [mode, query, openResultsView])
 
   // Open a result: the note, or the note zoomed to the block.
   const openResult = useCallback(
@@ -458,12 +475,17 @@ export function CommandMenu() {
   }, [outlineResults])
 
   // cmdk reports every change of the highlighted item here — both the user
-  // arrowing and its own auto-select of the first item after a list change.
-  // In outline mode that's the live preview: highlight + scroll the block
-  // behind the dialog. The auto-select right after entering the mode is
-  // skipped so merely opening ⌘P doesn't scroll the note.
+  // arrowing (or pointing) and its own pick of the first item after the
+  // list changes. In outline mode that's the live preview: highlight +
+  // scroll the block behind the dialog; the pick right after entering the
+  // mode is skipped so merely opening ⌘P doesn't scroll the note. In the
+  // commands palette cmdk's own pick is refused (see `highlightedValue`).
   const handleHighlightChange = useCallback(
     (value: string) => {
+      if (mode !== "outline" && !interactingRef.current && value !== "") {
+        setHighlightedValue(noHighlight())
+        return
+      }
       // Echo the value back — cmdk's selection is fully controlled, so
       // dropping this would freeze the highlight.
       setHighlightedValue(value)
@@ -479,6 +501,14 @@ export function CommandMenu() {
     },
     [mode, outlineValueToId, sendReveal],
   )
+
+  // The palette's input is the combobox for cmdk's list, as cmdk's own
+  // input would be; the list's id is read once it is there.
+  const [listId, setListId] = useState<string | undefined>()
+  useEffect(() => {
+    if (!isOpen) return
+    setListId(paletteRoot(inputRef.current)?.querySelector("[cmdk-list]")?.id)
+  }, [isOpen])
 
   return (
     <Command.Dialog
@@ -509,27 +539,11 @@ export function CommandMenu() {
           event.preventDefault()
           return
         }
-        // The results under the items are the block editor, browsed. ↓ in
-        // the query with cmdk's highlight on the last item (or no items at
-        // all) hands it the keyboard — as ↓ in the notes page's search box
-        // does — and from there its keys are the editor's own: arrows,
-        // space, →/←, w/s/a/d, f, Enter to open. ↑ from its first row hands
-        // the keyboard back (`onExitTop`); so does Escape.
-        if (
-          mode === "commands" &&
-          event.key === "ArrowDown" &&
-          event.target instanceof HTMLInputElement &&
-          !event.metaKey &&
-          !event.ctrlKey &&
-          !event.altKey &&
-          !event.shiftKey &&
-          resultRoots.length > 0 &&
-          highlightIsLastItem(event.currentTarget)
-        ) {
-          event.preventDefault()
-          handOffToRows()
-          return
-        }
+        // The results under the items are the block editor, browsed; ↓ in
+        // the query hands it the keyboard (`handOff`), and from there its
+        // keys are the editor's own: arrows, space, →/←, w/s/a/d, f, Enter
+        // to open. ↑ from its first row hands the keyboard back
+        // (`onExitTop`); so does Escape.
         if (
           event.key === "Escape" &&
           event.target instanceof Element &&
@@ -553,202 +567,177 @@ export function CommandMenu() {
         }
       }}
     >
-      <div className="card-3 overflow-hidden rounded-xl!">
-        <Command.Input
-          ref={inputRef}
-          placeholder={mode === "outline" ? "Jump to a heading…" : "Search or jump to…"}
-          value={query}
-          onValueChange={handleQueryChange}
-          autoCapitalize="off"
-          onKeyDown={(event) => {
-            // While the picker is open it owns ↑/↓/↵/Tab/Esc; the event
-            // stops here so cmdk's list never moves under it.
-            const handled = suggestions.handleKeyDown(event)
-            if (!handled) return
-            event.stopPropagation()
-            if (typeof handled === "object") applyPick(handled)
-          }}
-          onKeyUp={syncCaret}
-          onClick={syncCaret}
-        />
-
-        {scope && deferredQuery ? (
-          <div
-            data-testid="palette-scope"
-            className="flex flex-wrap items-center gap-2 border-t border-border-secondary px-3 py-2 text-sm text-text-secondary"
-          >
-            <span>Blocks in</span>
-            <ScopePill value={scope} onRemove={() => setScopeRemoved(true)} />
-          </div>
-        ) : null}
-
-        {suggestions.visible && suggestions.trigger ? (
-          <QualifierSuggestions
-            id={suggestions.listboxId}
-            variant="inline"
-            trigger={suggestions.trigger}
-            items={suggestions.items}
-            activeIndex={suggestions.activeIndex}
-            onHover={suggestions.setActiveIndex}
-            onPick={(item) => {
-              const next = suggestions.pick(item)
-              if (next) applyPick(next)
-            }}
+      {/* The keys and the pointer that move cmdk's highlight are noted on
+          their way in (capture), before cmdk's own handlers see them, so a
+          highlight change that follows is known to be the reader's. */}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+      <div
+        ref={bodyRef}
+        className="relative"
+        onKeyDownCapture={(event) => {
+          if (NAVIGATION_KEYS.has(event.key) || event.ctrlKey) noteInteraction()
+        }}
+        onPointerMoveCapture={noteInteraction}
+      >
+        <div className="card-3 overflow-hidden rounded-xl!">
+          <QueryBox
+            variant="palette"
+            inputRef={inputRef}
+            popoverHost={bodyRef}
+            placeholder={mode === "outline" ? "Jump to a heading…" : "Search or jump to…"}
+            value={query}
+            onChange={handleQueryChange}
+            currentNoteId={noteId}
+            impliedScope={
+              scope && deferredQuery
+                ? { value: scope, onRemove: () => setScopeRemoved(true) }
+                : null
+            }
+            onHandOff={handOff}
+            onSubmit={submit}
+            role="combobox"
+            aria-expanded
+            aria-autocomplete="list"
+            aria-controls={listId}
           />
-        ) : null}
 
-        <Command.List>
-          {mode === "outline" ? (
-            !noteId ? (
-              <div className="px-3 py-2 text-text-secondary">No note open</div>
-            ) : outlineResults.length === 0 ? (
-              <div className="px-3 py-2 text-text-secondary">
-                {outlineItems.length === 0
-                  ? "No headings in this note"
-                  : `No headings matching "${deferredQuery}"`}
-              </div>
+          <Command.List>
+            {mode === "outline" ? (
+              !noteId ? (
+                <div className="px-1.5 py-2 text-text-secondary">No note open</div>
+              ) : outlineResults.length === 0 ? (
+                <div className="px-1.5 py-2 text-text-secondary">
+                  {outlineItems.length === 0
+                    ? "No headings in this note"
+                    : `No headings matching "${deferredQuery}"`}
+                </div>
+              ) : (
+                <Command.Group heading="Headings">
+                  {outlineResults.map((item) => (
+                    <CommandItem
+                      key={item.id}
+                      value={`outline:${item.id}`}
+                      icon={<span className="text-text-tertiary">#</span>}
+                      // While filtering, the list is flat and ranked — structure
+                      // is conveyed by the ancestor path instead of indents.
+                      description={
+                        deferredQuery.trim() ? item.path.join(" › ") || undefined : undefined
+                      }
+                      // Indent by heading depth (visually capped at 4 levels).
+                      // 6px matches the item's own px-1.5; 24px per level
+                      // matches the pl-9 indent of the note-search heading
+                      // sub-items.
+                      style={
+                        deferredQuery.trim()
+                          ? undefined
+                          : { paddingLeft: 6 + Math.min(item.depth, 4) * 24 }
+                      }
+                      onSelect={handleSelect(() => {
+                        previewedRef.current = false
+                        sendReveal({ type: "commit", id: item.id })
+                      })}
+                    >
+                      {item.text}
+                    </CommandItem>
+                  ))}
+                </Command.Group>
+              )
             ) : (
-              <Command.Group heading="Headings">
-                {outlineResults.map((item) => (
-                  <CommandItem
-                    key={item.id}
-                    value={`outline:${item.id}`}
-                    icon={<span className="text-text-tertiary">#</span>}
-                    // While filtering, the list is flat and ranked — structure
-                    // is conveyed by the ancestor path instead of indents.
-                    description={
-                      deferredQuery.trim() ? item.path.join(" › ") || undefined : undefined
-                    }
-                    // Indent by heading depth (visually capped at 4 levels).
-                    // 12px matches the item's own px-3; 24px per level matches
-                    // the pl-9 indent of the note-search heading sub-items.
-                    style={
-                      deferredQuery.trim()
-                        ? undefined
-                        : { paddingLeft: 12 + Math.min(item.depth, 4) * 24 }
-                    }
-                    onSelect={handleSelect(() => {
-                      previewedRef.current = false
-                      sendReveal({ type: "commit", id: item.id })
-                    })}
-                  >
-                    {item.text}
-                  </CommandItem>
-                ))}
-              </Command.Group>
-            )
-          ) : (
-            <>
-              {filteredNoteActions.length > 0 ? (
-                <Command.Group heading="Note actions">
-                  {filteredNoteActions.map((action) => (
-                    <CommandItem
-                      key={action.label}
-                      icon={action.icon}
-                      onSelect={handleSelect(action.onSelect)}
-                    >
-                      {action.label}
-                    </CommandItem>
-                  ))}
-                </Command.Group>
-              ) : null}
-              {filteredNavItems.length ? (
-                <Command.Group heading="Jump to">
-                  {filteredNavItems.map((item) => (
-                    <CommandItem
-                      key={item.label}
-                      icon={item.icon}
-                      shortcut={item.shortcut}
-                      onSelect={handleSelect(item.onSelect)}
-                    >
-                      {item.label}
-                    </CommandItem>
-                  ))}
-                </Command.Group>
-              ) : null}
-              {dateString ? (
-                <Command.Group heading="Date">
-                  <CommandItem
-                    key={dateString}
-                    icon={<CalendarDateIcon16 date={new Date(dateString).getUTCDate()} />}
-                    description={formatDateDistance(dateString)}
-                    onSelect={handleSelect(() => {
-                      navigate({
-                        to: "/notes/$",
-                        params: {
-                          _splat: dateString,
-                        },
-                        search: {
-                          query: undefined,
-                        },
-                      })
-                    })}
-                  >
-                    {formatDate(dateString)}
-                  </CommandItem>
-                </Command.Group>
-              ) : null}
-              {deferredQuery || resultRoots.length > 0 ? (
-                <Command.Group heading={deferredQuery ? "Results" : "Pinned notes"}>
-                  {/* The item comes first, the editor's rows after it: cmdk
-                      walks the items, and ↓ past the last hands off to the
-                      rows. "See all" leads so Enter straight after typing
-                      commits the query to the results view; it carries the
-                      COUNT — matched blocks, which expanding never inflates. */}
-                  {showBlocks ? (
-                    hits.length > 0 ? (
+              <>
+                {filteredNoteActions.length > 0 ? (
+                  <Command.Group heading="Note actions">
+                    {filteredNoteActions.map((action) => (
                       <CommandItem
-                        key="see-all-results"
-                        value="see all results"
-                        icon={<SearchIcon16 />}
-                        onSelect={openResultsView}
+                        key={action.label}
+                        icon={action.icon}
+                        onSelect={handleSelect(action.onSelect)}
                       >
-                        See all {pluralize(hits.length, "matching block")} in{" "}
-                        {pluralize(hitNotes.length, "note")}
+                        {action.label}
                       </CommandItem>
-                    ) : (
-                      <div className="px-3 py-2 text-text-secondary">No matching blocks</div>
-                    )
-                  ) : null}
-                  {/* Set in by the rows' own reach (a listed root's surface
-                      extends 4.5px past its box), so the surfaces sit flush
-                      with the items above. */}
-                  <div className="px-[4.5px]">
-                    <ResultsEditor
-                      roots={resultRoots}
-                      resetKey={scopedQuery}
+                    ))}
+                  </Command.Group>
+                ) : null}
+                {filteredNavItems.length ? (
+                  <Command.Group heading="Jump to">
+                    {filteredNavItems.map((item) => (
+                      <CommandItem
+                        key={item.label}
+                        icon={item.icon}
+                        shortcut={item.shortcut}
+                        onSelect={handleSelect(item.onSelect)}
+                      >
+                        {item.label}
+                      </CommandItem>
+                    ))}
+                  </Command.Group>
+                ) : null}
+                {dateString ? (
+                  <Command.Group heading="Date">
+                    <CommandItem
+                      key={dateString}
+                      icon={<CalendarDateIcon16 date={new Date(dateString).getUTCDate()} />}
+                      description={formatDateDistance(dateString)}
+                      onSelect={handleSelect(() => {
+                        navigate({
+                          to: "/notes/$",
+                          params: {
+                            _splat: dateString,
+                          },
+                          search: {
+                            query: undefined,
+                          },
+                        })
+                      })}
+                    >
+                      {formatDate(dateString)}
+                    </CommandItem>
+                  </Command.Group>
+                ) : null}
+                {deferredQuery || pinnedNotes.length > 0 ? (
+                  <Command.Group heading={deferredQuery ? "Results" : "Pinned notes"}>
+                    {/* The results block — the count and the rows — as the
+                        notes page draws it. ↓ past the last item hands the
+                        keyboard to the rows; ↵ straight after typing commits
+                        the query to the results view (`submit`). */}
+                    <ResultsList
+                      variant="palette"
+                      query={scopedQuery}
+                      results={results}
+                      leading={noteResults}
+                      browseNotes={pinnedNotes}
+                      limit={NUM_VISIBLE_RESULTS}
                       readOnly
                       onOpen={openResult}
                       focusFirstSignal={focusFirstSignal}
                       onExitTop={takeBackFromRows}
                     />
-                  </div>
-                </Command.Group>
-              ) : null}
-            </>
-          )}
-        </Command.List>
-        {mode === "commands" ? (
-          // The footer: always there, whatever the query. A button, not a
-          // cmdk item — the items are walked with ↑/↓ above the rows, and
-          // this one is reached by its key instead.
-          <div className="border-t border-border-secondary p-2">
-            <button
-              type="button"
-              data-testid="palette-create"
-              onClick={createFromQuery}
-              className="focus-ring flex h-9 w-full items-center gap-3 rounded px-3 text-left hover:bg-bg-hover active:bg-bg-secondary-active"
-            >
-              <span className="grid h-4 w-4 place-items-center text-text-secondary">
-                <PlusIcon16 />
-              </span>
-              <span className="grow truncate">
-                {query.trim() ? `Create new note "${query.trim()}"` : "Create new note"}
-              </span>
-              <Keys keys={formatCombo("Mod+Enter")} className="coarse:hidden" />
-            </button>
-          </div>
-        ) : null}
+                  </Command.Group>
+                ) : null}
+              </>
+            )}
+          </Command.List>
+          {mode === "commands" ? (
+            // The footer: always there, whatever the query. A button, not a
+            // cmdk item — the items are walked with ↑/↓ above the rows, and
+            // this one is reached by its key instead.
+            <div className="border-t border-border-secondary p-2">
+              <button
+                type="button"
+                data-testid="palette-create"
+                onClick={createFromQuery}
+                className="focus-ring flex h-9 w-full items-center gap-3 rounded px-3 text-left hover:bg-bg-hover active:bg-bg-secondary-active"
+              >
+                <span className="grid h-4 w-4 place-items-center text-text-secondary">
+                  <PlusIcon16 />
+                </span>
+                <span className="grow truncate">
+                  {query.trim() ? `Create new note "${query.trim()}"` : "Create new note"}
+                </span>
+                <Keys keys={formatCombo("Mod+Enter")} className="coarse:hidden" />
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
     </Command.Dialog>
   )

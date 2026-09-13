@@ -54,7 +54,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 ### Editor
 
 - **Block editor** (`src/components/block-editor/`, `src/blocks/`): each note is a `BlockDoc` walked out of the graph (`pageDoc`). Block types are declared once in `src/blocks/registry.ts` (markers, markdown lines, slash-menu and search entries) with their presentation in `block-editor/block-kinds.tsx`. Block bodies render through `block-content.tsx`: inline markdown only (bold, italic, links, code spans, `$$…$$` maths), with the stored text otherwise shown as is.
-- **Search** (`src/utils/search.ts`, `block-search.ts`, `search-notes.ts`): the query language in docs/query-language.md, over notes and blocks, with the qualifier picker in `components/qualifier-picker.tsx`.
+- **Search** (`src/utils/search.ts`, `block-search.ts`, `search-notes.ts`): the query language in docs/query-language.md, over notes and blocks, with the one query box (input, qualifier popover, scope pills) in `components/query-box.tsx` and the results block in `components/results-list.tsx`, shared by the notes page and the ⌘K palette.
 
 ### Routing and Worker
 

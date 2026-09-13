@@ -33,20 +33,23 @@ const MIRROR_PROPS = [
   "overflowWrap",
 ] as const
 
+/** A box whose caret can be measured: a textarea, or a single-line input
+ * (a search box), whose text never wraps. */
+type TextBox = HTMLTextAreaElement | HTMLInputElement
+
 /** Where the caret for `position` sits within `textarea`, in px from its
- * top-left (padding included), measured in the mirror. */
-function measureCaret(
-  textarea: HTMLTextAreaElement,
-  position: number,
-): { top: number; left: number } {
+ * top-left (padding included), measured in the mirror. An input's text runs
+ * on one line, so its mirror never wraps either. */
+function measureCaret(textarea: TextBox, position: number): { top: number; left: number } {
   const doc = textarea.ownerDocument
   const div = doc.createElement("div")
   const computed = getComputedStyle(textarea)
   const style = div.style
+  const wraps = textarea instanceof HTMLTextAreaElement
   style.position = "absolute"
   style.visibility = "hidden"
-  style.whiteSpace = "pre-wrap"
-  style.overflowWrap = "break-word"
+  style.whiteSpace = wraps ? "pre-wrap" : "pre"
+  style.overflowWrap = wraps ? "break-word" : "normal"
   style.height = "auto"
   const writable = style as unknown as Record<string, string>
   const source = computed as unknown as Record<string, string>
@@ -71,16 +74,18 @@ function caretTop(textarea: HTMLTextAreaElement, position: number): number {
 }
 
 /**
- * The caret's box for `position`, relative to the textarea's top-left — where
- * a popover anchored to a character (the slash menu's `/`) should hang from.
+ * The caret's box for `position`, relative to the box's top-left — where a
+ * popover anchored to a character (the slash menu's `/`, a search box's
+ * `type:`) should hang from. An input that has scrolled sideways reports
+ * where the character is drawn, not where it would be unscrolled.
  */
 export function caretCoordinates(
-  textarea: HTMLTextAreaElement,
+  textarea: TextBox,
   position: number,
 ): { top: number; left: number; height: number } {
   const { top, left } = measureCaret(textarea, position)
   const height = parseFloat(getComputedStyle(textarea).lineHeight) || 16
-  return { top, left, height }
+  return { top, left: left - textarea.scrollLeft, height }
 }
 
 /**

@@ -154,9 +154,9 @@ describe("outline palette (⌘P)", () => {
     expect(screen.getByText("Gamma")).toBeTruthy()
     // Unfiltered items are indented by heading depth.
     const beta = screen.getByText("Beta").closest("[cmdk-item]") as HTMLElement
-    expect(beta.style.paddingLeft).toBe("36px")
+    expect(beta.style.paddingLeft).toBe("30px")
     const alpha = screen.getByText("Alpha").closest("[cmdk-item]") as HTMLElement
-    expect(alpha.style.paddingLeft).toBe("12px")
+    expect(alpha.style.paddingLeft).toBe("6px")
   })
 
   it("shows an empty state when no note is open", () => {
@@ -320,8 +320,7 @@ const rowIds = () =>
 const editor = () => document.querySelector("[data-block-editor]") as HTMLElement
 
 /** ↓ in the query walks cmdk's items; past the last it hands the keyboard to
- * the rows. With block results there is one item ("See all…"), highlighted
- * from the start, so one press crosses over; with none, the first does. */
+ * the rows. A search query matches no item, so the first press crosses over. */
 function handOffToRows() {
   const input = commandsInput()
   for (let i = 0; i < 3 && document.activeElement !== editor(); i += 1) {
@@ -346,9 +345,11 @@ describe("block results", () => {
     expect(rowOf("blk_milk")?.querySelector('input[type="checkbox"]')).not.toBeNull()
   })
 
-  it("shows the count of matched blocks, and the notes they live in", async () => {
+  it("shows the count of matched blocks, and the notes they live in — the page's line", async () => {
     await openWithBlocks([NVIDIA, TODO_MILK, TODO_SHIP])
-    expect(screen.getByText("See all 3 matching blocks in 1 note")).toBeTruthy()
+    expect(screen.getByTestId("result-count").textContent).toBe("3 matching blocks in 1 note")
+    // No "See all" item: ↵ on the query is what opens the results view.
+    expect(document.querySelector("[cmdk-item]")).toBeNull()
   })
 
   it("says so plainly when nothing matches", async () => {
@@ -356,19 +357,57 @@ describe("block results", () => {
     expect(screen.getByText("No matching blocks")).toBeTruthy()
   })
 
-  it("Enter on the query opens the full results view at ?query=", async () => {
+  it("typing never hands the keyboard to the rows", async () => {
+    mocks.results = { mode: "blocks", hits: [NVIDIA, TODO_MILK], notes: [RESEARCH] }
+    renderMenu({ open: true })
+    const input = commandsInput()
+    input.focus()
+    // Each letter is a new query, and new rows beneath — which must not
+    // take the focus from the box mid-word.
+    for (const value of ["nv", "nvi", "nvid"]) {
+      fireEvent.change(input, { target: { value } })
+      await waitFor(() => {
+        expect(screen.queryByText("Settings")).toBeNull()
+      })
+      expect(rowIds()).toEqual(["blk_nvidia", "blk_milk"])
+      expect(document.activeElement).toBe(input)
+    }
+  })
+
+  it("Enter straight after typing opens the full results view at ?query=", async () => {
     // Outside a note there is nothing to scope to.
     mocks.match = undefined
     await openWithBlocks([NVIDIA])
-    // Nothing arrowed: cmdk highlights the first row, which is "see all".
+    // Nothing arrowed: no item is highlighted, so ↵ is the query's.
+    expect(document.querySelector('[cmdk-item][aria-selected="true"]')).toBeNull()
     fireEvent.keyDown(commandsInput(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", search: { query: "nvidia" } })
+  })
+
+  it("Enter on a highlighted item picks the item, not the results view", async () => {
+    mocks.match = undefined
+    renderMenu({ open: true })
+    const input = commandsInput()
+    fireEvent.change(input, { target: { value: "sett" } })
+    // The debounce has filtered the items down to the one match.
+    await waitFor(() => {
+      expect(screen.queryByText("Notes")).toBeNull()
+    })
+    expect(screen.getByText("Settings")).toBeTruthy()
+    // ↓ puts cmdk's highlight on the first item.
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    expect(document.querySelector('[cmdk-item][aria-selected="true"]')?.textContent).toContain(
+      "Settings",
+    )
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({ to: "/settings" })
+    expect(mocks.navigate).not.toHaveBeenCalledWith(expect.objectContaining({ to: "/" }))
   })
 
   it("inside a note, scopes the search to it — an `in:` the results view inherits", async () => {
     await openWithBlocks([NVIDIA])
     // Said plainly under the query, as a pill naming the note.
-    expect(screen.getByTestId("palette-scope").textContent).toContain("note-1")
+    expect(screen.getByTestId("query-scopes").textContent).toContain("note-1")
     fireEvent.keyDown(commandsInput(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: "/",
@@ -378,8 +417,8 @@ describe("block results", () => {
 
   it("the scope comes off with its pill", async () => {
     await openWithBlocks([NVIDIA])
-    fireEvent.click(screen.getByTestId("palette-scope").querySelector("button")!)
-    expect(screen.queryByTestId("palette-scope")).toBeNull()
+    fireEvent.click(screen.getByTestId("query-scopes").querySelector("button")!)
+    expect(screen.queryByTestId("query-scopes")).toBeNull()
     fireEvent.keyDown(commandsInput(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", search: { query: "nvidia" } })
   })
@@ -389,7 +428,7 @@ describe("block results", () => {
     const input = commandsInput()
     fireEvent.change(input, { target: { value: "in:other nvidia" } })
     await waitFor(() => {
-      expect(screen.queryByTestId("palette-scope")).toBeNull()
+      expect(screen.getByTestId("query-scopes").textContent).not.toContain("note-1")
     })
     fireEvent.keyDown(input, { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
@@ -401,7 +440,7 @@ describe("block results", () => {
   it("zoomed into a block, the scope is that block", async () => {
     mocks.match = { params: { _splat: "note-1" }, search: { block: "blk_zoom" } }
     await openWithBlocks([NVIDIA])
-    expect(screen.getByTestId("palette-scope").textContent).toContain("blk_zoom")
+    expect(screen.getByTestId("query-scopes").textContent).toContain("blk_zoom")
     fireEvent.keyDown(commandsInput(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: "/",
@@ -437,18 +476,15 @@ describe("block results", () => {
     expect(rowIds()).toEqual(["blk_nvidia", "blk_h100", "blk_rev"])
   })
 
-  it("↑ from the first row, or Escape, returns to the query with the last item highlighted", async () => {
+  it("↑ from the first row, or Escape, returns to the query", async () => {
     await openWithBlocks([NVIDIA])
-    const seeAll = () => screen.getByText(/^See all/).closest("[cmdk-item]")
     handOffToRows()
     fireEvent.keyDown(editor(), { key: "ArrowUp" })
     expect(document.activeElement).toBe(commandsInput())
-    expect(seeAll()?.getAttribute("aria-selected")).toBe("true")
 
     handOffToRows()
     fireEvent.keyDown(editor(), { key: "Escape" })
     expect(document.activeElement).toBe(commandsInput())
-    expect(seeAll()?.getAttribute("aria-selected")).toBe("true")
     // The palette is still open, the query still there.
     expect(commandsInput().value).toBe("nvidia")
   })

@@ -1868,6 +1868,12 @@ export function BlockEditor({
   // after a structural change or after focus drifted to a non-interactive spot.
   // Edit mode is left alone (the textarea owns focus). `preventScroll` stops the
   // focus call from jumping the page around on every doc change.
+  //
+  // Never from somewhere the keyboard is in use, though: a query box typing
+  // over a results view changes this doc on every keystroke (the rows are
+  // the results), and taking focus from it would send the next letter to
+  // the rows. The same exclusions as the arrow replay below — form fields,
+  // dialogs, menus, lists, other editors — keep their focus.
   useLayoutEffect(() => {
     if (!navigable || focus || !selected) return
     // While the outline palette is previewing, focus stays in its input — the
@@ -1875,7 +1881,10 @@ export function BlockEditor({
     if (revealSnapshotRef.current) return
     const el = containerRef.current
     if (!el) return
-    if (!el.contains(document.activeElement)) el.focus({ preventScroll: true })
+    const active = document.activeElement
+    if (el.contains(active)) return
+    if (active instanceof Element && active.closest(ARROWS_KEEP_TO_THEMSELVES)) return
+    el.focus({ preventScroll: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, focus, anchorKey, doc, navigable])
 
