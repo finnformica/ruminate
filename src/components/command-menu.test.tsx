@@ -84,6 +84,7 @@ vi.mock("../global-state", async (importOriginal) => {
     isDatabaseModeAtom: atom(false),
     notesAtom: atom(new Map()),
     sortedNotesAtom: atom([]),
+    pinnedNotesAtom: atom([]),
     recentTouchesAtom: atom([]),
     noteOutlineAtom: atom(null),
     blockRevealAtom: atom(null),
@@ -95,6 +96,7 @@ vi.mock("../global-state", async (importOriginal) => {
 import {
   blockRevealAtom,
   noteOutlineAtom,
+  pinnedNotesAtom,
   recentTouchesAtom,
   sortedNotesAtom,
 } from "../global-state"
@@ -131,19 +133,22 @@ function renderMenu({
   open = false,
   notes = [],
   touches = [],
+  pinned = [],
 }: {
   outline?: typeof OUTLINE | null
   open?: boolean
   notes?: unknown[]
   touches?: { id: string; at: number }[]
+  pinned?: unknown[]
 } = {}) {
   const store = createStore()
   store.set(noteOutlineAtom, outline)
-  // The corpus's notes, and the touches this device remembers: what the
-  // palette's Recent list is merged from. The atoms are the mock's plain,
-  // writable ones.
+  // The corpus's notes, the touches this device remembers (what the
+  // palette's Recent list is merged from) and the pinned notes. The atoms
+  // are the mock's plain, writable ones.
   store.set(sortedNotesAtom as never, notes as never)
   store.set(recentTouchesAtom as never, touches as never)
+  store.set(pinnedNotesAtom as never, pinned as never)
   if (open) store.set(isCommandMenuOpenAtom, true)
   render(
     <Provider store={store}>
@@ -656,6 +661,68 @@ describe("note results", () => {
       expect(screen.getByText("Recent")).toBeTruthy()
     })
     expect(rowIds()).toEqual(["research"])
+  })
+
+  it("lists the pinned notes beneath the recent ones — a note in both shows once, as recent", () => {
+    // `research` is recent AND pinned: it is listed under Recent only.
+    // `journal` (never edited, never touched) is pinned only: Pinned holds
+    // it, beneath.
+    const research = { ...edited("research", 5000), pinned: true }
+    const journal = { ...makeNote("journal"), pinned: true }
+    renderMenu({ open: true, notes: [research, journal], pinned: [research, journal] })
+    const groups = Array.from(document.querySelectorAll("[cmdk-group]")).filter((group) =>
+      ["Recent", "Pinned"].includes(group.querySelector("[cmdk-group-heading]")?.textContent ?? ""),
+    )
+    expect(groups.map((group) => group.querySelector("[cmdk-group-heading]")?.textContent)).toEqual(
+      ["Recent", "Pinned"],
+    )
+    const idsIn = (group: Element) =>
+      Array.from(group.querySelectorAll<HTMLElement>("[data-block-row]")).map(
+        (row) => row.dataset.blockRow,
+      )
+    expect(idsIn(groups[0])).toEqual(["research"])
+    expect(idsIn(groups[1])).toEqual(["journal"])
+    expect(rowIds()).toEqual(["research", "journal"])
+  })
+
+  it("Pinned holds the pinned notes that are not recent, and goes with Recent when typing", async () => {
+    // Six newer notes keep `journal` out of Recent; pinned, it is listed
+    // beneath.
+    const notes = [
+      ...["n1", "n2", "n3", "n4", "n5"].map((id, i) => edited(id, 9000 - i)),
+      edited("research", 8000),
+      { ...edited("journal", 100), pinned: true },
+    ]
+    mocks.results = {
+      mode: "blocks",
+      hits: [TODO_MILK],
+      notes: [RESEARCH],
+      titleMatches: [],
+      rows: rowsOf([TODO_MILK]),
+    }
+    renderMenu({ open: true, notes, pinned: [notes[6]] })
+    expect(screen.getByText("Recent")).toBeTruthy()
+    expect(screen.getByText("Pinned")).toBeTruthy()
+    expect(rowIds()).toEqual(["journal"])
+    expect(document.querySelector('[cmdk-item][aria-selected="true"]')).toBeNull()
+    fireEvent.change(commandsInput(), { target: { value: "milk" } })
+    await waitFor(() => {
+      expect(screen.queryByText("Pinned")).toBeNull()
+    })
+    expect(screen.queryByText("Recent")).toBeNull()
+    expect(rowIds()).toEqual(["blk_milk"])
+  })
+
+  it("with nothing recent, ↓ from the query lands in the pinned rows", () => {
+    // A note never edited (no timestamp) and never touched is not recent —
+    // pinned, it is the only listing.
+    const journal = { ...makeNote("journal"), pinned: true }
+    renderMenu({ open: true, notes: [journal], pinned: [journal] })
+    expect(screen.queryByText("Recent")).toBeNull()
+    expect(screen.getByText("Pinned")).toBeTruthy()
+    expect(rowIds()).toEqual(["journal"])
+    handOffToRows()
+    expect(rowOf("journal")?.querySelector(".block-highlight")).not.toBeNull()
   })
 
   it("expands a note in the palette to its top-level blocks", async () => {

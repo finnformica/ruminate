@@ -73,3 +73,47 @@ describe("BlockNoteEditor doc propagation", () => {
     expect(after!.value).toBe("typing in progress")
   })
 })
+
+// The note page counts a fold as touching the note (the palette's Recent
+// list), and never a selection: reading a note is not touching it.
+describe("BlockNoteEditor onToggleCollapse", () => {
+  const OUTLINE = "- parent\n  - child\n- sibling\n"
+
+  it("is told of a fold or unfold, with the row's key", () => {
+    const onToggleCollapse = vi.fn()
+    const onChange = vi.fn()
+    const { getByLabelText } = render(
+      <BlockNoteEditor
+        noteId="n"
+        doc={parse(OUTLINE)}
+        onChange={onChange}
+        onToggleCollapse={onToggleCollapse}
+      />,
+    )
+    fireEvent.click(getByLabelText("Collapse"))
+    expect(onToggleCollapse).toHaveBeenCalledTimes(1)
+    expect(typeof onToggleCollapse.mock.calls[0][0]).toBe("string")
+    // A fold is the view's, not the note's: no change to the doc.
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("is not told of a selection — a click on a row, or the arrows through it", () => {
+    const onToggleCollapse = vi.fn()
+    const onChange = vi.fn()
+    const { container, getByText } = render(
+      <BlockNoteEditor
+        noteId="n"
+        doc={parse(OUTLINE)}
+        onChange={onChange}
+        onToggleCollapse={onToggleCollapse}
+      />,
+    )
+    fireEvent.click(getByText("parent"))
+    const editor = container.querySelector<HTMLElement>("[data-block-editor]")!
+    fireEvent.keyDown(editor, { key: "ArrowDown" })
+    fireEvent.keyDown(editor, { key: "ArrowDown" })
+    fireEvent.keyDown(editor, { key: "ArrowUp" })
+    expect(onToggleCollapse).not.toHaveBeenCalled()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+})

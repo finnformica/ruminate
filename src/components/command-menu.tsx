@@ -10,6 +10,7 @@ import {
   blockRevealAtom,
   graphSnapshotAtom,
   noteOutlineAtom,
+  pinnedNotesAtom,
   recentTouchesAtom,
   sortedNotesAtom,
 } from "../global-state"
@@ -75,11 +76,18 @@ export function CommandMenu() {
   const createNote = useCreateNote()
   const jotaiStore = useStore()
   // With nothing typed: the notes most recently TOUCHED — edited or created
-  // (the graph's `updatedAt`) merged with what was opened, focused, folded
-  // or selected on this device (`recentTouchesAtom`) — at most five.
+  // (the graph's `updatedAt`) merged with what was opened, edited or folded
+  // on this device (`recentTouchesAtom`) — at most five; then the pinned
+  // notes beneath, less any already listed as recent, so nothing is there
+  // twice.
   const sortedNotes = useAtomValue(sortedNotesAtom)
   const touches = useAtomValue(recentTouchesAtom)
   const recentNotes = useMemo(() => recentTouched(touches, sortedNotes), [touches, sortedNotes])
+  const pinned = useAtomValue(pinnedNotesAtom)
+  const pinnedNotes = useMemo(
+    () => pinned.filter((note) => !recentNotes.some((recent) => recent.id === note.id)),
+    [pinned, recentNotes],
+  )
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
 
   // Get the current note if we're on a note page.
@@ -376,7 +384,9 @@ export function CommandMenu() {
   // is a first-class row here, not a note it happens to live in; a note
   // whose title matched is a row among them, by score.
   const results = useSearchResults(scopedQuery)
-  const hasRows = deferredQuery ? results.rows.length > 0 : recentNotes.length > 0
+  const hasRows = deferredQuery
+    ? results.rows.length > 0
+    : recentNotes.length > 0 || pinnedNotes.length > 0
 
   // Bumped to hand the keyboard to the results (↓ past the last item).
   const [focusFirstSignal, setFocusFirstSignal] = useState(0)
@@ -704,6 +714,25 @@ export function CommandMenu() {
                       readOnly
                       onOpen={openResult}
                       focusFirstSignal={focusFirstSignal}
+                      onExitTop={takeBackFromRows}
+                    />
+                  </Command.Group>
+                ) : null}
+                {!deferredQuery && pinnedNotes.length > 0 ? (
+                  // The pinned notes, beneath the recent ones: a second
+                  // results block, browsed the same way. ↓ from the query
+                  // lands here only when there is nothing recent to land
+                  // in; ↑ from its first row returns to the query.
+                  <Command.Group heading="Pinned">
+                    <ResultsList
+                      variant="palette"
+                      query=""
+                      results={results}
+                      browseNotes={pinnedNotes}
+                      limit={NUM_VISIBLE_RESULTS}
+                      readOnly
+                      onOpen={openResult}
+                      focusFirstSignal={recentNotes.length > 0 ? undefined : focusFirstSignal}
                       onExitTop={takeBackFromRows}
                     />
                   </Command.Group>

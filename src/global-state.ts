@@ -264,6 +264,13 @@ export const sortedNotesAtom = atom((get) => {
   })
 })
 
+/** The pinned notes, in `sortedNotesAtom`'s order (they lead it): the
+ * palette's **Pinned** group with nothing typed. */
+export const pinnedNotesAtom = atom((get) => {
+  const sortedNotes = get(sortedNotesAtom)
+  return sortedNotes.filter((note) => note.pinned)
+})
+
 export const noteSearcherAtom = atom((get) => {
   const sortedNotes = get(sortedNotesAtom)
   return new Searcher(sortedNotes, {

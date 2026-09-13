@@ -4,9 +4,10 @@ import type { Note, NoteId } from "../schema"
  * **Recent notes** — what the ⌘K palette offers with nothing typed: the
  * notes most recently TOUCHED, at most `RECENT_LIMIT`. A note is touched
  * when it is edited or created (the graph's `updatedAt`, which every device
- * sees) and when it is interacted with — opened, a block in it focused or
- * selected, folded or unfolded (a small list kept on this device,
- * `RecentTouch[]`). The two are merged, most recent first, deduped.
+ * sees) and when it is opened, edited, or a block in it folded or unfolded
+ * on this device (a small list kept here, `RecentTouch[]`) — never by
+ * selecting, focusing or arrowing through it: reading a note is not
+ * touching it. The two are merged, most recent first, deduped.
  *
  * The interaction list is deliberately tiny: one entry per note, at most
  * `RECENT_LIMIT` of them, a timestamp each — a few dozen bytes under one

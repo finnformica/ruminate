@@ -111,10 +111,11 @@ function NotePage() {
     defaultDoc,
   })
   // The note is TOUCHED — for the palette's Recent list (`touchNoteAtom`,
-  // coalesced there) — when it is opened, and on any interaction with its
-  // editor: a pointer or a key in it (a block focused, selected, folded,
-  // typed into) is caught here on its way in, and an edit lands through
-  // `setEditorDoc`. One seam, no calls inside the editor.
+  // coalesced there) — exactly when it is opened, edited (an edit lands
+  // through `setEditorDoc`) or a block in it folded or unfolded (the
+  // editor's `onToggleCollapse`). Never by selecting, focusing or arrowing
+  // through it: reading a note is not touching it. One seam, no calls
+  // inside the editor.
   const touchNote = useSetAtom(touchNoteAtom)
   useEffect(() => {
     if (noteId) touchNote(noteId)
@@ -267,13 +268,7 @@ function NotePage() {
             ) : null}
 
             {useBlockEditor ? (
-              // eslint-disable-next-line jsx-a11y/no-static-element-interactions
-              <div
-                className="flex flex-col gap-3"
-                onPointerDownCapture={touch}
-                onKeyDownCapture={touch}
-                onFocusCapture={touch}
-              >
+              <div className="flex flex-col gap-3">
                 {/* While zoomed, the breadcrumb (inside the editor) carries the
                     note title as its first crumb — hide the standalone title to
                     avoid doubling it. */}
@@ -294,6 +289,7 @@ function NotePage() {
                   noteId={noteId}
                   doc={editorDoc}
                   onChange={setEditorDoc}
+                  onToggleCollapse={touch}
                   startEditing={!noteExists && notesLoaded}
                   highlightHeading={highlightHeading}
                   onExitTop={() => setTitleFocusSignal((n) => n + 1)}

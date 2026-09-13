@@ -86,12 +86,16 @@ export function BlockNoteEditor({
   onZoomNavigate,
   noteTitle,
   collapseKey,
+  onToggleCollapse,
   publishOutline = true,
   trailingBlank = true,
   rowRemoval = "unlink",
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc, hint?: ChangeHint) => void
+  /** Told after a block is folded or unfolded (the fold itself is kept
+   * here, per device) — the note page counts it as touching the note. */
+  onToggleCollapse?: (key: string) => void
   /**
    * The note's id. When provided, the note's folds persist per-device in
    * localStorage (seeded on first open from the default-expansion policy);
@@ -157,7 +161,11 @@ export function BlockNoteEditor({
     setDoc(seedDoc(incoming))
   }
 
-  const { collapsed, toggleCollapse } = useCollapseState(collapseKey ?? noteId, doc)
+  const { collapsed, toggleCollapse: toggleFold } = useCollapseState(collapseKey ?? noteId, doc)
+  const toggleCollapse = (key: string) => {
+    toggleFold(key)
+    onToggleCollapse?.(key)
+  }
 
   const handleChange = (next: BlockDoc, hint?: ChangeHint) => {
     // While zoomed, the trailing-blank rule is suspended (a root-level blank
