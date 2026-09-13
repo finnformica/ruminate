@@ -51,6 +51,12 @@ export interface BlockEditorApi {
   /** Display-only: no editing, selection, or mutation (collapse still works). */
   readOnly?: boolean
   /**
+   * The roots are the view's own — a results list's hits, the notes list's
+   * notes — not a parent's children (`BlockEditor.fixedRoots`). A kind may
+   * draw a root differently for it (a listed note takes a roomier row).
+   */
+  fixedRoots?: boolean
+  /**
    * Whether the editor owns the keyboard: focus is inside its container and
    * the user's last act was not a click on blank space (a key press hands it
    * back). While false, selected rows demote to the quiet inactive-selection
@@ -203,6 +209,13 @@ export function BlockItem({
   // and the textarea, so editing never moves a character.
   const panel = kind.panel ?? null
   const rowContext: RowContext = { block, occurrence, api, depth, editing }
+  const roomy = kind.roomy?.(rowContext) ?? false
+  // A ROOT of a results view (`api.fixedRoots`): its surface is set in by
+  // the same 8.5px at the sides a listed note's is all round, so every
+  // root's surface — a note's, a matched block's — shares one left edge, the
+  // one the page's search box sits on (the view pads by the reach). The
+  // margin still nets the text to the shared 4px column.
+  const wide = !!api.fixedRoots && depth === 0
 
   // Focus and place the caret when editing starts.
   useLayoutEffect(() => {
@@ -611,7 +624,13 @@ export function BlockItem({
         slotClass,
       )}
     >
-      {glyph ? (
+      {kind.glyphNode ? (
+        // A rendered key (a note's favicon). Not `aria-hidden`: unlike the
+        // typographic keys it can carry meaning of its own.
+        <span className={cx("block-glyph flex items-center", keyClass)}>
+          {kind.glyphNode(block)}
+        </span>
+      ) : glyph ? (
         <span aria-hidden className={cx("block-glyph select-none text-text-tertiary", keyClass)}>
           {glyph}
         </span>
@@ -838,7 +857,10 @@ export function BlockItem({
             // run into one continuous surface. Either way the negative
             // margin equals the padding, so the text never moves a pixel
             // and the block rhythm gains nothing.
-            "relative -ml-0.5 -mr-0.5 flex items-start gap-2 rounded pl-1.5 pr-1.5",
+            "relative flex items-start gap-2 rounded",
+            wide
+              ? "-ml-[4.5px] -mr-[4.5px] pl-[8.5px] pr-[8.5px]"
+              : "-ml-0.5 -mr-0.5 pl-1.5 pr-1.5",
             // Per-side vertical pairs. Mid-run sides also square their
             // corners and drop that edge of the selection ring
             // (`.block-run-*`, block-editor.css) so the run reads as ONE
@@ -848,8 +870,22 @@ export function BlockItem({
             // seamlessly (same solid fill, same solid side lines); root rows
             // sit 6px apart: 4+4 still overlaps 2px, so runs merge at every
             // level.
-            runEdges?.top ? "-mt-1 pt-1 rounded-t-none block-run-top" : "-mt-0.5 pt-0.5",
-            runEdges?.bottom ? "-mb-1 pb-1 rounded-b-none block-run-bottom" : "-mb-0.5 pb-0.5",
+            //
+            // A roomy row (`BlockKind.roomy` — a note in a list) pads for
+            // real instead: 8.5px each side of its 23px line is the 40px
+            // row the notes list always had, and the 1px reach leaves the
+            // same 2px between two of them. It is never mid-run: only
+            // read-only lists have one, and they have no multi-select.
+            runEdges?.top
+              ? "-mt-1 pt-1 rounded-t-none block-run-top"
+              : roomy
+                ? "-mt-px pt-[8.5px]"
+                : "-mt-0.5 pt-0.5",
+            runEdges?.bottom
+              ? "-mb-1 pb-1 rounded-b-none block-run-bottom"
+              : roomy
+                ? "-mb-px pb-[8.5px]"
+                : "-mb-0.5 pb-0.5",
             // bg-bg-secondary is the structural "selected" hook (tests query
             // it); .block-highlight draws the accent ring and faint wash over
             // it so selection reads as selected, not hovered.

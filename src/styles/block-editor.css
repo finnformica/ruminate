@@ -60,16 +60,6 @@
   --block-ring-bottom: transparent;
 }
 
-/* `.list-highlight` is the selected-row surface outside the editor: the
- * notes list keyboard highlight keeps the app-wide selected WASH, shared
- * verbatim with the sidebar's current row (see "Selection has its own color"
- * in docs/design-principles.md) — a list row is a nav row, and paints like
- * one. */
-.list-highlight {
-  background-color: var(--color-bg-selected);
-  color: var(--color-text-selected);
-}
-
 /* ── Inactive selection ──────────────────────────────────────────────────────
  * When the editor doesn't own the keyboard (focus is in the sidebar, a dialog,
  * the page — including the ⌘P palette's live previews), the selection demotes

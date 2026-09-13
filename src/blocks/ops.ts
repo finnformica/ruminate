@@ -74,7 +74,9 @@ export function updateText(doc: BlockDoc, id: string, text: string): BlockDoc {
 /** Change a block's type (its text and children untouched). */
 export function updateType(doc: BlockDoc, id: string, type: BlockType): BlockDoc {
   const block = doc.blocks[id]
-  if (!block || block.type === type) return doc
+  // A note node is a note for good (docs/graph-schema-v2.md): a note row in
+  // a results view can be retitled, never turned into a bullet.
+  if (!block || block.type === type || block.type === "note") return doc
   const next = clone(doc)
   next.blocks[id] = { ...block, type }
   return next
@@ -94,7 +96,8 @@ export function updateBlock(doc: BlockDoc, id: string, patch: BlockPatch): Block
   const block = doc.blocks[id]
   if (!block) return doc
   const text = patch.text ?? block.text
-  const type = patch.type ?? block.type
+  // A note's type is not a block's to change (see `updateType`).
+  const type = block.type === "note" ? block.type : (patch.type ?? block.type)
   const props = patch.props === undefined ? block.props : patch.props
   if (text === block.text && type === block.type && props === block.props) return doc
   const next = clone(doc)
