@@ -13,15 +13,13 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   match: { params: { _splat: "note-1" } } as
     { params: { _splat: string }; search?: { block?: string } } | undefined,
-  // The block-search data source, injected at its single seam
-  // (`useBlockSearchSource`) — see src/utils/block-search-source.ts.
+  // What the query resolves to, injected at `useSearchResults`; the rows
+  // themselves are walked out of the mocked graph (see the global-state mock).
   results: { mode: "notes", hits: [], notes: [] } as {
     mode: "blocks" | "notes"
     hits: unknown[]
     notes: unknown[]
   },
-  children: new Map<string, unknown[]>(),
-  childCalls: [] as string[],
   noteResults: [] as unknown[],
 }))
 
@@ -39,26 +37,55 @@ vi.mock("../hooks/search-notes", () => ({
   useSearchNotes: () => () => mocks.noteResults,
 }))
 
-vi.mock("../hooks/search-results", async () => {
-  const { noteHit } = await import("../utils/block-search-source")
-  return {
-    useSearchResults: () => mocks.results,
-    useBlockSearchSource: () => ({
-      search: () => mocks.results.hits,
-      children: (hit: { blockId: string }) => {
-        mocks.childCalls.push(hit.blockId)
-        return mocks.children.get(hit.blockId) ?? []
-      },
-      noteHit: (note: { id: string }) =>
-        noteHit(note as never, (mocks.children.get(note.id) ?? []).length),
-    }),
-  }
-})
-
-vi.mock("../global-state", async () => {
+vi.mock("../hooks/search-results", () => ({
+  useSearchResults: () => mocks.results,
+}))
+vi.mock("../data/store", () => ({ useApplyOps: () => () => {} }))
+// The real module underneath (the block editor behind the rows reads several
+// of its atoms), with the palette's own inputs pinned.
+vi.mock("../global-state", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../global-state")>()
   const { atom } = await import("jotai")
   const { Searcher } = await import("fast-fuzzy")
+  const { parse } = await import("../blocks/parse")
+  const { serialize } = await import("../blocks/serialize")
+  const { buildGraphSnapshot, docToGraph } = await import("../data/graph")
+  // The corpus the result rows are walked out of (the palette's results are
+  // the block editor over the graph — see ResultsEditor). Ids are pinned so
+  // the hits below can name them.
+  const CORPUS: Record<string, string> = {
+    research: [
+      "# Semiconductors",
+      "  id:: blk_semis",
+      "  - GPUs",
+      "    id:: blk_gpus",
+      "    - nvidia",
+      "      id:: blk_nvidia",
+      "      - H100 supply",
+      "        id:: blk_h100",
+      "      - datacenter revenue",
+      "        id:: blk_rev",
+      "- [ ] buy milk",
+      "  id:: blk_milk",
+      "",
+    ].join("\n"),
+    journal: ["- [ ] ship it", "  id:: blk_ship", "- in another note", "  id:: blk_else", ""].join(
+      "\n",
+    ),
+  }
+  const nodes = []
+  const links = []
+  for (const [id, markdown] of Object.entries(CORPUS)) {
+    const g = docToGraph(id, serialize(parse(markdown)), 1)
+    nodes.push(...g.nodes)
+    links.push(...g.links)
+  }
+  const graph = buildGraphSnapshot(nodes, links)
   return {
+    ...original,
+    graphSnapshotAtom: atom(graph),
+    sampleGraphAtom: atom(graph),
+    isDatabaseModeAtom: atom(false),
     notesAtom: atom(new Map()),
     pinnedNotesAtom: atom([]),
     sortedNotesAtom: atom([]),
@@ -91,8 +118,6 @@ beforeEach(() => {
   mocks.match = { params: { _splat: "note-1" } }
   mocks.navigate.mockClear()
   mocks.results = { mode: "notes", hits: [], notes: [] }
-  mocks.children = new Map()
-  mocks.childCalls = []
   mocks.noteResults = []
 })
 
@@ -298,7 +323,7 @@ const NVIDIA = hit(
   2,
 )
 const TODO_MILK = hit("blk_milk", "buy milk", "todo")
-const TODO_SHIP = hit("blk_ship", "ship it", "todo")
+const TODO_SHIP = hit("blk_ship", "ship it", "todo", [], 0, JOURNAL)
 const ELSEWHERE = hit("blk_else", "in another note", "text", [], 0, JOURNAL)
 
 async function openWithBlocks(hits: unknown[], notes: unknown[] = [RESEARCH]) {
@@ -316,23 +341,40 @@ async function openWithBlocks(hits: unknown[], notes: unknown[] = [RESEARCH]) {
   return rendered
 }
 
-const rowFor = (text: string) => screen.getByText(text).closest("[cmdk-item]") as HTMLElement | null
+/** A result row: the editor's own, by block id. */
+const rowOf = (id: string) =>
+  document.querySelector(`[data-block-row="${id}"]`) as HTMLElement | null
+const rowIds = () =>
+  Array.from(document.querySelectorAll<HTMLElement>("[data-block-row]")).map(
+    (row) => row.dataset.blockRow,
+  )
+const editor = () => document.querySelector("[data-block-editor]") as HTMLElement
+
+/** ↓ in the query walks cmdk's items; past the last it hands the keyboard to
+ * the rows. With a query there are two items ("See all…", "Create new
+ * note…"), so two presses reach the last and a third crosses over. */
+function handOffToRows() {
+  const input = commandsInput()
+  for (let i = 0; i < 3 && document.activeElement !== editor(); i += 1) {
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+  }
+  expect(document.activeElement).toBe(editor())
+}
 
 describe("block results", () => {
-  it("lists a nested heading as its own row, with its breadcrumb", async () => {
+  it("lists a nested heading as its own row — the editor's, with no breadcrumb", async () => {
     await openWithBlocks([NVIDIA, ELSEWHERE], [RESEARCH, JOURNAL])
-    const row = rowFor("nvidia")
-    expect(row).toBeTruthy()
-    // Where it lives: note, then ancestry.
-    expect(row?.textContent).toContain("research")
-    expect(row?.textContent).toContain("Semiconductors")
-    expect(row?.textContent).toContain("GPUs")
+    expect(rowIds()).toEqual(["blk_nvidia", "blk_else"])
+    expect(rowOf("blk_nvidia")?.querySelector('[data-testid="block-body"]')?.textContent).toBe(
+      "nvidia",
+    )
+    expect(rowOf("blk_nvidia")?.textContent).not.toContain("Semiconductors")
   })
 
   it("lists matching todo blocks as rows (the type:todo case)", async () => {
     await openWithBlocks([TODO_MILK, TODO_SHIP])
-    expect(rowFor("buy milk")).toBeTruthy()
-    expect(rowFor("ship it")).toBeTruthy()
+    expect(rowIds()).toEqual(["blk_milk", "blk_ship"])
+    expect(rowOf("blk_milk")?.querySelector('input[type="checkbox"]')).not.toBeNull()
   })
 
   it("shows the count of matched blocks, and the notes they live in", async () => {
@@ -398,10 +440,12 @@ describe("block results", () => {
     })
   })
 
-  it("Enter on a highlighted hit opens its note, zoomed to the block", async () => {
+  it("↓ past the items hands the keyboard to the rows; Enter opens the note zoomed to the block", async () => {
     await openWithBlocks([NVIDIA])
-    fireEvent.keyDown(commandsInput(), { key: "ArrowDown" })
-    fireEvent.keyDown(commandsInput(), { key: "Enter" })
+    handOffToRows()
+    // The first row is the highlight, as in a note.
+    expect(rowOf("blk_nvidia")?.querySelector(".block-highlight")).not.toBeNull()
+    fireEvent.keyDown(editor(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: "/notes/$",
       params: { _splat: "research" },
@@ -409,42 +453,43 @@ describe("block results", () => {
     })
   })
 
-  it("→ expands a hit in place, resolving its children once; ← collapses", async () => {
-    mocks.children.set("blk_nvidia", [
-      hit("blk_h100", "H100 supply", "ul"),
-      hit("blk_rev", "datacenter revenue", "ul"),
-    ])
+  it("→ and space open a hit in place, one level at a time; ← closes it", async () => {
     await openWithBlocks([NVIDIA])
+    handOffToRows()
+    expect(rowIds()).toEqual(["blk_nvidia"])
 
-    fireEvent.keyDown(commandsInput(), { key: "ArrowDown" })
-    expect(screen.queryByText("H100 supply")).toBeNull()
+    fireEvent.keyDown(editor(), { key: "ArrowRight" })
+    expect(rowIds()).toEqual(["blk_nvidia", "blk_h100", "blk_rev"])
 
-    fireEvent.keyDown(commandsInput(), { key: "ArrowRight" })
-    expect(screen.getByText("H100 supply")).toBeTruthy()
-    expect(screen.getByText("datacenter revenue")).toBeTruthy()
-    expect(mocks.childCalls).toEqual(["blk_nvidia"])
+    fireEvent.keyDown(editor(), { key: "ArrowLeft" })
+    expect(rowIds()).toEqual(["blk_nvidia"])
 
-    fireEvent.keyDown(commandsInput(), { key: "ArrowLeft" })
-    expect(screen.queryByText("H100 supply")).toBeNull()
+    fireEvent.keyDown(editor(), { key: " " })
+    expect(rowIds()).toEqual(["blk_nvidia", "blk_h100", "blk_rev"])
+  })
 
-    // Re-expanding is served from the tree's own cache — no second fetch.
-    fireEvent.keyDown(commandsInput(), { key: "ArrowRight" })
-    expect(screen.getByText("H100 supply")).toBeTruthy()
-    expect(mocks.childCalls).toEqual(["blk_nvidia", "blk_nvidia"])
+  it("↑ from the first row, or Escape, returns to the query", async () => {
+    await openWithBlocks([NVIDIA])
+    handOffToRows()
+    fireEvent.keyDown(editor(), { key: "ArrowUp" })
+    expect(document.activeElement).toBe(commandsInput())
+
+    handOffToRows()
+    fireEvent.keyDown(editor(), { key: "Escape" })
+    expect(document.activeElement).toBe(commandsInput())
+    // The palette is still open, the query still there.
+    expect(commandsInput().value).toBe("nvidia")
   })
 
   it("clicking the chevron expands and collapses the same way", async () => {
-    mocks.children.set("blk_nvidia", [hit("blk_h100", "H100 supply", "ul")])
     await openWithBlocks([NVIDIA])
-
-    const toggle = screen.getByLabelText("Expand")
-    fireEvent.click(toggle)
-    expect(screen.getByText("H100 supply")).toBeTruthy()
+    fireEvent.click(screen.getByLabelText("Expand"))
+    expect(rowOf("blk_h100")).not.toBeNull()
     // The click expanded rather than opening the result.
     expect(mocks.navigate).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByLabelText("Collapse"))
-    expect(screen.queryByText("H100 supply")).toBeNull()
+    expect(rowOf("blk_h100")).toBeNull()
   })
 
   it("a leaf hit draws no expand affordance", async () => {
@@ -452,28 +497,16 @@ describe("block results", () => {
     // Like a leaf in the editor: its marker slot holds only its key.
     expect(screen.queryByLabelText("Expand")).toBeNull()
   })
-
-  it("leaves the arrows to the query input while the caret is inside the text", async () => {
-    mocks.children.set("blk_nvidia", [hit("blk_h100", "H100 supply", "ul")])
-    await openWithBlocks([NVIDIA])
-    fireEvent.keyDown(commandsInput(), { key: "ArrowDown" })
-
-    const input = commandsInput()
-    input.setSelectionRange(2, 2)
-    fireEvent.keyDown(input, { key: "ArrowRight" })
-    expect(screen.queryByText("H100 supply")).toBeNull()
-    expect(mocks.childCalls).toEqual([])
-  })
 })
 
 // ── Note results ────────────────────────────────────────────────────────────
 // A note is a node whose children are its blocks, so a note result is a root
-// row drawn by the same component as a block result — and expandable in the
-// palette exactly as one.
+// row of the same editor as a block result — in the same list, ahead of the
+// blocks — and opens exactly as one.
 
 describe("note results", () => {
-  async function openWithNotes(notes: unknown[]) {
-    mocks.results = { mode: "notes", hits: [], notes: [] }
+  async function openWithNotes(notes: unknown[], hits: unknown[] = []) {
+    mocks.results = { mode: hits.length > 0 ? "blocks" : "notes", hits, notes: [] }
     mocks.noteResults = notes
     const rendered = renderMenu({ open: true })
     const input = commandsInput()
@@ -485,34 +518,31 @@ describe("note results", () => {
     return rendered
   }
 
-  it("draws a note as a block row, not a bespoke palette item", async () => {
+  it("draws a note as an editor row, keyed by its favicon", async () => {
     await openWithNotes([RESEARCH])
-    const row = rowFor("research")
-    expect(row).toBeTruthy()
-    // The editor's own row: its body hook, and the note's favicon as its key.
+    const row = rowOf("research")
     expect(row?.querySelector('[data-testid="block-body"]')?.textContent).toBe("research")
     expect(row?.querySelector('[data-testid="note-favicon-slot"]')).not.toBeNull()
   })
 
-  it("expands a note in the palette to reveal its blocks", async () => {
-    mocks.children.set("research", [NVIDIA, TODO_MILK])
+  it("lists notes and blocks as one list, the notes first", async () => {
+    await openWithNotes([RESEARCH], [TODO_SHIP])
+    expect(rowIds()).toEqual(["research", "blk_ship"])
+  })
+
+  it("expands a note in the palette to its top-level blocks", async () => {
     await openWithNotes([RESEARCH])
-
-    // cmdk highlights the first item, which here IS the note row.
-    expect(screen.queryByText("buy milk")).toBeNull()
-
-    fireEvent.keyDown(commandsInput(), { key: "ArrowRight" })
-    expect(screen.getByText("nvidia")).toBeTruthy()
-    expect(screen.getByText("buy milk")).toBeTruthy()
-    expect(mocks.childCalls).toEqual(["research"])
-
-    fireEvent.keyDown(commandsInput(), { key: "ArrowLeft" })
-    expect(screen.queryByText("buy milk")).toBeNull()
+    handOffToRows()
+    fireEvent.keyDown(editor(), { key: "ArrowRight" })
+    expect(rowIds()).toEqual(["research", "blk_semis", "blk_milk"])
+    fireEvent.keyDown(editor(), { key: "ArrowLeft" })
+    expect(rowIds()).toEqual(["research"])
   })
 
   it("Enter on a note row opens the note whole — not zoomed to a block", async () => {
     await openWithNotes([RESEARCH])
-    fireEvent.keyDown(commandsInput(), { key: "Enter" })
+    handOffToRows()
+    fireEvent.keyDown(editor(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: "/notes/$",
       params: { _splat: "research" },
@@ -521,15 +551,13 @@ describe("note results", () => {
   })
 
   it("a block revealed under a note opens that block", async () => {
-    mocks.children.set("research", [NVIDIA])
     await openWithNotes([RESEARCH])
-
-    fireEvent.keyDown(commandsInput(), { key: "ArrowRight" })
-    fireEvent.click(screen.getByText("nvidia"))
+    fireEvent.click(screen.getByLabelText("Expand"))
+    fireEvent.click(screen.getByText("buy milk"))
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: "/notes/$",
       params: { _splat: "research" },
-      search: { query: undefined, block: "blk_nvidia" },
+      search: { query: undefined, block: "blk_milk" },
     })
   })
 })

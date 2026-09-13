@@ -271,15 +271,19 @@ export function NoteList({
             </div>
           ) : null}
           {/* One editor, whatever the roots are: matched blocks, or the
-              notes themselves. Open a row to read what is inside it. */}
-          <ResultsEditor
-            roots={roots}
-            resetKey={`${mode}:${fullQuery}`}
-            readOnly={readOnly}
-            onOpen={openNote}
-            focusFirstSignal={focusFirstSignal}
-            onExitTop={() => searchInput()?.focus()}
-          />
+              notes themselves. Open a row to read what is inside it. Set in
+              by the rows' own reach (a root's surface extends 4.5px past its
+              box), so the surfaces sit flush with the search box. */}
+          <div className="px-[4.5px]">
+            <ResultsEditor
+              roots={roots}
+              resetKey={`${mode}:${fullQuery}`}
+              readOnly={readOnly}
+              onOpen={openNote}
+              focusFirstSignal={focusFirstSignal}
+              onExitTop={() => searchInput()?.focus()}
+            />
+          </div>
         </div>
 
         {totalResults > numVisibleItems ? (

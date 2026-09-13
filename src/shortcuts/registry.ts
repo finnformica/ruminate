@@ -376,13 +376,13 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   },
 ]
 
-// Linear-style keys on the filterable list pages — the notes index and the
-// tags page (see src/hooks/list-keyboard-nav.ts).
+// Linear-style keys on the tags page (see src/hooks/list-keyboard-nav.ts). The
+// notes list is the block editor now, with the editor's keys.
 const LIST_ENTRIES: Shortcut[] = [
   {
     combos: ["ArrowUp", "ArrowDown"],
     scope: "global",
-    description: "Move the list highlight (notes list, tags)",
+    description: "Move the list highlight (tags)",
     group: "Lists",
   },
   {
@@ -394,7 +394,7 @@ const LIST_ENTRIES: Shortcut[] = [
   {
     combos: ["Enter"],
     scope: "global",
-    description: "Open the highlighted note or tag",
+    description: "Open the highlighted tag",
     group: "Lists",
   },
   {
@@ -411,31 +411,32 @@ const LIST_ENTRIES: Shortcut[] = [
   },
 ]
 
-// Block search results — the rows in ⌘K and on the results view (`/?query=`).
-// See src/components/search-results.tsx and src/hooks/block-result-tree.ts.
+// Search results — the rows in ⌘K, on the notes list and on the results view
+// (`/?query=`) are the block editor (src/components/results-editor.tsx), so
+// their keys are the editor's. These are the hand-offs around them.
 const SEARCH_RESULT_ENTRIES: Shortcut[] = [
   {
-    combos: ["ArrowUp", "ArrowDown"],
+    combos: ["ArrowDown"],
     scope: "global",
-    description: "Move between result rows (including blocks revealed by expanding)",
+    description: "In the search box (past the last palette item): into the result rows",
     group: "Search results",
   },
   {
-    combos: ["ArrowRight"],
+    combos: ["ArrowUp"],
     scope: "global",
-    description: "Expand the highlighted result — show the blocks inside it",
+    description: "From the first row: back to the search box",
     group: "Search results",
   },
   {
-    combos: ["ArrowLeft"],
+    combos: [" ", "ArrowRight", "ArrowLeft"],
     scope: "global",
-    description: "Collapse it (already closed: jump to the block it sits under)",
+    description: "Fold and unfold the highlighted result — the blocks inside it",
     group: "Search results",
   },
   {
     combos: ["Enter"],
     scope: "global",
-    description: "Open the highlighted block (its note, zoomed to that block)",
+    description: "Open the highlighted result (its note, zoomed to a block)",
     group: "Search results",
   },
   {

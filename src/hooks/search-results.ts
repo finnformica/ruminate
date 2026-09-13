@@ -29,7 +29,7 @@ function resolvesToBlocks(query: string): boolean {
  * this one hook; replacing the body with an async (server-backed) source is
  * the entire migration — see `BlockSearchSource`.
  */
-export function useBlockSearchSource(): BlockSearchSource {
+function useBlockSearchSource(): BlockSearchSource {
   const index = useAtomValue(blockIndexAtom)
   return React.useMemo(() => inMemoryBlockSearchSource(index), [index])
 }

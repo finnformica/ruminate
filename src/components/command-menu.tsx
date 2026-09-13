@@ -13,9 +13,9 @@ import {
   pinnedNotesAtom,
   tagSearcherAtom,
 } from "../global-state"
-import { useBlockResultTree, type ResultRow } from "../hooks/block-result-tree"
+import type { ResultRoot } from "../hooks/results-doc"
 import { useCreateNote, useNoteById } from "../hooks/note"
-import { useBlockSearchSource, useSearchResults } from "../hooks/search-results"
+import { useSearchResults } from "../hooks/search-results"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/registry"
 import { rollup } from "../data/graph"
 import { copyAsMarkdown } from "../utils/copy-markdown"
@@ -42,7 +42,7 @@ import {
   useQualifierSuggestions,
 } from "./qualifier-suggestions"
 import { ScopePill } from "./scope-pill"
-import { SearchResults, blockHitNavigation, resultRowValue } from "./search-results"
+import { ResultsEditor } from "./results-editor"
 
 export const isCommandMenuOpenAtom = atom(false)
 
@@ -52,6 +52,14 @@ export const isCommandMenuOpenAtom = atom(false)
  * headings for fast in-note navigation.
  */
 type PaletteMode = "commands" | "outline"
+
+/** Is cmdk's highlight on the last item (or is there no item to be on)? The
+ * point past which ↓ hands the keyboard to the results beneath. */
+function highlightIsLastItem(root: HTMLElement): boolean {
+  const items = root.querySelectorAll("[cmdk-item]")
+  if (items.length === 0) return true
+  return items[items.length - 1].getAttribute("aria-selected") === "true"
+}
 
 /** How many block results the palette lists before "see all". */
 const NUM_VISIBLE_BLOCKS = 6
@@ -132,11 +140,6 @@ export function CommandMenu() {
   // Whether any preview was sent since outline mode was entered — i.e. the
   // editor holds a restore snapshot that a close-without-commit must release.
   const previewedRef = useRef(false)
-  // The row value the highlight must stay on across one item-set change: cmdk
-  // re-selects its first item whenever items mount or unmount, which would
-  // otherwise throw the highlight to the top every time a result is expanded
-  // or collapsed. One-shot, so cmdk keeps full control otherwise.
-  const pinnedHighlightRef = useRef<string | null>(null)
   const revealNonceRef = useRef(0)
   const setBlockReveal = useSetAtom(blockRevealAtom)
   const outline = useAtomValue(noteOutlineAtom)
@@ -384,41 +387,26 @@ export function CommandMenu() {
 
   // Search BLOCKS — the palette's primary results. A nested heading or a todo
   // is a first-class row here, not a note it happens to live in.
-  const source = useBlockSearchSource()
   const { mode: resultMode, hits, notes: hitNotes } = useSearchResults(scopedQuery)
   const showBlocks = resultMode === "blocks"
-  const blockTree = useBlockResultTree({
-    hits,
-    source,
-    limit: NUM_VISIBLE_BLOCKS,
-    resetKey: deferredQuery,
-  })
 
-  // NOTES are the same kind of row: a note is a node whose children are its
-  // blocks (docs/graph-schema-v2.md), so a note result is a root that expands
-  // to reveal what is in it — drawn by the same component, in the same tree
-  // machinery, as a block result. The palette lists the matches while there
-  // is a query and the pinned notes while there is not; they never show at
-  // once, so one tree serves both.
-  const noteHits = useMemo(
-    () =>
-      (deferredQuery ? noteResults.slice(0, NUM_VISIBLE_NOTES) : pinnedNotes).map((note) =>
-        source.noteHit(note),
-      ),
-    [deferredQuery, noteResults, pinnedNotes, source],
-  )
-  const noteTree = useBlockResultTree({ hits: noteHits, source, resetKey: deferredQuery })
-
-  // cmdk lowercases item values, so highlight events map back to rows through
-  // a lowercased key (the same trick outline mode uses for block ids) — and,
-  // with it, to the tree the row belongs to, so →/← open the right one.
-  const rowByValue = useMemo(() => {
-    const map = new Map<string, { row: ResultRow; tree: typeof blockTree }>()
-    for (const tree of [blockTree, noteTree]) {
-      for (const row of tree.rows) map.set(resultRowValue(row).toLowerCase(), { row, tree })
-    }
-    return map
-  }, [blockTree, noteTree])
+  // The results are the block editor, browsed (`ResultsEditor`) — the same
+  // rows, keys and folds as the notes page. Notes and blocks are one list: a
+  // note is a node whose children are its blocks (docs/graph-schema-v2.md),
+  // so a note whose title matched and a block whose text matched are both
+  // roots — the notes first. With no query the roots are the pinned notes.
+  const resultRoots = useMemo<ResultRoot[]>(() => {
+    if (!deferredQuery) return pinnedNotes.map((note) => ({ id: note.id, noteId: note.id }))
+    const notes = noteResults
+      .slice(0, NUM_VISIBLE_NOTES)
+      .map((note) => ({ id: note.id, noteId: note.id }))
+    const blocks = showBlocks
+      ? hits.slice(0, NUM_VISIBLE_BLOCKS).map((hit) => ({ id: hit.blockId, noteId: hit.noteId }))
+      : []
+    return [...notes, ...blocks]
+  }, [deferredQuery, pinnedNotes, noteResults, showBlocks, hits])
+  // Bumped to hand the keyboard to the results (↓ past the last item).
+  const [focusFirstSignal, setFocusFirstSignal] = useState(0)
 
   // Commit the typed query to the full results view — the URL-addressable
   // `/?query=` the notes route already owns, so filter views are bookmarkable
@@ -430,12 +418,17 @@ export function CommandMenu() {
     navigate({ to: "/", search: { query: scopedQuery } })
   }, [setIsOpen, navigate, scopedQuery])
 
-  const openBlock = useCallback(
-    (hit: Parameters<typeof blockHitNavigation>[0]) => {
+  // Open a result: the note, or the note zoomed to the block.
+  const openResult = useCallback(
+    (noteId: string, blockId?: string) => {
       setIsOpen(false)
       setQuery("")
       setMode("commands")
-      navigate(blockHitNavigation(hit))
+      navigate({
+        to: "/notes/$",
+        params: { _splat: noteId },
+        search: { query: undefined, block: blockId },
+      })
     },
     [setIsOpen, navigate],
   )
@@ -468,15 +461,6 @@ export function CommandMenu() {
   // skipped so merely opening ⌘P doesn't scroll the note.
   const handleHighlightChange = useCallback(
     (value: string) => {
-      // A pinned highlight (a result row that was just expanded/collapsed)
-      // survives exactly one of cmdk's own re-selections.
-      if (pinnedHighlightRef.current !== null && value !== pinnedHighlightRef.current) {
-        const pinned = pinnedHighlightRef.current
-        pinnedHighlightRef.current = null
-        setHighlightedValue(pinned)
-        return
-      }
-      pinnedHighlightRef.current = null
       // Echo the value back — cmdk's selection is fully controlled, so
       // dropping this would freeze the highlight.
       setHighlightedValue(value)
@@ -522,43 +506,35 @@ export function CommandMenu() {
           event.preventDefault()
           return
         }
-        // →/← expand and collapse the highlighted block result. The query
-        // input owns those keys while there is still text to move through, so
-        // the tree only takes them with the caret parked at the END of the
-        // query — where it sits after typing, and where → could not move it
-        // anyway. Move the caret back into the text (⌫, Home, a click) and the
-        // arrows are the input's again. Same hand-off idea as the editor's
-        // arrows leaving a block at its first/last line.
+        // The results under the items are the block editor, browsed. ↓ in
+        // the query with cmdk's highlight on the last item (or no items at
+        // all) hands it the keyboard — as ↓ in the notes page's search box
+        // does — and from there its keys are the editor's own: arrows,
+        // space, →/←, w/s/a/d, f, Enter to open. ↑ from its first row hands
+        // the keyboard back (`onExitTop`); so does Escape.
         if (
           mode === "commands" &&
-          (event.key === "ArrowRight" || event.key === "ArrowLeft") &&
+          event.key === "ArrowDown" &&
+          event.target instanceof HTMLInputElement &&
           !event.metaKey &&
           !event.ctrlKey &&
           !event.altKey &&
-          !event.shiftKey
+          !event.shiftKey &&
+          resultRoots.length > 0 &&
+          highlightIsLastItem(event.currentTarget)
         ) {
-          const input = event.target instanceof HTMLInputElement ? event.target : null
-          const caret = input ? input.selectionStart : null
-          const collapsed = !input || input.selectionStart === input.selectionEnd
-          const atEnd = !input || caret === input.value.length
-          const entry = rowByValue.get(highlightedValue.toLowerCase())
-          if (entry && collapsed && atEnd) {
-            const { row, tree } = entry
-            event.preventDefault()
-            // cmdk re-selects its first item whenever the item set changes;
-            // opening or closing a row must not move the highlight off it.
-            pinnedHighlightRef.current = resultRowValue(row)
-            if (event.key === "ArrowRight") {
-              tree.expand(row)
-            } else if (row.expanded) {
-              tree.collapse(row)
-            } else if (row.parentKey) {
-              // Already closed: step out to the parent it was revealed under.
-              const parent = tree.rows.find((other) => other.key === row.parentKey)
-              if (parent) setHighlightedValue(resultRowValue(parent))
-            }
-            return
-          }
+          event.preventDefault()
+          setFocusFirstSignal((n) => n + 1)
+          return
+        }
+        if (
+          event.key === "Escape" &&
+          event.target instanceof Element &&
+          event.target.closest("[data-block-editor]")
+        ) {
+          event.preventDefault()
+          inputRef.current?.focus()
+          return
         }
         // Clear input with `esc`
         if (event.key === "Escape" && query) {
@@ -680,15 +656,6 @@ export function CommandMenu() {
                   ))}
                 </Command.Group>
               ) : null}
-              {!deferredQuery && pinnedNotes.length ? (
-                <Command.Group heading="Pinned notes">
-                  <SearchResults
-                    rows={noteTree.rows}
-                    onActivate={openBlock}
-                    onToggle={noteTree.toggle}
-                  />
-                </Command.Group>
-              ) : null}
               {dateString ? (
                 <Command.Group heading="Date">
                   <CommandItem
@@ -747,63 +714,68 @@ export function CommandMenu() {
                   ) : null}
                 </Command.Group>
               ) : null}
-              {showBlocks ? (
-                <Command.Group heading="Blocks">
-                  {/* First row, so Enter straight after typing commits the
-                      query to the results view. It also carries the COUNT —
-                      matched blocks, which expanding never inflates. */}
-                  {hits.length > 0 ? (
+              {deferredQuery || resultRoots.length > 0 ? (
+                <Command.Group heading={deferredQuery ? "Results" : "Pinned notes"}>
+                  {/* The items come first, the editor's rows after them: cmdk
+                      walks the items, and ↓ past the last hands off to the
+                      rows. "See all" leads so Enter straight after typing
+                      commits the query to the results view; it carries the
+                      COUNT — matched blocks, which expanding never inflates. */}
+                  {showBlocks ? (
+                    hits.length > 0 ? (
+                      <CommandItem
+                        key="see-all-results"
+                        value="see all results"
+                        icon={<SearchIcon16 />}
+                        onSelect={openResultsView}
+                      >
+                        See all {pluralize(hits.length, "matching block")} in{" "}
+                        {pluralize(hitNotes.length, "note")}
+                      </CommandItem>
+                    ) : (
+                      <div className="px-3 py-2 text-text-secondary">No matching blocks</div>
+                    )
+                  ) : null}
+                  {deferredQuery ? (
                     <CommandItem
-                      key="see-all-results"
-                      value="see all results"
-                      icon={<SearchIcon16 />}
-                      onSelect={openResultsView}
-                    >
-                      See all {pluralize(hits.length, "matching block")} in{" "}
-                      {pluralize(hitNotes.length, "note")}
-                    </CommandItem>
-                  ) : (
-                    <div className="px-3 py-2 text-text-secondary">No matching blocks</div>
-                  )}
-                  <SearchResults
-                    rows={blockTree.rows}
-                    onActivate={openBlock}
-                    onToggle={blockTree.toggle}
-                  />
-                </Command.Group>
-              ) : null}
-              {deferredQuery ? (
-                <Command.Group heading="Notes">
-                  <SearchResults
-                    rows={noteTree.rows}
-                    onActivate={openBlock}
-                    onToggle={noteTree.toggle}
-                  />
-                  <CommandItem
-                    key={`Create new note "${deferredQuery}"`}
-                    icon={<PlusIcon16 />}
-                    onSelect={handleSelect(() => {
-                      // The typed text becomes the note's TITLE; the id is
-                      // minted and opaque (docs/graph-storage.md). Any
-                      // text works — there is no filename charset to sanitize
-                      // against and no name collision to avoid, so a fresh
-                      // note is always a fresh note.
-                      const id = generateNoteId()
-                      createNote(id, { title: deferredQuery.trim() })
+                      key={`Create new note "${deferredQuery}"`}
+                      icon={<PlusIcon16 />}
+                      onSelect={handleSelect(() => {
+                        // The typed text becomes the note's TITLE; the id is
+                        // minted and opaque (docs/graph-storage.md). Any
+                        // text works — there is no filename charset to sanitize
+                        // against and no name collision to avoid, so a fresh
+                        // note is always a fresh note.
+                        const id = generateNoteId()
+                        createNote(id, { title: deferredQuery.trim() })
 
-                      navigate({
-                        to: "/notes/$",
-                        params: {
-                          _splat: id,
-                        },
-                        search: {
-                          query: undefined,
-                        },
-                      })
-                    })}
-                  >
-                    Create new note "{deferredQuery}"
-                  </CommandItem>
+                        navigate({
+                          to: "/notes/$",
+                          params: {
+                            _splat: id,
+                          },
+                          search: {
+                            query: undefined,
+                          },
+                        })
+                      })}
+                    >
+                      Create new note "{deferredQuery}"
+                    </CommandItem>
+                  ) : null}
+                  {/* Set in by the rows' own reach (a listed root's surface
+                      extends 4.5px past its box), so the surfaces sit flush
+                      with the items above. */}
+                  <div className="px-[4.5px]">
+                    <ResultsEditor
+                      roots={resultRoots}
+                      resetKey={scopedQuery}
+                      readOnly
+                      onOpen={openResult}
+                      focusFirstSignal={focusFirstSignal}
+                      onExitTop={() => inputRef.current?.focus()}
+                    />
+                  </div>
                 </Command.Group>
               ) : null}
             </>

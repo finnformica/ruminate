@@ -77,26 +77,26 @@ The tags page keeps its own Linear-style list keys (<kbd>↑</kbd> / <kbd>↓</k
 
 ## ⌘K results
 
-Search results are the matching **blocks**, at any depth — a nested heading or
-a single todo is a row of its own, shown with the note and ancestry it came
-from. <kbd>⌘</kbd> <kbd>K</kbd> draws the same rows, read-only.
+The palette's results — the notes whose title matched, then the matching
+**blocks** at any depth, or the pinned notes with no query — are the same
+block editor, browsed. The palette's own items ("See all…", "Create new note…",
+the jump-to and note actions) come first and take cmdk's <kbd>↑</kbd> /
+<kbd>↓</kbd>; <kbd>↓</kbd> past the last of them hands the keyboard to the
+rows, whose keys are then the editor's (fold with <kbd>space</kbd> /
+<kbd>→</kbd> / <kbd>←</kbd>, walk with <kbd>w</kbd> <kbd>s</kbd> <kbd>a</kbd>
+<kbd>d</kbd>, open with <kbd>↵</kbd> or <kbd>f</kbd>). <kbd>↑</kbd> from the
+first row, or <kbd>Esc</kbd>, returns to the query.
 
-| Action                                     | Shortcut                    |
-| ------------------------------------------ | --------------------------- |
-| Move between result rows                   | <kbd>↑</kbd> / <kbd>↓</kbd> |
-| Expand the highlighted result              | <kbd>→</kbd>                |
-| Collapse it (already closed: go to parent) | <kbd>←</kbd>                |
-| Open the highlighted block (note + zoom)   | <kbd>↵</kbd>                |
-| See all results for the query (⌘K)         | <kbd>↵</kbd>                |
+| Action                                    | Shortcut                           |
+| ----------------------------------------- | ---------------------------------- |
+| Move between the palette's items          | <kbd>↑</kbd> / <kbd>↓</kbd>        |
+| Past the last item: into the result rows  | <kbd>↓</kbd>                       |
+| From the first row: back to the query     | <kbd>↑</kbd> / <kbd>Esc</kbd>      |
+| Open the highlighted result (note + zoom) | <kbd>↵</kbd>                       |
+| See all results for the query             | <kbd>↵</kbd> straight after typing |
 
-Expanding fetches only that block's children, and remembers them — reopening
-is instant, and a child expands the next level the same way.
-
-In <kbd>⌘</kbd> <kbd>K</kbd> the query input owns <kbd>←</kbd>/<kbd>→</kbd>
-while there is text to move through; with the caret parked at the **end** of
-the query (where typing leaves it) they expand and collapse the highlighted
-result instead. Move the caret back into the text and the arrows are the
-input's again. <kbd>↵</kbd> with nothing arrowed lands on the "see all …" row
+Opening a row loads only that row's blocks; a child opens the next level the
+same way.
 and opens the full results view, whose `?query=` URL is bookmarkable and
 works with back/forward.
 

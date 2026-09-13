@@ -210,6 +210,12 @@ export function BlockItem({
   const panel = kind.panel ?? null
   const rowContext: RowContext = { block, occurrence, api, depth, editing }
   const roomy = kind.roomy?.(rowContext) ?? false
+  // A ROOT of a results view (`api.fixedRoots`): its surface is set in by
+  // the same 8.5px at the sides a listed note's is all round, so every
+  // root's surface — a note's, a matched block's — shares one left edge, the
+  // one the page's search box sits on (the view pads by the reach). The
+  // margin still nets the text to the shared 4px column.
+  const wide = !!api.fixedRoots && depth === 0
 
   // Focus and place the caret when editing starts.
   useLayoutEffect(() => {
@@ -852,11 +858,7 @@ export function BlockItem({
             // margin equals the padding, so the text never moves a pixel
             // and the block rhythm gains nothing.
             "relative flex items-start gap-2 rounded",
-            // A roomy row's surface is set in by the same 8.5px on every side
-            // (see the vertical pairs below): the margin still nets the text
-            // to the shared 4px column, so the favicon lines up with the
-            // guide its blocks hang from.
-            roomy
+            wide
               ? "-ml-[4.5px] -mr-[4.5px] pl-[8.5px] pr-[8.5px]"
               : "-ml-0.5 -mr-0.5 pl-1.5 pr-1.5",
             // Per-side vertical pairs. Mid-run sides also square their
