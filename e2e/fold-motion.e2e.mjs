@@ -71,6 +71,9 @@ async function record(text, texts, ms = 480) {
           .find((b) => b.textContent.trim() === t)
           ?.closest("[data-block-line]")
       const top = (el) => (el ? Math.round(el.getBoundingClientRect().top * 10) / 10 : null)
+      const parent = Array.from(document.querySelectorAll("[data-occurrence]")).find(
+        (r) => r.querySelector('[data-testid="block-body"]')?.textContent.trim() === text,
+      )
       const sample = () => {
         const ghost = document.querySelector("[data-folding]")
         const out = { ghost: !!ghost }
@@ -80,11 +83,16 @@ async function record(text, texts, ms = 480) {
           out.ghostTransform = getComputedStyle(ghost).transform
           out.ghostAnimations = ghost.getAnimations().map((a) => a.id)
         }
+        // The parent's live box (the one an unfold sweeps): its height, and
+        // its cut — its transformed bottom edge, which the clip follows.
+        const box = parent.nextElementSibling
+        if (box?.hasAttribute("data-subtree") && !box.hasAttribute("data-folding")) {
+          const r = box.getBoundingClientRect()
+          out.boxHeight = Math.round(r.height * 10) / 10
+          out.boxCut = Math.round(r.bottom * 10) / 10
+        }
         return out
       }
-      const parent = Array.from(document.querySelectorAll("[data-occurrence]")).find(
-        (r) => r.querySelector('[data-testid="block-body"]')?.textContent.trim() === text,
-      )
       const before = sample()
       parent.querySelector(".block-toggle").click()
       const frames = []
@@ -312,6 +320,56 @@ await story("blockeditor--fold-motion-deferred")
     "deferred fold: nothing lingers at rest",
     rest.ghosts === 0 && rest.styledBoxes === 0 && rest.animations === 0,
     JSON.stringify(rest),
+  )
+}
+
+// ── A picture in the nest: its row reserves the picture's space, so the
+// unfold measures the nest's true height before the picture has loaded ─────
+// The picture's bytes arrive mid-sweep, as an upload's do from the network.
+await page.route("**/fold-picture.svg", async (route) => {
+  await new Promise((done) => setTimeout(done, 150))
+  await route.continue()
+})
+await story("blockeditor--fold-motion-image")
+{
+  await page.waitForTimeout(400)
+  await clickToggle("Parent of the picture")
+  await page.waitForTimeout(500)
+  const texts = ["First row inside", "Last row inside", "Row below the parent 0"]
+  const { before, frames } = await record("Parent of the picture", texts)
+  const heights = frames.map((f) => f.boxHeight).filter((x) => typeof x === "number")
+  const settled = await page.evaluate(() => {
+    const img = document.querySelector('[data-testid="block-image"]')
+    return img ? Math.round(img.getBoundingClientRect().height) : null
+  })
+  check(
+    "unfold with a picture: the picture has its height from the first frame",
+    settled !== null && settled > 100,
+    `picture ${settled}px tall once settled`,
+  )
+  check(
+    "unfold with a picture: the nest never changes height as it unfolds",
+    heights.length > 5 && maxSpread(heights) <= 1,
+    `box heights ${[...new Set(heights)].join(", ")}`,
+  )
+  // The cut starts at the nest's top edge: nothing shows before the edge
+  // has swept down over it.
+  const first = frames[0]
+  check(
+    "unfold with a picture: the cut starts at the nest's top",
+    first.boxCut - first["First row inside"] <= 6,
+    `cut ${first.boxCut}, first row ${first["First row inside"]}`,
+  )
+  const returning = frames.map((f) => f["Last row inside"]).filter((x) => x !== null)
+  check(
+    "unfold with a picture: the rows after the picture hold still under the cut",
+    maxSpread(returning) <= 1,
+    [...new Set(returning)].join(", "),
+  )
+  check(
+    "unfold with a picture: the row below sets off from where it was",
+    Math.abs(first["Row below the parent 0"] - before["Row below the parent 0"]) <= 1,
+    `${before["Row below the parent 0"]} → ${first["Row below the parent 0"]}`,
   )
 }
 

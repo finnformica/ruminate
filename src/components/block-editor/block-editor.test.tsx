@@ -2777,6 +2777,64 @@ describe("BlockEditor images", () => {
     expect(plain.querySelector('[data-testid="block-body"]')!.className).toContain("text-center")
   })
 
+  it("reserves a picture's space from its pixel size, before its bytes arrive", () => {
+    // At its natural size: the figure is as wide as the picture's pixels,
+    // capped at the row and at what a screenful of height allows (20rem,
+    // through the ratio), and the picture fills it at its own shape — so
+    // the row is its final height before the picture has loaded.
+    const natural = render(
+      <Harness initialDoc={imageDoc({ src: SRC, width: 1200, height: 500 })} />,
+    )
+    const figure = natural.container.querySelector<HTMLElement>('[data-testid="image-figure"]')!
+    expect(figure.style.width).toBe("min(1200px, 100%, 48rem)")
+    const img = natural.container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!
+    expect(img.style.aspectRatio).toBe("1200 / 500")
+    expect(img.className).toContain("w-full")
+    natural.unmount()
+
+    // A sized picture keeps its fraction of the row, at the same shape.
+    const sized = render(
+      <Harness initialDoc={imageDoc({ src: SRC, width: 1200, height: 500, size: 40 })} />,
+    )
+    expect(
+      sized.container.querySelector<HTMLElement>('[data-testid="image-figure"]')!.style.width,
+    ).toBe("40%")
+    expect(
+      sized.container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!.style
+        .aspectRatio,
+    ).toBe("1200 / 500")
+    sized.unmount()
+
+    // An uploaded picture's placeholder, shown while its bytes are fetched,
+    // is the same box, so the swap moves nothing.
+    const fetched = render(
+      <Harness
+        initialDoc={imageDoc({ image: "img_abcdefghijklmnop", width: 1200, height: 500 })}
+      />,
+    )
+    const placeholder = fetched.container.querySelector<HTMLElement>(
+      '[data-testid="block-image-placeholder"]',
+    )!
+    expect(placeholder.style.aspectRatio).toBe("1200 / 500")
+    expect(placeholder.className).toContain("w-full")
+    expect(
+      fetched.container.querySelector<HTMLElement>('[data-testid="image-figure"]')!.style.width,
+    ).toBe("min(1200px, 100%, 48rem)")
+    fetched.unmount()
+
+    // A picture of unknown size (an external URL pasted as markdown) is laid
+    // out as it loads, as before: natural width, capped by the row and by
+    // a screenful of height.
+    const bare = render(<Harness initialDoc={imageDoc({ src: SRC })} />)
+    expect(
+      bare.container.querySelector<HTMLElement>('[data-testid="image-figure"]')!.style.width,
+    ).toBe("")
+    const plain = bare.container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!
+    expect(plain.style.aspectRatio).toBe("")
+    expect(plain.className).toContain("max-h-80")
+    expect(plain.className).not.toMatch(/(^|\s)w-full(\s|$)/)
+  })
+
   it("the figure's toolbar sets the side the picture keeps to, as one undo step", () => {
     const { container, getByTestId } = render(<Harness initialDoc={imageDoc({ src: SRC })} />)
     // Centred: a handle at each side.

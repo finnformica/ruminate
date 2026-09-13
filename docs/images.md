@@ -39,8 +39,15 @@ match.
 ## Layout
 
 A picture is, left to itself, its natural size: as wide as the row when it is
-wide enough, centred when it is not, and never taller than a screenful. Two
-props change how it sits in the row (`src/blocks/image.ts`), Notion-style:
+wide enough, centred when it is not, and never taller than a screenful. When
+its pixel size is known (`width`/`height`, measured at upload) the row is
+laid out at the picture's final size before its bytes arrive — the figure's
+width is worked out from those pixels, and the placeholder and the `<img>`
+keep the picture's shape — so nothing moves when they land, and a fold that
+has just unfolded the row's nest (`fold-motion.ts` measures it the moment it
+mounts) is not short by a picture. A picture whose size is not known (an
+external URL pasted as markdown) is laid out as it loads. Two props change
+how it sits in the row (`src/blocks/image.ts`), Notion-style:
 
 | prop    | holds                                                                                                                                                         |
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
