@@ -294,6 +294,16 @@ const MODIFIER_KEYS = new Set(["Shift", "Meta", "Control", "Alt", "CapsLock"])
 /** Why an edit to a results view's root list did nothing (`fixedRoots`). */
 const FIXED_ROOTS_NOTICE = "Open the note to add or remove blocks at this level"
 
+/** The nearest ancestor that scrolls vertically, if any (the document's own
+ * scrolling is the window's — not counted). */
+function scrollParentOf(el: Element): Element | null {
+  for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY
+    if (overflow === "auto" || overflow === "scroll") return node
+  }
+  return null
+}
+
 /** Same roots, same order — what `fixedRoots` holds an edit to. */
 function sameRoots(prev: BlockDoc, next: BlockDoc): boolean {
   return (
@@ -1890,11 +1900,23 @@ export function BlockEditor({
     // [data-block-line] gives keyboard travel a few lines of context, like
     // scrolloff. Only a far jump (palette, zoom, search — more than a viewport
     // away) recentres for orientation.
+    //
+    // "On screen" is the window — narrowed to the nearest scrolling ancestor
+    // when the editor sits in one (the palette's list), or a highlight could
+    // sit below that box's edge, hidden, while still inside the viewport.
     const rect = line.getBoundingClientRect()
-    const vh = window.innerHeight || document.documentElement.clientHeight
-    const margin = 72
-    if (rect.top >= margin && rect.bottom <= vh - margin) return
-    const far = rect.bottom < -vh || rect.top > 2 * vh
+    let top = 0
+    let bottom = window.innerHeight || document.documentElement.clientHeight
+    const scroller = scrollParentOf(line)
+    if (scroller) {
+      const box = scroller.getBoundingClientRect()
+      top = Math.max(top, box.top)
+      bottom = Math.min(bottom, box.bottom)
+    }
+    const height = bottom - top
+    const margin = Math.min(72, Math.floor(height / 4))
+    if (rect.top >= top + margin && rect.bottom <= bottom - margin) return
+    const far = rect.bottom < top - height || rect.top > bottom + height
     line.scrollIntoView({ block: far ? "center" : "nearest" })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, anchorKey, focus, navigable])

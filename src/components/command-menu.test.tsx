@@ -326,8 +326,8 @@ const rowIds = () =>
 const editor = () => document.querySelector("[data-block-editor]") as HTMLElement
 
 /** ↓ in the query walks cmdk's items; past the last it hands the keyboard to
- * the rows. With a query there are two items ("See all…", "Create new
- * note…"), so two presses reach the last and a third crosses over. */
+ * the rows. With block results there is one item ("See all…"), highlighted
+ * from the start, so one press crosses over; with none, the first does. */
 function handOffToRows() {
   const input = commandsInput()
   for (let i = 0; i < 3 && document.activeElement !== editor(); i += 1) {
@@ -443,17 +443,40 @@ describe("block results", () => {
     expect(rowIds()).toEqual(["blk_nvidia", "blk_h100", "blk_rev"])
   })
 
-  it("↑ from the first row, or Escape, returns to the query", async () => {
+  it("↑ from the first row, or Escape, returns to the query with the last item highlighted", async () => {
     await openWithBlocks([NVIDIA])
+    const seeAll = () => screen.getByText(/^See all/).closest("[cmdk-item]")
     handOffToRows()
     fireEvent.keyDown(editor(), { key: "ArrowUp" })
     expect(document.activeElement).toBe(commandsInput())
+    expect(seeAll()?.getAttribute("aria-selected")).toBe("true")
 
     handOffToRows()
     fireEvent.keyDown(editor(), { key: "Escape" })
     expect(document.activeElement).toBe(commandsInput())
+    expect(seeAll()?.getAttribute("aria-selected")).toBe("true")
     // The palette is still open, the query still there.
     expect(commandsInput().value).toBe("nvidia")
+  })
+
+  it("creates a note from the query — the footer, or ⌘↵ from anywhere", async () => {
+    await openWithBlocks([NVIDIA])
+    expect(screen.getByTestId("palette-create").textContent).toContain('Create new note "nvidia"')
+    fireEvent.keyDown(commandsInput(), { key: "Enter", metaKey: true })
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "/notes/$", search: { query: undefined } }),
+    )
+  })
+
+  it("the create footer is there with nothing typed, and makes an untitled note", () => {
+    renderMenu({ open: true })
+    const footer = screen.getByTestId("palette-create")
+    expect(footer.textContent).toContain("Create new note")
+    expect(footer.textContent).not.toContain('"')
+    fireEvent.click(footer)
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "/notes/$", search: { query: undefined } }),
+    )
   })
 
   it("clicking the chevron expands and collapses the same way", async () => {

@@ -450,6 +450,12 @@ const SEARCH_RESULT_ENTRIES: Shortcut[] = [
 // Bindings inside the open command palette (see src/components/command-menu.tsx).
 const PALETTE_ENTRIES: Shortcut[] = [
   {
+    combos: ["Mod+Enter"],
+    scope: "palette",
+    description: "Create a note titled with the query (untitled with none)",
+    group: "Palette",
+  },
+  {
     combos: ["@"],
     scope: "palette",
     description: "Type @ first in ⌘K to jump to a heading",

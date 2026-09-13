@@ -407,6 +407,33 @@ export function CommandMenu() {
   }, [deferredQuery, pinnedNotes, noteResults, showBlocks, hits])
   // Bumped to hand the keyboard to the results (↓ past the last item).
   const [focusFirstSignal, setFocusFirstSignal] = useState(0)
+  /** Hand the keyboard to the result rows: the editor takes focus (cmdk's
+   * highlight stays on the last item, dimmed — command-menu.css — and marks
+   * where ↑ returns to). */
+  const handOffToRows = useCallback(() => setFocusFirstSignal((n) => n + 1), [])
+  /** Take the keyboard back from the rows: the query has focus again, with
+   * cmdk's highlight on the last item — the one ↓ left from. */
+  const takeBackFromRows = useCallback(() => {
+    inputRef.current?.focus()
+    const items = document.querySelectorAll("[cmdk-root] [cmdk-item]")
+    const last = items[items.length - 1]
+    setHighlightedValue(last?.getAttribute("data-value") ?? "")
+  }, [])
+
+  // Create a note from the query — the palette's footer, and ⌘↵. The typed
+  // text becomes the note's TITLE; the id is minted and opaque
+  // (docs/graph-storage.md). Any text works — there is no filename charset
+  // to sanitize against and no name collision to avoid, so a fresh note is
+  // always a fresh note; with nothing typed it is untitled.
+  const createFromQuery = useCallback(() => {
+    const title = query.trim()
+    const id = generateNoteId()
+    createNote(id, title ? { title } : {})
+    setIsOpen(false)
+    setQuery("")
+    setMode("commands")
+    navigate({ to: "/notes/$", params: { _splat: id }, search: { query: undefined } })
+  }, [query, createNote, setIsOpen, navigate])
 
   // Commit the typed query to the full results view — the URL-addressable
   // `/?query=` the notes route already owns, so filter views are bookmarkable
@@ -524,7 +551,7 @@ export function CommandMenu() {
           highlightIsLastItem(event.currentTarget)
         ) {
           event.preventDefault()
-          setFocusFirstSignal((n) => n + 1)
+          handOffToRows()
           return
         }
         if (
@@ -533,7 +560,14 @@ export function CommandMenu() {
           event.target.closest("[data-block-editor]")
         ) {
           event.preventDefault()
-          inputRef.current?.focus()
+          takeBackFromRows()
+          return
+        }
+        // ⌘↵ creates a note from the query (the footer's action), wherever
+        // the keyboard is.
+        if (mode === "commands" && event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault()
+          createFromQuery()
           return
         }
         // Clear input with `esc`
@@ -716,7 +750,7 @@ export function CommandMenu() {
               ) : null}
               {deferredQuery || resultRoots.length > 0 ? (
                 <Command.Group heading={deferredQuery ? "Results" : "Pinned notes"}>
-                  {/* The items come first, the editor's rows after them: cmdk
+                  {/* The item comes first, the editor's rows after it: cmdk
                       walks the items, and ↓ past the last hands off to the
                       rows. "See all" leads so Enter straight after typing
                       commits the query to the results view; it carries the
@@ -736,33 +770,6 @@ export function CommandMenu() {
                       <div className="px-3 py-2 text-text-secondary">No matching blocks</div>
                     )
                   ) : null}
-                  {deferredQuery ? (
-                    <CommandItem
-                      key={`Create new note "${deferredQuery}"`}
-                      icon={<PlusIcon16 />}
-                      onSelect={handleSelect(() => {
-                        // The typed text becomes the note's TITLE; the id is
-                        // minted and opaque (docs/graph-storage.md). Any
-                        // text works — there is no filename charset to sanitize
-                        // against and no name collision to avoid, so a fresh
-                        // note is always a fresh note.
-                        const id = generateNoteId()
-                        createNote(id, { title: deferredQuery.trim() })
-
-                        navigate({
-                          to: "/notes/$",
-                          params: {
-                            _splat: id,
-                          },
-                          search: {
-                            query: undefined,
-                          },
-                        })
-                      })}
-                    >
-                      Create new note "{deferredQuery}"
-                    </CommandItem>
-                  ) : null}
                   {/* Set in by the rows' own reach (a listed root's surface
                       extends 4.5px past its box), so the surfaces sit flush
                       with the items above. */}
@@ -773,7 +780,7 @@ export function CommandMenu() {
                       readOnly
                       onOpen={openResult}
                       focusFirstSignal={focusFirstSignal}
-                      onExitTop={() => inputRef.current?.focus()}
+                      onExitTop={takeBackFromRows}
                     />
                   </div>
                 </Command.Group>
@@ -781,6 +788,27 @@ export function CommandMenu() {
             </>
           )}
         </Command.List>
+        {mode === "commands" ? (
+          // The footer: always there, whatever the query. A button, not a
+          // cmdk item — the items are walked with ↑/↓ above the rows, and
+          // this one is reached by its key instead.
+          <div className="border-t border-border-secondary p-2">
+            <button
+              type="button"
+              data-testid="palette-create"
+              onClick={createFromQuery}
+              className="focus-ring flex h-9 w-full items-center gap-3 rounded px-3 text-left hover:bg-bg-hover active:bg-bg-secondary-active"
+            >
+              <span className="grid h-4 w-4 place-items-center text-text-secondary">
+                <PlusIcon16 />
+              </span>
+              <span className="grow truncate">
+                {query.trim() ? `Create new note "${query.trim()}"` : "Create new note"}
+              </span>
+              <Keys keys={formatCombo("Mod+Enter")} className="coarse:hidden" />
+            </button>
+          </div>
+        ) : null}
       </div>
     </Command.Dialog>
   )
