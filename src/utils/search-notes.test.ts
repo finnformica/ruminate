@@ -17,7 +17,6 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     pinned: false,
     updatedAt: null,
     dates: [],
-    tags: [],
     tasks: [],
     headings: [],
     text: "",
@@ -40,7 +39,7 @@ describe("in: scope", () => {
 })
 
 describe("filtering", () => {
-  test("matches by tag, title, type, frontmatter, counts, dates, has and no filters", () => {
+  test("matches by title, type, property, counts, dates, has and no filters", () => {
     const note = makeNote({
       type: "daily",
       title: "Title 1",
@@ -49,17 +48,14 @@ describe("filtering", () => {
         {
           completed: false,
           text: "do it",
-          tags: [],
           blockId: "blk",
         },
         {
           completed: true,
           text: "done",
-          tags: [],
           blockId: "blk",
         },
       ],
-      tags: ["a", "b"],
       dates: ["2021-01-01", "2021-01-03"],
     })
 
@@ -68,12 +64,10 @@ describe("filtering", () => {
       true,
     )
     expect(testNoteFilters([{ key: "type", values: ["daily"], exclude: false }], note)).toBe(true)
-    expect(testNoteFilters([{ key: "tag", values: ["a"], exclude: false }], note)).toBe(true)
     expect(testNoteFilters([{ key: "priority", values: ["high"], exclude: false }], note)).toBe(
       true,
     )
 
-    expect(testNoteFilters([{ key: "tags", values: [">=2"], exclude: false }], note)).toBe(true)
     expect(testNoteFilters([{ key: "dates", values: ["2"], exclude: false }], note)).toBe(true)
     expect(testNoteFilters([{ key: "tasks", values: [">=1"], exclude: false }], note)).toBe(true)
 
@@ -82,27 +76,29 @@ describe("filtering", () => {
     )
 
     expect(testNoteFilters([{ key: "has", values: ["dates"], exclude: false }], note)).toBe(true)
-    expect(testNoteFilters([{ key: "no", values: ["tags"], exclude: false }], note)).toBe(false)
+    expect(testNoteFilters([{ key: "no", values: ["dates"], exclude: false }], note)).toBe(false)
 
-    expect(testNoteFilters([{ key: "tag", values: ["a"], exclude: true }], note)).toBe(false)
+    expect(testNoteFilters([{ key: "priority", values: ["high"], exclude: true }], note)).toBe(
+      false,
+    )
   })
 
   test("AND semantics across multiple filters", () => {
-    const note = makeNote({ tags: ["a", "b"] })
+    const note = makeNote({ props: { area: "work", status: "open" } })
     const filters = [
-      { key: "tag", values: ["a"], exclude: false },
-      { key: "tag", values: ["b"], exclude: false },
+      { key: "area", values: ["work"], exclude: false },
+      { key: "status", values: ["open"], exclude: false },
     ]
     expect(testNoteFilters(filters, note)).toBe(true)
   })
 
   test("filterNotes applies filters and removes non-matching notes", () => {
     const notes = [
-      makeNote({ id: "1", tags: ["a"] }),
-      makeNote({ id: "2", tags: ["b"] }),
-      makeNote({ id: "3", tags: ["a", "b"] }),
+      makeNote({ id: "1", props: { area: "work" } }),
+      makeNote({ id: "2", props: { area: "home" } }),
+      makeNote({ id: "3", props: { area: "work" } }),
     ]
-    const filtered = filterNotes(notes, [{ key: "tag", values: ["a"], exclude: false }])
+    const filtered = filterNotes(notes, [{ key: "area", values: ["work"], exclude: false }])
     expect(filtered.map((n) => n.id)).toEqual(["1", "3"])
   })
 
@@ -127,14 +123,14 @@ describe("filtering", () => {
   })
 
   test("AND with exclusion allows include and exclude combinations", () => {
-    const aOnly = makeNote({ id: "1", tags: ["a"] })
-    const aAndB = makeNote({ id: "2", tags: ["a", "b"] })
+    const workOnly = makeNote({ id: "1", props: { area: "work" } })
+    const workDone = makeNote({ id: "2", props: { area: "work", status: "done" } })
     const filters = [
-      { key: "tag", values: ["a"], exclude: false },
-      { key: "tag", values: ["b"], exclude: true },
+      { key: "area", values: ["work"], exclude: false },
+      { key: "status", values: ["done"], exclude: true },
     ]
-    expect(testNoteFilters(filters, aOnly)).toBe(true)
-    expect(testNoteFilters(filters, aAndB)).toBe(false)
+    expect(testNoteFilters(filters, workOnly)).toBe(true)
+    expect(testNoteFilters(filters, workDone)).toBe(false)
   })
 
   test("task count filters match incomplete task counts with range operators", () => {
@@ -143,7 +139,6 @@ describe("filtering", () => {
         {
           completed: false,
           text: "x",
-          tags: [],
           blockId: "blk",
         },
       ],
@@ -154,14 +149,14 @@ describe("filtering", () => {
 })
 
 describe("sorting", () => {
-  test("sorts by tag count desc then id asc with punctuation and case ignored", () => {
+  test("sorts by a property desc then id asc with punctuation and case ignored", () => {
     const notes = [
-      makeNote({ id: "note-2", displayName: "A-2", tags: ["x"] }),
-      makeNote({ id: "note 10", displayName: "A-1", tags: ["x", "y"] }),
-      makeNote({ id: "note-1", displayName: "A-1", tags: [] }),
+      makeNote({ id: "note-2", displayName: "A-2", props: { priority: 1 } }),
+      makeNote({ id: "note 10", displayName: "A-1", props: { priority: 2 } }),
+      makeNote({ id: "note-1", displayName: "A-1", props: { priority: 0 } }),
     ]
     const sorted = sortNotes(notes, [
-      { key: "tags", direction: "desc" },
+      { key: "priority", direction: "desc" },
       { key: "id", direction: "asc" },
     ])
     expect(sorted.map((n) => n.id)).toEqual(["note 10", "note-2", "note-1"])
@@ -201,32 +196,21 @@ describe("sorting", () => {
 })
 
 describe("integration: parse + filter + sort", () => {
-  test("filters by tag and sorts by title asc with punctuation ignored", () => {
+  test("filters by a property and sorts by title asc with punctuation ignored", () => {
     const notes = [
-      makeNote({ id: "1", displayName: "B--", tags: ["a"] }),
-      makeNote({ id: "2", displayName: "A!!", tags: ["a"] }),
-      makeNote({ id: "3", displayName: "C??", tags: ["b"] }),
+      makeNote({ id: "1", displayName: "B--", props: { area: "work" } }),
+      makeNote({ id: "2", displayName: "A!!", props: { area: "work" } }),
+      makeNote({ id: "3", displayName: "C??", props: { area: "home" } }),
     ]
-    const { filters, sorts } = parseQuery("tag:a sort:title")
+    const { filters, sorts } = parseQuery("area:work sort:title")
     const filtered = filterNotes(notes, filters)
     const sorted = sortNotes(filtered, sorts)
     expect(sorted.map((n) => n.id)).toEqual(["2", "1"]) // A before B
   })
 
-  test("default sort direction for tags count is desc", () => {
-    const notes = [
-      makeNote({ id: "1", tags: [] }),
-      makeNote({ id: "2", tags: ["x"] }),
-      makeNote({ id: "3", tags: ["x", "y"] }),
-    ]
-    const { sorts } = parseQuery("sort:tags")
-    const sorted = sortNotes(notes, sorts)
-    expect(sorted.map((n) => n.id)).toEqual(["3", "2", "1"]) // desc by tags count
-  })
-
-  test("exclusion filter excludes notes with matching tags", () => {
-    const notes = [makeNote({ id: "1", tags: ["foo"] }), makeNote({ id: "2", tags: [] })]
-    const { filters } = parseQuery("-tag:foo")
+  test("exclusion filter excludes notes with a matching property", () => {
+    const notes = [makeNote({ id: "1", props: { area: "work" } }), makeNote({ id: "2" })]
+    const { filters } = parseQuery("-area:work")
     const filtered = filterNotes(notes, filters)
     expect(filtered.map((n) => n.id)).toEqual(["2"])
   })

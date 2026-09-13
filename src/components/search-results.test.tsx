@@ -20,7 +20,6 @@ const NOTE: Note = {
   pinned: false,
   updatedAt: null,
   dates: [],
-  tags: [],
   tasks: [],
   headings: [],
   text: "",

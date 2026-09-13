@@ -20,8 +20,6 @@ import {
   PinFillIcon12,
   SettingsFillIcon16,
   SettingsIcon16,
-  TagFillIcon16,
-  TagIcon16,
 } from "./icons"
 import { Keys } from "./keys"
 import { NavListSkeleton } from "./skeleton"
@@ -87,19 +85,6 @@ export function NavItems({
                 onNavigate={onNavigate}
               >
                 Calendar
-              </NavLink>
-            </li>
-            <li>
-              {/* Tags view isn't ready yet — shown disabled as a reminder to revisit. */}
-              <NavLink
-                to="/tags"
-                search={{ query: undefined, sort: "name" }}
-                activeIcon={<TagFillIcon16 />}
-                icon={<TagIcon16 />}
-                onNavigate={onNavigate}
-                disabled
-              >
-                Tags
               </NavLink>
             </li>
           </ul>
@@ -205,7 +190,6 @@ function NavLink({
   onNavigate,
   children,
   onClick,
-  disabled = false,
   shortcut,
   ...props
 }: LinkComponentProps<"a"> & {
@@ -215,8 +199,6 @@ function NavLink({
   forceActive?: boolean
   onNavigate?: () => void
   children: React.ReactNode
-  /** Render a non-interactive, greyed-out item (feature not ready yet). */
-  disabled?: boolean
   /** The keys that reach this destination (`formatCombo`), shown beside it. */
   shortcut?: string[]
 }) {
@@ -239,19 +221,6 @@ function NavLink({
       {shortcut ? <NavShortcut keys={shortcut} chord /> : null}
     </>
   )
-
-  if (disabled) {
-    return (
-      <div
-        data-size={size}
-        aria-disabled="true"
-        title="Coming soon"
-        className={cx("nav-item cursor-not-allowed opacity-50", className)}
-      >
-        {inner}
-      </div>
-    )
-  }
 
   return (
     <Link

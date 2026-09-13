@@ -25,12 +25,6 @@ function testNoteFilter(filter: Filter, note: Note) {
     case "title":
       value = filter.values.includes(note.title)
       break
-    case "tag":
-      value = note.tags.some((tag) => filter.values.includes(tag))
-      break
-    case "tags":
-      value = filter.values.some((range) => isInRange(String(note.tags.length), range))
-      break
     case "date":
       value = note.dates.some((date) => {
         return filter.values.some((value) => isInRange(date, value))
@@ -47,9 +41,6 @@ function testNoteFilter(filter: Filter, note: Note) {
     case "no":
       value = filter.values.some((value) => {
         switch (value) {
-          case "tag":
-          case "tags":
-            return note.tags.length === 0
           case "date":
           case "dates":
             return note.dates.length === 0
@@ -66,9 +57,6 @@ function testNoteFilter(filter: Filter, note: Note) {
     case "has":
       value = filter.values.some((value) => {
         switch (value) {
-          case "tag":
-          case "tags":
-            return note.tags.length > 0
           case "date":
           case "dates":
             return note.dates.length > 0
@@ -132,12 +120,6 @@ export function compareNotes(a: Note, b: Note, sorts: Sort[]) {
       }
       case "title": {
         compareResult = collator.compare(a.displayName, b.displayName)
-        break
-      }
-      case "tags": {
-        const aTagCount = a.tags.length
-        const bTagCount = b.tags.length
-        compareResult = aTagCount - bTagCount
         break
       }
       case "updated_at": {

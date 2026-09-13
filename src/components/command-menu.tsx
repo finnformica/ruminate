@@ -11,7 +11,6 @@ import {
   graphSnapshotAtom,
   noteOutlineAtom,
   pinnedNotesAtom,
-  tagSearcherAtom,
 } from "../global-state"
 import { useBlockResultTree, type ResultRow } from "../hooks/block-result-tree"
 import { useCreateNote, useNoteById } from "../hooks/note"
@@ -35,7 +34,6 @@ import {
   PrinterIcon16,
   SearchIcon16,
   SettingsIcon16,
-  TagIcon16,
 } from "./icons"
 import { Keys } from "./keys"
 import { NoteFavicon } from "./note-favicon"
@@ -62,7 +60,6 @@ const NUM_VISIBLE_BLOCKS = 6
 export function CommandMenu() {
   const navigate = useNavigate()
   const searchNotes = useSearchNotes()
-  const tagSearcher = useAtomValue(tagSearcherAtom)
   const createNote = useCreateNote()
   const jotaiStore = useStore()
   const pinnedNotes = useAtomValue(pinnedNotesAtom)
@@ -90,7 +87,7 @@ export function CommandMenu() {
   // on each open: a fresh palette is a fresh view.
   const [scopeRemoved, setScopeRemoved] = useState(false)
 
-  // The qualifier picker: `type:`, `in:`, `tag:` … typed into the query open
+  // The qualifier picker: `type:`, `in:`, `has:` … typed into the query open
   // a list of values (see qualifier-suggestions.tsx). It follows the caret,
   // read off the input on every change and caret move.
   const inputRef = useRef<HTMLInputElement>(null)
@@ -299,20 +296,6 @@ export function CommandMenu() {
         },
       },
       {
-        label: "Tags",
-        shortcut: formatCombo("g t"),
-        icon: <TagIcon16 />,
-        onSelect: () => {
-          navigate({
-            to: "/tags",
-            search: {
-              query: undefined,
-              sort: "name",
-            },
-          })
-        },
-      },
-      {
         label: "Settings",
         shortcut: formatCombo("g s"),
         icon: <SettingsIcon16 />,
@@ -370,11 +353,6 @@ export function CommandMenu() {
     if (!date) return ""
     return toDateString(date)
   }, [deferredQuery])
-
-  // Search tags
-  const tagResults = useMemo(() => {
-    return tagSearcher.search(deferredQuery)
-  }, [tagSearcher, deferredQuery])
 
   // Search notes
   const noteResults = useMemo(() => {
@@ -486,9 +464,6 @@ export function CommandMenu() {
     },
     [mode, outlineValueToId, sendReveal],
   )
-
-  // Only show the first 2 tags
-  const numVisibleTags = 2
 
   // Only show the first 6 notes
   const numVisibleNotes = 6
@@ -712,42 +687,6 @@ export function CommandMenu() {
                   >
                     {formatDate(dateString)}
                   </CommandItem>
-                </Command.Group>
-              ) : null}
-              {tagResults.length ? (
-                <Command.Group heading="Tags">
-                  {tagResults.slice(0, numVisibleTags).map(([name, noteIds]) => (
-                    <CommandItem
-                      key={name}
-                      icon={<TagIcon16 />}
-                      description={pluralize(noteIds.length, "note")}
-                      onSelect={handleSelect(() =>
-                        navigate({
-                          to: "/",
-                          search: { query: `tag:${name}` },
-                        }),
-                      )}
-                    >
-                      {name}
-                    </CommandItem>
-                  ))}
-                  {tagResults.length > numVisibleTags ? (
-                    <CommandItem
-                      key={`Show all tags matching "${deferredQuery}"`}
-                      icon={<SearchIcon16 />}
-                      onSelect={handleSelect(() =>
-                        navigate({
-                          to: "/tags",
-                          search: {
-                            query: deferredQuery,
-                            sort: "name",
-                          },
-                        }),
-                      )}
-                    >
-                      Show all {pluralize(tagResults.length, "tag")} matching "{deferredQuery}"
-                    </CommandItem>
-                  ) : null}
                 </Command.Group>
               ) : null}
               {showBlocks ? (

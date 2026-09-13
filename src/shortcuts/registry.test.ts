@@ -103,7 +103,6 @@ describe("shortcut registry entries", () => {
     for (const expected of [
       "g d",
       "g n",
-      "g t",
       "g s",
       "?",
       APP_SHORTCUTS.focusSearch,
@@ -120,7 +119,7 @@ describe("shortcut registry entries", () => {
     }
   })
 
-  it("documents the list-page keys (notes list / tags keyboard navigation)", () => {
+  it("documents the list-page keys (notes list keyboard navigation)", () => {
     const lists = SHORTCUTS.filter((shortcut) => shortcut.group === "Lists")
     const combos = new Set(lists.flatMap((shortcut) => shortcut.combos))
     for (const expected of ["ArrowUp", "ArrowDown", "Enter", "Escape", "Home", "End"]) {

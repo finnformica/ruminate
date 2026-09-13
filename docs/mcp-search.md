@@ -27,16 +27,16 @@ It has been removed.
 
 Unbounded listing is not the answer either. A paginated dump of every note is low signal
 for an agent, spends context, and invites it to confuse "the notes I was shown" with "the
-notes that exist". Enumeration is worth keeping only in its _filtered_ forms — by tag, by
-type, by date — which answer real questions ("what did I write this week?") that no
-semantic query can.
+notes that exist". Enumeration is worth keeping only in its _filtered_ forms — by type,
+by date — which answer real questions ("what did I write this week?") that no semantic
+query can.
 
 ## The shape
 
 One tool, not two:
 
 ```
-search(query?, tag?, type?, kind?: "notes" | "blocks" | "both", limit?, cursor?)
+search(query?, type?, kind?: "notes" | "blocks" | "both", limit?, cursor?)
 ```
 
 - `query` optional — omitted, it is an enumeration filtered by the structured fields.
@@ -61,7 +61,7 @@ large part of what makes it better than substring.
 cannot. Cloudflare has both halves (Workers AI for embeddings, Vectorize for the index) on
 the account already.
 
-Hybrid rather than pure semantic: exact terms — a tag, a name, an id, a bit of jargon —
+Hybrid rather than pure semantic: exact terms — a name, an id, a bit of jargon —
 are where embeddings are worst and lexical is perfect. Rank by combining both.
 
 ### Keeping an index in sync, without coupling the write path

@@ -10,8 +10,7 @@ import { XIcon12 } from "./icons"
  * An `in:` scope as a removable pill — the note (or note › block) the results
  * are limited to, named for a human even though the query carries an id.
  * Shared by the ⌘K palette (which scopes itself to the open note) and the
- * results page (which shows every `in:` in the query this way, next to the
- * tag pills).
+ * results page (which shows every `in:` in the query this way).
  */
 export function ScopePill({
   value,

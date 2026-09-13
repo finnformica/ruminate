@@ -36,7 +36,7 @@ const NOTES: SampleNote[] = [
   {
     id: "readme",
     title: "👋 Welcome to Ruminate",
-    props: { tags: ["ruminate/welcome"], pinned: true },
+    props: { pinned: true },
     blocks: [
       b(
         "blk_welcome001",
@@ -56,7 +56,7 @@ const NOTES: SampleNote[] = [
       b(
         "blk_welcome004",
         "ul",
-        "🌿 **Grow**: Connect your notes with links and tags. A block can live in more than one place at once.",
+        "🌿 **Grow**: Connect your notes with links. A block can live in more than one place at once.",
       ),
       b(
         "blk_welcome005",

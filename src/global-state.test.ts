@@ -44,7 +44,7 @@ const FILES = {
   "tasks.md": md(
     "# Today",
     "  id:: blk_head",
-    "  [ ] buy milk #work",
+    "  [ ] buy milk",
     "    id:: blk_milk",
     "  [x] ship it",
     "    id:: blk_ship",
@@ -96,7 +96,6 @@ describe("graphSnapshotAtom", () => {
     // The readme's title and props come from the note node, not markdown.
     expect(readme.title).toBe("👋 Welcome to Ruminate")
     expect(readme.pinned).toBe(true)
-    expect(readme.tags).toEqual(["ruminate", "ruminate/welcome"])
     expect(rollup("readme", snapshot)).toBe(serialize(noteDoc("readme", snapshot)!))
 
     // An edit signed out applies to the sample graph in memory, and the
@@ -124,10 +123,10 @@ describe("block search atoms", () => {
     const milk = hits.find((hit) => hit.blockId === "blk_milk") as (typeof hits)[number]
     // Everything a results row needs, without re-deriving: text, breadcrumb
     // ancestry, and the note-route + ?block= navigation target.
-    expect(milk.text).toBe("buy milk #work")
+    expect(milk.text).toBe("buy milk")
     expect(milk.noteId).toBe("tasks")
     expect(milk.ancestors).toEqual([{ id: "blk_head", text: "Today" }])
-    expect(milk.note.tags).toEqual(["work"])
+    expect(milk.note.id).toBe("tasks")
 
     // A matched section carries only its has-downstream count; the children
     // themselves are resolved (and cached) on expand.
@@ -146,7 +145,7 @@ describe("block search atoms", () => {
     const { store, unsubscribe } = await signedInStore(FILES)
     const search = store.get(searchBlocksAtom)
 
-    expect(search("type:todo tag:work").map((hit) => hit.blockId)).toEqual(["blk_milk"])
+    expect(search("type:todo in:tasks").map((hit) => hit.blockId)).toEqual(["blk_milk"])
     expect(search("type:todo plants").map((hit) => hit.blockId)).toEqual(["blk_plants"])
     expect(search("type:done").map((hit) => hit.blockId)).toEqual(["blk_ship"])
 

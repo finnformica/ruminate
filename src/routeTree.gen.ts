@@ -14,9 +14,7 @@ import { Route as rootRoute } from './routes/__root'
 import { Route as AppRootImport } from './routes/_appRoot'
 import { Route as AppRootIndexImport } from './routes/_appRoot.index'
 import { Route as AppRootSettingsImport } from './routes/_appRoot.settings'
-import { Route as AppRootTagsIndexImport } from './routes/_appRoot.tags.index'
 import { Route as AppRootNotesIndexImport } from './routes/_appRoot.notes.index'
-import { Route as AppRootTagsSplatImport } from './routes/_appRoot.tags_.$'
 import { Route as AppRootNotesSplatImport } from './routes/_appRoot.notes_.$'
 
 // Create/Update Routes
@@ -38,21 +36,9 @@ const AppRootSettingsRoute = AppRootSettingsImport.update({
   getParentRoute: () => AppRootRoute,
 } as any)
 
-const AppRootTagsIndexRoute = AppRootTagsIndexImport.update({
-  id: '/tags/',
-  path: '/tags/',
-  getParentRoute: () => AppRootRoute,
-} as any)
-
 const AppRootNotesIndexRoute = AppRootNotesIndexImport.update({
   id: '/notes/',
   path: '/notes/',
-  getParentRoute: () => AppRootRoute,
-} as any)
-
-const AppRootTagsSplatRoute = AppRootTagsSplatImport.update({
-  id: '/tags_/$',
-  path: '/tags/$',
   getParentRoute: () => AppRootRoute,
 } as any)
 
@@ -94,25 +80,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRootNotesSplatImport
       parentRoute: typeof AppRootImport
     }
-    '/_appRoot/tags_/$': {
-      id: '/_appRoot/tags_/$'
-      path: '/tags/$'
-      fullPath: '/tags/$'
-      preLoaderRoute: typeof AppRootTagsSplatImport
-      parentRoute: typeof AppRootImport
-    }
     '/_appRoot/notes/': {
       id: '/_appRoot/notes/'
       path: '/notes'
       fullPath: '/notes'
       preLoaderRoute: typeof AppRootNotesIndexImport
-      parentRoute: typeof AppRootImport
-    }
-    '/_appRoot/tags/': {
-      id: '/_appRoot/tags/'
-      path: '/tags'
-      fullPath: '/tags'
-      preLoaderRoute: typeof AppRootTagsIndexImport
       parentRoute: typeof AppRootImport
     }
   }
@@ -124,18 +96,14 @@ interface AppRootRouteChildren {
   AppRootSettingsRoute: typeof AppRootSettingsRoute
   AppRootIndexRoute: typeof AppRootIndexRoute
   AppRootNotesSplatRoute: typeof AppRootNotesSplatRoute
-  AppRootTagsSplatRoute: typeof AppRootTagsSplatRoute
   AppRootNotesIndexRoute: typeof AppRootNotesIndexRoute
-  AppRootTagsIndexRoute: typeof AppRootTagsIndexRoute
 }
 
 const AppRootRouteChildren: AppRootRouteChildren = {
   AppRootSettingsRoute: AppRootSettingsRoute,
   AppRootIndexRoute: AppRootIndexRoute,
   AppRootNotesSplatRoute: AppRootNotesSplatRoute,
-  AppRootTagsSplatRoute: AppRootTagsSplatRoute,
   AppRootNotesIndexRoute: AppRootNotesIndexRoute,
-  AppRootTagsIndexRoute: AppRootTagsIndexRoute,
 }
 
 const AppRootRouteWithChildren =
@@ -146,18 +114,14 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppRootSettingsRoute
   '/': typeof AppRootIndexRoute
   '/notes/$': typeof AppRootNotesSplatRoute
-  '/tags/$': typeof AppRootTagsSplatRoute
   '/notes': typeof AppRootNotesIndexRoute
-  '/tags': typeof AppRootTagsIndexRoute
 }
 
 export interface FileRoutesByTo {
   '/settings': typeof AppRootSettingsRoute
   '/': typeof AppRootIndexRoute
   '/notes/$': typeof AppRootNotesSplatRoute
-  '/tags/$': typeof AppRootTagsSplatRoute
   '/notes': typeof AppRootNotesIndexRoute
-  '/tags': typeof AppRootTagsIndexRoute
 }
 
 export interface FileRoutesById {
@@ -166,26 +130,21 @@ export interface FileRoutesById {
   '/_appRoot/settings': typeof AppRootSettingsRoute
   '/_appRoot/': typeof AppRootIndexRoute
   '/_appRoot/notes_/$': typeof AppRootNotesSplatRoute
-  '/_appRoot/tags_/$': typeof AppRootTagsSplatRoute
   '/_appRoot/notes/': typeof AppRootNotesIndexRoute
-  '/_appRoot/tags/': typeof AppRootTagsIndexRoute
 }
 
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    '' | '/settings' | '/' | '/notes/$' | '/tags/$' | '/notes' | '/tags'
+  fullPaths: '' | '/settings' | '/' | '/notes/$' | '/notes'
   fileRoutesByTo: FileRoutesByTo
-  to: '/settings' | '/' | '/notes/$' | '/tags/$' | '/notes' | '/tags'
+  to: '/settings' | '/' | '/notes/$' | '/notes'
   id:
     | '__root__'
     | '/_appRoot'
     | '/_appRoot/settings'
     | '/_appRoot/'
     | '/_appRoot/notes_/$'
-    | '/_appRoot/tags_/$'
     | '/_appRoot/notes/'
-    | '/_appRoot/tags/'
   fileRoutesById: FileRoutesById
 }
 
@@ -216,9 +175,7 @@ export const routeTree = rootRoute
         "/_appRoot/settings",
         "/_appRoot/",
         "/_appRoot/notes_/$",
-        "/_appRoot/tags_/$",
-        "/_appRoot/notes/",
-        "/_appRoot/tags/"
+        "/_appRoot/notes/"
       ]
     },
     "/_appRoot/settings": {
@@ -233,16 +190,8 @@ export const routeTree = rootRoute
       "filePath": "_appRoot.notes_.$.tsx",
       "parent": "/_appRoot"
     },
-    "/_appRoot/tags_/$": {
-      "filePath": "_appRoot.tags_.$.tsx",
-      "parent": "/_appRoot"
-    },
     "/_appRoot/notes/": {
       "filePath": "_appRoot.notes.index.tsx",
-      "parent": "/_appRoot"
-    },
-    "/_appRoot/tags/": {
-      "filePath": "_appRoot.tags.index.tsx",
       "parent": "/_appRoot"
     }
   }

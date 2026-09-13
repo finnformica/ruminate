@@ -9,6 +9,6 @@ export function pluralize(count: number, noun: string, suffix = "s") {
   return `${formatNumber(count)} ${noun}${count !== 1 ? suffix : ""}`
 }
 
-export function formatNumber(value: number) {
+function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value)
 }

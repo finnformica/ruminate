@@ -63,7 +63,7 @@ export function classifyLine(
  * block's text — `# `, `- `, `[ ] `, `> `, `1. ` — becomes the block's type,
  * and the marker itself is dropped. Returns the type and the text after the
  * marker, or null when the text does not begin with one. A marker always
- * needs its trailing space, so `#foo` (a tag) or a bare `-` never switches.
+ * needs its trailing space, so `#foo` (no space) or a bare `-` never switches.
  */
 export function leadingMarker(text: string): { type: BlockType; text: string } | null {
   for (const def of BLOCK_TYPE_DEFS) {

@@ -94,14 +94,11 @@ describe("g chords", () => {
     expect(call.params._splat).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 
-  it("g then n / t / s navigate to notes, tags, settings", () => {
+  it("g then n / s navigate to notes, settings", () => {
     renderShortcuts()
     fireEvent.keyDown(document.body, { key: "g" })
     fireEvent.keyDown(document.body, { key: "n" })
     expect(mocks.navigate).toHaveBeenLastCalledWith(expect.objectContaining({ to: "/" }))
-    fireEvent.keyDown(document.body, { key: "g" })
-    fireEvent.keyDown(document.body, { key: "t" })
-    expect(mocks.navigate).toHaveBeenLastCalledWith(expect.objectContaining({ to: "/tags" }))
     fireEvent.keyDown(document.body, { key: "g" })
     fireEvent.keyDown(document.body, { key: "s" })
     expect(mocks.navigate).toHaveBeenLastCalledWith(expect.objectContaining({ to: "/settings" }))

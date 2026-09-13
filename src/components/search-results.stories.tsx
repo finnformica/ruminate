@@ -25,7 +25,6 @@ function note(id: string, text: string): Note {
     pinned: false,
     updatedAt: null,
     dates: [],
-    tags: [],
     tasks: [],
     headings: [],
   }

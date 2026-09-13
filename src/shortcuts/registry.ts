@@ -339,12 +339,6 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
     group: "Navigation",
   },
   {
-    combos: ["g t"],
-    scope: "global",
-    description: "Go to tags (press g, then t)",
-    group: "Navigation",
-  },
-  {
     combos: ["g s"],
     scope: "global",
     description: "Go to settings (press g, then s)",
@@ -353,7 +347,7 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   {
     combos: [APP_SHORTCUTS.focusSearch],
     scope: "global",
-    description: "Focus the search input (notes list, tags)",
+    description: "Focus the search input (notes list)",
     group: "Navigation",
   },
   {
@@ -376,13 +370,13 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   },
 ]
 
-// Linear-style keys on the filterable list pages — the notes index and the
-// tags page (see src/hooks/list-keyboard-nav.ts).
+// Linear-style keys on the filterable list page — the notes index (see
+// src/hooks/list-keyboard-nav.ts).
 const LIST_ENTRIES: Shortcut[] = [
   {
     combos: ["ArrowUp", "ArrowDown"],
     scope: "global",
-    description: "Move the list highlight (notes list, tags)",
+    description: "Move the list highlight (notes list)",
     group: "Lists",
   },
   {
@@ -394,7 +388,7 @@ const LIST_ENTRIES: Shortcut[] = [
   {
     combos: ["Enter"],
     scope: "global",
-    description: "Open the highlighted note or tag",
+    description: "Open the highlighted note",
     group: "Lists",
   },
   {

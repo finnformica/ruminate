@@ -22,15 +22,14 @@ reference, complete with a filter box.
 `g` pressed outside any text field arms a short (~1.5s) chord window; the next
 key navigates. The chords work from the block editor's select mode too.
 
-| Action                              | Shortcut                                              |
-| ----------------------------------- | ----------------------------------------------------- |
-| Go to today's daily note            | <kbd>g</kbd> then <kbd>d</kbd>                        |
-| Go to the notes list                | <kbd>g</kbd> then <kbd>n</kbd>                        |
-| Go to tags                          | <kbd>g</kbd> then <kbd>t</kbd>                        |
-| Go to settings                      | <kbd>g</kbd> then <kbd>s</kbd>                        |
-| Focus the search (notes list, tags) | <kbd>/</kbd>                                          |
-| `i`                                 | Focus the editor, restoring the last selected block   |
-| Back / forward (browser history)    | <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> |
+| Action                           | Shortcut                                              |
+| -------------------------------- | ----------------------------------------------------- |
+| Go to today's daily note         | <kbd>g</kbd> then <kbd>d</kbd>                        |
+| Go to the notes list             | <kbd>g</kbd> then <kbd>n</kbd>                        |
+| Go to settings                   | <kbd>g</kbd> then <kbd>s</kbd>                        |
+| Focus the search (notes list)    | <kbd>/</kbd>                                          |
+| `i`                              | Focus the editor, restoring the last selected block   |
+| Back / forward (browser history) | <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> |
 
 ### Outline palette
 
@@ -48,11 +47,11 @@ palette also switches to outline mode (the VS Code prefix grammar);
 with <kbd>⌘</kbd> <kbd>P</kbd> directly, <kbd>⌫</kbd> on an empty query stays
 put.
 
-## Lists (notes list, tags)
+## Lists (notes list)
 
-Linear-style keys on the filterable list pages — the notes index (`/`) and the
-tags page. A roving highlight (drawn in the same selection accent as the block
-editor) follows the arrows; it tracks filtering, resetting to the first result
+Linear-style keys on the filterable list page — the notes index (`/`). A roving
+highlight (drawn in the same selection accent as the block editor) follows the
+arrows; it tracks filtering, resetting to the first result
 when the query changes. <kbd>↓</kbd> pressed inside the search input hands the
 keyboard to the list; everything else stays quiet while any text field has
 focus.
@@ -61,7 +60,7 @@ focus.
 | ------------------------------------- | -------------------------------- |
 | Move the list highlight               | <kbd>↑</kbd> / <kbd>↓</kbd>      |
 | In the search: highlight first result | <kbd>↓</kbd>                     |
-| Open the highlighted note / tag       | <kbd>↵</kbd>                     |
+| Open the highlighted note             | <kbd>↵</kbd>                     |
 | Clear the highlight, back to search   | <kbd>Esc</kbd>                   |
 | Jump to the first / last item         | <kbd>Home</kbd> / <kbd>End</kbd> |
 

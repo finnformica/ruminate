@@ -39,7 +39,7 @@ Rate limiting caps the damage; not reading the whole corpus removes most of it. 
 first, because it changes what the limits need to be.
 
 Built as described below, with two departures worth recording. `read_note` turned out to
-be O(**note**) rather than O(depth) — `blockCount` and a note's tags are whole-note facts,
+be O(**note**) rather than O(depth) — `blockCount` and a note's tasks are whole-note facts,
 so `depth` bounds what comes back rather than what is read — and `list_parents` is
 O(the notes holding the block), because it names those notes and an untitled note's name
 is derived from its outline. `list_notes`, which this table did not cover, reads the note
@@ -53,12 +53,12 @@ docs/mcp-server.md §4, and the equivalence argument and its tests are in §4's
 | -------------------------------------------- | ------------------------------------------- | ------------------------------- |
 | `get_block`, `list_children`, `list_parents` | one node, its child links, its parent links | 3 indexed reads                 |
 | `read_note`                                  | the note's subtree to `depth`               | recursive CTE bounded by depth  |
-| `search`, `list_tags`                        | all text / all notes                        | genuinely O(corpus)             |
+| `search`                                     | all text                                    | genuinely O(corpus)             |
 | scope computation (note-scoped grants)       | reachability from granted notes             | CTE seeded at the granted notes |
 
 So the point reads — the ones an agent traversing a graph makes most — become a handful of
-indexed rows instead of seventeen hundred. Only `search` and `list_tags` stay corpus-wide,
-which is inherent to what they do.
+indexed rows instead of seventeen hundred. Only `search` stays corpus-wide, which is
+inherent to what it does.
 
 The cost of doing this is the reason it was not done first: the snapshot approach reuses
 the app's own pure functions (`noteFromPage`, `reachableFrom`, `basketRootIds`), so an
