@@ -53,6 +53,7 @@ import { blockId } from "../../src/blocks/id"
 import { NOTE_TYPE, propsJson, sortKeyBetween } from "../../src/data/graph"
 import { deleteBlockOps, deleteNoteOps, deleteSubtreeOps, type Op } from "../../src/data/ops"
 import type { TenantDb } from "../tenancy-db"
+import { hybridSearch, type Semantic } from "../search/engine"
 import { allows, type Grant, type Permission } from "./grant"
 import {
   applyOpsToReplica,
@@ -70,7 +71,6 @@ import {
   propsOf,
   notesView,
   scopedGraph,
-  sees,
   subtreeView,
   unassignedOf,
   type ScopedGraph,
@@ -84,6 +84,20 @@ interface ToolContext {
   grant: Grant
   tenant: TenantDb
   now: number
+  /**
+   * The semantic half of `search`, already bound to this tenant's namespace
+   * (worker/search/vector-index.ts), or null.
+   *
+   * Null is the ordinary state of a deployment without the bindings, not a
+   * failure: `search` then ranks lexically and says so. It arrives here rather
+   * than being read off `env` inside the tool for the same reason the tenant
+   * does — a `run` never touches a binding, so a `run` cannot reach a tenant's
+   * vectors other than its own.
+   *
+   * Optional rather than required so that a caller with no semantic half to
+   * offer — the differential tests, a `wrangler dev` — simply omits it.
+   */
+  semantic?: Semantic | null
 }
 
 /** The same, once the call's rows are loaded. A `run` only ever sees this. */
@@ -810,66 +824,56 @@ export const TOOLS: ToolDef[] = [
     name: "search",
     title: "Search blocks",
     description:
-      "Find blocks whose text contains `query` (case-insensitive substring, not " +
-      "the app's query language). Each hit names the block and the notes it " +
-      "appears in, so it is the way to get from a phrase to a note or a block id. " +
+      "Find blocks, by meaning AND by words. `query` is the app's own query " +
+      "language (the same one a person types): free text is matched both " +
+      "fuzzily and semantically — so 'the deploy broke' finds a block that says " +
+      "'the rollout went wrong' — and qualifiers FILTER, exactly as they do in " +
+      "the app. `tag:work`, `type:todo` (or `heading`, `code`, `done`, …), " +
+      '`in:"Reading list"` or `in:<block id>` to scope to a note or a ' +
+      "subtree, `-tag:x` to exclude, `a,b` for either, `sort:updated`. A query " +
+      "with NO free text is an enumeration of whatever the qualifiers admit. " +
+      "Each hit names the block, the note it is in and the heading it sits " +
+      "under, so it is the way to get from a phrase to a block id to walk from. " +
       "Page with `cursor` when `nextCursor` comes back.",
     permission: "read",
     annotations: readOnly,
     schema: z.object({
-      query: requiredArg("The text to look for."),
+      query: requiredArg(
+        "The app's query language: free text, plus qualifiers like `tag:`, " +
+          "`type:`, `in:`, `has:`/`no:`, `sort:`.",
+      ),
       limit: limitArg(),
       cursor: cursorArg(),
     }),
-    run(args, { graph }) {
-      const query = args.query.toLowerCase()
+    async run(args, { graph, semantic }) {
       const offset = offsetOf(args.cursor)
-
-      const hits: {
-        id: string
-        type: string
-        text: string
-        noteIds: string[]
-        noteTitles: string[]
-      }[] = []
-      // Sorted ids so the order — and therefore the cursor — is the same for
-      // the same corpus and query. One hit past the page is collected, which is
-      // all it takes to answer `nextCursor` without deriving a `Note` for every
-      // match in the corpus.
-      const ids = [...graph.snapshot.nodes.keys()].filter((id) => sees(graph, id)).sort()
-      let found = 0
-      for (const id of ids) {
-        const row = graph.snapshot.nodes.get(id)
-        if (!row || row.type === NOTE_TYPE) continue
-        if (!row.text.toLowerCase().includes(query)) continue
-        found += 1
-        if (found <= offset) continue
-        const noteIds = notesReaching(graph, id)
-        hits.push({
-          id,
-          type: row.type,
-          text: row.text,
-          noteIds,
-          noteTitles: noteIds.map((noteId) => noteOf(graph, noteId)?.displayName ?? noteId),
-        })
-        if (hits.length > args.limit) break
-      }
-      const more = hits.length > args.limit
-      if (more) hits.pop()
-      const nextCursor = more ? String(offset + args.limit) : null
+      const found = await hybridSearch({
+        graph,
+        query: args.query,
+        limit: args.limit,
+        offset,
+        semantic,
+      })
 
       return {
         ok: true,
-        data: { hits, nextCursor, truncated: more },
+        data: {
+          hits: found.hits,
+          total: found.total,
+          nextCursor: found.nextCursor,
+          semantic: found.semanticUsed,
+        },
         text:
-          hits.length === 0
-            ? `Nothing matched "${query}".`
-            : hits
+          found.hits.length === 0
+            ? `Nothing matched "${args.query}".`
+            : found.hits
                 .map(
                   (hit) =>
-                    `${hit.id}  [${hit.noteTitles.join(", ") || "unassigned"}]  ${preview(hit.text, 14)}`,
+                    `${hit.id}  [${hit.noteTitle}${hit.section ? ` › ${hit.section}` : ""}]  ` +
+                    preview(hit.text, 14),
                 )
-                .join("\n"),
+                .join("\n") +
+              (found.nextCursor ? `\n\n${found.total - offset - found.hits.length} more.` : ""),
       }
     },
   }),
@@ -1677,6 +1681,7 @@ export async function callTool(
   name: string,
   args: Record<string, unknown>,
   now: number = Date.now(),
+  semantic: Semantic | null = null,
 ): Promise<CallResult> {
   const tool = TOOLS.find((candidate) => candidate.name === name)
   if (!tool) return { kind: "unknown_tool", message: `Unknown tool: ${name}` }
@@ -1692,5 +1697,5 @@ export async function callTool(
     }
   }
 
-  return { kind: "result", outcome: await tool.invoke(args, { grant, tenant, now }) }
+  return { kind: "result", outcome: await tool.invoke(args, { grant, tenant, now, semantic }) }
 }

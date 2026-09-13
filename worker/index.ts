@@ -13,6 +13,7 @@ import { images } from "./handlers/images"
 import { mcp, MCP_PATH } from "./handlers/mcp"
 import { mcpTokens, MCP_TOKENS_PREFIX } from "./handlers/mcp-tokens"
 import { replica } from "./handlers/replica"
+import { search, SEARCH_PATH } from "./handlers/search"
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -22,6 +23,9 @@ export default {
     if (pathname === "/github-refresh") return githubRefresh(request, env)
     if (pathname.startsWith("/api/replica/")) return replica(request, env)
     if (pathname === MCP_PATH) return mcp(request, env)
+    if (pathname === SEARCH_PATH || pathname.startsWith(`${SEARCH_PATH}/`)) {
+      return search(request, env)
+    }
     if (pathname === MCP_TOKENS_PREFIX || pathname.startsWith(`${MCP_TOKENS_PREFIX}/`)) {
       return mcpTokens(request, env)
     }

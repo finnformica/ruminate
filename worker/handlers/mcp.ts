@@ -45,6 +45,8 @@ import {
 } from "../mcp/protocol"
 import { checkRateLimit, type RateRefusal } from "../mcp/rate-limit"
 import { callTool, toolsFor } from "../mcp/tools"
+import type { Semantic } from "../search/engine"
+import { semanticFor } from "../search/vector-index"
 import { findGrant, tenantIsActive } from "../mcp/tokens"
 
 /** The MCP endpoint's path. */
@@ -208,7 +210,17 @@ export async function mcp(request: Request, env: Env): Promise<Response> {
     name: null,
   })
 
-  return dispatch(message.method, message.id, message.params, grant, tenant)
+  // The semantic half of `search`, bound to this tenant's Vectorize namespace
+  // and to no other (worker/search/vector-index.ts). Minted here, from the
+  // tenant handle, so no tool ever sees a binding.
+  return dispatch(
+    message.method,
+    message.id,
+    message.params,
+    grant,
+    tenant,
+    semanticFor(env, tenant),
+  )
 }
 
 /**
@@ -270,6 +282,7 @@ async function dispatch(
   params: Record<string, unknown>,
   grant: Grant,
   tenant: TenantDb,
+  semantic: Semantic | null,
 ): Promise<Response> {
   switch (method) {
     case "server/discover":
@@ -312,7 +325,7 @@ async function dispatch(
       // would be two writes on every single tool call to no end. A tenant
       // whose corpus an agent wrote first is seeded by `readyTenant` the
       // moment a browser syncs it.
-      const called = await callTool(grant, tenant, name, args)
+      const called = await callTool(grant, tenant, name, args, Date.now(), semantic)
       if (called.kind === "unknown_tool") {
         return protocolFailure({
           status: 200,

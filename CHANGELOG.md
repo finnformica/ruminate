@@ -2,6 +2,10 @@
 
 ## 2026-W37
 
+### Added
+
+- **An agent can find things it does not know the words for.** The MCP `search` tool used to look for a case-insensitive substring, so "the deploy broke" found nothing in a note that says "the rollout went wrong" — which is exactly the search an agent asked to research a topic makes, because it phrases the query in its own words rather than yours. It now searches by meaning as well as by words, and it takes **the same query language you type in the search box**: `tag:work`, `type:todo`, `in:"Reading list"`, `-tag:x`, `sort:updated` all mean what they mean in the app, and the free text is matched both fuzzily and by meaning. A hit names the block, its note and the heading it sits under, so an agent can walk straight into the right section. Nothing about who can see what changes: a token scoped to one note still cannot be shown a block from another, whatever the search turns up. Your own search box is unchanged — it still works entirely on your device and offline.
+
 ### Changed
 
 - Ruminate asks you to update once, and each device fetches a fresh copy of your notes afterwards. A note's root is now stored under the name the app has always used for it — `note`, rather than the historical `page` it was still written as in the database — and a copy of Ruminate from before that change cannot read the new rows. Older versions are therefore refused by the server and show the **Update Ruminate** notice instead of quietly showing you nothing; once updated, the device throws its local copy away and pulls your notes down again. Nothing that has reached the server is lost, but anything written offline and never synced goes with the old copy, so sync before you update.

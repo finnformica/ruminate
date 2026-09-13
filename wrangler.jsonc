@@ -21,6 +21,10 @@
       "/mcp",
       "/api/mcp/tokens",
       "/api/mcp/tokens/*",
+      // Hybrid search, and the indexing pass behind it
+      // (docs/semantic-search.md). Session-authed, like the replica.
+      "/api/search",
+      "/api/search/*",
     ],
   },
   // The one database: the control plane (users + allowlist,
@@ -90,6 +94,43 @@
       "simple": { "limit": 120, "period": 60 },
     },
   ],
+  // The semantic half of hybrid search (docs/semantic-search.md). Two bindings
+  // for one feature, and they are separable on purpose: `AI` turns text into a
+  // vector, `VECTORIZE` remembers which block a vector came from.
+  //
+  // The index is 1024-dimensional cosine because that is what `@cf/baai/bge-m3`
+  // emits, and bge-m3 is the model because it costs 1,075 neurons per million
+  // input tokens against bge-base-en-v1.5's 6,058 — five times cheaper for a
+  // corpus this small, and multilingual for free. Changing the model means
+  // changing the dimensions, which means a NEW index: a Vectorize index's
+  // dimensions are fixed at creation, and vectors from two models are not
+  // comparable even at the same width. So the index name carries no version
+  // today; the day the model changes, create `ruminate-blocks-v2` alongside and
+  // switch the binding, rather than mixing two embeddings in one space.
+  //
+  //   npx wrangler vectorize create ruminate-blocks --dimensions=1024 --metric=cosine
+  //
+  // TENANCY: every vector is written and queried under a NAMESPACE that is the
+  // tenant's user id (`worker/search/vector-index.ts`). A namespace is a
+  // partition, not a filter — a query in one structurally cannot see another's
+  // vectors, which is the same "impossible, not careful" property `TenantDb`
+  // gives the corpus. Metadata filtering would have been a filter someone can
+  // forget. The free plan allows 1,000 namespaces per index; there are three
+  // tenants.
+  //
+  // Nothing in the request path fails without these: `semanticAvailable`
+  // (worker/search/semantic.ts) treats an absent binding as "lexical only", so
+  // a deployment that has not rolled them out still searches.
+  //
+  // `remote: true` is a LOCAL-DEVELOPMENT flag and nothing else — a deployed
+  // Worker's bindings are always the real ones. Neither of these has a local
+  // implementation: Workers AI always calls the real service (so the flag only
+  // silences a warning about being billed for it), and Vectorize refuses
+  // outright with "Binding VECTORIZE needs to be run remotely". Without the
+  // flag, `wrangler dev` and `getPlatformProxy` cannot exercise this path at
+  // all.
+  "ai": { "binding": "AI", "remote": true },
+  "vectorize": [{ "binding": "VECTORIZE", "index_name": "ruminate-blocks", "remote": true }],
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": true },

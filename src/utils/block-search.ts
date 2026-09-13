@@ -386,9 +386,21 @@ export function searchBlocks(query: Query, index: BlockIndex): BlockHit[] {
       testNoteFilters(noteFilters, hit.note),
   )
 
-  return query.sorts.length
-    ? [...results].sort((a, b) => compareBlockHits(a, b, query.sorts))
-    : results
+  return sortBlockHits(results, query.sorts)
+}
+
+/**
+ * Apply a query's `sort:` keys to a list of hits — the same comparator
+ * `searchBlocks` ends with, pulled out so a caller that produced its ranking
+ * some other way can still honour `sort:`.
+ *
+ * The hybrid ranker (worker/search/engine.ts) is that caller: it fuses a fuzzy
+ * ranking with a vector one, and `sort:title` has to mean the same thing over
+ * the result as it does here. No sorts: the ranking is kept exactly as given,
+ * which is what makes relevance the default order.
+ */
+export function sortBlockHits(hits: BlockHit[], sorts: Sort[]): BlockHit[] {
+  return sorts.length ? [...hits].sort((a, b) => compareBlockHits(a, b, sorts)) : hits
 }
 
 /**

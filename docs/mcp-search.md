@@ -1,6 +1,26 @@
-# Search: one surface for the person and the agent — planned
+# Search: one surface for the person and the agent
 
-**Status: not built.** This is the design for a follow-up PR. Today the MCP endpoint has
+**Status: built — see docs/semantic-search.md for what shipped and what it
+measured.** This page is the design that preceded it, kept because most of it
+survived contact and the parts that did not are worth knowing about:
+
+- **Hybrid, sharing the query language** — shipped. `search` takes the app's
+  own query language; the structured filters filter, the free text goes to both
+  matchers.
+- **`seq`-driven indexing** — shipped, exactly as sketched below.
+- **Granularity: "probably blocks, skipping ones too short to carry meaning"** —
+  **wrong**, and measured to be wrong. Bare blocks find a paraphrased query's
+  target in the top five 54% of the time; a heading with its section under it,
+  85%. The unit is a section.
+- **"A snippet around the match rather than its whole text"** — dropped. At a
+  mean block length of 41 characters the whole block IS the snippet.
+- **One tool folding in `list_notes`** — not done, still intended.
+
+The rest of this page is the original design.
+
+---
+
+Today the MCP endpoint has
 its own substring matcher (`search`, worker/mcp/tools.ts) which shares nothing with the
 app's query language (docs/query-language.md, `src/utils/search.ts`). Two search
 semantics over one corpus is one too many.

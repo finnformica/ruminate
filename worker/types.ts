@@ -43,4 +43,16 @@ export interface Env {
    * been rolled out yet.
    */
   MCP_BURST?: RateLimiter
+  /**
+   * The semantic half of search (docs/semantic-search.md): Workers AI turns a
+   * query into a vector, Vectorize says which chunks are near it.
+   *
+   * BOTH optional, and absent means lexical-only rather than broken —
+   * `semanticFor` (worker/search/vector-index.ts) reads a missing binding the
+   * way the image routes read a missing bucket. A `wrangler dev` without
+   * remote bindings, or a preview that has not had them rolled out, still
+   * searches; it just says `semanticUsed: false`.
+   */
+  AI?: Ai
+  VECTORIZE?: Vectorize
 }
