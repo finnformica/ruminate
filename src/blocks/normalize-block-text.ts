@@ -15,9 +15,9 @@
  * `getBlockType` already treats as typed — normalizing exactly the
  * ingest/display mismatch — with these documented exceptions:
  *
- * - `#Heading` (no space) stays text. `#word` is the app's tag syntax
- *   (src/remark-plugins/tag.ts), so a heading intent is indistinguishable
- *   from a tag; `getBlockType` agrees (HEADING_RE requires a space). Same for
+ * - `#Heading` (no space) stays text: a heading intent is indistinguishable
+ *   from a `#word` written as prose; `getBlockType` agrees (HEADING_RE
+ *   requires a space). Same for
  *   `##foo` — the editor renders it as a paragraph, so ingest must not
  *   promote it.
  * - Ordered markers are capped at three digits (`999. ` normalizes, `1990. `

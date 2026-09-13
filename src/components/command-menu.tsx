@@ -11,7 +11,6 @@ import {
   graphSnapshotAtom,
   noteOutlineAtom,
   pinnedNotesAtom,
-  tagSearcherAtom,
 } from "../global-state"
 import type { ResultRoot } from "../hooks/results-doc"
 import { useCreateNote, useNoteById } from "../hooks/note"
@@ -33,7 +32,6 @@ import {
   PrinterIcon16,
   SearchIcon16,
   SettingsIcon16,
-  TagIcon16,
 } from "./icons"
 import { Keys } from "./keys"
 import {
@@ -63,15 +61,12 @@ function highlightIsLastItem(root: HTMLElement): boolean {
 
 /** How many block results the palette lists before "see all". */
 const NUM_VISIBLE_BLOCKS = 6
-/** How many tags the palette lists before "show all". */
-const NUM_VISIBLE_TAGS = 2
 /** How many note results the palette lists. */
 const NUM_VISIBLE_NOTES = 6
 
 export function CommandMenu() {
   const navigate = useNavigate()
   const searchNotes = useSearchNotes()
-  const tagSearcher = useAtomValue(tagSearcherAtom)
   const createNote = useCreateNote()
   const jotaiStore = useStore()
   const pinnedNotes = useAtomValue(pinnedNotesAtom)
@@ -99,7 +94,7 @@ export function CommandMenu() {
   // on each open: a fresh palette is a fresh view.
   const [scopeRemoved, setScopeRemoved] = useState(false)
 
-  // The qualifier picker: `type:`, `in:`, `tag:` … typed into the query open
+  // The qualifier picker: `type:`, `in:`, `has:` … typed into the query open
   // a list of values (see qualifier-suggestions.tsx). It follows the caret,
   // read off the input on every change and caret move.
   const inputRef = useRef<HTMLInputElement>(null)
@@ -289,20 +284,6 @@ export function CommandMenu() {
         },
       },
       {
-        label: "Tags",
-        shortcut: formatCombo("g t"),
-        icon: <TagIcon16 />,
-        onSelect: () => {
-          navigate({
-            to: "/tags",
-            search: {
-              query: undefined,
-              sort: "name",
-            },
-          })
-        },
-      },
-      {
         label: "Settings",
         shortcut: formatCombo("g s"),
         icon: <SettingsIcon16 />,
@@ -360,11 +341,6 @@ export function CommandMenu() {
     if (!date) return ""
     return toDateString(date)
   }, [deferredQuery])
-
-  // Search tags
-  const tagResults = useMemo(() => {
-    return tagSearcher.search(deferredQuery)
-  }, [tagSearcher, deferredQuery])
 
   // Search notes
   const noteResults = useMemo(() => {
@@ -710,42 +686,6 @@ export function CommandMenu() {
                   >
                     {formatDate(dateString)}
                   </CommandItem>
-                </Command.Group>
-              ) : null}
-              {tagResults.length ? (
-                <Command.Group heading="Tags">
-                  {tagResults.slice(0, NUM_VISIBLE_TAGS).map(([name, noteIds]) => (
-                    <CommandItem
-                      key={name}
-                      icon={<TagIcon16 />}
-                      description={pluralize(noteIds.length, "note")}
-                      onSelect={handleSelect(() =>
-                        navigate({
-                          to: "/",
-                          search: { query: `tag:${name}` },
-                        }),
-                      )}
-                    >
-                      {name}
-                    </CommandItem>
-                  ))}
-                  {tagResults.length > NUM_VISIBLE_TAGS ? (
-                    <CommandItem
-                      key={`Show all tags matching "${deferredQuery}"`}
-                      icon={<SearchIcon16 />}
-                      onSelect={handleSelect(() =>
-                        navigate({
-                          to: "/tags",
-                          search: {
-                            query: deferredQuery,
-                            sort: "name",
-                          },
-                        }),
-                      )}
-                    >
-                      Show all {pluralize(tagResults.length, "tag")} matching "{deferredQuery}"
-                    </CommandItem>
-                  ) : null}
                 </Command.Group>
               ) : null}
               {deferredQuery || resultRoots.length > 0 ? (

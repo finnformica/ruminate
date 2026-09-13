@@ -16,7 +16,7 @@ type SearchInputProps = Omit<React.ComponentPropsWithoutRef<"input">, "onChange"
   onChange?: (value: string) => void
   /**
    * Offer values for the query language's qualifiers as they are typed
-   * (`type:`, `in:`, `tag:`, …) — for inputs that take a search query, not
+   * (`type:`, `in:`, `has:`, …) — for inputs that take a search query, not
    * a plain filter string.
    */
   suggest?: boolean

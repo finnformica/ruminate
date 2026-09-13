@@ -2,6 +2,10 @@
 
 ## 2026-W37
 
+### Removed
+
+- Tags are gone. The tags page, the sidebar's greyed-out **Tags** entry and its <kbd>g</kbd> then <kbd>t</kbd> shortcut, the tag pills and tag filter above the notes list, the `tag:` and `tags:` qualifiers (and `has:tags` / `no:tags`, `sort:tags`) in search, the `#tag` line in the help panel's formatting reference, and the MCP server's `list_tags` tool with `list_notes`' `tag` filter and `read_note`'s `tags` part have all been removed. A `#word` in a block is plain text, as it has rendered for a while. Nothing is deleted from your notes: a `tags` entry a note's properties already carry stays where it is, it is simply no longer read.
+
 ### Changed
 
 - Notes and blocks are drawn by one row. A note in a search result, in the notes list and under a ⌘K query is now the same row the editor draws a block with — its own icon in the marker slot (the arrow stands in for it while the note is closed, as it does for any block), its title beside it — and it opens in place: click the arrow (or press <kbd>→</kbd>) to read the blocks inside it without leaving the list, and again on those to go deeper. A block result already worked this way; a note used to be a card, or a flat row in the palette, that could only be opened. The palette no longer lists a note's first four headings beneath it — expanding the note shows everything in it, and opening one of those lands on the block itself rather than on a heading of that name. The notes list is one list now, so the grid/list switch on the notes page is gone (the calendar's week still shows its days as cards); pinned notes still lead the list and say so on their row.

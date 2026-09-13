@@ -81,7 +81,7 @@ asks for it.
    fades — perceptually instant.
    Outside the editor "chosen" and "current" are a **wash**: the sidebar's
    active nav row / open note (`.nav-item[aria-current]`, with
-   `-hover`/`-active` steps), the notes/tags list keyboard highlight
+   `-hover`/`-active` steps), the notes list keyboard highlight
    (`.list-highlight`), the calendar's current day and week, and the settings
    pickers (`<Button selected>`) all use `--color-bg-selected` /
    `--color-text-selected` verbatim. Every one of
@@ -95,7 +95,7 @@ asks for it.
    never focusable (the editor container holds the keyboard, `tabIndex={-1}`),
    which is exactly why the ring is free there. Everywhere else "chosen" is a
    fill. Two deliberate exceptions, both surfaces a fill would destroy: a
-   note card in grid view and a tag pill take `--color-border-selected` (never
+   note card in grid view and a scope pill take `--color-border-selected` (never
    `--color-border-focus`, so highlight and focus stay tellable apart), and
    the accent swatch takes an INK ring, since an accent ring on an accent
    swatch would vanish.

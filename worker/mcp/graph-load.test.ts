@@ -106,7 +106,7 @@ const CALLS = (id: string) => [
 ]
 
 /** Everything `read_note` will read the whole note for. */
-const EVERYTHING = ["counts", "tags", "tasks", "headings", "unassigned"]
+const EVERYTHING = ["counts", "tasks", "headings", "unassigned"]
 
 /** The calls that take no id — the note list, in each of its shapes. */
 const LIST_CALLS = [
@@ -115,7 +115,6 @@ const LIST_CALLS = [
   { name: "list_notes", args: { limit: 1, cursor: "1" } },
   { name: "list_notes", args: { limit: 2, cursor: "3" } },
   { name: "list_notes", args: { type: "note" } },
-  { name: "list_notes", args: { tag: "deep" } },
   { name: "list_notes", args: { limit: 1000 } },
 ]
 
@@ -385,7 +384,7 @@ describe("read_note reads what was asked for, not what the note is", () => {
 
   it("charges for `include`, which is why it is asked for", async () => {
     const bounded = await cost(BIG, { depth: 1 })
-    for (const part of ["counts", "tags", "tasks", "headings", "unassigned"]) {
+    for (const part of ["counts", "tasks", "headings", "unassigned"]) {
       expect(await cost(BIG, { depth: 1, include: [part] }), part).toBeGreaterThan(bounded * 5)
     }
     // And the whole-note read it forces is the note, not the corpus.
@@ -479,7 +478,7 @@ describe("what a tool call costs", () => {
   it("reads one note for `read_note`, whatever the depth", async () => {
     const shallow = await compare(grantOf(), "read_note", { note_id: "blk_note10" })
     const whole = await compare(grantOf(), "read_note", { note_id: "blk_note10", depth: 0 })
-    // `blockCount` and a note's tags are whole-note facts, so `depth` bounds
+    // `blockCount` and a note's tasks are whole-note facts, so `depth` bounds
     // what comes BACK rather than what is read. Both are one note of twenty.
     expect(shallow.targeted).toEqual(whole.targeted)
     expect(whole.targeted).toBeLessThan(perNote() * 2)
@@ -500,15 +499,10 @@ describe("what a tool call costs", () => {
     expect(five.targeted).toBeLessThan(perNote() * 8)
   })
 
-  it("leaves the corpus-wide reads corpus-wide, and says so", async () => {
-    // `search` looks at every block's text, `list_tags` at every note's tags,
-    // and a `tag` filter on `list_notes` is the same question. None can be
-    // answered from a slice, so none pretends to be.
-    const wide: [string, Record<string, unknown>][] = [
-      ["search", { query: "detail" }],
-      ["list_tags", {}],
-      ["list_notes", { tag: "note4" }],
-    ]
+  it("leaves the corpus-wide read corpus-wide, and says so", async () => {
+    // `search` looks at every block's text. It cannot be answered from a
+    // slice, so it does not pretend to be.
+    const wide: [string, Record<string, unknown>][] = [["search", { query: "detail" }]]
     for (const [name, args] of wide) {
       const measured = await compare(grantOf(), name, args)
       expect(measured.targeted, name).toBe(measured.snapshot)

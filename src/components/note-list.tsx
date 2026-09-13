@@ -5,11 +5,8 @@ import { useDebounce } from "use-debounce"
 import type { ResultRoot } from "../hooks/results-doc"
 import { useSearchResults } from "../hooks/search-results"
 import { parseQuery, removeQualifier } from "../utils/search"
-import { formatNumber, pluralize } from "../utils/pluralize"
+import { pluralize } from "../utils/pluralize"
 import { Button } from "./button"
-import { DropdownMenu } from "./dropdown-menu"
-import { TagFillIcon12, TagIcon12, TagIcon16, XIcon12 } from "./icons"
-import { PillButton } from "./pill-button"
 import { ResultsEditor } from "./results-editor"
 import { ScopePill } from "./scope-pill"
 import { SearchInput } from "./search-input"
@@ -40,7 +37,7 @@ export function NoteList({
 
   // A query with text (or a block-scoped `type:`) resolves to BLOCKS: the
   // results are the matching blocks themselves, at any depth. A query that
-  // only names notes (`tag:`, a date, nothing at all) keeps the note listing —
+  // only names notes (a date, a property, nothing at all) keeps the note listing —
   // see `resolvesToBlocks`.
   const fullQuery = `${baseQuery} ${deferredQuery}`.trim()
   const { mode, hits, notes: noteResults } = useSearchResults(fullQuery)
@@ -96,46 +93,9 @@ export function NoteList({
     }
   }, [bottomInView, loadMore])
 
-  const numVisibleTags = 4
-
-  const sortedTagFrequencies = React.useMemo(() => {
-    const frequencyMap = new Map<string, number>()
-
-    const tags = noteResults.flatMap((result) => result.tags)
-
-    for (const tag of tags) {
-      frequencyMap.set(tag, (frequencyMap.get(tag) ?? 0) + 1)
-    }
-
-    const frequencyEntries = [...frequencyMap.entries()]
-
-    return (
-      frequencyEntries
-        // Filter out tags that every note has
-        .filter(([, frequency]) => frequency < noteResults.length)
-        // Filter out parent tags if the all the childs tag has the same frequency
-        .filter(([tag, frequency]) => {
-          const childTags = frequencyEntries.filter(
-            ([otherTag]) => otherTag !== tag && otherTag.startsWith(tag),
-          )
-
-          if (childTags.length === 0) return true
-
-          return !childTags.every(([, otherFrequency]) => otherFrequency === frequency)
-        })
-        .sort((a, b) => {
-          return b[1] - a[1]
-        })
-    )
-  }, [noteResults])
-
   const filters = React.useMemo(() => {
     return parseQuery(query).filters
   }, [query])
-
-  const tagFilters = React.useMemo(() => {
-    return filters.filter((filter) => filter.key === "tag")
-  }, [filters])
 
   // `in:` scopes — shown as pills naming the note (or block), since the
   // query carries an id.
@@ -164,10 +124,7 @@ export function NoteList({
               }}
             />
           </div>
-          {sortedTagFrequencies.length > 0 ||
-          tagFilters.length > 0 ||
-          scopeFilters.length > 0 ||
-          deferredQuery ? (
+          {scopeFilters.length > 0 || deferredQuery ? (
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap gap-2 empty:hidden">
                 {scopeFilters.flatMap((filter) =>
@@ -182,81 +139,6 @@ export function NoteList({
                     />
                   )),
                 )}
-                {sortedTagFrequencies.length > 0 || tagFilters.length > 0 ? (
-                  <>
-                    {tagFilters.map((filter) => (
-                      <PillButton
-                        key={filter.values.join(",")}
-                        data-tag={filter.values.join(",")}
-                        variant="primary"
-                        onClick={() => {
-                          // Remove the tag qualifier from the query
-                          onQueryChange(removeQualifier(query, filter))
-
-                          // TODO: Move focus
-                        }}
-                      >
-                        <TagFillIcon12 />
-                        {filter.exclude ? <span className="italic">not</span> : null}
-                        {filter.values.map((value, index) => (
-                          <React.Fragment key={value}>
-                            {index > 0 ? <span>or</span> : null}
-                            <span key={value}>{value}</span>
-                          </React.Fragment>
-                        ))}
-                        <XIcon12 className="-mr-0.5" />
-                      </PillButton>
-                    ))}
-                    {sortedTagFrequencies.slice(0, numVisibleTags).map(([tag, frequency]) => (
-                      <PillButton
-                        key={tag}
-                        data-tag={tag}
-                        onClick={(event) => {
-                          const qualifier = `${event.shiftKey ? "-" : ""}tag:${tag}`
-
-                          onQueryChange(query ? `${query} ${qualifier}` : qualifier)
-
-                          // Move focus
-                          setTimeout(() => {
-                            document.querySelector<HTMLElement>(`[data-tag="${tag}"]`)?.focus()
-                          })
-                        }}
-                      >
-                        <TagIcon12 className="text-text-secondary" />
-                        {tag}
-                        <span className="text-text-secondary">{formatNumber(frequency)}</span>
-                      </PillButton>
-                    ))}
-                    {sortedTagFrequencies.length > numVisibleTags ? (
-                      <DropdownMenu>
-                        <DropdownMenu.Trigger
-                          render={
-                            <PillButton variant="dashed" className="data-[popup-open]:bg-bg-hover">
-                              More…
-                            </PillButton>
-                          }
-                        />
-                        <DropdownMenu.Content width={300}>
-                          {sortedTagFrequencies.slice(numVisibleTags).map(([tag, frequency]) => (
-                            <DropdownMenu.Item
-                              key={tag}
-                              icon={<TagIcon16 />}
-                              trailingVisual={
-                                <span className="text-text-secondary">{frequency}</span>
-                              }
-                              onClick={(event) => {
-                                const qualifier = `${event.shiftKey ? "-" : ""}tag:${tag}`
-                                onQueryChange(query ? `${query} ${qualifier}` : qualifier)
-                              }}
-                            >
-                              {tag}
-                            </DropdownMenu.Item>
-                          ))}
-                        </DropdownMenu.Content>
-                      </DropdownMenu>
-                    ) : null}
-                  </>
-                ) : null}
               </div>
               {deferredQuery ? (
                 <div data-testid="result-count" className="text-sm text-text-secondary leading-4">

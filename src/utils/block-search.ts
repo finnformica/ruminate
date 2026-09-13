@@ -23,7 +23,7 @@ import { compareNotes, matchesNoteScope, testNoteFilters } from "./search-notes"
  * Query semantics (all composable with the existing `parseQuery` vocabulary):
  * - `type:` filters with block-type values (the table below) match the block
  *   itself; `in:` scopes to what is downstream of a note or a block (see
- *   `testScopeFilter`); every other qualifier (`tag:`, `date:`, a property,
+ *   `testScopeFilter`); every other qualifier (`date:`, a property,
  *   `has:`/`no:`, …) filters by the containing note, exactly as note search
  *   does.
  * - Fuzzy text matches the block's own text (fast-fuzzy, same threshold as

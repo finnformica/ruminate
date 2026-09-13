@@ -1,12 +1,12 @@
 import { searchTypeOptions } from "../blocks/registry"
 /**
- * **Value suggestions for qualifiers.** Typing `type:`, `in:`, `tag:` — any
+ * **Value suggestions for qualifiers.** Typing `type:`, `in:`, `has:` — any
  * key whose values come from a known set — opens a picker over the search
  * box listing what can go there (`src/components/qualifier-suggestions.tsx`).
  * This module is the DOM-free half: read the qualifier under the caret, list
  * and filter the static vocabularies, and splice a picked value back into
- * the query. The corpus-backed sets (notes for `in:`, tags for `tag:`) are
- * supplied by the hook, which has the atoms.
+ * the query. The corpus-backed set (notes for `in:`) is supplied by the
+ * hook, which has the atoms.
  */
 
 /** The qualifier being typed at the caret. */
@@ -130,23 +130,20 @@ export const STATIC_QUALIFIER_OPTIONS: Readonly<Record<string, readonly Qualifie
     { value: "template", description: "notes: templates" },
   ],
   has: [
-    { value: "tags", description: "with any tag" },
     { value: "dates", description: "with any date" },
     { value: "tasks", description: "with an open task" },
     { value: "title", description: "with a title" },
   ],
   no: [
-    { value: "tags", description: "without a tag" },
     { value: "dates", description: "without a date" },
     { value: "tasks", description: "without an open task" },
     { value: "title", description: "without a title" },
   ],
 }
 
-/** The keys the picker opens for: the static sets above plus the two the
- * corpus supplies (`in:` — notes; `tag:` — tags). */
+/** The keys the picker opens for: the static sets above plus the one the
+ * corpus supplies (`in:` — notes). */
 export const SUGGESTED_QUALIFIER_KEYS: readonly string[] = [
   ...Object.keys(STATIC_QUALIFIER_OPTIONS),
   "in",
-  "tag",
 ]

@@ -22,15 +22,14 @@ reference, complete with a filter box.
 `g` pressed outside any text field arms a short (~1.5s) chord window; the next
 key navigates. The chords work from the block editor's select mode too.
 
-| Action                              | Shortcut                                              |
-| ----------------------------------- | ----------------------------------------------------- |
-| Go to today's daily note            | <kbd>g</kbd> then <kbd>d</kbd>                        |
-| Go to the notes list                | <kbd>g</kbd> then <kbd>n</kbd>                        |
-| Go to tags                          | <kbd>g</kbd> then <kbd>t</kbd>                        |
-| Go to settings                      | <kbd>g</kbd> then <kbd>s</kbd>                        |
-| Focus the search (notes list, tags) | <kbd>/</kbd>                                          |
-| `i`                                 | Focus the editor, restoring the last selected block   |
-| Back / forward (browser history)    | <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> |
+| Action                           | Shortcut                                              |
+| -------------------------------- | ----------------------------------------------------- |
+| Go to today's daily note         | <kbd>g</kbd> then <kbd>d</kbd>                        |
+| Go to the notes list             | <kbd>g</kbd> then <kbd>n</kbd>                        |
+| Go to settings                   | <kbd>g</kbd> then <kbd>s</kbd>                        |
+| Focus the search (notes list)    | <kbd>/</kbd>                                          |
+| `i`                              | Focus the editor, restoring the last selected block   |
+| Back / forward (browser history) | <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> |
 
 ### Outline palette
 

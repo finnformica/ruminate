@@ -44,7 +44,7 @@ import {
  * **How the UI is fed.** This module publishes the store's indexed rows as
  * `databaseGraphAtom`, served as `graphSnapshotAtom` whenever a user is
  * signed in (see global-state.ts). Everything above reads that graph: the
- * note page walks its doc out of it, and note metadata, tags and search are
+ * note page walks its doc out of it, and note metadata and search are
  * derived from it (`src/data/note-meta.ts`).
  *
  * **Conflicts are last-writer-wins per row**, decided by push order at the

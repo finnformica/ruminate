@@ -339,12 +339,6 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
     group: "Navigation",
   },
   {
-    combos: ["g t"],
-    scope: "global",
-    description: "Go to tags (press g, then t)",
-    group: "Navigation",
-  },
-  {
     combos: ["g s"],
     scope: "global",
     description: "Go to settings (press g, then s)",
@@ -353,7 +347,7 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   {
     combos: [APP_SHORTCUTS.focusSearch],
     scope: "global",
-    description: "Focus the search input (notes list, tags)",
+    description: "Focus the search input (notes list)",
     group: "Navigation",
   },
   {
@@ -373,41 +367,6 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
     scope: "global",
     description: "Forward (browser history)",
     group: "Navigation",
-  },
-]
-
-// Linear-style keys on the tags page (see src/hooks/list-keyboard-nav.ts). The
-// notes list is the block editor now, with the editor's keys.
-const LIST_ENTRIES: Shortcut[] = [
-  {
-    combos: ["ArrowUp", "ArrowDown"],
-    scope: "global",
-    description: "Move the list highlight (tags)",
-    group: "Lists",
-  },
-  {
-    combos: ["ArrowDown"],
-    scope: "global",
-    description: "In the search input: highlight the first result",
-    group: "Lists",
-  },
-  {
-    combos: ["Enter"],
-    scope: "global",
-    description: "Open the highlighted tag",
-    group: "Lists",
-  },
-  {
-    combos: ["Escape"],
-    scope: "global",
-    description: "Clear the highlight, back to the search input",
-    group: "Lists",
-  },
-  {
-    combos: ["Home", "End"],
-    scope: "global",
-    description: "Jump to the first / last item",
-    group: "Lists",
   },
 ]
 
@@ -526,7 +485,6 @@ const TITLE_ENTRIES: Shortcut[] = [
 export const GROUP_ORDER = [
   "Global",
   "Navigation",
-  "Lists",
   "Search results",
   "Select mode",
   "Edit mode",
@@ -542,7 +500,6 @@ export const GROUP_ORDER = [
 export const SHORTCUTS: Shortcut[] = [
   ...GLOBAL_ENTRIES,
   ...NAVIGATION_ENTRIES,
-  ...LIST_ENTRIES,
   ...SEARCH_RESULT_ENTRIES,
   ...editorEntries(),
   ...CLIPBOARD_HISTORY_ENTRIES,

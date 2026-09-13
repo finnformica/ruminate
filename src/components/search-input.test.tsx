@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { Provider, createStore } from "jotai"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-// The picker reads the corpus (notes, tags) from the global-state atoms,
+// The picker reads the corpus (notes) from the global-state atoms,
 // which sit on the app's state machine — mocked here as plain atoms.
 vi.mock("../global-state", async () => {
   const { atom } = await import("jotai")
@@ -16,17 +16,12 @@ vi.mock("../global-state", async () => {
     pinned: false,
     updatedAt: null,
     dates: [],
-    tags: [],
     tasks: [],
     headings: [],
     text: "",
   })
   return {
     sortedNotesAtom: atom([note("n1", "Groceries"), note("n2", "Reading list")]),
-    sortedTagEntriesAtom: atom([
-      ["home", ["n1"]],
-      ["work", ["n1", "n2"]],
-    ]),
   }
 })
 
@@ -82,17 +77,6 @@ describe("search input suggestions", () => {
     expect(options[0].textContent).toContain("Reading list")
   })
 
-  it("offers the tags for `tag:`, with their counts, and Tab picks", async () => {
-    const { input, onChange } = renderInput()
-    type(input, "milk tag:w")
-    const list = await findPicker()
-    expect(list.textContent).toContain("work")
-    expect(list.textContent).toContain("2")
-    expect(list.textContent).not.toContain("home")
-    fireEvent.keyDown(input, { key: "Tab" })
-    expect(onChange).toHaveBeenLastCalledWith("milk tag:work ")
-  })
-
   it("clicking a row picks it", async () => {
     const { input, onChange } = renderInput()
     type(input, "type:")
@@ -108,7 +92,7 @@ describe("search input suggestions", () => {
     fireEvent.keyDown(input, { key: "Escape" })
     expect(picker()).toBeNull()
     // A different qualifier opens afresh.
-    type(input, "tag:")
+    type(input, "in:")
     expect(await findPicker()).not.toBeNull()
     fireEvent.blur(input)
     expect(picker()).toBeNull()

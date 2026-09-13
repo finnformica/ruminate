@@ -81,7 +81,7 @@ export interface ChangeHint {
 
 export interface BlockDoc {
   /**
-   * The note's props — its metadata (`title`, `pinned`, `tags`, `updated_at`…)
+   * The note's props — its metadata (`title`, `pinned`, `updated_at`…)
    * as the entries the note node holds — or null for a doc that is not a
    * note's (a clipboard fragment, a subtree, anything parsed from text).
    * There is no frontmatter: `parse` drops a leading YAML block and
