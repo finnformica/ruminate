@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { useAtomValue } from "jotai"
+import { useAtomValue, useSetAtom } from "jotai"
 import React, { useEffect, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import useResizeObserver from "use-resize-observer"
@@ -19,7 +19,7 @@ import { PageLayout } from "../components/page-layout"
 import { isSyncingAtom } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
-import { isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
+import { isDatabaseModeAtom, isSignedOutAtom, touchNoteAtom } from "../global-state"
 import { useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
 import { useNoteDoc } from "../hooks/note-doc"
 import { Width, fontSchema, widthSchema } from "../schema"
@@ -110,15 +110,28 @@ function NotePage() {
     noteId,
     defaultDoc,
   })
+  // The note is TOUCHED — for the palette's Recent list (`touchNoteAtom`,
+  // coalesced there) — when it is opened, and on any interaction with its
+  // editor: a pointer or a key in it (a block focused, selected, folded,
+  // typed into) is caught here on its way in, and an edit lands through
+  // `setEditorDoc`. One seam, no calls inside the editor.
+  const touchNote = useSetAtom(touchNoteAtom)
+  useEffect(() => {
+    if (noteId) touchNote(noteId)
+  }, [noteId, touchNote])
+  const touch = React.useCallback(() => {
+    if (noteId) touchNote(noteId)
+  }, [noteId, touchNote])
   const setEditorDoc = React.useCallback(
     (next: BlockDoc, hint?: ChangeHint) => {
       if (!isSignedOut) {
         setPendingSave(true)
         window.setTimeout(() => setPendingSave(false), 4000)
       }
+      touch()
       setDoc(next, hint)
     },
-    [isSignedOut, setDoc],
+    [isSignedOut, setDoc, touch],
   )
   const setNoteProps = useSetNoteProps()
 
@@ -254,7 +267,13 @@ function NotePage() {
             ) : null}
 
             {useBlockEditor ? (
-              <div className="flex flex-col gap-3">
+              // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+              <div
+                className="flex flex-col gap-3"
+                onPointerDownCapture={touch}
+                onKeyDownCapture={touch}
+                onFocusCapture={touch}
+              >
                 {/* While zoomed, the breadcrumb (inside the editor) carries the
                     note title as its first crumb — hide the standalone title to
                     avoid doubling it. */}

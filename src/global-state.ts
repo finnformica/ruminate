@@ -2,6 +2,12 @@ import { Searcher } from "fast-fuzzy"
 import { atom } from "jotai"
 import { atomWithStorage } from "jotai/utils"
 import { GitHubUser, NoteId, githubUserSchema } from "./schema"
+import {
+  loadRecentTouches,
+  saveRecentTouches,
+  touchRecent,
+  type RecentTouch,
+} from "./utils/recent-notes"
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
 import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
@@ -341,6 +347,27 @@ export const themeAtom = atomWithStorage<Theme>("theme", "system")
 export const sidebarAtom = atomWithStorage<"expanded" | "collapsed">("sidebar", "expanded")
 
 export const isHelpPanelOpenAtom = atomWithStorage<boolean>("help-panel", false)
+
+/**
+ * The notes recently TOUCHED on this device — opened, a block in them
+ * focused, selected, folded or edited — at most five, a timestamp each
+ * (`src/utils/recent-notes.ts`), under the one storage key, overwritten
+ * whole. Read once at load; written through `touchNoteAtom`, which
+ * coalesces (a note already first is bumped at most once a second) and
+ * writes only when the list changed. The palette merges these with the
+ * graph's `updatedAt` for its **Recent** list (`recentNotes`).
+ */
+export const recentTouchesAtom = atom<readonly RecentTouch[]>(
+  loadRecentTouches(typeof localStorage === "undefined" ? null : localStorage),
+)
+
+export const touchNoteAtom = atom(null, (get, set, noteId: NoteId, now: number = Date.now()) => {
+  const touches = get(recentTouchesAtom)
+  const next = touchRecent(touches, noteId, now)
+  if (next === touches) return
+  set(recentTouchesAtom, next)
+  saveRecentTouches(typeof localStorage === "undefined" ? null : localStorage, next)
+})
 
 /**
  * The live outline (heading blocks) of the note open in the block editor,

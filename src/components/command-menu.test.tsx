@@ -84,6 +84,7 @@ vi.mock("../global-state", async (importOriginal) => {
     isDatabaseModeAtom: atom(false),
     notesAtom: atom(new Map()),
     sortedNotesAtom: atom([]),
+    recentTouchesAtom: atom([]),
     noteOutlineAtom: atom(null),
     blockRevealAtom: atom(null),
     // The block index only serves the scope pill's label here.
@@ -91,7 +92,12 @@ vi.mock("../global-state", async (importOriginal) => {
   }
 })
 
-import { blockRevealAtom, noteOutlineAtom, sortedNotesAtom } from "../global-state"
+import {
+  blockRevealAtom,
+  noteOutlineAtom,
+  recentTouchesAtom,
+  sortedNotesAtom,
+} from "../global-state"
 import type { BlockRevealRequest } from "../utils/note-outline"
 import { CommandMenu, isCommandMenuOpenAtom } from "./command-menu"
 
@@ -124,12 +130,20 @@ function renderMenu({
   outline = OUTLINE,
   open = false,
   notes = [],
-}: { outline?: typeof OUTLINE | null; open?: boolean; notes?: unknown[] } = {}) {
+  touches = [],
+}: {
+  outline?: typeof OUTLINE | null
+  open?: boolean
+  notes?: unknown[]
+  touches?: { id: string; at: number }[]
+} = {}) {
   const store = createStore()
   store.set(noteOutlineAtom, outline)
-  // The corpus's notes, most recent first (the palette's recents are a
-  // slice of them). The atom is the mock's plain, writable one.
+  // The corpus's notes, and the touches this device remembers: what the
+  // palette's Recent list is merged from. The atoms are the mock's plain,
+  // writable ones.
   store.set(sortedNotesAtom as never, notes as never)
+  store.set(recentTouchesAtom as never, touches as never)
   if (open) store.set(isCommandMenuOpenAtom, true)
   render(
     <Provider store={store}>
@@ -584,20 +598,64 @@ describe("note results", () => {
     )
   })
 
-  it("with nothing typed, lists the recent notes — at most five, most recent first", () => {
-    const recent = ["journal", "research", "n3", "n4", "n5", "n6"].map(makeNote)
-    renderMenu({ open: true, notes: recent })
+  /** A note with when it was last edited. */
+  const edited = (id: string, updatedAt: number) => ({ ...makeNote(id), updatedAt })
+
+  it("with nothing typed, lists the recently touched notes — edits and opens merged, most recent first", () => {
+    // `research` was edited last; `journal` was opened on this device more
+    // recently still, so it leads. Nothing is highlighted, and no count.
+    renderMenu({
+      open: true,
+      notes: [edited("research", 5000), edited("journal", 1000)],
+      touches: [{ id: "journal", at: 9000 }],
+    })
     expect(screen.getByText("Recent")).toBeTruthy()
-    // The rows are walked out of the corpus, which holds two of the six;
-    // both are within the first five, in the order given.
     expect(rowIds()).toEqual(["journal", "research"])
     expect(screen.queryByTestId("result-count")).toBeNull()
+    expect(document.querySelector('[cmdk-item][aria-selected="true"]')).toBeNull()
   })
 
-  it("a note beyond the fifth is not recent", () => {
-    const recent = ["n1", "n2", "n3", "n4", "journal", "research"].map(makeNote)
-    renderMenu({ open: true, notes: recent })
+  it("a note beyond the fifth most recently touched is not recent", () => {
+    // Five notes newer than `research` (the rows are walked out of the
+    // corpus, which holds `research` and `journal` only).
+    const notes = [
+      ...["n1", "n2", "n3", "n4"].map((id, i) => edited(id, 9000 - i)),
+      edited("journal", 8000),
+      edited("research", 100),
+    ]
+    renderMenu({ open: true, notes })
     expect(rowIds()).toEqual(["journal"])
+    // A touch brings it back in, at the top — and `journal`, now sixth,
+    // drops out.
+    cleanup()
+    renderMenu({ open: true, notes, touches: [{ id: "research", at: 10000 }] })
+    expect(rowIds()).toEqual(["research"])
+  })
+
+  it("Recent gives way to the results the moment a query is typed", async () => {
+    mocks.results = {
+      mode: "blocks",
+      hits: [TODO_SHIP],
+      notes: [JOURNAL],
+      titleMatches: [],
+      rows: rowsOf([TODO_SHIP]),
+    }
+    renderMenu({ open: true, notes: [edited("research", 5000)] })
+    expect(screen.getByText("Recent")).toBeTruthy()
+    expect(rowIds()).toEqual(["research"])
+    const input = commandsInput()
+    fireEvent.change(input, { target: { value: "ship" } })
+    await waitFor(() => {
+      expect(screen.queryByText("Recent")).toBeNull()
+    })
+    expect(screen.getByText("Results")).toBeTruthy()
+    expect(rowIds()).toEqual(["blk_ship"])
+    // And comes back when the query is cleared.
+    fireEvent.change(input, { target: { value: "" } })
+    await waitFor(() => {
+      expect(screen.getByText("Recent")).toBeTruthy()
+    })
+    expect(rowIds()).toEqual(["research"])
   })
 
   it("expands a note in the palette to its top-level blocks", async () => {

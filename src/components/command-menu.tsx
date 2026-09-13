@@ -10,8 +10,10 @@ import {
   blockRevealAtom,
   graphSnapshotAtom,
   noteOutlineAtom,
+  recentTouchesAtom,
   sortedNotesAtom,
 } from "../global-state"
+import { recentNotes as recentTouched } from "../utils/recent-notes"
 import { useCreateNote, useNoteById } from "../hooks/note"
 import { useSearchResults } from "../hooks/search-results"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/registry"
@@ -65,11 +67,6 @@ function hasHighlightedItem(root: HTMLElement): boolean {
 /** How many result rows the palette lists. */
 const NUM_VISIBLE_RESULTS = 6
 
-/** How many notes the palette offers with nothing typed: the most recently
- * edited or created, read off the graph (`sortedNotesAtom` — pinned notes
- * first, then by `updatedAt`), so nothing is stored anywhere. */
-const RECENT_NOTES = 5
-
 /** The keys cmdk walks its items with (plus ctrl+n / ctrl+p). */
 const NAVIGATION_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End"])
 
@@ -77,10 +74,12 @@ export function CommandMenu() {
   const navigate = useNavigate()
   const createNote = useCreateNote()
   const jotaiStore = useStore()
-  // With nothing typed: the recent notes — pinned ones first, then the most
-  // recently edited or created, to `RECENT_NOTES` in all.
+  // With nothing typed: the notes most recently TOUCHED — edited or created
+  // (the graph's `updatedAt`) merged with what was opened, focused, folded
+  // or selected on this device (`recentTouchesAtom`) — at most five.
   const sortedNotes = useAtomValue(sortedNotesAtom)
-  const recentNotes = useMemo(() => sortedNotes.slice(0, RECENT_NOTES), [sortedNotes])
+  const touches = useAtomValue(recentTouchesAtom)
+  const recentNotes = useMemo(() => recentTouched(touches, sortedNotes), [touches, sortedNotes])
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
 
   // Get the current note if we're on a note page.
