@@ -1,0 +1,33 @@
+-- Migration number: 0009    2026-09-12
+--
+-- What a token has spent today: the daily half of the MCP rate limit
+-- (docs/mcp-rate-limiting.md).
+--
+-- The limit is per TOKEN, because the token is the thing a person minted, can
+-- revoke, and can reason about — and it is already read on every request, so
+-- keying the count by it costs no extra lookup.
+--
+-- Two columns rather than a usage table, and that is the whole design:
+--
+--   * `calls_day` is the UTC day number (ms epoch / 86,400,000). Storing the
+--     day beside the count is what makes the reset free — there is no cron, no
+--     expiry sweep, and no row to clean up. A call on a new day sees a
+--     different day number and starts again at 1.
+--   * `calls_today` is the count within that day.
+--
+-- Both live on `mcp_tokens` so that counting is an UPDATE of a row the request
+-- has already located by hash, rather than a second table to insert into. The
+-- count is incremented in ONE statement that also refuses to increment past
+-- the cap (`spendDailyCall`, worker/mcp/rate-limit.ts), so a token that has
+-- spent its day stops writing rows entirely: the cost of the counter is
+-- bounded by the limit the counter enforces.
+--
+-- The burst half of the limit is not here. It is Cloudflare's rate-limiting
+-- binding, which costs no database round trip at all and so is the right place
+-- for the check that a runaway loop trips first.
+--
+-- Control-plane, like 0003 and 0007: D1 only, not part of the ladder the
+-- browser store applies (src/data/corpus-schema.ts).
+
+ALTER TABLE mcp_tokens ADD COLUMN calls_day INTEGER;
+ALTER TABLE mcp_tokens ADD COLUMN calls_today INTEGER NOT NULL DEFAULT 0;

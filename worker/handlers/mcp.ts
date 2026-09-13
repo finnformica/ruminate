@@ -43,8 +43,9 @@ import {
   type JsonRpcId,
   type ProtocolError,
 } from "../mcp/protocol"
+import { checkRateLimit, type RateRefusal } from "../mcp/rate-limit"
 import { callTool, toolsFor } from "../mcp/tools"
-import { findGrant, tenantIsActive, touchToken } from "../mcp/tokens"
+import { findGrant, tenantIsActive } from "../mcp/tokens"
 
 /** The MCP endpoint's path. */
 export const MCP_PATH = "/mcp"
@@ -191,6 +192,14 @@ export async function mcp(request: Request, env: Env): Promise<Response> {
     )
   }
 
+  // The rate limit, BEFORE the work and before the tenant handle exists: a
+  // refusal must be cheaper than an answer, or a runaway loop costs as much
+  // refused as it would have allowed (docs/mcp-rate-limiting.md). The call is
+  // counted here rather than after dispatch for the same reason — a limiter
+  // that only counts successes is one an agent can escape by failing.
+  const spent = await checkRateLimit(control, grant.tokenId, env.MCP_BURST)
+  if (!spent.ok) return rateLimited(spent.refusal, message.id, message.method === "tools/call")
+
   // THE tenant-scoping invariant (see the header comment): the only input to
   // the tenant handle is the user id on the token row.
   const tenant = forTenant(corpusDriver(env), {
@@ -199,16 +208,34 @@ export async function mcp(request: Request, env: Env): Promise<Response> {
     name: null,
   })
 
-  const response = await dispatch(message.method, message.id, message.params, grant, tenant)
+  return dispatch(message.method, message.id, message.params, grant, tenant)
+}
 
-  // After the answer, never before: `last_used_at` is bookkeeping, and a
-  // failure to record it must not fail the call the user asked for.
-  try {
-    await touchToken(control, grant.tokenId)
-  } catch {
-    // Deliberately swallowed — see above.
+/**
+ * How a refused call is answered: `429` with `Retry-After`, and — for a TOOL
+ * call — a tool-execution error rather than a protocol one.
+ *
+ * That distinction is the whole point of the shape. A protocol error tells a
+ * model its call was malformed, which invites it to rephrase and try again;
+ * this call was perfectly well formed and rephrasing it will not help. A tool
+ * error is handed to the model as text it can act on, and the text says to
+ * wait and for how long. For the other methods there is no tool to fail, so
+ * the protocol error is the right one.
+ */
+function rateLimited(refusal: RateRefusal, id: JsonRpcId, isToolCall: boolean): Response {
+  const headers = { "Retry-After": String(refusal.retryAfter) }
+  if (isToolCall) {
+    return json(
+      result(id, { content: [{ type: "text", text: refusal.message }], isError: true }),
+      429,
+      headers,
+    )
   }
-  return response
+  return json(
+    errorBody({ status: 429, code: ERROR.invalidRequest, message: refusal.message, id }),
+    429,
+    headers,
+  )
 }
 
 /** `Authorization: Bearer <token>`, or null. */

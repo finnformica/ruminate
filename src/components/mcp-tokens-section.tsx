@@ -264,6 +264,9 @@ function TokenList({
                 {token.lastUsedAt === null
                   ? "Never used"
                   : `Last used ${formatUsedAt(token.lastUsedAt)}`}
+                {token.callsToday > 0
+                  ? ` · ${token.callsToday} of ${token.dailyLimit} calls today`
+                  : ""}
                 {token.expiresAt === null
                   ? ""
                   : ` · Expires ${new Date(token.expiresAt).toLocaleDateString()}`}

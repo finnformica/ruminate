@@ -26,6 +26,7 @@ import {
   type McpTokenRow,
   type Permission,
 } from "./grant"
+import { DAILY_LIMIT, dayOf } from "./rate-limit"
 
 /** The prefix every MCP token carries. Greppable in logs and secret
  * scanners, and it lets an obviously-wrong credential be refused before it
@@ -37,12 +38,6 @@ const TOKEN_BYTES = 32
 
 /** `id` column: a short public handle, distinct from the secret. */
 const ID_BYTES = 15
-
-/** Refresh `last_used_at` at most this often — an agent's tool loop must not
- * cost a control-plane WRITE per call (the same reasoning as
- * `LAST_SEEN_REFRESH_MS` in tenancy.ts, at a tighter interval because "when
- * did this token last act" is the question a user revoking one will ask). */
-const LAST_USED_REFRESH_MS = 60 * 60 * 1000
 
 const BASE64URL = (bytes: Uint8Array): string => {
   let binary = ""
@@ -70,6 +65,11 @@ export interface TokenSummary {
   expiresAt: number | null
   lastUsedAt: number | null
   revokedAt: number | null
+  /** Calls made today, and the cap — so a limit a person cannot see is not a
+   * limit a person cannot debug (docs/mcp-rate-limiting.md). Zero on any day
+   * the token has not been used: the counter carries the day it counted. */
+  callsToday: number
+  dailyLimit: number
 }
 
 export interface MintOptions {
@@ -124,18 +124,26 @@ export async function mintToken(
       expiresAt: options.expiresAt,
       lastUsedAt: null,
       revokedAt: null,
+      callsToday: 0,
+      dailyLimit: DAILY_LIMIT,
     },
   }
 }
 
 /** A user's tokens, newest first. Revoked ones are included — the audit
  * trail is the point of keeping the row. */
-export async function listTokens(driver: SqlDriver, userId: number): Promise<TokenSummary[]> {
+export async function listTokens(
+  driver: SqlDriver,
+  userId: number,
+  now: number = Date.now(),
+): Promise<TokenSummary[]> {
   const rows = await driver.exec(
-    "SELECT id, name, permissions, note_ids, created_at, expires_at, last_used_at, revoked_at " +
-      "FROM mcp_tokens WHERE user_id = ?1 ORDER BY created_at DESC",
+    "SELECT id, name, permissions, note_ids, created_at, expires_at, last_used_at, " +
+      "revoked_at, calls_day, calls_today FROM mcp_tokens WHERE user_id = ?1 " +
+      "ORDER BY created_at DESC",
     [userId],
   )
+  const today = dayOf(now)
   return rows.map((row) => ({
     id: String(row.id),
     name: String(row.name),
@@ -151,6 +159,9 @@ export async function listTokens(driver: SqlDriver, userId: number): Promise<Tok
       row.last_used_at === null || row.last_used_at === undefined ? null : Number(row.last_used_at),
     revokedAt:
       row.revoked_at === null || row.revoked_at === undefined ? null : Number(row.revoked_at),
+    // A count from an earlier day is spent history, not today's usage.
+    callsToday: Number(row.calls_day) === today ? Number(row.calls_today ?? 0) : 0,
+    dailyLimit: DAILY_LIMIT,
   }))
 }
 
@@ -214,22 +225,11 @@ export async function findGrant(
   return grantFromRow(row, now)
 }
 
-/**
- * Stamp `last_used_at`, at most hourly. Deliberately separate from
- * `findGrant`: authentication is a read, and a write on the read path is how
- * a busy agent turns a tool loop into a write-rate problem.
- */
-export async function touchToken(
-  driver: SqlDriver,
-  tokenId: string,
-  now: number = Date.now(),
-): Promise<void> {
-  await driver.exec(
-    "UPDATE mcp_tokens SET last_used_at = ?2 WHERE id = ?1 " +
-      "AND (last_used_at IS NULL OR last_used_at < ?3)",
-    [tokenId, now, now - LAST_USED_REFRESH_MS],
-  )
-}
+// `last_used_at` is not stamped here. It used to be, at most hourly, so that
+// an agent's tool loop did not cost a control-plane write per call. The rate
+// limiter now writes that row on every call anyway (`spendDailyCall`,
+// rate-limit.ts) — the count has to go somewhere — so the stamp rides along
+// with it and is exact rather than approximate.
 
 /**
  * Is this user still a tenant in good standing?

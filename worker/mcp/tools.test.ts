@@ -185,7 +185,10 @@ describe("list_notes", () => {
 
 describe("read_note", () => {
   it("returns the note's blocks as stored rows, not markdown", async () => {
-    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    const data = await run(harness, grantOf({}), "read_note", {
+      note_id: ALPHA,
+      include: ["counts"],
+    })
 
     expect(data).not.toHaveProperty("markdown")
     expect(data.title).toBe("Alpha")
@@ -218,12 +221,16 @@ describe("read_note", () => {
   })
 
   it("reads only the top levels when asked, and says where it stopped", async () => {
-    const shallow = await run(harness, grantOf({}), "read_note", { note_id: ALPHA, depth: 1 })
+    const shallow = await run(harness, grantOf({}), "read_note", {
+      note_id: ALPHA,
+      depth: 1,
+      include: ["counts"],
+    })
 
     expect(shallow.blocks).toHaveLength(1)
     expect(shallow.blocks[0].hasMoreChildren).toBe(true)
     expect(shallow.truncated).toBe(true)
-    // The full size is still reported, so the agent knows what it has not seen.
+    // Asked for, so still reported: the agent knows what it has not seen.
     expect(shallow.blockCount).toBe(3)
   })
 
@@ -231,7 +238,10 @@ describe("read_note", () => {
     // A note three levels deep, which the default depth cannot cover.
     await harness.seedNote(USER, { id: DEEP, markdown: "# One\n  - two\n    - three\n" })
 
-    const shallow = await run(harness, grantOf({}), "read_note", { note_id: DEEP })
+    const shallow = await run(harness, grantOf({}), "read_note", {
+      note_id: DEEP,
+      include: ["counts"],
+    })
     expect(shallow.blocks).toHaveLength(2)
     expect(shallow.truncated).toBe(true)
     expect(shallow.blockCount).toBe(3)
@@ -343,6 +353,187 @@ describe("search and tags", () => {
 })
 
 // -----------------------------------------------------------------------------
+// Bounds
+// -----------------------------------------------------------------------------
+
+/**
+ * Nothing this server returns is unbounded, and nothing it cuts is cut
+ * silently: every collection has a `limit`, and every one an agent could
+ * legitimately want the rest of has a `cursor` — the same opaque digit-string
+ * offset on every tool, refused if it was not issued by a previous call. The
+ * one place a cursor would make no sense (a point read's embedded id lists)
+ * says which tool to call instead.
+ */
+describe("every collection is bounded", () => {
+  /** A block with more children than any one response will embed. */
+  async function wideBlock(count: number): Promise<string> {
+    const blocks = Array.from({ length: count }, (_, at) => ({ text: `row ${at}` }))
+    await run(harness, grantOf({}), "create_blocks", { parent_id: BETA, blocks })
+    return BETA
+  }
+
+  it("pages `search` with a cursor", async () => {
+    const grant = grantOf({})
+    const first = await run(harness, grant, "search", { query: "a", limit: 1 })
+    expect(first.hits).toHaveLength(1)
+    expect(first.truncated).toBe(true)
+    expect(first.nextCursor).toBe("1")
+
+    const second = await run(harness, grant, "search", {
+      query: "a",
+      limit: 1,
+      cursor: first.nextCursor,
+    })
+    expect(second.hits[0].id).not.toBe(first.hits[0].id)
+  })
+
+  it("pages `list_children` with a cursor rather than cutting with no recourse", async () => {
+    const grant = grantOf({})
+    const first = await run(harness, grant, "list_children", {
+      block_id: ALPHA,
+      depth: 2,
+      limit: 1,
+    })
+    expect(first.children).toHaveLength(1)
+    expect(first.total).toBe(3)
+    expect(first.truncated).toBe(true)
+    expect(first.nextCursor).toBe("1")
+
+    const rest = await run(harness, grant, "list_children", {
+      block_id: ALPHA,
+      depth: 2,
+      limit: 50,
+      cursor: first.nextCursor,
+    })
+    expect(rest.children).toHaveLength(2)
+    expect(rest.nextCursor).toBeNull()
+  })
+
+  it("bounds and pages `list_parents`", async () => {
+    const grant = grantOf({})
+    const heading = (await run(harness, grant, "list_children", { block_id: ALPHA })).children[0]
+    const data = await run(harness, grant, "list_parents", { block_id: heading.id, limit: 1 })
+    expect(data.parents).toHaveLength(1)
+    expect(data.parentCount).toBe(1)
+    expect(data.noteCount).toBe(1)
+    expect(data.nextCursor).toBeNull()
+  })
+
+  it("bounds and pages `list_tags`", async () => {
+    const grant = grantOf({})
+    const first = await run(harness, grant, "list_tags", { limit: 1 })
+    expect(first.tags).toHaveLength(1)
+    expect(first.total).toBe(2)
+    expect(first.nextCursor).toBe("1")
+
+    const second = await run(harness, grant, "list_tags", { limit: 1, cursor: first.nextCursor })
+    expect(second.tags[0].tag).not.toBe(first.tags[0].tag)
+    expect(second.nextCursor).toBeNull()
+  })
+
+  it("caps the ids a `get_block` embeds, and says where the rest are", async () => {
+    // A point read has no cursor, so it must steer instead of cutting
+    // silently: the counts are true and the text names the tool that pages.
+    const id = await wideBlock(60)
+    const called = await callTool(grantOf({}), harness.tenant(USER), "get_block", { block_id: id })
+    if (called.kind !== "result" || !called.outcome.ok) throw new Error("get_block failed")
+    const data = called.outcome.data as any
+
+    expect(data.childIds).toHaveLength(50)
+    expect(data.childCount).toBe(61)
+    expect(data.hasMoreChildren).toBe(true)
+    expect(called.outcome.text).toMatch(/list_children/)
+
+    // And the tool it points at really does return the rest.
+    const rest = await run(harness, grantOf({}), "list_children", {
+      block_id: id,
+      limit: 200,
+      cursor: "50",
+    })
+    expect(rest.children).toHaveLength(11)
+  })
+
+  it("bounds `read_note` by count as well as by depth", async () => {
+    // `depth` is a structural bound: a note 500 rows WIDE is still enormous
+    // one level down, so there is a cardinal bound too — and `blockCount`
+    // keeps reporting the note's true size through both.
+    const id = await wideBlock(60)
+    const first = await run(harness, grantOf({}), "read_note", {
+      note_id: id,
+      depth: 0,
+      limit: 10,
+      include: ["counts"],
+    })
+    expect(first.blocks).toHaveLength(10)
+    expect(first.blockCount).toBe(61)
+    expect(first.truncated).toBe(true)
+    expect(first.nextCursor).toBe("10")
+
+    const later = await run(harness, grantOf({}), "read_note", {
+      note_id: id,
+      depth: 0,
+      limit: 200,
+      cursor: first.nextCursor,
+    })
+    expect(later.blocks).toHaveLength(51)
+    expect(later.nextCursor).toBeNull()
+  })
+
+  it("pages a note's Unassigned section in the same sequence as its outline", async () => {
+    await orphanAlphaOutline()
+    const basket = { include: ["unassigned"] }
+    const whole = await run(harness, grantOf({}), "read_note", {
+      note_id: ALPHA,
+      depth: 0,
+      ...basket,
+    })
+    expect(whole.blocks).toEqual([])
+    expect(whole.unassignedCount).toBe(3)
+
+    const first = await run(harness, grantOf({}), "read_note", {
+      note_id: ALPHA,
+      depth: 0,
+      limit: 1,
+      ...basket,
+    })
+    expect(first.unassigned).toHaveLength(1)
+    expect(first.nextCursor).toBe("1")
+
+    const rest = await run(harness, grantOf({}), "read_note", {
+      note_id: ALPHA,
+      depth: 0,
+      limit: 50,
+      cursor: first.nextCursor,
+      ...basket,
+    })
+    expect(rest.unassigned).toHaveLength(2)
+    expect(rest.nextCursor).toBeNull()
+  })
+
+  it("refuses a cursor it did not issue, on every tool that takes one", async () => {
+    const grant = grantOf({})
+    const calls: [string, Record<string, unknown>][] = [
+      ["list_notes", { cursor: "../../etc" }],
+      ["search", { query: "a", cursor: "../../etc" }],
+      ["list_children", { block_id: ALPHA, cursor: "../../etc" }],
+      ["list_parents", { block_id: ALPHA, cursor: "../../etc" }],
+      ["list_tags", { cursor: "../../etc" }],
+      ["read_note", { note_id: ALPHA, cursor: "../../etc" }],
+    ]
+    for (const [name, args] of calls) {
+      expect(await refuse(harness, grant, name, args), name).toMatch(/cursor/)
+    }
+  })
+
+  it("caps `depth` rather than walking however deep it is asked to", async () => {
+    // A depth-bounded read is a recursive walk, and the graph can hold a loop.
+    const tool = TOOLS.find((entry) => entry.name === "list_children")
+    const schema = tool?.inputSchema as { properties: { depth: { maximum: number } } }
+    expect(schema.properties.depth.maximum).toBe(32)
+  })
+})
+
+// -----------------------------------------------------------------------------
 // The Unassigned basket
 // -----------------------------------------------------------------------------
 
@@ -357,14 +548,28 @@ describe("unassigned blocks", () => {
     return heading
   }
 
-  it("is empty for a note whose blocks are all in its outline", async () => {
+  /** The basket is not free — it is a question about every block WRITTEN in
+   * the note, not about the blocks the outline returned — so it is asked for.
+   * Every read below asks. */
+  const basket = { include: ["unassigned"] }
+
+  it("is not returned unless it is asked for", async () => {
+    // It is the one opt-in part that LOOKS like it should be free: usually
+    // empty, always small. But learning that it is empty means looking at
+    // every block written in the note.
     const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    expect(data).not.toHaveProperty("unassigned")
+    expect(data).not.toHaveProperty("unassignedCount")
+  })
+
+  it("is empty for a note whose blocks are all in its outline", async () => {
+    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA, ...basket })
     expect(data.unassigned).toEqual([])
   })
 
   it("reports a block that fell out of the outline, as a row", async () => {
     const heading = await orphanAlpha()
-    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA, ...basket })
 
     expect(data.unassigned.map((block: any) => block.id)).toContain(heading.id)
     expect(data.unassigned[0].text).toBe("Heading")
@@ -372,7 +577,7 @@ describe("unassigned blocks", () => {
 
   it("carries what the orphaned block still holds", async () => {
     await orphanAlpha()
-    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA, ...basket })
     const texts = data.unassigned.map((block: any) => block.text)
 
     expect(texts).toContain("a bullet")
@@ -381,21 +586,23 @@ describe("unassigned blocks", () => {
 
   it("keeps them out of the note's outline", async () => {
     await orphanAlpha()
-    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA, ...basket })
 
     expect(data.blocks).toEqual([])
   })
 
   it("reports nothing for another note", async () => {
     await orphanAlpha()
-    expect((await run(harness, grantOf({}), "read_note", { note_id: BETA })).unassigned).toEqual([])
+    expect(
+      (await run(harness, grantOf({}), "read_note", { note_id: BETA, ...basket })).unassigned,
+    ).toEqual([])
   })
 
   it("stops reporting a block once it is linked back into the outline", async () => {
     const heading = await orphanAlpha()
     await run(harness, grantOf({}), "link_block", { parent_id: ALPHA, block_id: heading.id })
 
-    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA })
+    const data = await run(harness, grantOf({}), "read_note", { note_id: ALPHA, ...basket })
     expect(data.unassigned).toEqual([])
     expect(data.blocks.map((block: any) => block.id)).toContain(heading.id)
   })
@@ -582,7 +789,10 @@ describe("create_blocks", () => {
       parent_id: BETA,
       blocks: [{ text: "more" }],
     })
-    const after = await run(harness, grantOf({}), "read_note", { note_id: BETA })
+    const after = await run(harness, grantOf({}), "read_note", {
+      note_id: BETA,
+      include: ["unassigned"],
+    })
 
     for (const id of before.rootBlockIds) expect(after.rootBlockIds).toContain(id)
     expect(after.unassigned).toEqual([])

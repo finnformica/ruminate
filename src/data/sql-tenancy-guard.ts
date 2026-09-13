@@ -21,7 +21,8 @@
 //    `TenantDb` can bind. (Skipped in `"single"` mode: the browser corpus is
 //    one user per browser profile and has no `user_id` column.)
 // 2. **Say what it means about tombstones** —
-//    - `SELECT`/`UPDATE` on `nodes`/`link` needs a `deleted_at` predicate,
+//    - `SELECT`/`WITH`/`UPDATE` on `nodes`/`link` needs a `deleted_at`
+//      predicate (a CTE is a read, and a recursive one traverses),
 //    - `INSERT` on `nodes`/`link` needs `deleted_at` among its columns,
 //    - `DELETE` from `nodes`/`link` is refused outright: nothing is
 //      hard-deleted by the app.
@@ -111,7 +112,11 @@ export function corpusTablesIn(sql: string): CorpusTable[] {
 
 const statementKind = (sql: string): "select" | "insert" | "update" | "delete" | "other" => {
   const head = sql.trimStart()
-  if (/^SELECT\b/i.test(head)) return "select"
+  // A statement opening with `WITH` is a read: a CTE that walks `nodes` and
+  // `link` has to say what it means about tombstones exactly as a plain
+  // `SELECT` does, or a recursive traversal would be free to follow a link
+  // into a deleted block.
+  if (/^(?:SELECT|WITH)\b/i.test(head)) return "select"
   if (/^INSERT\b/i.test(head)) return "insert"
   if (/^UPDATE\b/i.test(head)) return "update"
   if (/^DELETE\b/i.test(head)) return "delete"
