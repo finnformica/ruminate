@@ -845,7 +845,14 @@ export function BlockItem({
             // run into one continuous surface. Either way the negative
             // margin equals the padding, so the text never moves a pixel
             // and the block rhythm gains nothing.
-            "relative -ml-0.5 -mr-0.5 flex items-start gap-2 rounded pl-1.5 pr-1.5",
+            "relative flex items-start gap-2 rounded",
+            // A roomy row's surface is set in by the same 8.5px on every side
+            // (see the vertical pairs below): the margin still nets the text
+            // to the shared 4px column, so the favicon lines up with the
+            // guide its blocks hang from.
+            roomy
+              ? "-ml-[4.5px] -mr-[4.5px] pl-[8.5px] pr-[8.5px]"
+              : "-ml-0.5 -mr-0.5 pl-1.5 pr-1.5",
             // Per-side vertical pairs. Mid-run sides also square their
             // corners and drop that edge of the selection ring
             // (`.block-run-*`, block-editor.css) so the run reads as ONE
