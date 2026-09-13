@@ -10,9 +10,9 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 /**
- * Linear-style keyboard navigation for a filterable list page (the notes
- * index, the tags page): a roving highlight the caller renders with the
- * selection accent (`.list-highlight` — the editor's selection tokens).
+ * Linear-style keyboard navigation for a filterable list page (the tags
+ * page; the notes list is the block editor now, with the editor's keys): a
+ * roving highlight the caller renders.
  *
  * - `↓`/`↑` move the highlight (from nothing: `↓` starts at the first item,
  *   `↑` at the last); `Home`/`End` jump while a highlight exists.

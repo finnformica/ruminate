@@ -290,41 +290,16 @@ function makeNote(id: string) {
 const RESEARCH = makeNote("research")
 const JOURNAL = makeNote("journal")
 
-function hit(
-  blockId: string,
-  text: string,
-  type: string,
-  ancestors: { id: string; text: string }[] = [],
-  childCount = 0,
-  note = RESEARCH,
-) {
-  return {
-    blockId,
-    noteId: note.id,
-    text,
-    type,
-    olNumber: 1,
-    ancestors,
-    childCount,
-    note,
-  }
+function hit(blockId: string, text: string, type: string, note = RESEARCH) {
+  return { blockId, noteId: note.id, text, type, ancestors: [], note }
 }
 
 /** A heading nested under two other blocks — invisible to the old note-only
  * results, a first-class row now. */
-const NVIDIA = hit(
-  "blk_nvidia",
-  "nvidia",
-  "h3",
-  [
-    { id: "blk_semis", text: "Semiconductors" },
-    { id: "blk_gpus", text: "GPUs" },
-  ],
-  2,
-)
+const NVIDIA = hit("blk_nvidia", "nvidia", "ul")
 const TODO_MILK = hit("blk_milk", "buy milk", "todo")
-const TODO_SHIP = hit("blk_ship", "ship it", "todo", [], 0, JOURNAL)
-const ELSEWHERE = hit("blk_else", "in another note", "text", [], 0, JOURNAL)
+const TODO_SHIP = hit("blk_ship", "ship it", "todo", JOURNAL)
+const ELSEWHERE = hit("blk_else", "in another note", "text", JOURNAL)
 
 async function openWithBlocks(hits: unknown[], notes: unknown[] = [RESEARCH]) {
   mocks.results = { mode: "blocks", hits, notes }

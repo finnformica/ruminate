@@ -19,8 +19,7 @@ import { parseQuery } from "./search"
  * swap — one factory, at the single call site in `src/hooks/search-results.ts`.
  *
  * The contract an async implementation must keep: `search` returns hits in
- * result order; each hit carries its own text, type, breadcrumb `ancestors`,
- * containing `note`, and `childCount`.
+ * result order, each naming its block and note.
  */
 export interface BlockSearchSource {
   /** Blocks matching a query, in result order. */

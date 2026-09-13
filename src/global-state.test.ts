@@ -129,15 +129,11 @@ describe("block search atoms", () => {
     expect(milk.ancestors).toEqual([{ id: "blk_head", text: "Today" }])
     expect(milk.note.tags).toEqual(["work"])
 
-    // A matched section carries only its has-downstream count; the children
-    // themselves are resolved (and cached) on expand.
+    // A matched section is one hit; its children are walked out of the
+    // graph by the results view, never embedded here.
     const [head] = store.get(searchBlocksAtom)("type:heading")
     expect(head.blockId).toBe("blk_head")
     expect(head).not.toHaveProperty("children")
-    expect(head.childCount).toBe(2)
-    const getChildren = store.get(blockIndexAtom).getChildren
-    expect(getChildren(head).map((child) => child.blockId)).toEqual(["blk_milk", "blk_ship"])
-    expect(getChildren(head)).toBe(getChildren(head))
 
     unsubscribe()
   })
