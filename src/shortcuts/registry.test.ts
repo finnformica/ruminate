@@ -119,11 +119,11 @@ describe("shortcut registry entries", () => {
     }
   })
 
-  it("documents the list-page keys (notes list keyboard navigation)", () => {
-    const lists = SHORTCUTS.filter((shortcut) => shortcut.group === "Lists")
-    const combos = new Set(lists.flatMap((shortcut) => shortcut.combos))
-    for (const expected of ["ArrowUp", "ArrowDown", "Enter", "Escape", "Home", "End"]) {
-      expect(combos.has(expected), `Lists group is missing "${expected}"`).toBe(true)
+  it("documents the hand-offs around the result rows (the block editor's own keys are the editor's)", () => {
+    const results = SHORTCUTS.filter((shortcut) => shortcut.group === "Search results")
+    const combos = new Set(results.flatMap((shortcut) => shortcut.combos))
+    for (const expected of ["ArrowDown", "ArrowUp", " ", "ArrowRight", "ArrowLeft", "Enter"]) {
+      expect(combos.has(expected), `Search results group is missing "${expected}"`).toBe(true)
     }
   })
 

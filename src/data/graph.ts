@@ -265,7 +265,7 @@ export function buildGraphSnapshot(nodes: NodeRow[], links: LinkRow[]): GraphSna
 }
 
 /** Ordered child ids of a node. */
-function childIdsOf(graph: GraphSnapshot, id: string): string[] {
+export function childIdsOf(graph: GraphSnapshot, id: string): string[] {
   return (graph.childLinks.get(id) ?? []).map((link) => link.destination_id)
 }
 

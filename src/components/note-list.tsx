@@ -1,40 +1,24 @@
-import { Link, useNavigate } from "@tanstack/react-router"
-import { useAtom } from "jotai"
+import { useNavigate } from "@tanstack/react-router"
 import React, { useState } from "react"
 import { useInView } from "react-intersection-observer"
 import { useDebounce } from "use-debounce"
-import { noteListViewAtom } from "../global-state"
-import { useBlockResultTree } from "../hooks/block-result-tree"
-import { useListKeyboardNav } from "../hooks/list-keyboard-nav"
-import { useBlockSearchSource, useSearchResults } from "../hooks/search-results"
-import { cx } from "../utils/cx"
+import type { ResultRoot } from "../hooks/results-doc"
+import { useSearchResults } from "../hooks/search-results"
 import { parseQuery, removeQualifier } from "../utils/search"
 import { pluralize } from "../utils/pluralize"
 import { Button } from "./button"
-import { DropdownMenu } from "./dropdown-menu"
-import { IconButton } from "./icon-button"
-import { GridIcon16, ListIcon16, PinFillIcon12 } from "./icons"
-import { NoteFavicon } from "./note-favicon"
-import { NotePreviewCard } from "./note-preview-card"
+import { ResultsEditor } from "./results-editor"
 import { ScopePill } from "./scope-pill"
 import { SearchInput } from "./search-input"
-import { SearchResults, blockHitNavigation } from "./search-results"
-
-type View = "grid" | "list"
-
-const viewIcons: Record<View, React.ReactNode> = {
-  grid: <GridIcon16 />,
-  list: <ListIcon16 />,
-}
 
 type NoteListProps = {
   baseQuery?: string
   query: string
   onQueryChange: (query: string) => void
   /**
-   * Linear-style list keys (↑/↓ highlight, Enter opens, ↓ from search hands
-   * off, Escape returns to search). Only the notes *index* page turns this on
-   * — embedded lists must not grab document-level keys.
+   * `↓` in the search box hands the keyboard to the rows (and `↑` past the
+   * first row hands it back). The rows' own keys are the block editor's
+   * whatever this says; only the notes *index* page turns the hand-off on.
    */
   enableKeyboardNav?: boolean
 }
@@ -48,69 +32,53 @@ export function NoteList({
   enableKeyboardNav = false,
 }: NoteListProps) {
   const navigate = useNavigate()
-  // Grid/list layout is a local preference, persisted outside the URL.
-  const [view, setView] = useAtom(noteListViewAtom)
 
   const [deferredQuery] = useDebounce(query, 150)
 
   // A query with text (or a block-scoped `type:`) resolves to BLOCKS: the
   // results are the matching blocks themselves, at any depth. A query that
-  // only names notes (a date, a property, nothing at all) keeps the note
-  // listing — see `resolvesToBlocks`.
-  const source = useBlockSearchSource()
-  const { mode, hits, notes: noteResults } = useSearchResults(`${baseQuery} ${deferredQuery}`)
+  // only names notes (a date, a property, nothing at all) keeps the note listing —
+  // see `resolvesToBlocks`.
+  const fullQuery = `${baseQuery} ${deferredQuery}`.trim()
+  const { mode, hits, notes: noteResults } = useSearchResults(fullQuery)
   const showBlocks = mode === "blocks"
 
   const [numVisibleItems, setNumVisibleItems] = useState(initialVisibleItems)
 
-  // Block results are a tree: `rows` is the visible flattening, expanded rows
-  // resolving their children lazily (and once) through the data source.
-  const { rows, expand, collapse, toggle } = useBlockResultTree({
-    hits,
-    source,
-    limit: numVisibleItems,
-    resetKey: deferredQuery,
-  })
-
-  // The rows the keyboard highlight roves over.
-  const visibleResults = noteResults.slice(0, numVisibleItems)
+  // The two modes differ only in WHICH ROOTS are listed. A note is a node
+  // whose children are its blocks (docs/graph-schema-v2.md), so a note is a
+  // root row exactly as a matched block is — and from here down there is one
+  // editor, one keyboard, one set of rows (`ResultsEditor`).
   const totalResults = showBlocks ? hits.length : noteResults.length
-  const { activeIndex, setActiveIndex, containerRef } = useListKeyboardNav({
-    enabled: enableKeyboardNav,
-    count: showBlocks ? rows.length : visibleResults.length,
-    resetKey: deferredQuery,
-    onActivate: (index) => {
-      if (showBlocks) {
-        const row = rows[index]
-        if (row) navigate(blockHitNavigation(row.hit))
-        return
-      }
-      const note = noteResults[index]
-      if (note) {
-        navigate({ to: "/notes/$", params: { _splat: note.id }, search: { query: undefined } })
-      }
-    },
-    // `→` opens a result in place; `←` closes it, or — on a row that is
-    // already closed — steps out to the parent it was revealed under.
-    onExpand: showBlocks
-      ? (index) => {
-          const row = rows[index]
-          if (row) expand(row)
-        }
-      : undefined,
-    onCollapse: showBlocks
-      ? (index) => {
-          const row = rows[index]
-          if (!row) return
-          if (row.expanded) {
-            collapse(row)
-            return
-          }
-          const parentIndex = rows.findIndex((other) => other.key === row.parentKey)
-          if (parentIndex !== -1) setActiveIndex(parentIndex)
-        }
-      : undefined,
-  })
+  const roots = React.useMemo<ResultRoot[]>(
+    () =>
+      showBlocks
+        ? hits.slice(0, numVisibleItems).map((hit) => ({ id: hit.blockId, noteId: hit.noteId }))
+        : noteResults.slice(0, numVisibleItems).map((note) => ({ id: note.id, noteId: note.id })),
+    [showBlocks, hits, noteResults, numVisibleItems],
+  )
+  // A filtered view edits in place; the plain notes list is browsed (for
+  // now — it could edit too).
+  const readOnly = fullQuery === ""
+
+  // The keyboard hand-off between the search box and the rows: `↓` in the
+  // box highlights the first row; `↑` past the first row returns to the box.
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  const [focusFirstSignal, setFocusFirstSignal] = useState(0)
+  const searchInput = () =>
+    containerRef.current?.querySelector<HTMLInputElement>('input[type="search"]') ?? null
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!enableKeyboardNav || event.key !== "ArrowDown" || roots.length === 0) return
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
+    event.preventDefault()
+    event.currentTarget.blur()
+    setFocusFirstSignal((n) => n + 1)
+  }
+  const openNote = React.useCallback(
+    (noteId: string, block?: string) =>
+      navigate({ to: "/notes/$", params: { _splat: noteId }, search: { query: undefined, block } }),
+    [navigate],
+  )
 
   const [bottomRef, bottomInView] = useInView()
 
@@ -147,6 +115,7 @@ export function NoteList({
               autoCapitalize="off"
               spellCheck="false"
               suggest
+              onKeyDown={handleSearchKeyDown}
               onChange={(value) => {
                 onQueryChange(value)
 
@@ -154,41 +123,6 @@ export function NoteList({
                 setNumVisibleItems(initialVisibleItems)
               }}
             />
-            {/* Grid/list is how the note LISTING is laid out; block results
-                have their own shape, so the control retires while they show. */}
-            {showBlocks ? null : (
-              <DropdownMenu>
-                <DropdownMenu.Trigger
-                  render={
-                    <IconButton
-                      aria-label="View"
-                      className="h-10 w-10 shrink-0 rounded-lg bg-bg-secondary hover:bg-bg-secondary-hover! data-[popup-open]:bg-bg-secondary-hover! active:bg-bg-secondary-active! coarse:h-12 coarse:w-12"
-                    >
-                      {viewIcons[view]}
-                    </IconButton>
-                  }
-                />
-                <DropdownMenu.Content align="end" width={160}>
-                  <DropdownMenu.Group>
-                    <DropdownMenu.GroupLabel>View as</DropdownMenu.GroupLabel>
-                    <DropdownMenu.Item
-                      icon={<GridIcon16 />}
-                      onClick={() => setView("grid")}
-                      selected={view === "grid"}
-                    >
-                      Grid
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                      icon={<ListIcon16 />}
-                      onClick={() => setView("list")}
-                      selected={view === "list"}
-                    >
-                      List
-                    </DropdownMenu.Item>
-                  </DropdownMenu.Group>
-                </DropdownMenu.Content>
-              </DropdownMenu>
-            )}
           </div>
           {scopeFilters.length > 0 || deferredQuery ? (
             <div className="flex flex-col gap-3">
@@ -218,70 +152,20 @@ export function NoteList({
               ) : null}
             </div>
           ) : null}
-          {showBlocks ? (
-            <SearchResults
-              variant="page"
-              rows={rows}
-              activeIndex={activeIndex}
-              onActivate={(hit) => navigate(blockHitNavigation(hit))}
-              onToggle={toggle}
+          {/* One editor, whatever the roots are: matched blocks, or the
+              notes themselves. Open a row to read what is inside it. Set in
+              by the rows' own reach (a root's surface extends 4.5px past its
+              box), so the surfaces sit flush with the search box. */}
+          <div className="px-[4.5px]">
+            <ResultsEditor
+              roots={roots}
+              resetKey={`${mode}:${fullQuery}`}
+              readOnly={readOnly}
+              onOpen={openNote}
+              focusFirstSignal={focusFirstSignal}
+              onExitTop={() => searchInput()?.focus()}
             />
-          ) : null}
-          {!showBlocks && view === "grid" ? (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-4">
-              {visibleResults.map(({ id }, index) => (
-                <div
-                  key={id}
-                  data-list-index={index}
-                  className={cx(
-                    // The keyboard highlight on a card is a ring: the card's
-                    // own surface must stay readable, so it can't be filled.
-                    // The ring is the SELECTED border, never the focus one —
-                    // the card inside is focusable, and a selected ring in the
-                    // focus colour was indistinguishable from focus itself.
-                    activeIndex === index &&
-                      "rounded-[calc(var(--border-radius-base)+6px)] ring-2 ring-border-selected",
-                  )}
-                >
-                  <NotePreviewCard id={id} />
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {!showBlocks && view === "list" ? (
-            <ul className="flex flex-col gap-0.5">
-              {visibleResults.map((note, index) => {
-                return (
-                  <li key={note.id} data-list-index={index}>
-                    <Link
-                      to="/notes/$"
-                      params={{ _splat: note.id }}
-                      search={{
-                        query: undefined,
-                      }}
-                      className={cx(
-                        "focus-ring flex h-10 items-center rounded-lg px-3 hover:bg-bg-hover coarse:h-12 coarse:p-4",
-                        // The roving keyboard highlight — the editor's
-                        // selection surface (same tokens, see block-editor.css).
-                        activeIndex === index && "list-highlight",
-                      )}
-                    >
-                      <NoteFavicon note={note} className="mr-3 coarse:mr-4" />
-                      {note.pinned ? (
-                        <PinFillIcon12 className="mr-2 coarse:mr-3 shrink-0 text-text-pinned" />
-                      ) : null}
-                      <span className="truncate text-text-secondary">
-                        {/* Show the note's name, matching the page header and
-                            sidebar — ids are opaque now, so that is the title
-                            (docs/graph-storage.md). */}
-                        <span className="text-text">{note.displayName}</span>
-                      </span>
-                    </Link>
-                  </li>
-                )
-              })}
-            </ul>
-          ) : null}
+          </div>
         </div>
 
         {totalResults > numVisibleItems ? (

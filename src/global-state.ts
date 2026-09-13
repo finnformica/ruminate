@@ -331,9 +331,6 @@ export const themeAtom = atomWithStorage<Theme>("theme", "system")
 
 export const sidebarAtom = atomWithStorage<"expanded" | "collapsed">("sidebar", "expanded")
 
-/** Grid/list layout for note lists, persisted locally (not in the URL). */
-export const noteListViewAtom = atomWithStorage<"grid" | "list">("note-list-view", "list")
-
 export const isHelpPanelOpenAtom = atomWithStorage<boolean>("help-panel", false)
 
 /**

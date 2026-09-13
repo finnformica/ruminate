@@ -2,9 +2,7 @@ import { describe, expect, test } from "vitest"
 import { buildGraphSnapshot, docToGraph, type GraphSnapshot } from "../data/graph"
 import type { Note } from "../schema"
 import {
-  blockKey,
   createBlockIndexer,
-  createChildResolver,
   hasBlockTypeFilter,
   indexNoteBlocks,
   isBlockTypeFilter,
@@ -208,130 +206,11 @@ describe("block hits", () => {
     expect(hits.find((hit) => hit.blockId === "blk_setup")?.ancestors).toEqual([])
   })
 
-  test("never embed their children — only the has-downstream count", () => {
+  test("never embed their children: a matched section is one hit", () => {
     const [head] = run("type:h1")
-    expect(head.childCount).toBe(2)
     expect(head).not.toHaveProperty("children")
     // Children are context, not matches: the heading is the only hit.
     expect(ids(run("type:h1"))).toEqual(["blk_head"])
-  })
-
-  test("carry an ordered item's number in its run", () => {
-    const note = makeNote({
-      id: "n",
-      content: md("1. one", "  id:: blk_1", "2. two", "  id:: blk_2", "- dash", "  id:: blk_d"),
-    })
-    const { hits } = indexNoteBlocks(note, snapshotFor([note]))
-    expect(hits.map((hit) => [hit.blockId, hit.olNumber])).toEqual([
-      ["blk_1", 1],
-      ["blk_2", 2],
-      ["blk_d", 1],
-    ])
-  })
-
-  test("a leaf block reports no downstream", () => {
-    const [milk] = run("type:todo")
-    expect(milk.blockId).toBe("blk_milk")
-    expect(milk.childCount).toBe(0)
-  })
-
-  test("childCount is the block's true child count, however many", () => {
-    const lines = ["# Big", "  id:: blk_big"]
-    for (let i = 0; i < 25; i++) lines.push(`  - child ${i}`, `    id:: blk_c${i}`)
-    const bigNote = makeNote({ content: md(...lines) })
-    const [big] = indexNoteBlocks(bigNote, snapshotFor([bigNote])).hits
-    expect(big.blockId).toBe("blk_big")
-    expect(big.childCount).toBe(25)
-  })
-})
-
-describe("lazy child resolution", () => {
-  test("resolves a hit's direct children, in document order", () => {
-    const index = buildIndex([TASKS_NOTE, MISC_NOTE])
-    const [head] = searchBlocks(parseQuery("type:h1"), index)
-    expect(ids(index.getChildren(head))).toEqual(["blk_milk", "blk_ship"])
-    expect(index.getChildren(head).map((hit) => [hit.text, hit.type])).toEqual([
-      ["buy milk", "todo"],
-      ["ship it", "done"],
-    ])
-  })
-
-  test("a leaf resolves to nothing", () => {
-    const index = buildIndex([TASKS_NOTE])
-    const [milk] = searchBlocks(parseQuery("type:todo"), index)
-    expect(index.getChildren(milk)).toEqual([])
-  })
-
-  test("expanding a child resolves the next level the same way", () => {
-    const note = makeNote({
-      id: "n",
-      content: md(
-        "# Setup",
-        "  id:: blk_setup",
-        "  - api",
-        "    id:: blk_api",
-        "    [ ] add auth",
-        "      id:: blk_auth",
-      ),
-    })
-    const index = buildIndex([note])
-    const [setup] = searchBlocks(parseQuery("type:h1"), index)
-    const [api] = index.getChildren(setup)
-    expect(api.blockId).toBe("blk_api")
-    expect(api.childCount).toBe(1)
-    expect(ids(index.getChildren(api))).toEqual(["blk_auth"])
-  })
-
-  test("resolution is memoized — a second expand does no work", () => {
-    let calls = 0
-    const resolve = createChildResolver((hit) => {
-      calls++
-      return [{ ...hit, blockId: `${hit.blockId}_child` }]
-    })
-    const index = buildIndex([TASKS_NOTE])
-    const [head] = searchBlocks(parseQuery("type:h1"), index)
-    const first = resolve(head)
-    expect(calls).toBe(1)
-    // Same block again: cached, down to the array identity.
-    expect(resolve(head)).toBe(first)
-    expect(calls).toBe(1)
-    // A different block still resolves.
-    resolve(index.hits[1])
-    expect(calls).toBe(2)
-  })
-
-  test("the index's own resolver caches too", () => {
-    const index = buildIndex([TASKS_NOTE])
-    const [head] = searchBlocks(parseQuery("type:h1"), index)
-    expect(index.getChildren(head)).toBe(index.getChildren(head))
-  })
-
-  test("a block reached from two notes is one node: both hits resolve the same children", () => {
-    // In the graph an id names ONE block; a second note naming it links the
-    // same node, so every child it has is there from either note.
-    const a = makeNote({
-      id: "a",
-      content: md("# Shared", "  id:: blk_dup", "  - only in a", "    id:: blk_a1"),
-    })
-    const b = makeNote({
-      id: "b",
-      content: md(
-        "# Shared",
-        "  id:: blk_dup",
-        "  - first in b",
-        "    id:: blk_b1",
-        "  - second in b",
-        "    id:: blk_b2",
-      ),
-    })
-    const index = buildIndex([a, b])
-    const [fromA, fromB] = searchBlocks(parseQuery("type:h1"), index)
-    expect(blockKey(fromA)).toBe("a::blk_dup")
-    expect(blockKey(fromB)).toBe("b::blk_dup")
-    expect(fromA.childCount).toBe(3)
-    expect(fromB.childCount).toBe(3)
-    expect(ids(index.getChildren(fromA)).sort()).toEqual(["blk_a1", "blk_b1", "blk_b2"])
-    expect(ids(index.getChildren(fromB)).sort()).toEqual(["blk_a1", "blk_b1", "blk_b2"])
   })
 })
 
