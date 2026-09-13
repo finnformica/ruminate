@@ -203,6 +203,7 @@ export function BlockItem({
   // and the textarea, so editing never moves a character.
   const panel = kind.panel ?? null
   const rowContext: RowContext = { block, occurrence, api, depth, editing }
+  const roomy = kind.roomy?.(rowContext) ?? false
 
   // Focus and place the caret when editing starts.
   useLayoutEffect(() => {
@@ -545,14 +546,9 @@ export function BlockItem({
       </svg>
     </IconButton>
   ) : null
-  // The chevron the marker SLOT hosts — none when it sits beside instead (a
-  // to-do's checkbox, a note's favicon both keep their slot to themselves).
-  const slotToggle = toggleBeside ? null : toggle
   // The key of a swapping parent: fades out as the chevron fades in, and is
   // hidden outright while collapsed (the pinned chevron stands in for it).
-  // A key that does not swap keeps its own ink throughout.
-  const keyClass =
-    hasToggle && !toggleBeside ? cx("block-key", pinned && "block-key-hidden") : undefined
+  const keyClass = hasToggle ? cx("block-key", pinned && "block-key-hidden") : undefined
   // The slot of a swapping parent is the chevron's hover area (see
   // `.block-toggle-slot` in block-editor.css). Not a todo's: its chevron is
   // beside, and hovering the checkbox must mean the checkbox.
@@ -596,7 +592,7 @@ export function BlockItem({
           className={cx("block-glyph-fill size-1.5 rounded-full bg-text-tertiary", keyClass)}
         />
       )}
-      {slotToggle}
+      {toggle}
     </span>
   )
   // A static text glyph key (the quote's `>`) or none at all (a paragraph):
@@ -614,7 +610,6 @@ export function BlockItem({
       className={cx(
         "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
         slotClass,
-        toggleBeside && "block-toggle-hint",
       )}
     >
       {kind.glyphNode ? (
@@ -628,7 +623,7 @@ export function BlockItem({
           {glyph}
         </span>
       ) : null}
-      {slotToggle}
+      {toggle}
     </span>
   )
   // An image (`slot: "none"`) has no slot at all: the row's content starts at
@@ -682,7 +677,7 @@ export function BlockItem({
         )}
       >
         <Hash className={keyClass} />
-        {slotToggle}
+        {toggle}
       </span>
     ) : kind.slot === "number" ? (
       // Numbers are read (they carry order), so they sit one step up the ramp
@@ -708,7 +703,7 @@ export function BlockItem({
             {olNumber}.
           </span>
         )}
-        {slotToggle}
+        {toggle}
       </span>
     ) : (
       glyphSlot(kind.glyph ?? null, kind.slotTestId ?? "paragraph-slot")
@@ -860,8 +855,22 @@ export function BlockItem({
             // seamlessly (same solid fill, same solid side lines); root rows
             // sit 6px apart: 4+4 still overlaps 2px, so runs merge at every
             // level.
-            runEdges?.top ? "-mt-1 pt-1 rounded-t-none block-run-top" : "-mt-0.5 pt-0.5",
-            runEdges?.bottom ? "-mb-1 pb-1 rounded-b-none block-run-bottom" : "-mb-0.5 pb-0.5",
+            //
+            // A roomy row (`BlockKind.roomy` — a note in a list) pads for
+            // real instead: 8.5px each side of its 23px line is the 40px
+            // row the notes list always had, and the 1px reach leaves the
+            // same 2px between two of them. It is never mid-run: only
+            // read-only lists have one, and they have no multi-select.
+            runEdges?.top
+              ? "-mt-1 pt-1 rounded-t-none block-run-top"
+              : roomy
+                ? "-mt-px pt-[8.5px]"
+                : "-mt-0.5 pt-0.5",
+            runEdges?.bottom
+              ? "-mb-1 pb-1 rounded-b-none block-run-bottom"
+              : roomy
+                ? "-mb-px pb-[8.5px]"
+                : "-mb-0.5 pb-0.5",
             // bg-bg-secondary is the structural "selected" hook (tests query
             // it); .block-highlight draws the accent ring and faint wash over
             // it so selection reads as selected, not hovered.

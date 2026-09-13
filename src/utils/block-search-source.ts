@@ -83,8 +83,11 @@ export function inMemoryBlockSearchSource(index: BlockIndex): BlockSearchSource 
   // A note's OWN children are not in the index's parent → child table: that
   // table is keyed by parent block, and a note's top-level blocks have no
   // parent block. They are read off the hits' own ancestry instead, in one
-  // pass built on first use — so a page that never expands a note (and one
-  // that never lists any) pays nothing for it.
+  // pass over the index built on first use. Listing notes IS that first use
+  // (`noteHit` needs each note's has-children flag for its chevron), so the
+  // pass runs once per index when a note list renders — never per
+  // expansion, and never on a page that lists no notes. It builds no rows:
+  // those come only from `children`, when a note is opened.
   let noteRoots: Map<NoteId, BlockHit[]> | null = null
   const rootsOf = (noteId: NoteId): BlockHit[] => {
     if (!noteRoots) {

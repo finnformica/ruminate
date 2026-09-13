@@ -300,6 +300,33 @@ describe("search results (page)", () => {
     expect(rowAt(0)?.querySelector('[data-testid="note-pinned"]')).not.toBeNull()
   })
 
+  it("a closed note's chevron stands in for its favicon, as any block's does for its key", () => {
+    const { source } = makeSource({ research: [NVIDIA] })
+    onActivate.mockClear()
+    render(<Harness hits={[source.noteHit(NOTE)]} source={source} />)
+    const slot = rowAt(0)?.querySelector('[data-testid="note-favicon-slot"]')
+    const toggle = screen.getByLabelText("Expand")
+    // In the marker slot, not beside it — and pinned while the note is closed.
+    expect(slot?.contains(toggle)).toBe(true)
+    expect(toggle.className).toContain("block-toggle-pinned")
+    expect(slot?.querySelector(".block-key")?.className).toContain("block-key-hidden")
+
+    // Open, the favicon is back and the chevron waits for a hover.
+    fireEvent.click(toggle)
+    expect(screen.getByLabelText("Collapse").className).not.toContain("block-toggle-pinned")
+    expect(slot?.querySelector(".block-key")?.className).not.toContain("block-key-hidden")
+  })
+
+  it("a listed note sits in a roomier row than the blocks inside it", () => {
+    const { source } = makeSource({ research: [NVIDIA] })
+    onActivate.mockClear()
+    render(<Harness hits={[source.noteHit(NOTE)]} source={source} />)
+    fireEvent.click(screen.getByLabelText("Expand"))
+    const line = (index: number) => rowAt(index)?.querySelector("[data-block-line]")?.className
+    expect(line(0)).toContain("pt-[8.5px]")
+    expect(line(1)).not.toContain("pt-[8.5px]")
+  })
+
   it("only the matched hits carry a breadcrumb — revealed children are context", () => {
     renderResults([NVIDIA], { blk_nvidia: [REVENUE] })
     fireEvent.click(screen.getByLabelText("Expand"))

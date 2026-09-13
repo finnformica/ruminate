@@ -52,6 +52,15 @@ export interface BlockKind {
   /** A parent's collapse chevron sits beside the marker rather than
    * replacing it (the checkbox keeps its own click). */
   readonly toggleBeside?: boolean
+  /**
+   * The row stands with more room above and below its line: real padding on
+   * the highlight surface, so the hover and the keyboard highlight grow with
+   * it, rather than the margin-cancelled pair every other row uses. The text
+   * column is untouched. Given the row's context, so a type can be roomy in
+   * one view and keep the editor's rhythm in another — the only one that is
+   * is `note`, listed as a result.
+   */
+  readonly roomy?: (context: RowContext) => boolean
   /** Text size and weight, by outline depth — the same on the rendered view
    * and the textarea, so switching never shifts a character. Given the block
    * too, for a type whose text follows its props (an image's caption sits
@@ -152,16 +161,21 @@ const heading: BlockKind = {
 const note: BlockKind = {
   slot: "glyph",
   slotTestId: "note-favicon-slot",
-  // The favicon does not swap out for the collapse chevron the way a bullet
-  // or a `#` does: those are pure chrome, and this says something the row's
-  // text does not (a day, a week, a note). So the chevron sits BESIDE it, as
-  // a to-do's does beside its checkbox — and a listing of collapsed notes
-  // still tells a daily note from an ordinary one.
-  toggleBeside: true,
+  // The favicon is a MARKER, so on a note with blocks in it the collapse
+  // chevron takes its place exactly as it does a bullet's dot or a heading's
+  // `#`: revealed on hover, and pinned over it while the note is closed.
+  // (The beside-placement is for a to-do, whose slot holds a checkbox — a
+  // control, which a swap would leave un-tickable. A favicon is nothing of
+  // the kind.)
   glyphNode: (block) => (
     <NoteFavicon note={{ id: block.id, type: noteTypeOf(block.id) }} className="size-[15px]" />
   ),
   typography: () => BODY,
+  // A note listed as a result (a root of a read-only list) is a whole note,
+  // not a line inside one: it takes the 40px row the notes list gave it
+  // before notes were drawn as blocks. Linked under a block in the editor it
+  // keeps the editor's rhythm.
+  roomy: ({ api, depth }) => !!api.readOnly && depth === 0,
   // Pinned is the note's own state, so the row says it — the same glyph the
   // sidebar and the note header use.
   after: ({ block }) =>
