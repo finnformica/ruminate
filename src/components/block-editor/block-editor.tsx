@@ -6,6 +6,7 @@ import type React from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent, TouchEvent } from "react"
 import { newBlockMarkerAtom } from "../../global-state"
 import type { Block, BlockDoc, ChangeHint } from "../../blocks/types"
+import type { BlockOp } from "../../blocks/history"
 import { blockId } from "../../blocks/id"
 import {
   beginPendingImage,
@@ -30,6 +31,7 @@ import {
   type CaretInput,
   type CommandInput,
   type CommandName,
+  BROWSE_COMMANDS,
   type CommandResult,
   type FocusIntent,
   type Mode,
@@ -289,6 +291,17 @@ const BLANK_CLICK_EXCLUDES =
 /** Keys that are only modifiers: pressing one alone is not "using the keyboard". */
 const MODIFIER_KEYS = new Set(["Shift", "Meta", "Control", "Alt", "CapsLock"])
 
+/** Why an edit to a results view's root list did nothing (`fixedRoots`). */
+const FIXED_ROOTS_NOTICE = "Open the note to add or remove blocks at this level"
+
+/** Same roots, same order — what `fixedRoots` holds an edit to. */
+function sameRoots(prev: BlockDoc, next: BlockDoc): boolean {
+  return (
+    prev.rootBlockIds.length === next.rootBlockIds.length &&
+    prev.rootBlockIds.every((id, index) => id === next.rootBlockIds[index])
+  )
+}
+
 export function BlockEditor({
   doc,
   onChange,
@@ -314,6 +327,8 @@ export function BlockEditor({
   onDeleteSubtree,
   knownBlock,
   onImageUpload,
+  onActivate,
+  fixedRoots = false,
 }: {
   doc: BlockDoc
   /** The next doc, and what the change means beyond it (`ChangeHint`). */
@@ -367,6 +382,22 @@ export function BlockEditor({
   /** Display-only: renders blocks without any editing (e.g. past-day history). */
   readOnly?: boolean
   /**
+   * Open a row — what Enter and a click do in a read-only view that is still
+   * BROWSED: the notes list, a search's results. Given, a read-only editor
+   * keeps the keyboard: the highlight moves, folds open and close, `f` zooms
+   * (which navigates, through `onZoomNavigate`), and nothing writes
+   * (`BROWSE_COMMANDS`). Without it a read-only editor is inert display.
+   */
+  onActivate?: (id: string) => void
+  /**
+   * The roots are the view's own, not a parent's children — a results
+   * list's hits, the notes list's notes — so there is nowhere for a new root
+   * to go and nothing a removed one leaves. An edit that would add, remove
+   * or reorder them is refused with a notice; everything beneath a root
+   * edits as it does in its note.
+   */
+  fixedRoots?: boolean
+  /**
    * Zoom ("focus mode"): the block whose subtree is the whole view. With
    * `onZoomNavigate` the zoom is controlled by the caller (URL search param);
    * without it, this is just the initial value of transient local zoom state
@@ -397,6 +428,10 @@ export function BlockEditor({
    */
   debug?: BlockDebugOptions
 }) {
+  // A read-only view still owns the keyboard when it can open rows (browse —
+  // see `onActivate`); one that cannot is inert display.
+  const navigable = !readOnly || onActivate !== undefined
+
   // ── Zoom state ────────────────────────────────────────────────────────────
   // Controlled by the caller (URL) when `onZoomNavigate` is given; otherwise
   // transient local state so the editor works standalone.
@@ -455,7 +490,23 @@ export function BlockEditor({
   const collapsed = collapsedProp ?? collapsedInternal
   // The other end of a multi-row selection (Shift+Arrow). null = single select.
   const [anchorKey, setAnchorKey] = useState<string | null>(null)
-  const history = useBlockHistory(onChange, knownBlock)
+  const rawHistory = useBlockHistory(onChange, knownBlock)
+  // Under `fixedRoots` a change to the root list has nowhere to land (see the
+  // prop): it is refused here, at the one funnel every edit goes through,
+  // with a notice — so a split at the end of a matched block, a Backspace on
+  // one, a paste over one, all say why nothing happened.
+  const history = fixedRoots
+    ? {
+        ...rawHistory,
+        commit: (prev: BlockDoc, next: BlockDoc, op: BlockOp) => {
+          if (!sameRoots(prev, next)) {
+            toast(FIXED_ROOTS_NOTICE)
+            return
+          }
+          rawHistory.commit(prev, next, op)
+        },
+      }
+    : rawHistory
 
   // The view: the rows on screen, in order, indented by depth, folds applied
   // (`buildRows`). Zoomed, the zoomed block leads as the view's editable
@@ -539,7 +590,7 @@ export function BlockEditor({
   // paste as plain text (newlines collapsed into one block).
   const plainPasteRef = useRef(false)
   const focusContainer = () => {
-    if (!readOnly) containerRef.current?.focus({ preventScroll: true })
+    if (navigable) containerRef.current?.focus({ preventScroll: true })
   }
 
   // Re-highlight when the target heading changes (Cmd-K into the open note).
@@ -977,7 +1028,7 @@ export function BlockEditor({
   // title), highlight the first block — moving between the title and the blocks
   // moves the highlight, like moving between blocks.
   useEffect(() => {
-    if (!focusFirstSignal || readOnly) return
+    if (!focusFirstSignal || !navigable) return
     const first = firstSelectable(docRef.current)
     if (!first) return
     setAnchorKey(null)
@@ -985,6 +1036,10 @@ export function BlockEditor({
     // Mirror the title's own state: editing the title drops into the first block
     // editing (caret at its start); a highlighted title just highlights it.
     setFocus(focusFirstMode === "edit" ? { key: first, atStart: true } : null)
+    // Take the keyboard now: the first row may already be the selection (it
+    // is, on a fresh mount), in which case nothing above re-renders and the
+    // focus-keeping effect never runs.
+    if (focusFirstMode !== "edit") containerRef.current?.focus({ preventScroll: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusFirstSignal])
 
@@ -992,7 +1047,7 @@ export function BlockEditor({
   // editor keyboard focus back and restore the LAST selected row — "put me
   // back where I was" — falling back to the first selectable row.
   useEffect(() => {
-    if (!refocusSignal || readOnly) return
+    if (!refocusSignal || !navigable) return
     const last = lastSelectedRef.current
     const target =
       last && hasOccurrence(docRef.current, last) ? last : firstSelectable(docRef.current)
@@ -1189,7 +1244,7 @@ export function BlockEditor({
   // event to a command via the keymap and run it. Touch/menu entry points would
   // dispatch the same commands. Returns whether the gesture was consumed.
   const dispatchKey = (mode: Mode, key: string, event: KeyLike, caret?: CaretInput): boolean => {
-    if (readOnly) return false
+    if (!navigable) return false
     const input: CommandInput = {
       doc,
       key,
@@ -1203,6 +1258,15 @@ export function BlockEditor({
     }
     const name = resolveKey(mode, event, input)
     if (!name) return false
+    if (readOnly) {
+      // Browsing: Enter opens the row where it would have edited it, and
+      // only what moves, folds or zooms runs — nothing that writes.
+      if (name === "enterEdit") {
+        onActivate?.(idOfKey(key))
+        return true
+      }
+      if (!BROWSE_COMMANDS.has(name)) return false
+    }
     const result = runCommand(name, input)
     applyResult(result)
     return result.handled
@@ -1511,7 +1575,11 @@ export function BlockEditor({
     // plain display state — never demote them to "inactive". Editable ones
     // own the keyboard when focus is inside AND the last thing the user did
     // was not click on blank space (`pointerIdle`).
-    keyboardActive: readOnly || (keyboardActive && !pointerIdle),
+    keyboardActive: !navigable || (keyboardActive && !pointerIdle),
+    fixedRoots,
+    // Browsing: a click opens the row (BlockItem routes a read-only row's
+    // click here).
+    activate: readOnly && onActivate ? (key) => onActivate(idOfKey(key)) : undefined,
     select,
     edit,
     toggleCollapse,
@@ -1557,7 +1625,7 @@ export function BlockEditor({
     },
     dispatchKey,
     zoomInto: (id) => {
-      if (!readOnly) navigateZoom(id)
+      if (navigable) navigateZoom(id)
     },
     startSelectionLadder: (key) => {
       if (readOnly) return
@@ -1610,7 +1678,7 @@ export function BlockEditor({
   // menus, lists, other editors) keeps them. The replay is a fresh event on
   // the container; the original is cancelled so the control never sees it.
   useEffect(() => {
-    if (readOnly) return
+    if (!navigable) return
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return
       if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return
@@ -1632,7 +1700,7 @@ export function BlockEditor({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [readOnly])
+  }, [navigable])
 
   // The container is the single keyboard target for select mode (see the focus
   // effect below). Edit mode is handled by the focused textarea inside the
@@ -1791,7 +1859,7 @@ export function BlockEditor({
   // Edit mode is left alone (the textarea owns focus). `preventScroll` stops the
   // focus call from jumping the page around on every doc change.
   useLayoutEffect(() => {
-    if (readOnly || focus || !selected) return
+    if (!navigable || focus || !selected) return
     // While the outline palette is previewing, focus stays in its input — the
     // moving highlight must not steal the keyboard mid-typing.
     if (revealSnapshotRef.current) return
@@ -1799,7 +1867,7 @@ export function BlockEditor({
     if (!el) return
     if (!el.contains(document.activeElement)) el.focus({ preventScroll: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, focus, anchorKey, doc, readOnly])
+  }, [selected, focus, anchorKey, doc, navigable])
 
   // Keep the highlighted block centred as it moves, since focusing the
   // container itself no longer scrolls it into view. Let the browser do the
@@ -1810,7 +1878,7 @@ export function BlockEditor({
   // otherwise distort where the highlight lands and make headings jump. When
   // the note fits on screen there's nothing to scroll, so this is a no-op.
   useLayoutEffect(() => {
-    if (readOnly || focus || !selected) return
+    if (!navigable || focus || !selected) return
     const row = containerRef.current?.querySelector<HTMLElement>(`[data-occurrence="${selected}"]`)
     const line = row?.querySelector<HTMLElement>("[data-block-line]") ?? row
     if (!line || typeof line.scrollIntoView !== "function") return
@@ -1829,7 +1897,7 @@ export function BlockEditor({
     const far = rect.bottom < -vh || rect.top > 2 * vh
     line.scrollIntoView({ block: far ? "center" : "nearest" })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, anchorKey, focus, readOnly])
+  }, [selected, anchorKey, focus, navigable])
 
   // When focus falls to nothing (a click on empty page space) while a block is
   // still highlighted, keep the keyboard alive by re-grabbing focus. A click on
@@ -1839,7 +1907,7 @@ export function BlockEditor({
     // nothing): settle keyboard ownership on the next frame. If the re-grab
     // below (or anything else) puts focus back first, the check is a no-op.
     scheduleKeyboardIdleCheck()
-    if (readOnly || focus || !selected || event.relatedTarget) return
+    if (!navigable || focus || !selected || event.relatedTarget) return
     const el = containerRef.current
     requestAnimationFrame(() => {
       if (el && el.isConnected && !el.contains(document.activeElement)) {

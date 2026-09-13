@@ -48,29 +48,38 @@ palette also switches to outline mode (the VS Code prefix grammar);
 with <kbd>⌘</kbd> <kbd>P</kbd> directly, <kbd>⌫</kbd> on an empty query stays
 put.
 
-## Lists (notes list, tags)
+## The notes list and search results
 
-Linear-style keys on the filterable list pages — the notes index (`/`) and the
-tags page. A roving highlight (drawn in the same selection accent as the block
-editor) follows the arrows; it tracks filtering, resetting to the first result
-when the query changes. <kbd>↓</kbd> pressed inside the search input hands the
-keyboard to the list; everything else stays quiet while any text field has
-focus.
+The notes list (`/`) and the full results view (`/?query=…`) are the block
+editor over a set of roots — every note, or the matched blocks — so the keys
+are the editor's own (see "Block editor" above): the arrows and <kbd>w</kbd> /
+<kbd>s</kbd> / <kbd>a</kbd> / <kbd>d</kbd> move the highlight, <kbd>space</kbd>
+/ <kbd>→</kbd> / <kbd>←</kbd> fold and unfold, <kbd>f</kbd> zooms — which,
+here, opens the note at that block. Opening a row loads only that row's
+blocks; a child opens the next level the same way.
 
-| Action                                | Shortcut                         |
-| ------------------------------------- | -------------------------------- |
-| Move the list highlight               | <kbd>↑</kbd> / <kbd>↓</kbd>      |
-| In the search: highlight first result | <kbd>↓</kbd>                     |
-| Open the highlighted note / tag       | <kbd>↵</kbd>                     |
-| Clear the highlight, back to search   | <kbd>Esc</kbd>                   |
-| Jump to the first / last item         | <kbd>Home</kbd> / <kbd>End</kbd> |
+The notes list is browsed: <kbd>↵</kbd> (or a click) opens the highlighted
+note, and nothing writes. A filtered view **edits in place**: <kbd>↵</kbd>
+edits the row as it would in its note, the change lands in the note, and the
+only thing refused is adding a block beside a result or removing one from the
+list — open the note for that.
 
-## Search results
+| Action                                  | Shortcut     |
+| --------------------------------------- | ------------ |
+| In the search box: highlight first row  | <kbd>↓</kbd> |
+| From the first row: back to the search  | <kbd>↑</kbd> |
+| Notes list: open the highlighted note   | <kbd>↵</kbd> |
+| Filtered view: edit the highlighted row | <kbd>↵</kbd> |
+| Open the note at this block             | <kbd>f</kbd> |
+
+The tags page keeps its own Linear-style list keys (<kbd>↑</kbd> / <kbd>↓</kbd>,
+<kbd>↵</kbd>, <kbd>Esc</kbd> back to search).
+
+## ⌘K results
 
 Search results are the matching **blocks**, at any depth — a nested heading or
 a single todo is a row of its own, shown with the note and ancestry it came
-from. The same rows appear in <kbd>⌘</kbd> <kbd>K</kbd> and on the full results
-view (`/?query=…`), so the keys are the same in both.
+from. <kbd>⌘</kbd> <kbd>K</kbd> draws the same rows, read-only.
 
 | Action                                     | Shortcut                    |
 | ------------------------------------------ | --------------------------- |

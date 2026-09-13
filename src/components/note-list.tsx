@@ -2,27 +2,26 @@ import { useNavigate } from "@tanstack/react-router"
 import React, { useState } from "react"
 import { useInView } from "react-intersection-observer"
 import { useDebounce } from "use-debounce"
-import { useBlockResultTree } from "../hooks/block-result-tree"
-import { useListKeyboardNav } from "../hooks/list-keyboard-nav"
-import { useBlockSearchSource, useSearchResults } from "../hooks/search-results"
+import type { ResultRoot } from "../hooks/results-doc"
+import { useSearchResults } from "../hooks/search-results"
 import { parseQuery, removeQualifier } from "../utils/search"
 import { formatNumber, pluralize } from "../utils/pluralize"
 import { Button } from "./button"
 import { DropdownMenu } from "./dropdown-menu"
 import { TagFillIcon12, TagIcon12, TagIcon16, XIcon12 } from "./icons"
 import { PillButton } from "./pill-button"
+import { ResultsEditor } from "./results-editor"
 import { ScopePill } from "./scope-pill"
 import { SearchInput } from "./search-input"
-import { SearchResults, blockHitNavigation } from "./search-results"
 
 type NoteListProps = {
   baseQuery?: string
   query: string
   onQueryChange: (query: string) => void
   /**
-   * Linear-style list keys (↑/↓ highlight, Enter opens, ↓ from search hands
-   * off, Escape returns to search). Only the notes *index* page turns this on
-   * — embedded lists must not grab document-level keys.
+   * `↓` in the search box hands the keyboard to the rows (and `↑` past the
+   * first row hands it back). The rows' own keys are the block editor's
+   * whatever this says; only the notes *index* page turns the hand-off on.
    */
   enableKeyboardNav?: boolean
 }
@@ -43,8 +42,8 @@ export function NoteList({
   // results are the matching blocks themselves, at any depth. A query that
   // only names notes (`tag:`, a date, nothing at all) keeps the note listing —
   // see `resolvesToBlocks`.
-  const source = useBlockSearchSource()
-  const { mode, hits, notes: noteResults } = useSearchResults(`${baseQuery} ${deferredQuery}`)
+  const fullQuery = `${baseQuery} ${deferredQuery}`.trim()
+  const { mode, hits, notes: noteResults } = useSearchResults(fullQuery)
   const showBlocks = mode === "blocks"
 
   const [numVisibleItems, setNumVisibleItems] = useState(initialVisibleItems)
@@ -52,47 +51,37 @@ export function NoteList({
   // The two modes differ only in WHICH ROOTS are listed. A note is a node
   // whose children are its blocks (docs/graph-schema-v2.md), so a note is a
   // root row exactly as a matched block is — and from here down there is one
-  // tree, one keyboard, one renderer.
-  const noteHits = React.useMemo(
-    () => (showBlocks ? [] : noteResults.map((note) => source.noteHit(note))),
-    [showBlocks, noteResults, source],
-  )
-
-  // Results are a tree: `rows` is the visible flattening, expanded rows
-  // resolving their children lazily (and once) through the data source.
-  const { rows, expand, collapse, toggle } = useBlockResultTree({
-    hits: showBlocks ? hits : noteHits,
-    source,
-    limit: numVisibleItems,
-    resetKey: `${mode}:${deferredQuery}`,
-  })
-
+  // editor, one keyboard, one set of rows (`ResultsEditor`).
   const totalResults = showBlocks ? hits.length : noteResults.length
-  const { activeIndex, setActiveIndex, containerRef } = useListKeyboardNav({
-    enabled: enableKeyboardNav,
-    count: rows.length,
-    resetKey: deferredQuery,
-    onActivate: (index) => {
-      const row = rows[index]
-      if (row) navigate(blockHitNavigation(row.hit))
-    },
-    // `→` opens a result in place; `←` closes it, or — on a row that is
-    // already closed — steps out to the parent it was revealed under.
-    onExpand: (index) => {
-      const row = rows[index]
-      if (row) expand(row)
-    },
-    onCollapse: (index) => {
-      const row = rows[index]
-      if (!row) return
-      if (row.expanded) {
-        collapse(row)
-        return
-      }
-      const parentIndex = rows.findIndex((other) => other.key === row.parentKey)
-      if (parentIndex !== -1) setActiveIndex(parentIndex)
-    },
-  })
+  const roots = React.useMemo<ResultRoot[]>(
+    () =>
+      showBlocks
+        ? hits.slice(0, numVisibleItems).map((hit) => ({ id: hit.blockId, noteId: hit.noteId }))
+        : noteResults.slice(0, numVisibleItems).map((note) => ({ id: note.id, noteId: note.id })),
+    [showBlocks, hits, noteResults, numVisibleItems],
+  )
+  // A filtered view edits in place; the plain notes list is browsed (for
+  // now — it could edit too).
+  const readOnly = fullQuery === ""
+
+  // The keyboard hand-off between the search box and the rows: `↓` in the
+  // box highlights the first row; `↑` past the first row returns to the box.
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  const [focusFirstSignal, setFocusFirstSignal] = useState(0)
+  const searchInput = () =>
+    containerRef.current?.querySelector<HTMLInputElement>('input[type="search"]') ?? null
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!enableKeyboardNav || event.key !== "ArrowDown" || roots.length === 0) return
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
+    event.preventDefault()
+    event.currentTarget.blur()
+    setFocusFirstSignal((n) => n + 1)
+  }
+  const openNote = React.useCallback(
+    (noteId: string, block?: string) =>
+      navigate({ to: "/notes/$", params: { _splat: noteId }, search: { query: undefined, block } }),
+    [navigate],
+  )
 
   const [bottomRef, bottomInView] = useInView()
 
@@ -166,6 +155,7 @@ export function NoteList({
               autoCapitalize="off"
               spellCheck="false"
               suggest
+              onKeyDown={handleSearchKeyDown}
               onChange={(value) => {
                 onQueryChange(value)
 
@@ -280,14 +270,15 @@ export function NoteList({
               ) : null}
             </div>
           ) : null}
-          {/* One renderer, whatever the roots are: matched blocks, or the
-              notes themselves. Expand a row to read what is inside it. */}
-          <SearchResults
-            variant="page"
-            rows={rows}
-            activeIndex={activeIndex}
-            onActivate={(hit) => navigate(blockHitNavigation(hit))}
-            onToggle={toggle}
+          {/* One editor, whatever the roots are: matched blocks, or the
+              notes themselves. Open a row to read what is inside it. */}
+          <ResultsEditor
+            roots={roots}
+            resetKey={`${mode}:${fullQuery}`}
+            readOnly={readOnly}
+            onOpen={openNote}
+            focusFirstSignal={focusFirstSignal}
+            onExitTop={() => searchInput()?.focus()}
           />
         </div>
 

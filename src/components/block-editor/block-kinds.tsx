@@ -174,11 +174,11 @@ const note: BlockKind = {
   // the sidebar and the note header use for it, not the content font the
   // blocks inside it are set in.
   typography: () => cx(BODY, "font-sans"),
-  // A note listed as a result (a root of a read-only list) is a whole note,
+  // A note listed as a result (a root of a results view) is a whole note,
   // not a line inside one: it takes the 40px row the notes list gave it
   // before notes were drawn as blocks. Linked under a block in the editor it
   // keeps the editor's rhythm.
-  roomy: ({ api, depth }) => !!api.readOnly && depth === 0,
+  roomy: ({ api, depth }) => !!api.fixedRoots && depth === 0,
   // Pinned is the note's own state, so the row says it — the same glyph the
   // sidebar and the note header use.
   after: ({ block }) =>

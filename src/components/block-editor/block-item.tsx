@@ -51,6 +51,12 @@ export interface BlockEditorApi {
   /** Display-only: no editing, selection, or mutation (collapse still works). */
   readOnly?: boolean
   /**
+   * The roots are the view's own — a results list's hits, the notes list's
+   * notes — not a parent's children (`BlockEditor.fixedRoots`). A kind may
+   * draw a root differently for it (a listed note takes a roomier row).
+   */
+  fixedRoots?: boolean
+  /**
    * Whether the editor owns the keyboard: focus is inside its container and
    * the user's last act was not a click on blank space (a key press hands it
    * back). While false, selected rows demote to the quiet inactive-selection

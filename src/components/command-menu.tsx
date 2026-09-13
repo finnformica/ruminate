@@ -683,7 +683,6 @@ export function CommandMenu() {
               {!deferredQuery && pinnedNotes.length ? (
                 <Command.Group heading="Pinned notes">
                   <SearchResults
-                    variant="palette"
                     rows={noteTree.rows}
                     onActivate={openBlock}
                     onToggle={noteTree.toggle}
@@ -767,7 +766,6 @@ export function CommandMenu() {
                     <div className="px-3 py-2 text-text-secondary">No matching blocks</div>
                   )}
                   <SearchResults
-                    variant="palette"
                     rows={blockTree.rows}
                     onActivate={openBlock}
                     onToggle={blockTree.toggle}
@@ -777,7 +775,6 @@ export function CommandMenu() {
               {deferredQuery ? (
                 <Command.Group heading="Notes">
                   <SearchResults
-                    variant="palette"
                     rows={noteTree.rows}
                     onActivate={openBlock}
                     onToggle={noteTree.toggle}

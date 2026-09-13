@@ -5,29 +5,25 @@ import type { Occurrence } from "../blocks/view"
 import type { ResultRow } from "../hooks/block-result-tree"
 import type { BlockHit } from "../utils/block-search"
 import { isNoteHit } from "../utils/block-search-source"
-import { cx } from "../utils/cx"
 import { BlockItem, type BlockEditorApi } from "./block-editor/block-item"
 
 /**
- * The results list, shared by the ⌘K palette, the full results view
- * (`/?query=…`) and the notes list. The results are a VIEW in the editor's
- * sense: its roots are whatever matched, each row is an occurrence, and every
- * row is drawn by the editor's own row component (`BlockItem`, read-only) —
- * the same marker slot, type scale, quote bar, checkbox, collapse chevron and
- * guide lines the block has in its note.
+ * The ⌘K palette's results. The results are a VIEW in the editor's sense:
+ * its roots are whatever matched, each row is an occurrence, and every row
+ * is drawn by the editor's own row component (`BlockItem`, read-only) — the
+ * same marker slot, type scale, quote bar, checkbox, collapse chevron and
+ * guide lines the block has in its note. (The full results view and the
+ * notes list go further and run the editor itself — `ResultsEditor` — but
+ * cmdk owns the palette's highlight and Enter, so here the rows are drawn
+ * one by one as cmdk items.)
  *
  * **Notes and blocks are the same kind of row.** A note is a node whose type
  * is `note` and whose children are its blocks (docs/graph-schema-v2.md), so a
  * note result is a root row that expands to reveal what is in it, exactly as
- * a block result does. What differs between the surfaces this list serves is
- * which ROOTS are handed in, never how a row is drawn.
- *
- * One component, two chromes: `palette` renders cmdk items (cmdk owns the
- * highlight and Enter), `page` renders a keyboard-navigable list whose
- * highlight is the editor's own selection surface. Rows come from
- * `useBlockResultTree`, which asks the data source for a row's children only
- * when it is expanded (see `BlockSearchSource`). This component never touches
- * the source itself — it renders rows and reports intent.
+ * a block result does. Rows come from `useBlockResultTree`, which asks the
+ * data source for a row's children only when it is expanded (see
+ * `BlockSearchSource`). This component never touches the source itself — it
+ * renders rows and reports intent.
  */
 
 /** The cmdk item value for a row (cmdk lowercases these — see the palette's
@@ -81,30 +77,26 @@ function blockOf(row: ResultRow): Block {
 const noop = () => {}
 
 /**
- * The editor api a results list hands its rows: read-only, with the fold
- * toggle routed to the tree and (on the page) a click opening the result.
- * The page's keyboard highlight is the editor's selection: one selected row.
+ * The editor api the palette hands its rows: read-only, with the fold toggle
+ * routed to the tree; cmdk's item owns the highlight and the click.
  */
 function useResultsApi({
   rows,
-  activeKey,
   onToggle,
-  onActivate,
 }: {
   rows: ResultRow[]
-  activeKey: string | null
   onToggle: (row: ResultRow) => void
-  /** Absent in the palette, where cmdk's item owns the click. */
-  onActivate?: (hit: BlockHit) => void
 }): BlockEditorApi {
   return React.useMemo(() => {
     const byKey = new Map(rows.map((row) => [row.key, row]))
     return {
       focus: null,
-      selected: activeKey,
-      selectedSet: activeKey === null ? new Set<string>() : new Set([activeKey]),
+      selected: null,
+      selectedSet: new Set<string>(),
       selectionRunEdges: new Map(),
       readOnly: true,
+      // The roots are the query's (a listed note takes its roomier row).
+      fixedRoots: true,
       keyboardActive: true,
       select: noop,
       edit: noop,
@@ -118,14 +110,8 @@ function useResultsApi({
         const row = byKey.get(key)
         if (row) onToggle(row)
       },
-      activate: onActivate
-        ? (key) => {
-            const row = byKey.get(key)
-            if (row) onActivate(row.hit)
-          }
-        : undefined,
     }
-  }, [rows, activeKey, onToggle, onActivate])
+  }, [rows, onToggle])
 }
 
 /**
@@ -139,15 +125,7 @@ function useResultsApi({
  * is the key a NOTE row hangs in its own marker slot now, and under a block
  * row it only ever restated the name beside it. An empty trail draws nothing.
  */
-function Breadcrumb({
-  hit,
-  compact,
-  withNote,
-}: {
-  hit: BlockHit
-  compact: boolean
-  withNote: boolean
-}) {
+function Breadcrumb({ hit, withNote }: { hit: BlockHit; withNote: boolean }) {
   const trail = [
     ...(withNote ? [{ id: hit.noteId, text: hit.note.displayName }] : []),
     ...hit.ancestors,
@@ -156,10 +134,7 @@ function Breadcrumb({
   return (
     <div
       data-testid="result-breadcrumb"
-      className={cx(
-        "flex min-w-0 items-center pl-[31px] text-text-secondary",
-        compact ? "text-xs" : "text-sm",
-      )}
+      className="flex min-w-0 items-center pl-[31px] text-xs text-text-secondary"
     >
       <span className="truncate">
         {trail.map((crumb, index) => (
@@ -180,19 +155,17 @@ function Breadcrumb({
 function ResultBlock({
   row,
   api,
-  compact,
   withNote,
 }: {
   row: ResultRow
   api: BlockEditorApi
-  compact: boolean
   withNote: boolean
 }) {
   return (
     <>
       <BlockItem doc={NO_DOC} block={blockOf(row)} occurrence={occurrenceOf(row)} api={api} />
       {row.depth === 0 && !isNoteHit(row.hit) ? (
-        <Breadcrumb hit={row.hit} compact={compact} withNote={withNote} />
+        <Breadcrumb hit={row.hit} withNote={withNote} />
       ) : null}
     </>
   )
@@ -200,75 +173,41 @@ function ResultBlock({
 
 export interface SearchResultsProps {
   rows: ResultRow[]
-  /** `palette` = cmdk items inside ⌘K; `page` = the full results view. */
-  variant: "palette" | "page"
   onActivate: (hit: BlockHit) => void
   onToggle: (row: ResultRow) => void
-  /** `page` only: the roving keyboard highlight (an index into `rows`). */
-  activeIndex?: number | null
 }
 
-export function SearchResults({
-  rows,
-  variant,
-  onActivate,
-  onToggle,
-  activeIndex = null,
-}: SearchResultsProps) {
-  const compact = variant === "palette"
+/** The rows as cmdk items, inside a `Command.List`. */
+export function SearchResults({ rows, onActivate, onToggle }: SearchResultsProps) {
   // The note's name earns its place in a breadcrumb only while it tells two
   // rows apart (see `Breadcrumb`).
   const withNote = React.useMemo(() => new Set(rows.map((row) => row.hit.noteId)).size > 1, [rows])
-  const activeKey = activeIndex === null ? null : (rows[activeIndex]?.key ?? null)
-  const api = useResultsApi({
-    rows,
-    activeKey,
-    onToggle,
-    onActivate: variant === "page" ? onActivate : undefined,
-  })
-
-  if (variant === "palette") {
-    return (
-      <>
-        {rows.map((row) => (
-          <Command.Item
-            key={row.key}
-            value={resultRowValue(row)}
-            onSelect={() => onActivate(row.hit)}
-            className="leading-normal!"
-          >
-            {/* A click on the row's own controls (the fold chevron) must not
-                read as "select this result" to cmdk's item. */}
-            {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
-            <div
-              className="min-w-0 flex-1"
-              onClick={(event) => {
-                if ((event.target as HTMLElement).closest("button, input")) {
-                  event.stopPropagation()
-                }
-              }}
-            >
-              <ResultBlock row={row} api={api} compact={compact} withNote={withNote} />
-            </div>
-          </Command.Item>
-        ))}
-      </>
-    )
-  }
+  const api = useResultsApi({ rows, onToggle })
 
   return (
-    // No vertical gap: rows sit flush so the guide lines of an expanded
-    // result join into one continuous rule, as they do in the editor.
-    <ul className="flex flex-col">
-      {rows.map((row, index) => (
-        <li
+    <>
+      {rows.map((row) => (
+        <Command.Item
           key={row.key}
-          data-list-index={index}
-          data-active={activeIndex === index ? "true" : undefined}
+          value={resultRowValue(row)}
+          onSelect={() => onActivate(row.hit)}
+          className="leading-normal!"
         >
-          <ResultBlock row={row} api={api} compact={compact} withNote={withNote} />
-        </li>
+          {/* A click on the row's own controls (the fold chevron) must not
+              read as "select this result" to cmdk's item. */}
+          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+          <div
+            className="min-w-0 flex-1"
+            onClick={(event) => {
+              if ((event.target as HTMLElement).closest("button, input")) {
+                event.stopPropagation()
+              }
+            }}
+          >
+            <ResultBlock row={row} api={api} withNote={withNote} />
+          </div>
+        </Command.Item>
       ))}
-    </ul>
+    </>
   )
 }
