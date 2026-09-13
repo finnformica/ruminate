@@ -1,13 +1,8 @@
 import type { Heading, Note, NoteId, Task } from "../schema"
 import { isHeading } from "../blocks/markers"
 import type { Block, BlockDoc } from "../blocks/types"
-import {
-  formatDate,
-  formatWeek,
-  isValidDateString,
-  isValidWeekString,
-  toDateStringUtc,
-} from "../utils/date"
+import { formatDate, formatWeek, toDateStringUtc } from "../utils/date"
+import { noteTypeOf } from "../utils/note-type"
 import { NOTE_TYPE, noteDoc, parseProps, propsJson, type GraphSnapshot } from "./graph"
 import type { Op } from "./ops"
 import { emittedNoteTitle, isMintedNoteId } from "./note-identity"
@@ -156,7 +151,7 @@ export function noteFromNode(id: NoteId, snapshot: GraphSnapshot): Note | null {
     const date = dateOf(value)
     if (date) dates.add(date)
   }
-  const type = isValidDateString(id) ? "daily" : isValidWeekString(id) ? "weekly" : "note"
+  const type = noteTypeOf(id)
   if (type === "daily") dates.add(id)
 
   const text = texts.join("\n")

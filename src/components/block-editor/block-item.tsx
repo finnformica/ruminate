@@ -545,9 +545,14 @@ export function BlockItem({
       </svg>
     </IconButton>
   ) : null
+  // The chevron the marker SLOT hosts — none when it sits beside instead (a
+  // to-do's checkbox, a note's favicon both keep their slot to themselves).
+  const slotToggle = toggleBeside ? null : toggle
   // The key of a swapping parent: fades out as the chevron fades in, and is
   // hidden outright while collapsed (the pinned chevron stands in for it).
-  const keyClass = hasToggle ? cx("block-key", pinned && "block-key-hidden") : undefined
+  // A key that does not swap keeps its own ink throughout.
+  const keyClass =
+    hasToggle && !toggleBeside ? cx("block-key", pinned && "block-key-hidden") : undefined
   // The slot of a swapping parent is the chevron's hover area (see
   // `.block-toggle-slot` in block-editor.css). Not a todo's: its chevron is
   // beside, and hovering the checkbox must mean the checkbox.
@@ -591,7 +596,7 @@ export function BlockItem({
           className={cx("block-glyph-fill size-1.5 rounded-full bg-text-tertiary", keyClass)}
         />
       )}
-      {toggle}
+      {slotToggle}
     </span>
   )
   // A static text glyph key (the quote's `>`) or none at all (a paragraph):
@@ -609,14 +614,21 @@ export function BlockItem({
       className={cx(
         "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
         slotClass,
+        toggleBeside && "block-toggle-hint",
       )}
     >
-      {glyph ? (
+      {kind.glyphNode ? (
+        // A rendered key (a note's favicon). Not `aria-hidden`: unlike the
+        // typographic keys it can carry meaning of its own.
+        <span className={cx("block-glyph flex items-center", keyClass)}>
+          {kind.glyphNode(block)}
+        </span>
+      ) : glyph ? (
         <span aria-hidden className={cx("block-glyph select-none text-text-tertiary", keyClass)}>
           {glyph}
         </span>
       ) : null}
-      {toggle}
+      {slotToggle}
     </span>
   )
   // An image (`slot: "none"`) has no slot at all: the row's content starts at
@@ -670,7 +682,7 @@ export function BlockItem({
         )}
       >
         <Hash className={keyClass} />
-        {toggle}
+        {slotToggle}
       </span>
     ) : kind.slot === "number" ? (
       // Numbers are read (they carry order), so they sit one step up the ramp
@@ -696,7 +708,7 @@ export function BlockItem({
             {olNumber}.
           </span>
         )}
-        {toggle}
+        {slotToggle}
       </span>
     ) : (
       glyphSlot(kind.glyph ?? null, kind.slotTestId ?? "paragraph-slot")

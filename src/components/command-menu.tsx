@@ -20,7 +20,6 @@ import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/
 import { rollup } from "../data/graph"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { useSearchNotes } from "../hooks/search-notes"
-import { Note } from "../schema"
 import { formatDate, formatDateDistance, toDateString } from "../utils/date"
 import { generateNoteId } from "../utils/note-id"
 import { filterOutline } from "../utils/note-outline"
@@ -30,7 +29,6 @@ import {
   CalendarDateIcon16,
   CopyIcon16,
   NoteIcon16,
-  PinFillIcon12,
   PlusIcon16,
   PrinterIcon16,
   SearchIcon16,
@@ -38,7 +36,6 @@ import {
   TagIcon16,
 } from "./icons"
 import { Keys } from "./keys"
-import { NoteFavicon } from "./note-favicon"
 import {
   QualifierSuggestions,
   useComboboxAria,
@@ -58,6 +55,10 @@ type PaletteMode = "commands" | "outline"
 
 /** How many block results the palette lists before "see all". */
 const NUM_VISIBLE_BLOCKS = 6
+/** How many tags the palette lists before "show all". */
+const NUM_VISIBLE_TAGS = 2
+/** How many note results the palette lists. */
+const NUM_VISIBLE_NOTES = 6
 
 export function CommandMenu() {
   const navigate = useNavigate()
@@ -212,20 +213,6 @@ export function CommandMenu() {
       }
     },
     [setIsOpen],
-  )
-
-  // Open a note, optionally highlighting one of its headings on landing.
-  const openNote = useCallback(
-    (id: string, heading?: string) => {
-      setIsOpen(false)
-      setQuery("")
-      navigate({
-        to: "/notes/$",
-        params: { _splat: id },
-        search: { query: undefined, heading },
-      })
-    },
-    [setIsOpen, navigate],
   )
 
   useHotkeys(APP_SHORTCUTS.commandMenu, toggleMenu, GLOBAL_HOTKEY_OPTIONS)
@@ -400,19 +387,38 @@ export function CommandMenu() {
   const source = useBlockSearchSource()
   const { mode: resultMode, hits, notes: hitNotes } = useSearchResults(scopedQuery)
   const showBlocks = resultMode === "blocks"
-  const { rows, expand, collapse } = useBlockResultTree({
+  const blockTree = useBlockResultTree({
     hits,
     source,
     limit: NUM_VISIBLE_BLOCKS,
     resetKey: deferredQuery,
   })
+
+  // NOTES are the same kind of row: a note is a node whose children are its
+  // blocks (docs/graph-schema-v2.md), so a note result is a root that expands
+  // to reveal what is in it — drawn by the same component, in the same tree
+  // machinery, as a block result. The palette lists the matches while there
+  // is a query and the pinned notes while there is not; they never show at
+  // once, so one tree serves both.
+  const noteHits = useMemo(
+    () =>
+      (deferredQuery ? noteResults.slice(0, NUM_VISIBLE_NOTES) : pinnedNotes).map((note) =>
+        source.noteHit(note),
+      ),
+    [deferredQuery, noteResults, pinnedNotes, source],
+  )
+  const noteTree = useBlockResultTree({ hits: noteHits, source, resetKey: deferredQuery })
+
   // cmdk lowercases item values, so highlight events map back to rows through
-  // a lowercased key (the same trick outline mode uses for block ids).
+  // a lowercased key (the same trick outline mode uses for block ids) — and,
+  // with it, to the tree the row belongs to, so →/← open the right one.
   const rowByValue = useMemo(() => {
-    const map = new Map<string, ResultRow>()
-    for (const row of rows) map.set(resultRowValue(row).toLowerCase(), row)
+    const map = new Map<string, { row: ResultRow; tree: typeof blockTree }>()
+    for (const tree of [blockTree, noteTree]) {
+      for (const row of tree.rows) map.set(resultRowValue(row).toLowerCase(), { row, tree })
+    }
     return map
-  }, [rows])
+  }, [blockTree, noteTree])
 
   // Commit the typed query to the full results view — the URL-addressable
   // `/?query=` the notes route already owns, so filter views are bookmarkable
@@ -487,12 +493,6 @@ export function CommandMenu() {
     [mode, outlineValueToId, sendReveal],
   )
 
-  // Only show the first 2 tags
-  const numVisibleTags = 2
-
-  // Only show the first 6 notes
-  const numVisibleNotes = 6
-
   return (
     <Command.Dialog
       label="Global command menu"
@@ -541,19 +541,20 @@ export function CommandMenu() {
           const caret = input ? input.selectionStart : null
           const collapsed = !input || input.selectionStart === input.selectionEnd
           const atEnd = !input || caret === input.value.length
-          const row = rowByValue.get(highlightedValue.toLowerCase())
-          if (row && collapsed && atEnd) {
+          const entry = rowByValue.get(highlightedValue.toLowerCase())
+          if (entry && collapsed && atEnd) {
+            const { row, tree } = entry
             event.preventDefault()
             // cmdk re-selects its first item whenever the item set changes;
             // opening or closing a row must not move the highlight off it.
             pinnedHighlightRef.current = resultRowValue(row)
             if (event.key === "ArrowRight") {
-              expand(row)
+              tree.expand(row)
             } else if (row.expanded) {
-              collapse(row)
+              tree.collapse(row)
             } else if (row.parentKey) {
               // Already closed: step out to the parent it was revealed under.
-              const parent = rows.find((other) => other.key === row.parentKey)
+              const parent = tree.rows.find((other) => other.key === row.parentKey)
               if (parent) setHighlightedValue(resultRowValue(parent))
             }
             return
@@ -681,15 +682,12 @@ export function CommandMenu() {
               ) : null}
               {!deferredQuery && pinnedNotes.length ? (
                 <Command.Group heading="Pinned notes">
-                  {pinnedNotes.map((note) => (
-                    <NoteItem
-                      key={note.id}
-                      note={note}
-                      // Since they're all pinned, we don't need to show the pin icon
-                      hidePinIcon
-                      onOpen={(heading) => openNote(note.id, heading)}
-                    />
-                  ))}
+                  <SearchResults
+                    variant="palette"
+                    rows={noteTree.rows}
+                    onActivate={openBlock}
+                    onToggle={noteTree.toggle}
+                  />
                 </Command.Group>
               ) : null}
               {dateString ? (
@@ -716,7 +714,7 @@ export function CommandMenu() {
               ) : null}
               {tagResults.length ? (
                 <Command.Group heading="Tags">
-                  {tagResults.slice(0, numVisibleTags).map(([name, noteIds]) => (
+                  {tagResults.slice(0, NUM_VISIBLE_TAGS).map(([name, noteIds]) => (
                     <CommandItem
                       key={name}
                       icon={<TagIcon16 />}
@@ -731,7 +729,7 @@ export function CommandMenu() {
                       {name}
                     </CommandItem>
                   ))}
-                  {tagResults.length > numVisibleTags ? (
+                  {tagResults.length > NUM_VISIBLE_TAGS ? (
                     <CommandItem
                       key={`Show all tags matching "${deferredQuery}"`}
                       icon={<SearchIcon16 />}
@@ -770,21 +768,20 @@ export function CommandMenu() {
                   )}
                   <SearchResults
                     variant="palette"
-                    rows={rows}
+                    rows={blockTree.rows}
                     onActivate={openBlock}
-                    onToggle={(row) => (row.expanded ? collapse(row) : expand(row))}
+                    onToggle={blockTree.toggle}
                   />
                 </Command.Group>
               ) : null}
               {deferredQuery ? (
                 <Command.Group heading="Notes">
-                  {noteResults.slice(0, numVisibleNotes).map((note) => (
-                    <NoteItem
-                      key={note.id}
-                      note={note}
-                      onOpen={(heading) => openNote(note.id, heading)}
-                    />
-                  ))}
+                  <SearchResults
+                    variant="palette"
+                    rows={noteTree.rows}
+                    onActivate={openBlock}
+                    onToggle={noteTree.toggle}
+                  />
                   <CommandItem
                     key={`Create new note "${deferredQuery}"`}
                     icon={<PlusIcon16 />}
@@ -856,49 +853,5 @@ function CommandItem({
         <span className="hidden leading-none text-text-secondary in-aria-selected:inline">⏎</span>
       </div>
     </Command.Item>
-  )
-}
-
-// How many of a note's headings to list beneath it.
-const NUM_VISIBLE_HEADINGS = 4
-
-function NoteItem({
-  note,
-  hidePinIcon,
-  onOpen,
-}: {
-  note: Note
-  hidePinIcon?: boolean
-  onOpen: (heading?: string) => void
-}) {
-  // Show the note by its name, with its headings listed (tabbed over) as
-  // children so you can find a note by a heading it contains. Selecting the
-  // note opens it; selecting a heading opens it and highlights that heading.
-  const headings = note.headings.slice(0, NUM_VISIBLE_HEADINGS)
-  // cmdk matches on `value`, so it carries the name (what the user typed
-  // against) plus the id (still unique, and how duplicates stay distinct).
-  const itemValue = `${note.displayName} ${note.id}`
-  return (
-    <>
-      <CommandItem value={itemValue} icon={<NoteFavicon note={note} />} onSelect={() => onOpen()}>
-        <span className="flex items-center gap-2 truncate">
-          {!hidePinIcon && note.pinned ? (
-            <PinFillIcon12 className="shrink-0 text-text-pinned" />
-          ) : null}
-          <span className="truncate">{note.displayName}</span>
-        </span>
-      </CommandItem>
-      {headings.map((heading, index) => (
-        <CommandItem
-          key={`${note.id}::${index}`}
-          value={`${itemValue} › ${heading.text}`}
-          className="pl-9!"
-          icon={<span className="text-text-tertiary">#</span>}
-          onSelect={() => onOpen(heading.text)}
-        >
-          <span className="truncate text-text-secondary">{heading.text}</span>
-        </CommandItem>
-      ))}
-    </>
   )
 }

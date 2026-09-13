@@ -2,7 +2,7 @@ import { z } from "zod"
 
 export type NoteId = string
 
-type NoteType = "note" | "daily" | "weekly"
+export type NoteType = "note" | "daily" | "weekly"
 
 /** A heading block: its level (its outline depth, from 1) and text. */
 export type Heading = { level: number; text: string }

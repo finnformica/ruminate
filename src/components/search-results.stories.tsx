@@ -9,9 +9,10 @@ import { parseQuery } from "../utils/search"
 import { SearchResults } from "./search-results"
 
 /**
- * The block-results list in its `page` chrome (the full results view). Rows
- * are the matching BLOCKS — expand one with the chevron, or with ↑/↓ then →,
- * to read the blocks inside it.
+ * The results list in its `page` chrome (the full results view, and the notes
+ * list). Rows are whatever matched — blocks, or the NOTES themselves — and
+ * every one is the editor's own row: expand it with the chevron, or with ↑/↓
+ * then →, to read what is inside it.
  */
 
 function note(id: string, text: string): Note {
@@ -79,9 +80,18 @@ const CORPUS_GRAPH = (() => {
 const index = createBlockIndexer()(CORPUS, CORPUS_GRAPH)
 const source = inMemoryBlockSearchSource(index)
 
-function Harness({ query }: { query: string }) {
-  const hits: BlockHit[] = searchBlocks(parseQuery(query), index)
-  const { rows, expand, collapse, toggle } = useBlockResultTree({ hits, source, resetKey: query })
+/** `query` lists the blocks it matches; `notes` lists the corpus's notes as
+ * roots — the two kinds of root the one renderer draws. */
+function Harness({ query, roots = "blocks" }: { query: string; roots?: "blocks" | "notes" }) {
+  const hits: BlockHit[] =
+    roots === "notes"
+      ? CORPUS.map((n) => source.noteHit(n))
+      : searchBlocks(parseQuery(query), index)
+  const { rows, expand, collapse, toggle } = useBlockResultTree({
+    hits,
+    source,
+    resetKey: `${roots}:${query}`,
+  })
   const { activeIndex, setActiveIndex, containerRef } = useListKeyboardNav({
     count: rows.length,
     resetKey: query,
@@ -97,7 +107,13 @@ function Harness({ query }: { query: string }) {
   return (
     <div ref={containerRef} style={{ maxWidth: 640, padding: 24 }}>
       <div className="mb-3 text-sm text-text-secondary">
-        {hits.length} matching blocks — query: <code>{query}</code>
+        {roots === "notes" ? (
+          <>{hits.length} notes</>
+        ) : (
+          <>
+            {hits.length} matching blocks — query: <code>{query}</code>
+          </>
+        )}
       </div>
       <SearchResults
         variant="page"
@@ -130,4 +146,12 @@ export const TodoFilter: Story = {
 /** Mixed types, showing how each block renders in its own style. */
 export const MixedTypes: Story = {
   args: { query: "type:heading,todo,done,quote" },
+}
+
+/**
+ * The notes list: the same rows, with the NOTES as the roots. Each keys on
+ * its favicon and opens to its top-level blocks.
+ */
+export const NoteRoots: Story = {
+  args: { query: "", roots: "notes" },
 }

@@ -4,18 +4,23 @@ import type { Block, BlockDoc } from "../blocks/types"
 import type { Occurrence } from "../blocks/view"
 import type { ResultRow } from "../hooks/block-result-tree"
 import type { BlockHit } from "../utils/block-search"
+import { isNoteHit } from "../utils/block-search-source"
 import { cx } from "../utils/cx"
 import { BlockItem, type BlockEditorApi } from "./block-editor/block-item"
-import { NoteFavicon } from "./note-favicon"
 
 /**
- * The block-results list, shared by the ⌘K palette and the full results view
- * (`/?query=…`). The results are a VIEW in the editor's sense: its roots are
- * the matching blocks, each row is an occurrence, and every row is drawn by
- * the editor's own row component (`BlockItem`, read-only) — the same marker
- * slot, type scale, quote bar, checkbox, collapse chevron and guide lines as
- * the block has in its note. The one addition is the breadcrumb under a
- * matched row saying where it lives.
+ * The results list, shared by the ⌘K palette, the full results view
+ * (`/?query=…`) and the notes list. The results are a VIEW in the editor's
+ * sense: its roots are whatever matched, each row is an occurrence, and every
+ * row is drawn by the editor's own row component (`BlockItem`, read-only) —
+ * the same marker slot, type scale, quote bar, checkbox, collapse chevron and
+ * guide lines the block has in its note.
+ *
+ * **Notes and blocks are the same kind of row.** A note is a node whose type
+ * is `note` and whose children are its blocks (docs/graph-schema-v2.md), so a
+ * note result is a root row that expands to reveal what is in it, exactly as
+ * a block result does. What differs between the surfaces this list serves is
+ * which ROOTS are handed in, never how a row is drawn.
  *
  * One component, two chromes: `palette` renders cmdk items (cmdk owns the
  * highlight and Enter), `page` renders a keyboard-navigable list whose
@@ -32,12 +37,13 @@ export function resultRowValue(row: ResultRow): string {
 }
 
 /** Where a hit opens: its note, zoomed into the block (the `?block=` param the
- * editor already reads). Shared so every Enter lands in the same place. */
+ * editor already reads) — or, for a note row, that note whole. Shared so every
+ * Enter lands in the same place. */
 export function blockHitNavigation(hit: BlockHit) {
   return {
     to: "/notes/$" as const,
     params: { _splat: hit.noteId },
-    search: { query: undefined, block: hit.blockId },
+    search: { query: undefined, block: isNoteHit(hit) ? undefined : hit.blockId },
   }
 }
 
@@ -62,9 +68,14 @@ function occurrenceOf(row: ResultRow): Occurrence {
 }
 
 /** The block a row shows. Children are not embedded in a hit (they are
- * resolved on expand); the occurrence's `hasChildren` is what the row reads. */
+ * resolved on expand); the occurrence's `hasChildren` is what the row reads.
+ * A note row's block is the note NODE, props and all — the row draws its
+ * favicon and its pinned state from them, as the editor does for a note
+ * block walked out of the graph. */
 function blockOf(row: ResultRow): Block {
-  return { id: row.hit.blockId, type: row.hit.type, text: row.hit.text, children: [] }
+  const { hit } = row
+  const base = { id: hit.blockId, type: hit.type, text: hit.text, children: [] }
+  return isNoteHit(hit) ? { ...base, props: hit.note.props } : base
 }
 
 const noop = () => {}
@@ -117,24 +128,44 @@ function useResultsApi({
   }, [rows, activeKey, onToggle, onActivate])
 }
 
-/** `Note name › Ancestor › Ancestor` — where this block lives. Sits under
- * the row's text column (the marker slot and its gaps to the left). */
-function Breadcrumb({ hit, compact }: { hit: BlockHit; compact: boolean }) {
+/**
+ * `Note name › Ancestor › Ancestor` — where this block lives. Sits under the
+ * row's text column (the marker slot and its gaps to the left).
+ *
+ * It carries only what ORIENTS, never what repeats. The note's name leads it
+ * only while the results span more than one note (`withNote`): scoped to one
+ * — an `in:blk_…` query, the palette's in-note scope — the same name under
+ * every row says nothing. The note's favicon is gone from it altogether: it
+ * is the key a NOTE row hangs in its own marker slot now, and under a block
+ * row it only ever restated the name beside it. An empty trail draws nothing.
+ */
+function Breadcrumb({
+  hit,
+  compact,
+  withNote,
+}: {
+  hit: BlockHit
+  compact: boolean
+  withNote: boolean
+}) {
+  const trail = [
+    ...(withNote ? [{ id: hit.noteId, text: hit.note.displayName }] : []),
+    ...hit.ancestors,
+  ]
+  if (trail.length === 0) return null
   return (
     <div
       data-testid="result-breadcrumb"
       className={cx(
-        "flex min-w-0 items-center gap-1.5 pl-[31px] text-text-secondary",
+        "flex min-w-0 items-center pl-[31px] text-text-secondary",
         compact ? "text-xs" : "text-sm",
       )}
     >
-      <NoteFavicon note={hit.note} className="shrink-0" />
       <span className="truncate">
-        {hit.note.displayName}
-        {hit.ancestors.map((ancestor) => (
-          <React.Fragment key={ancestor.id}>
-            <span className="px-1 text-text-tertiary">›</span>
-            {ancestor.text}
+        {trail.map((crumb, index) => (
+          <React.Fragment key={`${crumb.id}:${index}`}>
+            {index > 0 ? <span className="px-1 text-text-tertiary">›</span> : null}
+            {crumb.text}
           </React.Fragment>
         ))}
       </span>
@@ -143,21 +174,26 @@ function Breadcrumb({ hit, compact }: { hit: BlockHit; compact: boolean }) {
 }
 
 /** One row: the block as the editor draws it, plus (for a matched hit) the
- * breadcrumb. Revealed children are already positioned under their parent;
- * repeating the note and ancestry there would be noise. */
+ * breadcrumb. Revealed children are already positioned under their parent,
+ * and a note row is the top of its own outline — repeating the note and
+ * ancestry on either would be noise. */
 function ResultBlock({
   row,
   api,
   compact,
+  withNote,
 }: {
   row: ResultRow
   api: BlockEditorApi
   compact: boolean
+  withNote: boolean
 }) {
   return (
     <>
       <BlockItem doc={NO_DOC} block={blockOf(row)} occurrence={occurrenceOf(row)} api={api} />
-      {row.depth === 0 ? <Breadcrumb hit={row.hit} compact={compact} /> : null}
+      {row.depth === 0 && !isNoteHit(row.hit) ? (
+        <Breadcrumb hit={row.hit} compact={compact} withNote={withNote} />
+      ) : null}
     </>
   )
 }
@@ -180,6 +216,9 @@ export function SearchResults({
   activeIndex = null,
 }: SearchResultsProps) {
   const compact = variant === "palette"
+  // The note's name earns its place in a breadcrumb only while it tells two
+  // rows apart (see `Breadcrumb`).
+  const withNote = React.useMemo(() => new Set(rows.map((row) => row.hit.noteId)).size > 1, [rows])
   const activeKey = activeIndex === null ? null : (rows[activeIndex]?.key ?? null)
   const api = useResultsApi({
     rows,
@@ -209,7 +248,7 @@ export function SearchResults({
                 }
               }}
             >
-              <ResultBlock row={row} api={api} compact={compact} />
+              <ResultBlock row={row} api={api} compact={compact} withNote={withNote} />
             </div>
           </Command.Item>
         ))}
@@ -227,7 +266,7 @@ export function SearchResults({
           data-list-index={index}
           data-active={activeIndex === index ? "true" : undefined}
         >
-          <ResultBlock row={row} api={api} compact={compact} />
+          <ResultBlock row={row} api={api} compact={compact} withNote={withNote} />
         </li>
       ))}
     </ul>

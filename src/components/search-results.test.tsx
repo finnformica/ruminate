@@ -6,7 +6,7 @@ import { useListKeyboardNav } from "../hooks/list-keyboard-nav"
 import type { BlockType } from "../blocks/types"
 import type { Note } from "../schema"
 import type { BlockHit } from "../utils/block-search"
-import type { BlockSearchSource } from "../utils/block-search-source"
+import { noteHit, type BlockSearchSource } from "../utils/block-search-source"
 import { SearchResults, blockHitNavigation } from "./search-results"
 
 afterEach(cleanup)
@@ -26,14 +26,17 @@ const NOTE: Note = {
   text: "",
 }
 
+const OTHER_NOTE: Note = { ...NOTE, id: "journal", displayName: "journal", title: "journal" }
+
 function hit(
   blockId: string,
   text: string,
   type: BlockType,
   ancestors: { id: string; text: string }[] = [],
   childCount = 0,
+  note: Note = NOTE,
 ): BlockHit {
-  return { blockId, noteId: NOTE.id, text, type, olNumber: 1, ancestors, childCount, note: NOTE }
+  return { blockId, noteId: note.id, text, type, olNumber: 1, ancestors, childCount, note }
 }
 
 /** The owner's two reported cases, as fixtures: a heading nested two levels
@@ -51,6 +54,8 @@ const NVIDIA = hit(
 const MILK = hit("blk_milk", "buy milk", "todo")
 const SHIP = hit("blk_ship", "ship it", "done")
 
+const ELSEWHERE = hit("blk_elsewhere", "in another note", "text", [], 0, OTHER_NOTE)
+
 const H100 = hit("blk_h100", "H100 supply", "ul", [], 1)
 const H100_DETAIL = hit("blk_detail", "80GB HBM3", "text")
 const REVENUE = hit("blk_rev", "datacenter revenue", "ul")
@@ -65,6 +70,7 @@ function makeSource(children: Record<string, BlockHit[]>) {
       calls.push(parent.blockId)
       return children[parent.blockId] ?? []
     },
+    noteHit: (note) => noteHit(note, (children[note.id] ?? []).length),
   }
   return { source, calls }
 }
@@ -117,13 +123,23 @@ const arrow = (key: string) => fireEvent.keyDown(document.body, { key })
 
 describe("search results (page)", () => {
   it("renders a nested block as its own row, with its breadcrumb", () => {
-    renderResults([NVIDIA])
+    renderResults([NVIDIA, ELSEWHERE])
     const row = rowAt(0)
     expect(row?.textContent).toContain("nvidia")
     // Where it lives: the note, then its ancestry.
     expect(row?.textContent).toContain("research")
     expect(row?.textContent).toContain("Semiconductors")
     expect(row?.textContent).toContain("GPUs")
+  })
+
+  it("keeps the ancestry but drops the note name when every hit is in one note", () => {
+    // The `in:blk_…` case: repeating the one note's name under every row says
+    // nothing, so only the trail inside it is drawn.
+    renderResults([NVIDIA, MILK])
+    const crumb = rowAt(0)?.querySelector('[data-testid="result-breadcrumb"]')
+    expect(crumb?.textContent).toBe("Semiconductors\u203aGPUs")
+    // A root hit with no ancestry has nothing left to say.
+    expect(rowAt(1)?.querySelector('[data-testid="result-breadcrumb"]')).toBeNull()
   })
 
   it("draws each block exactly as the editor does — the same row component", () => {
@@ -233,6 +249,55 @@ describe("search results (page)", () => {
       params: { _splat: "research" },
       search: { query: undefined, block: "blk_milk" },
     })
+  })
+
+  it("draws a NOTE result as a root row, keyed by its favicon and with no breadcrumb", () => {
+    const source = makeSource({ research: [NVIDIA] }).source
+    renderResults([source.noteHit(NOTE)])
+    const row = rowAt(0)
+    // The note's own title is the row's text — it is a node like any other.
+    expect(row?.querySelector('[data-testid="block-body"]')?.textContent).toBe("research")
+    // Its key is its favicon, in the shared marker slot.
+    expect(row?.querySelector('[data-testid="note-favicon-slot"]')).not.toBeNull()
+    // It is the top of its own outline: nothing to say about where it lives.
+    expect(row?.querySelector('[data-testid="result-breadcrumb"]')).toBeNull()
+  })
+
+  it("expands a note result to its top-level blocks, which draw as themselves", () => {
+    const { source, calls } = makeSource({ research: [NVIDIA, MILK] })
+    onActivate.mockClear()
+    render(<Harness hits={[source.noteHit(NOTE)]} source={source} />)
+    expect(calls).toEqual([])
+
+    fireEvent.click(screen.getByLabelText("Expand"))
+    expect(calls).toEqual(["research"])
+    // A heading child is still a heading; a todo is still a checkbox.
+    expect(rowAt(1)?.querySelector('[data-testid="heading-hash"]')).not.toBeNull()
+    expect(rowAt(2)?.querySelector('input[type="checkbox"]')).not.toBeNull()
+    // Indented under the note, hanging from its guide line.
+    expect(rowAt(1)?.querySelector("[data-guide]")).not.toBeNull()
+  })
+
+  it("Enter on a note row opens the note whole — not zoomed to a block", () => {
+    const { source } = makeSource({})
+    onActivate.mockClear()
+    render(<Harness hits={[source.noteHit(NOTE)]} source={source} />)
+    arrow("ArrowDown")
+    arrow("Enter")
+    expect(onActivate).toHaveBeenCalledWith({
+      to: "/notes/$",
+      params: { _splat: "research" },
+      search: { query: undefined, block: undefined },
+    })
+  })
+
+  it("a pinned note says so on its row", () => {
+    const { source } = makeSource({})
+    onActivate.mockClear()
+    render(
+      <Harness hits={[source.noteHit({ ...NOTE, props: { pinned: true } })]} source={source} />,
+    )
+    expect(rowAt(0)?.querySelector('[data-testid="note-pinned"]')).not.toBeNull()
   })
 
   it("only the matched hits carry a breadcrumb — revealed children are context", () => {

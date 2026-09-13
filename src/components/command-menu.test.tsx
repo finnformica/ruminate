@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   },
   children: new Map<string, unknown[]>(),
   childCalls: [] as string[],
+  noteResults: [] as unknown[],
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -35,19 +36,24 @@ vi.mock("../hooks/note", () => ({
 }))
 
 vi.mock("../hooks/search-notes", () => ({
-  useSearchNotes: () => () => [],
+  useSearchNotes: () => () => mocks.noteResults,
 }))
 
-vi.mock("../hooks/search-results", () => ({
-  useSearchResults: () => mocks.results,
-  useBlockSearchSource: () => ({
-    search: () => mocks.results.hits,
-    children: (hit: { blockId: string }) => {
-      mocks.childCalls.push(hit.blockId)
-      return mocks.children.get(hit.blockId) ?? []
-    },
-  }),
-}))
+vi.mock("../hooks/search-results", async () => {
+  const { noteHit } = await import("../utils/block-search-source")
+  return {
+    useSearchResults: () => mocks.results,
+    useBlockSearchSource: () => ({
+      search: () => mocks.results.hits,
+      children: (hit: { blockId: string }) => {
+        mocks.childCalls.push(hit.blockId)
+        return mocks.children.get(hit.blockId) ?? []
+      },
+      noteHit: (note: { id: string }) =>
+        noteHit(note as never, (mocks.children.get(note.id) ?? []).length),
+    }),
+  }
+})
 
 vi.mock("../global-state", async () => {
   const { atom } = await import("jotai")
@@ -87,6 +93,7 @@ beforeEach(() => {
   mocks.results = { mode: "notes", hits: [], notes: [] }
   mocks.children = new Map()
   mocks.childCalls = []
+  mocks.noteResults = []
 })
 
 const OUTLINE = {
@@ -256,6 +263,7 @@ function makeNote(id: string) {
 }
 
 const RESEARCH = makeNote("research")
+const JOURNAL = makeNote("journal")
 
 function hit(
   blockId: string,
@@ -263,16 +271,17 @@ function hit(
   type: string,
   ancestors: { id: string; text: string }[] = [],
   childCount = 0,
+  note = RESEARCH,
 ) {
   return {
     blockId,
-    noteId: RESEARCH.id,
+    noteId: note.id,
     text,
     type,
     olNumber: 1,
     ancestors,
     childCount,
-    note: RESEARCH,
+    note,
   }
 }
 
@@ -290,6 +299,7 @@ const NVIDIA = hit(
 )
 const TODO_MILK = hit("blk_milk", "buy milk", "todo")
 const TODO_SHIP = hit("blk_ship", "ship it", "todo")
+const ELSEWHERE = hit("blk_else", "in another note", "text", [], 0, JOURNAL)
 
 async function openWithBlocks(hits: unknown[], notes: unknown[] = [RESEARCH]) {
   mocks.results = { mode: "blocks", hits, notes }
@@ -310,7 +320,7 @@ const rowFor = (text: string) => screen.getByText(text).closest("[cmdk-item]") a
 
 describe("block results", () => {
   it("lists a nested heading as its own row, with its breadcrumb", async () => {
-    await openWithBlocks([NVIDIA])
+    await openWithBlocks([NVIDIA, ELSEWHERE], [RESEARCH, JOURNAL])
     const row = rowFor("nvidia")
     expect(row).toBeTruthy()
     // Where it lives: note, then ancestry.
@@ -453,6 +463,74 @@ describe("block results", () => {
     fireEvent.keyDown(input, { key: "ArrowRight" })
     expect(screen.queryByText("H100 supply")).toBeNull()
     expect(mocks.childCalls).toEqual([])
+  })
+})
+
+// ── Note results ────────────────────────────────────────────────────────────
+// A note is a node whose children are its blocks, so a note result is a root
+// row drawn by the same component as a block result — and expandable in the
+// palette exactly as one.
+
+describe("note results", () => {
+  async function openWithNotes(notes: unknown[]) {
+    mocks.results = { mode: "notes", hits: [], notes: [] }
+    mocks.noteResults = notes
+    const rendered = renderMenu({ open: true })
+    const input = commandsInput()
+    fireEvent.change(input, { target: { value: "research" } })
+    input.setSelectionRange(input.value.length, input.value.length)
+    await waitFor(() => {
+      expect(screen.queryByText("Settings")).toBeNull()
+    })
+    return rendered
+  }
+
+  it("draws a note as a block row, not a bespoke palette item", async () => {
+    await openWithNotes([RESEARCH])
+    const row = rowFor("research")
+    expect(row).toBeTruthy()
+    // The editor's own row: its body hook, and the note's favicon as its key.
+    expect(row?.querySelector('[data-testid="block-body"]')?.textContent).toBe("research")
+    expect(row?.querySelector('[data-testid="note-favicon-slot"]')).not.toBeNull()
+  })
+
+  it("expands a note in the palette to reveal its blocks", async () => {
+    mocks.children.set("research", [NVIDIA, TODO_MILK])
+    await openWithNotes([RESEARCH])
+
+    // cmdk highlights the first item, which here IS the note row.
+    expect(screen.queryByText("buy milk")).toBeNull()
+
+    fireEvent.keyDown(commandsInput(), { key: "ArrowRight" })
+    expect(screen.getByText("nvidia")).toBeTruthy()
+    expect(screen.getByText("buy milk")).toBeTruthy()
+    expect(mocks.childCalls).toEqual(["research"])
+
+    fireEvent.keyDown(commandsInput(), { key: "ArrowLeft" })
+    expect(screen.queryByText("buy milk")).toBeNull()
+  })
+
+  it("Enter on a note row opens the note whole — not zoomed to a block", async () => {
+    await openWithNotes([RESEARCH])
+    fireEvent.keyDown(commandsInput(), { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/notes/$",
+      params: { _splat: "research" },
+      search: { query: undefined, block: undefined },
+    })
+  })
+
+  it("a block revealed under a note opens that block", async () => {
+    mocks.children.set("research", [NVIDIA])
+    await openWithNotes([RESEARCH])
+
+    fireEvent.keyDown(commandsInput(), { key: "ArrowRight" })
+    fireEvent.click(screen.getByText("nvidia"))
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/notes/$",
+      params: { _splat: "research" },
+      search: { query: undefined, block: "blk_nvidia" },
+    })
   })
 })
 
