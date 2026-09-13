@@ -45,7 +45,7 @@ export function useDateMentions(id: NoteId | undefined) {
 }
 
 /**
- * Set props on a note (pin, width, font, gist id, tags…): the current props
+ * Set props on a note (pin, width, font, gist id…): the current props
  * with the patch applied — a `null` value removes the key — and
  * `updated_at` stamped, as one `setProps` op.
  */

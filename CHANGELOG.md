@@ -2,6 +2,10 @@
 
 ## 2026-W37
 
+### Removed
+
+- Tags are gone. The tags page, the sidebar's greyed-out **Tags** entry and its <kbd>g</kbd> then <kbd>t</kbd> shortcut, the tag pills and tag filter above the notes list, the `tag:` and `tags:` qualifiers (and `has:tags` / `no:tags`, `sort:tags`) in search, the `#tag` line in the help panel's formatting reference, and the MCP server's `list_tags` tool with `list_notes`' `tag` filter and `read_note`'s `tags` part have all been removed. A `#word` in a block is plain text, as it has rendered for a while. Nothing is deleted from your notes: a `tags` entry a note's properties already carry stays where it is, it is simply no longer read.
+
 ### Changed
 
 - Ruminate asks you to update once, and each device fetches a fresh copy of your notes afterwards. A note's root is now stored under the name the app has always used for it — `note`, rather than the historical `page` it was still written as in the database — and a copy of Ruminate from before that change cannot read the new rows. Older versions are therefore refused by the server and show the **Update Ruminate** notice instead of quietly showing you nothing; once updated, the device throws its local copy away and pulls your notes down again. Nothing that has reached the server is lost, but anything written offline and never synced goes with the old copy, so sync before you update.

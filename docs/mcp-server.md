@@ -94,13 +94,12 @@ An agent works in the notes you already have: there is no tool to create one.
 
 | Tool             | Perm   | What it does                                                                                                                                                                         |
 | ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `list_notes`     | read   | Notes the token can reach, newest first. Filter by `tag` or `type`; page with `cursor`.                                                                                              |
+| `list_notes`     | read   | Notes the token can reach, newest first. Filter by `type`; page with `cursor`.                                                                                                       |
 | `search`         | read   | Blocks whose text contains a substring, each naming the notes it appears in. Page with `cursor`.                                                                                     |
 | `read_note`      | read   | A note's blocks **as stored rows** — top 2 levels by default (`depth: 0` for all), bounded by `limit` too; page with `cursor`. `include` adds the parts that cost a whole-note read. |
 | `get_block`      | read   | One block by id: type, text, props, children, parents, the notes it is in. Its id lists are capped.                                                                                  |
 | `list_children`  | read   | The blocks beneath one, `depth` levels deep — walking **down**. Page with `cursor`.                                                                                                  |
 | `list_parents`   | read   | The blocks that hold one, and the notes it appears in — walking **up**. Page with `cursor`.                                                                                          |
-| `list_tags`      | read   | Tags across the reachable notes, with note counts. Page with `cursor`.                                                                                                               |
 | `create_blocks`  | write  | Add blocks under a parent, nesting with `children`. Purely additive.                                                                                                                 |
 | `set_note_title` | write  | Set or clear a note's title.                                                                                                                                                         |
 | `update_block`   | write  | Change one block's text, type or metadata, in place.                                                                                                                                 |
@@ -230,11 +229,10 @@ corpus (`worker/mcp/graph-load.test.ts`):
 | `list_notes` (default page of 50) |  1,620 |   820 |
 | `list_notes` (page of 5)          |  1,620 |   220 |
 | `get_block`, note-scoped token    |  1,620 |    45 |
-| `search`, `list_tags`             |  1,620 | 1,620 |
+| `search`                          |  1,620 | 1,620 |
 
 The traversal tools are now bounded by the question rather than by the corpus. `search`
-and `list_tags` are not, and are not pretended to be: one reads every block's text and
-the other every note's tags, which is what they are for.
+is not, and is not pretended to be: it reads every block's text, which is what it is for.
 
 Five things worth knowing about the table:
 
@@ -242,17 +240,16 @@ Five things worth knowing about the table:
   the response. Two notes with the same first two levels and ten times the blocks
   underneath one of them cost the SAME at `depth: 1` — 51 rows each, measured, not
   asserted in a comment. The parts of a note that cannot be known without reading all of
-  it — `blockCount`, the tags written anywhere in it, its tasks, its headings, its
-  Unassigned section — moved behind `include`, and asking for any of them reads the whole
+  it — `blockCount`, its tasks, its headings, its Unassigned section — moved behind
+  `include`, and asking for any of them reads the whole
   note. See "What `include` costs" below.
 - **`list_parents` is O(the notes holding the block)**, because it names those notes and
   an untitled note's display name is derived from its outline. Reading them is the price
   of that name being the one on screen rather than a second guess at it.
 - **`list_notes` reads the note rows, then only the notes on the page.** Which notes a
   page names, and in what order, is decided by facts on each note's own row — its
-  `updated_at` prop, and its id, which says whether it is a daily or a weekly. Its tags,
-  task counts and preview are not, so those are read for the page alone. A `tag` filter
-  is a question about every block of every note, so it loads the corpus and says so.
+  `updated_at` prop, and its id, which says whether it is a daily or a weekly. Its task
+  counts and preview are not, so those are read for the page alone.
 - **A note-scoped grant pays for its scope.** The visible-node set is a walk seeded at the
   granted notes rather than a pass over a loaded corpus — cheaper, and the same set.
 
@@ -337,7 +334,6 @@ rest of has a `cursor`:
 | `search`        | `limit` + `cursor`                                                   |
 | `list_children` | `depth`, then `limit` + `cursor` over the flattened walk             |
 | `list_parents`  | `limit` + `cursor`, over the parents and the notes alike             |
-| `list_tags`     | `limit` + `cursor`                                                   |
 | `read_note`     | `depth`, then `limit` + `cursor`; `include` for the whole-note parts |
 | `get_block`     | its embedded id lists are capped; the counts and the flags say so    |
 

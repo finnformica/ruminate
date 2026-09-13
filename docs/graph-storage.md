@@ -60,7 +60,7 @@ Everything above `src/data` reads one atom: `graphSnapshotAtom`, the
 `src/data/database-mode.ts` serves the SQL store's rows into
 `databaseGraphAtom`, and `graphSnapshotAtom` reads it whenever a user is
 signed in. `notesAtom` is derived from it per page (`src/data/note-meta.ts`:
-title, props, tags and priorities from block text, tasks, headings, memoized
+title, props, tasks, headings, memoized
 by the page's row identities), search and the block index read those notes,
 and the open note's editor walks its page straight off the snapshot
 (`noteDoc` via `useNoteDoc`). Markdown is a projection at the edges only —
@@ -72,7 +72,7 @@ sign-in/sign-out. Signed out, `graphSnapshotAtom` reads `sampleGraphAtom`
 (hard-coded sample blocks, `src/data/sample-graph.ts`), which the same
 writers edit in memory. The write seam (`src/data/store.ts`) is one hook,
 `useApplyOps`: every writer — the editor's diff (`docToOps`), rename, page
-props, create, delete, tag rename — hands it a batch of graph ops
+props, create, delete — hands it a batch of graph ops
 (`src/data/ops.ts`), routed to `databaseApplyOps` signed in and to the sample
 atom signed out.
 
@@ -263,7 +263,7 @@ schema doc (`note`, `text`, `h1`–`h3`, `todo`, `done`, `ul`, `ol`, `quote`,
 `code`); checked state is a type (`todo` ↔ `done`), so a checkbox toggle is a
 generic type transition. `text` is marker-free. `props` is JSON: a page node
 carries its metadata as **individual entries** (e.g.
-`{"updated_at": "…", "tags": […]}`, docs/metadata.md). There is no
+`{"updated_at": "…", "pinned": true}`, docs/metadata.md). There is no
 frontmatter: the rollup writes blocks only, and `parse` drops a leading YAML
 block rather than reading it. A row still in the retired raw-YAML shape
 (`{"frontmatter": "…"}`, written before entries existed) reads as no
@@ -280,9 +280,9 @@ per note — which doubles as the rebalancing mechanism. The store's diffing
 write path (`reconcileSortKeys`) keeps existing keys wherever the relative
 order allows, so an unchanged sibling produces no row change. Multi-parent is
 just two link rows pointing at one node; the same-parent duplicate is
-unrepresentable by the primary key. Tags stay derived from `text` in memory
-(`tagsInText` in `note-meta.ts`), not materialized — `kind` reserves the slot. (Wikilinks were
-removed as a feature; `[[...]]` in text is plain text.)
+unrepresentable by the primary key. `kind` reserves the slot for other edge
+kinds. (Wikilinks and tags were removed as features; `[[...]]` and `#word` in
+text are plain text.)
 
 ### `meta` (key/value)
 
@@ -305,7 +305,7 @@ ingest kept every near-miss marker spelling byte-for-byte):
   conservative near-miss set in `src/data/normalize-block-text.ts` (`[] x` →
   todo, `[X] x` → done, `* x`/`+ x` → ul, `2) x`/`01. x` → ol) instead of
   leaving them untyped `text` nodes invisible to `type:todo` search.
-  Ambiguous spellings (`#word` — the tag syntax; tight markers; 4+ digit
+  Ambiguous spellings (`#word` — no space; tight markers; 4+ digit
   "ordered" numbers) stay verbatim text.
 
 Page metadata never touches markdown at all: it is props on the page node,

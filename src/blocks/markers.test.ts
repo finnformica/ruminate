@@ -29,8 +29,8 @@ describe("classifyLine (import)", () => {
     expect(classifyLine("* item", 1, false)).toEqual({ type: "ul", text: "item" })
   })
 
-  it("leaves ambiguous text alone: a tag, a bare marker, a year", () => {
-    expect(classifyLine("#tag", 1, false)).toEqual({ type: "text", text: "#tag" })
+  it("leaves ambiguous text alone: a #word, a bare marker, a year", () => {
+    expect(classifyLine("#word", 1, false)).toEqual({ type: "text", text: "#word" })
     expect(classifyLine("1st place", 1, false)).toEqual({ type: "text", text: "1st place" })
     expect(classifyLine("1990. That year", 1, false).type).toBe("text")
     expect(classifyLine("", 1, false)).toEqual({ type: "text", text: "" })
@@ -71,7 +71,7 @@ describe("leadingMarker (the typing shortcut)", () => {
   })
 
   it("returns null without a trailing space, so a partial marker never switches type", () => {
-    expect(leadingMarker("#tag")).toBeNull()
+    expect(leadingMarker("#word")).toBeNull()
     expect(leadingMarker("-dash")).toBeNull()
     expect(leadingMarker("1st")).toBeNull()
     expect(leadingMarker("plain text")).toBeNull()

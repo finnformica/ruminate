@@ -1,6 +1,6 @@
 import { useAtomValue } from "jotai"
 import React from "react"
-import { sortedNotesAtom, sortedTagEntriesAtom } from "../global-state"
+import { sortedNotesAtom } from "../global-state"
 import type { Note } from "../schema"
 import { cx } from "../utils/cx"
 import {
@@ -12,19 +12,18 @@ import {
   type QualifierOption,
   type QualifierTrigger,
 } from "../utils/qualifier-suggestions"
-import { TagIcon16 } from "./icons"
 import { Keys } from "./keys"
 import { NoteFavicon } from "./note-favicon"
 
 /**
- * **The qualifier picker.** Type `type:`, `in:`, `tag:`, `has:` or `no:` into
- * a search box and a list of what can go there opens over it — the block and
- * note types, your notes, your tags — filtered as you keep typing, ↑/↓ to
+ * **The qualifier picker.** Type `type:`, `in:`, `has:` or `no:` into a
+ * search box and a list of what can go there opens over it — the block and
+ * note types, your notes — filtered as you keep typing, ↑/↓ to
  * move, ↵ or Tab to pick, Esc to leave what you typed. The pure grammar
  * (which token is under the caret, how a pick is spliced back) lives in
  * `src/utils/qualifier-suggestions.ts`; this file adds the corpus-backed
- * sets and the rendering, shared by the notes/tags pages' search input and
- * the ⌘K palette.
+ * set and the rendering, shared by the notes page's search input and the ⌘K
+ * palette.
  */
 
 /** A row of the picker: a query value, plus (for `in:`) the note it names. */
@@ -32,7 +31,7 @@ export interface SuggestionItem extends QualifierOption {
   note?: Note
 }
 
-/** How many corpus-backed rows (notes, tags) to list at once. */
+/** How many corpus-backed rows (notes) to list at once. */
 const MAX_ITEMS = 8
 
 /** What the key handler reads — a native or a React keyboard event. */
@@ -56,7 +55,6 @@ export function useQualifierSuggestions({
   currentNoteId?: string
 }) {
   const notes = useAtomValue(sortedNotesAtom)
-  const tags = useAtomValue(sortedTagEntriesAtom)
 
   const trigger = React.useMemo(
     () => (caret === null ? null : findQualifierTrigger(value, caret)),
@@ -81,15 +79,10 @@ export function useQualifierSuggestions({
         const ordered = current && trigger.partial === "" ? [current, ...rest] : options
         return filterQualifierOptions(ordered, trigger.partial).slice(0, MAX_ITEMS)
       }
-      case "tag":
-        return filterQualifierOptions(
-          tags.map(([tag, noteIds]) => ({ value: tag, description: String(noteIds.length) })),
-          trigger.partial,
-        ).slice(0, MAX_ITEMS)
       default:
         return filterQualifierOptions(STATIC_QUALIFIER_OPTIONS[trigger.key] ?? [], trigger.partial)
     }
-  }, [trigger, known, notes, tags, currentNoteId])
+  }, [trigger, known, notes, currentNoteId])
 
   // The highlighted row, back to the top whenever the list changes shape.
   const [activeIndex, setActiveIndex] = React.useState(0)
@@ -317,8 +310,6 @@ export function QualifierSuggestions({
             <span className="grid h-4 w-4 shrink-0 place-items-center text-sm text-text-secondary">
               {item.note ? (
                 <NoteFavicon note={item.note} />
-              ) : trigger.key === "tag" ? (
-                <TagIcon16 />
               ) : (
                 <span aria-hidden className="font-mono text-text-tertiary">
                   :

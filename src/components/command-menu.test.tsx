@@ -51,15 +51,10 @@ vi.mock("../hooks/search-results", () => ({
 
 vi.mock("../global-state", async () => {
   const { atom } = await import("jotai")
-  const { Searcher } = await import("fast-fuzzy")
   return {
     notesAtom: atom(new Map()),
     pinnedNotesAtom: atom([]),
     sortedNotesAtom: atom([]),
-    sortedTagEntriesAtom: atom([["work", ["note-1"]]]),
-    tagSearcherAtom: atom(
-      new Searcher([] as [string, string[]][], { keySelector: ([tag]) => tag }),
-    ),
     noteOutlineAtom: atom(null),
     blockRevealAtom: atom(null),
     // The block index only serves the scope pill's label here.
@@ -248,7 +243,6 @@ function makeNote(id: string) {
     pinned: false,
     updatedAt: null,
     dates: [],
-    tags: [],
     tasks: [],
     headings: [],
     text: "",
@@ -457,7 +451,7 @@ describe("block results", () => {
 })
 
 // ── Qualifier suggestions ───────────────────────────────────────────────────
-// Typing `type:` (or `tag:`, `in:`, …) opens the value picker inside the
+// Typing `type:` (or `in:`, `has:`, …) opens the value picker inside the
 // palette; its keys are the picker's until it closes, so cmdk's list never
 // moves under it.
 
@@ -494,12 +488,6 @@ describe("qualifier suggestions", () => {
     expect(picker.querySelectorAll('[role="option"]')).toHaveLength(1)
     fireEvent.keyDown(input, { key: "Tab" })
     expect(input.value).toBe("milk type:quote ")
-  })
-
-  it("lists the corpus's tags for `tag:`", () => {
-    renderMenu({ open: true })
-    type("tag:")
-    expect(screen.getByTestId("qualifier-suggestions").textContent).toContain("work")
   })
 
   it("Escape closes it and leaves the query as typed — the palette stays open", () => {

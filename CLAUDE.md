@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Ruminate is a note-taking web application built with React and TypeScript. Notes are outlines of typed blocks (a Logseq-style block editor) held in a graph: nodes plus child links, stored in SQLite in the browser and replicated to Cloudflare D1 behind a Worker. GitHub is used for identity only. Features include tags, block search with a query language, daily and weekly notes, maths, and (behind a switch) images.
+Ruminate is a note-taking web application built with React and TypeScript. Notes are outlines of typed blocks (a Logseq-style block editor) held in a graph: nodes plus child links, stored in SQLite in the browser and replicated to Cloudflare D1 behind a Worker. GitHub is used for identity only. Features include block search with a query language, daily and weekly notes, maths, and (behind a switch) images.
 
 ## Development Commands
 
@@ -45,7 +45,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 - **Store** (`src/data/note-store.ts`, `sql-note-store.ts`): eight methods — `getGraph`, `applyOps`, `getAllRows`, `applyPull`, `clear`, `getMeta`, `setMeta`, `close` — over a `SqlDriver` (sqlite-wasm with OPFS in the browser, `node:sqlite` in tests). The store never sees markdown.
 - **Ops** (`src/data/ops.ts`): every edit is a batch of ops (`create`, `setText`, `setType`, `setProps`, `link`, `unlink`, `delete`) applied to the in-memory `GraphSnapshot` and persisted verbatim. `docToOps` diffs an edited doc against the snapshot; `deleteBlockOps` / `deletePageOps` carry the delete-rescue rules.
 - **Runtime** (`src/data/database-mode.ts`): holds the live graph atom, coalesces pending ops, and pushes/pulls row diffs to the D1 replica through the Worker (`worker/handlers/replica.ts`).
-- **Notes as metadata** (`src/data/note-meta.ts`): `Note` objects (title, tags, dates, props) are derived from the graph for lists, search and the calendar.
+- **Notes as metadata** (`src/data/note-meta.ts`): `Note` objects (title, dates, props) are derived from the graph for lists, search and the calendar.
 
 ### State
 

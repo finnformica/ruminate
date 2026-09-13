@@ -29,8 +29,6 @@ import { isValidDateString, isValidWeekString, toDateString } from "../utils/dat
 
 type RouteSearch = {
   query: string | undefined
-  /** Comma-separated tags a new note starts with (from `useCreateNewNote`). */
-  tags?: string
   /** Heading text to highlight in the block editor on landing (from Cmd-K). */
   heading?: string
   /** Block id the editor is zoomed into ("focus mode"); absent = un-zoomed. */
@@ -41,7 +39,6 @@ export const Route = createFileRoute("/_appRoot/notes_/$")({
   validateSearch: (search: Record<string, unknown>): RouteSearch => {
     return {
       query: typeof search.query === "string" ? search.query : undefined,
-      tags: typeof search.tags === "string" ? search.tags : undefined,
       heading: typeof search.heading === "string" ? search.heading : undefined,
       block: typeof search.block === "string" ? search.block : undefined,
     }
@@ -70,7 +67,7 @@ function RouteComponent() {
 function NotePage() {
   // Router
   const { _splat: noteId } = Route.useParams()
-  const { tags: defaultTags, heading: highlightHeading, block: zoomBlockId } = Route.useSearch()
+  const { heading: highlightHeading, block: zoomBlockId } = Route.useSearch()
   const navigate = Route.useNavigate()
 
   // Global state
@@ -100,12 +97,8 @@ function NotePage() {
   // short fallback, in case no sync was needed).
   const [pendingSave, setPendingSave] = useState(false)
 
-  // What a note that is not in the graph yet starts as: empty, with the
-  // `?tags=` search param (a note created from a tag page) as its props.
-  const defaultDoc = React.useMemo(() => {
-    const tags = defaultTags?.split(",").filter(Boolean) ?? []
-    return { ...parse(""), props: tags.length > 0 ? { tags } : null }
-  }, [defaultTags])
+  // What a note that is not in the graph yet starts as: empty.
+  const defaultDoc = React.useMemo(() => ({ ...parse(""), props: null }), [])
 
   // The doc is the walk of the note over the live graph; every change the
   // editor hands back becomes ops applied to the graph — see useNoteDoc.

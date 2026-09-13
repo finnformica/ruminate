@@ -307,42 +307,6 @@ export const searchBlocksAtom = atom((get) => {
 })
 
 // -----------------------------------------------------------------------------
-// Tags
-// -----------------------------------------------------------------------------
-
-const tagsAtom = atom((get) => {
-  const notes = get(notesAtom)
-  const tags: Record<string, NoteId[]> = {}
-
-  for (const note of notes.values()) {
-    for (const tag of note.tags) {
-      // If the tag doesn't exist, create it
-      if (!tags[tag]) tags[tag] = []
-      // If the note isn't already linked to the tag, link it
-      if (!tags[tag].includes(note.id)) tags[tag].push(note.id)
-    }
-  }
-
-  return tags
-})
-
-export const sortedTagEntriesAtom = atom((get) => {
-  const tags = get(tagsAtom)
-  // Sort tags alphabetically in ascending order
-  return Object.entries(tags).sort((a, b) => {
-    return a[0].localeCompare(b[0])
-  })
-})
-
-export const tagSearcherAtom = atom((get) => {
-  const sortedTagEntries = get(sortedTagEntriesAtom)
-  return new Searcher(sortedTagEntries, {
-    keySelector: ([tag]) => tag,
-    threshold: 0.8,
-  })
-})
-
-// -----------------------------------------------------------------------------
 // UI state
 // -----------------------------------------------------------------------------
 

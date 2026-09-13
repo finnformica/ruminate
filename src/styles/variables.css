@@ -93,7 +93,7 @@
 
   /* Selected / "current" colors — see docs/design-principles.md §3.
      One token family paints every "you are here / keys act here" state: the
-     editor's block selection, the notes/tags list keyboard highlight and the
+     editor's block selection, the notes list keyboard highlight and the
      sidebar's current route, so they can never drift apart. The surface is a
      LUMINOUS WASH rather than a Radix alpha step: a small accent-9
      contribution color-mixed over the app background (in dark, over a

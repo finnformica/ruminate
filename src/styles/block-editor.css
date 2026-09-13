@@ -61,7 +61,7 @@
 }
 
 /* `.list-highlight` is the selected-row surface outside the editor: the
- * notes/tags list keyboard highlight keeps the app-wide selected WASH, shared
+ * notes list keyboard highlight keeps the app-wide selected WASH, shared
  * verbatim with the sidebar's current row (see "Selection has its own color"
  * in docs/design-principles.md) — a list row is a nav row, and paints like
  * one. */

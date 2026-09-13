@@ -30,7 +30,6 @@ function makeNote(overrides: Partial<Fixture> = {}): Fixture {
     pinned: false,
     updatedAt: null,
     dates: [],
-    tags: [],
     tasks: [],
     headings: [],
     text: "",
@@ -58,7 +57,7 @@ const md = (...lines: string[]) => lines.join("\n") + "\n"
 const TASKS_NOTE = makeNote({
   id: "tasks",
   updatedAt: 200,
-  tags: ["work"],
+  props: { area: "work" },
   content: md(
     "# Today",
     "  id:: blk_head",
@@ -72,7 +71,7 @@ const TASKS_NOTE = makeNote({
 const MISC_NOTE = makeNote({
   id: "misc",
   updatedAt: 100,
-  tags: ["home"],
+  props: { area: "home" },
   content: md(
     "[ ] water plants",
     "  id:: blk_plants",
@@ -357,9 +356,9 @@ describe("searchBlocks", () => {
   })
 
   test("note-level qualifiers filter by the containing note", () => {
-    expect(ids(run("type:todo tag:work"))).toEqual(["blk_milk"])
-    expect(ids(run("type:todo -tag:work"))).toEqual(["blk_plants"])
-    expect(ids(run("type:todo tag:work,home"))).toEqual(["blk_milk", "blk_plants"])
+    expect(ids(run("type:todo area:work"))).toEqual(["blk_milk"])
+    expect(ids(run("type:todo -area:work"))).toEqual(["blk_plants"])
+    expect(ids(run("type:todo area:work,home"))).toEqual(["blk_milk", "blk_plants"])
   })
 
   test("fuzzy text matches the block's own text", () => {
@@ -422,7 +421,7 @@ describe("searchBlocks", () => {
     expect(ids(run("in:blk_head"))).toEqual(["blk_milk", "blk_ship"])
     expect(ids(run("type:done in:blk_head"))).toEqual(["blk_ship"])
     // Composes with everything else, and a leaf has nothing downstream.
-    expect(ids(run("type:todo in:blk_head tag:work"))).toEqual(["blk_milk"])
+    expect(ids(run("type:todo in:blk_head area:work"))).toEqual(["blk_milk"])
     expect(run("in:blk_milk")).toEqual([])
   })
 })
@@ -443,9 +442,9 @@ describe("block-scoped type detection", () => {
     expect(isBlockTypeFilter(filterOf("-type:heading"))).toBe(true)
     expect(isBlockTypeFilter(filterOf("type:daily"))).toBe(false)
     expect(isBlockTypeFilter(filterOf("type:template"))).toBe(false)
-    expect(isBlockTypeFilter(filterOf("tag:todo"))).toBe(false)
-    expect(hasBlockTypeFilter(parseQuery("tag:a type:todo").filters)).toBe(true)
-    expect(hasBlockTypeFilter(parseQuery("tag:a type:daily").filters)).toBe(false)
+    expect(isBlockTypeFilter(filterOf("area:todo"))).toBe(false)
+    expect(hasBlockTypeFilter(parseQuery("area:a type:todo").filters)).toBe(true)
+    expect(hasBlockTypeFilter(parseQuery("area:a type:daily").filters)).toBe(false)
   })
 })
 
