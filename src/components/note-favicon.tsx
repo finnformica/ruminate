@@ -11,7 +11,10 @@ import {
 } from "./icons"
 
 type NoteFaviconProps = React.ComponentPropsWithoutRef<"span"> & {
-  note: Note
+  /** Only the identity and the kind: the icon says which sort of note this
+   * is, so a row that knows an id (and derived its kind with `noteTypeOf`)
+   * can draw one without carrying a whole `Note`. */
+  note: Pick<Note, "id" | "type">
   defaultFavicon?: React.ReactNode
   /** The filled variant of each icon — for the note that is current, as the
    * sidebar's nav links swap to theirs. */

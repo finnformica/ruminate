@@ -739,6 +739,33 @@ export const COMMANDS: Record<CommandName, Command> = {
 }
 
 /** Run a named command. Unknown names are a no-op (defensive). */
+/**
+ * The commands a **browse** view runs — a read-only editor the reader still
+ * moves through (the notes list, a search's results): everything that moves
+ * the highlight, folds a row or zooms, and nothing that writes. Enter is
+ * the view's own (it opens the row rather than editing it), so `enterEdit`
+ * is not here.
+ */
+export const BROWSE_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>([
+  "deselect",
+  "moveSelectionUp",
+  "moveSelectionDown",
+  "prevSibling",
+  "nextSibling",
+  "treePrev",
+  "treeNext",
+  "selectParent",
+  "selectFirstChild",
+  "expandOrFirstChild",
+  "collapseOrParent",
+  "jumpLevelTop",
+  "jumpLevelBottom",
+  "toggleCollapse",
+  "zoomIn",
+  "zoomOut",
+  "zoomExit",
+])
+
 export function runCommand(name: CommandName, input: CommandInput): CommandResult {
   const command = COMMANDS[name]
   return command ? command(input) : IGNORED

@@ -23,11 +23,11 @@
 // ## The division of labour
 //
 // `parseQuery` (src/utils/search.ts) already splits a query into STRUCTURED
-// filters — `tag`, `type`, `date`, `in`, `no`, `has`, property keys, `sort` —
+// filters — `type`, `date`, `in`, `no`, `has`, property keys, `sort` —
 // and a free-text remainder. Only the remainder is a retrieval question:
 //
 //   - the filters run over EVERY candidate, whichever half proposed it. They
-//     are not semantic, they are filters, and `tag:work` has to mean the same
+//     are not semantic, they are filters, and `type:todo` has to mean the same
 //     thing whether the block was found by a fuzzy match or by a vector. There
 //     is one statement of what they mean — `searchBlocks` with an empty fuzzy
 //     string — and both halves are intersected with its answer.
@@ -158,13 +158,13 @@ export interface HybridSearchResult {
    * can tell whether the semantic half was consulted at all. */
   counts: { lexical: number; semantic: number }
   /** False without a binding, and false for a query with no free text for
-   * either matcher to work on (a bare `tag:work` enumeration). */
+   * either matcher to work on (a bare `type:todo` enumeration). */
   semanticUsed: boolean
 }
 
 /**
  * The notes a grant can see, as `Note` objects — the app's own derivation
- * (`noteFromNode`), so an agent's search sees the titles and tags a person
+ * (`noteFromNode`), so an agent's search sees the titles and properties a person
  * sees. O(corpus), which is what `search` has always cost and what
  * docs/mcp-server.md §4 says it costs.
  */
@@ -309,7 +309,7 @@ export async function hybridSearch(input: HybridSearchInput): Promise<HybridSear
   const offset = input.offset ?? 0
 
   // Everything the structured half admits, in document order. This is also the
-  // whole answer for a query with no free text (`tag:recipe`), which the query
+  // whole answer for a query with no free text (`type:todo`), which the query
   // language calls an enumeration rather than a search.
   const filtersOnly: Query = { filters: parsed.filters, fuzzy: "", sorts: [] }
   const allowed = searchBlocks(filtersOnly, index)

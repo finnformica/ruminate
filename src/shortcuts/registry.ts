@@ -339,12 +339,6 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
     group: "Navigation",
   },
   {
-    combos: ["g t"],
-    scope: "global",
-    description: "Go to tags (press g, then t)",
-    group: "Navigation",
-  },
-  {
     combos: ["g s"],
     scope: "global",
     description: "Go to settings (press g, then s)",
@@ -353,7 +347,7 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   {
     combos: [APP_SHORTCUTS.focusSearch],
     scope: "global",
-    description: "Focus the search input (notes list, tags)",
+    description: "Focus the search input (notes list)",
     group: "Navigation",
   },
   {
@@ -376,66 +370,32 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   },
 ]
 
-// Linear-style keys on the filterable list pages — the notes index and the
-// tags page (see src/hooks/list-keyboard-nav.ts).
-const LIST_ENTRIES: Shortcut[] = [
-  {
-    combos: ["ArrowUp", "ArrowDown"],
-    scope: "global",
-    description: "Move the list highlight (notes list, tags)",
-    group: "Lists",
-  },
+// Search results — the rows in ⌘K, on the notes list and on the results view
+// (`/?query=`) are the block editor (src/components/results-editor.tsx), so
+// their keys are the editor's. These are the hand-offs around them.
+const SEARCH_RESULT_ENTRIES: Shortcut[] = [
   {
     combos: ["ArrowDown"],
     scope: "global",
-    description: "In the search input: highlight the first result",
-    group: "Lists",
-  },
-  {
-    combos: ["Enter"],
-    scope: "global",
-    description: "Open the highlighted note or tag",
-    group: "Lists",
-  },
-  {
-    combos: ["Escape"],
-    scope: "global",
-    description: "Clear the highlight, back to the search input",
-    group: "Lists",
-  },
-  {
-    combos: ["Home", "End"],
-    scope: "global",
-    description: "Jump to the first / last item",
-    group: "Lists",
-  },
-]
-
-// Block search results — the rows in ⌘K and on the results view (`/?query=`).
-// See src/components/search-results.tsx and src/hooks/block-result-tree.ts.
-const SEARCH_RESULT_ENTRIES: Shortcut[] = [
-  {
-    combos: ["ArrowUp", "ArrowDown"],
-    scope: "global",
-    description: "Move between result rows (including blocks revealed by expanding)",
+    description: "In the search box (past the last palette item): into the result rows",
     group: "Search results",
   },
   {
-    combos: ["ArrowRight"],
+    combos: ["ArrowUp"],
     scope: "global",
-    description: "Expand the highlighted result — show the blocks inside it",
+    description: "From the first row: back to the search box",
     group: "Search results",
   },
   {
-    combos: ["ArrowLeft"],
+    combos: [" ", "ArrowRight", "ArrowLeft"],
     scope: "global",
-    description: "Collapse it (already closed: jump to the block it sits under)",
+    description: "Fold and unfold the highlighted result — the blocks inside it",
     group: "Search results",
   },
   {
     combos: ["Enter"],
     scope: "global",
-    description: "Open the highlighted block (its note, zoomed to that block)",
+    description: "Open the highlighted result (its note, zoomed to a block)",
     group: "Search results",
   },
   {
@@ -448,6 +408,12 @@ const SEARCH_RESULT_ENTRIES: Shortcut[] = [
 
 // Bindings inside the open command palette (see src/components/command-menu.tsx).
 const PALETTE_ENTRIES: Shortcut[] = [
+  {
+    combos: ["Mod+Enter"],
+    scope: "palette",
+    description: "Create a note titled with the query (untitled with none)",
+    group: "Palette",
+  },
   {
     combos: ["@"],
     scope: "palette",
@@ -519,7 +485,6 @@ const TITLE_ENTRIES: Shortcut[] = [
 export const GROUP_ORDER = [
   "Global",
   "Navigation",
-  "Lists",
   "Search results",
   "Select mode",
   "Edit mode",
@@ -535,7 +500,6 @@ export const GROUP_ORDER = [
 export const SHORTCUTS: Shortcut[] = [
   ...GLOBAL_ENTRIES,
   ...NAVIGATION_ENTRIES,
-  ...LIST_ENTRIES,
   ...SEARCH_RESULT_ENTRIES,
   ...editorEntries(),
   ...CLIPBOARD_HISTORY_ENTRIES,

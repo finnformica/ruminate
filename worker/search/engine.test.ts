@@ -103,11 +103,11 @@ describe("hybridSearch — the query language", () => {
     expect(found.semanticUsed).toBe(false)
   })
 
-  test("a tag filter narrows the corpus whichever half found the block", async () => {
+  test("a note filter narrows the corpus whichever half found the block", async () => {
     const { env, semantic } = await fixture()
 
-    const lexicalOnly = await run(env, "tag:food crumb")
-    const hybrid = await run(env, "tag:food crumb", { semantic })
+    const lexicalOnly = await run(env, 'in:"Sourdough" crumb')
+    const hybrid = await run(env, 'in:"Sourdough" crumb', { semantic })
 
     for (const found of [lexicalOnly, hybrid]) {
       expect(ids(found)).toContain("blk_retard")
@@ -135,7 +135,7 @@ describe("hybridSearch — the query language", () => {
   test("`-` exclusion still excludes", async () => {
     const { env, semantic } = await fixture()
 
-    const found = await run(env, "-tag:food ops", { semantic })
+    const found = await run(env, '-in:"Sourdough" ops', { semantic })
 
     expect(ids(found)).not.toContain("blk_retard")
   })

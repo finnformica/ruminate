@@ -118,8 +118,8 @@ parseQuery(q)  →  { filters, fuzzy, sorts }
   fuse(lexical, semantic) by reciprocal rank  →  sorts  →  page
 ```
 
-**The filters are not semantic.** `tag:work`, `type:todo`, `in:"Reading list"`,
-`-tag:x`, `has:`/`no:`, a property key — each has to mean the same thing
+**The filters are not semantic.** `type:todo`, `in:"Reading list"`,
+`-type:x`, `has:`/`no:`, a property key — each has to mean the same thing
 whichever half proposed the block, so there is exactly one statement of what
 they mean (`searchBlocks` with an empty fuzzy string) and both halves are
 intersected with its answer. A query with no free text at all is an
@@ -298,7 +298,7 @@ alone (`import * as` form, minified: chrono-node 45,250 / 13,056, fast-fuzzy
 the app modules it reaches. docs/mcp-search.md called this cost "real, but
 measurable and probably acceptable" before it was measured. It is real: a 71%
 increase on a bundle deliberately kept small. It is paid for one thing — that a
-query which works in the app works over MCP, and that `tag:`, `type:` and `in:`
+query which works in the app works over MCP, and that `type:`, `in:` and a property
 are not reimplemented a second time.
 
 ---

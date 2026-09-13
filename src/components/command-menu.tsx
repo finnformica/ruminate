@@ -11,16 +11,14 @@ import {
   graphSnapshotAtom,
   noteOutlineAtom,
   pinnedNotesAtom,
-  tagSearcherAtom,
 } from "../global-state"
-import { useBlockResultTree, type ResultRow } from "../hooks/block-result-tree"
+import type { ResultRoot } from "../hooks/results-doc"
 import { useCreateNote, useNoteById } from "../hooks/note"
-import { useBlockSearchSource, useSearchResults } from "../hooks/search-results"
+import { useSearchResults } from "../hooks/search-results"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/registry"
 import { rollup } from "../data/graph"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { useSearchNotes } from "../hooks/search-notes"
-import { Note } from "../schema"
 import { formatDate, formatDateDistance, toDateString } from "../utils/date"
 import { generateNoteId } from "../utils/note-id"
 import { filterOutline } from "../utils/note-outline"
@@ -30,22 +28,19 @@ import {
   CalendarDateIcon16,
   CopyIcon16,
   NoteIcon16,
-  PinFillIcon12,
   PlusIcon16,
   PrinterIcon16,
   SearchIcon16,
   SettingsIcon16,
-  TagIcon16,
 } from "./icons"
 import { Keys } from "./keys"
-import { NoteFavicon } from "./note-favicon"
 import {
   QualifierSuggestions,
   useComboboxAria,
   useQualifierSuggestions,
 } from "./qualifier-suggestions"
 import { ScopePill } from "./scope-pill"
-import { SearchResults, blockHitNavigation, resultRowValue } from "./search-results"
+import { ResultsEditor } from "./results-editor"
 
 export const isCommandMenuOpenAtom = atom(false)
 
@@ -56,13 +51,22 @@ export const isCommandMenuOpenAtom = atom(false)
  */
 type PaletteMode = "commands" | "outline"
 
+/** Is cmdk's highlight on the last item (or is there no item to be on)? The
+ * point past which ↓ hands the keyboard to the results beneath. */
+function highlightIsLastItem(root: HTMLElement): boolean {
+  const items = root.querySelectorAll("[cmdk-item]")
+  if (items.length === 0) return true
+  return items[items.length - 1].getAttribute("aria-selected") === "true"
+}
+
 /** How many block results the palette lists before "see all". */
 const NUM_VISIBLE_BLOCKS = 6
+/** How many note results the palette lists. */
+const NUM_VISIBLE_NOTES = 6
 
 export function CommandMenu() {
   const navigate = useNavigate()
   const searchNotes = useSearchNotes()
-  const tagSearcher = useAtomValue(tagSearcherAtom)
   const createNote = useCreateNote()
   const jotaiStore = useStore()
   const pinnedNotes = useAtomValue(pinnedNotesAtom)
@@ -90,7 +94,7 @@ export function CommandMenu() {
   // on each open: a fresh palette is a fresh view.
   const [scopeRemoved, setScopeRemoved] = useState(false)
 
-  // The qualifier picker: `type:`, `in:`, `tag:` … typed into the query open
+  // The qualifier picker: `type:`, `in:`, `has:` … typed into the query open
   // a list of values (see qualifier-suggestions.tsx). It follows the caret,
   // read off the input on every change and caret move.
   const inputRef = useRef<HTMLInputElement>(null)
@@ -131,11 +135,6 @@ export function CommandMenu() {
   // Whether any preview was sent since outline mode was entered — i.e. the
   // editor holds a restore snapshot that a close-without-commit must release.
   const previewedRef = useRef(false)
-  // The row value the highlight must stay on across one item-set change: cmdk
-  // re-selects its first item whenever items mount or unmount, which would
-  // otherwise throw the highlight to the top every time a result is expanded
-  // or collapsed. One-shot, so cmdk keeps full control otherwise.
-  const pinnedHighlightRef = useRef<string | null>(null)
   const revealNonceRef = useRef(0)
   const setBlockReveal = useSetAtom(blockRevealAtom)
   const outline = useAtomValue(noteOutlineAtom)
@@ -214,20 +213,6 @@ export function CommandMenu() {
     [setIsOpen],
   )
 
-  // Open a note, optionally highlighting one of its headings on landing.
-  const openNote = useCallback(
-    (id: string, heading?: string) => {
-      setIsOpen(false)
-      setQuery("")
-      navigate({
-        to: "/notes/$",
-        params: { _splat: id },
-        search: { query: undefined, heading },
-      })
-    },
-    [setIsOpen, navigate],
-  )
-
   useHotkeys(APP_SHORTCUTS.commandMenu, toggleMenu, GLOBAL_HOTKEY_OPTIONS)
 
   // ⌘P opens the palette straight into outline mode (headings of the open
@@ -299,20 +284,6 @@ export function CommandMenu() {
         },
       },
       {
-        label: "Tags",
-        shortcut: formatCombo("g t"),
-        icon: <TagIcon16 />,
-        onSelect: () => {
-          navigate({
-            to: "/tags",
-            search: {
-              query: undefined,
-              sort: "name",
-            },
-          })
-        },
-      },
-      {
         label: "Settings",
         shortcut: formatCombo("g s"),
         icon: <SettingsIcon16 />,
@@ -371,11 +342,6 @@ export function CommandMenu() {
     return toDateString(date)
   }, [deferredQuery])
 
-  // Search tags
-  const tagResults = useMemo(() => {
-    return tagSearcher.search(deferredQuery)
-  }, [tagSearcher, deferredQuery])
-
   // Search notes
   const noteResults = useMemo(() => {
     return searchNotes(deferredQuery)
@@ -397,22 +363,53 @@ export function CommandMenu() {
 
   // Search BLOCKS — the palette's primary results. A nested heading or a todo
   // is a first-class row here, not a note it happens to live in.
-  const source = useBlockSearchSource()
   const { mode: resultMode, hits, notes: hitNotes } = useSearchResults(scopedQuery)
   const showBlocks = resultMode === "blocks"
-  const { rows, expand, collapse } = useBlockResultTree({
-    hits,
-    source,
-    limit: NUM_VISIBLE_BLOCKS,
-    resetKey: deferredQuery,
-  })
-  // cmdk lowercases item values, so highlight events map back to rows through
-  // a lowercased key (the same trick outline mode uses for block ids).
-  const rowByValue = useMemo(() => {
-    const map = new Map<string, ResultRow>()
-    for (const row of rows) map.set(resultRowValue(row).toLowerCase(), row)
-    return map
-  }, [rows])
+
+  // The results are the block editor, browsed (`ResultsEditor`) — the same
+  // rows, keys and folds as the notes page. Notes and blocks are one list: a
+  // note is a node whose children are its blocks (docs/graph-schema-v2.md),
+  // so a note whose title matched and a block whose text matched are both
+  // roots — the notes first. With no query the roots are the pinned notes.
+  const resultRoots = useMemo<ResultRoot[]>(() => {
+    if (!deferredQuery) return pinnedNotes.map((note) => ({ id: note.id, noteId: note.id }))
+    const notes = noteResults
+      .slice(0, NUM_VISIBLE_NOTES)
+      .map((note) => ({ id: note.id, noteId: note.id }))
+    const blocks = showBlocks
+      ? hits.slice(0, NUM_VISIBLE_BLOCKS).map((hit) => ({ id: hit.blockId, noteId: hit.noteId }))
+      : []
+    return [...notes, ...blocks]
+  }, [deferredQuery, pinnedNotes, noteResults, showBlocks, hits])
+  // Bumped to hand the keyboard to the results (↓ past the last item).
+  const [focusFirstSignal, setFocusFirstSignal] = useState(0)
+  /** Hand the keyboard to the result rows: the editor takes focus (cmdk's
+   * highlight stays on the last item, dimmed — command-menu.css — and marks
+   * where ↑ returns to). */
+  const handOffToRows = useCallback(() => setFocusFirstSignal((n) => n + 1), [])
+  /** Take the keyboard back from the rows: the query has focus again, with
+   * cmdk's highlight on the last item — the one ↓ left from. */
+  const takeBackFromRows = useCallback(() => {
+    inputRef.current?.focus()
+    const items = document.querySelectorAll("[cmdk-root] [cmdk-item]")
+    const last = items[items.length - 1]
+    setHighlightedValue(last?.getAttribute("data-value") ?? "")
+  }, [])
+
+  // Create a note from the query — the palette's footer, and ⌘↵. The typed
+  // text becomes the note's TITLE; the id is minted and opaque
+  // (docs/graph-storage.md). Any text works — there is no filename charset
+  // to sanitize against and no name collision to avoid, so a fresh note is
+  // always a fresh note; with nothing typed it is untitled.
+  const createFromQuery = useCallback(() => {
+    const title = query.trim()
+    const id = generateNoteId()
+    createNote(id, title ? { title } : {})
+    setIsOpen(false)
+    setQuery("")
+    setMode("commands")
+    navigate({ to: "/notes/$", params: { _splat: id }, search: { query: undefined } })
+  }, [query, createNote, setIsOpen, navigate])
 
   // Commit the typed query to the full results view — the URL-addressable
   // `/?query=` the notes route already owns, so filter views are bookmarkable
@@ -424,12 +421,17 @@ export function CommandMenu() {
     navigate({ to: "/", search: { query: scopedQuery } })
   }, [setIsOpen, navigate, scopedQuery])
 
-  const openBlock = useCallback(
-    (hit: Parameters<typeof blockHitNavigation>[0]) => {
+  // Open a result: the note, or the note zoomed to the block.
+  const openResult = useCallback(
+    (noteId: string, blockId?: string) => {
       setIsOpen(false)
       setQuery("")
       setMode("commands")
-      navigate(blockHitNavigation(hit))
+      navigate({
+        to: "/notes/$",
+        params: { _splat: noteId },
+        search: { query: undefined, block: blockId },
+      })
     },
     [setIsOpen, navigate],
   )
@@ -462,15 +464,6 @@ export function CommandMenu() {
   // skipped so merely opening ⌘P doesn't scroll the note.
   const handleHighlightChange = useCallback(
     (value: string) => {
-      // A pinned highlight (a result row that was just expanded/collapsed)
-      // survives exactly one of cmdk's own re-selections.
-      if (pinnedHighlightRef.current !== null && value !== pinnedHighlightRef.current) {
-        const pinned = pinnedHighlightRef.current
-        pinnedHighlightRef.current = null
-        setHighlightedValue(pinned)
-        return
-      }
-      pinnedHighlightRef.current = null
       // Echo the value back — cmdk's selection is fully controlled, so
       // dropping this would freeze the highlight.
       setHighlightedValue(value)
@@ -486,12 +479,6 @@ export function CommandMenu() {
     },
     [mode, outlineValueToId, sendReveal],
   )
-
-  // Only show the first 2 tags
-  const numVisibleTags = 2
-
-  // Only show the first 6 notes
-  const numVisibleNotes = 6
 
   return (
     <Command.Dialog
@@ -522,42 +509,42 @@ export function CommandMenu() {
           event.preventDefault()
           return
         }
-        // →/← expand and collapse the highlighted block result. The query
-        // input owns those keys while there is still text to move through, so
-        // the tree only takes them with the caret parked at the END of the
-        // query — where it sits after typing, and where → could not move it
-        // anyway. Move the caret back into the text (⌫, Home, a click) and the
-        // arrows are the input's again. Same hand-off idea as the editor's
-        // arrows leaving a block at its first/last line.
+        // The results under the items are the block editor, browsed. ↓ in
+        // the query with cmdk's highlight on the last item (or no items at
+        // all) hands it the keyboard — as ↓ in the notes page's search box
+        // does — and from there its keys are the editor's own: arrows,
+        // space, →/←, w/s/a/d, f, Enter to open. ↑ from its first row hands
+        // the keyboard back (`onExitTop`); so does Escape.
         if (
           mode === "commands" &&
-          (event.key === "ArrowRight" || event.key === "ArrowLeft") &&
+          event.key === "ArrowDown" &&
+          event.target instanceof HTMLInputElement &&
           !event.metaKey &&
           !event.ctrlKey &&
           !event.altKey &&
-          !event.shiftKey
+          !event.shiftKey &&
+          resultRoots.length > 0 &&
+          highlightIsLastItem(event.currentTarget)
         ) {
-          const input = event.target instanceof HTMLInputElement ? event.target : null
-          const caret = input ? input.selectionStart : null
-          const collapsed = !input || input.selectionStart === input.selectionEnd
-          const atEnd = !input || caret === input.value.length
-          const row = rowByValue.get(highlightedValue.toLowerCase())
-          if (row && collapsed && atEnd) {
-            event.preventDefault()
-            // cmdk re-selects its first item whenever the item set changes;
-            // opening or closing a row must not move the highlight off it.
-            pinnedHighlightRef.current = resultRowValue(row)
-            if (event.key === "ArrowRight") {
-              expand(row)
-            } else if (row.expanded) {
-              collapse(row)
-            } else if (row.parentKey) {
-              // Already closed: step out to the parent it was revealed under.
-              const parent = rows.find((other) => other.key === row.parentKey)
-              if (parent) setHighlightedValue(resultRowValue(parent))
-            }
-            return
-          }
+          event.preventDefault()
+          handOffToRows()
+          return
+        }
+        if (
+          event.key === "Escape" &&
+          event.target instanceof Element &&
+          event.target.closest("[data-block-editor]")
+        ) {
+          event.preventDefault()
+          takeBackFromRows()
+          return
+        }
+        // ⌘↵ creates a note from the query (the footer's action), wherever
+        // the keyboard is.
+        if (mode === "commands" && event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault()
+          createFromQuery()
+          return
         }
         // Clear input with `esc`
         if (event.key === "Escape" && query) {
@@ -679,19 +666,6 @@ export function CommandMenu() {
                   ))}
                 </Command.Group>
               ) : null}
-              {!deferredQuery && pinnedNotes.length ? (
-                <Command.Group heading="Pinned notes">
-                  {pinnedNotes.map((note) => (
-                    <NoteItem
-                      key={note.id}
-                      note={note}
-                      // Since they're all pinned, we don't need to show the pin icon
-                      hidePinIcon
-                      onOpen={(heading) => openNote(note.id, heading)}
-                    />
-                  ))}
-                </Command.Group>
-              ) : null}
               {dateString ? (
                 <Command.Group heading="Date">
                   <CommandItem
@@ -714,107 +688,67 @@ export function CommandMenu() {
                   </CommandItem>
                 </Command.Group>
               ) : null}
-              {tagResults.length ? (
-                <Command.Group heading="Tags">
-                  {tagResults.slice(0, numVisibleTags).map(([name, noteIds]) => (
-                    <CommandItem
-                      key={name}
-                      icon={<TagIcon16 />}
-                      description={pluralize(noteIds.length, "note")}
-                      onSelect={handleSelect(() =>
-                        navigate({
-                          to: "/",
-                          search: { query: `tag:${name}` },
-                        }),
-                      )}
-                    >
-                      {name}
-                    </CommandItem>
-                  ))}
-                  {tagResults.length > numVisibleTags ? (
-                    <CommandItem
-                      key={`Show all tags matching "${deferredQuery}"`}
-                      icon={<SearchIcon16 />}
-                      onSelect={handleSelect(() =>
-                        navigate({
-                          to: "/tags",
-                          search: {
-                            query: deferredQuery,
-                            sort: "name",
-                          },
-                        }),
-                      )}
-                    >
-                      Show all {pluralize(tagResults.length, "tag")} matching "{deferredQuery}"
-                    </CommandItem>
+              {deferredQuery || resultRoots.length > 0 ? (
+                <Command.Group heading={deferredQuery ? "Results" : "Pinned notes"}>
+                  {/* The item comes first, the editor's rows after it: cmdk
+                      walks the items, and ↓ past the last hands off to the
+                      rows. "See all" leads so Enter straight after typing
+                      commits the query to the results view; it carries the
+                      COUNT — matched blocks, which expanding never inflates. */}
+                  {showBlocks ? (
+                    hits.length > 0 ? (
+                      <CommandItem
+                        key="see-all-results"
+                        value="see all results"
+                        icon={<SearchIcon16 />}
+                        onSelect={openResultsView}
+                      >
+                        See all {pluralize(hits.length, "matching block")} in{" "}
+                        {pluralize(hitNotes.length, "note")}
+                      </CommandItem>
+                    ) : (
+                      <div className="px-3 py-2 text-text-secondary">No matching blocks</div>
+                    )
                   ) : null}
-                </Command.Group>
-              ) : null}
-              {showBlocks ? (
-                <Command.Group heading="Blocks">
-                  {/* First row, so Enter straight after typing commits the
-                      query to the results view. It also carries the COUNT —
-                      matched blocks, which expanding never inflates. */}
-                  {hits.length > 0 ? (
-                    <CommandItem
-                      key="see-all-results"
-                      value="see all results"
-                      icon={<SearchIcon16 />}
-                      onSelect={openResultsView}
-                    >
-                      See all {pluralize(hits.length, "matching block")} in{" "}
-                      {pluralize(hitNotes.length, "note")}
-                    </CommandItem>
-                  ) : (
-                    <div className="px-3 py-2 text-text-secondary">No matching blocks</div>
-                  )}
-                  <SearchResults
-                    variant="palette"
-                    rows={rows}
-                    onActivate={openBlock}
-                    onToggle={(row) => (row.expanded ? collapse(row) : expand(row))}
-                  />
-                </Command.Group>
-              ) : null}
-              {deferredQuery ? (
-                <Command.Group heading="Notes">
-                  {noteResults.slice(0, numVisibleNotes).map((note) => (
-                    <NoteItem
-                      key={note.id}
-                      note={note}
-                      onOpen={(heading) => openNote(note.id, heading)}
+                  {/* Set in by the rows' own reach (a listed root's surface
+                      extends 4.5px past its box), so the surfaces sit flush
+                      with the items above. */}
+                  <div className="px-[4.5px]">
+                    <ResultsEditor
+                      roots={resultRoots}
+                      resetKey={scopedQuery}
+                      readOnly
+                      onOpen={openResult}
+                      focusFirstSignal={focusFirstSignal}
+                      onExitTop={takeBackFromRows}
                     />
-                  ))}
-                  <CommandItem
-                    key={`Create new note "${deferredQuery}"`}
-                    icon={<PlusIcon16 />}
-                    onSelect={handleSelect(() => {
-                      // The typed text becomes the note's TITLE; the id is
-                      // minted and opaque (docs/graph-storage.md). Any
-                      // text works — there is no filename charset to sanitize
-                      // against and no name collision to avoid, so a fresh
-                      // note is always a fresh note.
-                      const id = generateNoteId()
-                      createNote(id, { title: deferredQuery.trim() })
-
-                      navigate({
-                        to: "/notes/$",
-                        params: {
-                          _splat: id,
-                        },
-                        search: {
-                          query: undefined,
-                        },
-                      })
-                    })}
-                  >
-                    Create new note "{deferredQuery}"
-                  </CommandItem>
+                  </div>
                 </Command.Group>
               ) : null}
             </>
           )}
         </Command.List>
+        {mode === "commands" ? (
+          // The footer: always there, whatever the query. A button, not a
+          // cmdk item — the items are walked with ↑/↓ above the rows, and
+          // this one is reached by its key instead.
+          <div className="border-t border-border-secondary p-2">
+            <button
+              type="button"
+              data-testid="palette-create"
+              onClick={createFromQuery}
+              className="focus-ring flex h-9 w-full items-center gap-3 rounded px-3 text-left hover:bg-bg-hover active:bg-bg-secondary-active"
+            >
+              <span className="grid h-4 w-4 place-items-center text-text-secondary">
+                <PlusIcon16 />
+              </span>
+              <span className="grow truncate">
+                {query.trim() ? `Create new note "${query.trim()}"` : "Create new note"}
+              </span>
+              <Keys keys={formatCombo("Mod+Enter")} className="coarse:hidden" />
+            </button>
+          </div>
+        ) : null}
       </div>
     </Command.Dialog>
   )
@@ -856,49 +790,5 @@ function CommandItem({
         <span className="hidden leading-none text-text-secondary in-aria-selected:inline">⏎</span>
       </div>
     </Command.Item>
-  )
-}
-
-// How many of a note's headings to list beneath it.
-const NUM_VISIBLE_HEADINGS = 4
-
-function NoteItem({
-  note,
-  hidePinIcon,
-  onOpen,
-}: {
-  note: Note
-  hidePinIcon?: boolean
-  onOpen: (heading?: string) => void
-}) {
-  // Show the note by its name, with its headings listed (tabbed over) as
-  // children so you can find a note by a heading it contains. Selecting the
-  // note opens it; selecting a heading opens it and highlights that heading.
-  const headings = note.headings.slice(0, NUM_VISIBLE_HEADINGS)
-  // cmdk matches on `value`, so it carries the name (what the user typed
-  // against) plus the id (still unique, and how duplicates stay distinct).
-  const itemValue = `${note.displayName} ${note.id}`
-  return (
-    <>
-      <CommandItem value={itemValue} icon={<NoteFavicon note={note} />} onSelect={() => onOpen()}>
-        <span className="flex items-center gap-2 truncate">
-          {!hidePinIcon && note.pinned ? (
-            <PinFillIcon12 className="shrink-0 text-text-pinned" />
-          ) : null}
-          <span className="truncate">{note.displayName}</span>
-        </span>
-      </CommandItem>
-      {headings.map((heading, index) => (
-        <CommandItem
-          key={`${note.id}::${index}`}
-          value={`${itemValue} › ${heading.text}`}
-          className="pl-9!"
-          icon={<span className="text-text-tertiary">#</span>}
-          onSelect={() => onOpen(heading.text)}
-        >
-          <span className="truncate text-text-secondary">{heading.text}</span>
-        </CommandItem>
-      ))}
-    </>
   )
 }

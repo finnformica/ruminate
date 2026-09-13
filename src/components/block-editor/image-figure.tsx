@@ -1,5 +1,5 @@
 import type React from "react"
-import { useRef, useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import {
   FULL_IMAGE_SIZE,
@@ -79,6 +79,20 @@ const SNAP_TO_FULL = 3
  * spinner (`useImageSrc`), so pasting one is instant and the round trip
  * happens behind it. Bytes that had to be fetched fade in, so a note full of
  * pictures settles rather than snapping.
+ *
+ * The figure is its final size from its first frame, before the bytes
+ * arrive, whenever the picture's pixel size is known (an upload's is
+ * measured as it goes up): the width the picture will have is worked out
+ * from that size and set on the figure, and the picture's box keeps the
+ * same ratio, so neither the placeholder that stands in for a fetched
+ * picture nor the `<img>` waiting for its bytes is any smaller than the
+ * picture will be. Nothing moves when the bytes land — and nothing that
+ * measured the row meanwhile is short by a picture: a fold unfolding the
+ * row's nest measures it the moment it mounts (fold-motion.ts), and a nest
+ * measured without its picture is revealed with the picture's height
+ * already showing, then grows under the rows below. A picture whose size
+ * is not known (an external URL pasted as markdown) is laid out as it
+ * loads, as before.
  */
 export function ImageFigure({
   block,
@@ -106,6 +120,29 @@ export function ImageFigure({
   const selected = editable && api.selectedSet.has(occurrence.key)
   const shownSize = dragSize ?? size
   const sized = shownSize !== undefined
+  // The picture's shape, when its pixel size is known: the box the
+  // placeholder and the `<img>` keep before and after the bytes arrive.
+  const pixels = width && height ? { width, height } : null
+  const ratio = pixels ? `${pixels.width} / ${pixels.height}` : undefined
+  // The figure's width, when it can be known before the picture loads: a
+  // sized picture's fraction of the row, or the width its natural size
+  // gives — its own pixels, no wider than the row, and no wider than a
+  // screenful of height allows (the 20rem `max-h-80` cap below, carried
+  // over to the width through the ratio). A figure with a width fills it
+  // with the picture; one without shrinks to the picture as it loads.
+  const figureWidth = sized
+    ? `${shownSize}%`
+    : pixels
+      ? `min(${pixels.width}px, 100%, ${(20 * pixels.width) / pixels.height}rem)`
+      : undefined
+  const boxed = figureWidth !== undefined
+  // A picture the browser already holds (the row was just remounted — a
+  // nest unfolded, say) needs no fade: it is there on the first frame.
+  const imgRef = useRef<HTMLImageElement>(null)
+  useLayoutEffect(() => {
+    const img = imgRef.current
+    if (img?.complete && img.naturalWidth > 0) setLoaded(true)
+  }, [src])
 
   const open = (event: React.MouseEvent) => {
     event.stopPropagation()
@@ -175,23 +212,28 @@ export function ImageFigure({
         onClick={open}
         className={cx(
           "block max-w-full overflow-hidden rounded-lg",
-          sized && "w-full",
+          boxed && "w-full",
           uploading ? "cursor-progress" : "cursor-zoom-in",
         )}
       >
         {src ? (
           <span className="relative block">
             <img
+              ref={imgRef}
               src={src}
               alt={captionText}
               data-testid="block-image"
               draggable={false}
               onLoad={() => setLoaded(true)}
+              // The picture's ratio, set outright rather than left to the
+              // bytes: the box is then the same shape before they arrive
+              // as after.
+              style={ratio ? { aspectRatio: ratio } : undefined}
               className={cx(
-                // At its natural size the picture is capped at the row's
-                // width and a screenful of height; a sized picture is the
-                // width it was given, whatever that makes its height.
-                sized ? "block h-auto w-full" : "block h-auto max-h-80 w-auto max-w-full",
+                // In a figure with a width the picture fills it, whatever
+                // that makes its height. Otherwise it is its natural size,
+                // capped at the row's width and a screenful of height.
+                boxed ? "block h-auto w-full" : "block h-auto max-h-80 w-auto max-w-full",
                 "transition-opacity duration-300 ease-out",
                 loaded ? "opacity-100" : "opacity-0",
               )}
@@ -211,11 +253,13 @@ export function ImageFigure({
           <span
             aria-hidden
             data-testid="block-image-placeholder"
+            // The picture's own box, when its size is known; a guess at
+            // one when it is not.
             className={cx(
               "block max-w-full animate-pulse bg-bg-tertiary",
-              sized ? "w-full" : "max-h-80 w-64",
+              boxed ? "w-full" : "max-h-80 w-64",
             )}
-            style={{ aspectRatio: width && height ? `${width} / ${height}` : "4 / 3" }}
+            style={{ aspectRatio: ratio ?? "4 / 3" }}
           />
         )}
       </button>
@@ -243,7 +287,7 @@ export function ImageFigure({
         ALIGN_SELF[align],
         dragSize !== null && "select-none",
       )}
-      style={sized ? { width: `${shownSize}%` } : undefined}
+      style={boxed ? { width: figureWidth } : undefined}
     >
       {/* The picture and, over it, its controls: the handles span the
           picture's height, never the caption's. */}

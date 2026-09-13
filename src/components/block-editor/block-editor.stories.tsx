@@ -196,6 +196,46 @@ export const FoldMotionDeferred: Story = {
   args: { initial: foldMotionSample(), deferCollapse: 150 },
 }
 
+/** A nest with a picture in it, for the fold's end-to-end tests. The
+ * picture is fetched (a file Storybook serves, which the test holds back),
+ * never drawn in place, since the point is what the row is before the
+ * bytes arrive: its pixel size is stored, as an upload's is, and the row
+ * reserves the picture's space from it — the unfold measures the nest the
+ * moment it mounts, before any picture in it has loaded. */
+function foldMotionImageDoc(): BlockDoc {
+  const text = (id: string, text: string, children: string[] = []) => ({
+    id,
+    type: "text" as const,
+    text,
+    children,
+  })
+  return {
+    props: null,
+    rootBlockIds: ["blk_pa0", "blk_pa1", "blk_pn", "blk_pb0", "blk_pb1", "blk_pb2"],
+    blocks: {
+      blk_pa0: text("blk_pa0", "Row above the parent 0"),
+      blk_pa1: text("blk_pa1", "Row above the parent 1"),
+      blk_pn: text("blk_pn", "Parent of the picture", ["blk_pc0", "blk_pi", "blk_pc1"]),
+      blk_pc0: text("blk_pc0", "First row inside"),
+      blk_pi: {
+        id: "blk_pi",
+        type: "image",
+        text: "The picture in the nest",
+        props: { src: "/fold-picture.svg", width: 1200, height: 500 },
+        children: [],
+      },
+      blk_pc1: text("blk_pc1", "Last row inside"),
+      blk_pb0: text("blk_pb0", "Row below the parent 0"),
+      blk_pb1: text("blk_pb1", "Row below the parent 1"),
+      blk_pb2: text("blk_pb2", "Row below the parent 2"),
+    },
+  }
+}
+
+export const FoldMotionImage: Story = {
+  args: { initial: "", initialDoc: foldMotionImageDoc() },
+}
+
 export const NestedTodo: Story = {
   args: { initial: "[ ] Parent todo\n  id:: blk_pt\n  - child bullet\n    id:: blk_pc\n" },
 }

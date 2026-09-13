@@ -22,15 +22,14 @@ reference, complete with a filter box.
 `g` pressed outside any text field arms a short (~1.5s) chord window; the next
 key navigates. The chords work from the block editor's select mode too.
 
-| Action                              | Shortcut                                              |
-| ----------------------------------- | ----------------------------------------------------- |
-| Go to today's daily note            | <kbd>g</kbd> then <kbd>d</kbd>                        |
-| Go to the notes list                | <kbd>g</kbd> then <kbd>n</kbd>                        |
-| Go to tags                          | <kbd>g</kbd> then <kbd>t</kbd>                        |
-| Go to settings                      | <kbd>g</kbd> then <kbd>s</kbd>                        |
-| Focus the search (notes list, tags) | <kbd>/</kbd>                                          |
-| `i`                                 | Focus the editor, restoring the last selected block   |
-| Back / forward (browser history)    | <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> |
+| Action                           | Shortcut                                              |
+| -------------------------------- | ----------------------------------------------------- |
+| Go to today's daily note         | <kbd>g</kbd> then <kbd>d</kbd>                        |
+| Go to the notes list             | <kbd>g</kbd> then <kbd>n</kbd>                        |
+| Go to settings                   | <kbd>g</kbd> then <kbd>s</kbd>                        |
+| Focus the search (notes list)    | <kbd>/</kbd>                                          |
+| `i`                              | Focus the editor, restoring the last selected block   |
+| Back / forward (browser history) | <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> |
 
 ### Outline palette
 
@@ -48,46 +47,56 @@ palette also switches to outline mode (the VS Code prefix grammar);
 with <kbd>⌘</kbd> <kbd>P</kbd> directly, <kbd>⌫</kbd> on an empty query stays
 put.
 
-## Lists (notes list, tags)
+## The notes list and search results
 
-Linear-style keys on the filterable list pages — the notes index (`/`) and the
-tags page. A roving highlight (drawn in the same selection accent as the block
-editor) follows the arrows; it tracks filtering, resetting to the first result
-when the query changes. <kbd>↓</kbd> pressed inside the search input hands the
-keyboard to the list; everything else stays quiet while any text field has
-focus.
+The notes list (`/`) and the full results view (`/?query=…`) are the block
+editor over a set of roots — every note, or the matched blocks — so the keys
+are the editor's own (see "Block editor" above): the arrows and <kbd>w</kbd> /
+<kbd>s</kbd> / <kbd>a</kbd> / <kbd>d</kbd> move the highlight, <kbd>space</kbd>
+/ <kbd>→</kbd> / <kbd>←</kbd> fold and unfold, <kbd>f</kbd> zooms — which,
+here, opens the note at that block. Opening a row loads only that row's
+blocks; a child opens the next level the same way.
 
-| Action                                | Shortcut                         |
-| ------------------------------------- | -------------------------------- |
-| Move the list highlight               | <kbd>↑</kbd> / <kbd>↓</kbd>      |
-| In the search: highlight first result | <kbd>↓</kbd>                     |
-| Open the highlighted note / tag       | <kbd>↵</kbd>                     |
-| Clear the highlight, back to search   | <kbd>Esc</kbd>                   |
-| Jump to the first / last item         | <kbd>Home</kbd> / <kbd>End</kbd> |
+The notes list is browsed: <kbd>↵</kbd> (or a click) opens the highlighted
+note, and nothing writes. A filtered view **edits in place**: <kbd>↵</kbd>
+edits the row as it would in its note, the change lands in the note, and the
+only thing refused is adding a block beside a result or removing one from the
+list — open the note for that.
 
-## Search results
+| Action                                  | Shortcut     |
+| --------------------------------------- | ------------ |
+| In the search box: highlight first row  | <kbd>↓</kbd> |
+| From the first row: back to the search  | <kbd>↑</kbd> |
+| Notes list: open the highlighted note   | <kbd>↵</kbd> |
+| Filtered view: edit the highlighted row | <kbd>↵</kbd> |
+| Open the note at this block             | <kbd>f</kbd> |
 
-Search results are the matching **blocks**, at any depth — a nested heading or
-a single todo is a row of its own, shown with the note and ancestry it came
-from. The same rows appear in <kbd>⌘</kbd> <kbd>K</kbd> and on the full results
-view (`/?query=…`), so the keys are the same in both.
+The tags page keeps its own Linear-style list keys (<kbd>↑</kbd> / <kbd>↓</kbd>,
+<kbd>↵</kbd>, <kbd>Esc</kbd> back to search).
 
-| Action                                     | Shortcut                    |
-| ------------------------------------------ | --------------------------- |
-| Move between result rows                   | <kbd>↑</kbd> / <kbd>↓</kbd> |
-| Expand the highlighted result              | <kbd>→</kbd>                |
-| Collapse it (already closed: go to parent) | <kbd>←</kbd>                |
-| Open the highlighted block (note + zoom)   | <kbd>↵</kbd>                |
-| See all results for the query (⌘K)         | <kbd>↵</kbd>                |
+## ⌘K results
 
-Expanding fetches only that block's children, and remembers them — reopening
-is instant, and a child expands the next level the same way.
+The palette's results — the notes whose title matched, then the matching
+**blocks** at any depth, or the pinned notes with no query — are the same
+block editor, browsed. The palette's own items ("See all…", the jump-to and note
+actions) come first and take cmdk's <kbd>↑</kbd> /
+<kbd>↓</kbd>; <kbd>↓</kbd> past the last of them hands the keyboard to the
+rows, whose keys are then the editor's (fold with <kbd>space</kbd> /
+<kbd>→</kbd> / <kbd>←</kbd>, walk with <kbd>w</kbd> <kbd>s</kbd> <kbd>a</kbd>
+<kbd>d</kbd>, open with <kbd>↵</kbd> or <kbd>f</kbd>). <kbd>↑</kbd> from the
+first row, or <kbd>Esc</kbd>, returns to the query.
 
-In <kbd>⌘</kbd> <kbd>K</kbd> the query input owns <kbd>←</kbd>/<kbd>→</kbd>
-while there is text to move through; with the caret parked at the **end** of
-the query (where typing leaves it) they expand and collapse the highlighted
-result instead. Move the caret back into the text and the arrows are the
-input's again. <kbd>↵</kbd> with nothing arrowed lands on the "see all …" row
+| Action                                    | Shortcut                                 |
+| ----------------------------------------- | ---------------------------------------- |
+| Move between the palette's items          | <kbd>↑</kbd> / <kbd>↓</kbd>              |
+| Past the last item: into the result rows  | <kbd>↓</kbd>                             |
+| From the first row: back to the query     | <kbd>↑</kbd> / <kbd>Esc</kbd>            |
+| Open the highlighted result (note + zoom) | <kbd>↵</kbd>                             |
+| See all results for the query             | <kbd>↵</kbd> straight after typing       |
+| Create a note titled with the query       | <kbd>⌘</kbd> <kbd>↵</kbd>, or the footer |
+
+Opening a row loads only that row's blocks; a child opens the next level the
+same way.
 and opens the full results view, whose `?query=` URL is bookmarkable and
 works with back/forward.
 

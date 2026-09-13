@@ -14,7 +14,6 @@ function makeNote(id: string, overrides: Partial<Note> = {}): Note {
     pinned: false,
     updatedAt: null,
     dates: [],
-    tags: [],
     tasks: [],
     headings: [],
     text: "",

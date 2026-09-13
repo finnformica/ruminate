@@ -13,15 +13,14 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   match: { params: { _splat: "note-1" } } as
     { params: { _splat: string }; search?: { block?: string } } | undefined,
-  // The block-search data source, injected at its single seam
-  // (`useBlockSearchSource`) — see src/utils/block-search-source.ts.
+  // What the query resolves to, injected at `useSearchResults`; the rows
+  // themselves are walked out of the mocked graph (see the global-state mock).
   results: { mode: "notes", hits: [], notes: [] } as {
     mode: "blocks" | "notes"
     hits: unknown[]
     notes: unknown[]
   },
-  children: new Map<string, unknown[]>(),
-  childCalls: [] as string[],
+  noteResults: [] as unknown[],
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -35,31 +34,60 @@ vi.mock("../hooks/note", () => ({
 }))
 
 vi.mock("../hooks/search-notes", () => ({
-  useSearchNotes: () => () => [],
+  useSearchNotes: () => () => mocks.noteResults,
 }))
 
 vi.mock("../hooks/search-results", () => ({
   useSearchResults: () => mocks.results,
-  useBlockSearchSource: () => ({
-    search: () => mocks.results.hits,
-    children: (hit: { blockId: string }) => {
-      mocks.childCalls.push(hit.blockId)
-      return mocks.children.get(hit.blockId) ?? []
-    },
-  }),
 }))
-
-vi.mock("../global-state", async () => {
+vi.mock("../data/store", () => ({ useApplyOps: () => () => {} }))
+// The real module underneath (the block editor behind the rows reads several
+// of its atoms), with the palette's own inputs pinned.
+vi.mock("../global-state", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../global-state")>()
   const { atom } = await import("jotai")
-  const { Searcher } = await import("fast-fuzzy")
+  const { parse } = await import("../blocks/parse")
+  const { serialize } = await import("../blocks/serialize")
+  const { buildGraphSnapshot, docToGraph } = await import("../data/graph")
+  // The corpus the result rows are walked out of (the palette's results are
+  // the block editor over the graph — see ResultsEditor). Ids are pinned so
+  // the hits below can name them.
+  const CORPUS: Record<string, string> = {
+    research: [
+      "# Semiconductors",
+      "  id:: blk_semis",
+      "  - GPUs",
+      "    id:: blk_gpus",
+      "    - nvidia",
+      "      id:: blk_nvidia",
+      "      - H100 supply",
+      "        id:: blk_h100",
+      "      - datacenter revenue",
+      "        id:: blk_rev",
+      "- [ ] buy milk",
+      "  id:: blk_milk",
+      "",
+    ].join("\n"),
+    journal: ["- [ ] ship it", "  id:: blk_ship", "- in another note", "  id:: blk_else", ""].join(
+      "\n",
+    ),
+  }
+  const nodes = []
+  const links = []
+  for (const [id, markdown] of Object.entries(CORPUS)) {
+    const g = docToGraph(id, serialize(parse(markdown)), 1)
+    nodes.push(...g.nodes)
+    links.push(...g.links)
+  }
+  const graph = buildGraphSnapshot(nodes, links)
   return {
+    ...original,
+    graphSnapshotAtom: atom(graph),
+    sampleGraphAtom: atom(graph),
+    isDatabaseModeAtom: atom(false),
     notesAtom: atom(new Map()),
     pinnedNotesAtom: atom([]),
     sortedNotesAtom: atom([]),
-    sortedTagEntriesAtom: atom([["work", ["note-1"]]]),
-    tagSearcherAtom: atom(
-      new Searcher([] as [string, string[]][], { keySelector: ([tag]) => tag }),
-    ),
     noteOutlineAtom: atom(null),
     blockRevealAtom: atom(null),
     // The block index only serves the scope pill's label here.
@@ -85,8 +113,7 @@ beforeEach(() => {
   mocks.match = { params: { _splat: "note-1" } }
   mocks.navigate.mockClear()
   mocks.results = { mode: "notes", hits: [], notes: [] }
-  mocks.children = new Map()
-  mocks.childCalls = []
+  mocks.noteResults = []
 })
 
 const OUTLINE = {
@@ -248,7 +275,6 @@ function makeNote(id: string) {
     pinned: false,
     updatedAt: null,
     dates: [],
-    tags: [],
     tasks: [],
     headings: [],
     text: "",
@@ -256,40 +282,18 @@ function makeNote(id: string) {
 }
 
 const RESEARCH = makeNote("research")
+const JOURNAL = makeNote("journal")
 
-function hit(
-  blockId: string,
-  text: string,
-  type: string,
-  ancestors: { id: string; text: string }[] = [],
-  childCount = 0,
-) {
-  return {
-    blockId,
-    noteId: RESEARCH.id,
-    text,
-    type,
-    olNumber: 1,
-    ancestors,
-    childCount,
-    note: RESEARCH,
-  }
+function hit(blockId: string, text: string, type: string, note = RESEARCH) {
+  return { blockId, noteId: note.id, text, type, ancestors: [], note }
 }
 
 /** A heading nested under two other blocks — invisible to the old note-only
  * results, a first-class row now. */
-const NVIDIA = hit(
-  "blk_nvidia",
-  "nvidia",
-  "h3",
-  [
-    { id: "blk_semis", text: "Semiconductors" },
-    { id: "blk_gpus", text: "GPUs" },
-  ],
-  2,
-)
+const NVIDIA = hit("blk_nvidia", "nvidia", "ul")
 const TODO_MILK = hit("blk_milk", "buy milk", "todo")
-const TODO_SHIP = hit("blk_ship", "ship it", "todo")
+const TODO_SHIP = hit("blk_ship", "ship it", "todo", JOURNAL)
+const ELSEWHERE = hit("blk_else", "in another note", "text", JOURNAL)
 
 async function openWithBlocks(hits: unknown[], notes: unknown[] = [RESEARCH]) {
   mocks.results = { mode: "blocks", hits, notes }
@@ -306,23 +310,40 @@ async function openWithBlocks(hits: unknown[], notes: unknown[] = [RESEARCH]) {
   return rendered
 }
 
-const rowFor = (text: string) => screen.getByText(text).closest("[cmdk-item]") as HTMLElement | null
+/** A result row: the editor's own, by block id. */
+const rowOf = (id: string) =>
+  document.querySelector(`[data-block-row="${id}"]`) as HTMLElement | null
+const rowIds = () =>
+  Array.from(document.querySelectorAll<HTMLElement>("[data-block-row]")).map(
+    (row) => row.dataset.blockRow,
+  )
+const editor = () => document.querySelector("[data-block-editor]") as HTMLElement
+
+/** ↓ in the query walks cmdk's items; past the last it hands the keyboard to
+ * the rows. With block results there is one item ("See all…"), highlighted
+ * from the start, so one press crosses over; with none, the first does. */
+function handOffToRows() {
+  const input = commandsInput()
+  for (let i = 0; i < 3 && document.activeElement !== editor(); i += 1) {
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+  }
+  expect(document.activeElement).toBe(editor())
+}
 
 describe("block results", () => {
-  it("lists a nested heading as its own row, with its breadcrumb", async () => {
-    await openWithBlocks([NVIDIA])
-    const row = rowFor("nvidia")
-    expect(row).toBeTruthy()
-    // Where it lives: note, then ancestry.
-    expect(row?.textContent).toContain("research")
-    expect(row?.textContent).toContain("Semiconductors")
-    expect(row?.textContent).toContain("GPUs")
+  it("lists a nested heading as its own row — the editor's, with no breadcrumb", async () => {
+    await openWithBlocks([NVIDIA, ELSEWHERE], [RESEARCH, JOURNAL])
+    expect(rowIds()).toEqual(["blk_nvidia", "blk_else"])
+    expect(rowOf("blk_nvidia")?.querySelector('[data-testid="block-body"]')?.textContent).toBe(
+      "nvidia",
+    )
+    expect(rowOf("blk_nvidia")?.textContent).not.toContain("Semiconductors")
   })
 
   it("lists matching todo blocks as rows (the type:todo case)", async () => {
     await openWithBlocks([TODO_MILK, TODO_SHIP])
-    expect(rowFor("buy milk")).toBeTruthy()
-    expect(rowFor("ship it")).toBeTruthy()
+    expect(rowIds()).toEqual(["blk_milk", "blk_ship"])
+    expect(rowOf("blk_milk")?.querySelector('input[type="checkbox"]')).not.toBeNull()
   })
 
   it("shows the count of matched blocks, and the notes they live in", async () => {
@@ -388,10 +409,12 @@ describe("block results", () => {
     })
   })
 
-  it("Enter on a highlighted hit opens its note, zoomed to the block", async () => {
+  it("↓ past the items hands the keyboard to the rows; Enter opens the note zoomed to the block", async () => {
     await openWithBlocks([NVIDIA])
-    fireEvent.keyDown(commandsInput(), { key: "ArrowDown" })
-    fireEvent.keyDown(commandsInput(), { key: "Enter" })
+    handOffToRows()
+    // The first row is the highlight, as in a note.
+    expect(rowOf("blk_nvidia")?.querySelector(".block-highlight")).not.toBeNull()
+    fireEvent.keyDown(editor(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: "/notes/$",
       params: { _splat: "research" },
@@ -399,42 +422,66 @@ describe("block results", () => {
     })
   })
 
-  it("→ expands a hit in place, resolving its children once; ← collapses", async () => {
-    mocks.children.set("blk_nvidia", [
-      hit("blk_h100", "H100 supply", "ul"),
-      hit("blk_rev", "datacenter revenue", "ul"),
-    ])
+  it("→ and space open a hit in place, one level at a time; ← closes it", async () => {
     await openWithBlocks([NVIDIA])
+    handOffToRows()
+    expect(rowIds()).toEqual(["blk_nvidia"])
 
-    fireEvent.keyDown(commandsInput(), { key: "ArrowDown" })
-    expect(screen.queryByText("H100 supply")).toBeNull()
+    fireEvent.keyDown(editor(), { key: "ArrowRight" })
+    expect(rowIds()).toEqual(["blk_nvidia", "blk_h100", "blk_rev"])
 
-    fireEvent.keyDown(commandsInput(), { key: "ArrowRight" })
-    expect(screen.getByText("H100 supply")).toBeTruthy()
-    expect(screen.getByText("datacenter revenue")).toBeTruthy()
-    expect(mocks.childCalls).toEqual(["blk_nvidia"])
+    fireEvent.keyDown(editor(), { key: "ArrowLeft" })
+    expect(rowIds()).toEqual(["blk_nvidia"])
 
-    fireEvent.keyDown(commandsInput(), { key: "ArrowLeft" })
-    expect(screen.queryByText("H100 supply")).toBeNull()
+    fireEvent.keyDown(editor(), { key: " " })
+    expect(rowIds()).toEqual(["blk_nvidia", "blk_h100", "blk_rev"])
+  })
 
-    // Re-expanding is served from the tree's own cache — no second fetch.
-    fireEvent.keyDown(commandsInput(), { key: "ArrowRight" })
-    expect(screen.getByText("H100 supply")).toBeTruthy()
-    expect(mocks.childCalls).toEqual(["blk_nvidia", "blk_nvidia"])
+  it("↑ from the first row, or Escape, returns to the query with the last item highlighted", async () => {
+    await openWithBlocks([NVIDIA])
+    const seeAll = () => screen.getByText(/^See all/).closest("[cmdk-item]")
+    handOffToRows()
+    fireEvent.keyDown(editor(), { key: "ArrowUp" })
+    expect(document.activeElement).toBe(commandsInput())
+    expect(seeAll()?.getAttribute("aria-selected")).toBe("true")
+
+    handOffToRows()
+    fireEvent.keyDown(editor(), { key: "Escape" })
+    expect(document.activeElement).toBe(commandsInput())
+    expect(seeAll()?.getAttribute("aria-selected")).toBe("true")
+    // The palette is still open, the query still there.
+    expect(commandsInput().value).toBe("nvidia")
+  })
+
+  it("creates a note from the query — the footer, or ⌘↵ from anywhere", async () => {
+    await openWithBlocks([NVIDIA])
+    expect(screen.getByTestId("palette-create").textContent).toContain('Create new note "nvidia"')
+    fireEvent.keyDown(commandsInput(), { key: "Enter", metaKey: true })
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "/notes/$", search: { query: undefined } }),
+    )
+  })
+
+  it("the create footer is there with nothing typed, and makes an untitled note", () => {
+    renderMenu({ open: true })
+    const footer = screen.getByTestId("palette-create")
+    expect(footer.textContent).toContain("Create new note")
+    expect(footer.textContent).not.toContain('"')
+    fireEvent.click(footer)
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "/notes/$", search: { query: undefined } }),
+    )
   })
 
   it("clicking the chevron expands and collapses the same way", async () => {
-    mocks.children.set("blk_nvidia", [hit("blk_h100", "H100 supply", "ul")])
     await openWithBlocks([NVIDIA])
-
-    const toggle = screen.getByLabelText("Expand")
-    fireEvent.click(toggle)
-    expect(screen.getByText("H100 supply")).toBeTruthy()
+    fireEvent.click(screen.getByLabelText("Expand"))
+    expect(rowOf("blk_h100")).not.toBeNull()
     // The click expanded rather than opening the result.
     expect(mocks.navigate).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByLabelText("Collapse"))
-    expect(screen.queryByText("H100 supply")).toBeNull()
+    expect(rowOf("blk_h100")).toBeNull()
   })
 
   it("a leaf hit draws no expand affordance", async () => {
@@ -442,22 +489,73 @@ describe("block results", () => {
     // Like a leaf in the editor: its marker slot holds only its key.
     expect(screen.queryByLabelText("Expand")).toBeNull()
   })
+})
 
-  it("leaves the arrows to the query input while the caret is inside the text", async () => {
-    mocks.children.set("blk_nvidia", [hit("blk_h100", "H100 supply", "ul")])
-    await openWithBlocks([NVIDIA])
-    fireEvent.keyDown(commandsInput(), { key: "ArrowDown" })
+// ── Note results ────────────────────────────────────────────────────────────
+// A note is a node whose children are its blocks, so a note result is a root
+// row of the same editor as a block result — in the same list, ahead of the
+// blocks — and opens exactly as one.
 
+describe("note results", () => {
+  async function openWithNotes(notes: unknown[], hits: unknown[] = []) {
+    mocks.results = { mode: hits.length > 0 ? "blocks" : "notes", hits, notes: [] }
+    mocks.noteResults = notes
+    const rendered = renderMenu({ open: true })
     const input = commandsInput()
-    input.setSelectionRange(2, 2)
-    fireEvent.keyDown(input, { key: "ArrowRight" })
-    expect(screen.queryByText("H100 supply")).toBeNull()
-    expect(mocks.childCalls).toEqual([])
+    fireEvent.change(input, { target: { value: "research" } })
+    input.setSelectionRange(input.value.length, input.value.length)
+    await waitFor(() => {
+      expect(screen.queryByText("Settings")).toBeNull()
+    })
+    return rendered
+  }
+
+  it("draws a note as an editor row, keyed by its favicon", async () => {
+    await openWithNotes([RESEARCH])
+    const row = rowOf("research")
+    expect(row?.querySelector('[data-testid="block-body"]')?.textContent).toBe("research")
+    expect(row?.querySelector('[data-testid="note-favicon-slot"]')).not.toBeNull()
+  })
+
+  it("lists notes and blocks as one list, the notes first", async () => {
+    await openWithNotes([RESEARCH], [TODO_SHIP])
+    expect(rowIds()).toEqual(["research", "blk_ship"])
+  })
+
+  it("expands a note in the palette to its top-level blocks", async () => {
+    await openWithNotes([RESEARCH])
+    handOffToRows()
+    fireEvent.keyDown(editor(), { key: "ArrowRight" })
+    expect(rowIds()).toEqual(["research", "blk_semis", "blk_milk"])
+    fireEvent.keyDown(editor(), { key: "ArrowLeft" })
+    expect(rowIds()).toEqual(["research"])
+  })
+
+  it("Enter on a note row opens the note whole — not zoomed to a block", async () => {
+    await openWithNotes([RESEARCH])
+    handOffToRows()
+    fireEvent.keyDown(editor(), { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/notes/$",
+      params: { _splat: "research" },
+      search: { query: undefined, block: undefined },
+    })
+  })
+
+  it("a block revealed under a note opens that block", async () => {
+    await openWithNotes([RESEARCH])
+    fireEvent.click(screen.getByLabelText("Expand"))
+    fireEvent.click(screen.getByText("buy milk"))
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/notes/$",
+      params: { _splat: "research" },
+      search: { query: undefined, block: "blk_milk" },
+    })
   })
 })
 
 // ── Qualifier suggestions ───────────────────────────────────────────────────
-// Typing `type:` (or `tag:`, `in:`, …) opens the value picker inside the
+// Typing `type:` (or `in:`, `has:`, …) opens the value picker inside the
 // palette; its keys are the picker's until it closes, so cmdk's list never
 // moves under it.
 
@@ -494,12 +592,6 @@ describe("qualifier suggestions", () => {
     expect(picker.querySelectorAll('[role="option"]')).toHaveLength(1)
     fireEvent.keyDown(input, { key: "Tab" })
     expect(input.value).toBe("milk type:quote ")
-  })
-
-  it("lists the corpus's tags for `tag:`", () => {
-    renderMenu({ open: true })
-    type("tag:")
-    expect(screen.getByTestId("qualifier-suggestions").textContent).toContain("work")
   })
 
   it("Escape closes it and leaves the query as typed — the palette stays open", () => {

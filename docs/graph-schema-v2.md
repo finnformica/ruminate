@@ -127,9 +127,9 @@ Design notes, and why:
   reverse edge — maintained atomically by the engine, zero drift risk. The
   in-memory snapshot (`buildGraphSnapshot`) indexes the reverse direction, so
   callers never care that one direction is an index scan.
-- **`kind` is `'child'` only, for now.** Tags stay derived from `text` at
-  load (the v1 links table was a derived index). Wikilinks were removed as a
-  feature — `[[...]]` in text is plain text and produces no edges. The `kind`
+- **`kind` is `'child'` only, for now.** Wikilinks and tags were removed as
+  features — `[[...]]` and `#word` in text are plain text and produce no
+  edges (the v1 links table was a derived index). The `kind`
   column still reserves the slot: if reference edges are ever worth
   materializing, they land here as another kind — a cache, never truth.
 - **No view_state table.** Collapse state is per-device ephemera →
@@ -318,7 +318,7 @@ untouched on main's seed.
   with wikilinks removed there is currently nothing to materialize.
 - **Future: semantic types.** The cousin schema's `category`/`field` layer
   (user-defined types with typed, ordered fields — Notion-database/Tana-style)
-  is the natural next chapter: a `#book` tag carrying `author`/`status`
+  is the natural next chapter: a `book` type carrying `author`/`status`
   fields, queryable. v2 deliberately doesn't preclude it — `type` has no
   CHECK constraint and instance values would live in `props`; formalizing
   means adding a categories/fields pair later, additively. Adopt its

@@ -2,7 +2,7 @@ import { z } from "zod"
 
 export type NoteId = string
 
-type NoteType = "note" | "daily" | "weekly"
+export type NoteType = "note" | "daily" | "weekly"
 
 /** A heading block: its level (its outline depth, from 1) and text. */
 export type Heading = { level: number; text: string }
@@ -12,7 +12,6 @@ export type Task = {
   blockId: string
   completed: boolean
   text: string
-  tags: string[]
 }
 
 /**
@@ -35,7 +34,7 @@ export type Note = {
   /** Depending on the type, either the title or the date */
   displayName: string
   /** The note node's props — the note's metadata (pinned, width, font,
-   * updated_at, tags, dates…). */
+   * updated_at, dates…). */
   props: Record<string, unknown>
   /** The note node's text, falling back to the first heading block. */
   title: string
@@ -45,7 +44,6 @@ export type Note = {
   updatedAt: number | null
   /** The dates this note references (date props, e.g. a birthday) */
   dates: string[]
-  tags: string[]
   /** The tasks in the note: its `todo` and `done` blocks. */
   tasks: Task[]
   /** The heading blocks, in document order. */

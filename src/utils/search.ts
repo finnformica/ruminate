@@ -105,7 +105,7 @@ function getSortDirection(key: string, direction?: string): SortDirection {
   if (direction === "asc") return "asc"
   if (direction === "desc") return "desc"
   // `updated` is the block-search spelling of `updated_at` — recent-first too.
-  if (["tags", "updated", "updated_at"].includes(key)) return "desc"
+  if (["updated", "updated_at"].includes(key)) return "desc"
   return "asc"
 }
 

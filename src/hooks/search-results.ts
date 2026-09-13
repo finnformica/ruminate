@@ -13,11 +13,11 @@ import { useSearchNotes } from "./search-notes"
  * heading nested six levels down is a first-class result row rather than a
  * filename.
  *
- * A query that only names NOTES — `tag:recipe`, `date:2026-01-01`, a bare
- * property qualifier, or nothing at all — stays a note listing: every block
- * in every tagged note is not a search result, it's the corpus. That rule is
- * what keeps the tags page (which drives its list with a `tag:` base query)
- * browsing notes, while typing text into it narrows to blocks.
+ * A query that only names NOTES — `date:2026-01-01`, a bare property
+ * qualifier, or nothing at all — stays a note listing: every block in every
+ * matching note is not a search result, it's the corpus. That rule is what
+ * keeps the notes page browsing notes, while typing text into it narrows to
+ * blocks.
  */
 function resolvesToBlocks(query: string): boolean {
   const parsed = parseQuery(query)
@@ -29,7 +29,7 @@ function resolvesToBlocks(query: string): boolean {
  * this one hook; replacing the body with an async (server-backed) source is
  * the entire migration — see `BlockSearchSource`.
  */
-export function useBlockSearchSource(): BlockSearchSource {
+function useBlockSearchSource(): BlockSearchSource {
   const index = useAtomValue(blockIndexAtom)
   return React.useMemo(() => inMemoryBlockSearchSource(index), [index])
 }
@@ -64,7 +64,7 @@ export interface SearchResults {
   /** The matching blocks, in result order. Empty in "notes" mode. */
   hits: BlockHit[]
   /** The notes to list ("notes"), or the notes the hits live in ("blocks") —
-   * either way what tag frequencies and the dice roll are computed from. */
+   * either way what the result count is computed from. */
   notes: Note[]
 }
 

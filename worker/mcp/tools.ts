@@ -270,8 +270,8 @@ const depthArg = (least: 0 | 1, fallback: number, description: string) => {
  *
  * The division is not about how big each answer is — `blockCount` is one
  * number — it is about what has to be READ to produce it. Every one of these
- * is a fact about every block in the note: its size, the tags written anywhere
- * in it, the to-dos anywhere in it, its headings, and which of the blocks
+ * is a fact about every block in the note: its size, the to-dos anywhere in
+ * it, its headings, and which of the blocks
  * written in it nothing links to any more. None can be known from the note's
  * own row or from the blocks `depth` and `limit` asked for.
  *
@@ -285,7 +285,7 @@ const depthArg = (least: 0 | 1, fallback: number, description: string) => {
  * can only be answered by looking at every block written in it — the emptiness
  * is what you learn by paying, not a reason not to pay.
  */
-const INCLUDABLE = ["counts", "tags", "tasks", "headings", "unassigned"] as const
+const INCLUDABLE = ["counts", "tasks", "headings", "unassigned"] as const
 
 type Included = (typeof INCLUDABLE)[number]
 
@@ -303,7 +303,7 @@ const includeArg = () =>
     )
     .register(z.globalRegistry, {
       description:
-        "Extra parts of the note: `counts` (`blockCount`, its true size), `tags`, " +
+        "Extra parts of the note: `counts` (`blockCount`, its true size), " +
         "`tasks`, `headings`, `unassigned`. Each is a fact about EVERY block in " +
         "the note, so asking for any of them reads the whole note however small " +
         "a `depth` you gave. Omit unless you need them.",
@@ -680,7 +680,6 @@ const noteSummary = (graph: ScopedGraph, id: string) => {
     id: note.id,
     title: note.displayName,
     type: note.type,
-    tags: note.tags,
     updatedAt: note.updatedAt,
     taskCount: note.tasks.length,
     openTaskCount: note.tasks.filter((task) => !task.completed).length,
@@ -690,7 +689,6 @@ const noteSummary = (graph: ScopedGraph, id: string) => {
 
 /** What `list_notes` was asked for, once parsed. */
 interface NoteQuery {
-  tag?: string
   type?: "note" | "daily" | "weekly"
   limit: number
   cursor?: string
@@ -710,18 +708,14 @@ interface NoteQuery {
  * result.
  *
  * Sharing the function is what makes that safe: the two calls see the same
- * note rows, so they cannot choose different pages. The one thing they could
- * disagree about is `tag` — a note's tags come from its blocks, not its row —
- * which is why a tag filter loads the corpus instead.
+ * note rows, so they cannot choose different pages.
  */
 function notePage(graph: ScopedGraph, query: NoteQuery) {
-  const tag = query.tag?.replace(/^#/, "").toLowerCase()
   const matches = graph
     .notes()
     .map((id) => noteSummary(graph, id))
     .filter((note): note is NonNullable<typeof note> => note !== null)
     .filter((note) => query.type === undefined || note.type === query.type)
-    .filter((note) => tag === undefined || note.tags.some((t) => t.toLowerCase() === tag))
     .sort(byRecency)
   return pageOf(matches, offsetOf(query.cursor), query.limit)
 }
@@ -778,14 +772,13 @@ export const TOOLS: ToolDef[] = [
     title: "List notes",
     description:
       "List the notes this token can reach, most recently updated first, with " +
-      "each note's tags and task counts. Filter by `tag` or by `type` " +
+      "each note's task counts. Filter by `type` " +
       "(`note`, `daily`, `weekly`); page with `cursor` when `nextCursor` comes " +
       "back. This ENUMERATES notes — to find notes by their content, use " +
       "`search`, which looks at every block rather than a note's opening lines.",
     permission: "read",
     annotations: readOnly,
     schema: z.object({
-      tag: textArg("Only notes carrying this tag. Without the leading '#'. Matches sub-tags."),
       type: z.optional(
         z
           .enum(["note", "daily", "weekly"], {
@@ -797,14 +790,10 @@ export const TOOLS: ToolDef[] = [
       limit: limitArg(),
       cursor: cursorArg(),
     }),
-    // A tag lives in a note's BLOCKS, so filtering by one is a question about
-    // every block of every note — genuinely corpus-wide, and loaded as such.
-    // Without a tag filter the page is decided by the note rows alone, so only
-    // the notes on the page are read (`notePage`).
+    // The page is decided by the note rows alone, so only the notes on the
+    // page are read (`notePage`).
     load: (args, { tenant, grant }) =>
-      args.tag === undefined
-        ? notesView(tenant, grant, (notes) => notePage(notes, args).page.map((note) => note.id))
-        : scopedGraph(tenant, grant),
+      notesView(tenant, grant, (notes) => notePage(notes, args).page.map((note) => note.id)),
     run(args, { graph }) {
       const { page, total, nextCursor } = notePage(graph, args)
 
@@ -828,9 +817,9 @@ export const TOOLS: ToolDef[] = [
       "language (the same one a person types): free text is matched both " +
       "fuzzily and semantically — so 'the deploy broke' finds a block that says " +
       "'the rollout went wrong' — and qualifiers FILTER, exactly as they do in " +
-      "the app. `tag:work`, `type:todo` (or `heading`, `code`, `done`, …), " +
+      "the app. `type:todo` (or `heading`, `code`, `done`, …), " +
       '`in:"Reading list"` or `in:<block id>` to scope to a note or a ' +
-      "subtree, `-tag:x` to exclude, `a,b` for either, `sort:updated`. A query " +
+      "subtree, `-type:x` to exclude, `a,b` for either, `sort:updated`. A query " +
       "with NO free text is an enumeration of whatever the qualifiers admit. " +
       "Each hit names the block, the note it is in and the heading it sits " +
       "under, so it is the way to get from a phrase to a block id to walk from. " +
@@ -839,8 +828,8 @@ export const TOOLS: ToolDef[] = [
     annotations: readOnly,
     schema: z.object({
       query: requiredArg(
-        "The app's query language: free text, plus qualifiers like `tag:`, " +
-          "`type:`, `in:`, `has:`/`no:`, `sort:`.",
+        "The app's query language: free text, plus qualifiers like `type:`, " +
+          "`in:`, `has:`/`no:`, `sort:`.",
       ),
       limit: limitArg(),
       cursor: cursorArg(),
@@ -893,7 +882,7 @@ export const TOOLS: ToolDef[] = [
       "`list_children`; page with `cursor` when `nextCursor` comes back; pass " +
       "`depth: 0` for the whole note. What this returns by default costs only " +
       "the blocks it returns. `include` asks for the things that do not — the " +
-      "note's true size, its tags, its tasks, its headings, its unassigned " +
+      "note's true size, its tasks, its headings, its unassigned " +
       "blocks — and every one of those is a fact about EVERY block in the note, " +
       "so asking for any of them reads the whole note however small a `depth` " +
       "you gave. Ask when you need them, not by habit.",
@@ -956,7 +945,6 @@ export const TOOLS: ToolDef[] = [
         ...(wants("counts")
           ? { blockCount: blocksOfNote(graph, rootBlockIds, 0).blocks.length }
           : {}),
-        ...(wants("tags") ? { tags: note.tags } : {}),
         ...(wants("tasks") ? { tasks: note.tasks } : {}),
         ...(wants("headings") ? { headings: note.headings } : {}),
         ...(wants("unassigned") ? { unassigned, unassignedCount: loose.length } : {}),
@@ -1141,42 +1129,6 @@ export const TOOLS: ToolDef[] = [
                 .map((parent) => `${parent.id} (${parent.type})  ${preview(parent.text, 14)}`)
                 .join("\n") +
               (nextCursor ? `\n\n${parents.total - parents.page.length} more.` : ""),
-      }
-    },
-  }),
-
-  tool({
-    name: "list_tags",
-    title: "List tags",
-    description:
-      "Every tag across the notes this token can reach, with how many notes " +
-      "carry it, commonest first. Pass one to `list_notes` as `tag` to see " +
-      "them; page with `cursor` when `nextCursor` comes back.",
-    permission: "read",
-    annotations: readOnly,
-    schema: z.object({ limit: limitArg(), cursor: cursorArg() }),
-    run(args, { graph }) {
-      const counts = new Map<string, number>()
-      for (const noteId of graph.notes()) {
-        for (const tag of noteOf(graph, noteId)?.tags ?? []) {
-          counts.set(tag, (counts.get(tag) ?? 0) + 1)
-        }
-      }
-      // Commonest first, the tag itself breaking every tie — so the order, and
-      // therefore the cursor, is the same for the same corpus.
-      const all = [...counts.entries()]
-        .map(([tag, noteCount]) => ({ tag, noteCount }))
-        .sort((a, b) => b.noteCount - a.noteCount || (a.tag < b.tag ? -1 : 1))
-      const { page, total, nextCursor } = pageOf(all, offsetOf(args.cursor), args.limit)
-
-      return {
-        ok: true,
-        data: { tags: page, total, nextCursor },
-        text:
-          page.length === 0
-            ? "No tags."
-            : page.map((entry) => `#${entry.tag}  ${entry.noteCount}`).join("\n") +
-              (nextCursor ? `\n\n${total - page.length} more.` : ""),
       }
     },
   }),

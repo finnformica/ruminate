@@ -134,18 +134,10 @@ describe("list_notes", () => {
     expect(data.notes[1].title).toBe("Alpha")
   })
 
-  it("surfaces tags read off the blocks, as the app does", async () => {
+  it("surfaces task counts read off the blocks, as the app does", async () => {
     const data = await run(harness, grantOf({}), "list_notes")
     const alpha = data.notes.find((note: any) => note.id === ALPHA)
-    expect(alpha.tags).toContain("work")
     expect(alpha.openTaskCount).toBe(1)
-  })
-
-  it("filters by tag, with or without the leading hash", async () => {
-    const grant = grantOf({})
-    expect((await run(harness, grant, "list_notes", { tag: "home" })).notes).toHaveLength(1)
-    expect((await run(harness, grant, "list_notes", { tag: "#home" })).notes).toHaveLength(1)
-    expect((await run(harness, grant, "list_notes", { tag: "nope" })).notes).toHaveLength(0)
   })
 
   it("filters by note type", async () => {
@@ -332,7 +324,7 @@ describe("traversal", () => {
   })
 })
 
-describe("search and tags", () => {
+describe("search", () => {
   it("finds a block by its words and names the note it is in", async () => {
     const data = await run(harness, grantOf({}), "search", { query: "bullet" })
     expect(data.hits).toHaveLength(1)
@@ -353,10 +345,6 @@ describe("search and tags", () => {
     // `type:` with a block-type value resolves at block granularity.
     const todos = await run(harness, grant, "search", { query: "type:todo" })
     expect(todos.hits.map((hit: any) => hit.text)).toEqual(["a task #work"])
-    // A note-level qualifier filters by the containing note.
-    const tagged = await run(harness, grant, "search", { query: "tag:home" })
-    expect(tagged.hits.length).toBeGreaterThan(0)
-    expect(tagged.hits.every((hit: any) => hit.noteId === BETA)).toBe(true)
     // `in:` scopes to a note, by name.
     const scoped = await run(harness, grant, "search", { query: 'in:"Beta"' })
     expect(scoped.hits.length).toBeGreaterThan(0)
@@ -384,11 +372,6 @@ describe("search and tags", () => {
     ).toHaveLength(0)
     expect(data.hits.length).toBeGreaterThan(0)
     expect(data.hits.every((hit: any) => hit.noteId === BETA)).toBe(true)
-  })
-
-  it("counts tags across the notes it can reach", async () => {
-    const data = await run(harness, grantOf({}), "list_tags")
-    expect(data.tags.map((entry: any) => entry.tag).sort()).toEqual(["home", "work"])
   })
 })
 
@@ -457,18 +440,6 @@ describe("every collection is bounded", () => {
     expect(data.parentCount).toBe(1)
     expect(data.noteCount).toBe(1)
     expect(data.nextCursor).toBeNull()
-  })
-
-  it("bounds and pages `list_tags`", async () => {
-    const grant = grantOf({})
-    const first = await run(harness, grant, "list_tags", { limit: 1 })
-    expect(first.tags).toHaveLength(1)
-    expect(first.total).toBe(2)
-    expect(first.nextCursor).toBe("1")
-
-    const second = await run(harness, grant, "list_tags", { limit: 1, cursor: first.nextCursor })
-    expect(second.tags[0].tag).not.toBe(first.tags[0].tag)
-    expect(second.nextCursor).toBeNull()
   })
 
   it("caps the ids a `get_block` embeds, and says where the rest are", async () => {
@@ -557,7 +528,6 @@ describe("every collection is bounded", () => {
       ["search", { query: "a", cursor: "../../etc" }],
       ["list_children", { block_id: ALPHA, cursor: "../../etc" }],
       ["list_parents", { block_id: ALPHA, cursor: "../../etc" }],
-      ["list_tags", { cursor: "../../etc" }],
       ["read_note", { note_id: ALPHA, cursor: "../../etc" }],
     ]
     for (const [name, args] of calls) {
@@ -663,11 +633,6 @@ describe("note scope", () => {
   it("cannot search into a note outside the scope", async () => {
     const data = await run(harness, scoped(), "search", { query: "beta" })
     expect(data.hits).toEqual([])
-  })
-
-  it("cannot see a tag that only exists outside the scope", async () => {
-    const data = await run(harness, scoped(), "list_tags")
-    expect(data.tags.map((entry: any) => entry.tag)).toEqual(["work"])
   })
 
   it("cannot traverse into a block of a note outside the scope", async () => {
@@ -1082,7 +1047,9 @@ describe("arguments", () => {
 
   it("refuses a wrongly-typed argument", async () => {
     expect(await refuse(harness, grantOf({}), "list_notes", { limit: -1 })).toMatch(/positive/)
-    expect(await refuse(harness, grantOf({}), "list_notes", { tag: 5 })).toMatch(/must be a string/)
+    expect(await refuse(harness, grantOf({}), "list_notes", { cursor: 5 })).toMatch(
+      /must be a cursor/,
+    )
   })
 
   it("caps an over-large limit rather than refusing it", async () => {

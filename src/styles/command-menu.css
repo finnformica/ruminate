@@ -38,12 +38,18 @@
   @apply cursor-default rounded px-3 py-2.5 leading-4;
 }
 
-/* The highlighted row. In the palette the pointer and the keyboard share one
- * highlight — moving the mouse moves the cursor — so there is no separate
- * hover to tell it apart from, and the hover surface is the right one to use.
- * Named `bg-bg-hover` (not `bg-bg-secondary`, the identical rest surface) so
- * the token says which job it is doing; the slash menu and the qualifier list
- * work the same way and already use it. */
+/* The highlighted item: the app-wide selected wash, as the sidebar's current
+ * row paints it (see "Selection has its own color" in
+ * docs/design-principles.md) — a palette item is a nav row, and the
+ * highlight must read as "this one", not as hovered. In the palette the
+ * pointer and the keyboard share the one highlight. */
 [cmdk-dialog] [cmdk-item][aria-selected] {
-  @apply bg-bg-hover;
+  @apply bg-bg-selected font-bold text-text-selected;
+}
+
+/* While the result rows have the keyboard (the block editor beneath the
+ * items is focused), the editor's highlight is the one that moves; cmdk's
+ * steps back to a quiet mark of where ↑ returns to. */
+[cmdk-dialog]:has([data-block-editor]:focus) [cmdk-item][aria-selected] {
+  @apply bg-bg-secondary font-normal text-text;
 }

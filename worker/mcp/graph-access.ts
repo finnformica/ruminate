@@ -4,7 +4,7 @@
 // ## One definition, two ways of feeding it
 //
 // Every read tool here answers a question the APP already answers from a
-// `GraphSnapshot` in memory — what a note is called and tagged
+// `GraphSnapshot` in memory — what a note is called
 // (`noteFromNode`), which of its blocks are unassigned (`basketRootIds`), what
 // a node's children are, which notes reach a block (`reachableFrom`). Those
 // pure functions are the only definition of "what the user can see" in this
@@ -17,7 +17,7 @@
 //
 // - `scopedGraph` loads the tenant's whole live corpus — two queries, O(corpus)
 //   rows. It is the reference implementation, it is what every write tool and
-//   every corpus-wide read (`search`, `list_tags`) still uses, and the
+//   corpus-wide read (`search`) still uses, and the
 //   equivalence tests run every targeted view against it.
 // - the four **views** below load a bounded piece of the corpus instead, sized
 //   to the question: a block's neighbourhood, a subtree to a depth, a block's
@@ -287,7 +287,7 @@ async function visibleFor(tenant: TenantDb, grant: Grant): Promise<Set<string> |
  * Two phases, because a note list is two different questions. WHICH notes are
  * on the page, and in what order, is decided by facts on the note's own row
  * (its `updated_at` prop, and its id, which says whether it is a daily or a
- * weekly). WHAT each of those notes is — its tags, its task counts, its
+ * weekly). WHAT each of those notes is — its task counts, its
  * preview — comes from its blocks. So the note rows are read first and `pick`
  * is asked which of them the answer names; only those notes' blocks follow.
  *
@@ -419,7 +419,7 @@ export async function parentsView(
  * unaffected: its name is on its own row.
  *
  * **Whole** (anything in `include`): the note's entire subtree. `blockCount`,
- * the tags written anywhere in it, its to-dos, its headings — each is a fact
+ * its to-dos, its headings — each is a fact
  * about every block in the note, so there is no bounded read that answers
  * them. `include` is how an agent says it wants that, and the tool's
  * description says what it costs.
@@ -485,7 +485,7 @@ export function noteNodeOf(graph: ScopedGraph, id: string) {
   return row !== null && row.type === NOTE_TYPE ? row : null
 }
 
-/** A note's `Note` — title, tags, tasks, headings, preview text — exactly as
+/** A note's `Note` — title, tasks, headings, preview text — exactly as
  * the app derives it. Null when the id is not a visible note. */
 export function noteOf(graph: ScopedGraph, id: string): Note | null {
   return noteNodeOf(graph, id) === null ? null : noteFromNode(id, graph.snapshot)

@@ -6,19 +6,15 @@ import { Note, fontSchema } from "../schema"
 import { cx } from "../utils/cx"
 import { formatDate, formatDateDistance, formatWeekDistance } from "../utils/date"
 import { BlockEditor } from "./block-editor/block-editor"
-import { TagIcon12 } from "./icons"
-import { Label } from "./label"
 
-const NUM_VISIBLE_TAGS = 3
 const noop = () => {}
 
 type NotePreviewProps = {
   note: Note
   className?: string
-  hideProperties?: boolean
 }
 
-export function NotePreview({ note, className, hideProperties }: NotePreviewProps) {
+export function NotePreview({ note, className }: NotePreviewProps) {
   const props = note.props
 
   // The preview is the note's view, read-only: the same rows the note page
@@ -31,13 +27,6 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
     const parseResult = fontSchema.safeParse(props?.font as unknown)
     return parseResult.success ? parseResult.data : "sans"
   }, [props?.font])
-
-  const propTags = useMemo(() => {
-    return Array.isArray(props?.tags) &&
-      (props.tags as unknown[]).every((tag) => typeof tag === "string")
-      ? (props.tags as string[])
-      : []
-  }, [props?.tags])
 
   return (
     <div
@@ -72,31 +61,6 @@ export function NotePreview({ note, className, hideProperties }: NotePreviewProp
           )}
         </div>
       </div>
-      {!hideProperties ? (
-        <div className="flex flex-wrap gap-x-1.5 gap-y-2 pr-10 font-content empty:hidden coarse:pr-12">
-          {/*{note.tasks.length > 0 ? (
-            <Label
-              icon={
-                <ProgressRing
-                  size={14}
-                  value={note.tasks.filter((t) => t.completed).length / note.tasks.length}
-                  strokeWidth={2}
-                />
-              }
-            >
-              {note.tasks.filter((t) => t.completed).length}/{note.tasks.length}
-            </Label>
-          ) : null}*/}
-          {propTags.slice(0, NUM_VISIBLE_TAGS).map((tag) => (
-            <Label key={tag} icon={<TagIcon12 />}>
-              {tag}
-            </Label>
-          ))}
-          {propTags.length > NUM_VISIBLE_TAGS ? (
-            <Label icon={<TagIcon12 />}>+{propTags.length - NUM_VISIBLE_TAGS}</Label>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   )
 }

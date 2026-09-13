@@ -5,6 +5,9 @@ import { BLOCK_TYPE_DEFS } from "../../blocks/registry"
 import type { Block, BlockType } from "../../blocks/types"
 import type { Occurrence } from "../../blocks/view"
 import { cx } from "../../utils/cx"
+import { noteTypeOf } from "../../utils/note-type"
+import { PinFillIcon12 } from "../icons"
+import { NoteFavicon } from "../note-favicon"
 import type { BlockEditorApi } from "./block-item"
 import { ImageFigure } from "./image-figure"
 
@@ -39,11 +42,25 @@ export interface BlockKind {
   readonly slot: "checkbox" | "dot" | "hash" | "number" | "glyph" | "none"
   /** The glyph for a `glyph` slot, or null for an empty slot. */
   readonly glyph?: string | null
+  /** A RENDERED key for a `glyph` slot, where the key depends on the block
+   * rather than being one fixed character — a note's favicon, which says
+   * whether it is a day, a week or an ordinary note. Takes precedence over
+   * `glyph`; like it, a parent's chevron swaps in for it on hover. */
+  readonly glyphNode?: (block: Block) => ReactNode
   /** The empty/glyph slot's test id. */
   readonly slotTestId?: string
   /** A parent's collapse chevron sits beside the marker rather than
    * replacing it (the checkbox keeps its own click). */
   readonly toggleBeside?: boolean
+  /**
+   * The row stands with more room above and below its line: real padding on
+   * the highlight surface, so the hover and the keyboard highlight grow with
+   * it, rather than the margin-cancelled pair every other row uses. The text
+   * column is untouched. Given the row's context, so a type can be roomy in
+   * one view and keep the editor's rhythm in another — the only one that is
+   * is `note`, listed as a result.
+   */
+  readonly roomy?: (context: RowContext) => boolean
   /** Text size and weight, by outline depth — the same on the rendered view
    * and the textarea, so switching never shifts a character. Given the block
    * too, for a type whose text follows its props (an image's caption sits
@@ -130,9 +147,49 @@ const heading: BlockKind = {
   topMargin: (depth) => (depth === 0 ? 20 : depth === 1 ? 16 : depth === 2 ? 10 : 6),
 }
 
+/**
+ * A note is a node like any other (docs/graph-schema-v2.md): its `text` is
+ * the title, its `props` the metadata, and its children are its top-level
+ * blocks. It draws as a row like any other too — which is what lets a note
+ * search result, a note in the notes list and a note linked under a block all
+ * be the same row. Its key is its **favicon** (the day for a daily note, a
+ * calendar for a weekly one, the note icon otherwise): the one thing about a
+ * note that its title does not already say, in the shared 15px marker slot
+ * every other type's key sits in. Its text is ordinary body type — the 3xl
+ * note-title scale belongs on the note's own page, not on a row among many.
+ */
+const note: BlockKind = {
+  slot: "glyph",
+  slotTestId: "note-favicon-slot",
+  // The favicon is a MARKER, so on a note with blocks in it the collapse
+  // chevron takes its place exactly as it does a bullet's dot or a heading's
+  // `#`: revealed on hover, and pinned over it while the note is closed.
+  // (The beside-placement is for a to-do, whose slot holds a checkbox — a
+  // control, which a swap would leave un-tickable. A favicon is nothing of
+  // the kind.)
+  glyphNode: (block) => (
+    <NoteFavicon note={{ id: block.id, type: noteTypeOf(block.id) }} className="size-[15px]" />
+  ),
+  // A note's title is a NAME, not content: it is set in the interface font
+  // the sidebar and the note header use for it, not the content font the
+  // blocks inside it are set in.
+  typography: () => cx(BODY, "font-sans"),
+  // A note listed as a result (a root of a results view) is a whole note,
+  // not a line inside one: it takes the 40px row the notes list gave it
+  // before notes were drawn as blocks. Linked under a block in the editor it
+  // keeps the editor's rhythm.
+  roomy: ({ api, depth }) => !!api.fixedRoots && depth === 0,
+  // Pinned is the note's own state, so the row says it — the same glyph the
+  // sidebar and the note header use.
+  after: ({ block }) =>
+    block.props?.pinned === true ? (
+      <PinFillIcon12 data-testid="note-pinned" className="shrink-0 self-center text-text-pinned" />
+    ) : null,
+}
+
 export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
   text,
-  note: text,
+  note,
   ul: { slot: "dot", typography: () => BODY },
   ol: { slot: "number", typography: () => BODY },
   todo,

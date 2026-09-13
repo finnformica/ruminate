@@ -51,7 +51,6 @@ export function GlobalShortcuts() {
           search: { query: undefined },
         }),
       n: () => navigate({ to: "/", search: { query: undefined } }),
-      t: () => navigate({ to: "/tags", search: { query: undefined, sort: "name" } }),
       s: () => navigate({ to: "/settings", search: { query: undefined } }),
     })
 

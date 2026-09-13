@@ -3,17 +3,17 @@ import { isInRange, parseQuery, removeQualifier, resolveRelativeDate } from "./s
 
 describe("parseQuery", () => {
   test("parses quoted values, comma lists, exclusions, and multiple sorts", () => {
-    const q = parseQuery('foo tag:a,b title:"hello, world" -tag:c sort:title,id:desc,tags')
+    const q = parseQuery('foo area:a,b title:"hello, world" -area:c sort:title,id:desc,updated')
     expect(q.fuzzy).toBe("foo")
     expect(q.filters).toEqual([
-      { key: "tag", values: ["a", "b"], exclude: false },
+      { key: "area", values: ["a", "b"], exclude: false },
       { key: "title", values: ["hello, world"], exclude: false },
-      { key: "tag", values: ["c"], exclude: true },
+      { key: "area", values: ["c"], exclude: true },
     ])
     expect(q.sorts).toEqual([
       { key: "title", direction: "asc" },
       { key: "id", direction: "desc" },
-      { key: "tags", direction: "desc" },
+      { key: "updated", direction: "desc" },
     ])
   })
 
@@ -38,7 +38,7 @@ describe("parseQuery", () => {
   })
 
   test("trims fuzzy text and preserves inner spacing", () => {
-    const q = parseQuery("   hello   world   tag:a   ")
+    const q = parseQuery("   hello   world   area:a   ")
     expect(q.fuzzy).toBe("hello   world")
   })
 
@@ -55,11 +55,11 @@ describe("parseQuery", () => {
     expect(parseQuery('type:"todo"').filters).toEqual([
       { key: "type", values: ["todo"], exclude: false },
     ])
-    const q = parseQuery("milk type:todo tag:work")
+    const q = parseQuery("milk type:todo area:work")
     expect(q.fuzzy).toBe("milk")
     expect(q.filters).toEqual([
       { key: "type", values: ["todo"], exclude: false },
-      { key: "tag", values: ["work"], exclude: false },
+      { key: "area", values: ["work"], exclude: false },
     ])
   })
 
@@ -69,9 +69,9 @@ describe("parseQuery", () => {
   })
 
   test("applies default sort directions when omitted per key", () => {
-    const q = parseQuery("sort:tags,title,updated:asc")
+    const q = parseQuery("sort:updated_at,title,updated:asc")
     expect(q.sorts).toEqual([
-      { key: "tags", direction: "desc" },
+      { key: "updated_at", direction: "desc" },
       { key: "title", direction: "asc" },
       { key: "updated", direction: "asc" },
     ])
@@ -157,11 +157,15 @@ describe("isInRange with relative dates", () => {
 describe("removeQualifier", () => {
   test("takes one qualifier out of the query, as parsed, and tidies the spacing", () => {
     expect(
-      removeQualifier("type:todo tag:work milk", { key: "tag", values: ["work"], exclude: false }),
+      removeQualifier("type:todo area:work milk", {
+        key: "area",
+        values: ["work"],
+        exclude: false,
+      }),
     ).toBe("type:todo milk")
-    expect(removeQualifier("-tag:work milk", { key: "tag", values: ["work"], exclude: true })).toBe(
-      "milk",
-    )
+    expect(
+      removeQualifier("-area:work milk", { key: "area", values: ["work"], exclude: true }),
+    ).toBe("milk")
     expect(removeQualifier("in:n1 type:todo", { key: "in", values: ["n1"], exclude: false })).toBe(
       "type:todo",
     )
@@ -176,16 +180,16 @@ describe("removeQualifier", () => {
       }),
     ).toBe("milk type:todo")
     expect(
-      removeQualifier("tag:a,b milk", { key: "tag", values: ["a", "b"], exclude: false }),
+      removeQualifier("area:a,b milk", { key: "area", values: ["a", "b"], exclude: false }),
     ).toBe("milk")
   })
 
   test("leaves the query alone when nothing matches exactly", () => {
-    expect(removeQualifier("tag:work milk", { key: "tag", values: ["home"], exclude: false })).toBe(
-      "tag:work milk",
-    )
-    expect(removeQualifier("tag:work milk", { key: "tag", values: ["work"], exclude: true })).toBe(
-      "tag:work milk",
-    )
+    expect(
+      removeQualifier("area:work milk", { key: "area", values: ["home"], exclude: false }),
+    ).toBe("area:work milk")
+    expect(
+      removeQualifier("area:work milk", { key: "area", values: ["work"], exclude: true }),
+    ).toBe("area:work milk")
   })
 })

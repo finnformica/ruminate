@@ -1,13 +1,8 @@
 import type { Heading, Note, NoteId, Task } from "../schema"
 import { isHeading } from "../blocks/markers"
 import type { Block, BlockDoc } from "../blocks/types"
-import {
-  formatDate,
-  formatWeek,
-  isValidDateString,
-  isValidWeekString,
-  toDateStringUtc,
-} from "../utils/date"
+import { formatDate, formatWeek, toDateStringUtc } from "../utils/date"
+import { noteTypeOf } from "../utils/note-type"
 import { NOTE_TYPE, noteDoc, parseProps, propsJson, type GraphSnapshot } from "./graph"
 import type { Op } from "./ops"
 import { emittedNoteTitle, isMintedNoteId } from "./note-identity"
@@ -16,31 +11,9 @@ import { emittedNoteTitle, isMintedNoteId } from "./note-identity"
  * Note metadata from the graph: everything
  * the notes list, the sidebar, search and the calendar know about a note is
  * read off the note node's `text` and `props` and the blocks it reaches. No
- * markdown is parsed on the way — a `#tag` is found in a block's text, a
- * task is a `todo`/`done` block, the preview of an untitled note is its first
- * words.
+ * markdown is parsed on the way — a task is a `todo`/`done` block, the
+ * preview of an untitled note is its first words.
  */
-
-/**
- * A `#tag` in block text, as the syntax defines it (docs/markdown-syntax.md):
- * `#` at the start or after whitespace, then a letter, then letters, digits,
- * `_`, `-` or `/`.
- */
-const TAG_RE = /(?:^|(?<=\s))#(\p{L}[\p{L}\p{N}_\-/]*)/gu
-const TAGS_SCHEMA_RE = /^[\p{L}][\p{L}\p{N}_\-/]*$/u
-
-/** A tag and every parent of it: `a/b/c` → `a`, `a/b`, `a/b/c`. */
-function expandTag(tag: string, into: Set<string>) {
-  const parts = tag.split("/")
-  for (let i = 1; i <= parts.length; i += 1) into.add(parts.slice(0, i).join("/"))
-}
-
-/** Every tag in a text, parents included, in order of first appearance. */
-export function tagsInText(text: string): string[] {
-  const tags = new Set<string>()
-  for (const match of text.matchAll(TAG_RE)) expandTag(match[1], tags)
-  return [...tags]
-}
 
 /**
  * The note's props as JSON-safe entries — the shape the `props` column holds
@@ -126,12 +99,6 @@ export function noteFromNode(id: NoteId, snapshot: GraphSnapshot): Note | null {
     const heading = blocks.find(({ block }) => isHeading(block.type))
     if (heading) title = heading.block.text.trim()
   }
-  const tags = new Set<string>()
-  const tagList = Array.isArray(props.tags)
-    ? props.tags.filter((tag): tag is string => typeof tag === "string" && TAGS_SCHEMA_RE.test(tag))
-    : []
-  for (const tag of tagList) expandTag(tag, tags)
-
   const tasks: Task[] = []
   const headings: Heading[] = []
   const texts: string[] = []
@@ -139,13 +106,11 @@ export function noteFromNode(id: NoteId, snapshot: GraphSnapshot): Note | null {
     texts.push(block.text)
     // Headings are one type, sized by depth — a heading's level IS its depth.
     if (isHeading(block.type)) headings.push({ level: depth + 1, text: block.text.trim() })
-    for (const tag of tagsInText(block.text)) tags.add(tag)
     if (block.type === "todo" || block.type === "done") {
       tasks.push({
         blockId: block.id,
         completed: block.type === "done",
         text: block.text.trim(),
-        tags: tagsInText(block.text),
       })
     }
   }
@@ -156,7 +121,7 @@ export function noteFromNode(id: NoteId, snapshot: GraphSnapshot): Note | null {
     const date = dateOf(value)
     if (date) dates.add(date)
   }
-  const type = isValidDateString(id) ? "daily" : isValidWeekString(id) ? "weekly" : "note"
+  const type = noteTypeOf(id)
   if (type === "daily") dates.add(id)
 
   const text = texts.join("\n")
@@ -195,7 +160,6 @@ export function noteFromNode(id: NoteId, snapshot: GraphSnapshot): Note | null {
     pinned: props.pinned === true,
     updatedAt,
     dates: [...dates],
-    tags: [...tags],
     tasks,
     headings,
     text,
