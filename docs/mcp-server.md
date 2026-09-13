@@ -92,23 +92,23 @@ Reads need `read`; the writers need `write`; the two deleting verbs need `delete
 
 An agent works in the notes you already have: there is no tool to create one.
 
-| Tool             | Perm   | What it does                                                                                                                                      |
-| ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list_notes`     | read   | Notes the token can reach, newest first. Filter by `tag` or `type`; page with `cursor`.                                                           |
-| `search`         | read   | Blocks whose text contains a substring, each naming the notes it appears in. Page with `cursor`.                                                  |
-| `read_note`      | read   | A note's blocks **as stored rows** — top 2 levels by default (`depth: 0` for all), plus `unassigned`. Bounded by `limit` too; page with `cursor`. |
-| `get_block`      | read   | One block by id: type, text, props, children, parents, the notes it is in. Its id lists are capped.                                               |
-| `list_children`  | read   | The blocks beneath one, `depth` levels deep — walking **down**. Page with `cursor`.                                                               |
-| `list_parents`   | read   | The blocks that hold one, and the notes it appears in — walking **up**. Page with `cursor`.                                                       |
-| `list_tags`      | read   | Tags across the reachable notes, with note counts. Page with `cursor`.                                                                            |
-| `create_blocks`  | write  | Add blocks under a parent, nesting with `children`. Purely additive.                                                                              |
-| `set_note_title` | write  | Set or clear a note's title.                                                                                                                      |
-| `update_block`   | write  | Change one block's text, type or metadata, in place.                                                                                              |
-| `link_block`     | write  | Put an existing block under a parent, at an index.                                                                                                |
-| `unlink_block`   | write  | Take a block out of one place. Kept, not deleted.                                                                                                 |
-| `move_block`     | write  | Re-parent or reorder a block in one step.                                                                                                         |
-| `delete_block`   | delete | Delete a block everywhere, optionally with its contents.                                                                                          |
-| `delete_note`    | delete | Delete a note and the blocks only it holds.                                                                                                       |
+| Tool             | Perm   | What it does                                                                                                                                                                         |
+| ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `list_notes`     | read   | Notes the token can reach, newest first. Filter by `tag` or `type`; page with `cursor`.                                                                                              |
+| `search`         | read   | Blocks whose text contains a substring, each naming the notes it appears in. Page with `cursor`.                                                                                     |
+| `read_note`      | read   | A note's blocks **as stored rows** — top 2 levels by default (`depth: 0` for all), bounded by `limit` too; page with `cursor`. `include` adds the parts that cost a whole-note read. |
+| `get_block`      | read   | One block by id: type, text, props, children, parents, the notes it is in. Its id lists are capped.                                                                                  |
+| `list_children`  | read   | The blocks beneath one, `depth` levels deep — walking **down**. Page with `cursor`.                                                                                                  |
+| `list_parents`   | read   | The blocks that hold one, and the notes it appears in — walking **up**. Page with `cursor`.                                                                                          |
+| `list_tags`      | read   | Tags across the reachable notes, with note counts. Page with `cursor`.                                                                                                               |
+| `create_blocks`  | write  | Add blocks under a parent, nesting with `children`. Purely additive.                                                                                                                 |
+| `set_note_title` | write  | Set or clear a note's title.                                                                                                                                                         |
+| `update_block`   | write  | Change one block's text, type or metadata, in place.                                                                                                                                 |
+| `link_block`     | write  | Put an existing block under a parent, at an index.                                                                                                                                   |
+| `unlink_block`   | write  | Take a block out of one place. Kept, not deleted.                                                                                                                                    |
+| `move_block`     | write  | Re-parent or reorder a block in one step.                                                                                                                                            |
+| `delete_block`   | delete | Delete a block everywhere, optionally with its contents.                                                                                                                             |
+| `delete_note`    | delete | Delete a note and the blocks only it holds.                                                                                                                                          |
 
 ### There is no markdown
 
@@ -224,7 +224,9 @@ corpus (`worker/mcp/graph-load.test.ts`):
 | `list_children` (1 level)         |  1,620 |    17 |
 | `list_children` (2 levels)        |  1,620 |    41 |
 | `list_parents` (a leaf)           |  1,620 |    46 |
-| `read_note` (any depth)           |  1,620 |    81 |
+| `read_note` (1 level)             |  1,620 |    17 |
+| `read_note` (default, 2 levels)   |  1,620 |    41 |
+| `read_note` with `include`        |  1,620 |    81 |
 | `list_notes` (default page of 50) |  1,620 |   820 |
 | `list_notes` (page of 5)          |  1,620 |   220 |
 | `get_block`, note-scoped token    |  1,620 |    45 |
@@ -234,11 +236,15 @@ The traversal tools are now bounded by the question rather than by the corpus. `
 and `list_tags` are not, and are not pretended to be: one reads every block's text and
 the other every note's tags, which is what they are for.
 
-Four things worth knowing about the table:
+Five things worth knowing about the table:
 
-- **`read_note` is O(note), not O(depth).** `blockCount` is the note's true size and the
-  title, tags, tasks and preview are derived from every block in it, so `depth` bounds
-  what comes BACK, never what is read. One note of twenty is still the saving.
+- **`read_note` costs what was asked for.** `depth` and `limit` bound the read, not just
+  the response. Two notes with the same first two levels and ten times the blocks
+  underneath one of them cost the SAME at `depth: 1` — 51 rows each, measured, not
+  asserted in a comment. The parts of a note that cannot be known without reading all of
+  it — `blockCount`, the tags written anywhere in it, its tasks, its headings, its
+  Unassigned section — moved behind `include`, and asking for any of them reads the whole
+  note. See "What `include` costs" below.
 - **`list_parents` is O(the notes holding the block)**, because it names those notes and
   an untitled note's display name is derived from its outline. Reading them is the price
   of that name being the one on screen rather than a second guess at it.
@@ -249,6 +255,35 @@ Four things worth knowing about the table:
   is a question about every block of every note, so it loads the corpus and says so.
 - **A note-scoped grant pays for its scope.** The visible-node set is a walk seeded at the
   granted notes rather than a pass over a loaded corpus — cheaper, and the same set.
+
+### What `include` costs
+
+`read_note`'s free half is the note's own row plus the blocks `depth` and `limit` asked
+for. Its `include` half is everything that is a fact about EVERY block in the note.
+Measured on two notes with identical first two levels, one ten times the size of the
+other:
+
+| `read_note` on a 50-block / 500-block note | 50 rows | 500 rows |
+| ------------------------------------------ | ------: | -------: |
+| `depth: 1`                                 |      51 |       51 |
+| `depth: 1, limit: 5`                       |      51 |       51 |
+| `depth: 2` (the default)                   |      51 |      501 |
+| `depth: 1, include: ["counts"]`            |      51 |      501 |
+| `include` everything                       |     101 |     1001 |
+
+The first two rows are the property: at a fixed `depth` and `limit`, the cost does not
+move when the note gets ten times bigger. The third is the same property stated the other
+way — at `depth: 2` the two notes stop asking for the same thing, because every block
+comes back carrying its `childIds` and the bigger note's blocks have children. The cost
+tracks the response, not the note.
+
+One thing is traded for that, and it is worth naming. An **untitled** note's display name
+is derived from its blocks — its first heading, else its first words (`noteFromNode`) —
+so the only way to give the answer a whole-note read would give is to do a whole-note
+read. Instead it is derived from the blocks actually fetched, using the app's own rule on
+fewer rows: a heading three levels down names the note at `depth: 0` and does not at
+`depth: 1`. A titled note is unaffected, its name being on its own row. Paying for a
+second read of a note to name it would defeat the bound the argument exists to give.
 
 ### Why this is safe
 
@@ -296,15 +331,15 @@ A tool call's cost is bounded on the way IN (§4); the response is bounded on th
 Every collection has a `limit`, and every collection an agent could legitimately want the
 rest of has a `cursor`:
 
-| Tool            | Bounded by                                                              |
-| --------------- | ----------------------------------------------------------------------- |
-| `list_notes`    | `limit` + `cursor`                                                      |
-| `search`        | `limit` + `cursor`                                                      |
-| `list_children` | `depth`, then `limit` + `cursor` over the flattened walk                |
-| `list_parents`  | `limit` + `cursor`, over the parents and the notes alike                |
-| `list_tags`     | `limit` + `cursor`                                                      |
-| `read_note`     | `depth`, then `limit` + `cursor` over the outline and Unassigned as one |
-| `get_block`     | its embedded id lists are capped; the counts and the flags say so       |
+| Tool            | Bounded by                                                           |
+| --------------- | -------------------------------------------------------------------- |
+| `list_notes`    | `limit` + `cursor`                                                   |
+| `search`        | `limit` + `cursor`                                                   |
+| `list_children` | `depth`, then `limit` + `cursor` over the flattened walk             |
+| `list_parents`  | `limit` + `cursor`, over the parents and the notes alike             |
+| `list_tags`     | `limit` + `cursor`                                                   |
+| `read_note`     | `depth`, then `limit` + `cursor`; `include` for the whole-note parts |
+| `get_block`     | its embedded id lists are capped; the counts and the flags say so    |
 
 Three rules behind that table.
 

@@ -250,6 +250,51 @@ const depthArg = (least: 0 | 1, fallback: number, description: string) => {
     .register(z.globalRegistry, { description, maximum: MAX_DEPTH })
 }
 
+/**
+ * The parts of a note that cost a read of the WHOLE note, and are therefore
+ * asked for rather than given.
+ *
+ * The division is not about how big each answer is — `blockCount` is one
+ * number — it is about what has to be READ to produce it. Every one of these
+ * is a fact about every block in the note: its size, the tags written anywhere
+ * in it, the to-dos anywhere in it, its headings, and which of the blocks
+ * written in it nothing links to any more. None can be known from the note's
+ * own row or from the blocks `depth` and `limit` asked for.
+ *
+ * So `read_note` costs what it returns, and an agent that wants more says so.
+ * That is the difference between a `depth` an agent can rely on and a `depth`
+ * that bounds the response while the call reads the note anyway.
+ *
+ * `unassigned` is in this list for the same reason as the rest, and it is the
+ * one that looks like it should not be: the section is usually empty and
+ * always small. But "which blocks written in this note does no note reach?"
+ * can only be answered by looking at every block written in it — the emptiness
+ * is what you learn by paying, not a reason not to pay.
+ */
+const INCLUDABLE = ["counts", "tags", "tasks", "headings", "unassigned"] as const
+
+type Included = (typeof INCLUDABLE)[number]
+
+const includeArg = () =>
+  z
+    ._default(
+      z.array(
+        z.enum(INCLUDABLE, {
+          error: (issue) =>
+            `must be one of ${INCLUDABLE.join(", ")} (got ${JSON.stringify(issue.input)}).`,
+        }),
+        "must be an array of strings.",
+      ),
+      [] as Included[],
+    )
+    .register(z.globalRegistry, {
+      description:
+        "Extra parts of the note: `counts` (`blockCount`, its true size), `tags`, " +
+        "`tasks`, `headings`, `unassigned`. Each is a fact about EVERY block in " +
+        "the note, so asking for any of them reads the whole note however small " +
+        "a `depth` you gave. Omit unless you need them.",
+    })
+
 /** A 0-based position among a parent's children. Omitted = the end. */
 const indexArg = () =>
   z.optional(
@@ -837,17 +882,17 @@ export const TOOLS: ToolDef[] = [
       "and children, in outline order with its depth. NOT markdown — this is the " +
       "row data, so to change a block you name it by id with `update_block` " +
       "rather than rewriting the note. Returns the top " +
-      `${DEFAULT_NOTE_DEPTH} levels by default, because a large note is expensive ` +
-      "to read whole: `blockCount` is always the note's true size, `truncated` " +
-      "says whether you got all of it, and a block whose children were cut off " +
-      "is marked `hasMoreChildren` so you know where to walk in with " +
-      "`list_children`. Pass `depth: 0` for the whole note, and page with " +
-      "`cursor` when `nextCursor` comes back — `depth` bounds how DEEP the " +
+      `${DEFAULT_NOTE_DEPTH} levels by default; \`depth\` bounds how DEEP the ` +
       "outline goes and `limit` how MANY rows come back, so a wide note is " +
-      "bounded as well as a tall one. Also returns the note's `unassigned` " +
-      "blocks: ones written in it that nothing links to any more, which the app " +
-      "shows in a section at the foot of the note; they follow the outline in " +
-      "the same paged sequence.",
+      "bounded as well as a tall one. A block whose children were cut off is " +
+      "marked `hasMoreChildren`, so you know where to walk in with " +
+      "`list_children`; page with `cursor` when `nextCursor` comes back; pass " +
+      "`depth: 0` for the whole note. What this returns by default costs only " +
+      "the blocks it returns. `include` asks for the things that do not — the " +
+      "note's true size, its tags, its tasks, its headings, its unassigned " +
+      "blocks — and every one of those is a fact about EVERY block in the note, " +
+      "so asking for any of them reads the whole note however small a `depth` " +
+      "you gave. Ask when you need them, not by habit.",
     permission: "read",
     annotations: readOnly,
     schema: z.object({
@@ -860,21 +905,23 @@ export const TOOLS: ToolDef[] = [
       ),
       limit: limitArg(),
       cursor: cursorArg(),
+      include: includeArg(),
     }),
-    load: (args, { tenant, grant }) => noteView(tenant, grant, args.note_id, args.depth),
+    load: (args, { tenant, grant }) =>
+      noteView(tenant, grant, args.note_id, args.depth, args.include),
     run(args, { graph }) {
       const noteId = args.note_id
       const note = noteOf(graph, noteId)
       if (!note) return { ok: false, message: OUT_OF_SCOPE }
       const depth = args.depth
       const offset = offsetOf(args.cursor)
+      const wants = (part: Included) => args.include.includes(part)
 
       const rootBlockIds = childrenOf(graph, noteId)
       const outline = blocksOfNote(graph, rootBlockIds, depth)
-      const loose = blocksOfNote(graph, unassignedOf(graph, noteId) ?? [], depth).blocks
-      // The whole note's size, whatever `depth` and `limit` returned — so an
-      // agent that was cut off knows how much it has not seen.
-      const blockCount = blocksOfNote(graph, rootBlockIds, 0).blocks.length
+      const loose = wants("unassigned")
+        ? blocksOfNote(graph, unassignedOf(graph, noteId) ?? [], depth).blocks
+        : []
 
       // `depth` bounds the outline's SHAPE; a note 500 rows wide is still
       // enormous one level down. So the outline and the Unassigned section are
@@ -886,25 +933,37 @@ export const TOOLS: ToolDef[] = [
       const blocks = page.slice(0, Math.max(0, Math.min(outlineEnd - offset, page.length)))
       const unassigned = page.slice(blocks.length)
 
+      // The note's own row answers these whatever was loaded beneath it, which
+      // is why they are free. `title` is the one with a wrinkle: an UNTITLED
+      // note's display name is derived from its blocks, and the blocks in hand
+      // are the ones `depth` and `limit` asked for — so it is derived from
+      // those rather than from a read of the whole note nobody asked for. See
+      // `noteView`.
+      const data: Record<string, unknown> = {
+        id: note.id,
+        title: note.displayName,
+        type: note.type,
+        props: note.props,
+        updatedAt: note.updatedAt,
+        rootBlockIds,
+        blocks,
+        truncated: outline.truncated || nextCursor !== null,
+        nextCursor,
+        ...(wants("counts")
+          ? { blockCount: blocksOfNote(graph, rootBlockIds, 0).blocks.length }
+          : {}),
+        ...(wants("tags") ? { tags: note.tags } : {}),
+        ...(wants("tasks") ? { tasks: note.tasks } : {}),
+        ...(wants("headings") ? { headings: note.headings } : {}),
+        ...(wants("unassigned") ? { unassigned, unassignedCount: loose.length } : {}),
+      }
+
+      const size = wants("counts") ? `${String(data.blockCount)} block(s)` : `${total} loaded`
       return {
         ok: true,
-        data: {
-          id: note.id,
-          title: note.displayName,
-          type: note.type,
-          tags: note.tags,
-          props: note.props,
-          updatedAt: note.updatedAt,
-          rootBlockIds,
-          blocks,
-          blockCount,
-          unassignedCount: loose.length,
-          truncated: outline.truncated || nextCursor !== null,
-          nextCursor,
-          unassigned,
-        },
+        data,
         text:
-          `${note.displayName} — ${blockCount} block(s)` +
+          `${note.displayName} — ${size}` +
           (outline.truncated || nextCursor !== null
             ? ` (showing ${page.length} of ${total} to depth ${depth})`
             : "") +

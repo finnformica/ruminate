@@ -68,6 +68,19 @@ async function bothWays(
   return { targeted, reference }
 }
 
+/** Run a tool through the endpoint's own dispatch and expect it to succeed. */
+async function run(
+  env: McpTestEnv,
+  grant: Grant,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<any> {
+  const called = await callTool(grant, env.tenant(grant.userId), name, args, NOW)
+  if (called.kind !== "result") throw new Error(called.message)
+  if (!called.outcome.ok) throw new Error(called.outcome.message)
+  return called.outcome.data
+}
+
 /** Every tool call the equivalence sweep makes for one id. Paged variants are
  * in it too: a page is a window on an order, and a targeted view that loaded a
  * different set of rows could order them differently. */
@@ -85,7 +98,15 @@ const CALLS = (id: string) => [
   { name: "read_note", args: { note_id: id, depth: 1 } },
   { name: "read_note", args: { note_id: id, depth: 0, limit: 2 } },
   { name: "read_note", args: { note_id: id, depth: 0, limit: 2, cursor: "2" } },
+  { name: "read_note", args: { note_id: id, include: EVERYTHING } },
+  { name: "read_note", args: { note_id: id, depth: 0, include: EVERYTHING } },
+  { name: "read_note", args: { note_id: id, depth: 1, include: EVERYTHING } },
+  { name: "read_note", args: { note_id: id, depth: 1, include: ["unassigned"] } },
+  { name: "read_note", args: { note_id: id, depth: 0, limit: 1, include: EVERYTHING } },
 ]
+
+/** Everything `read_note` will read the whole note for. */
+const EVERYTHING = ["counts", "tags", "tasks", "headings", "unassigned"]
 
 /** The calls that take no id — the note list, in each of its shapes. */
 const LIST_CALLS = [
@@ -241,8 +262,134 @@ describe("a targeted view answers what the whole corpus answers", () => {
   })
 
   it("terminates on a loop rather than walking it forever", async () => {
-    const data = await call("read_note", { note_id: LOOPY, depth: 0 })
+    const data = await call("read_note", { note_id: LOOPY, depth: 0, include: ["counts"] })
     expect(data.blockCount).toBe(3)
+  })
+})
+
+// -----------------------------------------------------------------------------
+// `read_note` costs what it was asked for, not what the note is
+// -----------------------------------------------------------------------------
+
+/**
+ * The acceptance test for the bounded read, and the reason `read_note` has an
+ * `include` argument at all.
+ *
+ * Two notes with the SAME first two levels — five sections of nine points —
+ * and ten times the blocks underneath one of them. At a fixed `depth` and
+ * `limit` the two must cost the same, because the caller asked for the same
+ * thing; anything else means `depth` bounds the response while the call reads
+ * the note anyway, which is the bug this fixes.
+ *
+ * The other direction is asserted too, because a bound nobody can spend is not
+ * a bound: a deeper `depth`, and an `include`, DO cost more on the bigger note,
+ * and that is the agent choosing to pay.
+ */
+describe("read_note reads what was asked for, not what the note is", () => {
+  const SMALL = "blk_small"
+  const BIG = "blk_big"
+
+  /** Five sections of nine points each — 50 blocks. With `deep`, ten bullets
+   * under every point as well: 500 blocks, same first two levels. */
+  const note = (deep: boolean): string => {
+    const lines: string[] = []
+    for (let section = 1; section <= 5; section += 1) {
+      lines.push(`# Section ${section}`)
+      for (let point = 1; point <= 9; point += 1) {
+        lines.push(`  - point ${section}.${point}`)
+        if (!deep) continue
+        for (let leaf = 1; leaf <= 10; leaf += 1) {
+          lines.push(`    - leaf ${section}.${point}.${leaf}`)
+        }
+      }
+    }
+    return lines.join("\n") + "\n"
+  }
+
+  /** Rows `read_note` reads for these arguments. */
+  async function cost(noteId: string, args: Record<string, unknown>): Promise<number> {
+    const grant = grantOf()
+    const tenant = harness.tenant(USER)
+    const tool = toolNamed("read_note")
+    const measured = await harness.measure(() =>
+      tool.invoke({ note_id: noteId, ...args }, { grant, tenant, now: NOW }),
+    )
+    if (!(measured.value as { ok: boolean }).ok) throw new Error("read_note failed")
+    return measured.rows
+  }
+
+  beforeEach(async () => {
+    harness = await createMcpTestEnv()
+    await harness.addUser(USER)
+    await harness.seedNote(USER, { id: SMALL, title: "Small", markdown: note(false) })
+    await harness.seedNote(USER, { id: BIG, title: "Big", markdown: note(true) })
+  })
+
+  it("has the fixtures it claims: same first two levels, ten times the blocks", async () => {
+    const size = async (id: string) =>
+      (await run(harness, grantOf(), "read_note", { note_id: id, depth: 0, include: ["counts"] }))
+        .blockCount
+    expect(await size(SMALL)).toBe(50)
+    expect(await size(BIG)).toBe(500)
+
+    const level = async (id: string, depth: number) =>
+      (await run(harness, grantOf(), "read_note", { note_id: id, depth, limit: 200 })).blocks.length
+    expect(await level(SMALL, 1)).toBe(await level(BIG, 1))
+    expect(await level(SMALL, 2)).toBe(await level(BIG, 2))
+  })
+
+  it("costs the same on a 50-block note and a 500-block note at depth 1", async () => {
+    expect(await cost(BIG, { depth: 1 })).toBe(await cost(SMALL, { depth: 1 }))
+  })
+
+  it("costs the same however small a `limit` the caller gives", async () => {
+    expect(await cost(BIG, { depth: 1, limit: 1 })).toBe(await cost(SMALL, { depth: 1, limit: 1 }))
+  })
+
+  it("costs what the RESPONSE holds, once the notes stop being the same shape", async () => {
+    // At depth 2 the two notes no longer ask for the same thing: every point
+    // comes back carrying its `childIds`, and the big note's points have ten
+    // children each where the small note's have none. So the bigger read is
+    // the bigger answer, not the bigger note — which is the property, stated
+    // the other way round.
+    const big = await cost(BIG, { depth: 2 })
+    expect(big).toBeGreaterThan(await cost(SMALL, { depth: 2 }))
+
+    // And going deeper than either note reaches costs neither of them more:
+    // the walk stops where the blocks do, not where `depth` allows.
+    expect(await cost(BIG, { depth: 3 })).toBe(big)
+    expect(await cost(SMALL, { depth: 3 })).toBe(await cost(SMALL, { depth: 2 }))
+  })
+
+  it("names an untitled note from the blocks it fetched, not from a fresh read", async () => {
+    // The one thing the bounded read cannot answer the way a whole read would.
+    // A note with no title is named after its first heading, else its first
+    // words — both facts about its blocks. Paying for a whole-note read to
+    // produce a NAME would defeat the bound, so the name comes from the blocks
+    // `depth` asked for, and improves as more are asked for.
+    await harness.seedNote(USER, {
+      id: "blk_untitled",
+      markdown: "- alpha bravo\n  - charlie delta\n    - ## A Deep Heading\n",
+    })
+    const named = async (depth: number) =>
+      (await run(harness, grantOf(), "read_note", { note_id: "blk_untitled", depth })).title
+
+    // One level in, the heading three levels down has not been fetched, so the
+    // name is the first words of what has.
+    expect(await named(1)).toBe("alpha bravo charlie delta")
+    // Deeper in, the heading is in hand and the app's own rule prefers it —
+    // the same rule, given more blocks.
+    expect(await named(0)).toBe("A Deep Heading")
+    expect(await named(2)).toBe(await named(0))
+  })
+
+  it("charges for `include`, which is why it is asked for", async () => {
+    const bounded = await cost(BIG, { depth: 1 })
+    for (const part of ["counts", "tags", "tasks", "headings", "unassigned"]) {
+      expect(await cost(BIG, { depth: 1, include: [part] }), part).toBeGreaterThan(bounded * 5)
+    }
+    // And the whole-note read it forces is the note, not the corpus.
+    expect(await cost(BIG, { depth: 1, include: ["counts"] })).toBeLessThan(1_200)
   })
 })
 

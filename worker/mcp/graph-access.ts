@@ -398,35 +398,61 @@ export async function parentsView(
 }
 
 /**
- * One note: its outline and its Unassigned section — what `read_note` reads.
+ * One note — what `read_note` reads, and it reads what was asked for.
  *
- * It loads the note's WHOLE subtree regardless of `depth`, and that is not an
- * oversight. `blockCount` is the note's true size and `noteFromNode` derives
- * the title, tags, tasks and preview from every block in it, so both are
- * whole-note facts; `depth` bounds what is RETURNED, never what is read. The
- * saving here is O(note) against O(corpus), not O(depth).
+ * Two shapes, and which one runs is decided by the call rather than by the
+ * note:
  *
- * Then the basket. Its candidates are the blocks written in the note
- * (`notes_id`), and the question `basketRootIds` asks of each is "does no note
- * reach it?". A candidate the note's own subtree reached is visibly reached
- * already; for the rest, the upward closure brings in every other note that
- * reaches one, so the answer cannot be a false "unassigned" (invariant 3).
- * Those loose blocks are also walked down `depth` levels, because the basket
- * is shown with its contents exactly as the outline is.
+ * **Bounded** (nothing in `include`): the outline to `depth`, one level
+ * further so a cut block can be marked `hasMoreChildren` (invariant 2). Its
+ * cost is a function of the levels asked for, NOT of how big the note is — a
+ * 500-block note and a 50-block note with the same first two levels cost the
+ * same at `depth: 1`, which `graph-load.test.ts` pins with a pair of fixtures
+ * rather than a comment.
+ *
+ * The one subtlety this buys is the note's display name. An UNTITLED note's
+ * name is derived from its blocks — the first heading, else its first words
+ * (`noteFromNode`) — so a whole-note read is the only way to get the answer a
+ * whole-note read would give. Here it is derived from the blocks actually
+ * fetched, because those are the blocks the caller asked for and paying for a
+ * second read of the note to name it would defeat the point. A titled note is
+ * unaffected: its name is on its own row.
+ *
+ * **Whole** (anything in `include`): the note's entire subtree. `blockCount`,
+ * the tags written anywhere in it, its to-dos, its headings — each is a fact
+ * about every block in the note, so there is no bounded read that answers
+ * them. `include` is how an agent says it wants that, and the tool's
+ * description says what it costs.
+ *
+ * `unassigned` costs a little more again: its candidates are the blocks
+ * WRITTEN in the note (`notes_id`), and `basketRootIds` asks of each "does no
+ * note reach it?". A candidate the note's own subtree reached is visibly
+ * reached already; for the rest, the upward closure brings in every other note
+ * that reaches one, so the answer cannot be a false "unassigned"
+ * (invariant 3). Those loose blocks are walked down `depth` levels too,
+ * because the basket is shown with its contents exactly as the outline is.
  */
 export async function noteView(
   tenant: TenantDb,
   grant: Grant,
   noteId: string,
   depth: number,
+  include: readonly string[] = [],
 ): Promise<ScopedGraph> {
-  const [visible, outline, written] = await Promise.all([
+  const whole = include.length > 0
+  const [visible, outline] = await Promise.all([
     visibleFor(tenant, grant),
-    linksBelow(tenant, [noteId], null),
-    nodesWrittenIn(tenant, noteId),
+    // `depth: 0` already means the whole note, so the bounded read and the
+    // whole read are the same query there.
+    linksBelow(tenant, [noteId], whole || depth === 0 ? null : depth),
   ])
-  const rows = new Rows().add(outline).addNodes(written)
+  const rows = new Rows().add(outline)
+  if (!include.includes("unassigned")) {
+    return makeScopedGraph(await rows.complete(tenant, noteId), visible)
+  }
 
+  const written = await nodesWrittenIn(tenant, noteId)
+  rows.addNodes(written)
   const reached = new Set(outline.links.map((link) => link.destination_id))
   const loose = written
     .filter((row) => row.id !== noteId && !reached.has(row.id))
