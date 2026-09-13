@@ -170,8 +170,15 @@ does.
 - **Protocol error** (`-32602`) — the tool does not exist for this token. A model cannot
   fix it by retrying, and the message says which permission is missing so the _person_
   reading the transcript can.
-- **Tool execution error** (`isError: true`) — no such note, out of scope, empty
-  markdown, bad argument. Handed back as text so the model can self-correct.
+- **Tool execution error** (`isError: true`) — no such note, out of scope, an argument
+  that does not fit the tool's schema. Handed back as text so the model can
+  self-correct; an argument failure names the field's path (`blocks[1].text`), so the
+  fix is one field rather than a fresh guess at the whole call.
+
+Each tool's arguments are one [zod](https://zod.dev) schema (`zod/mini`, in
+`worker/mcp/tools.ts`), and the `inputSchema` a client reads is generated from it with
+`z.toJSONSchema` rather than written beside it — one statement of the contract, so what
+an agent is told and what the server enforces cannot drift apart.
 
 ---
 
