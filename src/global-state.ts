@@ -396,8 +396,9 @@ export const calendarLayoutAtom = atomWithStorage<"week" | "month">("calendar-la
 
 /**
  * The markdown a new block starts with when Enter creates one in the block
- * editor (from anything but a todo / ordered item, which continue their own
- * list). `"- "` by default; `""` makes Enter produce plain paragraphs. Read by
+ * editor (from anything but a list item, which continues its own list), and
+ * what Enter on an empty list item leaves it as. `"- "` by default; `""` makes
+ * Enter produce plain paragraphs. Read by
  * `BlockEditor` and handed to the command layer via `CommandInput`.
  */
 export const newBlockMarkerAtom = atomWithStorage<string>(

@@ -74,9 +74,10 @@ export interface CommandInput {
   zoomBackId?: string | null
   /**
    * The type a fresh block starts as when Enter creates one from a block that
-   * isn't a todo or ordered item (those continue their own list). A user
-   * preference — `ul` by default, `text` for a plain paragraph, or any other
-   * type (`todo`, `quote`). Absent = the default.
+   * isn't a list item (those continue their own list), and what an empty list
+   * item becomes when Enter leaves the list. A user preference — `ul` by
+   * default, `text` for a plain paragraph, or any other type (`todo`,
+   * `quote`). Absent = the default.
    */
   newBlockType?: BlockType
   /**
@@ -85,6 +86,13 @@ export interface CommandInput {
    * and an edit to its text would show everywhere. Absent = one place.
    */
   placesOf?: (id: string) => number
+  /**
+   * Whether the doc may be left with no blocks at all. Absent or false, the
+   * only root block cannot be removed — a note keeps a block to type in. True
+   * for a view whose rows are all it is (the Unassigned basket): removing the
+   * last row empties it.
+   */
+  emptyable?: boolean
 }
 
 /** Where selection / edit focus should land after a command runs (a row). */
@@ -136,14 +144,17 @@ const blockOf = ({ doc, key }: CommandInput) => doc.blocks[idOfKey(key)]
 const isZoomTitle = ({ key, zoomRootId }: CommandInput) =>
   !!zoomRootId && idOfKey(key) === zoomRootId
 
+/** The reader's configured new-block type — an unordered list item by default. */
+const defaultNewType = (input: CommandInput): BlockType =>
+  input.newBlockType ?? DEFAULT_NEW_BLOCK_TYPE
+
 /**
- * The type a new sibling block should take. Todo / ordered lists continue
- * their own type; everything else (paragraph, heading, quote, bullet) starts
- * as the user's configured new-block type — an unordered list item by
- * default.
+ * The type a new sibling block should take. Lists (bullet, numbered, to-do)
+ * continue their own type; everything else (paragraph, heading, quote) starts
+ * as the user's configured new-block type.
  */
 function continuationType(type: BlockType, input: CommandInput): BlockType {
-  return defOf(type).continues ?? input.newBlockType ?? DEFAULT_NEW_BLOCK_TYPE
+  return defOf(type).continues ?? defaultNewType(input)
 }
 
 /** The type for a new block of the *same* type as `type` — used by Shift-Enter
@@ -567,7 +578,7 @@ export const COMMANDS: Record<CommandName, Command> = {
       doc.rootBlockIds.length === 1 &&
       doc.rootBlockIds[0] === id &&
       (doc.blocks[id]?.children.length ?? 0) === 0
-    if (onlyBlock) return { handled: true }
+    if (onlyBlock && !input.emptyable) return { handled: true }
     const { doc: next } = removeBlock(doc, key)
     // Walk the pre-delete visible order outward from the deleted row: first
     // below (skipping its own removed subtree via the survives-in-next check),
@@ -683,12 +694,17 @@ export const COMMANDS: Record<CommandName, Command> = {
   // Shift-Enter keeps the current block's type for the new block.
   splitPlain: splitAtCaret(sameType),
 
-  /** Enter on an empty list item exits the list (becomes a paragraph). */
-  exitList: ({ doc, key }) => {
+  /** Enter on an empty list item exits the list: the block becomes the
+   * reader's default new-block type, or a paragraph when the default is this
+   * very list (the key must still leave the list). */
+  exitList: (input) => {
+    const { doc, key } = input
     const id = idOfKey(key)
+    const preferred = defaultNewType(input)
+    const type = preferred === doc.blocks[id]?.type ? "text" : preferred
     return {
       handled: true,
-      doc: updateType(updateText(doc, id, ""), id, "text"),
+      doc: updateType(updateText(doc, id, ""), id, type),
       op: { type: "text", blockId: id },
       focus: { mode: "edit", key },
     }
@@ -712,7 +728,9 @@ export const COMMANDS: Record<CommandName, Command> = {
     // The zoomed title can't delete itself out of its own view.
     if (isZoomTitle(input)) return { handled: true }
     const id = idOfKey(key)
-    if (doc.rootBlockIds.length === 1 && doc.rootBlockIds[0] === id) return { handled: true }
+    if (doc.rootBlockIds.length === 1 && doc.rootBlockIds[0] === id && !input.emptyable) {
+      return { handled: true }
+    }
     const { doc: next, focusKey } = removeBlock(doc, key)
     return {
       handled: true,

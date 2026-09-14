@@ -2477,6 +2477,35 @@ describe("BlockEditor context menu", () => {
     })
     expect(screen.queryByTestId("block-context-menu")).toBeNull()
   })
+
+  it("leaves a right-click inside the block being typed in to the browser", async () => {
+    // The browser's own menu on a textarea carries the spelling suggestions
+    // for a marked word (and cut/copy/paste); the block's menu used to open
+    // over it and cancel it. A right-click on the row outside its textarea
+    // still opens the block's menu.
+    const { container } = render(<Harness initial={"A\nB"} startEditing />)
+    const textarea = container.querySelector("textarea")!
+    let allowed = false
+    await act(async () => {
+      // `dispatchEvent` returns false when a handler cancelled the default.
+      allowed = fireEvent.contextMenu(textarea, { clientX: 10, clientY: 10 })
+    })
+    expect(allowed).toBe(true)
+    expect(screen.queryByTestId("block-context-menu")).toBeNull()
+    // Still typing: the textarea kept focus and is the same one.
+    expect(container.querySelector("textarea")).toBe(textarea)
+
+    let cancelled = true
+    await act(async () => {
+      cancelled = !fireEvent.contextMenu(container.querySelectorAll("[data-occurrence]")[1]!, {
+        clientX: 10,
+        clientY: 10,
+      })
+    })
+    expect(cancelled).toBe(true)
+    expect(screen.getByTestId("block-context-menu").textContent).toContain("Duplicate")
+    expect(highlightedText(container)).toBe("B")
+  })
 })
 
 describe("BlockEditor images", () => {
@@ -3001,5 +3030,45 @@ describe("BlockEditor images", () => {
     })
     const lightbox = screen.getByTestId("image-lightbox")
     expect(lightbox.querySelector("img")!.alt).toBe("Wide")
+  })
+})
+
+describe("two editors on one page", () => {
+  /** The note page's shape: the outline and, beneath it, the Unassigned
+   * basket — a second editor whose doc is walked from the same graph, so it
+   * changes on every keystroke in the first. */
+  function TwoEditors() {
+    const [outline, setOutline] = useState<BlockDoc>(() => parse("A"))
+    const [basket, setBasket] = useState<BlockDoc>(() => parse("B"))
+    return (
+      <>
+        <div data-testid="outline">
+          <BlockEditor doc={outline} onChange={setOutline} />
+        </div>
+        <div data-testid="basket">
+          <BlockEditor doc={basket} onChange={setBasket} />
+        </div>
+        <button data-testid="graph-change" onClick={() => setBasket(parse("B, changed"))}>
+          graph change
+        </button>
+      </>
+    )
+  }
+
+  it("keeps the block being typed in editing when the other editor's doc changes", () => {
+    const { getByTestId } = render(<TwoEditors />)
+    const outline = getByTestId("outline")
+    const root = editorRoot(outline)
+    act(() => root.focus())
+    fireEvent.keyDown(root, { key: "Enter" }) // edit A
+    const textarea = outline.querySelector("textarea")!
+    expect(textarea).not.toBeNull()
+    expect(document.activeElement).toBe(textarea)
+
+    // The other editor's doc changes underneath (as every keystroke here
+    // changes the graph the basket is walked from): the textarea stays.
+    fireEvent.click(getByTestId("graph-change"))
+    expect(outline.querySelector("textarea")).toBe(textarea)
+    expect(document.activeElement).toBe(textarea)
   })
 })

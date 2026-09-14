@@ -134,3 +134,33 @@ describe("BlockNoteEditor onToggleCollapse", () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 })
+
+describe("the last row of a doc without a trailing blank (the basket)", () => {
+  /** The basket's shape: no trailing blank, and a removal is the delete. */
+  function Basket({ initial }: { initial: string }) {
+    const [doc, setDoc] = useState(() => parse(initial))
+    return (
+      <>
+        <BlockNoteEditor doc={doc} onChange={setDoc} trailingBlank={false} rowRemoval="delete" />
+        <pre data-testid="roots">{doc.rootBlockIds.length}</pre>
+      </>
+    )
+  }
+  const editorRoot = (container: HTMLElement) =>
+    container.querySelector<HTMLElement>('[tabindex="-1"]')!
+
+  it("can be removed: the basket empties", () => {
+    const { container, getByTestId } = render(<Basket initial="- the last unassigned block" />)
+    expect(getByTestId("roots").textContent).toBe("1")
+    fireEvent.keyDown(editorRoot(container), { key: "Backspace" })
+    expect(getByTestId("roots").textContent).toBe("0")
+    expect(container.querySelector("[data-occurrence]")).toBeNull()
+  })
+
+  it("is kept in the outline, where the trailing blank is the block to type in", () => {
+    const { container } = render(<Host initial="" />)
+    expect(container.querySelectorAll("[data-occurrence]")).toHaveLength(1)
+    fireEvent.keyDown(editorRoot(container), { key: "Backspace" })
+    expect(container.querySelectorAll("[data-occurrence]")).toHaveLength(1)
+  })
+})

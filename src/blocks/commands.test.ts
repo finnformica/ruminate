@@ -503,6 +503,22 @@ describe("deleteBlock", () => {
     expect(result.handled).toBe(true)
     expect(result.doc).toBeUndefined()
   })
+
+  it("deletes the only block of a doc that may be emptied (the basket)", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["only"],
+      blocks: { only: { id: "only", type: "text", text: "last one", children: [] } },
+    }
+    const result = runCommand(
+      "deleteBlock",
+      input(doc, "only", { visibleOrder: ["only"], emptyable: true }),
+    )
+    expect(result.handled).toBe(true)
+    expect(result.doc!.rootBlockIds).toEqual([])
+    expect(result.doc!.blocks.only).toBeUndefined()
+    expect(result.focus).toEqual({ mode: "select", key: null })
+  })
 })
 
 describe("toggleTodo", () => {
@@ -692,16 +708,24 @@ describe("insertBelow", () => {
     }
   })
 
-  it("still continues todo and numbered lists whatever the configured marker", () => {
+  it("still continues bullet, todo and numbered lists whatever the configured marker", () => {
     const doc: BlockDoc = {
       props: null,
-      rootBlockIds: ["t", "n"],
+      rootBlockIds: ["b", "t", "n"],
       blocks: {
+        b: { id: "b", type: "ul", text: "point", children: [] },
         t: { id: "t", type: "todo", text: "task", children: [] },
         n: { id: "n", type: "ol", text: "second", children: [] },
       },
     }
-    const over = { mode: "edit" as const, visibleOrder: ["t", "n"], newBlockType: "text" as const }
+    const over = {
+      mode: "edit" as const,
+      visibleOrder: ["b", "t", "n"],
+      newBlockType: "text" as const,
+    }
+    const bullet = runCommand("insertBelow", input(doc, "b", over))
+    expect(bullet.doc!.blocks[newBlockId(doc, bullet.doc!)].type).toBe("ul")
+    expect(bullet.doc!.blocks[newBlockId(doc, bullet.doc!)].text).toBe("")
     const todo = runCommand("insertBelow", input(doc, "t", over))
     expect(todo.doc!.blocks[newBlockId(doc, todo.doc!)].type).toBe("todo")
     expect(todo.doc!.blocks[newBlockId(doc, todo.doc!)].text).toBe("")
@@ -812,15 +836,49 @@ describe("split", () => {
 })
 
 describe("marker editing", () => {
-  it("exitList clears an empty list item to a paragraph", () => {
+  it("exitList clears an empty list item to a paragraph when the default is that list", () => {
     const doc: BlockDoc = {
       props: null,
       rootBlockIds: ["x"],
       blocks: { x: { id: "x", type: "ul", text: "", children: [] } },
     }
+    // The default new-block type is a bullet: leaving the list must not keep it one.
     const result = runCommand("exitList", input(doc, "x", { mode: "edit", visibleOrder: ["x"] }))
     expect(result.doc!.blocks.x.type).toBe("text")
     expect(result.doc!.blocks.x.text).toBe("")
+    const explicit = runCommand(
+      "exitList",
+      input(doc, "x", { mode: "edit", visibleOrder: ["x"], newBlockType: "ul" }),
+    )
+    expect(explicit.doc!.blocks.x.type).toBe("text")
+  })
+
+  it("exitList leaves an empty list item as the configured new-block type", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["x", "y"],
+      blocks: {
+        x: { id: "x", type: "ul", text: " ", children: [] },
+        y: { id: "y", type: "ol", text: "", children: [] },
+      },
+    }
+    const plain = runCommand(
+      "exitList",
+      input(doc, "x", { mode: "edit", visibleOrder: ["x", "y"], newBlockType: "text" }),
+    )
+    expect(plain.doc!.blocks.x.type).toBe("text")
+    expect(plain.doc!.blocks.x.text).toBe("")
+    const todo = runCommand(
+      "exitList",
+      input(doc, "x", { mode: "edit", visibleOrder: ["x", "y"], newBlockType: "todo" }),
+    )
+    expect(todo.doc!.blocks.x.type).toBe("todo")
+    // A numbered item leaves for the default bullet.
+    const numbered = runCommand(
+      "exitList",
+      input(doc, "y", { mode: "edit", visibleOrder: ["x", "y"], newBlockType: "ul" }),
+    )
+    expect(numbered.doc!.blocks.y.type).toBe("ul")
   })
 
   it("stripMarker removes the leading marker", () => {
@@ -833,6 +891,23 @@ describe("marker editing", () => {
     expect(result.doc!.blocks.x.type).toBe("text")
     expect(result.doc!.blocks.x.text).toBe("Heading")
     expect(result.focus).toEqual({ mode: "edit", key: "x", atStart: true })
+  })
+
+  it("backspaceEmpty keeps the only block, unless the doc may be emptied", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["only"],
+      blocks: { only: { id: "only", type: "text", text: "", children: [] } },
+    }
+    const kept = runCommand("backspaceEmpty", input(doc, "only", { mode: "edit" }))
+    expect(kept.handled).toBe(true)
+    expect(kept.doc).toBeUndefined()
+    const emptied = runCommand(
+      "backspaceEmpty",
+      input(doc, "only", { mode: "edit", emptyable: true }),
+    )
+    expect(emptied.doc!.rootBlockIds).toEqual([])
+    expect(emptied.focus).toEqual({ mode: "select", key: null })
   })
 
   it("backspaceEmpty removes an empty block and edits the previous one", () => {

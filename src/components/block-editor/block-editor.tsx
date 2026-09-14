@@ -342,6 +342,7 @@ export function BlockEditor({
   onImageUpload,
   onActivate,
   fixedRoots = false,
+  emptyable = false,
 }: {
   doc: BlockDoc
   /** The next doc, and what the change means beyond it (`ChangeHint`). */
@@ -419,6 +420,13 @@ export function BlockEditor({
    * edits as it does in its note.
    */
   fixedRoots?: boolean
+  /**
+   * Whether the doc may be left with no blocks at all. Off, the only root
+   * cannot be removed (⌫ on it does nothing): a note always keeps a block to
+   * type in. On for a view whose rows are all it is — the Unassigned basket,
+   * where removing the last block empties the basket, which then goes.
+   */
+  emptyable?: boolean
   /**
    * Zoom ("focus mode"): the block whose subtree is the whole view. With
    * `onZoomNavigate` the zoom is controlled by the caller (URL search param);
@@ -1319,6 +1327,7 @@ export function BlockEditor({
       zoomBackId,
       newBlockType: typeOfMarker(newBlockMarker),
       placesOf: parentCountOf,
+      emptyable,
     }
     const name = resolveKey(mode, event, input)
     if (!name) return false
@@ -1349,6 +1358,7 @@ export function BlockEditor({
         zoomBackId,
         newBlockType: typeOfMarker(newBlockMarker),
         placesOf: parentCountOf,
+        emptyable,
       }),
     )
   }
@@ -1386,8 +1396,19 @@ export function BlockEditor({
   }
   // A right-click: the `contextmenu` event reaches here (capture) before the
   // menu's trigger opens on it, so the target is set by the time it shows.
+  // Stopping the event here keeps it from the trigger altogether (its own
+  // handler, and the document listener it cancels the browser's menu with),
+  // so the browser's menu shows instead: off the rows, and inside the
+  // textarea being typed in, where that menu carries the spelling
+  // suggestions for a marked word and a text field's cut/copy/paste. The
+  // block's menu still opens on the rest of the row (its marker, the
+  // margin), and on the whole row once it is not being edited.
   const handleContextMenuCapture = (event: MouseEvent<HTMLDivElement>) => {
     if (readOnly) return
+    if (event.target instanceof HTMLTextAreaElement) {
+      event.stopPropagation()
+      return
+    }
     const target = menuTargetAt(event.target)
     if (!target) {
       event.stopPropagation()
@@ -1923,11 +1944,15 @@ export function BlockEditor({
   // Edit mode is left alone (the textarea owns focus). `preventScroll` stops the
   // focus call from jumping the page around on every doc change.
   //
-  // Never from somewhere the keyboard is in use, though: a query box typing
-  // over a results view changes this doc on every keystroke (the rows are
-  // the results), and taking focus from it would send the next letter to
-  // the rows. The same exclusions as the arrow replay below — form fields,
-  // dialogs, menus, lists, other editors — keep their focus.
+  // Only focus that is NOWHERE (the body, or nothing) is taken: this runs on
+  // every doc change, and a second editor on the page — the note's Unassigned
+  // basket, walked from the same graph, so its doc changes on every keystroke
+  // in the outline — used to take the keyboard from the textarea being typed
+  // in, which left edit mode after a single character. A control that holds
+  // focus (a textarea in another editor, the note's title, a dialog's input,
+  // the query box typing over a results view whose rows change with every
+  // letter) keeps it; the arrow-key replay below still brings the keys back
+  // here.
   useLayoutEffect(() => {
     if (!navigable || focus || !selected) return
     // While the outline palette is previewing, focus stays in its input — the
@@ -1936,8 +1961,7 @@ export function BlockEditor({
     const el = containerRef.current
     if (!el) return
     const active = document.activeElement
-    if (el.contains(active)) return
-    if (active instanceof Element && active.closest(ARROWS_KEEP_TO_THEMSELVES)) return
+    if (active && active !== document.body) return
     el.focus({ preventScroll: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, focus, anchorKey, doc, navigable])

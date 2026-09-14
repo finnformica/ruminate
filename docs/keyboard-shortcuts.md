@@ -252,8 +252,10 @@ format). With nothing selected (after <kbd>Esc</kbd>), <kbd>↓</kbd> /
 | Strip the block's marker → merge up     | <kbd>⌫</kbd> at line start                                                 |
 | Slash menu (dates, turn into)           | <kbd>/</kbd> at the start of a word                                        |
 
-Enter from a heading nests the new block underneath it. Enter on an empty list
-item exits the list.
+Enter from a heading nests the new block underneath it. A list item (bullet,
+numbered, to-do) continues its own list whatever the new-block setting says;
+Enter on an empty list item exits the list, leaving the block as the configured
+new-block type (a paragraph when that is the same list).
 
 ### Slash menu
 
