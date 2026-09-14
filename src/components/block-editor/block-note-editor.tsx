@@ -288,6 +288,9 @@ export function BlockNoteEditor({
       onDeleteSubtree={noteId && rowRemoval === "delete" ? deleteSubtree : undefined}
       knownBlock={noteId ? knownBlock : undefined}
       onImageUpload={onImageUpload}
+      // The trailing blank is what keeps a block to type in; without it (the
+      // basket) the last row may go, and the basket goes with it.
+      emptyable={!trailingBlank}
     />
   )
 }
