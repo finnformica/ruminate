@@ -1342,8 +1342,19 @@ export function BlockEditor({
   }
   // A right-click: the `contextmenu` event reaches here (capture) before the
   // menu's trigger opens on it, so the target is set by the time it shows.
+  // Stopping the event here keeps it from the trigger altogether (its own
+  // handler, and the document listener it cancels the browser's menu with),
+  // so the browser's menu shows instead: off the rows, and inside the
+  // textarea being typed in, where that menu carries the spelling
+  // suggestions for a marked word and a text field's cut/copy/paste. The
+  // block's menu still opens on the rest of the row (its marker, the
+  // margin), and on the whole row once it is not being edited.
   const handleContextMenuCapture = (event: MouseEvent<HTMLDivElement>) => {
     if (readOnly) return
+    if (event.target instanceof HTMLTextAreaElement) {
+      event.stopPropagation()
+      return
+    }
     const target = menuTargetAt(event.target)
     if (!target) {
       event.stopPropagation()

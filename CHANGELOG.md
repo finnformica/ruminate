@@ -6,8 +6,13 @@
 
 - An agent can fetch your pictures. The MCP server's `read_note` and `get_block` showed an image block as its caption and an asset id, with no way to reach the bytes: the route that serves them takes the browser's session, which an agent does not have. A new `get_image` tool hands back a download link for the picture an image block holds, on this server, lasting fifteen minutes and bound to the token that minted it, so revoking the token kills its links too. The bytes are never embedded in a tool result; the agent fetches them. A picture kept at an external address comes back as that address. The link is signed with a new Worker secret, `IMAGE_LINK_SECRET`, set once with `wrangler secret put`; without it the tool refuses and says so. See docs/mcp-server.md, "Pictures".
 
+### Changed
+
+- A bullet list continues as bullets. <kbd>↵</kbd> at the end of a bullet now makes another bullet, whatever **New block markdown** (Settings → Editor) is set to — a numbered list and a to-do list already carried on this way, and a bullet used to make the setting's block instead, so with the setting on plain text a list stopped after one item. To leave a list, press <kbd>↵</kbd> on an empty item: the block goes back to the setting's type, or to a paragraph when the setting is that very list, so the key always leaves.
+
 ### Fixed
 
+- Right-clicking inside the block you are typing in now shows the browser's own menu, so a misspelt word's suggestions (and cut, copy and paste) are there as in any text field. The block's menu used to open over it and swallow it. The block's menu still opens on a right-click anywhere else on the row, or on the row once you have left it.
 - Typing in a block no longer drops you out of it after one character. When a note had an **Unassigned** basket beneath its outline, every keystroke changed the basket too (it is drawn from the same notes), and the basket then took the keyboard back for its own highlighted row, so the block you were typing in closed after a single character. This bit hardest in the basket itself, where the outline above did the same in return. An editor now takes the keyboard only when nothing else holds it, so the block being typed in keeps it, and so does the note's title, or a dialog's field, while your notes change underneath.
 - The last block in the **Unassigned** basket can be deleted. <kbd>⌫</kbd> on it, and the menu's **Delete**, did nothing: the rule that keeps a note from losing its only block (there is always one to type in) applied to the basket as well, where the last row going is the point, and the basket goes with it. The outline keeps the rule.
 
