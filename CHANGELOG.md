@@ -2,6 +2,10 @@
 
 ## 2026-W38
 
+### Changed
+
+- A bullet list continues as bullets. <kbd>↵</kbd> at the end of a bullet now makes another bullet, whatever **New block markdown** (Settings → Editor) is set to — a numbered list and a to-do list already carried on this way, and a bullet used to make the setting's block instead, so with the setting on plain text a list stopped after one item. To leave a list, press <kbd>↵</kbd> on an empty item: the block goes back to the setting's type, or to a paragraph when the setting is that very list, so the key always leaves.
+
 ### Fixed
 
 - Typing in a block no longer drops you out of it after one character. When a note had an **Unassigned** basket beneath its outline, every keystroke changed the basket too (it is drawn from the same notes), and the basket then took the keyboard back for its own highlighted row, so the block you were typing in closed after a single character. This bit hardest in the basket itself, where the outline above did the same in return. An editor now takes the keyboard only when nothing else holds it, so the block being typed in keeps it, and so does the note's title, or a dialog's field, while your notes change underneath.

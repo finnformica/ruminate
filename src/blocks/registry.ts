@@ -57,7 +57,8 @@ export interface BlockTypeDef {
   readonly typed?: { re: RegExp; type?: (match: RegExpExecArray) => BlockType }
   /** The select-mode key that toggles this type (`#` for a heading). */
   readonly turnIntoKey?: string
-  /** A list item: Enter on an empty one leaves the list; display markdown
+  /** A list item: Enter on an empty one leaves the list for the reader's
+   * default new-block type (a paragraph when that is this list); display markdown
    * nests it under its parent; the clipboard groups runs into one list. */
   readonly listItem: boolean
   /** For list items: the HTML list element runs of them share. */
@@ -142,6 +143,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     listItem: true,
     listTag: "ul",
     marked: true,
+    continues: "ul",
     turnInto: true,
     search: { value: "bullet", aliases: ["ul"], description: "bullet item" },
   },
