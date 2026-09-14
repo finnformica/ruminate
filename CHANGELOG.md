@@ -2,6 +2,10 @@
 
 ## 2026-W38
 
+### Changed
+
+- A bullet list continues as bullets. <kbd>↵</kbd> at the end of a bullet now makes another bullet, whatever **New block markdown** (Settings → Editor) is set to — a numbered list and a to-do list already carried on this way, and a bullet used to make the setting's block instead, so with the setting on plain text a list stopped after one item. To leave a list, press <kbd>↵</kbd> on an empty item: the block goes back to the setting's type, or to a paragraph when the setting is that very list, so the key always leaves.
+
 ### Fixed
 
 - Right-clicking inside the block you are typing in now shows the browser's own menu, so a misspelt word's suggestions (and cut, copy and paste) are there as in any text field. The block's menu used to open over it and swallow it. The block's menu still opens on a right-click anywhere else on the row, or on the row once you have left it.
