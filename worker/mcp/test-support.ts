@@ -20,8 +20,52 @@ import { asFakeD1, createTenantTestDriver } from "../handlers/sqlite-test-driver
 import { forTenant, type TenantDb } from "../tenancy-db"
 import type { Env } from "../types"
 
+/**
+ * Just enough of R2 for the image paths: put/get by key, metadata kept. Keyed
+ * by the tenant prefix the real handler mints, so a cross-tenant read is an
+ * honest miss rather than a fixture that cannot tell.
+ */
+function fakeBucket() {
+  const objects = new Map<string, { bytes: ArrayBuffer; contentType?: string }>()
+  const bucket = {
+    async put(
+      key: string,
+      value: ArrayBuffer,
+      options?: { httpMetadata?: { contentType?: string } },
+    ) {
+      objects.set(key, { bytes: value, contentType: options?.httpMetadata?.contentType })
+      return null
+    },
+    async head(key: string) {
+      const found = objects.get(key)
+      if (!found) return null
+      return {
+        size: found.bytes.byteLength,
+        httpEtag: `"etag-${key}"`,
+        httpMetadata: { contentType: found.contentType },
+      }
+    },
+    async get(key: string) {
+      const found = objects.get(key)
+      if (!found) return null
+      return {
+        body: found.bytes,
+        size: found.bytes.byteLength,
+        httpEtag: `"etag-${key}"`,
+        httpMetadata: { contentType: found.contentType },
+      }
+    },
+  }
+  return { bucket: bucket as unknown as R2Bucket, objects }
+}
+
+/** The link-signing secret the harness env carries. */
+export const TEST_IMAGE_LINK_SECRET = "link-secret-for-tests"
+
 export interface McpTestEnv {
   env: Env
+  /** Put a picture's bytes where `get_image` reads them: under the user's prefix. */
+  putImage(userId: number, id: string, bytes: Uint8Array, contentType: string): Promise<void>
   /** The one database, behind the shared seam — for control-plane reads. */
   control: SqlDriver
   /** A tenant handle for a user, minted the way production mints one. */
@@ -60,6 +104,7 @@ export async function createMcpTestEnv(): Promise<McpTestEnv> {
   await driver.execScript(migration0009)
 
   const db = asFakeD1(driver)
+  const { bucket } = fakeBucket()
   const env = {
     DB: db,
     ASSETS: { fetch: () => Promise.resolve(new Response("asset")) } as unknown as Fetcher,
@@ -67,6 +112,9 @@ export async function createMcpTestEnv(): Promise<McpTestEnv> {
     GITHUB_CLIENT_SECRET: "secret",
     ALLOWED_GITHUB_ID: "42536816",
     SIGNUP_MODE: "allowlist",
+    IMAGES: bucket,
+    VITE_IMAGES_ENABLED: "true",
+    IMAGE_LINK_SECRET: TEST_IMAGE_LINK_SECRET,
   } satisfies Env
 
   let rows = 0
@@ -93,6 +141,11 @@ export async function createMcpTestEnv(): Promise<McpTestEnv> {
 
   return {
     env,
+    async putImage(userId, id, bytes, contentType) {
+      await bucket.put(`${userId}/${id}`, bytes.buffer as ArrayBuffer, {
+        httpMetadata: { contentType },
+      })
+    },
     control: driver,
     tenant,
     async addUser(userId, status = "active") {

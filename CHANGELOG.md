@@ -2,6 +2,10 @@
 
 ## 2026-W38
 
+### Added
+
+- An agent can fetch your pictures. The MCP server's `read_note` and `get_block` showed an image block as its caption and an asset id, with no way to reach the bytes: the route that serves them takes the browser's session, which an agent does not have. A new `get_image` tool hands back a download link for the picture an image block holds, on this server, lasting fifteen minutes and bound to the token that minted it, so revoking the token kills its links too. The bytes are never embedded in a tool result; the agent fetches them. A picture kept at an external address comes back as that address. The link is signed with a new Worker secret, `IMAGE_LINK_SECRET`, set once with `wrangler secret put`; without it the tool refuses and says so. See docs/mcp-server.md, "Pictures".
+
 ### Fixed
 
 - Typing in a block no longer drops you out of it after one character. When a note had an **Unassigned** basket beneath its outline, every keystroke changed the basket too (it is drawn from the same notes), and the basket then took the keyboard back for its own highlighted row, so the block you were typing in closed after a single character. This bit hardest in the basket itself, where the outline above did the same in return. An editor now takes the keyboard only when nothing else holds it, so the block being typed in keeps it, and so does the note's title, or a dialog's field, while your notes change underneath.
