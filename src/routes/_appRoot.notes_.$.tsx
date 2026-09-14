@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { useAtomValue, useSetAtom } from "jotai"
+import { useAtomValue } from "jotai"
 import React, { useEffect, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import useResizeObserver from "use-resize-observer"
@@ -19,8 +19,9 @@ import { PageLayout } from "../components/page-layout"
 import { isSyncingAtom } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
-import { isDatabaseModeAtom, isSignedOutAtom, touchNoteAtom } from "../global-state"
+import { isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
 import { useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
+import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
 import { Width, fontSchema, widthSchema } from "../schema"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
@@ -110,19 +111,13 @@ function NotePage() {
     noteId,
     defaultDoc,
   })
-  // The note is TOUCHED — for the palette's Recent list (`touchNoteAtom`,
-  // coalesced there) — exactly when it is opened, edited (an edit lands
-  // through `setEditorDoc`) or a block in it folded or unfolded (the
-  // editor's `onToggleCollapse`). Never by selecting, focusing or arrowing
-  // through it: reading a note is not touching it. One seam, no calls
-  // inside the editor.
-  const touchNote = useSetAtom(touchNoteAtom)
-  useEffect(() => {
-    if (noteId) touchNote(noteId)
-  }, [noteId, touchNote])
-  const touch = React.useCallback(() => {
-    if (noteId) touchNote(noteId)
-  }, [noteId, touchNote])
+  // The note is TOUCHED — for the palette's Recent list — exactly when it
+  // is opened, edited (an edit lands through `setEditorDoc`), a block in it
+  // folded or unfolded (`onToggleCollapse`) or zoomed into
+  // (`onZoomNavigate`). Never by selecting, focusing or arrowing through
+  // it: reading a note is not touching it. One seam (`useTouchNote`), no
+  // calls inside the editor.
+  const { touch, touching } = useTouchNote(noteId)
   const setEditorDoc = React.useCallback(
     (next: BlockDoc, hint?: ChangeHint) => {
       if (!isSignedOut) {
@@ -298,10 +293,10 @@ function NotePage() {
                   newRootSignal={newRootSignal}
                   refocusSignal={refocusSignal}
                   zoomBlockId={zoomBlockId ?? null}
-                  onZoomNavigate={(id) =>
+                  onZoomNavigate={touching((id) =>
                     // A plain push, so the back button undoes zoom naturally.
-                    navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
-                  }
+                    navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) }),
+                  )}
                   noteTitle={note?.displayName ?? ""}
                 />
                 {noteId && noteExists ? <UnassignedBasket noteId={noteId} /> : null}

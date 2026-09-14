@@ -97,6 +97,23 @@ describe("BlockNoteEditor onToggleCollapse", () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
+  it("a zoom reaches the page through onZoomNavigate — which the page counts as a touch", () => {
+    const onZoomNavigate = vi.fn()
+    const { container, getByText } = render(
+      <BlockNoteEditor
+        noteId="n"
+        doc={parse(OUTLINE)}
+        onChange={() => {}}
+        onZoomNavigate={onZoomNavigate}
+      />,
+    )
+    fireEvent.click(getByText("parent"))
+    const editor = container.querySelector<HTMLElement>("[data-block-editor]")!
+    fireEvent.keyDown(editor, { key: "f" })
+    expect(onZoomNavigate).toHaveBeenCalledTimes(1)
+    expect(typeof onZoomNavigate.mock.calls[0][0]).toBe("string")
+  })
+
   it("is not told of a selection — a click on a row, or the arrows through it", () => {
     const onToggleCollapse = vi.fn()
     const onChange = vi.fn()

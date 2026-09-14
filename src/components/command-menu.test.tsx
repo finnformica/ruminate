@@ -160,7 +160,7 @@ function renderMenu({
 
 const pressCmdP = () => fireEvent.keyDown(document.body, { key: "p", code: "KeyP", metaKey: true })
 const outlineInput = () => screen.getByPlaceholderText("Jump to a heading…") as HTMLInputElement
-const commandsInput = () => screen.getByPlaceholderText("Search or jump to…") as HTMLInputElement
+const commandsInput = () => screen.getByPlaceholderText("Search notes…") as HTMLInputElement
 
 describe("outline palette (⌘P)", () => {
   it("⌘P opens the palette in outline mode listing the note's headings", () => {
@@ -886,7 +886,7 @@ describe("qualifier suggestions", () => {
     expect(screen.queryByTestId("qualifier-suggestions")).toBeNull()
     expect(input.value).toBe("type:")
     // The dialog's own Escape (close) must not fire for the picker's Escape.
-    expect(screen.getByPlaceholderText("Search or jump to…")).toBe(input)
+    expect(screen.getByPlaceholderText("Search notes…")).toBe(input)
     expect(input.isConnected).toBe(true)
   })
 

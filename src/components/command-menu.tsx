@@ -504,7 +504,7 @@ export function CommandMenu() {
             variant="palette"
             inputRef={inputRef}
             popoverHost={bodyRef}
-            placeholder={mode === "outline" ? "Jump to a heading…" : "Search or jump to…"}
+            placeholder={mode === "outline" ? "Jump to a heading…" : "Search notes…"}
             value={query}
             onChange={handleQueryChange}
             currentNoteId={noteId}
