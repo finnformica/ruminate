@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import migration0003 from "../../migrations/0003_control_plane.sql?raw"
+import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import type { SqlDriver } from "../../src/data/sql-driver"
 import { createTestSqlDriver } from "./sqlite-test-driver"
 import { resolveTenancy, type VerifiedIdentity } from "./tenancy"
@@ -28,6 +29,60 @@ async function controlPlane(): Promise<SqlDriver> {
 
 const userRow = async (driver: SqlDriver, id: number) =>
   (await driver.exec("SELECT * FROM users WHERE github_id = ?1", [id]))[0]
+
+describe("resolveTenancy — the address", () => {
+  it("records the sign-in's address on the row it provisions, lowercased", async () => {
+    const driver = await controlPlane()
+    await driver.execScript(migration0010)
+    const decision = await resolveTenancy(
+      driver,
+      { ...identity(7), email: "Ada@Example.com" },
+      { signupMode: "open", bootstrapGithubId: undefined },
+    )
+    expect(decision.allowed).toBe(true)
+    expect((await userRow(driver, 7))?.email).toBe("ada@example.com")
+  })
+
+  it("refreshes a changed address on an existing row, and leaves it alone without one", async () => {
+    const driver = await controlPlane()
+    await driver.execScript(migration0010)
+    await driver.exec(
+      "INSERT INTO users (github_id, login, created_at, email) VALUES (7, 'a', 1, 'old@example.com')",
+    )
+    // The API path carries no address: the stored one survives.
+    await resolveTenancy(driver, identity(7), { signupMode: "open", bootstrapGithubId: undefined })
+    expect((await userRow(driver, 7))?.email).toBe("old@example.com")
+    await resolveTenancy(
+      driver,
+      { ...identity(7), email: "new@example.com" },
+      { signupMode: "open", bootstrapGithubId: undefined },
+    )
+    expect((await userRow(driver, 7))?.email).toBe("new@example.com")
+  })
+
+  it("records nothing for a refused identity", async () => {
+    const driver = await controlPlane()
+    await driver.execScript(migration0010)
+    const decision = await resolveTenancy(
+      driver,
+      { ...identity(7), email: "ada@example.com" },
+      { signupMode: "allowlist", bootstrapGithubId: undefined },
+    )
+    expect(decision.allowed).toBe(false)
+    expect(await userRow(driver, 7)).toBeUndefined()
+  })
+
+  it("survives the column not existing yet", async () => {
+    const driver = await controlPlane()
+    const decision = await resolveTenancy(
+      driver,
+      { ...identity(7), email: "ada@example.com" },
+      { signupMode: "open", bootstrapGithubId: undefined },
+    )
+    expect(decision.allowed).toBe(true)
+    expect((await userRow(driver, 7))?.login).toBe("user-7")
+  })
+})
 
 describe("resolveTenancy — existing users", () => {
   it("allows an active user in every mode", async () => {
