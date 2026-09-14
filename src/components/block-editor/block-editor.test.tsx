@@ -2463,6 +2463,35 @@ describe("BlockEditor context menu", () => {
     })
     expect(screen.queryByTestId("block-context-menu")).toBeNull()
   })
+
+  it("leaves a right-click inside the block being typed in to the browser", async () => {
+    // The browser's own menu on a textarea carries the spelling suggestions
+    // for a marked word (and cut/copy/paste); the block's menu used to open
+    // over it and cancel it. A right-click on the row outside its textarea
+    // still opens the block's menu.
+    const { container } = render(<Harness initial={"A\nB"} startEditing />)
+    const textarea = container.querySelector("textarea")!
+    let allowed = false
+    await act(async () => {
+      // `dispatchEvent` returns false when a handler cancelled the default.
+      allowed = fireEvent.contextMenu(textarea, { clientX: 10, clientY: 10 })
+    })
+    expect(allowed).toBe(true)
+    expect(screen.queryByTestId("block-context-menu")).toBeNull()
+    // Still typing: the textarea kept focus and is the same one.
+    expect(container.querySelector("textarea")).toBe(textarea)
+
+    let cancelled = true
+    await act(async () => {
+      cancelled = !fireEvent.contextMenu(container.querySelectorAll("[data-occurrence]")[1]!, {
+        clientX: 10,
+        clientY: 10,
+      })
+    })
+    expect(cancelled).toBe(true)
+    expect(screen.getByTestId("block-context-menu").textContent).toContain("Duplicate")
+    expect(highlightedText(container)).toBe("B")
+  })
 })
 
 describe("BlockEditor images", () => {
