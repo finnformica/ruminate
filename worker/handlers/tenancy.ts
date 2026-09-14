@@ -71,11 +71,7 @@ function legacyOwnerDecision(id: number, bootstrapGithubId: string | undefined):
  * (migration 0010 not applied): the address is a convenience for sharing,
  * and a sign-in must never fail on it.
  */
-async function recordUserEmail(
-  driver: SqlDriver,
-  githubId: number,
-  email: string,
-): Promise<void> {
+async function recordUserEmail(driver: SqlDriver, githubId: number, email: string): Promise<void> {
   try {
     await driver.exec("UPDATE users SET email = ?2 WHERE github_id = ?1", [
       githubId,
