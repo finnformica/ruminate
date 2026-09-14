@@ -320,8 +320,11 @@ export function BlockEditor({
   collapsed: collapsedProp,
   onToggleCollapse,
   onExitTop,
+  onExitBottom,
   focusFirstSignal,
+  focusLastSignal,
   focusFirstMode = "select",
+  initialSelection = "first",
   newRootSignal,
   refocusSignal,
   readOnly = false,
@@ -381,10 +384,19 @@ export function BlockEditor({
   /** Called when the user navigates up past the first block — lets the caller
    * move focus to whatever sits above the editor (e.g. the note title). */
   onExitTop?: () => void
+  /** Called when the user navigates down past the last block — lets the
+   * caller move focus to whatever sits below the editor (a second results
+   * list). Without it the key is consumed and the last row stays. */
+  onExitBottom?: () => void
   /** Bump this (e.g. Down-arrow from the note title) to focus the first block. */
   focusFirstSignal?: number
+  /** Bump this (↑ from a list beneath the editor) to focus the last block. */
+  focusLastSignal?: number
   /** Whether `focusFirstSignal` opens the first block editing or just highlighted. */
   focusFirstMode?: "edit" | "select"
+  /** What is highlighted on mount: the first block (a note), or nothing
+   * until the keyboard arrives (the palette's lists). */
+  initialSelection?: "first" | "none"
   /** Bump this (e.g. Cmd+Enter on the note title) to add a new root block. */
   newRootSignal?: number
   /** Bump this (the global `i` shortcut) to refocus the editor, restoring the
@@ -501,8 +513,17 @@ export function BlockEditor({
   const [focus, setFocus] = useState<FocusRequest | null>(() =>
     startEditing && firstKey ? { key: firstKey } : null,
   )
+  // A note opens with its first block highlighted (or the heading asked
+  // for). A caller can ask for nothing highlighted until the keyboard
+  // arrives (`initialSelection: "none"` — the palette's lists: two under
+  // one query would otherwise each show a highlight, and neither where the
+  // keys are).
   const [selected, setSelected] = useState<string | null>(() =>
-    highlightHeading ? (findHeadingKey(doc, highlightHeading) ?? firstKey) : firstKey,
+    initialSelection === "none"
+      ? null
+      : highlightHeading
+        ? (findHeadingKey(doc, highlightHeading) ?? firstKey)
+        : firstKey,
   )
   const [collapsedInternal, setCollapsedInternal] = useState<Set<string>>(new Set())
   const collapsed = collapsedProp ?? collapsedInternal
@@ -1045,7 +1066,16 @@ export function BlockEditor({
   // When the caller bumps `focusFirstSignal` (e.g. Down-arrow from the note
   // title), highlight the first block — moving between the title and the blocks
   // moves the highlight, like moving between blocks.
+  //
+  // A signal is an edge, not a level: only a bump AFTER mount is a request.
+  // An editor mounting under a counter that was bumped for an earlier
+  // editor (the palette swaps its lists as the query changes) must not
+  // take the keyboard from wherever it is — the query box, mid-word.
+  const seenFocusFirst = useRef(focusFirstSignal)
+  const seenFocusLast = useRef(focusLastSignal)
   useEffect(() => {
+    if (focusFirstSignal === seenFocusFirst.current) return
+    seenFocusFirst.current = focusFirstSignal
     if (!focusFirstSignal || !navigable) return
     const first = firstSelectable(docRef.current)
     if (!first) return
@@ -1060,6 +1090,21 @@ export function BlockEditor({
     if (focusFirstMode !== "edit") containerRef.current?.focus({ preventScroll: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusFirstSignal])
+
+  // The mirror image: `focusLastSignal` (↑ from a results list beneath this
+  // one) highlights the last visible row and takes the keyboard.
+  useEffect(() => {
+    if (focusLastSignal === seenFocusLast.current) return
+    seenFocusLast.current = focusLastSignal
+    if (!focusLastSignal || !navigable) return
+    const last = visibleOrder[visibleOrder.length - 1]
+    if (!last) return
+    setAnchorKey(null)
+    setFocus(null)
+    setSelected(last)
+    containerRef.current?.focus({ preventScroll: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusLastSignal])
 
   // When the caller bumps `refocusSignal` (the global `i` shortcut), give the
   // editor keyboard focus back and restore the LAST selected row — "put me
@@ -1255,6 +1300,15 @@ export function BlockEditor({
       setSelected(null)
       setAnchorKey(null)
       onExitTop?.()
+    }
+    // Leaving the bottom is the same, downward — only where there is
+    // something below to take the keyboard; otherwise the key is consumed
+    // and the last row stays highlighted.
+    if (result.exitBottom && onExitBottom) {
+      setFocus(null)
+      setSelected(null)
+      setAnchorKey(null)
+      onExitBottom()
     }
   }
 
@@ -1895,8 +1949,10 @@ export function BlockEditor({
   // basket, walked from the same graph, so its doc changes on every keystroke
   // in the outline — used to take the keyboard from the textarea being typed
   // in, which left edit mode after a single character. A control that holds
-  // focus (a textarea in another editor, the note's title, a dialog's input)
-  // keeps it; the arrow-key replay below still brings the keys back here.
+  // focus (a textarea in another editor, the note's title, a dialog's input,
+  // the query box typing over a results view whose rows change with every
+  // letter) keeps it; the arrow-key replay below still brings the keys back
+  // here.
   useLayoutEffect(() => {
     if (!navigable || focus || !selected) return
     // While the outline palette is previewing, focus stays in its input — the

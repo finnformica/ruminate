@@ -2,15 +2,27 @@
 
 ## 2026-W38
 
+### Removed
+
+- <kbd>⌘</kbd> <kbd>K</kbd> no longer lists **Jump to** (Notes, Calendar, Settings) or **Note actions** (Copy note markdown, Copy note ID, Print note). The jumps have their own keys (<kbd>g</kbd> then <kbd>n</kbd> / <kbd>d</kbd> / <kbd>s</kbd>) and the sidebar; the note actions live in the note's own menu. The palette is for finding notes and blocks: with nothing typed it shows Recent and Pinned, and <kbd>↓</kbd> goes straight to the first row.
+
 ### Changed
 
 - A bullet list continues as bullets. <kbd>↵</kbd> at the end of a bullet now makes another bullet, whatever **New block markdown** (Settings → Editor) is set to — a numbered list and a to-do list already carried on this way, and a bullet used to make the setting's block instead, so with the setting on plain text a list stopped after one item. To leave a list, press <kbd>↵</kbd> on an empty item: the block goes back to the setting's type, or to a paragraph when the setting is that very list, so the key always leaves.
 
 ### Fixed
 
+- Typing in <kbd>⌘</kbd> <kbd>K</kbd> no longer loses the keyboard to the results. Each letter you typed changed the rows beneath the query, and the rows took the focus as they changed, so the next letter went to them and your search stopped mid-word. The rows now take the keyboard only when you press <kbd>↓</kbd> into them; the same rule holds on the notes page.
 - Right-clicking inside the block you are typing in now shows the browser's own menu, so a misspelt word's suggestions (and cut, copy and paste) are there as in any text field. The block's menu used to open over it and swallow it. The block's menu still opens on a right-click anywhere else on the row, or on the row once you have left it.
 - Typing in a block no longer drops you out of it after one character. When a note had an **Unassigned** basket beneath its outline, every keystroke changed the basket too (it is drawn from the same notes), and the basket then took the keyboard back for its own highlighted row, so the block you were typing in closed after a single character. This bit hardest in the basket itself, where the outline above did the same in return. An editor now takes the keyboard only when nothing else holds it, so the block being typed in keeps it, and so does the note's title, or a dialog's field, while your notes change underneath.
 - The last block in the **Unassigned** basket can be deleted. <kbd>⌫</kbd> on it, and the menu's **Delete**, did nothing: the rule that keeps a note from losing its only block (there is always one to type in) applied to the basket as well, where the last row going is the point, and the basket goes with it. The outline keeps the rule.
+
+### Improved
+
+- Search is one thing wherever you meet it. The notes page, a filtered view and <kbd>⌘</kbd> <kbd>K</kbd> now share the same query box and the same results block: the same count line ("3 matching blocks in 2 notes"), the same rows, the same `in:` pills under the query, the same 150ms pause before a search runs, and the same words when nothing matches. In the palette the "See all … matching blocks" row is gone — nothing is highlighted after you type, so <kbd>↵</kbd> straight away opens the full results view, and <kbd>↵</kbd> on an item you have arrowed to picks that item. The palette's results also sit a little further in from the card's edge, so a collapse arrow or a checkbox never touches it.
+- Results are ranked purely by how well they match. A note whose **title** matches what you typed is a result row, on both surfaces now, and it sits among the matching blocks by score rather than in a group of its own above them — a block that matched better comes first. The count says how many notes matched by title. A query for a block type (`type:todo`) or scoped with `in:` lists blocks only.
+- With nothing typed, <kbd>⌘</kbd> <kbd>K</kbd> shows **Recent**: the five notes you most recently touched — edited or created (which every device sees) or, on this device, opened, typed into, zoomed into, or a block in them folded or unfolded. Merely reading a note — selecting a block, clicking one, arrowing through it — never counts. The device keeps at most five note ids with a timestamp, under a single browser-storage entry that is overwritten whole (a few dozen bytes, never a growing log), and a note you keep working in is noted at most once a second. Beneath Recent, **Pinned** lists your pinned notes, less any already shown as recent, so nothing appears twice. Both give way to results the moment you type.
+- Qualifier values open in a popover beside what you are typing. Type `type:`, `in:`, `has:`, `no:` — and now `sort:` (each key with its other direction) and `date:` (the same Today, Tomorrow, Yesterday, Next week and Last week the `/` menu offers, each with the day it means, and the day is what lands in the query) — and the choices appear next to the token, on the notes page and in <kbd>⌘</kbd> <kbd>K</kbd> alike, rather than as rows added into the palette. The keys stay in the box: keep typing to narrow the list, <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>↵</kbd> or <kbd>Tab</kbd> to pick, <kbd>Esc</kbd> to close. On a phone the popover takes the full width of the box.
 
 ## 2026-W37
 

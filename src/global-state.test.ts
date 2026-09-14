@@ -14,9 +14,12 @@ import {
   graphSnapshotAtom,
   isSignedOutAtom,
   notesAtom,
+  recentTouchesAtom,
   sampleGraphAtom,
   searchBlocksAtom,
+  touchNoteAtom,
 } from "./global-state"
+import { RECENT_STORAGE_KEY } from "./utils/recent-notes"
 
 /**
  * The unchecked-boxes flow end-to-end at the atom level: sign in,
@@ -217,5 +220,34 @@ describe("isBootingAtom", () => {
     expect(store.get(isBootingAtom)).toBe(false)
     store.set(databaseModeStatusAtom, status({ pull: "error", emptyOffline: true }))
     expect(store.get(isBootingAtom)).toBe(false)
+  })
+})
+
+describe("touchNoteAtom", () => {
+  it("notes a touch once, writes the one storage key, and coalesces bumps within a second", () => {
+    localStorage.clear()
+    const store = createStore()
+    store.set(recentTouchesAtom, [])
+    store.set(touchNoteAtom, "a", 1000)
+    store.set(touchNoteAtom, "b", 2000)
+    expect(store.get(recentTouchesAtom)).toEqual([
+      { id: "b", at: 2000 },
+      { id: "a", at: 1000 },
+    ])
+    expect(JSON.parse(localStorage.getItem(RECENT_STORAGE_KEY)!)).toEqual([
+      { id: "b", at: 2000 },
+      { id: "a", at: 1000 },
+    ])
+    // A selection walking through `b` within the second: nothing changes,
+    // nothing is written.
+    const before = store.get(recentTouchesAtom)
+    localStorage.setItem(RECENT_STORAGE_KEY, "sentinel")
+    store.set(touchNoteAtom, "b", 2500)
+    expect(store.get(recentTouchesAtom)).toBe(before)
+    expect(localStorage.getItem(RECENT_STORAGE_KEY)).toBe("sentinel")
+    // A second on, it is noted again — and only one key is ever used.
+    store.set(touchNoteAtom, "b", 3000)
+    expect(store.get(recentTouchesAtom)[0]).toEqual({ id: "b", at: 3000 })
+    expect(Object.keys(localStorage)).toEqual([RECENT_STORAGE_KEY])
   })
 })

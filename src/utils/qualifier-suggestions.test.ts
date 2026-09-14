@@ -1,7 +1,11 @@
 import { describe, expect, test } from "vitest"
+import { dateShortcuts } from "../blocks/slash-menu"
+import { formatDate } from "./date"
 import {
   STATIC_QUALIFIER_OPTIONS,
+  SUGGESTED_QUALIFIER_KEYS,
   applyQualifierOption,
+  dateQualifierOptions,
   filterQualifierOptions,
   findQualifierTrigger,
 } from "./qualifier-suggestions"
@@ -107,5 +111,57 @@ describe("filterQualifierOptions", () => {
     const values = STATIC_QUALIFIER_OPTIONS.type.map((o) => o.value)
     expect(values.slice(0, 3)).toEqual(["todo", "done", "task"])
     expect(values).toContain("daily")
+  })
+})
+
+describe("sort: and date: vocabularies", () => {
+  test("sort: lists each key with its other direction, and `title:` narrows to it", () => {
+    const options = STATIC_QUALIFIER_OPTIONS.sort
+    expect(options.map((option) => option.value)).toEqual([
+      "title",
+      "title:desc",
+      "updated_at",
+      "updated_at:asc",
+      "id",
+      "id:desc",
+    ])
+    // The direction suffix is part of the value the picker filters on.
+    const trigger = atEnd("sort:title:")
+    expect(trigger?.key).toBe("sort")
+    expect(trigger?.partial).toBe("title:")
+    expect(filterQualifierOptions(options, "title:").map((o) => o.value)).toEqual(["title:desc"])
+    expect(applyQualifierOption("sort:title:", trigger!, options[1])).toEqual({
+      value: "sort:title:desc ",
+      caret: 16,
+    })
+  })
+
+  test("date: offers the slash menu's shortcuts, each resolved to the day it means", () => {
+    const now = new Date(2026, 8, 13) // a Sunday
+    const options = dateQualifierOptions(now)
+    // The one source the slash menu's date rows come from: same words,
+    // same days.
+    expect(options).toEqual(
+      dateShortcuts(now).map((s) => ({ value: s.date, label: s.label, description: s.detail })),
+    )
+    expect(options.map((option) => option.label)).toEqual([
+      "Today",
+      "Tomorrow",
+      "Yesterday",
+      "Next week",
+      "Last week",
+    ])
+    expect(options.map((option) => option.value)).toEqual([
+      "2026-09-13",
+      "2026-09-14",
+      "2026-09-12",
+      "2026-09-20",
+      "2026-09-06",
+    ])
+    expect(options[0].description).toBe(formatDate("2026-09-13"))
+    // The row is found by its word, and the day is what a pick writes.
+    expect(filterQualifierOptions(options, "tom").map((o) => o.value)).toEqual(["2026-09-14"])
+    expect(SUGGESTED_QUALIFIER_KEYS).toContain("date")
+    expect(SUGGESTED_QUALIFIER_KEYS).toContain("sort")
   })
 })

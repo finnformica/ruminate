@@ -32,8 +32,9 @@ Any query with text in it — or a block-scoped `type:` (below) — resolves at 
 
 - **Expand a result in place** with the chevron or <kbd>→</kbd> to see the blocks inside it; <kbd>←</kbd> closes it again (and, from a revealed child, jumps to the block it sits under). Only the level you open is fetched, and it's remembered.
 - <kbd>↵</kbd> **on a highlighted result** opens its note, zoomed to that block.
-- <kbd>↵</kbd> **on the query itself** in <kbd>⌘</kbd> <kbd>K</kbd> (the "see all …" row) opens the full results view. That view is just a URL — `/?query=type:todo+in:%22Reading+list%22` — so any filter is bookmarkable and back/forward behave.
-- The result count is the number of **matched blocks**, alongside how many notes they live in. Blocks revealed by expanding are context, not matches, so they never change the count.
+- <kbd>↵</kbd> **on the query itself** in <kbd>⌘</kbd> <kbd>K</kbd> — straight after typing, with no item highlighted — opens the full results view. That view is just a URL — `/?query=type:todo+in:%22Reading+list%22` — so any filter is bookmarkable and back/forward behave.
+- A note whose **title** matches the text is a result row too, ranked among the blocks **purely by score** — both are fast-fuzzy matches at the one threshold, so a title that matched well sits beside the blocks that matched as well, never in a bucket of its own. Ties keep the note above the block. A query that names a block type or an `in:` scope asks for blocks, so it lists no note rows; an explicit `sort:` orders the notes and then the blocks by the sort instead. The notes page and <kbd>⌘</kbd> <kbd>K</kbd> rank the same way.
+- The result count is the number of **matched blocks**, alongside how many notes they live in, and how many notes matched by title. Blocks revealed by expanding are context, not matches, so they never change the count.
 
 A query that names only notes — a date, a bare property qualifier, or an empty query — still lists notes: every block of every matching note isn't a search result, it's your corpus.
 
@@ -45,17 +46,19 @@ A query that names only notes — a date, a bare property qualifier, or an empty
 - `in:<block id>` names a block; the query then runs over the blocks under it (the block itself is not inside itself). `type:heading in:blk_a1b2c3` lists the headings within that section.
 - It composes like any qualifier: `-in:` excludes, `in:a,b` means either, and it stacks with `type:`, a property and text.
 
-**It is set for you inside a note.** Open <kbd>⌘</kbd> <kbd>K</kbd> from a note and block results are scoped to that note — or, if you have zoomed into a block, to that block — shown as a pill under the query (**Blocks in …**). Click the pill to search everything instead, or type your own `in:` to scope elsewhere. "See all …" carries the scope into the results view as a plain `in:` in the URL, so it reads back as what it is.
+**It is set for you inside a note.** Open <kbd>⌘</kbd> <kbd>K</kbd> from a note and block results are scoped to that note — or, if you have zoomed into a block, to that block — shown as a pill under the query, exactly as a typed `in:` is shown on the notes page. Click the pill to search everything instead, or type your own `in:` to scope elsewhere. <kbd>↵</kbd> carries the scope into the results view as a plain `in:` in the URL, so it reads back as what it is.
 
 ## Suggestions as you type
 
-Typing a qualifier whose values are a known set opens a picker under the search box — on the notes page and in <kbd>⌘</kbd> <kbd>K</kbd>:
+Typing a qualifier whose values are a known set opens a popover beside the token — on the notes page and in <kbd>⌘</kbd> <kbd>K</kbd>, the same one (`src/components/query-box.tsx`):
 
 - `type:` — the block types below, then the note types.
 - `in:` — your notes, by name, most recent first (the open note leads).
 - `has:` / `no:` — `dates`, `tasks`, `title`.
+- `sort:` — `title`, `updated_at`, `id`, each with its other direction (`title:desc`); typing `sort:title:` narrows to it.
+- `date:` — the slash menu's date shortcuts (Today, Tomorrow, Yesterday, Next week, Last week — `dateShortcuts` in `src/blocks/slash-menu.ts`, the one source for both), each glossed with the day it means. The day is what lands in the query (`date:2026-09-14`), exactly as the slash menu writes a day into a note; type a word (`date:tomorrow`) to keep a query relative.
 
-Keep typing to narrow the list, <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>↵</kbd> or <kbd>Tab</kbd> to pick (a note lands as its id; a value with spaces is quoted), <kbd>Esc</kbd> to leave what you typed. `-type:` and comma lists (`type:todo,done`) work the same way.
+Focus never leaves the box: keep typing to narrow the list, <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>↵</kbd> or <kbd>Tab</kbd> to pick (a note lands as its id; a value with spaces is quoted), <kbd>Esc</kbd> to leave what you typed. `-type:` and comma lists (`type:todo,done`) work the same way. On a phone, or in a narrow box, the popover takes the box's full width instead of hanging at the token.
 
 ## Block types
 

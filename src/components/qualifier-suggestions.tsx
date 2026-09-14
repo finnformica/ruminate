@@ -7,6 +7,7 @@ import {
   SUGGESTED_QUALIFIER_KEYS,
   STATIC_QUALIFIER_OPTIONS,
   applyQualifierOption,
+  dateQualifierOptions,
   filterQualifierOptions,
   findQualifierTrigger,
   type QualifierOption,
@@ -16,14 +17,16 @@ import { Keys } from "./keys"
 import { NoteFavicon } from "./note-favicon"
 
 /**
- * **The qualifier picker.** Type `type:`, `in:`, `has:` or `no:` into a
- * search box and a list of what can go there opens over it — the block and
- * note types, your notes — filtered as you keep typing, ↑/↓ to
- * move, ↵ or Tab to pick, Esc to leave what you typed. The pure grammar
- * (which token is under the caret, how a pick is spliced back) lives in
- * `src/utils/qualifier-suggestions.ts`; this file adds the corpus-backed
- * set and the rendering, shared by the notes page's search input and the ⌘K
- * palette.
+ * **The qualifier picker.** Type `type:`, `in:`, `has:`, `no:`, `sort:` or
+ * `date:` into a query box and a popover opens beside the token listing
+ * what can go there — the block and note types, your notes, the sort keys,
+ * a few relative dates — filtered as you keep typing, ↑/↓ to move, ↵ or
+ * Tab to pick, Esc to leave what you typed. Focus never leaves the box: the
+ * box's own text is what narrows the list. The pure grammar (which token is
+ * under the caret, how a pick is spliced back) lives in
+ * `src/utils/qualifier-suggestions.ts`; this file adds the corpus-backed set
+ * and the rendering. The one box that shows it is `QueryBox`
+ * (query-box.tsx), on the notes page and in the ⌘K palette alike.
  */
 
 /** A row of the picker: a query value, plus (for `in:`) the note it names. */
@@ -33,6 +36,9 @@ export interface SuggestionItem extends QualifierOption {
 
 /** How many corpus-backed rows (notes) to list at once. */
 const MAX_ITEMS = 8
+
+/** The popover's width when it hangs beside the token. */
+export const QUALIFIER_POPOVER_WIDTH = 288
 
 /** What the key handler reads — a native or a React keyboard event. */
 type SuggestionKeyEvent = Pick<
@@ -79,6 +85,9 @@ export function useQualifierSuggestions({
         const ordered = current && trigger.partial === "" ? [current, ...rest] : options
         return filterQualifierOptions(ordered, trigger.partial).slice(0, MAX_ITEMS)
       }
+      case "date":
+        // Built when asked for: the rows say which day each word means today.
+        return filterQualifierOptions(dateQualifierOptions(), trigger.partial)
       default:
         return filterQualifierOptions(STATIC_QUALIFIER_OPTIONS[trigger.key] ?? [], trigger.partial)
     }
@@ -183,8 +192,8 @@ function optionId(listboxId: string, index: number): string {
  * pointing at the listbox, and `aria-activedescendant` following the
  * highlighted row, so assistive technology announces each row as the arrows
  * move while keyboard focus stays in the box. Set on the element directly
- * (the palette's input belongs to cmdk, which owns its ARIA props) and put
- * back exactly as found when the picker closes.
+ * (the palette's input carries the palette's own ARIA props) and put back
+ * exactly as found when the picker closes.
  */
 export function useComboboxAria(
   inputRef: React.RefObject<HTMLInputElement>,
@@ -225,18 +234,28 @@ function headingFor(trigger: QualifierTrigger): string {
   return `${trigger.exclude ? "-" : ""}${trigger.key}:`
 }
 
+/** Where the popover hangs, in px within its positioned host: under the
+ * box, at the token — or, on a narrow or touch screen, the box's full width
+ * (`full`), where a card beside the token would have nowhere to go. */
+export interface QualifierPopoverPlacement {
+  top: number
+  left: number
+  width: number
+  full: boolean
+}
+
 /**
- * The picker's rows. Pure presentation, in the slash menu's idiom (a card
- * of rows, one highlighted, a faint group label) — `floating` hangs under a
- * page's search input, `inline` sits inside the palette's card above its
- * list. Mousedown is cancelled so a click never blurs the input.
+ * The picker's rows: a card in the slash menu's idiom (a faint label, rows,
+ * one highlighted), hung where `placement` says. Pure presentation — the
+ * box owns the state and the keys. Mousedown is cancelled so a click never
+ * blurs the input.
  */
-export function QualifierSuggestions({
+export function QualifierPopover({
   id,
   trigger,
   items,
   activeIndex,
-  variant,
+  placement,
   onHover,
   onPick,
 }: {
@@ -245,7 +264,7 @@ export function QualifierSuggestions({
   trigger: QualifierTrigger
   items: SuggestionItem[]
   activeIndex: number
-  variant: "floating" | "inline"
+  placement: QualifierPopoverPlacement
   onHover: (index: number) => void
   onPick: (item: SuggestionItem) => void
 }) {
@@ -263,19 +282,20 @@ export function QualifierSuggestions({
       role="listbox"
       aria-label="Suggestions"
       data-testid="qualifier-suggestions"
+      data-placement={placement.full ? "full" : "token"}
       tabIndex={-1}
-      className={cx(
-        "max-h-[45svh] overflow-auto font-sans text-base font-normal leading-normal text-text",
-        variant === "floating" &&
-          "card-2 absolute left-0 right-0 top-full z-20 mt-1 rounded-lg p-1",
-        variant === "inline" && "border-t border-border-secondary p-2",
-      )}
+      style={{ top: placement.top, left: placement.left, width: placement.width }}
+      className="card-2 absolute z-30 max-h-[45svh] overflow-auto rounded-lg p-1 font-sans text-base font-normal leading-normal text-text"
       onMouseDown={(event) => event.preventDefault()}
     >
       <div className="flex h-7 items-center gap-3 px-2 text-sm text-text-tertiary">
         <span className="font-mono">{headingFor(trigger)}</span>
-        {/* The keys are the box's — say so, since nothing here takes focus. */}
-        <span aria-hidden className="ml-auto flex shrink-0 items-center gap-2 text-xs">
+        {/* The keys are the box's — say so, since nothing here takes focus.
+            Not on a touch screen, which has none of them. */}
+        <span
+          aria-hidden
+          className="ml-auto flex shrink-0 items-center gap-2 text-xs coarse:hidden"
+        >
           <span className="flex items-center gap-1">
             <Keys keys={["↑", "↓"]} /> move
           </span>
@@ -318,7 +338,9 @@ export function QualifierSuggestions({
             </span>
             <span className="grow truncate">{item.label ?? item.value}</span>
             {item.description ? (
-              <span className="shrink-0 text-sm text-text-secondary">{item.description}</span>
+              <span className="shrink-0 truncate text-sm text-text-secondary">
+                {item.description}
+              </span>
             ) : null}
           </div>
         )
