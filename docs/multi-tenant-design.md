@@ -208,7 +208,8 @@ CREATE TABLE users (
   status     TEXT NOT NULL DEFAULT 'active',  -- 'active' | 'blocked'
   created_at INTEGER NOT NULL,     -- ms epoch — attribution lives HERE (§7)
   created_by TEXT NOT NULL DEFAULT 'signup',  -- 'signup' | 'allowlist' | 'admin'
-  last_seen_at INTEGER
+  last_seen_at INTEGER,
+  email      TEXT              -- primary verified GitHub address, recorded at sign-in (0010)
 );
 
 CREATE TABLE allowlist (

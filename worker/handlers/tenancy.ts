@@ -29,6 +29,13 @@ export interface VerifiedIdentity {
   id: number
   login: string
   name: string | null
+  /**
+   * The primary verified address GitHub reports for the account — known only
+   * to the sign-in callback, which fetches it. Absent on the API path
+   * (`requireSession` checks `/user`, not `/user/emails`), where the stored
+   * value is left alone.
+   */
+  email?: string | null
 }
 
 export type TenancyDecision = { allowed: true } | { allowed: false; status: number; error: string }
@@ -57,6 +64,24 @@ function legacyOwnerDecision(id: number, bootstrapGithubId: string | undefined):
   return String(id) === bootstrapGithubId ? allow : deny(403, "forbidden")
 }
 
+/**
+ * Record the account's address on its `users` row — the address sharing
+ * resolves a grantee through (migrations/0010_user_email.sql). Idempotent;
+ * a changed address replaces the old one. Tolerates a missing column
+ * (migration 0010 not applied): the address is a convenience for sharing,
+ * and a sign-in must never fail on it.
+ */
+async function recordUserEmail(driver: SqlDriver, githubId: number, email: string): Promise<void> {
+  try {
+    await driver.exec("UPDATE users SET email = ?2 WHERE github_id = ?1", [
+      githubId,
+      email.trim().toLowerCase(),
+    ])
+  } catch {
+    // Column missing: nothing to record into.
+  }
+}
+
 async function provisionUser(
   driver: SqlDriver,
   identity: VerifiedIdentity,
@@ -76,6 +101,21 @@ async function provisionUser(
  * control-plane database behind the `SqlDriver` seam.
  */
 export async function resolveTenancy(
+  driver: SqlDriver,
+  identity: VerifiedIdentity,
+  options: TenancyOptions,
+): Promise<TenancyDecision> {
+  const decision = await decideTenancy(driver, identity, options)
+  // Signing in IS signing up, and the sign-in callback is the one caller
+  // that knows the address: an admitted identity carrying one has it
+  // recorded on the row that now exists.
+  if (decision.allowed && typeof identity.email === "string" && identity.email.length > 0) {
+    await recordUserEmail(driver, identity.id, identity.email)
+  }
+  return decision
+}
+
+async function decideTenancy(
   driver: SqlDriver,
   identity: VerifiedIdentity,
   options: TenancyOptions,
