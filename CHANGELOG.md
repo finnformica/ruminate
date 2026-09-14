@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-W38
+
+### Fixed
+
+- Typing in a block no longer drops you out of it after one character. When a note had an **Unassigned** basket beneath its outline, every keystroke changed the basket too (it is drawn from the same notes), and the basket then took the keyboard back for its own highlighted row, so the block you were typing in closed after a single character. This bit hardest in the basket itself, where the outline above did the same in return. An editor now takes the keyboard only when nothing else holds it, so the block being typed in keeps it, and so does the note's title, or a dialog's field, while your notes change underneath.
+- The last block in the **Unassigned** basket can be deleted. <kbd>⌫</kbd> on it, and the menu's **Delete**, did nothing: the rule that keeps a note from losing its only block (there is always one to type in) applied to the basket as well, where the last row going is the point, and the basket goes with it. The outline keeps the rule.
+
 ## 2026-W37
 
 ### Removed

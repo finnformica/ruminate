@@ -85,6 +85,13 @@ export interface CommandInput {
    * and an edit to its text would show everywhere. Absent = one place.
    */
   placesOf?: (id: string) => number
+  /**
+   * Whether the doc may be left with no blocks at all. Absent or false, the
+   * only root block cannot be removed — a note keeps a block to type in. True
+   * for a view whose rows are all it is (the Unassigned basket): removing the
+   * last row empties it.
+   */
+  emptyable?: boolean
 }
 
 /** Where selection / edit focus should land after a command runs (a row). */
@@ -562,7 +569,7 @@ export const COMMANDS: Record<CommandName, Command> = {
       doc.rootBlockIds.length === 1 &&
       doc.rootBlockIds[0] === id &&
       (doc.blocks[id]?.children.length ?? 0) === 0
-    if (onlyBlock) return { handled: true }
+    if (onlyBlock && !input.emptyable) return { handled: true }
     const { doc: next } = removeBlock(doc, key)
     // Walk the pre-delete visible order outward from the deleted row: first
     // below (skipping its own removed subtree via the survives-in-next check),
@@ -707,7 +714,9 @@ export const COMMANDS: Record<CommandName, Command> = {
     // The zoomed title can't delete itself out of its own view.
     if (isZoomTitle(input)) return { handled: true }
     const id = idOfKey(key)
-    if (doc.rootBlockIds.length === 1 && doc.rootBlockIds[0] === id) return { handled: true }
+    if (doc.rootBlockIds.length === 1 && doc.rootBlockIds[0] === id && !input.emptyable) {
+      return { handled: true }
+    }
     const { doc: next, focusKey } = removeBlock(doc, key)
     return {
       handled: true,

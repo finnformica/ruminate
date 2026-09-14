@@ -500,6 +500,22 @@ describe("deleteBlock", () => {
     expect(result.handled).toBe(true)
     expect(result.doc).toBeUndefined()
   })
+
+  it("deletes the only block of a doc that may be emptied (the basket)", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["only"],
+      blocks: { only: { id: "only", type: "text", text: "last one", children: [] } },
+    }
+    const result = runCommand(
+      "deleteBlock",
+      input(doc, "only", { visibleOrder: ["only"], emptyable: true }),
+    )
+    expect(result.handled).toBe(true)
+    expect(result.doc!.rootBlockIds).toEqual([])
+    expect(result.doc!.blocks.only).toBeUndefined()
+    expect(result.focus).toEqual({ mode: "select", key: null })
+  })
 })
 
 describe("toggleTodo", () => {
@@ -830,6 +846,23 @@ describe("marker editing", () => {
     expect(result.doc!.blocks.x.type).toBe("text")
     expect(result.doc!.blocks.x.text).toBe("Heading")
     expect(result.focus).toEqual({ mode: "edit", key: "x", atStart: true })
+  })
+
+  it("backspaceEmpty keeps the only block, unless the doc may be emptied", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["only"],
+      blocks: { only: { id: "only", type: "text", text: "", children: [] } },
+    }
+    const kept = runCommand("backspaceEmpty", input(doc, "only", { mode: "edit" }))
+    expect(kept.handled).toBe(true)
+    expect(kept.doc).toBeUndefined()
+    const emptied = runCommand(
+      "backspaceEmpty",
+      input(doc, "only", { mode: "edit", emptyable: true }),
+    )
+    expect(emptied.doc!.rootBlockIds).toEqual([])
+    expect(emptied.focus).toEqual({ mode: "select", key: null })
   })
 
   it("backspaceEmpty removes an empty block and edits the previous one", () => {
