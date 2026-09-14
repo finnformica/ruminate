@@ -327,7 +327,7 @@ async function openWithBlocks(hits: ReturnType<typeof hit>[], notes: unknown[] =
   input.setSelectionRange(input.value.length, input.value.length)
   // The query is debounced (150ms) before the palette re-derives its groups.
   await waitFor(() => {
-    expect(screen.queryByText("Settings")).toBeNull()
+    expect(screen.getByText("Results")).toBeTruthy()
   })
   return rendered
 }
@@ -395,7 +395,7 @@ describe("block results", () => {
     for (const value of ["nv", "nvi", "nvid"]) {
       fireEvent.change(input, { target: { value } })
       await waitFor(() => {
-        expect(screen.queryByText("Settings")).toBeNull()
+        expect(screen.getByText("Results")).toBeTruthy()
       })
       expect(rowIds()).toEqual(["blk_nvidia", "blk_milk"])
       expect(document.activeElement).toBe(input)
@@ -413,23 +413,33 @@ describe("block results", () => {
   })
 
   it("Enter on a highlighted item picks the item, not the results view", async () => {
+    // The palette's one item of its own: the date a query reads as.
     mocks.match = undefined
     renderMenu({ open: true })
     const input = commandsInput()
-    fireEvent.change(input, { target: { value: "sett" } })
-    // The debounce has filtered the items down to the one match.
+    fireEvent.change(input, { target: { value: "tomorrow" } })
     await waitFor(() => {
-      expect(screen.queryByText("Notes")).toBeNull()
+      expect(screen.getByText("Date")).toBeTruthy()
     })
-    expect(screen.getByText("Settings")).toBeTruthy()
-    // ↓ puts cmdk's highlight on the first item.
+    // Nothing highlighted until arrowed; ↓ puts cmdk's highlight on the item.
+    expect(document.querySelector('[cmdk-item][aria-selected="true"]')).toBeNull()
     fireEvent.keyDown(input, { key: "ArrowDown" })
-    expect(document.querySelector('[cmdk-item][aria-selected="true"]')?.textContent).toContain(
-      "Settings",
-    )
+    expect(document.querySelector('[cmdk-item][aria-selected="true"]')).not.toBeNull()
     fireEvent.keyDown(input, { key: "Enter" })
-    expect(mocks.navigate).toHaveBeenCalledWith({ to: "/settings" })
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "/notes/$",
+        params: { _splat: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) },
+      }),
+    )
     expect(mocks.navigate).not.toHaveBeenCalledWith(expect.objectContaining({ to: "/" }))
+  })
+
+  it("no group of jumps or note actions: the palette finds notes and blocks", () => {
+    renderMenu({ open: true })
+    for (const label of ["Jump to", "Note actions", "Settings", "Copy note markdown"]) {
+      expect(screen.queryByText(label)).toBeNull()
+    }
   })
 
   it("inside a note, scopes the search to it — an `in:` the results view inherits", async () => {
@@ -582,7 +592,7 @@ describe("note results", () => {
     fireEvent.change(input, { target: { value: "research" } })
     input.setSelectionRange(input.value.length, input.value.length)
     await waitFor(() => {
-      expect(screen.queryByText("Settings")).toBeNull()
+      expect(screen.getByText("Results")).toBeTruthy()
     })
     return rendered
   }
@@ -711,6 +721,78 @@ describe("note results", () => {
     })
     expect(screen.queryByText("Recent")).toBeNull()
     expect(rowIds()).toEqual(["blk_milk"])
+  })
+
+  it("↓ and ↑ walk Recent and then Pinned as one list, and ↑ from the first row returns to the query", () => {
+    // `research` recent; `journal` pinned only. Nothing typed.
+    const research = edited("research", 5000)
+    const journal = { ...makeNote("journal"), pinned: true }
+    renderMenu({ open: true, notes: [research, journal], pinned: [journal] })
+    const input = commandsInput()
+    input.focus()
+    const editors = () => Array.from(document.querySelectorAll<HTMLElement>("[data-block-editor]"))
+    const highlighted = () =>
+      Array.from(document.querySelectorAll<HTMLElement>("[data-block-row]"))
+        .filter((row) => row.querySelector(".block-highlight"))
+        .map((row) => row.dataset.blockRow)
+    expect(editors()).toHaveLength(2)
+
+    // ↓ from the query: straight to the first recent row — no item in the way.
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    expect(document.activeElement).toBe(editors()[0])
+    expect(highlighted()).toEqual(["research"])
+    // ↓ past the last recent row: the first pinned row, in the second editor.
+    fireEvent.keyDown(editors()[0], { key: "ArrowDown" })
+    expect(document.activeElement).toBe(editors()[1])
+    expect(highlighted()).toEqual(["journal"])
+    // ↓ at the very end stays put.
+    fireEvent.keyDown(editors()[1], { key: "ArrowDown" })
+    expect(highlighted()).toEqual(["journal"])
+    // ↑ walks back into the last recent row.
+    fireEvent.keyDown(editors()[1], { key: "ArrowUp" })
+    expect(document.activeElement).toBe(editors()[0])
+    expect(highlighted()).toEqual(["research"])
+    // ↑ from the very first row returns to the query.
+    fireEvent.keyDown(editors()[0], { key: "ArrowUp" })
+    expect(document.activeElement).toBe(input)
+    expect(highlighted()).toEqual([])
+    // ↵ on a highlighted row opens it.
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(editors()[0], { key: "ArrowDown" })
+    fireEvent.keyDown(editors()[1], { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/notes/$",
+      params: { _splat: "journal" },
+      search: { query: undefined, block: undefined },
+    })
+  })
+
+  it("a results list mounting after an earlier hand-off never takes the keyboard from the query", async () => {
+    // Seen in the browser: ↓ had handed the keyboard to the pinned rows once;
+    // back in the query, typing swapped the lists for the results, whose
+    // fresh editor mounted under the already-bumped signal and took focus
+    // mid-word.
+    const journal = { ...makeNote("journal"), pinned: true }
+    mocks.results = {
+      mode: "blocks",
+      hits: [NVIDIA],
+      notes: [RESEARCH],
+      titleMatches: [],
+      rows: rowsOf([NVIDIA]),
+    }
+    renderMenu({ open: true, notes: [journal], pinned: [journal] })
+    const input = commandsInput()
+    input.focus()
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    expect(document.activeElement).toBe(editor())
+    fireEvent.keyDown(editor(), { key: "Escape" })
+    expect(document.activeElement).toBe(input)
+    fireEvent.change(input, { target: { value: "nvidia" } })
+    await waitFor(() => {
+      expect(rowIds()).toEqual(["blk_nvidia"])
+    })
+    expect(document.activeElement).toBe(input)
+    expect(rowOf("blk_nvidia")?.querySelector(".block-highlight")).toBeNull()
   })
 
   it("with nothing recent, ↓ from the query lands in the pinned rows", () => {

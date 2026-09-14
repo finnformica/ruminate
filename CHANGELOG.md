@@ -4,6 +4,7 @@
 
 ### Removed
 
+- <kbd>⌘</kbd> <kbd>K</kbd> no longer lists **Jump to** (Notes, Calendar, Settings) or **Note actions** (Copy note markdown, Copy note ID, Print note). The jumps have their own keys (<kbd>g</kbd> then <kbd>n</kbd> / <kbd>d</kbd> / <kbd>s</kbd>) and the sidebar; the note actions live in the note's own menu. The palette is for finding notes and blocks: with nothing typed it shows Recent and Pinned, and <kbd>↓</kbd> goes straight to the first row.
 - Tags are gone. The tags page, the sidebar's greyed-out **Tags** entry and its <kbd>g</kbd> then <kbd>t</kbd> shortcut, the tag pills and tag filter above the notes list, the `tag:` and `tags:` qualifiers (and `has:tags` / `no:tags`, `sort:tags`) in search, the `#tag` line in the help panel's formatting reference, and the MCP server's `list_tags` tool with `list_notes`' `tag` filter and `read_note`'s `tags` part have all been removed. A `#word` in a block is plain text, as it has rendered for a while. Nothing is deleted from your notes: a `tags` entry a note's properties already carry stays where it is, it is simply no longer read.
 
 ### Changed

@@ -314,17 +314,31 @@ describe("BlockEditor focus + keyboard", () => {
   })
 
   it("hands off from the title into the first block editing when mode is edit", () => {
-    // focusFirstSignal truthy on mount fires the hand-off effect once; mode
+    // A signal is an edge: a bump after mount fires the hand-off once; mode
     // "edit" should open the first block's textarea (title was being edited).
+    const doc = withStarter(parse("A\nB"))
+    const { container, rerender } = render(
+      <BlockEditor doc={doc} onChange={() => {}} focusFirstSignal={0} focusFirstMode="edit" />,
+    )
+    expect(container.querySelector("textarea")).toBeNull()
+    rerender(
+      <BlockEditor doc={doc} onChange={() => {}} focusFirstSignal={1} focusFirstMode="edit" />,
+    )
+    expect(container.querySelector("textarea")).not.toBeNull()
+  })
+
+  it("mounting under an already-bumped signal is not a hand-off", () => {
+    // The palette swaps its lists as the query changes; a fresh editor under
+    // a counter bumped for an earlier one must not take the keyboard.
     const { container } = render(
       <BlockEditor
         doc={withStarter(parse("A\nB"))}
         onChange={() => {}}
-        focusFirstSignal={1}
+        focusFirstSignal={3}
         focusFirstMode="edit"
       />,
     )
-    expect(container.querySelector("textarea")).not.toBeNull()
+    expect(container.querySelector("textarea")).toBeNull()
   })
 
   it("hands off from the title into the first block highlighted when mode is select", () => {

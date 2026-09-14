@@ -113,6 +113,9 @@ export interface CommandResult {
   /** Navigation tried to move above the first block — the caller may hand focus
    * to whatever sits above the editor (e.g. the note title). */
   exitTop?: boolean
+  /** Navigation tried to move below the last block — the caller may hand
+   * focus to whatever sits below the editor (a second results list). */
+  exitBottom?: boolean
   /** Requested zoom change: `{ id: null }` exits zoom, `{ id }` zooms into a
    * block. Absent = no change. The editor navigates (URL state) accordingly. */
   zoom?: { id: string | null }
@@ -181,8 +184,10 @@ function moveSelection(direction: "up" | "down"): Command {
     // Moving up past the first block hands focus to whatever's above the editor
     // — except while zoomed, where the note title isn't the context: swallow.
     if (next < 0) return zoomRootId ? { handled: true } : { handled: true, exitTop: true }
-    // Consume the key at the bottom too, so the page never scrolls instead.
-    if (next >= visibleOrder.length) return { handled: true }
+    // Past the last block it hands focus to whatever is below (`exitBottom`
+    // — a second results list under this one); consumed either way, so the
+    // page never scrolls instead.
+    if (next >= visibleOrder.length) return { handled: true, exitBottom: true }
     return { handled: true, focus: { mode: "select", key: visibleOrder[next] } }
   }
 }

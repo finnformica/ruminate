@@ -37,7 +37,10 @@ export function ResultsList({
   variant = "page",
   onOpen,
   focusFirstSignal,
+  focusLastSignal,
   onExitTop,
+  onExitBottom,
+  initialSelection,
 }: {
   /** The full query the results are for — empty when browsing. */
   query: string
@@ -58,8 +61,15 @@ export function ResultsList({
   onOpen: (noteId: NoteId, blockId?: string) => void
   /** Bump to highlight the first row (↓ from the query box). */
   focusFirstSignal?: number
+  /** Bump to highlight the last row (↑ from a list beneath this one). */
+  focusLastSignal?: number
   /** ↑ past the first row hands focus back (to the query box). */
   onExitTop?: () => void
+  /** ↓ past the last row hands focus on (to a list beneath this one). */
+  onExitBottom?: () => void
+  /** The first row highlighted on mount (the page), or nothing until the
+   * keyboard arrives (the palette's lists). */
+  initialSelection?: "first" | "none"
 }) {
   const { mode, hits, notes, titleMatches, rows: ranked } = results
   const showBlocks = mode === "blocks"
@@ -131,7 +141,10 @@ export function ResultsList({
           readOnly={readOnly}
           onOpen={onOpen}
           focusFirstSignal={focusFirstSignal}
+          focusLastSignal={focusLastSignal}
           onExitTop={onExitTop}
+          onExitBottom={onExitBottom}
+          initialSelection={initialSelection}
         />
       </div>
       {more && total > visible ? (

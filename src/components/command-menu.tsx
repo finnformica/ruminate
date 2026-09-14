@@ -1,37 +1,26 @@
 import { useMatch, useNavigate } from "@tanstack/react-router"
 import { parseDate } from "chrono-node"
 import { Command } from "cmdk"
-import copy from "copy-to-clipboard"
-import { atom, useAtom, useAtomValue, useSetAtom, useStore } from "jotai"
+import { atom, useAtom, useAtomValue, useSetAtom } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
 import {
   blockRevealAtom,
-  graphSnapshotAtom,
   noteOutlineAtom,
   pinnedNotesAtom,
   recentTouchesAtom,
   sortedNotesAtom,
 } from "../global-state"
 import { recentNotes as recentTouched } from "../utils/recent-notes"
-import { useCreateNote, useNoteById } from "../hooks/note"
+import { useCreateNote } from "../hooks/note"
 import { useSearchResults } from "../hooks/search-results"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/registry"
-import { rollup } from "../data/graph"
-import { copyAsMarkdown } from "../utils/copy-markdown"
 import { formatDate, formatDateDistance, toDateString } from "../utils/date"
 import { generateNoteId } from "../utils/note-id"
 import { filterOutline } from "../utils/note-outline"
 import { parseQuery } from "../utils/search"
-import {
-  CalendarDateIcon16,
-  CopyIcon16,
-  NoteIcon16,
-  PlusIcon16,
-  PrinterIcon16,
-  SettingsIcon16,
-} from "./icons"
+import { CalendarDateIcon16, PlusIcon16 } from "./icons"
 import { Keys } from "./keys"
 import { QUERY_DEBOUNCE_MS } from "./note-list"
 import { QueryBox } from "./query-box"
@@ -74,7 +63,6 @@ const NAVIGATION_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End"])
 export function CommandMenu() {
   const navigate = useNavigate()
   const createNote = useCreateNote()
-  const jotaiStore = useStore()
   // With nothing typed: the notes most recently TOUCHED — edited or created
   // (the graph's `updatedAt`) merged with what was opened, edited or folded
   // on this device (`recentTouchesAtom`) — at most five; then the pinned
@@ -90,11 +78,10 @@ export function CommandMenu() {
   )
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
 
-  // Get the current note if we're on a note page.
-  // This is used to show note actions in the command menu.
+  // The open note, if any: the palette's default `in:` scope, and whose
+  // outline ⌘P lists.
   const noteMatch = useMatch({ from: "/_appRoot/notes_/$", shouldThrow: false })
   const noteId = noteMatch?.params._splat
-  const note = useNoteById(noteId)
   // The block the note is zoomed into, if any — the view's scope is then that
   // subtree, not the whole note.
   const zoomBlockId = noteMatch?.search?.block
@@ -263,89 +250,6 @@ export function CommandMenu() {
     [mode, query, enterOutlineMode],
   )
 
-  const navItems = useMemo(() => {
-    return [
-      {
-        label: "Notes",
-        shortcut: formatCombo("g n"),
-        icon: <NoteIcon16 />,
-        onSelect: () => {
-          navigate({
-            to: "/",
-            search: {
-              query: undefined,
-            },
-          })
-        },
-      },
-      {
-        label: "Calendar",
-        shortcut: formatCombo("g d"),
-        icon: <CalendarDateIcon16 date={new Date().getDate()} />,
-        onSelect: () => {
-          navigate({
-            to: "/notes/$",
-            params: {
-              _splat: toDateString(new Date()),
-            },
-            search: {
-              query: undefined,
-            },
-          })
-        },
-      },
-      {
-        label: "Settings",
-        shortcut: formatCombo("g s"),
-        icon: <SettingsIcon16 />,
-        onSelect: () => {
-          navigate({
-            to: "/settings",
-          })
-        },
-      },
-    ]
-  }, [navigate])
-
-  const filteredNavItems = useMemo(() => {
-    return navItems.filter((item) => {
-      return item.label.toLowerCase().includes(deferredQuery.toLowerCase())
-    })
-  }, [navItems, deferredQuery])
-
-  const noteActions = useMemo(() => {
-    if (!note) return []
-    return [
-      {
-        label: "Copy note markdown",
-        icon: <CopyIcon16 />,
-        onSelect: () => {
-          copyAsMarkdown(rollup(note.id, jotaiStore.get(graphSnapshotAtom)) ?? "")
-        },
-      },
-      {
-        label: "Copy note ID",
-        icon: <CopyIcon16 />,
-        onSelect: () => {
-          copy(note.id)
-        },
-      },
-      {
-        label: "Print note",
-        icon: <PrinterIcon16 />,
-        onSelect: () => {
-          window.print()
-        },
-      },
-    ]
-  }, [note, jotaiStore])
-
-  const filteredNoteActions = useMemo(() => {
-    return noteActions.filter((item) => {
-      return item.label.toLowerCase().includes(deferredQuery.toLowerCase())
-    })
-  }, [noteActions, deferredQuery])
-
   // Check if query can be parsed as a date
   const dateString = useMemo(() => {
     const date = parseDate(deferredQuery)
@@ -388,8 +292,18 @@ export function CommandMenu() {
     ? results.rows.length > 0
     : recentNotes.length > 0 || pinnedNotes.length > 0
 
-  // Bumped to hand the keyboard to the results (↓ past the last item).
+  // The keyboard's way through the rows. With nothing typed there are two
+  // lists, Recent and then Pinned, walked as one: ↓ from the query lands on
+  // the first row of the first list there is; ↓ past the last recent row
+  // lands on the first pinned row (`recentToPinned`); ↑ past the first
+  // pinned row lands on the last recent row (`pinnedToRecent`); ↑ past the
+  // first row of the first list returns to the query. Each hop is a signal
+  // the editor concerned acts on.
   const [focusFirstSignal, setFocusFirstSignal] = useState(0)
+  const [recentLastSignal, setRecentLastSignal] = useState(0)
+  const [pinnedFirstSignal, setPinnedFirstSignal] = useState(0)
+  const recentToPinned = useCallback(() => setPinnedFirstSignal((n) => n + 1), [])
+  const pinnedToRecent = useCallback(() => setRecentLastSignal((n) => n + 1), [])
   /** ↓ in the query with cmdk's highlight on the last item (or no items at
    * all) hands the keyboard to the result rows: the editor takes focus
    * (cmdk's highlight stays on the last item, dimmed — command-menu.css —
@@ -650,33 +564,6 @@ export function CommandMenu() {
               )
             ) : (
               <>
-                {filteredNoteActions.length > 0 ? (
-                  <Command.Group heading="Note actions">
-                    {filteredNoteActions.map((action) => (
-                      <CommandItem
-                        key={action.label}
-                        icon={action.icon}
-                        onSelect={handleSelect(action.onSelect)}
-                      >
-                        {action.label}
-                      </CommandItem>
-                    ))}
-                  </Command.Group>
-                ) : null}
-                {filteredNavItems.length ? (
-                  <Command.Group heading="Jump to">
-                    {filteredNavItems.map((item) => (
-                      <CommandItem
-                        key={item.label}
-                        icon={item.icon}
-                        shortcut={item.shortcut}
-                        onSelect={handleSelect(item.onSelect)}
-                      >
-                        {item.label}
-                      </CommandItem>
-                    ))}
-                  </Command.Group>
-                ) : null}
                 {dateString ? (
                   <Command.Group heading="Date">
                     <CommandItem
@@ -712,17 +599,22 @@ export function CommandMenu() {
                       browseNotes={recentNotes}
                       limit={NUM_VISIBLE_RESULTS}
                       readOnly
+                      initialSelection="none"
                       onOpen={openResult}
                       focusFirstSignal={focusFirstSignal}
+                      focusLastSignal={recentLastSignal}
                       onExitTop={takeBackFromRows}
+                      onExitBottom={
+                        !deferredQuery && pinnedNotes.length > 0 ? recentToPinned : undefined
+                      }
                     />
                   </Command.Group>
                 ) : null}
                 {!deferredQuery && pinnedNotes.length > 0 ? (
                   // The pinned notes, beneath the recent ones: a second
-                  // results block, browsed the same way. ↓ from the query
-                  // lands here only when there is nothing recent to land
-                  // in; ↑ from its first row returns to the query.
+                  // results block, browsed the same way, walked into from
+                  // the recent rows and back out of them (or, with nothing
+                  // recent, straight from the query).
                   <Command.Group heading="Pinned">
                     <ResultsList
                       variant="palette"
@@ -731,9 +623,12 @@ export function CommandMenu() {
                       browseNotes={pinnedNotes}
                       limit={NUM_VISIBLE_RESULTS}
                       readOnly
+                      initialSelection="none"
                       onOpen={openResult}
-                      focusFirstSignal={recentNotes.length > 0 ? undefined : focusFirstSignal}
-                      onExitTop={takeBackFromRows}
+                      focusFirstSignal={
+                        recentNotes.length > 0 ? pinnedFirstSignal : focusFirstSignal
+                      }
+                      onExitTop={recentNotes.length > 0 ? pinnedToRecent : takeBackFromRows}
                     />
                   </Command.Group>
                 ) : null}
