@@ -85,6 +85,7 @@ vi.mock("../global-state", async (importOriginal) => {
     notesAtom: atom(new Map()),
     sortedNotesAtom: atom([]),
     pinnedNotesAtom: atom([]),
+    pinnedBlocksAtom: atom([]),
     recentTouchesAtom: atom([]),
     noteOutlineAtom: atom(null),
     blockRevealAtom: atom(null),
@@ -96,6 +97,7 @@ vi.mock("../global-state", async (importOriginal) => {
 import {
   blockRevealAtom,
   noteOutlineAtom,
+  pinnedBlocksAtom,
   pinnedNotesAtom,
   recentTouchesAtom,
   sortedNotesAtom,
@@ -134,12 +136,14 @@ function renderMenu({
   notes = [],
   touches = [],
   pinned = [],
+  pinnedBlocks = [],
 }: {
   outline?: typeof OUTLINE | null
   open?: boolean
   notes?: unknown[]
   touches?: { id: string; at: number }[]
   pinned?: unknown[]
+  pinnedBlocks?: unknown[]
 } = {}) {
   const store = createStore()
   store.set(noteOutlineAtom, outline)
@@ -149,6 +153,7 @@ function renderMenu({
   store.set(sortedNotesAtom as never, notes as never)
   store.set(recentTouchesAtom as never, touches as never)
   store.set(pinnedNotesAtom as never, pinned as never)
+  store.set(pinnedBlocksAtom as never, pinnedBlocks as never)
   if (open) store.set(isCommandMenuOpenAtom, true)
   render(
     <Provider store={store}>
@@ -693,6 +698,27 @@ describe("note results", () => {
     expect(idsIn(groups[0])).toEqual(["research"])
     expect(idsIn(groups[1])).toEqual(["journal"])
     expect(rowIds()).toEqual(["research", "journal"])
+  })
+
+  it("Pinned lists the pinned blocks after the pinned notes, each a row of its own", () => {
+    // `journal` is pinned; so is the block `blk_ship` inside it. Nothing is
+    // recent, so Pinned is the only group — and the block is a row that
+    // opens its note zoomed into it.
+    const journal = { ...makeNote("journal"), pinned: true }
+    const ship = { id: "blk_ship", noteId: "journal", text: "ship it", note: journal }
+    renderMenu({ open: true, notes: [journal], pinned: [journal], pinnedBlocks: [ship] })
+    expect(screen.queryByText("Recent")).toBeNull()
+    expect(screen.getByText("Pinned")).toBeTruthy()
+    expect(rowIds()).toEqual(["journal", "blk_ship"])
+    // ↓ twice from the query lands on the block's row; ↵ opens it.
+    fireEvent.keyDown(commandsInput(), { key: "ArrowDown" })
+    fireEvent.keyDown(editor(), { key: "ArrowDown" })
+    fireEvent.keyDown(editor(), { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/notes/$",
+      params: { _splat: "journal" },
+      search: { query: undefined, block: "blk_ship" },
+    })
   })
 
   it("Pinned holds the pinned notes that are not recent, and goes with Recent when typing", async () => {

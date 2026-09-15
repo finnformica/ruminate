@@ -1384,6 +1384,7 @@ export function BlockEditor({
       hasChildren: row.hasChildren,
       collapsed: row.collapsed,
       places: parentCountOf ? Math.max(1, parentCountOf(row.id)) : 1,
+      pinned: block.props?.pinned === true,
       image:
         block.type === "image"
           ? { align: imageAlignOf(block), sized: imagePropsOf(block).size !== undefined }
@@ -1606,6 +1607,22 @@ export function BlockEditor({
   const sharedOrigin = useAtomValue(sharedOriginAtom)
   const openShareDialog = useSetAtom(shareDialogAtom)
   const canShare = noteId !== undefined && isDatabaseMode && !sharedOrigin.has(noteId)
+  // A block is the user's own to pin when the editor has a note of theirs
+  // behind it — signed out too, where the sample notes are theirs to play
+  // with — and never in a note someone shared with them: the pin is a prop
+  // on the block, which is the owner's row.
+  const canPin = noteId !== undefined && !sharedOrigin.has(noteId)
+  // Pinning is a prop on the block (docs/metadata.md), so it goes through
+  // the doc like a change to its text and undoes the same way.
+  const togglePin = (id: string) => {
+    const block = doc.blocks[id]
+    if (!block) return
+    const props = { ...(block.props ?? {}) }
+    if (props.pinned === true) delete props.pinned
+    else props.pinned = true
+    const next = updateBlock(doc, id, { props: Object.keys(props).length > 0 ? props : null })
+    if (next !== doc) history.commit(doc, next, { type: "structural" })
+  }
 
   const menuActions: BlockMenuActions = {
     edit: (key) => edit(key),
@@ -1627,6 +1644,7 @@ export function BlockEditor({
     copyLink: noteId
       ? (id) => copy(`${window.location.origin}/notes/${noteId}?block=${id}`)
       : undefined,
+    pin: canPin ? togglePin : undefined,
     share: canShare ? (id) => openShareDialog(id) : undefined,
     remove: (key) => runOnRow("deleteBlock", key),
     deleteEverywhere: onDeleteEverywhere,

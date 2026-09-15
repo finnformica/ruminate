@@ -5,6 +5,7 @@ import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
 import { buildGraphSnapshot, docToGraph, noteDoc, rollup } from "./data/graph"
 import { serialize } from "./blocks/serialize"
 import { applyOps } from "./data/ops"
+import { sharedOriginAtom } from "./data/shared-mode"
 import {
   blockIndexAtom,
   githubUserAtom,
@@ -14,6 +15,7 @@ import {
   graphSnapshotAtom,
   isSignedOutAtom,
   notesAtom,
+  pinnedBlocksAtom,
   recentTouchesAtom,
   sampleGraphAtom,
   searchBlocksAtom,
@@ -109,6 +111,77 @@ describe("graphSnapshotAtom", () => {
     )
     expect(store.get(notesAtom).get("readme")!.text).toContain("edited")
 
+    unsubscribe()
+  })
+})
+
+describe("pinnedBlocksAtom", () => {
+  const pin = (id: string) => ({
+    op: "setProps" as const,
+    id,
+    props: JSON.stringify({ pinned: true }),
+  })
+
+  it("lists the blocks with a pinned prop, each with the note it opens in, in index order", async () => {
+    const { store, unsubscribe } = await signedInStore(FILES)
+    expect(store.get(pinnedBlocksAtom)).toEqual([])
+
+    store.set(databaseGraphAtom, applyOps(store.get(databaseGraphAtom), [pin("blk_milk")], 2))
+    expect(store.get(pinnedBlocksAtom)).toMatchObject([
+      { id: "blk_milk", noteId: "tasks", text: "buy milk", note: { id: "tasks" } },
+    ])
+
+    // Index order: the notes' sorted order ("misc" before "Today"), then
+    // document order within a note.
+    store.set(databaseGraphAtom, applyOps(store.get(databaseGraphAtom), [pin("blk_plants")], 3))
+    expect(store.get(pinnedBlocksAtom).map((block) => block.id)).toEqual(["blk_plants", "blk_milk"])
+
+    // Unpinned, the block is gone from the list.
+    store.set(
+      databaseGraphAtom,
+      applyOps(
+        store.get(databaseGraphAtom),
+        [{ op: "setProps", id: "blk_plants", props: null }],
+        4,
+      ),
+    )
+    expect(store.get(pinnedBlocksAtom).map((block) => block.id)).toEqual(["blk_milk"])
+    unsubscribe()
+  })
+
+  it("opens a block held in several notes in the note it was written in", async () => {
+    const { store, unsubscribe } = await signedInStore(FILES)
+    // A block written in `tasks` (its `notes_id`), held by `tasks` and by
+    // `misc` — which the index lists first. The row still opens in `tasks`.
+    store.set(
+      databaseGraphAtom,
+      applyOps(
+        store.get(databaseGraphAtom),
+        [
+          {
+            op: "create",
+            id: "blk_both",
+            type: "text",
+            text: "both",
+            props: null,
+            notesId: "tasks",
+          },
+          { op: "link", source: "misc", destination: "blk_both", sortKey: "a0" },
+          { op: "link", source: "tasks", destination: "blk_both", sortKey: "a0" },
+          pin("blk_both"),
+        ],
+        2,
+      ),
+    )
+    expect(store.get(pinnedBlocksAtom)).toMatchObject([{ id: "blk_both", noteId: "tasks" }])
+    unsubscribe()
+  })
+
+  it("leaves out a block in a note someone shared with the user — the owner's pin, not theirs", async () => {
+    const { store, unsubscribe } = await signedInStore(FILES)
+    store.set(databaseGraphAtom, applyOps(store.get(databaseGraphAtom), [pin("blk_milk")], 2))
+    store.set(sharedOriginAtom, new Map([["blk_milk", "share-1"]]))
+    expect(store.get(pinnedBlocksAtom)).toEqual([])
     unsubscribe()
   })
 })

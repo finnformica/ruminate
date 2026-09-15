@@ -45,6 +45,7 @@ function Harness({
   onImageUpload,
   onHint,
   knownBlock,
+  noteId,
 }: {
   initial?: string
   /** A doc built by hand — for shapes markdown cannot express (a shared block). */
@@ -60,6 +61,8 @@ function Harness({
   /** Sees every change's hint (undefined when there is none). */
   onHint?: (hint: ChangeHint | undefined) => void
   knownBlock?: (id: string) => boolean
+  /** The note behind the doc (what Pin and Copy link need). */
+  noteId?: string
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarter(parse(initial)))
   return (
@@ -71,6 +74,7 @@ function Harness({
           setDoc(next)
         }}
         knownBlock={knownBlock}
+        noteId={noteId}
         startEditing={startEditing}
         zoomRootId={zoomRootId}
         refocusSignal={refocusSignal}
@@ -2425,6 +2429,31 @@ describe("BlockEditor context menu", () => {
     expect(fireEvent.touchEnd(body, { changedTouches: [{ clientX: 20, clientY: 20 }] })).toBe(true)
     await pick("Unlink")
     expect(serializedLines(getByTestId)).toEqual(["A", "C"])
+  })
+
+  it("pins and unpins a block from its menu, as a prop on the block, and the row says so", async () => {
+    const { container } = render(<Harness initial={"A\nB"} noteId="n" />)
+    let menu = await openMenuOn(container, 1)
+    expect(menu.textContent).toContain("Pin")
+    expect(menu.textContent).not.toContain("Unpin")
+    expect(container.querySelector('[data-testid="block-pinned"]')).toBeNull()
+    await pick("Pin")
+    // The row now carries the pin glyph; the menu offers Unpin.
+    const rows = container.querySelectorAll("[data-occurrence]")
+    expect(rows[1]!.querySelector('[data-testid="block-pinned"]')).not.toBeNull()
+    expect(rows[0]!.querySelector('[data-testid="block-pinned"]')).toBeNull()
+    menu = await openMenuOn(container, 1)
+    expect(menu.textContent).toContain("Unpin")
+    await pick("Unpin")
+    expect(container.querySelector('[data-testid="block-pinned"]')).toBeNull()
+  })
+
+  it("offers Pin only where the rows are a note's own", async () => {
+    // No note behind the editor (a clipboard fragment, Storybook): nothing
+    // to list the block under, so no Pin.
+    const { container } = render(<Harness initial={"A\nB"} />)
+    const menu = await openMenuOn(container, 1)
+    expect(menu.textContent).not.toContain("Pin")
   })
 
   it("opens on a row with the standard actions, and selects that row", async () => {

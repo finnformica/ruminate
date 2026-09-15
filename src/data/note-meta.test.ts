@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import { buildGraphSnapshot, docToGraph, type GraphSnapshot } from "./graph"
-import { createNotesBuilder, noteFromNode, notePropsEntries, notePropsOps } from "./note-meta"
+import {
+  blockPropsOps,
+  createNotesBuilder,
+  noteFromNode,
+  notePropsEntries,
+  notePropsOps,
+} from "./note-meta"
 import { applyOps } from "./ops"
 
 /** A note fixture: its markdown body, with its metadata as props (never as
@@ -94,6 +100,25 @@ describe("note props", () => {
     expect(entries).toMatchObject({ width: "full", font: "serif" })
     expect(typeof entries.updated_at).toBe("string")
     expect(notePropsOps("nope", {}, snapshot)).toEqual([])
+  })
+
+  it("blockPropsOps merges a block's props, removes null keys, and never stamps updated_at", () => {
+    const snapshot = graphOf({ p: "- x\n  id:: blk_x000000000\n" })
+    const pinned = applyOps(
+      snapshot,
+      blockPropsOps("blk_x000000000", { pinned: true }, snapshot),
+      2,
+    )
+    expect(JSON.parse(pinned.nodes.get("blk_x000000000")!.props!)).toEqual({ pinned: true })
+    // Unpinning takes the key out, and empty props are stored as none.
+    const unpinned = applyOps(pinned, blockPropsOps("blk_x000000000", { pinned: null }, pinned), 3)
+    expect(unpinned.nodes.get("blk_x000000000")!.props).toBeNull()
+    // A note node is a note's props op (stamped); an unknown node is nothing.
+    const onNote = applyOps(snapshot, blockPropsOps("p", { pinned: true }, snapshot), 4)
+    const entries = notePropsEntries(onNote.nodes.get("p")!.props)
+    expect(entries.pinned).toBe(true)
+    expect(typeof entries.updated_at).toBe("string")
+    expect(blockPropsOps("nope", { pinned: true }, snapshot)).toEqual([])
   })
 })
 

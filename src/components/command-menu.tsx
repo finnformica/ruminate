@@ -8,10 +8,12 @@ import { useDebounce } from "use-debounce"
 import {
   blockRevealAtom,
   noteOutlineAtom,
+  pinnedBlocksAtom,
   pinnedNotesAtom,
   recentTouchesAtom,
   sortedNotesAtom,
 } from "../global-state"
+import type { ResultRoot } from "../hooks/results-doc"
 import { recentNotes as recentTouched } from "../utils/recent-notes"
 import { useCreateNote } from "../hooks/note"
 import { useSearchResults } from "../hooks/search-results"
@@ -67,14 +69,25 @@ export function CommandMenu() {
   // (the graph's `updatedAt`) merged with what was opened, edited or folded
   // on this device (`recentTouchesAtom`) — at most five; then the pinned
   // notes beneath, less any already listed as recent, so nothing is there
-  // twice.
+  // twice, and the pinned blocks after them (docs/metadata.md), each a row
+  // that opens its note zoomed into it.
   const sortedNotes = useAtomValue(sortedNotesAtom)
   const touches = useAtomValue(recentTouchesAtom)
   const recentNotes = useMemo(() => recentTouched(touches, sortedNotes), [touches, sortedNotes])
+  const recentRoots = useMemo<ResultRoot[]>(
+    () => recentNotes.map((note) => ({ id: note.id, noteId: note.id })),
+    [recentNotes],
+  )
   const pinned = useAtomValue(pinnedNotesAtom)
-  const pinnedNotes = useMemo(
-    () => pinned.filter((note) => !recentNotes.some((recent) => recent.id === note.id)),
-    [pinned, recentNotes],
+  const pinnedBlocks = useAtomValue(pinnedBlocksAtom)
+  const pinnedRoots = useMemo<ResultRoot[]>(
+    () => [
+      ...pinned
+        .filter((note) => !recentNotes.some((recent) => recent.id === note.id))
+        .map((note) => ({ id: note.id, noteId: note.id })),
+      ...pinnedBlocks.map((block) => ({ id: block.id, noteId: block.noteId })),
+    ],
+    [pinned, pinnedBlocks, recentNotes],
   )
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
 
@@ -290,7 +303,7 @@ export function CommandMenu() {
   const results = useSearchResults(scopedQuery)
   const hasRows = deferredQuery
     ? results.rows.length > 0
-    : recentNotes.length > 0 || pinnedNotes.length > 0
+    : recentNotes.length > 0 || pinnedRoots.length > 0
 
   // The keyboard's way through the rows. With nothing typed there are two
   // lists, Recent and then Pinned, walked as one: ↓ from the query lands on
@@ -596,7 +609,7 @@ export function CommandMenu() {
                       variant="palette"
                       query={scopedQuery}
                       results={results}
-                      browseNotes={recentNotes}
+                      browseRoots={recentRoots}
                       limit={NUM_VISIBLE_RESULTS}
                       readOnly
                       initialSelection="none"
@@ -605,22 +618,22 @@ export function CommandMenu() {
                       focusLastSignal={recentLastSignal}
                       onExitTop={takeBackFromRows}
                       onExitBottom={
-                        !deferredQuery && pinnedNotes.length > 0 ? recentToPinned : undefined
+                        !deferredQuery && pinnedRoots.length > 0 ? recentToPinned : undefined
                       }
                     />
                   </Command.Group>
                 ) : null}
-                {!deferredQuery && pinnedNotes.length > 0 ? (
-                  // The pinned notes, beneath the recent ones: a second
-                  // results block, browsed the same way, walked into from
-                  // the recent rows and back out of them (or, with nothing
-                  // recent, straight from the query).
+                {!deferredQuery && pinnedRoots.length > 0 ? (
+                  // The pinned notes and blocks, beneath the recent ones: a
+                  // second results block, browsed the same way, walked into
+                  // from the recent rows and back out of them (or, with
+                  // nothing recent, straight from the query).
                   <Command.Group heading="Pinned">
                     <ResultsList
                       variant="palette"
                       query=""
                       results={results}
-                      browseNotes={pinnedNotes}
+                      browseRoots={pinnedRoots}
                       limit={NUM_VISIBLE_RESULTS}
                       readOnly
                       initialSelection="none"

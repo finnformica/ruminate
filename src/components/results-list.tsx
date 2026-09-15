@@ -2,7 +2,7 @@ import React, { useState } from "react"
 import { useInView } from "react-intersection-observer"
 import type { ResultRoot } from "../hooks/results-doc"
 import type { SearchResults } from "../hooks/search-results"
-import type { Note, NoteId } from "../schema"
+import type { NoteId } from "../schema"
 import { cx } from "../utils/cx"
 import { pluralize } from "../utils/pluralize"
 import { Button } from "./button"
@@ -20,8 +20,8 @@ import { ResultsEditor } from "./results-editor"
  * them purely by score (`rankResultRows`; a note is a node whose children
  * are its blocks, so it is a root row like any other); one that only names
  * notes lists notes; with no query at all the surface says what to browse
- * (`browseNotes`: the palette's recent notes; the page leaves it to the
- * empty query, every note).
+ * (`browseRoots`: the palette's recent notes, and its pinned notes and
+ * blocks; the page leaves it to the empty query, every note).
  *
  * Only `limit` rows are drawn at first. `more` adds a **Load more** button
  * beneath, which also fires as it scrolls into view; a new query starts
@@ -30,7 +30,7 @@ import { ResultsEditor } from "./results-editor"
 export function ResultsList({
   query,
   results,
-  browseNotes,
+  browseRoots,
   limit,
   more = false,
   readOnly = false,
@@ -45,9 +45,10 @@ export function ResultsList({
   /** The full query the results are for — empty when browsing. */
   query: string
   results: SearchResults
-  /** What to list with no query at all (the palette's recent notes); left
-   * out, every note the empty query resolved to. */
-  browseNotes?: readonly Note[]
+  /** What to list with no query at all (the palette's recent notes, or its
+   * pinned notes and blocks — a block root opens its note zoomed into it);
+   * left out, every note the empty query resolved to. */
+  browseRoots?: readonly ResultRoot[]
   /** How many rows to draw before **Load more**. */
   limit: number
   /** Offer the rest beneath the rows. */
@@ -87,12 +88,15 @@ export function ResultsList({
   // The rows: the ranked results, or what the surface browses with no
   // query — and nothing said to browse is every note the empty query
   // resolved to.
-  const browseList = browseNotes ?? notes
+  const browseList = React.useMemo<readonly ResultRoot[]>(
+    () => browseRoots ?? notes.map((note) => ({ id: note.id, noteId: note.id })),
+    [browseRoots, notes],
+  )
   const total = browsing ? browseList.length : ranked.length
   const roots = React.useMemo<ResultRoot[]>(
     () =>
       browsing
-        ? browseList.slice(0, visible).map((note) => ({ id: note.id, noteId: note.id }))
+        ? browseList.slice(0, visible)
         : ranked.slice(0, visible).map((row) => ({ id: row.id, noteId: row.noteId })),
     [browsing, browseList, ranked, visible],
   )
