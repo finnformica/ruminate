@@ -27,7 +27,10 @@ export function ResultsEditor({
   readOnly = false,
   onOpen,
   focusFirstSignal,
+  focusLastSignal,
   onExitTop,
+  onExitBottom,
+  initialSelection,
 }: {
   /** Memoized by the caller (see `useResultsDoc`). */
   roots: readonly ResultRoot[]
@@ -39,8 +42,15 @@ export function ResultsEditor({
   onOpen: (noteId: NoteId, blockId?: string) => void
   /** Bump to highlight the first row (↓ from the search box). */
   focusFirstSignal?: number
+  /** Bump to highlight the last row (↑ from a list beneath this one). */
+  focusLastSignal?: number
   /** ↑ past the first row hands focus back to the caller (the search box). */
   onExitTop?: () => void
+  /** ↓ past the last row hands focus on (to a list beneath this one). */
+  onExitBottom?: () => void
+  /** The first row highlighted on mount (the page), or nothing until the
+   * keyboard arrives (the palette's lists). */
+  initialSelection?: "first" | "none"
 }) {
   const { doc, collapsed, toggleCollapse, setDoc, noteOf } = useResultsDoc({ roots, resetKey })
 
@@ -73,7 +83,10 @@ export function ResultsEditor({
       zoomRootId={null}
       onZoomNavigate={onZoomNavigate}
       focusFirstSignal={focusFirstSignal}
+      focusLastSignal={focusLastSignal}
       onExitTop={onExitTop}
+      onExitBottom={onExitBottom}
+      initialSelection={initialSelection}
     />
   )
 }

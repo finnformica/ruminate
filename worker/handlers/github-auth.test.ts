@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+import migration0003 from "../../migrations/0003_control_plane.sql?raw"
+import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import type { Env } from "../types"
 import { githubAuth, resolveDisplayName, resolveSignInEmail } from "./github-auth"
+import { asFakeD1, createTestSqlDriver } from "./sqlite-test-driver"
 
 describe("githubAuth", () => {
   afterEach(() => {
@@ -40,6 +43,44 @@ describe("githubAuth", () => {
     expect(exchangeBody?.redirect_uri).toBe(
       "https://claude-graph-storage-ruminate.finnformica.workers.dev/github-auth",
     )
+  })
+
+  it("provisions the users row, address included, as the account signs in", async () => {
+    // Signing in is signing up: the callback is the one moment the address is
+    // known, so the row exists — with it — before the first API request.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = String(input)
+        if (target === "https://github.com/login/oauth/access_token") {
+          return Response.json({ access_token: "test-token" })
+        }
+        if (target === "https://api.github.com/user") {
+          return Response.json({ id: 1, login: "ada", name: "Ada" })
+        }
+        if (target === "https://api.github.com/user/emails") {
+          return Response.json([{ email: "Ada@Example.com", primary: true, visibility: "private" }])
+        }
+        throw new Error(`Unexpected fetch: ${target}`)
+      }),
+    )
+    const driver = createTestSqlDriver()
+    await driver.execScript(migration0003)
+    await driver.execScript(migration0010)
+    const env = {
+      VITE_GITHUB_CLIENT_ID: "client-id",
+      GITHUB_CLIENT_SECRET: "secret",
+      SIGNUP_MODE: "open",
+      DB: asFakeD1(driver),
+    } as Env
+
+    const response = await githubAuth(
+      new Request("https://ruminate.test/github-auth?code=abc"),
+      env,
+    )
+    expect(response.status).toBe(302)
+    const rows = await driver.exec("SELECT login, email FROM users WHERE github_id = 1")
+    expect(rows).toEqual([{ login: "ada", email: "ada@example.com" }])
   })
 })
 

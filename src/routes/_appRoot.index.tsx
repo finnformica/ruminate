@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { useEffect, useState } from "react"
 import { NoteIcon16 } from "../components/icons"
 import { NoteList } from "../components/note-list"
 import { PageLayout } from "../components/page-layout"
@@ -19,15 +20,22 @@ export const Route = createFileRoute("/_appRoot/")({
 function RouteComponent() {
   const { query } = Route.useSearch()
   const navigate = Route.useNavigate()
+  // The text as typed, held here so the box shows a keystroke the same
+  // render; the URL follows (and leads on back/forward, or a link in).
+  const [text, setText] = useState(query ?? "")
+  useEffect(() => {
+    setText(query ?? "")
+  }, [query])
 
   return (
     <PageLayout title="Notes" icon={<NoteIcon16 />}>
       <div className="p-4 pt-0">
         <NoteList
-          query={query ?? ""}
-          onQueryChange={(query) =>
-            navigate({ search: (prev) => ({ ...prev, query }), replace: true })
-          }
+          query={text}
+          onQueryChange={(next) => {
+            setText(next)
+            navigate({ search: (prev) => ({ ...prev, query: next }), replace: true })
+          }}
           enableKeyboardNav
         />
       </div>

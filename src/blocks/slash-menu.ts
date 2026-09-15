@@ -107,6 +107,27 @@ const DATE_OPTIONS: DateOption[] = [
   { label: "Last week", resolve: (today) => addDays(today, -7) },
 ]
 
+/** A fixed date row, resolved for `now`: its label, the day it means as
+ * `YYYY-MM-DD`, and that day formatted for the row's detail. */
+export interface DateShortcut {
+  label: string
+  date: string
+  detail: string
+}
+
+/**
+ * The fixed date shortcuts, resolved for `now` — the ONE source for every
+ * picker that offers them: the slash menu's date rows and the query box's
+ * `date:` suggestions (src/utils/qualifier-suggestions.ts), so the two
+ * never drift in wording or in which day "Next week" means.
+ */
+export function dateShortcuts(now: Date): DateShortcut[] {
+  return DATE_OPTIONS.map((option) => {
+    const date = toDateString(option.resolve(now))
+    return { label: option.label, date, detail: formatDate(date) }
+  })
+}
+
 // ── Block types ─────────────────────────────────────────────────────────────
 
 /** The rows under "Turn into": every type the registry offers, in its
@@ -158,15 +179,14 @@ export function slashMenuItems(
   const q = query.trim().toLowerCase().replace(/\s+/g, " ")
   const items: SlashItem[] = []
 
-  for (const option of DATE_OPTIONS) {
-    if (!matches(q, option.label)) continue
-    const date = toDateString(option.resolve(now))
+  for (const shortcut of dateShortcuts(now)) {
+    if (!matches(q, shortcut.label)) continue
     items.push({
       kind: "date",
-      id: `date:${option.label}`,
-      label: option.label,
-      detail: formatDate(date),
-      date,
+      id: `date:${shortcut.label}`,
+      label: shortcut.label,
+      detail: shortcut.detail,
+      date: shortcut.date,
     })
   }
 

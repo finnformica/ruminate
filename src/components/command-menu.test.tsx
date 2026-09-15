@@ -15,12 +15,13 @@ const mocks = vi.hoisted(() => ({
     { params: { _splat: string }; search?: { block?: string } } | undefined,
   // What the query resolves to, injected at `useSearchResults`; the rows
   // themselves are walked out of the mocked graph (see the global-state mock).
-  results: { mode: "notes", hits: [], notes: [] } as {
+  results: { mode: "notes", hits: [], notes: [], titleMatches: [], rows: [] } as {
     mode: "blocks" | "notes"
     hits: unknown[]
     notes: unknown[]
+    titleMatches: unknown[]
+    rows: { id: string; noteId: string; kind: "note" | "block"; score?: number }[]
   },
-  noteResults: [] as unknown[],
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -31,10 +32,6 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("../hooks/note", () => ({
   useNoteById: () => undefined,
   useCreateNote: () => vi.fn(),
-}))
-
-vi.mock("../hooks/search-notes", () => ({
-  useSearchNotes: () => () => mocks.noteResults,
 }))
 
 vi.mock("../hooks/search-results", () => ({
@@ -86,8 +83,9 @@ vi.mock("../global-state", async (importOriginal) => {
     sampleGraphAtom: atom(graph),
     isDatabaseModeAtom: atom(false),
     notesAtom: atom(new Map()),
-    pinnedNotesAtom: atom([]),
     sortedNotesAtom: atom([]),
+    pinnedNotesAtom: atom([]),
+    recentTouchesAtom: atom([]),
     noteOutlineAtom: atom(null),
     blockRevealAtom: atom(null),
     // The block index only serves the scope pill's label here.
@@ -95,7 +93,13 @@ vi.mock("../global-state", async (importOriginal) => {
   }
 })
 
-import { blockRevealAtom, noteOutlineAtom } from "../global-state"
+import {
+  blockRevealAtom,
+  noteOutlineAtom,
+  pinnedNotesAtom,
+  recentTouchesAtom,
+  sortedNotesAtom,
+} from "../global-state"
 import type { BlockRevealRequest } from "../utils/note-outline"
 import { CommandMenu, isCommandMenuOpenAtom } from "./command-menu"
 
@@ -112,8 +116,7 @@ afterEach(cleanup)
 beforeEach(() => {
   mocks.match = { params: { _splat: "note-1" } }
   mocks.navigate.mockClear()
-  mocks.results = { mode: "notes", hits: [], notes: [] }
-  mocks.noteResults = []
+  mocks.results = { mode: "notes", hits: [], notes: [], titleMatches: [], rows: [] }
 })
 
 const OUTLINE = {
@@ -128,9 +131,24 @@ const OUTLINE = {
 function renderMenu({
   outline = OUTLINE,
   open = false,
-}: { outline?: typeof OUTLINE | null; open?: boolean } = {}) {
+  notes = [],
+  touches = [],
+  pinned = [],
+}: {
+  outline?: typeof OUTLINE | null
+  open?: boolean
+  notes?: unknown[]
+  touches?: { id: string; at: number }[]
+  pinned?: unknown[]
+} = {}) {
   const store = createStore()
   store.set(noteOutlineAtom, outline)
+  // The corpus's notes, the touches this device remembers (what the
+  // palette's Recent list is merged from) and the pinned notes. The atoms
+  // are the mock's plain, writable ones.
+  store.set(sortedNotesAtom as never, notes as never)
+  store.set(recentTouchesAtom as never, touches as never)
+  store.set(pinnedNotesAtom as never, pinned as never)
   if (open) store.set(isCommandMenuOpenAtom, true)
   render(
     <Provider store={store}>
@@ -142,7 +160,7 @@ function renderMenu({
 
 const pressCmdP = () => fireEvent.keyDown(document.body, { key: "p", code: "KeyP", metaKey: true })
 const outlineInput = () => screen.getByPlaceholderText("Jump to a heading…") as HTMLInputElement
-const commandsInput = () => screen.getByPlaceholderText("Search or jump to…") as HTMLInputElement
+const commandsInput = () => screen.getByPlaceholderText("Search notes…") as HTMLInputElement
 
 describe("outline palette (⌘P)", () => {
   it("⌘P opens the palette in outline mode listing the note's headings", () => {
@@ -154,9 +172,9 @@ describe("outline palette (⌘P)", () => {
     expect(screen.getByText("Gamma")).toBeTruthy()
     // Unfiltered items are indented by heading depth.
     const beta = screen.getByText("Beta").closest("[cmdk-item]") as HTMLElement
-    expect(beta.style.paddingLeft).toBe("36px")
+    expect(beta.style.paddingLeft).toBe("30px")
     const alpha = screen.getByText("Alpha").closest("[cmdk-item]") as HTMLElement
-    expect(alpha.style.paddingLeft).toBe("12px")
+    expect(alpha.style.paddingLeft).toBe("6px")
   })
 
   it("shows an empty state when no note is open", () => {
@@ -295,8 +313,12 @@ const TODO_MILK = hit("blk_milk", "buy milk", "todo")
 const TODO_SHIP = hit("blk_ship", "ship it", "todo", JOURNAL)
 const ELSEWHERE = hit("blk_else", "in another note", "text", JOURNAL)
 
-async function openWithBlocks(hits: unknown[], notes: unknown[] = [RESEARCH]) {
-  mocks.results = { mode: "blocks", hits, notes }
+/** The rows `useSearchResults` would rank: the hits, in the order given. */
+const rowsOf = (hits: ReturnType<typeof hit>[]) =>
+  hits.map((h) => ({ id: h.blockId, noteId: h.noteId, kind: "block" as const }))
+
+async function openWithBlocks(hits: ReturnType<typeof hit>[], notes: unknown[] = [RESEARCH]) {
+  mocks.results = { mode: "blocks", hits, notes, titleMatches: [], rows: rowsOf(hits) }
   const rendered = renderMenu({ open: true })
   const input = commandsInput()
   fireEvent.change(input, { target: { value: "nvidia" } })
@@ -305,7 +327,7 @@ async function openWithBlocks(hits: unknown[], notes: unknown[] = [RESEARCH]) {
   input.setSelectionRange(input.value.length, input.value.length)
   // The query is debounced (150ms) before the palette re-derives its groups.
   await waitFor(() => {
-    expect(screen.queryByText("Settings")).toBeNull()
+    expect(screen.getByText("Results")).toBeTruthy()
   })
   return rendered
 }
@@ -320,8 +342,7 @@ const rowIds = () =>
 const editor = () => document.querySelector("[data-block-editor]") as HTMLElement
 
 /** ↓ in the query walks cmdk's items; past the last it hands the keyboard to
- * the rows. With block results there is one item ("See all…"), highlighted
- * from the start, so one press crosses over; with none, the first does. */
+ * the rows. A search query matches no item, so the first press crosses over. */
 function handOffToRows() {
   const input = commandsInput()
   for (let i = 0; i < 3 && document.activeElement !== editor(); i += 1) {
@@ -346,9 +367,11 @@ describe("block results", () => {
     expect(rowOf("blk_milk")?.querySelector('input[type="checkbox"]')).not.toBeNull()
   })
 
-  it("shows the count of matched blocks, and the notes they live in", async () => {
+  it("shows the count of matched blocks, and the notes they live in — the page's line", async () => {
     await openWithBlocks([NVIDIA, TODO_MILK, TODO_SHIP])
-    expect(screen.getByText("See all 3 matching blocks in 1 note")).toBeTruthy()
+    expect(screen.getByTestId("result-count").textContent).toBe("3 matching blocks in 1 note")
+    // No "See all" item: ↵ on the query is what opens the results view.
+    expect(document.querySelector("[cmdk-item]")).toBeNull()
   })
 
   it("says so plainly when nothing matches", async () => {
@@ -356,19 +379,73 @@ describe("block results", () => {
     expect(screen.getByText("No matching blocks")).toBeTruthy()
   })
 
-  it("Enter on the query opens the full results view at ?query=", async () => {
+  it("typing never hands the keyboard to the rows", async () => {
+    mocks.results = {
+      mode: "blocks",
+      hits: [NVIDIA, TODO_MILK],
+      notes: [RESEARCH],
+      titleMatches: [],
+      rows: rowsOf([NVIDIA, TODO_MILK]),
+    }
+    renderMenu({ open: true })
+    const input = commandsInput()
+    input.focus()
+    // Each letter is a new query, and new rows beneath — which must not
+    // take the focus from the box mid-word.
+    for (const value of ["nv", "nvi", "nvid"]) {
+      fireEvent.change(input, { target: { value } })
+      await waitFor(() => {
+        expect(screen.getByText("Results")).toBeTruthy()
+      })
+      expect(rowIds()).toEqual(["blk_nvidia", "blk_milk"])
+      expect(document.activeElement).toBe(input)
+    }
+  })
+
+  it("Enter straight after typing opens the full results view at ?query=", async () => {
     // Outside a note there is nothing to scope to.
     mocks.match = undefined
     await openWithBlocks([NVIDIA])
-    // Nothing arrowed: cmdk highlights the first row, which is "see all".
+    // Nothing arrowed: no item is highlighted, so ↵ is the query's.
+    expect(document.querySelector('[cmdk-item][aria-selected="true"]')).toBeNull()
     fireEvent.keyDown(commandsInput(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", search: { query: "nvidia" } })
+  })
+
+  it("Enter on a highlighted item picks the item, not the results view", async () => {
+    // The palette's one item of its own: the date a query reads as.
+    mocks.match = undefined
+    renderMenu({ open: true })
+    const input = commandsInput()
+    fireEvent.change(input, { target: { value: "tomorrow" } })
+    await waitFor(() => {
+      expect(screen.getByText("Date")).toBeTruthy()
+    })
+    // Nothing highlighted until arrowed; ↓ puts cmdk's highlight on the item.
+    expect(document.querySelector('[cmdk-item][aria-selected="true"]')).toBeNull()
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    expect(document.querySelector('[cmdk-item][aria-selected="true"]')).not.toBeNull()
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "/notes/$",
+        params: { _splat: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) },
+      }),
+    )
+    expect(mocks.navigate).not.toHaveBeenCalledWith(expect.objectContaining({ to: "/" }))
+  })
+
+  it("no group of jumps or note actions: the palette finds notes and blocks", () => {
+    renderMenu({ open: true })
+    for (const label of ["Jump to", "Note actions", "Settings", "Copy note markdown"]) {
+      expect(screen.queryByText(label)).toBeNull()
+    }
   })
 
   it("inside a note, scopes the search to it — an `in:` the results view inherits", async () => {
     await openWithBlocks([NVIDIA])
     // Said plainly under the query, as a pill naming the note.
-    expect(screen.getByTestId("palette-scope").textContent).toContain("note-1")
+    expect(screen.getByTestId("query-scopes").textContent).toContain("note-1")
     fireEvent.keyDown(commandsInput(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: "/",
@@ -378,8 +455,8 @@ describe("block results", () => {
 
   it("the scope comes off with its pill", async () => {
     await openWithBlocks([NVIDIA])
-    fireEvent.click(screen.getByTestId("palette-scope").querySelector("button")!)
-    expect(screen.queryByTestId("palette-scope")).toBeNull()
+    fireEvent.click(screen.getByTestId("query-scopes").querySelector("button")!)
+    expect(screen.queryByTestId("query-scopes")).toBeNull()
     fireEvent.keyDown(commandsInput(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", search: { query: "nvidia" } })
   })
@@ -389,7 +466,7 @@ describe("block results", () => {
     const input = commandsInput()
     fireEvent.change(input, { target: { value: "in:other nvidia" } })
     await waitFor(() => {
-      expect(screen.queryByTestId("palette-scope")).toBeNull()
+      expect(screen.getByTestId("query-scopes").textContent).not.toContain("note-1")
     })
     fireEvent.keyDown(input, { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
@@ -401,7 +478,7 @@ describe("block results", () => {
   it("zoomed into a block, the scope is that block", async () => {
     mocks.match = { params: { _splat: "note-1" }, search: { block: "blk_zoom" } }
     await openWithBlocks([NVIDIA])
-    expect(screen.getByTestId("palette-scope").textContent).toContain("blk_zoom")
+    expect(screen.getByTestId("query-scopes").textContent).toContain("blk_zoom")
     fireEvent.keyDown(commandsInput(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: "/",
@@ -437,18 +514,15 @@ describe("block results", () => {
     expect(rowIds()).toEqual(["blk_nvidia", "blk_h100", "blk_rev"])
   })
 
-  it("↑ from the first row, or Escape, returns to the query with the last item highlighted", async () => {
+  it("↑ from the first row, or Escape, returns to the query", async () => {
     await openWithBlocks([NVIDIA])
-    const seeAll = () => screen.getByText(/^See all/).closest("[cmdk-item]")
     handOffToRows()
     fireEvent.keyDown(editor(), { key: "ArrowUp" })
     expect(document.activeElement).toBe(commandsInput())
-    expect(seeAll()?.getAttribute("aria-selected")).toBe("true")
 
     handOffToRows()
     fireEvent.keyDown(editor(), { key: "Escape" })
     expect(document.activeElement).toBe(commandsInput())
-    expect(seeAll()?.getAttribute("aria-selected")).toBe("true")
     // The palette is still open, the query still there.
     expect(commandsInput().value).toBe("nvidia")
   })
@@ -492,23 +566,37 @@ describe("block results", () => {
 })
 
 // ── Note results ────────────────────────────────────────────────────────────
-// A note is a node whose children are its blocks, so a note result is a root
-// row of the same editor as a block result — in the same list, ahead of the
-// blocks — and opens exactly as one.
+// A note is a node whose children are its blocks, so a note result (its
+// title matched) is a root row of the same editor as a block result — in the
+// same list, ranked by score among the blocks — and opens exactly as one.
 
 describe("note results", () => {
-  async function openWithNotes(notes: unknown[], hits: unknown[] = []) {
-    mocks.results = { mode: hits.length > 0 ? "blocks" : "notes", hits, notes: [] }
-    mocks.noteResults = notes
+  /** Open with the ranked rows `useSearchResults` would hand over: notes
+   * and hits in the order given. */
+  async function openWithRows(rows: (ReturnType<typeof makeNote> | ReturnType<typeof hit>)[]) {
+    const hits = rows.filter((row): row is ReturnType<typeof hit> => "blockId" in row)
+    const titleMatches = rows.filter((row) => !("blockId" in row))
+    mocks.results = {
+      mode: "blocks",
+      hits,
+      notes: [RESEARCH],
+      titleMatches,
+      rows: rows.map((row) =>
+        "blockId" in row
+          ? { id: row.blockId, noteId: row.noteId, kind: "block" as const }
+          : { id: row.id, noteId: row.id, kind: "note" as const },
+      ),
+    }
     const rendered = renderMenu({ open: true })
     const input = commandsInput()
     fireEvent.change(input, { target: { value: "research" } })
     input.setSelectionRange(input.value.length, input.value.length)
     await waitFor(() => {
-      expect(screen.queryByText("Settings")).toBeNull()
+      expect(screen.getByText("Results")).toBeTruthy()
     })
     return rendered
   }
+  const openWithNotes = (notes: ReturnType<typeof makeNote>[]) => openWithRows(notes)
 
   it("draws a note as an editor row, keyed by its favicon", async () => {
     await openWithNotes([RESEARCH])
@@ -517,9 +605,206 @@ describe("note results", () => {
     expect(row?.querySelector('[data-testid="note-favicon-slot"]')).not.toBeNull()
   })
 
-  it("lists notes and blocks as one list, the notes first", async () => {
-    await openWithNotes([RESEARCH], [TODO_SHIP])
-    expect(rowIds()).toEqual(["research", "blk_ship"])
+  it("lists notes and blocks as one list, in the ranked order — a block above a note", async () => {
+    await openWithRows([TODO_SHIP, RESEARCH])
+    expect(rowIds()).toEqual(["blk_ship", "research"])
+    expect(screen.getByTestId("result-count").textContent).toBe(
+      "1 matching block in 1 note, 1 note by title",
+    )
+  })
+
+  /** A note with when it was last edited. */
+  const edited = (id: string, updatedAt: number) => ({ ...makeNote(id), updatedAt })
+
+  it("with nothing typed, lists the recently touched notes — edits and opens merged, most recent first", () => {
+    // `research` was edited last; `journal` was opened on this device more
+    // recently still, so it leads. Nothing is highlighted, and no count.
+    renderMenu({
+      open: true,
+      notes: [edited("research", 5000), edited("journal", 1000)],
+      touches: [{ id: "journal", at: 9000 }],
+    })
+    expect(screen.getByText("Recent")).toBeTruthy()
+    expect(rowIds()).toEqual(["journal", "research"])
+    expect(screen.queryByTestId("result-count")).toBeNull()
+    expect(document.querySelector('[cmdk-item][aria-selected="true"]')).toBeNull()
+  })
+
+  it("a note beyond the fifth most recently touched is not recent", () => {
+    // Five notes newer than `research` (the rows are walked out of the
+    // corpus, which holds `research` and `journal` only).
+    const notes = [
+      ...["n1", "n2", "n3", "n4"].map((id, i) => edited(id, 9000 - i)),
+      edited("journal", 8000),
+      edited("research", 100),
+    ]
+    renderMenu({ open: true, notes })
+    expect(rowIds()).toEqual(["journal"])
+    // A touch brings it back in, at the top — and `journal`, now sixth,
+    // drops out.
+    cleanup()
+    renderMenu({ open: true, notes, touches: [{ id: "research", at: 10000 }] })
+    expect(rowIds()).toEqual(["research"])
+  })
+
+  it("Recent gives way to the results the moment a query is typed", async () => {
+    mocks.results = {
+      mode: "blocks",
+      hits: [TODO_SHIP],
+      notes: [JOURNAL],
+      titleMatches: [],
+      rows: rowsOf([TODO_SHIP]),
+    }
+    renderMenu({ open: true, notes: [edited("research", 5000)] })
+    expect(screen.getByText("Recent")).toBeTruthy()
+    expect(rowIds()).toEqual(["research"])
+    const input = commandsInput()
+    fireEvent.change(input, { target: { value: "ship" } })
+    await waitFor(() => {
+      expect(screen.queryByText("Recent")).toBeNull()
+    })
+    expect(screen.getByText("Results")).toBeTruthy()
+    expect(rowIds()).toEqual(["blk_ship"])
+    // And comes back when the query is cleared.
+    fireEvent.change(input, { target: { value: "" } })
+    await waitFor(() => {
+      expect(screen.getByText("Recent")).toBeTruthy()
+    })
+    expect(rowIds()).toEqual(["research"])
+  })
+
+  it("lists the pinned notes beneath the recent ones — a note in both shows once, as recent", () => {
+    // `research` is recent AND pinned: it is listed under Recent only.
+    // `journal` (never edited, never touched) is pinned only: Pinned holds
+    // it, beneath.
+    const research = { ...edited("research", 5000), pinned: true }
+    const journal = { ...makeNote("journal"), pinned: true }
+    renderMenu({ open: true, notes: [research, journal], pinned: [research, journal] })
+    const groups = Array.from(document.querySelectorAll("[cmdk-group]")).filter((group) =>
+      ["Recent", "Pinned"].includes(group.querySelector("[cmdk-group-heading]")?.textContent ?? ""),
+    )
+    expect(groups.map((group) => group.querySelector("[cmdk-group-heading]")?.textContent)).toEqual(
+      ["Recent", "Pinned"],
+    )
+    const idsIn = (group: Element) =>
+      Array.from(group.querySelectorAll<HTMLElement>("[data-block-row]")).map(
+        (row) => row.dataset.blockRow,
+      )
+    expect(idsIn(groups[0])).toEqual(["research"])
+    expect(idsIn(groups[1])).toEqual(["journal"])
+    expect(rowIds()).toEqual(["research", "journal"])
+  })
+
+  it("Pinned holds the pinned notes that are not recent, and goes with Recent when typing", async () => {
+    // Six newer notes keep `journal` out of Recent; pinned, it is listed
+    // beneath.
+    const notes = [
+      ...["n1", "n2", "n3", "n4", "n5"].map((id, i) => edited(id, 9000 - i)),
+      edited("research", 8000),
+      { ...edited("journal", 100), pinned: true },
+    ]
+    mocks.results = {
+      mode: "blocks",
+      hits: [TODO_MILK],
+      notes: [RESEARCH],
+      titleMatches: [],
+      rows: rowsOf([TODO_MILK]),
+    }
+    renderMenu({ open: true, notes, pinned: [notes[6]] })
+    expect(screen.getByText("Recent")).toBeTruthy()
+    expect(screen.getByText("Pinned")).toBeTruthy()
+    expect(rowIds()).toEqual(["journal"])
+    expect(document.querySelector('[cmdk-item][aria-selected="true"]')).toBeNull()
+    fireEvent.change(commandsInput(), { target: { value: "milk" } })
+    await waitFor(() => {
+      expect(screen.queryByText("Pinned")).toBeNull()
+    })
+    expect(screen.queryByText("Recent")).toBeNull()
+    expect(rowIds()).toEqual(["blk_milk"])
+  })
+
+  it("↓ and ↑ walk Recent and then Pinned as one list, and ↑ from the first row returns to the query", () => {
+    // `research` recent; `journal` pinned only. Nothing typed.
+    const research = edited("research", 5000)
+    const journal = { ...makeNote("journal"), pinned: true }
+    renderMenu({ open: true, notes: [research, journal], pinned: [journal] })
+    const input = commandsInput()
+    input.focus()
+    const editors = () => Array.from(document.querySelectorAll<HTMLElement>("[data-block-editor]"))
+    const highlighted = () =>
+      Array.from(document.querySelectorAll<HTMLElement>("[data-block-row]"))
+        .filter((row) => row.querySelector(".block-highlight"))
+        .map((row) => row.dataset.blockRow)
+    expect(editors()).toHaveLength(2)
+
+    // ↓ from the query: straight to the first recent row — no item in the way.
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    expect(document.activeElement).toBe(editors()[0])
+    expect(highlighted()).toEqual(["research"])
+    // ↓ past the last recent row: the first pinned row, in the second editor.
+    fireEvent.keyDown(editors()[0], { key: "ArrowDown" })
+    expect(document.activeElement).toBe(editors()[1])
+    expect(highlighted()).toEqual(["journal"])
+    // ↓ at the very end stays put.
+    fireEvent.keyDown(editors()[1], { key: "ArrowDown" })
+    expect(highlighted()).toEqual(["journal"])
+    // ↑ walks back into the last recent row.
+    fireEvent.keyDown(editors()[1], { key: "ArrowUp" })
+    expect(document.activeElement).toBe(editors()[0])
+    expect(highlighted()).toEqual(["research"])
+    // ↑ from the very first row returns to the query.
+    fireEvent.keyDown(editors()[0], { key: "ArrowUp" })
+    expect(document.activeElement).toBe(input)
+    expect(highlighted()).toEqual([])
+    // ↵ on a highlighted row opens it.
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(editors()[0], { key: "ArrowDown" })
+    fireEvent.keyDown(editors()[1], { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/notes/$",
+      params: { _splat: "journal" },
+      search: { query: undefined, block: undefined },
+    })
+  })
+
+  it("a results list mounting after an earlier hand-off never takes the keyboard from the query", async () => {
+    // Seen in the browser: ↓ had handed the keyboard to the pinned rows once;
+    // back in the query, typing swapped the lists for the results, whose
+    // fresh editor mounted under the already-bumped signal and took focus
+    // mid-word.
+    const journal = { ...makeNote("journal"), pinned: true }
+    mocks.results = {
+      mode: "blocks",
+      hits: [NVIDIA],
+      notes: [RESEARCH],
+      titleMatches: [],
+      rows: rowsOf([NVIDIA]),
+    }
+    renderMenu({ open: true, notes: [journal], pinned: [journal] })
+    const input = commandsInput()
+    input.focus()
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    expect(document.activeElement).toBe(editor())
+    fireEvent.keyDown(editor(), { key: "Escape" })
+    expect(document.activeElement).toBe(input)
+    fireEvent.change(input, { target: { value: "nvidia" } })
+    await waitFor(() => {
+      expect(rowIds()).toEqual(["blk_nvidia"])
+    })
+    expect(document.activeElement).toBe(input)
+    expect(rowOf("blk_nvidia")?.querySelector(".block-highlight")).toBeNull()
+  })
+
+  it("with nothing recent, ↓ from the query lands in the pinned rows", () => {
+    // A note never edited (no timestamp) and never touched is not recent —
+    // pinned, it is the only listing.
+    const journal = { ...makeNote("journal"), pinned: true }
+    renderMenu({ open: true, notes: [journal], pinned: [journal] })
+    expect(screen.queryByText("Recent")).toBeNull()
+    expect(screen.getByText("Pinned")).toBeTruthy()
+    expect(rowIds()).toEqual(["journal"])
+    handOffToRows()
+    expect(rowOf("journal")?.querySelector(".block-highlight")).not.toBeNull()
   })
 
   it("expands a note in the palette to its top-level blocks", async () => {
@@ -601,7 +886,7 @@ describe("qualifier suggestions", () => {
     expect(screen.queryByTestId("qualifier-suggestions")).toBeNull()
     expect(input.value).toBe("type:")
     // The dialog's own Escape (close) must not fire for the picker's Escape.
-    expect(screen.getByPlaceholderText("Search or jump to…")).toBe(input)
+    expect(screen.getByPlaceholderText("Search notes…")).toBe(input)
     expect(input.isConnected).toBe(true)
   })
 

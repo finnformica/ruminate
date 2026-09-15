@@ -4,7 +4,9 @@
 // Reference: https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps
 
 import { refreshCookie } from "../github-cookie"
+import { controlPlaneDriver } from "../tenancy-db"
 import type { Env } from "../types"
+import { resolveTenancy } from "./tenancy"
 
 export async function githubAuth(request: Request, env: Env): Promise<Response> {
   try {
@@ -47,6 +49,20 @@ export async function githubAuth(request: Request, env: Env): Promise<Response> 
     }
 
     const { id, login, name, email } = await getUser(token)
+
+    // Signing in is signing up: resolve the verified identity against the
+    // control plane HERE, where the address is known, so an admitted account
+    // has its `users` row — address included — before its first API request
+    // (migrations/0010_user_email.sql). The same resolver `requireSession` runs, with the
+    // same gate; a refusal is not raised here (the API answers it, with its
+    // copy), and nothing about it can fail the sign-in.
+    if (typeof id === "number" && Number.isFinite(id)) {
+      await resolveTenancy(
+        controlPlaneDriver(env),
+        { id, login, name, email },
+        { signupMode: env.SIGNUP_MODE, bootstrapGithubId: env.ALLOWED_GITHUB_ID },
+      ).catch(() => undefined)
+    }
 
     // `state` is the app URL to return to (set by the sign-in button).
     const redirectUrl = new URL(state || url.origin)

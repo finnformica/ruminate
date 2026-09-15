@@ -1,4 +1,5 @@
 import { searchTypeOptions } from "../blocks/registry"
+import { dateShortcuts } from "../blocks/slash-menu"
 /**
  * **Value suggestions for qualifiers.** Typing `type:`, `in:`, `has:` — any
  * key whose values come from a known set — opens a picker over the search
@@ -28,8 +29,8 @@ export interface QualifierTrigger {
  * The `-?key:value` token the caret sits in — at its end, after typing, or
  * anywhere inside it. A token starts at the beginning of the text or after
  * whitespace (so `https://` never triggers); an open quote lets the value run
- * over spaces (`in:"reading li`). `sort:` is not offered: its values carry a
- * direction suffix the picker doesn't model.
+ * over spaces (`in:"reading li`). A `sort:` value's direction suffix
+ * (`title:desc`) is part of the value: the partial `title:` narrows to it.
  */
 export function findQualifierTrigger(value: string, caret: number): QualifierTrigger | null {
   const before = value.slice(0, caret)
@@ -118,8 +119,11 @@ export function filterQualifierOptions(
 /**
  * The fixed vocabularies. `type:` lists the block types (docs/query-language.md,
  * "Block types" — the registry's, `src/blocks/types.ts`) and then the note
- * types; `has:`/`no:` the countable things; `sort:` is left to the typed
- * form (`sort:title:desc`).
+ * types; `has:`/`no:` the countable things; `sort:` the sortable keys, each
+ * with the direction it does not default to as a second row (`sort:title`
+ * is A→Z, so `title:desc` is offered beside it). `date:` is supplied by
+ * `dateQualifierOptions` — its rows carry today's date, so they are built
+ * when asked for, not when the module loads.
  */
 export const STATIC_QUALIFIER_OPTIONS: Readonly<Record<string, readonly QualifierOption[]>> = {
   type: [
@@ -139,11 +143,34 @@ export const STATIC_QUALIFIER_OPTIONS: Readonly<Record<string, readonly Qualifie
     { value: "tasks", description: "without an open task" },
     { value: "title", description: "without a title" },
   ],
+  sort: [
+    { value: "title", description: "title, A to Z" },
+    { value: "title:desc", description: "title, Z to A" },
+    { value: "updated_at", description: "most recently updated first" },
+    { value: "updated_at:asc", description: "least recently updated first" },
+    { value: "id", description: "oldest first" },
+    { value: "id:desc", description: "newest first" },
+  ],
 }
 
-/** The keys the picker opens for: the static sets above plus the one the
- * corpus supplies (`in:` — notes). */
+/** The `date:` rows: the slash menu's date shortcuts (Today, Tomorrow, …
+ * — `dateShortcuts`, the one source for both), each resolved to the day it
+ * means right now. The day is what lands in the query, as the slash menu
+ * writes a day into a note; the row reads as the word, glossed with the
+ * date. */
+export function dateQualifierOptions(now: Date = new Date()): QualifierOption[] {
+  return dateShortcuts(now).map((shortcut) => ({
+    value: shortcut.date,
+    label: shortcut.label,
+    description: shortcut.detail,
+  }))
+}
+
+/** The keys the picker opens for: the static sets above, the one built on
+ * demand (`date:` — today's dates) and the one the corpus supplies (`in:` —
+ * notes). */
 export const SUGGESTED_QUALIFIER_KEYS: readonly string[] = [
   ...Object.keys(STATIC_QUALIFIER_OPTIONS),
+  "date",
   "in",
 ]

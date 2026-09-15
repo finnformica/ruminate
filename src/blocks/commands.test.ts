@@ -91,12 +91,15 @@ describe("selection movement", () => {
     expect(result.exitTop).toBe(true)
   })
 
-  it("consumes the key at the bottom without moving or exiting", () => {
+  it("consumes the key at the bottom, signalling exitBottom for whatever sits below", () => {
     const doc = fixture()
     const result = runCommand("moveSelectionDown", input(doc, "c"))
     expect(result.handled).toBe(true)
     expect(result.focus).toBeUndefined()
     expect(result.exitTop).toBeUndefined()
+    expect(result.exitBottom).toBe(true)
+    // Not from a row that has one below it.
+    expect(runCommand("moveSelectionDown", input(doc, "a")).exitBottom).toBeUndefined()
   })
 
   it("arrow-out of edit mode commits the edit and selects the neighbour", () => {

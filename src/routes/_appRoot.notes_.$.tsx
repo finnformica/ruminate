@@ -21,6 +21,7 @@ import { databaseModeStatusAtom } from "../data/database-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
 import { isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
 import { useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
+import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
 import { Width, fontSchema, widthSchema } from "../schema"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
@@ -110,15 +111,23 @@ function NotePage() {
     noteId,
     defaultDoc,
   })
+  // The note is TOUCHED — for the palette's Recent list — exactly when it
+  // is opened, edited (an edit lands through `setEditorDoc`), a block in it
+  // folded or unfolded (`onToggleCollapse`) or zoomed into
+  // (`onZoomNavigate`). Never by selecting, focusing or arrowing through
+  // it: reading a note is not touching it. One seam (`useTouchNote`), no
+  // calls inside the editor.
+  const { touch, touching } = useTouchNote(noteId)
   const setEditorDoc = React.useCallback(
     (next: BlockDoc, hint?: ChangeHint) => {
       if (!isSignedOut) {
         setPendingSave(true)
         window.setTimeout(() => setPendingSave(false), 4000)
       }
+      touch()
       setDoc(next, hint)
     },
-    [isSignedOut, setDoc],
+    [isSignedOut, setDoc, touch],
   )
   const setNoteProps = useSetNoteProps()
 
@@ -275,6 +284,7 @@ function NotePage() {
                   noteId={noteId}
                   doc={editorDoc}
                   onChange={setEditorDoc}
+                  onToggleCollapse={touch}
                   startEditing={!noteExists && notesLoaded}
                   highlightHeading={highlightHeading}
                   onExitTop={() => setTitleFocusSignal((n) => n + 1)}
@@ -283,10 +293,10 @@ function NotePage() {
                   newRootSignal={newRootSignal}
                   refocusSignal={refocusSignal}
                   zoomBlockId={zoomBlockId ?? null}
-                  onZoomNavigate={(id) =>
+                  onZoomNavigate={touching((id) =>
                     // A plain push, so the back button undoes zoom naturally.
-                    navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
-                  }
+                    navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) }),
+                  )}
                   noteTitle={note?.displayName ?? ""}
                 />
                 {noteId && noteExists ? <UnassignedBasket noteId={noteId} /> : null}
