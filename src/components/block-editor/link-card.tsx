@@ -192,6 +192,8 @@ export function LinkCard({
             title={block.text}
             onRename={(text) => api.onBlockChange(block.id, { text }, "structural")}
             toggle={{ label: "Turn into inline", onClick: () => api.linkToInline?.(block.id) }}
+            open={api.linkCard?.key === occurrence.key}
+            onClose={api.closeLinkCard}
             render={card}
           >
             {inner}

@@ -11,29 +11,66 @@ switch to the other form.
 ## Inline links
 
 An inline link is markdown in the block's text, `[display text](url)`, as
-it has always been. What is new:
+it has always been.
 
-- **A pasted address gets a name.** Paste `https://www.example.com/a/b?c=1`
-  and the block holds `[example.com](https://www.example.com/a/b?c=1)`: the
-  display text is the address's host, with the scheme, the path and the
-  query left out of it, and the address itself is kept whole. Only how the
-  link reads changes. A link already written out, an image, a code span
-  and a code fence in the paste are left as they are, as is a paste as
-  plain text (<kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>). A typed address is
-  not rewritten as you type; its hover card offers the host as its display
-  text.
-- **The hover card.** Hover a link in view mode (in an editor you can
-  write in) and a card names where it goes with **Visit**, which opens the
-  page in a new tab; holds a field for the display text, saved on
-  <kbd>↵</kbd> or on leaving the field; and offers **Turn into block**.
+### An address gets a name
+
+Paste `https://www.example.com/a/b?c=1` and the block holds
+`[example.com](https://www.example.com/a/b?c=1)`: the display text is the
+address's host, with the scheme, the path and the query left out of it,
+and the address itself is kept whole. Only how the link reads changes. A
+link already written out, an image, a code span and a code fence in the
+paste are left as they are, as is a paste as plain text (<kbd>⌘</kbd>
+<kbd>⇧</kbd> <kbd>V</kbd>).
+
+A typed address is written out the same way the moment a space is typed
+after it, with the caret following, and any bare address still in the row
+when you leave edit mode (<kbd>Esc</kbd>, <kbd>↵</kbd>, a click elsewhere)
+is written out then. Each rewrite is its own undo step, so <kbd>⌘</kbd>
+<kbd>Z</kbd> gives the bare address back. An address in a code block, a
+code span, an autolink (`<https://…>`) or a link already written out is
+left alone.
+
+The rewrite is `linkifyPastedText` (`src/blocks/link.ts`), applied to the
+pasted text in the row's paste handler before it is parsed, and to the
+row's text when its edit ends; `linkifyTypedAddress` is the one a typed
+space runs.
+
+### The hover card
+
+Hover a link in view mode (in an editor you can write in) and a small card
+opens beneath it (`link-hover-card.tsx`):
+
+- where the link goes, and **Visit**, which opens the page in a new tab,
+  always;
+- a field for the display text, saved on <kbd>↵</kbd> or on leaving the
+  field with it changed. An emptied field saves nothing. A link whose text
+  is its own address is offered its host;
+- **Turn into block**, below.
+
+Changing the display text rewrites `[old](url)` to `[new](url)` in the
+block's text — the first occurrence of that link — and is one undo step. A
+link that is not a web address (`mailto:`, an anchor) has no card.
+
+A touch screen has nothing to hover with, so the row's context menu
+(press and hold) offers **Edit link**, which opens the same card outright
+— straight away for a row with one link, and by display text for a row
+with several. A tap outside closes it.
+
+The card is only offered where the row can be written: the row provides
+the actions (`link-actions.ts`) and the rendered link reads them
+(`block-content.tsx`); a read-only view, a search result or the help panel
+draws the link plain.
 
 ## Link blocks
 
-**Turn into block** goes one of two ways. A block whose text is nothing
-but the link — a pasted address, or `[title](url)` on its own — becomes the
-link block itself, keeping its place in the outline (and its pin, if
-pinned). A link in a sentence leaves the sentence as it is, and the block
-goes in as a new row beneath it, titled as the link was.
+**Turn into block** on the hover card — or **Turn into → Link** in the
+row's context menu, which takes the row's first link — goes one of two
+ways. A block whose text is nothing but the link — a pasted address, or
+`[title](url)` on its own — becomes the link block itself, keeping its
+place in the outline (and its pin, if pinned). A link in a sentence leaves
+the sentence as it is, and the block goes in as a new row beneath it,
+titled as the link was.
 
 The card shows the page's title (the block's text), its description (two
 lines at most) and a byline of favicon and site name, with the page's
@@ -45,7 +82,8 @@ a picture does; double-click edits the title (**Edit title** in the menu).
 Hover the card and the same hover card opens over it as over an inline
 link: **Visit**, the display text — the block's title — and **Turn into
 inline**, which puts the link back in the text as `[title](url)` (also in
-the context menu, for a keyboard or a touch screen).
+the context menu, for a keyboard or a touch screen, beside **Edit link**,
+which opens the card outright).
 
 A link block whose page said nothing — not yet fetched, a page that will
 not answer, a page behind a sign-in — says **No preview available** where
@@ -135,9 +173,9 @@ The client (`src/data/link-previews.ts`) asks when a block is made and on
 **Refresh preview**, and writes the answer onto the block **without a
 history step**, so the whole block is one undo, as a picture's upload is. A
 fetch that fails says why in a toast, naming the host — the block is there
-to open either way. Signed out (the sample notes) there
-is no session to fetch through: a block is still made, with its address
-alone, and the menu offers no refresh.
+to open either way. Signed out (the sample notes) there is no session to
+fetch through: a block is still made, with its address alone, and the menu
+offers no refresh.
 
 ## What a preview can and cannot show
 

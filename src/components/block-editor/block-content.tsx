@@ -114,6 +114,8 @@ function Link({
       title={title}
       onRename={(next) => actions.rename(href, title, next)}
       toggle={{ label: "Turn into block", onClick: () => actions.toBlock(href, title) }}
+      open={actions.openHref === href}
+      onClose={actions.closeCard}
       render={anchor}
     >
       {children}

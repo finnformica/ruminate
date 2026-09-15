@@ -157,3 +157,49 @@ export function linkifyPastedText(text: string): string {
     )
     .join("")
 }
+
+/** What the address may not follow to be bare: the opening of a link's
+ * address, an autolink, a quote. */
+const NOT_BARE_BEFORE = /[(<["'`]$/
+
+/**
+ * The text with an address just typed and then followed by a space written
+ * out as a link — `see https://e.com/x |` becomes `see [e.com](https://e.com/x) |`
+ * — and where the caret then sits. Null when the character before the caret
+ * is not whitespace, or what precedes it is not a bare address (one inside a
+ * link, an autolink or a code span is left alone).
+ */
+export function linkifyTypedAddress(
+  text: string,
+  caret: number,
+): { text: string; caret: number } | null {
+  if (caret < 2 || !/\s/.test(text[caret - 1])) return null
+  const before = text.slice(0, caret - 1)
+  const match = /https?:\/\/[^\s<>()[\]]+$/i.exec(before)
+  if (!match) return null
+  const lead = before.slice(0, match.index)
+  if (NOT_BARE_BEFORE.test(lead)) return null
+  // An odd number of backticks before it: inside a code span.
+  if ((lead.match(/`/g)?.length ?? 0) % 2 === 1) return null
+  const linked = linkifyPastedText(match[0])
+  if (linked === match[0]) return null
+  const head = lead + linked + text[caret - 1]
+  return { text: head + text.slice(caret), caret: head.length }
+}
+
+/** The web links in a block's text, in order: each `[title](url)` and each
+ * bare address, as what the menu's "Edit link" offers. */
+export function linksInText(text: string): { href: string; title: string }[] {
+  const links: { href: string; title: string }[] = []
+  for (const match of text.matchAll(
+    /\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s<>()[\]]+)/gi,
+  )) {
+    if (match[2]) links.push({ href: match[2], title: match[1] })
+    else if (match[3]) {
+      const trail = TRAILING_RE.exec(match[3])?.[0] ?? ""
+      const href = trail ? match[3].slice(0, -trail.length) : match[3]
+      links.push({ href, title: href })
+    }
+  }
+  return links
+}

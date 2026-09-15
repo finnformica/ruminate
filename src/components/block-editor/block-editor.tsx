@@ -30,6 +30,8 @@ import {
 import {
   hostOf,
   linkPropsOf,
+  linkifyPastedText,
+  linksInText,
   wholeTextLink,
   withLinkPreview,
   type LinkPreview,
@@ -1343,6 +1345,12 @@ export function BlockEditor({
       figure: isFigureType(block.type)
         ? { align: figureAlignOf(block), sized: figureLayoutOf(block).size !== undefined }
         : undefined,
+      links:
+        block.type === "link"
+          ? [{ href: linkPropsOf(block).url, title: block.text }].filter((l) => l.href !== "")
+          : block.type === "code"
+            ? []
+            : linksInText(block.text),
     }
   }
   const openMenuOn = (target: BlockMenuTarget) => {
@@ -1696,8 +1704,33 @@ export function BlockEditor({
     if (next !== doc) history.commit(doc, next, { type: "structural" })
   }
 
+  // ── Links ─────────────────────────────────────────────────────────────────
+  // Leaving a row's edit mode writes out any bare address in it as a link
+  // named for its host (docs/links.md), as a space typed after one does
+  // and a paste does — so an address typed and left by Escape, a click
+  // elsewhere or Enter reads as a name too. Its own undo step, so the bare
+  // address is one ⌘Z away. Never in a code block.
+  const lastEdited = useRef<string | null>(null)
+  useEffect(() => {
+    const previous = lastEdited.current
+    lastEdited.current = focus?.key ?? null
+    if (previous === null || previous === focus?.key || readOnly) return
+    const current = docRef.current
+    const block = current.blocks[idOfKey(previous)]
+    if (!block || block.type === "code" || block.type === "note") return
+    const text = linkifyPastedText(block.text)
+    if (text === block.text) return
+    history.commit(current, updateBlock(current, block.id, { text }), { type: "structural" })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus])
+  /** The link card the menu asked to open (a touch screen's "Edit link"):
+   * the row and the address; the row's rendered link opens its card. */
+  const [linkCard, setLinkCard] = useState<{ key: string; href: string } | null>(null)
+
   const menuActions: BlockMenuActions = {
     edit: (key) => edit(key),
+    editLink: (key, href) => setLinkCard({ key, href }),
+    turnIntoLink: (key, href, title) => linkToBlock(key, href, title === href ? "" : title),
     openImage: (id) => setLightbox(id),
     downloadImage: (id) => {
       const block = doc.blocks[id]
@@ -1761,6 +1794,8 @@ export function BlockEditor({
     linkToBlock: readOnly ? undefined : linkToBlock,
     renameLink: readOnly ? undefined : renameLink,
     linkToInline: readOnly ? undefined : linkToInline,
+    linkCard,
+    closeLinkCard: () => setLinkCard(null),
     focus,
     selected,
     selectedSet,

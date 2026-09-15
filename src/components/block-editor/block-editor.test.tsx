@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { useState } from "react"
 import { toast, Toaster } from "sonner"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
@@ -3377,6 +3377,65 @@ describe("BlockEditor links", () => {
     )
   })
 
+  it("Turn into → Link in the menu makes the block of the row's first link", async () => {
+    const { container, getByTestId } = render(
+      <Harness
+        initial={"Read [the guide](https://e.com/g) and https://e.com/x\n[e.com](https://e.com/y)"}
+      />,
+    )
+    // A sentence: the block goes in beneath, titled as the link.
+    await openMenuOn(container, 0)
+    await act(async () => {
+      fireEvent.click(screen.getByText("Turn into"))
+    })
+    await act(async () => {
+      fireEvent.click(await screen.findByText("Link"))
+    })
+    expect(serializedLines(getByTestId)).toEqual([
+      "Read [the guide](https://e.com/g) and https://e.com/x",
+      "[the guide](https://e.com/g)",
+      "[e.com](https://e.com/y)",
+    ])
+    // A row that is only the link becomes the block itself.
+    await openMenuOn(container, 2)
+    await act(async () => {
+      fireEvent.click(screen.getByText("Turn into"))
+    })
+    await act(async () => {
+      fireEvent.click(await screen.findByText("Link"))
+    })
+    expect(serializedLines(getByTestId)).toEqual([
+      "Read [the guide](https://e.com/g) and https://e.com/x",
+      "[the guide](https://e.com/g)",
+      "[e.com](https://e.com/y)",
+    ])
+    expect(linkProps(getByTestId)).toHaveLength(2)
+    expect(linkProps(getByTestId)).toEqual(
+      expect.arrayContaining([{ url: "https://e.com/g" }, { url: "https://e.com/y" }]),
+    )
+    // A row with no link is not offered it.
+    const plain = render(<Harness initial={"No link here"} />)
+    await openMenuOn(plain.container, 0)
+    await act(async () => {
+      fireEvent.click(screen.getByText("Turn into"))
+    })
+    expect(screen.queryByText("Link")).toBeNull()
+  })
+
+  it("the menu's Edit link opens a link block's card outright, for a touch screen", async () => {
+    const { container } = render(
+      <Harness initialDoc={linkDoc({ url: "https://e.com/x", site: "E" }, "Old")} />,
+    )
+    const menu = await openMenuOn(container, 0)
+    expect(menu.textContent).toContain("Edit link")
+    await act(async () => {
+      fireEvent.click(screen.getByText("Edit link"))
+    })
+    const card = await screen.findByTestId("link-hover-card")
+    expect(card.textContent).toContain("Turn into inline")
+    expect((screen.getByTestId("link-display-text") as HTMLInputElement).value).toBe("Old")
+  })
+
   it("a link in a sentence gets its block as a new row beneath, titled as the link", async () => {
     const { container, getByTestId } = render(
       <Harness initial={"Read [the guide](https://e.com/g) first"} />,
@@ -3426,6 +3485,62 @@ describe("BlockEditor links", () => {
       fireEvent.submit(field.closest("form")!)
     })
     expect(serializedLines(getByTestId)).toEqual(["See [e.com](https://www.e.com/x) now"])
+  })
+
+  it("a space typed after an address writes it out as a link, the caret following", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "see https://www.e.com/x" } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["see https://www.e.com/x"])
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "see https://www.e.com/x " } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["see [e.com](https://www.e.com/x) "])
+    expect(textarea.selectionStart).toBe("see [e.com](https://www.e.com/x) ".length)
+    // Its own undo step: the bare address comes back.
+    fireEvent.keyDown(textarea, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["see https://www.e.com/x"])
+  })
+
+  it("leaving edit mode writes out a bare address left in the row", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "https://www.e.com/x" } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["https://www.e.com/x"])
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Escape" })
+    })
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(serializedLines(getByTestId)).toEqual(["[e.com](https://www.e.com/x)"])
+  })
+
+  it("the menu's Edit link opens a link's card without a hover, for a touch screen", async () => {
+    const { container } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) and https://e.com/x"} />,
+    )
+    const row = container.querySelector("[data-occurrence]")!
+    await act(async () => {
+      fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
+    })
+    const menu = screen.getByTestId("block-context-menu")
+    expect(menu.textContent).toContain("Edit link")
+    // Two links: a submenu names them by their text.
+    await act(async () => {
+      fireEvent.click(screen.getByText("Edit link"))
+    })
+    const submenu = await screen.findByTestId("edit-link-menu")
+    expect(submenu.textContent).toContain("the guide")
+    expect(submenu.textContent).toContain("https://e.com/x")
+    await act(async () => {
+      fireEvent.click(within(submenu).getByText("the guide"))
+    })
+    const card = await screen.findByTestId("link-hover-card")
+    expect(card.textContent).toContain("e.com/g")
+    expect((screen.getByTestId("link-display-text") as HTMLInputElement).value).toBe("the guide")
   })
 
   it("a read-only row's link is only a link", async () => {
