@@ -4,8 +4,9 @@ import { QueryBox } from "./query-box"
 
 /**
  * The query box on its own: type `type:`, `in:`, `has:`, `no:`, `sort:` or
- * `date:` and the qualifier popover hangs beside the token; an `in:` shows
- * as a pill beneath. The page dress, or the palette's bare line.
+ * `date:` and the qualifier popover hangs beside the token; a finished
+ * qualifier is lifted out of the line as a pill beneath. The page dress, or
+ * the palette's bare line.
  */
 function Harness({
   initial = "",
@@ -39,9 +40,10 @@ export const Page: Story = {
   args: { initial: "" },
 }
 
-/** A scope already in the text: its pill beneath the box. */
-export const Scoped: Story = {
-  args: { initial: "in:n1 milk" },
+/** Filters already in the query: their pills beneath the box, the text in
+ * the line. */
+export const Filtered: Story = {
+  args: { initial: "in:n1 type:todo milk" },
 }
 
 export const Palette: Story = {

@@ -23,7 +23,7 @@ import { blurLeavesWindow } from "../../utils/window-blur"
 import { IconButton } from "../icon-button"
 import { PinFillIcon12 } from "../icons"
 import { BlockContent } from "./block-content"
-import { headingScale, kindOf, type RowContext } from "./block-kinds"
+import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext } from "./block-kinds"
 import { caretCoordinates, caretLineFlags } from "./caret"
 import { Hash } from "./hash"
 import { SLASH_MENU_WIDTH, SlashMenu } from "./slash-menu"
@@ -213,7 +213,11 @@ export function BlockItem({
   // How this type looks (`block-kinds.tsx`): its marker, typography, any
   // panel, and the chrome around the content line.
   const kind = kindOf(type)
-  const typo = kind.typography(depth, block)
+  // A results view's row (`fixedRoots`): one among many, so a heading keeps
+  // the body's scale and its breathing room.
+  const listed = !!api.fixedRoots
+  const scaleDepth = listed ? LISTED_HEADING_DEPTH : depth
+  const typo = kind.typography(depth, block, listed)
   // Whether this block owns a collapse toggle at all: parents only, and never
   // the zoom title (the editor renders its children itself, at depth 0). The
   // row that closes a loop keeps its chevron too — the block has children,
@@ -706,7 +710,7 @@ export function BlockItem({
         data-testid="heading-hash"
         className={cx(
           "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-end font-bold",
-          headingScale(depth),
+          headingScale(scaleDepth),
           slotClass,
         )}
       >
@@ -749,7 +753,10 @@ export function BlockItem({
   // parent's line runs unbroken beside its subtree.
   const marginTop = zoomTitle
     ? 0
-    : Math.max(kind.topMargin?.(depth) ?? 0, depth === 0 && occurrence.index > 0 ? ROOT_GAP : 0)
+    : Math.max(
+        kind.topMargin?.(depth, listed) ?? 0,
+        depth === 0 && occurrence.index > 0 ? ROOT_GAP : 0,
+      )
 
   // The caption/body line: the textarea while editing, the rendered text
   // otherwise (an image row hangs it beneath the picture).
@@ -866,7 +873,7 @@ export function BlockItem({
           // A heading's surface reaches further left at the larger scales
           // (`[data-heading-scale]` in block-editor.css), so its chevron and
           // `#` sit as far from the left edge as from the top and bottom.
-          data-heading-scale={kind.slot === "hash" ? HEADING_SCALE_NAMES[depth] : undefined}
+          data-heading-scale={kind.slot === "hash" ? HEADING_SCALE_NAMES[scaleDepth] : undefined}
           className={cx(
             // Negative margin + padding pairs grow the highlight surface
             // while the text (and every marker) stays exactly where it was —
@@ -921,7 +928,7 @@ export function BlockItem({
             // it so selection reads as selected, not hovered.
             selected && "bg-bg-secondary block-highlight",
             // When the editor doesn't own the keyboard (focus is in the
-            // sidebar, a dialog, the ⌘P palette mid-preview), the selection
+            // sidebar, a dialog, the ⌘K palette), the selection
             // demotes to a quiet neutral — additive class only, so the
             // structural hooks above are untouched.
             selected && !api.keyboardActive && "block-highlight-inactive",

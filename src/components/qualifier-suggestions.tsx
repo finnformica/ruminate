@@ -10,10 +10,11 @@ import {
   dateQualifierOptions,
   filterQualifierOptions,
   findQualifierTrigger,
+  sortQualifierOptions,
   type QualifierOption,
   type QualifierTrigger,
 } from "../utils/qualifier-suggestions"
-import { Keys } from "./keys"
+import { CalendarIcon16, NoteIcon16 } from "./icons"
 import { NoteFavicon } from "./note-favicon"
 
 /**
@@ -37,8 +38,10 @@ export interface SuggestionItem extends QualifierOption {
 /** How many corpus-backed rows (notes) to list at once. */
 const MAX_ITEMS = 8
 
-/** The popover's width when it hangs beside the token. */
-export const QUALIFIER_POPOVER_WIDTH = 288
+/** Beside the token the popover is as wide as its rows, between these two;
+ * on a narrow or touch screen it takes the box's width instead. */
+export const QUALIFIER_POPOVER_MIN_WIDTH = 160
+export const QUALIFIER_POPOVER_MAX_WIDTH = 288
 
 /** What the key handler reads — a native or a React keyboard event. */
 type SuggestionKeyEvent = Pick<
@@ -72,19 +75,25 @@ export function useQualifierSuggestions({
     if (!trigger || !known) return []
     switch (trigger.key) {
       case "in": {
-        // Notes by name, most recent first (the sorted order) — the open note
-        // leading when nothing narrows the list yet.
+        // Notes by name, most recent first (the sorted order), the open note
+        // leading — with nothing typed and among whatever the typing keeps.
+        // A note open before it exists (today's daily note, say) is not in
+        // the corpus yet, so it gets a row of its own, named by its id.
         const options: SuggestionItem[] = notes.map((note) => ({
           value: note.id,
           label: note.displayName,
-          description: note.id === currentNoteId ? "this note" : undefined,
           note,
         }))
-        const current = options.find((option) => option.note?.id === currentNoteId)
+        const current =
+          options.find((option) => option.note?.id === currentNoteId) ??
+          (currentNoteId ? { value: currentNoteId } : undefined)
         const rest = options.filter((option) => option !== current)
-        const ordered = current && trigger.partial === "" ? [current, ...rest] : options
+        const ordered = current ? [current, ...rest] : options
         return filterQualifierOptions(ordered, trigger.partial).slice(0, MAX_ITEMS)
       }
+      case "sort":
+        // Two steps: the key, then (after its colon) the direction.
+        return filterQualifierOptions(sortQualifierOptions(trigger.partial), trigger.partial)
       case "date":
         // Built when asked for: the rows say which day each word means today.
         return filterQualifierOptions(dateQualifierOptions(), trigger.partial)
@@ -109,10 +118,13 @@ export function useQualifierSuggestions({
   const tokenKey = trigger ? `${trigger.start}:${trigger.key}` : null
   if (tokenKey === null && dismissed !== null) setDismissed(null)
   // A value typed out in full (`type:heading`) needs no suggesting: the one
-  // row it would show is the word already there.
+  // row it would show is the word already there — unless the row is only
+  // half a value (a sort key, before its direction), which still has a
+  // step to offer.
   const complete =
     trigger !== null &&
     items.length === 1 &&
+    !items[0].partial &&
     items[0].value.toLowerCase() === trigger.partial.trim().toLowerCase()
   const visible = trigger !== null && items.length > 0 && !complete && dismissed !== tokenKey
 
@@ -181,6 +193,15 @@ export function useQualifierSuggestions({
   }
 }
 
+/** The note types' icons for the `type:` picker, where a block type shows
+ * its markdown glyph. */
+const NOTE_TYPE_ICONS: Record<string, React.ReactNode> = {
+  note: <NoteIcon16 />,
+  template: <NoteIcon16 />,
+  daily: <CalendarIcon16 />,
+  weekly: <CalendarIcon16 />,
+}
+
 /** The DOM id of one row of the listbox. */
 function optionId(listboxId: string, index: number): string {
   return `${listboxId}-option-${index}`
@@ -228,25 +249,24 @@ export function useComboboxAria(
   }, [inputRef, visible, activeOptionId])
 }
 
-/** The group label for a key: the qualifier as typed, so the row reads as
- * "what completes `type:`". */
-function headingFor(trigger: QualifierTrigger): string {
-  return `${trigger.exclude ? "-" : ""}${trigger.key}:`
-}
-
 /** Where the popover hangs, in px within its positioned host: under the
- * box, at the token — or, on a narrow or touch screen, the box's full width
- * (`full`), where a card beside the token would have nowhere to go. */
+ * box, at the token, as wide as its rows up to `maxWidth` (the room to the
+ * box's right edge, at most `QUALIFIER_POPOVER_MAX_WIDTH`) — or, on a
+ * narrow or touch screen, the box's full `width` (`full`), where a card
+ * beside the token would have nowhere to go. */
 export interface QualifierPopoverPlacement {
   top: number
   left: number
-  width: number
+  /** The box's width, in full mode. */
+  width?: number
+  maxWidth: number
   full: boolean
 }
 
 /**
- * The picker's rows: a card in the slash menu's idiom (a faint label, rows,
- * one highlighted), hung where `placement` says. Pure presentation — the
+ * The picker's rows: a card in the slash menu's idiom (rows, one
+ * highlighted — no label and no key hints, which only crowded it), hung
+ * where `placement` says. Pure presentation — the
  * box owns the state and the keys. Mousedown is cancelled so a click never
  * blurs the input.
  */
@@ -275,6 +295,12 @@ export function QualifierPopover({
     active?.scrollIntoView?.({ block: "nearest" })
   }, [activeIndex, items])
 
+  // Whether any row has something for the leading slot: the slot is drawn
+  // on every row or on none, so the labels line up.
+  const pictured = items.some(
+    (item) => item.note || item.glyph || (trigger.key === "type" && NOTE_TYPE_ICONS[item.value]),
+  )
+
   return (
     <div
       ref={listRef}
@@ -284,31 +310,27 @@ export function QualifierPopover({
       data-testid="qualifier-suggestions"
       data-placement={placement.full ? "full" : "token"}
       tabIndex={-1}
-      style={{ top: placement.top, left: placement.left, width: placement.width }}
+      style={{
+        top: placement.top,
+        left: placement.left,
+        width: placement.full ? placement.width : "max-content",
+        minWidth: placement.full ? undefined : QUALIFIER_POPOVER_MIN_WIDTH,
+        maxWidth: placement.maxWidth,
+      }}
       className="card-2 absolute z-30 max-h-[45svh] overflow-auto rounded-lg p-1 font-sans text-base font-normal leading-normal text-text"
       onMouseDown={(event) => event.preventDefault()}
     >
-      <div className="flex h-7 items-center gap-3 px-2 text-sm text-text-tertiary">
-        <span className="font-mono">{headingFor(trigger)}</span>
-        {/* The keys are the box's — say so, since nothing here takes focus.
-            Not on a touch screen, which has none of them. */}
-        <span
-          aria-hidden
-          className="ml-auto flex shrink-0 items-center gap-2 text-xs coarse:hidden"
-        >
-          <span className="flex items-center gap-1">
-            <Keys keys={["↑", "↓"]} /> move
-          </span>
-          <span className="flex items-center gap-1">
-            <Keys keys={["↵"]} /> pick
-          </span>
-          <span className="flex items-center gap-1">
-            <Keys keys={["esc"]} /> close
-          </span>
-        </span>
-      </div>
       {items.map((item, index) => {
         const active = index === activeIndex
+        const picture = item.note ? (
+          <NoteFavicon note={item.note} />
+        ) : item.glyph ? (
+          <span aria-hidden data-glyph={item.glyph} className="font-mono text-text-tertiary">
+            {item.glyph}
+          </span>
+        ) : trigger.key === "type" ? (
+          NOTE_TYPE_ICONS[item.value]
+        ) : null
         return (
           // Keyboard handling lives on the input (arrows / Enter / Esc); a row
           // only needs the pointer.
@@ -327,21 +349,16 @@ export function QualifierPopover({
             onMouseEnter={() => onHover(index)}
             onClick={() => onPick(item)}
           >
-            <span className="grid h-4 w-4 shrink-0 place-items-center text-sm text-text-secondary">
-              {item.note ? (
-                <NoteFavicon note={item.note} />
-              ) : (
-                <span aria-hidden className="font-mono text-text-tertiary">
-                  :
-                </span>
-              )}
-            </span>
-            <span className="grow truncate">{item.label ?? item.value}</span>
-            {item.description ? (
-              <span className="shrink-0 truncate text-sm text-text-secondary">
-                {item.description}
+            {/* The leading slot: a note's favicon, a block type's markdown
+                glyph, a note type's icon, a sort direction's arrow. A list
+                with no pictures at all (`has:`, the sort keys) has no slot,
+                so its labels start at the edge. */}
+            {pictured ? (
+              <span className="grid h-4 w-6 shrink-0 place-items-center text-sm text-text-secondary">
+                {picture}
               </span>
             ) : null}
+            <span className="min-w-0 grow truncate">{item.label ?? item.value}</span>
           </div>
         )
       })}

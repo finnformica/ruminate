@@ -123,7 +123,6 @@ import {
   subtreeIds,
 } from "../../blocks/ops"
 import { htmlToMarkdown } from "../../utils/html-to-markdown"
-import type { BlockRevealRequest } from "../../utils/note-outline"
 import {
   clipboardBlocksToDoc,
   clipboardBlocksToDocWithIds,
@@ -141,27 +140,6 @@ import {
 } from "./block-item"
 export type { BlockDebugOptions } from "./block-item"
 import { useBlockHistory } from "./use-block-history"
-
-/** The row (occurrence key) of the first heading block whose text matches
- * `heading`, in document order, or null. Used to highlight a heading arrived
- * at from the command menu. */
-function findHeadingKey(doc: BlockDoc, heading: string): string | null {
-  const target = heading.trim()
-  for (const key of occurrenceKeys(doc)) {
-    const block = doc.blocks[idOfKey(key)]
-    if (block && isHeading(block.type) && block.text.trim() === target) return key
-  }
-  return null
-}
-
-/** What a reveal `cancel` puts back: the selected row and every scroll
- * position captured when the outline palette's first preview moved the view. */
-type RevealSnapshot = {
-  selected: string | null
-  scrolls: { el: Element; top: number; left: number }[]
-  windowX: number
-  windowY: number
-}
 
 /** The first row (in document order) of a block present in `restored` but
  * not in `current` — the block an undo brought back, e.g. after a delete. */
@@ -318,7 +296,6 @@ export function BlockEditor({
   doc,
   onChange,
   startEditing = false,
-  highlightHeading,
   collapsed: collapsedProp,
   onToggleCollapse,
   onExitTop,
@@ -334,7 +311,6 @@ export function BlockEditor({
   zoomRootId: zoomRootIdProp = null,
   onZoomNavigate,
   noteTitle,
-  revealRequest = null,
   resolveBlocks,
   debug,
   noteId,
@@ -374,8 +350,6 @@ export function BlockEditor({
   knownBlock?: (id: string) => boolean
   /** Start with the first block in edit mode (e.g. a brand-new note). */
   startEditing?: boolean
-  /** Highlight the block for this heading text on mount / when it changes. */
-  highlightHeading?: string
   /**
    * Folded occurrence keys (`src/blocks/view.ts`). Optional: when provided
    * (with `onToggleCollapse`), collapse is controlled and persisted by the
@@ -447,13 +421,6 @@ export function BlockEditor({
   /** The note's title — the breadcrumb's first crumb while zoomed. */
   noteTitle?: string
   /**
-   * Driven by the command palette's outline mode (⌘P): preview highlights +
-   * scrolls a block live behind the dialog, commit keeps the selection there,
-   * cancel restores what the first preview captured. Messages are consumed by
-   * nonce, so a request left over from a previous mount is ignored.
-   */
-  revealRequest?: BlockRevealRequest | null
-  /**
    * Live subtree markdown per block id from the note corpus — the "paste as
    * link" lookup (see `embeddedPasteFragment`). Optional: without it
    * (Storybook, standalone usage) unknown-id pastes fall back to the
@@ -521,17 +488,12 @@ export function BlockEditor({
   const [focus, setFocus] = useState<FocusRequest | null>(() =>
     startEditing && firstKey ? { key: firstKey } : null,
   )
-  // A note opens with its first block highlighted (or the heading asked
-  // for). A caller can ask for nothing highlighted until the keyboard
-  // arrives (`initialSelection: "none"` — the palette's lists: two under
-  // one query would otherwise each show a highlight, and neither where the
-  // keys are).
+  // A note opens with its first block highlighted. A caller can ask for
+  // nothing highlighted until the keyboard arrives (`initialSelection:
+  // "none"` — the palette's lists: two under one query would otherwise each
+  // show a highlight, and neither where the keys are).
   const [selected, setSelected] = useState<string | null>(() =>
-    initialSelection === "none"
-      ? null
-      : highlightHeading
-        ? (findHeadingKey(doc, highlightHeading) ?? firstKey)
-        : firstKey,
+    initialSelection === "none" ? null : firstKey,
   )
   const [collapsedInternal, setCollapsedInternal] = useState<Set<string>>(new Set())
   const collapsed = collapsedProp ?? collapsedInternal
@@ -566,21 +528,13 @@ export function BlockEditor({
   // The rows' keys in the order they appear on screen — what up/down
   // navigation and a Shift+Arrow range walk.
   const visibleOrder = useMemo(() => rows.map((row) => row.key), [rows])
-  // The row a block id is addressed by when something outside names a block
-  // (the outline palette, `?heading=`): its first row in the view, else its
-  // first occurrence in the document (a block hidden under a fold).
-  const keyOfId = (id: string, inDoc: BlockDoc = doc): string => {
-    for (const row of rows) if (row.id === id) return row.key
-    return firstOccurrenceKey(inDoc, id) ?? id
-  }
-
   // The container is the focusable keyboard target for select mode.
   const containerRef = useRef<HTMLDivElement>(null)
 
   // ── Keyboard ownership ────────────────────────────────────────────────────
   // Whether the editor owns the keyboard: focus (container or a textarea) is
   // inside the container. While it doesn't — focus moved to the sidebar, a
-  // dialog, the ⌘P palette mid-preview — the selection highlight demotes to a
+  // dialog, the ⌘K palette — the selection highlight demotes to a
   // quiet neutral (`.block-highlight-inactive`), Finder-style, so "arrows work
   // here" is never claimed falsely. Tracked via the container's focus/blur
   // (they bubble, i.e. focusin/focusout); the blur side settles on a rAF so
@@ -640,8 +594,8 @@ export function BlockEditor({
     if (navigable) containerRef.current?.focus({ preventScroll: true })
   }
 
-  // Re-highlight when the target heading changes (Cmd-K into the open note).
-  // Reads the latest doc via a ref so this only runs on heading changes.
+  // The latest doc, for effects and handlers that must not re-run on every
+  // edit.
   const docRef = useRef(doc)
   docRef.current = doc
 
@@ -685,119 +639,10 @@ export function BlockEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoomRootId, navigable])
 
-  useEffect(() => {
-    if (!highlightHeading) return
-    const key = findHeadingKey(docRef.current, highlightHeading)
-    if (key) {
-      setFocus(null)
-      setSelected(key)
-    }
-  }, [highlightHeading])
-
-  // ── Reveal requests (⌘P outline palette) ──────────────────────────────────
-  // The palette drives the editor through small {type, id, nonce} messages —
-  // see `BlockRevealRequest`. All capture/restore state lives here so the
-  // palette never has to know the editor's selection or scroll internals.
-  const selectedRef = useRef(selected)
-  selectedRef.current = selected
   // Survives deselection (Escape, focus loss): the row `refocusSignal`
   // returns the user to.
   const lastSelectedRef = useRef(selected)
   if (selected) lastSelectedRef.current = selected
-  // Non-null exactly while a preview sequence is underway. Doubles as the
-  // "palette is driving" flag: the focus-grab effect below must not steal
-  // focus from the palette's input as previews move the selection.
-  const revealSnapshotRef = useRef<RevealSnapshot | null>(null)
-  // Consume messages by nonce so a request left over in the atom from a
-  // previous mount (or a re-render) never re-fires.
-  const lastRevealNonceRef = useRef(revealRequest?.nonce ?? 0)
-
-  // Center a row's content line, same target the select-mode auto-scroll
-  // uses. Called directly so a repeat jump to the already-selected row still
-  // scrolls (state effects wouldn't re-run — the old `?heading=` param bug).
-  const scrollBlockLineIntoView = (key: string) => {
-    const row = containerRef.current?.querySelector<HTMLElement>(`[data-occurrence="${key}"]`)
-    const line = row?.querySelector<HTMLElement>("[data-block-line]") ?? row
-    if (line && typeof line.scrollIntoView === "function") line.scrollIntoView({ block: "center" })
-  }
-
-  const captureRevealSnapshot = (): RevealSnapshot => {
-    // Record every scrollable ancestor of the editor (plus the window), so the
-    // restore is exact no matter which container scrollIntoView actually moved.
-    const scrolls: RevealSnapshot["scrolls"] = []
-    let node: HTMLElement | null = containerRef.current
-    while (node) {
-      if (node.scrollHeight > node.clientHeight || node.scrollWidth > node.clientWidth) {
-        scrolls.push({ el: node, top: node.scrollTop, left: node.scrollLeft })
-      }
-      node = node.parentElement
-    }
-    return {
-      selected: selectedRef.current,
-      scrolls,
-      windowX: window.scrollX,
-      windowY: window.scrollY,
-    }
-  }
-
-  useEffect(() => {
-    const request = revealRequest
-    if (!request || request.nonce === lastRevealNonceRef.current) return
-    lastRevealNonceRef.current = request.nonce
-    if (readOnly) return
-    const current = docRef.current
-    // The palette names a block; the editor lands on its row (the first on
-    // screen, or the first the document has).
-    if (request.type === "preview") {
-      if (!current.blocks[request.id]) return
-      const key = keyOfId(request.id, current)
-      // The first preview of a sequence captures what cancel must restore.
-      if (!revealSnapshotRef.current) revealSnapshotRef.current = captureRevealSnapshot()
-      setAnchorKey(null)
-      setFocus(null)
-      setSelected(key)
-      scrollBlockLineIntoView(key)
-      return
-    }
-    const snapshot = revealSnapshotRef.current
-    revealSnapshotRef.current = null
-    if (request.type === "commit") {
-      if (current.blocks[request.id]) {
-        const key = keyOfId(request.id, current)
-        setAnchorKey(null)
-        setFocus(null)
-        setSelected(key)
-        scrollBlockLineIntoView(key)
-      }
-      // After the dialog unmounts (and its own focus juggling settles), make
-      // the container the keyboard target so arrows work from the landing spot.
-      setTimeout(() => focusContainer())
-      return
-    }
-    // cancel — put back exactly what the first preview captured.
-    if (!snapshot) return
-    setAnchorKey(null)
-    setFocus(null)
-    setSelected(
-      snapshot.selected === null
-        ? null
-        : hasOccurrence(current, snapshot.selected)
-          ? snapshot.selected
-          : firstSelectable(current),
-    )
-    // The palette's close handler refocuses its previously-active element in a
-    // timeout queued before this one, so the scroll we restore here is the one
-    // that sticks.
-    setTimeout(() => {
-      for (const { el, top, left } of snapshot.scrolls) {
-        el.scrollTop = top
-        el.scrollLeft = left
-      }
-      window.scrollTo(snapshot.windowX, snapshot.windowY)
-      focusContainer()
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revealRequest, readOnly])
 
   // The selected rows. Single select is just `[selected]`; a Shift+Arrow
   // range is the contiguous span of `visibleOrder` between anchor and head.
@@ -2018,9 +1863,6 @@ export function BlockEditor({
   // here.
   useLayoutEffect(() => {
     if (!navigable || focus || !selected) return
-    // While the outline palette is previewing, focus stays in its input — the
-    // moving highlight must not steal the keyboard mid-typing.
-    if (revealSnapshotRef.current) return
     const el = containerRef.current
     if (!el) return
     const active = document.activeElement

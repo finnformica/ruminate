@@ -4,7 +4,6 @@ import { basketDoc, basketRootIds } from "../data/basket"
 import { buildGraphSnapshot, docFromGraph, noteDoc, rollup } from "../data/graph"
 import { applyOps, docToOps } from "../data/ops"
 import { indexNoteBlocks } from "../utils/block-search"
-import { buildOutline } from "../utils/note-outline"
 import { richClipboardFormats, extractClipboardBlocks } from "../utils/rich-clipboard"
 import { defaultCollapsedKeys } from "./default-collapsed"
 import { duplicateBlocks, subtreeIds } from "./ops"
@@ -78,9 +77,6 @@ describe("a doc that holds a loop", () => {
     // The heading A folds like any other parent at depth 1; the loop's closing
     // occurrence beneath B is a leaf, so nothing folds past it.
     expect(defaultCollapsedKeys(looped(), 1)).toEqual(["a", "a/b"])
-    // The outline lists a heading once: the closing occurrence is the same
-    // heading again.
-    expect(buildOutline(looped()).map((i) => i.id)).toEqual(["a"])
     expect(subtreeIds(looped(), "a").sort()).toEqual(["a", "b", "c"])
     // A copy is a tree and ends where the loop closes: the payload holds A
     // once, B beneath it with nothing beneath B, and C.

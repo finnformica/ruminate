@@ -1,5 +1,13 @@
 import { describe, expect, test } from "vitest"
-import { isInRange, parseQuery, removeQualifier, resolveRelativeDate } from "./search"
+import {
+  composeQuery,
+  extractQualifiers,
+  isInRange,
+  parseQualifierToken,
+  parseQuery,
+  resolveRelativeDate,
+  splitQuery,
+} from "./search"
 
 describe("parseQuery", () => {
   test("parses quoted values, comma lists, exclusions, and multiple sorts", () => {
@@ -154,42 +162,96 @@ describe("isInRange with relative dates", () => {
   })
 })
 
-describe("removeQualifier", () => {
-  test("takes one qualifier out of the query, as parsed, and tidies the spacing", () => {
-    expect(
-      removeQualifier("type:todo area:work milk", {
-        key: "area",
-        values: ["work"],
-        exclude: false,
-      }),
-    ).toBe("type:todo milk")
-    expect(
-      removeQualifier("-area:work milk", { key: "area", values: ["work"], exclude: true }),
-    ).toBe("milk")
-    expect(removeQualifier("in:n1 type:todo", { key: "in", values: ["n1"], exclude: false })).toBe(
-      "type:todo",
+describe("splitQuery and composeQuery", () => {
+  test("splits a query into its qualifier tokens, as typed, and the text between", () => {
+    expect(splitQuery('milk  in:"Reading list" type:todo  bread -area:work')).toEqual({
+      qualifiers: ['in:"Reading list"', "type:todo", "-area:work"],
+      text: "milk bread",
+    })
+    expect(splitQuery("")).toEqual({ qualifiers: [], text: "" })
+    expect(splitQuery("sort:title,id:desc")).toEqual({
+      qualifiers: ["sort:title,id:desc"],
+      text: "",
+    })
+  })
+
+  test("composes the qualifiers first and the text after, and round-trips", () => {
+    expect(composeQuery(["type:todo", 'in:"Reading list"'], " milk ")).toBe(
+      'type:todo in:"Reading list" milk',
     )
+    expect(composeQuery([], "")).toBe("")
+    expect(composeQuery(["type:todo"], "")).toBe("type:todo")
+    const query = "in:n1 type:todo milk"
+    expect(composeQuery(splitQuery(query).qualifiers, splitQuery(query).text)).toBe(query)
+  })
+})
+
+describe("extractQualifiers", () => {
+  test("lifts a token out once whitespace follows it, moving the caret with the text", () => {
+    expect(extractQualifiers("type:todo ", 10)).toEqual({
+      text: "",
+      caret: 0,
+      qualifiers: ["type:todo"],
+    })
+    expect(extractQualifiers("milk type:todo bread", 20)).toEqual({
+      text: "milk bread",
+      caret: 10,
+      qualifiers: ["type:todo"],
+    })
+    // The caret inside the lifted token lands where it stood.
+    expect(extractQualifiers("milk type:todo  bread", 15)).toEqual({
+      text: "milk bread",
+      caret: 5,
+      qualifiers: ["type:todo"],
+    })
+    // Before the token, the caret does not move.
+    expect(extractQualifiers("milk type:todo bread", 2).caret).toBe(2)
   })
 
-  test("finds quoted and comma-list values as typed", () => {
-    expect(
-      removeQualifier('milk in:"reading list" type:todo', {
-        key: "in",
-        values: ["reading list"],
-        exclude: false,
-      }),
-    ).toBe("milk type:todo")
-    expect(
-      removeQualifier("area:a,b milk", { key: "area", values: ["a", "b"], exclude: false }),
-    ).toBe("milk")
+  test("leaves the token the line ends in — it is still being typed", () => {
+    expect(extractQualifiers("milk type:to", 12)).toEqual({
+      text: "milk type:to",
+      caret: 12,
+      qualifiers: [],
+    })
+    expect(extractQualifiers('in:"Reading li', 14).qualifiers).toEqual([])
   })
 
-  test("leaves the query alone when nothing matches exactly", () => {
-    expect(
-      removeQualifier("area:work milk", { key: "area", values: ["home"], exclude: false }),
-    ).toBe("area:work milk")
-    expect(
-      removeQualifier("area:work milk", { key: "area", values: ["work"], exclude: true }),
-    ).toBe("area:work milk")
+  test("lifts several at once, quoted and negated values as typed", () => {
+    expect(extractQualifiers('-type:done in:"Reading list" milk', 33)).toEqual({
+      text: "milk",
+      caret: 4,
+      qualifiers: ["-type:done", 'in:"Reading list"'],
+    })
+  })
+})
+
+describe("parseQualifierToken", () => {
+  test("reads a token as a filter: key, values, negation", () => {
+    expect(parseQualifierToken("type:todo")).toEqual({
+      key: "type",
+      values: ["todo"],
+      exclude: false,
+    })
+    expect(parseQualifierToken('-in:"Reading list"')).toEqual({
+      key: "in",
+      values: ["Reading list"],
+      exclude: true,
+    })
+    expect(parseQualifierToken("area:a,b")).toEqual({
+      key: "area",
+      values: ["a", "b"],
+      exclude: false,
+    })
+  })
+
+  test("reads a sort as one value, and refuses what is not a token", () => {
+    expect(parseQualifierToken("sort:title,id:desc")).toEqual({
+      key: "sort",
+      values: ["title,id:desc"],
+      exclude: false,
+    })
+    expect(parseQualifierToken("milk")).toBeNull()
+    expect(parseQualifierToken("type:todo milk")).toBeNull()
   })
 })

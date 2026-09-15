@@ -13,8 +13,7 @@ import type { NoteId } from "../schema"
  * The rows are the editor's own: type in them, copy one and paste it onto a
  * block in the outline to link it back (which takes it out of the basket),
  * or remove it, which here is the delete for good (`rowRemoval`). Folds are
- * kept apart from the outline's, and the basket never feeds the outline in
- * the command palette.
+ * kept apart from the outline's.
  */
 export function UnassignedBasket({ noteId }: { noteId: NoteId }) {
   const { doc, count, setDoc } = useBasketDoc(noteId)
@@ -30,7 +29,6 @@ export function UnassignedBasket({ noteId }: { noteId: NoteId }) {
           doc={doc}
           onChange={setDoc}
           noteTitle="Unassigned"
-          publishOutline={false}
           trailingBlank={false}
           rowRemoval="delete"
         />
