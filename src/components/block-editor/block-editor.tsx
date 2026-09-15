@@ -2337,7 +2337,10 @@ export function BlockEditor({
         <nav
           aria-label="Zoom path"
           data-testid="zoom-breadcrumb"
-          className="mb-3 flex min-w-0 items-center gap-0.5 font-content text-sm text-text-secondary"
+          // `note-header` hangs the trail into the page gutter with the
+          // title (block-editor.css): the first crumb's text keeps starting
+          // where the marker slot does, now the zoom title's hanging #.
+          className="note-header mb-3 flex min-w-0 items-center gap-0.5 font-content text-sm text-text-secondary"
         >
           <button type="button" className={crumbClass} onClick={() => navigateZoom(null)}>
             {noteTitle?.trim() || "Note"}

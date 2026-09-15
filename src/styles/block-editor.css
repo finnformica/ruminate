@@ -321,3 +321,18 @@
   scroll-margin-top: 72px;
   scroll-margin-bottom: 72px;
 }
+
+/* ── Header pull ─────────────────────────────────────────────────────────────
+ * The note's header — its title, the zoom breadcrumb and the zoom title —
+ * hangs into the page gutter, so the outline reads as indented beneath it
+ * rather than the title as one more row at the text column. The page says
+ * how far (`--note-header-pull`, set on its padded wrapper; unset means the
+ * header keeps the column): the full marker-slot offset, 27px, puts the
+ * header's text at the content column's edge and the hanging `#` in the
+ * gutter, which the 3xl glyph needs some 30px of — the wide (40px) gutter
+ * has it, the 16–20px ones on a narrow page do not, so there the header
+ * stays at the text column. The block rows never take the variable: the
+ * text column is theirs and does not move. */
+.note-header {
+  margin-left: calc(-1 * var(--note-header-pull, 0px));
+}

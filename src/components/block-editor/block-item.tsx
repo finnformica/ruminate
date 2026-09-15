@@ -845,7 +845,10 @@ export function BlockItem({
     <div
       data-block-row={block.id}
       data-occurrence={occurrence.key}
-      className={cx("relative", zoomTitle && "mb-3")}
+      // The zoom title is the page's title while zoomed, so it hangs into
+      // the gutter as the note title does (`note-header`, block-editor.css);
+      // its children keep the text column.
+      className={cx("relative", zoomTitle && "note-header mb-3")}
       style={{ paddingLeft: depth * INDENT, marginTop }}
     >
       {occurrence.guideKeys.map((guideKey, level) => (

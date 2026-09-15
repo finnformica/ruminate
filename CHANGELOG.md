@@ -13,6 +13,7 @@
 
 ### Changed
 
+- A note's title no longer lines up with the blocks beneath it. On a wide enough page the title, and when zoomed in the breadcrumb trail and the zoomed block's title, sit further out towards the page's edge, with the title's `#` in the margin beside it, so the outline reads as indented under its heading rather than the title as one more row. The blocks themselves have not moved. On a narrow page the title keeps its old place, as there is no room in the margin for the `#`.
 - Code highlighting is stronger in dark mode: its four syntax hues were the near-white text steps and now sit at the same saturated step the light scheme uses; and in both schemes more of the code is picked out — numbers, types, class names, constants, regexes, template literals' `${…}`.
 - **Settings → Sharing** now leads each row with what was shared. A share you have given shows the note, or the block as _Note › text_, with the address beneath it; a share you have received shows the note or block, with who shared it beneath. It used to lead with the address, and a shared block was named by its text alone, so you could not tell which note it was from.
 
