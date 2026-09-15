@@ -6,6 +6,10 @@
 
 - <kbd>⌘</kbd> <kbd>K</kbd> no longer lists **Jump to** (Notes, Calendar, Settings) or **Note actions** (Copy note markdown, Copy note ID, Print note). The jumps have their own keys (<kbd>g</kbd> then <kbd>n</kbd> / <kbd>d</kbd> / <kbd>s</kbd>) and the sidebar; the note actions live in the note's own menu. The palette is for finding notes and blocks: with nothing typed it shows Recent and Pinned, and <kbd>↓</kbd> goes straight to the first row.
 
+### Added
+
+- An agent can fetch your pictures. The MCP server's `read_note` and `get_block` showed an image block as its caption and an asset id, with no way to reach the bytes: the route that serves them takes the browser's session, which an agent does not have. A new `get_image` tool hands back a download link for the picture an image block holds, on this server, lasting fifteen minutes and bound to the token that minted it, so revoking the token kills its links too. The bytes are never embedded in a tool result; the agent fetches them. A picture kept at an external address comes back as that address. The link is signed with a new Worker secret, `IMAGE_LINK_SECRET`, set once with `wrangler secret put`; without it the tool refuses and says so. See docs/mcp-server.md, "Pictures".
+
 ### Changed
 
 - A bullet list continues as bullets. <kbd>↵</kbd> at the end of a bullet now makes another bullet, whatever **New block markdown** (Settings → Editor) is set to — a numbered list and a to-do list already carried on this way, and a bullet used to make the setting's block instead, so with the setting on plain text a list stopped after one item. To leave a list, press <kbd>↵</kbd> on an empty item: the block goes back to the setting's type, or to a paragraph when the setting is that very list, so the key always leaves.

@@ -107,6 +107,26 @@ back down. Other reads go through `fetch` with the bearer token (an
 `<img src>` cannot carry one) and become object URLs, cached for the page's
 life.
 
+## Reading through MCP
+
+An agent (docs/mcp-server.md) sees an image block as its row: the caption
+and the asset id. The `get_image` tool is how it gets the picture: a download
+link on this server, which the agent fetches itself —
+
+```
+/api/images/img_6f9619ff8b86d011b42d00c0?exp=1800000900&tok=mcp_…&sig=…
+```
+
+The images route accepts such a link with no session. `sig` is an
+HMAC-SHA256 under `IMAGE_LINK_SECRET` (`worker/handlers/image-links.ts`)
+over the tenant, the asset, the MCP token id and the expiry; the tenant is
+read off the token row `tok` names, exactly as the MCP endpoint reads it, and
+the token must still be live. So a link lasts fifteen minutes, dies with its
+token, and can no more name another tenant's picture than a tool call can.
+The secret is set once with `npx wrangler secret put IMAGE_LINK_SECRET`
+(and in `.dev.vars` locally); without it the tool refuses and says what to
+set.
+
 ## Switching it on
 
 Two halves, both now in place:

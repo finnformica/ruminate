@@ -97,6 +97,11 @@
   // bundle). The client secret is NOT here — set it once with
   //   npx wrangler secret put GITHUB_CLIENT_SECRET
   // and put both in .dev.vars (git-ignored) for local `wrangler dev`.
+  //
+  // IMAGE_LINK_SECRET is a secret too (worker/handlers/image-links.ts): it
+  // signs the download links the MCP `get_image` tool hands an agent.
+  //   npx wrangler secret put IMAGE_LINK_SECRET
+  // Without it the tool refuses and says what to set.
   "vars": {
     "VITE_GITHUB_CLIENT_ID": "Ov23lidqIncQ8ul67fUo",
     // Bootstrap owner id: implicit allowlist entry, and the fail-closed
