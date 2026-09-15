@@ -5,7 +5,7 @@ import { hostOf, linkPropsOf } from "../../blocks/link"
 import type { Block } from "../../blocks/types"
 import type { Occurrence } from "../../blocks/view"
 import { cx } from "../../utils/cx"
-import { ExternalLinkIcon16 } from "../icons"
+import { ExternalLinkIcon16, GlobeIcon16 } from "../icons"
 import type { BlockEditorApi } from "./block-item"
 import { FigureFrame, FigureTool } from "./figure-frame"
 import { LinkHoverCard, openLink } from "./link-hover-card"
@@ -25,24 +25,32 @@ import { LinkHoverCard, openLink } from "./link-hover-card"
  * the block's title — and **Turn into inline**, which puts the link back
  * in the text.
  *
- * A link whose page said nothing — not yet fetched, or a page that will
- * not say — is the card with its host for a title, so it is still
- * something to read and to open. The card is the row's full width unless
- * dragged narrower; the frame (`figure-frame.tsx`) holds the layout.
+ * A link whose page said nothing — not yet fetched, a page that will not
+ * say, a page behind a sign-in — has no description or picture to show, so
+ * the card says so in their place ("No preview available") over the
+ * address, and shows the title only when it is a title: a name the reader
+ * gave the link, or one the page gave it. A title that is only the
+ * address's host (what a pasted address is named) is left to the byline,
+ * which says it already. Editing shows the title line whatever it holds,
+ * so one can be typed. The card is the row's full width unless dragged
+ * narrower; the frame (`figure-frame.tsx`) holds the layout.
  */
 export function LinkCard({
   block,
   occurrence,
   api,
   title,
+  editing,
   pointer,
 }: {
   block: Block
   occurrence: Occurrence
   api: BlockEditorApi
   /** The title line (the row's body, view or textarea), or null for an
-   * untitled link that is not being edited — the host stands in. */
+   * untitled link that is not being edited. */
   title: ReactNode
+  /** The title line is a textarea right now. */
+  editing: boolean
   /** The row's click and double-click, for the card's plain surface. */
   pointer: Pick<React.HTMLAttributes<HTMLElement>, "onClick" | "onDoubleClick">
 }) {
@@ -52,6 +60,12 @@ export function LinkCard({
   const [faviconBroken, setFaviconBroken] = useState(false)
   const editable = !api.readOnly
   const picture = image && !imageBroken ? image : null
+  // What the page said about itself, beyond a name for it.
+  const previewed = description !== undefined || picture !== null
+  // A title worth a line of its own: not empty, and not just the host the
+  // byline already says.
+  const named = block.text.trim() !== "" && block.text.trim() !== host
+  const showTitle = title !== null && (editing || named)
 
   // The card's own surface takes the row's click; its links, tools and the
   // title being edited keep theirs.
@@ -77,18 +91,18 @@ export function LinkCard({
   const inner = (
     <>
       <div className="flex min-w-0 flex-1 flex-col gap-1 px-4 py-3">
-        {title ? (
+        {showTitle ? (
           <div data-block-body className="flex min-w-0">
             {title}
           </div>
-        ) : (
+        ) : previewed || !url ? (
           <div
             data-testid="link-untitled"
             className="min-h-[1lh] truncate text-base font-medium leading-relaxed text-text"
           >
             {url ? host : "No address"}
           </div>
-        )}
+        ) : null}
         {description ? (
           <p
             data-testid="link-description"
@@ -96,6 +110,14 @@ export function LinkCard({
           >
             {description}
           </p>
+        ) : url && !previewed ? (
+          <div
+            data-testid="link-placeholder"
+            className="flex min-h-[1lh] items-center gap-1.5 text-sm leading-relaxed text-text-tertiary"
+          >
+            <GlobeIcon16 className="shrink-0" />
+            <span className="truncate">No preview available</span>
+          </div>
         ) : null}
         {url ? (
           <a

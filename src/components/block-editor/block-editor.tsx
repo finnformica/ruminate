@@ -27,7 +27,13 @@ import {
   withFigureLayout,
   type FigureAlign,
 } from "../../blocks/figure"
-import { linkPropsOf, wholeTextLink, withLinkPreview, type LinkPreview } from "../../blocks/link"
+import {
+  hostOf,
+  linkPropsOf,
+  wholeTextLink,
+  withLinkPreview,
+  type LinkPreview,
+} from "../../blocks/link"
 import { LinkPreviewError } from "../../data/link-previews"
 import { openLink } from "./link-hover-card"
 import { ImageLightbox } from "./image-lightbox"
@@ -1548,15 +1554,14 @@ export function BlockEditor({
   // text for a title; its preview — what the page says about itself — is
   // fetched behind it and written on without a history step, so the whole
   // block is one undo, as a picture's upload is. A page that will not
-  // answer leaves the card with its address alone, quietly: the block is
-  // still there to open, and Refresh preview asks again.
+  // answer leaves the card with its address alone and says so in a toast:
+  // the block is still there to open, and Refresh preview asks again.
   /**
    * Fetch `url`'s preview and write it onto block `id`. An untitled block
    * takes the page's title; a titled one keeps its own. Not a history
-   * step. `announce` says failure in a toast (a refresh the reader asked
-   * for); a first fetch is quiet.
+   * step. Failure is said in a toast, with the page's host and why.
    */
-  const previewInto = async (id: string, url: string, announce: boolean) => {
+  const previewInto = async (id: string, url: string) => {
     if (!onLinkPreview) return
     try {
       const preview = await onLinkPreview(url)
@@ -1577,9 +1582,8 @@ export function BlockEditor({
       docRef.current = next
       onChange(next)
     } catch (error) {
-      if (announce) {
-        toast.error(error instanceof LinkPreviewError ? error.message : "Preview failed")
-      }
+      const why = error instanceof LinkPreviewError ? error.message : "Preview failed"
+      toast.error(`No preview for ${hostOf(url)}: ${why.charAt(0).toLowerCase()}${why.slice(1)}`)
     }
   }
   /**
@@ -1623,7 +1627,7 @@ export function BlockEditor({
     setAnchorKey(null)
     setFocus(null)
     setSelected(nextKey)
-    void previewInto(id, href, false)
+    void previewInto(id, href)
   }
   /**
    * A link's display text, changed in the row's text: `[title](href)`
@@ -1652,7 +1656,7 @@ export function BlockEditor({
     const block = doc.blocks[id]
     if (!block || block.type !== "link") return
     const { url } = linkPropsOf(block)
-    if (url) void previewInto(id, url, true)
+    if (url) void previewInto(id, url)
   }
   /** A link block back to a paragraph holding its link as text. */
   const linkToInline = (id: string) => {

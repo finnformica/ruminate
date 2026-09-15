@@ -249,6 +249,38 @@ describe("/api/unfurl", () => {
     expect(pulled).toBeLessThan(MAX_BYTES / chunk.byteLength + 4)
   })
 
+  it("reads a link to this app from its own assets, never by fetching itself", async () => {
+    const log: string[] = []
+    const shell = new Response("<title>Ruminate</title>", {
+      status: 200,
+      headers: { "Content-Type": "text/html" },
+    })
+    const env = {
+      ...(await testEnv()),
+      ASSETS: { fetch: async () => shell.clone() } as unknown as Fetcher,
+    } as Env
+    const response = await unfurl(
+      request("https://example.com/notes/blk_abc"),
+      env,
+      fetchStub({}, log),
+    )
+    expect(await response.json()).toEqual({
+      url: "https://example.com/notes/blk_abc",
+      title: "Ruminate",
+      favicon: "https://example.com/favicon.ico",
+      site: "example.com",
+    })
+    expect(log).toEqual([])
+    // Without the binding, the address and its host.
+    const bare = await unfurl(
+      request("https://example.com/notes/x"),
+      await testEnv(),
+      fetchStub({}, log),
+    )
+    expect(await bare.json()).toEqual({ url: "https://example.com/notes/x", site: "example.com" })
+    expect(log).toEqual([])
+  })
+
   it("answers the address and host for a page that is not HTML", async () => {
     const env = await testEnv()
     const fetchImpl = fetchStub({

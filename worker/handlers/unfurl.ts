@@ -63,7 +63,18 @@ export async function unfurl(
   const url = publicWebUrl(target)
   if (!url) return jsonResponse({ error: "invalid_url" }, 400)
 
-  const page = await fetchPage(url, fetchImpl)
+  // A link to this app itself (a note's address, pasted from the bar): a
+  // Worker cannot fetch its own hostname — the platform refuses the
+  // subrequest — so the page is read from the static assets instead, the
+  // same shell every app address serves. Without an assets binding (tests)
+  // it is the address and its host.
+  const own = url.host === new URL(request.url).host
+  if (own && !env.ASSETS) return jsonResponse(previewOf(url.toString(), "", ""), 200)
+  const fetcher: typeof fetch = own
+    ? (input, init) => env.ASSETS.fetch(new Request(input, init))
+    : fetchImpl
+
+  const page = await fetchPage(url, fetcher)
   if (!page.ok) return jsonResponse({ error: page.error }, page.error === "invalid_url" ? 400 : 502)
 
   const preview = previewOf(page.url, page.contentType, page.html)

@@ -332,14 +332,16 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     // The card (`LinkCard`) holds the title line — the block's text, the
     // ordinary body (view or textarea) — with the page's description and
     // byline beneath. An untitled link block drops the line rather than
-    // leaving a blank one in the card (the host stands in); it comes back
-    // the moment the row is being edited, so a title can still be typed.
+    // leaving a blank one in the card (the card decides what stands in);
+    // it comes back the moment the row is being edited, so a title can
+    // still be typed.
     wrap: figureWrap("link-block", (content, context) => (
       <LinkCard
         block={context.block}
         occurrence={context.occurrence}
         api={context.api}
         title={context.editing || context.block.text.trim() !== "" ? lineOf(content) : null}
+        editing={context.editing}
         pointer={rowPointer(context)}
       />
     )),

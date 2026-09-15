@@ -10,6 +10,7 @@ import type { BlockDoc, ChangeHint } from "../../blocks/types"
 import { richClipboardFormats } from "../../utils/rich-clipboard"
 import { ImageUploadError, type UploadedImage } from "../../data/images"
 import type { LinkPreview } from "../../blocks/link"
+import { LinkPreviewError } from "../../data/link-previews"
 import { BlockEditor, type BlockDebugOptions } from "./block-editor"
 
 // The context menu (Base UI) measures its popup with a ResizeObserver and
@@ -3327,10 +3328,15 @@ describe("BlockEditor links", () => {
     await act(async () => {
       fireEvent.click(screen.getByText("Turn into block"))
     })
-    // The row is the block at once, with its address and the link's text.
+    // The row is the block at once, with its address and the link's text —
+    // which is only the host, so the card says there is no preview yet.
     expect(serializedLines(getByTestId)).toEqual(["A", "[e.com](https://e.com/x)", "C"])
     expect(linkProps(getByTestId)).toEqual([{ url: "https://e.com/x" }])
     expect(container.querySelector('[data-testid="link-card"]')).not.toBeNull()
+    expect(getByTestId("link-placeholder").textContent).toBe("No preview available")
+    expect(
+      container.querySelector('[data-testid="link-card"] [data-testid="block-body"]'),
+    ).toBeNull()
     expect(highlightedText(container)).toContain("e.com")
     expect(onLinkPreview).toHaveBeenCalledWith("https://e.com/x")
 
@@ -3349,6 +3355,7 @@ describe("BlockEditor links", () => {
       },
     ])
     expect(getByTestId("link-description").textContent).toBe("What the page says.")
+    expect(container.querySelector('[data-testid="link-placeholder"]')).toBeNull()
 
     // Landing the preview is the same edit as making the block: one undo.
     fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
@@ -3462,17 +3469,59 @@ describe("BlockEditor links", () => {
     expect(container.querySelector('[data-testid="link-image"]')).toBeNull()
   })
 
-  it("an untitled link block shows its host in place of the title line, until edited", async () => {
-    const { container, getByTestId } = render(
-      <Harness initialDoc={linkDoc({ url: "https://e.com/x" })} />,
-    )
-    expect(container.querySelector('[data-testid="block-body"]')).toBeNull()
-    expect(getByTestId("link-untitled").textContent).toBe("e.com")
+  it("a link block without a preview says so, keeps a real title, and edits on double-click", async () => {
+    // No description, no picture: a placeholder where the description
+    // would be, the address in the byline, and no title line for a title
+    // that is only the host.
+    const bare = render(<Harness initialDoc={linkDoc({ url: "https://e.com/x" }, "e.com")} />)
+    expect(bare.container.querySelector('[data-testid="block-body"]')).toBeNull()
+    expect(bare.container.querySelector('[data-testid="link-untitled"]')).toBeNull()
+    expect(bare.getByTestId("link-placeholder").textContent).toBe("No preview available")
+    expect(bare.getByTestId("link-byline").textContent).toBe("e.com")
     await act(async () => {
-      fireEvent.doubleClick(getByTestId("link-card"))
+      fireEvent.doubleClick(bare.getByTestId("link-card"))
     })
-    expect(container.querySelector("textarea")).not.toBeNull()
-    expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Add a title…")
+    expect(bare.container.querySelector("textarea")).not.toBeNull()
+    expect(bare.container.querySelector("textarea")!.getAttribute("placeholder")).toBe(
+      "Add a title…",
+    )
+    bare.unmount()
+
+    // A title the reader gave it stays, over the placeholder.
+    const named = render(
+      <Harness initialDoc={linkDoc({ url: "https://e.com/x" }, "Flight booking")} />,
+    )
+    expect(named.container.querySelector('[data-testid="block-body"]')!.textContent).toBe(
+      "Flight booking",
+    )
+    expect(named.getByTestId("link-placeholder")).not.toBeNull()
+    named.unmount()
+
+    // With a preview and no title, the host stands in for the title line.
+    const previewed = render(
+      <Harness initialDoc={linkDoc({ url: "https://e.com/x", description: "D" })} />,
+    )
+    expect(previewed.getByTestId("link-untitled").textContent).toBe("e.com")
+    expect(previewed.container.querySelector('[data-testid="link-placeholder"]')).toBeNull()
+  })
+
+  it("says why when a preview cannot be fetched", async () => {
+    const onLinkPreview = vi.fn(async () => {
+      throw new LinkPreviewError("unreachable", "The page did not answer")
+    })
+    const { container } = render(
+      <>
+        <Harness initial={"[e.com](https://e.com/x)"} onLinkPreview={onLinkPreview} />
+        <Toaster />
+      </>,
+    )
+    await hoverLink(container, 0)
+    await act(async () => {
+      fireEvent.click(screen.getByText("Turn into block"))
+    })
+    await waitFor(() =>
+      expect(document.body.textContent).toContain("No preview for e.com: the page did not answer"),
+    )
   })
 
   it("a click on the card selects its row; the byline keeps its own click", () => {

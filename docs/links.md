@@ -47,9 +47,14 @@ link: **Visit**, the display text — the block's title — and **Turn into
 inline**, which puts the link back in the text as `[title](url)` (also in
 the context menu, for a keyboard or a touch screen).
 
-A link block whose page said nothing shows its address's host for a title,
-so it is still something to read and to open. Pictures and favicons that
-fail to load are simply not shown.
+A link block whose page said nothing — not yet fetched, a page that will
+not answer, a page behind a sign-in — says **No preview available** where
+the description would be, over the address, and shows the title only when
+it is a title: a name you gave the link, or one the page gave it. A title
+that is only the address's host (what a pasted address is named) is left
+to the byline, which says it already; editing shows the title line
+whatever it holds. Pictures and favicons that fail to load are simply not
+shown.
 
 ### The block
 
@@ -122,13 +127,15 @@ whatever sits behind the Worker), follows redirects by hand so each hop is
 checked the same way, waits eight seconds at most, and reads no more than
 half a megabyte of the page — the tags are in the head. A page that will not
 answer, is not HTML, or says nothing about itself still yields the address
-and its host, so the block is a card with a name rather than an error.
+and its host, so the block is a card with a name rather than an error. A
+link to the app itself (a note's address) is read from the app's own
+static assets, since a Worker cannot fetch its own hostname.
 
 The client (`src/data/link-previews.ts`) asks when a block is made and on
 **Refresh preview**, and writes the answer onto the block **without a
 history step**, so the whole block is one undo, as a picture's upload is. A
-first fetch that fails is quiet — the block is there to open either way; a
-refresh that fails says why in a toast. Signed out (the sample notes) there
+fetch that fails says why in a toast, naming the host — the block is there
+to open either way. Signed out (the sample notes) there
 is no session to fetch through: a block is still made, with its address
 alone, and the menu offers no refresh.
 
