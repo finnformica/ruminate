@@ -69,7 +69,9 @@ export function PageHeader({ title, icon, className, actions }: PageHeaderProps)
             <NewNoteButton />
           </div>
         ) : null}
-        {sidebar === "collapsed" && icon ? (
+        {/* The rule between the nav buttons and the title, whether or not
+            the title has an icon (a shared note carries its own, inline). */}
+        {sidebar === "collapsed" ? (
           <div role="separator" className="h-5 w-px bg-border hidden sm:block" />
         ) : null}
         <div className="flex w-0 grow items-center gap-3 px-2">

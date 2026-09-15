@@ -144,7 +144,7 @@ someone else's rows does not belong in it. So shared notes live in memory
   read a shared note exactly as they read an own one. `sharedOriginAtom`
   (node id → share id) is what tells them apart: the sidebar lists own notes
   under Notes and the notes shared with them under **Shared** (who shared each
-  is the row's tooltip, and the page header's second crumb), and the note page
+  is the row's tooltip, and the page header's first crumb), and the note page
   shows a notice naming the owner, renders read-only, and hides Rename, Pin,
   Delete and the basket.
 - **A shared block is a note here.** A root may be a block, and a block has

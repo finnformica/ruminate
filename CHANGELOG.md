@@ -27,7 +27,7 @@
 
 ### Changed
 
-- Notes shared with you are one list in the sidebar, under **Shared**, rather than a list per person. Who shared a note is its row's tooltip, and the note's header says it too, as a quieter second crumb after the title: _My Note › John Smith_. The shared-note notice above the blocks now sits flush with them.
+- Notes shared with you are one list in the sidebar, under **Shared**, rather than a list per person. Who shared a note is its row's tooltip, and the note's header says it too, as a quieter first crumb before the title: _John Smith › My Note_, with the note's icon beside its name. The shared-note notice above the blocks now sits flush with them.
 
 ### Removed
 
