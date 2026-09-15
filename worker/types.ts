@@ -14,6 +14,8 @@
  * - `IMAGES` (an R2 bucket) and `VITE_IMAGES_ENABLED` switch on image
  *   uploads (worker/handlers/images.ts, docs/images.md). Both optional: with
  *   either missing the image routes answer 501 and the feature is a no-op.
+ * - `IMAGE_LINK_SECRET` signs the download links the MCP `get_image` tool
+ *   mints (worker/handlers/image-links.ts).
  */
 import type { RateLimiter } from "./mcp/rate-limit"
 
@@ -35,6 +37,13 @@ export interface Env {
   /** "true" switches the image routes on; the same variable, at build time,
    * switches the client's upload paths on. Anything else = off. */
   VITE_IMAGES_ENABLED?: string
+  /**
+   * Signs the fifteen-minute download links `get_image` hands an MCP agent
+   * (worker/handlers/image-links.ts). A secret, set with `wrangler secret
+   * put IMAGE_LINK_SECRET`. Without it the tool refuses and says what to
+   * set.
+   */
+  IMAGE_LINK_SECRET?: string
   /**
    * The burst half of the MCP rate limit (docs/mcp-rate-limiting.md) —
    * Cloudflare's rate-limiting binding, keyed by token id, configured in

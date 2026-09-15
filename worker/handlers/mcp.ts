@@ -44,7 +44,7 @@ import {
   type ProtocolError,
 } from "../mcp/protocol"
 import { checkRateLimit, type RateRefusal } from "../mcp/rate-limit"
-import { callTool, toolsFor } from "../mcp/tools"
+import { callTool, toolsFor, type ImageAssets } from "../mcp/tools"
 import { findGrant, tenantIsActive } from "../mcp/tokens"
 
 /** The MCP endpoint's path. */
@@ -208,7 +208,21 @@ export async function mcp(request: Request, env: Env): Promise<Response> {
     name: null,
   })
 
-  return dispatch(message.method, message.id, message.params, grant, tenant)
+  return dispatch(
+    message.method,
+    message.id,
+    message.params,
+    grant,
+    tenant,
+    imageAssets(env, origin),
+  )
+}
+
+/** Where `get_image` reads from, or undefined while pictures are switched
+ * off — the same two-part switch as the image routes (docs/images.md). */
+function imageAssets(env: Env, origin: string): ImageAssets | undefined {
+  if (env.VITE_IMAGES_ENABLED !== "true" || env.IMAGES === undefined) return undefined
+  return { bucket: env.IMAGES, origin, linkSecret: env.IMAGE_LINK_SECRET ?? null }
 }
 
 /**
@@ -254,7 +268,8 @@ function discoverResult(id: JsonRpcId, grant: Grant | null): Record<string, unkn
       "rows, never as markdown. Start with `list_notes` or `search`, then " +
       "`read_note`, or walk the graph with `get_block` / `list_children` / " +
       "`list_parents` — a big note is far cheaper walked than read whole, and " +
-      "`read_note` takes a `depth`. To change something, name the block: " +
+      "`read_note` takes a `depth`. `get_image` reads the picture an `image` " +
+      "block holds. To change something, name the block: " +
       "`update_block`, `move_block`, `link_block`. `update_note` replaces a " +
       "note's ENTIRE body and is rarely what you want. " +
       (grant === null
@@ -270,6 +285,7 @@ async function dispatch(
   params: Record<string, unknown>,
   grant: Grant,
   tenant: TenantDb,
+  images: ImageAssets | undefined,
 ): Promise<Response> {
   switch (method) {
     case "server/discover":
@@ -312,7 +328,7 @@ async function dispatch(
       // would be two writes on every single tool call to no end. A tenant
       // whose corpus an agent wrote first is seeded by `readyTenant` the
       // moment a browser syncs it.
-      const called = await callTool(grant, tenant, name, args)
+      const called = await callTool(grant, tenant, name, args, Date.now(), images)
       if (called.kind === "unknown_tool") {
         return protocolFailure({
           status: 200,
@@ -333,7 +349,7 @@ async function dispatch(
       }
       return json(
         result(id, {
-          content: [{ type: "text", text: outcome.text }],
+          content: [...(outcome.media ?? []), { type: "text", text: outcome.text }],
           structuredContent: outcome.data,
           isError: false,
         }),

@@ -7,3 +7,8 @@ GITHUB_CLIENT_SECRET=
 # Image uploads (docs/images.md): "true" with an IMAGES R2 binding in
 # wrangler.jsonc switches the /api/images routes on; otherwise they answer 501.
 VITE_IMAGES_ENABLED=false
+# Signs the fifteen-minute download links the MCP `get_image` tool mints
+# (docs/images.md, "Reading through MCP"). Any long random string; in
+# production set it once with `npx wrangler secret put IMAGE_LINK_SECRET`.
+# Without it the tool refuses and says what to set.
+IMAGE_LINK_SECRET=

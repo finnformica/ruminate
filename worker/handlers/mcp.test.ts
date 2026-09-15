@@ -437,3 +437,46 @@ describe("tools/call", () => {
     expect(rows[0].last_used_at).not.toBeNull()
   })
 })
+
+describe("get_image over the wire", () => {
+  it("answers with the link and the text, in that order, and no bytes", async () => {
+    const picture = "img_abcdefghijkl"
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9, 9])
+    await harness.seedNote(USER, {
+      id: "blk_pictures",
+      markdown: `![Shot](/api/images/${picture})\n`,
+    })
+    await harness.putImage(USER, picture, png, "image/png")
+    const bearer = await token()
+    const listed = await bodyOf(
+      await send(
+        mcpRequest(
+          "tools/call",
+          { name: "list_children", arguments: { block_id: "blk_pictures" } },
+          { token: bearer },
+        ),
+      ),
+    )
+    const blockId = listed.result.structuredContent.children[0].id as string
+
+    const response = await send(
+      mcpRequest(
+        "tools/call",
+        { name: "get_image", arguments: { block_id: blockId } },
+        { token: bearer },
+      ),
+    )
+    expect(response.status).toBe(200)
+    const { result } = await bodyOf(response)
+    expect(result.isError).toBe(false)
+    expect(result.content.map((block: { type: string }) => block.type)).toEqual([
+      "resource_link",
+      "text",
+    ])
+    expect(result.content[0].uri).toMatch(
+      /^https:\/\/ruminate\.test\/api\/images\/img_abcdefghijkl\?exp=\d+&tok=mcp_/,
+    )
+    expect(result.structuredContent).toMatchObject({ size: png.byteLength, mimeType: "image/png" })
+    expect(JSON.stringify(result)).not.toContain(btoa(String.fromCharCode(...png)))
+  })
+})
