@@ -327,17 +327,46 @@ describe("traversal", () => {
 })
 
 describe("search", () => {
-  it("finds a block by substring and names the note it is in", async () => {
+  it("finds a block by its words and names the note it is in", async () => {
     const data = await run(harness, grantOf({}), "search", { query: "bullet" })
     expect(data.hits).toHaveLength(1)
-    expect(data.hits[0].noteIds).toEqual([ALPHA])
-    expect(data.hits[0].noteTitles).toEqual(["Alpha"])
+    expect(data.hits[0].noteId).toBe(ALPHA)
+    expect(data.hits[0].noteTitle).toBe("Alpha")
+    // The heading it sits under — where an agent walks in.
+    expect(data.hits[0].section).toBe("Heading")
   })
 
   it("is case-insensitive and never matches a note node", async () => {
     expect((await run(harness, grantOf({}), "search", { query: "BULLET" })).hits).toHaveLength(1)
     // "Alpha" is the note's own text, and a note is not a block hit.
     expect((await run(harness, grantOf({}), "search", { query: "Alpha" })).hits).toHaveLength(0)
+  })
+
+  it("takes the app's query language: a qualifier FILTERS, free text matches", async () => {
+    const grant = grantOf({})
+    // `type:` with a block-type value resolves at block granularity.
+    const todos = await run(harness, grant, "search", { query: "type:todo" })
+    expect(todos.hits.map((hit: any) => hit.text)).toEqual(["a task #work"])
+    // `in:` scopes to a note, by name.
+    const scoped = await run(harness, grant, "search", { query: 'in:"Beta"' })
+    expect(scoped.hits.length).toBeGreaterThan(0)
+    expect(scoped.hits.every((hit: any) => hit.noteId === BETA)).toBe(true)
+  })
+
+  it("a note-scoped grant searches only its notes", async () => {
+    // A word from BETA and a word from ALPHA: only BETA's may come back.
+    const data = await run(harness, grantOf({ note_ids: JSON.stringify([BETA]) }), "search", {
+      query: "content",
+    })
+    expect(
+      (
+        await run(harness, grantOf({ note_ids: JSON.stringify([BETA]) }), "search", {
+          query: "bullet",
+        })
+      ).hits,
+    ).toHaveLength(0)
+    expect(data.hits.length).toBeGreaterThan(0)
+    expect(data.hits.every((hit: any) => hit.noteId === BETA)).toBe(true)
   })
 })
 
@@ -365,7 +394,7 @@ describe("every collection is bounded", () => {
     const grant = grantOf({})
     const first = await run(harness, grant, "search", { query: "a", limit: 1 })
     expect(first.hits).toHaveLength(1)
-    expect(first.truncated).toBe(true)
+    expect(first.total).toBeGreaterThan(1)
     expect(first.nextCursor).toBe("1")
 
     const second = await run(harness, grant, "search", {

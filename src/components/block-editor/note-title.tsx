@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { cx } from "../../utils/cx"
+import { blurLeavesWindow } from "../../utils/window-blur"
 import { Hash } from "./hash"
 
 /**
@@ -10,7 +11,9 @@ import { Hash } from "./hash"
  *
  * - Arrow-up from the first block selects the title (via `focusSignal`), which
  *   highlights it and clears the block highlight below.
- * - Enter (or a click) edits it; Escape / Enter / blur commit or revert.
+ * - Enter (or a click) edits it; Escape reverts, blur commits, and Enter
+ *   commits and carries on into a block below (`onCreateBelow`), as Enter at
+ *   the end of a block does.
  * - Arrow-down returns focus to the editor (`onArrowDown`).
  *
  * The field edits the note's **title** — data on the note node, not its id
@@ -26,6 +29,7 @@ export function NoteTitle({
   onArrowDown,
   onCreateBelow,
   focusSignal,
+  startEditing,
 }: {
   /** The note's current title; empty means untitled. */
   title: string
@@ -37,14 +41,21 @@ export function NoteTitle({
    * highlights the first block.
    */
   onArrowDown?: (mode: "edit" | "select") => void
-  /** Cmd/Shift+Enter while the title is selected adds a new root block. */
+  /** Enter while editing the title, or Cmd/Shift+Enter while it is selected,
+   * opens a new root block below it. */
   onCreateBelow?: () => void
   /** Bump to select the title from the keyboard (arrow-up past the first block). */
   focusSignal?: number
+  /**
+   * Open with the field editing, the caret in it (a brand-new note: naming
+   * it is the first thing to do). Read once, on mount, like the editor's own
+   * `startEditing`.
+   */
+  startEditing?: boolean
 }) {
   const [value, setValue] = useState(title)
-  const [editing, setEditing] = useState(false)
-  const [selected, setSelected] = useState(false)
+  const [editing, setEditing] = useState(startEditing ?? false)
+  const [selected, setSelected] = useState(startEditing ?? false)
   const headingRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -104,17 +115,23 @@ export function NoteTitle({
           ref={inputRef}
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          onBlur={() => {
+          onBlur={(event) => {
+            // The window going (a tab switch) is not the user leaving the
+            // field: focus comes back to it with the window, so keep editing.
+            if (blurLeavesWindow(event.relatedTarget)) return
             commit()
             setEditing(false)
             setSelected(false)
           }}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
+              // Enter finishes the name and carries on into the note: a block
+              // below the title, like Enter at the end of a block.
               event.preventDefault()
               commit()
               setEditing(false)
-              setSelected(true)
+              setSelected(false)
+              onCreateBelow?.()
             } else if (event.key === "Escape") {
               event.preventDefault()
               setValue(title)

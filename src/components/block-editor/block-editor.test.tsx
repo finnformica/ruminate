@@ -38,6 +38,7 @@ function Harness({
   startEditing,
   zoomRootId,
   refocusSignal,
+  newRootSignal,
   resolveBlocks,
   debug,
   parentCountOf,
@@ -45,6 +46,7 @@ function Harness({
   onImageUpload,
   onHint,
   knownBlock,
+  noteId,
 }: {
   initial?: string
   /** A doc built by hand — for shapes markdown cannot express (a shared block). */
@@ -52,6 +54,7 @@ function Harness({
   startEditing?: boolean
   zoomRootId?: string | null
   refocusSignal?: number
+  newRootSignal?: number
   resolveBlocks?: (ids: string[]) => Record<string, string | null>
   debug?: BlockDebugOptions
   parentCountOf?: (id: string) => number
@@ -60,6 +63,8 @@ function Harness({
   /** Sees every change's hint (undefined when there is none). */
   onHint?: (hint: ChangeHint | undefined) => void
   knownBlock?: (id: string) => boolean
+  /** The note behind the doc (what Pin and Copy link need). */
+  noteId?: string
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarter(parse(initial)))
   return (
@@ -71,9 +76,11 @@ function Harness({
           setDoc(next)
         }}
         knownBlock={knownBlock}
+        noteId={noteId}
         startEditing={startEditing}
         zoomRootId={zoomRootId}
         refocusSignal={refocusSignal}
+        newRootSignal={newRootSignal}
         resolveBlocks={resolveBlocks}
         debug={debug}
         parentCountOf={parentCountOf}
@@ -204,6 +211,70 @@ describe("BlockEditor focus + keyboard", () => {
     const textarea = container.querySelector("textarea")
     expect(textarea).not.toBeNull()
     expect(document.activeElement).toBe(textarea)
+  })
+
+  it("a new root block (Enter on the title) edits an empty first block rather than adding one", () => {
+    const { container, getByTestId, rerender } = render(<Harness initial="" newRootSignal={0} />)
+    expect(container.querySelectorAll("[data-block-row]").length).toBe(1)
+    rerender(<Harness initial="" newRootSignal={1} />)
+    const textarea = container.querySelector("textarea")
+    expect(textarea).not.toBeNull()
+    expect(document.activeElement).toBe(textarea)
+    // Still one block: the starter was reused, none stacked above it — and
+    // it is the type Enter makes (the "New block markdown" setting, a bullet
+    // by default), as a block made at the end of another would be.
+    expect(container.querySelectorAll("[data-block-row]").length).toBe(1)
+    expect(serializedLines(getByTestId)).toEqual(["- "])
+  })
+
+  it("a new root block above content goes in first and is edited", () => {
+    const { container, getByTestId, rerender } = render(<Harness initial="- a" newRootSignal={0} />)
+    rerender(<Harness initial="- a" newRootSignal={1} />)
+    const textarea = container.querySelector("textarea")
+    expect(document.activeElement).toBe(textarea)
+    expect(textarea?.value).toBe("")
+    const rows = container.querySelectorAll("[data-block-row]")
+    expect(rows.length).toBe(2)
+    // The fresh block is first, of the default new-block type; the existing
+    // bullet follows it.
+    expect(rows[0].contains(textarea)).toBe(true)
+    expect(serializedLines(getByTestId)).toEqual(["- ", "- a"])
+  })
+
+  it("keeps editing when the window loses focus (a tab switch), ends it on a real blur", () => {
+    const { container } = render(
+      <>
+        <Harness initial="A" startEditing />
+        <input data-testid="outside" />
+      </>,
+    )
+    const textarea = container.querySelector("textarea")!
+    expect(document.activeElement).toBe(textarea)
+
+    // The window going away: the textarea blurs with nowhere in the page
+    // taking focus and the document no longer focused. The edit stays open,
+    // so the browser can hand focus back to the same textarea on return.
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false)
+    fireEvent.blur(textarea)
+    expect(container.querySelector("textarea")).toBe(textarea)
+    hasFocus.mockReturnValue(true)
+    fireEvent.focus(textarea)
+    expect(container.querySelector("textarea")).toBe(textarea)
+
+    // Focus moving to another control in the page is the user leaving the
+    // block: editing ends.
+    act(() => container.querySelector<HTMLInputElement>('[data-testid="outside"]')!.focus())
+    expect(container.querySelector("textarea")).toBeNull()
+    hasFocus.mockRestore()
+  })
+
+  it("a blur with focus still in the document (a click on blank page) ends editing", () => {
+    const { container } = render(<Harness initial="A" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true)
+    fireEvent.blur(textarea)
+    expect(container.querySelector("textarea")).toBeNull()
+    hasFocus.mockRestore()
   })
 
   it("an empty block shows nothing in view mode (no placeholder text)", () => {
@@ -2389,6 +2460,31 @@ describe("BlockEditor context menu", () => {
     expect(fireEvent.touchEnd(body, { changedTouches: [{ clientX: 20, clientY: 20 }] })).toBe(true)
     await pick("Unlink")
     expect(serializedLines(getByTestId)).toEqual(["A", "C"])
+  })
+
+  it("pins and unpins a block from its menu, as a prop on the block, and the row says so", async () => {
+    const { container } = render(<Harness initial={"A\nB"} noteId="n" />)
+    let menu = await openMenuOn(container, 1)
+    expect(menu.textContent).toContain("Pin")
+    expect(menu.textContent).not.toContain("Unpin")
+    expect(container.querySelector('[data-testid="block-pinned"]')).toBeNull()
+    await pick("Pin")
+    // The row now carries the pin glyph; the menu offers Unpin.
+    const rows = container.querySelectorAll("[data-occurrence]")
+    expect(rows[1]!.querySelector('[data-testid="block-pinned"]')).not.toBeNull()
+    expect(rows[0]!.querySelector('[data-testid="block-pinned"]')).toBeNull()
+    menu = await openMenuOn(container, 1)
+    expect(menu.textContent).toContain("Unpin")
+    await pick("Unpin")
+    expect(container.querySelector('[data-testid="block-pinned"]')).toBeNull()
+  })
+
+  it("offers Pin only where the rows are a note's own", async () => {
+    // No note behind the editor (a clipboard fragment, Storybook): nothing
+    // to list the block under, so no Pin.
+    const { container } = render(<Harness initial={"A\nB"} />)
+    const menu = await openMenuOn(container, 1)
+    expect(menu.textContent).not.toContain("Pin")
   })
 
   it("opens on a row with the standard actions, and selects that row", async () => {

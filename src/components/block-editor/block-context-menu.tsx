@@ -23,6 +23,9 @@ import { DropdownMenu } from "../dropdown-menu"
  * **Delete with contents** on a block that holds something, since
  * its plain Delete leaves what the block held as new basket roots.
  *
+ * **Pin** puts the block in the sidebar's Pinned list (docs/metadata.md),
+ * from where it opens zoomed into; on a pinned block the item reads Unpin.
+ *
  * Structure moves (indent, outdent, move up/down) are keyboard-only: the
  * menu is for what a pointer cannot already do.
  */
@@ -36,6 +39,8 @@ export interface BlockMenuTarget {
   collapsed: boolean
   /** How many places the block appears across the corpus (1 = only here). */
   places: number
+  /** Pinned (docs/metadata.md): listed in the sidebar's Pinned list. */
+  pinned: boolean
   /** An image row's layout (`src/blocks/image.ts`): the side its picture
    * keeps to, and whether it has been dragged to a size of its own. */
   image?: { align: ImageAlign; sized: boolean }
@@ -50,6 +55,10 @@ export interface BlockMenuActions {
   copy: (key: string) => void
   /** Absent when the editor has no note to link into (Storybook, tests). */
   copyLink?: (id: string) => void
+  /** Pin this block — or unpin it, when it is (`target.pinned`): a pinned
+   * block is listed in the sidebar under Pinned and opens zoomed into.
+   * Absent where the rows are not the user's own to pin. */
+  pin?: (id: string) => void
   /** Share this block — and everything beneath it — with someone
    * (docs/sharing.md). Absent where the rows are not the user's own. */
   share?: (id: string) => void
@@ -226,6 +235,11 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
       {actions.copyLink ? (
         <DropdownMenu.Item onClick={() => actions.copyLink?.(id)}>
           Copy link to block
+        </DropdownMenu.Item>
+      ) : null}
+      {actions.pin ? (
+        <DropdownMenu.Item onClick={() => actions.pin?.(id)}>
+          {target.pinned ? "Unpin" : "Pin"}
         </DropdownMenu.Item>
       ) : null}
       {actions.share ? (

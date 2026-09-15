@@ -19,7 +19,9 @@ import {
 import { htmlToMarkdown } from "../../utils/html-to-markdown"
 import { clipboardBlocksToMarkdown, extractClipboardBlocks } from "../../utils/rich-clipboard"
 import { imageFilesOf } from "../../data/images"
+import { blurLeavesWindow } from "../../utils/window-blur"
 import { IconButton } from "../icon-button"
+import { PinFillIcon12 } from "../icons"
 import { BlockContent } from "./block-content"
 import { headingScale, kindOf, type RowContext } from "./block-kinds"
 import { caretCoordinates, caretLineFlags } from "./caret"
@@ -765,7 +767,13 @@ export function BlockItem({
           syncSlash(event.currentTarget.value, event.currentTarget.selectionStart)
         }
         onPaste={handlePaste}
-        onBlur={() => api.setFocus(null)}
+        // Leaving the field ends the edit — unless it is the window that
+        // went (a tab switch, another app): the browser brings focus back
+        // to this textarea when it returns, so the edit stays open.
+        onBlur={(event) => {
+          if (blurLeavesWindow(event.relatedTarget)) return
+          api.setFocus(null)
+        }}
         className={cx(
           "min-w-0 flex-1 resize-none overflow-hidden font-content leading-relaxed text-text outline-none [overflow-wrap:anywhere] placeholder:text-text-tertiary",
           // The panel supplies a code block's surface and padding.
@@ -938,6 +946,15 @@ export function BlockItem({
           {kind.before?.(rowContext)}
           {kind.wrap ? kind.wrap(content, rowContext) : content}
           {kind.after?.(rowContext)}
+          {/* A pinned block says so, with the glyph the sidebar's Pinned
+              list and a pinned note's row use. (A note row draws its own,
+              in its kind's `after`.) */}
+          {block.type !== "note" && block.props?.pinned === true ? (
+            <PinFillIcon12
+              data-testid="block-pinned"
+              className="shrink-0 self-center text-text-pinned"
+            />
+          ) : null}
           {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
         </div>
         {api.debug?.showMetadata ? (

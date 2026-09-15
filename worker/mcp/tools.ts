@@ -56,6 +56,7 @@ import { IMAGE_LINK_TTL_SECONDS, signImageLink } from "../handlers/image-links"
 import { imageUrlOf } from "../handlers/image-policy"
 import { deleteBlockOps, deleteNoteOps, deleteSubtreeOps, type Op } from "../../src/data/ops"
 import type { TenantDb } from "../tenancy-db"
+import { searchCorpus } from "../search/engine"
 import { allows, type Grant, type Permission } from "./grant"
 import {
   applyOpsToReplica,
@@ -73,7 +74,6 @@ import {
   propsOf,
   notesView,
   scopedGraph,
-  sees,
   subtreeView,
   unassignedOf,
   type ScopedGraph,
@@ -838,66 +838,46 @@ export const TOOLS: ToolDef[] = [
     name: "search",
     title: "Search blocks",
     description:
-      "Find blocks whose text contains `query` (case-insensitive substring, not " +
-      "the app's query language). Each hit names the block and the notes it " +
-      "appears in, so it is the way to get from a phrase to a note or a block id. " +
-      "Page with `cursor` when `nextCursor` comes back.",
+      "Find blocks. `query` is the app's own query language — the same one a " +
+      "person types in the search box: free text is matched fuzzily against " +
+      "each block's text, and qualifiers FILTER. `type:todo` (or `done`, " +
+      "`task`, `heading`, `code`, …); `in:<note id>` or `in:<block id>` to " +
+      'scope to a note or a subtree (or `in:"Reading list"` by name); ' +
+      "`-type:done` to exclude; `a,b` for either; qualifiers stack as AND; " +
+      "`sort:updated` / `sort:text`. A query with NO free text is an " +
+      "enumeration of whatever the qualifiers admit, in note order — " +
+      "`type:todo` is every open to-do. Each hit names the block, the note it " +
+      "is in and the heading it sits under, so it is the way to get from a " +
+      "phrase to a block id to walk from. Page with `cursor` when " +
+      "`nextCursor` comes back.",
     permission: "read",
     annotations: readOnly,
     schema: z.object({
-      query: requiredArg("The text to look for."),
+      query: requiredArg(
+        "The app's query language: free text, plus qualifiers like `type:`, " +
+          "`in:`, `has:`/`no:`, `sort:`.",
+      ),
       limit: limitArg(),
       cursor: cursorArg(),
     }),
     run(args, { graph }) {
-      const query = args.query.toLowerCase()
       const offset = offsetOf(args.cursor)
-
-      const hits: {
-        id: string
-        type: string
-        text: string
-        noteIds: string[]
-        noteTitles: string[]
-      }[] = []
-      // Sorted ids so the order — and therefore the cursor — is the same for
-      // the same corpus and query. One hit past the page is collected, which is
-      // all it takes to answer `nextCursor` without deriving a `Note` for every
-      // match in the corpus.
-      const ids = [...graph.snapshot.nodes.keys()].filter((id) => sees(graph, id)).sort()
-      let found = 0
-      for (const id of ids) {
-        const row = graph.snapshot.nodes.get(id)
-        if (!row || row.type === NOTE_TYPE) continue
-        if (!row.text.toLowerCase().includes(query)) continue
-        found += 1
-        if (found <= offset) continue
-        const noteIds = notesReaching(graph, id)
-        hits.push({
-          id,
-          type: row.type,
-          text: row.text,
-          noteIds,
-          noteTitles: noteIds.map((noteId) => noteOf(graph, noteId)?.displayName ?? noteId),
-        })
-        if (hits.length > args.limit) break
-      }
-      const more = hits.length > args.limit
-      if (more) hits.pop()
-      const nextCursor = more ? String(offset + args.limit) : null
+      const found = searchCorpus({ graph, query: args.query, limit: args.limit, offset })
 
       return {
         ok: true,
-        data: { hits, nextCursor, truncated: more },
+        data: { hits: found.hits, total: found.total, nextCursor: found.nextCursor },
         text:
-          hits.length === 0
-            ? `Nothing matched "${query}".`
-            : hits
+          found.hits.length === 0
+            ? `Nothing matched "${args.query}".`
+            : found.hits
                 .map(
                   (hit) =>
-                    `${hit.id}  [${hit.noteTitles.join(", ") || "unassigned"}]  ${preview(hit.text, 14)}`,
+                    `${hit.id}  [${hit.noteTitle}${hit.section ? ` › ${hit.section}` : ""}]  ` +
+                    preview(hit.text, 14),
                 )
-                .join("\n"),
+                .join("\n") +
+              (found.nextCursor ? `\n\n${found.total - offset - found.hits.length} more.` : ""),
       }
     },
   }),

@@ -84,7 +84,9 @@ a block folded or unfolded, or zoomed into on this device (a list of at
 most five note ids and timestamps, under one browser-storage key that
 overwrites itself); selecting, focusing or arrowing through a note never
 counts — with the
-**Pinned** notes beneath, less any already listed as recent; both give way
+**Pinned** notes beneath, less any already listed as recent, and the pinned
+blocks after them (docs/metadata.md), each opening its note zoomed into
+it; both give way
 to results the moment you type — are the same block editor, browsed, under
 the same count line as the notes page. The
 palette's one item of its own — a date, when the query reads as one —
@@ -323,14 +325,20 @@ Rules while zoomed:
 
 ### Note title
 
-| Action                    | Shortcut                                              |
-| ------------------------- | ----------------------------------------------------- |
-| Select the title          | <kbd>↑</kbd> from the first block                     |
-| Edit it                   | <kbd>↵</kbd> (or click)                               |
-| New root block below      | <kbd>⌘</kbd> <kbd>↵</kbd> / <kbd>⇧</kbd> <kbd>↵</kbd> |
-| Drop back into the editor | <kbd>↓</kbd>                                          |
-| Commit rename             | <kbd>↵</kbd>                                          |
-| Cancel rename             | <kbd>Esc</kbd>                                        |
+| Action                                | Shortcut                                              |
+| ------------------------------------- | ----------------------------------------------------- |
+| Select the title                      | <kbd>↑</kbd> from the first block                     |
+| Edit it                               | <kbd>↵</kbd> (or click)                               |
+| New root block below                  | <kbd>⌘</kbd> <kbd>↵</kbd> / <kbd>⇧</kbd> <kbd>↵</kbd> |
+| Drop back into the editor             | <kbd>↓</kbd>                                          |
+| Commit rename and start a block below | <kbd>↵</kbd>                                          |
+| Cancel rename                         | <kbd>Esc</kbd>                                        |
+
+A brand-new note opens with the title editing, so the name is the first thing
+typed and <kbd>↵</kbd> carries straight on into the first block. A new root
+block is of the type <kbd>↵</kbd> makes (Settings → Editor, "New block
+markdown"), and reuses an empty block already at the top rather than adding
+another.
 
 ### Document
 

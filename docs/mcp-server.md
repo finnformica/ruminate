@@ -95,7 +95,7 @@ An agent works in the notes you already have: there is no tool to create one.
 | Tool             | Perm   | What it does                                                                                                                                                                         |
 | ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `list_notes`     | read   | Notes the token can reach, newest first. Filter by `type`; page with `cursor`.                                                                                                       |
-| `search`         | read   | Blocks whose text contains a substring, each naming the notes it appears in. Page with `cursor`.                                                                                     |
+| `search`         | read   | Blocks, in the app's own query language (`in:`, `type:`, `-`, `sort:`, free text). Page with `cursor`. See docs/mcp-search.md.                                                       |
 | `read_note`      | read   | A note's blocks **as stored rows** — top 2 levels by default (`depth: 0` for all), bounded by `limit` too; page with `cursor`. `include` adds the parts that cost a whole-note read. |
 | `get_block`      | read   | One block by id: type, text, props, children, parents, the notes it is in. Its id lists are capped.                                                                                  |
 | `get_image`      | read   | A download link for the picture an `image` block holds: fifteen minutes, bound to the token. The bytes are fetched, never embedded.                                                  |
@@ -461,12 +461,16 @@ worth paying.
 
 ## 8. Not built yet
 
-Two follow-ups have their designs written down rather than their code (rate limiting was the third, and is built — §5 and docs/mcp-rate-limiting.md):
+Two follow-ups have their design written down rather than their code (rate limiting
+was a third, and is built — §5 and docs/mcp-rate-limiting.md):
 
-|                        |                                                                                |
-| ---------------------- | ------------------------------------------------------------------------------ |
-| docs/mcp-search.md     | One search surface for the person and the agent, lexical then hybrid-semantic. |
-| docs/mcp-provenance.md | Marking agent writes, and accepting or discarding them.                        |
+|                        |                                                             |
+| ---------------------- | ----------------------------------------------------------- |
+| docs/mcp-provenance.md | Marking agent writes, and accepting or discarding them.     |
+| docs/mcp-search.md     | The semantic half of `search`; the query language is built. |
+
+`search` still does not fold in `list_notes`, which docs/mcp-search.md intends
+and this server has not done.
 
 ## 9. Files
 
@@ -482,6 +486,7 @@ Two follow-ups have their designs written down rather than their code (rate limi
 | `worker/mcp/rate-limit.ts`              | How much an agent may ask for, and what it is told |
 | `worker/mcp/tools.ts`                   | Every tool, and the refusals before them           |
 | `worker/handlers/image-links.ts`        | The signed download link `get_image` mints         |
+| `worker/search/engine.ts`               | `search`: the app's query language, scoped         |
 | `src/data/ops-rows.ts`                  | Ops → rows, shared with the browser store's rule   |
 | `src/components/mcp-tokens-section.tsx` | The Settings panel                                 |
 | `migrations/0007_mcp_tokens.sql`        | The grants table                                   |
