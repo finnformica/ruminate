@@ -334,7 +334,9 @@ Rules while zoomed:
 
 A brand-new note opens with the title editing, so the name is the first thing
 typed and <kbd>↵</kbd> carries straight on into the first block. A new root
-block reuses an empty block already at the top rather than adding another.
+block is of the type <kbd>↵</kbd> makes (Settings → Editor, "New block
+markdown"), and reuses an empty block already at the top rather than adding
+another.
 
 ### Document
 
