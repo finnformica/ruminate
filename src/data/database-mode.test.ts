@@ -230,6 +230,36 @@ describe("database mode boot", () => {
     expect(await store.getMeta("d1_pull_cursor")).toBe("600")
   })
 
+  it("while the browser says offline, no pull is attempted — it waits for the network", async () => {
+    // `navigator.onLine === false` is a definite "no network": a pull would
+    // only fail and read as "Sync failed". It is skipped instead — nothing
+    // recorded as an error, a first-ever boot still gets the empty-offline
+    // notice — and the `online` event's pull runs once the network is back.
+    Object.defineProperty(navigator, "onLine", { configurable: true, get: () => false })
+    try {
+      const { source, calls } = stubSource({
+        full: remoteCorpus({ "note-a": NOTE_A }, 1, "1000"),
+      })
+      const store = await boot({ source })
+      expect(calls.full).toBe(0)
+      expect(status()).toMatchObject({
+        status: "ready",
+        pull: "idle",
+        lastPullError: null,
+        emptyOffline: true,
+      })
+
+      Object.defineProperty(navigator, "onLine", { configurable: true, get: () => true })
+      requestDatabasePull()
+      await flushDatabaseMode()
+      expect(calls.full).toBe(1)
+      expect(await notesOf(store)).toEqual({ "note-a": NOTE_A })
+      expect(status()).toMatchObject({ pull: "idle", emptyOffline: false })
+    } finally {
+      delete (navigator as { onLine?: boolean }).onLine
+    }
+  })
+
   it("first-ever boot offline: empty state flagged, cleared by the first write", async () => {
     const { source } = stubSource({ fail: true })
     await boot({ source })

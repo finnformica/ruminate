@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { attentionTone } from "./sync-status"
+import { attentionTone, syncStatusKind } from "./sync-status"
 
 const base = {
   isDatabaseMode: true,
@@ -8,6 +8,35 @@ const base = {
   isSyncing: false,
   isSyncError: false,
 }
+
+describe("syncStatusKind", () => {
+  it("reads Synced when nothing is pending or wrong", () => {
+    expect(syncStatusKind(base)).toBe("synced")
+  })
+
+  it("is hidden outside database mode, whatever else is true", () => {
+    expect(syncStatusKind({ ...base, isDatabaseMode: false, online: false })).toBe("hidden")
+    expect(syncStatusKind({ ...base, isDatabaseMode: false, session: "expired" })).toBe("hidden")
+  })
+
+  it("reads Offline over everything but being signed out", () => {
+    expect(syncStatusKind({ ...base, online: false })).toBe("offline")
+    // A push that failed before the network went is not the news now.
+    expect(syncStatusKind({ ...base, online: false, isSyncError: true })).toBe("offline")
+    // Pending edits wait for the network; they are not "syncing".
+    expect(syncStatusKind({ ...base, online: false, isSyncing: true })).toBe("offline")
+    // A re-sign-in cannot happen offline either.
+    expect(syncStatusKind({ ...base, online: false, session: "expired" })).toBe("offline")
+    expect(syncStatusKind({ ...base, online: false, session: "expiring" })).toBe("offline")
+  })
+
+  it("online, a dead sign-in outranks the sync state", () => {
+    expect(syncStatusKind({ ...base, session: "expired", isSyncing: true })).toBe("signed-out")
+    expect(syncStatusKind({ ...base, isSyncing: true, isSyncError: true })).toBe("syncing")
+    expect(syncStatusKind({ ...base, session: "expiring", isSyncError: true })).toBe("expiring")
+    expect(syncStatusKind({ ...base, isSyncError: true })).toBe("failed")
+  })
+})
 
 describe("attentionTone", () => {
   it("is quiet when everything is fine", () => {
