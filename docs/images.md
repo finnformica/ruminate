@@ -29,6 +29,17 @@ In markdown (the note rollup, copy/paste, export) the block is one line:
 ![caption](/api/images/img_6f9619ff8b86d011b42d00c0)
 ```
 
+The clipboard's html flavour writes it as a figure — the `<img>`, absolute,
+and a `<figcaption>` reading `[image: caption]` (`[image]` uncaptioned). The
+bytes are never fetched at copy time. An app that can load the picture shows
+it; the composers that take the html flavour and drop an `<img>` (Slack, the
+Claude chat) keep the caption, so a pasted note still says where its
+pictures were. Read back — Ruminate's own no-payload path, or any web page's
+`<img>` or `<figure>` — the tag becomes this line, a same-origin address as
+its path, so an upload comes back as the upload it was and an external
+picture as itself. HTML pasted from a web page brings its pictures in this
+way; only files upload.
+
 which the parser reads straight back into the same props. A whole-line image
 with any other URL parses as an external picture (`props.src`) and loads
 straight from that address; an image in the middle of a sentence stays text.
@@ -167,6 +178,3 @@ pricing page for the current figures.
   in the bucket: a block delete is undoable, and the bytes must outlive the
   undo window. A sweep that removes assets no block names is future work;
   until then orphans cost storage only, at the rate above.
-- **External pictures on paste.** HTML pasted from a web page drops its
-  `<img>` tags (as before); only files upload. Typing the markdown line by
-  hand does work.

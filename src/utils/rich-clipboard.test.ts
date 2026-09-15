@@ -107,6 +107,21 @@ describe("richClipboardFormats", () => {
     expect(html).toContain("<li>[x] done</li>")
   })
 
+  it("writes an image as a figure whose caption says there is a picture", () => {
+    // The composers that drop the <img> (Slack, Claude) keep the caption, so
+    // the pasted note still shows where the picture was and what it was of;
+    // the bytes are never fetched. An uploaded picture's path is absolute.
+    const origin = window.location.origin
+    const { html } = richClipboardFormats("![the stage gate](/api/images/img_abcdefghijkl)")
+    expect(html).toContain(
+      `<figure><img src="${origin}/api/images/img_abcdefghijkl" alt="the stage gate">` +
+        "<figcaption>[image: the stage gate]</figcaption></figure>",
+    )
+    expect(richClipboardFormats("![](https://e.com/a.png)").html).toContain(
+      '<figure><img src="https://e.com/a.png" alt=""><figcaption>[image]</figcaption></figure>',
+    )
+  })
+
   it("gives fresh ids on every rebuild through the duplicate path", () => {
     const { html } = richClipboardFormats("- a\n  - b")
     const blocks = extractClipboardBlocks(html)!
@@ -128,20 +143,26 @@ describe("every block type's html survives a foreign app", () => {
   const excused: Partial<Record<BlockType, string>> = {
     h2: "a heading's level comes from its outline depth; the marker is `#` at any level",
     h3: "as h2",
-    image: "an <img> is the picture itself; the converter has no image block to read it into",
     note: "a page's title, never a copied block",
   }
   const text = "some **bold** text"
   for (const def of BLOCK_TYPE_DEFS) {
     if (def.id in excused) continue
     it(def.id, () => {
-      const block: Block = { id: "blk_x", type: def.id, text, children: [] }
+      const props = def.id === "image" ? { image: "img_abcdefghijkl" } : undefined
+      const block: Block = {
+        id: "blk_x",
+        type: def.id,
+        text,
+        children: [],
+        ...(props && { props }),
+      }
       const { html } = richClipboardFormats(blockLines(block).join("\n"))
       const visible = html.replace(/<meta[^>]*>/g, "")
       expect(visible).not.toMatch(/<(input|button|select|textarea)\b/)
       const doc = parse(htmlToMarkdown(visible))
       const [first] = doc.rootBlockIds.map((id) => doc.blocks[id])
-      expect(first).toMatchObject({ type: def.id, text })
+      expect(first).toMatchObject({ type: def.id, text, ...(props && { props }) })
     })
   }
 })
