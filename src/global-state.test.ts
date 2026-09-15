@@ -5,7 +5,7 @@ import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
 import { buildGraphSnapshot, docToGraph, noteDoc, rollup } from "./data/graph"
 import { serialize } from "./blocks/serialize"
 import { applyOps } from "./data/ops"
-import { sharedOriginAtom } from "./data/shared-mode"
+import { receivedSharesAtom, sharedOriginAtom } from "./data/shared-mode"
 import {
   blockIndexAtom,
   githubUserAtom,
@@ -15,10 +15,12 @@ import {
   graphSnapshotAtom,
   isSignedOutAtom,
   notesAtom,
+  ownSortedNotesAtom,
   pinnedBlocksAtom,
   recentTouchesAtom,
   sampleGraphAtom,
   searchBlocksAtom,
+  sharedNotesAtom,
   touchNoteAtom,
 } from "./global-state"
 import { RECENT_STORAGE_KEY } from "./utils/recent-notes"
@@ -182,6 +184,25 @@ describe("pinnedBlocksAtom", () => {
     store.set(databaseGraphAtom, applyOps(store.get(databaseGraphAtom), [pin("blk_milk")], 2))
     store.set(sharedOriginAtom, new Map([["blk_milk", "share-1"]]))
     expect(store.get(pinnedBlocksAtom)).toEqual([])
+    unsubscribe()
+  })
+})
+
+describe("sharedNotesAtom", () => {
+  it("is one list of the notes shared with the user, each with its share, apart from their own", async () => {
+    const { store, unsubscribe } = await signedInStore(FILES)
+    expect(store.get(sharedNotesAtom)).toEqual([])
+    const share = {
+      id: "share-1",
+      owner: { login: "octocat", name: "John Smith" },
+      rootIds: ["misc"],
+      permissions: ["read" as const],
+      createdAt: 1,
+    }
+    store.set(receivedSharesAtom, [share])
+    store.set(sharedOriginAtom, new Map([["misc", "share-1"]]))
+    expect(store.get(sharedNotesAtom)).toMatchObject([{ note: { id: "misc" }, share }])
+    expect(store.get(ownSortedNotesAtom).map((note) => note.id)).toEqual(["tasks"])
     unsubscribe()
   })
 })

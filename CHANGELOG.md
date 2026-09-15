@@ -25,6 +25,10 @@
 
 - A shared note's title looks and behaves like your own notes' again: the hanging `#`, the alignment with the blocks beneath, the highlight when you arrow up to it from the first block, and <kbd>↓</kbd> back into the note. It was drawn as a plain heading with none of those. Only renaming stays off.
 
+### Changed
+
+- Notes shared with you are one list in the sidebar, under **Shared**, rather than a list per person. Who shared a note is its row's tooltip, and the note's header says it too, as a quieter second crumb after the title: _My Note › John Smith_. The shared-note notice above the blocks now sits flush with them.
+
 ### Removed
 
 - <kbd>⌘</kbd> <kbd>K</kbd> no longer lists **Jump to** (Notes, Calendar, Settings) or **Note actions** (Copy note markdown, Copy note ID, Print note). The jumps have their own keys (<kbd>g</kbd> then <kbd>n</kbd> / <kbd>d</kbd> / <kbd>s</kbd>) and the sidebar; the note actions live in the note's own menu. The palette is for finding notes and blocks: with nothing typed it shows Recent and Pinned, and <kbd>↓</kbd> goes straight to the first row.
