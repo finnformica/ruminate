@@ -67,6 +67,9 @@ export interface QualifierOption {
   label?: string
   /** A markdown glyph for the row's leading slot (`type:` rows). */
   glyph?: string
+  /** A pick writes the value with a colon after it and keeps the picker
+   * open for what follows — a sort key, before its direction. */
+  partial?: boolean
 }
 
 /**
@@ -86,6 +89,11 @@ export function applyQualifierOption(
   const values = [...trigger.prefixValues, picked].join(",")
   const token = `${trigger.exclude ? "-" : ""}${trigger.key}:${values}`
   const after = value.slice(trigger.end)
+  if (option.partial) {
+    // Half a value: the colon opens the second step, the caret stays put.
+    const next = value.slice(0, trigger.start) + token + ":" + after
+    return { value: next, caret: trigger.start + token.length + 1 }
+  }
   const next = value.slice(0, trigger.start) + token + " " + after.replace(/^\s+/, "")
   return { value: next, caret: trigger.start + token.length + 1 }
 }
@@ -119,32 +127,45 @@ export function filterQualifierOptions(
 /**
  * The fixed vocabularies. `type:` lists the block types (docs/query-language.md,
  * "Block types" — the registry's, `src/blocks/types.ts`) and then the note
- * types; `has:`/`no:` the countable things; `sort:` the sortable keys, each
- * with the direction it does not default to as a second row (`sort:title`
- * is A→Z, so `title:desc` is offered beside it). `date:` is supplied by
- * `dateQualifierOptions` — its rows carry today's date, so they are built
- * when asked for, not when the module loads. A row is its label — the
- * value capitalised, or a sort spelt out — and, for a block type, its
- * glyph: nothing is glossed.
+ * types; `has:`/`no:` the countable things. `sort:` is built from the
+ * partial (`sortQualifierOptions`: the key, then its direction) and `date:`
+ * from today's date (`dateQualifierOptions`), so both are made when asked
+ * for, not when the module loads. A row is its label — the value
+ * capitalised — and, for a block type, its glyph: nothing is glossed.
  */
 export const STATIC_QUALIFIER_OPTIONS: Readonly<Record<string, readonly QualifierOption[]>> = {
   // The block types, each with its markdown glyph, then the note types.
   type: [...searchTypeOptions(), named("note"), named("daily"), named("weekly"), named("template")],
   has: [named("dates"), named("tasks"), named("title")],
   no: [named("dates"), named("tasks"), named("title")],
-  // `sort:id` still works when typed; it is not offered, an id being
-  // opaque (docs/graph-storage.md).
-  sort: [
-    { value: "title", label: "Title, A to Z" },
-    { value: "title:desc", label: "Title, Z to A" },
-    { value: "updated_at", label: "Updated, newest first" },
-    { value: "updated_at:asc", label: "Updated, oldest first" },
-  ],
 }
 
-/** A row that reads as its value, capitalised. */
+/** A row that reads as its value, capitalised, an underscore a space. */
 function named(value: string): QualifierOption {
-  return { value, label: value.charAt(0).toUpperCase() + value.slice(1) }
+  const words = value.replace(/_/g, " ")
+  return { value, label: words.charAt(0).toUpperCase() + words.slice(1) }
+}
+
+/** The keys a query can sort by, as the picker offers them. `id` still
+ * works typed; it is not offered, an id being opaque (docs/graph-storage.md). */
+const SORT_KEYS = ["title", "updated_at"]
+
+/**
+ * The `sort:` rows, in two steps. Before a colon in the partial, the keys
+ * (Title, Updated at): a pick writes the key and a colon and keeps the
+ * picker open. After one (`title:`), the directions for that key, spelt
+ * out and written in full (`title:asc`, `title:desc`) — the arrows say
+ * which. An unknown key has no directions to offer.
+ */
+export function sortQualifierOptions(partial: string): QualifierOption[] {
+  const colon = partial.indexOf(":")
+  if (colon === -1) return SORT_KEYS.map((key) => ({ ...named(key), partial: true }))
+  const key = partial.slice(0, colon).toLowerCase()
+  if (!SORT_KEYS.includes(key)) return []
+  return [
+    { value: `${key}:asc`, label: "Ascending", glyph: "↑" },
+    { value: `${key}:desc`, label: "Descending", glyph: "↓" },
+  ]
 }
 
 /** The `date:` rows: the slash menu's date shortcuts (Today, Tomorrow, …
@@ -160,6 +181,7 @@ export function dateQualifierOptions(now: Date = new Date()): QualifierOption[] 
  * notes). */
 export const SUGGESTED_QUALIFIER_KEYS: readonly string[] = [
   ...Object.keys(STATIC_QUALIFIER_OPTIONS),
+  "sort",
   "date",
   "in",
 ]

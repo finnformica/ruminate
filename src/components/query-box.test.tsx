@@ -126,12 +126,31 @@ describe("the qualifier popover", () => {
     expect(options()[0].textContent).toContain("Reading list")
   })
 
-  it("lists the sort keys with their directions, and the relative dates", () => {
-    const { input } = renderBox()
+  it("sort: picks the key, then the direction, then lands as a pill", () => {
+    const { input, onChange } = renderBox()
     type(input, "sort:")
-    expect(options().map((row) => row.getAttribute("data-suggestion"))).toContain("title:desc")
+    expect(options().map((row) => row.textContent)).toEqual(["Title", "Updated at"])
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(input, { key: "Enter" })
+    // The key is half a value: it stays in the line, and the picker moves
+    // on to the directions.
+    expect(input.value).toBe("sort:updated_at:")
+    expect(pillTokens()).toEqual([])
     type(input, "sort:updated_at:")
-    expect(options().map((row) => row.getAttribute("data-suggestion"))).toEqual(["updated_at:asc"])
+    expect(options().map((row) => row.textContent)).toEqual(["↑Ascending", "↓Descending"])
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(pillTokens()).toEqual(["sort:updated_at:desc"])
+    expect(onChange).toHaveBeenLastCalledWith("sort:updated_at:desc")
+    // Typed out in full, the key still offers its directions.
+    type(input, "sort:title")
+    expect(options().map((row) => row.textContent)).toEqual(["Title"])
+    type(input, "sort:title:a")
+    expect(options().map((row) => row.getAttribute("data-suggestion"))).toEqual(["title:asc"])
+  })
+
+  it("lists the relative dates", () => {
+    const { input } = renderBox()
     type(input, "date:")
     // The slash menu's shortcuts, each resolved to a day: the row reads as
     // the word, glossed with the date, and the day is what lands.

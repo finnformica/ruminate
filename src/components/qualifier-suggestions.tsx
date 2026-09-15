@@ -10,6 +10,7 @@ import {
   dateQualifierOptions,
   filterQualifierOptions,
   findQualifierTrigger,
+  sortQualifierOptions,
   type QualifierOption,
   type QualifierTrigger,
 } from "../utils/qualifier-suggestions"
@@ -88,6 +89,9 @@ export function useQualifierSuggestions({
         const ordered = current ? [current, ...rest] : options
         return filterQualifierOptions(ordered, trigger.partial).slice(0, MAX_ITEMS)
       }
+      case "sort":
+        // Two steps: the key, then (after its colon) the direction.
+        return filterQualifierOptions(sortQualifierOptions(trigger.partial), trigger.partial)
       case "date":
         // Built when asked for: the rows say which day each word means today.
         return filterQualifierOptions(dateQualifierOptions(), trigger.partial)
@@ -112,10 +116,13 @@ export function useQualifierSuggestions({
   const tokenKey = trigger ? `${trigger.start}:${trigger.key}` : null
   if (tokenKey === null && dismissed !== null) setDismissed(null)
   // A value typed out in full (`type:heading`) needs no suggesting: the one
-  // row it would show is the word already there.
+  // row it would show is the word already there — unless the row is only
+  // half a value (a sort key, before its direction), which still has a
+  // step to offer.
   const complete =
     trigger !== null &&
     items.length === 1 &&
+    !items[0].partial &&
     items[0].value.toLowerCase() === trigger.partial.trim().toLowerCase()
   const visible = trigger !== null && items.length > 0 && !complete && dismissed !== tokenKey
 

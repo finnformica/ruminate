@@ -7,6 +7,7 @@ import {
   dateQualifierOptions,
   filterQualifierOptions,
   findQualifierTrigger,
+  sortQualifierOptions,
 } from "./qualifier-suggestions"
 
 /** The trigger with the caret at the end of the text. */
@@ -114,23 +115,38 @@ describe("filterQualifierOptions", () => {
 })
 
 describe("sort: and date: vocabularies", () => {
-  test("sort: lists each key with its other direction, and `title:` narrows to it", () => {
-    const options = STATIC_QUALIFIER_OPTIONS.sort
-    expect(options.map((option) => option.value)).toEqual([
-      "title",
-      "title:desc",
-      "updated_at",
-      "updated_at:asc",
+  test("sort: offers the keys first, and a picked key opens on its directions", () => {
+    const keys = sortQualifierOptions("")
+    expect(keys.map((option) => [option.value, option.label])).toEqual([
+      ["title", "Title"],
+      ["updated_at", "Updated at"],
     ])
+    expect(filterQualifierOptions(keys, "up").map((o) => o.value)).toEqual(["updated_at"])
+    // A key is half a value: the pick writes it with a colon and no space,
+    // so the picker stays open on the second step.
+    const atKey = atEnd("sort:up")
+    expect(applyQualifierOption("sort:up", atKey!, keys[1])).toEqual({
+      value: "sort:updated_at:",
+      caret: 16,
+    })
     // The direction suffix is part of the value the picker filters on.
     const trigger = atEnd("sort:title:")
     expect(trigger?.key).toBe("sort")
     expect(trigger?.partial).toBe("title:")
-    expect(filterQualifierOptions(options, "title:").map((o) => o.value)).toEqual(["title:desc"])
-    expect(applyQualifierOption("sort:title:", trigger!, options[1])).toEqual({
+    const directions = sortQualifierOptions("title:")
+    expect(directions.map((o) => [o.value, o.label, o.glyph])).toEqual([
+      ["title:asc", "Ascending", "↑"],
+      ["title:desc", "Descending", "↓"],
+    ])
+    expect(filterQualifierOptions(directions, "title:de").map((o) => o.value)).toEqual([
+      "title:desc",
+    ])
+    expect(applyQualifierOption("sort:title:", trigger!, directions[1])).toEqual({
       value: "sort:title:desc ",
       caret: 16,
     })
+    // A key the picker does not know has no directions to offer.
+    expect(sortQualifierOptions("id:")).toEqual([])
   })
 
   test("date: offers the slash menu's shortcuts, each resolved to the day it means", () => {
