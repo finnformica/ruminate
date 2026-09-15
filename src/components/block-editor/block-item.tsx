@@ -107,10 +107,15 @@ export interface BlockEditorApi {
   requestImage?: (key: string) => void
   /** Expand an image block's picture (the lightbox). */
   openImage?: (id: string) => void
-  /** Change a link's display text in this row's text (docs/links.md):
-   * `[title](href)` becomes `[next](href)`; a bare address is written out
-   * as a link. Absent in read-only views. */
+  /** Make a link block of a link in this row's text (docs/links.md): the
+   * row itself when its text is nothing but the link, else a new row
+   * beneath it. Absent in read-only views. */
+  linkToBlock?: (key: string, href: string, title: string) => void
+  /** Change a link's display text in this row's text: `[title](href)`
+   * becomes `[next](href)`; a bare address is written out as a link. */
   renameLink?: (key: string, href: string, title: string, next: string) => void
+  /** A link block back to a paragraph holding its link as text. */
+  linkToInline?: (id: string) => void
   /** A link's card the reader asked to open from the menu ("Edit link",
    * for a touch screen): the row and the address. */
   linkCard?: { key: string; href: string } | null
@@ -775,21 +780,23 @@ export function BlockItem({
   )
 
   // What a link in the rendered text can do to this row: its hover card
-  // (`link-hover-card.tsx`) changes its display text, in an editor that
-  // can write the change.
+  // (`link-hover-card.tsx`) changes its display text and makes a block of
+  // it, in an editor that can write the change.
+  const linkToBlock = readOnly ? undefined : api.linkToBlock
   const renameLink = readOnly ? undefined : api.renameLink
   const openHref = api.linkCard?.key === occurrence.key ? api.linkCard.href : null
   const closeLinkCard = api.closeLinkCard
   const linkActions = useMemo<LinkActions | null>(
     () =>
-      renameLink
+      linkToBlock && renameLink
         ? {
+            toBlock: (href, title) => linkToBlock(occurrence.key, href, title),
             rename: (href, title, next) => renameLink(occurrence.key, href, title, next),
             openHref,
             closeCard: () => closeLinkCard?.(),
           }
         : null,
-    [renameLink, occurrence.key, openHref, closeLinkCard],
+    [linkToBlock, renameLink, occurrence.key, openHref, closeLinkCard],
   )
 
   // The caption/body line: the textarea while editing, the rendered text

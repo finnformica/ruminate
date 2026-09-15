@@ -15,6 +15,8 @@
       "/api/replica/*",
       "/api/images",
       "/api/images/*",
+      // Link previews for bookmark blocks (docs/bookmarks.md).
+      "/api/unfurl",
       // The MCP endpoint agents POST to, and the session-authed routes the
       // settings page mints and revokes their tokens through
       // (docs/mcp-server.md).
