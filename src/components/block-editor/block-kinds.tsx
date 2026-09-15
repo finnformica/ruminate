@@ -9,6 +9,7 @@ import { noteTypeOf } from "../../utils/note-type"
 import { PinFillIcon12 } from "../icons"
 import { NoteFavicon } from "../note-favicon"
 import type { BlockEditorApi } from "./block-item"
+import { CodeHighlight } from "./code-highlight"
 import { ImageFigure } from "./image-figure"
 
 /**
@@ -31,6 +32,11 @@ export interface RowContext {
    * hides an empty line (an image's caption) must keep it while it is being
    * typed into. */
   editing: boolean
+  /** The row draws a marker slot before the content line: every type with a
+   * slot, and a parent of any type (its chevron needs one). A slotless
+   * type's chrome that reaches the row's edge (a code block's panel) must
+   * stop short of the slot when it is there. */
+  slotted: boolean
 }
 
 export interface BlockKind {
@@ -70,8 +76,10 @@ export interface BlockKind {
   readonly topMargin?: (depth: number) => number
   /** The textarea's ghost text while empty. */
   readonly placeholder?: string
-  /** The body is shown verbatim, not as inline markdown. */
-  readonly verbatim?: boolean
+  /** How the view draws the body. The default is inline markdown
+   * (`BlockContent`); a code block draws its text verbatim, tokenised for
+   * its language. The textarea is untouched either way. */
+  readonly body?: (block: Block) => ReactNode
   /** Extra classes on the rendered body (a checked to-do's strike-through). */
   readonly bodyClass?: string
   /** Chrome before the content line (a quote's bar). */
@@ -217,20 +225,23 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     ),
   },
   code: {
-    // No marker slot: the panel starts where the row does, as a picture
-    // does, and runs to where the row ends — the same 6px in from the
-    // surface's edges on both sides (the line's own padding), so it reads
-    // as a panel set in the row, not a box hung off the text column with
-    // 23px of slot and gap on its left and 6px on its right. A parent code
-    // block still gets the slot back to host its chevron.
+    // No marker slot: the panel is the ROW SURFACE, as below, so it starts
+    // where the row does, as a picture does. A parent code block still gets
+    // the slot back to host its chevron, and its panel starts after it.
     slot: "none",
-    // Set in the mono face, a touch smaller. The tab width rides the shared
-    // typography (a textarea inherits it), so the view and the textarea
-    // agree on every column.
-    typography: () => "font-mono text-[0.9em] leading-relaxed [tab-size:2]",
-    // Verbatim: a code block's text is not markdown.
-    verbatim: true,
-    // The panel — a tinted, bordered surface at the block-panel radius —
+    // Body type in the mono face — the same size and leading as a
+    // paragraph, so a line of code is exactly as tall as a line of text and
+    // the panel that fits one is exactly the surface every other row has.
+    // The tab width rides the shared typography (a textarea inherits it),
+    // so the view and the textarea agree on every column.
+    typography: () => cx(BODY, "font-mono [tab-size:2]"),
+    // The view is tokenised for the language (`code-highlight.tsx`); the
+    // textarea shows the text plain in the same face, so the swap changes
+    // colour and nothing else. Never markdown.
+    body: (block) => (
+      <CodeHighlight text={block.text} language={String(block.props?.language ?? "")} />
+    ),
+    // The panel — a tinted, bordered surface at the row's own radius —
     // WRAPS the line rather than being classes on it. The row sizes its
     // textarea by its text alone (`1lh` empty, else its scroll height) and
     // draws the view with the same `min-h-[1lh]`; padding and a border on
@@ -238,22 +249,36 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     // by its own padding (the caret clipped, then a jump to size on the
     // first keystroke), and the border went uncounted, so every edit was
     // 2px shorter than its view. Around the line, the chrome adds the same
-    // to both states and the text never moves. The language sits in the
-    // panel's top-right padding — chrome, not content — clear of the
-    // corner's curve.
-    wrap: (content, { block }) => {
+    // to both states and the text never moves.
+    //
+    // Its box IS the row's highlight surface: it pulls over the line's
+    // padding (2px above and below, 6px at the sides) with negative margins
+    // that its border and 1px of padding pay back, so a one-line block is
+    // the 27px every other row is, and turning a paragraph into code moves
+    // nothing — the text keeps its column (the 28px of left padding is the
+    // marker slot and gap it no longer has, less the border) and its right
+    // edge, and the panel simply appears around it. After a parent's slot,
+    // the panel starts where the slot ends and the text sits 4px in.
+    // Selected, its border takes the selection ring's colour (`.block-code-
+    // panel`, block-editor.css), since it sits exactly where the ring
+    // would. The language sits in its top-right corner — chrome, not
+    // content — over the padding the text does not use.
+    wrap: (content, { block, slotted }) => {
       const language = String(block.props?.language ?? "")
       return (
         <div
           data-testid="code-panel"
-          className="relative flex min-w-0 flex-1 rounded-lg border border-border-secondary bg-[var(--color-bg-code-block)] px-4 py-3"
+          className={cx(
+            "block-code-panel prism relative -my-0.5 flex min-w-0 flex-1 rounded border border-border-secondary bg-[var(--color-bg-code-block)] py-px pr-[5px]",
+            slotted ? "-mr-1.5 pl-1" : "-mx-1.5 pl-[28px]",
+          )}
         >
           {content}
           {language ? (
             <span
               aria-hidden
               data-testid="code-language"
-              className="pointer-events-none absolute right-3 top-1.5 select-none font-mono text-[11px] leading-4 text-text-tertiary"
+              className="pointer-events-none absolute right-[5px] top-1 select-none font-mono text-[11px] leading-4 text-text-tertiary"
             >
               {language}
             </span>

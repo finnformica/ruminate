@@ -206,7 +206,16 @@ export function BlockItem({
   // panel, and the chrome around the content line.
   const kind = kindOf(type)
   const typo = kind.typography(depth, block)
-  const rowContext: RowContext = { block, occurrence, api, depth, editing }
+  // Whether this block owns a collapse toggle at all: parents only, and never
+  // the zoom title (the editor renders its children itself, at depth 0). The
+  // row that closes a loop keeps its chevron too — the block has children,
+  // they are simply above it — pinned, greyed and inert, with the reason in
+  // its tooltip (zoom in to go round again).
+  const looped = !!occurrence.looped
+  const hasToggle = (hasChildren || looped) && !zoomTitle
+  // A marker slot is drawn unless the type has none AND nothing needs one.
+  const slotted = kind.slot !== "none" || hasToggle
+  const rowContext: RowContext = { block, occurrence, api, depth, editing, slotted }
   const roomy = kind.roomy?.(rowContext) ?? false
   // A ROOT of a results view (`api.fixedRoots`): its surface is set in by
   // the same 8.5px at the sides a listed note's is all round, so every
@@ -460,13 +469,6 @@ export function BlockItem({
     api.onPaste(occurrence.key, before, pasted, after)
   }
 
-  // Whether this block owns a collapse toggle at all: parents only, and never
-  // the zoom title (the editor renders its children itself, at depth 0). The
-  // row that closes a loop keeps its chevron too — the block has children,
-  // they are simply above it — pinned, greyed and inert, with the reason in
-  // its tooltip (zoom in to go round again).
-  const looped = !!occurrence.looped
-  const hasToggle = (hasChildren || looped) && !zoomTitle
   const pinned = isCollapsed || looped
   // Every block type but an image owns the 15px marker slot. Most carry a KEY there — a
   // bullet dot, heading `#`, number, quote `>` — and the key is pure chrome,
@@ -811,7 +813,7 @@ export function BlockItem({
             onDoubleClick: () => api.edit(occurrence.key),
           })}
     >
-      {kind.verbatim ? body : <BlockContent content={body} />}
+      {kind.body ? kind.body(block) : <BlockContent content={body} />}
     </div>
   )
 

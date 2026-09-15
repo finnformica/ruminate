@@ -107,17 +107,38 @@ for (const name of ["export function greet", "Some text with"]) {
   await page.keyboard.press("Escape")
 }
 {
-  // The panel spans the row: as far from the row's right edge as its left.
-  const inset = await page.evaluate(() => {
-    const row = document.querySelector('[data-block-row="blk_cl"]')
-    const line = row.querySelector("[data-block-line]").getBoundingClientRect()
-    const panel = row.querySelector('[data-testid="code-panel"]').getBoundingClientRect()
-    return { left: panel.left - line.left, right: line.right - panel.right }
+  // The panel is the row's surface: its box is the line's box, so a one-line
+  // code block is exactly as tall as a one-line paragraph, and its text
+  // starts in the same column as a paragraph's.
+  const geo = await page.evaluate(() => {
+    const box = (sel) => document.querySelector(sel).getBoundingClientRect()
+    const line = box('[data-block-row="blk_cl"] [data-block-line]')
+    const panel = box('[data-block-row="blk_cl"] [data-testid="code-panel"]')
+    return {
+      left: panel.left - line.left,
+      right: line.right - panel.right,
+      top: panel.top - line.top,
+      bottom: line.bottom - panel.bottom,
+      codeText: box('[data-block-id="blk_ce"]').left,
+      paraText: box('[data-block-id="blk_cz"]').left,
+      oneLineCode: box('[data-block-row="blk_ce"] [data-block-line]').height,
+      oneLinePara: box('[data-block-row="blk_cz"] [data-block-line]').height,
+    }
   })
   check(
-    "code panel is set in evenly from the row's edges",
-    Math.abs(inset.left - inset.right) <= 1,
-    `left=${inset.left} right=${inset.right}`,
+    "code panel is the row's surface",
+    [geo.left, geo.right, geo.top, geo.bottom].every((d) => Math.abs(d) <= 1),
+    `left=${geo.left} right=${geo.right} top=${geo.top} bottom=${geo.bottom}`,
+  )
+  check(
+    "one-line code block is as tall as a paragraph",
+    Math.abs(geo.oneLineCode - geo.oneLinePara) <= 1,
+    `code=${geo.oneLineCode.toFixed(1)} para=${geo.oneLinePara.toFixed(1)}`,
+  )
+  check(
+    "code text starts in the text column",
+    Math.abs(geo.codeText - geo.paraText) <= 1,
+    `code=${geo.codeText} para=${geo.paraText}`,
   )
   // ``` then Enter: the new, empty code block is one full line tall at once
   // and does not jump when the first character is typed.

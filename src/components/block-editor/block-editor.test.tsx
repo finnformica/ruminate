@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useState } from "react"
 import { toast, Toaster } from "sonner"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
@@ -1522,6 +1522,24 @@ describe("code blocks", () => {
     expect(row.querySelector('[data-testid="paragraph-slot"]')).toBeNull()
     expect(row.querySelector('[data-testid="code-slot"]')).toBeNull()
     expect(row.querySelector(".block-key")).toBeNull()
+  })
+
+  it("highlights the view for its language once the grammar has loaded", async () => {
+    const { container } = render(<Harness initial={CODE} />)
+    const body = container.querySelector<HTMLElement>('[data-block-id="blk_code"]')!
+    await waitFor(() => expect(body.querySelector(".token.keyword")?.textContent).toBe("const"))
+    // Tokens colour the text; they never change it.
+    expect(body.textContent).toBe("const a = 1\n  b()")
+    expect(body.closest('[data-testid="code-panel"]')?.className).toContain("prism")
+  })
+
+  it("stays plain for a language it has no grammar for", async () => {
+    const plain = ["```klingon", "nuqneH", "```", "  id:: blk_code"].join("\n")
+    const { container } = render(<Harness initial={plain} />)
+    const body = container.querySelector<HTMLElement>('[data-block-id="blk_code"]')!
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(body.querySelector(".token")).toBeNull()
+    expect(body.textContent).toBe("nuqneH")
   })
 
   it("gets the slot back for its chevron when it has rows under it", () => {

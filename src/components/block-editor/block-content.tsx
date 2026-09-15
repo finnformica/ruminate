@@ -82,12 +82,12 @@ const components = {
   ),
   code: ({ children }: { children?: React.ReactNode }) => (
     // The inline code chip: a bordered, tinted pill in the mono face, a touch
-    // smaller than the text around it (the Linear / Notion idiom), rounded at
-    // the control radius (`rounded`, --border-radius-base) — on a chip one
-    // line tall that is a soft pill; the small radius read as square. py is
-    // a hairline so the chip never inflates the line box (which would break
+    // smaller than the text around it (the Linear / Notion idiom), at the
+    // chip radius (`rounded-sm`, --border-radius-sm) — on a chip one line
+    // tall it reads as the row surface's radius does on a row. py is a
+    // hairline so the chip never inflates the line box (which would break
     // the pixel-identical view/edit swap).
-    <code className="rounded border border-border-secondary bg-[var(--color-bg-code-block)] box-decoration-clone px-1.5 py-px font-mono text-[0.85em]">
+    <code className="rounded-sm border border-border-secondary bg-[var(--color-bg-code-block)] box-decoration-clone px-1.5 py-px font-mono text-[0.85em]">
       {children}
     </code>
   ),

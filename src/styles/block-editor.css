@@ -60,6 +60,13 @@
   --block-ring-bottom: transparent;
 }
 
+/* A code block's panel (block-kinds.tsx) is drawn exactly where the row's
+ * surface is, so the ring would sit under its border: the border takes the
+ * ring's colour instead, and follows it through the inactive demotion. */
+.block-highlight .block-code-panel {
+  border-color: var(--block-ring);
+}
+
 /* ── Inactive selection ──────────────────────────────────────────────────────
  * When the editor doesn't own the keyboard (focus is in the sidebar, a dialog,
  * the page — including the ⌘P palette's live previews), the selection demotes
