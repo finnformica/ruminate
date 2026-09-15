@@ -51,6 +51,13 @@ export interface BlockEditorApi {
   /** Display-only: no editing, selection, or mutation (collapse still works). */
   readOnly?: boolean
   /**
+   * Whether the editor moves through its rows at all (`BlockEditor`): every
+   * editable one does, and a read-only one that is browsed. A read-only row
+   * of a browsed editor highlights on click and zooms from its bullet, as
+   * an editable one does; one of an inert editor does nothing.
+   */
+  navigable?: boolean
+  /**
    * The roots are the view's own — a results list's hits, the notes list's
    * notes — not a parent's children (`BlockEditor.fixedRoots`). A kind may
    * draw a root differently for it (a listed note takes a roomier row).
@@ -570,7 +577,7 @@ export function BlockItem({
   // make this block the note) — on leaves. A parent's key is its collapse
   // toggle, so zoom stays on F / Cmd+. there. The negative-margin padding
   // enlarges the hit area without shifting the marker's layout size.
-  const zoomable = !readOnly && !zoomTitle && !hasToggle
+  const zoomable = (!readOnly || api.navigable) && !zoomTitle && !hasToggle
   // Every marker occupies the same 15px slot, so body text starts at one
   // column across every block type and the markers read as one chrome
   // family: dots centre in it; text glyphs (`#`, number, `>`) right-align
@@ -801,7 +808,9 @@ export function BlockItem({
       {...(readOnly
         ? api.activate
           ? { onClick: () => api.activate?.(occurrence.key) }
-          : {}
+          : api.navigable
+            ? { onClick: () => api.select(occurrence.key) }
+            : {}
         : {
             onClick: () => api.select(occurrence.key),
             onDoubleClick: () => api.edit(occurrence.key),
@@ -896,11 +905,11 @@ export function BlockItem({
             // structural hooks above are untouched.
             selected && !api.keyboardActive && "block-highlight-inactive",
             // A quiet neutral hover marks the row as interactive (see
-            // .block-hoverable); never while read-only (unless the row opens
-            // something — `api.activate`) or already editing, and selection
-            // (accent) always wins because the class is simply absent on
-            // selected rows.
-            (!readOnly || api.activate) && !editing && !selected && "block-hoverable",
+            // .block-hoverable); never while inert (a read-only row that
+            // neither opens something — `api.activate` — nor is browsed) or
+            // already editing, and selection (accent) always wins because
+            // the class is simply absent on selected rows.
+            (!readOnly || api.navigable) && !editing && !selected && "block-hoverable",
           )}
         >
           {marker}

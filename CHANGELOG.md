@@ -6,6 +6,10 @@
 
 - Share notes with another Ruminate user, to read. Choose **Share…** in a note's **⋯** menu, or when right-clicking a block, and type the email address the other person signs in to GitHub with; a shared block opens for them as a note of its own. **Settings → Sharing** lists what you have shared and with whom, with a Revoke, and what has been shared with you. Everything beneath a shared note is shared with it — including blocks you add later — and nothing else: the share is the subtree under the notes you picked, computed afresh every time it is read, so a block you unlink leaves the share and one you link in joins it. The address is matched against the primary verified email on the other person's GitHub account, and the app never says whether an address belongs to a user; they see who shared with them, never the address it was sent to. Notes shared with you appear in the sidebar under **Shared by …**, open like any note, and can be searched with your own; they cannot be changed, and the page says so. Revoke a share from the same panel and it is gone for them at once.
 
+### Fixed
+
+- A note shared with you now reads like your own. The arrow keys move through its blocks, a click highlights one, <kbd>space</kbd>, <kbd>←</kbd> and <kbd>→</kbd> fold and unfold, <kbd>f</kbd> zooms in, and it opens folded to your **Expanded levels** setting (Settings → Editor), with your folds kept on this device as for any note. It used to open with nothing highlighted and answer no key. Only editing is off.
+
 ### Removed
 
 - <kbd>⌘</kbd> <kbd>K</kbd> no longer lists **Jump to** (Notes, Calendar, Settings) or **Note actions** (Copy note markdown, Copy note ID, Print note). The jumps have their own keys (<kbd>g</kbd> then <kbd>n</kbd> / <kbd>d</kbd> / <kbd>s</kbd>) and the sidebar; the note actions live in the note's own menu. The palette is for finding notes and blocks: with nothing typed it shows Recent and Pinned, and <kbd>↓</kbd> goes straight to the first row.

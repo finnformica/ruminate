@@ -330,6 +330,7 @@ export function BlockEditor({
   newRootSignal,
   refocusSignal,
   readOnly = false,
+  browse = false,
   zoomRootId: zoomRootIdProp = null,
   onZoomNavigate,
   noteTitle,
@@ -407,11 +408,16 @@ export function BlockEditor({
   /** Display-only: renders blocks without any editing (e.g. past-day history). */
   readOnly?: boolean
   /**
-   * Open a row — what Enter and a click do in a read-only view that is still
-   * BROWSED: the notes list, a search's results. Given, a read-only editor
-   * keeps the keyboard: the highlight moves, folds open and close, `f` zooms
-   * (which navigates, through `onZoomNavigate`), and nothing writes
-   * (`BROWSE_COMMANDS`). Without it a read-only editor is inert display.
+   * A read-only editor the reader still moves through — a note someone
+   * shared with them (docs/sharing.md): the highlight moves, a click
+   * highlights, folds open and close, `f` zooms (through `onZoomNavigate`),
+   * and nothing writes (`BROWSE_COMMANDS`). Implied by `onActivate`. Without
+   * either, a read-only editor is inert display (a preview).
+   */
+  browse?: boolean
+  /**
+   * Open a row — what Enter and a click do in a read-only view that is
+   * browsed with somewhere to go: the notes list, a search's results.
    */
   onActivate?: (id: string) => void
   /**
@@ -460,9 +466,9 @@ export function BlockEditor({
    */
   debug?: BlockDebugOptions
 }) {
-  // A read-only view still owns the keyboard when it can open rows (browse —
-  // see `onActivate`); one that cannot is inert display.
-  const navigable = !readOnly || onActivate !== undefined
+  // A read-only view still owns the keyboard when it is browsed (`browse`,
+  // or `onActivate`, which opens rows); one that is neither is inert display.
+  const navigable = !readOnly || browse || onActivate !== undefined
 
   // ── Zoom state ────────────────────────────────────────────────────────────
   // Controlled by the caller (URL) when `onZoomNavigate` is given; otherwise
@@ -656,7 +662,7 @@ export function BlockEditor({
     const prev = prevZoomRef.current
     if (prev === zoomRootId) return
     prevZoomRef.current = zoomRootId
-    if (readOnly) return
+    if (!navigable) return
     const current = docRef.current
     setAnchorKey(null)
     setFocus(null)
@@ -677,7 +683,7 @@ export function BlockEditor({
       if (back) setSelected(back)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zoomRootId, readOnly])
+  }, [zoomRootId, navigable])
 
   useEffect(() => {
     if (!highlightHeading) return
@@ -1334,8 +1340,9 @@ export function BlockEditor({
     const name = resolveKey(mode, event, input)
     if (!name) return false
     if (readOnly) {
-      // Browsing: Enter opens the row where it would have edited it, and
-      // only what moves, folds or zooms runs — nothing that writes.
+      // Browsing: Enter opens the row where it would have edited it (or
+      // does nothing, where there is nowhere to go), and only what moves,
+      // folds or zooms runs — nothing that writes.
       if (name === "enterEdit") {
         onActivate?.(idOfKey(key))
         return true
@@ -1666,8 +1673,9 @@ export function BlockEditor({
     selectedSet,
     selectionRunEdges,
     readOnly,
-    // Read-only views never take keyboard focus, but their highlights are
-    // plain display state — never demote them to "inactive". Editable ones
+    navigable,
+    // Inert read-only views never take keyboard focus, but their highlights
+    // are plain display state — never demote them to "inactive". The rest
     // own the keyboard when focus is inside AND the last thing the user did
     // was not click on blank space (`pointerIdle`).
     keyboardActive: !navigable || (keyboardActive && !pointerIdle),

@@ -148,6 +148,10 @@ someone else's rows does not belong in it. So shared notes live in memory
   `/notes/<id>` with its text as the title and its children as the outline,
   and searches like any note. Nothing is pushed, so the owner's row is never
   touched by it.
+- **Reading a shared note**: the same block editor as the reader's own
+  notes, with editing off (`BlockEditor.browse`): the highlight moves, a
+  click highlights, folds open and close and are kept per device, the
+  default depth applies, `f` zooms. Nothing writes.
 - **Where to share from**: a note's **⋯** menu (**Share…**) shares the note;
   a block's right-click menu (**Share…**) shares that block, as the root.
   One dialog, asking only for the address. Settings → Sharing is the

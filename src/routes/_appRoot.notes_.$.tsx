@@ -311,6 +311,7 @@ function NotePage() {
                   onToggleCollapse={touch}
                   startEditing={!noteExists && notesLoaded && share === null}
                   readOnly={readOnlyShare}
+                  browse={readOnlyShare}
                   highlightHeading={highlightHeading}
                   onExitTop={() => setTitleFocusSignal((n) => n + 1)}
                   focusFirstSignal={focusFirstSignal}
