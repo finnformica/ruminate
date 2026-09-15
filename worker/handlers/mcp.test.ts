@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest"
+import { setFeatureAudience } from "../features"
 import { mintToken } from "../mcp/tokens"
 import { createMcpTestEnv, mcpRequest, type McpTestEnv } from "../mcp/test-support"
 import { mcp } from "./mcp"
@@ -297,6 +298,20 @@ describe("authentication", () => {
 // -----------------------------------------------------------------------------
 // tools/list and tools/call
 // -----------------------------------------------------------------------------
+
+describe("the mcp feature flag", () => {
+  it("refuses every call once the feature is off for the token's owner, whatever the grant", async () => {
+    const bearer = await token()
+    expect((await send(mcpRequest("tools/list", {}, { token: bearer }))).status).toBe(200)
+    await setFeatureAudience(harness.control, "mcp", "off", 1)
+    const refused = await send(mcpRequest("tools/list", {}, { token: bearer }))
+    expect(refused.status).toBe(403)
+    expect((await bodyOf(refused)).error.message).toMatch(/not enabled/)
+    // `admin` reads the same way for a token whose owner is not the admin.
+    await setFeatureAudience(harness.control, "mcp", "admin", 1)
+    expect((await send(mcpRequest("tools/list", {}, { token: bearer }))).status).toBe(403)
+  })
+})
 
 describe("tools/list", () => {
   it("returns the tools this token permits, with cache hints", async () => {

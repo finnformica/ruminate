@@ -216,7 +216,23 @@ CREATE TABLE allowlist (
   github_id INTEGER PRIMARY KEY,   -- pre-approved ids while signups are gated
   note TEXT
 );
+
+CREATE TABLE feature_flags (      -- 0013
+  key        TEXT PRIMARY KEY,    -- src/data/feature-flags.ts names the keys
+  audience   TEXT NOT NULL,       -- 'off' | 'admin' | 'everyone'
+  updated_at INTEGER NOT NULL, updated_by INTEGER NOT NULL
+);
 ```
+
+**Feature flags** (`src/data/feature-flags.ts`, `worker/features.ts`) are the
+admin's switchboard for beta features: each registered feature has an
+audience — `off`, `admin` (the bootstrap owner alone) or `everyone` — set on
+the admin page (`/admin`) and enforced by the Worker on the feature's own
+routes (minting MCP tokens and the `/mcp` endpoint; giving a share). The
+client reads `GET /api/features` once per sign-in to know what to draw; a
+feature with no row is at its registry default. The **admin** is exactly the
+bootstrap owner: `ALLOWED_GITHUB_ID` names the one account that may reach
+`/api/admin/*`; everyone else gets the 404 a missing route gets.
 
 **Signup flow.** A `SIGNUP_MODE` var (`'allowlist'` initially, `'open'`
 later, absent = fail closed, preserving `replica.ts:70`'s spirit) decides

@@ -346,6 +346,12 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
     group: "Navigation",
   },
   {
+    combos: ["g a"],
+    scope: "global",
+    description: "Go to the admin page (press g, then a; the admin only)",
+    group: "Navigation",
+  },
+  {
     combos: [APP_SHORTCUTS.focusSearch],
     scope: "global",
     description: "Focus the search input (notes list)",

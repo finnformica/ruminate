@@ -14,6 +14,7 @@ import { Route as rootRoute } from './routes/__root'
 import { Route as AppRootImport } from './routes/_appRoot'
 import { Route as AppRootIndexImport } from './routes/_appRoot.index'
 import { Route as AppRootSettingsImport } from './routes/_appRoot.settings'
+import { Route as AppRootAdminImport } from './routes/_appRoot.admin'
 import { Route as AppRootNotesIndexImport } from './routes/_appRoot.notes.index'
 import { Route as AppRootNotesSplatImport } from './routes/_appRoot.notes_.$'
 
@@ -33,6 +34,12 @@ const AppRootIndexRoute = AppRootIndexImport.update({
 const AppRootSettingsRoute = AppRootSettingsImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => AppRootRoute,
+} as any)
+
+const AppRootAdminRoute = AppRootAdminImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => AppRootRoute,
 } as any)
 
@@ -58,6 +65,13 @@ declare module '@tanstack/react-router' {
       fullPath: ''
       preLoaderRoute: typeof AppRootImport
       parentRoute: typeof rootRoute
+    }
+    '/_appRoot/admin': {
+      id: '/_appRoot/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AppRootAdminImport
+      parentRoute: typeof AppRootImport
     }
     '/_appRoot/settings': {
       id: '/_appRoot/settings'
@@ -93,6 +107,7 @@ declare module '@tanstack/react-router' {
 // Create and export the route tree
 
 interface AppRootRouteChildren {
+  AppRootAdminRoute: typeof AppRootAdminRoute
   AppRootSettingsRoute: typeof AppRootSettingsRoute
   AppRootIndexRoute: typeof AppRootIndexRoute
   AppRootNotesSplatRoute: typeof AppRootNotesSplatRoute
@@ -100,6 +115,7 @@ interface AppRootRouteChildren {
 }
 
 const AppRootRouteChildren: AppRootRouteChildren = {
+  AppRootAdminRoute: AppRootAdminRoute,
   AppRootSettingsRoute: AppRootSettingsRoute,
   AppRootIndexRoute: AppRootIndexRoute,
   AppRootNotesSplatRoute: AppRootNotesSplatRoute,
@@ -111,6 +127,7 @@ const AppRootRouteWithChildren =
 
 export interface FileRoutesByFullPath {
   '': typeof AppRootRouteWithChildren
+  '/admin': typeof AppRootAdminRoute
   '/settings': typeof AppRootSettingsRoute
   '/': typeof AppRootIndexRoute
   '/notes/$': typeof AppRootNotesSplatRoute
@@ -118,6 +135,7 @@ export interface FileRoutesByFullPath {
 }
 
 export interface FileRoutesByTo {
+  '/admin': typeof AppRootAdminRoute
   '/settings': typeof AppRootSettingsRoute
   '/': typeof AppRootIndexRoute
   '/notes/$': typeof AppRootNotesSplatRoute
@@ -127,6 +145,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRoute
   '/_appRoot': typeof AppRootRouteWithChildren
+  '/_appRoot/admin': typeof AppRootAdminRoute
   '/_appRoot/settings': typeof AppRootSettingsRoute
   '/_appRoot/': typeof AppRootIndexRoute
   '/_appRoot/notes_/$': typeof AppRootNotesSplatRoute
@@ -135,12 +154,13 @@ export interface FileRoutesById {
 
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '' | '/settings' | '/' | '/notes/$' | '/notes'
+  fullPaths: '' | '/admin' | '/settings' | '/' | '/notes/$' | '/notes'
   fileRoutesByTo: FileRoutesByTo
-  to: '/settings' | '/' | '/notes/$' | '/notes'
+  to: '/admin' | '/settings' | '/' | '/notes/$' | '/notes'
   id:
     | '__root__'
     | '/_appRoot'
+    | '/_appRoot/admin'
     | '/_appRoot/settings'
     | '/_appRoot/'
     | '/_appRoot/notes_/$'
@@ -172,11 +192,16 @@ export const routeTree = rootRoute
     "/_appRoot": {
       "filePath": "_appRoot.tsx",
       "children": [
+        "/_appRoot/admin",
         "/_appRoot/settings",
         "/_appRoot/",
         "/_appRoot/notes_/$",
         "/_appRoot/notes/"
       ]
+    },
+    "/_appRoot/admin": {
+      "filePath": "_appRoot.admin.tsx",
+      "parent": "/_appRoot"
     },
     "/_appRoot/settings": {
       "filePath": "_appRoot.settings.tsx",

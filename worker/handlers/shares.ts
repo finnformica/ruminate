@@ -41,6 +41,7 @@ import {
   type ReceivedShare,
 } from "../shares/store"
 import type { GivenShare, ReceivedShareSummary, SharesListBody } from "../shares/wire"
+import { featureAllows, featureRefusal } from "../features"
 import { requireSession } from "./replica"
 import type { VerifiedIdentity } from "./tenancy"
 
@@ -114,7 +115,15 @@ export async function shares(
       }
       return json(body)
     }
-    if (request.method === "POST") return create(request, env, session)
+    if (request.method === "POST") {
+      // The feature flag gates GIVING a share. Reading what one has been
+      // given stays open: a share only exists because someone allowed to
+      // share made it.
+      if (!(await featureAllows(control, env, "sharing", session.id))) {
+        return json(featureRefusal("sharing"), 403)
+      }
+      return create(request, env, session)
+    }
     return json({ error: "method_not_allowed" }, 405)
   }
 
