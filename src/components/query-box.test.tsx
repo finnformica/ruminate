@@ -241,6 +241,21 @@ describe("the qualifier popover", () => {
     expect(popover()?.style.top).not.toBe("")
   })
 
+  it("draws the leading slot on every row or on none, so labels line up at the edge", () => {
+    const { input } = renderBox()
+    type(input, "sort:")
+    // Sort keys have no picture: no slot, the label is the whole row.
+    expect(popover()?.querySelector("[data-glyph]")).toBeNull()
+    expect(options()[0].children).toHaveLength(1)
+    type(input, "sort:title:")
+    // The directions have arrows: every row has the slot.
+    expect(options().map((row) => row.children.length)).toEqual([2, 2])
+    type(input, "type:")
+    // The note types have no glyph but sit among glyphs: they keep a slot.
+    const note = options().find((row) => row.getAttribute("data-suggestion") === "note")
+    expect(note?.children).toHaveLength(2)
+  })
+
   it("tells assistive technology which row is highlighted, without moving focus", () => {
     const { input } = renderBox()
     type(input, "in:")

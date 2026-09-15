@@ -38,8 +38,10 @@ export interface SuggestionItem extends QualifierOption {
 /** How many corpus-backed rows (notes) to list at once. */
 const MAX_ITEMS = 8
 
-/** The popover's width when it hangs beside the token. */
-export const QUALIFIER_POPOVER_WIDTH = 288
+/** Beside the token the popover is as wide as its rows, between these two;
+ * on a narrow or touch screen it takes the box's width instead. */
+export const QUALIFIER_POPOVER_MIN_WIDTH = 160
+export const QUALIFIER_POPOVER_MAX_WIDTH = 288
 
 /** What the key handler reads — a native or a React keyboard event. */
 type SuggestionKeyEvent = Pick<
@@ -248,12 +250,16 @@ export function useComboboxAria(
 }
 
 /** Where the popover hangs, in px within its positioned host: under the
- * box, at the token — or, on a narrow or touch screen, the box's full width
- * (`full`), where a card beside the token would have nowhere to go. */
+ * box, at the token, as wide as its rows up to `maxWidth` (the room to the
+ * box's right edge, at most `QUALIFIER_POPOVER_MAX_WIDTH`) — or, on a
+ * narrow or touch screen, the box's full `width` (`full`), where a card
+ * beside the token would have nowhere to go. */
 export interface QualifierPopoverPlacement {
   top: number
   left: number
-  width: number
+  /** The box's width, in full mode. */
+  width?: number
+  maxWidth: number
   full: boolean
 }
 
@@ -289,6 +295,12 @@ export function QualifierPopover({
     active?.scrollIntoView?.({ block: "nearest" })
   }, [activeIndex, items])
 
+  // Whether any row has something for the leading slot: the slot is drawn
+  // on every row or on none, so the labels line up.
+  const pictured = items.some(
+    (item) => item.note || item.glyph || (trigger.key === "type" && NOTE_TYPE_ICONS[item.value]),
+  )
+
   return (
     <div
       ref={listRef}
@@ -298,12 +310,27 @@ export function QualifierPopover({
       data-testid="qualifier-suggestions"
       data-placement={placement.full ? "full" : "token"}
       tabIndex={-1}
-      style={{ top: placement.top, left: placement.left, width: placement.width }}
+      style={{
+        top: placement.top,
+        left: placement.left,
+        width: placement.full ? placement.width : "max-content",
+        minWidth: placement.full ? undefined : QUALIFIER_POPOVER_MIN_WIDTH,
+        maxWidth: placement.maxWidth,
+      }}
       className="card-2 absolute z-30 max-h-[45svh] overflow-auto rounded-lg p-1 font-sans text-base font-normal leading-normal text-text"
       onMouseDown={(event) => event.preventDefault()}
     >
       {items.map((item, index) => {
         const active = index === activeIndex
+        const picture = item.note ? (
+          <NoteFavicon note={item.note} />
+        ) : item.glyph ? (
+          <span aria-hidden data-glyph={item.glyph} className="font-mono text-text-tertiary">
+            {item.glyph}
+          </span>
+        ) : trigger.key === "type" ? (
+          NOTE_TYPE_ICONS[item.value]
+        ) : null
         return (
           // Keyboard handling lives on the input (arrows / Enter / Esc); a row
           // only needs the pointer.
@@ -323,20 +350,15 @@ export function QualifierPopover({
             onClick={() => onPick(item)}
           >
             {/* The leading slot: a note's favicon, a block type's markdown
-                glyph, a note type's icon — or nothing, for a value that
-                has no picture. */}
-            <span className="grid h-4 w-6 shrink-0 place-items-center text-sm text-text-secondary">
-              {item.note ? (
-                <NoteFavicon note={item.note} />
-              ) : item.glyph ? (
-                <span aria-hidden data-glyph={item.glyph} className="font-mono text-text-tertiary">
-                  {item.glyph}
-                </span>
-              ) : trigger.key === "type" ? (
-                NOTE_TYPE_ICONS[item.value]
-              ) : null}
-            </span>
-            <span className="grow truncate">{item.label ?? item.value}</span>
+                glyph, a note type's icon, a sort direction's arrow. A list
+                with no pictures at all (`has:`, the sort keys) has no slot,
+                so its labels start at the edge. */}
+            {pictured ? (
+              <span className="grid h-4 w-6 shrink-0 place-items-center text-sm text-text-secondary">
+                {picture}
+              </span>
+            ) : null}
+            <span className="min-w-0 grow truncate">{item.label ?? item.value}</span>
           </div>
         )
       })}

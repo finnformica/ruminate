@@ -9,7 +9,8 @@ import { IconButton } from "./icon-button"
 import { ClearIcon16, SearchIcon16 } from "./icons"
 import { Keys } from "./keys"
 import {
-  QUALIFIER_POPOVER_WIDTH,
+  QUALIFIER_POPOVER_MAX_WIDTH,
+  QUALIFIER_POPOVER_MIN_WIDTH,
   QualifierPopover,
   useComboboxAria,
   useQualifierSuggestions,
@@ -141,8 +142,10 @@ export function QueryBox({
     changeLine(next.value, next.caret, true)
 
   // Where the popover hangs: under the box, at the token — measured in the
-  // host's coordinates, since the host is what it is positioned in. A
-  // narrow box or a touch screen gets it the box's full width instead.
+  // host's coordinates, since the host is what it is positioned in — as
+  // wide as its rows, never past the box's right edge (the token's left
+  // gives way when the room there is under the minimum). A narrow box or
+  // a touch screen gets it the box's full width instead.
   const [placement, setPlacement] = React.useState<QualifierPopoverPlacement | null>(null)
   const tokenStart = suggestions.visible ? (suggestions.trigger?.start ?? null) : null
   React.useLayoutEffect(() => {
@@ -156,18 +159,25 @@ export function QueryBox({
       const top = box.bottom - frame.top + POPOVER_GAP
       const coarse =
         typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches
-      if (coarse || box.width < QUALIFIER_POPOVER_WIDTH * 1.5) {
-        setPlacement({ top, left: box.left - frame.left, width: box.width, full: true })
+      if (coarse || box.width < QUALIFIER_POPOVER_MAX_WIDTH * 1.5) {
+        setPlacement({
+          top,
+          left: box.left - frame.left,
+          width: box.width,
+          maxWidth: box.width,
+          full: true,
+        })
         return
       }
       const { left } = caretCoordinates(input, tokenStart)
       const at = box.left - frame.left + left
       const first = box.left - frame.left
-      const last = box.right - frame.left - QUALIFIER_POPOVER_WIDTH
+      const right = box.right - frame.left
+      const placedLeft = Math.max(first, Math.min(at, right - QUALIFIER_POPOVER_MIN_WIDTH))
       setPlacement({
         top,
-        left: Math.max(first, Math.min(at, last)),
-        width: QUALIFIER_POPOVER_WIDTH,
+        left: placedLeft,
+        maxWidth: Math.min(QUALIFIER_POPOVER_MAX_WIDTH, right - placedLeft),
         full: false,
       })
     }
