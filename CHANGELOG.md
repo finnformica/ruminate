@@ -8,6 +8,7 @@
 
 ### Changed
 
+- An agent searches with the words you do. The MCP `search` tool used to look for a case-insensitive substring; it now takes **the same query language you type in the search box**: `in:<note id>` or `in:<block id>` to look inside a note or a subtree, `type:todo` (or `done`, `heading`, `code`, …), `-type:done` to exclude, `a,b` for either, `sort:updated`, and free text matched as the app matches it. A query with no free text lists everything the qualifiers admit — `type:todo` is every open to-do the token can see — and each hit names the block, its note and the heading it sits under. Nothing about who can see what changes: a token scoped to one note is still shown nothing outside it.
 - A bullet list continues as bullets. <kbd>↵</kbd> at the end of a bullet now makes another bullet, whatever **New block markdown** (Settings → Editor) is set to — a numbered list and a to-do list already carried on this way, and a bullet used to make the setting's block instead, so with the setting on plain text a list stopped after one item. To leave a list, press <kbd>↵</kbd> on an empty item: the block goes back to the setting's type, or to a paragraph when the setting is that very list, so the key always leaves.
 
 ### Fixed
