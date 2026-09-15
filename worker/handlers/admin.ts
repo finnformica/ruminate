@@ -1,30 +1,69 @@
 // The admin API — `/api/admin/*` (docs/multi-tenant-design.md §3).
 //
-// The bootstrap owner's controls: the feature flags
-// (src/data/feature-flags.ts). Reached by the admin page in the browser, so
-// it authenticates like every other browser-facing route — `requireSession`,
-// the cookie + GitHub token check — and then asks one more question: is this
-// verified id the admin? Nobody else gets past the first line, whatever the
-// path.
+// The bootstrap owner's controls: invite links, which admit people without
+// an allowlist, and the feature flags (src/data/feature-flags.ts). Reached by
+// the admin page in the browser, so it authenticates like every other
+// browser-facing route — `requireSession`, the cookie + GitHub token check —
+// and then asks one more question: is this verified id the admin? Nobody
+// else gets past the first line, whatever the path.
 //
 // Routes:
+//   GET    /api/admin/invites         — every invite, newest first
+//   POST   /api/admin/invites         — mint one; answers with the link's token, once
+//   DELETE /api/admin/invites/<id>    — revoke a live invite
 //   GET    /api/admin/features        — every flag's audience
 //   PUT    /api/admin/features/<key>  — set one flag's audience
 
 import { isAudience, isFeatureKey } from "../../src/data/feature-flags"
-import type { FeatureAudiencesBody } from "../admin-wire"
+import type { FeatureAudiencesBody, InvitesListBody, MintedInviteBody } from "../admin-wire"
 import { featureAudiences, isAdmin, setFeatureAudience } from "../features"
+import {
+  DEFAULT_INVITE_DAYS,
+  listInvites,
+  MAX_INVITE_DAYS,
+  mintInvite,
+  revokeInvite,
+} from "../invites"
 import { controlPlaneDriver } from "../tenancy-db"
 import type { Env } from "../types"
 import { requireSession } from "./replica"
 
 export const ADMIN_PREFIX = "/api/admin"
 
+const MAX_NOTE_LENGTH = 80
+
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
   })
+
+/** Validate the mint request. Returns the parsed body or the reason it is
+ * refused, written for the person filling in the form. */
+function parseMintBody(raw: unknown): { note: string | null; expiresInDays: number } | string {
+  if (raw !== null && typeof raw !== "object") return "Body must be an object."
+  const body = (raw ?? {}) as Record<string, unknown>
+
+  let note: string | null = null
+  if (body.note !== undefined && body.note !== null) {
+    if (typeof body.note !== "string") return "`note` must be text."
+    note = body.note.trim()
+    if (note.length === 0) note = null
+    else if (note.length > MAX_NOTE_LENGTH)
+      return `The note must be ${MAX_NOTE_LENGTH} characters or fewer.`
+  }
+
+  let expiresInDays = DEFAULT_INVITE_DAYS
+  if (body.expiresInDays !== undefined && body.expiresInDays !== null) {
+    const days = body.expiresInDays
+    if (typeof days !== "number" || !Number.isInteger(days) || days < 1 || days > MAX_INVITE_DAYS) {
+      return `\`expiresInDays\` must be a whole number of days between 1 and ${MAX_INVITE_DAYS}.`
+    }
+    expiresInDays = days
+  }
+
+  return { note, expiresInDays }
+}
 
 /** Route `/api/admin/*`. Every route is session-guarded AND admin-only. */
 export async function admin(
@@ -48,6 +87,35 @@ export async function admin(
   const control = controlPlaneDriver(env)
 
   try {
+    if (segments[0] === "invites") {
+      if (segments.length === 1) {
+        if (request.method === "GET") {
+          const body: InvitesListBody = { invites: await listInvites(control) }
+          return json(body)
+        }
+        if (request.method === "POST") {
+          let raw: unknown = null
+          try {
+            raw = await request.json()
+          } catch {
+            // An empty body means "the defaults".
+          }
+          const parsed = parseMintBody(raw)
+          if (typeof parsed === "string")
+            return json({ error: "invalid_request", detail: parsed }, 400)
+          const minted = await mintInvite(control, { createdBy: session.id, ...parsed })
+          const body: MintedInviteBody = { token: minted.token, invite: minted.summary }
+          return json(body, 201)
+        }
+        return json({ error: "method_not_allowed" }, 405)
+      }
+      if (segments.length === 2) {
+        if (request.method !== "DELETE") return json({ error: "method_not_allowed" }, 405)
+        const revoked = await revokeInvite(control, segments[1])
+        return revoked ? json({ ok: true, id: segments[1] }) : json({ error: "not_found" }, 404)
+      }
+    }
+
     if (segments[0] === "features") {
       if (segments.length === 1) {
         if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405)
@@ -71,7 +139,7 @@ export async function admin(
       }
     }
   } catch {
-    // The feature_flags table (migrations/0013) is not there yet.
+    // The feature_flags or invites table (migrations/0013, 0014) is not there yet.
     return json(
       {
         error: "admin_unavailable",

@@ -21,7 +21,7 @@
 // 3. **The escapes are narrow and greppable.** `includingDeleted()` for reads
 //    that genuinely want tombstones (replication, trash, audit);
 //    `-- tenant-exempt: <reason>` for the rare statement with no tenant to
-//    name; `controlPlaneDriver` for the control plane (`users`, `allowlist`,
+//    name; `controlPlaneDriver` for the control plane (`users`, `invites`,
 //    `feature_flags`…), which is not tenant-scoped data at all.
 //
 // The `SqlDriver` seam is preserved underneath (docs/multi-tenant-design.md
@@ -124,10 +124,10 @@ export function forTenant(driver: SqlDriver, identity: VerifiedIdentity): Tenant
 export const corpusDriver = (env: Env): SqlDriver => createD1SqlDriver(env.DB)
 
 /**
- * The control plane (`users`, `allowlist`, `feature_flags`, and the
- * per-feature tables) — identity, signup gating and the admin's switches,
- * which are deliberately NOT tenant-scoped: `resolveTenancy` has to be able
- * to look up an id that is not yet a tenant. Narrow by construction: the tables it
+ * The control plane (`users`, `invites`, `feature_flags`, and the per-feature
+ * tables) — identity, signup gating and the admin's switches, which are
+ * deliberately NOT tenant-scoped: `resolveTenancy` has to be able to look up
+ * an id that is not yet a tenant. Narrow by construction: the tables it
  * reaches have no corpus rows in them.
  */
 export const controlPlaneDriver = (env: Env): SqlDriver => createD1SqlDriver(env.DB)

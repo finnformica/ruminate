@@ -1,9 +1,17 @@
-import type { FeatureAudiencesBody } from "../../worker/admin-wire"
+import type {
+  FeatureAudiencesBody,
+  InvitesListBody,
+  MintedInviteBody,
+} from "../../worker/admin-wire"
+import type { InviteSummary } from "../../worker/invites"
 import type { Audience, FeatureAudiences, FeatureKey } from "./feature-flags"
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
 
+export type { InviteSummary } from "../../worker/invites"
+export { inviteState } from "../../worker/invites"
+
 /**
- * The client half of the admin page: the requests behind it, against
+ * The client half of the admin page: the five requests behind it, against
  * `/api/admin/*` (worker/handlers/admin.ts). Authenticated exactly as the
  * shares calls are — same-origin, so the `gh_refresh` cookie rides along,
  * plus the GitHub access token as a bearer — and answered only for the
@@ -22,7 +30,7 @@ class AdminError extends Error {
   }
 }
 
-async function adminRequest(path: string, init: RequestInit = {}): Promise<unknown> {
+async function request(path: string, init: RequestInit = {}): Promise<unknown> {
   await ensureFreshToken()
   if (!getAccessToken()) throw new AdminError("Not signed in.", 401)
   const response = await withAuthRetry(async () => {
@@ -57,8 +65,36 @@ async function adminRequest(path: string, init: RequestInit = {}): Promise<unkno
   return body
 }
 
+export async function listInvites(): Promise<InviteSummary[]> {
+  const body = (await request("/invites")) as Partial<InvitesListBody> | null
+  return body?.invites ?? []
+}
+
+/**
+ * Mint an invite. The returned `token` is the ONLY copy that will ever exist
+ * — the server stores a hash — so the caller must show the link before
+ * discarding it.
+ */
+export async function mintInvite(mint: {
+  note: string | null
+  expiresInDays: number
+}): Promise<MintedInviteBody> {
+  return (await request("/invites", {
+    method: "POST",
+    body: JSON.stringify(mint),
+  })) as MintedInviteBody
+}
+
+export async function revokeInvite(id: string): Promise<void> {
+  await request(`/invites/${encodeURIComponent(id)}`, { method: "DELETE" })
+}
+
+/** The link an invite token opens: the invite page, on this deployment. */
+export const inviteUrl = (token: string): string =>
+  `${window.location.origin}/invite/${encodeURIComponent(token)}`
+
 export async function listFeatureAudiences(): Promise<FeatureAudiences> {
-  const body = (await adminRequest("/features")) as FeatureAudiencesBody
+  const body = (await request("/features")) as FeatureAudiencesBody
   return body.audiences
 }
 
@@ -66,7 +102,7 @@ export async function setFeatureAudience(
   key: FeatureKey,
   audience: Audience,
 ): Promise<FeatureAudiences> {
-  const body = (await adminRequest(`/features/${encodeURIComponent(key)}`, {
+  const body = (await request(`/features/${encodeURIComponent(key)}`, {
     method: "PUT",
     body: JSON.stringify({ audience }),
   })) as FeatureAudiencesBody
