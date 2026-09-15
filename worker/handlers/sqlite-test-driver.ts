@@ -44,7 +44,7 @@ export function createTestSqlDriver(): SqlDriver {
       // with `.run()` hands back `[]` rather than rows. D1 does not care, so a
       // statement that works in production would silently return nothing here
       // — the worst way for a test to lie.
-      if (/^\s*(?:select|with)\b/i.test(sql) || /\breturning\b/i.test(sql)) {
+      if (/^\s*(?:select|with|explain)\b/i.test(sql) || /\breturning\b/i.test(sql)) {
         return Promise.resolve(statement.all(...params) as Record<string, SqlValue>[])
       }
       statement.run(...params)

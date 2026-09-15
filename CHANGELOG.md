@@ -17,6 +17,7 @@
 
 ### Fixed
 
+- Reading a note shared with you cost far more than it should. The database walk that finds everything beneath a shared note was scanning the owner's entire link table once for every block it reached — about 329,000 rows read to pull a 285-block share, on every focus, tab switch and reconnect — which spent most of a day's D1 read budget in a morning. The walk now seeks each block's links directly (a few thousand rows for the same share), and the same fix applies to the MCP server's `read_note`, `list_parents` and note-scoped tokens, which walked the same way. A new test checks the query plan of every bounded read so a scan of that shape cannot land again.
 - A note shared with you now reads like your own. The arrow keys move through its blocks, a click highlights one, <kbd>space</kbd>, <kbd>←</kbd> and <kbd>→</kbd> fold and unfold, <kbd>f</kbd> zooms in, and it opens folded to your **Expanded levels** setting (Settings → Editor), with your folds kept on this device as for any note. It used to open with nothing highlighted and answer no key. Only editing is off.
 
 ### Removed

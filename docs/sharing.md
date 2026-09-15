@@ -47,7 +47,11 @@ grant, and that choice decides everything else:
   `nodes` at both ends of every link so the walk over rows crosses exactly the
   edges `buildGraphSnapshot` would. Every statement names `:tenant` — the
   **owner's** — and satisfies the query guard like every other corpus
-  statement.
+  statement. The closure is the OUTER side of every join (`CROSS JOIN`, which
+  SQLite reads as a join-order hint): left to its own estimates the planner
+  scanned the owner's whole `link` table once per node reached, which cost
+  329k rows a pull on a 285-block share (docs/scaling-thresholds.md, "Rows
+  returned is not rows read"). `worker/query-plans.test.ts` pins the plan.
 
 ### What is deliberately not in the slice
 
