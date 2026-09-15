@@ -103,8 +103,15 @@ atom signed out.
   pull. Applied rows flow through the store into the graph atom (pending
   local ops re-applied on top); the open editor re-walks its page from the
   new snapshot, so another device's edit shows the moment it lands.
-- **Offline:** the OPFS store serves everything; pushes queue with backoff and
-  pulls retry on the `online` event. A first-ever boot while offline shows an
+- **Offline:** the OPFS store serves everything. While the browser says it
+  is offline (`navigator.onLine === false` — a definite "no network"; `true`
+  only means "not known to be offline") neither a push nor a pull is
+  attempted: pushes queue, pulls wait, nothing is recorded as an error, and
+  the `online` event runs both at once (a timer re-checks the flag as a
+  backstop). The sidebar's sync status reads **Offline** in place of Synced /
+  Syncing… / Sync failed, with a tooltip saying notes are saved on this
+  device and will sync once the network is back; it is not a button, since
+  a click could do nothing. A first-ever boot while offline shows an
   explanatory empty state; anything written then is kept locally and synced
   later. If a _second_ tab opens while another holds the OPFS database, the
   tab says so honestly ("open in another tab — temporary in-memory copy",

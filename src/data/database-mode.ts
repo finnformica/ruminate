@@ -16,6 +16,7 @@ import { applyOps, notesTouchedBy, type Op } from "./ops"
 import { resetReplicaAccess } from "./replica-access"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import type { NoteStore } from "./note-store"
+import { isBrowserOffline } from "../utils/network"
 import {
   OFF_STORAGE_DIAGNOSTICS,
   storageDiagnosticsAtom,
@@ -39,7 +40,9 @@ import {
  *          hand the row diff to the replica push queue (replica-sync.ts —
  *          write-behind, coalesced)
  *   sync   visibility/focus/online triggers re-run the since-cursor pull;
- *          hiding the tab flushes the push queue immediately
+ *          hiding the tab flushes the push queue immediately. While the
+ *          browser says it is offline neither pulls nor pushes are attempted
+ *          — they wait for the `online` event, and nothing is an error
  *
  * **How the UI is fed.** This module publishes the store's indexed rows as
  * `databaseGraphAtom`, served as `graphSnapshotAtom` whenever a user is
@@ -598,6 +601,22 @@ function runPull(activation: DatabaseModeRuntime) {
   enqueue(async () => {
     if (runtime !== activation || !activation.store) return
     const store = activation.store
+    // No network: skip rather than fail. The status stays as it was (the
+    // sidebar reads "Offline" over it), the `online` event pulls when the
+    // network is back (use-database-mode.ts), and the retry timer re-checks
+    // in case the flag flips without one. A first-ever boot with nothing
+    // local still gets the empty-offline notice.
+    if (isBrowserOffline()) {
+      patchStatus({ emptyOffline: noteCount(jotai().get(databaseGraphAtom)) === 0 })
+      // A skipped pull is not a pull: leave the ambient gap open, so the
+      // `online` event's pull runs at once rather than up to 30s later.
+      activation.lastPullStartedAt = 0
+      activation.pullRetryTimer = setTimeout(() => {
+        activation.pullRetryTimer = null
+        if (runtime === activation) runPull(activation)
+      }, activation.options.pullRetryMs ?? PULL_RETRY_MS)
+      return
+    }
     patchStatus({ pull: "pulling" })
     try {
       await flushOps(activation)

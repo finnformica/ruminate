@@ -2,7 +2,6 @@ import { Link, LinkComponentProps, useLocation } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
 import { useAtom, useAtomValue } from "jotai"
 import { createContext, useContext } from "react"
-import { useNetworkState } from "react-use"
 import { requestDatabasePull } from "../data/database-mode"
 import {
   isBootingAtom,
@@ -31,7 +30,6 @@ import {
   MoreIcon16,
   NoteFillIcon16,
   NoteIcon16,
-  OfflineIcon16,
   PinFillIcon12,
   PinFillIcon16,
   PinIcon16,
@@ -60,7 +58,6 @@ export function NavItems({
   const booting = useAtomValue(isBootingAtom)
   const syncText = useSyncStatusText()
   const syncMeta = useSyncStatusMeta()
-  const { online } = useNetworkState()
   const { pathname } = useLocation()
 
   const today = new Date()
@@ -158,13 +155,13 @@ export function NavItems({
               Update Ruminate
             </button>
           ) : null}
-          {!online ? (
-            <div className="nav-item text-text-secondary" data-size={size}>
-              <OfflineIcon16 />
-              Offline
+          {syncText === null ? null : syncMeta.action === null ? (
+            // Offline: nothing a click could do, so the row only states it.
+            <div className="nav-item text-text-secondary" data-size={size} title={syncMeta.tooltip}>
+              <SyncStatusIcon />
+              {syncText}
             </div>
-          ) : null}
-          {syncText ? (
+          ) : (
             <button
               className="nav-item text-text-secondary"
               data-size={size}
@@ -172,13 +169,13 @@ export function NavItems({
               onClick={() =>
                 // Pushes are automatic (write-behind); the button pulls the
                 // latest from D1 — or re-authenticates when the session died.
-                syncMeta.needsReauth ? beginGitHubSignIn() : requestDatabasePull()
+                syncMeta.action === "reauth" ? beginGitHubSignIn() : requestDatabasePull()
               }
             >
               <SyncStatusIcon />
               {syncText}
             </button>
-          ) : null}
+          )}
           <NavLink
             to="/settings"
             search={{ query: undefined }}
