@@ -1,11 +1,11 @@
 // Sharing — `/api/shares` (docs/sharing.md).
 //
 // A share is a scoped grant: an owner names a set of root notes and an email,
-// and the person GitHub reports that email for reads the slice of the owner's
-// corpus beneath those roots. The slice is computed here on every request
-// from the owner's rows (`worker/shares/slice.ts`), so it is live and
-// least-privilege by construction. Shares are read-only: there is no write
-// route, so nothing a grantee sends can reach the owner's rows.
+// and the person GitHub reports that email for reads — and, with the verbs the
+// owner ticked, edits or deletes — the slice of the owner's corpus beneath
+// those roots. The slice is computed here on every request from the owner's
+// rows (`worker/shares/slice.ts`), so it is live and least-privilege by
+// construction.
 //
 // Reached by a browser, so every route authenticates like the replica does —
 // `requireSession`, the cookie + GitHub token check — and nothing here takes
@@ -17,19 +17,28 @@
 // when the share was created — and from nothing the caller sent. The caller
 // reaches that handle only through a share the ledger says is addressed to
 // them (`findReceivedShare`: verified id → `users.email`, recorded at sign-in
-// → share), and only the slice-scoped reads in `slice.ts` ever run on it.
-// Both halves are pinned by the adversarial tests in shares.test.ts.
+// → share), and only
+// the slice-scoped reads and writes in `slice.ts` ever run on it. Both
+// halves are pinned by the adversarial tests in shares.test.ts.
 //
 // Routes (wired in worker/index.ts):
 //   GET    /api/shares            — shares given and received
 //   POST   /api/shares            — create a share
 //   DELETE /api/shares/:id        — revoke one (owner only)
 //   GET    /api/shares/:id/notes  — the slice (grantee only)
+//   PUT    /api/shares/:id/notes  — write into the slice (grantee only)
 
 import { controlPlaneDriver, corpusDriver, forTenant } from "../tenancy-db"
 import type { Env } from "../types"
-import { normalizeEmail, type ShareGrant } from "../shares/grant"
-import { MAX_SHARE_ROOTS, sliceRows } from "../shares/slice"
+import { PERMISSIONS, normalizeEmail, type Permission, type ShareGrant } from "../shares/grant"
+import {
+  MAX_SHARE_ROOTS,
+  applySliceWrite,
+  closureIds,
+  planSliceWrite,
+  sliceRows,
+  takenIds,
+} from "../shares/slice"
 import {
   countLiveShares,
   createShare,
@@ -41,12 +50,15 @@ import {
   type ReceivedShare,
 } from "../shares/store"
 import type { GivenShare, ReceivedShareSummary, SharesListBody } from "../shares/wire"
+import { parseReplicaPayload } from "./replica-payload"
 import { requireSession } from "./replica"
 import type { VerifiedIdentity } from "./tenancy"
 
 export const SHARES_PREFIX = "/api/shares"
 
 const MAX_LIVE_SHARES = 50
+/** A grantee's push is a coalesced diff of one editing session, never a corpus. */
+const MAX_BODY_BYTES = 4 * 1024 * 1024
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
@@ -58,6 +70,7 @@ const asGiven = (grant: ShareGrant): GivenShare => ({
   id: grant.id,
   granteeEmail: grant.granteeEmail,
   rootIds: [...grant.rootIds],
+  permissions: PERMISSIONS.filter((permission) => grant.permissions.has(permission)),
   createdAt: grant.createdAt,
   revokedAt: grant.revokedAt,
 })
@@ -66,6 +79,7 @@ const asReceived = ({ grant, owner }: ReceivedShare): ReceivedShareSummary => ({
   id: grant.id,
   owner: { login: owner.login, name: owner.name },
   rootIds: [...grant.rootIds],
+  permissions: PERMISSIONS.filter((permission) => grant.permissions.has(permission)),
   createdAt: grant.createdAt,
 })
 
@@ -145,6 +159,7 @@ export async function shares(
     })
 
     if (request.method === "GET") return json(await sliceRows(owner, received.grant))
+    if (request.method === "PUT") return write(request, owner, received.grant)
     return json({ error: "method_not_allowed" }, 405)
   }
 
@@ -154,6 +169,7 @@ export async function shares(
 interface ParsedCreate {
   email: string
   rootIds: string[]
+  permissions: Permission[]
 }
 
 /** Validate the create request. Every refusal names the field, because this
@@ -177,7 +193,18 @@ function parseCreateBody(raw: unknown): ParsedCreate | string {
     unique.add(entry)
   }
 
-  return { email, rootIds: [...unique] }
+  const permissions: Permission[] = ["read"]
+  if (body.permissions !== undefined) {
+    if (!Array.isArray(body.permissions)) return "`permissions` must be a list."
+    for (const entry of body.permissions) {
+      if (typeof entry !== "string" || !(PERMISSIONS as readonly string[]).includes(entry)) {
+        return `Unknown permission: ${String(entry)}.`
+      }
+      if (!permissions.includes(entry as Permission)) permissions.push(entry as Permission)
+    }
+  }
+
+  return { email, rootIds: [...unique], permissions }
 }
 
 /** Which of these ids are live nodes — notes or blocks — in the caller's own
@@ -244,8 +271,38 @@ async function create(request: Request, env: Env, session: VerifiedIdentity): Pr
     ownerId: session.id,
     granteeEmail: parsed.email,
     rootIds: parsed.rootIds,
+    permissions: parsed.permissions,
   })
   // The response says what was stored and nothing about the address: whether
   // it belongs to a Ruminate user is not this endpoint's to reveal.
   return json({ share: asGiven(grant) }, 201)
+}
+
+async function write(
+  request: Request,
+  owner: ReturnType<typeof forTenant>,
+  grant: ShareGrant,
+): Promise<Response> {
+  const contentLength = Number(request.headers.get("Content-Length") ?? "0")
+  if (contentLength > MAX_BODY_BYTES) return json({ error: "payload_too_large" }, 413)
+
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return json({ error: "invalid_json" }, 400)
+  }
+  const payload = parseReplicaPayload(body)
+  if (!payload) return json({ error: "invalid_payload" }, 400)
+
+  const closure = await closureIds(owner, grant)
+  const outside = payload.nodes.map((node) => node.id).filter((id) => !closure.nodes.has(id))
+  const taken = outside.length > 0 ? await takenIds(owner, outside) : new Set<string>()
+
+  const plan = planSliceWrite(grant, { nodes: closure.nodes, roots: closure.roots, taken }, payload)
+  if (!plan.ok) {
+    return json({ error: plan.refusal.error, detail: plan.refusal.detail }, plan.refusal.status)
+  }
+  await applySliceWrite(owner, plan)
+  return json({ ok: true, nodes: plan.nodes.length, links: plan.links.length })
 }

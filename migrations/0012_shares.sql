@@ -44,10 +44,8 @@ CREATE TABLE shares (
   -- endpoint refuses an empty list rather than storing a share over nothing.
   root_ids      TEXT NOT NULL,
   -- Comma-separated subset of 'read,write,delete', in that order; `read` is
-  -- always present, and today it is all there is: shares are read-only. The
-  -- column is here so write and delete can arrive without a migration. A
-  -- string rather than three columns because the set is read whole on every
-  -- request and never queried by member.
+  -- always present. A string rather than three columns because the set is
+  -- read whole on every request and never queried by member.
   permissions   TEXT NOT NULL,
   created_at    INTEGER NOT NULL,     -- ms epoch
   revoked_at    INTEGER               -- ms epoch; non-NULL = dead, kept for the audit trail

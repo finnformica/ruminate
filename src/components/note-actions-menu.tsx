@@ -66,12 +66,12 @@ export function NoteActionsMenu({
   const isDeveloper = useIsDeveloper()
   const [debug, setDebug] = useAtom(developerDebugPreferenceAtom)
   // A note someone shared with the user (docs/sharing.md): its rows are the
-  // owner's and the share is read-only, so nothing here may change it.
+  // owner's, so the verbs the owner granted decide what the menu offers.
   // Pinning and width are props on the note node — the owner's node, and
   // the owner's pin — so a shared note has neither.
   const share = useNoteShare(noteId)
-  const canRename = !isSignedOut && share === null
-  const canDelete = !isSignedOut && share === null
+  const canRename = !isSignedOut && (share === null || share.canWrite)
+  const canDelete = !isSignedOut && (share === null || share.canDelete)
   // Sharing is the owner's: an own note, signed in (docs/sharing.md).
   const canShare = !isSignedOut && share === null
   const openShare = useSetAtom(shareDialogAtom)

@@ -4,22 +4,25 @@
 // no drift.
 
 import type { LinkRow, NodeRow } from "../handlers/replica-payload"
+import type { Permission } from "../mcp/grant"
 
-/** A share as its OWNER sees it: the address they typed and the roots. */
+/** A share as its OWNER sees it: the address they typed, the roots, the verbs. */
 export interface GivenShare {
   id: string
   granteeEmail: string
   rootIds: string[]
+  permissions: Permission[]
   createdAt: number
   revokedAt: number | null
 }
 
 /** A share as its GRANTEE sees it: who shared it (login and display name,
- * never an address) and the roots. */
+ * never an address), the roots, the verbs. */
 export interface ReceivedShareSummary {
   id: string
   owner: { login: string; name: string | null }
   rootIds: string[]
+  permissions: Permission[]
   createdAt: number
 }
 
@@ -35,6 +38,7 @@ export interface SharesListBody {
 export interface CreateShareBody {
   email: string
   rootIds: string[]
+  permissions: Permission[]
 }
 
 /** Body of `GET /api/shares/:id/notes` — the slice, live rows only. */

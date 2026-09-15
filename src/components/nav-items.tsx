@@ -132,7 +132,7 @@ export function NavItems({
               one list, whoever shared them, with who did in each row's
               tooltip and in the note page's header. They are listed apart
               from the user's own notes — they are rows in someone else's
-              corpus — but open and read like any note. */}
+              corpus — but open, read and edit as the verbs allow, like any note. */}
           {sharedNotes.length > 0 ? (
             <div className="flex flex-col gap-1 pt-2">
               <SectionHeading>Shared</SectionHeading>
@@ -140,7 +140,9 @@ export function NavItems({
                 notes={sharedNotes.map(({ note }) => note)}
                 titleOf={(note) => {
                   const entry = sharedNotes.find((shared) => shared.note.id === note.id)
-                  return entry ? `Shared by ${shareOwnerName(entry.share)}` : undefined
+                  if (!entry) return undefined
+                  const verbs = entry.share.permissions.includes("write") ? "" : " · read only"
+                  return `Shared by ${shareOwnerName(entry.share)}${verbs}`
                 }}
                 size={size}
                 onNavigate={onNavigate}

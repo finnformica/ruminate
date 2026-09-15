@@ -3,6 +3,7 @@ import {
   normalizeEmail,
   parseRootIds,
   serializeSharePermissions,
+  shareAllows,
   shareFromRow,
   type ShareRow,
 } from "./grant"
@@ -12,7 +13,7 @@ const row: ShareRow = {
   owner_id: 7,
   grantee_email: "bob@example.com",
   root_ids: '["blk_a","blk_b"]',
-  permissions: "read",
+  permissions: "read,write",
   created_at: 1,
   revoked_at: null,
 }
@@ -21,9 +22,14 @@ describe("shareFromRow", () => {
   it("reads the roots and verbs off the row", () => {
     const grant = shareFromRow(row)
     expect([...grant.rootIds]).toEqual(["blk_a", "blk_b"])
-    expect([...grant.permissions]).toEqual(["read"])
-    expect(grant.revokedAt).toBeNull()
-    expect(shareFromRow({ ...row, revoked_at: 5 }).revokedAt).toBe(5)
+    expect([...grant.permissions]).toEqual(["read", "write"])
+    expect(shareAllows(grant, "write")).toBe(true)
+    expect(shareAllows(grant, "delete")).toBe(false)
+  })
+
+  it("permits nothing once revoked", () => {
+    const grant = shareFromRow({ ...row, revoked_at: 5 })
+    expect(shareAllows(grant, "read")).toBe(false)
   })
 
   it("reads a broken root list as NO notes, never every note", () => {
