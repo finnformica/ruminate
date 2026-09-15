@@ -354,21 +354,27 @@ function searchGlyph(def: BlockTypeDef): string {
   return def.family === "code" ? "```" : def.family === "image" ? "![]" : "¶"
 }
 
-/** The qualifier picker's `type:` rows for blocks, in vocabulary order: a
- * family's members, with its group name beside them, each with its glyph
- * (a group's is its first member's). */
-export function searchTypeOptions(): { value: string; glyph: string }[] {
-  const rows: { value: string; glyph: string }[] = []
+/** The qualifier picker's `type:` rows for blocks, in vocabulary order,
+ * each with its glyph and its name capitalised. Headings are offered as
+ * the one `heading` (its levels, `h1`…`h3`, stay typed values only); the
+ * to-dos as `todo`, `done` and then `task`; lists as `bullet` and
+ * `ordered` (the `list` group stays a typed value only). */
+export function searchTypeOptions(): { value: string; label: string; glyph: string }[] {
+  const rows: { value: string; label: string; glyph: string }[] = []
+  const row = (value: string, glyph: string) => ({
+    value,
+    label: value.charAt(0).toUpperCase() + value.slice(1),
+    glyph,
+  })
   for (const family of SEARCH_FAMILY_ORDER) {
     const members = BLOCK_TYPE_DEFS.filter((def) => def.family === family && def.search)
     const group = SEARCH_GROUPS.find((g) => g.families[0] === family)
-    const groupRow = group && { value: group.value, glyph: searchGlyph(members[0]) }
-    // A group of one family reads "any …": after its members for to-dos
-    // (todo, done, task), before them for headings (heading, h1, h2, h3);
-    // the list group covers two families and leads them.
-    if (groupRow && family !== "todo") rows.push(groupRow)
-    for (const def of members) rows.push({ value: def.search!.value, glyph: searchGlyph(def) })
-    if (groupRow && family === "todo") rows.push(groupRow)
+    if (family === "heading" && group) {
+      rows.push(row(group.value, searchGlyph(members[0])))
+      continue
+    }
+    for (const def of members) rows.push(row(def.search!.value, searchGlyph(def)))
+    if (family === "todo" && group) rows.push(row(group.value, searchGlyph(members[0])))
   }
   return rows
 }

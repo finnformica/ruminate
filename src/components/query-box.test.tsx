@@ -158,21 +158,27 @@ describe("the qualifier popover", () => {
         row.querySelector("[data-glyph]")?.getAttribute("data-glyph") ?? null,
       ]),
     )
-    expect(glyphs).toMatchObject({
+    expect(glyphs).toEqual({
       todo: "[ ]",
       done: "[x]",
       task: "[ ]",
       heading: "#",
-      h2: "##",
       bullet: "-",
       ordered: "1.",
       quote: ">",
       code: "```",
+      image: "![]",
       text: "¶",
+      note: null,
+      daily: null,
+      weekly: null,
+      template: null,
     })
+    // Capitalised, beside the glyph; the heading levels and the list group
+    // are typed values only.
     expect(
       options().find((row) => row.getAttribute("data-suggestion") === "todo")?.textContent,
-    ).toBe("[ ]todo")
+    ).toBe("[ ]Todo")
     expect(popover()?.textContent).not.toContain("move")
     expect(popover()?.textContent).not.toContain("pick")
   })

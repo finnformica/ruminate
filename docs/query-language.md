@@ -56,13 +56,13 @@ The query box — on the notes page and in <kbd>⌘</kbd> <kbd>K</kbd> — keeps
 
 Typing a qualifier whose values are a known set opens a popover beside the token — on the notes page and in <kbd>⌘</kbd> <kbd>K</kbd>, the same one (`src/components/query-box.tsx`):
 
-- `type:` — the block types below, each beside its markdown glyph, then the note types.
+- `type:` — the block types below, each beside its markdown glyph, then the note types. Headings are offered as the one `heading` and lists as `bullet` and `ordered`; `h1`…`h3` and `list` still work typed.
 - `in:` — your notes, by name, most recent first (the open note leads, even before it exists).
 - `has:` / `no:` — `dates`, `tasks`, `title`.
 - `sort:` — `title` and `updated_at`, each with its other direction (`title:desc`); typing `sort:title:` narrows to it. (`sort:id` still works typed; an id is opaque, so it is not offered.)
 - `date:` — the slash menu's date shortcuts (Today, Tomorrow, Yesterday, Next week, Last week — `dateShortcuts` in `src/blocks/slash-menu.ts`, the one source for both). The day is what lands in the query (`date:2026-09-14`), exactly as the slash menu writes a day into a note; type a word (`date:tomorrow`) to keep a query relative.
 
-The rows are just the values (a block type beside its glyph): no header, no glosses, no key hints. ↑/↓ move, ↵ or Tab pick, Esc closes.
+The rows are just the values, capitalised (a block type beside its glyph; a sort spelt out, "Title, A to Z"): no header, no glosses, no key hints. ↑/↓ move, ↵ or Tab pick, Esc closes.
 
 Focus never leaves the box: keep typing to narrow the list, <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>↵</kbd> or <kbd>Tab</kbd> to pick (a note lands as its id; a value with spaces is quoted), <kbd>Esc</kbd> to leave what you typed. `-type:` and comma lists (`type:todo,done`) work the same way. On a phone, or in a narrow box, the popover takes the box's full width instead of hanging at the token.
 

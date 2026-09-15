@@ -840,8 +840,8 @@ describe("qualifier suggestions", () => {
     renderMenu({ open: true })
     const input = type("type:")
     const picker = screen.getByTestId("qualifier-suggestions")
-    expect(picker.textContent).toContain("todo")
-    expect(picker.textContent).toContain("heading")
+    expect(picker.textContent).toContain("Todo")
+    expect(picker.textContent).toContain("Heading")
     // ↓ moves the highlight within the picker, not cmdk's list.
     fireEvent.keyDown(input, { key: "ArrowDown" })
     fireEvent.keyDown(input, { key: "Enter" })

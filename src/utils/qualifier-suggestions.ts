@@ -123,28 +123,28 @@ export function filterQualifierOptions(
  * with the direction it does not default to as a second row (`sort:title`
  * is A→Z, so `title:desc` is offered beside it). `date:` is supplied by
  * `dateQualifierOptions` — its rows carry today's date, so they are built
- * when asked for, not when the module loads. A row is its value (or its
- * label) and, for a block type, its glyph: nothing is glossed.
+ * when asked for, not when the module loads. A row is its label — the
+ * value capitalised, or a sort spelt out — and, for a block type, its
+ * glyph: nothing is glossed.
  */
 export const STATIC_QUALIFIER_OPTIONS: Readonly<Record<string, readonly QualifierOption[]>> = {
   // The block types, each with its markdown glyph, then the note types.
-  type: [
-    ...searchTypeOptions(),
-    { value: "note" },
-    { value: "daily" },
-    { value: "weekly" },
-    { value: "template" },
-  ],
-  has: [{ value: "dates" }, { value: "tasks" }, { value: "title" }],
-  no: [{ value: "dates" }, { value: "tasks" }, { value: "title" }],
+  type: [...searchTypeOptions(), named("note"), named("daily"), named("weekly"), named("template")],
+  has: [named("dates"), named("tasks"), named("title")],
+  no: [named("dates"), named("tasks"), named("title")],
   // `sort:id` still works when typed; it is not offered, an id being
   // opaque (docs/graph-storage.md).
   sort: [
-    { value: "title" },
-    { value: "title:desc" },
-    { value: "updated_at" },
-    { value: "updated_at:asc" },
+    { value: "title", label: "Title, A to Z" },
+    { value: "title:desc", label: "Title, Z to A" },
+    { value: "updated_at", label: "Updated, newest first" },
+    { value: "updated_at:asc", label: "Updated, oldest first" },
   ],
+}
+
+/** A row that reads as its value, capitalised. */
+function named(value: string): QualifierOption {
+  return { value, label: value.charAt(0).toUpperCase() + value.slice(1) }
 }
 
 /** The `date:` rows: the slash menu's date shortcuts (Today, Tomorrow, …
