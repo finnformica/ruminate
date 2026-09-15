@@ -75,7 +75,9 @@ describe("a doc that holds a loop", () => {
   })
 
   it("folds, outlines, indexes and copies without hanging", () => {
-    expect(defaultCollapsedKeys(looped(), 1)).toEqual(["a/b"])
+    // The heading A folds like any other parent at depth 1; the loop's closing
+    // occurrence beneath B is a leaf, so nothing folds past it.
+    expect(defaultCollapsedKeys(looped(), 1)).toEqual(["a", "a/b"])
     // The outline lists a heading once: the closing occurrence is the same
     // heading again.
     expect(buildOutline(looped()).map((i) => i.id)).toEqual(["a"])

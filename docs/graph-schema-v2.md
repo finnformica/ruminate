@@ -145,7 +145,7 @@ serializer is a pure type→marker map.
 | -------------- | ------------------ | --------------------------------------------------------------------------------------------------------- |
 | `note`         | — (file root)      | `text` = title; `props` = metadata entries (stored as `page` until migrations/0008)                       |
 | `text`         | `- `               | plain outline bullet                                                                                      |
-| `h1` `h2` `h3` | `# ` `## ` `### `  | always expanded by default                                                                                |
+| `h1` `h2` `h3` | `# ` `## ` `### `  | fold by default like any other block                                                                      |
 | `todo`         | `- [ ] `           | checked state is a TYPE, not an attribute                                                                 |
 | `done`         | `- [x] `           |                                                                                                           |
 | `ul`           | `- ` (styled)      |                                                                                                           |
@@ -226,8 +226,10 @@ invisible — each has a basket to be shown in. A block whose note is later
 deleted, but that another note holds, keeps a dead `notes_id`; it only
 matters if it is later orphaned, which a global "no note" view can cover.
 
-**Default expansion.** Headers (`h1`–`h3`) always expanded; below any header,
-expand **n=2** levels by default. That policy is a **seed, not a layer**: the
+**Default expansion.** Expand **n=2** levels beneath the top of the note by
+default (Settings → Editor moves n), counting every block alike: a header is
+folded at depth n like any other parent, so a note of headers over lists opens
+as its headers. That policy is a **seed, not a layer**: the
 first time a note is opened on a device it fills in that note's collapsed set
 in localStorage (one set of node ids — collapsed means folded, everything else
 is open), and it is never consulted again. Afterwards a toggle simply adds or

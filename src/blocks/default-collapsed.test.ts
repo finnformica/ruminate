@@ -26,32 +26,44 @@ describe("defaultCollapsedKeys", () => {
     expect(collapsedContents(markdown)).toEqual(["b"])
   })
 
-  it("always expands headings", () => {
+  it("folds headings like any other parent", () => {
     const markdown = [
       "- outer",
       "  - inner",
       "    # Deep heading",
       "      - under heading",
       "        - deeper",
-      "          - deepest",
       "",
     ].join("\n")
-    // `inner` is level 2 → collapsed. The heading itself stays expanded even
-    // deeper, and it resets the level count for its subtree: `under heading`
-    // is level 1 (expanded), `deeper` is level 2 (collapsed).
-    expect(collapsedContents(markdown)).toEqual(["inner", "deeper"])
+    // `inner` is level 2 → collapsed, and so are the heading at level 3 and
+    // the parent beneath it: a heading has no special standing in the count,
+    // and does not restart it.
+    expect(collapsedContents(markdown)).toEqual(["inner", "Deep heading", "under heading"])
   })
 
-  it("resets the level below every heading (top-level heading case)", () => {
-    const markdown = ["# Section", "  - point", "    - detail", "      - minutiae", ""].join("\n")
-    expect(collapsedContents(markdown)).toEqual(["detail"])
+  it("shows the headings and folds the lists beneath them (heading, sub-heading, list)", () => {
+    const markdown = [
+      "# Week",
+      "  ## Monday",
+      "    - [ ] todo",
+      "    - point",
+      "      - detail",
+      "",
+    ].join("\n")
+    // Two levels: the top heading (level 1) opens, the sub-heading (level 2)
+    // folds, so the note opens as its two rows of headings and nothing else.
+    // `point` (level 3) folds too, so unfolding the sub-heading reveals one
+    // level at a time.
+    expect(collapsedContents(markdown)).toEqual(["Monday", "point"])
+    // Three levels: the lists show, and only `point` (level 3) folds.
+    expect(collapsedContents(markdown, 3)).toEqual(["point"])
   })
 
   it("handles an empty document", () => {
     expect(defaultCollapsedKeys(doc(""))).toEqual([])
   })
 
-  it("opens as many levels as asked, beneath the top and beneath every heading", () => {
+  it("opens as many levels as asked, counted from the top of the note", () => {
     const markdown = [
       "- root",
       "  - middle",
@@ -63,11 +75,18 @@ describe("defaultCollapsedKeys", () => {
       "      - minutiae",
       "",
     ].join("\n")
-    // One level: only the direct children show; every parent beneath folds
+    // One level: only the top-level rows show; every parent beneath folds
     // (a folded row's own children fold too, so opening it reveals one level).
-    expect(collapsedContents(markdown, 1)).toEqual(["root", "middle", "deep", "point", "detail"])
-    // Three levels: a parent three down folds.
-    expect(collapsedContents(markdown, 3)).toEqual(["deep"])
+    expect(collapsedContents(markdown, 1)).toEqual([
+      "root",
+      "middle",
+      "deep",
+      "Section",
+      "point",
+      "detail",
+    ])
+    // Three levels: a parent three down folds, under a heading as anywhere.
+    expect(collapsedContents(markdown, 3)).toEqual(["deep", "detail"])
     // Ten levels: nothing here is deep enough to fold.
     expect(collapsedContents(markdown, 10)).toEqual([])
   })
