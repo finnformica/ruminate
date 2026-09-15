@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent, ClipboardEvent, CSSProperties, KeyboardEvent } from "react"
 import { cx } from "../../utils/cx"
 import type { Block, BlockDoc } from "../../blocks/types"
+import { linkifyPastedText } from "../../blocks/link"
 import { leadingMarker } from "../../blocks/markers"
 import { defOf } from "../../blocks/registry"
 import type { BlockPatch } from "../../blocks/ops"
@@ -26,6 +27,7 @@ import { BlockContent } from "./block-content"
 import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext } from "./block-kinds"
 import { caretCoordinates, caretLineFlags } from "./caret"
 import { Hash } from "./hash"
+import { LinkActionsContext, type LinkActions } from "./link-actions"
 import { SLASH_MENU_WIDTH, SlashMenu } from "./slash-menu"
 
 /** A request to edit a row (an occurrence key — a block twice in the view is
@@ -105,6 +107,10 @@ export interface BlockEditorApi {
   requestImage?: (key: string) => void
   /** Expand an image block's picture (the lightbox). */
   openImage?: (id: string) => void
+  /** Change a link's display text in this row's text (docs/links.md):
+   * `[title](href)` becomes `[next](href)`; a bare address is written out
+   * as a link. Absent in read-only views. */
+  renameLink?: (key: string, href: string, title: string, next: string) => void
   /**
    * Exit edit mode and take the first selection-ladder rung on this row
    * (Cmd/Ctrl+A pressed with the textarea's text already fully selected).
@@ -469,6 +475,12 @@ export function BlockItem({
         if (converted.trim() !== "") pasted = converted
       }
     }
+    // A bare address in the paste is written out as a link with its host
+    // for display text (docs/links.md), so a pasted URL reads as a name
+    // rather than a string of slashes; the address itself is kept whole.
+    // Done before the single-line shortcut below: a rewritten line is no
+    // longer the plain text, so it is inserted by hand as converted html is.
+    pasted = linkifyPastedText(pasted)
     if (!pasted.includes("\n")) {
       // Single-line paste: plain text falls through to the browser's ordinary
       // inline insertion; converted html (e.g. `**bold**`) is inserted manually.
@@ -750,6 +762,18 @@ export function BlockItem({
     depth === 0 && occurrence.index > 0 ? ROOT_GAP : 0,
   )
 
+  // What a link in the rendered text can do to this row: its hover card
+  // (`link-hover-card.tsx`) changes its display text, in an editor that
+  // can write the change.
+  const renameLink = readOnly ? undefined : api.renameLink
+  const linkActions = useMemo<LinkActions | null>(
+    () =>
+      renameLink
+        ? { rename: (href, title, next) => renameLink(occurrence.key, href, title, next) }
+        : null,
+    [renameLink, occurrence.key],
+  )
+
   // The caption/body line: the textarea while editing, the rendered text
   // otherwise (an image row hangs it beneath the picture).
   const content = editing ? (
@@ -835,7 +859,9 @@ export function BlockItem({
             onDoubleClick: () => api.edit(occurrence.key),
           })}
     >
-      {kind.body ? kind.body(block) : <BlockContent content={body} />}
+      <LinkActionsContext.Provider value={linkActions}>
+        {kind.body ? kind.body(block) : <BlockContent content={body} />}
+      </LinkActionsContext.Provider>
     </div>
   )
 

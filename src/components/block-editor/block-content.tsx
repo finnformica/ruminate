@@ -1,10 +1,14 @@
+import type { Element, ElementContent } from "hast"
 import type { Root } from "mdast"
-import { Fragment } from "react"
+import { Fragment, useContext } from "react"
 import ReactMarkdown from "react-markdown"
 import rehypeKatex from "rehype-katex"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import type { Processor } from "unified"
+import { isWebUrl } from "../../blocks/link"
+import { LinkActionsContext } from "./link-actions"
+import { LinkHoverCard } from "./link-hover-card"
 
 /**
  * Markdown's block-level rules, switched off for block bodies. A block is one
@@ -67,19 +71,58 @@ function remarkDisplayMathLines() {
   }
 }
 
-const components = {
-  p: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-  a: ({ children, href }: { children?: React.ReactNode; href?: string }) => (
+/** The text of a link's markdown node — its title, formatting and all. */
+function textOf(node: ElementContent | Element | undefined): string {
+  if (!node) return ""
+  if (node.type === "text") return node.value
+  if (node.type === "element") return node.children.map(textOf).join("")
+  return ""
+}
+
+/**
+ * A link: opens in a new tab, and in an editable row (`LinkActionsContext`,
+ * provided by the block item) carries the hover card that visits it and
+ * changes its display text. A link that is not a web address (`mailto:`,
+ * an anchor) has no card.
+ */
+function Link({
+  children,
+  href,
+  node,
+}: {
+  children?: React.ReactNode
+  href?: string
+  node?: Element
+}) {
+  const actions = useContext(LinkActionsContext)
+  const anchor = (
+    // The card's trigger fills the anchor with the link's own text.
+    // eslint-disable-next-line jsx-a11y/anchor-has-content
     <a
       href={href}
       className="link"
       target="_blank"
       rel="noreferrer"
       onClick={(event) => event.stopPropagation()}
+    />
+  )
+  if (!actions || !href || !isWebUrl(href)) return <a {...anchor.props}>{children}</a>
+  const title = textOf(node)
+  return (
+    <LinkHoverCard
+      href={href}
+      title={title}
+      onRename={(next) => actions.rename(href, title, next)}
+      render={anchor}
     >
       {children}
-    </a>
-  ),
+    </LinkHoverCard>
+  )
+}
+
+const components = {
+  p: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  a: Link,
   code: ({ children }: { children?: React.ReactNode }) => (
     // The inline code chip: a bordered, tinted pill in the mono face, a touch
     // smaller than the text around it (the Linear / Notion idiom), at the

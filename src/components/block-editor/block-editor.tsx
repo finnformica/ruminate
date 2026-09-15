@@ -1551,6 +1551,30 @@ export function BlockEditor({
     if (next !== doc) history.commit(doc, next, { type: "structural" })
   }
 
+  /**
+   * A link's display text, changed in the row's text (docs/links.md):
+   * `[title](href)` becomes `[next](href)`. A link that was a bare address,
+   * or an autolink written another way, is found by its address or its
+   * text and written out as a link. The first occurrence is the one
+   * changed; one undo step.
+   */
+  const renameLink = (key: string, href: string, title: string, next: string) => {
+    const block = doc.blocks[idOfKey(key)]
+    const display = next.trim()
+    if (!block || display === "") return
+    const linked = `[${display}](${href})`
+    let text: string | null = null
+    for (const needle of [`[${title}](${href})`, `<${href}>`, href, title]) {
+      if (needle !== "" && block.text.includes(needle)) {
+        text = block.text.replace(needle, linked)
+        break
+      }
+    }
+    if (text === null || text === block.text) return
+    const updated = updateBlock(doc, block.id, { text })
+    history.commit(doc, updated, { type: "structural" })
+  }
+
   const menuActions: BlockMenuActions = {
     edit: (key) => edit(key),
     openImage: (id) => setLightbox(id),
@@ -1606,6 +1630,7 @@ export function BlockEditor({
       onImageUpload && !readOnly ? (key, files) => void insertImages(key, files) : undefined,
     requestImage: onImageUpload && !readOnly ? requestImage : undefined,
     openImage: (id) => setLightbox(id),
+    renameLink: readOnly ? undefined : renameLink,
     focus,
     selected,
     selectedSet,

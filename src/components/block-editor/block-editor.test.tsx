@@ -3243,6 +3243,96 @@ describe("BlockEditor images", () => {
   })
 })
 
+describe("BlockEditor inline links", () => {
+  /** Hover `element` until the link's card opens. */
+  async function hover(element: Element): Promise<HTMLElement> {
+    await act(async () => {
+      fireEvent.pointerEnter(element, { pointerType: "mouse" })
+      fireEvent.mouseEnter(element)
+      fireEvent.mouseMove(element)
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    })
+    return screen.getByTestId("link-hover-card")
+  }
+  /** Hover the link in row `index`. */
+  const hoverLink = (container: HTMLElement, index: number) =>
+    hover(container.querySelectorAll("[data-occurrence]")[index]!.querySelector("a")!)
+  /** A paste of plain text into the textarea being edited. */
+  const pasteText = (textarea: Element, text: string) =>
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        files: [],
+        types: ["text/plain"],
+        getData: (type: string) => (type === "text/plain" ? text : ""),
+      },
+    })
+
+  it("a pasted address is written out as a link named for its host, the address kept whole", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    await act(async () => {
+      pasteText(textarea, "see https://www.example.com/a/b?c=1. and [kept](https://e.com/k)")
+    })
+    expect(serializedLines(getByTestId)).toEqual([
+      "see [example.com](https://www.example.com/a/b?c=1). and [kept](https://e.com/k)",
+    ])
+  })
+
+  it("the hover card names where a link goes, visits it in a new tab, and changes its display text", async () => {
+    const open = vi.fn()
+    vi.stubGlobal("open", open)
+    try {
+      const { container, getByTestId } = render(
+        <Harness initial={"Read [the guide](https://e.com/g) first"} />,
+      )
+      const card = await hoverLink(container, 0)
+      expect(card.textContent).toContain("e.com/g")
+      await act(async () => {
+        fireEvent.click(screen.getByText("Visit"))
+      })
+      expect(open).toHaveBeenCalledWith("https://e.com/g", "_blank", "noopener,noreferrer")
+
+      const field = screen.getByTestId("link-display-text") as HTMLInputElement
+      expect(field.value).toBe("the guide")
+      await act(async () => {
+        fireEvent.change(field, { target: { value: "the manual" } })
+        fireEvent.submit(field.closest("form")!)
+      })
+      expect(serializedLines(getByTestId)).toEqual(["Read [the manual](https://e.com/g) first"])
+      // One undo step.
+      fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
+      expect(serializedLines(getByTestId)).toEqual(["Read [the guide](https://e.com/g) first"])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("a typed address is offered its host as display text, and written out as a link", async () => {
+    const { container, getByTestId } = render(<Harness initial={"See https://www.e.com/x now"} />)
+    await hoverLink(container, 0)
+    const field = screen.getByTestId("link-display-text") as HTMLInputElement
+    expect(field.value).toBe("e.com")
+    await act(async () => {
+      fireEvent.submit(field.closest("form")!)
+    })
+    expect(serializedLines(getByTestId)).toEqual(["See [e.com](https://www.e.com/x) now"])
+  })
+
+  it("a read-only row's link is only a link", async () => {
+    const { container } = render(
+      <BlockEditor doc={withStarter(parse("https://e.com/x"))} onChange={() => {}} readOnly />,
+    )
+    const anchor = container.querySelector("a")!
+    await act(async () => {
+      fireEvent.pointerEnter(anchor, { pointerType: "mouse" })
+      fireEvent.mouseEnter(anchor)
+      fireEvent.mouseMove(anchor)
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    })
+    expect(screen.queryByTestId("link-hover-card")).toBeNull()
+  })
+})
+
 describe("two editors on one page", () => {
   /** The note page's shape: the outline and, beneath it, the Unassigned
    * basket — a second editor whose doc is walked from the same graph, so it
