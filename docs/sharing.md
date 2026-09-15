@@ -156,6 +156,11 @@ someone else's rows does not belong in it. So shared notes live in memory
   notes, with editing off (`BlockEditor.browse`): the highlight moves, a
   click highlights, folds open and close and are kept per device, the
   default depth applies, `f` zooms. Nothing writes.
+- **The note page is one page.** A shared note is the same components as
+  the reader's own — `NoteTitle` and `BlockNoteEditor`, told they are
+  read-only — never a second rendering of the title or the outline. What
+  differs for a share is data: the rows come from the slice, and writes are
+  refused at the store.
 - **Where to share from**: a note's **⋯** menu (**Share…**) shares the note;
   a block's right-click menu (**Share…**) shares that block, as the root.
   One dialog, asking only for the address. Settings → Sharing is the

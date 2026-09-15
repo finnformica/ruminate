@@ -35,6 +35,15 @@ export const Default: Story = {
   args: { initial: "Meeting notes" },
 }
 
+/** A note someone shared without write: the same heading, never editable. */
+export const ReadOnly: Story = {
+  render: () => (
+    <div style={{ maxWidth: 640, padding: 24 }}>
+      <NoteTitle title="Their meeting notes" onRename={() => false} readOnly />
+    </div>
+  ),
+}
+
 /** The title above the block editor, mirroring the note page layout, to check
  * the title is the largest header and lines up with the heading blocks. */
 function PageHarness() {
