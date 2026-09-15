@@ -3,7 +3,7 @@
 Share a subgraph of your notes with another Ruminate user. From a note's or a
 block's menu, type the email address they sign in to GitHub with; they see
 that root and everything beneath it — including blocks you add later — under
-a **Shared by …** heading in their sidebar. Shares are read-only; write and
+a **Shared** heading in their sidebar. Shares are read-only; write and
 delete are a follow-up (§5).
 
 |                |                                                                          |
@@ -143,7 +143,8 @@ someone else's rows does not belong in it. So shared notes live in memory
   union of every slice, so the editor, search, hover cards and the notes list
   read a shared note exactly as they read an own one. `sharedOriginAtom`
   (node id → share id) is what tells them apart: the sidebar lists own notes
-  under Notes and each share's notes under **Shared by …**, and the note page
+  under Notes and the notes shared with them under **Shared** (who shared each
+  is the row's tooltip, and the page header's second crumb), and the note page
   shows a notice naming the owner, renders read-only, and hides Rename, Pin,
   Delete and the basket.
 - **A shared block is a note here.** A root may be a block, and a block has

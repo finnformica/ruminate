@@ -9,7 +9,7 @@ import {
   isHelpPanelOpenAtom,
   ownSortedNotesAtom,
   pinnedBlocksAtom,
-  sharedNoteGroupsAtom,
+  sharedNotesAtom,
   type PinnedBlock,
 } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
@@ -56,7 +56,7 @@ export function NavItems({
 }) {
   const notes = useAtomValue(ownSortedNotesAtom)
   const pinnedBlocks = useAtomValue(pinnedBlocksAtom)
-  const sharedGroups = useAtomValue(sharedNoteGroupsAtom)
+  const sharedNotes = useAtomValue(sharedNotesAtom)
   const booting = useAtomValue(isBootingAtom)
   const syncText = useSyncStatusText()
   const syncMeta = useSyncStatusMeta()
@@ -107,9 +107,9 @@ export function NavItems({
               </NavLink>
             </li>
           </ul>
-          {/* The lists, each under its own heading — Notes, Pinned, then
-              one Shared by … per share — with one rule above them all,
-              setting them off from the links above. */}
+          {/* The lists, each under its own heading — Notes, Pinned, Shared —
+              with one rule above them all, setting them off from the links
+              above. */}
           {notes.length > 0 ? (
             <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
               <SectionHeading>Notes</SectionHeading>
@@ -129,17 +129,24 @@ export function NavItems({
             </div>
           ) : null}
           {/* Notes other people shared with this account (docs/sharing.md):
-              one group per share, under the person who shared it. They are
-              listed apart from the user's own notes — they are rows in
-              someone else's corpus — but open, read and edit like any note. */}
-          {sharedGroups.map(({ share, notes: sharedNotes }) => (
-            <div key={share.id} className="flex flex-col gap-1 pt-2">
-              <SectionHeading title={`Shared by ${shareOwnerName(share)} · read only`}>
-                Shared by {shareOwnerName(share)}
-              </SectionHeading>
-              <NoteRows notes={sharedNotes} size={size} onNavigate={onNavigate} />
+              one list, whoever shared them, with who did in each row's
+              tooltip and in the note page's header. They are listed apart
+              from the user's own notes — they are rows in someone else's
+              corpus — but open and read like any note. */}
+          {sharedNotes.length > 0 ? (
+            <div className="flex flex-col gap-1 pt-2">
+              <SectionHeading>Shared</SectionHeading>
+              <NoteRows
+                notes={sharedNotes.map(({ note }) => note)}
+                titleOf={(note) => {
+                  const entry = sharedNotes.find((shared) => shared.note.id === note.id)
+                  return entry ? `Shared by ${shareOwnerName(entry.share)}` : undefined
+                }}
+                size={size}
+                onNavigate={onNavigate}
+              />
             </div>
-          ))}
+          ) : null}
         </div>
         <div className="flex flex-col gap-1">
           {needRefresh ? (
@@ -202,13 +209,16 @@ function SectionHeading({ title, children }: { title?: string; children: React.R
   )
 }
 
-/** The note rows of one list: the user's own, or one share's. */
+/** The note rows of one list: the user's own, or the shared ones. */
 function NoteRows({
   notes,
+  titleOf,
   size,
   onNavigate,
 }: {
   notes: Note[]
+  /** A row's tooltip, where a list has one (who shared the note). */
+  titleOf?: (note: Note) => string | undefined
   size: "medium" | "large"
   onNavigate?: () => void
 }) {
@@ -227,7 +237,13 @@ function NoteRows({
               sibling, not its child (a button cannot live in a
               link), so the same rules keep the row's hover surface
               while the pointer is on it. */}
-          <NoteNavItem note={note} size={size} onNavigate={onNavigate} className="w-full" />
+          <NoteNavItem
+            note={note}
+            title={titleOf?.(note)}
+            size={size}
+            onNavigate={onNavigate}
+            className="w-full"
+          />
           <RowActions size={size}>
             <NoteActionsMenu noteId={note.id} pinned={note.pinned} />
           </RowActions>
@@ -430,11 +446,13 @@ function NavLink({
  * note's display name. Pinned notes sort to the top (see sortedNotesAtom). */
 function NoteNavItem({
   note,
+  title,
   size,
   onNavigate,
   className,
 }: {
   note: Note
+  title?: string
   size: "medium" | "large"
   onNavigate?: () => void
   className?: string
@@ -447,6 +465,7 @@ function NoteNavItem({
       activeOptions={{ exact: true, includeSearch: false }}
       data-size={size}
       className={cx("nav-item", className)}
+      title={title}
       onClick={(event) => {
         if (!event.defaultPrevented) onNavigate?.()
       }}

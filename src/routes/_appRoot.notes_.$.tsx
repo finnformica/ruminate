@@ -252,8 +252,21 @@ function NotePage() {
 
   return (
     <PageLayout
-      // The note's name is its title now, not its (opaque) id.
-      title={<span className="truncate">{note?.displayName || "Untitled"}</span>}
+      // The note's name is its title now, not its (opaque) id. A shared
+      // note's header also says whose it is, as a quiet second crumb.
+      title={
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate">{note?.displayName || "Untitled"}</span>
+          {share !== null ? (
+            <>
+              <span aria-hidden className="shrink-0 text-text-tertiary">
+                ›
+              </span>
+              <span className="truncate text-text-secondary">{shareOwnerName(share)}</span>
+            </>
+          ) : null}
+        </span>
+      }
       icon={note ? <NoteFavicon note={note} /> : <NoteIcon16 />}
       actions={
         <div className="flex items-center gap-2">
@@ -298,7 +311,9 @@ function NotePage() {
             ) : null}
 
             {share !== null ? (
-              <Notice icon={<ShareIcon16 />} className="print:hidden">
+              // -mx-0.5: the notice's edges sit where the rows' surfaces
+              // reach (2px past the text column), as the title's do.
+              <Notice icon={<ShareIcon16 />} className="-mx-0.5 print:hidden">
                 Shared by {shareOwnerName(share)} — you can read this note but not change it.
               </Notice>
             ) : null}

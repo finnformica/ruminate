@@ -285,22 +285,16 @@ export const ownSortedNotesAtom = atom((get) => {
   return origin.size === 0 ? notes : notes.filter((note) => !origin.has(note.id))
 })
 
-/** The notes shared with the user, grouped by share, in the order the shares
- * were received (newest first) and each group in `sortedNotesAtom` order. */
-export const sharedNoteGroupsAtom = atom((get) => {
+/** The notes shared with the user, each with the share it came through, in
+ * `sortedNotesAtom` order — one list, whoever shared them (the sidebar's
+ * **Shared** section). */
+export const sharedNotesAtom = atom((get) => {
   const origin = get(sharedOriginAtom)
-  if (origin.size === 0) return [] as { share: ReceivedShareSummary; notes: Note[] }[]
-  const byShare = new Map<string, Note[]>()
-  for (const note of get(sortedNotesAtom)) {
-    const shareId = origin.get(note.id)
-    if (shareId === undefined) continue
-    const list = byShare.get(shareId)
-    if (list) list.push(note)
-    else byShare.set(shareId, [note])
-  }
-  return get(receivedSharesAtom).flatMap((share) => {
-    const notes = byShare.get(share.id)
-    return notes && notes.length > 0 ? [{ share, notes }] : []
+  if (origin.size === 0) return [] as { note: Note; share: ReceivedShareSummary }[]
+  const shares = new Map(get(receivedSharesAtom).map((share) => [share.id, share]))
+  return get(sortedNotesAtom).flatMap((note) => {
+    const share = shares.get(origin.get(note.id) ?? "")
+    return share ? [{ note, share }] : []
   })
 })
 
