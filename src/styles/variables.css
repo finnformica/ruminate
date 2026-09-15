@@ -138,10 +138,10 @@
   --color-border-focus: var(--accent-9);
 
   /* Syntax colors */
-  --color-syntax-cyan: var(--cyan-9);
-  --color-syntax-red: var(--red-9);
-  --color-syntax-purple: var(--purple-9);
-  --color-syntax-green: var(--green-9);
+  --color-syntax-cyan: var(--cyan-11);
+  --color-syntax-red: var(--red-11);
+  --color-syntax-purple: var(--purple-11);
+  --color-syntax-green: var(--green-11);
 
   /* Font families */
   --font-family-sans: "iA Writer Quattro", system-ui, sans-serif;
@@ -243,10 +243,10 @@
   --color-border-focus: var(--accent-11);
 
   /* Syntax colors */
-  --color-syntax-cyan: var(--cyan-10);
-  --color-syntax-red: var(--red-10);
-  --color-syntax-purple: var(--purple-10);
-  --color-syntax-green: var(--green-10);
+  --color-syntax-cyan: var(--cyan-11);
+  --color-syntax-red: var(--red-11);
+  --color-syntax-purple: var(--purple-11);
+  --color-syntax-green: var(--green-11);
 }
 
 @media (pointer: coarse) {

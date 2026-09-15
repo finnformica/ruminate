@@ -12,7 +12,7 @@
 
 ### Changed
 
-- Code highlighting is stronger: the four syntax hues step up two notches in both schemes (dark mode's were nearly white), and more of the code is picked out — numbers, types, class names, constants, regexes, template literals' `${…}`.
+- Code highlighting is stronger in dark mode: its four syntax hues were the near-white text steps and now sit at the same saturated step the light scheme uses; and in both schemes more of the code is picked out — numbers, types, class names, constants, regexes, template literals' `${…}`.
 - **Settings → Sharing** now leads each row with what was shared. A share you have given shows the note, or the block as _Note › text_, with the address beneath it; a share you have received shows the note or block, with who shared it beneath. It used to lead with the address, and a shared block was named by its text alone, so you could not tell which note it was from.
 
 ### Removed
