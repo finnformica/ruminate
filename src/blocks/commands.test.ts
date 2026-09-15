@@ -241,17 +241,13 @@ describe("wasd sibling traversal (treePrev / treeNext break out of the level)", 
   it("clamps at the zoom boundary (never escapes the zoomed subtree)", () => {
     const doc = deep()
     const zoomed = (id: string): Parameters<typeof runCommand>[1] =>
-      input(doc, id, { visibleOrder: ["b", "b/b1", "b/b1/b2"], zoomRootId: "b" })
-    // The title's own siblings are outside the view: both no-op on the title
-    // (w does NOT zoom out — that stays `a`'s job).
-    for (const name of ["treePrev", "treeNext"] as const) {
-      const result = runCommand(name, zoomed("b"))
-      expect(result.handled).toBe(true)
-      expect(result.focus).toBeUndefined()
-      expect(result.zoom).toBeUndefined()
-    }
-    // w on a direct child of the zoom root breaks out to the title (in view).
-    expect(runCommand("treePrev", zoomed("b/b1")).focus).toEqual({ mode: "select", key: "b" })
+      input(doc, id, { visibleOrder: ["b/b1", "b/b1/b2"], zoomRootId: "b" })
+    // w on a direct child of the zoom root breaks out to the title — not a
+    // row, but the view's title above them (`exitTop`), never a zoom out
+    // (that stays `a`'s job).
+    const up = runCommand("treePrev", zoomed("b/b1"))
+    expect(up).toEqual({ handled: true, exitTop: true })
+    expect(up.zoom).toBeUndefined()
     // s at the end of the zoomed subtree would have to climb past the title
     // to reach c — clamp instead.
     expect(runCommand("treeNext", zoomed("b/b1/b2")).focus).toBeUndefined()
@@ -293,29 +289,26 @@ describe("wasd depth navigation (selectParent / selectFirstChild)", () => {
     expect(result.expand).toBeUndefined()
   })
 
-  it("while zoomed, selectParent on a direct child selects the title, and on the title zooms out", () => {
+  it("while zoomed, selectParent on a direct child hands up to the title", () => {
     const doc = fixture()
     const zoomed = (id: string): Parameters<typeof runCommand>[1] =>
-      input(doc, id, { visibleOrder: ["b", "b/b1"], zoomRootId: "b" })
-    // Direct child of the zoom root → the zoom-root title (falls out of the
-    // ordinary parent walk, since the title is the child's parent).
-    expect(runCommand("selectParent", zoomed("b/b1")).focus).toEqual({ mode: "select", key: "b" })
-    // The title itself → zoom out one level ("a always goes up the tree").
-    // b is root-level, so one level out is a full exit — same as zoomOut.
-    expect(runCommand("selectParent", zoomed("b")).zoom).toEqual({ id: null })
-    // With a navigation stack below, the title pops back along the path taken
-    // (zoomBackId) instead of exiting fully.
-    const nested = input(doc, "b/b1", { visibleOrder: ["b/b1"], zoomRootId: "b1", zoomBackId: "b" })
-    expect(runCommand("selectParent", nested).zoom).toEqual({ id: "b" })
-  })
-
-  it("while zoomed, selectFirstChild on the title selects its first child", () => {
-    const doc = fixture()
-    const result = runCommand(
-      "selectFirstChild",
-      input(doc, "b", { visibleOrder: ["b", "b/b1"], zoomRootId: "b" }),
-    )
-    expect(result.focus).toEqual({ mode: "select", key: "b/b1" })
+      input(doc, id, { visibleOrder: ["b/b1"], zoomRootId: "b" })
+    // The child's parent is the zoomed block — the view's title above the
+    // rows, not a row: `exitTop`, as ↑ from the first row. Never a zoom.
+    const result = runCommand("selectParent", zoomed("b/b1"))
+    expect(result).toEqual({ handled: true, exitTop: true })
+    expect(result.zoom).toBeUndefined()
+    // Deeper, the parent walk is the ordinary one.
+    const nested: BlockDoc = {
+      ...doc,
+      blocks: {
+        ...doc.blocks,
+        b1: { ...doc.blocks.b1, children: ["b2"] },
+        b2: { id: "b2", type: "text", text: "B2", children: [] },
+      },
+    }
+    const deeper = input(nested, "b/b1/b2", { visibleOrder: ["b/b1", "b/b1/b2"], zoomRootId: "b" })
+    expect(runCommand("selectParent", deeper).focus).toEqual({ mode: "select", key: "b/b1" })
   })
 })
 
@@ -386,20 +379,14 @@ describe("arrow-key folding (expandOrFirstChild / collapseOrParent)", () => {
     }
   })
 
-  it("while zoomed, ← is a no-op on the title and selects the title from a direct child", () => {
+  it("while zoomed, ← on a direct child hands up to the title", () => {
     const doc = fixture()
-    const zoomed = (id: string) => input(doc, id, { visibleOrder: ["b", "b/b1"], zoomRootId: "b" })
-    // The title is pinned open and zoom-out stays `a`'s job — never collapse,
-    // never zoom, never escape the subtree.
-    const onTitle = runCommand("collapseOrParent", zoomed("b"))
-    expect(onTitle.handled).toBe(true)
-    expect(onTitle.collapse).toBeUndefined()
-    expect(onTitle.focus).toBeUndefined()
-    expect(onTitle.zoom).toBeUndefined()
-    // A direct child's "parent" is the zoom root — its title, still in view.
-    expect(runCommand("collapseOrParent", zoomed("b/b1")).focus).toEqual({
-      mode: "select",
-      key: "b",
+    const zoomed = (id: string) => input(doc, id, { visibleOrder: ["b/b1"], zoomRootId: "b" })
+    // A direct child's "parent" is the zoom root — the view's title above the
+    // rows (`exitTop`), never a zoom out or an escape from the subtree.
+    expect(runCommand("collapseOrParent", zoomed("b/b1"))).toEqual({
+      handled: true,
+      exitTop: true,
     })
   })
 
@@ -920,21 +907,15 @@ describe("marker editing", () => {
 })
 
 describe("zoom", () => {
-  /** Command input as seen while zoomed into `b` (visible: b as title, then b1). */
+  /** Command input as seen while zoomed into `b`: its children are the rows
+   * (b1); b itself is the view's title above them, not a row. */
   function zoomed(doc: BlockDoc, key: string, over: Partial<CommandInput> = {}): CommandInput {
-    return { doc, key, mode: "select", visibleOrder: ["b", "b/b1"], zoomRootId: "b", ...over }
+    return { doc, key, mode: "select", visibleOrder: ["b/b1"], zoomRootId: "b", ...over }
   }
 
   it("zoomIn requests a zoom into the block", () => {
     const doc = fixture()
     expect(runCommand("zoomIn", input(doc, "b")).zoom).toEqual({ id: "b" })
-  })
-
-  it("zoomIn on the zoom root itself is a no-op", () => {
-    const doc = fixture()
-    const result = runCommand("zoomIn", zoomed(doc, "b"))
-    expect(result.handled).toBe(true)
-    expect(result.zoom).toBeUndefined()
   })
 
   it("zoomOut pops the navigation stack, and exits when nothing is below", () => {
@@ -962,100 +943,57 @@ describe("zoom", () => {
     expect(runCommand("zoomExit", zoomed(doc, "b/b1")).zoom).toEqual({ id: null })
   })
 
-  it("outdent refuses at the zoom boundary (root and its direct children)", () => {
+  it("outdent refuses at the zoom boundary (the root's direct children)", () => {
     const doc = fixture()
-    for (const key of ["b", "b/b1"]) {
-      const result = runCommand("outdent", zoomed(doc, key))
-      expect(result.handled).toBe(true)
-      expect(result.doc).toBeUndefined()
-    }
+    const result = runCommand("outdent", zoomed(doc, "b/b1"))
+    expect(result.handled).toBe(true)
+    expect(result.doc).toBeUndefined()
     // The same block outdents fine when not zoomed.
     expect(runCommand("outdent", input(doc, "b/b1")).doc).toBeDefined()
   })
 
-  it("indent refuses on the zoom root", () => {
+  it("deleting the last child empties the view and hands up to the title", () => {
     const doc = fixture()
-    expect(runCommand("indent", zoomed(doc, "b")).doc).toBeUndefined()
-  })
-
-  it("delete and backspace refuse on the zoom root, but children still delete", () => {
-    const doc = fixture()
-    expect(runCommand("deleteBlock", zoomed(doc, "b")).doc).toBeUndefined()
-    expect(runCommand("backspaceEmpty", zoomed(doc, "b", { mode: "edit" })).doc).toBeUndefined()
-    // Deleting the last child is allowed — the title alone is a valid view.
+    // The zoomed block alone is a valid view — Enter on its title makes a child.
     const result = runCommand("deleteBlock", zoomed(doc, "b/b1"))
     expect(result.doc!.blocks.b1).toBeUndefined()
-    expect(result.focus).toEqual({ mode: "select", key: "b" })
+    expect(result.focus).toBeUndefined()
+    expect(result.exitTop).toBe(true)
+    // Backspace in the emptied last child merges upward the same way — to
+    // the title, never to a row outside the view.
+    const empty = { ...doc, blocks: { ...doc.blocks, b1: { ...doc.blocks.b1, text: "" } } }
+    const merged = runCommand("backspaceEmpty", zoomed(empty, "b/b1", { mode: "edit" }))
+    expect(merged.doc!.blocks.b1).toBeUndefined()
+    expect(merged.exitTop).toBe(true)
   })
 
-  it("move / duplicate are no-ops on the zoom root", () => {
+  it("level and sibling jumps clamp at the zoomed subtree", () => {
     const doc = fixture()
-    for (const name of [
-      "moveBlockUp",
-      "moveBlockDown",
-      "duplicateAbove",
-      "duplicateBelow",
-    ] as const) {
-      const result = runCommand(name, zoomed(doc, "b"))
-      expect(result.handled).toBe(true)
-      expect(result.doc).toBeUndefined()
-    }
-  })
-
-  it("level and sibling jumps clamp at the zoom root", () => {
-    const doc = fixture()
-    for (const name of ["jumpLevelTop", "jumpLevelBottom", "prevSibling", "nextSibling"] as const) {
-      const result = runCommand(name, zoomed(doc, "b"))
+    for (const name of ["jumpLevelBottom", "prevSibling", "nextSibling"] as const) {
+      const result = runCommand(name, zoomed(doc, "b/b1"))
       expect(result.handled).toBe(true)
       expect(result.focus).toBeUndefined()
+      expect(result.exitTop).toBeUndefined()
     }
-    // A child can still jump up to the (visible) zoom root.
-    expect(runCommand("jumpLevelTop", zoomed(doc, "b/b1")).focus).toEqual({
-      mode: "select",
-      key: "b",
+    // The top of the first level is the title above the rows.
+    expect(runCommand("jumpLevelTop", zoomed(doc, "b/b1"))).toEqual({
+      handled: true,
+      exitTop: true,
     })
   })
 
-  it("Enter variants on the zoom root create its FIRST child, not a sibling", () => {
+  it("upward exits at the top of the zoomed view hand up to the title", () => {
     const doc = fixture()
-    for (const name of ["insertBelow", "insertSiblingBelow"] as const) {
-      const result = runCommand(name, zoomed(doc, "b"))
-      const id = newBlockId(doc, result.doc!)
-      expect(result.doc!.blocks.b.children).toEqual([id, "b1"])
-      expect(result.doc!.rootBlockIds).toEqual(["a", "b", "c"])
-      expect(result.focus).toEqual({ mode: "edit", key: `b/${id}` })
-    }
-    // Splitting the title mid-line drops the tail into the first child too.
-    const split = runCommand(
-      "splitContinuingList",
-      zoomed(doc, "b", { mode: "edit", caret: caret("B", 1) }),
-    )
-    const id = newBlockId(doc, split.doc!)
-    expect(split.doc!.blocks.b.children).toEqual([id, "b1"])
-  })
-
-  it("swallows upward exits at the top of the zoomed view (never the note title)", () => {
-    const doc = fixture()
-    // Select mode on the title (visibleOrder[0]).
-    const select = runCommand("moveSelectionUp", zoomed(doc, "b"))
-    expect(select.handled).toBe(true)
-    expect(select.exitTop).toBeUndefined()
-    // Edit mode on the title: commit the edit, stay on the title.
-    const edit = runCommand("moveEditFocusUp", zoomed(doc, "b", { mode: "edit" }))
-    expect(edit.exitTop).toBeUndefined()
-    expect(edit.focus).toEqual({ mode: "select", key: "b" })
-    // Arrow-up from the first child selects the title.
-    expect(runCommand("moveSelectionUp", zoomed(doc, "b/b1")).focus).toEqual({
-      mode: "select",
-      key: "b",
+    // ↑ from the first row, highlighted or editing: the editor takes
+    // `exitTop` to the zoom title, as it would to the note title.
+    expect(runCommand("moveSelectionUp", zoomed(doc, "b/b1"))).toEqual({
+      handled: true,
+      exitTop: true,
     })
-  })
-
-  it("pins the zoomed title open (Space cannot collapse the whole view)", () => {
-    const doc = fixture()
-    const result = runCommand("toggleCollapse", zoomed(doc, "b"))
-    expect(result.handled).toBe(true)
-    expect(result.toggleCollapse).toBeUndefined()
+    expect(runCommand("moveEditFocusUp", zoomed(doc, "b/b1", { mode: "edit" }))).toEqual({
+      handled: true,
+      exitTop: true,
+    })
   })
 })
 

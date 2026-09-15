@@ -60,9 +60,10 @@ describe("a doc that holds a loop", () => {
       ["a/b/a", false, true],
       ["a/c", false, false],
     ])
-    // Zooming into the closing block starts a fresh path: one more turn.
+    // Zooming into the closing block starts a fresh path: one more turn (the
+    // zoomed block is the view's title, not a row).
     const zoomed = buildRows(looped(), { zoomRootId: "a", folds: new Set() })
-    expect(zoomed.map((r) => r.key)).toEqual(["a", "a/b", "a/b/a", "a/c"])
+    expect(zoomed.map((r) => r.key)).toEqual(["a/b", "a/b/a", "a/c"])
   })
 
   it("serialises and displays to where the loop closes, and no further", () => {

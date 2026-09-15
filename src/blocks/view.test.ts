@@ -142,7 +142,6 @@ describe("buildRows", () => {
     expect(byKey.get("a/d")?.olNumber).toBe(1)
     expect(byKey.get("a/e")?.olNumber).toBe(2)
     expect(byKey.get("f")?.index).toBe(1)
-    expect(rows.every((row) => !row.zoomTitle)).toBe(true)
   })
 
   it("a fold hides the children and marks the row", () => {
@@ -184,11 +183,10 @@ describe("buildRows", () => {
     ])
   })
 
-  it("zoomed: the root leads as the title and its children start at depth 0", () => {
+  it("zoomed: the rows are the root's children, from depth 0 — the root is the title, not a row", () => {
     const rows = buildRows(outline, { zoomRootId: "b", folds: NONE })
-    expect(summary(rows)).toEqual(["a/b", "a/b/c"])
-    expect(rows[0]).toMatchObject({ zoomTitle: true, depth: 0, collapsed: false, guideKeys: [] })
-    expect(rows[1]).toMatchObject({ zoomTitle: false, depth: 0, parentKey: "a/b", guideKeys: [] })
+    expect(summary(rows)).toEqual(["a/b/c"])
+    expect(rows[0]).toMatchObject({ depth: 0, parentKey: "a/b", guideKeys: [] })
     // Deeper rows count their guides from the zoom root's children, not the note.
     const deep = buildRows(outline, { zoomRootId: "a", folds: NONE })
     expect(deep.find((row) => row.key === "a/b/c")).toMatchObject({ depth: 1, guideKeys: ["a/b"] })
@@ -196,7 +194,7 @@ describe("buildRows", () => {
 
   it("zoomed: the title is always open, and folds made here are the note's folds", () => {
     const rows = buildRows(outline, { zoomRootId: "a", folds: new Set(["a", "a/b"]) })
-    expect(summary(rows)).toEqual(["a", "a/b ▸", "a/d", "a/e"])
+    expect(summary(rows)).toEqual(["a/b ▸", "a/d", "a/e"])
   })
 
   it("zoomed into an unknown block: the whole note", () => {

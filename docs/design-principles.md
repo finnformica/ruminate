@@ -169,11 +169,19 @@ asks for it.
    (`--color-text-selected-chrome`, via `.block-glyph` / `.block-glyph-fill`):
    the selection's text tint never reaches an element with explicit ink.
    Controls (checkbox, chevron) keep their own. The note title's
-   hash sits in the same slot, so the title reads as the outline's top
-   heading with its text at the block text column. Unlike the bullet and
-   number the hash is NOT a zoom target — it reads as typography, and zoom
-   stays on F / Cmd+. and the bullet/number clicks (on leaves; a parent's key
-   is its collapse toggle).
+   hash sits in the same slot, so the title is set exactly as the outline's
+   top heading — but the title is not a row. On a wide page the whole header
+   (title, zoom breadcrumb, zoom title) hangs into the page gutter by the
+   marker-slot offset (`.note-header` + `--note-header-pull`,
+   block-editor.css; the page sets it with its padding), so the header's
+   text sits at the content column's edge, the hash in the gutter beside it,
+   and the outline reads as indented beneath the title rather than the title
+   as one more row. The pull is the page's to grant: it needs the 40px
+   gutter, so a narrow page (16–20px) leaves the header at the text column.
+   The rows never take it — the text column does not move. Unlike the bullet
+   and number the hash is NOT a zoom target — it reads as typography, and
+   zoom stays on F / Cmd+. and the bullet/number clicks (on leaves; a
+   parent's key is its collapse toggle).
 
 ## Type scale
 
@@ -200,8 +208,19 @@ promote chrome over content.
 
 Zooming re-derives depth: the zoomed block's children start again at depth 0,
 so a level-4 heading reads as a top-level section inside its own zoomed view.
-The zoom title itself uses the **note-title scale** (3xl) — the zoomed block
-_is_ the page — keeping a full step between it and its depth-0 children.
+The zoom title _is_ the note title: the zoomed block is the page, so the
+editor draws it with the same `NoteTitle` component the page draws the note's
+title with — 3xl, the hanging `#`, the same highlight and the same keys — fed
+the block's text instead of the note's. It is not a row: the rows are the
+block's children, from depth 0, and ↑ from the first hands the keyboard up to
+the title as it would to the note title (`exitTop`), Enter on the title makes
+the block's first child, and renaming it is a text edit of the block. Whatever
+the block's type, only its text reads as the title (its bullet, checkbox or
+heading `#` belongs to its row in the outline); a block whose text is more
+than one plain line — a code block, a picture's caption, text with line breaks
+— reads as the title but is edited in its own row, un-zoomed. It hangs into
+the gutter with the breadcrumb above it (`.note-header`), so its children
+read as indented beneath it.
 
 ## Spacing
 
@@ -222,6 +241,13 @@ _is_ the page — keeping a full step between it and its depth-0 children.
   square sits evenly inside. Block
   rhythm is untouched: the surface borrows the space between rows, it never
   adds any. The text column is sacred; surfaces flex around it.
+- **Header pull:** the note title, the zoom breadcrumb and the zoom title
+  hang into the page gutter by `--note-header-pull` (`.note-header`,
+  block-editor.css): 27px — the marker-slot offset — once the page's gutter
+  is 40px (`@[640px]`), else 0. A plain negative margin on the header alone,
+  so the header's text moves to the column's edge and nothing in the rows
+  does. The breadcrumb hangs by the same amount, so its first crumb's text
+  keeps starting where the marker slot does — the zoom title's `#`.
 - **Vertical extension is conditional, per side.** The inter-row gap is 4px
   between nested rows and 6px between roots, so surfaces may only grow as far
   as their neighbour's paint allows. By default each side extends 2px
