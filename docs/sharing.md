@@ -152,7 +152,9 @@ someone else's rows does not belong in it. So shared notes live in memory
   a block's right-click menu (**Share…**) shares that block, as the root.
   One dialog, asking only for the address. Settings → Sharing is the
   overview: what this account has shared and with whom (with Revoke), and
-  what has been shared with it.
+  what has been shared with it. Each row leads with the note or block — a
+  block as `Note › text`, by the note it was written in — and the address,
+  or the person who shared it, is its subtext.
 
 ## 5. Decisions, and what was not built
 
