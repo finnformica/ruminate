@@ -100,7 +100,12 @@ function Section({ children }: { children: React.ReactNode }) {
 /** How much of a block's text names it in a list. */
 const LABEL_LENGTH = 60
 
-/** What a share's roots are called: a note by its name, a block by its text. */
+/**
+ * What a share's roots are called: a note by its name; a block by the note
+ * it was written in and its text, `Note › text`, since a block's text alone
+ * rarely says where it lives. A root the graph does not hold yet (a shared
+ * slice still loading) shows its id.
+ */
 function useRootLabel() {
   const notes = useAtomValue(notesAtom)
   const graph = useAtomValue(graphSnapshotAtom)
@@ -108,9 +113,13 @@ function useRootLabel() {
     (id: string): string => {
       const node = graph.nodes.get(id)
       if (!node) return id
-      if (node.type === NOTE_TYPE) return notes.get(id)?.displayName ?? node.text
+      const noteName = (noteId: string) =>
+        notes.get(noteId)?.displayName || graph.nodes.get(noteId)?.text || ""
+      if (node.type === NOTE_TYPE) return noteName(id) || "Untitled note"
       const text = node.text.trim() || "Untitled block"
-      return text.length > LABEL_LENGTH ? `${text.slice(0, LABEL_LENGTH - 1)}…` : text
+      const clipped = text.length > LABEL_LENGTH ? `${text.slice(0, LABEL_LENGTH - 1)}…` : text
+      const home = node.notes_id ? noteName(node.notes_id) : ""
+      return home ? `${home} › ${clipped}` : clipped
     },
     [graph, notes],
   )
@@ -143,10 +152,12 @@ function GivenList({
           >
             <div className="flex w-0 grow flex-col gap-1">
               <span className="truncate leading-4">
-                {share.granteeEmail}
+                {names}
                 {!live ? <span className="ml-2 text-sm text-text-secondary">(revoked)</span> : null}
               </span>
-              <span className="text-sm leading-5 text-text-secondary">{names}</span>
+              <span className="truncate text-sm leading-5 text-text-secondary">
+                {share.granteeEmail}
+              </span>
             </div>
             {live ? (
               <Button
@@ -174,8 +185,7 @@ function ReceivedList({ shares }: { shares: ReceivedShareSummary[] | null }) {
       <ul className="flex list-none flex-col gap-3 p-0">
         {shares.map((share) => (
           <li key={share.id} className="flex flex-col gap-1">
-            <span className="leading-4">{shareOwnerName(share)}</span>
-            <span className="flex flex-wrap gap-x-2 text-sm leading-5 text-text-secondary">
+            <span className="flex flex-wrap gap-x-2 leading-4">
               {/* A shared block opens as a note of its own (shared-mode.ts). */}
               {share.rootIds.map((id) => (
                 <Link
@@ -188,6 +198,9 @@ function ReceivedList({ shares }: { shares: ReceivedShareSummary[] | null }) {
                   {labelOf(id)}
                 </Link>
               ))}
+            </span>
+            <span className="text-sm leading-5 text-text-secondary">
+              Shared by {shareOwnerName(share)}
             </span>
           </li>
         ))}
