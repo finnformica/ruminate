@@ -113,8 +113,14 @@ const todoTyped = {
   re: TODO_TYPED_RE,
   type: (match: RegExpExecArray): BlockType => (match[1].toLowerCase() === "x" ? "done" : "todo"),
 }
+// The clipboard's html flavor writes the box as the literal `[ ]` / `[x]`
+// text, not an `<input type="checkbox">`: the composers that take the html
+// flavor over the plain one (Slack, Claude, Google Docs, mail) drop a form
+// control on paste, which left the item as its text behind a stray space.
+// The text survives everywhere, and reads back as a GFM task item (a list
+// item beginning `[ ]`) wherever markdown is understood, Ruminate included.
 const todoHtml = (checked: boolean) => (_block: unknown, inline: string) =>
-  `<input type="checkbox"${checked ? " checked" : ""} disabled> ${inline}`
+  `[${checked ? "x" : " "}] ${inline}`
 
 const ORDERED_RE = /^(0|[1-9]\d*)\. /
 
@@ -252,6 +258,14 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     fromLine: (line) => parseImageLine(line),
     toLines: (block) => [imageLine(block)],
     html: (block) => {
+      // A figure: the picture, and beneath it a caption that says there is
+      // one — `[image: caption]`, or `[image]` uncaptioned. The bytes are
+      // never fetched at copy time; an app that can load the <img> shows it
+      // (an external picture; an uploaded one is behind the session, so
+      // only Ruminate can), and every other composer drops the <img> and
+      // keeps the caption, so a pasted note still shows where its pictures
+      // were and what they were of.
+      //
       // Same-origin asset paths are made absolute so the picture resolves
       // wherever the html lands (another app; Ruminate reads the payload).
       //
@@ -263,7 +277,12 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
       const url = imageUrlOfBlock(block)
       const origin = (globalThis as { location?: { origin?: string } }).location?.origin ?? ""
       const src = url.startsWith("/") ? origin + url : url
-      return `<img src="${escapeHtml(src)}" alt="${escapeHtml(block.text)}">`
+      const caption = block.text.trim()
+      const label = caption === "" ? "[image]" : `[image: ${caption}]`
+      return (
+        `<figure><img src="${escapeHtml(src)}" alt="${escapeHtml(block.text)}">` +
+        `<figcaption>${escapeHtml(label)}</figcaption></figure>`
+      )
     },
     listItem: false,
     // The picture is the marker: Backspace at the caption's start must not

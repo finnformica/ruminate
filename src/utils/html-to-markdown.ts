@@ -20,7 +20,6 @@ const SKIPPED = new Set([
   "LINK",
   "TEMPLATE",
   "NOSCRIPT",
-  "IMG", // image paste is deferred — strip rather than emit a broken ref
   "INPUT", // task-list checkboxes are read at the <li> level
 ])
 
@@ -127,6 +126,16 @@ function renderNodes(nodes: Node[], depth: number): string[] {
       lines.push("```" + language, ...text.split("\n"), "```", "")
     } else if (tag === "HR") {
       lines.push("")
+    } else if (tag === "FIGURE" && el.querySelector("img") !== null) {
+      // A captioned picture: the image line alone. The alt is the caption;
+      // a <figcaption> stands in when there is none. (Ruminate's own copy
+      // writes the caption to both, its figcaption as `[image: caption]`,
+      // so the alt is the one to read.)
+      const img = el.querySelector("img")!
+      const alt =
+        img.getAttribute("alt")?.trim() || inlineText(el.querySelector("figcaption") ?? el)
+      const line = imageMarkdown(img, alt)
+      if (line !== "") lines.push(line, "")
     } else {
       // <p>, <div>, and any other (possibly inline-tagged) block container:
       // recurse transparently.
@@ -207,6 +216,8 @@ function renderInlineNode(node: Node): string {
   switch (tag) {
     case "BR":
       return "\n"
+    case "IMG":
+      return imageMarkdown(el, el.getAttribute("alt") ?? "")
     case "CODE": {
       const text = (el.textContent ?? "").trim()
       return text === "" ? "" : "`" + text + "`"
@@ -238,6 +249,27 @@ function renderInlineNode(node: Node): string {
       return out
     }
   }
+}
+
+/**
+ * An `<img>` as a markdown image, `![caption](src)`, or nothing for one with
+ * no usable address. On a line of its own it parses as an image block
+ * (`parseImageLine`); mid-sentence it stays the reference it is.
+ *
+ * A same-origin address is written as its path, so a picture copied out of
+ * Ruminate (whose html spells its uploads absolute) reads back as the
+ * upload it was, not as an external picture at the app's own URL. A `data:`
+ * URL is skipped: the bytes would land in the block's text, and a block is
+ * a row in the graph, not a place for a picture's bytes.
+ */
+function imageMarkdown(img: Element, alt: string): string {
+  let src = (img.getAttribute("src") ?? "").trim()
+  if (src === "" || /^data:/i.test(src) || /[\s)]/.test(src)) return ""
+  const origin = window.location?.origin
+  if (origin && src.startsWith(origin + "/")) src = src.slice(origin.length)
+  // The caption sits in brackets: brackets and line breaks in it would end it.
+  const caption = alt.replace(/[[\]]/g, "").replace(/\s+/g, " ").trim()
+  return `![${caption}](${src})`
 }
 
 /** Wrap text in an inline marker, keeping leading/trailing spaces outside it

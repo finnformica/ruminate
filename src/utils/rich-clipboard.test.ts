@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { parse } from "../blocks/parse"
-import { serialize } from "../blocks/serialize"
+import { BLOCK_TYPE_DEFS } from "../blocks/registry"
+import { blockLines, serialize } from "../blocks/serialize"
+import type { Block, BlockType } from "../blocks/types"
 import { htmlToMarkdown } from "./html-to-markdown"
 import {
   clipboardBlocksToDoc,
@@ -95,6 +97,31 @@ describe("richClipboardFormats", () => {
     ])
   })
 
+  it("writes a todo's box as literal text in the html flavor, never a form control", () => {
+    // Slack, Claude and other composers that prefer the html flavor drop an
+    // <input> on paste, which left `[ ] task` as ` task`. The literal marker
+    // survives as text, and reads back as a task item where markdown does.
+    const { html } = richClipboardFormats(EVERY_TYPE)
+    expect(html).not.toContain("<input")
+    expect(html).toContain("<li>[ ] task</li>")
+    expect(html).toContain("<li>[x] done</li>")
+  })
+
+  it("writes an image as a figure whose caption says there is a picture", () => {
+    // The composers that drop the <img> (Slack, Claude) keep the caption, so
+    // the pasted note still shows where the picture was and what it was of;
+    // the bytes are never fetched. An uploaded picture's path is absolute.
+    const origin = window.location.origin
+    const { html } = richClipboardFormats("![the stage gate](/api/images/img_abcdefghijkl)")
+    expect(html).toContain(
+      `<figure><img src="${origin}/api/images/img_abcdefghijkl" alt="the stage gate">` +
+        "<figcaption>[image: the stage gate]</figcaption></figure>",
+    )
+    expect(richClipboardFormats("![](https://e.com/a.png)").html).toContain(
+      '<figure><img src="https://e.com/a.png" alt=""><figcaption>[image]</figcaption></figure>',
+    )
+  })
+
   it("gives fresh ids on every rebuild through the duplicate path", () => {
     const { html } = richClipboardFormats("- a\n  - b")
     const blocks = extractClipboardBlocks(html)!
@@ -102,6 +129,42 @@ describe("richClipboardFormats", () => {
     const two = clipboardBlocksToDoc(blocks)
     expect(Object.keys(one.blocks)).not.toEqual(Object.keys(two.blocks))
   })
+})
+
+describe("every block type's html survives a foreign app", () => {
+  // The composers that take the html flavor over the plain one (Slack,
+  // Claude, Google Docs) drop the private payload and keep only what their
+  // own formatting can hold — and a form control is not that (the to-do box
+  // used to be one). So each type's html, put through the same converter
+  // foreign html comes back through, must read as the block it was: its
+  // marker held by an element those composers translate (a list item, a
+  // heading, a quote, a fence) or by literal text, never lost. A new block
+  // type is covered here by default; excuse it only with a reason.
+  const excused: Partial<Record<BlockType, string>> = {
+    h2: "a heading's level comes from its outline depth; the marker is `#` at any level",
+    h3: "as h2",
+    note: "a page's title, never a copied block",
+  }
+  const text = "some **bold** text"
+  for (const def of BLOCK_TYPE_DEFS) {
+    if (def.id in excused) continue
+    it(def.id, () => {
+      const props = def.id === "image" ? { image: "img_abcdefghijkl" } : undefined
+      const block: Block = {
+        id: "blk_x",
+        type: def.id,
+        text,
+        children: [],
+        ...(props && { props }),
+      }
+      const { html } = richClipboardFormats(blockLines(block).join("\n"))
+      const visible = html.replace(/<meta[^>]*>/g, "")
+      expect(visible).not.toMatch(/<(input|button|select|textarea)\b/)
+      const doc = parse(htmlToMarkdown(visible))
+      const [first] = doc.rootBlockIds.map((id) => doc.blocks[id])
+      expect(first).toMatchObject({ type: def.id, text, ...(props && { props }) })
+    })
+  }
 })
 
 describe("block ids in the payload (paste as link)", () => {
