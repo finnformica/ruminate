@@ -102,10 +102,7 @@ function InvitesSection() {
 
   return (
     <SettingsSection title="Invites">
-      <p className="leading-5 text-text-secondary">
-        Send someone a link; signing in with GitHub through it lets them in. Each link works once
-        and expires.
-      </p>
+      <p className="leading-5 text-text-secondary">Invite users to Ruminate via a link.</p>
 
       {error ? <p className="text-text-danger">{error}</p> : null}
 
