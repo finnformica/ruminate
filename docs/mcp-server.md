@@ -98,6 +98,7 @@ An agent works in the notes you already have: there is no tool to create one.
 | `search`         | read   | Blocks, in the app's own query language (`in:`, `type:`, `-`, `sort:`, free text). Page with `cursor`. See docs/mcp-search.md.                                                       |
 | `read_note`      | read   | A note's blocks **as stored rows** — top 2 levels by default (`depth: 0` for all), bounded by `limit` too; page with `cursor`. `include` adds the parts that cost a whole-note read. |
 | `get_block`      | read   | One block by id: type, text, props, children, parents, the notes it is in. Its id lists are capped.                                                                                  |
+| `get_image`      | read   | A download link for the picture an `image` block holds: fifteen minutes, bound to the token. The bytes are fetched, never embedded.                                                  |
 | `list_children`  | read   | The blocks beneath one, `depth` levels deep — walking **down**. Page with `cursor`.                                                                                                  |
 | `list_parents`   | read   | The blocks that hold one, and the notes it appears in — walking **up**. Page with `cursor`.                                                                                          |
 | `create_blocks`  | write  | Add blocks under a parent, nesting with `children`. Purely additive.                                                                                                                 |
@@ -163,6 +164,38 @@ it needs no tool of its own. Linking it back with `link_block` takes it out agai
 
 `delete_note` still removes a note's Unassigned blocks along with the note, as the app
 does.
+
+### Pictures
+
+An `image` block's row (docs/images.md) is its caption as `text` and an asset id in
+`props` — `{ "image": "img_…" }` — or, for a picture kept elsewhere, `{ "src": url }`.
+`read_note` and `get_block` return that row and nothing more: the bytes are in R2, not
+in the graph, and the route that serves them (`GET /api/images/<id>`) takes the
+browser's session, which an agent does not have.
+
+`get_image` is the one tool that reaches the bytes, and it hands them back one way: as
+a **link** — an MCP `resource_link` to `/api/images/<id>?exp=…&tok=…&sig=…` on this
+server, which the agent fetches itself. The bytes never pass through the tool (it does
+an R2 `head`, for the size and type) and never enter a tool result, so a call costs a
+few hundred bytes whatever the picture weighs. An external picture (`props.src`) comes
+back as its URL: this server does not proxy other hosts.
+
+The link lasts fifteen minutes and is bound to the token that minted it. The images
+handler reads the tenant off that token row, checks the token is still live, and only
+then verifies the signature and serves the bytes — so revoking the token kills its
+links too, and the tenant is never in the URL. The signature is an HMAC-SHA256 under
+`IMAGE_LINK_SECRET` (`worker/handlers/image-links.ts`); a deployment without that secret
+refuses the call and says what to set.
+
+This is the presigned-URL idea on the app's own route. R2's own presigning needs an S3
+access key held by the Worker and serves from the bucket's S3 host, off this origin and
+outside every check above, and the R2 binding cannot presign at all; the Worker-signed
+link needs one HMAC secret that can only ever sign links, is served by the route and the
+tenancy prefix that already exist, and dies with its token.
+
+One consequence to know: the agent has to be able to fetch a URL. Claude Code, a
+container or a script can; a client that speaks only MCP and has no download tool of its
+own gets a link it cannot follow.
 
 ### Two kinds of failure
 
@@ -336,6 +369,7 @@ rest of has a `cursor`:
 | `list_parents`  | `limit` + `cursor`, over the parents and the notes alike             |
 | `read_note`     | `depth`, then `limit` + `cursor`; `include` for the whole-note parts |
 | `get_block`     | its embedded id lists are capped; the counts and the flags say so    |
+| `get_image`     | one link; the bytes are fetched from the route, never returned       |
 
 Three rules behind that table.
 
@@ -451,7 +485,8 @@ and this server has not done.
 | `worker/mcp/graph-load.ts`              | Which rows a view reads — loaders only, no answers |
 | `worker/mcp/rate-limit.ts`              | How much an agent may ask for, and what it is told |
 | `worker/mcp/tools.ts`                   | Every tool, and the refusals before them           |
-| `worker/search/engine.ts`               | `search`'s ranker, shared with the HTTP endpoint   |
+| `worker/handlers/image-links.ts`        | The signed download link `get_image` mints         |
+| `worker/search/engine.ts`               | `search`: the app's query language, scoped         |
 | `src/data/ops-rows.ts`                  | Ops → rows, shared with the browser store's rule   |
 | `src/components/mcp-tokens-section.tsx` | The Settings panel                                 |
 | `migrations/0007_mcp_tokens.sql`        | The grants table                                   |

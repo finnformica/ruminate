@@ -1,11 +1,13 @@
 import { useLocation, useNavigate } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
-import { useAtom, useAtomValue, useStore } from "jotai"
+import { useAtom, useAtomValue, useSetAtom, useStore } from "jotai"
 import { graphSnapshotAtom, isSignedOutAtom } from "../global-state"
 import { rollup } from "../data/graph"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
 import { useDeleteNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
+import { useNoteShare } from "../hooks/share"
+import { shareDialogAtom } from "./share-note-dialog"
 import type { Width } from "../schema"
 import { cx } from "../utils/cx"
 import { DropdownMenu } from "./dropdown-menu"
@@ -17,6 +19,7 @@ import {
   PinFillIcon16,
   PinIcon16,
   PrinterIcon16,
+  ShareIcon16,
   TrashIcon16,
   WidthFixedIcon16,
   WidthFullIcon16,
@@ -62,6 +65,16 @@ export function NoteActionsMenu({
   // the bottom of the open note's menu, for the developer's account only.
   const isDeveloper = useIsDeveloper()
   const [debug, setDebug] = useAtom(developerDebugPreferenceAtom)
+  // A note someone shared with the user (docs/sharing.md): its rows are the
+  // owner's and the share is read-only, so nothing here may change it.
+  // Pinning and width are props on the note node — the owner's node, and
+  // the owner's pin — so a shared note has neither.
+  const share = useNoteShare(noteId)
+  const canRename = !isSignedOut && share === null
+  const canDelete = !isSignedOut && share === null
+  // Sharing is the owner's: an own note, signed in (docs/sharing.md).
+  const canShare = !isSignedOut && share === null
+  const openShare = useSetAtom(shareDialogAtom)
 
   // Compare the decoded path segment, not the raw pathname: a note id with a
   // space or other special character is percent-encoded in the URL, so a raw
@@ -109,7 +122,7 @@ export function NoteActionsMenu({
         }
       />
       <DropdownMenu.Content align={align}>
-        {editor?.showWidth && editor.onWidth ? (
+        {editor?.showWidth && editor.onWidth && share === null ? (
           <>
             <DropdownMenu.Group>
               <DropdownMenu.GroupLabel>Width</DropdownMenu.GroupLabel>
@@ -131,12 +144,14 @@ export function NoteActionsMenu({
             <DropdownMenu.Separator />
           </>
         ) : null}
-        <DropdownMenu.Item
-          icon={pinned ? <PinFillIcon16 className="text-text-pinned" /> : <PinIcon16 />}
-          onClick={togglePin}
-        >
-          {pinned ? "Unpin" : "Pin"}
-        </DropdownMenu.Item>
+        {share === null ? (
+          <DropdownMenu.Item
+            icon={pinned ? <PinFillIcon16 className="text-text-pinned" /> : <PinIcon16 />}
+            onClick={togglePin}
+          >
+            {pinned ? "Unpin" : "Pin"}
+          </DropdownMenu.Item>
+        ) : null}
         <DropdownMenu.Item
           icon={<CopyIcon16 />}
           onClick={() => copyAsMarkdown(rollup(noteId, jotaiStore.get(graphSnapshotAtom)) ?? "")}
@@ -146,7 +161,14 @@ export function NoteActionsMenu({
         <DropdownMenu.Item icon={<CopyIcon16 />} onClick={() => copy(noteId)}>
           Copy ID
         </DropdownMenu.Item>
-        <DropdownMenu.Item icon={<EditIcon16 />} disabled={isSignedOut} onClick={rename}>
+        <DropdownMenu.Item
+          icon={<ShareIcon16 />}
+          disabled={!canShare}
+          onClick={() => openShare(noteId)}
+        >
+          Share…
+        </DropdownMenu.Item>
+        <DropdownMenu.Item icon={<EditIcon16 />} disabled={!canRename} onClick={rename}>
           Rename
         </DropdownMenu.Item>
         <DropdownMenu.Separator />
@@ -157,7 +179,7 @@ export function NoteActionsMenu({
         <DropdownMenu.Item
           variant="danger"
           icon={<TrashIcon16 />}
-          disabled={isSignedOut}
+          disabled={!canDelete}
           onClick={remove}
         >
           Delete

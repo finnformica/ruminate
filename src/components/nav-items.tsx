@@ -3,8 +3,14 @@ import { useAtom, useAtomValue } from "jotai"
 import { createContext, useContext } from "react"
 import { useNetworkState } from "react-use"
 import { requestDatabasePull } from "../data/database-mode"
-import { isBootingAtom, isHelpPanelOpenAtom, sortedNotesAtom } from "../global-state"
+import {
+  isBootingAtom,
+  isHelpPanelOpenAtom,
+  ownSortedNotesAtom,
+  sharedNoteGroupsAtom,
+} from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
+import { shareOwnerName } from "../data/shares"
 import type { Note } from "../schema"
 import { APP_SHORTCUTS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
@@ -37,7 +43,8 @@ export function NavItems({
   size?: "medium" | "large"
   onNavigate?: () => void
 }) {
-  const notes = useAtomValue(sortedNotesAtom)
+  const notes = useAtomValue(ownSortedNotesAtom)
+  const sharedGroups = useAtomValue(sharedNoteGroupsAtom)
   const booting = useAtomValue(isBootingAtom)
   const syncText = useSyncStatusText()
   const syncMeta = useSyncStatusMeta()
@@ -89,37 +96,33 @@ export function NavItems({
             </li>
           </ul>
           {notes.length > 0 ? (
-            <ul className="flex flex-col gap-1 border-t border-border-secondary pt-3">
-              {notes.map((note) => (
-                <li key={note.id} className="note-row group/note relative">
-                  {/* The note fills the row. Its actions button is not there
-                      until the row is hovered (or its menu is open): then it
-                      sits INSIDE the row's surface at the far end — the same
-                      distance from the surface's edge on every side, as the
-                      collapse chevron sits in a block's row — and the row
-                      pads its end (`.note-row` in index.css) so the name
-                      truncates with an ellipsis to make room rather than
-                      running under the button. The button is the row's
-                      sibling, not its child (a button cannot live in a
-                      link), so the same rules keep the row's hover surface
-                      while the pointer is on it. */}
-                  <NoteNavItem note={note} size={size} onNavigate={onNavigate} className="w-full" />
-                  <div
-                    className={cx(
-                      "absolute inset-y-0 hidden items-center group-hover/note:flex has-data-[popup-open]:flex",
-                      // The 24px button in a 32px row (40px large) sits 4px
-                      // (8px) in from the top and bottom; the same from the end.
-                      size === "large" ? "right-2" : "right-1",
-                    )}
-                  >
-                    <NoteActionsMenu noteId={note.id} pinned={note.pinned} />
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <NoteRows
+              notes={notes}
+              size={size}
+              onNavigate={onNavigate}
+              className="border-t border-border-secondary pt-3"
+            />
           ) : booting ? (
             <NavListSkeleton />
           ) : null}
+          {/* Notes other people shared with this account (docs/sharing.md):
+              one group per share, under the person who shared it. They are
+              listed apart from the user's own notes — they are rows in
+              someone else's corpus — but open, read and edit like any note. */}
+          {sharedGroups.map(({ share, notes: sharedNotes }) => (
+            <div
+              key={share.id}
+              className="flex flex-col gap-1 border-t border-border-secondary pt-3"
+            >
+              <div
+                className="flex h-6 items-center gap-2 px-2 text-sm text-text-secondary coarse:px-3"
+                title={`Shared by ${shareOwnerName(share)} · read only`}
+              >
+                <span className="truncate">Shared by {shareOwnerName(share)}</span>
+              </div>
+              <NoteRows notes={sharedNotes} size={size} onNavigate={onNavigate} />
+            </div>
+          ))}
         </div>
         <div className="flex flex-col gap-1">
           {needRefresh ? (
@@ -167,6 +170,50 @@ export function NavItems({
         </div>
       </div>
     </SizeContext.Provider>
+  )
+}
+
+/** The note rows of one list: the user's own, or one share's. */
+function NoteRows({
+  notes,
+  size,
+  onNavigate,
+  className,
+}: {
+  notes: Note[]
+  size: "medium" | "large"
+  onNavigate?: () => void
+  className?: string
+}) {
+  return (
+    <ul className={cx("flex flex-col gap-1", className)}>
+      {notes.map((note) => (
+        <li key={note.id} className="note-row group/note relative">
+          {/* The note fills the row. Its actions button is not there
+              until the row is hovered (or its menu is open): then it
+              sits INSIDE the row's surface at the far end — the same
+              distance from the surface's edge on every side, as the
+              collapse chevron sits in a block's row — and the row
+              pads its end (`.note-row` in index.css) so the name
+              truncates with an ellipsis to make room rather than
+              running under the button. The button is the row's
+              sibling, not its child (a button cannot live in a
+              link), so the same rules keep the row's hover surface
+              while the pointer is on it. */}
+          <NoteNavItem note={note} size={size} onNavigate={onNavigate} className="w-full" />
+          <div
+            className={cx(
+              "absolute inset-y-0 hidden items-center group-hover/note:flex has-data-[popup-open]:flex",
+              // The 24px button in a 32px row (40px large) sits 4px
+              // (8px) in from the top and bottom; the same from the end.
+              size === "large" ? "right-2" : "right-1",
+            )}
+          >
+            <NoteActionsMenu noteId={note.id} pinned={note.pinned} />
+          </div>
+        </li>
+      ))}
+    </ul>
   )
 }
 

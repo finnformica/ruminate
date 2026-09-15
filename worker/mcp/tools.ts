@@ -50,7 +50,10 @@ import * as z from "zod/mini"
 import { BLOCK_TYPES } from "../../src/blocks/types"
 import { generateNKeysBetween } from "fractional-indexing"
 import { blockId } from "../../src/blocks/id"
+import { imagePropsOf } from "../../src/blocks/image"
 import { NOTE_TYPE, propsJson, sortKeyBetween } from "../../src/data/graph"
+import { IMAGE_LINK_TTL_SECONDS, signImageLink } from "../handlers/image-links"
+import { imageUrlOf } from "../handlers/image-policy"
 import { deleteBlockOps, deleteNoteOps, deleteSubtreeOps, type Op } from "../../src/data/ops"
 import type { TenantDb } from "../tenancy-db"
 import { searchCorpus } from "../search/engine"
@@ -76,14 +79,43 @@ import {
   type ScopedGraph,
 } from "./graph-access"
 
-/** What a tool hands back. `ok: false` becomes `isError: true`. */
-type ToolOutcome = { ok: true; data: unknown; text: string } | { ok: false; message: string }
+/**
+ * A content block a result carries BESIDES its text: the link `get_image`
+ * hands the agent to download a picture. The MCP shape, spelled once.
+ */
+type MediaContent = {
+  type: "resource_link"
+  uri: string
+  name: string
+  mimeType?: string
+  description?: string
+}
+
+/** What a tool hands back. `ok: false` becomes `isError: true`. `media`, when
+ * present, goes BEFORE the text block. */
+type ToolOutcome =
+  { ok: true; data: unknown; text: string; media?: MediaContent[] } | { ok: false; message: string }
+
+/**
+ * Where a picture's bytes are, and how a link to them is signed — what
+ * `get_image` needs beyond the graph. Absent = pictures are switched off on
+ * this server (`worker/handlers/images.ts` answers 501 for the same reason).
+ */
+export interface ImageAssets {
+  bucket: R2Bucket
+  /** The server's origin (`https://host`), so a link is absolute. */
+  origin: string
+  /** Signs a download link (`worker/handlers/image-links.ts`); null = the
+   * secret is not configured, so no link can be minted and the tool says so. */
+  linkSecret: string | null
+}
 
 /** What a call knows before any rows are read. */
 interface ToolContext {
   grant: Grant
   tenant: TenantDb
   now: number
+  images?: ImageAssets
 }
 
 /** The same, once the call's rows are loaded. A `run` only ever sees this. */
@@ -725,6 +757,13 @@ const byRecency = (
 // The tools
 // -----------------------------------------------------------------------------
 
+/** `1.2 MB`, `340 KB`, `812 B` — for the text a reader skims. */
+function humanBytes(size: number): string {
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`
+  if (size >= 1024) return `${Math.round(size / 1024)} KB`
+  return `${size} B`
+}
+
 const readOnly = {
   readOnlyHint: true,
   destructiveHint: false,
@@ -991,6 +1030,117 @@ export const TOOLS: ToolDef[] = [
           `parents: ${allParents.length}, ` +
           `in notes: ${noteIds.join(", ") || "none"}` +
           (cut ? "\n\nSome lists were cut: use `list_children` / `list_parents` for all." : ""),
+      }
+    },
+  }),
+
+  tool({
+    name: "get_image",
+    title: "Get a picture",
+    description:
+      "A download link for the picture an `image` block holds. `read_note` and " +
+      "`get_block` show only the block's row (its caption as `text`, an asset " +
+      "id in `props`); this is the one tool that reaches the bytes, and it " +
+      "hands them back as a link on this server to fetch yourself. The link " +
+      "lasts fifteen minutes and dies with this token. A picture kept at an " +
+      "external URL (`props.src`) is returned as that URL, which this server " +
+      "does not proxy.",
+    permission: "read",
+    annotations: readOnly,
+    schema: z.object({ block_id: requiredArg("An image block's id.") }),
+    load: (args, { tenant, grant }) => blockView(tenant, grant, args.block_id),
+    async run(args, context) {
+      const id = args.block_id
+      const row = nodeOf(context.graph, id)
+      if (!row) return { ok: false, message: BLOCK_OUT_OF_SCOPE }
+      if (row.type !== "image") {
+        return { ok: false, message: `${id} is not an image block (its type is \`${row.type}\`).` }
+      }
+      const picture = imagePropsOf({ props: propsOf(context.graph, id) })
+      const caption = row.text
+      const captioned = caption === "" ? "" : ` ("${caption}")`
+      const dims =
+        picture.width !== undefined && picture.height !== undefined
+          ? { width: picture.width, height: picture.height }
+          : {}
+
+      if (picture.src !== undefined) {
+        return {
+          ok: true,
+          data: { blockId: id, caption, source: "external", url: picture.src, ...dims },
+          text:
+            `${id}${captioned} is an external picture at ${picture.src}. ` +
+            "Fetch it yourself; this server does not proxy it.",
+          media: [{ type: "resource_link", uri: picture.src, name: caption || id }],
+        }
+      }
+      if (picture.image === undefined) {
+        return {
+          ok: false,
+          message: `${id} has no picture yet: its upload has not finished, or it failed.`,
+        }
+      }
+      const assets = context.images
+      if (!assets) {
+        return {
+          ok: false,
+          message: "Pictures are switched off on this server, so there are no bytes to read.",
+        }
+      }
+      if (assets.linkSecret === null) {
+        return {
+          ok: false,
+          message:
+            "This server cannot mint download links: its IMAGE_LINK_SECRET is not set. " +
+            "The owner sets it with `wrangler secret put IMAGE_LINK_SECRET`.",
+        }
+      }
+      // The same key the images route mints: the grant's verified tenant,
+      // never anything the arguments could steer. A HEAD, not a GET — the
+      // bytes never pass through this tool, only their size and type do.
+      const object = await assets.bucket.head(`${context.grant.userId}/${picture.image}`)
+      if (!object) {
+        return {
+          ok: false,
+          message: `The bytes of ${id}'s picture (${picture.image}) are not in storage.`,
+        }
+      }
+      const mimeType = object.httpMetadata?.contentType ?? "application/octet-stream"
+      const expiresAt = Math.floor(context.now / 1000) + IMAGE_LINK_TTL_SECONDS
+      const query = await signImageLink(assets.linkSecret, {
+        userId: context.grant.userId,
+        imageId: picture.image,
+        tokenId: context.grant.tokenId,
+        expiresAt,
+      })
+      const url = `${assets.origin}${imageUrlOf(picture.image)}?${query}`
+      const expires = new Date(expiresAt * 1000).toISOString()
+      const shape = "width" in dims ? `${dims.width}×${dims.height}, ` : ""
+      return {
+        ok: true,
+        data: {
+          blockId: id,
+          caption,
+          source: "uploaded",
+          imageId: picture.image,
+          mimeType,
+          size: object.size,
+          ...dims,
+          url,
+          urlExpiresAt: expires,
+        },
+        text:
+          `Picture of ${id}${captioned}: ${mimeType}, ${shape}${humanBytes(object.size)}. ` +
+          `Download it before ${expires}: ${url}`,
+        media: [
+          {
+            type: "resource_link",
+            uri: url,
+            name: caption || picture.image,
+            mimeType,
+            description: `Download link; expires ${expires}.`,
+          },
+        ],
       }
     },
   }),
@@ -1609,6 +1759,7 @@ export async function callTool(
   name: string,
   args: Record<string, unknown>,
   now: number = Date.now(),
+  images?: ImageAssets,
 ): Promise<CallResult> {
   const tool = TOOLS.find((candidate) => candidate.name === name)
   if (!tool) return { kind: "unknown_tool", message: `Unknown tool: ${name}` }
@@ -1624,5 +1775,5 @@ export async function callTool(
     }
   }
 
-  return { kind: "result", outcome: await tool.invoke(args, { grant, tenant, now }) }
+  return { kind: "result", outcome: await tool.invoke(args, { grant, tenant, now, images }) }
 }

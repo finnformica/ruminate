@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import migration0003 from "../../migrations/0003_control_plane.sql?raw"
-import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import type { Env } from "../types"
 import { githubAuth, resolveDisplayName, resolveSignInEmail } from "./github-auth"
-import { asFakeD1, createTestSqlDriver } from "./sqlite-test-driver"
+import { applyControlPlane, asFakeD1, createTestSqlDriver } from "./sqlite-test-driver"
 
 describe("githubAuth", () => {
   afterEach(() => {
@@ -65,8 +63,7 @@ describe("githubAuth", () => {
       }),
     )
     const driver = createTestSqlDriver()
-    await driver.execScript(migration0003)
-    await driver.execScript(migration0010)
+    await applyControlPlane(driver)
     const env = {
       VITE_GITHUB_CLIENT_ID: "client-id",
       GITHUB_CLIENT_SECRET: "secret",

@@ -1,11 +1,20 @@
 // tenant-guard: exempt — no SQL here; the fake bucket is keyed by tenant on
 // purpose so the cross-tenant assertions below prove the prefix scoping.
 import { describe, expect, it } from "vitest"
-import migration0003 from "../../migrations/0003_control_plane.sql?raw"
+import migration0007 from "../../migrations/0007_mcp_tokens.sql?raw"
+import migration0009 from "../../migrations/0009_mcp_token_usage.sql?raw"
+import { mintToken, revokeToken } from "../mcp/tokens"
+import { controlPlaneDriver } from "../tenancy-db"
 import type { Env } from "../types"
+import { IMAGE_LINK_TTL_SECONDS, signImageLink } from "./image-links"
 import { imageIdOfUrl, imageUrlOf, isImageId, isImageMime, newImageId } from "./image-policy"
 import { images } from "./images"
-import { asFakeD1, createTenantTestDriver } from "./sqlite-test-driver"
+import {
+  applyControlPlane,
+  signInUser,
+  asFakeD1,
+  createTenantTestDriver,
+} from "./sqlite-test-driver"
 
 /** Just enough of R2 for the handler: put/get by key, metadata kept. */
 function fakeBucket() {
@@ -50,7 +59,13 @@ async function testEnv(
   overrides: Partial<Env> = {},
 ): Promise<{ env: Env; objects: Map<string, unknown> }> {
   const driver = await createTenantTestDriver()
-  await driver.execScript(migration0003)
+  await applyControlPlane(driver)
+  await driver.execScript(migration0007)
+  await driver.execScript(migration0009)
+  // Alice and Bob have signed in (the callback provisions the row, address
+  // included; the API path cannot).
+  await signInUser(driver, 1001, "alice")
+  await signInUser(driver, 1002, "bob")
   const { bucket, objects } = fakeBucket()
   const env = {
     DB: asFakeD1(driver),
@@ -172,5 +187,93 @@ describe("/api/images", () => {
       github,
     )
     expect(response.status).toBe(404)
+  })
+})
+
+describe("signed links (the MCP agent's download)", () => {
+  const NOW = 1_800_000_000_000
+  const SECRET = "link-secret"
+  const clock = () => NOW
+
+  /** Alice's picture, a live token of hers, and a link minted the way
+   * `get_image` mints one. */
+  async function fixture() {
+    const { env } = await testEnv({ IMAGE_LINK_SECRET: SECRET })
+    const control = controlPlaneDriver(env)
+    const created = await images(upload("alice", png), env, github)
+    const { id } = (await created.json()) as { id: string }
+    const minted = await mintToken(control, {
+      userId: 1001,
+      name: "agent",
+      permissions: ["read"],
+      noteIds: null,
+      expiresAt: null,
+      now: NOW,
+    })
+    const link = async (
+      claims: Partial<Parameters<typeof signImageLink>[1]> = {},
+      secret = SECRET,
+    ) =>
+      new Request(
+        `https://example.com/api/images/${id}?${await signImageLink(secret, {
+          userId: 1001,
+          imageId: id,
+          tokenId: minted.summary.id,
+          expiresAt: NOW / 1000 + IMAGE_LINK_TTL_SECONDS,
+          ...claims,
+        })}`,
+      )
+    return { env, control, id, tokenId: minted.summary.id, link }
+  }
+
+  it("serves the bytes with no session at all", async () => {
+    const { env, link } = await fixture()
+    const served = await images(await link(), env, github, clock)
+    expect(served.status).toBe(200)
+    expect(served.headers.get("Content-Type")).toBe("image/png")
+    expect(new Uint8Array(await served.arrayBuffer())).toEqual(png)
+  })
+
+  it("dies with its token: revoked, and expired", async () => {
+    const { env, control, tokenId, link } = await fixture()
+    const request = await link()
+    expect((await images(request, env, github, clock)).status).toBe(200)
+    expect(await revokeToken(control, 1001, tokenId, NOW)).toBe(true)
+    expect((await images(request, env, github, clock)).status).toBe(401)
+
+    const fresh = await fixture()
+    const later = () => NOW + (IMAGE_LINK_TTL_SECONDS + 1) * 1000
+    expect((await images(await fresh.link(), fresh.env, github, later)).status).toBe(401)
+  })
+
+  it("refuses a tampered or foreign signature, and a link for another tenant's asset", async () => {
+    const { env, link } = await fixture()
+    // Signed under the wrong secret.
+    expect((await images(await link({}, "not-the-secret"), env, github, clock)).status).toBe(401)
+    // The expiry pushed out after signing.
+    const signed = await link()
+    const pushed = new URL(signed.url)
+    pushed.searchParams.set("exp", String(NOW / 1000 + 86_400))
+    expect((await images(new Request(pushed), env, github, clock)).status).toBe(401)
+    // A link claiming bob's tenant: the tenant is read off the token row,
+    // so a signature over the wrong user never matches.
+    expect((await images(await link({ userId: 1002 }), env, github, clock)).status).toBe(401)
+  })
+
+  it("is refused outright where no secret is configured, and 501 with pictures off", async () => {
+    const { link } = await fixture()
+    const bare = await testEnv({ IMAGE_LINK_SECRET: undefined })
+    expect((await images(await link(), bare.env, github, clock)).status).toBe(404)
+    const { env, link: signed } = await fixture()
+    const off = { ...env, VITE_IMAGES_ENABLED: undefined } as Env
+    expect((await images(await signed(), off, github, clock)).status).toBe(501)
+  })
+
+  it("does not let a half-formed link fall through to the session path", async () => {
+    const { env, id } = await fixture()
+    const request = new Request(`https://example.com/api/images/${id}?sig=abc`, {
+      headers: headers("alice"),
+    })
+    expect((await images(request, env, github, clock)).status).toBe(401)
   })
 })

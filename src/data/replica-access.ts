@@ -37,6 +37,9 @@ const DENIALS: Record<string, ReplicaAccessDenial> = {
   blocked: "blocked",
   forbidden: "forbidden",
   owner_not_configured: "forbidden",
+  // No `users` row and no address to provision one with: only a sign-in
+  // through the callback can create the row (worker/handlers/tenancy.ts).
+  sign_in_required: "forbidden",
   client_too_old: "client_too_old",
 }
 

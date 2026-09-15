@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { loadSnapshot } from "./graph-access"
 import { grantFromRow, type Grant, type McpTokenRow } from "./grant"
-import { callTool, toolsFor, TOOLS } from "./tools"
-import { createMcpTestEnv, type McpTestEnv } from "./test-support"
+import { callTool, toolsFor, TOOLS, type ImageAssets } from "./tools"
+import { createMcpTestEnv, TEST_IMAGE_LINK_SECRET, type McpTestEnv } from "./test-support"
+import { images } from "../handlers/images"
+import { IMAGE_LINK_TTL_SECONDS } from "../handlers/image-links"
 
 /**
  * The tools against a REAL engine and the REAL schema, with two tenants and
@@ -1063,5 +1065,145 @@ describe("arguments", () => {
   it("reports an unknown tool name", async () => {
     const called = await callTool(grantOf({}), harness.tenant(USER), "rm_rf", {})
     expect(called.kind).toBe("unknown_tool")
+  })
+})
+
+describe("get_image", () => {
+  const NOW = 1_800_000_000_000
+  const PICTURE = "img_abcdefghijkl"
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 5, 6])
+  const NOTE = "blk_pictures"
+  const assets = (): ImageAssets => ({
+    bucket: harness.env.IMAGES!,
+    origin: "https://ruminate.test",
+    linkSecret: TEST_IMAGE_LINK_SECRET,
+  })
+
+  /** A note with an uploaded picture, an external one and a plain block;
+   * returns their ids. */
+  async function seedPictures() {
+    await harness.seedNote(USER, {
+      id: NOTE,
+      title: "Pictures",
+      markdown:
+        `![A screenshot](/api/images/${PICTURE})\n` +
+        "![Elsewhere](https://elsewhere.example/p.png)\n" +
+        "- just words\n",
+    })
+    await harness.putImage(USER, PICTURE, png, "image/png")
+    const { children } = await run(harness, grantOf({}), "list_children", { block_id: NOTE })
+    return {
+      uploaded: children[0].id as string,
+      external: children[1].id as string,
+      words: children[2].id as string,
+    }
+  }
+
+  const call = (grant: Grant, args: Record<string, unknown>, extras = assets()) =>
+    callTool(grant, harness.tenant(grant.userId), "get_image", args, NOW, extras)
+
+  it("mints a fifteen-minute link bound to the token, and never the bytes", async () => {
+    const { uploaded } = await seedPictures()
+    const called = await call(grantOf({}), { block_id: uploaded })
+    if (called.kind !== "result" || !called.outcome.ok) throw new Error("expected a result")
+    const { data, text, media } = called.outcome
+    const expiresAt = new Date(NOW + IMAGE_LINK_TTL_SECONDS * 1000).toISOString()
+    expect(media).toEqual([
+      {
+        type: "resource_link",
+        uri: expect.stringContaining(`https://ruminate.test/api/images/${PICTURE}?`),
+        name: "A screenshot",
+        mimeType: "image/png",
+        description: `Download link; expires ${expiresAt}.`,
+      },
+    ])
+    expect(data).toEqual({
+      blockId: uploaded,
+      caption: "A screenshot",
+      source: "uploaded",
+      imageId: PICTURE,
+      mimeType: "image/png",
+      size: png.byteLength,
+      url: expect.any(String),
+      urlExpiresAt: expiresAt,
+    })
+    const url = new URL((data as { url: string }).url)
+    expect(url.origin + url.pathname).toBe(`https://ruminate.test/api/images/${PICTURE}`)
+    expect(url.searchParams.get("tok")).toBe("mcp_test")
+    expect(url.searchParams.get("exp")).toBe(String(NOW / 1000 + IMAGE_LINK_TTL_SECONDS))
+    expect(text).toContain(url.toString())
+    // No base64 anywhere in the result: the bytes are the route's to serve.
+    expect(JSON.stringify(called.outcome)).not.toContain(btoa(String.fromCharCode(...png)))
+  })
+
+  it("the link it mints is one the images route serves, without a session", async () => {
+    const { uploaded } = await seedPictures()
+    // The route reads the token row the link names, so the token must exist.
+    await harness.control.exec(
+      "INSERT INTO mcp_tokens (id, user_id, token_hash, name, permissions, note_ids, created_at, expires_at) " +
+        "VALUES ('mcp_test', ?1, 'hash', 'Test', 'read', NULL, 1, NULL)",
+      [USER],
+    )
+    const called = await call(grantOf({}), { block_id: uploaded })
+    if (called.kind !== "result" || !called.outcome.ok) throw new Error("expected a result")
+    const { url } = called.outcome.data as { url: string }
+    const served = await images(new Request(url), harness.env, undefined, () => NOW)
+    expect(served.status).toBe(200)
+    expect(new Uint8Array(await served.arrayBuffer())).toEqual(png)
+  })
+
+  it("refuses, and says what to set, where no signing secret is configured", async () => {
+    const { uploaded } = await seedPictures()
+    const called = await call(
+      grantOf({}),
+      { block_id: uploaded },
+      { ...assets(), linkSecret: null },
+    )
+    if (called.kind !== "result" || called.outcome.ok) throw new Error("expected a refusal")
+    expect(called.outcome.message).toContain("IMAGE_LINK_SECRET")
+  })
+
+  it("returns an external picture as its URL, and refuses everything that is not a picture", async () => {
+    const { external, words, uploaded } = await seedPictures()
+    const outside = await call(grantOf({}), { block_id: external })
+    if (outside.kind !== "result" || !outside.outcome.ok) throw new Error("expected a result")
+    expect(outside.outcome.data).toMatchObject({
+      source: "external",
+      url: "https://elsewhere.example/p.png",
+    })
+    expect(outside.outcome.media).toEqual([
+      { type: "resource_link", uri: "https://elsewhere.example/p.png", name: "Elsewhere" },
+    ])
+
+    expect(await refuse(harness, grantOf({}), "get_image", { block_id: words })).toContain(
+      "is not an image block",
+    )
+    // Out of scope reads exactly like a block that does not exist.
+    const scoped = grantOf({ note_ids: JSON.stringify([ALPHA]) })
+    expect(await refuse(harness, scoped, "get_image", { block_id: uploaded })).toContain(
+      "No such block",
+    )
+    // A picture whose bytes never landed, and a server with pictures off.
+    await harness.seedNote(USER, { id: "blk_pending", markdown: "- pending\n" })
+    const pending = (await run(harness, grantOf({}), "list_children", { block_id: "blk_pending" }))
+      .children[0].id
+    await run(harness, grantOf({}), "update_block", { block_id: pending, type: "image" })
+    expect(await refuse(harness, grantOf({}), "get_image", { block_id: pending })).toContain(
+      "has no picture yet",
+    )
+    const off = await callTool(grantOf({}), harness.tenant(USER), "get_image", {
+      block_id: uploaded,
+    })
+    if (off.kind !== "result" || off.outcome.ok) throw new Error("expected a refusal")
+    expect(off.outcome.message).toContain("switched off")
+  })
+
+  it("is a read: listed for a read token, absent for a write-only one", () => {
+    expect(toolsFor(grantOf({ permissions: "read" })).map((tool) => tool.name)).toContain(
+      "get_image",
+    )
+    expect(toolsFor(grantOf({ permissions: "write" })).map((tool) => tool.name)).not.toContain(
+      "get_image",
+    )
   })
 })

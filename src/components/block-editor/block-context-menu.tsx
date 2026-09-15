@@ -50,6 +50,9 @@ export interface BlockMenuActions {
   copy: (key: string) => void
   /** Absent when the editor has no note to link into (Storybook, tests). */
   copyLink?: (id: string) => void
+  /** Share this block — and everything beneath it — with someone
+   * (docs/sharing.md). Absent where the rows are not the user's own. */
+  share?: (id: string) => void
   /** Remove this row (the block stays where else it is held). */
   remove: (key: string) => void
   /** Delete the block from every place it appears. Absent standalone. */
@@ -224,6 +227,9 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
         <DropdownMenu.Item onClick={() => actions.copyLink?.(id)}>
           Copy link to block
         </DropdownMenu.Item>
+      ) : null}
+      {actions.share ? (
+        <DropdownMenu.Item onClick={() => actions.share?.(id)}>Share…</DropdownMenu.Item>
       ) : null}
       <DropdownMenu.Separator />
       {actions.deleteEverywhere ? (

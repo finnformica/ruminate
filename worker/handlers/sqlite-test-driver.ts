@@ -13,6 +13,9 @@ import migration0002 from "../../migrations/0002_nodes.sql?raw"
 import migration0004 from "../../migrations/0004_tenant_columns.sql?raw"
 import migration0005 from "../../migrations/0005_row_seq.sql?raw"
 import migration0006 from "../../migrations/0006_notes_id.sql?raw"
+import migration0003 from "../../migrations/0003_control_plane.sql?raw"
+import migration0010 from "../../migrations/0010_user_email.sql?raw"
+import migration0011 from "../../migrations/0011_user_email_required.sql?raw"
 import { ensureCorpusSchema } from "../../src/data/corpus-schema"
 import type { SqlDriver, SqlValue } from "../../src/data/sql-driver"
 
@@ -88,6 +91,35 @@ export async function createTenantTestDriver(): Promise<SqlDriver> {
     "columns",
   )
   return driver
+}
+
+/**
+ * The control plane in the exact shape production D1 is in: the real 0003,
+ * 0010 and 0011 files in order — `users` (address mandatory) and `allowlist`.
+ * Feature tables (MCP tokens, shares) are applied by the suites that need them.
+ */
+export async function applyControlPlane(driver: SqlDriver): Promise<void> {
+  await driver.execScript(migration0003)
+  await driver.execScript(migration0010)
+  await driver.execScript(migration0011)
+}
+
+/**
+ * An account as the sign-in callback leaves it: a `users` row with the
+ * address `<login>@example.com`. The API path cannot provision a row (the
+ * address is mandatory and only the callback carries one), so a suite that
+ * drives the API as a user signs that user in here first.
+ */
+export async function signInUser(
+  driver: SqlDriver,
+  githubId: number,
+  login = `u${githubId}`,
+): Promise<void> {
+  await driver.exec(
+    "INSERT INTO users (github_id, login, created_at, email) VALUES (?1, ?2, 1, ?3) " +
+      "ON CONFLICT (github_id) DO NOTHING",
+    [githubId, login, `${login}@example.com`],
+  )
 }
 
 /**

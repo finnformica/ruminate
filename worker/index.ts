@@ -13,6 +13,7 @@ import { images } from "./handlers/images"
 import { mcp, MCP_PATH } from "./handlers/mcp"
 import { mcpTokens, MCP_TOKENS_PREFIX } from "./handlers/mcp-tokens"
 import { replica } from "./handlers/replica"
+import { shares, SHARES_PREFIX } from "./handlers/shares"
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -24,6 +25,9 @@ export default {
     if (pathname === MCP_PATH) return mcp(request, env)
     if (pathname === MCP_TOKENS_PREFIX || pathname.startsWith(`${MCP_TOKENS_PREFIX}/`)) {
       return mcpTokens(request, env)
+    }
+    if (pathname === SHARES_PREFIX || pathname.startsWith(`${SHARES_PREFIX}/`)) {
+      return shares(request, env)
     }
     if (pathname === "/api/images" || pathname.startsWith("/api/images/")) {
       return images(request, env)

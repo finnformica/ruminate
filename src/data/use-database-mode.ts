@@ -4,6 +4,7 @@ import { useEvent, useNetworkState } from "react-use"
 import { githubUserAtom, signOutAtom } from "../global-state"
 import { sessionStatusAtom } from "../utils/github-session"
 import { requestAmbientDatabasePull, startDatabaseMode, stopDatabaseMode } from "./database-mode"
+import { requestAmbientSharesRefresh, startSharedMode, stopSharedMode } from "./shared-mode"
 
 /**
  * Mounts the database storage runtime (see `database-mode.ts`). Rendered once
@@ -43,7 +44,13 @@ export function useDatabaseMode() {
   React.useEffect(() => {
     if (!active || owner === null) return
     startDatabaseMode({ owner })
-    return () => stopDatabaseMode()
+    // The notes others shared with this identity ride alongside the user's
+    // own corpus (src/data/shared-mode.ts) and stop with it.
+    startSharedMode()
+    return () => {
+      stopSharedMode()
+      stopDatabaseMode()
+    }
   }, [active, owner])
 
   React.useEffect(() => {
@@ -57,14 +64,21 @@ export function useDatabaseMode() {
   useEvent("visibilitychange", () => {
     if (active && document.visibilityState === "visible" && online) {
       requestAmbientDatabasePull()
+      requestAmbientSharesRefresh()
     }
   })
 
   useEvent("focus", () => {
-    if (active && online) requestAmbientDatabasePull()
+    if (active && online) {
+      requestAmbientDatabasePull()
+      requestAmbientSharesRefresh()
+    }
   })
 
   useEvent("online", () => {
-    if (active) requestAmbientDatabasePull()
+    if (active) {
+      requestAmbientDatabasePull()
+      requestAmbientSharesRefresh()
+    }
   })
 }

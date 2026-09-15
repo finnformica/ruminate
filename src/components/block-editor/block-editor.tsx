@@ -1,10 +1,12 @@
 import copy from "copy-to-clipboard"
-import { useAtomValue } from "jotai"
+import { useAtomValue, useSetAtom } from "jotai"
 import { toast } from "sonner"
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type React from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent, TouchEvent } from "react"
-import { newBlockMarkerAtom } from "../../global-state"
+import { isDatabaseModeAtom, newBlockMarkerAtom } from "../../global-state"
+import { sharedOriginAtom } from "../../data/shared-mode"
+import { shareDialogAtom } from "../share-note-dialog"
 import type { Block, BlockDoc, ChangeHint } from "../../blocks/types"
 import type { BlockOp } from "../../blocks/history"
 import { blockId } from "../../blocks/id"
@@ -1598,6 +1600,13 @@ export function BlockEditor({
     if (next !== doc) history.commit(doc, next, { type: "structural" })
   }
 
+  // A block is the user's own to share when the editor has a note of theirs
+  // behind it: signed in, and not a note someone shared with them.
+  const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
+  const sharedOrigin = useAtomValue(sharedOriginAtom)
+  const openShareDialog = useSetAtom(shareDialogAtom)
+  const canShare = noteId !== undefined && isDatabaseMode && !sharedOrigin.has(noteId)
+
   const menuActions: BlockMenuActions = {
     edit: (key) => edit(key),
     openImage: (id) => setLightbox(id),
@@ -1618,6 +1627,7 @@ export function BlockEditor({
     copyLink: noteId
       ? (id) => copy(`${window.location.origin}/notes/${noteId}?block=${id}`)
       : undefined,
+    share: canShare ? (id) => openShareDialog(id) : undefined,
     remove: (key) => runOnRow("deleteBlock", key),
     deleteEverywhere: onDeleteEverywhere,
     deleteSubtree: onDeleteSubtree,

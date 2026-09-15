@@ -225,6 +225,27 @@ export async function findGrant(
   return grantFromRow(row, now)
 }
 
+/**
+ * The same decision, by the token's public id rather than its secret — what a
+ * signed image link (`worker/handlers/image-links.ts`) is checked against.
+ * The id is not a credential: what the link proves is its HMAC, and this
+ * lookup is how the handler learns whose asset the link names and whether
+ * the token behind it is still live.
+ */
+export async function grantById(
+  driver: SqlDriver,
+  id: string,
+  now: number = Date.now(),
+): Promise<FindGrantResult> {
+  const rows = await driver.exec(
+    "SELECT id, user_id, name, permissions, note_ids, expires_at, revoked_at " +
+      "FROM mcp_tokens WHERE id = ?1",
+    [id],
+  )
+  if (rows.length === 0) return { ok: false, refusal: "invalid_token" }
+  return grantFromRow(rows[0] as unknown as McpTokenRow, now)
+}
+
 // `last_used_at` is not stamped here. It used to be, at most hourly, so that
 // an agent's tool loop did not cost a control-plane write per call. The rate
 // limiter now writes that row on every call anyway (`spendDailyCall`,
