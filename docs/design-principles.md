@@ -338,6 +338,15 @@ Placement conventions:
   persists is a notice in the page, not a toast — and never a success
   message: the picture landing is its own confirmation.
 
+### Copy
+
+Descriptive copy — the line under a field, the sentence that opens a settings
+panel, a notice, a toast — is **one line long**. One clause that says what
+the thing is or does; the reader is here to act, not to read. If it needs a
+second sentence, the control is unclear or the sentence belongs in the docs.
+Labels are nouns (**Email address**), buttons are verbs (**Share**), and the
+sentence before a consequential button says exactly what it will do.
+
 ## Loading
 
 While the notes are still on their way — the identity resolving at boot, the

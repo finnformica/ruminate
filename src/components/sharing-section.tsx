@@ -55,16 +55,16 @@ export function SharingSection() {
 
   return (
     <Section>
-      <p className="leading-5 text-text-secondary">
-        Share a note or a block from its menu, by the email address the other person signs in to
-        GitHub with.
+      <div className="flex flex-col gap-1">
+        <p className="leading-5 text-text-secondary">
+          Share a note or block from its menu, by their GitHub sign-in email.
+        </p>
         {recordedEmail ? (
-          <>
-            {" "}
+          <p className="leading-5 text-text-secondary">
             Others can share with you at <span className="text-text">{recordedEmail}</span>.
-          </>
+          </p>
         ) : null}
-      </p>
+      </div>
 
       {error ? (
         <p className="text-text-danger">{error}</p>

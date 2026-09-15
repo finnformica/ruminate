@@ -105,9 +105,8 @@ function ShareForm({
             onChange={(event) => setEmail(event.target.value)}
           />
           <span className="text-sm leading-5 text-text-secondary">
-            The address they sign in to GitHub with. They will be able to read this{" "}
-            {isNote ? "note" : "block"} and everything beneath it, including what you add later, but
-            not change it. Shares are listed in Settings.
+            Their GitHub sign-in email; they can read this {isNote ? "note" : "block"} and what is
+            beneath it.
           </span>
         </div>
         {error ? <p className="text-text-danger">{error}</p> : null}
