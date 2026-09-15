@@ -6,9 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 // The palette lives inside the app's router and global state machine — both
 // far too heavy for jsdom. Navigation, note hooks, and the global-state atoms
 // are mocked (the atoms as plain Jotai atoms, which is all the palette needs);
-// the pure pieces (outline builder, filter/rank) are tested exhaustively in
-// note-outline.test.ts, so these tests focus on the palette's mode/reveal
-// behavior.
+// the pure pieces (the query grammar, filter/rank) are tested in their own
+// files, so these tests focus on the palette's behaviour around the query.
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   match: { params: { _splat: "note-1" } } as
@@ -87,22 +86,17 @@ vi.mock("../global-state", async (importOriginal) => {
     pinnedNotesAtom: atom([]),
     pinnedBlocksAtom: atom([]),
     recentTouchesAtom: atom([]),
-    noteOutlineAtom: atom(null),
-    blockRevealAtom: atom(null),
     // The block index only serves the scope pill's label here.
     blockIndexAtom: atom({ hits: [], getBlock: () => undefined }),
   }
 })
 
 import {
-  blockRevealAtom,
-  noteOutlineAtom,
   pinnedBlocksAtom,
   pinnedNotesAtom,
   recentTouchesAtom,
   sortedNotesAtom,
 } from "../global-state"
-import type { BlockRevealRequest } from "../utils/note-outline"
 import { CommandMenu, isCommandMenuOpenAtom } from "./command-menu"
 
 // cmdk scrolls the selected item into view and measures its list with a
@@ -121,24 +115,13 @@ beforeEach(() => {
   mocks.results = { mode: "notes", hits: [], notes: [], titleMatches: [], rows: [] }
 })
 
-const OUTLINE = {
-  noteId: "note-1",
-  items: [
-    { id: "blk_alpha", text: "Alpha", depth: 0 },
-    { id: "blk_beta", text: "Beta", depth: 1 },
-    { id: "blk_gamma", text: "Gamma", depth: 0 },
-  ],
-}
-
 function renderMenu({
-  outline = OUTLINE,
   open = false,
   notes = [],
   touches = [],
   pinned = [],
   pinnedBlocks = [],
 }: {
-  outline?: typeof OUTLINE | null
   open?: boolean
   notes?: unknown[]
   touches?: { id: string; at: number }[]
@@ -146,7 +129,6 @@ function renderMenu({
   pinnedBlocks?: unknown[]
 } = {}) {
   const store = createStore()
-  store.set(noteOutlineAtom, outline)
   // The corpus's notes, the touches this device remembers (what the
   // palette's Recent list is merged from) and the pinned notes. The atoms
   // are the mock's plain, writable ones.
@@ -164,122 +146,77 @@ function renderMenu({
 }
 
 const pressCmdP = () => fireEvent.keyDown(document.body, { key: "p", code: "KeyP", metaKey: true })
-const outlineInput = () => screen.getByPlaceholderText("Jump to a heading…") as HTMLInputElement
 const commandsInput = () => screen.getByPlaceholderText("Search notes…") as HTMLInputElement
+/** The filter pills under the query: each qualifier's token. */
+const pills = () =>
+  Array.from(
+    screen
+      .queryByTestId("query-filters")
+      ?.querySelectorAll<HTMLElement>("[data-scope],[data-filter]") ?? [],
+  ).map((pill) => pill.dataset.scope ?? pill.dataset.filter)
 
-describe("outline palette (⌘P)", () => {
-  it("⌘P opens the palette in outline mode listing the note's headings", () => {
+describe("⌘P: the open note's headings", () => {
+  it("opens the palette with the note's headings as the query — two pills, an empty line", () => {
     renderMenu()
     pressCmdP()
-    expect(outlineInput()).toBeTruthy()
-    expect(screen.getByText("Alpha")).toBeTruthy()
-    expect(screen.getByText("Beta")).toBeTruthy()
-    expect(screen.getByText("Gamma")).toBeTruthy()
-    // Unfiltered items are indented by heading depth.
-    const beta = screen.getByText("Beta").closest("[cmdk-item]") as HTMLElement
-    expect(beta.style.paddingLeft).toBe("30px")
-    const alpha = screen.getByText("Alpha").closest("[cmdk-item]") as HTMLElement
-    expect(alpha.style.paddingLeft).toBe("6px")
+    expect(commandsInput().value).toBe("")
+    expect(pills()).toEqual(["type:heading", "note-1"])
+    // ↵ on the query is the search itself.
+    fireEvent.keyDown(commandsInput(), { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/",
+      search: { query: "type:heading in:note-1" },
+    })
   })
 
-  it("shows an empty state when no note is open", () => {
+  it("zoomed into a block, the headings under that block", () => {
+    mocks.match = { params: { _splat: "note-1" }, search: { block: "blk_zoom" } }
+    renderMenu()
+    pressCmdP()
+    expect(pills()).toEqual(["type:heading", "blk_zoom"])
+  })
+
+  it("with no note open, every heading", () => {
     mocks.match = undefined
     renderMenu()
     pressCmdP()
-    expect(screen.getByText("No note open")).toBeTruthy()
+    expect(pills()).toEqual(["type:heading"])
   })
 
-  it("shows an empty state when the note has no headings", () => {
-    renderMenu({ outline: { noteId: "note-1", items: [] } })
-    pressCmdP()
-    expect(screen.getByText("No headings in this note")).toBeTruthy()
-  })
-
-  it("ignores an outline published for a different note", () => {
-    renderMenu({ outline: { ...OUTLINE, noteId: "other-note" } })
-    pressCmdP()
-    expect(screen.getByText("No headings in this note")).toBeTruthy()
-  })
-
-  it("typing @ first in the ⌘K palette switches to outline mode (and strips the @)", () => {
-    renderMenu({ open: true })
-    const input = commandsInput()
-    fireEvent.change(input, { target: { value: "@" } })
-    expect(outlineInput().value).toBe("")
-    expect(screen.getByText("Alpha")).toBeTruthy()
-  })
-
-  it("Backspace on an empty query returns to the commands palette after @", () => {
-    renderMenu({ open: true })
-    fireEvent.change(commandsInput(), { target: { value: "@" } })
-    fireEvent.keyDown(outlineInput(), { key: "Backspace" })
-    expect(commandsInput()).toBeTruthy()
-  })
-
-  it("Backspace on an empty query stays in outline mode when opened via ⌘P", () => {
+  it("pressed again it closes; pressed over another query it sets its own", () => {
     renderMenu()
     pressCmdP()
-    fireEvent.keyDown(outlineInput(), { key: "Backspace" })
-    expect(outlineInput()).toBeTruthy()
+    pressCmdP()
+    expect(screen.queryByPlaceholderText("Search notes…")).toBeNull()
+    pressCmdP()
+    fireEvent.change(commandsInput(), { target: { value: "nvidia" } })
+    pressCmdP()
+    expect(commandsInput().value).toBe("")
+    expect(pills()).toEqual(["type:heading", "note-1"])
   })
 
-  it("filtering flattens the list and shows the ancestor path", async () => {
+  it("typing narrows the headings: the text joins the two filters", () => {
     renderMenu()
     pressCmdP()
-    fireEvent.change(outlineInput(), { target: { value: "beta" } })
-    // The query is debounced (150ms) before it filters.
-    await waitFor(() => {
-      expect(screen.queryByText("Gamma")).toBeNull()
+    fireEvent.change(commandsInput(), { target: { value: "alpha" } })
+    fireEvent.keyDown(commandsInput(), { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/",
+      search: { query: "type:heading in:note-1 alpha" },
     })
-    const beta = screen.getByText("Beta").closest("[cmdk-item]") as HTMLElement
-    expect(beta.textContent).toContain("Alpha") // the dimmed "Alpha" path
-    expect(beta.style.paddingLeft).toBe("") // flat while filtering
   })
 
-  it("Enter commits a reveal for the highlighted heading and closes", () => {
-    const { store } = renderMenu()
+  it("the query goes with the dialog: Escape clears it, Escape again closes, ⌘K reopens empty", () => {
+    renderMenu()
     pressCmdP()
-    // cmdk auto-highlights the first item (Alpha); Enter commits it.
-    fireEvent.keyDown(outlineInput(), { key: "Enter" })
-    const reveal = store.get(blockRevealAtom) as BlockRevealRequest
-    expect(reveal).toMatchObject({ type: "commit", id: "blk_alpha" })
-    expect(screen.queryByPlaceholderText("Jump to a heading…")).toBeNull()
-  })
-
-  it("arrowing previews the highlighted heading (initial auto-select doesn't)", () => {
-    const { store } = renderMenu()
-    pressCmdP()
-    // Opening the palette must not scroll the note: the auto-select of the
-    // first item is not a preview.
-    expect(store.get(blockRevealAtom)).toBeNull()
-    fireEvent.keyDown(outlineInput(), { key: "ArrowDown" })
-    expect(store.get(blockRevealAtom)).toMatchObject({ type: "preview", id: "blk_beta" })
-  })
-
-  it("Escape after a preview closes and cancels (restoring the editor)", () => {
-    const { store } = renderMenu()
-    pressCmdP()
-    fireEvent.keyDown(outlineInput(), { key: "ArrowDown" })
-    expect(store.get(blockRevealAtom)).toMatchObject({ type: "preview" })
-    fireEvent.keyDown(outlineInput(), { key: "Escape" })
-    expect(screen.queryByPlaceholderText("Jump to a heading…")).toBeNull()
-    expect(store.get(blockRevealAtom)).toMatchObject({ type: "cancel" })
-  })
-
-  it("leaving outline mode via Backspace cancels an active preview", () => {
-    const { store } = renderMenu({ open: true })
-    fireEvent.change(commandsInput(), { target: { value: "@" } })
-    fireEvent.keyDown(outlineInput(), { key: "ArrowDown" })
-    expect(store.get(blockRevealAtom)).toMatchObject({ type: "preview" })
-    fireEvent.keyDown(outlineInput(), { key: "Backspace" })
-    expect(store.get(blockRevealAtom)).toMatchObject({ type: "cancel" })
-  })
-
-  it("closing without any preview sends no cancel", () => {
-    const { store } = renderMenu()
-    pressCmdP()
-    fireEvent.keyDown(outlineInput(), { key: "Escape" })
-    expect(store.get(blockRevealAtom)).toBeNull()
+    fireEvent.keyDown(commandsInput(), { key: "Escape" })
+    expect(pills()).toEqual([])
+    expect(screen.getByPlaceholderText("Search notes…")).toBeTruthy()
+    fireEvent.change(commandsInput(), { target: { value: "nvidia" } })
+    fireEvent.keyDown(document.body, { key: "k", code: "KeyK", metaKey: true })
+    expect(screen.queryByPlaceholderText("Search notes…")).toBeNull()
+    fireEvent.keyDown(document.body, { key: "k", code: "KeyK", metaKey: true })
+    expect(commandsInput().value).toBe("")
   })
 })
 
@@ -408,8 +345,6 @@ describe("block results", () => {
   })
 
   it("Enter straight after typing opens the full results view at ?query=", async () => {
-    // Outside a note there is nothing to scope to.
-    mocks.match = undefined
     await openWithBlocks([NVIDIA])
     // Nothing arrowed: no item is highlighted, so ↵ is the query's.
     expect(document.querySelector('[cmdk-item][aria-selected="true"]')).toBeNull()
@@ -447,32 +382,19 @@ describe("block results", () => {
     }
   })
 
-  it("inside a note, scopes the search to it — an `in:` the results view inherits", async () => {
+  it("inside a note, the search is not scoped to it: Enter carries only what was typed", async () => {
     await openWithBlocks([NVIDIA])
-    // Said plainly under the query, as a pill naming the note.
-    expect(screen.getByTestId("query-scopes").textContent).toContain("note-1")
-    fireEvent.keyDown(commandsInput(), { key: "Enter" })
-    expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/",
-      search: { query: "in:note-1 nvidia" },
-    })
-  })
-
-  it("the scope comes off with its pill", async () => {
-    await openWithBlocks([NVIDIA])
-    fireEvent.click(screen.getByTestId("query-scopes").querySelector("button")!)
-    expect(screen.queryByTestId("query-scopes")).toBeNull()
+    expect(pills()).toEqual([])
     fireEvent.keyDown(commandsInput(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", search: { query: "nvidia" } })
   })
 
-  it("a typed in: replaces the automatic scope rather than stacking on it", async () => {
+  it("a typed in: is lifted out of the line as a pill, and Enter carries it", async () => {
     await openWithBlocks([NVIDIA])
     const input = commandsInput()
     fireEvent.change(input, { target: { value: "in:other nvidia" } })
-    await waitFor(() => {
-      expect(screen.getByTestId("query-scopes").textContent).not.toContain("note-1")
-    })
+    expect(input.value).toBe("nvidia")
+    expect(pills()).toEqual(["other"])
     fireEvent.keyDown(input, { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
       to: "/",
@@ -480,15 +402,27 @@ describe("block results", () => {
     })
   })
 
-  it("zoomed into a block, the scope is that block", async () => {
-    mocks.match = { params: { _splat: "note-1" }, search: { block: "blk_zoom" } }
+  it("the pill takes its filter out of the query", async () => {
     await openWithBlocks([NVIDIA])
-    expect(screen.getByTestId("query-scopes").textContent).toContain("blk_zoom")
-    fireEvent.keyDown(commandsInput(), { key: "Enter" })
-    expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/",
-      search: { query: "in:blk_zoom nvidia" },
-    })
+    const input = commandsInput()
+    fireEvent.change(input, { target: { value: "in:other nvidia" } })
+    fireEvent.click(screen.getByTestId("query-filters").querySelector("button")!)
+    expect(screen.queryByTestId("query-filters")).toBeNull()
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", search: { query: "nvidia" } })
+  })
+
+  it("`in:` offers the open note first, so scoping to it is one pick", () => {
+    renderMenu({ open: true, notes: [makeNote("note-1"), makeNote("other")] })
+    const input = commandsInput()
+    fireEvent.change(input, { target: { value: "in:" } })
+    input.setSelectionRange(3, 3)
+    fireEvent.keyUp(input, { key: ":" })
+    const picker = screen.getByTestId("qualifier-suggestions")
+    expect(picker.querySelector('[role="option"]')?.textContent).toContain("this note")
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(input.value).toBe("")
+    expect(pills()).toEqual(["note-1"])
   })
 
   it("↓ past the items hands the keyboard to the rows; Enter opens the note zoomed to the block", async () => {
@@ -532,8 +466,11 @@ describe("block results", () => {
     expect(commandsInput().value).toBe("nvidia")
   })
 
-  it("creates a note from the query — the footer, or ⌘↵ from anywhere", async () => {
+  it("creates a note from the query's text — the footer, or ⌘↵ from anywhere", async () => {
     await openWithBlocks([NVIDIA])
+    expect(screen.getByTestId("palette-create").textContent).toContain('Create new note "nvidia"')
+    // A filter is not a title.
+    fireEvent.change(commandsInput(), { target: { value: "type:todo nvidia" } })
     expect(screen.getByTestId("palette-create").textContent).toContain('Create new note "nvidia"')
     fireEvent.keyDown(commandsInput(), { key: "Enter", metaKey: true })
     expect(mocks.navigate).toHaveBeenCalledWith(
@@ -890,9 +827,11 @@ describe("qualifier suggestions", () => {
     // ↓ moves the highlight within the picker, not cmdk's list.
     fireEvent.keyDown(input, { key: "ArrowDown" })
     fireEvent.keyDown(input, { key: "Enter" })
-    expect(input.value).toBe("type:done ")
+    // Picked: the filter is a pill, the line is clear for the words, the
+    // picker is gone.
+    expect(input.value).toBe("")
+    expect(pills()).toEqual(["type:done"])
     expect(mocks.navigate).not.toHaveBeenCalled()
-    // Picked: the picker is gone, the query carries on.
     expect(screen.queryByTestId("qualifier-suggestions")).toBeNull()
   })
 
@@ -902,7 +841,8 @@ describe("qualifier suggestions", () => {
     const picker = screen.getByTestId("qualifier-suggestions")
     expect(picker.querySelectorAll('[role="option"]')).toHaveLength(1)
     fireEvent.keyDown(input, { key: "Tab" })
-    expect(input.value).toBe("milk type:quote ")
+    expect(input.value).toBe("milk ")
+    expect(pills()).toEqual(["type:quote"])
   })
 
   it("Escape closes it and leaves the query as typed — the palette stays open", () => {

@@ -921,7 +921,7 @@ export function BlockItem({
             // it so selection reads as selected, not hovered.
             selected && "bg-bg-secondary block-highlight",
             // When the editor doesn't own the keyboard (focus is in the
-            // sidebar, a dialog, the ⌘P palette mid-preview), the selection
+            // sidebar, a dialog, the ⌘K palette), the selection
             // demotes to a quiet neutral — additive class only, so the
             // structural hooks above are untouched.
             selected && !api.keyboardActive && "block-highlight-inactive",

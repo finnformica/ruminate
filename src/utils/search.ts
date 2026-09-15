@@ -59,28 +59,66 @@ export function parseQuery(query: string): Query {
 }
 
 /**
- * The query with one qualifier taken out — the `filter` as `parseQuery`
- * returned it (key, values, exclusion). Matched on the parsed form rather
- * than by re-spelling it, so a quoted value (`in:"Reading list"`) is found as
- * typed. Only the first occurrence goes; surrounding whitespace collapses.
+ * The query as the box shows it: the qualifier tokens as typed (`type:todo`,
+ * `-in:"Reading list"`, `sort:updated`), and the text between them with its
+ * spacing collapsed. The inverse of `composeQuery`.
  */
-export function removeQualifier(query: string, filter: Filter): string {
-  for (const match of query.matchAll(QUALIFIER_REGEX)) {
-    if (!match.groups || match.index === undefined) continue
-    const { key, values, exclude } = parseQualifier(match.groups)
-    if (
-      key !== filter.key ||
-      exclude !== filter.exclude ||
-      values.length !== filter.values.length ||
-      values.some((value, index) => value !== filter.values[index])
-    ) {
-      continue
-    }
-    const before = query.slice(0, match.index)
-    const after = query.slice(match.index + match[0].length)
-    return `${before.trimEnd()} ${after.trimStart()}`.trim()
+export function splitQuery(query: string): { qualifiers: string[]; text: string } {
+  const qualifiers = Array.from(query.matchAll(QUALIFIER_REGEX), (match) => match[0])
+  const text = query.replace(QUALIFIER_REGEX, " ").replace(/\s+/g, " ").trim()
+  return { qualifiers, text }
+}
+
+/** The one query string: the qualifiers first, then the text. */
+export function composeQuery(qualifiers: readonly string[], text: string): string {
+  return [...qualifiers, text.trim()].filter(Boolean).join(" ")
+}
+
+/**
+ * Lift the finished qualifiers out of a line being typed. A `key:value`
+ * token with whitespace after it is finished — typing carried on past it,
+ * or a pick from the popover wrote it with its trailing space — while one
+ * the line ends in is still being typed and stays. Returns the line with
+ * those tokens (and the whitespace after each) taken out, the caret moved
+ * with the text around it, and the tokens in the order they stood.
+ */
+export function extractQualifiers(
+  text: string,
+  caret: number,
+): { text: string; caret: number; qualifiers: string[] } {
+  const qualifiers: string[] = []
+  let kept = ""
+  let nextCaret = caret
+  let from = 0
+  for (const match of text.matchAll(QUALIFIER_REGEX)) {
+    if (match.index === undefined) continue
+    const start = match.index
+    const trailing = /^\s+/.exec(text.slice(start + match[0].length))?.[0] ?? ""
+    if (trailing === "") continue
+    const end = start + match[0].length + trailing.length
+    qualifiers.push(match[0])
+    kept += text.slice(from, start)
+    if (caret >= end) nextCaret -= end - start
+    else if (caret > start) nextCaret -= caret - start
+    from = end
   }
-  return query
+  kept += text.slice(from)
+  return { text: kept, caret: nextCaret, qualifiers }
+}
+
+/**
+ * One qualifier token as typed, read as a filter: its key, its values
+ * (unquoted, a comma list split) and whether it is negated. A `sort:` token
+ * reads as the key `sort` with its list as the one value, since it is not a
+ * filter (`parseQuery` keeps sorts apart). Null when the token is not one.
+ */
+export function parseQualifierToken(token: string): Filter | null {
+  const match = new RegExp(QUALIFIER_REGEX.source).exec(token)
+  if (!match?.groups || match[0] !== token) return null
+  if (match.groups.key === "sort") {
+    return { key: "sort", values: [match.groups.value], exclude: false }
+  }
+  return parseQualifier(match.groups)
 }
 
 /** One `key:value` match, as a filter. `sort:` is not a filter; callers

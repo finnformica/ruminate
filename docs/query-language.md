@@ -46,7 +46,11 @@ A query that names only notes — a date, a bare property qualifier, or an empty
 - `in:<block id>` names a block; the query then runs over the blocks under it (the block itself is not inside itself). `type:heading in:blk_a1b2c3` lists the headings within that section.
 - It composes like any qualifier: `-in:` excludes, `in:a,b` means either, and it stacks with `type:`, a property and text.
 
-**It is set for you inside a note.** Open <kbd>⌘</kbd> <kbd>K</kbd> from a note and block results are scoped to that note — or, if you have zoomed into a block, to that block — shown as a pill under the query, exactly as a typed `in:` is shown on the notes page. Click the pill to search everything instead, or type your own `in:` to scope elsewhere. <kbd>↵</kbd> carries the scope into the results view as a plain `in:` in the URL, so it reads back as what it is.
+**It is never set for you.** <kbd>⌘</kbd> <kbd>K</kbd> searches everything wherever it opens; inside a note, type `in:` and the open note leads the suggestions, so scoping to it is one pick. <kbd>⌘</kbd> <kbd>P</kbd> is the one preset: the palette with `type:heading` and `in:` the open note (or the zoomed block) already set — its headings, narrowed as you type.
+
+## Filters as pills
+
+The query box — on the notes page and in <kbd>⌘</kbd> <kbd>K</kbd> — keeps the qualifiers out of the line. A `key:value` you finish typing (a space after it, or a pick from the suggestions) is lifted out as a **pill** beneath the box: an `in:` named as the note (or note › block), anything else as typed (`type: todo`, `-type: done`, `sort: updated`). The line holds only the words you are searching for, and the query the app runs — and the `?query=` URL <kbd>↵</kbd> opens — is the pills and the words together, pills first. Click a pill to take it out; <kbd>⌫</kbd> on an empty line takes the last pill back into the line to edit; Clear (or <kbd>Esc</kbd> in the palette) empties both.
 
 ## Suggestions as you type
 

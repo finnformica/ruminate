@@ -8,8 +8,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 vi.mock("../../global-state", async () => {
   const { atom } = await import("jotai")
   return {
-    noteOutlineAtom: atom(null),
-    blockRevealAtom: atom(null),
     graphSnapshotAtom: atom({ nodes: new Map(), childLinks: new Map() }),
     githubUserAtom: atom(null),
     isDatabaseModeAtom: atom(false),

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom"
 import { useHotkeys } from "react-hotkeys-hook"
 import { APP_SHORTCUTS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
-import { parseQuery, removeQualifier } from "../utils/search"
+import { composeQuery, extractQualifiers, splitQuery } from "../utils/search"
 import { caretCoordinates } from "./block-editor/caret"
 import { IconButton } from "./icon-button"
 import { ClearIcon16, SearchIcon16 } from "./icons"
@@ -15,18 +15,25 @@ import {
   useQualifierSuggestions,
   type QualifierPopoverPlacement,
 } from "./qualifier-suggestions"
-import { ScopePill } from "./scope-pill"
+import { QueryPill } from "./query-pill"
 
 /**
  * **The query box** — the one search input, on the notes page and in the
- * ⌘K palette. It owns everything a query needs around its text: the caret
- * (read off the input on every change and move), the qualifier popover
- * (`type:`, `in:`, … — qualifier-suggestions.tsx) hung beside the token
- * being typed, the `in:` scopes as pills beneath it, and the hand-off of
- * the keyboard to the result rows on ↓ (`onHandOff`) and of the query on
- * ↵ (`onSubmit`). What differs between the two places is the dress
- * (`variant`) and what the surface does with a hand-off or a submit — never
- * the typing.
+ * ⌘K palette. The query is the caller's, one string (`in:n1 type:todo
+ * milk`); the box shows it as the **filters**, each a pill beneath the line
+ * (`QueryPill`), and the **text** in the line. A qualifier is lifted out of
+ * the line the moment it is finished — a space typed after it, or a pick
+ * from the qualifier popover (`type:`, `in:`, … — qualifier-suggestions.tsx)
+ * — so the line only ever holds the words being searched for; ⌫ on an
+ * empty line takes the last pill back into it to edit, and a pill's click
+ * takes it out of the query.
+ *
+ * The box also owns the caret (read off the input on every change and
+ * move), the popover hung beside the token being typed, and the hand-off
+ * of the keyboard to the result rows on ↓ (`onHandOff`) and of the query
+ * on ↵ (`onSubmit`). What differs between the two places is the dress
+ * (`variant`) and what the surface does with a hand-off or a submit —
+ * never the typing.
  *
  * While the popover is open its keys are the popover's — ↑/↓, ↵, Tab, Esc —
  * and the event stops here, so nothing beneath (the palette's list, the
@@ -39,7 +46,6 @@ export function QueryBox({
   variant = "page",
   shortcut,
   currentNoteId,
-  impliedScope = null,
   onHandOff,
   onSubmit,
   popoverHost,
@@ -60,9 +66,6 @@ export function QueryBox({
   shortcut?: string[]
   /** The open note, if any: leads the `in:` suggestions. */
   currentNoteId?: string
-  /** A scope in force that is not in the text (the palette's automatic
-   * `in:` of the open note), shown as a pill like a typed one. */
-  impliedScope?: { value: string; onRemove: () => void } | null
   /** ↓ with the popover shut: take the keyboard to the rows. Return true
    * when it was taken (the key is then consumed here). */
   onHandOff?: () => boolean
@@ -77,9 +80,29 @@ export function QueryBox({
   const inputRef = inputRefProp ?? ownRef
   const wrapperRef = React.useRef<HTMLDivElement>(null)
 
-  // The text is the caller's, as typed: the caller holds it in state of its
-  // own and writes it back the same render (a caller that echoed it a
-  // render late — through the URL, say — would reset the caret as it did).
+  // The split of the caller's string into pills and line is kept here: the
+  // string alone cannot say whether `type:to` is a finished filter or half
+  // a word, so what this box lifted out stays lifted, and what is typed
+  // stays in the line. A value the caller sets on its own — back/forward,
+  // a link in, a preset — is read afresh, every qualifier in it a pill.
+  // The caller holds the string in state of its own and writes it back the
+  // same render (a caller that echoed it a render late would reset the
+  // caret as it did).
+  const [shown, setShown] = React.useState(() => splitQuery(value))
+  const emittedRef = React.useRef(value)
+  if (value !== emittedRef.current) {
+    emittedRef.current = value
+    const next = splitQuery(value)
+    if (next.text !== shown.text || next.qualifiers.join(" ") !== shown.qualifiers.join(" ")) {
+      setShown(next)
+    }
+  }
+  const emit = (qualifiers: string[], text: string) => {
+    const next = composeQuery(qualifiers, text)
+    emittedRef.current = next
+    setShown({ qualifiers, text })
+    onChange(next)
+  }
 
   // The caret, and whether the box has focus: the popover follows the
   // caret while the box is focused and is gone the moment it is not.
@@ -90,14 +113,15 @@ export function QueryBox({
     [inputRef],
   )
   const suggestions = useQualifierSuggestions({
-    value,
+    value: shown.text,
     caret: focused ? caret : null,
     currentNoteId,
   })
   useComboboxAria(inputRef, suggestions)
 
-  // A pick moves the caret past the token; the DOM is told after the render
-  // that writes the new value (no caret event follows a value React set).
+  // A caret the box places itself (a pick moved it past the token; a lifted
+  // filter took text out before it): the DOM is told after the render that
+  // writes the new value (no caret event follows a value React set).
   const pendingCaret = React.useRef<number | null>(null)
   React.useLayoutEffect(() => {
     if (pendingCaret.current === null) return
@@ -105,11 +129,16 @@ export function QueryBox({
     pendingCaret.current = null
     inputRef.current?.setSelectionRange(at, at)
   })
-  const applyPick = (next: { value: string; caret: number }) => {
-    onChange(next.value)
-    setCaret(next.caret)
-    pendingCaret.current = next.caret
+  /** The line as typed (or as a pick wrote it): finished qualifiers become
+   * pills, the rest stays in the line with the caret where it was. */
+  const changeLine = (text: string, at: number, placeCaret = false) => {
+    const lifted = extractQualifiers(text, at)
+    if (lifted.qualifiers.length > 0 || placeCaret) pendingCaret.current = lifted.caret
+    setCaret(lifted.caret)
+    emit([...shown.qualifiers, ...lifted.qualifiers], lifted.text)
   }
+  const applyPick = (next: { value: string; caret: number }) =>
+    changeLine(next.value, next.caret, true)
 
   // Where the popover hangs: under the box, at the token — measured in the
   // host's coordinates, since the host is what it is positioned in. A
@@ -165,6 +194,16 @@ export function QueryBox({
       return
     }
     const plain = !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey
+    // ⌫ on an empty line takes the last pill back into it, to edit.
+    if (plain && event.key === "Backspace" && shown.text === "" && shown.qualifiers.length > 0) {
+      event.preventDefault()
+      event.stopPropagation()
+      const token = shown.qualifiers[shown.qualifiers.length - 1]
+      pendingCaret.current = token.length
+      setCaret(token.length)
+      emit(shown.qualifiers.slice(0, -1), token)
+      return
+    }
     if (plain && event.key === "ArrowDown" && onHandOff?.()) {
       event.preventDefault()
       event.stopPropagation()
@@ -179,33 +218,24 @@ export function QueryBox({
   }
 
   const clear = () => {
-    onChange("")
+    emit([], "")
+    inputRef.current?.focus()
+  }
+  const removePill = (index: number) => {
+    emit(
+      shown.qualifiers.filter((_, i) => i !== index),
+      shown.text,
+    )
     inputRef.current?.focus()
   }
 
-  // The `in:` scopes in the text, as pills — plus the implied one, which is
-  // in force without being typed.
-  const scopes = React.useMemo(
-    () => parseQuery(value).filters.filter((filter) => filter.key === "in"),
-    [value],
-  )
+  // The filters, as pills — the query's qualifiers, out of the line.
   const pills =
-    scopes.length > 0 || impliedScope ? (
-      <div data-testid="query-scopes" className="flex flex-wrap gap-2">
-        {impliedScope ? (
-          <ScopePill value={impliedScope.value} onRemove={impliedScope.onRemove} />
-        ) : null}
-        {scopes.flatMap((filter) =>
-          filter.values.map((scope) => (
-            <ScopePill
-              key={`${filter.exclude ? "-" : ""}in:${scope}`}
-              value={scope}
-              exclude={filter.exclude}
-              // The whole qualifier goes (a comma list as one).
-              onRemove={() => onChange(removeQualifier(value, filter))}
-            />
-          )),
-        )}
+    shown.qualifiers.length > 0 ? (
+      <div data-testid="query-filters" className="flex flex-wrap gap-2">
+        {shown.qualifiers.map((token, index) => (
+          <QueryPill key={`${index}:${token}`} token={token} onRemove={() => removePill(index)} />
+        ))}
       </div>
     ) : null
 
@@ -241,15 +271,14 @@ export function QueryBox({
       // The page's box is a search field (the browser clears it on Esc); the
       // palette's is plain text, since Esc is the palette's own there.
       type={variant === "page" ? "search" : "text"}
-      value={value}
+      value={shown.text}
       placeholder={placeholder}
       autoComplete="off"
       autoCorrect="off"
       autoCapitalize="off"
       spellCheck={false}
       onChange={(event) => {
-        onChange(event.target.value)
-        syncCaret()
+        changeLine(event.target.value, event.target.selectionStart ?? event.target.value.length)
       }}
       onKeyDown={handleKeyDown}
       onKeyUp={(event) => {

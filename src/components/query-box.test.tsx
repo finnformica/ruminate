@@ -78,6 +78,14 @@ function type(input: HTMLInputElement, value: string) {
 }
 
 const popover = () => screen.queryByTestId("qualifier-suggestions")
+/** The filter pills beneath the line: an `in:` by its scope, the rest by
+ * the token. */
+const pillTokens = () =>
+  Array.from(
+    screen
+      .queryByTestId("query-filters")
+      ?.querySelectorAll<HTMLElement>("[data-scope],[data-filter]") ?? [],
+  ).map((pill) => pill.dataset.scope ?? pill.dataset.filter)
 const options = () => Array.from(popover()?.querySelectorAll('[role="option"]') ?? [])
 
 describe("the qualifier popover", () => {
@@ -88,8 +96,10 @@ describe("the qualifier popover", () => {
     expect(popover()?.textContent).toContain("Reading list")
     fireEvent.keyDown(input, { key: "ArrowDown" })
     fireEvent.keyDown(input, { key: "Enter" })
-    expect(onChange).toHaveBeenLastCalledWith("in:n2 ")
-    expect(input.value).toBe("in:n2 ")
+    // The pick is a finished filter: a pill, and the line clear again.
+    expect(onChange).toHaveBeenLastCalledWith("in:n2")
+    expect(input.value).toBe("")
+    expect(pillTokens()).toEqual(["n2"])
     expect(popover()).toBeNull()
   })
 
@@ -115,7 +125,8 @@ describe("the qualifier popover", () => {
     const dates = options().map((row) => row.getAttribute("data-suggestion"))
     for (const date of dates) expect(date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     fireEvent.keyDown(input, { key: "Tab" })
-    expect(input.value).toBe(`date:${dates[0]} `)
+    expect(pillTokens()).toEqual([`date:${dates[0]}`])
+    expect(input.value).toBe("")
     // `tom` finds Tomorrow by its label.
     type(input, "date:tom")
     expect(options()).toHaveLength(1)
@@ -126,7 +137,7 @@ describe("the qualifier popover", () => {
     const { input, onChange } = renderBox()
     type(input, "type:")
     fireEvent.click(popover()!.querySelector('[data-suggestion="quote"]')!)
-    expect(onChange).toHaveBeenLastCalledWith("type:quote ")
+    expect(onChange).toHaveBeenLastCalledWith("type:quote")
   })
 
   it("Escape dismisses it; leaving the box hides it", () => {
@@ -195,21 +206,73 @@ describe("the qualifier popover", () => {
 })
 
 describe("the box around the query", () => {
-  it("shows each `in:` in the text as a pill, and the pill takes it out", () => {
-    const { onChange } = renderBox({ value: "in:n1 milk" })
-    const pills = screen.getByTestId("query-scopes")
-    expect(pills.querySelector("[data-scope='n1']")).not.toBeNull()
-    fireEvent.click(pills.querySelector("button")!)
-    expect(onChange).toHaveBeenLastCalledWith("milk")
+  it("shows every qualifier in the value as a pill, with only the text in the line", () => {
+    const { input, onChange } = renderBox({ value: "in:n1 type:todo milk" })
+    expect(input.value).toBe("milk")
+    expect(pillTokens()).toEqual(["n1", "type:todo"])
+    // A pill's click takes its filter out of the query.
+    fireEvent.click(screen.getByTestId("query-filters").querySelector("button")!)
+    expect(onChange).toHaveBeenLastCalledWith("type:todo milk")
+    expect(pillTokens()).toEqual(["type:todo"])
   })
 
-  it("shows a scope in force that is not in the text, with its own remove", () => {
-    const onRemove = vi.fn()
-    renderBox({ impliedScope: { value: "n2", onRemove } })
-    const pills = screen.getByTestId("query-scopes")
-    expect(pills.querySelector("[data-scope='n2']")).not.toBeNull()
-    fireEvent.click(pills.querySelector("button")!)
-    expect(onRemove).toHaveBeenCalled()
+  it("lifts a qualifier out of the line once a space follows it", () => {
+    const { input, onChange } = renderBox()
+    type(input, "milk type:todo")
+    // Still being typed: no pill yet, and the value is the line as typed.
+    expect(pillTokens()).toEqual([])
+    expect(onChange).toHaveBeenLastCalledWith("milk type:todo")
+    type(input, "milk type:todo ")
+    expect(pillTokens()).toEqual(["type:todo"])
+    expect(input.value).toBe("milk ")
+    // The one string the caller holds: the filters first, then the text.
+    expect(onChange).toHaveBeenLastCalledWith("type:todo milk")
+    type(input, "milk bread")
+    expect(onChange).toHaveBeenLastCalledWith("type:todo milk bread")
+  })
+
+  it("⌫ on an empty line takes the last pill back into it to edit", () => {
+    const { input, onChange } = renderBox({ value: "in:n1 -type:done" })
+    input.focus()
+    fireEvent.keyDown(input, { key: "Backspace" })
+    expect(input.value).toBe("-type:done")
+    expect(pillTokens()).toEqual(["n1"])
+    expect(onChange).toHaveBeenLastCalledWith("in:n1 -type:done")
+    // With text in the line, ⌫ is the line's own.
+    type(input, "milk")
+    expect(fireEvent.keyDown(input, { key: "Backspace" })).toBe(true)
+    expect(pillTokens()).toEqual(["n1"])
+  })
+
+  it("reads a value set from outside afresh: every qualifier a pill", () => {
+    function Outside() {
+      const [value, setValue] = useState("milk")
+      return (
+        <>
+          <QueryBox value={value} onChange={setValue} />
+          <button type="button" onClick={() => setValue("type:done bread")}>
+            set
+          </button>
+        </>
+      )
+    }
+    render(
+      <Provider store={createStore()}>
+        <Outside />
+      </Provider>,
+    )
+    const input = screen.getByTestId("query-box") as HTMLInputElement
+    expect(input.value).toBe("milk")
+    fireEvent.click(screen.getByText("set"))
+    expect(input.value).toBe("bread")
+    expect(pillTokens()).toEqual(["type:done"])
+  })
+
+  it("Clear empties the line and the pills together", () => {
+    const { onChange } = renderBox({ value: "type:todo milk" })
+    fireEvent.click(screen.getByLabelText("Clear"))
+    expect(onChange).toHaveBeenLastCalledWith("")
+    expect(pillTokens()).toEqual([])
   })
 
   it("↓ hands the keyboard off when the caller takes it, and not otherwise", () => {
@@ -234,7 +297,7 @@ describe("the box around the query", () => {
     type(input, "type:")
     fireEvent.keyDown(input, { key: "Enter" })
     expect(onSubmit).not.toHaveBeenCalled()
-    expect(input.value).toBe("type:todo ")
+    expect(pillTokens()).toEqual(["type:todo"])
     fireEvent.keyDown(input, { key: "Enter" })
     expect(onSubmit).toHaveBeenCalledTimes(1)
   })
