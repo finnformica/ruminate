@@ -90,3 +90,48 @@ describe("NoteTitle on a new note", () => {
     expect(getByRole("button")).toBeTruthy()
   })
 })
+
+// A note someone shared, without write (docs/sharing.md): the same heading
+// — the `#`, the highlight, Down into the editor — that never opens its field.
+describe("NoteTitle read-only", () => {
+  it("highlights on click or Enter and never opens the field", () => {
+    const onRename = vi.fn(() => true)
+    const { getByRole, queryByRole, container } = render(
+      <NoteTitle title="Theirs" onRename={onRename} readOnly />,
+    )
+    expect(container.querySelector("h1")?.textContent).toContain("Theirs")
+    const heading = getByRole("button")
+    fireEvent.click(heading)
+    expect(queryByRole("textbox", { name: "Note name" })).toBeNull()
+    expect(heading.className).toContain("block-highlight")
+    fireEvent.keyDown(heading, { key: "Enter" })
+    expect(queryByRole("textbox", { name: "Note name" })).toBeNull()
+    expect(onRename).not.toHaveBeenCalled()
+  })
+
+  it("keeps the keyboard flow: Down returns to the editor, Cmd+Enter creates nothing", () => {
+    const onArrowDown = vi.fn()
+    const onCreateBelow = vi.fn()
+    const { getByRole } = render(
+      <NoteTitle
+        title="Theirs"
+        onRename={() => true}
+        onArrowDown={onArrowDown}
+        onCreateBelow={onCreateBelow}
+        readOnly
+      />,
+    )
+    const heading = getByRole("button")
+    fireEvent.keyDown(heading, { key: "Enter", metaKey: true })
+    expect(onCreateBelow).not.toHaveBeenCalled()
+    fireEvent.keyDown(heading, { key: "ArrowDown" })
+    expect(onArrowDown).toHaveBeenCalledWith("select")
+  })
+
+  it("does not open editing when asked to start editing", () => {
+    const { queryByRole } = render(
+      <NoteTitle title="" onRename={() => true} startEditing readOnly />,
+    )
+    expect(queryByRole("textbox", { name: "Note name" })).toBeNull()
+  })
+})

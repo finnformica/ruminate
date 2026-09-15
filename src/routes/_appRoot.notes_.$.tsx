@@ -92,7 +92,9 @@ function NotePage() {
   const note = useNoteById(noteId)
   // A note someone shared with the user (docs/sharing.md): read-only, never
   // renamed, pinned or given a basket here — those are the owner's, and the
-  // basket holds blocks the slice does not carry.
+  // basket holds blocks the slice does not carry. The page is otherwise the
+  // same page: the title and the editor are the same components, told they
+  // are read-only.
   const share = useNoteShare(noteId)
   const readOnlyShare = share !== null
   const isDailyNote = isValidDateString(noteId ?? "")
@@ -105,7 +107,7 @@ function NotePage() {
   const useBlockEditor = !isReadOnlyDailyNote
   // An id no live note claims falls through to the new-note editor below —
   // renames never leave a dead id behind, since the id never changes.
-  const showsTitle = !isDailyNote && !isWeeklyNote && !zoomBlockId && !readOnlyShare
+  const showsTitle = !isDailyNote && !isWeeklyNote && !zoomBlockId
 
   // Show "Saving…" the instant a change is dispatched, rather than waiting for
   // the debounced sync to actually start. Cleared when the sync finishes (or a
@@ -306,15 +308,11 @@ function NotePage() {
                 {/* While zoomed, the breadcrumb (inside the editor) carries the
                     note title as its first crumb — hide the standalone title to
                     avoid doubling it. */}
-                {!isDailyNote && !isWeeklyNote && !zoomBlockId && readOnlyShare ? (
-                  <h1 className="font-content text-3xl font-bold leading-tight tracking-[-0.02em] [overflow-wrap:anywhere] pl-[27px]">
-                    {note?.title || <span className="text-text-tertiary">Untitled</span>}
-                  </h1>
-                ) : null}
                 {showsTitle ? (
                   <NoteTitle
                     title={note?.title ?? ""}
                     onRename={renameTo}
+                    readOnly={readOnlyShare}
                     startEditing={isNewNote}
                     onArrowDown={(mode) => {
                       setFocusFirstMode(mode)

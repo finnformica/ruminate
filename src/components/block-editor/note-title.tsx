@@ -22,6 +22,12 @@ import { Hash } from "./hash"
  *
  * `onRename` returns whether the title actually changed, so the field can
  * revert when it did not.
+ *
+ * Read-only (a note someone shared, without write — docs/sharing.md), the
+ * title is the same heading in every respect but one: it never opens the
+ * field. It still hangs its `#`, still takes the highlight from the
+ * keyboard, and Down still returns to the editor, so a shared note reads
+ * and moves exactly as the reader's own.
  */
 export function NoteTitle({
   title,
@@ -30,6 +36,7 @@ export function NoteTitle({
   onCreateBelow,
   focusSignal,
   startEditing,
+  readOnly = false,
 }: {
   /** The note's current title; empty means untitled. */
   title: string
@@ -52,9 +59,12 @@ export function NoteTitle({
    * `startEditing`.
    */
   startEditing?: boolean
+  /** Never edits: a click or Enter only highlights it. Selection and the
+   * keyboard flow to the editor are unchanged. */
+  readOnly?: boolean
 }) {
   const [value, setValue] = useState(title)
-  const [editing, setEditing] = useState(startEditing ?? false)
+  const [editing, setEditing] = useState((startEditing ?? false) && !readOnly)
   const [selected, setSelected] = useState(startEditing ?? false)
   const headingRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -163,17 +173,18 @@ export function NoteTitle({
           onBlur={() => setSelected(false)}
           onClick={() => {
             setSelected(true)
-            setEditing(true)
+            if (!readOnly) setEditing(true)
           }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && (event.metaKey || event.ctrlKey || event.shiftKey)) {
               // Cmd/Shift+Enter: create a new root block below the title.
               event.preventDefault()
+              if (readOnly) return
               setSelected(false)
               onCreateBelow?.()
             } else if (event.key === "Enter") {
               event.preventDefault()
-              setEditing(true)
+              if (!readOnly) setEditing(true)
             } else if (event.key === "ArrowDown") {
               event.preventDefault()
               setSelected(false)
@@ -184,7 +195,8 @@ export function NoteTitle({
             // -mx-0.5 + pl-[29px]/pr-0.5 keep the text at the block text column
             // (pl-[27px]) while the highlight surface gains the same 2px reach
             // as a selected block line.
-            "-mx-0.5 cursor-text rounded py-0 pl-[29px] pr-0.5 outline-none transition-colors duration-100",
+            "-mx-0.5 rounded py-0 pl-[29px] pr-0.5 outline-none transition-colors duration-100",
+            readOnly ? "cursor-default" : "cursor-text",
             // Same selection treatment as a block (see .block-highlight).
             selected && "bg-bg-secondary block-highlight",
           )}
