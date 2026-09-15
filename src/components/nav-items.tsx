@@ -42,6 +42,7 @@ import { NoteActionsMenu } from "./note-actions-menu"
 import { NoteFavicon } from "./note-favicon"
 import { beginGitHubSignIn } from "./github-auth"
 import { SyncStatusIcon, useSyncStatusMeta, useSyncStatusText } from "./sync-status"
+import { Tooltip } from "./tooltip"
 
 const SizeContext = createContext<"medium" | "large">("medium")
 
@@ -155,32 +156,43 @@ export function NavItems({
               Update Ruminate
             </button>
           ) : null}
-          {syncText === null ? null : syncMeta.action === null ? (
-            // Offline: nothing a click could do, so the row only states it —
-            // styled like its neighbours, with the default cursor.
-            <div
-              className="nav-item text-text-secondary"
-              data-size={size}
-              data-static=""
-              title={syncMeta.tooltip}
-            >
-              <SyncStatusIcon />
-              {syncText}
-            </div>
-          ) : (
-            <button
-              className="nav-item text-text-secondary"
-              data-size={size}
-              title={syncMeta.tooltip}
-              onClick={() =>
-                // Pushes are automatic (write-behind); the button pulls the
-                // latest from D1 — or re-authenticates when the session died.
-                syncMeta.action === "reauth" ? beginGitHubSignIn() : requestDatabasePull()
-              }
-            >
-              <SyncStatusIcon />
-              {syncText}
-            </button>
+          {syncText === null ? null : (
+            <Tooltip>
+              <Tooltip.Trigger
+                render={
+                  syncMeta.action === null ? (
+                    // Offline: nothing a click could do, so the row only
+                    // states it — styled like its neighbours, with the
+                    // default cursor.
+                    <div className="nav-item text-text-secondary" data-size={size} data-static="">
+                      <SyncStatusIcon />
+                      {syncText}
+                    </div>
+                  ) : (
+                    <button
+                      className="nav-item text-text-secondary"
+                      data-size={size}
+                      onClick={() =>
+                        // Pushes are automatic (write-behind); the button
+                        // pulls the latest from D1 — or re-authenticates when
+                        // the session died.
+                        syncMeta.action === "reauth" ? beginGitHubSignIn() : requestDatabasePull()
+                      }
+                    >
+                      <SyncStatusIcon />
+                      {syncText}
+                    </button>
+                  )
+                }
+              />
+              {syncMeta.tooltip ? (
+                // The explanation behind the short label: a sentence, so it
+                // wraps rather than running the width of the screen.
+                <Tooltip.Content className="max-w-72 leading-snug text-balance">
+                  {syncMeta.tooltip}
+                </Tooltip.Content>
+              ) : null}
+            </Tooltip>
           )}
           <NavLink
             to="/settings"
