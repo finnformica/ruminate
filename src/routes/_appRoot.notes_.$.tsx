@@ -105,6 +105,7 @@ function NotePage() {
   const useBlockEditor = !isReadOnlyDailyNote
   // An id no live note claims falls through to the new-note editor below —
   // renames never leave a dead id behind, since the id never changes.
+  const showsTitle = !isDailyNote && !isWeeklyNote && !zoomBlockId && !readOnlyShare
 
   // Show "Saving…" the instant a change is dispatched, rather than waiting for
   // the debounced sync to actually start. Cleared when the sync finishes (or a
@@ -124,6 +125,11 @@ function NotePage() {
     noteId,
     defaultDoc,
   })
+  // A brand-new note opens ready to be written: the title editing when there
+  // is one (naming it is the first thing to do, and naming it creates it —
+  // `renameTo`), else the first block. Never while the notes are still
+  // loading, or under a shared note's id (see `notesLoaded`).
+  const isNewNote = !noteExists && notesLoaded && share === null
   // The note is TOUCHED — for the palette's Recent list — exactly when it
   // is opened, edited (an edit lands through `setEditorDoc`), a block in it
   // folded or unfolded (`onToggleCollapse`) or zoomed into
@@ -305,10 +311,11 @@ function NotePage() {
                     {note?.title || <span className="text-text-tertiary">Untitled</span>}
                   </h1>
                 ) : null}
-                {!isDailyNote && !isWeeklyNote && !zoomBlockId && !readOnlyShare ? (
+                {showsTitle ? (
                   <NoteTitle
                     title={note?.title ?? ""}
                     onRename={renameTo}
+                    startEditing={isNewNote}
                     onArrowDown={(mode) => {
                       setFocusFirstMode(mode)
                       setFocusFirstSignal((n) => n + 1)
@@ -323,7 +330,7 @@ function NotePage() {
                   doc={editorDoc}
                   onChange={setEditorDoc}
                   onToggleCollapse={touch}
-                  startEditing={!noteExists && notesLoaded && share === null}
+                  startEditing={isNewNote && !showsTitle}
                   readOnly={readOnlyShare}
                   highlightHeading={highlightHeading}
                   onExitTop={() => setTitleFocusSignal((n) => n + 1)}

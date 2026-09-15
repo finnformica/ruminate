@@ -27,6 +27,7 @@ export function NoteTitle({
   onArrowDown,
   onCreateBelow,
   focusSignal,
+  startEditing,
 }: {
   /** The note's current title; empty means untitled. */
   title: string
@@ -42,22 +43,32 @@ export function NoteTitle({
   onCreateBelow?: () => void
   /** Bump to select the title from the keyboard (arrow-up past the first block). */
   focusSignal?: number
+  /**
+   * Open with the field editing, the caret in it (a brand-new note: naming
+   * it is the first thing to do). Read once, on mount, like the editor's own
+   * `startEditing`.
+   */
+  startEditing?: boolean
 }) {
   const [value, setValue] = useState(title)
-  const [editing, setEditing] = useState(false)
-  const [selected, setSelected] = useState(false)
+  const [editing, setEditing] = useState(startEditing ?? false)
+  const [selected, setSelected] = useState(startEditing ?? false)
   const headingRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   // Reset the field when the note's title changes underneath it — navigating
   // to another note, or a retitle arriving from another device (no effect
-  // needed).
+  // needed). The field's own commit coming back (the title now reads what
+  // was typed) is not that: it keeps its state, so Enter leaves the title
+  // highlighted and Down goes into the note from there.
   const [prevTitle, setPrevTitle] = useState(title)
   if (title !== prevTitle) {
     setPrevTitle(title)
-    setValue(title)
-    setEditing(false)
-    setSelected(false)
+    if (title !== value.trim()) {
+      setValue(title)
+      setEditing(false)
+      setSelected(false)
+    }
   }
 
   // Select (highlight) the title when the editor hands focus up to it.
