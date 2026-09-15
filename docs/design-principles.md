@@ -208,10 +208,19 @@ promote chrome over content.
 
 Zooming re-derives depth: the zoomed block's children start again at depth 0,
 so a level-4 heading reads as a top-level section inside its own zoomed view.
-The zoom title itself uses the **note-title scale** (3xl) — the zoomed block
-_is_ the page — keeping a full step between it and its depth-0 children, and
-hangs into the gutter with the breadcrumb above it, as the note title does
-(`.note-header`), so its children read as indented beneath it.
+The zoom title _is_ the note title: the zoomed block is the page, so the
+editor draws it with the same `NoteTitle` component the page draws the note's
+title with — 3xl, the hanging `#`, the same highlight and the same keys — fed
+the block's text instead of the note's. It is not a row: the rows are the
+block's children, from depth 0, and ↑ from the first hands the keyboard up to
+the title as it would to the note title (`exitTop`), Enter on the title makes
+the block's first child, and renaming it is a text edit of the block. Whatever
+the block's type, only its text reads as the title (its bullet, checkbox or
+heading `#` belongs to its row in the outline); a block whose text is more
+than one plain line — a code block, a picture's caption, text with line breaks
+— reads as the title but is edited in its own row, un-zoomed. It hangs into
+the gutter with the breadcrumb above it (`.note-header`), so its children
+read as indented beneath it.
 
 ## Spacing
 

@@ -31,8 +31,6 @@ export interface Occurrence {
   /** The keys of the rows this one is indented under, outermost first —
    * exactly `depth` of them; `guideKeys[k]` owns the guide line at level k. */
   guideKeys: string[]
-  /** The zoomed block, rendered as the view's title (no toggle, no guides). */
-  zoomTitle: boolean
   /**
    * This occurrence closes a loop: the block is already on the path above it
    * (`a/b/a`). It is shown once here, as a leaf — nothing beneath it is
@@ -204,7 +202,6 @@ export function buildRows(
         hasChildren,
         collapsed,
         guideKeys,
-        zoomTitle: false,
         ...(looped ? { looped: true } : {}),
       })
       if (hasChildren && !collapsed) {
@@ -217,20 +214,10 @@ export function buildRows(
 
   const zoomRoot = zoomRootId ? doc.blocks[zoomRootId] : undefined
   if (zoomRoot) {
+    // Zoomed, the rows are the zoom root's children, from depth 0: the root
+    // itself is not a row but the view's title (the editor draws it as the
+    // note title, above the rows), always open — its children are the note.
     const key = zoomRootKey(doc, zoomRoot.id)
-    rows.push({
-      key,
-      id: zoomRoot.id,
-      parentKey: null,
-      depth: 0,
-      index: 0,
-      olNumber: 1,
-      hasChildren: zoomRoot.children.length > 0,
-      // The title is always open — its children are the note.
-      collapsed: false,
-      guideKeys: [],
-      zoomTitle: true,
-    })
     path.add(zoomRoot.id)
     walk(zoomRoot.children, key, 0, [])
   } else {

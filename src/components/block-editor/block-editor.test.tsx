@@ -1081,20 +1081,88 @@ const ZOOMABLE = [
 describe("zoom (focus mode)", () => {
   const crumb = (container: HTMLElement) =>
     container.querySelector('[data-testid="zoom-breadcrumb"]')
+  /** The zoom title: the zoomed block drawn as the note title is (an h1 with
+   * the hanging #), above the rows. */
+  const zoomTitle = (container: HTMLElement) => container.querySelector("h1")
+  /** The title's focusable heading (select mode), or its field while editing. */
+  const zoomTitleButton = (container: HTMLElement) =>
+    container.querySelector<HTMLElement>('h1 [role="button"]')!
+  const zoomTitleInput = (container: HTMLElement) =>
+    container.querySelector<HTMLInputElement>("h1 input")
 
-  it("renders only the zoomed subtree, with the block styled as itself", () => {
+  it("renders only the zoomed subtree, with the block as the view's title", () => {
     const { container } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
+    // The rows are the zoomed block's children; the block itself is not a row…
     const bodies = Array.from(container.querySelectorAll('[data-testid="block-body"]'))
-    expect(bodies.map((el) => el.textContent)).toEqual(["B", "C", "D", "E"])
-    // Focus mode changes what is visible, never what a block looks like: no
-    // note-title promotion — the zoomed bullet keeps its normal typography.
-    expect(bodies[0].closest(".text-3xl")).toBeNull()
+    expect(bodies.map((el) => el.textContent)).toEqual(["C", "D", "E"])
+    // …but the title above them: the same heading the note's own title is —
+    // 3xl, the hanging # — with the block's text.
+    const title = zoomTitle(container)!
+    expect(title.className).toContain("text-3xl")
+    expect(title.className).toContain("note-header")
+    expect(title.textContent).toBe("#B")
+    expect(zoomTitleButton(container).textContent).toBe("B")
     // The breadcrumb is the navigation stack: a direct (deep-link) zoom knows
     // only the note and the block itself.
     expect(crumb(container)?.textContent).toContain("Note")
     expect(crumb(container)?.textContent).toContain("B")
     // Zoom-in lands on the first child, not the title.
     expect(highlightedText(container)).toBe("C")
+  })
+
+  it("↑ from the first row selects the title; ↓ and Enter come back down", () => {
+    const { container, getByTestId } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowUp" }) // C → the title
+    // The title takes the highlight (the same selected treatment as a row)
+    // and the keyboard; no row stays highlighted beneath it.
+    expect(highlightedText(container)).toBe("B")
+    expect(document.activeElement).toBe(zoomTitleButton(container))
+    // ↓ highlights the first row again.
+    fireEvent.keyDown(zoomTitleButton(container), { key: "ArrowDown" })
+    expect(highlightedText(container)).toBe("C")
+    // Enter on the highlighted title edits it: the block's text, in a field.
+    fireEvent.keyDown(root, { key: "ArrowUp" })
+    fireEvent.keyDown(zoomTitleButton(container), { key: "Enter" })
+    const input = zoomTitleInput(container)!
+    expect(input.value).toBe("B")
+    // Enter commits the rename — a text edit of the block — and carries on
+    // into a new FIRST child, as Enter on the note title does (of the type
+    // Enter makes: a bullet, by default).
+    fireEvent.change(input, { target: { value: "Bee" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    const textarea = container.querySelector("textarea")!
+    expect(textarea).not.toBeNull()
+    fireEvent.change(textarea, { target: { value: "hello" } })
+    expect(serializedLines(getByTestId)).toEqual([
+      "A",
+      "Bee",
+      "  - hello",
+      "  C",
+      "    D",
+      "  E",
+      "F",
+    ])
+    expect(zoomTitle(container)!.textContent).toBe("#Bee")
+  })
+
+  it("renaming the title is one undo step", () => {
+    const { container, getByTestId } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowUp" })
+    fireEvent.keyDown(zoomTitleButton(container), { key: "Enter" })
+    const input = zoomTitleInput(container)!
+    fireEvent.change(input, { target: { value: "Bee" } })
+    fireEvent.keyDown(input, { key: "Escape" }) // Escape reverts the field…
+    expect(zoomTitleButton(container).textContent).toBe("B")
+    fireEvent.keyDown(zoomTitleButton(container), { key: "Enter" })
+    fireEvent.change(zoomTitleInput(container)!, { target: { value: "Bee" } })
+    fireEvent.blur(zoomTitleInput(container)!) // …blur commits it.
+    expect(serializedLines(getByTestId)).toEqual(["A", "Bee", "  C", "    D", "  E", "F"])
+    // Undo (from the rows) takes the rename back.
+    fireEvent.keyDown(zoomTitleButton(container), { key: "ArrowDown" })
+    fireEvent.keyDown(root, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "  C", "    D", "  E", "F"])
   })
 
   it("the breadcrumb follows the path taken; Shift+F pops back along it", () => {
@@ -1145,42 +1213,59 @@ describe("zoom (focus mode)", () => {
     expect(highlightedText(container)).toBe("C")
   })
 
-  it("a zoomed block keeps its own marker and style — heading hash, quote ink", () => {
+  it("a zoomed block of any type reads as the title — only its text, at the title's scale", () => {
+    // The zoomed block is the page: its heading `#` or quote bar belongs to
+    // its row in the outline, not to the title (no row here draws it).
     const heading = ["# Section", "  id:: blk_h", "  - child", "    id:: blk_hc"].join("\n")
     const zoomHeading = render(<Harness initial={heading} zoomRootId="blk_h" />)
-    // The regular heading hash renders, exactly as un-zoomed — no promoted
-    // note-title variant exists any more.
-    expect(zoomHeading.queryByTestId("zoom-title-hash")).toBeNull()
-    expect(zoomHeading.queryAllByTestId("heading-hash").length).toBeGreaterThan(0)
-    const headingBody = zoomHeading
-      .getAllByTestId("block-body")
-      .find((el) => el.textContent === "Section")!
-    expect(headingBody.closest(".text-3xl")).toBeNull()
+    expect(zoomHeading.queryAllByTestId("heading-hash")).toHaveLength(0)
+    expect(zoomHeading.getAllByTestId("block-body").map((el) => el.textContent)).toEqual(["child"])
+    expect(zoomHeading.container.querySelector("h1")!.textContent).toBe("#Section")
     zoomHeading.unmount()
 
-    // A zoomed quote keeps its secondary ink at its normal scale.
     const quote = ["> Wise words", "  id:: blk_q", "  - child", "    id:: blk_qc"].join("\n")
     const zoomQuote = render(<Harness initial={quote} zoomRootId="blk_q" />)
-    const title = zoomQuote
-      .getAllByTestId("block-body")
-      .find((el) => el.textContent === "Wise words")!
-    expect(title.className).toContain("text-text-secondary")
-    expect(title.className).not.toContain("text-3xl")
+    const title = zoomQuote.container.querySelector("h1")!
+    expect(title.textContent).toBe("#Wise words")
+    expect(title.className).toContain("text-3xl")
+    expect(title.className).not.toContain("text-text-secondary")
   })
 
-  it("Mod+Enter on the zoomed title creates its FIRST child", () => {
+  it("a block whose text is more than one line has a read-only title", () => {
+    // The title is one plain line, as the note's is: a code block (or a
+    // caption, or text with line breaks) shows as the title but is edited in
+    // its own row, un-zoomed.
+    const code = ["```", "let x = 1", "let y = 2", "```", "  id:: blk_code", "  - child"].join("\n")
+    const { container } = render(<Harness initial={code} zoomRootId="blk_code" />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowUp" })
+    expect(document.activeElement).toBe(zoomTitleButton(container))
+    fireEvent.keyDown(zoomTitleButton(container), { key: "Enter" })
+    expect(zoomTitleInput(container)).toBeNull()
+    expect(zoomTitleButton(container).className).toContain("cursor-default")
+  })
+
+  it("Mod+Enter on the highlighted zoom title creates its FIRST child", () => {
     const { container, getByTestId } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
     const root = editorRoot(container)
     fireEvent.keyDown(root, { key: "ArrowUp" }) // C → title B
     expect(highlightedText(container)).toBe("B")
-    fireEvent.keyDown(root, { key: "Enter", metaKey: true })
+    fireEvent.keyDown(zoomTitleButton(container), { key: "Enter", metaKey: true })
     const textarea = container.querySelector("textarea")!
     expect(textarea).not.toBeNull()
     fireEvent.change(textarea, { target: { value: "hello" } })
-    expect(serializedLines(getByTestId)).toEqual(["A", "B", "  hello", "  C", "    D", "  E", "F"])
+    expect(serializedLines(getByTestId)).toEqual([
+      "A",
+      "B",
+      "  - hello",
+      "  C",
+      "    D",
+      "  E",
+      "F",
+    ])
   })
 
-  it("swallows arrow-up at the top of the zoomed view (no note-title exit)", () => {
+  it("↑ at the top of the zoomed view goes to the zoom title, never the note title", () => {
     const onExitTop = vi.fn()
     const { container } = render(
       <BlockEditor
@@ -1191,8 +1276,7 @@ describe("zoom (focus mode)", () => {
       />,
     )
     const root = editorRoot(container)
-    fireEvent.keyDown(root, { key: "ArrowUp" }) // C → title B
-    fireEvent.keyDown(root, { key: "ArrowUp" }) // swallowed
+    fireEvent.keyDown(root, { key: "ArrowUp" }) // C → the zoom title
     expect(highlightedText(container)).toBe("B")
     expect(onExitTop).not.toHaveBeenCalled()
   })
@@ -1204,11 +1288,11 @@ describe("zoom (focus mode)", () => {
     fireEvent.keyDown(root, { key: "a", metaKey: true })
     expect(highlightedAll(container)).toEqual(["C", "D"])
     fireEvent.keyDown(root, { key: "a", metaKey: true })
-    // The "page" rung is the zoomed view (title + subtree), nothing beyond.
-    expect(highlightedAll(container)).toEqual(["B", "C", "D", "E"])
+    // The "page" rung is the zoomed subtree — the rows — nothing beyond.
+    expect(highlightedAll(container)).toEqual(["C", "D", "E"])
     fireEvent.keyDown(root, { key: "a", metaKey: true })
-    expect(highlightedAll(container)).toEqual(["B", "C", "D", "E"])
-    // Delete on the page rung spares the title (its children are removed).
+    expect(highlightedAll(container)).toEqual(["C", "D", "E"])
+    // Delete on the page rung empties the view; the title takes the keyboard.
     fireEvent.keyDown(root, { key: "Backspace" })
     expect(highlightedText(container)).toBe("B")
   })
@@ -2359,12 +2443,15 @@ describe("brand placeholder (empty block being edited)", () => {
       <Harness initial={"Parent\n  id:: blk_p\n  child"} zoomRootId="blk_p" />,
     )
     const root = editorRoot(container)
-    // Zoom lands on the first child; ArrowUp selects the title, Enter edits it.
+    // Zoom lands on the first child; ArrowUp selects the title, Enter edits
+    // it — in the title's own field, which carries the title's prompt.
     fireEvent.keyDown(root, { key: "ArrowUp" })
-    fireEvent.keyDown(root, { key: "Enter" })
-    const textarea = container.querySelector("textarea")!
-    expect(textarea.value).toBe("Parent")
-    expect(textarea.placeholder).toBe("")
+    fireEvent.keyDown(container.querySelector<HTMLElement>('h1 [role="button"]')!, {
+      key: "Enter",
+    })
+    const input = container.querySelector<HTMLInputElement>("h1 input")!
+    expect(input.value).toBe("Parent")
+    expect(input.placeholder).not.toBe(PLACEHOLDER)
   })
 })
 

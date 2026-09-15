@@ -37,10 +37,13 @@ export function NoteTitle({
   focusSignal,
   startEditing,
   readOnly = false,
+  label = "Note name",
 }: {
   /** The note's current title; empty means untitled. */
   title: string
   onRename: (name: string) => boolean
+  /** What the field is, for assistive tech — the zoom title names the block. */
+  label?: string
   /**
    * Down-arrow returns focus to the editor below. The mode mirrors the title's
    * own: from an edited title it drops into the first block *editing* (like
@@ -162,7 +165,7 @@ export function NoteTitle({
             }
           }}
           spellCheck={false}
-          aria-label="Note name"
+          aria-label={label}
           placeholder="Untitled"
           className="w-full border-none bg-transparent py-0 pl-[27px] pr-0 text-text outline-none placeholder:text-text-tertiary"
         />
