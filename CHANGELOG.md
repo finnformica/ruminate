@@ -2,6 +2,20 @@
 
 ## 2026-W38
 
+### Changed
+
+- <kbd>⌘</kbd> <kbd>K</kbd> no longer searches only the open note. It used to add an `in:` scope of the note you were in (or the block you had zoomed into) to everything you typed, so a search from inside a note never found anything elsewhere. Now it searches everything wherever it opens; to look inside the open note, type `in:` and pick it — it leads the suggestions as "this note".
+- The query's filters are pills, not text. Finish typing a qualifier (`type:todo`, `in:`, `-type:done`, `sort:updated` — a space after it, or a pick from the suggestions) and it leaves the line for a pill beneath the box, on the notes page and in <kbd>⌘</kbd> <kbd>K</kbd> alike, so the line holds only the words you are searching for. Click a pill to take the filter out; <kbd>⌫</kbd> on an empty line takes the last pill back into the line to edit; Clear, or <kbd>Esc</kbd> in the palette, empties both. The `?query=` URL and what the search runs are unchanged: the pills and the words together.
+- <kbd>⌘</kbd> <kbd>P</kbd> is the <kbd>⌘</kbd> <kbd>K</kbd> palette with two pills set: `type:heading` and `in:` the open note (or the zoomed block). The results are that note's headings in order, typing narrows them, and <kbd>↵</kbd> on one opens the note zoomed into it. Take the pills off and it is the ordinary search. There is no longer a separate outline mode.
+- The palette starts empty each time it opens; the query goes with the dialog.
+- The suggestions popover is just its rows. The header that repeated the qualifier you had typed, the key hints beside it and the gloss on the right of every row are gone; a block type sits beside its markdown glyph (`[ ]` todo, `#` heading, `-` bullet, `1.` numbered, `>` quote, ``` code, `¶` paragraph), a note type beside its icon, and every row is capitalised. `sort:` is picked in two steps — the key (Title, Updated at), then Ascending or Descending — and lands written in full (`sort:title:asc`). The popover is as wide as its rows (within a minimum and a maximum) rather than a fixed 288px, and a list with no glyphs starts its labels at the edge instead of after an empty slot. `type:` offers headings as the one `heading` and lists as `bullet` and `ordered` — `h1`, `h2`, `h3` and `list` still work typed — and `sort:` no longer offers `id` (it still works typed). Inside a note, `in:` leads with that note even before it exists (today's daily note, say) and keeps it on top as you narrow.
+- A heading listed as a result — a pinned heading block in <kbd>⌘</kbd> <kbd>K</kbd>, a `type:heading` search — is drawn as a row among many: bold, at the body's size, level with the note rows beside it, with no heading breathing room above. It used to appear at its full in-note size, so a pinned heading towered over the Recent list.
+
+### Removed
+
+- The palette's outline mode: `@` typed first in <kbd>⌘</kbd> <kbd>K</kbd> to list headings, the live preview that highlighted and scrolled the note behind the dialog as you arrowed, and <kbd>⌫</kbd> on an empty query to leave the mode. Headings are searched with `type:heading` now (<kbd>⌘</kbd> <kbd>P</kbd> sets it), and a result opens the note at the heading.
+- The `?heading=` address on a note, which highlighted a heading by its text when the old palette opened one. Nothing has written it for some time; a link to a block is `?block=`.
+
 ### Added
 
 - Headings fold by default like any other block. The "Default expand" slider now counts every level from the top of the note, so a note of a heading, a sub-heading and the lists beneath opens at the default of two as just its two rows of headings, with the lists folded under the sub-heading. Until now a heading was always open and restarted the count beneath it, so those lists always showed whatever the slider said. Notes you have already folded on this device keep your folds.
@@ -29,7 +43,7 @@
 
 ### Changed
 
-- Notes shared with you are one list in the sidebar, under **Shared**, rather than a list per person. Who shared a note is its row's tooltip, and the note's header says it too, as a quieter second crumb after the title: _My Note › John Smith_. The shared-note notice above the blocks now sits flush with them.
+- Notes shared with you are one list in the sidebar, under **Shared**, rather than a list per person. Who shared a note is its row's tooltip, and the note's header says it too, as a quieter first crumb before the title: _John Smith › My Note_, with the note's icon beside its name. The shared-note notice above the blocks now sits flush with them.
 
 ### Removed
 

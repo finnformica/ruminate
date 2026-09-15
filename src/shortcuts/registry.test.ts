@@ -109,7 +109,7 @@ describe("shortcut registry entries", () => {
       APP_SHORTCUTS.historyBack,
       APP_SHORTCUTS.historyForward,
       APP_SHORTCUTS.commandMenu,
-      APP_SHORTCUTS.outlinePalette,
+      APP_SHORTCUTS.searchHeadings,
       APP_SHORTCUTS.newNote,
       APP_SHORTCUTS.save,
       APP_SHORTCUTS.toggleSidebar,

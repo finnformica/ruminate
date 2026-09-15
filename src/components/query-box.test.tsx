@@ -78,6 +78,14 @@ function type(input: HTMLInputElement, value: string) {
 }
 
 const popover = () => screen.queryByTestId("qualifier-suggestions")
+/** The filter pills beneath the line: an `in:` by its scope, the rest by
+ * the token. */
+const pillTokens = () =>
+  Array.from(
+    screen
+      .queryByTestId("query-filters")
+      ?.querySelectorAll<HTMLElement>("[data-scope],[data-filter]") ?? [],
+  ).map((pill) => pill.dataset.scope ?? pill.dataset.filter)
 const options = () => Array.from(popover()?.querySelectorAll('[role="option"]') ?? [])
 
 describe("the qualifier popover", () => {
@@ -88,9 +96,27 @@ describe("the qualifier popover", () => {
     expect(popover()?.textContent).toContain("Reading list")
     fireEvent.keyDown(input, { key: "ArrowDown" })
     fireEvent.keyDown(input, { key: "Enter" })
-    expect(onChange).toHaveBeenLastCalledWith("in:n2 ")
-    expect(input.value).toBe("in:n2 ")
+    // The pick is a finished filter: a pill, and the line clear again.
+    expect(onChange).toHaveBeenLastCalledWith("in:n2")
+    expect(input.value).toBe("")
+    expect(pillTokens()).toEqual(["n2"])
     expect(popover()).toBeNull()
+  })
+
+  it("leads with the open note, before typing and among what typing keeps", () => {
+    const { input } = renderBox({ currentNoteId: "n2" })
+    type(input, "in:")
+    expect(options()[0].getAttribute("data-suggestion")).toBe("n2")
+    type(input, "in:re")
+    expect(options()[0].getAttribute("data-suggestion")).toBe("n2")
+  })
+
+  it("offers an open note the corpus does not hold yet, by its id", () => {
+    const { input } = renderBox({ currentNoteId: "2026-09-15" })
+    type(input, "in:")
+    expect(options()[0].getAttribute("data-suggestion")).toBe("2026-09-15")
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(pillTokens()).toEqual(["2026-09-15"])
   })
 
   it("narrows notes by name as you type", () => {
@@ -100,12 +126,31 @@ describe("the qualifier popover", () => {
     expect(options()[0].textContent).toContain("Reading list")
   })
 
-  it("lists the sort keys with their directions, and the relative dates", () => {
-    const { input } = renderBox()
+  it("sort: picks the key, then the direction, then lands as a pill", () => {
+    const { input, onChange } = renderBox()
     type(input, "sort:")
-    expect(options().map((row) => row.getAttribute("data-suggestion"))).toContain("title:desc")
+    expect(options().map((row) => row.textContent)).toEqual(["Title", "Updated at"])
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(input, { key: "Enter" })
+    // The key is half a value: it stays in the line, and the picker moves
+    // on to the directions.
+    expect(input.value).toBe("sort:updated_at:")
+    expect(pillTokens()).toEqual([])
     type(input, "sort:updated_at:")
-    expect(options().map((row) => row.getAttribute("data-suggestion"))).toEqual(["updated_at:asc"])
+    expect(options().map((row) => row.textContent)).toEqual(["↑Ascending", "↓Descending"])
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(pillTokens()).toEqual(["sort:updated_at:desc"])
+    expect(onChange).toHaveBeenLastCalledWith("sort:updated_at:desc")
+    // Typed out in full, the key still offers its directions.
+    type(input, "sort:title")
+    expect(options().map((row) => row.textContent)).toEqual(["Title"])
+    type(input, "sort:title:a")
+    expect(options().map((row) => row.getAttribute("data-suggestion"))).toEqual(["title:asc"])
+  })
+
+  it("lists the relative dates", () => {
+    const { input } = renderBox()
     type(input, "date:")
     // The slash menu's shortcuts, each resolved to a day: the row reads as
     // the word, glossed with the date, and the day is what lands.
@@ -115,18 +160,53 @@ describe("the qualifier popover", () => {
     const dates = options().map((row) => row.getAttribute("data-suggestion"))
     for (const date of dates) expect(date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     fireEvent.keyDown(input, { key: "Tab" })
-    expect(input.value).toBe(`date:${dates[0]} `)
+    expect(pillTokens()).toEqual([`date:${dates[0]}`])
+    expect(input.value).toBe("")
     // `tom` finds Tomorrow by its label.
     type(input, "date:tom")
     expect(options()).toHaveLength(1)
     expect(options()[0].textContent).toContain("Tomorrow")
   })
 
+  it("draws a block type's markdown glyph beside it, and no gloss; no key hints", () => {
+    const { input } = renderBox()
+    type(input, "type:")
+    const glyphs = Object.fromEntries(
+      options().map((row) => [
+        row.getAttribute("data-suggestion"),
+        row.querySelector("[data-glyph]")?.getAttribute("data-glyph") ?? null,
+      ]),
+    )
+    expect(glyphs).toEqual({
+      todo: "[ ]",
+      done: "[x]",
+      task: "[ ]",
+      heading: "#",
+      bullet: "-",
+      ordered: "1.",
+      quote: ">",
+      code: "```",
+      image: "![]",
+      text: "¶",
+      note: null,
+      daily: null,
+      weekly: null,
+      template: null,
+    })
+    // Capitalised, beside the glyph; the heading levels and the list group
+    // are typed values only.
+    expect(
+      options().find((row) => row.getAttribute("data-suggestion") === "todo")?.textContent,
+    ).toBe("[ ]Todo")
+    expect(popover()?.textContent).not.toContain("move")
+    expect(popover()?.textContent).not.toContain("pick")
+  })
+
   it("clicking a row picks it", () => {
     const { input, onChange } = renderBox()
     type(input, "type:")
     fireEvent.click(popover()!.querySelector('[data-suggestion="quote"]')!)
-    expect(onChange).toHaveBeenLastCalledWith("type:quote ")
+    expect(onChange).toHaveBeenLastCalledWith("type:quote")
   })
 
   it("Escape dismisses it; leaving the box hides it", () => {
@@ -159,6 +239,21 @@ describe("the qualifier popover", () => {
     // jsdom lays nothing out, so the box measures narrow: the full width.
     expect(popover()?.getAttribute("data-placement")).toBe("full")
     expect(popover()?.style.top).not.toBe("")
+  })
+
+  it("draws the leading slot on every row or on none, so labels line up at the edge", () => {
+    const { input } = renderBox()
+    type(input, "sort:")
+    // Sort keys have no picture: no slot, the label is the whole row.
+    expect(popover()?.querySelector("[data-glyph]")).toBeNull()
+    expect(options()[0].children).toHaveLength(1)
+    type(input, "sort:title:")
+    // The directions have arrows: every row has the slot.
+    expect(options().map((row) => row.children.length)).toEqual([2, 2])
+    type(input, "type:")
+    // The note types have no glyph but sit among glyphs: they keep a slot.
+    const note = options().find((row) => row.getAttribute("data-suggestion") === "note")
+    expect(note?.children).toHaveLength(2)
   })
 
   it("tells assistive technology which row is highlighted, without moving focus", () => {
@@ -195,21 +290,73 @@ describe("the qualifier popover", () => {
 })
 
 describe("the box around the query", () => {
-  it("shows each `in:` in the text as a pill, and the pill takes it out", () => {
-    const { onChange } = renderBox({ value: "in:n1 milk" })
-    const pills = screen.getByTestId("query-scopes")
-    expect(pills.querySelector("[data-scope='n1']")).not.toBeNull()
-    fireEvent.click(pills.querySelector("button")!)
-    expect(onChange).toHaveBeenLastCalledWith("milk")
+  it("shows every qualifier in the value as a pill, with only the text in the line", () => {
+    const { input, onChange } = renderBox({ value: "in:n1 type:todo milk" })
+    expect(input.value).toBe("milk")
+    expect(pillTokens()).toEqual(["n1", "type:todo"])
+    // A pill's click takes its filter out of the query.
+    fireEvent.click(screen.getByTestId("query-filters").querySelector("button")!)
+    expect(onChange).toHaveBeenLastCalledWith("type:todo milk")
+    expect(pillTokens()).toEqual(["type:todo"])
   })
 
-  it("shows a scope in force that is not in the text, with its own remove", () => {
-    const onRemove = vi.fn()
-    renderBox({ impliedScope: { value: "n2", onRemove } })
-    const pills = screen.getByTestId("query-scopes")
-    expect(pills.querySelector("[data-scope='n2']")).not.toBeNull()
-    fireEvent.click(pills.querySelector("button")!)
-    expect(onRemove).toHaveBeenCalled()
+  it("lifts a qualifier out of the line once a space follows it", () => {
+    const { input, onChange } = renderBox()
+    type(input, "milk type:todo")
+    // Still being typed: no pill yet, and the value is the line as typed.
+    expect(pillTokens()).toEqual([])
+    expect(onChange).toHaveBeenLastCalledWith("milk type:todo")
+    type(input, "milk type:todo ")
+    expect(pillTokens()).toEqual(["type:todo"])
+    expect(input.value).toBe("milk ")
+    // The one string the caller holds: the filters first, then the text.
+    expect(onChange).toHaveBeenLastCalledWith("type:todo milk")
+    type(input, "milk bread")
+    expect(onChange).toHaveBeenLastCalledWith("type:todo milk bread")
+  })
+
+  it("⌫ on an empty line takes the last pill back into it to edit", () => {
+    const { input, onChange } = renderBox({ value: "in:n1 -type:done" })
+    input.focus()
+    fireEvent.keyDown(input, { key: "Backspace" })
+    expect(input.value).toBe("-type:done")
+    expect(pillTokens()).toEqual(["n1"])
+    expect(onChange).toHaveBeenLastCalledWith("in:n1 -type:done")
+    // With text in the line, ⌫ is the line's own.
+    type(input, "milk")
+    expect(fireEvent.keyDown(input, { key: "Backspace" })).toBe(true)
+    expect(pillTokens()).toEqual(["n1"])
+  })
+
+  it("reads a value set from outside afresh: every qualifier a pill", () => {
+    function Outside() {
+      const [value, setValue] = useState("milk")
+      return (
+        <>
+          <QueryBox value={value} onChange={setValue} />
+          <button type="button" onClick={() => setValue("type:done bread")}>
+            set
+          </button>
+        </>
+      )
+    }
+    render(
+      <Provider store={createStore()}>
+        <Outside />
+      </Provider>,
+    )
+    const input = screen.getByTestId("query-box") as HTMLInputElement
+    expect(input.value).toBe("milk")
+    fireEvent.click(screen.getByText("set"))
+    expect(input.value).toBe("bread")
+    expect(pillTokens()).toEqual(["type:done"])
+  })
+
+  it("Clear empties the line and the pills together", () => {
+    const { onChange } = renderBox({ value: "type:todo milk" })
+    fireEvent.click(screen.getByLabelText("Clear"))
+    expect(onChange).toHaveBeenLastCalledWith("")
+    expect(pillTokens()).toEqual([])
   })
 
   it("↓ hands the keyboard off when the caller takes it, and not otherwise", () => {
@@ -234,7 +381,7 @@ describe("the box around the query", () => {
     type(input, "type:")
     fireEvent.keyDown(input, { key: "Enter" })
     expect(onSubmit).not.toHaveBeenCalled()
-    expect(input.value).toBe("type:todo ")
+    expect(pillTokens()).toEqual(["type:todo"])
     fireEvent.keyDown(input, { key: "Enter" })
     expect(onSubmit).toHaveBeenCalledTimes(1)
   })

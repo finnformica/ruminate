@@ -44,7 +44,7 @@ export interface Shortcut {
  */
 export const APP_SHORTCUTS = {
   commandMenu: "mod+k",
-  outlinePalette: "mod+p",
+  searchHeadings: "mod+p",
   newNote: "mod+shift+o",
   save: "mod+s",
   focusEditor: "i",
@@ -287,9 +287,9 @@ const GLOBAL_ENTRIES: Shortcut[] = [
     group: "Global",
   },
   {
-    combos: [APP_SHORTCUTS.outlinePalette],
+    combos: [APP_SHORTCUTS.searchHeadings],
     scope: "global",
-    description: "Jump to a heading (or type @ in ⌘K)",
+    description: "Search the open note's headings (⌘K with type:heading and in: set)",
     group: "Global",
   },
   {
@@ -412,37 +412,19 @@ const PALETTE_ENTRIES: Shortcut[] = [
   {
     combos: ["Mod+Enter"],
     scope: "palette",
-    description: "Create a note titled with the query (untitled with none)",
-    group: "Palette",
-  },
-  {
-    combos: ["@"],
-    scope: "palette",
-    description: "Type @ first in ⌘K to jump to a heading",
-    group: "Palette",
-  },
-  {
-    combos: ["ArrowUp", "ArrowDown"],
-    scope: "palette",
-    description: "Preview the highlighted heading behind the dialog",
-    group: "Palette",
-  },
-  {
-    combos: ["Enter"],
-    scope: "palette",
-    description: "Jump to the highlighted heading",
-    group: "Palette",
-  },
-  {
-    combos: ["Escape"],
-    scope: "palette",
-    description: "Close, restoring the view exactly as it was",
+    description: "Create a note titled with the query's text (untitled with none)",
     group: "Palette",
   },
   {
     combos: ["Backspace"],
     scope: "palette",
-    description: "On an empty query: back to the commands palette (after @)",
+    description: "On an empty query: take the last filter pill back into the line to edit",
+    group: "Palette",
+  },
+  {
+    combos: ["Escape"],
+    scope: "palette",
+    description: "Clear the query (filters and text); again to close",
     group: "Palette",
   },
 ]

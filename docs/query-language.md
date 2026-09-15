@@ -46,17 +46,23 @@ A query that names only notes — a date, a bare property qualifier, or an empty
 - `in:<block id>` names a block; the query then runs over the blocks under it (the block itself is not inside itself). `type:heading in:blk_a1b2c3` lists the headings within that section.
 - It composes like any qualifier: `-in:` excludes, `in:a,b` means either, and it stacks with `type:`, a property and text.
 
-**It is set for you inside a note.** Open <kbd>⌘</kbd> <kbd>K</kbd> from a note and block results are scoped to that note — or, if you have zoomed into a block, to that block — shown as a pill under the query, exactly as a typed `in:` is shown on the notes page. Click the pill to search everything instead, or type your own `in:` to scope elsewhere. <kbd>↵</kbd> carries the scope into the results view as a plain `in:` in the URL, so it reads back as what it is.
+**It is never set for you.** <kbd>⌘</kbd> <kbd>K</kbd> searches everything wherever it opens; inside a note, type `in:` and the open note leads the suggestions, so scoping to it is one pick. <kbd>⌘</kbd> <kbd>P</kbd> is the one preset: the palette with `type:heading` and `in:` the open note (or the zoomed block) already set — its headings, narrowed as you type.
+
+## Filters as pills
+
+The query box — on the notes page and in <kbd>⌘</kbd> <kbd>K</kbd> — keeps the qualifiers out of the line. A `key:value` you finish typing (a space after it, or a pick from the suggestions) is lifted out as a **pill** beneath the box: an `in:` named as the note (or note › block), anything else as typed (`type: todo`, `-type: done`, `sort: updated`). The line holds only the words you are searching for, and the query the app runs — and the `?query=` URL <kbd>↵</kbd> opens — is the pills and the words together, pills first. Click a pill to take it out; <kbd>⌫</kbd> on an empty line takes the last pill back into the line to edit; Clear (or <kbd>Esc</kbd> in the palette) empties both.
 
 ## Suggestions as you type
 
 Typing a qualifier whose values are a known set opens a popover beside the token — on the notes page and in <kbd>⌘</kbd> <kbd>K</kbd>, the same one (`src/components/query-box.tsx`):
 
-- `type:` — the block types below, then the note types.
-- `in:` — your notes, by name, most recent first (the open note leads).
+- `type:` — the block types below, each beside its markdown glyph, then the note types. Headings are offered as the one `heading` and lists as `bullet` and `ordered`; `h1`…`h3` and `list` still work typed.
+- `in:` — your notes, by name, most recent first (the open note leads, even before it exists).
 - `has:` / `no:` — `dates`, `tasks`, `title`.
-- `sort:` — `title`, `updated_at`, `id`, each with its other direction (`title:desc`); typing `sort:title:` narrows to it.
-- `date:` — the slash menu's date shortcuts (Today, Tomorrow, Yesterday, Next week, Last week — `dateShortcuts` in `src/blocks/slash-menu.ts`, the one source for both), each glossed with the day it means. The day is what lands in the query (`date:2026-09-14`), exactly as the slash menu writes a day into a note; type a word (`date:tomorrow`) to keep a query relative.
+- `sort:` — in two steps: the key (Title, Updated at), then, once the key and its colon are there, Ascending or Descending, written in full (`sort:title:asc`, `sort:updated_at:desc`). Typing `sort:title:` goes straight to the second step. (`sort:id` still works typed; an id is opaque, so it is not offered.)
+- `date:` — the slash menu's date shortcuts (Today, Tomorrow, Yesterday, Next week, Last week — `dateShortcuts` in `src/blocks/slash-menu.ts`, the one source for both). The day is what lands in the query (`date:2026-09-14`), exactly as the slash menu writes a day into a note; type a word (`date:tomorrow`) to keep a query relative.
+
+The rows are just the values, capitalised (a block type beside its glyph): no header, no glosses, no key hints. ↑/↓ move, ↵ or Tab pick, Esc closes.
 
 Focus never leaves the box: keep typing to narrow the list, <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>↵</kbd> or <kbd>Tab</kbd> to pick (a note lands as its id; a value with spaces is quoted), <kbd>Esc</kbd> to leave what you typed. `-type:` and comma lists (`type:todo,done`) work the same way. On a phone, or in a narrow box, the popover takes the box's full width instead of hanging at the token.
 
