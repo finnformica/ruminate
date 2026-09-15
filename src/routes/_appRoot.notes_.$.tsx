@@ -250,24 +250,29 @@ function NotePage() {
     preventDefault: true,
   })
 
+  const favicon = note ? <NoteFavicon note={note} /> : <NoteIcon16 />
+
   return (
     <PageLayout
       // The note's name is its title now, not its (opaque) id. A shared
-      // note's header also says whose it is, as a quiet second crumb.
+      // note's header leads with whose it is, quietly, then the note as the
+      // current crumb — its favicon beside its name, as in the sidebar's
+      // rows — so the icon slot stays empty for a share.
       title={
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate">{note?.displayName || "Untitled"}</span>
           {share !== null ? (
             <>
+              <span className="truncate text-text-secondary">{shareOwnerName(share)}</span>
               <span aria-hidden className="shrink-0 text-text-tertiary">
                 ›
               </span>
-              <span className="truncate text-text-secondary">{shareOwnerName(share)}</span>
+              <span className="flex size-icon shrink-0 text-text-secondary">{favicon}</span>
             </>
           ) : null}
+          <span className="truncate">{note?.displayName || "Untitled"}</span>
         </span>
       }
-      icon={note ? <NoteFavicon note={note} /> : <NoteIcon16 />}
+      icon={share === null ? favicon : undefined}
       actions={
         <div className="flex items-center gap-2">
           {/* Changes save automatically; this is the honest-but-quiet trace of
