@@ -1583,6 +1583,65 @@ describe("code blocks", () => {
     expect(container.querySelector("textarea")?.className).not.toContain("font-mono")
   })
 
+  it("typing a backtick and a space turns a block into a code block", () => {
+    const { container, getByTestId } = render(<Harness initial={"- a"} startEditing />)
+    const textarea = container.querySelector("textarea")!
+    fireEvent.change(textarea, { target: { value: "` a" } })
+    expect(serializedLines(getByTestId)).toEqual(["```", "a", "```"])
+    expect(container.querySelector("textarea")?.className).toContain("font-mono")
+  })
+
+  it("keeps code that begins with a marker as code, but a lone marker turns it back", () => {
+    const { container, getByTestId } = render(<Harness initial={CODE} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "Enter" }) // edit blk_code
+    const textarea = container.querySelector("textarea")!
+    // A Python comment, a YAML list: code, not a heading or a bullet.
+    fireEvent.change(textarea, { target: { value: "# a comment\nprint(1)" } })
+    expect(serializedLines(getByTestId).slice(0, 2)).toEqual(["```ts", "# a comment"])
+    fireEvent.change(textarea, { target: { value: "- item: 1" } })
+    expect(serializedLines(getByTestId).slice(0, 2)).toEqual(["```ts", "- item: 1"])
+    // Cleared, then `- ` on its own: a bullet again.
+    fireEvent.change(textarea, { target: { value: "" } })
+    fireEvent.change(textarea, { target: { value: "- " } })
+    expect(serializedLines(getByTestId)).toEqual(["- ", "- after"])
+  })
+
+  it("` in select mode toggles a code block", () => {
+    const { container, getByTestId } = render(<Harness initial={"- a\n  id:: blk_a"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "`" })
+    expect(serializedLines(getByTestId)).toEqual(["```", "a", "```"])
+    fireEvent.keyDown(root, { key: "`" })
+    expect(serializedLines(getByTestId)).toEqual(["a"])
+  })
+
+  it("the language label is a field: click, type, Enter", () => {
+    const { container, getByTestId } = render(<Harness initial={CODE} />)
+    fireEvent.click(container.querySelector('[data-testid="code-language"]')!)
+    const input = container.querySelector<HTMLInputElement>('[data-testid="code-language-input"]')!
+    expect(input.value).toBe("ts")
+    fireEvent.change(input, { target: { value: "py" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(serializedLines(getByTestId)[0]).toBe("```py")
+    expect(container.querySelector('[data-testid="code-language"]')?.textContent).toBe("py")
+    // Escape puts the old one back; clearing it drops the language.
+    fireEvent.click(container.querySelector('[data-testid="code-language"]')!)
+    fireEvent.change(container.querySelector('[data-testid="code-language-input"]')!, {
+      target: { value: "rb" },
+    })
+    fireEvent.keyDown(container.querySelector('[data-testid="code-language-input"]')!, {
+      key: "Escape",
+    })
+    expect(serializedLines(getByTestId)[0]).toBe("```py")
+    fireEvent.click(container.querySelector('[data-testid="code-language"]')!)
+    fireEvent.change(container.querySelector('[data-testid="code-language-input"]')!, {
+      target: { value: "" },
+    })
+    fireEvent.blur(container.querySelector('[data-testid="code-language-input"]')!)
+    expect(serializedLines(getByTestId)[0]).toBe("```")
+  })
+
   it("typing ``` then Enter turns a block into a code block", () => {
     const { container, getByTestId } = render(<Harness initial={"- a"} startEditing />)
     const textarea = container.querySelector("textarea")!

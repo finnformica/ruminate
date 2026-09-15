@@ -62,6 +62,8 @@ describe("leadingMarker (the typing shortcut)", () => {
     expect(leadingMarker("# Title")).toEqual({ type: "h1", text: "Title" })
     expect(leadingMarker("### Small")).toEqual({ type: "h1", text: "Small" })
     expect(leadingMarker("- item")).toEqual({ type: "ul", text: "item" })
+    expect(leadingMarker("` x = 1")).toEqual({ type: "code", text: "x = 1" })
+    expect(leadingMarker("`x`")).toBeNull()
     expect(leadingMarker("[] task")).toEqual({ type: "todo", text: "task" })
     expect(leadingMarker("[x] done")).toEqual({ type: "done", text: "done" })
     expect(leadingMarker("> quote")).toEqual({ type: "quote", text: "quote" })

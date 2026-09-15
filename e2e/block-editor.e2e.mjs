@@ -95,7 +95,7 @@ for (const name of ["Some intro text", "A bullet point"]) {
 // keeps the line's height.
 await story("blockeditor--code")
 await page.screenshot({ path: `${OUT}/02c-code.png` })
-for (const name of ["export function greet", "Some text with"]) {
+for (const name of ["export async function fetchNotes", "Some text with"]) {
   const { viewBox, editBox } = await measureViewVsEdit(name)
   const dy = Math.abs(viewBox.y - editBox.y)
   const dh = Math.abs(viewBox.height - editBox.height)

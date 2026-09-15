@@ -333,7 +333,15 @@ export function BlockItem({
     // becomes a bullet, → `1. ` an ordered item, → `# ` a heading, and so on),
     // and the marker itself is dropped — the feel of markdown, none stored.
     // Otherwise the edit is to the block's text.
-    const typed = leadingMarker(newBody)
+    // In a code block a leading `# ` or `- ` is code (a comment, a YAML
+    // list), not a marker: only a marker typed on its own, into an empty
+    // block, turns it back into that type. And code's own marker (a
+    // backtick) never re-types the block it is already in.
+    const leading = leadingMarker(newBody)
+    const typed =
+      leading !== null && (type !== "code" || (leading.text === "" && leading.type !== "code"))
+        ? leading
+        : null
     const text = typed !== null ? typed.text : newBody
     if (typed !== null) {
       // The marker left the visible text; keep the caret relative to it.

@@ -10,6 +10,7 @@ import { PinFillIcon12 } from "../icons"
 import { NoteFavicon } from "../note-favicon"
 import type { BlockEditorApi } from "./block-item"
 import { CodeHighlight } from "./code-highlight"
+import { CodeLanguage } from "./code-language"
 import { ImageFigure } from "./image-figure"
 
 /**
@@ -262,27 +263,18 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     // Selected, its border takes the selection ring's colour (`.block-code-
     // panel`, block-editor.css), since it sits exactly where the ring
     // would. The language sits in its top-right corner — chrome, not
-    // content — over the padding the text does not use.
-    wrap: (content, { block, slotted }) => {
-      const language = String(block.props?.language ?? "")
+    // content, and a control: click it to change it (`code-language.tsx`).
+    wrap: (content, { block, api, slotted }) => {
       return (
         <div
           data-testid="code-panel"
           className={cx(
-            "block-code-panel prism relative -my-0.5 flex min-w-0 flex-1 rounded border border-border-secondary bg-[var(--color-bg-code-block)] py-px pr-[5px]",
+            "group block-code-panel prism relative -my-0.5 flex min-w-0 flex-1 rounded border border-border-secondary bg-[var(--color-bg-code-block)] py-px pr-[5px]",
             slotted ? "-mr-1.5 pl-1" : "-mx-1.5 pl-[28px]",
           )}
         >
           {content}
-          {language ? (
-            <span
-              aria-hidden
-              data-testid="code-language"
-              className="pointer-events-none absolute right-[5px] top-1 select-none font-mono text-[11px] leading-4 text-text-tertiary"
-            >
-              {language}
-            </span>
-          ) : null}
+          <CodeLanguage block={block} api={api} />
         </div>
       )
     },
