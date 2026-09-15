@@ -65,8 +65,8 @@ export interface QualifierOption {
   value: string
   /** How the row reads (defaults to the value). */
   label?: string
-  /** A short gloss, in the row's trailing slot. */
-  description?: string
+  /** A markdown glyph for the row's leading slot (`type:` rows). */
+  glyph?: string
 }
 
 /**
@@ -123,47 +123,36 @@ export function filterQualifierOptions(
  * with the direction it does not default to as a second row (`sort:title`
  * is A→Z, so `title:desc` is offered beside it). `date:` is supplied by
  * `dateQualifierOptions` — its rows carry today's date, so they are built
- * when asked for, not when the module loads.
+ * when asked for, not when the module loads. A row is its value (or its
+ * label) and, for a block type, its glyph: nothing is glossed.
  */
 export const STATIC_QUALIFIER_OPTIONS: Readonly<Record<string, readonly QualifierOption[]>> = {
+  // The block types, each with its markdown glyph, then the note types.
   type: [
     ...searchTypeOptions(),
-    { value: "note", description: "notes: plain notes" },
-    { value: "daily", description: "notes: daily" },
-    { value: "weekly", description: "notes: weekly" },
-    { value: "template", description: "notes: templates" },
+    { value: "note" },
+    { value: "daily" },
+    { value: "weekly" },
+    { value: "template" },
   ],
-  has: [
-    { value: "dates", description: "with any date" },
-    { value: "tasks", description: "with an open task" },
-    { value: "title", description: "with a title" },
-  ],
-  no: [
-    { value: "dates", description: "without a date" },
-    { value: "tasks", description: "without an open task" },
-    { value: "title", description: "without a title" },
-  ],
+  has: [{ value: "dates" }, { value: "tasks" }, { value: "title" }],
+  no: [{ value: "dates" }, { value: "tasks" }, { value: "title" }],
+  // `sort:id` still works when typed; it is not offered, an id being
+  // opaque (docs/graph-storage.md).
   sort: [
-    { value: "title", description: "title, A to Z" },
-    { value: "title:desc", description: "title, Z to A" },
-    { value: "updated_at", description: "most recently updated first" },
-    { value: "updated_at:asc", description: "least recently updated first" },
-    { value: "id", description: "oldest first" },
-    { value: "id:desc", description: "newest first" },
+    { value: "title" },
+    { value: "title:desc" },
+    { value: "updated_at" },
+    { value: "updated_at:asc" },
   ],
 }
 
 /** The `date:` rows: the slash menu's date shortcuts (Today, Tomorrow, …
  * — `dateShortcuts`, the one source for both), each resolved to the day it
  * means right now. The day is what lands in the query, as the slash menu
- * writes a day into a note; the row reads as the word, glossed with the
- * date. */
+ * writes a day into a note; the row reads as the word. */
 export function dateQualifierOptions(now: Date = new Date()): QualifierOption[] {
-  return dateShortcuts(now).map((shortcut) => ({
-    value: shortcut.date,
-    label: shortcut.label,
-    description: shortcut.detail,
-  }))
+  return dateShortcuts(now).map((shortcut) => ({ value: shortcut.date, label: shortcut.label }))
 }
 
 /** The keys the picker opens for: the static sets above, the one built on

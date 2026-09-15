@@ -419,7 +419,7 @@ describe("block results", () => {
     input.setSelectionRange(3, 3)
     fireEvent.keyUp(input, { key: ":" })
     const picker = screen.getByTestId("qualifier-suggestions")
-    expect(picker.querySelector('[role="option"]')?.textContent).toContain("this note")
+    expect(picker.querySelector('[role="option"]')?.getAttribute("data-suggestion")).toBe("note-1")
     fireEvent.keyDown(input, { key: "Enter" })
     expect(input.value).toBe("")
     expect(pills()).toEqual(["note-1"])
@@ -656,6 +656,24 @@ describe("note results", () => {
       params: { _splat: "journal" },
       search: { query: undefined, block: "blk_ship" },
     })
+  })
+
+  it("a pinned heading block is a row like the notes beside it: body scale, no breathing room", () => {
+    renderMenu({
+      open: true,
+      notes: [RESEARCH],
+      touches: [{ id: "research", at: 1 }],
+      pinnedBlocks: [{ id: "blk_semis", noteId: "research" }],
+    })
+    const row = rowOf("blk_semis")
+    const text = row?.querySelector<HTMLElement>(".whitespace-pre-wrap")
+    expect(text).not.toBeNull()
+    expect(text?.className).not.toContain("text-2xl")
+    expect(text?.className).toContain("font-bold")
+    expect(row?.querySelector("[data-block-line]")?.getAttribute("data-heading-scale")).toBeNull()
+    expect(
+      rowOf("blk_semis")?.querySelector("[data-testid='heading-hash']")?.className,
+    ).not.toContain("text-2xl")
   })
 
   it("Pinned holds the pinned notes that are not recent, and goes with Recent when typing", async () => {

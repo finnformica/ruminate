@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest"
 import { dateShortcuts } from "../blocks/slash-menu"
-import { formatDate } from "./date"
 import {
   STATIC_QUALIFIER_OPTIONS,
   SUGGESTED_QUALIFIER_KEYS,
@@ -122,8 +121,6 @@ describe("sort: and date: vocabularies", () => {
       "title:desc",
       "updated_at",
       "updated_at:asc",
-      "id",
-      "id:desc",
     ])
     // The direction suffix is part of the value the picker filters on.
     const trigger = atEnd("sort:title:")
@@ -141,9 +138,7 @@ describe("sort: and date: vocabularies", () => {
     const options = dateQualifierOptions(now)
     // The one source the slash menu's date rows come from: same words,
     // same days.
-    expect(options).toEqual(
-      dateShortcuts(now).map((s) => ({ value: s.date, label: s.label, description: s.detail })),
-    )
+    expect(options).toEqual(dateShortcuts(now).map((s) => ({ value: s.date, label: s.label })))
     expect(options.map((option) => option.label)).toEqual([
       "Today",
       "Tomorrow",
@@ -158,7 +153,6 @@ describe("sort: and date: vocabularies", () => {
       "2026-09-20",
       "2026-09-06",
     ])
-    expect(options[0].description).toBe(formatDate("2026-09-13"))
     // The row is found by its word, and the day is what a pick writes.
     expect(filterQualifierOptions(options, "tom").map((o) => o.value)).toEqual(["2026-09-14"])
     expect(SUGGESTED_QUALIFIER_KEYS).toContain("date")

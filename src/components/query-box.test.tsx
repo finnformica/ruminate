@@ -103,6 +103,22 @@ describe("the qualifier popover", () => {
     expect(popover()).toBeNull()
   })
 
+  it("leads with the open note, before typing and among what typing keeps", () => {
+    const { input } = renderBox({ currentNoteId: "n2" })
+    type(input, "in:")
+    expect(options()[0].getAttribute("data-suggestion")).toBe("n2")
+    type(input, "in:re")
+    expect(options()[0].getAttribute("data-suggestion")).toBe("n2")
+  })
+
+  it("offers an open note the corpus does not hold yet, by its id", () => {
+    const { input } = renderBox({ currentNoteId: "2026-09-15" })
+    type(input, "in:")
+    expect(options()[0].getAttribute("data-suggestion")).toBe("2026-09-15")
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(pillTokens()).toEqual(["2026-09-15"])
+  })
+
   it("narrows notes by name as you type", () => {
     const { input } = renderBox()
     type(input, "in:read")
@@ -131,6 +147,34 @@ describe("the qualifier popover", () => {
     type(input, "date:tom")
     expect(options()).toHaveLength(1)
     expect(options()[0].textContent).toContain("Tomorrow")
+  })
+
+  it("draws a block type's markdown glyph beside it, and no gloss; no key hints", () => {
+    const { input } = renderBox()
+    type(input, "type:")
+    const glyphs = Object.fromEntries(
+      options().map((row) => [
+        row.getAttribute("data-suggestion"),
+        row.querySelector("[data-glyph]")?.getAttribute("data-glyph") ?? null,
+      ]),
+    )
+    expect(glyphs).toMatchObject({
+      todo: "[ ]",
+      done: "[x]",
+      task: "[ ]",
+      heading: "#",
+      h2: "##",
+      bullet: "-",
+      ordered: "1.",
+      quote: ">",
+      code: "```",
+      text: "¶",
+    })
+    expect(
+      options().find((row) => row.getAttribute("data-suggestion") === "todo")?.textContent,
+    ).toBe("[ ]todo")
+    expect(popover()?.textContent).not.toContain("move")
+    expect(popover()?.textContent).not.toContain("pick")
   })
 
   it("clicking a row picks it", () => {

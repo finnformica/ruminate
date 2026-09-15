@@ -75,13 +75,11 @@ export interface BlockTypeDef {
   /** Offered by the slash menu even though it is not a plain type change
    * (an image asks for a file); gated on context. */
   readonly slash?: (context: SlashContext) => boolean
-  /** How search names this type: the `type:` value people type, its
-   * aliases, and the description the qualifier picker shows. Null for a
-   * type that is never a search result (`note`). */
+  /** How search names this type: the `type:` value people type and its
+   * aliases. Null for a type that is never a search result (`note`). */
   readonly search: {
     readonly value: string
     readonly aliases?: readonly string[]
-    readonly description: string
   } | null
 }
 
@@ -106,7 +104,7 @@ const heading = (id: BlockType, level: 1 | 2 | 3): BlockTypeDef => ({
   listItem: false,
   marked: true,
   turnInto: level === 1,
-  search: { value: id, description: `heading level ${level}` },
+  search: { value: id },
 })
 
 // The `[ ]` marker: `[ ]`, `[x]`, `[X]`, and the shorthand `[]`.
@@ -130,7 +128,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     listItem: false,
     marked: false,
     turnInto: true,
-    search: { value: "text", description: "paragraph" },
+    search: { value: "text" },
   },
   {
     id: "ul",
@@ -145,7 +143,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     marked: true,
     continues: "ul",
     turnInto: true,
-    search: { value: "bullet", aliases: ["ul"], description: "bullet item" },
+    search: { value: "bullet", aliases: ["ul"] },
   },
   {
     id: "ol",
@@ -167,7 +165,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     marked: true,
     continues: "ol",
     turnInto: true,
-    search: { value: "ordered", aliases: ["ol"], description: "numbered item" },
+    search: { value: "ordered", aliases: ["ol"] },
   },
   {
     id: "todo",
@@ -185,7 +183,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     marked: true,
     continues: "todo",
     turnInto: true,
-    search: { value: "todo", description: "unchecked to-do" },
+    search: { value: "todo" },
   },
   {
     id: "done",
@@ -201,7 +199,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     continues: "todo",
     splitsAs: "todo",
     turnInto: false,
-    search: { value: "done", description: "checked to-do" },
+    search: { value: "done" },
   },
   heading("h1", 1),
   heading("h2", 2),
@@ -218,7 +216,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     listItem: false,
     marked: true,
     turnInto: true,
-    search: { value: "quote", description: "quote" },
+    search: { value: "quote" },
   },
   {
     id: "code",
@@ -243,7 +241,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     marked: true,
     splitsAs: "text",
     turnInto: true,
-    search: { value: "code", description: "code" },
+    search: { value: "code" },
   },
   {
     id: "image",
@@ -276,7 +274,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     // slash menu offers it where uploads are on.
     turnInto: false,
     slash: (context) => context.images,
-    search: { value: "image", description: "image" },
+    search: { value: "image" },
   },
   {
     id: "note",
@@ -310,13 +308,12 @@ export function canonicalOf(type: BlockType): BlockType {
  * family groups (`task`, `heading`, `list`) alongside each type's own names. */
 interface SearchGroup {
   readonly value: string
-  readonly description: string
   readonly families: readonly BlockFamily[]
 }
 const SEARCH_GROUPS: readonly SearchGroup[] = [
-  { value: "task", description: "any to-do", families: ["todo"] },
-  { value: "heading", description: "any heading", families: ["heading"] },
-  { value: "list", description: "bullet or numbered item", families: ["bullet", "ordered"] },
+  { value: "task", families: ["todo"] },
+  { value: "heading", families: ["heading"] },
+  { value: "list", families: ["bullet", "ordered"] },
 ]
 
 /** The families in the order the search vocabulary lists them (the picker's
@@ -347,22 +344,31 @@ export function searchTypeValues(): Record<string, readonly BlockType[]> {
   return values
 }
 
+/** The markdown glyph the qualifier picker draws beside a `type:` row: the
+ * type's marker, or what stands for it where the marker is not a prefix
+ * (a numbered item's number, a code fence, an image's `![]`, a
+ * paragraph's pilcrow). */
+function searchGlyph(def: BlockTypeDef): string {
+  if (typeof def.marker === "function") return def.marker(1).trim()
+  if (def.marker.trim() !== "") return def.marker.trim()
+  return def.family === "code" ? "```" : def.family === "image" ? "![]" : "¶"
+}
+
 /** The qualifier picker's `type:` rows for blocks, in vocabulary order: a
- * family's members, with its group name beside them. */
-export function searchTypeOptions(): { value: string; description: string }[] {
-  const rows: { value: string; description: string }[] = []
+ * family's members, with its group name beside them, each with its glyph
+ * (a group's is its first member's). */
+export function searchTypeOptions(): { value: string; glyph: string }[] {
+  const rows: { value: string; glyph: string }[] = []
   for (const family of SEARCH_FAMILY_ORDER) {
     const members = BLOCK_TYPE_DEFS.filter((def) => def.family === family && def.search)
     const group = SEARCH_GROUPS.find((g) => g.families[0] === family)
+    const groupRow = group && { value: group.value, glyph: searchGlyph(members[0]) }
     // A group of one family reads "any …": after its members for to-dos
     // (todo, done, task), before them for headings (heading, h1, h2, h3);
     // the list group covers two families and leads them.
-    if (group && family !== "todo")
-      rows.push({ value: group.value, description: group.description })
-    for (const def of members)
-      rows.push({ value: def.search!.value, description: def.search!.description })
-    if (group && family === "todo")
-      rows.push({ value: group.value, description: group.description })
+    if (groupRow && family !== "todo") rows.push(groupRow)
+    for (const def of members) rows.push({ value: def.search!.value, glyph: searchGlyph(def) })
+    if (groupRow && family === "todo") rows.push(groupRow)
   }
   return rows
 }
