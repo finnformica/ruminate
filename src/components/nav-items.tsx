@@ -107,13 +107,14 @@ export function NavItems({
               </NavLink>
             </li>
           </ul>
+          {/* The lists, each under its own heading — Notes, Pinned, then
+              one Shared by … per share — with one rule above them all,
+              setting them off from the links above. */}
           {notes.length > 0 ? (
-            <NoteRows
-              notes={notes}
-              size={size}
-              onNavigate={onNavigate}
-              className="border-t border-border-secondary pt-3"
-            />
+            <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
+              <SectionHeading>Notes</SectionHeading>
+              <NoteRows notes={notes} size={size} onNavigate={onNavigate} />
+            </div>
           ) : booting ? (
             <NavListSkeleton />
           ) : null}
@@ -122,10 +123,8 @@ export function NavItems({
               the top of the notes above, so this list is for blocks — each
               opens its note zoomed into the block. */}
           {pinnedBlocks.length > 0 ? (
-            <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
-              <div className="flex h-6 items-center gap-2 px-2 text-sm text-text-secondary coarse:px-3">
-                <span className="truncate">Pinned</span>
-              </div>
+            <div className="flex flex-col gap-1 pt-2">
+              <SectionHeading>Pinned</SectionHeading>
               <PinnedBlockRows blocks={pinnedBlocks} size={size} onNavigate={onNavigate} />
             </div>
           ) : null}
@@ -134,16 +133,10 @@ export function NavItems({
               listed apart from the user's own notes — they are rows in
               someone else's corpus — but open, read and edit like any note. */}
           {sharedGroups.map(({ share, notes: sharedNotes }) => (
-            <div
-              key={share.id}
-              className="flex flex-col gap-1 border-t border-border-secondary pt-3"
-            >
-              <div
-                className="flex h-6 items-center gap-2 px-2 text-sm text-text-secondary coarse:px-3"
-                title={`Shared by ${shareOwnerName(share)} · read only`}
-              >
-                <span className="truncate">Shared by {shareOwnerName(share)}</span>
-              </div>
+            <div key={share.id} className="flex flex-col gap-1 pt-2">
+              <SectionHeading title={`Shared by ${shareOwnerName(share)} · read only`}>
+                Shared by {shareOwnerName(share)}
+              </SectionHeading>
               <NoteRows notes={sharedNotes} size={size} onNavigate={onNavigate} />
             </div>
           ))}
@@ -197,20 +190,30 @@ export function NavItems({
   )
 }
 
+/** A sidebar list's heading: quiet, in the row's inset. */
+function SectionHeading({ title, children }: { title?: string; children: React.ReactNode }) {
+  return (
+    <div
+      className="flex h-6 items-center gap-2 px-2 text-sm text-text-secondary coarse:px-3"
+      title={title}
+    >
+      <span className="truncate">{children}</span>
+    </div>
+  )
+}
+
 /** The note rows of one list: the user's own, or one share's. */
 function NoteRows({
   notes,
   size,
   onNavigate,
-  className,
 }: {
   notes: Note[]
   size: "medium" | "large"
   onNavigate?: () => void
-  className?: string
 }) {
   return (
-    <ul className={cx("flex flex-col gap-1", className)}>
+    <ul className="flex flex-col gap-1">
       {notes.map((note) => (
         <li key={note.id} className="note-row group/note relative">
           {/* The note fills the row. Its actions button is not there
