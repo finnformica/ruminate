@@ -153,6 +153,7 @@ declaratively in `src/blocks/keymap.ts` and dispatched through the command layer
 | Toggle checkbox (todo blocks)            | <kbd>x</kbd>                                                               |
 | Turn into: heading / bullet / todo       | <kbd>#</kbd> / <kbd>-</kbd> / <kbd>[</kbd>                                 |
 | Turn into: quote / numbered item         | <kbd>></kbd> / <kbd>1</kbd>                                                |
+| Turn into: code block                    | <kbd>`</kbd>                                                               |
 | Zoom into the block (see Zoom below)     | <kbd>F</kbd> (or <kbd>⌘</kbd> <kbd>.</kbd>)                                |
 | Zoom out one level                       | <kbd>⇧</kbd> <kbd>F</kbd>                                                  |
 | Exit zoom entirely                       | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>                                     |
@@ -183,7 +184,7 @@ job, and the fold walk never leaves the zoomed subtree. In edit mode
 **Turn into**: select mode never types text, so the markdown marker keys are
 structural — each _toggles_ the highlighted block's type: <kbd>#</kbd>
 heading, <kbd>-</kbd> bullet, <kbd>[</kbd> todo, <kbd>></kbd> quote,
-<kbd>1</kbd> numbered item. A block already of that type strips back to a
+<kbd>1</kbd> numbered item, <kbd>`</kbd> code block. A block already of that type strips back to a
 paragraph; anything else swaps just the leading marker — content and children
 are never touched, and each press is one undo step. On an _empty_ block the
 marker applies and editing opens, so you start typing that type immediately.

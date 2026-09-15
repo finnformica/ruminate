@@ -226,6 +226,11 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     label: "Code",
     keywords: ["code", "snippet", "pre", "fence", "monospace"],
     marker: "",
+    // The typing shortcut is a backtick and a space — the code span's own
+    // fence, one character of it — and the same key turns into code in
+    // select mode. Export is still the three-backtick fence (`toLines`).
+    typed: { re: /^`[ \t]+/ },
+    turnIntoKey: "`",
     // A fence spans lines, so import is the parser's (`parse.ts` reads the
     // fence as one block); export writes it back.
     toLines: (block) => [`\`\`\`${codeLanguage(block)}`, ...block.text.split("\n"), "```"],

@@ -88,6 +88,82 @@ for (const name of ["Some intro text", "A bullet point"]) {
   await page.keyboard.press("Escape")
 }
 
+// --- Code: the panel wraps the line, so editing never resizes the block ---
+// A code block's padding and border sit around the line, not on the
+// textarea, so the block is the same height edited as viewed, the empty
+// block is a full line tall from the start, and a paragraph's inline chip
+// keeps the line's height.
+await story("blockeditor--code")
+await page.screenshot({ path: `${OUT}/02c-code.png` })
+for (const name of ["export async function fetchNotes", "Some text with"]) {
+  const { viewBox, editBox } = await measureViewVsEdit(name)
+  const dy = Math.abs(viewBox.y - editBox.y)
+  const dh = Math.abs(viewBox.height - editBox.height)
+  check(
+    `"${name}": no vertical shift/resize when editing`,
+    dy <= 1 && dh <= 1,
+    `dy=${dy.toFixed(1)} dh=${dh.toFixed(1)}`,
+  )
+  await page.keyboard.press("Escape")
+}
+{
+  // The panel is the row's surface: its box is the line's box, so a one-line
+  // code block is exactly as tall as a one-line paragraph, and its text
+  // starts in the same column as a paragraph's.
+  const geo = await page.evaluate(() => {
+    const box = (sel) => document.querySelector(sel).getBoundingClientRect()
+    const line = box('[data-block-row="blk_cl"] [data-block-line]')
+    const panel = box('[data-block-row="blk_cl"] [data-testid="code-panel"]')
+    return {
+      left: panel.left - line.left,
+      right: line.right - panel.right,
+      top: panel.top - line.top,
+      bottom: line.bottom - panel.bottom,
+      codeText: box('[data-block-id="blk_ce"]').left,
+      paraText: box('[data-block-id="blk_cz"]').left,
+      oneLineCode: box('[data-block-row="blk_ce"] [data-block-line]').height,
+      oneLinePara: box('[data-block-row="blk_cz"] [data-block-line]').height,
+    }
+  })
+  check(
+    "code panel is the row's surface",
+    [geo.left, geo.right, geo.top, geo.bottom].every((d) => Math.abs(d) <= 1),
+    `left=${geo.left} right=${geo.right} top=${geo.top} bottom=${geo.bottom}`,
+  )
+  check(
+    "one-line code block is as tall as a paragraph",
+    Math.abs(geo.oneLineCode - geo.oneLinePara) <= 1,
+    `code=${geo.oneLineCode.toFixed(1)} para=${geo.oneLinePara.toFixed(1)}`,
+  )
+  check(
+    "code text starts in the text column",
+    Math.abs(geo.codeText - geo.paraText) <= 1,
+    `code=${geo.codeText} para=${geo.paraText}`,
+  )
+  // ``` then Enter: the new, empty code block is one full line tall at once
+  // and does not jump when the first character is typed.
+  await block("A closing paragraph").click()
+  await page.keyboard.press("Enter")
+  await page.keyboard.press("End")
+  await page.keyboard.press("Enter")
+  await page.keyboard.type("```js")
+  await page.keyboard.press("Enter")
+  const ta = page.locator("textarea").first()
+  await ta.waitFor()
+  await page.waitForTimeout(100)
+  const empty = await ta.boundingBox()
+  await page.keyboard.type("const x = 1")
+  await page.waitForTimeout(100)
+  const typed = await ta.boundingBox()
+  check(
+    "empty code block keeps its height on the first keystroke",
+    Math.abs(empty.height - typed.height) <= 1,
+    `empty=${empty.height.toFixed(1)} typed=${typed.height.toFixed(1)}`,
+  )
+  await page.screenshot({ path: `${OUT}/02d-code-fresh.png` })
+  await page.keyboard.press("Escape")
+}
+
 // --- Markdown shortcuts on an empty note ---
 await story("blockeditor--empty")
 const bodyCount = await page.getByTestId("block-body").count()

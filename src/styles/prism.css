@@ -1,51 +1,72 @@
-.prism .comment {
+/* Syntax highlighting — see docs/design-principles.md.
+ *
+ * Prism's token classes (`refractor` emits them; src/components/block-editor/
+ * code-highlight.tsx draws them) in the theme's four syntax hues
+ * (variables.css). Four is the point: names in green, calls and types in
+ * cyan, literals in red, structure in purple, and the rest — punctuation,
+ * operators, comments — in the muted ink, so code reads as text with a few
+ * things picked out rather than a Christmas tree. Print drops every hue to
+ * the text colour (variables.css, @media print). */
+
+.prism .comment,
+.prism .prolog,
+.prism .doctype,
+.prism .cdata,
+.prism .punctuation,
+.prism .operator {
   color: var(--color-text-secondary);
 }
 
-.prism .punctuation {
-  color: var(--color-text-secondary);
-}
-
-.prism .keyword {
+/* Names: keywords, and the left-hand side of things. */
+.prism .keyword,
+.prism .property,
+.prism .selector,
+.prism .attr-name,
+.prism .key,
+.prism .variable {
   color: var(--color-syntax-green);
 }
 
-.prism .function {
+/* Calls and types. */
+.prism .function,
+.prism .class-name,
+.prism .builtin,
+.prism .attr-value,
+.prism .url,
+.prism .maybe-class-name {
   color: var(--color-syntax-cyan);
 }
 
-.prism .property {
-  color: var(--color-syntax-green);
+/* Literals. */
+.prism .string,
+.prism .char,
+.prism .regex,
+.prism .number,
+.prism .boolean,
+.prism .inserted {
+  color: var(--color-syntax-red);
 }
 
-.prism .selector {
-  color: var(--color-syntax-green);
-}
-
-.prism .tag {
+/* Structure: tags, at-rules, constants. */
+.prism .tag,
+.prism .atrule,
+.prism .constant,
+.prism .symbol,
+.prism .important,
+.prism .deleted {
   color: var(--color-syntax-purple);
 }
 
-.prism .attr-name {
-  color: var(--color-syntax-green);
+/* A template literal's `${…}` is code again, not string. */
+.prism .interpolation {
+  color: var(--color-text);
 }
 
-.prism .attr-value {
-  color: var(--color-syntax-cyan);
+.prism .important,
+.prism .bold {
+  font-weight: var(--font-weight-bold);
 }
 
-.prism .key {
-  color: var(--color-syntax-green);
-}
-
-.prism .boolean {
-  color: var(--color-syntax-red);
-}
-
-.prism .string {
-  color: var(--color-syntax-red);
-}
-
-.prism .operator {
-  color: var(--color-text-secondary);
+.prism .italic {
+  font-style: italic;
 }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useState } from "react"
 import { toast, Toaster } from "sonner"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
@@ -1537,16 +1537,52 @@ describe("code blocks", () => {
     "  id:: blk_after",
   ].join("\n")
 
-  it("renders verbatim in a mono panel with its language, no marker key", () => {
+  it("renders verbatim in a mono panel around the line, with its language, no marker slot", () => {
     const { container } = render(<Harness initial={CODE} />)
     const body = container.querySelector<HTMLElement>('[data-block-id="blk_code"]')!
     expect(body.textContent).toBe("const a = 1\n  b()")
     expect(body.className).toContain("font-mono")
     expect(body.className).toContain("whitespace-pre-wrap")
-    expect(container.querySelector('[data-testid="code-language"]')?.textContent).toBe("ts")
     const row = container.querySelector('[data-block-row="blk_code"]')!
-    expect(row.querySelector('[data-testid="code-slot"]')).not.toBeNull()
+    // The panel WRAPS the line: the surface, border and padding are its, so
+    // the body (and the textarea, below) stay chrome-free and the row's
+    // height maths holds.
+    const panel = row.querySelector<HTMLElement>('[data-testid="code-panel"]')!
+    expect(panel).not.toBeNull()
+    expect(panel.contains(body)).toBe(true)
+    expect(panel.className).toContain("border")
+    expect(body.className).not.toContain("border")
+    expect(panel.querySelector('[data-testid="code-language"]')?.textContent).toBe("ts")
+    // No marker slot: the panel starts where the row does, as a picture does.
+    expect(row.querySelector('[data-testid="paragraph-slot"]')).toBeNull()
+    expect(row.querySelector('[data-testid="code-slot"]')).toBeNull()
     expect(row.querySelector(".block-key")).toBeNull()
+  })
+
+  it("highlights the view for its language once the grammar has loaded", async () => {
+    const { container } = render(<Harness initial={CODE} />)
+    const body = container.querySelector<HTMLElement>('[data-block-id="blk_code"]')!
+    await waitFor(() => expect(body.querySelector(".token.keyword")?.textContent).toBe("const"))
+    // Tokens colour the text; they never change it.
+    expect(body.textContent).toBe("const a = 1\n  b()")
+    expect(body.closest('[data-testid="code-panel"]')?.className).toContain("prism")
+  })
+
+  it("stays plain for a language it has no grammar for", async () => {
+    const plain = ["```klingon", "nuqneH", "```", "  id:: blk_code"].join("\n")
+    const { container } = render(<Harness initial={plain} />)
+    const body = container.querySelector<HTMLElement>('[data-block-id="blk_code"]')!
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(body.querySelector(".token")).toBeNull()
+    expect(body.textContent).toBe("nuqneH")
+  })
+
+  it("gets the slot back for its chevron when it has rows under it", () => {
+    const parent = ["```ts", "x", "```", "  id:: blk_code", "  - child", "    id:: blk_child"]
+    const { container } = render(<Harness initial={parent.join("\n")} />)
+    const row = container.querySelector('[data-block-row="blk_code"]')!
+    expect(row.querySelector(".block-toggle")).not.toBeNull()
+    expect(container.querySelector('[data-block-row="blk_child"]')).not.toBeNull()
   })
 
   it("Enter while editing stays in the block; Shift+Enter leaves with a block below", () => {
@@ -1555,6 +1591,12 @@ describe("code blocks", () => {
     fireEvent.keyDown(root, { key: "Enter" }) // edit blk_code
     const textarea = container.querySelector("textarea")!
     expect(textarea.className).toContain("font-mono")
+    // The textarea sits in the panel, chrome-free: the panel's padding and
+    // border are the same around the view and the edit, so the swap never
+    // moves a character or changes the block's height.
+    expect(textarea.closest('[data-testid="code-panel"]')).not.toBeNull()
+    expect(textarea.className).toContain("p-0")
+    expect(textarea.className).toContain("border-none")
     // Enter is left to the textarea (a newline), so the doc is untouched.
     const enter = fireEvent.keyDown(textarea, { key: "Enter" })
     expect(enter).toBe(true)
@@ -1570,6 +1612,77 @@ describe("code blocks", () => {
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })
     expect(container.querySelectorAll("[data-block-row]")).toHaveLength(3)
     expect(container.querySelector("textarea")?.className).not.toContain("font-mono")
+  })
+
+  it("typing a backtick and a space turns a block into a code block, keeping the keyboard", () => {
+    const { container, getByTestId } = render(<Harness initial={"- a"} startEditing />)
+    const textarea = container.querySelector("textarea")!
+    fireEvent.change(textarea, { target: { value: "` a" } })
+    expect(serializedLines(getByTestId)).toEqual(["```", "a", "```"])
+    // The panel wraps the line, so this is a fresh textarea: it must have
+    // taken the focus, with the caret where the marker left it.
+    const after = container.querySelector<HTMLTextAreaElement>("textarea")!
+    expect(after.className).toContain("font-mono")
+    expect(document.activeElement).toBe(after)
+    expect(after.selectionStart).toBe(after.value.length)
+    // And back out again, the same way.
+    fireEvent.change(after, { target: { value: "" } })
+    fireEvent.change(container.querySelector("textarea")!, { target: { value: "- " } })
+    expect(serializedLines(getByTestId)).toEqual(["- "])
+    const back = container.querySelector<HTMLTextAreaElement>("textarea")!
+    expect(back.className).not.toContain("font-mono")
+    expect(document.activeElement).toBe(back)
+  })
+
+  it("keeps code that begins with a marker as code, but a lone marker turns it back", () => {
+    const { container, getByTestId } = render(<Harness initial={CODE} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "Enter" }) // edit blk_code
+    const textarea = container.querySelector("textarea")!
+    // A Python comment, a YAML list: code, not a heading or a bullet.
+    fireEvent.change(textarea, { target: { value: "# a comment\nprint(1)" } })
+    expect(serializedLines(getByTestId).slice(0, 2)).toEqual(["```ts", "# a comment"])
+    fireEvent.change(textarea, { target: { value: "- item: 1" } })
+    expect(serializedLines(getByTestId).slice(0, 2)).toEqual(["```ts", "- item: 1"])
+    // Cleared, then `- ` on its own: a bullet again.
+    fireEvent.change(textarea, { target: { value: "" } })
+    fireEvent.change(textarea, { target: { value: "- " } })
+    expect(serializedLines(getByTestId)).toEqual(["- ", "- after"])
+  })
+
+  it("` in select mode toggles a code block", () => {
+    const { container, getByTestId } = render(<Harness initial={"- a\n  id:: blk_a"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "`" })
+    expect(serializedLines(getByTestId)).toEqual(["```", "a", "```"])
+    fireEvent.keyDown(root, { key: "`" })
+    expect(serializedLines(getByTestId)).toEqual(["a"])
+  })
+
+  it("the language label is a field: click, type, Enter", () => {
+    const { container, getByTestId } = render(<Harness initial={CODE} />)
+    fireEvent.click(container.querySelector('[data-testid="code-language"]')!)
+    const input = container.querySelector<HTMLInputElement>('[data-testid="code-language-input"]')!
+    expect(input.value).toBe("ts")
+    fireEvent.change(input, { target: { value: "py" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(serializedLines(getByTestId)[0]).toBe("```py")
+    expect(container.querySelector('[data-testid="code-language"]')?.textContent).toBe("py")
+    // Escape puts the old one back; clearing it drops the language.
+    fireEvent.click(container.querySelector('[data-testid="code-language"]')!)
+    fireEvent.change(container.querySelector('[data-testid="code-language-input"]')!, {
+      target: { value: "rb" },
+    })
+    fireEvent.keyDown(container.querySelector('[data-testid="code-language-input"]')!, {
+      key: "Escape",
+    })
+    expect(serializedLines(getByTestId)[0]).toBe("```py")
+    fireEvent.click(container.querySelector('[data-testid="code-language"]')!)
+    fireEvent.change(container.querySelector('[data-testid="code-language-input"]')!, {
+      target: { value: "" },
+    })
+    fireEvent.blur(container.querySelector('[data-testid="code-language-input"]')!)
+    expect(serializedLines(getByTestId)[0]).toBe("```")
   })
 
   it("typing ``` then Enter turns a block into a code block", () => {

@@ -234,8 +234,8 @@ describe("edit mode Enter in and into a code block", () => {
 
   it("Enter on ```lang turns the block into a code block", () => {
     const evt = key({ key: "Enter" })
-    expect(resolveKey("edit", evt, typed("text", "```", caret("```", 3)))).toBe("turnIntoCode")
-    expect(resolveKey("edit", evt, typed("text", "```ts", caret("```ts", 5)))).toBe("turnIntoCode")
+    expect(resolveKey("edit", evt, typed("text", "```", caret("```", 3)))).toBe("openFence")
+    expect(resolveKey("edit", evt, typed("text", "```ts", caret("```ts", 5)))).toBe("openFence")
     // Not a fence opener: text after a space, or backticks mid-text.
     expect(resolveKey("edit", evt, typed("text", "``` x y", caret("``` x y", 7)))).toBe(
       "insertBelow",

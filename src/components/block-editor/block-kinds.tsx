@@ -9,6 +9,8 @@ import { noteTypeOf } from "../../utils/note-type"
 import { PinFillIcon12 } from "../icons"
 import { NoteFavicon } from "../note-favicon"
 import type { BlockEditorApi } from "./block-item"
+import { CodeHighlight } from "./code-highlight"
+import { CodeLanguage } from "./code-language"
 import { ImageFigure } from "./image-figure"
 
 /**
@@ -17,7 +19,7 @@ import { ImageFigure } from "./image-figure"
  * draws every row from one of these: which key stands in the marker slot,
  * the typography the view and the textarea share, any panel the text sits
  * in, and the chrome around the content line (a quote's bar, a code block's
- * language, an image's picture). Adding a type is adding its entry here and
+ * panel, an image's picture). Adding a type is adding its entry here and
  * in the registry; the row itself never names a type.
  */
 
@@ -31,6 +33,11 @@ export interface RowContext {
    * hides an empty line (an image's caption) must keep it while it is being
    * typed into. */
   editing: boolean
+  /** The row draws a marker slot before the content line: every type with a
+   * slot, and a parent of any type (its chevron needs one). A slotless
+   * type's chrome that reaches the row's edge (a code block's panel) must
+   * stop short of the slot when it is there. */
+  slotted: boolean
 }
 
 export interface BlockKind {
@@ -68,19 +75,22 @@ export interface BlockKind {
   readonly typography: (depth: number, block: Block) => string
   /** Extra space above the row, in px (headings breathe). */
   readonly topMargin?: (depth: number) => number
-  /** A panel the text sits in — the same classes on view and textarea. */
-  readonly panel?: string
   /** The textarea's ghost text while empty. */
   readonly placeholder?: string
-  /** The body is shown verbatim, not as inline markdown. */
-  readonly verbatim?: boolean
+  /** How the view draws the body. The default is inline markdown
+   * (`BlockContent`); a code block draws its text verbatim, tokenised for
+   * its language. The textarea is untouched either way. */
+  readonly body?: (block: Block) => ReactNode
   /** Extra classes on the rendered body (a checked to-do's strike-through). */
   readonly bodyClass?: string
   /** Chrome before the content line (a quote's bar). */
   readonly before?: (context: RowContext) => ReactNode
-  /** Chrome after the content line (a code block's language). */
+  /** Chrome after the content line (a note's pin). */
   readonly after?: (context: RowContext) => ReactNode
-  /** Wrap the content line (an image's picture above its caption). */
+  /** Wrap the content line (an image's picture above its caption, a code
+   * block's panel). The line itself stays chrome-free: the row sizes its
+   * textarea by its text alone, so a panel's padding and border belong
+   * here, around the line, never on it. */
   readonly wrap?: (content: ReactNode, context: RowContext) => ReactNode
 }
 
@@ -216,30 +226,57 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     ),
   },
   code: {
-    // A code block keys on nothing, like a paragraph: the panel is its marker.
-    slot: "glyph",
-    glyph: null,
-    slotTestId: "code-slot",
-    // Set in the mono face, a touch smaller, inside its panel.
-    typography: () => "font-mono text-[0.9em] leading-relaxed",
-    // A tinted, bordered, padded surface the text sits in. Whitespace is
-    // kept as typed.
-    panel:
-      "block-code rounded-lg border border-border-secondary bg-[var(--color-bg-code-block)] px-3 py-2 whitespace-pre-wrap [overflow-wrap:anywhere] [tab-size:2]",
-    // Verbatim: a code block's text is not markdown.
-    verbatim: true,
-    // The language, top-right of the panel — chrome, not content.
-    after: ({ block }) => {
-      const language = String(block.props?.language ?? "")
-      return language ? (
-        <span
-          aria-hidden
-          data-testid="code-language"
-          className="pointer-events-none absolute right-2 top-1.5 select-none font-mono text-[11px] leading-4 text-text-tertiary"
+    // No marker slot: the panel is the ROW SURFACE, as below, so it starts
+    // where the row does, as a picture does. A parent code block still gets
+    // the slot back to host its chevron, and its panel starts after it.
+    slot: "none",
+    // Body type in the mono face — the same size and leading as a
+    // paragraph, so a line of code is exactly as tall as a line of text and
+    // the panel that fits one is exactly the surface every other row has.
+    // The tab width rides the shared typography (a textarea inherits it),
+    // so the view and the textarea agree on every column.
+    typography: () => cx(BODY, "font-mono [tab-size:2]"),
+    // The view is tokenised for the language (`code-highlight.tsx`); the
+    // textarea shows the text plain in the same face, so the swap changes
+    // colour and nothing else. Never markdown.
+    body: (block) => (
+      <CodeHighlight text={block.text} language={String(block.props?.language ?? "")} />
+    ),
+    // The panel — a tinted, bordered surface at the row's own radius —
+    // WRAPS the line rather than being classes on it. The row sizes its
+    // textarea by its text alone (`1lh` empty, else its scroll height) and
+    // draws the view with the same `min-h-[1lh]`; padding and a border on
+    // the line itself broke both: an empty block's one-line box was eaten
+    // by its own padding (the caret clipped, then a jump to size on the
+    // first keystroke), and the border went uncounted, so every edit was
+    // 2px shorter than its view. Around the line, the chrome adds the same
+    // to both states and the text never moves.
+    //
+    // Its box IS the row's highlight surface: it pulls over the line's
+    // padding (2px above and below, 6px at the sides) with negative margins
+    // that its border and 1px of padding pay back, so a one-line block is
+    // the 27px every other row is, and turning a paragraph into code moves
+    // nothing — the text keeps its column (the 28px of left padding is the
+    // marker slot and gap it no longer has, less the border) and its right
+    // edge, and the panel simply appears around it. After a parent's slot,
+    // the panel starts where the slot ends and the text sits 4px in.
+    // Selected, its border takes the selection ring's colour (`.block-code-
+    // panel`, block-editor.css), since it sits exactly where the ring
+    // would. The language sits in its top-right corner — chrome, not
+    // content, and a control: click it to change it (`code-language.tsx`).
+    wrap: (content, { block, api, slotted }) => {
+      return (
+        <div
+          data-testid="code-panel"
+          className={cx(
+            "group block-code-panel prism relative -my-0.5 flex min-w-0 flex-1 rounded border border-border-secondary bg-[var(--color-bg-code-block)] py-px pr-[5px]",
+            slotted ? "-mr-1.5 pl-1" : "-mx-1.5 pl-[28px]",
+          )}
         >
-          {language}
-        </span>
-      ) : null
+          {content}
+          <CodeLanguage block={block} api={api} />
+        </div>
+      )
     },
   },
   image: {

@@ -641,7 +641,7 @@ describe("turn into (select-mode marker keys)", () => {
   })
 })
 
-describe("turnIntoCode", () => {
+describe("openFence", () => {
   it("makes an empty code block of the typed language, editing at its start", () => {
     const doc: BlockDoc = {
       props: null,
@@ -649,7 +649,7 @@ describe("turnIntoCode", () => {
       blocks: { x: { id: "x", type: "ul", text: "```ts", children: [] } },
     }
     const result = runCommand(
-      "turnIntoCode",
+      "openFence",
       input(doc, "x", { mode: "edit", visibleOrder: ["x"], caret: caret("```ts", 5) }),
     )
     expect(result.doc!.blocks.x).toEqual({
@@ -663,7 +663,7 @@ describe("turnIntoCode", () => {
     expect(result.op).toEqual({ type: "structural" })
     // No language: no props.
     const bare = runCommand(
-      "turnIntoCode",
+      "openFence",
       input(doc, "x", { mode: "edit", visibleOrder: ["x"], caret: caret("```", 3) }),
     )
     expect(bare.doc!.blocks.x.props).toBeUndefined()

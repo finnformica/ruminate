@@ -68,7 +68,7 @@ const both =
     a(input) && b(input)
 
 /** The whole text is a fence opener — three backticks and an optional
- * language — so Enter turns the block into a code block (`turnIntoCode`). */
+ * language — so Enter turns the block into a code block (`openFence`). */
 const isFenceOpener: Predicate = (input) =>
   !inCode(input) && !!input.caret && /^```[ \t]*\S*\s*$/.test(input.caret.value)
 
@@ -140,6 +140,9 @@ export const KEYMAP: Binding[] = [
   { mode: "select", combo: "Alt+>", command: "turnIntoQuote" },
   { mode: "select", combo: "Alt+Shift+>", command: "turnIntoQuote" },
   { mode: "select", combo: "1", command: "turnIntoOrdered" },
+  // A backtick — the code span's fence — turns into a code block.
+  { mode: "select", combo: "`", command: "turnIntoCode" },
+  { mode: "select", combo: "Alt+`", command: "turnIntoCode" },
   // Zoom ("focus mode"): f dives into the block, Shift+F surfaces one level.
   { mode: "select", combo: "f", command: "zoomIn" },
   { mode: "select", combo: "Shift+F", command: "zoomOut" },
@@ -171,7 +174,7 @@ export const KEYMAP: Binding[] = [
   // Cmd/Ctrl+Enter forces a same-type block below, ignoring the caret.
   { mode: "edit", combo: "Mod+Enter", command: "insertSiblingBelow" },
   // ```lang then Enter: the block becomes a code block.
-  { mode: "edit", combo: "Enter", when: isFenceOpener, command: "turnIntoCode" },
+  { mode: "edit", combo: "Enter", when: isFenceOpener, command: "openFence" },
   // Enter: empty list item exits the list; caret-at-end appends a fresh block;
   // otherwise split the line at the caret (carrying the list style).
   { mode: "edit", combo: "Enter", when: isEmptyListItem, command: "exitList" },

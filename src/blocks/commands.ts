@@ -353,6 +353,7 @@ export type CommandName =
   | "turnIntoQuote"
   | "turnIntoOrdered"
   | "turnIntoCode"
+  | "openFence"
   | "toggleCollapse"
   | "insertBelow"
   | "insertSiblingBelow"
@@ -620,6 +621,7 @@ export const COMMANDS: Record<CommandName, Command> = {
   turnIntoTodo: turnInto("todo"),
   turnIntoQuote: turnInto("quote"),
   turnIntoOrdered: turnInto("ol"),
+  turnIntoCode: turnInto("code"),
 
   /**
    * The fence shortcut: Enter on a block whose whole text is three backticks
@@ -627,7 +629,7 @@ export const COMMANDS: Record<CommandName, Command> = {
    * block of that language, editing. The keymap guards the shape
    * (`isFenceOpener`); the language is whatever followed the backticks.
    */
-  turnIntoCode: ({ doc, key, caret }) => {
+  openFence: ({ doc, key, caret }) => {
     const id = idOfKey(key)
     const language = /^```[ \t]*(\S*)\s*$/.exec(caret?.value ?? "")?.[1] ?? ""
     return {

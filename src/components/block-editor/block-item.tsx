@@ -207,10 +207,16 @@ export function BlockItem({
   // panel, and the chrome around the content line.
   const kind = kindOf(type)
   const typo = kind.typography(depth, block)
-  // A panel (a code block's) carries the same classes on the rendered view
-  // and the textarea, so editing never moves a character.
-  const panel = kind.panel ?? null
-  const rowContext: RowContext = { block, occurrence, api, depth, editing }
+  // Whether this block owns a collapse toggle at all: parents only, and never
+  // the zoom title (the editor renders its children itself, at depth 0). The
+  // row that closes a loop keeps its chevron too — the block has children,
+  // they are simply above it — pinned, greyed and inert, with the reason in
+  // its tooltip (zoom in to go round again).
+  const looped = !!occurrence.looped
+  const hasToggle = (hasChildren || looped) && !zoomTitle
+  // A marker slot is drawn unless the type has none AND nothing needs one.
+  const slotted = kind.slot !== "none" || hasToggle
+  const rowContext: RowContext = { block, occurrence, api, depth, editing, slotted }
   const roomy = kind.roomy?.(rowContext) ?? false
   // A ROOT of a results view (`api.fixedRoots`): its surface is set in by
   // the same 8.5px at the sides a listed note's is all round, so every
@@ -219,7 +225,13 @@ export function BlockItem({
   // margin still nets the text to the shared 4px column.
   const wide = !!api.fixedRoots && depth === 0
 
-  // Focus and place the caret when editing starts.
+  // Focus and place the caret when editing starts — and again when the
+  // block's TYPE changes mid-edit: a type whose chrome wraps the line (a
+  // code block's panel, `BlockKind.wrap`) puts the textarea in a different
+  // place in the tree, so React mounts a fresh element and the keyboard
+  // would be left on nothing. Typing `\` ` into a paragraph, or `- ` into an
+  // empty code block, must keep the caret where it is; the resize effect
+  // below, which runs after this one, lands it there (`pendingCaret`).
   useLayoutEffect(() => {
     if (!editing) return
     const el = textareaRef.current
@@ -232,7 +244,7 @@ export function BlockItem({
           ? 0
           : el.value.length
     el.setSelectionRange(pos, pos)
-  }, [editing, api.focus?.atStart, api.focus?.caret])
+  }, [editing, api.focus?.atStart, api.focus?.caret, type])
 
   // Resize on content change, and restore the caret after a marker shortcut
   // reshaped the visible text (e.g. typing `# ` promoted the block to a
@@ -327,7 +339,15 @@ export function BlockItem({
     // becomes a bullet, → `1. ` an ordered item, → `# ` a heading, and so on),
     // and the marker itself is dropped — the feel of markdown, none stored.
     // Otherwise the edit is to the block's text.
-    const typed = leadingMarker(newBody)
+    // In a code block a leading `# ` or `- ` is code (a comment, a YAML
+    // list), not a marker: only a marker typed on its own, into an empty
+    // block, turns it back into that type. And code's own marker (a
+    // backtick) never re-types the block it is already in.
+    const leading = leadingMarker(newBody)
+    const typed =
+      leading !== null && (type !== "code" || (leading.text === "" && leading.type !== "code"))
+        ? leading
+        : null
     const text = typed !== null ? typed.text : newBody
     if (typed !== null) {
       // The marker left the visible text; keep the caret relative to it.
@@ -464,13 +484,6 @@ export function BlockItem({
     api.onPaste(occurrence.key, before, pasted, after)
   }
 
-  // Whether this block owns a collapse toggle at all: parents only, and never
-  // the zoom title (the editor renders its children itself, at depth 0). The
-  // row that closes a loop keeps its chevron too — the block has children,
-  // they are simply above it — pinned, greyed and inert, with the reason in
-  // its tooltip (zoom in to go round again).
-  const looped = !!occurrence.looped
-  const hasToggle = (hasChildren || looped) && !zoomTitle
   const pinned = isCollapsed || looped
   // Every block type but an image owns the 15px marker slot. Most carry a KEY there — a
   // bullet dot, heading `#`, number, quote `>` — and the key is pure chrome,
@@ -768,9 +781,10 @@ export function BlockItem({
           api.setFocus(null)
         }}
         className={cx(
-          "min-w-0 flex-1 resize-none overflow-hidden font-content leading-relaxed text-text outline-none [overflow-wrap:anywhere] placeholder:text-text-tertiary",
-          // The panel supplies a code block's surface and padding.
-          panel ?? "border-none bg-transparent p-0",
+          // Chrome-free, whatever the type: a panel (a code block's) wraps the
+          // line (`BlockKind.wrap`), so the height set above — `1lh` empty,
+          // else the scroll height — is the text's alone.
+          "min-w-0 flex-1 resize-none overflow-hidden border-none bg-transparent p-0 font-content leading-relaxed text-text outline-none [overflow-wrap:anywhere] placeholder:text-text-tertiary",
           typo,
         )}
       />
@@ -803,7 +817,6 @@ export function BlockItem({
         !readOnly && "cursor-text coarse:select-none",
         readOnly && api.activate && "cursor-pointer",
         typo,
-        panel,
         kind.bodyClass,
       )}
       {...(readOnly
@@ -815,7 +828,7 @@ export function BlockItem({
             onDoubleClick: () => api.edit(occurrence.key),
           })}
     >
-      {kind.verbatim ? body : <BlockContent content={body} />}
+      {kind.body ? kind.body(block) : <BlockContent content={body} />}
     </div>
   )
 

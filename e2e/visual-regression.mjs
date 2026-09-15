@@ -43,6 +43,8 @@ const STORIES = [
   { id: "blockeditor--deep-headings-zoomed", waitFor: '[data-testid="zoom-breadcrumb"]' },
   { id: "blockeditor--selection-sweep", waitFor: '[data-testid="block-body"]' },
   { id: "blockeditor--empty", waitFor: '[data-testid="block-body"]' },
+  // Waits for the tokens: the grammar is fetched after the story mounts.
+  { id: "blockeditor--code", waitFor: '[data-testid="code-panel"] .token' },
   { id: "notetitle--default", waitFor: "text=Meeting notes" },
   // Per-story override example: { id: "...", waitFor: "...", maxDiffRatio: 0.005 },
 ]

@@ -243,10 +243,10 @@
   --color-border-focus: var(--accent-11);
 
   /* Syntax colors */
-  --color-syntax-cyan: var(--cyan-12);
-  --color-syntax-red: var(--red-12);
-  --color-syntax-purple: var(--purple-12);
-  --color-syntax-green: var(--green-12);
+  --color-syntax-cyan: var(--cyan-11);
+  --color-syntax-red: var(--red-11);
+  --color-syntax-purple: var(--purple-11);
+  --color-syntax-green: var(--green-11);
 }
 
 @media (pointer: coarse) {

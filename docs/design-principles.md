@@ -250,11 +250,11 @@ _is_ the page — keeping a full step between it and its depth-0 children.
 
 One token family, sized by surface, never per-element drift:
 
-| Token                  | Value | Used for                                         |
-| ---------------------- | ----- | ------------------------------------------------ |
-| `--border-radius-sm`   | 4px   | inline chips: inline code, transclusions, keys   |
-| `--border-radius-base` | 8px   | line surfaces (block/title highlight) & controls |
-| `--border-radius-lg`   | 12px  | block panels: code blocks, cards                 |
+| Token                  | Value | Used for                                                               |
+| ---------------------- | ----- | ---------------------------------------------------------------------- |
+| `--border-radius-sm`   | 4px   | inline chips: inline code, transclusions, keys                         |
+| `--border-radius-base` | 8px   | line surfaces (block/title highlight, a code block's panel) & controls |
+| `--border-radius-lg`   | 12px  | block panels: cards                                                    |
 
 The rule: the bigger the surface, the bigger the radius. All values derive from
 `--border-radius-base`, so a theme that changes the base changes the whole
