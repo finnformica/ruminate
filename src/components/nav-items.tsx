@@ -156,8 +156,14 @@ export function NavItems({
             </button>
           ) : null}
           {syncText === null ? null : syncMeta.action === null ? (
-            // Offline: nothing a click could do, so the row only states it.
-            <div className="nav-item text-text-secondary" data-size={size} title={syncMeta.tooltip}>
+            // Offline: nothing a click could do, so the row only states it —
+            // styled like its neighbours, with the default cursor.
+            <div
+              className="nav-item text-text-secondary"
+              data-size={size}
+              data-static=""
+              title={syncMeta.tooltip}
+            >
               <SyncStatusIcon />
               {syncText}
             </div>
