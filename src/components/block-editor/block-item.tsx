@@ -206,9 +206,6 @@ export function BlockItem({
   // panel, and the chrome around the content line.
   const kind = kindOf(type)
   const typo = kind.typography(depth, block)
-  // A panel (a code block's) carries the same classes on the rendered view
-  // and the textarea, so editing never moves a character.
-  const panel = kind.panel ?? null
   const rowContext: RowContext = { block, occurrence, api, depth, editing }
   const roomy = kind.roomy?.(rowContext) ?? false
   // A ROOT of a results view (`api.fixedRoots`): its surface is set in by
@@ -767,9 +764,10 @@ export function BlockItem({
           api.setFocus(null)
         }}
         className={cx(
-          "min-w-0 flex-1 resize-none overflow-hidden font-content leading-relaxed text-text outline-none [overflow-wrap:anywhere] placeholder:text-text-tertiary",
-          // The panel supplies a code block's surface and padding.
-          panel ?? "border-none bg-transparent p-0",
+          // Chrome-free, whatever the type: a panel (a code block's) wraps the
+          // line (`BlockKind.wrap`), so the height set above — `1lh` empty,
+          // else the scroll height — is the text's alone.
+          "min-w-0 flex-1 resize-none overflow-hidden border-none bg-transparent p-0 font-content leading-relaxed text-text outline-none [overflow-wrap:anywhere] placeholder:text-text-tertiary",
           typo,
         )}
       />
@@ -802,7 +800,6 @@ export function BlockItem({
         !readOnly && "cursor-text coarse:select-none",
         readOnly && api.activate && "cursor-pointer",
         typo,
-        panel,
         kind.bodyClass,
       )}
       {...(readOnly

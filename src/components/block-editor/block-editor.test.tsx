@@ -1502,16 +1502,34 @@ describe("code blocks", () => {
     "  id:: blk_after",
   ].join("\n")
 
-  it("renders verbatim in a mono panel with its language, no marker key", () => {
+  it("renders verbatim in a mono panel around the line, with its language, no marker slot", () => {
     const { container } = render(<Harness initial={CODE} />)
     const body = container.querySelector<HTMLElement>('[data-block-id="blk_code"]')!
     expect(body.textContent).toBe("const a = 1\n  b()")
     expect(body.className).toContain("font-mono")
     expect(body.className).toContain("whitespace-pre-wrap")
-    expect(container.querySelector('[data-testid="code-language"]')?.textContent).toBe("ts")
     const row = container.querySelector('[data-block-row="blk_code"]')!
-    expect(row.querySelector('[data-testid="code-slot"]')).not.toBeNull()
+    // The panel WRAPS the line: the surface, border and padding are its, so
+    // the body (and the textarea, below) stay chrome-free and the row's
+    // height maths holds.
+    const panel = row.querySelector<HTMLElement>('[data-testid="code-panel"]')!
+    expect(panel).not.toBeNull()
+    expect(panel.contains(body)).toBe(true)
+    expect(panel.className).toContain("border")
+    expect(body.className).not.toContain("border")
+    expect(panel.querySelector('[data-testid="code-language"]')?.textContent).toBe("ts")
+    // No marker slot: the panel starts where the row does, as a picture does.
+    expect(row.querySelector('[data-testid="paragraph-slot"]')).toBeNull()
+    expect(row.querySelector('[data-testid="code-slot"]')).toBeNull()
     expect(row.querySelector(".block-key")).toBeNull()
+  })
+
+  it("gets the slot back for its chevron when it has rows under it", () => {
+    const parent = ["```ts", "x", "```", "  id:: blk_code", "  - child", "    id:: blk_child"]
+    const { container } = render(<Harness initial={parent.join("\n")} />)
+    const row = container.querySelector('[data-block-row="blk_code"]')!
+    expect(row.querySelector(".block-toggle")).not.toBeNull()
+    expect(container.querySelector('[data-block-row="blk_child"]')).not.toBeNull()
   })
 
   it("Enter while editing stays in the block; Shift+Enter leaves with a block below", () => {
@@ -1520,6 +1538,12 @@ describe("code blocks", () => {
     fireEvent.keyDown(root, { key: "Enter" }) // edit blk_code
     const textarea = container.querySelector("textarea")!
     expect(textarea.className).toContain("font-mono")
+    // The textarea sits in the panel, chrome-free: the panel's padding and
+    // border are the same around the view and the edit, so the swap never
+    // moves a character or changes the block's height.
+    expect(textarea.closest('[data-testid="code-panel"]')).not.toBeNull()
+    expect(textarea.className).toContain("p-0")
+    expect(textarea.className).toContain("border-none")
     // Enter is left to the textarea (a newline), so the doc is untouched.
     const enter = fireEvent.keyDown(textarea, { key: "Enter" })
     expect(enter).toBe(true)

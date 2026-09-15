@@ -88,6 +88,61 @@ for (const name of ["Some intro text", "A bullet point"]) {
   await page.keyboard.press("Escape")
 }
 
+// --- Code: the panel wraps the line, so editing never resizes the block ---
+// A code block's padding and border sit around the line, not on the
+// textarea, so the block is the same height edited as viewed, the empty
+// block is a full line tall from the start, and a paragraph's inline chip
+// keeps the line's height.
+await story("blockeditor--code")
+await page.screenshot({ path: `${OUT}/02c-code.png` })
+for (const name of ["export function greet", "Some text with"]) {
+  const { viewBox, editBox } = await measureViewVsEdit(name)
+  const dy = Math.abs(viewBox.y - editBox.y)
+  const dh = Math.abs(viewBox.height - editBox.height)
+  check(
+    `"${name}": no vertical shift/resize when editing`,
+    dy <= 1 && dh <= 1,
+    `dy=${dy.toFixed(1)} dh=${dh.toFixed(1)}`,
+  )
+  await page.keyboard.press("Escape")
+}
+{
+  // The panel spans the row: as far from the row's right edge as its left.
+  const inset = await page.evaluate(() => {
+    const row = document.querySelector('[data-block-row="blk_cl"]')
+    const line = row.querySelector("[data-block-line]").getBoundingClientRect()
+    const panel = row.querySelector('[data-testid="code-panel"]').getBoundingClientRect()
+    return { left: panel.left - line.left, right: line.right - panel.right }
+  })
+  check(
+    "code panel is set in evenly from the row's edges",
+    Math.abs(inset.left - inset.right) <= 1,
+    `left=${inset.left} right=${inset.right}`,
+  )
+  // ``` then Enter: the new, empty code block is one full line tall at once
+  // and does not jump when the first character is typed.
+  await block("A closing paragraph").click()
+  await page.keyboard.press("Enter")
+  await page.keyboard.press("End")
+  await page.keyboard.press("Enter")
+  await page.keyboard.type("```js")
+  await page.keyboard.press("Enter")
+  const ta = page.locator("textarea").first()
+  await ta.waitFor()
+  await page.waitForTimeout(100)
+  const empty = await ta.boundingBox()
+  await page.keyboard.type("const x = 1")
+  await page.waitForTimeout(100)
+  const typed = await ta.boundingBox()
+  check(
+    "empty code block keeps its height on the first keystroke",
+    Math.abs(empty.height - typed.height) <= 1,
+    `empty=${empty.height.toFixed(1)} typed=${typed.height.toFixed(1)}`,
+  )
+  await page.screenshot({ path: `${OUT}/02d-code-fresh.png` })
+  await page.keyboard.press("Escape")
+}
+
 // --- Markdown shortcuts on an empty note ---
 await story("blockeditor--empty")
 const bodyCount = await page.getByTestId("block-body").count()

@@ -17,7 +17,7 @@ import { ImageFigure } from "./image-figure"
  * draws every row from one of these: which key stands in the marker slot,
  * the typography the view and the textarea share, any panel the text sits
  * in, and the chrome around the content line (a quote's bar, a code block's
- * language, an image's picture). Adding a type is adding its entry here and
+ * panel, an image's picture). Adding a type is adding its entry here and
  * in the registry; the row itself never names a type.
  */
 
@@ -68,8 +68,6 @@ export interface BlockKind {
   readonly typography: (depth: number, block: Block) => string
   /** Extra space above the row, in px (headings breathe). */
   readonly topMargin?: (depth: number) => number
-  /** A panel the text sits in — the same classes on view and textarea. */
-  readonly panel?: string
   /** The textarea's ghost text while empty. */
   readonly placeholder?: string
   /** The body is shown verbatim, not as inline markdown. */
@@ -78,9 +76,12 @@ export interface BlockKind {
   readonly bodyClass?: string
   /** Chrome before the content line (a quote's bar). */
   readonly before?: (context: RowContext) => ReactNode
-  /** Chrome after the content line (a code block's language). */
+  /** Chrome after the content line (a note's pin). */
   readonly after?: (context: RowContext) => ReactNode
-  /** Wrap the content line (an image's picture above its caption). */
+  /** Wrap the content line (an image's picture above its caption, a code
+   * block's panel). The line itself stays chrome-free: the row sizes its
+   * textarea by its text alone, so a panel's padding and border belong
+   * here, around the line, never on it. */
   readonly wrap?: (content: ReactNode, context: RowContext) => ReactNode
 }
 
@@ -216,30 +217,49 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     ),
   },
   code: {
-    // A code block keys on nothing, like a paragraph: the panel is its marker.
-    slot: "glyph",
-    glyph: null,
-    slotTestId: "code-slot",
-    // Set in the mono face, a touch smaller, inside its panel.
-    typography: () => "font-mono text-[0.9em] leading-relaxed",
-    // A tinted, bordered, padded surface the text sits in. Whitespace is
-    // kept as typed.
-    panel:
-      "block-code rounded-lg border border-border-secondary bg-[var(--color-bg-code-block)] px-3 py-2 whitespace-pre-wrap [overflow-wrap:anywhere] [tab-size:2]",
+    // No marker slot: the panel starts where the row does, as a picture
+    // does, and runs to where the row ends — the same 6px in from the
+    // surface's edges on both sides (the line's own padding), so it reads
+    // as a panel set in the row, not a box hung off the text column with
+    // 23px of slot and gap on its left and 6px on its right. A parent code
+    // block still gets the slot back to host its chevron.
+    slot: "none",
+    // Set in the mono face, a touch smaller. The tab width rides the shared
+    // typography (a textarea inherits it), so the view and the textarea
+    // agree on every column.
+    typography: () => "font-mono text-[0.9em] leading-relaxed [tab-size:2]",
     // Verbatim: a code block's text is not markdown.
     verbatim: true,
-    // The language, top-right of the panel — chrome, not content.
-    after: ({ block }) => {
+    // The panel — a tinted, bordered surface at the block-panel radius —
+    // WRAPS the line rather than being classes on it. The row sizes its
+    // textarea by its text alone (`1lh` empty, else its scroll height) and
+    // draws the view with the same `min-h-[1lh]`; padding and a border on
+    // the line itself broke both: an empty block's one-line box was eaten
+    // by its own padding (the caret clipped, then a jump to size on the
+    // first keystroke), and the border went uncounted, so every edit was
+    // 2px shorter than its view. Around the line, the chrome adds the same
+    // to both states and the text never moves. The language sits in the
+    // panel's top-right padding — chrome, not content — clear of the
+    // corner's curve.
+    wrap: (content, { block }) => {
       const language = String(block.props?.language ?? "")
-      return language ? (
-        <span
-          aria-hidden
-          data-testid="code-language"
-          className="pointer-events-none absolute right-2 top-1.5 select-none font-mono text-[11px] leading-4 text-text-tertiary"
+      return (
+        <div
+          data-testid="code-panel"
+          className="relative flex min-w-0 flex-1 rounded-lg border border-border-secondary bg-[var(--color-bg-code-block)] px-4 py-3"
         >
-          {language}
-        </span>
-      ) : null
+          {content}
+          {language ? (
+            <span
+              aria-hidden
+              data-testid="code-language"
+              className="pointer-events-none absolute right-3 top-1.5 select-none font-mono text-[11px] leading-4 text-text-tertiary"
+            >
+              {language}
+            </span>
+          ) : null}
+        </div>
+      )
     },
   },
   image: {

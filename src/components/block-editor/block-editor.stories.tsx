@@ -102,6 +102,45 @@ export const Empty: Story = {
   args: { initial: "" },
 }
 
+/**
+ * Code: a fenced block with a language, one without, one nested under a
+ * bullet, one that is empty (as `\`\`\`` then Enter leaves it), one with a row
+ * under it (so its collapse chevron takes the slot), and inline code in a
+ * paragraph. The panel spans the row like a picture does, and the chip in
+ * the paragraph must not move the line when the row is edited.
+ */
+const CODE_SAMPLE = [
+  "Some text with `inline code` in it, then `more` after it.",
+  "  id:: blk_ci",
+  "```ts",
+  "export function greet(name: string): string {",
+  "\treturn `Hello, ${name}`",
+  "}",
+  "```",
+  "  id:: blk_cl",
+  "- A bullet after the code block",
+  "  id:: blk_cb",
+  "  ```",
+  "  nested, and no language",
+  "  ```",
+  "    id:: blk_cn",
+  "```sh",
+  "```",
+  "  id:: blk_ce",
+  "```py",
+  "print('a parent')",
+  "```",
+  "  id:: blk_cp",
+  "  - a row under the code block",
+  "    id:: blk_cc",
+  "A closing paragraph",
+  "  id:: blk_cz",
+].join("\n")
+
+export const Code: Story = {
+  args: { initial: CODE_SAMPLE },
+}
+
 /** A picture drawn in place, so the story needs no network and no upload. */
 const PICTURE = (fill: string, w: number, h: number) =>
   "data:image/svg+xml," +
