@@ -7,7 +7,7 @@ import { Button } from "../button"
 import { ExternalLinkIcon16, GlobeIcon16 } from "../icons"
 
 /** Opens `url` in a new tab, always, as a link with `target="_blank"` does. */
-function openLink(url: string): void {
+export function openLink(url: string): void {
   window.open(url, "_blank", "noopener,noreferrer")
 }
 

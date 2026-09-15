@@ -1,7 +1,7 @@
 import { ContextMenu } from "@base-ui/react/context-menu"
 import { Menu } from "@base-ui/react/menu"
 import React from "react"
-import { IMAGE_ALIGNS, type ImageAlign } from "../../blocks/image"
+import { FIGURE_ALIGNS, type FigureAlign } from "../../blocks/figure"
 import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
@@ -41,9 +41,9 @@ export interface BlockMenuTarget {
   places: number
   /** Pinned (docs/metadata.md): listed in the sidebar's Pinned list. */
   pinned: boolean
-  /** An image row's layout (`src/blocks/image.ts`): the side its picture
-   * keeps to, and whether it has been dragged to a size of its own. */
-  image?: { align: ImageAlign; sized: boolean }
+  /** A figure row's layout (`src/blocks/figure.ts`): the side its picture
+   * or card keeps to, and whether it has been dragged to a size of its own. */
+  figure?: { align: FigureAlign; sized: boolean }
 }
 
 export interface BlockMenuActions {
@@ -72,14 +72,22 @@ export interface BlockMenuActions {
   /** Image rows: expand the picture, and save it to the device. */
   openImage?: (id: string) => void
   downloadImage?: (id: string) => void
-  /** Image rows: which side of the row the picture keeps to. */
-  alignImage?: (id: string, align: ImageAlign) => void
-  /** Image rows: return a dragged picture to its natural size. */
-  resetImageSize?: (id: string) => void
+  /** Link rows (docs/links.md): open the page in a new tab, and fetch its
+   * preview again (absent signed out, where there is nothing to fetch it
+   * through). */
+  openLink?: (id: string) => void
+  refreshPreview?: (id: string) => void
+  /** Link rows: back to a paragraph holding the link as text (the hover
+   * card offers the same; here for a keyboard or a touch screen). */
+  linkToInline?: (id: string) => void
+  /** Figure rows: which side of the row the picture or card keeps to. */
+  alignFigure?: (id: string, align: FigureAlign) => void
+  /** Figure rows: return a dragged figure to its natural width. */
+  resetFigureSize?: (id: string) => void
 }
 
 /** The Align submenu's items, in the order the figure's toolbar has them. */
-const ALIGN_LABELS: Record<ImageAlign, string> = {
+const ALIGN_LABELS: Record<FigureAlign, string> = {
   left: "Left",
   center: "Centre",
   right: "Right",
@@ -149,10 +157,12 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
   const { key, id } = target
   const shared = target.places > 1
   const image = target.type === "image"
+  const link = target.type === "link"
+  const figure = target.figure !== undefined
   return (
     <>
       <DropdownMenu.Item shortcut={["↵"]} onClick={() => actions.edit(key)}>
-        {image ? "Edit caption" : "Edit"}
+        {image ? "Edit caption" : link ? "Edit title" : "Edit"}
       </DropdownMenu.Item>
       {image && actions.openImage ? (
         <DropdownMenu.Item onClick={() => actions.openImage?.(id)}>Open image</DropdownMenu.Item>
@@ -162,20 +172,28 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
           Download image
         </DropdownMenu.Item>
       ) : null}
-      {/* An image's layout: the side it keeps to (the figure's own toolbar
-          offers the same), and its natural size back after a drag. */}
-      {image && target.image && actions.alignImage ? (
+      {link && actions.openLink ? (
+        <DropdownMenu.Item onClick={() => actions.openLink?.(id)}>Open link</DropdownMenu.Item>
+      ) : null}
+      {link && actions.refreshPreview ? (
+        <DropdownMenu.Item onClick={() => actions.refreshPreview?.(id)}>
+          Refresh preview
+        </DropdownMenu.Item>
+      ) : null}
+      {/* A figure's layout: the side it keeps to (the frame's own toolbar
+          offers the same), and its natural width back after a drag. */}
+      {figure && actions.alignFigure ? (
         <Menu.SubmenuRoot>
           <SubmenuTrigger>Align</SubmenuTrigger>
           <Menu.Portal>
             <Menu.Positioner side="right" align="start" sideOffset={4}>
               <Menu.Popup className={popupClass} style={{ width: 160 }}>
-                <div className="grid p-1" data-testid="image-align-menu">
-                  {IMAGE_ALIGNS.map((align) => (
+                <div className="grid p-1" data-testid="figure-align-menu">
+                  {FIGURE_ALIGNS.map((align) => (
                     <DropdownMenu.Item
                       key={align}
-                      selected={target.image?.align === align}
-                      onClick={() => actions.alignImage?.(id, align)}
+                      selected={target.figure?.align === align}
+                      onClick={() => actions.alignFigure?.(id, align)}
                     >
                       {ALIGN_LABELS[align]}
                     </DropdownMenu.Item>
@@ -186,13 +204,20 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
           </Menu.Portal>
         </Menu.SubmenuRoot>
       ) : null}
-      {image && target.image?.sized && actions.resetImageSize ? (
-        <DropdownMenu.Item onClick={() => actions.resetImageSize?.(id)}>
-          Original size
+      {figure && target.figure?.sized && actions.resetFigureSize ? (
+        <DropdownMenu.Item onClick={() => actions.resetFigureSize?.(id)}>
+          {image ? "Original size" : "Full width"}
         </DropdownMenu.Item>
       ) : null}
-      {/* An image is its picture: "turn into" would only keep the caption. */}
-      {image ? null : (
+      {/* A figure is its picture or its page: "turn into" would only keep
+          the caption or the title. A link block goes back to the inline
+          link it was made from instead. */}
+      {link && actions.linkToInline ? (
+        <DropdownMenu.Item onClick={() => actions.linkToInline?.(id)}>
+          Turn into inline
+        </DropdownMenu.Item>
+      ) : null}
+      {figure ? null : (
         <Menu.SubmenuRoot>
           <SubmenuTrigger>Turn into</SubmenuTrigger>
           <Menu.Portal>

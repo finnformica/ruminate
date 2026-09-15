@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { imagePropsOf } from "../blocks/image"
 import type { Block } from "../blocks/types"
-import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
+import { sessionFetch } from "./session-fetch"
 import { imageUrlOf, isImageMime, MAX_IMAGE_BYTES } from "../../worker/handlers/image-policy"
 
 /**
@@ -92,25 +92,7 @@ async function measure(file: File): Promise<{ width: number; height: number } | 
   })
 }
 
-/** A fetch carrying the session: bearer token + same-origin cookie, refreshed
- * first if near expiry, and retried once through a refresh on a 401. */
-async function authorizedFetch(input: string, init: RequestInit): Promise<Response> {
-  await ensureFreshToken()
-  if (!getAccessToken()) throw new ImageUploadError("signed_out", "Sign in to add images")
-  return withAuthRetry(async () => {
-    const token = getAccessToken()
-    if (!token) throw new ImageUploadError("signed_out", "Sign in to add images")
-    const response = await fetch(input, {
-      ...init,
-      credentials: "same-origin",
-      headers: { ...(init.headers ?? {}), Authorization: `Bearer ${token}` },
-    })
-    if (response.status === 401) {
-      throw Object.assign(new Error("Image request rejected (401)"), { status: 401 })
-    }
-    return response
-  })
-}
+const signedOut = () => new ImageUploadError("signed_out", "Sign in to add images")
 
 /** Upload one picture; resolves to what the block should remember. */
 export async function uploadImage(file: File): Promise<UploadedImage> {
@@ -118,11 +100,11 @@ export async function uploadImage(file: File): Promise<UploadedImage> {
   if (rejected) throw rejected
   const [size, response] = await Promise.all([
     measure(file),
-    authorizedFetch("/api/images", {
-      method: "POST",
-      headers: { "Content-Type": file.type },
-      body: file,
-    }),
+    sessionFetch(
+      "/api/images",
+      { method: "POST", headers: { "Content-Type": file.type }, body: file },
+      signedOut,
+    ),
   ])
   if (response.status === 501) {
     throw new ImageUploadError("disabled", "Images are not switched on for this Ruminate")
@@ -208,7 +190,7 @@ function imageObjectUrl(id: string): Promise<string> {
   const cached = objectUrls.get(id)
   if (cached) return cached
   const loading = (async () => {
-    const response = await authorizedFetch(imageUrlOf(id), { method: "GET" })
+    const response = await sessionFetch(imageUrlOf(id), { method: "GET" }, signedOut)
     if (!response.ok) throw new Error(`Image ${id} unavailable (${response.status})`)
     return URL.createObjectURL(await response.blob())
   })()

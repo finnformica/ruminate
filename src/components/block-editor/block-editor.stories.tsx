@@ -211,6 +211,70 @@ export const Images: Story = {
   },
 }
 
+/**
+ * Link blocks (docs/links.md): a link kept as a card — the page's title,
+ * description and byline, with its picture at the side when it has one —
+ * and, above them, links in a sentence. Hover any link, inline or card,
+ * for the hover card: Visit, its display text, and the switch between the
+ * two forms (no preview is fetched here: the story has no session, so a
+ * new block shows its address's host). Hover a card for the handles and
+ * the toolbar every figure has, with **Open link** first.
+ */
+export const Links: Story = {
+  args: {
+    initial: "",
+    initialDoc: {
+      props: null,
+      rootBlockIds: ["blk_l1", "blk_b1", "blk_b2", "blk_b3", "blk_l2"],
+      blocks: {
+        blk_l1: {
+          id: "blk_l1",
+          type: "text",
+          text: "The booking confirmation is at [mail.example.com](https://mail.example.com/u/0/#inbox/18f2c3) and the [receipt](https://shop.example.com/orders/8841) came separately.",
+          children: [],
+        },
+        blk_b1: {
+          id: "blk_b1",
+          type: "link",
+          text: "Flight to Lisbon — booking LHR→LIS, 14 Oct",
+          props: {
+            url: "https://mail.example.com/u/0/#inbox/18f2c3",
+            description:
+              "Your booking is confirmed. Reference K7M2QX. Departing London Heathrow 14 October 09:35, arriving Lisbon 12:20.",
+            favicon: PICTURE("#c5221f", 32, 32),
+            site: "Gmail",
+          },
+          children: [],
+        },
+        blk_b2: {
+          id: "blk_b2",
+          type: "link",
+          text: "How to make a good cup of tea",
+          props: {
+            url: "https://www.example.org/essays/tea",
+            description:
+              "Eleven rules, every one of them controversial, on the making of tea — the drink, the pot, the milk, and the order they go in.",
+            image: PICTURE("#8a6d3b", 800, 600),
+            favicon: PICTURE("#333", 32, 32),
+            site: "Example Essays",
+          },
+          children: [],
+        },
+        // A link block whose page said nothing (not yet fetched, or a page
+        // that will not say): the address's host stands in for the title.
+        blk_b3: {
+          id: "blk_b3",
+          type: "link",
+          text: "",
+          props: { url: "https://www.example.com/a/page/with/no/preview", align: "left", size: 60 },
+          children: [],
+        },
+        blk_l2: { id: "blk_l2", type: "text", text: "", children: [] },
+      },
+    },
+  },
+}
+
 /** A todo that also has children — both shortcut hints stack when selected. */
 /** A long note with a large nest, for the fold's end-to-end tests
  * (e2e/fold-motion.e2e.mjs): rows above and below it, a nested bullet

@@ -187,6 +187,7 @@ describe("the qualifier popover", () => {
       quote: ">",
       code: "```",
       image: "![]",
+      link: "[]()",
       text: "¶",
       note: null,
       daily: null,

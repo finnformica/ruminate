@@ -1,13 +1,73 @@
 import { describe, expect, it } from "vitest"
-import { hostOf, isWebUrl, linkifyPastedText } from "./link"
+import {
+  hostOf,
+  isWebUrl,
+  linkLine,
+  linkPropsOf,
+  linkifyPastedText,
+  wholeTextLink,
+  withLinkPreview,
+} from "./link"
 
-describe("hostOf", () => {
+describe("link block props", () => {
+  it("reads the address and the preview leniently", () => {
+    expect(
+      linkPropsOf({
+        props: { url: "https://e.com/x", description: "Desc", site: "E", image: "", align: "left" },
+      }),
+    ).toEqual({ url: "https://e.com/x", description: "Desc", site: "E" })
+    expect(linkPropsOf({ props: null })).toEqual({ url: "" })
+    expect(linkPropsOf({ props: { url: 42 } })).toEqual({ url: "" })
+  })
+
+  it("writes a fetched preview over the old one, keeping the address and layout", () => {
+    const block = {
+      props: { url: "https://e.com/x", description: "Old", image: "old.png", size: 50 },
+    }
+    expect(
+      withLinkPreview(block, {
+        url: "https://e.com/final",
+        title: "T",
+        description: "New",
+        site: "E",
+        favicon: "",
+      }),
+    ).toEqual({ url: "https://e.com/x", description: "New", site: "E", size: 50 })
+    expect(block.props).toEqual({
+      url: "https://e.com/x",
+      description: "Old",
+      image: "old.png",
+      size: 50,
+    })
+  })
+
   it("names the host, without www, as the display text of an address", () => {
     expect(hostOf("https://www.example.co.uk/a?b")).toBe("example.co.uk")
     expect(hostOf("https://mail.google.com/mail/u/0/#inbox/abc?x=1")).toBe("mail.google.com")
     expect(hostOf("not a url")).toBe("not a url")
+  })
+
+  it("writes the block as its markdown line, and knows a web address", () => {
+    expect(linkLine({ text: "A **bold** title", props: { url: "https://e.com/x?y=1" } })).toBe(
+      "[A **bold** title](https://e.com/x?y=1)",
+    )
     expect(isWebUrl("https://e.com/")).toBe(true)
     expect(isWebUrl("ftp://e.com/")).toBe(false)
+  })
+})
+
+describe("wholeTextLink", () => {
+  it("is the link a block's text is, and nothing else", () => {
+    expect(wholeTextLink("https://e.com/x")).toEqual({ url: "https://e.com/x", title: "" })
+    expect(wholeTextLink("  https://e.com/x \n")).toEqual({ url: "https://e.com/x", title: "" })
+    expect(wholeTextLink("[Title](https://e.com/x)")).toEqual({
+      url: "https://e.com/x",
+      title: "Title",
+    })
+    expect(wholeTextLink("See https://e.com/x")).toBeNull()
+    expect(wholeTextLink("https://e.com/x and https://e.com/y")).toBeNull()
+    expect(wholeTextLink("[top](#anchor)")).toBeNull()
+    expect(wholeTextLink("")).toBeNull()
   })
 })
 

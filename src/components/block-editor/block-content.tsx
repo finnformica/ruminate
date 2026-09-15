@@ -81,9 +81,9 @@ function textOf(node: ElementContent | Element | undefined): string {
 
 /**
  * A link: opens in a new tab, and in an editable row (`LinkActionsContext`,
- * provided by the block item) carries the hover card that visits it and
- * changes its display text. A link that is not a web address (`mailto:`,
- * an anchor) has no card.
+ * provided by the block item) carries the hover card that offers to make a
+ * block of it, and changes its display text. A link that is not a web
+ * address (`mailto:`, an anchor) has no card: a link block is of a page.
  */
 function Link({
   children,
@@ -113,6 +113,7 @@ function Link({
       href={href}
       title={title}
       onRename={(next) => actions.rename(href, title, next)}
+      toggle={{ label: "Turn into block", onClick: () => actions.toBlock(href, title) }}
       render={anchor}
     >
       {children}

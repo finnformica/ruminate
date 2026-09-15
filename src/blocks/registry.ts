@@ -1,3 +1,4 @@
+import { linkLine, linkPropsOf } from "./link"
 import { imageLine, imageUrlOfBlock, parseImageLine } from "./image"
 import type { Block, BlockProps, BlockType } from "./types"
 
@@ -19,7 +20,7 @@ import type { Block, BlockProps, BlockType } from "./types"
 /** A family groups types that toggle into each other and continue alike:
  * the heading levels are one family, an open and a checked to-do another. */
 type BlockFamily =
-  "text" | "bullet" | "ordered" | "todo" | "heading" | "quote" | "code" | "image" | "note"
+  "text" | "bullet" | "ordered" | "todo" | "heading" | "quote" | "code" | "image" | "link" | "note"
 
 interface SlashContext {
   /** Whether image uploads are switched on here. */
@@ -296,6 +297,33 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     search: { value: "image" },
   },
   {
+    id: "link",
+    family: "link",
+    label: "Link",
+    keywords: ["bookmark", "url", "web"],
+    // Graph-only: no `fromLine`, so a `[title](url)` line imports as the
+    // inline link it reads as (`src/blocks/link.ts`); export writes the
+    // block as that line.
+    marker: "",
+    toLines: (block) => [linkLine(block)],
+    // A paragraph holding the link: the title as its text, the address as
+    // its href, which every composer keeps and which reads back as the
+    // inline link. The preview is not carried: it is the page's, fetched
+    // again on demand.
+    html: (block, inline) => `<p><a href="${escapeHtml(linkPropsOf(block).url)}">${inline}</a></p>`,
+    listItem: false,
+    // The card is the marker: Backspace at the title's start must not
+    // quietly turn the block into a paragraph (delete the row instead).
+    marked: false,
+    splitsAs: "text",
+    // Made from a link, never from a blank line: the hover card on a link
+    // in the text turns it into one (`link-hover-card.tsx`), so neither
+    // "Turn into" nor the slash menu offers it.
+    turnInto: false,
+    slash: () => false,
+    search: { value: "link" },
+  },
+  {
     id: "note",
     family: "note",
     label: "Note",
@@ -345,6 +373,7 @@ const SEARCH_FAMILY_ORDER: readonly BlockFamily[] = [
   "quote",
   "code",
   "image",
+  "link",
   "text",
 ]
 
@@ -365,12 +394,21 @@ export function searchTypeValues(): Record<string, readonly BlockType[]> {
 
 /** The markdown glyph the qualifier picker draws beside a `type:` row: the
  * type's marker, or what stands for it where the marker is not a prefix
- * (a numbered item's number, a code fence, an image's `![]`, a
- * paragraph's pilcrow). */
+ * (a numbered item's number, a code fence, an image's `![]`, a link
+ * block's `[]()`, a paragraph's pilcrow). */
 function searchGlyph(def: BlockTypeDef): string {
   if (typeof def.marker === "function") return def.marker(1).trim()
   if (def.marker.trim() !== "") return def.marker.trim()
-  return def.family === "code" ? "```" : def.family === "image" ? "![]" : "¶"
+  switch (def.family) {
+    case "code":
+      return "```"
+    case "image":
+      return "![]"
+    case "link":
+      return "[]()"
+    default:
+      return "¶"
+  }
 }
 
 /** The qualifier picker's `type:` rows for blocks, in vocabulary order,
