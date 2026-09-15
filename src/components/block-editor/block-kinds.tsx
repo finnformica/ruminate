@@ -313,7 +313,9 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
       const pointer = api.readOnly
         ? api.activate
           ? { onClick: (e: React.MouseEvent) => own(e) && api.activate?.(occurrence.key) }
-          : {}
+          : api.navigable
+            ? { onClick: (e: React.MouseEvent) => own(e) && api.select(occurrence.key) }
+            : {}
         : {
             onClick: (e: React.MouseEvent) => own(e) && api.select(occurrence.key),
             onDoubleClick: (e: React.MouseEvent) => own(e) && api.edit(occurrence.key),

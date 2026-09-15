@@ -82,6 +82,7 @@ export function BlockNoteEditor({
   newRootSignal,
   refocusSignal,
   readOnly = false,
+  browse = false,
   zoomBlockId = null,
   onZoomNavigate,
   noteTitle,
@@ -118,6 +119,9 @@ export function BlockNoteEditor({
   refocusSignal?: number
   /** Display-only: render the note as read-only blocks (e.g. past-day history). */
   readOnly?: boolean
+  /** Read-only, but still the reader's to move through, fold and zoom — a
+   * note someone shared with them (`BlockEditor.browse`). */
+  browse?: boolean
   /** Block id the editor is zoomed into (`?block=` search param), or null. */
   zoomBlockId?: string | null
   /** Zoom navigation (crumbs, F/Shift+F, bullet clicks) — updates the URL. */
@@ -284,6 +288,7 @@ export function BlockNoteEditor({
       newRootSignal={newRootSignal}
       refocusSignal={refocusSignal}
       readOnly={readOnly}
+      browse={browse}
       zoomRootId={zoomBlockId}
       onZoomNavigate={onZoomNavigate}
       noteTitle={noteTitle}

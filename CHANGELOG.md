@@ -15,6 +15,10 @@
 - Code highlighting is stronger in dark mode: its four syntax hues were the near-white text steps and now sit at the same saturated step the light scheme uses; and in both schemes more of the code is picked out — numbers, types, class names, constants, regexes, template literals' `${…}`.
 - **Settings → Sharing** now leads each row with what was shared. A share you have given shows the note, or the block as _Note › text_, with the address beneath it; a share you have received shows the note or block, with who shared it beneath. It used to lead with the address, and a shared block was named by its text alone, so you could not tell which note it was from.
 
+### Fixed
+
+- A note shared with you now reads like your own. The arrow keys move through its blocks, a click highlights one, <kbd>space</kbd>, <kbd>←</kbd> and <kbd>→</kbd> fold and unfold, <kbd>f</kbd> zooms in, and it opens folded to your **Expanded levels** setting (Settings → Editor), with your folds kept on this device as for any note. It used to open with nothing highlighted and answer no key. Only editing is off.
+
 ### Removed
 
 - <kbd>⌘</kbd> <kbd>K</kbd> no longer lists **Jump to** (Notes, Calendar, Settings) or **Note actions** (Copy note markdown, Copy note ID, Print note). The jumps have their own keys (<kbd>g</kbd> then <kbd>n</kbd> / <kbd>d</kbd> / <kbd>s</kbd>) and the sidebar; the note actions live in the note's own menu. The palette is for finding notes and blocks: with nothing typed it shows Recent and Pinned, and <kbd>↓</kbd> goes straight to the first row.
