@@ -11,7 +11,7 @@ import {
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
 import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
-import type { GraphSnapshot } from "./data/graph"
+import { NOTE_TYPE, parseProps, type GraphSnapshot } from "./data/graph"
 import {
   mergeSnapshots,
   receivedSharesAtom,
@@ -22,7 +22,7 @@ import type { ReceivedShareSummary } from "./data/shares"
 import { createNotesBuilder } from "./data/note-meta"
 import { sampleGraph } from "./data/sample-graph"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
-import { createBlockIndexer, searchBlocks } from "./utils/block-search"
+import { createBlockIndexer, searchBlocks, type BlockHit } from "./utils/block-search"
 import type { BlockRevealRequest, OutlineItem } from "./utils/note-outline"
 import { parseQuery, type Query } from "./utils/search"
 
@@ -366,6 +366,73 @@ export const searchBlocksAtom = atom((get) => {
   const index = get(blockIndexAtom)
   return (query: string | Query) =>
     searchBlocks(typeof query === "string" ? parseQuery(query) : query, index)
+})
+
+/**
+ * A pinned BLOCK (docs/metadata.md): a block with `pinned` in its props,
+ * and the note to open it in. Pinning a note puts it at the top of the
+ * sidebar's notes; pinning a block puts the block in the sidebar's
+ * **Pinned** list (and the palette's Pinned group), from where it opens
+ * zoomed into — a focused view of that one block and what is beneath it.
+ */
+export interface PinnedBlock {
+  id: string
+  /** The note the block opens in, zoomed: the note it was written in
+   * while that note still reaches it, else the first note (in
+   * `sortedNotesAtom` order) that does — a block can be held in several —
+   * else, for a block no note reaches (one in a note's Unassigned basket),
+   * the note it was written in, where the basket is. */
+  noteId: NoteId
+  /** The block's own text, marker-free. */
+  text: string
+  /** The note it opens in. */
+  note: Note
+}
+
+const NO_PINNED_BLOCKS: PinnedBlock[] = []
+
+/**
+ * The pinned blocks, in the block index's order (the notes'
+ * `sortedNotesAtom` order, document order within a note) — the user's own
+ * only: a block in a note someone shared with them carries the owner's pin,
+ * not theirs. Blocks no note reaches come last.
+ */
+export const pinnedBlocksAtom = atom((get) => {
+  const graph = get(graphSnapshotAtom)
+  const origin = get(sharedOriginAtom)
+  // The cheap pass: a pinned block's props JSON names the key, so nothing
+  // else is parsed.
+  const pinnedIds = new Set<string>()
+  for (const node of graph.nodes.values()) {
+    if (node.type === NOTE_TYPE || node.props === null || !node.props.includes('"pinned"')) continue
+    if (origin.has(node.id)) continue
+    if (parseProps(node.props)?.pinned === true) pinnedIds.add(node.id)
+  }
+  if (pinnedIds.size === 0) return NO_PINNED_BLOCKS
+
+  // Where each opens: its first hit in index order, unless a later hit is in
+  // the note it was written in. A Map keeps a key's first position, so the
+  // list stays in index order either way.
+  const homes = new Map<string, BlockHit>()
+  for (const hit of get(blockIndexAtom).hits) {
+    if (!pinnedIds.has(hit.blockId)) continue
+    const written = graph.nodes.get(hit.blockId)?.notes_id ?? null
+    const held = homes.get(hit.blockId)
+    if (!held || (hit.noteId === written && held.noteId !== written)) homes.set(hit.blockId, hit)
+  }
+  const blocks: PinnedBlock[] = []
+  for (const [id, hit] of homes) {
+    blocks.push({ id, noteId: hit.noteId, text: hit.text, note: hit.note })
+  }
+  const notes = get(notesAtom)
+  for (const id of pinnedIds) {
+    if (homes.has(id)) continue
+    const node = graph.nodes.get(id)
+    const note = node?.notes_id ? notes.get(node.notes_id) : undefined
+    if (!node || !note) continue
+    blocks.push({ id, noteId: note.id, text: node.text, note })
+  }
+  return blocks
 })
 
 // -----------------------------------------------------------------------------
