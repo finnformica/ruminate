@@ -1,7 +1,7 @@
 import { Searcher } from "fast-fuzzy"
 import { atom } from "jotai"
 import { atomWithStorage } from "jotai/utils"
-import { GitHubUser, NoteId, githubUserSchema } from "./schema"
+import { GitHubUser, Note, NoteId, githubUserSchema } from "./schema"
 import {
   loadRecentTouches,
   saveRecentTouches,
@@ -12,6 +12,13 @@ import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
 import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
 import type { GraphSnapshot } from "./data/graph"
+import {
+  mergeSnapshots,
+  receivedSharesAtom,
+  sharedGraphAtom,
+  sharedOriginAtom,
+} from "./data/shared-mode"
+import type { ReceivedShareSummary } from "./data/shares"
 import { createNotesBuilder } from "./data/note-meta"
 import { sampleGraph } from "./data/sample-graph"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
@@ -163,13 +170,18 @@ export const sampleGraphAtom = atom<GraphSnapshot>(sampleGraph())
 
 /**
  * The live graph — every node and child link, indexed for walking. Signed in
- * it is the local SQL store's rows (`src/data/database-mode.ts`); signed out
- * it is the sample graph. The editor walks its note out of this rather than
- * parsing markdown; every change is a batch of ops applied to it
- * (`src/data/ops.ts`).
+ * it is the local SQL store's rows (`src/data/database-mode.ts`) together
+ * with the slices other people have shared with the user
+ * (`src/data/shared-mode.ts`), so a shared note reads exactly like an own
+ * one; signed out it is the sample graph. The editor walks its note out of
+ * this rather than parsing markdown; every change is a batch of ops applied
+ * to it (`src/data/ops.ts`), routed by origin at the write seam
+ * (`src/data/store.ts`).
  */
 export const graphSnapshotAtom = atom((get) =>
-  get(isDatabaseModeAtom) ? get(databaseGraphAtom) : get(sampleGraphAtom),
+  get(isDatabaseModeAtom)
+    ? mergeSnapshots(get(databaseGraphAtom), get(sharedGraphAtom))
+    : get(sampleGraphAtom),
 )
 
 export const isSignedOutAtom = atom((get) => get(githubUserStateAtom) === null)
@@ -261,6 +273,34 @@ export const sortedNotesAtom = atom((get) => {
     // them would be arbitrary as well as unstable across a rename.)
     const byName = a.displayName.localeCompare(b.displayName)
     return byName !== 0 ? byName : a.id.localeCompare(b.id)
+  })
+})
+
+/** The user's OWN notes, in `sortedNotesAtom` order — what the sidebar lists
+ * under Notes. Shared notes are in the graph too (search, hover cards and
+ * the editor read them like any other) but are listed under Shared. */
+export const ownSortedNotesAtom = atom((get) => {
+  const origin = get(sharedOriginAtom)
+  const notes = get(sortedNotesAtom)
+  return origin.size === 0 ? notes : notes.filter((note) => !origin.has(note.id))
+})
+
+/** The notes shared with the user, grouped by share, in the order the shares
+ * were received (newest first) and each group in `sortedNotesAtom` order. */
+export const sharedNoteGroupsAtom = atom((get) => {
+  const origin = get(sharedOriginAtom)
+  if (origin.size === 0) return [] as { share: ReceivedShareSummary; notes: Note[] }[]
+  const byShare = new Map<string, Note[]>()
+  for (const note of get(sortedNotesAtom)) {
+    const shareId = origin.get(note.id)
+    if (shareId === undefined) continue
+    const list = byShare.get(shareId)
+    if (list) list.push(note)
+    else byShare.set(shareId, [note])
+  }
+  return get(receivedSharesAtom).flatMap((share) => {
+    const notes = byShare.get(share.id)
+    return notes && notes.length > 0 ? [{ share, notes }] : []
   })
 })
 

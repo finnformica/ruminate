@@ -7,7 +7,8 @@ import { Calendar } from "../components/calendar"
 import { CalendarHeader } from "../components/calendar-header"
 import { DaysOfWeek } from "../components/days-of-week"
 import { Details } from "../components/details"
-import { LoadingIcon16, NoteIcon16 } from "../components/icons"
+import { LoadingIcon16, NoteIcon16, ShareIcon16 } from "../components/icons"
+import { Notice } from "../components/notice"
 import { parse } from "../blocks/parse"
 import type { BlockDoc, ChangeHint } from "../blocks/types"
 import { BlockNoteEditor } from "../components/block-editor/block-note-editor"
@@ -18,11 +19,14 @@ import { NoteFavicon } from "../components/note-favicon"
 import { PageLayout } from "../components/page-layout"
 import { isSyncingAtom } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
+import { sharedModeStatusAtom } from "../data/shared-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
 import { isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
 import { useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
+import { useNoteShare } from "../hooks/share"
+import { shareOwnerName } from "../data/shares"
 import { Width, fontSchema, widthSchema } from "../schema"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
@@ -75,13 +79,22 @@ function NotePage() {
   const isSignedOut = useAtomValue(isSignedOutAtom)
   const isSyncing = useAtomValue(isSyncingAtom)
   const databaseStatus = useAtomValue(databaseModeStatusAtom)
-  // While the local store is still opening, a missing note means "not loaded
-  // yet", not "new note" — starting an empty editor there shows a blank page
-  // over content that is about to arrive.
-  const notesLoaded = isSignedOut || databaseStatus.status === "ready"
+  const sharedStatus = useAtomValue(sharedModeStatusAtom)
+  // While the local store is still opening — or the notes shared with the
+  // user are still on their way — a missing note means "not loaded yet", not
+  // "new note": starting an empty editor there shows a blank page over
+  // content that is about to arrive, and a first keystroke would mint a note
+  // of the user's own under a shared note's id.
+  const notesLoaded =
+    isSignedOut || (databaseStatus.status === "ready" && sharedStatus.status !== "loading")
 
   // Note data
   const note = useNoteById(noteId)
+  // A note someone shared with the user (docs/sharing.md): read-only, never
+  // renamed, pinned or given a basket here — those are the owner's, and the
+  // basket holds blocks the slice does not carry.
+  const share = useNoteShare(noteId)
+  const readOnlyShare = share !== null
   const isDailyNote = isValidDateString(noteId ?? "")
   const isWeeklyNote = isValidWeekString(noteId ?? "")
   // A daily note is editable only for the current day; the database stores
@@ -262,12 +275,23 @@ function NotePage() {
               </div>
             ) : null}
 
+            {share !== null ? (
+              <Notice icon={<ShareIcon16 />} className="print:hidden">
+                Shared by {shareOwnerName(share)} — you can read this note but not change it.
+              </Notice>
+            ) : null}
+
             {useBlockEditor ? (
               <div className="flex flex-col gap-3">
                 {/* While zoomed, the breadcrumb (inside the editor) carries the
                     note title as its first crumb — hide the standalone title to
                     avoid doubling it. */}
-                {!isDailyNote && !isWeeklyNote && !zoomBlockId ? (
+                {!isDailyNote && !isWeeklyNote && !zoomBlockId && readOnlyShare ? (
+                  <h1 className="font-content text-3xl font-bold leading-tight tracking-[-0.02em] [overflow-wrap:anywhere] pl-[27px]">
+                    {note?.title || <span className="text-text-tertiary">Untitled</span>}
+                  </h1>
+                ) : null}
+                {!isDailyNote && !isWeeklyNote && !zoomBlockId && !readOnlyShare ? (
                   <NoteTitle
                     title={note?.title ?? ""}
                     onRename={renameTo}
@@ -285,7 +309,8 @@ function NotePage() {
                   doc={editorDoc}
                   onChange={setEditorDoc}
                   onToggleCollapse={touch}
-                  startEditing={!noteExists && notesLoaded}
+                  startEditing={!noteExists && notesLoaded && share === null}
+                  readOnly={readOnlyShare}
                   highlightHeading={highlightHeading}
                   onExitTop={() => setTitleFocusSignal((n) => n + 1)}
                   focusFirstSignal={focusFirstSignal}
@@ -299,7 +324,9 @@ function NotePage() {
                   )}
                   noteTitle={note?.displayName ?? ""}
                 />
-                {noteId && noteExists ? <UnassignedBasket noteId={noteId} /> : null}
+                {noteId && noteExists && share === null ? (
+                  <UnassignedBasket noteId={noteId} />
+                ) : null}
               </div>
             ) : (
               // The database stores current state only, so there is no

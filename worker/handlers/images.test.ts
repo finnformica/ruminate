@@ -1,11 +1,15 @@
 // tenant-guard: exempt — no SQL here; the fake bucket is keyed by tenant on
 // purpose so the cross-tenant assertions below prove the prefix scoping.
 import { describe, expect, it } from "vitest"
-import migration0003 from "../../migrations/0003_control_plane.sql?raw"
 import type { Env } from "../types"
 import { imageIdOfUrl, imageUrlOf, isImageId, isImageMime, newImageId } from "./image-policy"
 import { images } from "./images"
-import { asFakeD1, createTenantTestDriver } from "./sqlite-test-driver"
+import {
+  applyControlPlane,
+  signInUser,
+  asFakeD1,
+  createTenantTestDriver,
+} from "./sqlite-test-driver"
 
 /** Just enough of R2 for the handler: put/get by key, metadata kept. */
 function fakeBucket() {
@@ -50,7 +54,9 @@ async function testEnv(
   overrides: Partial<Env> = {},
 ): Promise<{ env: Env; objects: Map<string, unknown> }> {
   const driver = await createTenantTestDriver()
-  await driver.execScript(migration0003)
+  await applyControlPlane(driver)
+  await signInUser(driver, 1001, "alice")
+  await signInUser(driver, 1002, "bob")
   const { bucket, objects } = fakeBucket()
   const env = {
     DB: asFakeD1(driver),

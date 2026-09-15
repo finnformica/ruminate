@@ -51,11 +51,11 @@ export async function githubAuth(request: Request, env: Env): Promise<Response> 
     const { id, login, name, email } = await getUser(token)
 
     // Signing in is signing up: resolve the verified identity against the
-    // control plane HERE, where the address is known, so an admitted account
-    // has its `users` row — address included — before its first API request
-    // (migrations/0010_user_email.sql). The same resolver `requireSession` runs, with the
-    // same gate; a refusal is not raised here (the API answers it, with its
-    // copy), and nothing about it can fail the sign-in.
+    // control plane HERE, where the address is known — the ONLY place a
+    // `users` row is provisioned, since the address is mandatory
+    // (migrations/0011_user_email_required.sql). The same resolver
+    // `requireSession` runs, with the same gate; a refusal is not raised here
+    // (the API answers it), and nothing about it can fail the sign-in.
     if (typeof id === "number" && Number.isFinite(id)) {
       await resolveTenancy(
         controlPlaneDriver(env),

@@ -21,6 +21,10 @@
       "/mcp",
       "/api/mcp/tokens",
       "/api/mcp/tokens/*",
+      // Sharing: shares given and received, and the slice a grantee reads
+      // and writes (docs/sharing.md).
+      "/api/shares",
+      "/api/shares/*",
     ],
   },
   // The one database: the control plane (users + allowlist,

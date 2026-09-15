@@ -9,6 +9,8 @@ import { GitHubAvatar } from "../components/github-avatar"
 import { SettingsIcon16 } from "../components/icons"
 import { McpTokensSection } from "../components/mcp-tokens-section"
 import { PageLayout } from "../components/page-layout"
+import { SharingSection } from "../components/sharing-section"
+import { recordedEmailAtom } from "../data/shared-mode"
 import { TextInput } from "../components/text-input"
 import {
   databaseModeStatusAtom,
@@ -48,6 +50,7 @@ function RouteComponent() {
           <AppearanceSection />
           <EditorSection />
           <StorageSection />
+          <SharingSection />
           <McpTokensSection />
           <GitHubSection />
           <div className="flex flex-col items-center gap-1 self-center p-5 text-center text-text-tertiary">
@@ -418,6 +421,10 @@ function formatDiagnosticTime(at: number) {
 function GitHubSection() {
   const navigate = useNavigate()
   const githubUser = useAtomValue(githubUserAtom)
+  // The address as the server has it recorded — what sharing resolves
+  // against — falling back to the sign-in's copy until the first shares
+  // request has answered.
+  const recordedEmail = useAtomValue(recordedEmailAtom)
   const signOut = useSignOut()
   const { online } = useNetworkState()
 
@@ -439,7 +446,9 @@ function GitHubSection() {
             {online ? <GitHubAvatar login={githubUser.login} size={16} /> : null}
             <span className="truncate">{githubUser.login}</span>
           </span>
-          <span className="truncate text-sm leading-5 text-text-secondary">{githubUser.email}</span>
+          <span className="truncate text-sm leading-5 text-text-secondary">
+            {recordedEmail ?? githubUser.email}
+          </span>
         </div>
         <Button
           className="shrink-0"

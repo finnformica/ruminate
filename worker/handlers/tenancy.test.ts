@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest"
-import migration0003 from "../../migrations/0003_control_plane.sql?raw"
-import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import type { SqlDriver } from "../../src/data/sql-driver"
-import { createTestSqlDriver } from "./sqlite-test-driver"
+import { applyControlPlane, createTestSqlDriver } from "./sqlite-test-driver"
 import { resolveTenancy, type VerifiedIdentity } from "./tenancy"
 
 /**
@@ -15,15 +13,20 @@ import { resolveTenancy, type VerifiedIdentity } from "./tenancy"
 const OWNER_ID = 42536816 // the id 0003 seeds into the allowlist
 const OWNER = "42536816"
 
+/** What the sign-in callback resolves: id, login and the address. */
 const identity = (id: number, login = `user-${id}`): VerifiedIdentity => ({
   id,
   login,
   name: null,
+  email: `${login}@example.com`,
 })
+
+/** What the API path resolves: no address. */
+const apiIdentity = (id: number): VerifiedIdentity => ({ id, login: `user-${id}`, name: null })
 
 async function controlPlane(): Promise<SqlDriver> {
   const driver = createTestSqlDriver()
-  await driver.execScript(migration0003)
+  await applyControlPlane(driver)
   return driver
 }
 
@@ -33,7 +36,6 @@ const userRow = async (driver: SqlDriver, id: number) =>
 describe("resolveTenancy — the address", () => {
   it("records the sign-in's address on the row it provisions, lowercased", async () => {
     const driver = await controlPlane()
-    await driver.execScript(migration0010)
     const decision = await resolveTenancy(
       driver,
       { ...identity(7), email: "Ada@Example.com" },
@@ -45,12 +47,14 @@ describe("resolveTenancy — the address", () => {
 
   it("refreshes a changed address on an existing row, and leaves it alone without one", async () => {
     const driver = await controlPlane()
-    await driver.execScript(migration0010)
     await driver.exec(
       "INSERT INTO users (github_id, login, created_at, email) VALUES (7, 'a', 1, 'old@example.com')",
     )
     // The API path carries no address: the stored one survives.
-    await resolveTenancy(driver, identity(7), { signupMode: "open", bootstrapGithubId: undefined })
+    await resolveTenancy(driver, apiIdentity(7), {
+      signupMode: "open",
+      bootstrapGithubId: undefined,
+    })
     expect((await userRow(driver, 7))?.email).toBe("old@example.com")
     await resolveTenancy(
       driver,
@@ -62,32 +66,36 @@ describe("resolveTenancy — the address", () => {
 
   it("records nothing for a refused identity", async () => {
     const driver = await controlPlane()
-    await driver.execScript(migration0010)
-    const decision = await resolveTenancy(
-      driver,
-      { ...identity(7), email: "ada@example.com" },
-      { signupMode: "allowlist", bootstrapGithubId: undefined },
-    )
+    const decision = await resolveTenancy(driver, identity(7), {
+      signupMode: "allowlist",
+      bootstrapGithubId: undefined,
+    })
     expect(decision.allowed).toBe(false)
     expect(await userRow(driver, 7)).toBeUndefined()
   })
 
-  it("survives the column not existing yet", async () => {
+  it("refuses to provision without an address: the API path cannot sign a new id up", async () => {
+    // `users.email` is mandatory (migrations/0011), and only the callback
+    // carries one — so a row can come from nowhere else.
     const driver = await controlPlane()
-    const decision = await resolveTenancy(
-      driver,
-      { ...identity(7), email: "ada@example.com" },
-      { signupMode: "open", bootstrapGithubId: undefined },
-    )
-    expect(decision.allowed).toBe(true)
-    expect((await userRow(driver, 7))?.login).toBe("user-7")
+    for (const signupMode of ["open", "allowlist"]) {
+      await driver.exec("INSERT OR IGNORE INTO allowlist (github_id) VALUES (9)")
+      const decision = await resolveTenancy(driver, apiIdentity(9), {
+        signupMode,
+        bootstrapGithubId: "9",
+      })
+      expect(decision).toEqual({ allowed: false, status: 403, error: "sign_in_required" })
+      expect(await userRow(driver, 9)).toBeUndefined()
+    }
   })
 })
 
 describe("resolveTenancy — existing users", () => {
   it("allows an active user in every mode", async () => {
     const driver = await controlPlane()
-    await driver.exec("INSERT INTO users (github_id, login, created_at) VALUES (7, 'a', 1)")
+    await driver.exec(
+      "INSERT INTO users (github_id, login, created_at, email) VALUES (7, 'a', 1, 'a@example.com')",
+    )
     for (const signupMode of ["allowlist", "open", undefined]) {
       const decision = await resolveTenancy(driver, identity(7), {
         signupMode,
@@ -100,7 +108,8 @@ describe("resolveTenancy — existing users", () => {
   it("always rejects a blocked user, even in open mode and for the owner", async () => {
     const driver = await controlPlane()
     await driver.exec(
-      "INSERT INTO users (github_id, login, status, created_at) VALUES (?1, 'x', 'blocked', 1)",
+      "INSERT INTO users (github_id, login, status, created_at, email) " +
+        "VALUES (?1, 'x', 'blocked', 1, 'x@example.com')",
       [OWNER_ID],
     )
     const decision = await resolveTenancy(driver, identity(OWNER_ID), {
@@ -113,7 +122,7 @@ describe("resolveTenancy — existing users", () => {
   it("refreshes last_seen_at only when stale", async () => {
     const driver = await controlPlane()
     await driver.exec(
-      "INSERT INTO users (github_id, login, created_at, last_seen_at) VALUES (7, 'a', 1, 1000)",
+      "INSERT INTO users (github_id, login, created_at, last_seen_at, email) VALUES (7, 'a', 1, 1000, 'a@example.com')",
     )
     // Fresh enough: untouched.
     await resolveTenancy(driver, identity(7), {
