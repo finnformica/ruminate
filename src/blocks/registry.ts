@@ -113,8 +113,14 @@ const todoTyped = {
   re: TODO_TYPED_RE,
   type: (match: RegExpExecArray): BlockType => (match[1].toLowerCase() === "x" ? "done" : "todo"),
 }
+// The clipboard's html flavor writes the box as the literal `[ ]` / `[x]`
+// text, not an `<input type="checkbox">`: the composers that take the html
+// flavor over the plain one (Slack, Claude, Google Docs, mail) drop a form
+// control on paste, which left the item as its text behind a stray space.
+// The text survives everywhere, and reads back as a GFM task item (a list
+// item beginning `[ ]`) wherever markdown is understood, Ruminate included.
 const todoHtml = (checked: boolean) => (_block: unknown, inline: string) =>
-  `<input type="checkbox"${checked ? " checked" : ""} disabled> ${inline}`
+  `[${checked ? "x" : " "}] ${inline}`
 
 const ORDERED_RE = /^(0|[1-9]\d*)\. /
 

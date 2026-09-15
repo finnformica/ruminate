@@ -95,6 +95,16 @@ describe("richClipboardFormats", () => {
     ])
   })
 
+  it("writes a todo's box as literal text in the html flavor, never a form control", () => {
+    // Slack, Claude and other composers that prefer the html flavor drop an
+    // <input> on paste, which left `[ ] task` as ` task`. The literal marker
+    // survives as text, and reads back as a task item where markdown does.
+    const { html } = richClipboardFormats(EVERY_TYPE)
+    expect(html).not.toContain("<input")
+    expect(html).toContain("<li>[ ] task</li>")
+    expect(html).toContain("<li>[x] done</li>")
+  })
+
   it("gives fresh ids on every rebuild through the duplicate path", () => {
     const { html } = richClipboardFormats("- a\n  - b")
     const blocks = extractClipboardBlocks(html)!
