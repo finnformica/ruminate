@@ -1124,15 +1124,42 @@ export function BlockEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refocusSignal])
 
-  // When the caller bumps `newRootSignal` (e.g. Cmd+Enter on the note title),
-  // add a fresh root block at the top and edit it.
+  // When the caller bumps `newRootSignal` (Enter or Cmd+Enter on the note
+  // title), add a fresh root block at the top and edit it. The block is of
+  // the type Enter makes (Settings → Editor, "New block markdown"), as one
+  // made at the end of a block would be.
   useEffect(() => {
     if (!newRootSignal || readOnly) return
     const current = docRef.current
-    const fresh = emptyBlock()
+    const type = typeOfMarker(newBlockMarker)
     // While zoomed, "a new root" means a new first child of the zoom root —
     // the zoomed subtree is the page.
     const zoomed = zoomRootId && current.blocks[zoomRootId] ? zoomRootId : null
+    // An empty block already first (a fresh note's starter, or one just
+    // added) is the new block: edit it, made that type, rather than
+    // stacking another above.
+    const firstId = zoomed ? current.blocks[zoomed].children[0] : current.rootBlockIds[0]
+    const first = firstId ? current.blocks[firstId] : undefined
+    if (
+      first &&
+      (first.type === "text" || first.type === type) &&
+      first.text === "" &&
+      first.children.length === 0
+    ) {
+      if (first.type !== type) {
+        const retyped: BlockDoc = {
+          ...current,
+          blocks: { ...current.blocks, [first.id]: { ...first, type } },
+        }
+        history.commit(current, retyped, { type: "structural" })
+      }
+      const key = zoomed ? keyOf(zoomRootKey(current, zoomed), first.id) : first.id
+      setAnchorKey(null)
+      setSelected(key)
+      setFocus({ key })
+      return
+    }
+    const fresh = emptyBlock(type)
     const next: BlockDoc = zoomed
       ? insertFirstChild(current, zoomed, fresh)
       : {

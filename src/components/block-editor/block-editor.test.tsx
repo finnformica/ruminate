@@ -38,6 +38,7 @@ function Harness({
   startEditing,
   zoomRootId,
   refocusSignal,
+  newRootSignal,
   resolveBlocks,
   debug,
   parentCountOf,
@@ -53,6 +54,7 @@ function Harness({
   startEditing?: boolean
   zoomRootId?: string | null
   refocusSignal?: number
+  newRootSignal?: number
   resolveBlocks?: (ids: string[]) => Record<string, string | null>
   debug?: BlockDebugOptions
   parentCountOf?: (id: string) => number
@@ -78,6 +80,7 @@ function Harness({
         startEditing={startEditing}
         zoomRootId={zoomRootId}
         refocusSignal={refocusSignal}
+        newRootSignal={newRootSignal}
         resolveBlocks={resolveBlocks}
         debug={debug}
         parentCountOf={parentCountOf}
@@ -208,6 +211,34 @@ describe("BlockEditor focus + keyboard", () => {
     const textarea = container.querySelector("textarea")
     expect(textarea).not.toBeNull()
     expect(document.activeElement).toBe(textarea)
+  })
+
+  it("a new root block (Enter on the title) edits an empty first block rather than adding one", () => {
+    const { container, getByTestId, rerender } = render(<Harness initial="" newRootSignal={0} />)
+    expect(container.querySelectorAll("[data-block-row]").length).toBe(1)
+    rerender(<Harness initial="" newRootSignal={1} />)
+    const textarea = container.querySelector("textarea")
+    expect(textarea).not.toBeNull()
+    expect(document.activeElement).toBe(textarea)
+    // Still one block: the starter was reused, none stacked above it — and
+    // it is the type Enter makes (the "New block markdown" setting, a bullet
+    // by default), as a block made at the end of another would be.
+    expect(container.querySelectorAll("[data-block-row]").length).toBe(1)
+    expect(serializedLines(getByTestId)).toEqual(["- "])
+  })
+
+  it("a new root block above content goes in first and is edited", () => {
+    const { container, getByTestId, rerender } = render(<Harness initial="- a" newRootSignal={0} />)
+    rerender(<Harness initial="- a" newRootSignal={1} />)
+    const textarea = container.querySelector("textarea")
+    expect(document.activeElement).toBe(textarea)
+    expect(textarea?.value).toBe("")
+    const rows = container.querySelectorAll("[data-block-row]")
+    expect(rows.length).toBe(2)
+    // The fresh block is first, of the default new-block type; the existing
+    // bullet follows it.
+    expect(rows[0].contains(textarea)).toBe(true)
+    expect(serializedLines(getByTestId)).toEqual(["- ", "- a"])
   })
 
   it("keeps editing when the window loses focus (a tab switch), ends it on a real blur", () => {

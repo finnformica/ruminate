@@ -47,3 +47,46 @@ describe("NoteTitle editing across a window blur", () => {
     expect(input.isConnected).toBe(false)
   })
 })
+
+describe("NoteTitle on a new note", () => {
+  it("opens editing with the caret in the field when asked to start editing", () => {
+    const onRename = vi.fn(() => true)
+    const { getByRole } = render(<NoteTitle title="" onRename={onRename} startEditing />)
+    const input = getByRole("textbox", { name: "Note name" }) as HTMLInputElement
+    expect(document.activeElement).toBe(input)
+  })
+
+  it("Enter commits the name and carries on into a block below", () => {
+    const onRename = vi.fn(() => true)
+    const onCreateBelow = vi.fn()
+    const { getByRole, queryByRole } = render(
+      <NoteTitle title="" onRename={onRename} onCreateBelow={onCreateBelow} startEditing />,
+    )
+    const input = getByRole("textbox", { name: "Note name" })
+    fireEvent.change(input, { target: { value: "Plans" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(onRename).toHaveBeenCalledWith("Plans")
+    expect(onCreateBelow).toHaveBeenCalledTimes(1)
+    // The title is left, not highlighted: the keyboard is in the block now.
+    expect(queryByRole("textbox", { name: "Note name" })).toBeNull()
+    expect(getByRole("button").className).not.toContain("block-highlight")
+  })
+
+  it("Enter on an unchanged name still moves on into a block below", () => {
+    const onRename = vi.fn(() => true)
+    const onCreateBelow = vi.fn()
+    const { getByRole } = render(
+      <NoteTitle title="Plans" onRename={onRename} onCreateBelow={onCreateBelow} />,
+    )
+    fireEvent.click(getByRole("button"))
+    fireEvent.keyDown(getByRole("textbox", { name: "Note name" }), { key: "Enter" })
+    expect(onRename).not.toHaveBeenCalled()
+    expect(onCreateBelow).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens highlighted, not editing, by default", () => {
+    const { getByRole, queryByRole } = render(<NoteTitle title="" onRename={() => true} />)
+    expect(queryByRole("textbox", { name: "Note name" })).toBeNull()
+    expect(getByRole("button")).toBeTruthy()
+  })
+})
