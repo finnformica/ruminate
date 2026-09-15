@@ -554,7 +554,7 @@ describe("requireSession", () => {
   })
 
   it("rejects a VALID GitHub identity the control plane does not admit (403)", async () => {
-    const { env } = await testEnv({ SIGNUP_MODE: "allowlist" })
+    const { env } = await testEnv({ SIGNUP_MODE: "invite" })
     const result = await requireSession(request(authHeaders("other")), env, github)
     expect((result as Response).status).toBe(403)
     expect(await (result as Response).json()).toEqual({ error: "signup_closed" })
@@ -813,7 +813,7 @@ describe("tenant scoping — the adversarial suite", () => {
 
 describe("the control plane is not tenant data", () => {
   it("resolveTenancy still admits an id that is not yet a tenant", async () => {
-    // The `users`/`allowlist` lookup has to happen BEFORE a tenant exists, so
+    // The `users` lookup has to happen BEFORE a tenant exists, so
     // those tables are deliberately outside the tenant scope. Proving it: a
     // brand-new id signs in (the callback's resolve, address in hand) and
     // gets a corpus.

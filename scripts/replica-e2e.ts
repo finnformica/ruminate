@@ -34,9 +34,9 @@ import {
 import type { Env } from "../worker/types"
 
 // The identities the GitHub stub vends, keyed by bearer token. The owner id
-// matches wrangler.jsonc's ALLOWED_GITHUB_ID (and the 0003 allowlist seed);
-// the guest is allowlisted by this script; the outsider is a valid GitHub
-// account that must stay locked out (SIGNUP_MODE=allowlist).
+// matches wrangler.jsonc's ALLOWED_GITHUB_ID; the guest is signed in by this
+// script (a `users` row, as the sign-in callback leaves it); the outsider is
+// a valid GitHub account that must stay locked out (SIGNUP_MODE=invite).
 const IDENTITIES: Record<string, { id: number; login: string }> = {
   "e2e-owner-token": { id: 42536816, login: "e2e-owner" },
   "e2e-guest-token": { id: 424242, login: "e2e-guest" },
@@ -83,7 +83,7 @@ async function main() {
   const db = platform.env.DB
   const env = {
     DB: db,
-    SIGNUP_MODE: "allowlist",
+    SIGNUP_MODE: "invite",
     ALLOWED_GITHUB_ID: String(OWNER_ID),
   } as unknown as Env
 
@@ -124,7 +124,6 @@ async function main() {
       db.prepare("DELETE FROM link WHERE user_id = ?1").bind(GUEST_ID),
       db.prepare("DELETE FROM nodes WHERE user_id = ?1").bind(GUEST_ID),
       db.prepare("DELETE FROM meta WHERE user_id = ?1").bind(GUEST_ID),
-      db.prepare("DELETE FROM allowlist WHERE github_id = ?1").bind(GUEST_ID),
       db.prepare("DELETE FROM users WHERE github_id = ?1").bind(GUEST_ID),
     ])
 
@@ -150,7 +149,7 @@ async function main() {
     })
     assert.equal(outsider.status, 403)
     assert.deepEqual(await outsider.json(), { error: "signup_closed" })
-    console.log("auth guards: 401 without session, 403 for a non-allowlisted identity ✓")
+    console.log("auth guards: 401 without session, 403 for an uninvited identity ✓")
 
     // --- push two notes' rows, built by the real ingest
     const before = await status()
@@ -279,11 +278,15 @@ async function main() {
     )
     console.log("soft deletes: tombstone round-trips, hides the row, and revives cleanly ✓")
 
-    // --- tenant isolation over the real handler: allowlist the guest, who
-    //     gets an EMPTY corpus, and whose claimed-tenant params change nothing
+    // --- tenant isolation over the real handler: sign the guest in (the row
+    //     the callback would write), who gets an EMPTY corpus, and whose
+    //     claimed-tenant params change nothing
     await db
-      .prepare("INSERT INTO allowlist (github_id, note) VALUES (?1, 'e2e')")
-      .bind(GUEST_ID)
+      .prepare(
+        "INSERT INTO users (github_id, login, created_at, created_by, email) " +
+          "VALUES (?1, 'e2e-guest', ?2, 'invite', 'e2e-guest@example.com')",
+      )
+      .bind(GUEST_ID, Date.now())
       .run()
     const guestPull = await api("/api/replica/notes?github_id=42536816&user_id=42536816", {
       headers: { ...authHeaders("e2e-guest-token"), "X-GitHub-Id": "42536816" },
