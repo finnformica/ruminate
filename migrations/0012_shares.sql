@@ -20,9 +20,9 @@
 -- recorded by the sign-in callback. An address nobody has signed in with is
 -- simply a share nobody can see yet.
 --
--- `root_ids` holds NOTE ids (the unit the owner picks in Settings). The
--- closure walk is root-agnostic, so a future share of a single block is a
--- UI change, not a schema change.
+-- `root_ids` holds node ids: a note (shared from its menu) or a block
+-- (shared from its right-click menu) — the closure walk is the same either
+-- way.
 --
 -- Control-plane, like 0003 and 0007: D1 only, not part of the ladder the
 -- browser store applies (src/data/corpus-schema.ts), reached through
@@ -34,7 +34,12 @@
 CREATE TABLE shares (
   id            TEXT PRIMARY KEY,     -- `shr_<20 chars>`; the public handle
   owner_id      INTEGER NOT NULL,     -- the verified GitHub id whose notes these are
-  grantee_email TEXT NOT NULL,        -- lowercased; resolved through users.email at read time
+  -- Lowercased; resolved through users.email at read time, under the same
+  -- CHECK that column carries (migrations/0011), so the two can only ever
+  -- differ by being different addresses.
+  grantee_email TEXT NOT NULL
+    CHECK (grantee_email = lower(trim(grantee_email)) AND grantee_email LIKE '%_@_%.__%'
+           AND grantee_email NOT LIKE '% %'),
   -- JSON array of note ids in the owner's corpus. Never empty: the create
   -- endpoint refuses an empty list rather than storing a share over nothing.
   root_ids      TEXT NOT NULL,

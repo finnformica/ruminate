@@ -1,14 +1,14 @@
 # Sharing
 
-Share a subgraph of your notes with another Ruminate user. You pick the root
-notes and type the email address they sign in to GitHub with; they see those
-notes and everything beneath them — including blocks you add later — under a
-**Shared by …** heading in their sidebar. Shares are read-only; write and
+Share a subgraph of your notes with another Ruminate user. From a note's or a
+block's menu, type the email address they sign in to GitHub with; they see
+that root and everything beneath it — including blocks you add later — under
+a **Shared by …** heading in their sidebar. Shares are read-only; write and
 delete are a follow-up (§5).
 
 |                |                                                                          |
 | -------------- | ------------------------------------------------------------------------ |
-| The unit       | A **scoped grant**: owner, roots, grantee address, verbs                 |
+| The unit       | A **scoped grant**: owner, roots (notes or blocks), grantee address      |
 | What is shared | The reachability closure beneath the roots, computed per request         |
 | Who            | An email address, matched to the primary verified GitHub email           |
 | Verbs          | `read` — write and delete are a follow-up                                |
@@ -83,7 +83,10 @@ named, and it is designed so the app never becomes a directory:
   than inventing one without an address. A client can never supply the
   address it is resolved by — that would let anyone claim anyone's shares —
   and Settings shows the address as the server has it recorded, which is the
-  address others can share with.
+  address others can share with. Both columns carry a `CHECK` on the shape
+  (lowercased, one `@` with something either side and a dot after it, no
+  whitespace), so a row the equality join could never match cannot be
+  written, by hand or by a bug.
 - **Resolution is a join, at read time.** "The shares addressed to me" is
   verified id → recorded address → `shares.grantee_email`. A share to an
   address nobody has signed in with is simply a share nobody can see yet; when
@@ -139,6 +142,17 @@ someone else's rows does not belong in it. So shared notes live in memory
   under Notes and each share's notes under **Shared by …**, and the note page
   shows a notice naming the owner, renders read-only, and hides Rename, Pin,
   Delete and the basket.
+- **A shared block is a note here.** A root may be a block, and a block has
+  no page of its own to open; so on the way into the snapshot a root that is
+  not a note is given the note type. It lists in the sidebar, opens at
+  `/notes/<id>` with its text as the title and its children as the outline,
+  and searches like any note. Nothing is pushed, so the owner's row is never
+  touched by it.
+- **Where to share from**: a note's **⋯** menu (**Share…**) shares the note;
+  a block's right-click menu (**Share…**) shares that block, as the root.
+  One dialog, asking only for the address. Settings → Sharing is the
+  overview: what this account has shared and with whom (with Revoke), and
+  what has been shared with it.
 
 ## 5. Decisions, and what was not built
 
@@ -146,9 +160,9 @@ someone else's rows does not belong in it. So shared notes live in memory
   truth, needs no migration of rows and no second replica loop, and revoking
   is one row. The cost is that live collaboration is per-row LWW rather than a
   sequenced log — the same trade the app already makes across devices.
-- **Roots are notes.** The Settings picker lists notes because a note is what
-  a person recognizes. The closure walk is root-agnostic, so a share of a
-  single block is a UI change, not a schema or protocol change.
+- **Roots are notes or blocks.** The closure walk is root-agnostic; the
+  client presents a block root as a note so the grantee has somewhere to
+  open it.
 - **Email, resolved by the server from GitHub.** The alternative — sharing by
   GitHub login — would need a lookup box that confirms who exists. An address
   the owner already knows, matched against what GitHub reports, reveals
@@ -166,8 +180,7 @@ someone else's rows does not belong in it. So shared notes live in memory
   passes through `planReplicaPut` into the owner's partition; and a client
   push path that applies ops to the slice at once, coalesces a row diff, and
   reverts on a refusal.
-- **Not built**: a since-cursor for slices; sharing a block rather than a
-  note; showing the owner "this share includes N blocks also used elsewhere"
+- **Not built**: a since-cursor for slices; showing the owner "this share includes N blocks also used elsewhere"
   (the multi-parent case is handled — such a block is in the slice — but not
   surfaced at share time); expiry on a share (revoke is the mechanism);
   per-row attribution of who wrote what.

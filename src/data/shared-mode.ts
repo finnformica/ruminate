@@ -1,5 +1,6 @@
 import { atom, getDefaultStore } from "jotai"
-import { buildGraphSnapshot, type GraphSnapshot } from "./graph"
+import { NOTE_TYPE, buildGraphSnapshot, type GraphSnapshot } from "./graph"
+import type { NodeRow } from "../../worker/handlers/replica-payload"
 import type { Op } from "./ops"
 import { listShares, pullShare, type ReceivedShareSummary } from "./shares"
 
@@ -19,6 +20,14 @@ import { listShares, pullShare, type ReceivedShareSummary } from "./shares"
  *
  * Shares are read-only: the write seam (`store.ts`) refuses a batch of ops
  * that names a shared node, so nothing here ever pushes.
+ *
+ * **A shared block is a note here.** A root may be a block (shared from its
+ * right-click menu), and a block has no page of its own to open. The slice
+ * arrives as the owner's rows; on the way into the snapshot a root that is
+ * not a note is given the note type, so it lists in the sidebar, opens at
+ * `/notes/<id>` with its text as the title and its children as the outline,
+ * and searches like any note. Nothing is pushed, so the owner's row is never
+ * touched by it.
  *
  * **Whole-slice pulls, deliberately.** A since-cursor cannot describe a
  * slice: a block leaves it by being UNLINKED (a change to a link row, not to
@@ -111,6 +120,14 @@ export function touchesShared(ops: readonly Op[], origin: ReadonlyMap<string, st
     } else if (origin.has(op.id)) return true
   }
   return false
+}
+
+/** The slice's rows with every root that is a block presented as a note. */
+export function asNotes(nodes: NodeRow[], rootIds: readonly string[]): NodeRow[] {
+  const roots = new Set(rootIds)
+  return nodes.map((node) =>
+    roots.has(node.id) && node.type !== NOTE_TYPE ? { ...node, type: NOTE_TYPE } : node,
+  )
 }
 
 // -----------------------------------------------------------------------------
@@ -228,7 +245,10 @@ async function pullAll(activation: SharedRuntime): Promise<void> {
     await Promise.all(
       received.map(async (share) => {
         const rows = await pullShare(share.id, activation.fetchImpl)
-        next.set(share.id, { share, graph: buildGraphSnapshot(rows.nodes, rows.links) })
+        next.set(share.id, {
+          share,
+          graph: buildGraphSnapshot(asNotes(rows.nodes, share.rootIds), rows.links),
+        })
       }),
     )
     if (runtime !== activation) return

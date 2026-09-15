@@ -1,12 +1,13 @@
 import { useLocation, useNavigate } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
-import { useAtom, useAtomValue, useStore } from "jotai"
+import { useAtom, useAtomValue, useSetAtom, useStore } from "jotai"
 import { graphSnapshotAtom, isSignedOutAtom } from "../global-state"
 import { rollup } from "../data/graph"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
 import { useDeleteNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
 import { useNoteShare } from "../hooks/share"
+import { shareDialogAtom } from "./share-note-dialog"
 import type { Width } from "../schema"
 import { cx } from "../utils/cx"
 import { DropdownMenu } from "./dropdown-menu"
@@ -18,6 +19,7 @@ import {
   PinFillIcon16,
   PinIcon16,
   PrinterIcon16,
+  ShareIcon16,
   TrashIcon16,
   WidthFixedIcon16,
   WidthFullIcon16,
@@ -70,6 +72,9 @@ export function NoteActionsMenu({
   const share = useNoteShare(noteId)
   const canRename = !isSignedOut && share === null
   const canDelete = !isSignedOut && share === null
+  // Sharing is the owner's: an own note, signed in (docs/sharing.md).
+  const canShare = !isSignedOut && share === null
+  const openShare = useSetAtom(shareDialogAtom)
 
   // Compare the decoded path segment, not the raw pathname: a note id with a
   // space or other special character is percent-encoded in the URL, so a raw
@@ -155,6 +160,13 @@ export function NoteActionsMenu({
         </DropdownMenu.Item>
         <DropdownMenu.Item icon={<CopyIcon16 />} onClick={() => copy(noteId)}>
           Copy ID
+        </DropdownMenu.Item>
+        <DropdownMenu.Item
+          icon={<ShareIcon16 />}
+          disabled={!canShare}
+          onClick={() => openShare(noteId)}
+        >
+          Share…
         </DropdownMenu.Item>
         <DropdownMenu.Item icon={<EditIcon16 />} disabled={!canRename} onClick={rename}>
           Rename

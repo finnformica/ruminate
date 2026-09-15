@@ -4,6 +4,7 @@ import { Toaster } from "sonner"
 import { AppLayout } from "../components/app-layout"
 import { CommandMenu } from "../components/command-menu"
 import { DevBar } from "../components/dev-bar"
+import { ShareDialog } from "../components/share-note-dialog"
 import { useDatabaseMode } from "../data/use-database-mode"
 import { GlobalShortcuts } from "../shortcuts/global-shortcuts"
 
@@ -62,6 +63,7 @@ function RouteComponent() {
         <Outlet />
       </AppLayout>
       <CommandMenu />
+      <ShareDialog />
       <GlobalShortcuts />
       <DevBar />
       {/* Toasts (sonner) — see "Notices" in docs/design-principles.md. Bottom

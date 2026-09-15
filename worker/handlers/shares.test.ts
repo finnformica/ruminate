@@ -168,6 +168,23 @@ describe("session", () => {
 // Creating
 // -----------------------------------------------------------------------------
 
+describe("the address column", () => {
+  it("is checked by the database: lowercased, one @, a dot after it, no spaces", async () => {
+    // `async`: the test driver throws synchronously, and a rejection is what
+    // the assertion below reads.
+    const insert = async (email: string) =>
+      harness.control.exec(
+        "INSERT INTO shares (id, owner_id, grantee_email, root_ids, permissions, created_at) " +
+          "VALUES ('shr_x', ?1, ?2, '[]', 'read', 1)",
+        [OWNER, email],
+      )
+    for (const bad of ["Bob@Example.com", "bob", "bob@x", "bob @example.com", " bob@example.com"]) {
+      await expect(insert(bad)).rejects.toThrow(/CHECK/)
+    }
+    await expect(insert("bob@example.com")).resolves.toBeDefined()
+  })
+})
+
 describe("create", () => {
   it("stores the share and answers with it, and nothing about the address", async () => {
     const response = await send(
@@ -200,7 +217,7 @@ describe("create", () => {
     expect((await bodyOf(response)).detail).toMatch(/at least one note/)
   })
 
-  it("refuses roots that are not the caller's notes, without telling ghosts from others'", async () => {
+  it("refuses roots that are not the caller's, without telling ghosts from others'", async () => {
     await harness.seedNote(GRANTEE, { id: "blk_theirs", title: "Theirs", markdown: "- x\n" })
     const ghost = await send(
       apiRequest("POST", "", { email: "u8@example.com", rootIds: ["blk_ghost"] }),
@@ -208,11 +225,14 @@ describe("create", () => {
     const theirs = await send(
       apiRequest("POST", "", { email: "u8@example.com", rootIds: ["blk_theirs"] }),
     )
-    const block = await send(apiRequest("POST", "", { email: "u8@example.com", rootIds: [A1] }))
-    for (const response of [ghost, theirs, block]) {
+    for (const response of [ghost, theirs]) {
       expect(response.status).toBe(400)
-      expect((await bodyOf(response)).detail).toMatch(/not notes in your corpus/)
+      expect((await bodyOf(response)).detail).toMatch(/not in your notes/)
     }
+    // A block of the caller's own is a fine root.
+    expect(
+      (await send(apiRequest("POST", "", { email: "u8@example.com", rootIds: [A1] }))).status,
+    ).toBe(201)
   })
 
   it("refuses sharing with yourself", async () => {
@@ -240,6 +260,14 @@ describe("create", () => {
 // -----------------------------------------------------------------------------
 
 describe("list", () => {
+  it("says so when sharing is not set up on the server yet", async () => {
+    // A deploy ahead of migration 0012: the table is missing.
+    await harness.control.execScript("DROP TABLE shares")
+    const response = await send(apiRequest("GET"))
+    expect(response.status).toBe(503)
+    expect((await bodyOf(response)).error).toBe("sharing_unavailable")
+  })
+
   it("shows the owner what they gave and the grantee what they received", async () => {
     const id = await share()
 
@@ -367,6 +395,17 @@ describe("slice", () => {
     )
     const body: SliceBody = await bodyOf(await slice(id))
     expect(body).toEqual({ nodes: [], links: [] })
+  })
+
+  it("can be rooted at a block: that block and what is beneath it", async () => {
+    const id = await share([A1])
+    const body: SliceBody = await bodyOf(await slice(id))
+    expect(sliceIds(body)).toEqual([A1, A2].sort())
+    expect(body.links.map((row) => `${row.source_id}>${row.destination_id}`)).toEqual([
+      `${A1}>${A2}`,
+    ])
+    // The root keeps its own type; the client presents it as a note.
+    expect(body.nodes.find((row) => row.id === A1)?.type).toBe("ul")
   })
 
   it("names nothing to anyone but the grantee", async () => {

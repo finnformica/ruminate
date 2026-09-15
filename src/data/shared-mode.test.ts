@@ -7,6 +7,7 @@ import { clearSession, seedSession } from "../utils/github-session"
 import { buildGraphSnapshot, noteDoc } from "./graph"
 import type { Op } from "./ops"
 import {
+  asNotes,
   flushSharedMode,
   mergeSnapshots,
   receivedSharesAtom,
@@ -62,6 +63,16 @@ describe("mergeSnapshots", () => {
     const merged = mergeSnapshots(own, shared)
     expect([...merged.nodes.keys()].sort()).toEqual(["blk_a", "blk_note", "blk_x"])
     expect(merged.childLinks.get("blk_note")).toHaveLength(1)
+  })
+})
+
+describe("asNotes", () => {
+  it("presents a block root as a note and leaves everything else alone", () => {
+    const rows = [node("blk_note", "Plan", "note"), node("blk_a", "one"), node("blk_b", "two")]
+    const out = asNotes(rows, ["blk_note", "blk_a"])
+    expect(out.map((row) => row.type)).toEqual(["note", "note", "ul"])
+    expect(out[1].text).toBe("one")
+    expect(rows[1].type).toBe("ul")
   })
 })
 

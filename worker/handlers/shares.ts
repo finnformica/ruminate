@@ -84,18 +84,33 @@ export async function shares(
 
   if (rest === "" || rest === "/") {
     if (request.method === "GET") {
-      const [email, given, received] = await Promise.all([
-        emailOf(control, session.id),
-        listGivenShares(control, session.id),
-        listReceivedShares(control, session.id),
-      ])
+      let listing: { email: string; given: ShareGrant[]; received: ReceivedShare[] }
+      try {
+        const [email, given, received] = await Promise.all([
+          emailOf(control, session.id),
+          listGivenShares(control, session.id),
+          listReceivedShares(control, session.id),
+        ])
+        listing = { email, given, received }
+      } catch {
+        // The shares table (migrations/0012) or the address column
+        // (0010/0011) is not there yet: say so, rather than a bare 500 the
+        // Settings panel can only show as "request failed".
+        return json(
+          {
+            error: "sharing_unavailable",
+            detail: "Sharing is not set up on this server yet (a migration is pending).",
+          },
+          503,
+        )
+      }
       const body: SharesListBody = {
         // The caller's OWN address, so Settings can say which address others
         // may share with — read back from the row, which is what shares are
         // resolved against, rather than from whatever the client remembers.
-        me: { email },
-        given: given.map(asGiven),
-        received: received.map(asReceived),
+        me: { email: listing.email },
+        given: listing.given.map(asGiven),
+        received: listing.received.map(asReceived),
       }
       return json(body)
     }
@@ -151,22 +166,23 @@ function parseCreateBody(raw: unknown): ParsedCreate | string {
   if (email === null) return "Enter the email address the person signs in to GitHub with."
 
   if (!Array.isArray(body.rootIds) || body.rootIds.length === 0) {
-    return "Pick at least one note to share."
+    return "Pick at least one note or block to share."
   }
   if (body.rootIds.length > MAX_SHARE_ROOTS) {
-    return `Share at most ${MAX_SHARE_ROOTS} notes at a time.`
+    return `Share at most ${MAX_SHARE_ROOTS} roots at a time.`
   }
   const unique = new Set<string>()
   for (const entry of body.rootIds) {
-    if (typeof entry !== "string" || entry.length === 0) return "`rootIds` must be note ids."
+    if (typeof entry !== "string" || entry.length === 0) return "`rootIds` must be node ids."
     unique.add(entry)
   }
 
   return { email, rootIds: [...unique] }
 }
 
-/** Which of these ids are live notes in the caller's own corpus. */
-async function ownNoteIds(
+/** Which of these ids are live nodes — notes or blocks — in the caller's own
+ * corpus. */
+async function ownNodeIds(
   env: Env,
   session: VerifiedIdentity,
   ids: string[],
@@ -175,7 +191,7 @@ async function ownNoteIds(
   const placeholders = ids.map((_, index) => `?${index + 1}`).join(", ")
   const rows = await tenant.exec(
     `SELECT id FROM nodes WHERE user_id = :tenant AND deleted_at IS NULL ` +
-      `AND type = 'note' AND id IN (${placeholders})`,
+      `AND id IN (${placeholders})`,
     ids,
   )
   return new Set(rows.map((row) => String(row.id)))
@@ -208,17 +224,17 @@ async function create(request: Request, env: Env, session: VerifiedIdentity): Pr
     )
   }
 
-  // A share is only worth storing if it names notes that exist and are the
+  // A share is only worth storing if it names rows that exist and are the
   // caller's. Checked through a `TenantDb`, so "are they the caller's" is the
   // same question the corpus answers everywhere else — and naming someone
-  // else's note id is indistinguishable from naming one that does not exist.
-  const own = await ownNoteIds(env, session, parsed.rootIds)
+  // else's id is indistinguishable from naming one that does not exist.
+  const own = await ownNodeIds(env, session, parsed.rootIds)
   const missing = parsed.rootIds.filter((id) => !own.has(id))
   if (missing.length > 0) {
     return json(
       {
         error: "invalid_request",
-        detail: `These are not notes in your corpus: ${missing.join(", ")}.`,
+        detail: `These are not in your notes: ${missing.join(", ")}.`,
       },
       400,
     )

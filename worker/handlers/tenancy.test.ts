@@ -90,6 +90,21 @@ describe("resolveTenancy — the address", () => {
   })
 })
 
+describe("users.email", () => {
+  it("is checked by the database: lowercased, one @, a dot after it, no spaces", async () => {
+    const driver = await controlPlane()
+    const insert = async (email: string) =>
+      driver.exec(
+        "INSERT INTO users (github_id, login, created_at, email) VALUES (9, 'x', 1, ?1)",
+        [email],
+      )
+    for (const bad of ["Ada@Example.com", "ada", "ada@x", "ada @example.com"]) {
+      await expect(insert(bad)).rejects.toThrow(/CHECK/)
+    }
+    await expect(insert("ada@example.com")).resolves.toBeDefined()
+  })
+})
+
 describe("resolveTenancy — existing users", () => {
   it("allows an active user in every mode", async () => {
     const driver = await controlPlane()

@@ -1,10 +1,11 @@
 // The slice: which of the owner's rows a share reaches (docs/sharing.md).
 //
-// A share names ROOT NOTES. What the grantee may see beneath them is derived
-// from the owner's rows on every request, never sent by anyone:
+// A share names ROOTS — notes, or blocks. What the grantee may see beneath
+// them is derived from the owner's rows on every request, never sent by
+// anyone:
 //
-// > A node is in the slice when it is a granted root that is a live note, or
-// > when it is reachable from one through live child links.
+// > A node is in the slice when it is a granted root that is live, or when
+// > it is reachable from one through live child links.
 //
 // That is the reachability closure, and it is why the share is live by
 // construction: a block added under a shared note joins the slice the moment
@@ -23,7 +24,6 @@
 //    (not `UNION ALL`) is what makes it terminate on a graph with a loop.
 
 import { toLinkRow, toNodeRow, type LinkRow, type NodeRow } from "../handlers/replica-payload"
-import { NOTE_TYPE } from "../../src/data/graph"
 import type { TenantDb } from "../tenancy-db"
 import type { ShareGrant } from "./grant"
 
@@ -40,14 +40,14 @@ const holes = (count: number): string =>
 
 /**
  * The recursive walk, as a CTE prefix every slice statement shares:
- * `granted` is the roots that are live notes, `visible` everything reachable
- * from them. Written out in full in each statement rather than assembled at
+ * `granted` is the roots that are live, `visible` everything reachable from
+ * them. Written out in full in each statement rather than assembled at
  * runtime, so the string the guard checks is the string that runs.
  */
 const closureCte = (rootCount: number) =>
   `WITH RECURSIVE granted (id) AS ( ` +
   `SELECT n.id FROM nodes n ` +
-  `WHERE n.user_id = :tenant AND n.deleted_at IS NULL AND n.type = ?${rootCount + 1} ` +
+  `WHERE n.user_id = :tenant AND n.deleted_at IS NULL ` +
   `AND n.id IN (${holes(rootCount)}) ), ` +
   `visible (id) AS ( ` +
   `SELECT id FROM granted ` +
@@ -69,7 +69,7 @@ export async function sliceRows(
 ): Promise<{ nodes: NodeRow[]; links: LinkRow[] }> {
   const roots = rootsOf(grant)
   if (roots.length === 0) return { nodes: [], links: [] }
-  const params = [...roots, NOTE_TYPE]
+  const params = [...roots]
   const nodes = (
     await owner.exec(
       closureCte(roots.length) +
