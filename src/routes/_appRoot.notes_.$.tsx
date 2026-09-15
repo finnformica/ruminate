@@ -22,7 +22,7 @@ import { databaseModeStatusAtom } from "../data/database-mode"
 import { sharedModeStatusAtom } from "../data/shared-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
 import { isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
-import { useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
+import { useCreateNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
 import { useNoteShare } from "../hooks/share"
@@ -181,6 +181,7 @@ function NotePage() {
 
   // Actions
   const renameNote = useRenameNote()
+  const createNote = useCreateNote()
 
   const wasSyncingRef = React.useRef(false)
   useEffect(() => {
@@ -213,9 +214,22 @@ function NotePage() {
   // Retitle the current note. Since ids are minted, this sets one property and
   // nothing else moves — no new id, no navigation, no broken links. Returns
   // whether anything changed (so the inline editor can revert a no-op).
+  //
+  // A note not in the graph yet (a fresh `/notes/<id>`) has no node to
+  // retitle, so naming it is what creates it — the same way a first block
+  // does (`useNoteDoc`). Only once the notes have loaded and the id is not a
+  // shared note's, for the reasons `notesLoaded` gives above.
   const renameTo = React.useCallback(
-    (rawName: string): boolean => renameNote({ noteId: noteId ?? "", newTitle: rawName }),
-    [noteId, renameNote],
+    (rawName: string): boolean => {
+      if (!noteId) return false
+      if (noteExists) return renameNote({ noteId, newTitle: rawName })
+      if (!notesLoaded || share !== null) return false
+      const title = rawName.trim()
+      if (!title) return false
+      createNote(noteId, { title })
+      return true
+    },
+    [noteId, noteExists, notesLoaded, share, renameNote, createNote],
   )
 
   // ⌘S writes the coalescing ops immediately (changes save on their own;
