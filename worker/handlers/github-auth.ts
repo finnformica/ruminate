@@ -3,10 +3,18 @@
 // the token and user info in the query string.
 // Reference: https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps
 
+import type { InviteOutcome } from "../admin-wire"
 import { refreshCookie } from "../github-cookie"
+import { inviteTokenFromUrl } from "../invites"
 import { controlPlaneDriver } from "../tenancy-db"
 import type { Env } from "../types"
-import { resolveTenancy } from "./tenancy"
+import { resolveTenancy, type TenancyDecision } from "./tenancy"
+
+/** How the sign-in went, for the invite page (`InviteOutcome`, admin-wire.ts). */
+const inviteOutcome = (decision: TenancyDecision | undefined): InviteOutcome => {
+  if (!decision || !decision.allowed) return "invalid"
+  return decision.via === "invite" ? "accepted" : "member"
+}
 
 export async function githubAuth(request: Request, env: Env): Promise<Response> {
   try {
@@ -56,16 +64,23 @@ export async function githubAuth(request: Request, env: Env): Promise<Response> 
     // (migrations/0011_user_email_required.sql). The same resolver
     // `requireSession` runs, with the same gate; a refusal is not raised here
     // (the API answers it), and nothing about it can fail the sign-in.
+    //
+    // A sign-in from an invite page returns to `/invite/<token>`, so the
+    // token rides in `state`: it is redeemed here, the one place a row can be
+    // written, and the page is told how it went (`?invite=`).
+    const inviteToken = inviteTokenFromUrl(state)
+    let decision: TenancyDecision | undefined
     if (typeof id === "number" && Number.isFinite(id)) {
-      await resolveTenancy(
+      decision = await resolveTenancy(
         controlPlaneDriver(env),
         { id, login, name, email },
-        { signupMode: env.SIGNUP_MODE, bootstrapGithubId: env.ALLOWED_GITHUB_ID },
+        { signupMode: env.SIGNUP_MODE, bootstrapGithubId: env.ALLOWED_GITHUB_ID, inviteToken },
       ).catch(() => undefined)
     }
 
     // `state` is the app URL to return to (set by the sign-in button).
     const redirectUrl = new URL(state || url.origin)
+    if (inviteToken !== null) redirectUrl.searchParams.set("invite", inviteOutcome(decision))
     redirectUrl.searchParams.set("user_token", token)
     if (typeof id === "number" && Number.isFinite(id)) {
       redirectUrl.searchParams.set("user_id", String(id))

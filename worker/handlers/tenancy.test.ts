@@ -1,16 +1,17 @@
 import { describe, expect, it } from "vitest"
 import type { SqlDriver } from "../../src/data/sql-driver"
 import { applyControlPlane, createTestSqlDriver } from "./sqlite-test-driver"
+import { mintInvite, revokeInvite } from "../invites"
 import { resolveTenancy, type VerifiedIdentity } from "./tenancy"
 
 /**
  * The tenancy resolver against a REAL engine and the REAL control-plane
- * migration: `node:sqlite` runs the exact `users`/`allowlist` DDL D1 runs
- * (0003_control_plane.sql, which also seeds the owner allowlist row), so
- * what's pinned here is the deployed behavior, not a fake's.
+ * migrations: `node:sqlite` runs the exact `users`/`invites` DDL D1 runs
+ * (0003_control_plane.sql through 0014_invites.sql), so what's
+ * pinned here is the deployed behavior, not a fake's.
  */
 
-const OWNER_ID = 42536816 // the id 0003 seeds into the allowlist
+const OWNER_ID = 42536816 // wrangler.jsonc's ALLOWED_GITHUB_ID
 const OWNER = "42536816"
 
 /** What the sign-in callback resolves: id, login and the address. */
@@ -67,7 +68,7 @@ describe("resolveTenancy — the address", () => {
   it("records nothing for a refused identity", async () => {
     const driver = await controlPlane()
     const decision = await resolveTenancy(driver, identity(7), {
-      signupMode: "allowlist",
+      signupMode: "invite",
       bootstrapGithubId: undefined,
     })
     expect(decision.allowed).toBe(false)
@@ -78,8 +79,9 @@ describe("resolveTenancy — the address", () => {
     // `users.email` is mandatory (migrations/0011), and only the callback
     // carries one — so a row can come from nowhere else.
     const driver = await controlPlane()
-    for (const signupMode of ["open", "allowlist"]) {
-      await driver.exec("INSERT OR IGNORE INTO allowlist (github_id) VALUES (9)")
+    for (const signupMode of ["open", "invite"]) {
+      // Id 9 is the bootstrap owner here: admitted by every mode, but only
+      // with an address.
       const decision = await resolveTenancy(driver, apiIdentity(9), {
         signupMode,
         bootstrapGithubId: "9",
@@ -111,12 +113,12 @@ describe("resolveTenancy — existing users", () => {
     await driver.exec(
       "INSERT INTO users (github_id, login, created_at, email) VALUES (7, 'a', 1, 'a@example.com')",
     )
-    for (const signupMode of ["allowlist", "open", undefined]) {
+    for (const signupMode of ["invite", "open", undefined]) {
       const decision = await resolveTenancy(driver, identity(7), {
         signupMode,
         bootstrapGithubId: undefined,
       })
-      expect(decision).toEqual({ allowed: true })
+      expect(decision).toEqual({ allowed: true, via: "existing" })
     }
   })
 
@@ -158,49 +160,116 @@ describe("resolveTenancy — existing users", () => {
 })
 
 describe("resolveTenancy — signup (no users row)", () => {
-  it("allowlist mode admits a listed id and provisions its users row", async () => {
+  const invite = async (driver: SqlDriver, now = 100, days = 7) =>
+    (await mintInvite(driver, { createdBy: OWNER_ID, note: null, expiresInDays: days, now })).token
+
+  it("invite mode admits a sign-in through a live invite, provisions its row and claims the invite", async () => {
     const driver = await controlPlane()
-    await driver.exec("INSERT INTO allowlist (github_id, note) VALUES (777, 'friend')")
+    const token = await invite(driver)
     const decision = await resolveTenancy(driver, identity(777, "friend"), {
-      signupMode: "allowlist",
+      signupMode: "invite",
       bootstrapGithubId: OWNER,
+      inviteToken: token,
       now: () => 123,
     })
-    expect(decision).toEqual({ allowed: true })
+    expect(decision).toEqual({ allowed: true, via: "invite" })
     expect(await userRow(driver, 777)).toMatchObject({
       login: "friend",
       status: "active",
       created_at: 123,
-      created_by: "allowlist",
+      created_by: "invite",
     })
+    const rows = await driver.exec("SELECT redeemed_at, redeemed_by FROM invites")
+    expect(rows).toEqual([{ redeemed_at: 123, redeemed_by: 777 }])
   })
 
-  it("allowlist mode admits the seeded owner row from the real migration", async () => {
+  it("an invite works once: the second sign-in through it is refused", async () => {
+    const driver = await controlPlane()
+    const token = await invite(driver)
+    const options = {
+      signupMode: "invite",
+      bootstrapGithubId: OWNER,
+      inviteToken: token,
+      now: () => 200,
+    }
+    expect((await resolveTenancy(driver, identity(777), options)).allowed).toBe(true)
+    expect(await resolveTenancy(driver, identity(778), options)).toEqual({
+      allowed: false,
+      status: 403,
+      error: "signup_closed",
+    })
+    expect(await userRow(driver, 778)).toBeUndefined()
+  })
+
+  it("refuses an expired, revoked or made-up invite, provisioning nothing", async () => {
+    const driver = await controlPlane()
+    const day = 24 * 60 * 60 * 1000
+    const expired = await invite(driver, 100, 1)
+    const revoked = await mintInvite(driver, {
+      createdBy: OWNER_ID,
+      note: null,
+      expiresInDays: 7,
+      now: 100,
+    })
+    expect(await revokeInvite(driver, revoked.summary.id, 101)).toBe(true)
+    for (const token of [expired, revoked.token, "rmn_inv_nope", "not-even-a-token"]) {
+      const decision = await resolveTenancy(driver, identity(777), {
+        signupMode: "invite",
+        bootstrapGithubId: OWNER,
+        inviteToken: token,
+        now: () => 100 + 2 * day,
+      })
+      expect(decision).toEqual({ allowed: false, status: 403, error: "signup_closed" })
+    }
+    expect(await userRow(driver, 777)).toBeUndefined()
+  })
+
+  it("leaves an invite unclaimed when the sign-in already has a row", async () => {
+    const driver = await controlPlane()
+    await driver.exec(
+      "INSERT INTO users (github_id, login, created_at, email) VALUES (7, 'a', 1, 'a@example.com')",
+    )
+    const token = await invite(driver)
+    const decision = await resolveTenancy(driver, identity(7), {
+      signupMode: "invite",
+      bootstrapGithubId: OWNER,
+      inviteToken: token,
+    })
+    expect(decision).toEqual({ allowed: true, via: "existing" })
+    expect((await driver.exec("SELECT redeemed_at FROM invites"))[0]?.redeemed_at).toBeNull()
+  })
+
+  it("leaves an invite unclaimed when the sign-in carries no address (nothing to provision)", async () => {
+    const driver = await controlPlane()
+    const token = await invite(driver)
+    const decision = await resolveTenancy(driver, apiIdentity(777), {
+      signupMode: "invite",
+      bootstrapGithubId: OWNER,
+      inviteToken: token,
+    })
+    expect(decision).toEqual({ allowed: false, status: 403, error: "sign_in_required" })
+    expect((await driver.exec("SELECT redeemed_at FROM invites"))[0]?.redeemed_at).toBeNull()
+  })
+
+  it("invite mode admits the bootstrap owner without an invite, as the admin", async () => {
     const driver = await controlPlane()
     const decision = await resolveTenancy(driver, identity(OWNER_ID), {
-      signupMode: "allowlist",
-      bootstrapGithubId: undefined, // even without the bootstrap var
-    })
-    expect(decision).toEqual({ allowed: true })
-  })
-
-  it("allowlist mode admits the bootstrap owner even without an allowlist row", async () => {
-    const driver = await controlPlane()
-    await driver.exec("DELETE FROM allowlist")
-    const decision = await resolveTenancy(driver, identity(OWNER_ID), {
-      signupMode: "allowlist",
+      signupMode: "invite",
       bootstrapGithubId: OWNER,
     })
-    expect(decision).toEqual({ allowed: true })
+    expect(decision).toEqual({ allowed: true, via: "owner" })
+    expect((await userRow(driver, OWNER_ID))?.created_by).toBe("admin")
   })
 
-  it("allowlist mode rejects an unlisted id (403 signup_closed), provisioning nothing", async () => {
+  it("invite mode rejects a sign-in with no invite (403 signup_closed), provisioning nothing", async () => {
     const driver = await controlPlane()
-    const decision = await resolveTenancy(driver, identity(999), {
-      signupMode: "allowlist",
-      bootstrapGithubId: OWNER,
-    })
-    expect(decision).toEqual({ allowed: false, status: 403, error: "signup_closed" })
+    for (const signupMode of ["invite", "allowlist" /* the old spelling stays gated */]) {
+      const decision = await resolveTenancy(driver, identity(999), {
+        signupMode,
+        bootstrapGithubId: OWNER,
+      })
+      expect(decision).toEqual({ allowed: false, status: 403, error: "signup_closed" })
+    }
     expect(await userRow(driver, 999)).toBeUndefined()
   })
 
@@ -211,7 +280,7 @@ describe("resolveTenancy — signup (no users row)", () => {
       bootstrapGithubId: OWNER,
       now: () => 456,
     })
-    expect(decision).toEqual({ allowed: true })
+    expect(decision).toEqual({ allowed: true, via: "signup" })
     expect(await userRow(driver, 999)).toMatchObject({
       login: "stranger",
       created_by: "signup",
@@ -234,7 +303,7 @@ describe("resolveTenancy — signup (no users row)", () => {
         signupMode: undefined,
         bootstrapGithubId: OWNER,
       }),
-    ).toEqual({ allowed: true })
+    ).toEqual({ allowed: true, via: "owner" })
     expect(
       await resolveTenancy(driver, identity(999), {
         signupMode: undefined,
@@ -264,7 +333,7 @@ describe("resolveTenancy — control-plane migration not applied", () => {
         signupMode: "open", // even open mode cannot admit without the tables
         bootstrapGithubId: OWNER,
       }),
-    ).toEqual({ allowed: true })
+    ).toEqual({ allowed: true, via: "owner" })
     expect(
       await resolveTenancy(bare, identity(999), {
         signupMode: "open",

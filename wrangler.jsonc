@@ -22,7 +22,7 @@
       "/api/mcp/tokens",
       "/api/mcp/tokens/*",
       // The feature flags as the caller sees them, and the admin API behind
-      // the /admin page: the flags' audiences.
+      // the /admin page: invite links and the flags' audiences.
       "/api/features",
       "/api/admin",
       "/api/admin/*",
@@ -32,7 +32,7 @@
       "/api/shares/*",
     ],
   },
-  // The one database: the control plane (users, allowlist, feature flags —
+  // The one database: the control plane (users, invites, feature flags —
   // docs/multi-tenant-design.md §3) AND every user's corpus, scoped by the
   // `user_id` column (migrations/0004_tenant_columns.sql). Only
   // worker/tenancy-db.ts may touch this binding — `npm run check:queries`
@@ -113,13 +113,14 @@
   // Without it the tool refuses and says what to set.
   "vars": {
     "VITE_GITHUB_CLIENT_ID": "Ov23lidqIncQ8ul67fUo",
-    // Bootstrap owner id: implicit allowlist entry, the fail-closed fallback
-    // if the control-plane migration hasn't run, and the ADMIN — the one
-    // account that sets feature flags (the /admin page, worker/features.ts).
+    // Bootstrap owner id: always admitted, the fail-closed fallback if the
+    // control-plane migration hasn't run, and the ADMIN — the one account
+    // that mints invite links and sets feature flags (the /admin page).
     "ALLOWED_GITHUB_ID": "42536816",
-    // Signup gate (worker/handlers/tenancy.ts): "allowlist" admits only ids in
-    // the control plane's allowlist table (plus the bootstrap owner); "open"
-    // auto-provisions any verified GitHub id; absent = bootstrap owner only.
+    // Signup gate (worker/handlers/tenancy.ts): "invite" admits the bootstrap
+    // owner and anyone who signs in through a live invite link minted on the
+    // admin page (migrations/0014); "open" auto-provisions any verified
+    // GitHub id; absent = bootstrap owner only.
     //
     // Closed 2026-09-08. Under "open" three ids other than the owner
     // provisioned themselves within a week — invited or not, an open door on a
@@ -131,7 +132,7 @@
     // before it ever consults the mode, so every id already provisioned keeps
     // its access — closing signups is not a revocation. Revoking is
     // `UPDATE users SET status = 'blocked'`, deliberately a separate act.
-    "SIGNUP_MODE": "allowlist",
+    "SIGNUP_MODE": "invite",
     // Image uploads: the Worker's half of the switch (the client's half is the
     // same variable in .env.production). Both are "true"; see the binding above.
     "VITE_IMAGES_ENABLED": "true",

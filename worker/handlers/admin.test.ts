@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import type { FeatureAudiencesBody } from "../admin-wire"
+import type { FeatureAudiencesBody, InvitesListBody, MintedInviteBody } from "../admin-wire"
 import { featureAllows, featureAudiences, isAdmin } from "../features"
+import { redeemInvite } from "../invites"
 import { createMcpTestEnv, type McpTestEnv } from "../mcp/test-support"
 import { admin } from "./admin"
 import { features } from "./features"
@@ -64,32 +65,108 @@ beforeEach(async () => {
 
 describe("the admin line", () => {
   it("refuses an unauthenticated caller", async () => {
-    expect(
-      (await sendAdmin(apiRequest("GET", "/api/admin/features", undefined, null))).status,
-    ).toBe(401)
+    expect((await sendAdmin(apiRequest("GET", "/api/admin/invites", undefined, null))).status).toBe(
+      401,
+    )
   })
 
   it("answers a tenant who is not the admin with the 404 a missing route gets", async () => {
     for (const [method, path, body] of [
+      ["GET", "/api/admin/invites"],
+      ["POST", "/api/admin/invites", {}],
+      ["DELETE", "/api/admin/invites/inv_x"],
       ["GET", "/api/admin/features"],
-      ["PUT", "/api/admin/features/mcp", { audience: "off" }],
+      ["PUT", "/api/admin/features/mcp", { audience: "everyone" }],
     ] as const) {
       const response = await sendAdmin(apiRequest(method, path, body, "user"))
       expect(response.status).toBe(404)
       expect(await bodyOf(response)).toEqual({ error: "not_found" })
     }
-    expect(await harness.control.exec("SELECT key FROM feature_flags")).toEqual([])
+    expect(await harness.control.exec("SELECT id FROM invites")).toEqual([])
   })
 
   it("has no admin at all without the bootstrap id configured", async () => {
     Object.assign(harness.env, { ALLOWED_GITHUB_ID: undefined })
     expect(isAdmin(harness.env, ADMIN)).toBe(false)
-    expect((await sendAdmin(apiRequest("GET", "/api/admin/features"))).status).toBe(404)
+    expect((await sendAdmin(apiRequest("GET", "/api/admin/invites"))).status).toBe(404)
   })
 
   it("answers an unknown admin route with 404", async () => {
     expect((await sendAdmin(apiRequest("GET", "/api/admin/users"))).status).toBe(404)
     expect((await sendAdmin(apiRequest("GET", "/api/admin"))).status).toBe(404)
+  })
+})
+
+// -----------------------------------------------------------------------------
+// Invites
+// -----------------------------------------------------------------------------
+
+describe("invites", () => {
+  it("mints with the defaults from an empty body, and shows the token once", async () => {
+    const response = await sendAdmin(apiRequest("POST", "/api/admin/invites"))
+    expect(response.status).toBe(201)
+    const body = (await bodyOf(response)) as MintedInviteBody
+    expect(body.token).toMatch(/^rmn_inv_/)
+    expect(body.invite.note).toBeNull()
+    expect(body.invite.expiresAt - body.invite.createdAt).toBe(7 * 24 * 60 * 60 * 1000)
+
+    const listed = (await bodyOf(
+      await sendAdmin(apiRequest("GET", "/api/admin/invites")),
+    )) as InvitesListBody
+    expect(listed.invites).toEqual([body.invite])
+    expect(JSON.stringify(listed)).not.toContain(body.token)
+  })
+
+  it("takes a note and an expiry", async () => {
+    const response = await sendAdmin(
+      apiRequest("POST", "/api/admin/invites", { note: "  for Ada ", expiresInDays: 30 }),
+    )
+    const body = (await bodyOf(response)) as MintedInviteBody
+    expect(body.invite.note).toBe("for Ada")
+    expect(body.invite.expiresAt - body.invite.createdAt).toBe(30 * 24 * 60 * 60 * 1000)
+  })
+
+  it("refuses a bad note or expiry, naming the field", async () => {
+    for (const bad of [
+      { note: 7 },
+      { note: "x".repeat(81) },
+      { expiresInDays: 0 },
+      { expiresInDays: 91 },
+      { expiresInDays: 1.5 },
+      { expiresInDays: "7" },
+    ]) {
+      const response = await sendAdmin(apiRequest("POST", "/api/admin/invites", bad))
+      expect(response.status).toBe(400)
+      expect((await bodyOf(response)).error).toBe("invalid_request")
+    }
+    expect(await harness.control.exec("SELECT id FROM invites")).toEqual([])
+  })
+
+  it("revokes a live invite; a second revoke, or a redeemed one, is not found", async () => {
+    const minted = (await bodyOf(
+      await sendAdmin(apiRequest("POST", "/api/admin/invites")),
+    )) as MintedInviteBody
+    expect(
+      (await sendAdmin(apiRequest("DELETE", `/api/admin/invites/${minted.invite.id}`))).status,
+    ).toBe(200)
+    expect(
+      (await sendAdmin(apiRequest("DELETE", `/api/admin/invites/${minted.invite.id}`))).status,
+    ).toBe(404)
+    expect(await redeemInvite(harness.control, minted.token, 99)).toBe(false)
+
+    const used = (await bodyOf(
+      await sendAdmin(apiRequest("POST", "/api/admin/invites")),
+    )) as MintedInviteBody
+    expect(await redeemInvite(harness.control, used.token, USER)).toBe(true)
+    expect(
+      (await sendAdmin(apiRequest("DELETE", `/api/admin/invites/${used.invite.id}`))).status,
+    ).toBe(404)
+    const listed = (await bodyOf(
+      await sendAdmin(apiRequest("GET", "/api/admin/invites")),
+    )) as InvitesListBody
+    expect(listed.invites.find((invite) => invite.id === used.invite.id)?.redeemedBy).toMatchObject(
+      { id: USER },
+    )
   })
 })
 
