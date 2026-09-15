@@ -1,6 +1,6 @@
 import { PreviewCard } from "@base-ui/react/preview-card"
 import type React from "react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { hostOf } from "../../blocks/link"
 import { cx } from "../../utils/cx"
 import { Button } from "../button"
@@ -21,12 +21,18 @@ function openLink(url: string): void {
  *
  * The display text is saved on Enter, or on leaving the field with it
  * changed; an emptied field saves nothing.
+ *
+ * A touch screen has nothing to hover with, so the row's context menu
+ * offers **Edit link**, which opens the card outright (`open`); a tap
+ * outside, or Escape, closes it and says so (`onClose`).
  */
 export function LinkHoverCard({
   href,
   title,
   onRename,
   toggle,
+  open: forced = false,
+  onClose,
   render,
   children,
 }: {
@@ -37,12 +43,26 @@ export function LinkHoverCard({
   onRename: (next: string) => void
   /** Another form the link can take: its label and what makes the change. */
   toggle?: { label: string; onClick: () => void }
+  /** Open the card now, without a hover (the menu's "Edit link"). */
+  open?: boolean
+  /** The card closed after being opened that way. */
+  onClose?: () => void
   /** The element the card opens over. */
   render: React.ReactElement
   children: React.ReactNode
 }) {
+  const [open, setOpen] = useState(forced)
+  useEffect(() => {
+    if (forced) setOpen(true)
+  }, [forced])
   return (
-    <PreviewCard.Root>
+    <PreviewCard.Root
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next && forced) onClose?.()
+      }}
+    >
       <PreviewCard.Trigger render={render} delay={400} closeDelay={150}>
         {children}
       </PreviewCard.Trigger>
@@ -51,7 +71,7 @@ export function LinkHoverCard({
           <PreviewCard.Popup
             data-testid="link-hover-card"
             className={cx(
-              "card-2 z-30 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-lg p-2 print:hidden no-hover:hidden",
+              "card-2 z-30 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-lg p-2 print:hidden",
               "origin-(--transform-origin) transition-[transform,scale,opacity]",
               "data-ending-style:scale-95 data-ending-style:opacity-0",
               "data-starting-style:scale-95 data-starting-style:opacity-0",

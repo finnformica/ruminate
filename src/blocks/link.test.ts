@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { hostOf, isWebUrl, linkifyPastedText } from "./link"
+import { hostOf, isWebUrl, linkifyPastedText, linkifyTypedAddress, linksInText } from "./link"
 
 describe("hostOf", () => {
   it("names the host, without www, as the display text of an address", () => {
@@ -41,5 +41,45 @@ describe("linkifyPastedText", () => {
     expect(linkifyPastedText("[x](https://e.com/a) and https://e.com/b")).toBe(
       "[x](https://e.com/a) and [e.com](https://e.com/b)",
     )
+  })
+})
+
+describe("linkifyTypedAddress", () => {
+  it("writes out an address once a space is typed after it, and places the caret", () => {
+    const text = "see https://www.e.com/x "
+    expect(linkifyTypedAddress(text, text.length)).toEqual({
+      text: "see [e.com](https://www.e.com/x) ",
+      caret: "see [e.com](https://www.e.com/x) ".length,
+    })
+    // Mid-text: what follows the caret is kept.
+    expect(linkifyTypedAddress("https://e.com/a. then", "https://e.com/a. ".length)).toEqual({
+      text: "[e.com](https://e.com/a). then",
+      caret: "[e.com](https://e.com/a). ".length,
+    })
+  })
+
+  it("leaves alone what is not a bare address before a typed space", () => {
+    for (const text of [
+      "see [x](https://e.com/x) ",
+      "<https://e.com/x> ",
+      "`https://e.com/x` ",
+      "see https://e.com/x",
+      "plain words ",
+      "(https://e.com/x ",
+    ]) {
+      expect(linkifyTypedAddress(text, text.length), text).toBeNull()
+    }
+  })
+})
+
+describe("linksInText", () => {
+  it("lists a block's links in order, bare or written out", () => {
+    expect(
+      linksInText("Read [the guide](https://e.com/g), then https://e.com/x. And [top](#top)."),
+    ).toEqual([
+      { href: "https://e.com/g", title: "the guide" },
+      { href: "https://e.com/x", title: "https://e.com/x" },
+    ])
+    expect(linksInText("no links")).toEqual([])
   })
 })

@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent, ClipboardEvent, CSSProperties, KeyboardEvent } from "react"
 import { cx } from "../../utils/cx"
 import type { Block, BlockDoc } from "../../blocks/types"
-import { linkifyPastedText } from "../../blocks/link"
+import { linkifyPastedText, linkifyTypedAddress } from "../../blocks/link"
 import { leadingMarker } from "../../blocks/markers"
 import { defOf } from "../../blocks/registry"
 import type { BlockPatch } from "../../blocks/ops"
@@ -111,6 +111,11 @@ export interface BlockEditorApi {
    * `[title](href)` becomes `[next](href)`; a bare address is written out
    * as a link. Absent in read-only views. */
   renameLink?: (key: string, href: string, title: string, next: string) => void
+  /** A link's card the reader asked to open from the menu ("Edit link",
+   * for a touch screen): the row and the address. */
+  linkCard?: { key: string; href: string } | null
+  /** That card closed. */
+  closeLinkCard?: () => void
   /**
    * Exit edit mode and take the first selection-ladder rung on this row
    * (Cmd/Ctrl+A pressed with the textarea's text already fully selected).
@@ -359,11 +364,18 @@ export function BlockItem({
       leading !== null && (type !== "code" || (leading.text === "" && leading.type !== "code"))
         ? leading
         : null
-    const text = typed !== null ? typed.text : newBody
+    // A space typed after a bare address writes it out as a link named for
+    // its host (docs/links.md), as a paste is; the caret follows. Not in a
+    // code block, where an address is code.
+    const linked = typed === null && type !== "code" ? linkifyTypedAddress(newBody, caret) : null
+    const text = typed !== null ? typed.text : linked !== null ? linked.text : newBody
     if (typed !== null) {
       // The marker left the visible text; keep the caret relative to it.
       pendingCaret.current = Math.max(0, caret - (newBody.length - text.length))
       api.onBlockChange(block.id, { type: typed.type, text })
+    } else if (linked !== null) {
+      pendingCaret.current = linked.caret
+      api.onBlockChange(block.id, { text }, "structural")
     } else {
       api.onBlockChange(block.id, { text })
     }
@@ -766,12 +778,18 @@ export function BlockItem({
   // (`link-hover-card.tsx`) changes its display text, in an editor that
   // can write the change.
   const renameLink = readOnly ? undefined : api.renameLink
+  const openHref = api.linkCard?.key === occurrence.key ? api.linkCard.href : null
+  const closeLinkCard = api.closeLinkCard
   const linkActions = useMemo<LinkActions | null>(
     () =>
       renameLink
-        ? { rename: (href, title, next) => renameLink(occurrence.key, href, title, next) }
+        ? {
+            rename: (href, title, next) => renameLink(occurrence.key, href, title, next),
+            openHref,
+            closeCard: () => closeLinkCard?.(),
+          }
         : null,
-    [renameLink, occurrence.key],
+    [renameLink, occurrence.key, openHref, closeLinkCard],
   )
 
   // The caption/body line: the textarea while editing, the rendered text

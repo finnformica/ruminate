@@ -11,8 +11,15 @@ address's host, with the scheme, the path and the query left out of it,
 and the address itself is kept whole. Only how the link reads changes. A
 link already written out, an image, a code span and a code fence in the
 paste are left as they are, as is a paste as plain text (<kbd>⌘</kbd>
-<kbd>⇧</kbd> <kbd>V</kbd>). A typed address is not rewritten as you type;
-its hover card offers the host as its display text.
+<kbd>⇧</kbd> <kbd>V</kbd>).
+
+A typed address is written out the same way the moment a space is typed
+after it, with the caret following, and any bare address still in the row
+when you leave edit mode (<kbd>Esc</kbd>, <kbd>↵</kbd>, a click elsewhere)
+is written out then. Each rewrite is its own undo step, so <kbd>⌘</kbd>
+<kbd>Z</kbd> gives the bare address back. An address in a code block, a
+code span, an autolink (`<https://…>`) or a link already written out is
+left alone.
 
 The rewrite is `linkifyPastedText` (`src/blocks/link.ts`), applied to the
 pasted text in the row's paste handler before it is parsed, so it works
@@ -33,6 +40,11 @@ opens beneath it (`link-hover-card.tsx`):
 Changing the display text rewrites `[old](url)` to `[new](url)` in the
 block's text — the first occurrence of that link — and is one undo step. A
 link that is not a web address (`mailto:`, an anchor) has no card.
+
+A touch screen has nothing to hover with, so the row's context menu
+(press and hold) offers **Edit link**, which opens the same card outright
+— straight away for a row with one link, and by display text for a row
+with several. A tap outside closes it.
 
 The card is only offered where the row can be written: the row provides
 the actions (`link-actions.ts`) and the rendered link reads them

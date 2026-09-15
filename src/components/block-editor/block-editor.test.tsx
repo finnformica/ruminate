@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { useState } from "react"
 import { toast, Toaster } from "sonner"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
@@ -3316,6 +3316,62 @@ describe("BlockEditor inline links", () => {
       fireEvent.submit(field.closest("form")!)
     })
     expect(serializedLines(getByTestId)).toEqual(["See [e.com](https://www.e.com/x) now"])
+  })
+
+  it("a space typed after an address writes it out as a link, the caret following", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "see https://www.e.com/x" } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["see https://www.e.com/x"])
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "see https://www.e.com/x " } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["see [e.com](https://www.e.com/x) "])
+    expect(textarea.selectionStart).toBe("see [e.com](https://www.e.com/x) ".length)
+    // Its own undo step: the bare address comes back.
+    fireEvent.keyDown(textarea, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["see https://www.e.com/x"])
+  })
+
+  it("leaving edit mode writes out a bare address left in the row", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "https://www.e.com/x" } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["https://www.e.com/x"])
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Escape" })
+    })
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(serializedLines(getByTestId)).toEqual(["[e.com](https://www.e.com/x)"])
+  })
+
+  it("the menu's Edit link opens a link's card without a hover, for a touch screen", async () => {
+    const { container } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) and https://e.com/x"} />,
+    )
+    const row = container.querySelector("[data-occurrence]")!
+    await act(async () => {
+      fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
+    })
+    const menu = screen.getByTestId("block-context-menu")
+    expect(menu.textContent).toContain("Edit link")
+    // Two links: a submenu names them by their text.
+    await act(async () => {
+      fireEvent.click(screen.getByText("Edit link"))
+    })
+    const submenu = await screen.findByTestId("edit-link-menu")
+    expect(submenu.textContent).toContain("the guide")
+    expect(submenu.textContent).toContain("https://e.com/x")
+    await act(async () => {
+      fireEvent.click(within(submenu).getByText("the guide"))
+    })
+    const card = await screen.findByTestId("link-hover-card")
+    expect(card.textContent).toContain("e.com/g")
+    expect((screen.getByTestId("link-display-text") as HTMLInputElement).value).toBe("the guide")
   })
 
   it("a read-only row's link is only a link", async () => {

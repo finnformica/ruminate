@@ -113,6 +113,8 @@ function Link({
       href={href}
       title={title}
       onRename={(next) => actions.rename(href, title, next)}
+      open={actions.openHref === href}
+      onClose={actions.closeCard}
       render={anchor}
     >
       {children}
