@@ -102,8 +102,6 @@ function InvitesSection() {
 
   return (
     <SettingsSection title="Invites">
-      <p className="leading-5 text-text-secondary">Invite users to Ruminate via a link.</p>
-
       {error ? <p className="text-text-danger">{error}</p> : null}
 
       {minted ? (
