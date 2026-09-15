@@ -152,8 +152,7 @@ export function useSyncStatusMeta(): { tooltip?: string; action: "reauth" | "pul
   switch (syncStatusKind(state)) {
     case "offline":
       return {
-        tooltip:
-          "You're offline — notes are saved on this device and will sync once you're back online",
+        tooltip: "Notes are saved on this device and will sync when you're back online",
         action: null,
       }
     case "signed-out":
