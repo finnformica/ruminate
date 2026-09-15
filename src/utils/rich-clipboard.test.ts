@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { parse } from "../blocks/parse"
-import { serialize } from "../blocks/serialize"
+import { BLOCK_TYPE_DEFS } from "../blocks/registry"
+import { blockLines, serialize } from "../blocks/serialize"
+import type { Block, BlockType } from "../blocks/types"
 import { htmlToMarkdown } from "./html-to-markdown"
 import {
   clipboardBlocksToDoc,
@@ -112,6 +114,36 @@ describe("richClipboardFormats", () => {
     const two = clipboardBlocksToDoc(blocks)
     expect(Object.keys(one.blocks)).not.toEqual(Object.keys(two.blocks))
   })
+})
+
+describe("every block type's html survives a foreign app", () => {
+  // The composers that take the html flavor over the plain one (Slack,
+  // Claude, Google Docs) drop the private payload and keep only what their
+  // own formatting can hold — and a form control is not that (the to-do box
+  // used to be one). So each type's html, put through the same converter
+  // foreign html comes back through, must read as the block it was: its
+  // marker held by an element those composers translate (a list item, a
+  // heading, a quote, a fence) or by literal text, never lost. A new block
+  // type is covered here by default; excuse it only with a reason.
+  const excused: Partial<Record<BlockType, string>> = {
+    h2: "a heading's level comes from its outline depth; the marker is `#` at any level",
+    h3: "as h2",
+    image: "an <img> is the picture itself; the converter has no image block to read it into",
+    note: "a page's title, never a copied block",
+  }
+  const text = "some **bold** text"
+  for (const def of BLOCK_TYPE_DEFS) {
+    if (def.id in excused) continue
+    it(def.id, () => {
+      const block: Block = { id: "blk_x", type: def.id, text, children: [] }
+      const { html } = richClipboardFormats(blockLines(block).join("\n"))
+      const visible = html.replace(/<meta[^>]*>/g, "")
+      expect(visible).not.toMatch(/<(input|button|select|textarea)\b/)
+      const doc = parse(htmlToMarkdown(visible))
+      const [first] = doc.rootBlockIds.map((id) => doc.blocks[id])
+      expect(first).toMatchObject({ type: def.id, text })
+    })
+  }
 })
 
 describe("block ids in the payload (paste as link)", () => {
