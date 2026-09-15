@@ -1,7 +1,6 @@
 // tenant-guard: exempt — no SQL here; the fake bucket is keyed by tenant on
 // purpose so the cross-tenant assertions below prove the prefix scoping.
 import { describe, expect, it } from "vitest"
-import migration0003 from "../../migrations/0003_control_plane.sql?raw"
 import migration0007 from "../../migrations/0007_mcp_tokens.sql?raw"
 import migration0009 from "../../migrations/0009_mcp_token_usage.sql?raw"
 import { mintToken, revokeToken } from "../mcp/tokens"
@@ -10,7 +9,12 @@ import type { Env } from "../types"
 import { IMAGE_LINK_TTL_SECONDS, signImageLink } from "./image-links"
 import { imageIdOfUrl, imageUrlOf, isImageId, isImageMime, newImageId } from "./image-policy"
 import { images } from "./images"
-import { asFakeD1, createTenantTestDriver } from "./sqlite-test-driver"
+import {
+  applyControlPlane,
+  signInUser,
+  asFakeD1,
+  createTenantTestDriver,
+} from "./sqlite-test-driver"
 
 /** Just enough of R2 for the handler: put/get by key, metadata kept. */
 function fakeBucket() {
@@ -55,9 +59,13 @@ async function testEnv(
   overrides: Partial<Env> = {},
 ): Promise<{ env: Env; objects: Map<string, unknown> }> {
   const driver = await createTenantTestDriver()
-  await driver.execScript(migration0003)
+  await applyControlPlane(driver)
   await driver.execScript(migration0007)
   await driver.execScript(migration0009)
+  // Alice and Bob have signed in (the callback provisions the row, address
+  // included; the API path cannot).
+  await signInUser(driver, 1001, "alice")
+  await signInUser(driver, 1002, "bob")
   const { bucket, objects } = fakeBucket()
   const env = {
     DB: asFakeD1(driver),
@@ -192,15 +200,6 @@ describe("signed links (the MCP agent's download)", () => {
   async function fixture() {
     const { env } = await testEnv({ IMAGE_LINK_SECRET: SECRET })
     const control = controlPlaneDriver(env)
-    for (const [id, login] of [
-      [1001, "alice"],
-      [1002, "bob"],
-    ] as const) {
-      await control.exec(
-        "INSERT INTO users (github_id, login, status, created_at) VALUES (?1, ?2, 'active', 1)",
-        [id, login],
-      )
-    }
     const created = await images(upload("alice", png), env, github)
     const { id } = (await created.json()) as { id: string }
     const minted = await mintToken(control, {

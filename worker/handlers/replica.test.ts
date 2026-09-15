@@ -1,7 +1,6 @@
 // tenant-guard: exempt — this suite reads raw storage (both tenants' rows,
 // tombstones included) on purpose: that is how it proves the scoping works.
 import { describe, expect, it } from "vitest"
-import migration0003 from "../../migrations/0003_control_plane.sql?raw"
 import migration0008 from "../../migrations/0008_note_type.sql?raw"
 import type { SqlDriver } from "../../src/data/sql-driver"
 import { ensureTenantMeta, forTenant, type TenantDb } from "../tenancy-db"
@@ -18,7 +17,14 @@ import {
   type ReplicaCorpusBody,
 } from "./replica-payload"
 import { replica, requireSession } from "./replica"
-import { asFakeD1, createTenantTestDriver, createTestSqlDriver } from "./sqlite-test-driver"
+import {
+  applyControlPlane,
+  asFakeD1,
+  createTenantTestDriver,
+  createTestSqlDriver,
+  signInUser,
+} from "./sqlite-test-driver"
+import { resolveTenancy } from "./tenancy"
 
 const node: NodeRow = { id: "blk_aaaaaaaaaa", type: "ul", text: "Hi", props: null, updated_at: 123 }
 const link: LinkRow = {
@@ -504,7 +510,11 @@ function githubStub(users: Record<string, { id: number; login?: string }>): type
  */
 async function testEnv(overrides: Partial<Env> = {}): Promise<{ env: Env; driver: SqlDriver }> {
   const driver = await createTenantTestDriver()
-  await driver.execScript(migration0003)
+  await applyControlPlane(driver)
+  // Alice and Bob have signed in (the callback provisions the row; the API
+  // path cannot). The owner and the stranger deliberately have not.
+  await signInUser(driver, 111, "alice")
+  await signInUser(driver, 222, "bob")
   const env = {
     DB: asFakeD1(driver),
     SIGNUP_MODE: "open",
@@ -558,7 +568,8 @@ describe("requireSession", () => {
   })
 
   it("returns the VERIFIED identity — GitHub's id for the token, nothing client-sent", async () => {
-    const { env } = await testEnv({ SIGNUP_MODE: undefined, ALLOWED_GITHUB_ID: "42536816" })
+    const { env, driver } = await testEnv({ SIGNUP_MODE: undefined, ALLOWED_GITHUB_ID: "42536816" })
+    await signInUser(driver, 42536816, "finn")
     const result = await requireSession(
       request({ ...authHeaders("good"), "X-GitHub-Id": "999" }),
       env,
@@ -773,10 +784,7 @@ describe("tenant scoping — the adversarial suite", () => {
 
   it("a control-plane rejection (blocked user) also stops before tenant work", async () => {
     const { env, driver } = await testEnv()
-    await driver.exec(
-      "INSERT INTO users (github_id, login, status, created_at) VALUES (?1, 'b', 'blocked', 1)",
-      [222],
-    )
+    await driver.exec("UPDATE users SET status = 'blocked' WHERE github_id = ?1", [222])
     const response = await get(env, "bob-token", "/api/replica/status")
     expect(response.status).toBe(403)
     expect(await driver.exec("SELECT COUNT(*) AS n FROM nodes")).toEqual([{ n: 0 }])
@@ -807,14 +815,21 @@ describe("the control plane is not tenant data", () => {
   it("resolveTenancy still admits an id that is not yet a tenant", async () => {
     // The `users`/`allowlist` lookup has to happen BEFORE a tenant exists, so
     // those tables are deliberately outside the tenant scope. Proving it: a
-    // brand-new id signs in and gets a corpus.
+    // brand-new id signs in (the callback's resolve, address in hand) and
+    // gets a corpus.
     const github = githubStub({ "new-token": { id: 4242, login: "new" } })
     const driver = await createTenantTestDriver()
-    await driver.execScript(migration0003)
+    await applyControlPlane(driver)
     const env = {
       DB: asFakeD1(driver),
       SIGNUP_MODE: "open",
     } as unknown as Env
+    const signedIn = await resolveTenancy(
+      driver,
+      { id: 4242, login: "new", name: null, email: "new@example.com" },
+      { signupMode: "open", bootstrapGithubId: undefined },
+    )
+    expect(signedIn.allowed).toBe(true)
     const response = await replica(
       new Request("https://example.com/api/replica/status", {
         headers: { ...authHeaders("new-token"), ...REPLICA_PROTOCOL_HEADERS },
@@ -824,6 +839,23 @@ describe("the control plane is not tenant data", () => {
     )
     expect(response.status).toBe(200)
     expect(await driver.exec("SELECT github_id FROM users")).toEqual([{ github_id: 4242 }])
+  })
+
+  it("the API path cannot provision: a new id that never signed in is refused", async () => {
+    // `requireSession` verifies `/user` alone and carries no address, and the
+    // address is mandatory — so the row can only come from the callback.
+    const github = githubStub({ "new-token": { id: 4343, login: "new" } })
+    const { env, driver } = await testEnv()
+    const response = await replica(
+      new Request("https://example.com/api/replica/status", {
+        headers: { ...authHeaders("new-token"), ...REPLICA_PROTOCOL_HEADERS },
+      }),
+      env,
+      github,
+    )
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: "sign_in_required" })
+    expect(await driver.exec("SELECT github_id FROM users WHERE github_id = 4343")).toEqual([])
   })
 })
 

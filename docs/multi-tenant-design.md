@@ -209,7 +209,7 @@ CREATE TABLE users (
   created_at INTEGER NOT NULL,     -- ms epoch — attribution lives HERE (§7)
   created_by TEXT NOT NULL DEFAULT 'signup',  -- 'signup' | 'allowlist' | 'admin'
   last_seen_at INTEGER,
-  email      TEXT              -- primary verified GitHub address, recorded at sign-in (0010)
+  email      TEXT NOT NULL     -- primary verified GitHub address, recorded at sign-in (0010, 0011)
 );
 
 CREATE TABLE allowlist (
@@ -277,7 +277,13 @@ each table" — conflates two things this design keeps apart:
 
 ## 8. Explicitly out of scope
 
-**Collaboration/sharing.** Not designed here, but the shape is decided
+**Collaboration/sharing.** _Update 2026-09-14: the scoped grant described
+below is built — on shared D1, not a DO — as docs/sharing.md. The closure is
+one recursive CTE against the owner's partition through a `TenantDb` minted
+from the share row, the client holds slices in memory beside its own corpus,
+and the deletion-by-absence concern this paragraph raised no longer applies:
+slices are pulled whole, and since-pulls carry tombstones rather than key
+lists._ Not designed here, but the shape is decided
 (discussed 2026-08-31): **the shareable unit is a space, not a row.** A
 shared space is simply another corpus — another SQLite DO (`space:<uuid>`),
 same schema, same replica protocol — with a membership table in the control

@@ -33,7 +33,7 @@ export interface VerifiedIdentity {
    * The primary verified address GitHub reports for the account — known only
    * to the sign-in callback, which fetches it. Absent on the API path
    * (`requireSession` checks `/user`, not `/user/emails`), where the stored
-   * value is left alone.
+   * value is left alone and no row can be provisioned.
    */
   email?: string | null
 }
@@ -64,74 +64,63 @@ function legacyOwnerDecision(id: number, bootstrapGithubId: string | undefined):
   return String(id) === bootstrapGithubId ? allow : deny(403, "forbidden")
 }
 
-/**
- * Record the account's address on its `users` row — the address sharing
- * resolves a grantee through (migrations/0010_user_email.sql). Idempotent;
- * a changed address replaces the old one. Tolerates a missing column
- * (migration 0010 not applied): the address is a convenience for sharing,
- * and a sign-in must never fail on it.
- */
-async function recordUserEmail(driver: SqlDriver, githubId: number, email: string): Promise<void> {
-  try {
-    await driver.exec("UPDATE users SET email = ?2 WHERE github_id = ?1", [
-      githubId,
-      email.trim().toLowerCase(),
-    ])
-  } catch {
-    // Column missing: nothing to record into.
-  }
-}
-
 async function provisionUser(
   driver: SqlDriver,
   identity: VerifiedIdentity,
+  email: string,
   createdBy: "signup" | "allowlist",
   now: number,
 ): Promise<void> {
   await driver.exec(
-    "INSERT INTO users (github_id, login, name, created_at, created_by, last_seen_at) " +
-      "VALUES (?1, ?2, ?3, ?4, ?5, ?4) ON CONFLICT (github_id) DO NOTHING",
-    [identity.id, identity.login, identity.name, now, createdBy],
+    "INSERT INTO users (github_id, login, name, email, created_at, created_by, last_seen_at) " +
+      "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?5) ON CONFLICT (github_id) DO NOTHING",
+    [identity.id, identity.login, identity.name, email, now, createdBy],
   )
 }
+
+const normalizeEmail = (email: string) => email.trim().toLowerCase()
 
 /**
  * Decide whether the verified identity is a tenant, provisioning the `users`
  * row when the mode admits a new one. Pure of platform types: `driver` is the
  * control-plane database behind the `SqlDriver` seam.
+ *
+ * A row is provisioned only from the sign-in callback, the one caller that
+ * carries the address (`users.email` is NOT NULL, migrations/0011): an
+ * admitted identity WITHOUT one — the API path, for an account that has
+ * never signed in through this Worker — is refused with `sign_in_required`
+ * rather than given a row with no address. An existing row's address is
+ * refreshed when the sign-in reports a different one.
  */
 export async function resolveTenancy(
   driver: SqlDriver,
   identity: VerifiedIdentity,
   options: TenancyOptions,
 ): Promise<TenancyDecision> {
-  const decision = await decideTenancy(driver, identity, options)
-  // Signing in IS signing up, and the sign-in callback is the one caller
-  // that knows the address: an admitted identity carrying one has it
-  // recorded on the row that now exists.
-  if (decision.allowed && typeof identity.email === "string" && identity.email.length > 0) {
-    await recordUserEmail(driver, identity.id, identity.email)
-  }
-  return decision
-}
-
-async function decideTenancy(
-  driver: SqlDriver,
-  identity: VerifiedIdentity,
-  options: TenancyOptions,
-): Promise<TenancyDecision> {
   const now = options.now?.() ?? Date.now()
+  const email =
+    typeof identity.email === "string" && identity.email.trim().length > 0
+      ? normalizeEmail(identity.email)
+      : null
 
-  let existing: { status: string; last_seen_at: number | null } | undefined
+  let existing: { status: string; last_seen_at: number | null; email: string } | undefined
   try {
-    const rows = await driver.exec("SELECT status, last_seen_at FROM users WHERE github_id = ?1", [
-      identity.id,
-    ])
-    existing = rows[0] as unknown as { status: string; last_seen_at: number | null } | undefined
+    const rows = await driver.exec(
+      "SELECT status, last_seen_at, email FROM users WHERE github_id = ?1",
+      [identity.id],
+    )
+    existing = rows[0] as unknown as typeof existing
   } catch {
     // Control-plane tables missing (migration 0003 not applied yet): behave
     // exactly like the pre-multi-tenant deployment.
     return legacyOwnerDecision(identity.id, options.bootstrapGithubId)
+  }
+
+  /** Admit a new id: provision its row, which needs the address. */
+  const admit = async (createdBy: "signup" | "allowlist"): Promise<TenancyDecision> => {
+    if (email === null) return deny(403, "sign_in_required")
+    await provisionUser(driver, identity, email, createdBy, now)
+    return allow
   }
 
   if (existing) {
@@ -142,14 +131,14 @@ async function decideTenancy(
         identity.id,
       ])
     }
+    if (email !== null && email !== existing.email) {
+      await driver.exec("UPDATE users SET email = ?1 WHERE github_id = ?2", [email, identity.id])
+    }
     return allow
   }
 
   // No users row: signing in is signing up — if the mode admits this id.
-  if (options.signupMode === "open") {
-    await provisionUser(driver, identity, "signup", now)
-    return allow
-  }
+  if (options.signupMode === "open") return admit("signup")
 
   const isBootstrapOwner =
     options.bootstrapGithubId !== undefined && String(identity.id) === options.bootstrapGithubId
@@ -159,12 +148,10 @@ async function decideTenancy(
       identity.id,
     ])
     if (listed.length === 0 && !isBootstrapOwner) return deny(403, "signup_closed")
-    await provisionUser(driver, identity, "allowlist", now)
-    return allow
+    return admit("allowlist")
   }
 
   // Mode absent or unrecognized: fail closed, bootstrap owner only.
   const decision = legacyOwnerDecision(identity.id, options.bootstrapGithubId)
-  if (decision.allowed) await provisionUser(driver, identity, "allowlist", now)
-  return decision
+  return decision.allowed ? admit("allowlist") : decision
 }
