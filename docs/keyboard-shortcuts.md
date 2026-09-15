@@ -323,14 +323,18 @@ Rules while zoomed:
 
 ### Note title
 
-| Action                    | Shortcut                                              |
-| ------------------------- | ----------------------------------------------------- |
-| Select the title          | <kbd>↑</kbd> from the first block                     |
-| Edit it                   | <kbd>↵</kbd> (or click)                               |
-| New root block below      | <kbd>⌘</kbd> <kbd>↵</kbd> / <kbd>⇧</kbd> <kbd>↵</kbd> |
-| Drop back into the editor | <kbd>↓</kbd>                                          |
-| Commit rename             | <kbd>↵</kbd>                                          |
-| Cancel rename             | <kbd>Esc</kbd>                                        |
+| Action                                | Shortcut                                              |
+| ------------------------------------- | ----------------------------------------------------- |
+| Select the title                      | <kbd>↑</kbd> from the first block                     |
+| Edit it                               | <kbd>↵</kbd> (or click)                               |
+| New root block below                  | <kbd>⌘</kbd> <kbd>↵</kbd> / <kbd>⇧</kbd> <kbd>↵</kbd> |
+| Drop back into the editor             | <kbd>↓</kbd>                                          |
+| Commit rename and start a block below | <kbd>↵</kbd>                                          |
+| Cancel rename                         | <kbd>Esc</kbd>                                        |
+
+A brand-new note opens with the title editing, so the name is the first thing
+typed and <kbd>↵</kbd> carries straight on into the first block. A new root
+block reuses an empty block already at the top rather than adding another.
 
 ### Document
 

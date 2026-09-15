@@ -11,7 +11,9 @@ import { Hash } from "./hash"
  *
  * - Arrow-up from the first block selects the title (via `focusSignal`), which
  *   highlights it and clears the block highlight below.
- * - Enter (or a click) edits it; Escape / Enter / blur commit or revert.
+ * - Enter (or a click) edits it; Escape reverts, blur commits, and Enter
+ *   commits and carries on into a block below (`onCreateBelow`), as Enter at
+ *   the end of a block does.
  * - Arrow-down returns focus to the editor (`onArrowDown`).
  *
  * The field edits the note's **title** — data on the note node, not its id
@@ -39,7 +41,8 @@ export function NoteTitle({
    * highlights the first block.
    */
   onArrowDown?: (mode: "edit" | "select") => void
-  /** Cmd/Shift+Enter while the title is selected adds a new root block. */
+  /** Enter while editing the title, or Cmd/Shift+Enter while it is selected,
+   * opens a new root block below it. */
   onCreateBelow?: () => void
   /** Bump to select the title from the keyboard (arrow-up past the first block). */
   focusSignal?: number
@@ -58,17 +61,13 @@ export function NoteTitle({
 
   // Reset the field when the note's title changes underneath it — navigating
   // to another note, or a retitle arriving from another device (no effect
-  // needed). The field's own commit coming back (the title now reads what
-  // was typed) is not that: it keeps its state, so Enter leaves the title
-  // highlighted and Down goes into the note from there.
+  // needed).
   const [prevTitle, setPrevTitle] = useState(title)
   if (title !== prevTitle) {
     setPrevTitle(title)
-    if (title !== value.trim()) {
-      setValue(title)
-      setEditing(false)
-      setSelected(false)
-    }
+    setValue(title)
+    setEditing(false)
+    setSelected(false)
   }
 
   // Select (highlight) the title when the editor hands focus up to it.
@@ -126,10 +125,13 @@ export function NoteTitle({
           }}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
+              // Enter finishes the name and carries on into the note: a block
+              // below the title, like Enter at the end of a block.
               event.preventDefault()
               commit()
               setEditing(false)
-              setSelected(true)
+              setSelected(false)
+              onCreateBelow?.()
             } else if (event.key === "Escape") {
               event.preventDefault()
               setValue(title)
