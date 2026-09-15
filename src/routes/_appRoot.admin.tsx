@@ -38,11 +38,11 @@ import { cx } from "../utils/cx"
 /**
  * The admin page: the bootstrap owner's controls, laid out like Settings.
  *
- * Two cards. **Invites** mints the links that admit people — single use,
- * expiring, shown once — and lists every invite with who took it.
- * **Feature flags** sets each flag's audience (Off, Admin, Everyone;
- * src/data/feature-flags.ts). Everything here is refused server-side for
- * anyone but the admin; the page only draws for them too.
+ * Two cards. **Feature flags** sets each flag's audience (Off, Admin,
+ * Everyone; src/data/feature-flags.ts). **Invites** mints the links that
+ * admit people — single use, expiring, shown once — and lists every invite
+ * with who took it. Everything here is refused server-side for anyone but
+ * the admin; the page only draws for them too.
  */
 export const Route = createFileRoute("/_appRoot/admin")({
   component: RouteComponent,
@@ -59,8 +59,8 @@ function RouteComponent() {
         <div className="mx-auto flex max-w-xl flex-col gap-6">
           {isAdmin ? (
             <>
-              <InvitesSection />
               <FeaturesSection />
+              <InvitesSection />
             </>
           ) : (
             <span className="text-text-secondary">Nothing here.</span>
@@ -103,8 +103,8 @@ function InvitesSection() {
   return (
     <SettingsSection title="Invites">
       <p className="leading-5 text-text-secondary">
-        Mint a link and send it. Whoever opens it and signs in with GitHub is in — no need to ask
-        for their account first. Each link works once and expires.
+        Send someone a link; signing in with GitHub through it lets them in. Each link works once
+        and expires.
       </p>
 
       {error ? <p className="text-text-danger">{error}</p> : null}
