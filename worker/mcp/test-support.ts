@@ -113,7 +113,7 @@ export async function createMcpTestEnv(): Promise<McpTestEnv> {
     VITE_GITHUB_CLIENT_ID: "client",
     GITHUB_CLIENT_SECRET: "secret",
     ALLOWED_GITHUB_ID: "42536816",
-    SIGNUP_MODE: "allowlist",
+    SIGNUP_MODE: "invite",
     IMAGES: bucket,
     VITE_IMAGES_ENABLED: "true",
     IMAGE_LINK_SECRET: TEST_IMAGE_LINK_SECRET,

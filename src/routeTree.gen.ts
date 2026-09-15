@@ -17,6 +17,7 @@ import { Route as AppRootSettingsImport } from './routes/_appRoot.settings'
 import { Route as AppRootAdminImport } from './routes/_appRoot.admin'
 import { Route as AppRootNotesIndexImport } from './routes/_appRoot.notes.index'
 import { Route as AppRootNotesSplatImport } from './routes/_appRoot.notes_.$'
+import { Route as AppRootInviteTokenImport } from './routes/_appRoot.invite.$token'
 
 // Create/Update Routes
 
@@ -55,6 +56,12 @@ const AppRootNotesSplatRoute = AppRootNotesSplatImport.update({
   getParentRoute: () => AppRootRoute,
 } as any)
 
+const AppRootInviteTokenRoute = AppRootInviteTokenImport.update({
+  id: '/invite/$token',
+  path: '/invite/$token',
+  getParentRoute: () => AppRootRoute,
+} as any)
+
 // Populate the FileRoutesByPath interface
 
 declare module '@tanstack/react-router' {
@@ -87,6 +94,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRootIndexImport
       parentRoute: typeof AppRootImport
     }
+    '/_appRoot/invite/$token': {
+      id: '/_appRoot/invite/$token'
+      path: '/invite/$token'
+      fullPath: '/invite/$token'
+      preLoaderRoute: typeof AppRootInviteTokenImport
+      parentRoute: typeof AppRootImport
+    }
     '/_appRoot/notes_/$': {
       id: '/_appRoot/notes_/$'
       path: '/notes/$'
@@ -110,6 +124,7 @@ interface AppRootRouteChildren {
   AppRootAdminRoute: typeof AppRootAdminRoute
   AppRootSettingsRoute: typeof AppRootSettingsRoute
   AppRootIndexRoute: typeof AppRootIndexRoute
+  AppRootInviteTokenRoute: typeof AppRootInviteTokenRoute
   AppRootNotesSplatRoute: typeof AppRootNotesSplatRoute
   AppRootNotesIndexRoute: typeof AppRootNotesIndexRoute
 }
@@ -118,6 +133,7 @@ const AppRootRouteChildren: AppRootRouteChildren = {
   AppRootAdminRoute: AppRootAdminRoute,
   AppRootSettingsRoute: AppRootSettingsRoute,
   AppRootIndexRoute: AppRootIndexRoute,
+  AppRootInviteTokenRoute: AppRootInviteTokenRoute,
   AppRootNotesSplatRoute: AppRootNotesSplatRoute,
   AppRootNotesIndexRoute: AppRootNotesIndexRoute,
 }
@@ -130,6 +146,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AppRootAdminRoute
   '/settings': typeof AppRootSettingsRoute
   '/': typeof AppRootIndexRoute
+  '/invite/$token': typeof AppRootInviteTokenRoute
   '/notes/$': typeof AppRootNotesSplatRoute
   '/notes': typeof AppRootNotesIndexRoute
 }
@@ -138,6 +155,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AppRootAdminRoute
   '/settings': typeof AppRootSettingsRoute
   '/': typeof AppRootIndexRoute
+  '/invite/$token': typeof AppRootInviteTokenRoute
   '/notes/$': typeof AppRootNotesSplatRoute
   '/notes': typeof AppRootNotesIndexRoute
 }
@@ -148,21 +166,24 @@ export interface FileRoutesById {
   '/_appRoot/admin': typeof AppRootAdminRoute
   '/_appRoot/settings': typeof AppRootSettingsRoute
   '/_appRoot/': typeof AppRootIndexRoute
+  '/_appRoot/invite/$token': typeof AppRootInviteTokenRoute
   '/_appRoot/notes_/$': typeof AppRootNotesSplatRoute
   '/_appRoot/notes/': typeof AppRootNotesIndexRoute
 }
 
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '' | '/admin' | '/settings' | '/' | '/notes/$' | '/notes'
+  fullPaths:
+    '' | '/admin' | '/settings' | '/' | '/invite/$token' | '/notes/$' | '/notes'
   fileRoutesByTo: FileRoutesByTo
-  to: '/admin' | '/settings' | '/' | '/notes/$' | '/notes'
+  to: '/admin' | '/settings' | '/' | '/invite/$token' | '/notes/$' | '/notes'
   id:
     | '__root__'
     | '/_appRoot'
     | '/_appRoot/admin'
     | '/_appRoot/settings'
     | '/_appRoot/'
+    | '/_appRoot/invite/$token'
     | '/_appRoot/notes_/$'
     | '/_appRoot/notes/'
   fileRoutesById: FileRoutesById
@@ -195,6 +216,7 @@ export const routeTree = rootRoute
         "/_appRoot/admin",
         "/_appRoot/settings",
         "/_appRoot/",
+        "/_appRoot/invite/$token",
         "/_appRoot/notes_/$",
         "/_appRoot/notes/"
       ]
@@ -209,6 +231,10 @@ export const routeTree = rootRoute
     },
     "/_appRoot/": {
       "filePath": "_appRoot.index.tsx",
+      "parent": "/_appRoot"
+    },
+    "/_appRoot/invite/$token": {
+      "filePath": "_appRoot.invite.$token.tsx",
       "parent": "/_appRoot"
     },
     "/_appRoot/notes_/$": {
