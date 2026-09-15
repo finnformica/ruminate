@@ -225,7 +225,13 @@ export function BlockItem({
   // margin still nets the text to the shared 4px column.
   const wide = !!api.fixedRoots && depth === 0
 
-  // Focus and place the caret when editing starts.
+  // Focus and place the caret when editing starts — and again when the
+  // block's TYPE changes mid-edit: a type whose chrome wraps the line (a
+  // code block's panel, `BlockKind.wrap`) puts the textarea in a different
+  // place in the tree, so React mounts a fresh element and the keyboard
+  // would be left on nothing. Typing `\` ` into a paragraph, or `- ` into an
+  // empty code block, must keep the caret where it is; the resize effect
+  // below, which runs after this one, lands it there (`pendingCaret`).
   useLayoutEffect(() => {
     if (!editing) return
     const el = textareaRef.current
@@ -238,7 +244,7 @@ export function BlockItem({
           ? 0
           : el.value.length
     el.setSelectionRange(pos, pos)
-  }, [editing, api.focus?.atStart, api.focus?.caret])
+  }, [editing, api.focus?.atStart, api.focus?.caret, type])
 
   // Resize on content change, and restore the caret after a marker shortcut
   // reshaped the visible text (e.g. typing `# ` promoted the block to a

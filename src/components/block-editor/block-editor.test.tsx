@@ -1583,12 +1583,24 @@ describe("code blocks", () => {
     expect(container.querySelector("textarea")?.className).not.toContain("font-mono")
   })
 
-  it("typing a backtick and a space turns a block into a code block", () => {
+  it("typing a backtick and a space turns a block into a code block, keeping the keyboard", () => {
     const { container, getByTestId } = render(<Harness initial={"- a"} startEditing />)
     const textarea = container.querySelector("textarea")!
     fireEvent.change(textarea, { target: { value: "` a" } })
     expect(serializedLines(getByTestId)).toEqual(["```", "a", "```"])
-    expect(container.querySelector("textarea")?.className).toContain("font-mono")
+    // The panel wraps the line, so this is a fresh textarea: it must have
+    // taken the focus, with the caret where the marker left it.
+    const after = container.querySelector<HTMLTextAreaElement>("textarea")!
+    expect(after.className).toContain("font-mono")
+    expect(document.activeElement).toBe(after)
+    expect(after.selectionStart).toBe(after.value.length)
+    // And back out again, the same way.
+    fireEvent.change(after, { target: { value: "" } })
+    fireEvent.change(container.querySelector("textarea")!, { target: { value: "- " } })
+    expect(serializedLines(getByTestId)).toEqual(["- "])
+    const back = container.querySelector<HTMLTextAreaElement>("textarea")!
+    expect(back.className).not.toContain("font-mono")
+    expect(document.activeElement).toBe(back)
   })
 
   it("keeps code that begins with a marker as code, but a lone marker turns it back", () => {
