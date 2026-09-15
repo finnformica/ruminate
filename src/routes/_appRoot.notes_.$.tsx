@@ -90,13 +90,13 @@ function NotePage() {
 
   // Note data
   const note = useNoteById(noteId)
-  // A note someone shared with the user (docs/sharing.md): read-only, never
-  // renamed, pinned or given a basket here — those are the owner's, and the
-  // basket holds blocks the slice does not carry. The page is otherwise the
-  // same page: the title and the editor are the same components, told they
-  // are read-only.
+  // A note someone shared with the user (docs/sharing.md): read-only unless
+  // the owner granted `write`; never renamed without it, pinned or given a
+  // basket here — those are the owner's, and the basket holds blocks the
+  // slice does not carry. The page is otherwise the same page: the title and
+  // the editor are the same components, told what they may do.
   const share = useNoteShare(noteId)
-  const readOnlyShare = share !== null
+  const readOnlyShare = share !== null && !share.canWrite
   const isDailyNote = isValidDateString(noteId ?? "")
   const isWeeklyNote = isValidWeekString(noteId ?? "")
   // A daily note is editable only for the current day; the database stores
@@ -262,7 +262,7 @@ function NotePage() {
         <span className="flex min-w-0 items-center gap-1.5">
           {share !== null ? (
             <>
-              <span className="truncate text-text-secondary">{shareOwnerName(share)}</span>
+              <span className="truncate text-text-secondary">{shareOwnerName(share.share)}</span>
               <span aria-hidden className="shrink-0 text-text-tertiary">
                 ›
               </span>
@@ -319,7 +319,12 @@ function NotePage() {
               // -mx-0.5: the notice's edges sit where the rows' surfaces
               // reach (2px past the text column), as the title's do.
               <Notice icon={<ShareIcon16 />} className="-mx-0.5 print:hidden">
-                Shared by {shareOwnerName(share)} — you can read this note but not change it.
+                Shared by {shareOwnerName(share.share)}
+                {readOnlyShare
+                  ? " — you can read this note but not change it."
+                  : share.canDelete
+                    ? " — you can edit and delete."
+                    : " — you can edit; deleting is not allowed."}
               </Notice>
             ) : null}
 
