@@ -3,6 +3,7 @@ import copy from "copy-to-clipboard"
 import { useAtom, useAtomValue } from "jotai"
 import { createContext, useContext } from "react"
 import { requestDatabasePull } from "../data/database-mode"
+import { useIsAdmin } from "../data/features"
 import {
   isBootingAtom,
   isHelpPanelOpenAtom,
@@ -27,6 +28,8 @@ import {
   CircleQuestionMarkFillIcon16,
   CircleQuestionMarkIcon16,
   CopyIcon16,
+  FlagFillIcon16,
+  FlagIcon16,
   MoreIcon16,
   NoteFillIcon16,
   NoteIcon16,
@@ -70,6 +73,10 @@ export function NavItems({
 
   // Registered once by the app layout (src/hooks/app-update.ts).
   const { needRefresh, apply: applyUpdate } = useAtomValue(appUpdateAtom)
+
+  // The admin page (invites, feature flags) is the bootstrap owner's alone,
+  // as the server says (src/data/features.ts); nobody else sees the link.
+  const isAdmin = useIsAdmin()
 
   return (
     <SizeContext.Provider value={size}>
@@ -194,6 +201,18 @@ export function NavItems({
               ) : null}
             </Tooltip>
           )}
+          {isAdmin ? (
+            <NavLink
+              to="/admin"
+              search={{ query: undefined }}
+              activeIcon={<FlagFillIcon16 />}
+              icon={<FlagIcon16 />}
+              className="text-text-secondary"
+              onNavigate={onNavigate}
+            >
+              Admin
+            </NavLink>
+          ) : null}
           <NavLink
             to="/settings"
             search={{ query: undefined }}

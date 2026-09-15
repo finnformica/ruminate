@@ -18,6 +18,7 @@
 // exist or is not theirs — the scope means something the moment it is stored,
 // not only when it is enforced.
 
+import { featureAllows, featureRefusal } from "../features"
 import { corpusDriver, controlPlaneDriver, forTenant } from "../tenancy-db"
 import type { Env } from "../types"
 import { PERMISSIONS, type Permission } from "../mcp/grant"
@@ -128,7 +129,15 @@ export async function mcpTokens(
 
   if (rest === "" || rest === "/") {
     if (request.method === "GET") return json({ tokens: await listTokens(control, session.id) })
-    if (request.method === "POST") return mint(request, env, control, session.id)
+    if (request.method === "POST") {
+      // The feature flag gates WIDENING: minting. Listing and revoking stay
+      // open so a token minted while the feature was on can still be taken
+      // back once it is off (the endpoint refuses it meanwhile).
+      if (!(await featureAllows(control, env, "mcp", session.id))) {
+        return json(featureRefusal("mcp"), 403)
+      }
+      return mint(request, env, control, session.id)
+    }
     return json({ error: "method_not_allowed" }, 405)
   }
 

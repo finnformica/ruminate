@@ -5,6 +5,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import type React from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent, TouchEvent } from "react"
 import { isDatabaseModeAtom, newBlockMarkerAtom } from "../../global-state"
+import { useFeature } from "../../data/features"
 import { sharedOriginAtom } from "../../data/shared-mode"
 import { shareDialogAtom } from "../share-note-dialog"
 import type { Block, BlockDoc, ChangeHint } from "../../blocks/types"
@@ -1530,7 +1531,9 @@ export function BlockEditor({
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const sharedOrigin = useAtomValue(sharedOriginAtom)
   const openShareDialog = useSetAtom(shareDialogAtom)
-  const canShare = noteId !== undefined && isDatabaseMode && !sharedOrigin.has(noteId)
+  const sharingEnabled = useFeature("sharing")
+  const canShare =
+    noteId !== undefined && isDatabaseMode && sharingEnabled && !sharedOrigin.has(noteId)
   // A block is the user's own to pin when the editor has a note of theirs
   // behind it — signed out too, where the sample notes are theirs to play
   // with — and never in a note someone shared with them: the pin is a prop

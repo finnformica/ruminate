@@ -28,6 +28,7 @@
 // Durable Object — the one this project had was deleted in migration `v2` and
 // this does not bring it back.
 
+import { featureAllows } from "../features"
 import { controlPlaneDriver, corpusDriver, forTenant, type TenantDb } from "../tenancy-db"
 import type { Env } from "../types"
 import { describeGrant, type Grant } from "../mcp/grant"
@@ -186,6 +187,20 @@ export async function mcp(request: Request, env: Env): Promise<Response> {
         status: 403,
         code: ERROR.invalidRequest,
         message: "This account cannot be accessed.",
+        id: message.id,
+      }),
+      403,
+    )
+  }
+
+  // The feature flag (src/data/feature-flags.ts), for the token's OWNER: a
+  // switched-off feature stops every agent, whatever the grant says.
+  if (!(await featureAllows(control, env, "mcp", grant.userId))) {
+    return json(
+      errorBody({
+        status: 403,
+        code: ERROR.invalidRequest,
+        message: "MCP access is not enabled for this account.",
         id: message.id,
       }),
       403,

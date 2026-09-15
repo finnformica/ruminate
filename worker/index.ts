@@ -7,6 +7,8 @@
  * else is served straight from static assets (with SPA fallback to index.html).
  */
 import type { Env } from "./types"
+import { admin, ADMIN_PREFIX } from "./handlers/admin"
+import { features, FEATURES_PATH } from "./handlers/features"
 import { githubAuth } from "./handlers/github-auth"
 import { githubRefresh } from "./handlers/github-refresh"
 import { images } from "./handlers/images"
@@ -31,6 +33,10 @@ export default {
     }
     if (pathname === "/api/images" || pathname.startsWith("/api/images/")) {
       return images(request, env)
+    }
+    if (pathname === FEATURES_PATH) return features(request, env)
+    if (pathname === ADMIN_PREFIX || pathname.startsWith(`${ADMIN_PREFIX}/`)) {
+      return admin(request, env)
     }
 
     // Everything else: static assets (index.html fallback for SPA routes).

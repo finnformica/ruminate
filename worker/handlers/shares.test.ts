@@ -2,6 +2,7 @@
 // tombstones included) on purpose: that is how it proves the slice holds.
 import { beforeEach, describe, expect, it } from "vitest"
 import migration0012 from "../../migrations/0012_shares.sql?raw"
+import { setFeatureAudience } from "../features"
 import { createMcpTestEnv, type McpTestEnv } from "../mcp/test-support"
 import type { SharesListBody, SliceBody } from "../shares/wire"
 import { corpusPut } from "./replica-corpus"
@@ -258,6 +259,23 @@ describe("create", () => {
 // -----------------------------------------------------------------------------
 // Listing and revoking
 // -----------------------------------------------------------------------------
+
+describe("the sharing feature flag", () => {
+  it("refuses to give a share when the feature is off for the caller; what was given still reads", async () => {
+    const id = await share()
+    await setFeatureAudience(harness.control, "sharing", "off", 1)
+    const refused = await send(
+      apiRequest("POST", "", { email: "u8@example.com", rootIds: [NOTE_A] }),
+    )
+    expect(refused.status).toBe(403)
+    expect((await bodyOf(refused)).error).toBe("feature_off")
+    // The grantee still reads the share, and the owner still sees and can revoke it.
+    expect((await slice(id)).status).toBe(200)
+    const listed = (await bodyOf(await send(apiRequest("GET")))) as SharesListBody
+    expect(listed.given.map((given) => given.id)).toEqual([id])
+    expect((await send(apiRequest("DELETE", `/${id}`))).status).toBe(200)
+  })
+})
 
 describe("list", () => {
   it("says so when sharing is not set up on the server yet", async () => {

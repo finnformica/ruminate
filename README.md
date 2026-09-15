@@ -23,7 +23,7 @@ Ruminate is built by [Finn Formica](https://github.com/finnformica). It began as
 
 - **Production:** the sign-in button sends you to GitHub; GitHub redirects back to the Worker's `/github-auth` route, which exchanges the `code` for tokens using the **client secret** (a Worker secret, never in the frontend bundle). The access token authenticates the replica API; the refresh token lives in an HttpOnly cookie and `/github-refresh` mints new access tokens silently.
 - **Local dev:** set `VITE_GITHUB_PAT` in `.env` to sign in directly with a personal access token (skips OAuth).
-- **Who may sign up** is decided by the Worker (`SIGNUP_MODE` in `wrangler.jsonc`): the bootstrap owner, an allowlist, or open. See [docs/multi-tenant-design.md](./docs/multi-tenant-design.md).
+- **Who may sign up** is decided by the Worker (`SIGNUP_MODE` in `wrangler.jsonc`): the bootstrap owner, an allowlist, or open. The bootstrap owner is also the admin, whose `/admin` page sets each beta feature's audience. See [docs/multi-tenant-design.md](./docs/multi-tenant-design.md).
 
 ## Local development
 
@@ -63,6 +63,8 @@ The Worker (`worker/index.ts`) serves the built SPA from `dist/` and handles:
 | `/github-refresh` | Mints a fresh access token from the refresh-token cookie      |
 | `/api/replica/*`  | Row push / pull for the signed-in tenant's corpus (D1)        |
 | `/api/images`     | Picture upload and download (R2), when images are switched on |
+| `/api/features`   | The feature flags as the signed-in account may use them       |
+| `/api/admin/*`    | The feature flags' audiences — the admin alone                |
 
 ## Scripts
 

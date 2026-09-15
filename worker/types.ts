@@ -3,8 +3,8 @@
  *
  * - `ASSETS` serves the built SPA (Workers Static Assets, configured in
  *   wrangler.jsonc). The Worker delegates non-API requests to it.
- * - `DB` is the one database: the control plane (users + allowlist,
- *   docs/multi-tenant-design.md §3) AND every user's corpus, scoped by the
+ * - `DB` is the one database: the control plane (users, allowlist, feature
+ *   flags — docs/multi-tenant-design.md §3) AND every user's corpus, scoped by the
  *   `user_id` column (migration 0004). Nothing outside `worker/tenancy-db.ts`
  *   may touch this binding — a CI guard enforces it
  *   (`npm run check:queries`).
@@ -23,8 +23,9 @@ export interface Env {
   ASSETS: Fetcher
   DB: D1Database
   VITE_GITHUB_CLIENT_ID: string
-  /** Bootstrap owner id: seeds the allowlist, and keeps auth fail-closed
-   * before/without the control-plane migration. */
+  /** Bootstrap owner id: seeds the allowlist, keeps auth fail-closed
+   * before/without the control-plane migration, and is THE admin — the one
+   * id that sets feature flags (worker/features.ts). */
   ALLOWED_GITHUB_ID: string
   /** Signup gate: "allowlist" | "open"; absent/unknown = bootstrap owner only
    * (fail closed). See worker/handlers/tenancy.ts. */
