@@ -44,6 +44,8 @@ export interface BlockMenuTarget {
   /** An image row's layout (`src/blocks/image.ts`): the side its picture
    * keeps to, and whether it has been dragged to a size of its own. */
   image?: { align: ImageAlign; sized: boolean }
+  /** The web links in the row's text (docs/links.md), for "Edit link". */
+  links?: { href: string; title: string }[]
 }
 
 export interface BlockMenuActions {
@@ -62,6 +64,9 @@ export interface BlockMenuActions {
   /** Share this block — and everything beneath it — with someone
    * (docs/sharing.md). Absent where the rows are not the user's own. */
   share?: (id: string) => void
+  /** Open a link's card (`link-hover-card.tsx`) outright — a touch screen
+   * has nothing to hover with. */
+  editLink?: (key: string, href: string) => void
   /** Remove this row (the block stays where else it is held). */
   remove: (key: string) => void
   /** Delete the block from every place it appears. Absent standalone. */
@@ -149,11 +154,39 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
   const { key, id } = target
   const shared = target.places > 1
   const image = target.type === "image"
+  const links = target.links ?? []
   return (
     <>
       <DropdownMenu.Item shortcut={["↵"]} onClick={() => actions.edit(key)}>
         {image ? "Edit caption" : "Edit"}
       </DropdownMenu.Item>
+      {/* A link's card, for a screen with nothing to hover with: the one
+          link straight away, several by their display text. */}
+      {links.length === 1 && actions.editLink ? (
+        <DropdownMenu.Item onClick={() => actions.editLink?.(key, links[0].href)}>
+          Edit link
+        </DropdownMenu.Item>
+      ) : links.length > 1 && actions.editLink ? (
+        <Menu.SubmenuRoot>
+          <SubmenuTrigger>Edit link</SubmenuTrigger>
+          <Menu.Portal>
+            <Menu.Positioner side="right" align="start" sideOffset={4}>
+              <Menu.Popup className={popupClass} style={{ width: 200 }}>
+                <div className="grid p-1" data-testid="edit-link-menu">
+                  {links.map((link, index) => (
+                    <DropdownMenu.Item
+                      key={`${index}:${link.href}`}
+                      onClick={() => actions.editLink?.(key, link.href)}
+                    >
+                      <span className="truncate">{link.title}</span>
+                    </DropdownMenu.Item>
+                  ))}
+                </div>
+              </Menu.Popup>
+            </Menu.Positioner>
+          </Menu.Portal>
+        </Menu.SubmenuRoot>
+      ) : null}
       {image && actions.openImage ? (
         <DropdownMenu.Item onClick={() => actions.openImage?.(id)}>Open image</DropdownMenu.Item>
       ) : null}

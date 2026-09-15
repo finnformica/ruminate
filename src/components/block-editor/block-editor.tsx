@@ -21,6 +21,7 @@ import {
   type UploadedImage,
 } from "../../data/images"
 import { imageAlignOf, imagePropsOf, withImageLayout, type ImageAlign } from "../../blocks/image"
+import { linkifyPastedText, linksInText } from "../../blocks/link"
 import { ImageLightbox } from "./image-lightbox"
 import { NoteTitle } from "./note-title"
 import {
@@ -1317,6 +1318,7 @@ export function BlockEditor({
       collapsed: row.collapsed,
       places: parentCountOf ? Math.max(1, parentCountOf(row.id)) : 1,
       pinned: block.props?.pinned === true,
+      links: block.type === "code" ? [] : linksInText(block.text),
       image:
         block.type === "image"
           ? { align: imageAlignOf(block), sized: imagePropsOf(block).size !== undefined }
@@ -1551,8 +1553,56 @@ export function BlockEditor({
     if (next !== doc) history.commit(doc, next, { type: "structural" })
   }
 
+  // ── Links ─────────────────────────────────────────────────────────────────
+  // Leaving a row's edit mode writes out any bare address in it as a link
+  // named for its host (docs/links.md), as a space typed after one does
+  // and a paste does — so an address typed and left by Escape, a click
+  // elsewhere or Enter reads as a name too. Its own undo step, so the bare
+  // address is one ⌘Z away. Never in a code block.
+  const lastEdited = useRef<string | null>(null)
+  useEffect(() => {
+    const previous = lastEdited.current
+    lastEdited.current = focus?.key ?? null
+    if (previous === null || previous === focus?.key || readOnly) return
+    const current = docRef.current
+    const block = current.blocks[idOfKey(previous)]
+    if (!block || block.type === "code" || block.type === "note") return
+    const text = linkifyPastedText(block.text)
+    if (text === block.text) return
+    history.commit(current, updateBlock(current, block.id, { text }), { type: "structural" })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus])
+  /** The link card the menu asked to open (a touch screen's "Edit link"):
+   * the row and the address; the row's rendered link opens its card. */
+  const [linkCard, setLinkCard] = useState<{ key: string; href: string } | null>(null)
+
+  /**
+   * A link's display text, changed in the row's text (docs/links.md):
+   * `[title](href)` becomes `[next](href)`. A link that was a bare address,
+   * or an autolink written another way, is found by its address or its
+   * text and written out as a link. The first occurrence is the one
+   * changed; one undo step.
+   */
+  const renameLink = (key: string, href: string, title: string, next: string) => {
+    const block = doc.blocks[idOfKey(key)]
+    const display = next.trim()
+    if (!block || display === "") return
+    const linked = `[${display}](${href})`
+    let text: string | null = null
+    for (const needle of [`[${title}](${href})`, `<${href}>`, href, title]) {
+      if (needle !== "" && block.text.includes(needle)) {
+        text = block.text.replace(needle, linked)
+        break
+      }
+    }
+    if (text === null || text === block.text) return
+    const updated = updateBlock(doc, block.id, { text })
+    history.commit(doc, updated, { type: "structural" })
+  }
+
   const menuActions: BlockMenuActions = {
     edit: (key) => edit(key),
+    editLink: (key, href) => setLinkCard({ key, href }),
     openImage: (id) => setLightbox(id),
     downloadImage: (id) => {
       const block = doc.blocks[id]
@@ -1606,6 +1656,9 @@ export function BlockEditor({
       onImageUpload && !readOnly ? (key, files) => void insertImages(key, files) : undefined,
     requestImage: onImageUpload && !readOnly ? requestImage : undefined,
     openImage: (id) => setLightbox(id),
+    renameLink: readOnly ? undefined : renameLink,
+    linkCard,
+    closeLinkCard: () => setLinkCard(null),
     focus,
     selected,
     selectedSet,
