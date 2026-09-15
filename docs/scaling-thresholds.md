@@ -69,6 +69,17 @@ are fixed (`graph-storage.md`), but the lesson generalizes:
 - Watch `rows_read` in the Cloudflare D1 dashboard as a leading indicator. It
   fails at a corpus size 100× below what the table predicts, because it counts
   events, not blocks.
+- **Rows returned is not rows read.** The third time (2026-09-15) the query
+  was O(closure) on paper and the tests counting rows _returned_ agreed. The
+  share slice walks a recursive CTE, and with no `sqlite_stat1` (D1 has none)
+  the planner chose, for each node reached, to scan every link the tenant has
+  — `link_tenant_seq (user_id=?)` rather than a seek on `link_tenant_source`.
+  A 285-block share returned 569 rows and read **329k**, on every focus,
+  tab switch and reconnect; the day's budget went before lunch. The fix is a
+  join-order hint (`FROM visible v CROSS JOIN link l …`, which SQLite honours),
+  not an index, and the guard is `worker/query-plans.test.ts`: every statement
+  a bounded read issues is `EXPLAIN`ed, and a step that reaches `nodes` or
+  `link` by `user_id` alone fails the build.
 
 ## Thresholds
 

@@ -78,14 +78,16 @@ export interface McpTestEnv {
    * Rows every statement has RETURNED through a tenant handle since the last
    * `measure()`, and how many statements returned them.
    *
-   * A stand-in for D1's `rows_read`, and a close one for the statements this
-   * server issues: each is either an index seek whose scan is its result
-   * (`nodes` by primary key, `link` by `link_tenant_source` /
-   * `link_tenant_destination`, `nodes` by `nodes_tenant_notes`) or a walk made
-   * of those, so rows returned and rows scanned differ by a constant. The
-   * whole-corpus path's two queries scan the tenant's partition and return all
-   * of it, so they are counted honestly too — which is the comparison that
-   * matters.
+   * A stand-in for D1's `rows_read` ONLY IF the planner seeks: an index seek
+   * whose scan is its result (`nodes` by primary key, `link` by
+   * `link_tenant_source` / `link_tenant_destination`, `nodes` by
+   * `nodes_tenant_notes`) returns what it read, and a walk made of those does
+   * too. Whether each statement IS such a seek is not something rows returned
+   * can tell — on 2026-09-15 the share walk returned 569 rows and scanned
+   * 329k — so that half is pinned separately, on the query plans, in
+   * `worker/query-plans.test.ts`. The whole-corpus path's two queries scan the
+   * tenant's partition and return all of it, so they are counted honestly
+   * too — which is the comparison that matters.
    */
   measure<T>(run: () => Promise<T>): Promise<{ value: T; rows: number; statements: number }>
 }

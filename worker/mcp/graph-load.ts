@@ -205,12 +205,12 @@ export function linksBelow(
       `WHERE n.user_id = :tenant AND n.deleted_at IS NULL AND n.id IN (${seeds}) ` +
       `UNION ` +
       `SELECT l.destination_id FROM below b ` +
-      `JOIN link l ON l.user_id = :tenant AND l.source_id = b.id ` +
+      `CROSS JOIN link l ON l.user_id = :tenant AND l.source_id = b.id ` +
       `AND l.kind = 'child' AND l.deleted_at IS NULL ` +
       `JOIN nodes c ON c.user_id = :tenant AND c.id = l.destination_id ` +
       `AND c.deleted_at IS NULL ) ` +
       `SELECT ${linkAndNode("c")} FROM below b ` +
-      `JOIN link l ON l.user_id = :tenant AND l.source_id = b.id ` +
+      `CROSS JOIN link l ON l.user_id = :tenant AND l.source_id = b.id ` +
       `AND l.kind = 'child' AND l.deleted_at IS NULL ` +
       `JOIN nodes c ON c.user_id = :tenant AND c.id = l.destination_id AND c.deleted_at IS NULL`
     // Bounded: the depth column makes a revisited node a NEW row, so the bound
@@ -221,13 +221,13 @@ export function linksBelow(
       `WHERE n.user_id = :tenant AND n.deleted_at IS NULL AND n.id IN (${seeds}) ` +
       `UNION ` +
       `SELECT l.destination_id, b.depth + 1 FROM below b ` +
-      `JOIN link l ON l.user_id = :tenant AND l.source_id = b.id ` +
+      `CROSS JOIN link l ON l.user_id = :tenant AND l.source_id = b.id ` +
       `AND l.kind = 'child' AND l.deleted_at IS NULL ` +
       `JOIN nodes c ON c.user_id = :tenant AND c.id = l.destination_id ` +
       `AND c.deleted_at IS NULL ` +
       `WHERE b.depth < ?${batch.length + 1} ) ` +
       `SELECT ${linkAndNode("c")} FROM below b ` +
-      `JOIN link l ON l.user_id = :tenant AND l.source_id = b.id ` +
+      `CROSS JOIN link l ON l.user_id = :tenant AND l.source_id = b.id ` +
       `AND l.kind = 'child' AND l.deleted_at IS NULL ` +
       `JOIN nodes c ON c.user_id = :tenant AND c.id = l.destination_id AND c.deleted_at IS NULL`
 
@@ -259,12 +259,12 @@ export const linksAbove = (tenant: TenantDb, ids: string[]): Promise<Fragment> =
           `AND n.id IN (${holes(batch.length)}) ` +
           `UNION ` +
           `SELECT l.source_id FROM above a ` +
-          `JOIN link l ON l.user_id = :tenant AND l.destination_id = a.id ` +
+          `CROSS JOIN link l ON l.user_id = :tenant AND l.destination_id = a.id ` +
           `AND l.kind = 'child' AND l.deleted_at IS NULL ` +
           `JOIN nodes p ON p.user_id = :tenant AND p.id = l.source_id ` +
           `AND p.deleted_at IS NULL ) ` +
           `SELECT ${linkAndNode("p")} FROM above a ` +
-          `JOIN link l ON l.user_id = :tenant AND l.destination_id = a.id ` +
+          `CROSS JOIN link l ON l.user_id = :tenant AND l.destination_id = a.id ` +
           `AND l.kind = 'child' AND l.deleted_at IS NULL ` +
           `JOIN nodes p ON p.user_id = :tenant AND p.id = l.source_id AND p.deleted_at IS NULL`,
         batch,
@@ -304,13 +304,13 @@ export const scopeNodeIds = async (tenant: TenantDb, noteIds: string[]): Promise
           `seed (id) AS ( ` +
           `SELECT id FROM granted ` +
           `UNION ` +
-          `SELECT n.id FROM nodes n JOIN granted g ON g.id = n.notes_id ` +
+          `SELECT n.id FROM granted g CROSS JOIN nodes n ON n.notes_id = g.id ` +
           `WHERE n.user_id = :tenant AND n.deleted_at IS NULL ), ` +
           `visible (id) AS ( ` +
           `SELECT id FROM seed ` +
           `UNION ` +
           `SELECT l.destination_id FROM visible v ` +
-          `JOIN link l ON l.user_id = :tenant AND l.source_id = v.id ` +
+          `CROSS JOIN link l ON l.user_id = :tenant AND l.source_id = v.id ` +
           `AND l.kind = 'child' AND l.deleted_at IS NULL ` +
           `JOIN nodes c ON c.user_id = :tenant AND c.id = l.destination_id ` +
           `AND c.deleted_at IS NULL ) ` +

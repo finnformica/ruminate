@@ -53,7 +53,7 @@ const closureCte = (rootCount: number) =>
   `SELECT id FROM granted ` +
   `UNION ` +
   `SELECT l.destination_id FROM visible v ` +
-  `JOIN link l ON l.user_id = :tenant AND l.source_id = v.id ` +
+  `CROSS JOIN link l ON l.user_id = :tenant AND l.source_id = v.id ` +
   `AND l.kind = 'child' AND l.deleted_at IS NULL ` +
   `JOIN nodes c ON c.user_id = :tenant AND c.id = l.destination_id ` +
   `AND c.deleted_at IS NULL ) `
@@ -78,7 +78,7 @@ export async function sliceRows(
         // outside the closure is never serialized, so it is blanked here.
         `SELECT n.id, n.type, n.text, n.props, n.updated_at, ` +
         `CASE WHEN n.notes_id IN (SELECT id FROM visible) THEN n.notes_id END AS notes_id ` +
-        `FROM nodes n JOIN visible v ON v.id = n.id ` +
+        `FROM visible v CROSS JOIN nodes n ON n.id = v.id ` +
         `WHERE n.user_id = :tenant AND n.deleted_at IS NULL`,
       params,
     )
@@ -87,8 +87,7 @@ export async function sliceRows(
     await owner.exec(
       closureCte(roots.length) +
         `SELECT l.source_id, l.destination_id, l.kind, l.sort_key, l.updated_at ` +
-        `FROM link l ` +
-        `JOIN visible a ON a.id = l.source_id ` +
+        `FROM visible a CROSS JOIN link l ON l.source_id = a.id ` +
         `JOIN visible b ON b.id = l.destination_id ` +
         `WHERE l.user_id = :tenant AND l.deleted_at IS NULL AND l.kind = 'child'`,
       params,
