@@ -1,4 +1,5 @@
 import { Link, LinkComponentProps, useLocation } from "@tanstack/react-router"
+import copy from "copy-to-clipboard"
 import { useAtom, useAtomValue } from "jotai"
 import { createContext, useContext } from "react"
 import { useNetworkState } from "react-use"
@@ -7,23 +8,33 @@ import {
   isBootingAtom,
   isHelpPanelOpenAtom,
   ownSortedNotesAtom,
+  pinnedBlocksAtom,
   sharedNoteGroupsAtom,
+  type PinnedBlock,
 } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
+import { useSetBlockProps } from "../hooks/note"
 import { shareOwnerName } from "../data/shares"
 import type { Note } from "../schema"
 import { APP_SHORTCUTS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
+import { inlineText } from "../utils/inline-text"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
+import { DropdownMenu } from "./dropdown-menu"
+import { IconButton } from "./icon-button"
 import {
   CalendarDateFillIcon16,
   CalendarDateIcon16,
   CircleQuestionMarkFillIcon16,
   CircleQuestionMarkIcon16,
+  CopyIcon16,
+  MoreIcon16,
   NoteFillIcon16,
   NoteIcon16,
   OfflineIcon16,
   PinFillIcon12,
+  PinFillIcon16,
+  PinIcon16,
   SettingsFillIcon16,
   SettingsIcon16,
 } from "./icons"
@@ -44,6 +55,7 @@ export function NavItems({
   onNavigate?: () => void
 }) {
   const notes = useAtomValue(ownSortedNotesAtom)
+  const pinnedBlocks = useAtomValue(pinnedBlocksAtom)
   const sharedGroups = useAtomValue(sharedNoteGroupsAtom)
   const booting = useAtomValue(isBootingAtom)
   const syncText = useSyncStatusText()
@@ -95,31 +107,36 @@ export function NavItems({
               </NavLink>
             </li>
           </ul>
+          {/* The lists, each under its own heading — Notes, Pinned, then
+              one Shared by … per share — with one rule above them all,
+              setting them off from the links above. */}
           {notes.length > 0 ? (
-            <NoteRows
-              notes={notes}
-              size={size}
-              onNavigate={onNavigate}
-              className="border-t border-border-secondary pt-3"
-            />
+            <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
+              <SectionHeading>Notes</SectionHeading>
+              <NoteRows notes={notes} size={size} onNavigate={onNavigate} />
+            </div>
           ) : booting ? (
             <NavListSkeleton />
+          ) : null}
+          {/* The user's pinned BLOCKS (docs/metadata.md), between their notes
+              and the notes shared with them: a pinned note is already at
+              the top of the notes above, so this list is for blocks — each
+              opens its note zoomed into the block. */}
+          {pinnedBlocks.length > 0 ? (
+            <div className="flex flex-col gap-1 pt-2">
+              <SectionHeading>Pinned</SectionHeading>
+              <PinnedBlockRows blocks={pinnedBlocks} size={size} onNavigate={onNavigate} />
+            </div>
           ) : null}
           {/* Notes other people shared with this account (docs/sharing.md):
               one group per share, under the person who shared it. They are
               listed apart from the user's own notes — they are rows in
               someone else's corpus — but open, read and edit like any note. */}
           {sharedGroups.map(({ share, notes: sharedNotes }) => (
-            <div
-              key={share.id}
-              className="flex flex-col gap-1 border-t border-border-secondary pt-3"
-            >
-              <div
-                className="flex h-6 items-center gap-2 px-2 text-sm text-text-secondary coarse:px-3"
-                title={`Shared by ${shareOwnerName(share)} · read only`}
-              >
-                <span className="truncate">Shared by {shareOwnerName(share)}</span>
-              </div>
+            <div key={share.id} className="flex flex-col gap-1 pt-2">
+              <SectionHeading title={`Shared by ${shareOwnerName(share)} · read only`}>
+                Shared by {shareOwnerName(share)}
+              </SectionHeading>
               <NoteRows notes={sharedNotes} size={size} onNavigate={onNavigate} />
             </div>
           ))}
@@ -173,20 +190,30 @@ export function NavItems({
   )
 }
 
+/** A sidebar list's heading: quiet, in the row's inset. */
+function SectionHeading({ title, children }: { title?: string; children: React.ReactNode }) {
+  return (
+    <div
+      className="flex h-6 items-center gap-2 px-2 text-sm text-text-secondary coarse:px-3"
+      title={title}
+    >
+      <span className="truncate">{children}</span>
+    </div>
+  )
+}
+
 /** The note rows of one list: the user's own, or one share's. */
 function NoteRows({
   notes,
   size,
   onNavigate,
-  className,
 }: {
   notes: Note[]
   size: "medium" | "large"
   onNavigate?: () => void
-  className?: string
 }) {
   return (
-    <ul className={cx("flex flex-col gap-1", className)}>
+    <ul className="flex flex-col gap-1">
       {notes.map((note) => (
         <li key={note.id} className="note-row group/note relative">
           {/* The note fills the row. Its actions button is not there
@@ -201,19 +228,130 @@ function NoteRows({
               link), so the same rules keep the row's hover surface
               while the pointer is on it. */}
           <NoteNavItem note={note} size={size} onNavigate={onNavigate} className="w-full" />
-          <div
-            className={cx(
-              "absolute inset-y-0 hidden items-center group-hover/note:flex has-data-[popup-open]:flex",
-              // The 24px button in a 32px row (40px large) sits 4px
-              // (8px) in from the top and bottom; the same from the end.
-              size === "large" ? "right-2" : "right-1",
-            )}
-          >
+          <RowActions size={size}>
             <NoteActionsMenu noteId={note.id} pinned={note.pinned} />
-          </div>
+          </RowActions>
         </li>
       ))}
     </ul>
+  )
+}
+
+/** The actions button's place at the end of a sidebar row (see `NoteRows`). */
+function RowActions({ size, children }: { size: "medium" | "large"; children: React.ReactNode }) {
+  return (
+    <div
+      className={cx(
+        "absolute inset-y-0 hidden items-center group-hover/note:flex has-data-[popup-open]:flex",
+        // The 24px button in a 32px row (40px large) sits 4px
+        // (8px) in from the top and bottom; the same from the end.
+        size === "large" ? "right-2" : "right-1",
+      )}
+    >
+      {children}
+    </div>
+  )
+}
+
+/** What a pinned block's row calls it: its text as one plain line (a row
+ * renders no inline markdown), or a stand-in for none. */
+const pinnedBlockLabel = (block: PinnedBlock): string => inlineText(block.text) || "Untitled block"
+
+/** The pinned blocks, as rows: each opens its note zoomed into the block. */
+function PinnedBlockRows({
+  blocks,
+  size,
+  onNavigate,
+}: {
+  blocks: PinnedBlock[]
+  size: "medium" | "large"
+  onNavigate?: () => void
+}) {
+  return (
+    <ul className="flex flex-col gap-1" data-testid="pinned-blocks">
+      {blocks.map((block) => (
+        <li key={block.id} className="note-row group/note relative">
+          <PinnedBlockNavItem
+            block={block}
+            size={size}
+            onNavigate={onNavigate}
+            className="w-full"
+          />
+          <RowActions size={size}>
+            <PinnedBlockActionsMenu block={block} />
+          </RowActions>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** A pinned block's row: the pin, and the block's text, with the note it
+ * opens in as the row's tooltip. Current while its note is open zoomed
+ * into it — the row's own link, exactly. */
+function PinnedBlockNavItem({
+  block,
+  size,
+  onNavigate,
+  className,
+}: {
+  block: PinnedBlock
+  size: "medium" | "large"
+  onNavigate?: () => void
+  className?: string
+}) {
+  const label = pinnedBlockLabel(block)
+  return (
+    <Link
+      to="/notes/$"
+      params={{ _splat: block.noteId }}
+      search={{ query: undefined, block: block.id }}
+      activeOptions={{ exact: true, includeSearch: true }}
+      data-size={size}
+      className={cx("nav-item", className)}
+      title={`${block.note.displayName} › ${label}`}
+      onClick={(event) => {
+        if (!event.defaultPrevented) onNavigate?.()
+      }}
+    >
+      <span className="nav-item-icon hidden shrink-0 [[aria-current=page]>&]:flex">
+        <PinFillIcon16 />
+      </span>
+      <span className="nav-item-icon flex shrink-0 text-text-secondary [[aria-current=page]>&]:hidden">
+        <PinIcon16 />
+      </span>
+      <span className="truncate">{label}</span>
+    </Link>
+  )
+}
+
+/** A pinned block's row menu: unpin it, or copy a link to it. */
+function PinnedBlockActionsMenu({ block }: { block: PinnedBlock }) {
+  const setBlockProps = useSetBlockProps()
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenu.Trigger
+        render={
+          <IconButton aria-label="Pinned block actions" size="small" disableTooltip>
+            <MoreIcon16 />
+          </IconButton>
+        }
+      />
+      <DropdownMenu.Content align="start">
+        <DropdownMenu.Item
+          icon={<PinFillIcon16 className="text-text-pinned" />}
+          onClick={() => setBlockProps(block.id, { pinned: null })}
+        >
+          Unpin
+        </DropdownMenu.Item>
+        <DropdownMenu.Item
+          icon={<CopyIcon16 />}
+          onClick={() => copy(`${window.location.origin}/notes/${block.noteId}?block=${block.id}`)}
+        >
+          Copy link to block
+        </DropdownMenu.Item>
+      </DropdownMenu.Content>
+    </DropdownMenu>
   )
 }
 

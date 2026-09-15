@@ -50,6 +50,30 @@ export function notePropsOps(
   return [{ op: "setProps", id: noteId, props: propsJson(entries) }]
 }
 
+/**
+ * The op that sets a BLOCK's props (a pin — docs/metadata.md): the current
+ * entries with `patch` applied (a `null` value removes the key), as one
+ * `setProps` op. A block's props carry no `updated_at`: the note it is in
+ * is what the notes list orders by, and pinning a block is not an edit to
+ * the note. A note node goes through `notePropsOps` (which stamps it).
+ * Nothing when the node is not in the graph.
+ */
+export function blockPropsOps(
+  id: string,
+  patch: Record<string, unknown>,
+  snapshot: GraphSnapshot,
+): Op[] {
+  const node = snapshot.nodes.get(id)
+  if (!node) return []
+  if (node.type === NOTE_TYPE) return notePropsOps(id, patch, snapshot)
+  const entries = { ...(parseProps(node.props) ?? {}) }
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null || value === undefined) delete entries[key]
+    else entries[key] = value
+  }
+  return [{ op: "setProps", id, props: propsJson(entries) }]
+}
+
 /** Blocks in document order with their depth (a block reached twice is
  * listed once, at its first depth). */
 function blocksInOrder(doc: BlockDoc): { block: Block; depth: number }[] {

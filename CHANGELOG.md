@@ -5,9 +5,7 @@
 ### Added
 
 - Code blocks are syntax-highlighted for their language — the word after the fence, as `ts or `python, or **Code** from the slash menu and the language typed after. Thirty-odd languages, with their usual short names (js, ts, py, sh, rs, go, yml, md, html…); a language with no grammar stays plain, as does the block while you are typing in it. The colours follow the theme and go to plain ink in print.
-
-### Added
-
+- Pin a block. **Pin** in a block's right-click menu lists it in the sidebar under a new **Pinned** heading, between your notes and the notes shared with you; the row opens the note zoomed into that block, a focused view of the block and everything beneath it, and its **⋯** menu unpins it or copies a link to it. A pinned block wears the pin glyph in the editor, as a pinned note does in the sidebar, and the menu reads **Unpin** on it. The ⌘K palette's **Pinned** group lists pinned blocks after the pinned notes. Pinning a note is unchanged: it stays at the top of your notes, where the sidebar already keeps it. The sidebar's lists are each headed now — **Notes**, **Pinned**, **Shared by …** — with no rule between them.
 - Share notes with another Ruminate user, to read. Choose **Share…** in a note's **⋯** menu, or when right-clicking a block, and type the email address the other person signs in to GitHub with; a shared block opens for them as a note of its own. **Settings → Sharing** lists what you have shared and with whom, with a Revoke, and what has been shared with you. Everything beneath a shared note is shared with it — including blocks you add later — and nothing else: the share is the subtree under the notes you picked, computed afresh every time it is read, so a block you unlink leaves the share and one you link in joins it. The address is matched against the primary verified email on the other person's GitHub account, and the app never says whether an address belongs to a user; they see who shared with them, never the address it was sent to. Notes shared with you appear in the sidebar under **Shared by …**, open like any note, and can be searched with your own; they cannot be changed, and the page says so. Revoke a share from the same panel and it is gone for them at once.
 
 ### Changed
@@ -24,6 +22,7 @@
 
 ### Changed
 
+- An agent searches with the words you do. The MCP `search` tool used to look for a case-insensitive substring; it now takes **the same query language you type in the search box**: `in:<note id>` or `in:<block id>` to look inside a note or a subtree, `type:todo` (or `done`, `heading`, `code`, …), `-type:done` to exclude, `a,b` for either, `sort:updated`, and free text matched as the app matches it. A query with no free text lists everything the qualifiers admit — `type:todo` is every open to-do the token can see — and each hit names the block, its note and the heading it sits under. Nothing about who can see what changes: a token scoped to one note is still shown nothing outside it.
 - A bullet list continues as bullets. <kbd>↵</kbd> at the end of a bullet now makes another bullet, whatever **New block markdown** (Settings → Editor) is set to — a numbered list and a to-do list already carried on this way, and a bullet used to make the setting's block instead, so with the setting on plain text a list stopped after one item. To leave a list, press <kbd>↵</kbd> on an empty item: the block goes back to the setting's type, or to a paragraph when the setting is that very list, so the key always leaves.
 
 ### Fixed

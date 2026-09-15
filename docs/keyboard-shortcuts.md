@@ -84,7 +84,9 @@ a block folded or unfolded, or zoomed into on this device (a list of at
 most five note ids and timestamps, under one browser-storage key that
 overwrites itself); selecting, focusing or arrowing through a note never
 counts — with the
-**Pinned** notes beneath, less any already listed as recent; both give way
+**Pinned** notes beneath, less any already listed as recent, and the pinned
+blocks after them (docs/metadata.md), each opening its note zoomed into
+it; both give way
 to results the moment you type — are the same block editor, browsed, under
 the same count line as the notes page. The
 palette's one item of its own — a date, when the query reads as one —

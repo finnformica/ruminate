@@ -1,6 +1,18 @@
-# Search: one surface for the person and the agent — planned
+# Search: one surface for the person and the agent
 
-**Status: not built.** This is the design for a follow-up PR. Today the MCP endpoint has
+**Status: the shared query language is built; the semantic half is not.**
+`search` (worker/mcp/tools.ts) now runs the app's own engine — `parseQuery` and
+`searchBlocks` — over the grant's scoped graph (worker/search/engine.ts), so
+`in:<note or block id>`, `type:todo,done`, `-type:done`, `sort:updated` and
+free text mean over MCP exactly what they mean in the search box. The
+embedding-based half sketched below was built and measured (section chunks
+retrieved paraphrases 85% of the time against the fuzzy matcher's 0%) and set
+aside for cost and complexity; the engine is shaped so it can slot back in as a
+second candidate list. What follows is the original design, kept for that day.
+
+---
+
+Today the MCP endpoint has
 its own substring matcher (`search`, worker/mcp/tools.ts) which shares nothing with the
 app's query language (docs/query-language.md, `src/utils/search.ts`). Two search
 semantics over one corpus is one too many.

@@ -472,7 +472,7 @@ export async function noteView(
 // -----------------------------------------------------------------------------
 
 /** Is this node inside the grant's view? */
-export const sees = (graph: ScopedGraph, id: string): boolean =>
+const sees = (graph: ScopedGraph, id: string): boolean =>
   graph.visible === null || graph.visible.has(id)
 
 /** A visible node row, or null. */

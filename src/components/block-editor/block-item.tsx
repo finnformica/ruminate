@@ -21,6 +21,7 @@ import { clipboardBlocksToMarkdown, extractClipboardBlocks } from "../../utils/r
 import { imageFilesOf } from "../../data/images"
 import { blurLeavesWindow } from "../../utils/window-blur"
 import { IconButton } from "../icon-button"
+import { PinFillIcon12 } from "../icons"
 import { BlockContent } from "./block-content"
 import { headingScale, kindOf, type RowContext } from "./block-kinds"
 import { caretCoordinates, caretLineFlags } from "./caret"
@@ -935,6 +936,15 @@ export function BlockItem({
           {kind.before?.(rowContext)}
           {kind.wrap ? kind.wrap(content, rowContext) : content}
           {kind.after?.(rowContext)}
+          {/* A pinned block says so, with the glyph the sidebar's Pinned
+              list and a pinned note's row use. (A note row draws its own,
+              in its kind's `after`.) */}
+          {block.type !== "note" && block.props?.pinned === true ? (
+            <PinFillIcon12
+              data-testid="block-pinned"
+              className="shrink-0 self-center text-text-pinned"
+            />
+          ) : null}
           {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
         </div>
         {api.debug?.showMetadata ? (
