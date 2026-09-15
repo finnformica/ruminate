@@ -1,12 +1,13 @@
-import { isHeading } from "./markers"
 import type { BlockDoc } from "./types"
 import { keyOf } from "./view"
 
 /**
- * The default-expansion policy (docs/graph-schema-v2.md): headings are always
- * expanded, and below any heading (or the note root) the outline starts with
- * `levels` levels visible — a block that many levels down that has children
- * starts collapsed. The number is a preference (Settings → Editor,
+ * The default-expansion policy (docs/graph-schema-v2.md): a note opens with
+ * `levels` levels visible beneath its top — a block that many levels down
+ * that has children starts collapsed, whatever its type. Headings count like
+ * any other block, so a note of headings over lists opens showing the
+ * headings and folds the lists beneath them once the headings alone use up
+ * the depth. The number is a preference (Settings → Editor,
  * `expandedLevelsAtom`; two by default). This is a seed, not a standing rule:
  * it is what a note opens as until the reader folds or unfolds something,
  * and from then on only their own folds are remembered (see
@@ -28,8 +29,7 @@ export function defaultCollapsedKeys(doc: BlockDoc, levels = DEFAULT_EXPANDED_LE
   const expanded = clampExpandedLevels(levels)
   const collapsed: string[] = []
 
-  // `level` = distance below the nearest heading ancestor (or the note root):
-  // direct children are level 1. A heading resets the count for its subtree.
+  // `level` = distance below the note root: direct children are level 1.
   const path = new Set<string>()
   const walk = (ids: string[], parentKey: string | null, level: number) => {
     for (const id of ids) {
@@ -37,12 +37,8 @@ export function defaultCollapsedKeys(doc: BlockDoc, levels = DEFAULT_EXPANDED_LE
       if (!block || path.has(id)) continue
       const key = keyOf(parentKey, id)
       path.add(id)
-      if (isHeading(block.type)) {
-        walk(block.children, key, 1)
-      } else {
-        if (level >= expanded && block.children.length > 0) collapsed.push(key)
-        walk(block.children, key, level + 1)
-      }
+      if (level >= expanded && block.children.length > 0) collapsed.push(key)
+      walk(block.children, key, level + 1)
       path.delete(id)
     }
   }

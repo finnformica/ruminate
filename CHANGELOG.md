@@ -4,6 +4,7 @@
 
 ### Added
 
+- Headings fold by default like any other block. The "Default expand" slider now counts every level from the top of the note, so a note of a heading, a sub-heading and the lists beneath opens at the default of two as just its two rows of headings, with the lists folded under the sub-heading. Until now a heading was always open and restarted the count beneath it, so those lists always showed whatever the slider said. Notes you have already folded on this device keep your folds.
 - A backtick and a space at the start of a block turns it into a code block, the way `- ` makes a bullet or `# ` a heading; in select mode <kbd>`</kbd> toggles one, like the other marker keys. A marker typed on its own into an empty code block turns it back into that type — a `# `or`- ` that begins your code (a comment, a YAML list) stays code, and <kbd>⌫</kbd> at the start of a code block makes it a paragraph as before. (```lang then Enter still works.)
 - Change a code block's language after the fact: click the language in the panel's corner (it appears on hover when there is none), type, and press Enter. The highlighting follows.
 - Code blocks are syntax-highlighted for their language — the word after the fence, as `ts or `python, or **Code** from the slash menu and the language typed after. Thirty-odd languages, with their usual short names (js, ts, py, sh, rs, go, yml, md, html…); a language with no grammar stays plain, as does the block while you are typing in it. The colours follow the theme and go to plain ink in print.
