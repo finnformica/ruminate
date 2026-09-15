@@ -206,6 +206,42 @@ describe("BlockEditor focus + keyboard", () => {
     expect(document.activeElement).toBe(textarea)
   })
 
+  it("keeps editing when the window loses focus (a tab switch), ends it on a real blur", () => {
+    const { container } = render(
+      <>
+        <Harness initial="A" startEditing />
+        <input data-testid="outside" />
+      </>,
+    )
+    const textarea = container.querySelector("textarea")!
+    expect(document.activeElement).toBe(textarea)
+
+    // The window going away: the textarea blurs with nowhere in the page
+    // taking focus and the document no longer focused. The edit stays open,
+    // so the browser can hand focus back to the same textarea on return.
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false)
+    fireEvent.blur(textarea)
+    expect(container.querySelector("textarea")).toBe(textarea)
+    hasFocus.mockReturnValue(true)
+    fireEvent.focus(textarea)
+    expect(container.querySelector("textarea")).toBe(textarea)
+
+    // Focus moving to another control in the page is the user leaving the
+    // block: editing ends.
+    act(() => container.querySelector<HTMLInputElement>('[data-testid="outside"]')!.focus())
+    expect(container.querySelector("textarea")).toBeNull()
+    hasFocus.mockRestore()
+  })
+
+  it("a blur with focus still in the document (a click on blank page) ends editing", () => {
+    const { container } = render(<Harness initial="A" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true)
+    fireEvent.blur(textarea)
+    expect(container.querySelector("textarea")).toBeNull()
+    hasFocus.mockRestore()
+  })
+
   it("an empty block shows nothing in view mode (no placeholder text)", () => {
     const { container } = render(<Harness initial="" />)
     expect(container.querySelector('[data-testid="block-body"]')?.textContent).toBe("")

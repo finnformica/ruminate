@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { cx } from "../../utils/cx"
+import { blurLeavesWindow } from "../../utils/window-blur"
 import { Hash } from "./hash"
 
 /**
@@ -104,7 +105,10 @@ export function NoteTitle({
           ref={inputRef}
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          onBlur={() => {
+          onBlur={(event) => {
+            // The window going (a tab switch) is not the user leaving the
+            // field: focus comes back to it with the window, so keep editing.
+            if (blurLeavesWindow(event.relatedTarget)) return
             commit()
             setEditing(false)
             setSelected(false)
