@@ -19,7 +19,7 @@ import { SettingsSection } from "../components/settings-section"
 /**
  * The admin page: the bootstrap owner's controls, laid out like Settings.
  *
- * **Features** sets each flag's audience (Off, Admin, Everyone;
+ * **Feature flags** sets each flag's audience (Off, Admin, Everyone;
  * src/data/feature-flags.ts). Everything here is refused server-side for
  * anyone but the admin; the page only draws for them too.
  */
@@ -78,12 +78,7 @@ function FeaturesSection() {
   }
 
   return (
-    <SettingsSection title="Features">
-      <p className="leading-5 text-text-secondary">
-        Who each feature is on for. <span className="text-text">Admin</span> is you alone;{" "}
-        <span className="text-text">Off</span> switches it off for everyone, including you.
-      </p>
-
+    <SettingsSection title="Feature flags">
       {error ? <p className="text-text-danger">{error}</p> : null}
 
       {audiences === null ? (
@@ -91,10 +86,7 @@ function FeaturesSection() {
       ) : (
         FEATURES.map((feature) => (
           <div key={feature.key} className="flex items-center justify-between gap-4">
-            <div className="flex w-0 grow flex-col gap-1">
-              <span className="leading-4">{feature.label}</span>
-              <span className="text-sm leading-5 text-text-secondary">{feature.description}</span>
-            </div>
+            <span className="w-0 grow truncate leading-4">{feature.label}</span>
             <AudienceMenu
               label={feature.label}
               value={audiences[feature.key]}

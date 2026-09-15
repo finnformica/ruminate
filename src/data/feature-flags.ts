@@ -25,10 +25,9 @@ export const isFeatureKey = (value: unknown): value is FeatureKey =>
 
 export interface FeatureDefinition {
   key: FeatureKey
-  /** The name on the admin page. */
+  /** The name on the admin page — long enough to say what the switch
+   * controls on its own. */
   label: string
-  /** One sentence on what the switch controls. */
-  description: string
   /** The audience while no row says otherwise. */
   defaultAudience: Audience
 }
@@ -37,14 +36,11 @@ export const FEATURES: readonly FeatureDefinition[] = [
   {
     key: "mcp",
     label: "MCP access",
-    description:
-      "Minting MCP tokens in Settings, and the /mcp endpoint the tokens are presented at.",
     defaultAudience: "everyone",
   },
   {
     key: "sharing",
-    label: "Sharing",
-    description: "Sharing notes and blocks with other users, and the Sharing panel in Settings.",
+    label: "Sharing notes",
     defaultAudience: "everyone",
   },
 ]

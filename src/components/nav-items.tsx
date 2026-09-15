@@ -208,6 +208,7 @@ export function NavItems({
               activeIcon={<FlagFillIcon16 />}
               icon={<FlagIcon16 />}
               className="text-text-secondary"
+              shortcut={formatCombo("g a")}
               onNavigate={onNavigate}
             >
               Admin

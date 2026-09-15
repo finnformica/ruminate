@@ -1,7 +1,8 @@
 import { useNavigate, useRouter } from "@tanstack/react-router"
 import { useSetAtom } from "jotai"
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
+import { useIsAdmin } from "../data/features"
 import { isHelpPanelOpenAtom } from "../global-state"
 import { toDateString } from "../utils/date"
 import { GChordMachine } from "./chords"
@@ -24,7 +25,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
  *   any input or the block editor's edit-mode textarea, but fire from the
  *   editor's select mode (whose container leaves unbound keys un-prevented, so
  *   they bubble here).
- * - `g` chords (`g d` / `g n` / `g t` / `g s`) navigate — same listener, same
+ * - `g` chords (`g d` / `g n` / `g s` / `g a`) navigate — same listener, same
  *   typing guard, via {@link GChordMachine}. An *armed* chord's second key is
  *   additionally intercepted at capture phase so it wins over the block
  *   editor's own single-key select-mode bindings (w/a/s/d — a bare `d` there
@@ -39,6 +40,11 @@ export function GlobalShortcuts() {
   const navigate = useNavigate()
   const router = useRouter()
   const setHelpPanel = useSetAtom(isHelpPanelOpenAtom)
+  // `g a` reaches the admin page for the admin alone (src/data/features.ts);
+  // read through a ref so the chord machine, built once, sees the live answer.
+  const isAdmin = useIsAdmin()
+  const isAdminRef = useRef(isAdmin)
+  isAdminRef.current = isAdmin
 
   useEffect(() => {
     const machine = new GChordMachine({
@@ -52,6 +58,9 @@ export function GlobalShortcuts() {
         }),
       n: () => navigate({ to: "/", search: { query: undefined } }),
       s: () => navigate({ to: "/settings", search: { query: undefined } }),
+      a: () => {
+        if (isAdminRef.current) navigate({ to: "/admin", search: { query: undefined } })
+      },
     })
 
     const chordKeyOf = (event: KeyboardEvent) => ({
