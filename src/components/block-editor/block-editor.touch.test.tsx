@@ -303,6 +303,18 @@ describe("the edit bar", () => {
     expect(screen.queryByTestId("mobile-edit-bar")).toBeNull()
   })
 
+  it("pins itself to the visual viewport's bottom and pads the page by what it covers", () => {
+    const { container } = render(<Harness initial={"Alpha\nBeta"} />)
+    fireEvent.click(bodyOf(rows(container)[1]))
+    const bar = screen.getByTestId("mobile-edit-bar")
+    // jsdom has no visualViewport: the layout viewport's bottom stands in.
+    expect(bar.style.transform).toBe(`translateY(calc(${window.innerHeight}px - 100%))`)
+    expect(bar.getAttribute("data-keyboard")).toBe("down")
+    expect(document.documentElement.style.getPropertyValue("--edit-bar-inset")).toBe("0px")
+    fireEvent.click(screen.getByLabelText("Done"))
+    expect(document.documentElement.style.getPropertyValue("--edit-bar-inset")).toBe("")
+  })
+
   it("never takes focus from the textarea: its taps cancel their pointer down", () => {
     const { container } = render(<Harness initial={"Alpha\nBeta"} />)
     fireEvent.click(bodyOf(rows(container)[1]))

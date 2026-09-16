@@ -53,13 +53,31 @@ keyboard that appears and disappears. The block editor
   the system (shake, the three-finger swipe), and they earn no space beside
   the moves. Each action runs the same command its key does
   (`src/blocks/commands.ts`), in edit mode with the caret, so Indent by bar is
-  Tab by key. The bar is fixed to the bottom of the _visual_ viewport,
-  tracked through `window.visualViewport`, so it rides the keyboard whether
-  the keyboard overlays the page (iOS Safari) or shrinks it (Chrome on
-  Android, with the viewport meta's `interactive-widget=resizes-content`).
-  Its buttons cancel their pointer down, so a tap never takes focus from the
-  textarea — which would end the edit and dismiss the keyboard the bar sits
-  on.
+  Tab by key.
+
+  Where the bar sits is the hard part. A `position: fixed` element lives in
+  the _layout_ viewport, which an overlaying keyboard (iOS Safari) does not
+  shrink, so a bar at `bottom: 0` is under the keyboard; and Safari's own
+  bottom bar and the keyboard's accessory row (‹ › Done) take more of the
+  screen again. The bar is pinned to the bottom of the _visual_ viewport
+  instead — what is actually on screen — read from `window.visualViewport`:
+  top-anchored at `offsetTop + height` and pulled up by its own height, from
+  the visual viewport's own numbers alone (never `window.innerHeight`, which
+  means different things in Safari, in a home-screen app and on Android).
+  Where the keyboard shrinks the page instead (Chrome on Android, with the
+  viewport meta's `interactive-widget=resizes-content`) the two viewports
+  agree and the bar lands at the bottom of the page. The viewport's `resize`
+  and `scroll` are listened to, the window's too, and a slow poll besides,
+  since iOS does not always announce the keyboard's moves; iOS 26.0 also
+  leaves the viewport 24px short after the keyboard goes (WebKit 297779,
+  fixed in 26.1), which the keyboard threshold ignores. While the bar is up
+  it sets `--edit-bar-inset` on the root — what the keyboard and the bar
+  together cover — and the page's scroller pads by it (`page-layout.tsx`), so
+  the end of a note can still be scrolled above them. Its buttons cancel
+  their pointer down, so a tap never takes focus from the textarea — which
+  would end the edit and dismiss the keyboard the bar sits on. iOS's
+  accessory row has a Done of its own beside the bar's; Android has none, so
+  the bar keeps it.
 
 - **The keyboard is told what to do.** The textarea says `autocapitalize=
 "sentences"` outright rather than leaving it to the browser's default, so a

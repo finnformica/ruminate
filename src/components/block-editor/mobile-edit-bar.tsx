@@ -39,43 +39,109 @@ export interface MobileEditBarActions {
 const TYPES = BLOCK_TYPE_DEFS.filter((def) => def.turnInto)
 
 /** A keyboard is at least this tall; the browser's own chrome (the address
- * bar coming and going) moves the viewport by less. */
+ * bar coming and going, iOS 26.0's 24px that never comes back) moves the
+ * viewport by less. */
 const KEYBOARD_MIN_HEIGHT = 150
 
+/** The CSS variable the page pads its scroller by while the bar is up
+ * (`page-layout.tsx`): what the keyboard and the bar together cover, so the
+ * end of a note can still be scrolled above them. */
+const INSET_VAR = "--edit-bar-inset"
+
+interface KeyboardState {
+  /** The visual viewport's bottom edge, in the layout viewport's
+   * coordinates — where the bar's bottom edge goes. */
+  bottom: number
+  /** The keyboard is up: the visual viewport is a keyboard's height short of
+   * the tallest it has been since the edit began. */
+  keyboardUp: boolean
+}
+
+function readKeyboard(): { bottom: number; height: number } {
+  const viewport = window.visualViewport
+  if (!viewport) return { bottom: window.innerHeight, height: window.innerHeight }
+  return { bottom: viewport.offsetTop + viewport.height, height: viewport.height }
+}
+
 /**
- * Where the keyboard is, read from the visual viewport (`window.visualViewport`):
- * how far its bottom sits above the layout viewport's — the height of a
- * keyboard that overlays the page rather than resizing it (iOS Safari;
- * Chrome on Android resizes the page, see the viewport meta's
- * `interactive-widget=resizes-content`, and reports 0) — and whether the
- * viewport has just grown back by a keyboard's height, which is the
- * keyboard going away. Both platforms shrink the visual viewport while
- * the keyboard is up, so the one measure serves both.
+ * Where the keyboard is, read from the visual viewport (`window.visualViewport`).
+ * A `position: fixed` element sits in the LAYOUT viewport, which an
+ * overlaying keyboard (iOS Safari) does not shrink — so a bar at `bottom: 0`
+ * is under the keyboard. The visual viewport is what is actually on screen:
+ * the bar is pinned to its bottom edge instead, top-anchored and pulled up
+ * by its own height, using nothing but the visual viewport's own numbers
+ * (its `offsetTop` is in layout coordinates, as `top` is). Where the
+ * keyboard shrinks the page instead (Chrome on Android, with the viewport
+ * meta's `interactive-widget=resizes-content`) the two viewports agree and
+ * the bar lands at the bottom of the page as before. Read on the viewport's
+ * `resize` and `scroll`, the window's too, and on a slow poll besides: iOS
+ * does not always announce the keyboard's moves.
+ *
+ * The keyboard going away is the viewport growing back by a keyboard's
+ * height, after having shrunk by one; `onClose` is called once for it. (On
+ * iOS the Done key also blurs the textarea, which ends the edit first; on
+ * Android the Back key hides the keyboard with no blur, and this is the only
+ * word of it.)
  */
-function useKeyboard(onClose: () => void): number {
-  const [inset, setInset] = useState(0)
+function useKeyboard(onClose: () => void): KeyboardState {
+  const [state, setState] = useState<KeyboardState>(() => ({
+    bottom: typeof window === "undefined" ? 0 : readKeyboard().bottom,
+    keyboardUp: false,
+  }))
   const close = useRef(onClose)
   close.current = onClose
   useEffect(() => {
-    const viewport = window.visualViewport
-    if (!viewport) return
-    // The shortest the viewport has been since the edit began: the keyboard
-    // up. Growing well past it again means the keyboard went.
-    let shortest = viewport.height
+    let tallest = readKeyboard().height
+    let wasUp = false
+    let closed = false
     const measure = () => {
-      setInset(Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop)))
-      if (viewport.height < shortest) shortest = viewport.height
-      else if (viewport.height - shortest > KEYBOARD_MIN_HEIGHT) close.current()
+      const { bottom, height } = readKeyboard()
+      if (height > tallest) tallest = height
+      const keyboardUp = tallest - height > KEYBOARD_MIN_HEIGHT
+      if (wasUp && !keyboardUp && !closed) {
+        closed = true
+        close.current()
+      }
+      wasUp = keyboardUp
+      setState((prev) =>
+        prev.bottom === bottom && prev.keyboardUp === keyboardUp ? prev : { bottom, keyboardUp },
+      )
     }
     measure()
-    viewport.addEventListener("resize", measure)
-    viewport.addEventListener("scroll", measure)
+    const viewport = window.visualViewport
+    viewport?.addEventListener("resize", measure)
+    viewport?.addEventListener("scroll", measure)
+    window.addEventListener("resize", measure)
+    window.addEventListener("scroll", measure, true)
+    const poll = window.setInterval(measure, 250)
     return () => {
-      viewport.removeEventListener("resize", measure)
-      viewport.removeEventListener("scroll", measure)
+      viewport?.removeEventListener("resize", measure)
+      viewport?.removeEventListener("scroll", measure)
+      window.removeEventListener("resize", measure)
+      window.removeEventListener("scroll", measure, true)
+      window.clearInterval(poll)
     }
   }, [])
-  return inset
+  return state
+}
+
+/**
+ * Tell the page what the keyboard and the bar cover (`INSET_VAR` on the
+ * root), so its scroller pads by it and the end of a note can be brought
+ * above them; cleared when the bar goes.
+ */
+function usePageInset(barRef: React.RefObject<HTMLDivElement | null>, bottom: number) {
+  useEffect(() => {
+    const covered = Math.max(0, window.innerHeight - bottom)
+    const bar = barRef.current?.offsetHeight ?? 0
+    document.documentElement.style.setProperty(INSET_VAR, `${covered + bar}px`)
+  }, [barRef, bottom])
+  useEffect(
+    () => () => {
+      document.documentElement.style.removeProperty(INSET_VAR)
+    },
+    [],
+  )
 }
 
 /**
@@ -104,20 +170,25 @@ export function MobileEditBar({
   type: BlockType
   actions: MobileEditBarActions
 }) {
-  const inset = useKeyboard(actions.done)
+  const { bottom, keyboardUp } = useKeyboard(actions.done)
+  const barRef = useRef<HTMLDivElement>(null)
+  usePageInset(barRef, bottom)
   const [view, setView] = useState<"main" | "turnInto">("main")
   if (typeof document === "undefined") return null
   return createPortal(
     <div
+      ref={barRef}
       role="toolbar"
       aria-label="Editing"
       data-testid="mobile-edit-bar"
-      className="fixed inset-x-0 z-20 flex items-stretch border-t border-border-secondary bg-bg-overlay print:hidden"
+      data-keyboard={keyboardUp ? "up" : "down"}
+      className="fixed inset-x-0 top-0 z-20 flex items-stretch border-t border-border-secondary bg-bg-overlay will-change-transform print:hidden"
       style={{
-        bottom: inset,
+        // The bar's bottom edge on the visual viewport's (see `useKeyboard`).
+        transform: `translateY(calc(${bottom}px - 100%))`,
         // Under a keyboard the safe area is the keyboard's; without one the
         // bar sits on the home indicator and keeps clear of it.
-        paddingBottom: inset > 0 ? 0 : "env(safe-area-inset-bottom)",
+        paddingBottom: keyboardUp ? 0 : "env(safe-area-inset-bottom)",
       }}
     >
       <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
