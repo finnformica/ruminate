@@ -2611,15 +2611,23 @@ export function BlockEditor({
       />
       {coarse && !readOnly && focus ? (
         <MobileEditBar
+          type={doc.blocks[idOfKey(focus.key)]?.type ?? "text"}
           actions={{
+            turnInto: (type) => menuActions.setType(idOfKey(focus.key), type),
+            bold: () => runOnEditing("wrapBold"),
+            italic: () => runOnEditing("wrapItalic"),
+            code: () => runOnEditing("wrapCode"),
             indent: () => runOnEditing("indent"),
             outdent: () => runOnEditing("outdent"),
             moveUp: () => runOnEditing("moveBlockUp"),
             moveDown: () => runOnEditing("moveBlockDown"),
-            undo,
-            redo,
+            duplicate: () => runOnEditing("duplicateBelow"),
+            remove: () => runOnRow("deleteBlock", focus.key),
+            image: api.requestImage ? () => api.requestImage?.(focus.key) : undefined,
             // Done: the keyboard goes and the row stays highlighted, where
-            // a tap picks the edit back up.
+            // a tap starts the next edit. The blur ends the edit itself;
+            // setting focus here too covers a keyboard that was already
+            // down (Android's Back key hides it without a blur).
             done: () => {
               const key = focus.key
               setFocus(null)

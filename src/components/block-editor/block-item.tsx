@@ -78,10 +78,9 @@ export interface BlockEditorApi {
   keyboardActive: boolean
   /**
    * The primary pointer is a finger (docs/mobile.md): a tap on a row edits
-   * it where the tap landed (a click selects; a double-click edits), the
-   * whole row is the tap target, and an edit outlives the keyboard going
-   * away — the textarea stays put, unfocused, for the tap that picks it
-   * back up. The long-press menu is how a row is selected.
+   * it where the tap landed (a click selects; a double-click edits), and
+   * the whole row is the tap target. The long-press menu is how a row is
+   * selected.
    */
   coarsePointer?: boolean
   /** Highlight a row (leaves edit mode, collapses any multi-selection). */
@@ -864,17 +863,11 @@ export function BlockItem({
         // Leaving the field ends the edit — unless it is the window that
         // went (a tab switch, another app): the browser brings focus back
         // to this textarea when it returns, so the edit stays open. On a
-        // touch screen, focus going to nothing is the keyboard being put
-        // away (or a tap on blank page), and the edit stays open there
-        // too: the textarea keeps its place, and a tap on it brings the
-        // keyboard back where it was. Focus going to a real control (a
-        // link, a menu, another block) ends it as anywhere.
+        // touch screen the keyboard being put away is a blur too (iOS's
+        // Done key), so it ends the edit the same way, and the row stays
+        // highlighted for the tap that starts the next one (docs/mobile.md).
         onBlur={(event) => {
           if (blurLeavesWindow(event.relatedTarget)) return
-          if (api.coarsePointer && event.relatedTarget === null) {
-            setSlash(null)
-            return
-          }
           api.setFocus(null)
         }}
         className={cx(

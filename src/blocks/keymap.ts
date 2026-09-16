@@ -166,6 +166,11 @@ export const KEYMAP: Binding[] = [
   { mode: "edit", combo: "Mod+Shift+ArrowDown", command: "moveBlockDown" },
   { mode: "edit", combo: "Alt+Shift+ArrowUp", command: "duplicateAbove" },
   { mode: "edit", combo: "Alt+Shift+ArrowDown", command: "duplicateBelow" },
+  // Inline markdown around the selection (the touch screen's edit bar
+  // offers the same three).
+  { mode: "edit", combo: "Mod+b", command: "wrapBold" },
+  { mode: "edit", combo: "Mod+i", command: "wrapItalic" },
+  { mode: "edit", combo: "Mod+e", command: "wrapCode" },
   // In a code block Enter is a newline (unbound: the textarea keeps it), and
   // Shift-Enter leaves with a fresh block below, like Cmd/Ctrl+Enter.
   { mode: "edit", combo: "Shift+Enter", when: inCode, command: "insertSiblingBelow" },

@@ -24,25 +24,43 @@ keyboard that appears and disappears. The block editor
   row and highlights it (`block-context-menu.tsx`), which is where the row-level
   actions live. On a touch screen the menu also carries the structure moves —
   Indent, Outdent, Move up, Move down — which a mouse's menu leaves to the keys.
-- **An edit outlives the keyboard.** Putting the keyboard away (iOS's Done key,
-  a tap on blank page) blurs the textarea with nowhere for focus to go. With a
-  mouse that ends the edit; by finger the textarea stays in place, unfocused,
-  and a tap on it brings the keyboard back with the caret where it was. Focus
-  going to a real control — a link, a menu, another row — ends the edit as it
-  does anywhere. (Android's back button hides the keyboard without blurring at
-  all, so there the edit was never in question.)
+- **The keyboard going away ends the edit.** Putting the keyboard away
+  (iOS's Done key, the bar's Done) blurs the textarea, which ends the edit as
+  a click away does on a desktop, and the row stays highlighted for the tap
+  that starts the next one. Android's Back key hides the keyboard without a
+  blur, so the edit bar watches the visual viewport grow back by a keyboard's
+  height and ends the edit itself. (Turning the phone from landscape to
+  portrait grows it too, and ends the edit the same way.)
 - **The edit bar** (`mobile-edit-bar.tsx`) sits above the keyboard while a row
-  is edited: Outdent, Indent, Move up, Move down, Undo, Redo and Done. A
-  phone's keyboard has no Tab, no Alt and no arrows, so these are the only way
-  to those commands mid-edit; each runs the same command its key does
+  is edited, in Notion's shape: a row of actions that scrolls sideways, and a
+  Done pinned at the right. A phone's keyboard has no Tab, no Alt, no arrows
+  and no Cmd to chord with, so the bar carries what those keys do:
+
+  | Bar             | Does                                                            | Notion's        |
+  | --------------- | --------------------------------------------------------------- | --------------- |
+  | Aa (Turn into)  | A second row of block types, the current one marked             | Aa / turn into  |
+  | B, I, `<>`      | `**`, `_`, backticks around the selection (⌘B / ⌘I / ⌘E by key) | Aa's formatting |
+  | Outdent, Indent | `outdent`, `indent`                                             | ⇤ ⇥             |
+  | Move up, down   | `moveBlockUp`, `moveBlockDown`                                  | ↑ ↓             |
+  | Duplicate       | `duplicateBelow`, editing the copy                              | Duplicate       |
+  | Delete          | `deleteBlock` (the next row is highlighted)                     | Delete          |
+  | Image           | The picture picker (`requestImage`), where images are on        | Insert image    |
+  | Done            | Ends the edit and puts the keyboard away                        | Hide keyboard   |
+
+  Left out of Notion's set, having no counterpart here: `+` add block (the
+  slash menu and Return do it), `@` mention, comment, text colour and
+  highlight. Undo and redo are not on the bar either: Notion leaves them to
+  the system (shake, the three-finger swipe), and they earn no space beside
+  the moves. Each action runs the same command its key does
   (`src/blocks/commands.ts`), in edit mode with the caret, so Indent by bar is
-  Tab by key. Done puts the keyboard away and leaves the row highlighted. The
-  bar is fixed to the bottom of the _visual_ viewport, tracked through
-  `window.visualViewport`, so it rides the keyboard whether the keyboard
-  overlays the page (iOS Safari) or shrinks it (Chrome on Android, with the
-  viewport meta's `interactive-widget=resizes-content`). Its buttons cancel
-  their pointer down, so a tap never takes focus from the textarea — which
-  would end the edit and dismiss the keyboard the bar sits on.
+  Tab by key. The bar is fixed to the bottom of the _visual_ viewport,
+  tracked through `window.visualViewport`, so it rides the keyboard whether
+  the keyboard overlays the page (iOS Safari) or shrinks it (Chrome on
+  Android, with the viewport meta's `interactive-widget=resizes-content`).
+  Its buttons cancel their pointer down, so a tap never takes focus from the
+  textarea — which would end the edit and dismiss the keyboard the bar sits
+  on.
+
 - **The keyboard is told what to do.** The textarea says `autocapitalize=
 "sentences"` outright rather than leaving it to the browser's default, so a
   new block's first letter shifts; a code block says `off`, and switches

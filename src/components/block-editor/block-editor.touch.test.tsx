@@ -139,29 +139,27 @@ describe("a touch screen's tap", () => {
 })
 
 describe("a touch screen's edit", () => {
-  it("survives the keyboard going away (focus to nothing) and ends on focus to a control", () => {
-    const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta"} />)
-    fireEvent.click(bodyOf(rows(container)[0]))
+  it("ends when the keyboard goes away (focus to nothing), leaving the row highlighted", () => {
+    const { container } = render(<Harness initial={"Alpha\nBeta"} />)
+    fireEvent.click(bodyOf(rows(container)[1]))
     const textarea = container.querySelector("textarea")!
-    // iOS's Done key: the textarea blurs with nowhere for focus to go.
+    // iOS's Done key: the textarea blurs with nowhere for focus to go, the
+    // window itself still focused (jsdom says otherwise unless told).
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true)
     act(() => {
       textarea.blur()
     })
-    expect(container.querySelector("textarea")).toBe(textarea)
-    // A real control takes focus: the edit ends, as on a desktop.
-    act(() => {
-      textarea.focus()
-      getByTestId("elsewhere").focus()
-    })
+    hasFocus.mockRestore()
     expect(container.querySelector("textarea")).toBeNull()
+    expect(container.querySelector(".bg-bg-secondary")!.textContent).toContain("Beta")
   })
 
-  it("moves from row to row as taps land, keeping edit mode", () => {
+  it("moves from row to row as taps land", () => {
     const { container } = render(<Harness initial={"Alpha\nBeta"} />)
     fireEvent.click(bodyOf(rows(container)[0]))
     expect(container.querySelector("textarea")!.value).toBe("Alpha")
-    // The tap's mousedown blurs the first textarea (to nothing) before the
-    // click lands on the second row.
+    // The tap's mousedown blurs the first textarea before the click lands
+    // on the second row.
     act(() => {
       container.querySelector("textarea")!.blur()
     })
@@ -201,6 +199,28 @@ describe("the edit bar", () => {
     expect(screen.queryByTestId("mobile-edit-bar")).toBeNull()
   })
 
+  it("carries Notion's actions and no undo", () => {
+    const { container } = render(<Harness initial={"Alpha"} />)
+    fireEvent.click(bodyOf(rows(container)[0]))
+    const bar = screen.getByTestId("mobile-edit-bar")
+    const labels = Array.from(bar.querySelectorAll("button")).map((b) =>
+      b.getAttribute("aria-label"),
+    )
+    expect(labels).toEqual([
+      "Turn into",
+      "Bold",
+      "Italic",
+      "Code",
+      "Outdent",
+      "Indent",
+      "Move up",
+      "Move down",
+      "Duplicate",
+      "Delete",
+      "Done",
+    ])
+  })
+
   it("indents and outdents the edited row, keeping the edit and the caret", () => {
     const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta"} />)
     fireEvent.click(bodyOf(rows(container)[1]))
@@ -217,7 +237,7 @@ describe("the edit bar", () => {
     expect(container.querySelector("textarea")!.value).toBe("Beta")
   })
 
-  it("moves the edited row up and down, and undoes", () => {
+  it("moves the edited row up and down", () => {
     const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta\nGamma"} />)
     fireEvent.click(bodyOf(rows(container)[1]))
     fireEvent.click(screen.getByLabelText("Move up"))
@@ -226,10 +246,61 @@ describe("the edit bar", () => {
     fireEvent.click(screen.getByLabelText("Move down"))
     fireEvent.click(screen.getByLabelText("Move down"))
     expect(lines(getByTestId)).toEqual(["Alpha", "Gamma", "Beta"])
-    fireEvent.click(screen.getByLabelText("Undo"))
-    expect(lines(getByTestId)).toEqual(["Alpha", "Beta", "Gamma"])
-    fireEvent.click(screen.getByLabelText("Redo"))
-    expect(lines(getByTestId)).toEqual(["Alpha", "Gamma", "Beta"])
+  })
+
+  it("wraps the selection in bold, italic or code markdown, and unwraps it again", () => {
+    const { container } = render(<Harness initial={"Alpha beta"} />)
+    fireEvent.click(bodyOf(rows(container)[0]))
+    container.querySelector("textarea")!.setSelectionRange(0, 5)
+    fireEvent.click(screen.getByLabelText("Bold"))
+    let textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("**Alpha** beta")
+    expect(document.activeElement).toBe(textarea)
+    expect(textarea.selectionStart).toBe(7)
+    textarea.setSelectionRange(2, 7)
+    fireEvent.click(screen.getByLabelText("Bold"))
+    textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("Alpha beta")
+    textarea.setSelectionRange(6, 10)
+    fireEvent.click(screen.getByLabelText("Italic"))
+    expect(container.querySelector("textarea")!.value).toBe("Alpha _beta_")
+    // Nothing selected: the pair goes in and the caret sits between.
+    textarea = container.querySelector("textarea")!
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+    fireEvent.click(screen.getByLabelText("Code"))
+    textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("Alpha _beta_``")
+    expect(textarea.selectionStart).toBe(textarea.value.length - 1)
+  })
+
+  it("turns the row into another type from a second row, marking the current one", () => {
+    const { container, getByTestId } = render(<Harness initial={"Alpha"} />)
+    fireEvent.click(bodyOf(rows(container)[0]))
+    fireEvent.click(screen.getByLabelText("Turn into"))
+    const bar = screen.getByTestId("mobile-edit-bar")
+    expect(bar.querySelector('[aria-label="Text"]')!.getAttribute("aria-pressed")).toBe("true")
+    expect(bar.querySelector('[aria-label="To-do"]')!.getAttribute("aria-pressed")).toBe("false")
+    fireEvent.click(screen.getByLabelText("To-do"))
+    expect(lines(getByTestId)).toEqual(["[ ] Alpha"])
+    // Back on the main row, still editing.
+    expect(screen.getByLabelText("Bold")).not.toBeNull()
+    expect(container.querySelector("textarea")!.value).toBe("Alpha")
+    fireEvent.click(screen.getByLabelText("Turn into"))
+    fireEvent.click(screen.getByLabelText("Back"))
+    expect(screen.getByLabelText("Bold")).not.toBeNull()
+  })
+
+  it("duplicates the edited row (editing the copy) and deletes it", () => {
+    const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta"} />)
+    fireEvent.click(bodyOf(rows(container)[0]))
+    fireEvent.click(screen.getByLabelText("Duplicate"))
+    expect(lines(getByTestId)).toEqual(["Alpha", "Alpha", "Beta"])
+    expect(container.querySelector("textarea")!.value).toBe("Alpha")
+    fireEvent.click(screen.getByLabelText("Delete"))
+    expect(lines(getByTestId)).toEqual(["Alpha", "Beta"])
+    // A delete leaves edit mode: the next row is highlighted.
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(screen.queryByTestId("mobile-edit-bar")).toBeNull()
   })
 
   it("never takes focus from the textarea: its taps cancel their pointer down", () => {

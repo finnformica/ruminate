@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { runCommand, type CaretInput, type CommandInput, type Mode } from "./commands"
+import {
+  runCommand,
+  wrapSelection,
+  type CaretInput,
+  type CommandInput,
+  type Mode,
+} from "./commands"
 import { parseLine } from "./parse"
 import type { BlockDoc, BlockType } from "./types"
 
@@ -1078,5 +1084,48 @@ describe("rows of a shared block", () => {
     const result = runCommand("turnIntoHeading", input(doc, "p/s", { visibleOrder: order }))
     expect(result.doc!.blocks.s.type).toBe("h1")
     expect(result.focus).toEqual({ mode: "select", key: "p/s" })
+  })
+})
+
+describe("wrapBold / wrapItalic / wrapCode", () => {
+  it("wraps the selection and puts the caret after it", () => {
+    expect(wrapSelection("Alpha beta", 0, 5, "**")).toEqual({
+      text: "**Alpha** beta",
+      start: 2,
+      end: 7,
+    })
+  })
+
+  it("takes the marker off a selection that already has it, inside or outside", () => {
+    expect(wrapSelection("**Alpha** beta", 0, 9, "**")).toEqual({
+      text: "Alpha beta",
+      start: 0,
+      end: 5,
+    })
+    expect(wrapSelection("**Alpha** beta", 2, 7, "**")).toEqual({
+      text: "Alpha beta",
+      start: 0,
+      end: 5,
+    })
+  })
+
+  it("with nothing selected, puts the pair in and the caret between", () => {
+    expect(wrapSelection("Alpha", 5, 5, "`")).toEqual({ text: "Alpha``", start: 6, end: 6 })
+  })
+
+  it("edits the block's text as a text op, keeping the row editing", () => {
+    const doc = fixture()
+    const result = runCommand(
+      "wrapItalic",
+      input(doc, "a", { mode: "edit", caret: caret("Alpha", 0, 2) }),
+    )
+    expect(result.handled).toBe(true)
+    expect(result.doc!.blocks.a.text).toBe("_Al_pha")
+    expect(result.op).toEqual({ type: "text", blockId: "a" })
+    expect(result.focus).toEqual({ mode: "edit", key: "a", caret: 3 })
+  })
+
+  it("does nothing in select mode", () => {
+    expect(runCommand("wrapBold", input(fixture(), "a")).handled).toBe(false)
   })
 })
