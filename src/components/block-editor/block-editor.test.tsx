@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { useState } from "react"
 import { toast, Toaster } from "sonner"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
@@ -3240,6 +3240,264 @@ describe("BlockEditor images", () => {
     })
     const lightbox = screen.getByTestId("image-lightbox")
     expect(lightbox.querySelector("img")!.alt).toBe("Wide")
+  })
+})
+
+describe("BlockEditor inline links", () => {
+  /** Hover `element` until the link's card opens. */
+  async function hover(element: Element): Promise<HTMLElement> {
+    await act(async () => {
+      fireEvent.pointerEnter(element, { pointerType: "mouse" })
+      fireEvent.mouseEnter(element)
+      fireEvent.mouseMove(element)
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    })
+    return screen.getByTestId("link-hover-card")
+  }
+  /** Hover the link in row `index`. */
+  const hoverLink = (container: HTMLElement, index: number) =>
+    hover(container.querySelectorAll("[data-occurrence]")[index]!.querySelector("a")!)
+  /** A paste of plain text into the textarea being edited. */
+  const pasteText = (textarea: Element, text: string) =>
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        files: [],
+        types: ["text/plain"],
+        getData: (type: string) => (type === "text/plain" ? text : ""),
+      },
+    })
+
+  it("a pasted address is written out as a link named for its host, the address kept whole", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    await act(async () => {
+      pasteText(textarea, "see https://www.example.com/a/b?c=1. and [kept](https://e.com/k)")
+    })
+    expect(serializedLines(getByTestId)).toEqual([
+      "see [example.com](https://www.example.com/a/b?c=1). and [kept](https://e.com/k)",
+    ])
+  })
+
+  it("the hover card is a pill — the address as a link, a copy, Edit — that opens to a panel", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) first"} />,
+    )
+    const card = await hoverLink(container, 0)
+    const address = within(card).getByTestId("link-card-address")
+    expect(address.getAttribute("href")).toBe("https://e.com/g")
+    expect(address.getAttribute("target")).toBe("_blank")
+    expect(within(card).getByLabelText("Copy address")).not.toBeNull()
+    expect(screen.queryByTestId("link-card-panel")).toBeNull()
+
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
+    expect((screen.getByTestId("link-card-url") as HTMLInputElement).value).toBe("https://e.com/g")
+    const field = screen.getByTestId("link-display-text") as HTMLInputElement
+    expect(field.value).toBe("the guide")
+    await act(async () => {
+      fireEvent.change(field, { target: { value: "the manual" } })
+      fireEvent.submit(field.closest("form")!)
+    })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the manual](https://e.com/g) first"])
+    // One undo step.
+    fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the guide](https://e.com/g) first"])
+  })
+
+  it("the panel points the link at a new address, and takes the link off", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) first"} />,
+    )
+    await hoverLink(container, 0)
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
+    const url = screen.getByTestId("link-card-url") as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(url, { target: { value: "docs.e.com/guide" } })
+      fireEvent.blur(url)
+    })
+    expect(serializedLines(getByTestId)).toEqual([
+      "Read [the guide](https://docs.e.com/guide) first",
+    ])
+
+    // The card stays at its panel after a save; hover again and it is
+    // there, or Edit brings it back.
+    await hoverLink(container, 0)
+    if (!screen.queryByTestId("link-card-panel")) {
+      await act(async () => {
+        fireEvent.click(getByTestId("link-card-edit"))
+      })
+    }
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-remove"))
+    })
+    expect(serializedLines(getByTestId)).toEqual(["Read the guide first"])
+    expect(container.querySelector("a")).toBeNull()
+  })
+
+  it("a field left unsaved is saved as the card closes, however it closes", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) first"} />,
+    )
+    await hoverLink(container, 0)
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
+    const field = screen.getByTestId("link-display-text") as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(field, { target: { value: "the manual" } })
+    })
+    // The pointer leaves; the card closes after its delay, with no blur
+    // (a click elsewhere takes the popup down before one could fire).
+    const anchor = container.querySelector("a")!
+    await act(async () => {
+      fireEvent.pointerLeave(anchor, { pointerType: "mouse" })
+      fireEvent.mouseLeave(anchor)
+      fireEvent.pointerLeave(screen.getByTestId("link-hover-card"), { pointerType: "mouse" })
+      fireEvent.mouseLeave(screen.getByTestId("link-hover-card"))
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    })
+    await waitFor(() => expect(screen.queryByTestId("link-hover-card")).toBeNull())
+    expect(serializedLines(getByTestId)).toEqual(["Read [the manual](https://e.com/g) first"])
+  })
+
+  it("both fields changed at once are one rewrite, and a field left alone is no change", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) first"} />,
+    )
+    await hoverLink(container, 0)
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("link-card-url"), {
+        target: { value: "https://docs.e.com/g" },
+      })
+      fireEvent.change(screen.getByTestId("link-display-text"), {
+        target: { value: "the manual" },
+      })
+      fireEvent.submit(screen.getByTestId("link-card-panel"))
+    })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the manual](https://docs.e.com/g) first"])
+    // One undo step for both.
+    fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the guide](https://e.com/g) first"])
+    // Opened and left alone: nothing is written.
+    await hoverLink(container, 0)
+    if (!screen.queryByTestId("link-card-panel")) {
+      await act(async () => {
+        fireEvent.click(getByTestId("link-card-edit"))
+      })
+    }
+    await act(async () => {
+      fireEvent.blur(screen.getByTestId("link-display-text"))
+    })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the guide](https://e.com/g) first"])
+  })
+
+  it("a typed address is offered its host as display text, and written out as a link", async () => {
+    const { container, getByTestId } = render(<Harness initial={"See https://www.e.com/x now"} />)
+    await hoverLink(container, 0)
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
+    const field = screen.getByTestId("link-display-text") as HTMLInputElement
+    expect(field.value).toBe("e.com")
+    await act(async () => {
+      fireEvent.submit(field.closest("form")!)
+    })
+    expect(serializedLines(getByTestId)).toEqual(["See [e.com](https://www.e.com/x) now"])
+  })
+
+  it("a space typed after an address writes it out as a link, the caret following", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "see https://www.e.com/x" } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["see https://www.e.com/x"])
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "see https://www.e.com/x " } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["see [e.com](https://www.e.com/x) "])
+    expect(textarea.selectionStart).toBe("see [e.com](https://www.e.com/x) ".length)
+    // Its own undo step: the bare address comes back.
+    fireEvent.keyDown(textarea, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["see https://www.e.com/x"])
+  })
+
+  it("a name with a common ending is an address too: google.com, then a space", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "search google.com " } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["search [google.com](https://google.com) "])
+    await act(async () => {
+      fireEvent.change(textarea, {
+        target: { value: "search [google.com](https://google.com) not node.js " },
+      })
+    })
+    expect(serializedLines(getByTestId)).toEqual([
+      "search [google.com](https://google.com) not node.js ",
+    ])
+  })
+
+  it("leaving edit mode writes out a bare address left in the row", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "https://www.e.com/x" } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["https://www.e.com/x"])
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Escape" })
+    })
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(serializedLines(getByTestId)).toEqual(["[e.com](https://www.e.com/x)"])
+  })
+
+  it("the menu's Edit link opens a link's card without a hover, for a touch screen", async () => {
+    const { container } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) and https://e.com/x"} />,
+    )
+    const row = container.querySelector("[data-occurrence]")!
+    await act(async () => {
+      fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
+    })
+    const menu = screen.getByTestId("block-context-menu")
+    expect(menu.textContent).toContain("Edit link")
+    // Two links: a submenu names them by their text.
+    await act(async () => {
+      fireEvent.click(screen.getByText("Edit link"))
+    })
+    const submenu = await screen.findByTestId("edit-link-menu")
+    expect(submenu.textContent).toContain("the guide")
+    expect(submenu.textContent).toContain("https://e.com/x")
+    await act(async () => {
+      fireEvent.click(within(submenu).getByText("the guide"))
+    })
+    // Opened this way it is the panel straight away: there is no hover to
+    // reach Edit from.
+    await screen.findByTestId("link-card-panel")
+    expect((screen.getByTestId("link-card-url") as HTMLInputElement).value).toBe("https://e.com/g")
+    expect((screen.getByTestId("link-display-text") as HTMLInputElement).value).toBe("the guide")
+  })
+
+  it("a read-only row's link is only a link", async () => {
+    const { container } = render(
+      <BlockEditor doc={withStarter(parse("https://e.com/x"))} onChange={() => {}} readOnly />,
+    )
+    const anchor = container.querySelector("a")!
+    await act(async () => {
+      fireEvent.pointerEnter(anchor, { pointerType: "mouse" })
+      fireEvent.mouseEnter(anchor)
+      fireEvent.mouseMove(anchor)
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    })
+    expect(screen.queryByTestId("link-hover-card")).toBeNull()
   })
 })
 
