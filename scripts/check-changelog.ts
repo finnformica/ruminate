@@ -18,15 +18,18 @@ import {
   MAX_ENTRY_LENGTH,
   MAX_LEAD_LENGTH,
   parseChangelog,
+  parseFragment,
   visibleLength,
   type ChangelogProblem,
+  type ChangelogSection,
 } from "../src/utils/changelog"
 
 // `node:fs` via `getBuiltinModule`, dodging the vite node-polyfills alias
 // (same trick as scripts/check-queries.ts).
 const builtin = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } }).process
   ?.getBuiltinModule as (id: string) => unknown
-const { readFileSync } = builtin("node:fs") as {
+const { readdirSync, readFileSync } = builtin("node:fs") as {
+  readdirSync: (path: string) => string[]
   readFileSync: (path: string, encoding: string) => string
 }
 
@@ -96,48 +99,88 @@ function checkEntryText(text: string, line: number, problems: ChangelogProblem[]
   }
 }
 
-function check(source: string): ChangelogProblem[] {
-  const { releases, problems } = parseChangelog(source)
+/** The rules every entry answers to, wherever it is written. */
+function checkSections(sections: ChangelogSection[], problems: ChangelogProblem[], where: string) {
+  for (const section of sections) {
+    if (section.entries.length === 0) {
+      problems.push({
+        line: section.line,
+        message: `"${section.category}" in ${where} has no entries. Leave the heading out.`,
+      })
+    }
+    for (const entry of section.entries) {
+      const fault = (message: string) => problems.push({ line: entry.line, message })
+      if (!entry.lead.endsWith(".")) {
+        fault("The lead sentence must end in a full stop, so the dialog can show it alone.")
+      }
+      const lead = visibleLength(entry.lead)
+      const whole = visibleLength(entry.text)
+      if (lead > MAX_LEAD_LENGTH) {
+        fault(`The lead sentence reads as ${lead} characters; the limit is ${MAX_LEAD_LENGTH}.`)
+      }
+      if (whole > MAX_ENTRY_LENGTH) {
+        fault(`The entry reads as ${whole} characters; the limit is ${MAX_ENTRY_LENGTH}.`)
+      }
+      checkEntryText(entry.text, entry.line, problems)
+    }
+  }
+}
 
+function checkChangelog(source: string): ChangelogProblem[] {
+  const { releases, problems } = parseChangelog(source)
   for (const release of releases) {
     if (release.sections.length === 0) {
       problems.push({ line: release.line, message: `${release.week} has no categories.` })
     }
-    for (const section of release.sections) {
-      if (section.entries.length === 0) {
-        problems.push({
-          line: section.line,
-          message: `"${section.category}" in ${release.week} has no entries. Leave the heading out.`,
-        })
-      }
-      for (const entry of section.entries) {
-        const fault = (message: string) => problems.push({ line: entry.line, message })
-        if (!entry.lead.endsWith(".")) {
-          fault("The lead sentence must end in a full stop, so the dialog can show it alone.")
-        }
-        const lead = visibleLength(entry.lead)
-        const whole = visibleLength(entry.text)
-        if (lead > MAX_LEAD_LENGTH) {
-          fault(`The lead sentence reads as ${lead} characters; the limit is ${MAX_LEAD_LENGTH}.`)
-        }
-        if (whole > MAX_ENTRY_LENGTH) {
-          fault(`The entry reads as ${whole} characters; the limit is ${MAX_ENTRY_LENGTH}.`)
-        }
-        checkEntryText(entry.text, entry.line, problems)
-      }
-    }
+    checkSections(release.sections, problems, release.week)
   }
-
   return problems.sort((a, b) => a.line - b.line)
 }
 
-const path = "CHANGELOG.md"
-const problems = check(readFileSync(path, "utf8"))
+/** A fragment is a release's entries with the week left off, so it answers to
+ * the same rules — it is about to become part of the changelog. */
+function checkFragment(source: string): ChangelogProblem[] {
+  const { sections, problems } = parseFragment(source)
+  if (sections.length === 0 && problems.length === 0) {
+    problems.push({ line: 1, message: "The fragment holds no entries." })
+  }
+  checkSections(sections, problems, "this fragment")
+  return problems.sort((a, b) => a.line - b.line)
+}
 
-if (problems.length === 0) {
-  console.log(`${path} — no problems.`)
+const FRAGMENTS = "changelog.d"
+
+function fragmentPaths(): string[] {
+  try {
+    return readdirSync(FRAGMENTS)
+      .filter((name) => name.endsWith(".md") && name !== "README.md")
+      .sort()
+      .map((name) => `${FRAGMENTS}/${name}`)
+  } catch {
+    return []
+  }
+}
+
+const reports: [string, ChangelogProblem[]][] = [
+  ["CHANGELOG.md", checkChangelog(readFileSync("CHANGELOG.md", "utf8"))],
+  ...fragmentPaths().map((path): [string, ChangelogProblem[]] => [
+    path,
+    checkFragment(readFileSync(path, "utf8")),
+  ]),
+]
+
+const total = reports.reduce((count, [, problems]) => count + problems.length, 0)
+
+if (total === 0) {
+  const checked =
+    reports.length === 1
+      ? "CHANGELOG.md"
+      : `CHANGELOG.md and ${reports.length - 1} fragment${reports.length === 2 ? "" : "s"}`
+  console.log(`${checked} \u2014 no problems.`)
 } else {
-  for (const { line, message } of problems) console.error(`${path}:${line}  ${message}`)
-  console.error(`\n${problems.length} problem${problems.length === 1 ? "" : "s"}.`)
+  for (const [path, problems] of reports) {
+    for (const { line, message } of problems) console.error(`${path}:${line}  ${message}`)
+  }
+  console.error(`\n${total} problem${total === 1 ? "" : "s"}.`)
   ;(globalThis as { process?: { exitCode?: number } }).process!.exitCode = 1
 }

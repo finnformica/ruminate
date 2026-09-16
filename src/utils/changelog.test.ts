@@ -1,5 +1,12 @@
 import { describe, expect, test } from "vitest"
-import { parseChangelog, splitLead, visibleLength } from "./changelog"
+import {
+  parseChangelog,
+  parseFragment,
+  renderRelease,
+  splitLead,
+  toReleaseWeek,
+  visibleLength,
+} from "./changelog"
 
 const WELL_FORMED = `# Changelog
 
@@ -115,5 +122,54 @@ describe("parseChangelog", () => {
   test("catches a missing title", () => {
     const { problems } = parseChangelog("## 2026-W38\n\n### Added\n\n- One.\n")
     expect(problems.some((problem) => problem.message.includes("# Changelog"))).toBe(true)
+  })
+})
+
+describe("parseFragment", () => {
+  test("reads a branch's entries, with no week of their own", () => {
+    const { sections, problems } = parseFragment("### Added\n\n- One thing. Detail.\n")
+    expect(problems).toEqual([])
+    expect(sections).toHaveLength(1)
+    expect(sections[0].category).toBe("Added")
+    expect(sections[0].entries[0].lead).toBe("One thing.")
+  })
+
+  test("holds a fragment to the changelog's own rules", () => {
+    const { problems } = parseFragment("### Improved\n\n- One thing.\n")
+    expect(problems[0].message).toContain("is not a category")
+  })
+
+  test("points a fault at the fragment's own lines", () => {
+    const { problems } = parseFragment("### Added\n\n- One.\n\n### Added\n\n- Two.\n")
+    expect(problems[0].line).toBe(5)
+  })
+})
+
+describe("toReleaseWeek", () => {
+  test("names the ISO week a date falls in", () => {
+    expect(toReleaseWeek(new Date(2026, 8, 16))).toBe("2026-W38")
+    expect(toReleaseWeek(new Date(2026, 0, 1))).toBe("2026-W01")
+  })
+
+  test("a year's last days can belong to the next year's first week", () => {
+    // 2025-12-29 is the Monday of the week holding 2026-01-01.
+    expect(toReleaseWeek(new Date(2025, 11, 29))).toBe("2026-W01")
+  })
+})
+
+describe("renderRelease", () => {
+  test("writes a release back out, categories in their canonical order", () => {
+    const { releases } = parseChangelog(
+      "# Changelog\n\n## 2026-W38\n\n### Added\n\n- One.\n\n### Fixed\n\n- Two.\n",
+    )
+    expect(renderRelease({ ...releases[0], sections: [...releases[0].sections].reverse() })).toBe(
+      "## 2026-W38\n\n### Added\n\n- One.\n\n### Fixed\n\n- Two.\n",
+    )
+  })
+
+  test("what it writes reads back as what it was given", () => {
+    const source = "# Changelog\n\n## 2026-W38\n\n### Added\n\n- One. Detail.\n- Two.\n"
+    const { releases } = parseChangelog(source)
+    expect(parseChangelog(`# Changelog\n\n${renderRelease(releases[0])}`).problems).toEqual([])
   })
 })

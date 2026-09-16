@@ -1,0 +1,48 @@
+# Fold pending changelog fragments into this week's release.
+#
+# Branches write entries to `changelog.d/` rather than to `CHANGELOG.md`, so
+# that two branches open in the same week never conflict over the same few
+# lines (changelog.d/README.md says why). This is where they are merged back
+# together: once, on `main`, after a branch lands.
+name: Changelog
+permissions:
+  contents: write
+on:
+  push:
+    branches: [main]
+    paths:
+      - "changelog.d/**"
+# One collation at a time. A run that has to wait picks up every fragment
+# merged while it waited, so nothing is missed by queueing.
+concurrency:
+  group: changelog-collate
+  cancel-in-progress: false
+jobs:
+  collate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22.x
+          cache: "npm"
+      - run: npm ci
+      # Refuses to write anything if the changelog or a fragment has a fault,
+      # so a bad entry stops here rather than landing in a release.
+      - run: npm run changelog:collate
+      - name: Commit the folded release
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Nothing was folded."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md changelog.d
+          git commit -m "changelog: fold the pending entries into this week's release"
+          # `main` may have moved while this ran; the fragments folded here are
+          # still the right ones, so replay the commit on top and push.
+          git pull --rebase origin main
+          git push origin HEAD:main
