@@ -4,7 +4,7 @@
  * `CHANGELOG.md` is written by hand (with `.claude/skills/changelog`) and read
  * by three things that must agree about its shape: the CI gate
  * (`npm run check:changelog`), the in-app changelog page, and the "what's new"
- * dialog shown after an update. This module is the one definition of that
+ * what's-new card shown after an update. This module is the one definition of that
  * shape — the parse and the rules — so a file that passes CI is a file the app
  * can render.
  *
@@ -19,7 +19,7 @@
  *   - Lead sentence. Detail follows in the same bullet.
  *
  * Every entry leads with one short sentence that stands on its own: the
- * dialog shows leads alone, so an entry whose first sentence needs the rest of
+ * card shows leads alone, so an entry whose first sentence needs the rest of
  * the bullet to make sense reads as a fragment there. Anything after it is
  * detail, shown on the changelog page.
  */
@@ -33,7 +33,7 @@ const CATEGORIES = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Secur
 type ChangelogCategory = (typeof CATEGORIES)[number]
 
 /** The longest a lead sentence may be. Long enough for a clause and its point,
- * short enough that a dialog of them is read rather than skimmed. */
+ * short enough that a card of them is read rather than skimmed. */
 export const MAX_LEAD_LENGTH = 140
 
 /** The longest a whole entry may be, lead and detail together. Past this an
@@ -194,11 +194,11 @@ function weekOfVersion(version: string): string {
  * The releases a reader has not seen, newest first.
  *
  * Nothing is new to a reader who has never been here: a first visit stores the
- * stamp and shows no dialog, rather than opening on the whole history.
+ * stamp and shows no card, rather than opening on the whole history.
  *
  * Releases are compared by week, so entries added to a week already seen are
  * not shown again. They are on the changelog page, which is the honest place
- * for them — a dialog that reopened on a week you had read would be worse than
+ * for them — a card that reopened on a week you had read would be worse than
  * one that missed a late entry.
  */
 export function releasesSince(
@@ -214,7 +214,7 @@ export function releasesSince(
  * The first `limit` entries across these releases, in the order they are
  * written, with the releases and categories they came from kept around them.
  *
- * The dialog after an update is a greeting, not the changelog: a reader
+ * The what's-new card is a greeting, not the changelog: a reader
  * returning after a month should meet a dozen lines and a way in, not a
  * hundred. Categories are written most-notable-first (`CATEGORIES`), so what
  * survives the cut is what was added and changed rather than what was fixed.

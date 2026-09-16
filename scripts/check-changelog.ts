@@ -3,9 +3,9 @@
  *
  *   npm run check:changelog
  *
- * `CHANGELOG.md` is read by the app — the changelog page and the "what's new"
- * dialog after an update — so a malformed file is a broken page, not just an
- * untidy document. This script parses it with the very module the app uses
+ * `CHANGELOG.md` is read by the app — the changelog page, and the what's-new
+ * card shown after an update — so a malformed file is a broken page, not just
+ * an untidy document. This script parses it with the very module the app uses
  * (`src/utils/changelog.ts`), so CI and the app cannot disagree about what the
  * format is, and then applies the house rules on top: the shape of an entry,
  * and the words it may not use.
@@ -111,7 +111,7 @@ function checkSections(sections: ChangelogSection[], problems: ChangelogProblem[
     for (const entry of section.entries) {
       const fault = (message: string) => problems.push({ line: entry.line, message })
       if (!entry.lead.endsWith(".")) {
-        fault("The lead sentence must end in a full stop, so the dialog can show it alone.")
+        fault("The lead sentence must end in a full stop, so the card can show it alone.")
       }
       const lead = visibleLength(entry.lead)
       const whole = visibleLength(entry.text)

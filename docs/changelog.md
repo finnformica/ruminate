@@ -1,8 +1,8 @@
 # The changelog
 
 `CHANGELOG.md` is a document and an interface. People read it on GitHub, and
-the app renders it: the changelog page at `/changelog`, and (next) the dialog
-shown after an update. This is how that works.
+the app renders it: the changelog page at `/changelog`, and the what's-new
+card shown after an update. This is how that works.
 
 ## The pieces
 
@@ -21,9 +21,11 @@ Two surfaces, from the same file:
 
 - **The changelog page** (`/changelog`), reached from **What's new** in the
   sidebar. Every release down the side, one open beside it, entries in full.
-- **The dialog after an update**, which greets a device running a build it has
-  not seen with the leads alone, capped at a dozen, and a way through to the
-  page for the rest.
+- **The what's-new card**, which greets a device running a build it has not
+  seen with the leads alone, a handful of them, and a way through to the page
+  for the rest. It sits in the corner rather than over the page: arriving at an
+  app you have just updated to find your way barred by something you must
+  dismiss is a poor greeting, and what changed is never urgent.
 
 ## The format
 
@@ -40,7 +42,7 @@ most once, in that order, and under those the entries.
 ```
 
 **An entry is a lead sentence and the detail behind it.** The lead runs to the
-first full stop and must stand on its own, because the dialog after an update
+first full stop and must stand on its own, because the what's-new card
 shows leads alone: an entry whose first sentence needs the rest of the bullet
 reads there as a fragment. The page shows both, the lead carrying the weight
 and the detail quieter beneath it, so a release can be read at either depth.
@@ -73,7 +75,7 @@ week and a hash of the file (vite.config.ts). The week is what the comparison
 is made on, since it says which releases are new; the hash is there so two
 builds in the same week are not mistaken for one.
 
-On boot, the dialog compares that stamp with the one this device stored last
+On boot, the card compares that stamp with the one this device stored last
 time. A device that has never stored one is on its first visit, so it stores
 the stamp and is shown nothing — a first visit has nothing to catch up on. A
 device whose stamp names an older week is shown the releases after it. A device
@@ -83,12 +85,23 @@ those entries already, so the stamp moves on without a word.
 The stamp is a string in the app bundle, so answering the question costs
 nothing: only a device that is actually behind fetches the changelog.
 
-**The dialog is not tied to the Update Ruminate button.** That button applies
+**The card is not tied to the Update Ruminate button.** That button applies
 the waiting service worker and reloads (`src/hooks/app-update.ts`), so there is
 no moment between the click and the new build in which anything could be shown:
 the page is about to be torn down. Asking the question on every boot instead
 also catches the reader whose waiting worker activated on its own after they
 closed every tab, which the button never sees.
+
+## What never goes in
+
+The admin's surfaces. The Admin page, the allowlist, invite links, feature
+flags and their audiences are not the changelog's business: almost nobody
+reading it is the admin, so an entry about them tells the overwhelming
+majority of readers about a door they cannot open, and quietly advertises
+where the controls are. `npm run check:changelog` fails on `admin`,
+`allowlist` and `feature flag`, in the changelog and in any pending fragment,
+so it is caught in the branch that wrote it. Such a change belongs in `docs/`
+or in its own pull request.
 
 ## Writing an entry
 
