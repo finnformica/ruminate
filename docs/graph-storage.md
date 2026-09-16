@@ -65,7 +65,8 @@ signed in. `notesAtom` is derived from it per page (`src/data/note-meta.ts`:
 title, props, tasks, headings, memoized
 by the page's row identities), search and the block index read those notes,
 and the open note's editor walks its page straight off the snapshot
-(`noteDoc` via `useNoteDoc`). Markdown is a projection at the edges only —
+(`noteView` via `useNoteDoc` — lazily, descending only where the reader's
+folds open a row; zoomed, the same walk from the block, `blockView`). Markdown is a projection at the edges only —
 the rollup for copy, share and export, `parse` for pasted or imported text.
 
 A small XState machine (`src/global-state.ts`) handles the rest: auth
@@ -357,21 +358,23 @@ nothing to normalize.
 
 ### No view_state table
 
-Collapse state is per-device ephemera. localStorage holds one set of collapsed
-occurrence keys per note the reader has folded (`collapse:<noteId>`,
-`src/data/view-state.ts`): collapsed means folded, everything else is open, so
-a row can never hold two opinions at once. The default-expansion policy is
-pure (`defaultCollapsedKeys`, `src/blocks/default-collapsed.ts`): headings
-always expanded, _n_ levels expanded below any heading (or the page root),
-deeper starts collapsed — _n_ is a preference (Settings → Editor, two by
-default). A note the reader has never folded is not stored: it opens as the
-policy says every time, so the setting governs it and nothing accumulates for
-notes merely read. The first fold takes the note over — from then on its set
-is the reader's, persisted and never re-seeded (blocks added later start
-expanded). Keys the document has lost are pruned on write, the least recently
-written notes fall off past a cap, Settings can forget every fold on the
-device, and losing localStorage simply re-seeds from the policy. The rollup's
-hard depth cap doubles as the render guard against corrupted (cyclic) graphs.
+Collapse state is per-device ephemera. The default-expansion policy is a
+standing rule by depth (`expandedByDepth`, `src/blocks/default-collapsed.ts`):
+_n_ levels open beneath the top of the view, deeper starts folded, headings
+counted like any other block — _n_ is a preference (Settings → Editor, two by
+default), and it governs every row the reader has not touched, so moving it
+moves every such row at once. Over the rule, localStorage holds the reader's
+own folds per note (`collapse:<noteId>`, `src/data/view-state.ts`): the
+occurrence keys they closed and the ones they opened, each explicit, so a
+row they opened stays open when the setting moves and a row they closed
+stays closed as the note grows. Only notes the reader has folded or unfolded
+are stored, the least recently written fall off past a cap, Settings can
+forget every fold on the device, and losing localStorage is back on the
+rule. Nothing is pruned against the document: the walk is lazy
+(graph-schema-v2.md, "Default expansion, and the lazy walk"), so the doc
+does not hold the rows beneath a fold, and a fold on a row that has since
+gone is inert. The rollup's hard depth cap doubles as the render guard
+against corrupted (cyclic) graphs.
 
 ## Remove = unlink, delete is explicit (and, underneath, a tombstone)
 
