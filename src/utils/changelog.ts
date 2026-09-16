@@ -136,13 +136,15 @@ export function renderRelease(release: ChangelogRelease): string {
  * @example
  * formatReleaseDates("2026-W38") // "14–20 September 2026"
  * formatReleaseDates("2026-W40") // "28 September – 4 October 2026"
+ * formatReleaseDates("2026-W40", { short: true }) // "28 Sep – 4 Oct 2026"
  */
-export function formatReleaseDates(week: string): string {
+export function formatReleaseDates(week: string, { short = false } = {}): string {
   const start = parseISO(week)
   if (Number.isNaN(start.getTime())) return week
   const end = addDays(start, 6)
   const day = (date: Date) => date.getDate()
-  const month = (date: Date) => MONTH_NAMES[date.getMonth()]
+  const month = (date: Date) =>
+    short ? MONTH_NAMES[date.getMonth()].slice(0, 3) : MONTH_NAMES[date.getMonth()]
   const year = (date: Date) => date.getFullYear()
   if (year(start) !== year(end)) {
     return `${day(start)} ${month(start)} ${year(start)} – ${day(end)} ${month(end)} ${year(end)}`
@@ -243,6 +245,43 @@ export function countEntries(releases: ChangelogRelease[]): number {
       total + release.sections.reduce((count, section) => count + section.entries.length, 0),
     0,
   )
+}
+
+/**
+ * Fold a set of fragment sections into the release for `week`, creating that
+ * release at the front if the week has none yet.
+ *
+ * Shared by collation (`scripts/collate-changelog.ts`), which writes the
+ * result back to `CHANGELOG.md`, and by the app, which does the same thing in
+ * memory at build time so that entries still waiting to be folded are shown
+ * anyway. Both must agree, or what a reader sees before collation runs would
+ * differ from what they see after it.
+ *
+ * A fragment's entries go to the end of their category, after whatever the
+ * week already holds: neither caller can judge which change matters most, and
+ * the order entries landed in is at least a true one.
+ */
+export function mergeFragments(
+  releases: ChangelogRelease[],
+  sections: ChangelogSection[],
+  week: string,
+): ChangelogRelease[] {
+  if (sections.length === 0) return releases
+  const existing = releases.find((release) => release.week === week)
+  const merged: ChangelogRelease = existing
+    ? { ...existing, sections: existing.sections.map((section) => ({ ...section })) }
+    : { week, sections: [], line: 0 }
+
+  for (const section of sections) {
+    const target = merged.sections.find((held) => held.category === section.category)
+    if (target) target.entries = [...target.entries, ...section.entries]
+    else merged.sections.push({ ...section })
+  }
+  merged.sections.sort((a, b) => CATEGORIES.indexOf(a.category) - CATEGORIES.indexOf(b.category))
+
+  return existing
+    ? releases.map((release) => (release.week === week ? merged : release))
+    : [merged, ...releases]
 }
 
 const TITLE = "# Changelog"

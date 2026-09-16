@@ -23,8 +23,9 @@ Two surfaces, from the same file:
   sidebar. Every release down the side, one open beside it, entries in full.
 - **The what's-new card**, which greets a device running a build it has not
   seen with the leads alone, a handful of them, and a way through to the page
-  for the rest. It sits in the corner rather than over the page: arriving at an
-  app you have just updated to find your way barred by something you must
+  for the rest. It sits in the bottom corner beside the sidebar's own **What's
+  new** and **Update Ruminate** items, rather than over the page: arriving at
+  an app you have just updated to find your way barred by something you must
   dismiss is a poor greeting, and what changed is never urgent.
 
 ## The format
@@ -51,6 +52,26 @@ Limits are measured as a reader sees them, not as characters in the file. A
 lead naming four shortcuts is short to read and long to store, and it is the
 reading the limits are about, so `<kbd>` keycaps, emphasis marks and a link's
 address do not count (`visibleLength`).
+
+## Entries that have not been folded yet
+
+A branch writes its entries to `changelog.d/`, and they reach `CHANGELOG.md`
+only once it lands on `main` and collation runs. A build taken before that —
+or while collation is blocked — would otherwise ship an app whose changelog
+says nothing about the very changes in it, and the reader who has just pressed
+**Update Ruminate** would be told there was nothing new. Which is the one
+moment the whole feature exists for.
+
+So the fold happens twice. For real on `main`, and again in memory at build
+time (`src/utils/changelog-source.ts`), where the pending fragments are
+bundled with the app and merged into the current week. Both use the same
+`mergeFragments`, so folding for real later changes nothing a reader sees: the
+same entries, in the same order, under the same week.
+
+Pending fragments count towards the build stamp too, week as well as hash. A
+stamp naming the older week would tell a device it had already seen entries it
+is about to be shown, and then show them a second time once collation folded
+them for real.
 
 ## How it reaches the page
 

@@ -83,10 +83,13 @@ export function WhatsNewPopover() {
     }
     let live = true
     void (async () => {
-      const { parseChangelog } = await import("../utils/changelog")
-      const { default: source } = await import("../../CHANGELOG.md?raw")
+      // The same source the changelog page reads, so entries still waiting in
+      // `changelog.d/` are shown here too. Without that, an update made before
+      // collation ran would greet the reader with nothing at all.
+      const { loadChangelog } = await import("../utils/changelog-source")
+      const loaded = await loadChangelog()
       if (!live) return
-      const releases = releasesSince(parseChangelog(source).releases, seen)
+      const releases = releasesSince(loaded, seen)
       // A build that adds no release of its own — a fix folded into a week
       // this device has already read — moves the stamp on without a word.
       if (releases.length === 0) rememberVersion(__CHANGELOG_VERSION__)
@@ -124,6 +127,12 @@ export function WhatsNewPopover() {
   const rest = total - countEntries(shown)
 
   return (
+    // Bottom left, where it sits beside the sidebar's own **What's new** and
+    // **Update Ruminate** items — the card and the things it is about read as
+    // one corner of the app rather than as two unrelated bits of furniture. On
+    // a phone there is no sidebar to sit beside, so it takes the width of the
+    // page instead of hugging an edge that means nothing there.
+    //
     // Hung off the page's own row (src/components/app-layout.tsx), which is
     // what keeps it clear of the bottom chrome on every screen. `aria-live` is
     // off: this is not news worth interrupting a screen reader mid-sentence
@@ -131,7 +140,7 @@ export function WhatsNewPopover() {
     <div
       role="complementary"
       aria-label="What's new"
-      className="whats-new-card card-2 absolute bottom-3 right-3 z-20 flex w-[min(21rem,calc(100vw-1.5rem))] flex-col gap-3 rounded-xl! p-4 sm:bottom-3 print:hidden"
+      className="whats-new-card card-2 absolute inset-x-3 bottom-3 z-20 flex flex-col gap-3 rounded-xl! p-4 sm:right-auto sm:w-[21rem] print:hidden"
     >
       <div className="flex items-center justify-between gap-2">
         <h2 className="font-bold">What's new</h2>

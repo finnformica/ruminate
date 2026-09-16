@@ -192,6 +192,11 @@ describe("formatReleaseDates", () => {
     expect(formatReleaseDates("2026-W01")).toBe("29 December 2025 – 4 January 2026")
   })
 
+  test("the short form abbreviates the month, for a narrow rail", () => {
+    expect(formatReleaseDates("2026-W40", { short: true })).toBe("28 Sep – 4 Oct 2026")
+    expect(formatReleaseDates("2026-W38", { short: true })).toBe("14–20 Sep 2026")
+  })
+
   test("a week it cannot read is left as it was", () => {
     expect(formatReleaseDates("not-a-week")).toBe("not-a-week")
   })

@@ -19,11 +19,11 @@
  * changelog or in any fragment stops the run with nothing written.
  */
 import {
+  mergeFragments,
   parseChangelog,
   parseFragment,
   renderRelease,
   toReleaseWeek,
-  type ChangelogRelease,
   type ChangelogSection,
 } from "../src/utils/changelog"
 
@@ -89,20 +89,10 @@ if (paths.length === 0) {
 
   const week = toReleaseWeek(new Date())
   const existing = releases.find((release) => release.week === week)
-  const merged: ChangelogRelease = existing
-    ? { ...existing, sections: existing.sections.map((section) => ({ ...section })) }
-    : { week, sections: [], line: 0 }
-
-  // A fragment's entries go to the end of their category, after whatever the
-  // week already holds: collation cannot judge which change matters most, and
-  // the order entries landed in is at least a true one.
-  let added = 0
-  for (const section of incoming) {
-    const target = merged.sections.find((existing) => existing.category === section.category)
-    if (target) target.entries = [...target.entries, ...section.entries]
-    else merged.sections.push({ ...section })
-    added += section.entries.length
-  }
+  const added = incoming.reduce((count, section) => count + section.entries.length, 0)
+  // The same fold the app does in memory at build time, so a reader sees the
+  // same release either side of collation.
+  const merged = mergeFragments(releases, incoming, week).find((release) => release.week === week)!
 
   const lines = source.split("\n")
   const rendered = renderRelease(merged)
