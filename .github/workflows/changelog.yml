@@ -7,6 +7,7 @@
 name: Changelog
 permissions:
   contents: write
+  pull-requests: write
 on:
   push:
     branches: [main]
@@ -24,15 +25,25 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          # `main` is a protected branch, and a push made with the default
+          # token is refused by the protection rule. A personal access token
+          # in `CHANGELOG_TOKEN` (allowed to push to `main`) lets the fold
+          # land directly; without one it falls back to the default token and
+          # the fold is opened as a pull request instead.
+          token: ${{ secrets.CHANGELOG_TOKEN || github.token }}
       - uses: actions/setup-node@v3
         with:
           node-version: 22.x
           cache: "npm"
       - run: npm ci
       # Refuses to write anything if the changelog or a fragment has a fault,
-      # so a bad entry stops here rather than landing in a release.
+      # so a bad entry stops here rather than landing in a release. The
+      # fragments are only deleted in this checkout, so a run that cannot push
+      # leaves them where they are for the next one.
       - run: npm run changelog:collate
-      - name: Commit the folded release
+      - name: Land the folded release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -z "$(git status --porcelain)" ]; then
             echo "Nothing was folded."
@@ -43,6 +54,23 @@ jobs:
           git add CHANGELOG.md changelog.d
           git commit -m "changelog: fold the pending entries into this week's release"
           # `main` may have moved while this ran; the fragments folded here are
-          # still the right ones, so replay the commit on top and push.
+          # still the right ones, so replay the commit on top.
           git pull --rebase origin main
-          git push origin HEAD:main
+          if git push origin HEAD:main 2>push.log; then
+            echo "Folded onto main."
+            exit 0
+          fi
+          cat push.log
+          if ! grep -qi "protected branch\|GH006" push.log; then
+            echo "::error::The push failed for a reason other than branch protection."
+            exit 1
+          fi
+          # Protected, and this token may not push through it. Put the fold on
+          # a branch and open a pull request, so a release is never stuck
+          # invisibly behind a rule.
+          branch="changelog/collate-${GITHUB_RUN_ID}"
+          git push origin "HEAD:${branch}"
+          gh pr create --base main --head "$branch" \
+            --title "changelog: fold the pending entries into this week's release" \
+            --body-file .github/changelog-collate-pr.md
+          echo "::warning::main is protected, so the fold was opened as a pull request instead of pushed."

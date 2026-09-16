@@ -38,6 +38,13 @@ git diff main...HEAD
 An entry earns its place if a person using Ruminate would notice the change, or
 would act differently knowing about it. Nothing else goes in.
 
+**Never write about the admin's surfaces.** The Admin page, the allowlist,
+invite links, feature flags and their audiences: none of it belongs in the
+changelog. Almost nobody reading it is the admin, so an entry about those
+tells the overwhelming majority of readers about a door they cannot open, and
+quietly advertises where the controls are. Put it in `docs/`, or in the pull
+request that makes the change. `npm run check:changelog` fails on it.
+
 Leave out:
 
 - Internal refactors, test infrastructure, CI and build configuration.
@@ -45,6 +52,7 @@ Leave out:
   internal function.
 - Deployment steps, secrets to set, storage engines, query costs. If a change
   needs an operator to do something, that belongs in `docs/`.
+- Anything only the admin can see or do, as above.
 - Anything you could only describe by naming the implementation.
 
 A useful test: could you write the entry without naming a file, a table, a
@@ -79,6 +87,7 @@ Rules the check enforces:
 - British spellings: colour, grey, centred, behaviour, labelled.
 - No pixel measurements, no deployment secrets, no fenced code blocks, and no
   jargon (`subtree`, `localStorage`, `idempotent`, and the like).
+- No admin surfaces: `admin`, `allowlist`, `feature flag`.
 
 Rules the check cannot enforce, which matter just as much:
 

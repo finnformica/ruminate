@@ -73,6 +73,17 @@ const JARGON: Record<string, string> = {
   wrangler: "a deployment step belongs in docs/, not the changelog",
 }
 
+/**
+ * The admin's surfaces are not the changelog's business.
+ *
+ * Ruminate's changelog is read by everybody, and almost nobody using it is the
+ * admin: an entry about the Admin page, the allowlist or a feature flag tells
+ * the overwhelming majority of readers about a door they cannot open. Worse,
+ * it quietly advertises where the controls are. Changes to those surfaces go
+ * in `docs/`, or in the pull request that makes them, and nowhere else.
+ */
+const ADMIN = /\badmins?\b|\ballowlist\b|\bfeature flags?\b/i
+
 const MEASUREMENT = /\b\d+px\b/
 const SECRET = /\b[A-Z][A-Z0-9]*_SECRET\b/
 const FENCE = /```/
@@ -86,6 +97,12 @@ function checkEntryText(text: string, line: number, problems: ChangelogProblem[]
   const spans = text.replace(/<kbd>.*?<\/kbd>/g, "")
   if ((spans.match(/`/g)?.length ?? 0) % 2 !== 0)
     fault("An unclosed code span: the backticks do not pair up.")
+  if (ADMIN.test(text)) {
+    fault(
+      "The changelog is read by everybody, and the admin's surfaces are not its business. " +
+        "Put this in docs/ or in the pull request instead.",
+    )
+  }
   if (MEASUREMENT.test(text))
     fault("A pixel measurement says nothing to a reader. Describe what moved.")
   if (SECRET.test(text)) fault("A deployment secret belongs in docs/, not the changelog.")
