@@ -212,7 +212,14 @@ export function MobileEditBar({
   const { bottom, keyboardUp } = useKeyboard(actions.done)
   const barRef = useRef<HTMLDivElement>(null)
   usePageInset(barRef, bottom)
-  const [view, setView] = useState<View>("main")
+  const [view, setViewState] = useState<View>("main")
+  // Which way the last swap went, for the row's entrance: a sub-row slides
+  // in from the right, the main row back in from the left.
+  const [direction, setDirection] = useState<"forward" | "back">("forward")
+  const setView = (next: View) => {
+    setDirection(next === "main" ? "back" : "forward")
+    setViewState(next)
+  }
   const rowRef = useRef<HTMLDivElement>(null)
   const overflows = useOverflowsRight(rowRef, [view, state.canRedo, actions.image !== undefined])
   if (typeof document === "undefined") return null
@@ -245,8 +252,12 @@ export function MobileEditBar({
     >
       <div
         ref={rowRef}
+        // A fresh element per row, so its entrance plays each swap.
+        key={view}
+        data-view={view}
+        data-direction={direction}
         data-overflows={overflows || undefined}
-        className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="edit-bar-row flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={{
           // A row longer than the bar runs off under a fade, which says
           // so; only then (`useOverflowsRight`), never over a last button.
@@ -257,12 +268,19 @@ export function MobileEditBar({
       >
         {view === "format" ? (
           <>
-            <BarButton label="Back" onClick={() => setView("main")} className="text-text">
+            <BarButton
+              label="Back"
+              enter="morph"
+              onClick={() => setView("main")}
+              className="text-text"
+            >
               <ChevronsLeftIcon16 />
             </BarButton>
             <Rule />
             <BarButton
               label="Bold"
+              enter="cascade"
+              index={0}
               onClick={actions.bold}
               className="font-content text-lg font-bold"
             >
@@ -270,6 +288,8 @@ export function MobileEditBar({
             </BarButton>
             <BarButton
               label="Italic"
+              enter="cascade"
+              index={1}
               onClick={actions.italic}
               className="font-content text-lg italic"
             >
@@ -277,26 +297,39 @@ export function MobileEditBar({
             </BarButton>
             <BarButton
               label="Strikethrough"
+              enter="cascade"
+              index={2}
               onClick={actions.strike}
               className="font-content text-lg line-through"
             >
               S
             </BarButton>
-            <BarButton label="Code" onClick={actions.code}>
+            <BarButton label="Code" enter="cascade" index={3} onClick={actions.code}>
               <code className="rounded-sm border border-border-secondary bg-[var(--color-bg-code-block)] px-1.5 py-px font-mono text-[13px]">
                 {"<>"}
               </code>
             </BarButton>
-            <BarButton label="Link" onClick={actions.link}>
+            <BarButton label="Link" enter="cascade" index={4} onClick={actions.link}>
               <LinkIcon16 />
             </BarButton>
-            <BarButton label="Maths" onClick={actions.math} className="font-serif text-lg italic">
+            <BarButton
+              label="Maths"
+              enter="cascade"
+              index={5}
+              onClick={actions.math}
+              className="font-serif text-lg italic"
+            >
               <span aria-hidden>√x</span>
             </BarButton>
           </>
         ) : view === "turnInto" ? (
           <>
-            <BarButton label="Back" onClick={() => setView("main")} className="text-text">
+            <BarButton
+              label="Back"
+              enter="morph"
+              onClick={() => setView("main")}
+              className="text-text"
+            >
               <ChevronsLeftIcon16 />
             </BarButton>
             <Rule />
@@ -305,16 +338,18 @@ export function MobileEditBar({
               <span
                 aria-hidden
                 data-testid="edit-bar-thumb"
-                className="absolute top-2 h-8 rounded-full bg-bg-secondary transition-transform duration-200 ease-[var(--ease-in-out)] motion-reduce:transition-none"
+                className="absolute top-2 h-8 rounded-full bg-bg-secondary transition-transform duration-300 ease-[var(--ease-out-strong)] motion-reduce:transition-none"
                 style={{
                   width: BUTTON_WIDTH,
                   transform: `translateX(${activeType * BUTTON_WIDTH}px)`,
                 }}
               />
-              {TYPES.map((def) => (
+              {TYPES.map((def, index) => (
                 <BarButton
                   key={def.id}
                   label={def.label}
+                  enter="rise"
+                  index={index}
                   pressed={def.id === current}
                   onClick={() => {
                     actions.turnInto(def.id)
@@ -339,34 +374,80 @@ export function MobileEditBar({
           <>
             <BarButton
               label="Formatting"
+              enter="morph"
               onClick={() => setView("format")}
               className="text-[15px] text-text"
             >
               Aa
             </BarButton>
-            <BarButton label="Turn into" onClick={() => setView("turnInto")}>
+            <BarButton
+              label="Turn into"
+              enter="cascade"
+              index={0}
+              onClick={() => setView("turnInto")}
+            >
               <SwapIcon16 />
             </BarButton>
-            <BarButton label="Outdent" onClick={actions.outdent} disabled={!state.canOutdent}>
+            <BarButton
+              label="Outdent"
+              enter="cascade"
+              index={1}
+              onClick={actions.outdent}
+              disabled={!state.canOutdent}
+            >
               <ArrowLeftToLineIcon16 />
             </BarButton>
-            <BarButton label="Indent" onClick={actions.indent} disabled={!state.canIndent}>
+            <BarButton
+              label="Indent"
+              enter="cascade"
+              index={2}
+              onClick={actions.indent}
+              disabled={!state.canIndent}
+            >
               <ArrowRightToLineIcon16 />
             </BarButton>
-            <BarButton label="Undo" onClick={actions.undo} disabled={!state.canUndo}>
+            <BarButton
+              label="Undo"
+              enter="cascade"
+              index={3}
+              onClick={actions.undo}
+              disabled={!state.canUndo}
+            >
               <UndoIcon16 />
             </BarButton>
-            {state.canRedo ? (
-              <BarButton label="Redo" onClick={actions.redo}>
+            {/* Redo stays in the row and grows in when there is something to
+                redo, then shrinks away; hidden to the accessibility tree and
+                the pointer while it is closed. */}
+            <span
+              aria-hidden={!state.canRedo}
+              className={cx(
+                "edit-bar-redo flex shrink-0 overflow-hidden transition-[width,opacity] duration-300 ease-[var(--ease-out-strong)] motion-reduce:transition-none",
+                state.canRedo ? "opacity-100" : "pointer-events-none opacity-0",
+              )}
+              style={{ width: state.canRedo ? BUTTON_WIDTH : 0 }}
+            >
+              <BarButton label="Redo" enter="cascade" index={4} onClick={actions.redo}>
                 <RedoIcon16 />
               </BarButton>
-            ) : null}
-            <BarButton label="Image" onClick={actions.image ?? noop} disabled={!actions.image}>
+            </span>
+            <BarButton
+              label="Image"
+              enter="cascade"
+              index={5}
+              onClick={actions.image ?? noop}
+              disabled={!actions.image}
+            >
               <ImageIcon16 />
             </BarButton>
             {/* Delete keeps to the far right, away from the rest, as the
                 destructive one; the gap closes only when the row scrolls. */}
-            <BarButton label="Delete" onClick={actions.remove} className="ml-auto text-text-danger">
+            <BarButton
+              label="Delete"
+              enter="cascade"
+              index={6}
+              onClick={actions.remove}
+              className="ml-auto text-text-danger"
+            >
               <TrashIcon16 />
             </BarButton>
           </>
@@ -422,6 +503,8 @@ function BarButton({
   onClick,
   pressed,
   disabled,
+  enter,
+  index = 0,
   className,
   children,
 }: {
@@ -431,6 +514,16 @@ function BarButton({
   pressed?: boolean
   /** Would do nothing right now: greyed, and inert, as its key would be. */
   disabled?: boolean
+  /**
+   * How the button arrives when its row does (block-editor.css). `morph`:
+   * in place, growing from the glyph that was there — Aa becomes Back and
+   * Back becomes Aa, the one button the tap was on. `cascade`: sliding in
+   * from the side the row came from, each a beat after the last. `rise`:
+   * up from beneath, the same beat apart, for the Turn into row.
+   */
+  enter?: "morph" | "cascade" | "rise"
+  /** The button's place in its cascade: its delay. */
+  index?: number
   className?: string
   children: React.ReactNode
 }) {
@@ -444,8 +537,13 @@ function BarButton({
       onPointerDown={keepFocus}
       onMouseDown={keepFocus}
       onClick={disabled ? undefined : onClick}
+      data-enter={enter}
+      style={enter ? ({ "--edit-bar-i": index } as React.CSSProperties) : undefined}
       className={cx(
-        "flex h-12 w-[38px] shrink-0 cursor-pointer select-none items-center justify-center text-text-secondary",
+        "edit-bar-button flex h-12 w-[38px] shrink-0 cursor-pointer select-none items-center justify-center text-text-secondary",
+        // Greying in and out eases rather than snaps; the press itself is
+        // on the glyph (block-editor.css).
+        "transition-[color,opacity] duration-200 ease-out motion-reduce:transition-none",
         disabled ? "cursor-default text-text-tertiary opacity-50" : "active:text-text",
         pressed && "text-text",
         className,

@@ -341,3 +341,90 @@
 .note-header {
   margin-left: calc(-1 * var(--note-header-pull, 0px));
 }
+
+/* ── The touch screen's edit bar ─────────────────────────────────────────────
+ * Motion in the bar (mobile-edit-bar.tsx) follows one rule: things arrive
+ * decelerating (`--ease-out-strong`), at the pace of a hand — 300ms and
+ * some — never snapping, and a row's buttons arrive one beat after another
+ * rather than all at once, so a swap reads as the row being laid out, not
+ * replaced. Three entrances:
+ *
+ * - `morph`: in place, for the one button the tap was on. Aa becomes Back
+ *   (and Back becomes Aa again) by growing out of the spot the other left,
+ *   so the eye stays where the finger is.
+ * - `cascade`: the rest of a row slides in from the side it came from — a
+ *   sub-row from the right, the main row back from the left — each button
+ *   30ms after the one before.
+ * - `rise`: the Turn into row's glyphs come up from beneath instead, the
+ *   same beat apart, so choosing a type feels different from formatting.
+ *
+ * The row is remounted per view, so every entrance plays on each swap;
+ * nothing animates out — the incoming row covers the cut. */
+.edit-bar-row {
+  --edit-bar-from: 16px;
+}
+.edit-bar-row[data-direction="back"] {
+  --edit-bar-from: -16px;
+}
+.edit-bar-button[data-enter="morph"] {
+  animation: edit-bar-morph 320ms var(--ease-out-strong) both;
+}
+.edit-bar-button[data-enter="cascade"] {
+  animation: edit-bar-cascade 360ms var(--ease-out-strong) both;
+  animation-delay: calc(40ms + var(--edit-bar-i, 0) * 30ms);
+}
+.edit-bar-button[data-enter="rise"] {
+  animation: edit-bar-rise 360ms var(--ease-out-strong) both;
+  animation-delay: calc(40ms + var(--edit-bar-i, 0) * 30ms);
+}
+/* The bar's first row plays no entrance: the bar itself has just appeared. */
+.edit-bar-row[data-view="main"][data-direction="forward"] .edit-bar-button {
+  animation: none;
+}
+@keyframes edit-bar-morph {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+@keyframes edit-bar-cascade {
+  from {
+    opacity: 0;
+    transform: translateX(var(--edit-bar-from));
+  }
+}
+@keyframes edit-bar-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+/* A press: the glyph gives under the finger, quickly, and springs back on
+ * release along the same decelerating curve as everything else. */
+.edit-bar-button > * {
+  transition: transform 220ms var(--ease-out-strong);
+}
+.edit-bar-button:active > * {
+  transform: scale(0.86);
+  transition-duration: 90ms;
+}
+
+/* Redo grows in beside Undo: the slot widens (the transition on the
+ * wrapper, in the component) while the glyph swells from small. */
+.edit-bar-redo > .edit-bar-button > * {
+  transition: transform 300ms var(--ease-out-strong);
+}
+.edit-bar-redo[aria-hidden="true"] > .edit-bar-button > * {
+  transform: scale(0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edit-bar-button,
+  .edit-bar-button > *,
+  .edit-bar-redo > .edit-bar-button > * {
+    animation: none;
+    transition: none;
+    transform: none;
+  }
+}
