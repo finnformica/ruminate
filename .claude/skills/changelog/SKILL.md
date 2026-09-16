@@ -5,80 +5,107 @@ description: Update CHANGELOG.md with user-facing changes from the current branc
 
 # Changelog
 
-Update CHANGELOG.md with user-facing changes from the current branch.
+Update `CHANGELOG.md` with the user-facing changes on the current branch.
+
+`CHANGELOG.md` is not only a document: the app reads it. The changelog page and
+the "what's new" dialog shown after an update are both rendered from this file,
+parsed by `src/utils/changelog.ts`. A malformed entry is a broken page, so
+**`npm run check:changelog` must pass before you finish** — CI runs it too.
+
+That check enforces the mechanical rules below. It cannot judge whether an
+entry is worth a reader's attention, which is the part that matters most and
+the part this skill is really for.
 
 ## Workflow
 
 ### 1. Get the diff
 
-Get the full diff of the current branch against main:
-
 ```bash
 git diff main...HEAD
 ```
 
-### 2. Identify user-facing changes
+### 2. Decide what belongs
 
-Analyze the diff and identify changes that affect the user. Ignore internal refactors, code style changes, and developer-only changes (test infrastructure, CI config, etc.) unless they have user-facing impact.
+An entry earns its place if a person using Ruminate would notice the change, or
+would act differently knowing about it. Nothing else goes in.
 
-Also skip minor polish changes that users wouldn't notice or care about (e.g. small spacing tweaks, cosmetic adjustments, moving elements slightly). Only include changes that meaningfully affect the user's experience or workflow.
+Leave out:
 
-Categorize each change:
+- Internal refactors, test infrastructure, CI and build configuration.
+- Polish nobody would notice: small spacing tweaks, a moved pixel, a renamed
+  internal function.
+- Deployment steps, secrets to set, storage engines, query costs. If a change
+  needs an operator to do something, that belongs in `docs/`.
+- Anything you could only describe by naming the implementation.
 
-- **New** - new features
-- **Improved** - changes in existing functionality
-- **Deprecated** - soon-to-be removed features
-- **Removed** - removed features
-- **Fixed** - bug fixes
-- **Security** - vulnerability fixes
+A useful test: could you write the entry without naming a file, a table, a
+secret, a measurement, or a term of art from the code? If not, it is either not
+a user-facing change, or you have not yet worked out what the user-facing part
+of it is.
 
-If there are no user-facing changes, inform the user and stop.
+If nothing on the branch is user-facing, say so and stop. An empty changelog
+entry is better than a padded one.
 
-### 3. Write entries
+### 3. Write the entries
 
-Each entry should:
-
-- Be written for humans. Describe what changed AND why the user should care. Lead with a concise statement of what changed, then explain the benefit. For example: "Cheatsheet dialog replaced with a help panel that stays open while you work, so you can reference shortcuts without interrupting what you're doing." Not: "Cheatsheet dialog replaced with a help panel."
-- Focus on outcomes and impact, not implementation details. Skip sub-features and internal specifics (e.g. don't mention specific icons added, individual links moved, or UI patterns used).
-- Use plain language, not technical jargon.
-- One bullet per feature. A bullet can have multiple sentences if needed, but don't split a single feature into multiple bullets.
-- Use "New" only for entirely new capabilities. If the feature already exists in any form, it's "Improved".
-- Within each category, order entries by user impact (most impactful first).
-- Avoid em dashes. Use periods or commas instead.
-- Vary sentence structure when it reads naturally, but don't sacrifice clarity for variety. "Now" is fine when it signals a change clearly.
-
-### 4. Update CHANGELOG.md
-
-Use the current ISO week (YYYY-Www, e.g. 2026-W06) as the section heading. To get the current week, run `date +%G-W%V`. More recent weeks go at the top (below the `# Changelog` title).
-
-Only include category subheadings (New, Improved, etc.) that have entries.
-
-**If this week's heading already exists**: merge intelligently — add new bullets under existing category subheadings, create new subheadings as needed, skip duplicate entries.
-
-**If this week's heading does not exist**: create a new `## YYYY-Www` section at the top (below the title).
-
-Format:
+**Every entry leads with one sentence that stands on its own.** The dialog after
+an update shows lead sentences alone, so a lead that needs the rest of the
+bullet to make sense reads there as a fragment. Everything after the lead is
+detail, and is shown on the changelog page.
 
 ```markdown
-# Changelog
-
-## 2026-W06
-
-### New
-
-- You can now export notes as PDF from the share menu, so you can share or print them with formatting intact.
-
-### Fixed
-
-- Fixed a bug where tags with special characters weren't searchable.
-
-## 2026-W03
-
-### Improved
-
-- The sidebar now remembers your scroll position between sessions, so you don't lose your place when navigating away.
+- Pin a block. **Pin** in a block's right-click menu lists it in the sidebar
+  under **Pinned**, and the row opens the note zoomed into that block.
 ```
 
-### 5. Commit
+The lead says what changed. The detail says how it behaves, and what it
+replaces. Where a change corrects something, say what it used to do — that is
+usually the sentence that tells a reader whether it affected them.
 
-After editing CHANGELOG.md, commit with message "Update changelog".
+Rules the check enforces:
+
+- The lead ends in a full stop, and reads as at most **140 characters**.
+- The whole entry reads as at most **500 characters**. Markup does not count
+  towards either: `<kbd>` keycaps, emphasis and link addresses are free.
+- British spellings: colour, grey, centred, behaviour, labelled.
+- No pixel measurements, no deployment secrets, no fenced code blocks, and no
+  jargon (`subtree`, `localStorage`, `idempotent`, and the like).
+
+Rules the check cannot enforce, which matter just as much:
+
+- One bullet per change. If a feature has five parts, it is still one bullet.
+- Order entries within a category by how much they affect people, most first.
+- Plain language. Write "everything under the block", not "the subtree".
+- Em dashes are fine. So is "now", when it genuinely signals a change — but if
+  most of your entries open with it, they have stopped saying anything.
+- Do not let an entry contradict its neighbours. If a change on this branch
+  withdraws something announced earlier in the same week, say so in the entry
+  rather than leaving two bullets that disagree.
+
+### 4. Place them in the file
+
+Sections are ISO weeks, newest first, written `## 2026-W38`. Get the current
+week with `date +%G-W%V`.
+
+Categories are Keep a Changelog's, and appear in this order, each at most once
+per week:
+
+**Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **Security**
+
+Only include a category that has entries.
+
+- **If this week's heading exists**: merge into it. Add bullets under the
+  existing category headings, create a category only if it is missing, and skip
+  anything already recorded. Never add a second `### Added` to a week.
+- **If it does not exist**: start a new `## YYYY-Www` section directly below the
+  `# Changelog` title.
+
+### 5. Check it
+
+```bash
+npm run check:changelog
+npm run format
+```
+
+The check reports a file and line for every problem. Fix them all: CI fails on
+any one of them.

@@ -37,6 +37,21 @@ jobs:
       # tenant and say what it means about tombstones
       # (src/data/sql-tenancy-guard.ts).
       - run: npm run check:queries
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22.x
+          cache: "npm"
+      - run: npm ci
+      # The changelog is rendered by the app (the changelog page, and the
+      # dialog after an update), so its format is a contract, not a
+      # convention: the same parser the app uses has to read the file, and
+      # the house rules have to hold (src/utils/changelog.ts).
+      - name: Check the changelog
+        run: npm run check:changelog
   knip:
     runs-on: ubuntu-latest
     steps:
