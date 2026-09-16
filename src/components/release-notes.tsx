@@ -17,10 +17,21 @@ import { Keys } from "./keys"
  * for what changed, or read on for what it means. The dialog after an update
  * shows the leads alone.
  */
+/** The element a release is scrolled to and linked by. */
+export function releaseId(week: string): string {
+  return `release-${week}`
+}
+
 export function ReleaseNotes({ release }: { release: ChangelogRelease }) {
   const count = release.sections.reduce((total, section) => total + section.entries.length, 0)
   return (
-    <article className="flex flex-col gap-6">
+    <article
+      id={releaseId(release.week)}
+      data-week={release.week}
+      // Enough room above it that scrolling to a release does not tuck its
+      // heading under the page header.
+      className="flex scroll-mt-4 flex-col gap-6"
+    >
       <header className="flex flex-col gap-0.5">
         <h2 className="text-lg font-bold leading-tight">{formatReleaseDates(release.week)}</h2>
         <p className="text-sm text-text-secondary">

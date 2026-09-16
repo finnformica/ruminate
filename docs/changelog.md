@@ -40,6 +40,21 @@ lead naming four shortcuts is short to read and long to store, and it is the
 reading the limits are about, so `<kbd>` keycaps, emphasis marks and a link's
 address do not count (`visibleLength`).
 
+## Entries that have not been folded yet
+
+A branch writes its entries to `changelog.d/`, and they reach `CHANGELOG.md`
+only once it lands on `main` and collation runs. A build taken before that —
+or while collation is blocked — would otherwise ship an app whose changelog
+says nothing about the very changes in it, and the reader who has just pressed
+**Update Ruminate** would be told there was nothing new. Which is the one
+moment the whole feature exists for.
+
+So the fold happens twice. For real on `main`, and again in memory at build
+time (`src/utils/changelog-source.ts`), where the pending fragments are
+bundled with the app and merged into the current week. Both use the same
+`mergeFragments`, so folding for real later changes nothing a reader sees: the
+same entries, in the same order, under the same week.
+
 ## How it reaches the page
 
 `CHANGELOG.md` is imported for its text (`?raw`) in the route's loader, so it
