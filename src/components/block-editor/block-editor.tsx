@@ -1577,24 +1577,29 @@ export function BlockEditor({
   const [linkCard, setLinkCard] = useState<{ key: string; href: string } | null>(null)
 
   /**
-   * A link's display text, changed in the row's text (docs/links.md):
-   * `[title](href)` becomes `[next](href)`. A link that was a bare address,
-   * or an autolink written another way, is found by its address or its
-   * text and written out as a link. The first occurrence is the one
-   * changed; one undo step.
+   * A link's display text and/or address, changed in the row's text
+   * (docs/links.md) in one rewrite: `[title](href)` becomes
+   * `[next.title](next.href)`. A link that was a bare address, or an
+   * autolink written another way, is found by its address or its text and
+   * written out as a link; a new address without a scheme is taken as
+   * https, and anything not a web address is refused. The first
+   * occurrence is the one changed; one undo step.
    */
-  const renameLink = (key: string, href: string, title: string, next: string) => {
-    const display = next.trim()
-    if (display !== "") rewriteLink(key, href, title, `[${display}](${href})`)
-  }
-  /** A link pointed at a new address: `[title](href)` becomes
-   * `[title](next)`, a bare address its host's link to the new one. A
-   * scheme-less address is taken as https; anything not a web address is
-   * refused. */
-  const retargetLink = (key: string, href: string, title: string, next: string) => {
-    const target = hrefOf(next.trim())
+  const updateLink = (
+    key: string,
+    href: string,
+    title: string,
+    next: { href?: string; title?: string },
+  ) => {
+    const target = next.href === undefined ? href : hrefOf(next.href.trim())
     if (!isWebUrl(target)) return
-    const display = title === "" || title === href ? hostOf(target) : title
+    const typed = next.title?.trim()
+    const display =
+      typed !== undefined && typed !== ""
+        ? typed
+        : title === "" || title === href
+          ? hostOf(target)
+          : title
     rewriteLink(key, href, title, `[${display}](${target})`)
   }
   /** A link taken off: `[title](href)` becomes `title`; a bare address
@@ -1676,8 +1681,7 @@ export function BlockEditor({
       onImageUpload && !readOnly ? (key, files) => void insertImages(key, files) : undefined,
     requestImage: onImageUpload && !readOnly ? requestImage : undefined,
     openImage: (id) => setLightbox(id),
-    renameLink: readOnly ? undefined : renameLink,
-    retargetLink: readOnly ? undefined : retargetLink,
+    updateLink: readOnly ? undefined : updateLink,
     removeLink: readOnly ? undefined : removeLink,
     linkCard,
     closeLinkCard: () => setLinkCard(null),

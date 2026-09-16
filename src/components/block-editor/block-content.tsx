@@ -113,8 +113,7 @@ function Link({
       href={href}
       title={title}
       actions={{
-        rename: (next) => actions.rename(href, title, next),
-        retarget: (next) => actions.retarget(href, title, next),
+        update: (next) => actions.update(href, title, next),
         remove: () => actions.remove(href, title),
       }}
       open={actions.openHref === href}

@@ -3337,6 +3337,66 @@ describe("BlockEditor inline links", () => {
     expect(container.querySelector("a")).toBeNull()
   })
 
+  it("a field left unsaved is saved as the card closes, however it closes", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) first"} />,
+    )
+    await hoverLink(container, 0)
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
+    const field = screen.getByTestId("link-display-text") as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(field, { target: { value: "the manual" } })
+    })
+    // The pointer leaves; the card closes after its delay, with no blur
+    // (a click elsewhere takes the popup down before one could fire).
+    const anchor = container.querySelector("a")!
+    await act(async () => {
+      fireEvent.pointerLeave(anchor, { pointerType: "mouse" })
+      fireEvent.mouseLeave(anchor)
+      fireEvent.pointerLeave(screen.getByTestId("link-hover-card"), { pointerType: "mouse" })
+      fireEvent.mouseLeave(screen.getByTestId("link-hover-card"))
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    })
+    await waitFor(() => expect(screen.queryByTestId("link-hover-card")).toBeNull())
+    expect(serializedLines(getByTestId)).toEqual(["Read [the manual](https://e.com/g) first"])
+  })
+
+  it("both fields changed at once are one rewrite, and a field left alone is no change", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) first"} />,
+    )
+    await hoverLink(container, 0)
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("link-card-url"), {
+        target: { value: "https://docs.e.com/g" },
+      })
+      fireEvent.change(screen.getByTestId("link-display-text"), {
+        target: { value: "the manual" },
+      })
+      fireEvent.submit(screen.getByTestId("link-card-panel"))
+    })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the manual](https://docs.e.com/g) first"])
+    // One undo step for both.
+    fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the guide](https://e.com/g) first"])
+    // Opened and left alone: nothing is written.
+    await hoverLink(container, 0)
+    if (!screen.queryByTestId("link-card-panel")) {
+      await act(async () => {
+        fireEvent.click(getByTestId("link-card-edit"))
+      })
+    }
+    await act(async () => {
+      fireEvent.blur(screen.getByTestId("link-display-text"))
+    })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the guide](https://e.com/g) first"])
+  })
+
   it("a typed address is offered its host as display text, and written out as a link", async () => {
     const { container, getByTestId } = render(<Harness initial={"See https://www.e.com/x now"} />)
     await hoverLink(container, 0)

@@ -107,12 +107,15 @@ export interface BlockEditorApi {
   requestImage?: (key: string) => void
   /** Expand an image block's picture (the lightbox). */
   openImage?: (id: string) => void
-  /** Change a link's display text in this row's text (docs/links.md):
-   * `[title](href)` becomes `[next](href)`; a bare address is written out
-   * as a link. Absent in read-only views. */
-  renameLink?: (key: string, href: string, title: string, next: string) => void
-  /** Point a link in this row's text at a new address. */
-  retargetLink?: (key: string, href: string, title: string, next: string) => void
+  /** Change a link's display text and/or address in this row's text
+   * (docs/links.md): `[title](href)` becomes `[next.title](next.href)`; a
+   * bare address is written out as a link. Absent in read-only views. */
+  updateLink?: (
+    key: string,
+    href: string,
+    title: string,
+    next: { href?: string; title?: string },
+  ) => void
   /** Take a link in this row's text off, leaving its text as words. */
   removeLink?: (key: string, href: string, title: string) => void
   /** A link's card the reader asked to open from the menu ("Edit link",
@@ -781,23 +784,21 @@ export function BlockItem({
   // What a link in the rendered text can do to this row: its hover card
   // (`link-hover-card.tsx`) changes its display text, in an editor that
   // can write the change.
-  const renameLink = readOnly ? undefined : api.renameLink
-  const retargetLink = readOnly ? undefined : api.retargetLink
+  const updateLink = readOnly ? undefined : api.updateLink
   const removeLink = readOnly ? undefined : api.removeLink
   const openHref = api.linkCard?.key === occurrence.key ? api.linkCard.href : null
   const closeLinkCard = api.closeLinkCard
   const linkActions = useMemo<LinkActions | null>(
     () =>
-      renameLink && retargetLink && removeLink
+      updateLink && removeLink
         ? {
-            rename: (href, title, next) => renameLink(occurrence.key, href, title, next),
-            retarget: (href, title, next) => retargetLink(occurrence.key, href, title, next),
+            update: (href, title, next) => updateLink(occurrence.key, href, title, next),
             remove: (href, title) => removeLink(occurrence.key, href, title),
             openHref,
             closeCard: () => closeLinkCard?.(),
           }
         : null,
-    [renameLink, retargetLink, removeLink, occurrence.key, openHref, closeLinkCard],
+    [updateLink, removeLink, occurrence.key, openHref, closeLinkCard],
   )
 
   // The caption/body line: the textarea while editing, the rendered text

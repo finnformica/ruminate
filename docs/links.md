@@ -52,9 +52,13 @@ tab; a button that copies it; and **Edit**. Edit opens the panel:
   is offered its host;
 - **Remove link**, which takes the link off and leaves its text as words.
 
-A field saves on <kbd>↵</kbd>, or on leaving it with its value changed; an
-emptied field saves nothing. Each change rewrites the first occurrence of
-that link in the block's text and is one undo step. A link that is not a
+A field saves on <kbd>↵</kbd>, on leaving it for the other, and — whatever
+is still unsaved — as the card closes, however it closes (a click
+elsewhere takes the popup down before a field's blur can fire, so the card
+saves on the way out). Both fields changed at once are one rewrite and one
+undo step; an emptied field, or one left as it was opened, saves nothing.
+Each change rewrites the first occurrence of that link in the block's
+text. A link that is not a
 web address (`mailto:`, an anchor) has no card.
 
 A touch screen has nothing to hover with, so the row's context menu

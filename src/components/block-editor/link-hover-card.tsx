@@ -10,10 +10,8 @@ import { CopyIcon16, GlobeIcon16, TrashIcon16 } from "../icons"
 
 /** What the card can do to the link it is over. */
 export interface LinkCardActions {
-  /** Save a new display text (a block's title). */
-  rename: (next: string) => void
-  /** Point the link at a new address. */
-  retarget: (nextHref: string) => void
+  /** Save a new display text (a block's title) and/or address, in one go. */
+  update: (next: { href?: string; title?: string }) => void
   /** Take the link off: the text stays, as words. */
   remove: () => void
   /** Another form the link can take: its label and what makes the change. */
@@ -27,7 +25,10 @@ export interface LinkCardActions {
  * Edit opens the panel: the address and the link's title, each a field,
  * and **Remove link**, with any other form the link can take
  * (**Turn into block**, **Turn into inline**) beside it. A field saves on
- * <kbd>↵</kbd>, or on leaving it with its value changed; an emptied field
+ * <kbd>↵</kbd>, on leaving it for the other, and — whatever is still
+ * unsaved — when the card closes, however it closes: a click elsewhere
+ * takes the popup down on pointer-down, before the field's blur can fire,
+ * so the card flushes its fields itself on the way out. An emptied field
  * saves nothing. Only in an editable editor; elsewhere a link is only a
  * link. Hover or focus the link to open it; the card is a popup of its
  * own, so the page's hover-card provider need not be around it.
@@ -59,6 +60,8 @@ export function LinkHoverCard({
 }) {
   const [open, setOpen] = useState(forced)
   const [editing, setEditing] = useState(forced)
+  // What the panel has not saved yet, to save as the card closes.
+  const flush = useRef<(() => void) | null>(null)
   useEffect(() => {
     if (forced) {
       setOpen(true)
@@ -69,6 +72,7 @@ export function LinkHoverCard({
     <PreviewCard.Root
       open={open}
       onOpenChange={(next) => {
+        if (!next) flush.current?.()
         setOpen(next)
         if (!next) {
           setEditing(false)
@@ -91,7 +95,7 @@ export function LinkHoverCard({
             )}
           >
             {editing ? (
-              <EditPanel href={href} title={title} actions={actions} />
+              <EditPanel href={href} title={title} actions={actions} flush={flush} />
             ) : (
               <Pill href={href} onEdit={() => setEditing(true)} />
             )}
@@ -148,24 +152,48 @@ function EditPanel({
   href,
   title,
   actions,
+  flush,
 }: {
   href: string
   title: string
   actions: LinkCardActions
+  /** Where the panel leaves what it has not saved, for the card to save
+   * as it closes. */
+  flush: React.MutableRefObject<(() => void) | null>
 }) {
   const [address, setAddress] = useState(href)
   // A link whose text is its own address (a typed one, never rewritten)
   // is offered the host it would have been given on paste.
-  const current = title.trim() === "" || title.trim() === href ? hostOf(href) : title
-  const [text, setText] = useState(current)
-  const saveAddress = () => {
-    const next = address.trim()
-    if (next !== "" && next !== href) actions.retarget(next)
+  const offered = title.trim() === "" || title.trim() === href ? hostOf(href) : title
+  const [text, setText] = useState(offered)
+  // The link changed under the panel — an undo, say — and the fields
+  // follow it, so a close never writes back what was undone. After the
+  // panel's own save the props catch up with the fields; the same values.
+  useEffect(() => setAddress(href), [href])
+  useEffect(() => setText(offered), [offered])
+  /**
+   * Save what changed, both fields in one rewrite (two would race: the
+   * second's search for the link would miss what the first had just
+   * rewritten). A field left as it was opened is not a change — except on
+   * <kbd>↵</kbd> (`submit`), which takes the offered host for a link that
+   * had only its address for a title. An emptied field saves nothing.
+   */
+  const save = (submit = false) => {
+    const nextHref = address.trim()
+    const nextTitle = text.trim()
+    const next: { href?: string; title?: string } = {}
+    if (nextHref !== "" && nextHref !== href) next.href = nextHref
+    if (nextTitle !== "" && nextTitle !== (submit ? title : offered)) next.title = nextTitle
+    if (next.href !== undefined || next.title !== undefined) actions.update(next)
   }
-  const saveTitle = () => {
-    const next = text.trim()
-    if (next !== "" && next !== title) actions.rename(next)
-  }
+  // The latest values, saved by the card on close (a stale closure would
+  // save what the fields held a render ago).
+  useEffect(() => {
+    flush.current = () => save()
+    return () => {
+      flush.current = null
+    }
+  })
   // The title is what the panel is most often opened to change (Notion
   // focuses it too); the field takes focus as the panel opens.
   const titleRef = useRef<HTMLInputElement>(null)
@@ -183,8 +211,7 @@ function EditPanel({
       className="flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-3 p-3"
       onSubmit={(event) => {
         event.preventDefault()
-        saveAddress()
-        saveTitle()
+        save(true)
       }}
       onClick={stop}
       onKeyDown={stop}
@@ -195,7 +222,7 @@ function EditPanel({
           data-testid="link-card-url"
           value={address}
           onChange={(event) => setAddress(event.target.value)}
-          onBlur={saveAddress}
+          onBlur={() => save()}
           spellCheck={false}
           placeholder="https://"
           className={FIELD}
@@ -207,7 +234,7 @@ function EditPanel({
           data-testid="link-display-text"
           value={text}
           onChange={(event) => setText(event.target.value)}
-          onBlur={saveTitle}
+          onBlur={() => save()}
           placeholder="Display text"
           ref={titleRef}
           className={FIELD}
