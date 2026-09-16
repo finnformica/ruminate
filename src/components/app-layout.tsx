@@ -10,6 +10,7 @@ import { HelpDrawer, HelpSidebar } from "./help-panel"
 import { NavBar } from "./nav-bar"
 import { Sidebar } from "./sidebar"
 import { SignInBanner } from "./sign-in-banner"
+import { WhatsNewPopover } from "./whats-new-popover"
 
 type AppLayoutProps = {
   className?: string
@@ -57,7 +58,16 @@ export function AppLayout({ className, children }: AppLayoutProps) {
           onLayoutChanged={onLayoutChanged}
         >
           <Panel id="content" className="grid grid-rows-[1fr_auto] overflow-hidden">
-            {children}
+            {/* The page, and hung off it the what's-new card
+                (src/components/whats-new-popover.tsx). It sits in this row
+                rather than over the window so that it clears the bottom
+                chrome — the phone's nav bar and the sign-in banner inside it,
+                and the banner below this panel on a wide screen — without
+                having to know the height of any of them. */}
+            <div className="relative grid overflow-hidden">
+              {children}
+              <WhatsNewPopover />
+            </div>
             <div className="sm:hidden print:hidden">
               <NavBar />
             </div>

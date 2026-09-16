@@ -4,7 +4,7 @@
  * `CHANGELOG.md` is written by hand (with `.claude/skills/changelog`) and read
  * by three things that must agree about its shape: the CI gate
  * (`npm run check:changelog`), the in-app changelog page, and the "what's new"
- * dialog shown after an update. This module is the one definition of that
+ * what's-new card shown after an update. This module is the one definition of that
  * shape — the parse and the rules — so a file that passes CI is a file the app
  * can render.
  *
@@ -19,7 +19,7 @@
  *   - Lead sentence. Detail follows in the same bullet.
  *
  * Every entry leads with one short sentence that stands on its own: the
- * dialog shows leads alone, so an entry whose first sentence needs the rest of
+ * card shows leads alone, so an entry whose first sentence needs the rest of
  * the bullet to make sense reads as a fragment there. Anything after it is
  * detail, shown on the changelog page.
  */
@@ -33,7 +33,7 @@ const CATEGORIES = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Secur
 type ChangelogCategory = (typeof CATEGORIES)[number]
 
 /** The longest a lead sentence may be. Long enough for a clause and its point,
- * short enough that a dialog of them is read rather than skimmed. */
+ * short enough that a card of them is read rather than skimmed. */
 export const MAX_LEAD_LENGTH = 140
 
 /** The longest a whole entry may be, lead and detail together. Past this an
@@ -181,6 +181,70 @@ export function toSegments(text: string): EntrySegment[] {
   }
   if (at < text.length) segments.push({ type: "text", text: text.slice(at) })
   return segments
+}
+
+/**
+ * The week a build stamp names. A stamp is `<week>.<hash>` (vite.config.ts);
+ * the hash tells two builds of the same week apart, and the week is what says
+ * which releases are new.
+ */
+function weekOfVersion(version: string): string {
+  return version.split(".")[0]
+}
+
+/**
+ * The releases a reader has not seen, newest first.
+ *
+ * Nothing is new to a reader who has never been here: a first visit stores the
+ * stamp and shows no card, rather than opening on the whole history.
+ *
+ * Releases are compared by week, so entries added to a week already seen are
+ * not shown again. They are on the changelog page, which is the honest place
+ * for them — a card that reopened on a week you had read would be worse than
+ * one that missed a late entry.
+ */
+export function releasesSince(
+  releases: ChangelogRelease[],
+  version: string | null,
+): ChangelogRelease[] {
+  if (!version) return []
+  const seen = weekOfVersion(version)
+  return releases.filter((release) => release.week > seen)
+}
+
+/**
+ * The first `limit` entries across these releases, in the order they are
+ * written, with the releases and categories they came from kept around them.
+ *
+ * The what's-new card is a greeting, not the changelog: a reader
+ * returning after a month should meet a dozen lines and a way in, not a
+ * hundred. Categories are written most-notable-first (`CATEGORIES`), so what
+ * survives the cut is what was added and changed rather than what was fixed.
+ */
+export function takeEntries(releases: ChangelogRelease[], limit: number): ChangelogRelease[] {
+  const taken: ChangelogRelease[] = []
+  let left = limit
+  for (const release of releases) {
+    if (left <= 0) break
+    const sections: ChangelogSection[] = []
+    for (const section of release.sections) {
+      if (left <= 0) break
+      const entries = section.entries.slice(0, left)
+      left -= entries.length
+      if (entries.length > 0) sections.push({ ...section, entries })
+    }
+    if (sections.length > 0) taken.push({ ...release, sections })
+  }
+  return taken
+}
+
+/** How many entries these releases hold altogether. */
+export function countEntries(releases: ChangelogRelease[]): number {
+  return releases.reduce(
+    (total, release) =>
+      total + release.sections.reduce((count, section) => count + section.entries.length, 0),
+    0,
+  )
 }
 
 /**

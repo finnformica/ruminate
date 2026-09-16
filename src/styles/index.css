@@ -250,6 +250,30 @@ body,
     animation-range: 0 32px;
   }
 
+  /* The what's-new card (src/components/whats-new-popover.tsx), arriving in the
+ * corner on the first boot of a build this device has not seen. It rises a
+ * little as it fades in, so it reads as having arrived rather than as having
+ * been there all along and missed. */
+  @keyframes whats-new-in {
+    from {
+      opacity: 0;
+      transform: translateY(0.5rem);
+    }
+  }
+
+  .whats-new-card {
+    animation: whats-new-in 200ms ease-out;
+  }
+
+  /* Reduced motion keeps the fade and drops the movement. */
+  @media (prefers-reduced-motion: reduce) {
+    @keyframes whats-new-in {
+      from {
+        opacity: 0;
+      }
+    }
+  }
+
   @keyframes mask-height-grow {
     from {
       --mask-height: 0px;

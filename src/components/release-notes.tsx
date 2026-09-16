@@ -14,8 +14,8 @@ import { Keys } from "./keys"
  * An entry is a lead sentence and the detail behind it (docs/changelog.md).
  * Here they are shown together, the lead carrying the weight and the detail
  * quieter beneath it, so a release can be read at either depth: skim the leads
- * for what changed, or read on for what it means. The dialog after an update
- * shows the leads alone.
+ * for what changed, or read on for what it means. The what's-new card after an
+ * update shows the leads alone.
  */
 /** The element a release is scrolled to and linked by. */
 export function releaseId(week: string): string {
@@ -70,11 +70,12 @@ function Entry({ entry }: { entry: ChangelogEntry }) {
   )
 }
 
-/** An entry's text, markdown and keycaps alike.
+/** An entry's text, markdown and keycaps alike. The what's-new card draws its
+ * leads with this too, so an entry reads the same in both places.
  *
  * Markdown between the keycaps: the `<kbd>` tags an entry names shortcuts
  * with are drawn as keys, and everything else is rendered as it is written. */
-function EntryText({ text }: { text: string }) {
+export function EntryText({ text }: { text: string }) {
   return (
     <>
       {toSegments(text).map((segment, index) =>

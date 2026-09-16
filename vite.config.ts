@@ -1,4 +1,7 @@
 /// <reference types="vitest/config" />
+import { createHash } from "node:crypto"
+import { readdirSync, readFileSync } from "node:fs"
+import { toReleaseWeek } from "./src/utils/changelog"
 import tailwindcss from "@tailwindcss/vite"
 import { TanStackRouterVite } from "@tanstack/router-plugin/vite"
 import react from "@vitejs/plugin-react"
@@ -11,8 +14,46 @@ import { nodePolyfills } from "vite-plugin-node-polyfills"
 import { VitePWA } from "vite-plugin-pwa"
 import { defaultExclude } from "vitest/config"
 
+/**
+ * What build of the changelog this is, as `<newest week>.<hash>`.
+ *
+ * The card shown after an update lists the releases a reader has not seen,
+ * which needs a stamp it can compare against the one it stored last time. The
+ * week says which releases are new; the hash is there so that two builds in
+ * the same week are not mistaken for one, which would leave the stamp stale
+ * until the following Monday.
+ *
+ * Pending fragments count towards both. They are merged into the current week
+ * at build time (`src/utils/changelog-source.ts`), so a build carrying them
+ * can show a release that `CHANGELOG.md` does not have yet — and a stamp
+ * naming the older week would tell a device it had already seen entries it is
+ * about to be shown, and then show them a second time once collation folded
+ * them for real.
+ */
+function changelogVersion(): string {
+  const parts = [readFileSync("CHANGELOG.md", "utf8")]
+  let pending = 0
+  try {
+    for (const name of readdirSync("changelog.d").sort()) {
+      if (!name.endsWith(".md") || name === "README.md") continue
+      parts.push(readFileSync(`changelog.d/${name}`, "utf8"))
+      pending++
+    }
+  } catch {
+    // No directory yet, which simply means nothing is pending.
+  }
+
+  const released = /^## (\d{4}-W\d{2})\s*$/m.exec(parts[0])?.[1] ?? "0000-W00"
+  const week = pending > 0 ? [released, toReleaseWeek(new Date())].sort().at(-1)! : released
+  const hash = createHash("sha256").update(parts.join("\0")).digest("hex").slice(0, 8)
+  return `${week}.${hash}`
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
+  // A string small enough to sit in the app bundle, so the dialog can decide
+  // whether it has anything to show before fetching the changelog itself.
+  define: { __CHANGELOG_VERSION__: JSON.stringify(changelogVersion()) },
   test: {
     // Keep vitest out of transient agent worktrees (checked out under
     // `.claude/worktrees/` by Claude Code sessions), which otherwise get

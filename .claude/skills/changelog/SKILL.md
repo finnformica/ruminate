@@ -16,7 +16,8 @@ folded into the changelog automatically when the branch lands on `main`
 
 The entries themselves are held to the same rules either way, because the app
 reads what they are folded into: the changelog page and the "what's new"
-dialog after an update are both rendered from `CHANGELOG.md`, parsed by
+what's-new card after an update are both rendered from `CHANGELOG.md`, parsed
+by
 `src/utils/changelog.ts`. A malformed entry is a broken page, so
 **`npm run check:changelog` must pass before you finish** — CI runs it too, on
 the fragment, in the branch that wrote it.
@@ -65,8 +66,8 @@ is better than a padded one.
 
 ### 3. Write the entries
 
-**Every entry leads with one sentence that stands on its own.** The dialog after
-an update shows lead sentences alone, so a lead that needs the rest of the
+**Every entry leads with one sentence that stands on its own.** The what's-new
+card after an update shows lead sentences alone, so a lead that needs the rest of the
 bullet to make sense reads there as a fragment. Everything after the lead is
 detail, and is shown on the changelog page.
 
