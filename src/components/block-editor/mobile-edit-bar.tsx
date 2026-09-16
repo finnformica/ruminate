@@ -60,9 +60,9 @@ const TYPE_GLYPHS: Record<string, string> = {
   ol: "1.",
   todo: "[ ]",
   quote: ">",
-  // The fence, not the single backtick that also opens one: three read as
-  // a glyph at this size where one is a speck.
-  code: "```",
+  // Drawn as the inline code chip (see the row), so it reads as code at
+  // all: a lone backtick is a speck at this size.
+  code: "``",
 }
 
 /** Every button is this wide, so the Turn into row's highlight can slide to
@@ -322,11 +322,15 @@ export function MobileEditBar({
                   }}
                   className="relative font-mono text-[15px] whitespace-pre"
                 >
-                  {/* Backticks hang high in the line; the fence is nudged 5px down to
-                      sit on the others' centre. */}
-                  <span className={def.id === "code" ? "translate-y-[5px]" : undefined}>
-                    {TYPE_GLYPHS[def.id] ?? def.label}
-                  </span>
+                  {def.id === "code" ? (
+                    <code className="rounded-sm border border-border-secondary bg-[var(--color-bg-code-block)] px-1.5 py-px font-mono text-[13px]">
+                      {/* Backticks hang at cap height; nudged down to sit
+                          on the chip's centre. */}
+                      <span className="inline-block translate-y-[3px]">{TYPE_GLYPHS.code}</span>
+                    </code>
+                  ) : (
+                    (TYPE_GLYPHS[def.id] ?? def.label)
+                  )}
                 </BarButton>
               ))}
             </div>

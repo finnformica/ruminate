@@ -53,8 +53,8 @@ keyboard that appears and disappears. The block editor
   maths) draws each button as the markdown renders it — a bold B, the inline
   code chip, √x — and wraps the selection in the marker, or takes it off
   again (`wrapBold` and the rest, ⌘B / ⌘I / ⌘⇧X / ⌘E / ⌘⇧K / ⌘⇧M by key).
-  The Turn into row (Back, then ¶ - 1. [ ] # > and a ``` fence, the glyphs
-  the query box's suggestions draw beside a type) slides one highlight to
+  The Turn into row (Back, then ¶ - 1. [ ] # > and backticks in the inline
+  code chip, the glyphs the query box's suggestions draw beside a type) slides one highlight to
   the current type; a pick returns to the main row. Left out of Notion's set,
   having no counterpart here: `+` add block (Return and the slash menu do
   it), `@` mention, comment, text colour and highlight, underline (no
