@@ -15,7 +15,17 @@ import {
   updateType,
 } from "./ops"
 import type { BlockDoc, BlockType } from "./types"
-import { ancestorKeys, hasOccurrence, idOfKey, keyOf, parentKeyOf } from "./view"
+import {
+  ancestorKeys,
+  directionOfKey,
+  hasOccurrence,
+  idOfKey,
+  keyOf,
+  parentKeyOf,
+  pathIdsOf,
+  rowsBeneath,
+  siblingKey,
+} from "./view"
 
 /**
  * The block editor's **command layer**: named, input-agnostic intents ("indent
@@ -66,6 +76,10 @@ export interface CommandInput {
    * zoomed, the visible world is this block (rendered as a title) plus its
    * subtree — commands must not move, delete, or navigate past that boundary. */
   zoomRootId?: string | null
+  /** The id of the view's own root when it is not a block in the doc (the
+   * note) — on the path above every row, so a row's parent that is the
+   * note is never one of the rows beneath it (`rowsBeneath`). */
+  rootId?: string | null
   /** Where zooming out one level returns to: the previous entry in the zoom
    * navigation stack — the path the user actually took, which under the graph
    * model (multi-parent blocks) is the only honest "up". Null/absent when
@@ -137,6 +151,18 @@ const STRUCTURAL: BlockOp = { type: "structural" }
 
 /** The block a row shows. */
 const blockOf = ({ doc, key }: CommandInput) => doc.blocks[idOfKey(key)]
+
+/** The keys of the rows beneath a row, in order: its children, then the
+ * parents shown under it (`rowsBeneath`) — what a fold hides or shows. */
+function keysBeneath({ doc, key, rootId, zoomRootId }: CommandInput): string[] {
+  const path = new Set(pathIdsOf(key))
+  if (rootId) path.add(rootId)
+  if (zoomRootId) path.add(zoomRootId)
+  const block = doc.blocks[idOfKey(key)] ?? null
+  return rowsBeneath(doc, block, path, directionOfKey(key)).map((row) =>
+    keyOf(key, row.id, row.direction),
+  )
+}
 
 /** Does `parentKey` name the zoomed block? Zoomed, the zoom root is not a
  * row but the view's title, drawn above the rows (the editor renders it as
@@ -216,7 +242,7 @@ function siblingJump(direction: "prev" | "next"): Command {
     if (!info) return { handled: true }
     const target = direction === "prev" ? info.index - 1 : info.index + 1
     if (target < 0 || target >= info.siblings.length) return { handled: true }
-    return { handled: true, focus: keepFocus(mode, keyOf(info.parentKey, info.siblings[target])) }
+    return { handled: true, focus: keepFocus(mode, siblingKey(key, info.siblings[target])) }
   }
 }
 
@@ -266,7 +292,7 @@ function splitAtCaret(typeFor: (type: BlockType, input: CommandInput) => BlockTy
     const updated = updateText(doc, id, before)
     const fresh = emptyBlock(typeFor(type, input), after)
     const next = insertAfter(updated, key, fresh)
-    const freshKey = keyOf(parentKeyOf(key), fresh.id)
+    const freshKey = siblingKey(key, fresh.id)
     return {
       handled: true,
       doc: next,
@@ -504,7 +530,7 @@ export const COMMANDS: Record<CommandName, Command> = {
     if (info.index > 0) {
       return {
         handled: true,
-        focus: keepFocus(mode, keyOf(info.parentKey, info.siblings[info.index - 1])),
+        focus: keepFocus(mode, siblingKey(key, info.siblings[info.index - 1])),
       }
     }
     // Top of the level: continue the traversal one level out, upward. A direct
@@ -527,7 +553,7 @@ export const COMMANDS: Record<CommandName, Command> = {
       if (info.index < info.siblings.length - 1) {
         return {
           handled: true,
-          focus: keepFocus(mode, keyOf(info.parentKey, info.siblings[info.index + 1])),
+          focus: keepFocus(mode, siblingKey(cur, info.siblings[info.index + 1])),
         }
       }
       // Last sibling: climb — but never past the zoom root or the document.
@@ -553,9 +579,9 @@ export const COMMANDS: Record<CommandName, Command> = {
    * editor to clear its fold so the child is actually visible. */
   selectFirstChild: (input) => {
     const { key, mode } = input
-    const first = blockOf(input)?.children[0]
+    const first = keysBeneath(input)[0]
     if (!first) return { handled: true }
-    return { handled: true, expand: key, focus: keepFocus(mode, keyOf(key, first)) }
+    return { handled: true, expand: key, focus: keepFocus(mode, first) }
   },
 
   // ── Arrow-key folding (the tree-view convention: ←/→ fold before they
@@ -567,11 +593,10 @@ export const COMMANDS: Record<CommandName, Command> = {
    * the first child (like `d`, minus the auto-expand). Leaf: no-op. */
   expandOrFirstChild: (input) => {
     const { key, mode, visibleOrder } = input
-    const first = blockOf(input)?.children[0]
-    if (!first) return { handled: true }
+    const firstKey = keysBeneath(input)[0]
+    if (!firstKey) return { handled: true }
     // Collapsed: open it and stay put — the second press steps in. (The zoomed
     // title is always open on screen, so it steps straight into its children.)
-    const firstKey = keyOf(key, first)
     if (!visibleOrder.includes(firstKey)) return { handled: true, expand: key }
     return { handled: true, focus: keepFocus(mode, firstKey) }
   },
@@ -582,8 +607,8 @@ export const COMMANDS: Record<CommandName, Command> = {
    * escapes the zoomed subtree. */
   collapseOrParent: (input) => {
     const { key, mode, visibleOrder, zoomRootId } = input
-    const first = blockOf(input)?.children[0]
-    if (first && visibleOrder.includes(keyOf(key, first))) return { handled: true, collapse: key }
+    const first = keysBeneath(input)[0]
+    if (first && visibleOrder.includes(first)) return { handled: true, collapse: key }
     const parentKey = parentKeyOf(key)
     if (parentKey === null) return { handled: true }
     if (parentIsZoomRoot(parentKey, zoomRootId)) return EXIT_TOP
@@ -597,7 +622,7 @@ export const COMMANDS: Record<CommandName, Command> = {
     const info = siblingsOf(doc, key)
     if (!info) return { handled: true }
     if (info.index > 0) {
-      return { handled: true, focus: keepFocus(mode, keyOf(info.parentKey, info.siblings[0])) }
+      return { handled: true, focus: keepFocus(mode, siblingKey(key, info.siblings[0])) }
     }
     if (info.parentKey === null) return { handled: true }
     if (parentIsZoomRoot(info.parentKey, zoomRootId)) return EXIT_TOP
@@ -609,7 +634,7 @@ export const COMMANDS: Record<CommandName, Command> = {
     const info = siblingsOf(doc, key)
     if (!info || info.index >= info.siblings.length - 1) return { handled: true }
     const last = info.siblings[info.siblings.length - 1]
-    return { handled: true, focus: keepFocus(mode, keyOf(info.parentKey, last)) }
+    return { handled: true, focus: keepFocus(mode, siblingKey(key, last)) }
   },
 
   /** Reorder the row among its siblings (subtree comes along). Preserves the
@@ -733,7 +758,7 @@ export const COMMANDS: Record<CommandName, Command> = {
   /** Collapse / expand a row with children; consumes Space regardless (so the
    * page never scrolls) but only toggles when there's something to fold. */
   toggleCollapse: (input) => {
-    const hasChildren = (blockOf(input)?.children.length ?? 0) > 0
+    const hasChildren = keysBeneath(input).length > 0
     if (!hasChildren) return { handled: true }
     return { handled: true, toggleCollapse: input.key }
   },
@@ -746,7 +771,7 @@ export const COMMANDS: Record<CommandName, Command> = {
     const type = doc.blocks[id]?.type ?? "text"
     const fresh = emptyBlock(continuationType(type, input))
     let next = insertAfter(doc, key, fresh)
-    let freshKey = keyOf(parentKeyOf(key), fresh.id)
+    let freshKey = siblingKey(key, fresh.id)
     if (isHeading(type)) ({ doc: next, key: freshKey } = indentBlock(next, freshKey))
     return { handled: true, doc: next, op: STRUCTURAL, focus: { mode: "edit", key: freshKey } }
   },
@@ -758,7 +783,7 @@ export const COMMANDS: Record<CommandName, Command> = {
     const id = idOfKey(key)
     const fresh = emptyBlock(sameType(doc.blocks[id]?.type ?? "text"))
     const next = insertAfter(doc, key, fresh)
-    const freshKey = keyOf(parentKeyOf(key), fresh.id)
+    const freshKey = siblingKey(key, fresh.id)
     return { handled: true, doc: next, op: STRUCTURAL, focus: { mode: "edit", key: freshKey } }
   },
 

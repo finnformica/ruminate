@@ -1170,3 +1170,77 @@ describe("wrapStrike / wrapMath / wrapLink", () => {
     expect(runCommand("wrapLink", input(fixture(), "a")).handled).toBe(false)
   })
 })
+
+describe("parent rows (upstream occurrences)", () => {
+  /** r holds x; r is held by p and q, shown beneath it. The note n is the root. */
+  function graphed(): BlockDoc {
+    return {
+      props: null,
+      rootBlockIds: ["r"],
+      upstream: [],
+      blocks: {
+        r: { id: "r", type: "text", text: "R", children: ["x"], upstream: ["p", "q"] },
+        x: { id: "x", type: "text", text: "X", children: [], upstream: ["r"] },
+        p: { id: "p", type: "text", text: "P", children: ["r"], upstream: ["n"] },
+        q: { id: "q", type: "text", text: "Q", children: ["r"], upstream: [] },
+      },
+    }
+  }
+  const order = ["r", "r/x", "r/^p", "r/^q"]
+
+  it("navigates among parent rows as siblings, with their own keys", () => {
+    const doc = graphed()
+    expect(
+      runCommand("nextSibling", input(doc, "r/^p", { visibleOrder: order, rootId: "n" })).focus,
+    ).toEqual({ mode: "select", key: "r/^q" })
+    expect(
+      runCommand("prevSibling", input(doc, "r/^q", { visibleOrder: order, rootId: "n" })).focus,
+    ).toEqual({ mode: "select", key: "r/^p" })
+    // A child row and a parent row are not siblings of each other.
+    expect(
+      runCommand("nextSibling", input(doc, "r/x", { visibleOrder: order, rootId: "n" })).focus,
+    ).toBeUndefined()
+  })
+
+  it("folds count the parents beneath a row, with the root never among them", () => {
+    const doc = graphed()
+    // r has a child and two parents beneath it; x has none (its only parent
+    // is r, on the path); p's only parent is the note, on the path.
+    expect(runCommand("toggleCollapse", input(doc, "r", { rootId: "n" })).toggleCollapse).toBe("r")
+    expect(
+      runCommand("toggleCollapse", input(doc, "r/x", { rootId: "n" })).toggleCollapse,
+    ).toBeUndefined()
+    expect(
+      runCommand("toggleCollapse", input(doc, "r/^p", { rootId: "n" })).toggleCollapse,
+    ).toBeUndefined()
+    // Without the root named, the note would count as a row beneath p.
+    expect(runCommand("toggleCollapse", input(doc, "r/^p")).toggleCollapse).toBe("r/^p")
+    // → on r steps into its first row beneath: the child before the parents.
+    expect(
+      runCommand("expandOrFirstChild", input(doc, "r", { visibleOrder: order, rootId: "n" })).focus,
+    ).toEqual({ mode: "select", key: "r/x" })
+  })
+
+  it("Enter after a parent row makes a new parent; indent moves which block it holds", () => {
+    const doc = graphed()
+    const entered = runCommand("insertSiblingBelow", input(doc, "r/^p", { rootId: "n" }))
+    const fresh = newBlockId(doc, entered.doc!)
+    expect(entered.doc!.blocks.r.upstream).toEqual(["p", fresh, "q"])
+    expect(entered.doc!.blocks[fresh].children).toEqual(["r"])
+    expect(entered.focus).toEqual({ mode: "edit", key: `r/^${fresh}` })
+
+    const indented = runCommand("indent", input(doc, "r/^q", { rootId: "n" }))
+    expect(indented.focus).toEqual({ mode: "select", key: "r/^p/^q" })
+    expect(indented.doc!.blocks.q.children).toEqual(["p"])
+  })
+
+  it("deleting a parent row removes it from beneath the block and lands on the row above", () => {
+    const doc = graphed()
+    const result = runCommand(
+      "deleteBlock",
+      input(doc, "r/^q", { visibleOrder: order, rootId: "n" }),
+    )
+    expect(result.doc!.blocks.r.upstream).toEqual(["p"])
+    expect(result.focus).toEqual({ mode: "select", key: "r/^p" })
+  })
+})

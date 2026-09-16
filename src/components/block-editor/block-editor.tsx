@@ -564,8 +564,13 @@ export function BlockEditor({
   // title (so arrow-up from the first child selects it) and its children
   // always render — the root's own fold is ignored while zoomed.
   const rows = useMemo(
-    () => buildRows(doc, { zoomRootId: zoomRoot ? zoomRoot.id : null, folds: collapsed }),
-    [doc, collapsed, zoomRoot],
+    () =>
+      buildRows(doc, {
+        zoomRootId: zoomRoot ? zoomRoot.id : null,
+        folds: collapsed,
+        rootId: noteId ?? null,
+      }),
+    [doc, collapsed, zoomRoot, noteId],
   )
   // The rows' keys in the order they appear on screen — what up/down
   // navigation and a Shift+Arrow range walk.
@@ -1302,6 +1307,7 @@ export function BlockEditor({
       caret,
       zoomRootId,
       zoomBackId,
+      rootId: noteId ?? null,
       newBlockType: typeOfMarker(newBlockMarker),
       placesOf: parentCountOf,
       emptyable,
@@ -1335,6 +1341,7 @@ export function BlockEditor({
         caret,
         zoomRootId,
         zoomBackId,
+        rootId: noteId ?? null,
         newBlockType: typeOfMarker(newBlockMarker),
         placesOf: parentCountOf,
         emptyable,
