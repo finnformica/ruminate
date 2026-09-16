@@ -41,7 +41,9 @@ import {
 import { LinkPreviewError } from "../../data/link-previews"
 import { openLink } from "./link-card"
 import { ImageLightbox } from "./image-lightbox"
+import { MobileEditBar } from "./mobile-edit-bar"
 import { NoteTitle } from "./note-title"
+import { useCoarsePointer } from "../../hooks/coarse-pointer"
 import {
   isHeading,
   leadingMarker,
@@ -468,6 +470,9 @@ export function BlockEditor({
   // A read-only view still owns the keyboard when it is browsed (`browse`,
   // or `onActivate`, which opens rows); one that is neither is inert display.
   const navigable = !readOnly || browse || onActivate !== undefined
+  // A touch screen (docs/mobile.md): a tap edits, an edit survives the
+  // keyboard going away, and the edit bar sits above the keyboard.
+  const coarse = useCoarsePointer()
 
   // ── Zoom state ────────────────────────────────────────────────────────────
   // Controlled by the caller (URL) when `onZoomNavigate` is given; otherwise
@@ -1098,11 +1103,11 @@ export function BlockEditor({
     !isFigureType(zoomRoot.type) &&
     !zoomRoot.text.includes("\n")
 
-  const edit = (key: string, atStart = false) => {
+  const edit = (key: string, atStart = false, caret?: number) => {
     if (readOnly) return
     setAnchorKey(null)
     setSelected(key)
-    setFocus({ key, atStart })
+    setFocus({ key, atStart, caret })
   }
 
   // After restoring a snapshot, keep editing/selecting the same row if it
@@ -1132,11 +1137,22 @@ export function BlockEditor({
       }
       return null
     }
-    setFocus((cur) => (cur && hasOccurrence(restored, cur.key) ? cur : null))
+    // A row whose key vanished but whose block is still there moved (an
+    // undone indent puts it back where it was): the edit, or the highlight,
+    // follows it to its new row rather than falling away — Cmd+Z after Tab
+    // keeps you typing, and the edit bar's Undo keeps the bar.
+    const movedTo = (key: string): string | null =>
+      hasOccurrence(restored, key) ? key : firstOccurrenceKey(restored, idOfKey(key))
+    setFocus((cur) => {
+      if (!cur) return null
+      const key = movedTo(cur.key)
+      return key === null ? null : key === cur.key ? cur : { ...cur, key }
+    })
     setSelected((cur) => {
-      if (cur && hasOccurrence(restored, cur)) return cur
-      const survivor = cur ? nearestSurvivor(cur) : null
-      return survivor ?? firstSelectable(restored)
+      if (!cur) return firstSelectable(restored)
+      const key = movedTo(cur)
+      if (key !== null) return key
+      return nearestSurvivor(cur) ?? firstSelectable(restored)
     })
   }
 
@@ -1308,14 +1324,15 @@ export function BlockEditor({
   }
   // Run a command by name on a row — what the context menu does, so a menu
   // item and its key do exactly the same thing.
-  const runOnRow = (name: CommandName, key: string) => {
+  const runOnRow = (name: CommandName, key: string, mode: Mode = "select", caret?: CaretInput) => {
     if (readOnly) return
     applyResult(
       runCommand(name, {
         doc,
         key,
-        mode: "select",
+        mode,
         visibleOrder,
+        caret,
         zoomRootId,
         zoomBackId,
         newBlockType: typeOfMarker(newBlockMarker),
@@ -1323,6 +1340,36 @@ export function BlockEditor({
         emptyable,
       }),
     )
+  }
+  // Whether the structure moves would do anything on a row — what the edit
+  // bar greys its Outdent and Indent by. Indent needs a sibling above (the
+  // row nests under it); Outdent a parent that is not the zoom root (its
+  // children cannot leave the view).
+  const structureMoves = (key: string): { canIndent: boolean; canOutdent: boolean } => {
+    const parentKey = parentKeyOf(key)
+    const siblings =
+      parentKey === null ? doc.rootBlockIds : (doc.blocks[idOfKey(parentKey)]?.children ?? [])
+    const canIndent = siblings.indexOf(idOfKey(key)) > 0
+    const canOutdent =
+      parentKey !== null && (zoomRootId === null || idOfKey(parentKey) !== zoomRootId)
+    return { canIndent, canOutdent }
+  }
+  // Run a command on the row being edited, in edit mode with its caret —
+  // what the touch screen's edit bar does, so its Indent is Tab's: the
+  // caret stays where it was on the row's new key.
+  const runOnEditing = (name: CommandName) => {
+    if (!focus) return
+    const el = containerRef.current?.querySelector("textarea")
+    const caret: CaretInput | undefined = el
+      ? {
+          value: el.value,
+          start: el.selectionStart,
+          end: el.selectionEnd,
+          atFirstLine: false,
+          atLastLine: false,
+        }
+      : undefined
+    runOnRow(name, focus.key, "edit", caret)
   }
 
   // ── The context menu ──────────────────────────────────────────────────────
@@ -1815,6 +1862,10 @@ export function BlockEditor({
     alignFigure: (id, align) => setFigureLayout(id, { align }),
     resetFigureSize: (id) => setFigureLayout(id, { size: null }),
     duplicate: (key) => runOnRow("duplicateBelow", key),
+    indent: (key) => runOnRow("indent", key),
+    outdent: (key) => runOnRow("outdent", key),
+    moveUp: (key) => runOnRow("moveBlockUp", key),
+    moveDown: (key) => runOnRow("moveBlockDown", key),
     toggleCollapse: (key) => toggleCollapse(key),
     zoomInto: (id) => navigateZoom(id),
     copy: (key) => copyRows([key]),
@@ -1875,6 +1926,7 @@ export function BlockEditor({
     // own the keyboard when focus is inside AND the last thing the user did
     // was not click on blank space (`pointerIdle`).
     keyboardActive: !navigable || (keyboardActive && !pointerIdle),
+    coarsePointer: coarse,
     fixedRoots,
     // Browsing: a click opens the row (BlockItem routes a read-only row's
     // click here).
@@ -2581,6 +2633,42 @@ export function BlockEditor({
         block={lightbox ? (doc.blocks[lightbox] ?? null) : null}
         onClose={() => setLightbox(null)}
       />
+      {coarse && !readOnly && focus ? (
+        <MobileEditBar
+          state={{
+            type: doc.blocks[idOfKey(focus.key)]?.type ?? "text",
+            ...structureMoves(focus.key),
+            canUndo: history.canUndo(),
+            canRedo: history.canRedo(),
+          }}
+          actions={{
+            turnInto: (type) => menuActions.setType(idOfKey(focus.key), type),
+            bold: () => runOnEditing("wrapBold"),
+            italic: () => runOnEditing("wrapItalic"),
+            strike: () => runOnEditing("wrapStrike"),
+            code: () => runOnEditing("wrapCode"),
+            link: () => runOnEditing("wrapLink"),
+            math: () => runOnEditing("wrapMath"),
+            indent: () => runOnEditing("indent"),
+            outdent: () => runOnEditing("outdent"),
+            undo,
+            redo,
+            remove: () => runOnRow("deleteBlock", focus.key),
+            image: api.requestImage ? () => api.requestImage?.(focus.key) : undefined,
+            // Done: the keyboard goes and the row stays highlighted, where
+            // a tap starts the next edit. The blur ends the edit itself;
+            // setting focus here too covers a keyboard that was already
+            // down (Android's Back key hides it without a blur).
+            done: () => {
+              const key = focus.key
+              setFocus(null)
+              setSelected(key)
+              setAnchorKey(null)
+              if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+            },
+          }}
+        />
+      ) : null}
     </>
   )
 }

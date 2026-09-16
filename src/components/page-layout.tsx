@@ -65,7 +65,13 @@ export function PageLayout({
           className="print:hidden"
         />
         <div className="relative grid overflow-hidden">
-          <main className="relative isolate overflow-auto [scrollbar-gutter:stable] scroll-fade">
+          {/* `--edit-bar-inset`: what a phone's keyboard and the edit bar
+              above it cover while a block is edited (mobile-edit-bar.tsx).
+              The scroller pads by it, so the end of the page can still be
+              scrolled above them, and treats it as scroll padding, so a row
+              brought into view (the editor's scrollIntoView on focus) lands
+              above them rather than "in view" behind the keyboard. */}
+          <main className="relative isolate overflow-auto pb-(--edit-bar-inset,0px) [scroll-padding-bottom:var(--edit-bar-inset,0px)] [scrollbar-gutter:stable] scroll-fade">
             {otherTabHasDatabase && !disableGuard ? (
               <div className="p-4">
                 <Notice

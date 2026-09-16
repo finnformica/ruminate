@@ -5,6 +5,7 @@ import { FIGURE_ALIGNS, type FigureAlign } from "../../blocks/figure"
 import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
+import { useCoarsePointer } from "../../hooks/coarse-pointer"
 import { DropdownMenu } from "../dropdown-menu"
 
 /**
@@ -27,7 +28,9 @@ import { DropdownMenu } from "../dropdown-menu"
  * from where it opens zoomed into; on a pinned block the item reads Unpin.
  *
  * Structure moves (indent, outdent, move up/down) are keyboard-only: the
- * menu is for what a pointer cannot already do.
+ * menu is for what a pointer cannot already do. A finger cannot (no Tab on
+ * a phone's keyboard), so on a touch screen the menu carries them too —
+ * the edit bar above the keyboard is the other way (docs/mobile.md).
  */
 
 /** The row the menu was opened on. */
@@ -53,6 +56,12 @@ export interface BlockMenuActions {
   edit: (key: string) => void
   setType: (id: string, type: BlockType) => void
   duplicate: (key: string) => void
+  /** Structure moves — offered on a touch screen only, where there are no
+   * keys for them. */
+  indent: (key: string) => void
+  outdent: (key: string) => void
+  moveUp: (key: string) => void
+  moveDown: (key: string) => void
   toggleCollapse: (key: string) => void
   zoomInto: (id: string) => void
   copy: (key: string) => void
@@ -166,6 +175,7 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
   const { key, id } = target
   const shared = target.places > 1
   const image = target.type === "image"
+  const coarse = useCoarsePointer()
   const link = target.type === "link"
   const figure = target.figure !== undefined
   const links = target.links ?? []
@@ -292,6 +302,15 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
       <DropdownMenu.Item shortcut={["⌥", "⇧", "↓"]} onClick={() => actions.duplicate(key)}>
         Duplicate
       </DropdownMenu.Item>
+      {coarse ? (
+        <>
+          <DropdownMenu.Separator />
+          <DropdownMenu.Item onClick={() => actions.indent(key)}>Indent</DropdownMenu.Item>
+          <DropdownMenu.Item onClick={() => actions.outdent(key)}>Outdent</DropdownMenu.Item>
+          <DropdownMenu.Item onClick={() => actions.moveUp(key)}>Move up</DropdownMenu.Item>
+          <DropdownMenu.Item onClick={() => actions.moveDown(key)}>Move down</DropdownMenu.Item>
+        </>
+      ) : null}
       <DropdownMenu.Separator />
       {target.hasChildren ? (
         <DropdownMenu.Item shortcut={["Space"]} onClick={() => actions.toggleCollapse(key)}>
