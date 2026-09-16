@@ -208,16 +208,20 @@ describe("the edit bar", () => {
   it("carries the main row: Aa, Turn into, the structure moves, Undo, Delete, the keyboard", () => {
     const { container } = render(<Harness initial={"Alpha"} />)
     fireEvent.click(bodyOf(rows(container)[0]))
-    // No Redo (nothing to redo) and no Image (images off here).
+    // No Redo (nothing to redo); Image is there but greyed (images off here).
     expect(labels()).toEqual([
       "Formatting",
       "Turn into",
       "Outdent",
       "Indent",
       "Undo",
+      "Image",
       "Delete",
       "Hide keyboard",
     ])
+    expect(screen.getByLabelText("Image").getAttribute("aria-disabled")).toBe("true")
+    // Everything fits: no fade over the last button.
+    expect(screen.getByTestId("mobile-edit-bar").querySelector("[data-overflows]")).toBeNull()
   })
 
   it("greys a move that would do nothing, and Undo with nothing to undo", () => {

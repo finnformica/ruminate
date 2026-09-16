@@ -32,7 +32,8 @@ export interface MobileEditBarActions {
   undo: () => void
   redo: () => void
   remove: () => void
-  /** Add a picture at this row; absent where images are switched off. */
+  /** Add a picture at this row; absent where images are switched off (the
+   * button stays, greyed, so the row never changes shape). */
   image?: () => void
   /** End the edit and put the keyboard away. */
   done: () => void
@@ -209,6 +210,8 @@ export function MobileEditBar({
   const barRef = useRef<HTMLDivElement>(null)
   usePageInset(barRef, bottom)
   const [view, setView] = useState<View>("main")
+  const rowRef = useRef<HTMLDivElement>(null)
+  const overflows = useOverflowsRight(rowRef, [view, state.canRedo, actions.image !== undefined])
   if (typeof document === "undefined") return null
   const current = canonicalOf(state.type)
   const activeType = Math.max(
@@ -235,11 +238,15 @@ export function MobileEditBar({
       }}
     >
       <div
+        ref={rowRef}
+        data-overflows={overflows || undefined}
         className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={{
-          // The row runs off under a fade, so a row longer than the bar
-          // says so.
-          maskImage: "linear-gradient(90deg, #000 calc(100% - 28px), transparent)",
+          // A row longer than the bar runs off under a fade, which says
+          // so; only then (`useOverflowsRight`), never over a last button.
+          maskImage: overflows
+            ? "linear-gradient(90deg, #000 calc(100% - 28px), transparent)"
+            : undefined,
         }}
       >
         {view === "format" ? (
@@ -342,14 +349,10 @@ export function MobileEditBar({
                 <RedoIcon16 />
               </BarButton>
             ) : null}
-            {actions.image ? (
-              <>
-                <Rule />
-                <BarButton label="Image" onClick={actions.image}>
-                  <ImageIcon16 />
-                </BarButton>
-              </>
-            ) : null}
+            <Rule />
+            <BarButton label="Image" onClick={actions.image ?? noop} disabled={!actions.image}>
+              <ImageIcon16 />
+            </BarButton>
             {/* Delete keeps to the far right, away from the rest, as the
                 destructive one; the gap closes only when the row scrolls. */}
             <Rule className="ml-auto" />
@@ -379,6 +382,31 @@ function Rule({ className }: { className?: string }) {
 /** Keeps focus where it is: the pointer down is cancelled, so the textarea
  * never blurs and the keyboard stays up for the tap that follows. */
 const keepFocus = (event: React.SyntheticEvent) => event.preventDefault()
+const noop = () => {}
+
+/**
+ * Whether a row that scrolls sideways has more past its right edge — when
+ * the fade that says so is drawn. Never while everything fits, or once the
+ * row is scrolled to its end: a fade over the last button would only dim it.
+ */
+function useOverflowsRight(ref: React.RefObject<HTMLDivElement | null>, deps: unknown[]) {
+  const [overflows, setOverflows] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const measure = () => setOverflows(el.scrollWidth - el.clientWidth - el.scrollLeft > 1)
+    measure()
+    el.addEventListener("scroll", measure, { passive: true })
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null
+    observer?.observe(el)
+    return () => {
+      el.removeEventListener("scroll", measure)
+      observer?.disconnect()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ref, ...deps])
+  return overflows
+}
 
 function BarButton({
   label,
