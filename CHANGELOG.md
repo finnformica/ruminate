@@ -129,7 +129,7 @@
 
 ### Added
 
-- Ruminate supports accounts. Each person who signs in gets their own private database, fully separate from everyone else's, so inviting someone no longer means sharing yours. Access is invite-only for now: sign-ins are checked against an allowlist, and anyone not on it is politely turned away. Existing notes move over automatically on first sync, and nothing changes in how you write, save or sync.
+- Ruminate supports accounts. Each person who signs in gets their own private database, fully separate from everyone else's, so inviting someone no longer means sharing yours. Existing notes move over automatically on first sync, and nothing changes in how you write, save or sync.
 - Search can filter by block type, so `type:todo` pulls up every unchecked box in your notes. It works anywhere you search and combines with everything else: `type:todo milk` narrows by text, and values like `done`, `heading`, `list`, `quote` and `code` filter for other kinds of block. See docs/query-language.md for the full list.
 
 ### Changed
@@ -143,9 +143,6 @@
 - Folding no longer changes under you as a note grows. A note still opens tidy the first time you see it on a device, with headings expanded and two levels visible, but that is a starting point rather than a rule that keeps reapplying: blocks added afterwards stay open, and nothing you unfolded quietly closes again. Folds you already have are kept as they are.
 - Old checkbox and list spellings behave as real checkboxes and lists. Blocks written as `[] buy milk`, `[X] done`, `* item` or `2) item` used to stay plain text, invisible to `type:todo` and unstyled; they are now recognised and tidied to their canonical form, both as you type and, once, for everything already in your notes. Genuinely ambiguous lines are left exactly as written.
 - Deleting a block or a note no longer erases it. Deleted content is marked as deleted and kept in your database: it disappears from every note, search and count exactly as before, and syncs away on your other devices, but the words are still there. Nothing in the app surfaces them yet. This is the groundwork for undoing a delete later.
-- A note's properties are stored as individual values rather than one opaque blob, so they sync and query cleanly. Typical properties look exactly the same. Unusual formatting may be tidied once to a canonical form, with lists on one line and consistent quoting, and properties carrying comments are kept exactly as written.
-- Signups are open: anyone can sign in with GitHub and get their own private notes database. The invite allowlist is switched off, and remains available if access ever needs gating again.
-- Published gists are named after the note rather than its internal id, so a shared link shows a readable filename on GitHub.
 - **Settings → Storage** says "cloud" rather than naming the internal database, and the manual action reads **Push full copy to the cloud now**.
 - The Settings footer credits the app correctly. It reads "Made by Finn Formica", with "Built on Lumen by Cole Bemis & contributors" beneath it, linking to Ruminate's author, the upstream project and its author. The upstream author's personal signature mark, which this fork had been showing as Ruminate's own sign-off, is gone.
 
@@ -167,9 +164,8 @@
 ### Added
 
 - Paste a copied block into another note and it becomes the same block in both places, not a copy. Edit it in either note and the change shows in the other, and cut and paste now truly moves a block between notes rather than recreating it. Pasting within the same note still makes an ordinary copy, and pasting where the block already sits does nothing.
-- Every note has version history. Open **History** from the note's **⋯** menu to browse each saved version, including edits merged in from another device, which are labelled. Preview any of them exactly as it looked, copy it as markdown, or restore it. Restoring is forward-only: the old content is saved as the newest version, so nothing is ever lost.
 - Zoom into any block with <kbd>f</kbd>, or a click on its bullet, and what sits under it becomes the whole page. A clickable breadcrumb trail shows how you got there. <kbd>⇧</kbd> <kbd>f</kbd> goes up one level and <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd> leaves entirely. The zoom lives in the address, so the back button and deep links work.
-- Jump to any heading in the open note with <kbd>⌘</kbd> <kbd>P</kbd>. With nothing typed you get the note's outline as an indented tree; typing filters to matches with their parent path shown. Arrowing previews the target behind the dialog, <kbd>↵</kbd> jumps, and <kbd>Esc</kbd> puts everything back exactly as it was. Nested and unsaved headings are included.
+- Jump to any heading in the open note with <kbd>⌘</kbd> <kbd>P</kbd>. With nothing typed you get every heading in the note; typing filters them, and <kbd>↵</kbd> jumps. Nested headings, and ones you have not saved yet, are included.
 - Press <kbd>⌘</kbd> <kbd>A</kbd> repeatedly to grow the selection through the outline. It takes the block and its visible children first, then the parent and everything under it, on up to the whole page, and <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>A</kbd> steps back down. Every action — indent, move, duplicate, copy, delete — works on whatever the ladder has selected.
 - Press <kbd>?</kbd> anywhere you are not typing for a reference of every shortcut in the app. It is searchable, grouped by context, and always in step with what the keys actually do.
 - Get around without the mouse. <kbd>g</kbd> then <kbd>d</kbd>, <kbd>n</kbd> or <kbd>s</kbd> goes to today's note, your notes or settings, <kbd>/</kbd> focuses search on list pages, and <kbd>⌘</kbd> <kbd>[</kbd> and <kbd>⌘</kbd> <kbd>]</kbd> walk back and forward through your history.
@@ -187,27 +183,22 @@
 - Sync works block by block rather than note by note. Editing different parts of the same note on two devices no longer makes the later save overwrite the whole note. Only edits to the very same block still resolve to the most recent save.
 - Notes open with a tidy amount of detail rather than everything unfolded. Headings are always expanded, the first two levels beneath them are visible, and anything deeper starts folded. Your own folding is remembered on each device on top of that default. Fold state no longer syncs between devices, so folding on your phone never touches how a note looks on your laptop.
 - **Settings → Storage** shows the live state of your data. It gives the local database's status, pending pushes to the cloud, remote row counts and a **Push full copy now** button for peace of mind. The sidebar's sync indicator reflects the same thing, reading "Syncing…" until your last save has reached the cloud.
-- A selected block is marked by a light accent wash with a subtle tint on the text, in place of the old solid colour band. It is clearer in dark mode and calmer everywhere, and hover, inactive and selected states now sit on a ladder that can never overlap. An empty block shows a quiet "Ruminate…" prompt.
-- It is now obvious when the editor is listening. The selection dims to a quiet grey whenever keyboard focus is elsewhere and lights back up in your accent colour when it returns, the sidebar tints the note you are in, and an empty block's placeholder teaches the type-change keys. Blocks also gained softer corners and a roomier line.
 - Headings carry a small grey `#` in the marker column. Click it to zoom in, and heading text finally lines up with bullets, to-dos and numbered items. The selection highlight has even padding, with clear space from the fold arrow.
 - Paste works without entering a block first. <kbd>⌘</kbd> <kbd>V</kbd> on a highlighted block inserts the clipboard below it, splitting lines into blocks and keeping their nesting. Rich content from Notion, Google Docs or the web converts to markdown, and copying between Ruminate notes round-trips block structure exactly. <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd> pastes as plain text.
 - Arrow keys finish editing at a block's edge. <kbd>↑</kbd> from the first line, or <kbd>↓</kbd> from the last, drops you back to the rendered view with the neighbouring block highlighted, rather than carrying the raw-markdown editor along. <kbd>Esc</kbd> now also clears the highlight entirely, and the arrows pick it back up.
 - Move a block with <kbd>⌥</kbd> <kbd>↑</kbd> and <kbd>⌥</kbd> <kbd>↓</kbd> as well as <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>↑</kbd> and <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>↓</kbd>, matching editor muscle memory. Sibling jumping moved to <kbd>⌘</kbd> <kbd>⌥</kbd> with the arrows. Moving and duplicating work on multi-block selections too.
-- The editor had a visual polish pass. Line heights are corrected, a bug having meant the intended ones never applied; the selection is accent-tinted with softer corners and breathing room around the text; every marker is aligned to one column so text starts in the same place across bullets, to-dos and numbered items; and checkboxes, quotes and code are quieter.
 - Deleting a block selects the block that takes its place, the one below, rather than jumping upward.
 - Pasted outlines indented with tabs or four spaces keep their nesting instead of flattening.
 
 ### Removed
 
-- Everything git. The repository-selection screen, git sync, **Reset local copy**, **Open in GitHub**, merge-conflict banners and conflicted-copy notes are gone, along with the repository itself.
-- Note version history and the calendar's past-day roll-ups, added earlier this week, are withdrawn again. Both were reconstructed from git commits, which no longer exist, so past days now show a simple placeholder. A database-backed history layer is planned to bring them back.
+- Everything git. The repository-selection screen, git sync, **Reset local copy**, **Open in GitHub**, merge-conflict banners and conflicted-copy notes are gone, along with the repository itself. The calendar's past days, which were reconstructed from git commits, now show a simple placeholder.
 - File attachments, the git-era `/uploads` folder. Legacy attachment references in notes render as an inert placeholder.
-- The unused e-paper theme. It was never reachable from the app, and was quietly accumulating visual bugs.
 
 ### Fixed
 
-- A stale device can no longer quietly revert your newer edits. When two devices' changes collide the newest edit wins, and a banner tells you a merge happened, with a **View previous version** action that opens the note's history on the exact version that lost. The silent-overwrite path that reverted a restructured note is closed, and nothing is ever lost.
-- Sync between devices no longer gets permanently stuck. Conflicting edits merge automatically, the newest version wins for the conflicting lines, and the losing version stays a click away in the note's history, with no extra conflict notes cluttering your list. Signing out and back in is no longer the fix, and folding blocks no longer causes conflicts between devices.
+- A stale device can no longer quietly revert your newer edits. When two devices' changes collide the newest edit wins, and a banner tells you a merge happened. The silent-overwrite path that reverted a restructured note is closed.
+- Sync between devices no longer gets permanently stuck. Conflicting edits merge automatically and the newest version wins for the conflicting lines, with no extra conflict notes cluttering your list. Signing out and back in is no longer the fix, and folding blocks no longer causes conflicts between devices.
 - When your GitHub session expires the app says so and returns you to the sign-in screen. Your notes reload as soon as you sign back in. It used to show a misleading "cannot reach the notes database" message, which is now reserved for actually being offline.
 - When sync does fail, the sidebar says why — network, sign-in or conflict — and clicking retries. Settings gains a **Reset local copy** that backs up any unpushed notes as conflict copies before re-cloning, so recovery cannot destroy work. Page loads also stop stalling on a GitHub token refresh.
 - Opening Ruminate in a second tab no longer shows a silently empty app. The second tab explains that your notes are open in another tab, works on a temporary copy in the meantime, and offers a one-click reload once the other tab is closed.
@@ -218,39 +209,36 @@
 - Arrow keys no longer go dead after folding the section your highlight was inside. They now land on the folded parent.
 - Cutting a mouse selection that spans several blocks copies and removes them; it used to do nothing. It only takes over when whole blocks are selected, so a partial selection never deletes more than you chose.
 - Undoing a freshly created block no longer flings the selection to the top of the note. It lands back on the block you were on.
-- The help panel no longer lists shortcuts that were removed with the old editor, and its links point at this project again.
 
 ## 2026-W34
 
 ### Added
 
 - Your GitHub sign-in stays connected. Access tokens are refreshed silently in the background, so sync no longer breaks every few hours and forces you to sign out and back in. When signing in again genuinely is needed, the sidebar shows a clear, clickable **Sign in soon** or **Signed out** status rather than a generic sync error.
-- Past days in the calendar show what you actually wrote that day, reconstructed from your history. It is a read-only view that merges every note you touched, with that day's note first, while today stays fully editable as before. Times are shown in your current timezone, and daily notes stay pinned to their date wherever in the world you open them.
-- Hovering a note in the sidebar reveals a **⋯** actions menu. Pin, copy, rename, open in GitHub or delete any note without opening it first. It is the same menu the open note uses, so the actions match everywhere.
+- Hovering a note in the sidebar reveals a **⋯** actions menu. Pin, copy, rename or delete any note without opening it first. It is the same menu the open note uses, so the actions match everywhere.
+- The sidebar has a **Calendar** link, reached with <kbd>g</kbd> then <kbd>d</kbd>, which opens today's daily note.
 - Select several blocks at once with <kbd>⇧</kbd> <kbd>↑</kbd> and <kbd>⇧</kbd> <kbd>↓</kbd>, then indent, delete, copy or cut them together.
 - Richer keyboard navigation of the outline. <kbd>⌥</kbd> with the arrows jumps across siblings at the same level, skipping their children, and <kbd>⌘</kbd> with the arrows jumps to the top or bottom of the current level. The note title is reachable too: <kbd>↑</kbd> from the first block selects it, and <kbd>↓</kbd> drops back in.
 
 ### Changed
 
-- Daily notes use the same outline editor as the rest of your notes. Past days render their history as blocks too, so editing and reading are consistent across the app.
-- The block editor is the only editor in the app. Weekly notes and inline property editing moved onto it too, so editing works the same everywhere.
+- Daily notes use the same outline editor as the rest of your notes. Weekly notes and inline property editing moved onto it in the same pass, so reading and writing work the same way wherever you are in the app.
+- The block editor is the only editor in the app. The old text editor is gone from every surface that still used it.
 - The editor feels more like an outliner. <kbd>↵</kbd> starts a bullet by default and nests under a heading, <kbd>⇧</kbd> <kbd>↵</kbd> is a plain line break, <kbd>space</kbd> never scrolls the page, <kbd>Tab</kbd> and <kbd>⌫</kbd> work on a highlighted block without entering it, and there is always a blank block waiting at the bottom.
 - Headings are sized by how deeply they are nested in the outline, not by how many hashes you type. The sizes run down to a bold, underlined floor at body size, with a little breathing room above them.
 - Reorder a block and everything under it with <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>↑</kbd> and <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>↓</kbd>.
 - Undo and redo survive saving a note.
-- The Notes view defaults to a list.
 - The app icon is a monospace `#`.
 
 ### Removed
 
-- Vim mode, along with the old text-editor engine it belonged to. In-editor wikilink and date autocomplete, cursor-position template insertion and drag-to-attach were part of that editor, and are tracked to be rebuilt on the outline editor.
+- Vim mode, along with the old text-editor engine it belonged to. Cursor-position template insertion and drag-to-attach were part of that editor and went with it.
 
 ### Fixed
 
 - A highlighted block reliably responds to the keyboard. The arrow keys move the highlight rather than scrolling the page, whichever block you are on.
 - The keyboard keeps working after you click elsewhere on the page. The highlighted block stays live instead of silently losing focus.
 - Every copy action goes through one path, so the result is always clean markdown. That covers <kbd>⌘</kbd> <kbd>C</kbd>, a multi-block selection, **Copy markdown** in the menu and the command palette: blank lines fall between paragraphs, checkboxes are real task-list boxes, and no stray metadata line is ever written.
-- Copying a note or block produces clean markdown again, with no stray metadata lines.
 - Note previews render properly again, with no raw block metadata in the cards.
 - Undo re-highlights a block it brought back, so a delete followed by an undo lands you back on it.
 - <kbd>⇧</kbd> <kbd>↵</kbd> splits into a new block of the same type, so a heading stays a heading. <kbd>⌘</kbd> <kbd>↵</kbd> makes a new block below from anywhere, including a new root block from the note title.
@@ -262,26 +250,10 @@
 - While editing the note title, <kbd>↓</kbd> drops into the first block below, already editing with the caret ready, matching how <kbd>↓</kbd> moves between blocks.
 - <kbd>Tab</kbd> and <kbd>⇧</kbd> <kbd>Tab</kbd> while editing a block keep the cursor where it is rather than jumping it to the end of the line.
 - Deleting the note you are viewing takes you back to the notes list.
-- The sidebar's note actions menu sits beside the note name, which truncates to make room, rather than overlapping it.
-
-## 2026-W08
-
-### Changed
-
-- Move tasks to any note, not just Today, Tomorrow or Next week. The **Move to** menu now lets you search across your notes, use natural dates such as "friday", "next month" or "in 2 weeks", or create a new note on the fly.
+- Daily notes stay pinned to their date wherever in the world you open them. A note's day is worked out in your own timezone, so travelling no longer shifts which note a date opens.
 
 ## 2026-W06
-
-### Added
-
-- Notes with an IMDb `url` display film and television poster art, in the same way that notes with an `isbn` show book covers.
 
 ### Changed
 
 - The cheatsheet dialog is now a help panel, opened with <kbd>⌘</kbd> <kbd>/</kbd>. It stays open while you work, so you can refer to shortcuts or markdown syntax without interrupting what you are doing.
-- Hovering a footnote reference shows a preview of the footnote, so you can read it without jumping to the bottom of the page.
-- **Read** and **Write** in the note page's mode switcher are now **View** and **Edit**, which say more plainly what they do.
-
-### Fixed
-
-- Quotes in shared note titles display correctly in link previews, such as when sharing a note on Discord.
