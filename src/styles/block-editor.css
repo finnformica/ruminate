@@ -341,3 +341,37 @@
 .note-header {
   margin-left: calc(-1 * var(--note-header-pull, 0px));
 }
+
+/* ── The touch screen's edit bar ─────────────────────────────────────────────
+ * A row swap (Aa, Turn into, Back) fades the new row in with a short slide
+ * from the side it came from: a sub-row from the right, the main row back
+ * from the left. The row is remounted per view (mobile-edit-bar.tsx), so
+ * the animation plays on each swap; nothing animates out — the old row is
+ * simply gone, and the fade covers the cut. */
+@keyframes edit-bar-row-forward {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+@keyframes edit-bar-row-back {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+}
+.edit-bar-row[data-direction="forward"] {
+  animation: edit-bar-row-forward 200ms var(--ease-in-out) both;
+}
+.edit-bar-row[data-direction="back"] {
+  animation: edit-bar-row-back 200ms var(--ease-in-out) both;
+}
+/* The very first row needs no entrance: the bar itself just appeared. */
+.edit-bar-row[data-view="main"][data-direction="forward"] {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .edit-bar-row {
+    animation: none;
+  }
+}

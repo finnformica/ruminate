@@ -212,7 +212,14 @@ export function MobileEditBar({
   const { bottom, keyboardUp } = useKeyboard(actions.done)
   const barRef = useRef<HTMLDivElement>(null)
   usePageInset(barRef, bottom)
-  const [view, setView] = useState<View>("main")
+  const [view, setViewState] = useState<View>("main")
+  // Which way the last swap went, for the row's entrance: a sub-row slides
+  // in from the right, the main row back in from the left.
+  const [direction, setDirection] = useState<"forward" | "back">("forward")
+  const setView = (next: View) => {
+    setDirection(next === "main" ? "back" : "forward")
+    setViewState(next)
+  }
   const rowRef = useRef<HTMLDivElement>(null)
   const overflows = useOverflowsRight(rowRef, [view, state.canRedo, actions.image !== undefined])
   if (typeof document === "undefined") return null
@@ -245,8 +252,12 @@ export function MobileEditBar({
     >
       <div
         ref={rowRef}
+        // A fresh element per row, so its entrance plays each swap.
+        key={view}
+        data-view={view}
+        data-direction={direction}
         data-overflows={overflows || undefined}
-        className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="edit-bar-row flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         style={{
           // A row longer than the bar runs off under a fade, which says
           // so; only then (`useOverflowsRight`), never over a last button.
@@ -356,11 +367,21 @@ export function MobileEditBar({
             <BarButton label="Undo" onClick={actions.undo} disabled={!state.canUndo}>
               <UndoIcon16 />
             </BarButton>
-            {state.canRedo ? (
+            {/* Redo stays in the row and grows in when there is something to
+                redo, then shrinks away; hidden to the accessibility tree and
+                the pointer while it is closed. */}
+            <span
+              aria-hidden={!state.canRedo}
+              className={cx(
+                "flex shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-[var(--ease-in-out)] motion-reduce:transition-none",
+                state.canRedo ? "opacity-100" : "pointer-events-none opacity-0",
+              )}
+              style={{ width: state.canRedo ? BUTTON_WIDTH : 0 }}
+            >
               <BarButton label="Redo" onClick={actions.redo}>
                 <RedoIcon16 />
               </BarButton>
-            ) : null}
+            </span>
             <BarButton label="Image" onClick={actions.image ?? noop} disabled={!actions.image}>
               <ImageIcon16 />
             </BarButton>
@@ -446,6 +467,10 @@ function BarButton({
       onClick={disabled ? undefined : onClick}
       className={cx(
         "flex h-12 w-[38px] shrink-0 cursor-pointer select-none items-center justify-center text-text-secondary",
+        // A press squeezes the glyph a little and lifts its ink; greying in
+        // and out eases rather than snaps.
+        "transition-[color,opacity,transform] duration-150 ease-out motion-reduce:transition-none",
+        "[&>*]:transition-transform [&>*]:duration-150 [&>*]:ease-out active:[&>*]:scale-[0.85] motion-reduce:active:[&>*]:scale-100",
         disabled ? "cursor-default text-text-tertiary opacity-50" : "active:text-text",
         pressed && "text-text",
         className,

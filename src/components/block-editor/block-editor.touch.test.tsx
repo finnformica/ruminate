@@ -200,10 +200,12 @@ describe("the edit bar", () => {
     expect(screen.queryByTestId("mobile-edit-bar")).toBeNull()
   })
 
+  /** The row's buttons, as a reader meets them: Redo sits in the row closed
+   * (width 0, aria-hidden) until there is something to redo. */
   const labels = () =>
-    Array.from(screen.getByTestId("mobile-edit-bar").querySelectorAll("button")).map((b) =>
-      b.getAttribute("aria-label"),
-    )
+    Array.from(screen.getByTestId("mobile-edit-bar").querySelectorAll("button"))
+      .filter((b) => !b.closest("[aria-hidden='true']"))
+      .map((b) => b.getAttribute("aria-label"))
 
   it("carries the main row: Aa, Turn into, the structure moves, Undo, Delete, the keyboard", () => {
     const { container } = render(<Harness initial={"Alpha"} />)
@@ -264,16 +266,16 @@ describe("the edit bar", () => {
   it("shows Redo beside Undo only while there is something to redo", () => {
     const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta"} />)
     fireEvent.click(bodyOf(rows(container)[1]))
-    expect(screen.queryByLabelText("Redo")).toBeNull()
+    expect(labels()).not.toContain("Redo")
     fireEvent.click(screen.getByLabelText("Indent"))
     expect(screen.getByLabelText("Undo").getAttribute("aria-disabled")).toBeNull()
-    expect(screen.queryByLabelText("Redo")).toBeNull()
+    expect(labels()).not.toContain("Redo")
     fireEvent.click(screen.getByLabelText("Undo"))
     expect(lines(getByTestId)).toEqual(["Alpha", "Beta"])
     expect(labels()).toContain("Redo")
     fireEvent.click(screen.getByLabelText("Redo"))
     expect(lines(getByTestId)).toEqual(["Alpha", "  Beta"])
-    expect(screen.queryByLabelText("Redo")).toBeNull()
+    expect(labels()).not.toContain("Redo")
   })
 
   it("Aa swaps the row for the formatting, which wraps the selection and unwraps it again", () => {
