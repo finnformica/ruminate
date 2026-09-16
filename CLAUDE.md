@@ -46,7 +46,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 - **Ops** (`src/data/ops.ts`): every edit is a batch of ops (`create`, `setText`, `setType`, `setProps`, `link`, `unlink`, `delete`) applied to the in-memory `GraphSnapshot` and persisted verbatim. `docToOps` diffs an edited doc against the snapshot; `deleteBlockOps` / `deletePageOps` carry the delete-rescue rules.
 - **Runtime** (`src/data/database-mode.ts`): holds the live graph atom, coalesces pending ops, and pushes/pulls row diffs to the D1 replica through the Worker (`worker/handlers/replica.ts`).
 - **Notes as metadata** (`src/data/note-meta.ts`): `Note` objects (title, dates, props) are derived from the graph for lists, search and the calendar.
-- **Shared notes** (`src/data/shared-mode.ts`, docs/sharing.md): slices of other users' corpora, fetched whole and held in memory, merged into `graphSnapshotAtom`; read-only, so the write seam (`src/data/store.ts`) refuses a batch of ops that names a shared node.
+- **Shared notes** (`src/data/shared-mode.ts`, docs/sharing.md): slices of other users' corpora, fetched whole and held in memory, merged into `graphSnapshotAtom`; the write seam (`src/data/store.ts`) routes a batch of ops to the share it names.
 
 ### State
 

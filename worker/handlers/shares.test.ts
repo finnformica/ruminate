@@ -5,19 +5,21 @@ import migration0012 from "../../migrations/0012_shares.sql?raw"
 import { setFeatureAudience } from "../features"
 import { createMcpTestEnv, type McpTestEnv } from "../mcp/test-support"
 import type { SharesListBody, SliceBody } from "../shares/wire"
+import { buildGraphSnapshot, noteDoc } from "../../src/data/graph"
+import { deleteBlockOps, docToOps } from "../../src/data/ops"
+import { opsToRows } from "../../src/data/ops-rows"
 import { corpusPut } from "./replica-corpus"
 import type { LinkRow, NodeRow } from "./replica-payload"
 import { shares } from "./shares"
 
 /**
  * Sharing, driven end to end through the handler: an owner shares notes with
- * an address, and the person GitHub reports that address for reads the slice
- * beneath them.
+ * an address, the person GitHub reports that address for reads the slice
+ * beneath them, and — with the verbs the owner ticked — writes into it.
  *
  * The properties that matter most are the ones about what is NOT possible:
- * nothing outside the closure is ever serialized, nothing a grantee sends
- * reaches the owner's rows, and a share id names nothing to anyone but its
- * grantee.
+ * nothing outside the closure is ever serialized, no write can reach past
+ * it, and a share id names nothing to anyone but its grantee.
  */
 
 const OWNER = 7
@@ -117,8 +119,12 @@ async function seedOwner() {
   )
 }
 
-async function share(rootIds: string[] = [NOTE_A], email = "u8@example.com"): Promise<string> {
-  const response = await send(apiRequest("POST", "", { email, rootIds }))
+async function share(
+  permissions: string[] = ["read"],
+  rootIds: string[] = [NOTE_A],
+  email = "u8@example.com",
+): Promise<string> {
+  const response = await send(apiRequest("POST", "", { email, rootIds, permissions }))
   expect(response.status).toBe(201)
   return (await bodyOf(response)).share.id as string
 }
@@ -126,7 +132,18 @@ async function share(rootIds: string[] = [NOTE_A], email = "u8@example.com"): Pr
 const slice = async (id: string, session = "grantee") =>
   send(apiRequest("GET", `/${id}/notes`, undefined, session))
 
+const push = async (id: string, body: unknown, session = "grantee") =>
+  send(apiRequest("PUT", `/${id}/notes`, body, session))
+
 const sliceIds = (body: SliceBody) => body.nodes.map((row) => row.id).sort()
+
+async function ownerNode(id: string): Promise<Record<string, unknown> | undefined> {
+  const rows = await harness.control.exec(
+    "SELECT id, type, text, props, notes_id, updated_at, deleted_at FROM nodes WHERE user_id = ?1 AND id = ?2",
+    [OWNER, id],
+  )
+  return rows[0]
+}
 
 beforeEach(async () => {
   harness = await createMcpTestEnv()
@@ -155,11 +172,6 @@ describe("session", () => {
 
   it("refuses unknown methods and paths", async () => {
     expect((await send(apiRequest("PUT", "", {}))).status).toBe(405)
-    // No write route: a grantee's PUT is refused before it names any row.
-    const id = await share()
-    expect(
-      (await send(apiRequest("PUT", `/${id}/notes`, { nodes: [], links: [] }, "grantee"))).status,
-    ).toBe(405)
     expect((await send(apiRequest("GET", "/shr_x"))).status).toBe(405)
     expect((await send(apiRequest("GET", "/shr_x/other"))).status).toBe(404)
   })
@@ -189,19 +201,26 @@ describe("the address column", () => {
 describe("create", () => {
   it("stores the share and answers with it, and nothing about the address", async () => {
     const response = await send(
-      apiRequest("POST", "", { email: " U8@Example.com ", rootIds: [NOTE_A] }),
+      apiRequest("POST", "", { email: " U8@Example.com ", rootIds: [NOTE_A], permissions: [] }),
     )
     expect(response.status).toBe(201)
     const { share: created } = await bodyOf(response)
     expect(created.id).toMatch(/^shr_/)
     expect(created.granteeEmail).toBe("u8@example.com")
     expect(created.rootIds).toEqual([NOTE_A])
+    expect(created.permissions).toEqual(["read"])
     expect(created.revokedAt).toBeNull()
     // The same answer for an address nobody has signed in with.
     const unknown = await send(
       apiRequest("POST", "", { email: "nobody@example.com", rootIds: [NOTE_A] }),
     )
     expect(unknown.status).toBe(201)
+  })
+
+  it("always includes read, and keeps the verbs it was given", async () => {
+    const id = await share(["delete"])
+    const listed: SharesListBody = await bodyOf(await send(apiRequest("GET")))
+    expect(listed.given.find((entry) => entry.id === id)?.permissions).toEqual(["read", "delete"])
   })
 
   it("needs an address that looks like one", async () => {
@@ -234,6 +253,13 @@ describe("create", () => {
     expect(
       (await send(apiRequest("POST", "", { email: "u8@example.com", rootIds: [A1] }))).status,
     ).toBe(201)
+  })
+
+  it("refuses a permission it does not know", async () => {
+    const response = await send(
+      apiRequest("POST", "", { email: "u8@example.com", rootIds: [NOTE_A], permissions: ["sudo"] }),
+    )
+    expect(response.status).toBe(400)
   })
 
   it("refuses sharing with yourself", async () => {
@@ -287,7 +313,7 @@ describe("list", () => {
   })
 
   it("shows the owner what they gave and the grantee what they received", async () => {
-    const id = await share()
+    const id = await share(["read", "write"])
 
     const mine: SharesListBody = await bodyOf(await send(apiRequest("GET")))
     expect(mine.me).toEqual({ email: "u7@example.com" })
@@ -303,6 +329,7 @@ describe("list", () => {
         id,
         owner: { login: "user-7", name: null },
         rootIds: [NOTE_A],
+        permissions: ["read", "write"],
         createdAt: expect.any(Number),
       },
     ])
@@ -312,7 +339,7 @@ describe("list", () => {
   })
 
   it("resolves the grantee by address, case-insensitively, and only them", async () => {
-    await share([NOTE_A], "U8@EXAMPLE.COM")
+    await share(["read"], [NOTE_A], "U8@EXAMPLE.COM")
     const grantee: SharesListBody = await bodyOf(
       await send(apiRequest("GET", "", undefined, "grantee")),
     )
@@ -325,7 +352,7 @@ describe("list", () => {
   })
 
   it("revokes for the owner only, and a revoked share is gone for the grantee", async () => {
-    const id = await share()
+    const id = await share(["read"])
     expect((await send(apiRequest("DELETE", `/${id}`, undefined, "grantee"))).status).toBe(404)
     expect((await slice(id)).status).toBe(200)
 
@@ -342,7 +369,7 @@ describe("list", () => {
   })
 
   it("ends with the owner: a blocked owner's shares vanish", async () => {
-    const id = await share()
+    const id = await share(["read"])
     await harness.addUser(OWNER, "blocked")
     const grantee: SharesListBody = await bodyOf(
       await send(apiRequest("GET", "", undefined, "grantee")),
@@ -416,7 +443,7 @@ describe("slice", () => {
   })
 
   it("can be rooted at a block: that block and what is beneath it", async () => {
-    const id = await share([A1])
+    const id = await share(["read"], [A1])
     const body: SliceBody = await bodyOf(await slice(id))
     expect(sliceIds(body)).toEqual([A1, A2].sort())
     expect(body.links.map((row) => `${row.source_id}>${row.destination_id}`)).toEqual([
@@ -431,5 +458,272 @@ describe("slice", () => {
     expect((await slice(id, "owner")).status).toBe(404)
     expect((await slice(id, "stranger")).status).toBe(404)
     expect((await slice("shr_missing")).status).toBe(404)
+  })
+})
+
+// -----------------------------------------------------------------------------
+// Writes
+// -----------------------------------------------------------------------------
+
+describe("write", () => {
+  const edit = (id: string, text: string, at = T0 + 10): NodeRow => ({
+    ...node(id, text, "ul", NOTE_A),
+    updated_at: at,
+  })
+
+  it("is refused on a read-only share", async () => {
+    const id = await share(["read"])
+    const response = await push(id, { nodes: [edit(A1, "changed")], links: [] })
+    expect(response.status).toBe(403)
+    expect((await bodyOf(response)).error).toBe("permission_denied")
+    expect((await ownerNode(A1))?.text).toBe("one")
+  })
+
+  it("lands an edit inside the slice in the owner's partition", async () => {
+    const id = await share(["read", "write"])
+    const response = await push(id, { nodes: [edit(A2, "changed")], links: [] })
+    expect(response.status).toBe(200)
+    expect(await bodyOf(response)).toEqual({ ok: true, nodes: 1, links: 0 })
+    expect((await ownerNode(A2))?.text).toBe("changed")
+    // And it is the owner's row, not a copy in the grantee's partition.
+    const theirs = await harness.control.exec(
+      "SELECT COUNT(*) AS n FROM nodes WHERE user_id = ?1",
+      [GRANTEE],
+    )
+    expect(Number(theirs[0].n)).toBe(0)
+  })
+
+  it("cannot reach a row outside the slice, even one the owner tombstoned", async () => {
+    const id = await share(["read", "write", "delete"])
+    for (const target of [B1, NOTE_B]) {
+      const response = await push(id, { nodes: [edit(target, "pwned")], links: [] })
+      expect(response.status).toBe(403)
+      expect((await bodyOf(response)).error).toBe("outside_share")
+    }
+    expect((await ownerNode(B1))?.text).toBe("secret")
+
+    // A3 tombstoned by the owner: reviving it is a write outside the slice.
+    await corpusPut(
+      harness.tenant(OWNER),
+      { nodes: [{ ...node(A3, "three", "ul", NOTE_A), deleted_at: T0 + 1 }], links: [] },
+      T0 + 1,
+    )
+    const revive = await push(id, { nodes: [edit(A3, "back")], links: [] })
+    expect(revive.status).toBe(403)
+    expect((await ownerNode(A3))?.deleted_at).toBe(T0 + 1)
+  })
+
+  it("cannot link the slice to anything outside it", async () => {
+    const id = await share(["read", "write"])
+    const out = await push(id, {
+      nodes: [],
+      links: [{ ...link(A1, B1, "a5"), updated_at: T0 + 10 }],
+    })
+    expect(out.status).toBe(403)
+    const into = await push(id, {
+      nodes: [],
+      links: [{ ...link(NOTE_B, A1, "a5"), updated_at: T0 + 10 }],
+    })
+    expect(into.status).toBe(403)
+  })
+
+  it("accepts a new block anchored to the slice, and refuses an orphan", async () => {
+    const id = await share(["read", "write"])
+    const linked = await push(id, {
+      nodes: [{ ...node("blk_new", "new", "ul"), updated_at: T0 + 10 }],
+      links: [{ ...link(A3, "blk_new", "a0"), updated_at: T0 + 10 }],
+    })
+    expect(linked.status).toBe(200)
+    const born = await push(id, {
+      nodes: [{ ...node("blk_born", "born", "ul", NOTE_A), updated_at: T0 + 10 }],
+      links: [],
+    })
+    expect(born.status).toBe(200)
+    const orphan = await push(id, {
+      nodes: [{ ...node("blk_orphan", "orphan", "ul"), updated_at: T0 + 10 }],
+      links: [],
+    })
+    expect(orphan.status).toBe(403)
+    const bornElsewhere = await push(id, {
+      nodes: [{ ...node("blk_elsewhere", "x", "ul", NOTE_B), updated_at: T0 + 10 }],
+      links: [],
+    })
+    expect(bornElsewhere.status).toBe(403)
+
+    const body: SliceBody = await bodyOf(await slice(id))
+    expect(sliceIds(body)).toContain("blk_new")
+    expect(await ownerNode("blk_orphan")).toBeUndefined()
+  })
+
+  it("needs delete to tombstone a block, and write to unlink one", async () => {
+    const writer = await share(["read", "write"])
+    const tombstone = await push(writer, {
+      nodes: [{ ...edit(A2, "two"), deleted_at: T0 + 10 }],
+      links: [],
+    })
+    expect(tombstone.status).toBe(403)
+    expect((await bodyOf(tombstone)).error).toBe("permission_denied")
+    expect((await ownerNode(A2))?.deleted_at).toBeNull()
+
+    const unlink = await push(writer, {
+      nodes: [],
+      links: [{ ...link(A1, A2, "a0"), updated_at: T0 + 10, deleted_at: T0 + 10 }],
+    })
+    expect(unlink.status).toBe(200)
+
+    const deleter = await share(["read", "write", "delete"])
+    const deleted = await push(deleter, {
+      nodes: [{ ...edit(A3, "three"), deleted_at: T0 + 20 }],
+      links: [],
+    })
+    expect(deleted.status).toBe(200)
+    expect((await ownerNode(A3))?.deleted_at).toBe(T0 + 20)
+  })
+
+  it("leaves the owner's cursor alone and refuses the purge channel", async () => {
+    const id = await share(["read", "write"])
+    const before = await harness.control.exec(
+      "SELECT value FROM meta WHERE user_id = ?1 AND key = 'replica_cursor'",
+      [OWNER],
+    )
+    const response = await push(id, { nodes: [edit(A1, "x")], links: [], cursor: "999" })
+    expect(response.status).toBe(200)
+    const after = await harness.control.exec(
+      "SELECT value FROM meta WHERE user_id = ?1 AND key = 'replica_cursor'",
+      [OWNER],
+    )
+    expect(after).toEqual(before)
+
+    const purge = await push(id, { nodes: [], links: [], deleteNodes: [A1] })
+    expect(purge.status).toBe(400)
+    expect((await ownerNode(A1))?.deleted_at).toBeNull()
+  })
+
+  it("is per-row last-writer-wins, like any other device", async () => {
+    const id = await share(["read", "write"])
+    const stale = await push(id, { nodes: [edit(A1, "stale", T0 - 1)], links: [] })
+    expect(stale.status).toBe(200)
+    expect((await ownerNode(A1))?.text).toBe("one")
+  })
+
+  it("refuses a malformed payload", async () => {
+    const id = await share(["read", "write"])
+    expect((await push(id, { nodes: "no" })).status).toBe(400)
+  })
+
+  it("keeps a row's type and the owner's props, and never makes a note", async () => {
+    const id = await share(["read", "write", "delete"])
+    const retyped = await push(id, { nodes: [{ ...edit(A1, "one"), type: "note" }], links: [] })
+    expect(retyped.status).toBe(403)
+    expect((await ownerNode(A1))?.type).toBe("ul")
+
+    const pinned = await push(id, {
+      nodes: [{ ...edit(A1, "one"), props: '{"pinned":true}' }],
+      links: [],
+    })
+    expect(pinned.status).toBe(403)
+    expect((await bodyOf(pinned)).detail).toContain("pinned")
+    expect((await ownerNode(A1))?.props).toBeNull()
+
+    const madeNote = await push(id, {
+      nodes: [{ ...node("blk_page", "a note of theirs", "note"), updated_at: T0 + 10 }],
+      links: [{ ...link(A1, "blk_page", "a9"), updated_at: T0 + 10 }],
+    })
+    expect(madeNote.status).toBe(403)
+    expect(await ownerNode("blk_page")).toBeUndefined()
+  })
+
+  it("keeps a row's home note, and its clocks never run ahead of the server", async () => {
+    const id = await share(["read", "write"])
+    const before = Date.now()
+    const response = await push(id, {
+      nodes: [{ ...edit(A1, "rehomed"), notes_id: NOTE_B, updated_at: before + 86_400_000 }],
+      links: [],
+    })
+    expect(response.status).toBe(200)
+    const row = await ownerNode(A1)
+    expect(row?.text).toBe("rehomed")
+    expect(row?.notes_id).toBe(NOTE_A)
+    expect(Number(row?.updated_at)).toBeLessThanOrEqual(Date.now())
+    expect(Number(row?.updated_at)).toBeGreaterThanOrEqual(before)
+  })
+})
+
+// -----------------------------------------------------------------------------
+// End to end: the client's own diff path against the handler
+// -----------------------------------------------------------------------------
+
+describe("the client's push", () => {
+  /** What the grantee's runtime does: walk the slice, edit the doc, diff it
+   * into ops (`docToOps`), turn the ops into rows (`opsToRows`), push. */
+  async function editShared(
+    id: string,
+    change: (doc: ReturnType<typeof noteDoc>) => ReturnType<typeof noteDoc>,
+  ) {
+    const body: SliceBody = await bodyOf(await slice(id))
+    const snapshot = buildGraphSnapshot(body.nodes, body.links)
+    const before = noteDoc(NOTE_A, snapshot)
+    const after = change(before)
+    if (!before || !after) throw new Error("no doc")
+    const ops = docToOps(NOTE_A, after, snapshot)
+    const diff = opsToRows(snapshot, ops, T0 + 100)
+    return push(id, { nodes: diff.nodes, links: diff.links })
+  }
+
+  it("lands a typed edit and a new block exactly as the app produces them", async () => {
+    const id = await share(["read", "write"])
+    const typed = await editShared(
+      id,
+      (doc) =>
+        doc && {
+          ...doc,
+          blocks: { ...doc.blocks, [A2]: { ...doc.blocks[A2], text: "two, edited" } },
+        },
+    )
+    expect(typed.status).toBe(200)
+    expect((await ownerNode(A2))?.text).toBe("two, edited")
+
+    const added = await editShared(
+      id,
+      (doc) =>
+        doc && {
+          ...doc,
+          blocks: {
+            ...doc.blocks,
+            blk_added: { id: "blk_added", type: "ul", text: "added", children: [] },
+          },
+          rootBlockIds: [...doc.rootBlockIds, "blk_added"],
+        },
+    )
+    expect(added.status).toBe(200)
+    expect((await ownerNode("blk_added"))?.text).toBe("added")
+    const body: SliceBody = await bodyOf(await slice(id))
+    expect(sliceIds(body)).toContain("blk_added")
+  })
+
+  it("removes a block from the outline with write, but deletes it only with delete", async () => {
+    const writer = await share(["read", "write"])
+    // Removing a row is an unlink (the block keeps its note and goes to the
+    // owner's Unassigned basket) — a write, so it lands.
+    const removed = await editShared(
+      writer,
+      (doc) => doc && { ...doc, rootBlockIds: doc.rootBlockIds.filter((root) => root !== A3) },
+    )
+    expect(removed.status).toBe(200)
+    expect((await ownerNode(A3))?.deleted_at).toBeNull()
+    expect(sliceIds(await bodyOf(await slice(writer)))).not.toContain(A3)
+
+    // The context menu's Delete tombstones the node: refused without `delete`.
+    const body: SliceBody = await bodyOf(await slice(writer))
+    const snapshot = buildGraphSnapshot(body.nodes, body.links)
+    const diff = opsToRows(snapshot, deleteBlockOps(A1, snapshot), T0 + 200)
+    const refused = await push(writer, { nodes: diff.nodes, links: diff.links })
+    expect(refused.status).toBe(403)
+    expect((await ownerNode(A1))?.deleted_at).toBeNull()
+
+    const deleter = await share(["read", "write", "delete"])
+    const deleted = await push(deleter, { nodes: diff.nodes, links: diff.links })
+    expect(deleted.status).toBe(200)
+    expect((await ownerNode(A1))?.deleted_at).toBe(T0 + 200)
   })
 })
