@@ -1,7 +1,7 @@
 import { PreviewCard } from "@base-ui/react/preview-card"
 import copy from "copy-to-clipboard"
 import type React from "react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { hostOf } from "../../blocks/link"
 import { cx } from "../../utils/cx"
 import { Button } from "../button"
@@ -166,8 +166,18 @@ function EditPanel({
     const next = text.trim()
     if (next !== "" && next !== title) actions.rename(next)
   }
+  // The title is what the panel is most often opened to change (Notion
+  // focuses it too); the field takes focus as the panel opens.
+  const titleRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    titleRef.current?.focus()
+  }, [])
+  // Keystrokes and clicks in the fields are the panel's, never the row's:
+  // the popup is portalled, but React events still bubble to the row, whose
+  // keymap would read an arrow or Escape and whose click would select it.
   const stop = (event: React.SyntheticEvent) => event.stopPropagation()
   return (
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <form
       data-testid="link-card-panel"
       className="flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-3 p-3"
@@ -199,7 +209,7 @@ function EditPanel({
           onChange={(event) => setText(event.target.value)}
           onBlur={saveTitle}
           placeholder="Display text"
-          autoFocus
+          ref={titleRef}
           className={FIELD}
         />
       </label>
