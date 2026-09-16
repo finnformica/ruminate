@@ -188,6 +188,28 @@ function MintedInvite({
 
 const formatDate = (at: number): string => new Date(at).toLocaleDateString()
 
+/**
+ * An invite's state as a coloured dot and a word: the sync status's palette
+ * (`sync-status.tsx`) — success for a link that let someone in, danger for
+ * one that never will (expired, revoked), pending for one still out there.
+ */
+const STATE_BADGE: Record<ReturnType<typeof inviteState>, { label: string; className: string }> = {
+  live: { label: "Live", className: "text-text-pending" },
+  redeemed: { label: "Used", className: "text-text-success" },
+  expired: { label: "Expired", className: "text-text-danger" },
+  revoked: { label: "Revoked", className: "text-text-danger" },
+}
+
+function StateBadge({ state }: { state: ReturnType<typeof inviteState> }) {
+  const badge = STATE_BADGE[state]
+  return (
+    <span className={cx("inline-flex items-center gap-1.5 text-sm leading-4", badge.className)}>
+      <span aria-hidden="true" className="size-2 rounded-full bg-current" />
+      {badge.label}
+    </span>
+  )
+}
+
 function InviteList({
   invites,
   onRevoke,
@@ -205,17 +227,12 @@ function InviteList({
         return (
           <li
             key={invite.id}
-            className={cx(
-              "flex items-start justify-between gap-4 border-t border-border-secondary pt-3 first:border-t-0 first:pt-0",
-              state !== "live" && "opacity-50",
-            )}
+            className="flex items-start justify-between gap-4 border-t border-border-secondary pt-3 first:border-t-0 first:pt-0"
           >
             <div className="flex w-0 grow flex-col gap-1">
-              <span className="truncate leading-4">
-                {invite.note ?? "Invite"}
-                {state !== "live" ? (
-                  <span className="ml-2 text-sm text-text-secondary">({state})</span>
-                ) : null}
+              <span className="flex items-center gap-3 leading-4">
+                <span className="truncate">{invite.note ?? "Invite"}</span>
+                <StateBadge state={state} />
               </span>
               <span className="text-sm leading-5 text-text-secondary">
                 {state === "redeemed" && invite.redeemedAt !== null
