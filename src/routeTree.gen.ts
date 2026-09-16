@@ -14,8 +14,10 @@ import { Route as rootRoute } from './routes/__root'
 import { Route as AppRootImport } from './routes/_appRoot'
 import { Route as AppRootIndexImport } from './routes/_appRoot.index'
 import { Route as AppRootSettingsImport } from './routes/_appRoot.settings'
+import { Route as AppRootAdminImport } from './routes/_appRoot.admin'
 import { Route as AppRootNotesIndexImport } from './routes/_appRoot.notes.index'
 import { Route as AppRootNotesSplatImport } from './routes/_appRoot.notes_.$'
+import { Route as AppRootInviteTokenImport } from './routes/_appRoot.invite.$token'
 
 // Create/Update Routes
 
@@ -36,6 +38,12 @@ const AppRootSettingsRoute = AppRootSettingsImport.update({
   getParentRoute: () => AppRootRoute,
 } as any)
 
+const AppRootAdminRoute = AppRootAdminImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AppRootRoute,
+} as any)
+
 const AppRootNotesIndexRoute = AppRootNotesIndexImport.update({
   id: '/notes/',
   path: '/notes/',
@@ -45,6 +53,12 @@ const AppRootNotesIndexRoute = AppRootNotesIndexImport.update({
 const AppRootNotesSplatRoute = AppRootNotesSplatImport.update({
   id: '/notes_/$',
   path: '/notes/$',
+  getParentRoute: () => AppRootRoute,
+} as any)
+
+const AppRootInviteTokenRoute = AppRootInviteTokenImport.update({
+  id: '/invite/$token',
+  path: '/invite/$token',
   getParentRoute: () => AppRootRoute,
 } as any)
 
@@ -59,6 +73,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRootImport
       parentRoute: typeof rootRoute
     }
+    '/_appRoot/admin': {
+      id: '/_appRoot/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AppRootAdminImport
+      parentRoute: typeof AppRootImport
+    }
     '/_appRoot/settings': {
       id: '/_appRoot/settings'
       path: '/settings'
@@ -71,6 +92,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AppRootIndexImport
+      parentRoute: typeof AppRootImport
+    }
+    '/_appRoot/invite/$token': {
+      id: '/_appRoot/invite/$token'
+      path: '/invite/$token'
+      fullPath: '/invite/$token'
+      preLoaderRoute: typeof AppRootInviteTokenImport
       parentRoute: typeof AppRootImport
     }
     '/_appRoot/notes_/$': {
@@ -93,15 +121,19 @@ declare module '@tanstack/react-router' {
 // Create and export the route tree
 
 interface AppRootRouteChildren {
+  AppRootAdminRoute: typeof AppRootAdminRoute
   AppRootSettingsRoute: typeof AppRootSettingsRoute
   AppRootIndexRoute: typeof AppRootIndexRoute
+  AppRootInviteTokenRoute: typeof AppRootInviteTokenRoute
   AppRootNotesSplatRoute: typeof AppRootNotesSplatRoute
   AppRootNotesIndexRoute: typeof AppRootNotesIndexRoute
 }
 
 const AppRootRouteChildren: AppRootRouteChildren = {
+  AppRootAdminRoute: AppRootAdminRoute,
   AppRootSettingsRoute: AppRootSettingsRoute,
   AppRootIndexRoute: AppRootIndexRoute,
+  AppRootInviteTokenRoute: AppRootInviteTokenRoute,
   AppRootNotesSplatRoute: AppRootNotesSplatRoute,
   AppRootNotesIndexRoute: AppRootNotesIndexRoute,
 }
@@ -111,15 +143,19 @@ const AppRootRouteWithChildren =
 
 export interface FileRoutesByFullPath {
   '': typeof AppRootRouteWithChildren
+  '/admin': typeof AppRootAdminRoute
   '/settings': typeof AppRootSettingsRoute
   '/': typeof AppRootIndexRoute
+  '/invite/$token': typeof AppRootInviteTokenRoute
   '/notes/$': typeof AppRootNotesSplatRoute
   '/notes': typeof AppRootNotesIndexRoute
 }
 
 export interface FileRoutesByTo {
+  '/admin': typeof AppRootAdminRoute
   '/settings': typeof AppRootSettingsRoute
   '/': typeof AppRootIndexRoute
+  '/invite/$token': typeof AppRootInviteTokenRoute
   '/notes/$': typeof AppRootNotesSplatRoute
   '/notes': typeof AppRootNotesIndexRoute
 }
@@ -127,22 +163,27 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRoute
   '/_appRoot': typeof AppRootRouteWithChildren
+  '/_appRoot/admin': typeof AppRootAdminRoute
   '/_appRoot/settings': typeof AppRootSettingsRoute
   '/_appRoot/': typeof AppRootIndexRoute
+  '/_appRoot/invite/$token': typeof AppRootInviteTokenRoute
   '/_appRoot/notes_/$': typeof AppRootNotesSplatRoute
   '/_appRoot/notes/': typeof AppRootNotesIndexRoute
 }
 
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '' | '/settings' | '/' | '/notes/$' | '/notes'
+  fullPaths:
+    '' | '/admin' | '/settings' | '/' | '/invite/$token' | '/notes/$' | '/notes'
   fileRoutesByTo: FileRoutesByTo
-  to: '/settings' | '/' | '/notes/$' | '/notes'
+  to: '/admin' | '/settings' | '/' | '/invite/$token' | '/notes/$' | '/notes'
   id:
     | '__root__'
     | '/_appRoot'
+    | '/_appRoot/admin'
     | '/_appRoot/settings'
     | '/_appRoot/'
+    | '/_appRoot/invite/$token'
     | '/_appRoot/notes_/$'
     | '/_appRoot/notes/'
   fileRoutesById: FileRoutesById
@@ -172,11 +213,17 @@ export const routeTree = rootRoute
     "/_appRoot": {
       "filePath": "_appRoot.tsx",
       "children": [
+        "/_appRoot/admin",
         "/_appRoot/settings",
         "/_appRoot/",
+        "/_appRoot/invite/$token",
         "/_appRoot/notes_/$",
         "/_appRoot/notes/"
       ]
+    },
+    "/_appRoot/admin": {
+      "filePath": "_appRoot.admin.tsx",
+      "parent": "/_appRoot"
     },
     "/_appRoot/settings": {
       "filePath": "_appRoot.settings.tsx",
@@ -184,6 +231,10 @@ export const routeTree = rootRoute
     },
     "/_appRoot/": {
       "filePath": "_appRoot.index.tsx",
+      "parent": "/_appRoot"
+    },
+    "/_appRoot/invite/$token": {
+      "filePath": "_appRoot.invite.$token.tsx",
       "parent": "/_appRoot"
     },
     "/_appRoot/notes_/$": {

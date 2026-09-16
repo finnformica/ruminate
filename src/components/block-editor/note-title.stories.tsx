@@ -44,9 +44,12 @@ export const ReadOnly: Story = {
   ),
 }
 
-/** The title above the block editor, mirroring the note page layout, to check
- * the title is the largest header and lines up with the heading blocks. */
-function PageHarness() {
+/** The title above the block editor, mirroring the note page layout (the wide
+ * page's 40px gutter and its header pull, `--note-header-pull`), to check the
+ * title is the largest header and hangs into the gutter ahead of the blocks.
+ * Zoomed, the page hides the title: the breadcrumb and the zoom title hang in
+ * its place. */
+function PageHarness({ zoomRootId }: { zoomRootId?: string }) {
   const [name, setName] = useState("Nvidia Sync")
   const [doc, setDoc] = useState<BlockDoc>(() =>
     parse(
@@ -54,16 +57,18 @@ function PageHarness() {
     ),
   )
   return (
-    <div style={{ maxWidth: 700, padding: 24 }}>
+    <div className="[--note-header-pull:27px]" style={{ maxWidth: 700, padding: 40 }}>
       <div className="flex flex-col gap-3">
-        <NoteTitle
-          title={name}
-          onRename={(next) => {
-            setName(next)
-            return true
-          }}
-        />
-        <BlockEditor doc={doc} onChange={setDoc} />
+        {zoomRootId ? null : (
+          <NoteTitle
+            title={name}
+            onRename={(next) => {
+              setName(next)
+              return true
+            }}
+          />
+        )}
+        <BlockEditor doc={doc} onChange={setDoc} zoomRootId={zoomRootId} noteTitle={name} />
       </div>
     </div>
   )
@@ -71,4 +76,8 @@ function PageHarness() {
 
 export const OnPage: Story = {
   render: () => <PageHarness />,
+}
+
+export const OnPageZoomed: Story = {
+  render: () => <PageHarness zoomRootId="blk_h1" />,
 }

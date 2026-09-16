@@ -20,9 +20,9 @@
 // — the `gh_refresh` HttpOnly cookie set by /github-auth (SameSite=Lax blocks
 // cross-site sends) plus the GitHub access token as `Authorization: Bearer`,
 // verified against `GET https://api.github.com/user`. The *verified* numeric
-// id is then resolved against the control plane (`tenancy.ts`: users /
-// allowlist tables per SIGNUP_MODE, with ALLOWED_GITHUB_ID as the fail-closed
-// bootstrap), and names the tenant.
+// id is then resolved against the control plane (`tenancy.ts`: the users
+// table, and per SIGNUP_MODE an invite, with ALLOWED_GITHUB_ID as the
+// fail-closed bootstrap), and names the tenant.
 //
 // TENANT-SCOPING INVARIANT: the only handle this file hands to corpus code is
 // `forTenant(corpusDriver(env), session)` — minted from the identity GitHub

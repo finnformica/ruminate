@@ -533,7 +533,10 @@ await story("blockeditor--zoomed")
   await page.screenshot({ path: `${OUT}/07-zoomed.png` })
   check("zoom: breadcrumb renders", await page.getByTestId("zoom-breadcrumb").isVisible())
   check("zoom: blocks outside the subtree are hidden", (await block("Project ideas").count()) === 0)
-  check("zoom: the zoomed block renders as the title", await block("A bullet point").isVisible())
+  check(
+    "zoom: the zoomed block renders as the title",
+    await page.locator("h1").filter({ hasText: "A bullet point" }).isVisible(),
+  )
   check("zoom: its child renders below", await block("A nested bullet").isVisible())
 }
 

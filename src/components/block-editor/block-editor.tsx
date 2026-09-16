@@ -5,6 +5,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import type React from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent, TouchEvent } from "react"
 import { isDatabaseModeAtom, newBlockMarkerAtom } from "../../global-state"
+import { useFeature } from "../../data/features"
 import { sharedOriginAtom } from "../../data/shared-mode"
 import { shareDialogAtom } from "../share-note-dialog"
 import type { Block, BlockDoc, ChangeHint } from "../../blocks/types"
@@ -20,7 +21,9 @@ import {
   type UploadedImage,
 } from "../../data/images"
 import { imageAlignOf, imagePropsOf, withImageLayout, type ImageAlign } from "../../blocks/image"
+import { hostOf, hrefOf, isWebUrl, linkifyPastedText, linksInText } from "../../blocks/link"
 import { ImageLightbox } from "./image-lightbox"
+import { NoteTitle } from "./note-title"
 import {
   isHeading,
   leadingMarker,
@@ -123,7 +126,6 @@ import {
   subtreeIds,
 } from "../../blocks/ops"
 import { htmlToMarkdown } from "../../utils/html-to-markdown"
-import type { BlockRevealRequest } from "../../utils/note-outline"
 import {
   clipboardBlocksToDoc,
   clipboardBlocksToDocWithIds,
@@ -141,27 +143,6 @@ import {
 } from "./block-item"
 export type { BlockDebugOptions } from "./block-item"
 import { useBlockHistory } from "./use-block-history"
-
-/** The row (occurrence key) of the first heading block whose text matches
- * `heading`, in document order, or null. Used to highlight a heading arrived
- * at from the command menu. */
-function findHeadingKey(doc: BlockDoc, heading: string): string | null {
-  const target = heading.trim()
-  for (const key of occurrenceKeys(doc)) {
-    const block = doc.blocks[idOfKey(key)]
-    if (block && isHeading(block.type) && block.text.trim() === target) return key
-  }
-  return null
-}
-
-/** What a reveal `cancel` puts back: the selected row and every scroll
- * position captured when the outline palette's first preview moved the view. */
-type RevealSnapshot = {
-  selected: string | null
-  scrolls: { el: Element; top: number; left: number }[]
-  windowX: number
-  windowY: number
-}
 
 /** The first row (in document order) of a block present in `restored` but
  * not in `current` — the block an undo brought back, e.g. after a delete. */
@@ -318,7 +299,6 @@ export function BlockEditor({
   doc,
   onChange,
   startEditing = false,
-  highlightHeading,
   collapsed: collapsedProp,
   onToggleCollapse,
   onExitTop,
@@ -334,7 +314,6 @@ export function BlockEditor({
   zoomRootId: zoomRootIdProp = null,
   onZoomNavigate,
   noteTitle,
-  revealRequest = null,
   resolveBlocks,
   debug,
   noteId,
@@ -374,8 +353,6 @@ export function BlockEditor({
   knownBlock?: (id: string) => boolean
   /** Start with the first block in edit mode (e.g. a brand-new note). */
   startEditing?: boolean
-  /** Highlight the block for this heading text on mount / when it changes. */
-  highlightHeading?: string
   /**
    * Folded occurrence keys (`src/blocks/view.ts`). Optional: when provided
    * (with `onToggleCollapse`), collapse is controlled and persisted by the
@@ -444,15 +421,10 @@ export function BlockEditor({
   zoomRootId?: string | null
   /** Called to change the zoom level (`null` exits). Makes zoom controlled. */
   onZoomNavigate?: (id: string | null) => void
-  /** The note's title — the breadcrumb's first crumb while zoomed. */
+  /** The note's title — the breadcrumb's first crumb while zoomed. (The
+   * zoomed block itself is drawn as the view's title beneath the breadcrumb,
+   * by the same `NoteTitle` the page draws the note's with.) */
   noteTitle?: string
-  /**
-   * Driven by the command palette's outline mode (⌘P): preview highlights +
-   * scrolls a block live behind the dialog, commit keeps the selection there,
-   * cancel restores what the first preview captured. Messages are consumed by
-   * nonce, so a request left over from a previous mount is ignored.
-   */
-  revealRequest?: BlockRevealRequest | null
   /**
    * Live subtree markdown per block id from the note corpus — the "paste as
    * link" lookup (see `embeddedPasteFragment`). Optional: without it
@@ -503,35 +475,35 @@ export function BlockEditor({
     else setZoomInternal(id)
   }
   const zoomRoot = zoomRootId ? (doc.blocks[zoomRootId] ?? null) : null
-  // The zoomed block's row: its first occurrence in the document.
+  // The zoomed block's key — its first occurrence in the document — which
+  // its children's row keys hang off. Zoomed, the block itself is not a row:
+  // it is the view's title, drawn above the rows as the note title is (the
+  // same `NoteTitle`, fed the block's text), and leaving the first row upward
+  // (`exitTop`) selects it, as it would the note title.
   const zoomKey = useMemo(() => (zoomRoot ? zoomRootKey(doc, zoomRoot.id) : null), [doc, zoomRoot])
+  const [zoomTitleFocus, setZoomTitleFocus] = useState(0)
 
   // Everything positional — the selection, its anchor, edit focus — is a row:
   // an occurrence key (`src/blocks/view.ts`), so a block that appears twice
   // in the note is two places to be. The block itself is by id.
 
   // The first selectable row: while zoomed, the zoom root's first child (the
-  // title itself is deliberately not the landing spot — avoids accidental edits).
+  // title is not a row; a childless zoom has no row to land on).
   const firstKey =
     zoomRoot && zoomKey
       ? zoomRoot.children[0]
         ? keyOf(zoomKey, zoomRoot.children[0])
-        : zoomKey
+        : null
       : (doc.rootBlockIds[0] ?? null)
   const [focus, setFocus] = useState<FocusRequest | null>(() =>
     startEditing && firstKey ? { key: firstKey } : null,
   )
-  // A note opens with its first block highlighted (or the heading asked
-  // for). A caller can ask for nothing highlighted until the keyboard
-  // arrives (`initialSelection: "none"` — the palette's lists: two under
-  // one query would otherwise each show a highlight, and neither where the
-  // keys are).
+  // A note opens with its first block highlighted. A caller can ask for
+  // nothing highlighted until the keyboard arrives (`initialSelection:
+  // "none"` — the palette's lists: two under one query would otherwise each
+  // show a highlight, and neither where the keys are).
   const [selected, setSelected] = useState<string | null>(() =>
-    initialSelection === "none"
-      ? null
-      : highlightHeading
-        ? (findHeadingKey(doc, highlightHeading) ?? firstKey)
-        : firstKey,
+    initialSelection === "none" ? null : firstKey,
   )
   const [collapsedInternal, setCollapsedInternal] = useState<Set<string>>(new Set())
   const collapsed = collapsedProp ?? collapsedInternal
@@ -566,21 +538,13 @@ export function BlockEditor({
   // The rows' keys in the order they appear on screen — what up/down
   // navigation and a Shift+Arrow range walk.
   const visibleOrder = useMemo(() => rows.map((row) => row.key), [rows])
-  // The row a block id is addressed by when something outside names a block
-  // (the outline palette, `?heading=`): its first row in the view, else its
-  // first occurrence in the document (a block hidden under a fold).
-  const keyOfId = (id: string, inDoc: BlockDoc = doc): string => {
-    for (const row of rows) if (row.id === id) return row.key
-    return firstOccurrenceKey(inDoc, id) ?? id
-  }
-
   // The container is the focusable keyboard target for select mode.
   const containerRef = useRef<HTMLDivElement>(null)
 
   // ── Keyboard ownership ────────────────────────────────────────────────────
   // Whether the editor owns the keyboard: focus (container or a textarea) is
   // inside the container. While it doesn't — focus moved to the sidebar, a
-  // dialog, the ⌘P palette mid-preview — the selection highlight demotes to a
+  // dialog, the ⌘K palette — the selection highlight demotes to a
   // quiet neutral (`.block-highlight-inactive`), Finder-style, so "arrows work
   // here" is never claimed falsely. Tracked via the container's focus/blur
   // (they bubble, i.e. focusin/focusout); the blur side settles on a rAF so
@@ -640,8 +604,8 @@ export function BlockEditor({
     if (navigable) containerRef.current?.focus({ preventScroll: true })
   }
 
-  // Re-highlight when the target heading changes (Cmd-K into the open note).
-  // Reads the latest doc via a ref so this only runs on heading changes.
+  // The latest doc, for effects and handlers that must not re-run on every
+  // edit.
   const docRef = useRef(doc)
   docRef.current = doc
 
@@ -677,7 +641,10 @@ export function BlockEditor({
           ? undefined
           : occurrenceKeys(current).find((key) => isWithin(key, rootKey) && idOfKey(key) === prev)
       if (back) setSelected(back)
-      else setSelected(root.children[0] ? keyOf(rootKey, root.children[0]) : rootKey)
+      else if (root.children[0]) setSelected(keyOf(rootKey, root.children[0]))
+      // Nothing beneath the block yet: the title takes the keyboard, so Enter
+      // on it makes the first child.
+      else setZoomTitleFocus((n) => n + 1)
     } else if (prev !== null) {
       const back = firstOccurrenceKey(current, prev)
       if (back) setSelected(back)
@@ -685,119 +652,10 @@ export function BlockEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoomRootId, navigable])
 
-  useEffect(() => {
-    if (!highlightHeading) return
-    const key = findHeadingKey(docRef.current, highlightHeading)
-    if (key) {
-      setFocus(null)
-      setSelected(key)
-    }
-  }, [highlightHeading])
-
-  // ── Reveal requests (⌘P outline palette) ──────────────────────────────────
-  // The palette drives the editor through small {type, id, nonce} messages —
-  // see `BlockRevealRequest`. All capture/restore state lives here so the
-  // palette never has to know the editor's selection or scroll internals.
-  const selectedRef = useRef(selected)
-  selectedRef.current = selected
   // Survives deselection (Escape, focus loss): the row `refocusSignal`
   // returns the user to.
   const lastSelectedRef = useRef(selected)
   if (selected) lastSelectedRef.current = selected
-  // Non-null exactly while a preview sequence is underway. Doubles as the
-  // "palette is driving" flag: the focus-grab effect below must not steal
-  // focus from the palette's input as previews move the selection.
-  const revealSnapshotRef = useRef<RevealSnapshot | null>(null)
-  // Consume messages by nonce so a request left over in the atom from a
-  // previous mount (or a re-render) never re-fires.
-  const lastRevealNonceRef = useRef(revealRequest?.nonce ?? 0)
-
-  // Center a row's content line, same target the select-mode auto-scroll
-  // uses. Called directly so a repeat jump to the already-selected row still
-  // scrolls (state effects wouldn't re-run — the old `?heading=` param bug).
-  const scrollBlockLineIntoView = (key: string) => {
-    const row = containerRef.current?.querySelector<HTMLElement>(`[data-occurrence="${key}"]`)
-    const line = row?.querySelector<HTMLElement>("[data-block-line]") ?? row
-    if (line && typeof line.scrollIntoView === "function") line.scrollIntoView({ block: "center" })
-  }
-
-  const captureRevealSnapshot = (): RevealSnapshot => {
-    // Record every scrollable ancestor of the editor (plus the window), so the
-    // restore is exact no matter which container scrollIntoView actually moved.
-    const scrolls: RevealSnapshot["scrolls"] = []
-    let node: HTMLElement | null = containerRef.current
-    while (node) {
-      if (node.scrollHeight > node.clientHeight || node.scrollWidth > node.clientWidth) {
-        scrolls.push({ el: node, top: node.scrollTop, left: node.scrollLeft })
-      }
-      node = node.parentElement
-    }
-    return {
-      selected: selectedRef.current,
-      scrolls,
-      windowX: window.scrollX,
-      windowY: window.scrollY,
-    }
-  }
-
-  useEffect(() => {
-    const request = revealRequest
-    if (!request || request.nonce === lastRevealNonceRef.current) return
-    lastRevealNonceRef.current = request.nonce
-    if (readOnly) return
-    const current = docRef.current
-    // The palette names a block; the editor lands on its row (the first on
-    // screen, or the first the document has).
-    if (request.type === "preview") {
-      if (!current.blocks[request.id]) return
-      const key = keyOfId(request.id, current)
-      // The first preview of a sequence captures what cancel must restore.
-      if (!revealSnapshotRef.current) revealSnapshotRef.current = captureRevealSnapshot()
-      setAnchorKey(null)
-      setFocus(null)
-      setSelected(key)
-      scrollBlockLineIntoView(key)
-      return
-    }
-    const snapshot = revealSnapshotRef.current
-    revealSnapshotRef.current = null
-    if (request.type === "commit") {
-      if (current.blocks[request.id]) {
-        const key = keyOfId(request.id, current)
-        setAnchorKey(null)
-        setFocus(null)
-        setSelected(key)
-        scrollBlockLineIntoView(key)
-      }
-      // After the dialog unmounts (and its own focus juggling settles), make
-      // the container the keyboard target so arrows work from the landing spot.
-      setTimeout(() => focusContainer())
-      return
-    }
-    // cancel — put back exactly what the first preview captured.
-    if (!snapshot) return
-    setAnchorKey(null)
-    setFocus(null)
-    setSelected(
-      snapshot.selected === null
-        ? null
-        : hasOccurrence(current, snapshot.selected)
-          ? snapshot.selected
-          : firstSelectable(current),
-    )
-    // The palette's close handler refocuses its previously-active element in a
-    // timeout queued before this one, so the scroll we restore here is the one
-    // that sticks.
-    setTimeout(() => {
-      for (const { el, top, left } of snapshot.scrolls) {
-        el.scrollTop = top
-        el.scrollLeft = left
-      }
-      window.scrollTo(snapshot.windowX, snapshot.windowY)
-      focusContainer()
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revealRequest, readOnly])
 
   // The selected rows. Single select is just `[selected]`; a Shift+Arrow
   // range is the contiguous span of `visibleOrder` between anchor and head.
@@ -950,17 +808,16 @@ export function BlockEditor({
     return selectedKeys.filter((key) => !ancestorKeys(key).some((ancestor) => set.has(ancestor)))
   }
 
-  // Selection roots for *structural* ops. The zoomed title can be part of a
-  // selection (e.g. the Cmd+A "page" rung) but must never be moved, indented,
-  // outdented, or deleted from inside its own view.
-  const structuralRoots = () => selectionRoots().filter((key) => key !== zoomKey)
+  // Selection roots for *structural* ops — the rows to move, indent, outdent
+  // or delete once each.
+  const structuralRoots = selectionRoots
 
   // The first selectable row of a given doc, honouring the current zoom.
   const firstSelectable = (d: BlockDoc): string | null => {
     if (zoomRootId && d.blocks[zoomRootId]) {
       const rootKey = zoomRootKey(d, zoomRootId)
       const child = d.blocks[zoomRootId].children[0]
-      return child ? keyOf(rootKey, child) : rootKey
+      return child ? keyOf(rootKey, child) : null
     }
     return d.rootBlockIds[0] ?? null
   }
@@ -1031,8 +888,11 @@ export function BlockEditor({
     history.commit(doc, next, { type: "structural" })
     setAnchorKey(null)
     setFocus(null)
-    // An emptied doc regains a blank block via the editor's trailing-blank rule.
-    setSelected(focusKey ?? firstSelectable(next))
+    // An emptied doc regains a blank block via the editor's trailing-blank
+    // rule; an emptied zoomed view hands the keyboard up to its title.
+    const target = focusKey ?? firstSelectable(next)
+    if (target === null && zoomRoot) exitTop()
+    else setSelected(target)
   }
 
   // Serialize the selected subtrees to block markdown (markers + nesting +
@@ -1081,21 +941,27 @@ export function BlockEditor({
   // take the keyboard from wherever it is — the query box, mid-word.
   const seenFocusFirst = useRef(focusFirstSignal)
   const seenFocusLast = useRef(focusLastSignal)
-  useEffect(() => {
-    if (focusFirstSignal === seenFocusFirst.current) return
-    seenFocusFirst.current = focusFirstSignal
-    if (!focusFirstSignal || !navigable) return
+  // Down from a title — the note's above the editor, or the zoom title inside
+  // it — into the first row. Mirrors the title's own state: editing the title
+  // drops into the first block editing (caret at its start); a highlighted
+  // title just highlights it.
+  const focusFirstRow = (mode: "edit" | "select") => {
+    if (!navigable) return
     const first = firstSelectable(docRef.current)
     if (!first) return
     setAnchorKey(null)
     setSelected(first)
-    // Mirror the title's own state: editing the title drops into the first block
-    // editing (caret at its start); a highlighted title just highlights it.
-    setFocus(focusFirstMode === "edit" ? { key: first, atStart: true } : null)
+    setFocus(mode === "edit" ? { key: first, atStart: true } : null)
     // Take the keyboard now: the first row may already be the selection (it
     // is, on a fresh mount), in which case nothing above re-renders and the
     // focus-keeping effect never runs.
-    if (focusFirstMode !== "edit") containerRef.current?.focus({ preventScroll: true })
+    if (mode !== "edit") containerRef.current?.focus({ preventScroll: true })
+  }
+  useEffect(() => {
+    if (focusFirstSignal === seenFocusFirst.current) return
+    seenFocusFirst.current = focusFirstSignal
+    if (!focusFirstSignal) return
+    focusFirstRow(focusFirstMode)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusFirstSignal])
 
@@ -1130,12 +996,12 @@ export function BlockEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refocusSignal])
 
-  // When the caller bumps `newRootSignal` (Enter or Cmd+Enter on the note
-  // title), add a fresh root block at the top and edit it. The block is of
+  // Enter or Cmd+Enter on a title — the note's (`newRootSignal`) or the zoom
+  // title's — adds a fresh root block at the top and edits it. The block is of
   // the type Enter makes (Settings → Editor, "New block markdown"), as one
   // made at the end of a block would be.
-  useEffect(() => {
-    if (!newRootSignal || readOnly) return
+  const newRootBlock = () => {
+    if (readOnly) return
     const current = docRef.current
     const type = typeOfMarker(newBlockMarker)
     // While zoomed, "a new root" means a new first child of the zoom root —
@@ -1178,8 +1044,32 @@ export function BlockEditor({
     setAnchorKey(null)
     setSelected(key)
     setFocus({ key })
+  }
+  useEffect(() => {
+    if (newRootSignal) newRootBlock()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newRootSignal])
+
+  // The zoom title's rename: the zoomed block's text, one history step.
+  const renameZoomRoot = (text: string): boolean => {
+    const current = docRef.current
+    const root = zoomRootId ? current.blocks[zoomRootId] : undefined
+    if (!root || root.text === text) return false
+    const next = updateBlock(current, root.id, { text })
+    history.commit(current, next, { type: "text", blockId: root.id })
+    // Enter commits the name and makes a first child in the same keystroke
+    // (`newRootBlock`, before the rename has rendered): it must build on this.
+    docRef.current = next
+    return true
+  }
+  // The title is one plain line, as the note's is: a block whose text is more
+  // than that (a code block, a caption under a picture, text with line
+  // breaks) reads as the title but is edited in its own row, un-zoomed.
+  const zoomTitleEditable =
+    zoomRoot !== null &&
+    zoomRoot.type !== "code" &&
+    zoomRoot.type !== "image" &&
+    !zoomRoot.text.includes("\n")
 
   const edit = (key: string, atStart = false) => {
     if (readOnly) return
@@ -1302,9 +1192,25 @@ export function BlockEditor({
 
   // Interpret a command's result: commit any doc change to history, toggle
   // collapse, and move focus/selection where the command asked.
+  // Leaving the rows upward: the highlight clears below while focus moves up
+  // to the title — the zoom title here, or whatever the page put above the
+  // editor (the note title).
+  const exitTop = () => {
+    setFocus(null)
+    setSelected(null)
+    setAnchorKey(null)
+    if (zoomRoot) setZoomTitleFocus((n) => n + 1)
+    else onExitTop?.()
+  }
   const applyFocus = (intent: FocusIntent) => {
     // Any single-target command collapses a multi-row selection.
     setAnchorKey(null)
+    // Zoomed, a target outside the view (the zoomed block itself, or a root
+    // the view does not show — where a delete falls back to) is the title.
+    if (intent.key !== null && zoomKey && !isWithin(intent.key, zoomKey)) {
+      exitTop()
+      return
+    }
     if (intent.mode === "select") {
       setFocus(null)
       setSelected(intent.key)
@@ -1328,14 +1234,7 @@ export function BlockEditor({
     // selection (first child on zoom-in, the block zoomed out from on zoom-out).
     if (result.zoom !== undefined) navigateZoom(result.zoom.id)
     if (result.notice) toast(result.notice)
-    if (result.exitTop) {
-      // Leaving the top clears the block highlight so nothing stays selected
-      // below while focus moves up to the title.
-      setFocus(null)
-      setSelected(null)
-      setAnchorKey(null)
-      onExitTop?.()
-    }
+    if (result.exitTop) exitTop()
     // Leaving the bottom is the same, downward — only where there is
     // something below to take the keyboard; otherwise the key is consumed
     // and the last row stays highlighted.
@@ -1419,6 +1318,7 @@ export function BlockEditor({
       collapsed: row.collapsed,
       places: parentCountOf ? Math.max(1, parentCountOf(row.id)) : 1,
       pinned: block.props?.pinned === true,
+      links: block.type === "code" ? [] : linksInText(block.text),
       image:
         block.type === "image"
           ? { align: imageAlignOf(block), sized: imagePropsOf(block).size !== undefined }
@@ -1508,9 +1408,7 @@ export function BlockEditor({
       const targetId = idOfKey(key)
       const target = current.blocks[targetId]
       if (!target) break
-      const row = rows.find((r) => r.key === key)
       const blank =
-        !row?.zoomTitle &&
         (target.type === "text" || target.type === "ul") &&
         target.text === "" &&
         target.children.length === 0
@@ -1534,13 +1432,8 @@ export function BlockEditor({
         const image: Block = { id: blockId(), type: "image", text: "", children: [] }
         imageId = image.id
         restore = null
-        if (row?.zoomTitle) {
-          next = insertFirstChild(current, targetId, image)
-          nextKey = keyOf(key, image.id)
-        } else {
-          next = insertAfter(current, key, image)
-          nextKey = keyOf(parentKeyOf(key), image.id)
-        }
+        next = insertAfter(current, key, image)
+        nextKey = keyOf(parentKeyOf(key), image.id)
       }
       beginPendingImage(imageId, file)
       history.commit(current, next, { type: "structural" })
@@ -1640,7 +1533,9 @@ export function BlockEditor({
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const sharedOrigin = useAtomValue(sharedOriginAtom)
   const openShareDialog = useSetAtom(shareDialogAtom)
-  const canShare = noteId !== undefined && isDatabaseMode && !sharedOrigin.has(noteId)
+  const sharingEnabled = useFeature("sharing")
+  const canShare =
+    noteId !== undefined && isDatabaseMode && sharingEnabled && !sharedOrigin.has(noteId)
   // A block is the user's own to pin when the editor has a note of theirs
   // behind it — signed out too, where the sample notes are theirs to play
   // with — and never in a note someone shared with them: the pin is a prop
@@ -1658,8 +1553,81 @@ export function BlockEditor({
     if (next !== doc) history.commit(doc, next, { type: "structural" })
   }
 
+  // ── Links ─────────────────────────────────────────────────────────────────
+  // Leaving a row's edit mode writes out any bare address in it as a link
+  // named for its host (docs/links.md), as a space typed after one does
+  // and a paste does — so an address typed and left by Escape, a click
+  // elsewhere or Enter reads as a name too. Its own undo step, so the bare
+  // address is one ⌘Z away. Never in a code block.
+  const lastEdited = useRef<string | null>(null)
+  useEffect(() => {
+    const previous = lastEdited.current
+    lastEdited.current = focus?.key ?? null
+    if (previous === null || previous === focus?.key || readOnly) return
+    const current = docRef.current
+    const block = current.blocks[idOfKey(previous)]
+    if (!block || block.type === "code" || block.type === "note") return
+    const text = linkifyPastedText(block.text)
+    if (text === block.text) return
+    history.commit(current, updateBlock(current, block.id, { text }), { type: "structural" })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus])
+  /** The link card the menu asked to open (a touch screen's "Edit link"):
+   * the row and the address; the row's rendered link opens its card. */
+  const [linkCard, setLinkCard] = useState<{ key: string; href: string } | null>(null)
+
+  /**
+   * A link's display text and/or address, changed in the row's text
+   * (docs/links.md) in one rewrite: `[title](href)` becomes
+   * `[next.title](next.href)`. A link that was a bare address, or an
+   * autolink written another way, is found by its address or its text and
+   * written out as a link; a new address without a scheme is taken as
+   * https, and anything not a web address is refused. The first
+   * occurrence is the one changed; one undo step.
+   */
+  const updateLink = (
+    key: string,
+    href: string,
+    title: string,
+    next: { href?: string; title?: string },
+  ) => {
+    const target = next.href === undefined ? href : hrefOf(next.href.trim())
+    if (!isWebUrl(target)) return
+    const typed = next.title?.trim()
+    const display =
+      typed !== undefined && typed !== ""
+        ? typed
+        : title === "" || title === href
+          ? hostOf(target)
+          : title
+    rewriteLink(key, href, title, `[${display}](${target})`)
+  }
+  /** A link taken off: `[title](href)` becomes `title`; a bare address
+   * stays as it is (there is nothing to take off it). */
+  const removeLink = (key: string, href: string, title: string) => {
+    if (title !== "" && title !== href) rewriteLink(key, href, title, title)
+  }
+  /** The first occurrence of the link in the row's text — written out, an
+   * autolink, a bare address, or its text — replaced by `replacement`. One
+   * undo step. */
+  const rewriteLink = (key: string, href: string, title: string, replacement: string) => {
+    const block = doc.blocks[idOfKey(key)]
+    if (!block) return
+    let text: string | null = null
+    for (const needle of [`[${title}](${href})`, `<${href}>`, href, title]) {
+      if (needle !== "" && block.text.includes(needle)) {
+        text = block.text.replace(needle, replacement)
+        break
+      }
+    }
+    if (text === null || text === block.text) return
+    const updated = updateBlock(doc, block.id, { text })
+    history.commit(doc, updated, { type: "structural" })
+  }
+
   const menuActions: BlockMenuActions = {
     edit: (key) => edit(key),
+    editLink: (key, href) => setLinkCard({ key, href }),
     openImage: (id) => setLightbox(id),
     downloadImage: (id) => {
       const block = doc.blocks[id]
@@ -1713,6 +1681,10 @@ export function BlockEditor({
       onImageUpload && !readOnly ? (key, files) => void insertImages(key, files) : undefined,
     requestImage: onImageUpload && !readOnly ? requestImage : undefined,
     openImage: (id) => setLightbox(id),
+    updateLink: readOnly ? undefined : updateLink,
+    removeLink: readOnly ? undefined : removeLink,
+    linkCard,
+    closeLinkCard: () => setLinkCard(null),
     focus,
     selected,
     selectedSet,
@@ -2018,9 +1990,6 @@ export function BlockEditor({
   // here.
   useLayoutEffect(() => {
     if (!navigable || focus || !selected) return
-    // While the outline palette is previewing, focus stays in its input — the
-    // moving highlight must not steal the keyboard mid-typing.
-    if (revealSnapshotRef.current) return
     const el = containerRef.current
     if (!el) return
     const active = document.activeElement
@@ -2210,9 +2179,7 @@ export function BlockEditor({
       )
       if (!block || !el || !selection.containsNode(el, true)) continue
       if (!selection.containsNode(el, false)) partial = true
-      // Zoomed, the title's body rows read one level beneath it.
-      const depth = row.zoomTitle ? 0 : row.depth + (zoomRoot ? 1 : 0)
-      const indent = "  ".repeat(depth)
+      const indent = "  ".repeat(row.depth)
       picked.push(
         [...blockLines(block).map((line) => indent + line), `${indent}  id:: ${block.id}`].join(
           "\n",
@@ -2337,7 +2304,10 @@ export function BlockEditor({
         <nav
           aria-label="Zoom path"
           data-testid="zoom-breadcrumb"
-          className="mb-3 flex min-w-0 items-center gap-0.5 font-content text-sm text-text-secondary"
+          // `note-header` hangs the trail into the page gutter with the
+          // title (block-editor.css): the first crumb's text keeps starting
+          // where the marker slot does, now the zoom title's hanging #.
+          className="note-header mb-3 flex min-w-0 items-center gap-0.5 font-content text-sm text-text-secondary"
         >
           <button type="button" className={crumbClass} onClick={() => navigateZoom(null)}>
             {noteTitle?.trim() || "Note"}
@@ -2359,6 +2329,24 @@ export function BlockEditor({
             {crumbLabel(zoomRoot.id)}
           </span>
         </nav>
+      ) : null}
+      {zoomRoot ? (
+        // The zoomed block is the page: its text is the title, drawn by the
+        // component the page draws the note's title with, and edited there
+        // as a title is — a rename of the block. The rows beneath are its
+        // children; ↑ from the first hands the keyboard up here, ↓ and Enter
+        // hand it back down.
+        <div className="mb-3">
+          <NoteTitle
+            title={zoomRoot.text}
+            label="Block title"
+            onRename={renameZoomRoot}
+            readOnly={readOnly || !zoomTitleEditable}
+            focusSignal={zoomTitleFocus}
+            onArrowDown={focusFirstRow}
+            onCreateBelow={newRootBlock}
+          />
+        </div>
       ) : null}
       <BlockContextMenu
         target={readOnly ? null : menuTarget}
@@ -2389,8 +2377,8 @@ export function BlockEditor({
           onDrop={handleDrop}
         >
           {/* The view is a flat list: one row per occurrence, indented by its
-            depth. Zoomed, the first row is the zoomed block as the view's
-            editable title and its children follow at depth 0. */}
+            depth. Zoomed, the rows are the zoomed block's children, from
+            depth 0, under its title above. */}
           {renderRows(
             rows.filter((row) => {
               const parent = parentKeyOf(row.key)

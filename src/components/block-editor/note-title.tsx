@@ -37,10 +37,13 @@ export function NoteTitle({
   focusSignal,
   startEditing,
   readOnly = false,
+  label = "Note name",
 }: {
   /** The note's current title; empty means untitled. */
   title: string
   onRename: (name: string) => boolean
+  /** What the field is, for assistive tech — the zoom title names the block. */
+  label?: string
   /**
    * Down-arrow returns focus to the editor below. The mode mirrors the title's
    * own: from an edited title it drops into the first block *editing* (like
@@ -111,13 +114,16 @@ export function NoteTitle({
   }
 
   return (
-    // pl-[27px] aligns the title with the block TEXT column: the marker slot
+    // pl-[27px] puts the title at the block TEXT column: the marker slot
     // starts 4px into the content column (the highlight surface's net reach)
     // and is 15px wide, then an 8px gap. The # sits in that slot exactly as a
     // heading's does — right-aligned, overflowing left when the 3xl glyph
-    // outgrows 15px — so the title reads as the outline's top heading. (27px
-    // is arbitrary-valued — the spacing scale has no 6.75 step.)
-    <h1 className="relative font-content text-3xl font-bold leading-tight tracking-[-0.02em] [overflow-wrap:anywhere]">
+    // outgrows 15px. (27px is arbitrary-valued — the spacing scale has no
+    // 6.75 step.) `note-header` then hangs the whole h1 into the page gutter
+    // by as much as the page allows (`--note-header-pull`, block-editor.css):
+    // on a wide page that is the full 27px, so the title's text sits at the
+    // column's edge and the outline reads as indented beneath it.
+    <h1 className="note-header relative font-content text-3xl font-bold leading-tight tracking-[-0.02em] [overflow-wrap:anywhere]">
       {/* The hanging # inherits the h1's full typography — same size as the title. */}
       <Hash className="pointer-events-none absolute left-1 top-0 flex w-[15px] justify-end" />
       {editing ? (
@@ -159,7 +165,7 @@ export function NoteTitle({
             }
           }}
           spellCheck={false}
-          aria-label="Note name"
+          aria-label={label}
           placeholder="Untitled"
           className="w-full border-none bg-transparent py-0 pl-[27px] pr-0 text-text outline-none placeholder:text-text-tertiary"
         />

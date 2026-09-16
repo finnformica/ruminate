@@ -2,6 +2,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
 import { useAtom, useAtomValue, useSetAtom, useStore } from "jotai"
 import { graphSnapshotAtom, isSignedOutAtom } from "../global-state"
+import { useFeature } from "../data/features"
 import { rollup } from "../data/graph"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
@@ -72,8 +73,10 @@ export function NoteActionsMenu({
   const share = useNoteShare(noteId)
   const canRename = !isSignedOut && (share === null || share.canWrite)
   const canDelete = !isSignedOut && (share === null || share.canDelete)
-  // Sharing is the owner's: an own note, signed in (docs/sharing.md).
-  const canShare = !isSignedOut && share === null
+  // Sharing is the owner's: an own note, signed in (docs/sharing.md), and
+  // the feature on for this account (src/data/feature-flags.ts).
+  const sharingEnabled = useFeature("sharing")
+  const canShare = !isSignedOut && share === null && sharingEnabled
   const openShare = useSetAtom(shareDialogAtom)
 
   // Compare the decoded path segment, not the raw pathname: a note id with a

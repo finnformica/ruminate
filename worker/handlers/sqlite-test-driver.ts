@@ -16,6 +16,8 @@ import migration0006 from "../../migrations/0006_notes_id.sql?raw"
 import migration0003 from "../../migrations/0003_control_plane.sql?raw"
 import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import migration0011 from "../../migrations/0011_user_email_required.sql?raw"
+import migration0013 from "../../migrations/0013_feature_flags.sql?raw"
+import migration0014 from "../../migrations/0014_invites.sql?raw"
 import { ensureCorpusSchema } from "../../src/data/corpus-schema"
 import type { SqlDriver, SqlValue } from "../../src/data/sql-driver"
 
@@ -95,13 +97,16 @@ export async function createTenantTestDriver(): Promise<SqlDriver> {
 
 /**
  * The control plane in the exact shape production D1 is in: the real 0003,
- * 0010 and 0011 files in order — `users` (address mandatory) and `allowlist`.
+ * 0010, 0011, 0013 and 0014 files in order — `users` (address mandatory),
+ * `feature_flags`, then `invites` (0014 also drops the allowlist 0003 made).
  * Feature tables (MCP tokens, shares) are applied by the suites that need them.
  */
 export async function applyControlPlane(driver: SqlDriver): Promise<void> {
   await driver.execScript(migration0003)
   await driver.execScript(migration0010)
   await driver.execScript(migration0011)
+  await driver.execScript(migration0013)
+  await driver.execScript(migration0014)
 }
 
 /**

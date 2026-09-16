@@ -2,6 +2,7 @@
 // tombstones included) on purpose: that is how it proves the slice holds.
 import { beforeEach, describe, expect, it } from "vitest"
 import migration0012 from "../../migrations/0012_shares.sql?raw"
+import { setFeatureAudience } from "../features"
 import { createMcpTestEnv, type McpTestEnv } from "../mcp/test-support"
 import type { SharesListBody, SliceBody } from "../shares/wire"
 import { buildGraphSnapshot, noteDoc } from "../../src/data/graph"
@@ -138,7 +139,7 @@ const sliceIds = (body: SliceBody) => body.nodes.map((row) => row.id).sort()
 
 async function ownerNode(id: string): Promise<Record<string, unknown> | undefined> {
   const rows = await harness.control.exec(
-    "SELECT id, text, deleted_at FROM nodes WHERE user_id = ?1 AND id = ?2",
+    "SELECT id, type, text, props, notes_id, updated_at, deleted_at FROM nodes WHERE user_id = ?1 AND id = ?2",
     [OWNER, id],
   )
   return rows[0]
@@ -284,6 +285,23 @@ describe("create", () => {
 // -----------------------------------------------------------------------------
 // Listing and revoking
 // -----------------------------------------------------------------------------
+
+describe("the sharing feature flag", () => {
+  it("refuses to give a share when the feature is off for the caller; what was given still reads", async () => {
+    const id = await share()
+    await setFeatureAudience(harness.control, "sharing", "off", 1)
+    const refused = await send(
+      apiRequest("POST", "", { email: "u8@example.com", rootIds: [NOTE_A] }),
+    )
+    expect(refused.status).toBe(403)
+    expect((await bodyOf(refused)).error).toBe("feature_off")
+    // The grantee still reads the share, and the owner still sees and can revoke it.
+    expect((await slice(id)).status).toBe(200)
+    const listed = (await bodyOf(await send(apiRequest("GET")))) as SharesListBody
+    expect(listed.given.map((given) => given.id)).toEqual([id])
+    expect((await send(apiRequest("DELETE", `/${id}`))).status).toBe(200)
+  })
+})
 
 describe("list", () => {
   it("says so when sharing is not set up on the server yet", async () => {
@@ -591,6 +609,43 @@ describe("write", () => {
   it("refuses a malformed payload", async () => {
     const id = await share(["read", "write"])
     expect((await push(id, { nodes: "no" })).status).toBe(400)
+  })
+
+  it("keeps a row's type and the owner's props, and never makes a note", async () => {
+    const id = await share(["read", "write", "delete"])
+    const retyped = await push(id, { nodes: [{ ...edit(A1, "one"), type: "note" }], links: [] })
+    expect(retyped.status).toBe(403)
+    expect((await ownerNode(A1))?.type).toBe("ul")
+
+    const pinned = await push(id, {
+      nodes: [{ ...edit(A1, "one"), props: '{"pinned":true}' }],
+      links: [],
+    })
+    expect(pinned.status).toBe(403)
+    expect((await bodyOf(pinned)).detail).toContain("pinned")
+    expect((await ownerNode(A1))?.props).toBeNull()
+
+    const madeNote = await push(id, {
+      nodes: [{ ...node("blk_page", "a note of theirs", "note"), updated_at: T0 + 10 }],
+      links: [{ ...link(A1, "blk_page", "a9"), updated_at: T0 + 10 }],
+    })
+    expect(madeNote.status).toBe(403)
+    expect(await ownerNode("blk_page")).toBeUndefined()
+  })
+
+  it("keeps a row's home note, and its clocks never run ahead of the server", async () => {
+    const id = await share(["read", "write"])
+    const before = Date.now()
+    const response = await push(id, {
+      nodes: [{ ...edit(A1, "rehomed"), notes_id: NOTE_B, updated_at: before + 86_400_000 }],
+      links: [],
+    })
+    expect(response.status).toBe(200)
+    const row = await ownerNode(A1)
+    expect(row?.text).toBe("rehomed")
+    expect(row?.notes_id).toBe(NOTE_A)
+    expect(Number(row?.updated_at)).toBeLessThanOrEqual(Date.now())
+    expect(Number(row?.updated_at)).toBeGreaterThanOrEqual(before)
   })
 })
 

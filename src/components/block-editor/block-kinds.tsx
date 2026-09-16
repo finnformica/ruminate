@@ -71,10 +71,12 @@ export interface BlockKind {
   /** Text size and weight, by outline depth — the same on the rendered view
    * and the textarea, so switching never shifts a character. Given the block
    * too, for a type whose text follows its props (an image's caption sits
-   * to the side its picture keeps to). */
-  readonly typography: (depth: number, block: Block) => string
-  /** Extra space above the row, in px (headings breathe). */
-  readonly topMargin?: (depth: number) => number
+   * to the side its picture keeps to), and whether the row is LISTED — a
+   * results view's (`BlockEditorApi.fixedRoots`), where a row is one among
+   * many and a heading keeps the body's scale. */
+  readonly typography: (depth: number, block: Block, listed: boolean) => string
+  /** Extra space above the row, in px (headings breathe — not when listed). */
+  readonly topMargin?: (depth: number, listed: boolean) => number
   /** The textarea's ghost text while empty. */
   readonly placeholder?: string
   /** How the view draws the body. The default is inline markdown
@@ -112,6 +114,10 @@ export function headingScale(depth: number): string {
 
 const BODY = "text-base leading-relaxed"
 
+/** The depth whose heading scale is the body's: what a listed heading (and
+ * its `#` slot) is drawn at. */
+export const LISTED_HEADING_DEPTH = 3
+
 const text: BlockKind = {
   slot: "glyph",
   glyph: null,
@@ -139,7 +145,11 @@ const todo: BlockKind = {
  */
 const heading: BlockKind = {
   slot: "hash",
-  typography: (depth) => {
+  // Listed as a result (the palette's rows, a `type:heading` search), a
+  // heading is a row among many: bold, at the body's scale, level with the
+  // note rows beside it — its `#` slot follows (`headingScale(LISTED)`).
+  typography: (depth, _block, listed) => {
+    if (listed) return cx(headingScale(LISTED_HEADING_DEPTH), "font-bold")
     switch (depth) {
       case 0:
         return cx(headingScale(0), "font-bold tracking-[-0.015em]")
@@ -154,7 +164,8 @@ const heading: BlockKind = {
         )
     }
   },
-  topMargin: (depth) => (depth === 0 ? 20 : depth === 1 ? 16 : depth === 2 ? 10 : 6),
+  topMargin: (depth, listed) =>
+    listed ? 0 : depth === 0 ? 20 : depth === 1 ? 16 : depth === 2 ? 10 : 6,
 }
 
 /**

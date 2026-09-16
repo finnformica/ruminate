@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest"
+import { setFeatureAudience } from "../features"
 import { createMcpTestEnv, mcpRequest, type McpTestEnv } from "../mcp/test-support"
 import { mcp } from "./mcp"
 import { mcpTokens } from "./mcp-tokens"
@@ -282,5 +283,30 @@ describe("an MCP token cannot mint an MCP token", () => {
 
     const names = (listed as any).result.tools.map((tool: any) => tool.name)
     expect(names.some((name: string) => /token|grant|permission/i.test(name))).toBe(false)
+  })
+})
+
+// -----------------------------------------------------------------------------
+// The feature flag (src/data/feature-flags.ts)
+// -----------------------------------------------------------------------------
+
+describe("the mcp feature flag", () => {
+  it("refuses to mint when the feature is off for the caller, but still lists and revokes", async () => {
+    const minted = await bodyOf(await send(apiRequest("POST", "", validMint)))
+    await setFeatureAudience(harness.control, "mcp", "admin", 1)
+
+    const refused = await send(apiRequest("POST", "", validMint))
+    expect(refused.status).toBe(403)
+    expect((await bodyOf(refused)).error).toBe("feature_off")
+
+    const listed = await bodyOf(await send(apiRequest("GET")))
+    expect(listed.tokens.map((token: { id: string }) => token.id)).toEqual([minted.summary.id])
+    expect((await send(apiRequest("DELETE", `/${minted.summary.id}`))).status).toBe(200)
+  })
+
+  it("lets the admin mint under `admin`", async () => {
+    await setFeatureAudience(harness.control, "mcp", "admin", 1)
+    Object.assign(harness.env, { ALLOWED_GITHUB_ID: String(USER) })
+    expect((await send(apiRequest("POST", "", validMint))).status).toBe(201)
   })
 })

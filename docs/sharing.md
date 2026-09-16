@@ -130,6 +130,14 @@ any row would leave the slice:
   else's corpus, visible to nobody; a tombstoned id revived from outside would
   be a write to a row the grantee cannot see.
 - A link row must have both ends in the closure or among those new ids.
+- A row keeps its shape. A slice node keeps its type, its home note
+  (`notes_id` lands only on a new row) and the owner's own props — `pinned`,
+  `font`, `width` (docs/metadata.md) — which a push may carry unchanged but
+  never change; a new row is never a note and never carries them. The verbs
+  say what a grantee may write, not what the owner's rows are.
+- Time is the server's: a pushed `updated_at` or `deleted_at` is clamped to
+  the request's clock, so a grantee cannot claim a row into the future and
+  win every edit the owner makes after it.
 - The owner's `replica_cursor` is theirs: a cursor in the payload is ignored.
   The legacy purge channel is refused.
 

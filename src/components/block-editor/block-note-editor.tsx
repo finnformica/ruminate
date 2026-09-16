@@ -1,4 +1,4 @@
-import { useAtomValue, useSetAtom, useStore } from "jotai"
+import { useAtomValue, useStore } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { emptyBlock } from "../../blocks/ops"
 import type { BlockDoc, ChangeHint } from "../../blocks/types"
@@ -6,14 +6,8 @@ import { imagesEnabled, uploadImage } from "../../data/images"
 import { deleteBlockOps, deleteSubtreeOps, parentCount } from "../../data/ops"
 import { useApplyOps } from "../../data/store"
 import { useCollapseState } from "../../data/view-state"
-import {
-  blockRevealAtom,
-  graphSnapshotAtom,
-  isDatabaseModeAtom,
-  noteOutlineAtom,
-} from "../../global-state"
+import { graphSnapshotAtom, isDatabaseModeAtom } from "../../global-state"
 import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
-import { buildOutline } from "../../utils/note-outline"
 import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
 import { BlockEditor, type BlockDebugOptions } from "./block-editor"
 
@@ -75,7 +69,6 @@ export function BlockNoteEditor({
   onChange,
   noteId,
   startEditing,
-  highlightHeading,
   onExitTop,
   focusFirstSignal,
   focusFirstMode,
@@ -88,7 +81,6 @@ export function BlockNoteEditor({
   noteTitle,
   collapseKey,
   onToggleCollapse,
-  publishOutline = true,
   trailingBlank = true,
   rowRemoval = "unlink",
 }: {
@@ -106,8 +98,6 @@ export function BlockNoteEditor({
   noteId?: string
   /** Start with the first block in edit mode (e.g. a brand-new note). */
   startEditing?: boolean
-  /** Heading text to highlight/scroll to on landing (e.g. from Cmd-K). */
-  highlightHeading?: string
   /** Navigating up past the first block hands focus here (e.g. the note title). */
   onExitTop?: () => void
   /** Bump to move focus into the first block (e.g. Down-arrow from the title). */
@@ -131,10 +121,6 @@ export function BlockNoteEditor({
   /** Where this editor's folds are kept, when not under the note's own id —
    * a second editor on the page (the Unassigned basket) keeps its own. */
   collapseKey?: string
-  /** Whether this editor's headings feed the command palette's outline.
-   * Off for a second editor on the page, which would otherwise overwrite the
-   * note's. */
-  publishOutline?: boolean
   /** Whether an editable doc always ends with a blank block to type into. Off
    * for the basket: a blank there would be a new unassigned block. */
   trailingBlank?: boolean
@@ -180,29 +166,6 @@ export function BlockNoteEditor({
     setLastDoc(withBlank)
     onChange(withBlank, hint)
   }
-
-  // Publish the live outline (heading blocks) for the command palette's ⌘P
-  // outline mode. The git-backed note content the palette could read on its
-  // own goes stale while editing, and its column-0 heading regex misses
-  // nested (indented) headings entirely — the live doc is the only correct
-  // source. Read-only history views (which can mount several editors at once)
-  // never publish.
-  const setOutline = useSetAtom(noteOutlineAtom)
-  useEffect(() => {
-    if (readOnly || !noteId || !publishOutline) return
-    setOutline({ noteId, items: buildOutline(doc) })
-  }, [doc, noteId, readOnly, setOutline, publishOutline])
-  // Clear on unmount so a stale outline never outlives its note. (React runs
-  // this cleanup before the next note's publish effect, so switching notes is
-  // safe.)
-  useEffect(() => {
-    if (readOnly || !noteId) return
-    return () => setOutline(null)
-  }, [noteId, readOnly, setOutline])
-
-  // The palette's preview/commit/cancel messages for the outline jump — the
-  // editable editor is the only consumer (read-only views ignore them).
-  const revealRequest = useAtomValue(blockRevealAtom)
 
   // "Paste as link": resolve pasted block ids to their live subtree markdown
   // from the graph. Read lazily through the jotai store (no subscription —
@@ -279,7 +242,6 @@ export function BlockNoteEditor({
       doc={doc}
       onChange={handleChange}
       startEditing={startEditing}
-      highlightHeading={highlightHeading}
       collapsed={noteId ? collapsed : undefined}
       onToggleCollapse={noteId ? toggleCollapse : undefined}
       onExitTop={onExitTop}
@@ -292,7 +254,6 @@ export function BlockNoteEditor({
       zoomRootId={zoomBlockId}
       onZoomNavigate={onZoomNavigate}
       noteTitle={noteTitle}
-      revealRequest={readOnly ? null : revealRequest}
       resolveBlocks={resolveBlocks}
       debug={debug}
       noteId={noteId}

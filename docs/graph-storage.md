@@ -103,8 +103,15 @@ atom signed out.
   pull. Applied rows flow through the store into the graph atom (pending
   local ops re-applied on top); the open editor re-walks its page from the
   new snapshot, so another device's edit shows the moment it lands.
-- **Offline:** the OPFS store serves everything; pushes queue with backoff and
-  pulls retry on the `online` event. A first-ever boot while offline shows an
+- **Offline:** the OPFS store serves everything. While the browser says it
+  is offline (`navigator.onLine === false` — a definite "no network"; `true`
+  only means "not known to be offline") neither a push nor a pull is
+  attempted: pushes queue, pulls wait, nothing is recorded as an error, and
+  the `online` event runs both at once (a timer re-checks the flag as a
+  backstop). The sidebar's sync status reads **Offline** in place of Synced /
+  Syncing… / Sync failed, with a tooltip saying notes are saved on this
+  device and will sync once the network is back; it is not a button, since
+  a click could do nothing. A first-ever boot while offline shows an
   explanatory empty state; anything written then is kept locally and synced
   later. If a _second_ tab opens while another holds the OPFS database, the
   tab says so honestly ("open in another tab — temporary in-memory copy",
@@ -410,7 +417,7 @@ retired along with the D1 corpus seeding path.)
 `worker/handlers/replica.ts`, routed like every other API route via
 `run_worker_first` in wrangler.jsonc. The handler is auth + dispatch: it
 verifies the session, resolves the verified id against the control plane
-(users + allowlist, migration `0003_control_plane.sql`), mints a `TenantDb`
+(users, invites, feature flags — migrations `0003`, `0013` and `0014`), mints a `TenantDb`
 from that id, and hands it to the engine-agnostic corpus code
 (`worker/handlers/replica-corpus.ts`), which runs every query through the
 shared `SqlDriver` seam.
@@ -458,7 +465,7 @@ shared `SqlDriver` seam.
   `GET https://api.github.com/user`. The **verified** id is then resolved
   against the control plane (`worker/handlers/tenancy.ts`): a `users` row
   admits (unless `blocked`), and a missing row is a signup decision per
-  `SIGNUP_MODE` (`allowlist`: the allowlist table or the `ALLOWED_GITHUB_ID`
+  `SIGNUP_MODE` (`invite`: a live invite link or the `ALLOWED_GITHUB_ID`
   bootstrap; `open`: auto-provision; absent: bootstrap owner only —
   fail-closed, and also the fallback if the control-plane migration hasn't
   run). If the per-request GitHub round-trip ever matters, cache verification
@@ -475,7 +482,7 @@ session)` is the only mint on the request path, and it takes the
   `nodes`/`link` that says nothing about tombstones and any `DELETE` from
   them. The narrow, greppable opt-outs are `includingDeleted()` (replication,
   trash, audit), `-- tenant-exempt: <reason>`, and `controlPlaneDriver` for
-  `users`/`allowlist`, which are not tenant data (the resolver has to look up
+  `users`/`invites`/`feature_flags`, which are not tenant data (the resolver has to look up
   an id that is not yet a tenant). `npm run check:queries` enforces the same
   rules over every SQL literal in `worker/**` and `src/data/**` in CI, and
   bans `env.DB` outside that module.

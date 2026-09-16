@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent, ClipboardEvent, CSSProperties, KeyboardEvent } from "react"
 import { cx } from "../../utils/cx"
 import type { Block, BlockDoc } from "../../blocks/types"
+import { linkifyPastedText, linkifyTypedAddress } from "../../blocks/link"
 import { leadingMarker } from "../../blocks/markers"
 import { defOf } from "../../blocks/registry"
 import type { BlockPatch } from "../../blocks/ops"
@@ -23,9 +24,10 @@ import { blurLeavesWindow } from "../../utils/window-blur"
 import { IconButton } from "../icon-button"
 import { PinFillIcon12 } from "../icons"
 import { BlockContent } from "./block-content"
-import { headingScale, kindOf, type RowContext } from "./block-kinds"
+import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext } from "./block-kinds"
 import { caretCoordinates, caretLineFlags } from "./caret"
 import { Hash } from "./hash"
+import { LinkActionsContext, type LinkActions } from "./link-actions"
 import { SLASH_MENU_WIDTH, SlashMenu } from "./slash-menu"
 
 /** A request to edit a row (an occurrence key — a block twice in the view is
@@ -105,6 +107,22 @@ export interface BlockEditorApi {
   requestImage?: (key: string) => void
   /** Expand an image block's picture (the lightbox). */
   openImage?: (id: string) => void
+  /** Change a link's display text and/or address in this row's text
+   * (docs/links.md): `[title](href)` becomes `[next.title](next.href)`; a
+   * bare address is written out as a link. Absent in read-only views. */
+  updateLink?: (
+    key: string,
+    href: string,
+    title: string,
+    next: { href?: string; title?: string },
+  ) => void
+  /** Take a link in this row's text off, leaving its text as words. */
+  removeLink?: (key: string, href: string, title: string) => void
+  /** A link's card the reader asked to open from the menu ("Edit link",
+   * for a touch screen): the row and the address. */
+  linkCard?: { key: string; href: string } | null
+  /** That card closed. */
+  closeLinkCard?: () => void
   /**
    * Exit edit mode and take the first selection-ladder rung on this row
    * (Cmd/Ctrl+A pressed with the textarea's text already fully selected).
@@ -164,12 +182,11 @@ export function BlockItem({
   doc: BlockDoc
   block: Block
   /** This row's place in the view (`src/blocks/view.ts`): its depth, fold,
-   * ordered number, guide lines — and whether it is the zoomed view's title
-   * (promoted typography, no toggle; its children follow it at depth 0). */
+   * ordered number, guide lines. */
   occurrence: Occurrence
   api: BlockEditorApi
 }) {
-  const { depth, zoomTitle, olNumber, hasChildren, collapsed: isCollapsed } = occurrence
+  const { depth, olNumber, hasChildren, collapsed: isCollapsed } = occurrence
   const readOnly = api.readOnly ?? false
   // Selection and edit focus are per row: this occurrence, not the block.
   const editing = !readOnly && api.focus?.key === occurrence.key
@@ -206,21 +223,20 @@ export function BlockItem({
   // real bullet/checkbox/heading style in the marker slot, never as text. This
   // keeps the view and the editor pixel-identical — nothing shifts on click.
   const body = block.text
-  // The zoomed block leads the view but renders as ITSELF — same typography,
-  // same marker as anywhere else in the outline (a bullet stays a bullet, a
-  // heading a heading). Focus mode changes what is visible, never what a
-  // block looks like.
   // How this type looks (`block-kinds.tsx`): its marker, typography, any
   // panel, and the chrome around the content line.
   const kind = kindOf(type)
-  const typo = kind.typography(depth, block)
-  // Whether this block owns a collapse toggle at all: parents only, and never
-  // the zoom title (the editor renders its children itself, at depth 0). The
+  // A results view's row (`fixedRoots`): one among many, so a heading keeps
+  // the body's scale and its breathing room.
+  const listed = !!api.fixedRoots
+  const scaleDepth = listed ? LISTED_HEADING_DEPTH : depth
+  const typo = kind.typography(depth, block, listed)
+  // Whether this block owns a collapse toggle at all: parents only. The
   // row that closes a loop keeps its chevron too — the block has children,
   // they are simply above it — pinned, greyed and inert, with the reason in
   // its tooltip (zoom in to go round again).
   const looped = !!occurrence.looped
-  const hasToggle = (hasChildren || looped) && !zoomTitle
+  const hasToggle = hasChildren || looped
   // A marker slot is drawn unless the type has none AND nothing needs one.
   const slotted = kind.slot !== "none" || hasToggle
   const rowContext: RowContext = { block, occurrence, api, depth, editing, slotted }
@@ -355,11 +371,18 @@ export function BlockItem({
       leading !== null && (type !== "code" || (leading.text === "" && leading.type !== "code"))
         ? leading
         : null
-    const text = typed !== null ? typed.text : newBody
+    // A space typed after a bare address writes it out as a link named for
+    // its host (docs/links.md), as a paste is; the caret follows. Not in a
+    // code block, where an address is code.
+    const linked = typed === null && type !== "code" ? linkifyTypedAddress(newBody, caret) : null
+    const text = typed !== null ? typed.text : linked !== null ? linked.text : newBody
     if (typed !== null) {
       // The marker left the visible text; keep the caret relative to it.
       pendingCaret.current = Math.max(0, caret - (newBody.length - text.length))
       api.onBlockChange(block.id, { type: typed.type, text })
+    } else if (linked !== null) {
+      pendingCaret.current = linked.caret
+      api.onBlockChange(block.id, { text }, "structural")
     } else {
       api.onBlockChange(block.id, { text })
     }
@@ -471,6 +494,12 @@ export function BlockItem({
         if (converted.trim() !== "") pasted = converted
       }
     }
+    // A bare address in the paste is written out as a link with its host
+    // for display text (docs/links.md), so a pasted URL reads as a name
+    // rather than a string of slashes; the address itself is kept whole.
+    // Done before the single-line shortcut below: a rewritten line is no
+    // longer the plain text, so it is inserted by hand as converted html is.
+    pasted = linkifyPastedText(pasted)
     if (!pasted.includes("\n")) {
       // Single-line paste: plain text falls through to the browser's ordinary
       // inline insertion; converted html (e.g. `**bold**`) is inserted manually.
@@ -592,7 +621,7 @@ export function BlockItem({
   // make this block the note) — on leaves. A parent's key is its collapse
   // toggle, so zoom stays on F / Cmd+. there. The negative-margin padding
   // enlarges the hit area without shifting the marker's layout size.
-  const zoomable = (!readOnly || api.navigable) && !zoomTitle && !hasToggle
+  const zoomable = (!readOnly || api.navigable) && !hasToggle
   // Every marker occupies the same 15px slot, so body text starts at one
   // column across every block type and the markers read as one chrome
   // family: dots centre in it; text glyphs (`#`, number, `>`) right-align
@@ -706,7 +735,7 @@ export function BlockItem({
         data-testid="heading-hash"
         className={cx(
           "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-end font-bold",
-          headingScale(depth),
+          headingScale(scaleDepth),
           slotClass,
         )}
       >
@@ -747,9 +776,30 @@ export function BlockItem({
   // sits under. A heading's breathing room is a margin, so the highlight
   // surface never grows; the guides reach back up through it (`top`), so a
   // parent's line runs unbroken beside its subtree.
-  const marginTop = zoomTitle
-    ? 0
-    : Math.max(kind.topMargin?.(depth) ?? 0, depth === 0 && occurrence.index > 0 ? ROOT_GAP : 0)
+  const marginTop = Math.max(
+    kind.topMargin?.(depth, listed) ?? 0,
+    depth === 0 && occurrence.index > 0 ? ROOT_GAP : 0,
+  )
+
+  // What a link in the rendered text can do to this row: its hover card
+  // (`link-hover-card.tsx`) changes its display text, in an editor that
+  // can write the change.
+  const updateLink = readOnly ? undefined : api.updateLink
+  const removeLink = readOnly ? undefined : api.removeLink
+  const openHref = api.linkCard?.key === occurrence.key ? api.linkCard.href : null
+  const closeLinkCard = api.closeLinkCard
+  const linkActions = useMemo<LinkActions | null>(
+    () =>
+      updateLink && removeLink
+        ? {
+            update: (href, title, next) => updateLink(occurrence.key, href, title, next),
+            remove: (href, title) => removeLink(occurrence.key, href, title),
+            openHref,
+            closeCard: () => closeLinkCard?.(),
+          }
+        : null,
+    [updateLink, removeLink, occurrence.key, openHref, closeLinkCard],
+  )
 
   // The caption/body line: the textarea while editing, the rendered text
   // otherwise (an image row hangs it beneath the picture).
@@ -765,8 +815,7 @@ export function BlockItem({
         // browser shows only while the textarea is empty, so it never
         // appears in view mode or over content. The turn-into keys
         // live in the `?` reference, not here.
-        // The zoom title is a note title, not a block — no ghost.
-        placeholder={zoomTitle ? undefined : (kind.placeholder ?? "Ruminate…")}
+        placeholder={kind.placeholder ?? "Ruminate…"}
         onChange={handleTextareaChange}
         onKeyDown={handleEditKeyDown}
         // Caret moves that aren't edits (arrows, Home/End, a click)
@@ -837,7 +886,9 @@ export function BlockItem({
             onDoubleClick: () => api.edit(occurrence.key),
           })}
     >
-      {kind.body ? kind.body(block) : <BlockContent content={body} />}
+      <LinkActionsContext.Provider value={linkActions}>
+        {kind.body ? kind.body(block) : <BlockContent content={body} />}
+      </LinkActionsContext.Provider>
     </div>
   )
 
@@ -845,7 +896,7 @@ export function BlockItem({
     <div
       data-block-row={block.id}
       data-occurrence={occurrence.key}
-      className={cx("relative", zoomTitle && "mb-3")}
+      className="relative"
       style={{ paddingLeft: depth * INDENT, marginTop }}
     >
       {occurrence.guideKeys.map((guideKey, level) => (
@@ -866,7 +917,7 @@ export function BlockItem({
           // A heading's surface reaches further left at the larger scales
           // (`[data-heading-scale]` in block-editor.css), so its chevron and
           // `#` sit as far from the left edge as from the top and bottom.
-          data-heading-scale={kind.slot === "hash" ? HEADING_SCALE_NAMES[depth] : undefined}
+          data-heading-scale={kind.slot === "hash" ? HEADING_SCALE_NAMES[scaleDepth] : undefined}
           className={cx(
             // Negative margin + padding pairs grow the highlight surface
             // while the text (and every marker) stays exactly where it was —
@@ -921,7 +972,7 @@ export function BlockItem({
             // it so selection reads as selected, not hovered.
             selected && "bg-bg-secondary block-highlight",
             // When the editor doesn't own the keyboard (focus is in the
-            // sidebar, a dialog, the ⌘P palette mid-preview), the selection
+            // sidebar, a dialog, the ⌘K palette), the selection
             // demotes to a quiet neutral — additive class only, so the
             // structural hooks above are untouched.
             selected && !api.keyboardActive && "block-highlight-inactive",

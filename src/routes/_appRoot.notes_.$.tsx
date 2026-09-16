@@ -34,8 +34,6 @@ import { isValidDateString, isValidWeekString, toDateString } from "../utils/dat
 
 type RouteSearch = {
   query: string | undefined
-  /** Heading text to highlight in the block editor on landing (from Cmd-K). */
-  heading?: string
   /** Block id the editor is zoomed into ("focus mode"); absent = un-zoomed. */
   block?: string
 }
@@ -44,7 +42,6 @@ export const Route = createFileRoute("/_appRoot/notes_/$")({
   validateSearch: (search: Record<string, unknown>): RouteSearch => {
     return {
       query: typeof search.query === "string" ? search.query : undefined,
-      heading: typeof search.heading === "string" ? search.heading : undefined,
       block: typeof search.block === "string" ? search.block : undefined,
     }
   },
@@ -72,7 +69,7 @@ function RouteComponent() {
 function NotePage() {
   // Router
   const { _splat: noteId } = Route.useParams()
-  const { heading: highlightHeading, block: zoomBlockId } = Route.useSearch()
+  const { block: zoomBlockId } = Route.useSearch()
   const navigate = Route.useNavigate()
 
   // Global state
@@ -301,7 +298,11 @@ function NotePage() {
       }
     >
       <div ref={containerRef} className="@container">
-        <div className="p-4 @[480px]:p-5 @[640px]:p-10">
+        {/* --note-header-pull: how far the title, zoom breadcrumb and zoom
+            title hang into the gutter (`.note-header`, block-editor.css) —
+            the full marker-slot offset, but only once the gutter is 40px, as
+            the hanging # needs the room. */}
+        <div className="p-4 @[480px]:p-5 @[640px]:p-10 @[640px]:[--note-header-pull:27px]">
           <div
             className={cx(
               "flex flex-col gap-8 pb-[50vh]",
@@ -356,7 +357,6 @@ function NotePage() {
                   startEditing={isNewNote && !showsTitle}
                   readOnly={readOnlyShare}
                   browse={readOnlyShare}
-                  highlightHeading={highlightHeading}
                   onExitTop={() => setTitleFocusSignal((n) => n + 1)}
                   focusFirstSignal={focusFirstSignal}
                   focusFirstMode={focusFirstMode}

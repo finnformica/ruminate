@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { useState } from "react"
 import { toast, Toaster } from "sonner"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
@@ -7,7 +7,6 @@ import { emptyBlock } from "../../blocks/ops"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
 import type { BlockDoc, ChangeHint } from "../../blocks/types"
-import type { BlockRevealRequest } from "../../utils/note-outline"
 import { richClipboardFormats } from "../../utils/rich-clipboard"
 import { ImageUploadError, type UploadedImage } from "../../data/images"
 import { BlockEditor, type BlockDebugOptions } from "./block-editor"
@@ -1081,20 +1080,88 @@ const ZOOMABLE = [
 describe("zoom (focus mode)", () => {
   const crumb = (container: HTMLElement) =>
     container.querySelector('[data-testid="zoom-breadcrumb"]')
+  /** The zoom title: the zoomed block drawn as the note title is (an h1 with
+   * the hanging #), above the rows. */
+  const zoomTitle = (container: HTMLElement) => container.querySelector("h1")
+  /** The title's focusable heading (select mode), or its field while editing. */
+  const zoomTitleButton = (container: HTMLElement) =>
+    container.querySelector<HTMLElement>('h1 [role="button"]')!
+  const zoomTitleInput = (container: HTMLElement) =>
+    container.querySelector<HTMLInputElement>("h1 input")
 
-  it("renders only the zoomed subtree, with the block styled as itself", () => {
+  it("renders only the zoomed subtree, with the block as the view's title", () => {
     const { container } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
+    // The rows are the zoomed block's children; the block itself is not a row…
     const bodies = Array.from(container.querySelectorAll('[data-testid="block-body"]'))
-    expect(bodies.map((el) => el.textContent)).toEqual(["B", "C", "D", "E"])
-    // Focus mode changes what is visible, never what a block looks like: no
-    // note-title promotion — the zoomed bullet keeps its normal typography.
-    expect(bodies[0].closest(".text-3xl")).toBeNull()
+    expect(bodies.map((el) => el.textContent)).toEqual(["C", "D", "E"])
+    // …but the title above them: the same heading the note's own title is —
+    // 3xl, the hanging # — with the block's text.
+    const title = zoomTitle(container)!
+    expect(title.className).toContain("text-3xl")
+    expect(title.className).toContain("note-header")
+    expect(title.textContent).toBe("#B")
+    expect(zoomTitleButton(container).textContent).toBe("B")
     // The breadcrumb is the navigation stack: a direct (deep-link) zoom knows
     // only the note and the block itself.
     expect(crumb(container)?.textContent).toContain("Note")
     expect(crumb(container)?.textContent).toContain("B")
     // Zoom-in lands on the first child, not the title.
     expect(highlightedText(container)).toBe("C")
+  })
+
+  it("↑ from the first row selects the title; ↓ and Enter come back down", () => {
+    const { container, getByTestId } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowUp" }) // C → the title
+    // The title takes the highlight (the same selected treatment as a row)
+    // and the keyboard; no row stays highlighted beneath it.
+    expect(highlightedText(container)).toBe("B")
+    expect(document.activeElement).toBe(zoomTitleButton(container))
+    // ↓ highlights the first row again.
+    fireEvent.keyDown(zoomTitleButton(container), { key: "ArrowDown" })
+    expect(highlightedText(container)).toBe("C")
+    // Enter on the highlighted title edits it: the block's text, in a field.
+    fireEvent.keyDown(root, { key: "ArrowUp" })
+    fireEvent.keyDown(zoomTitleButton(container), { key: "Enter" })
+    const input = zoomTitleInput(container)!
+    expect(input.value).toBe("B")
+    // Enter commits the rename — a text edit of the block — and carries on
+    // into a new FIRST child, as Enter on the note title does (of the type
+    // Enter makes: a bullet, by default).
+    fireEvent.change(input, { target: { value: "Bee" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    const textarea = container.querySelector("textarea")!
+    expect(textarea).not.toBeNull()
+    fireEvent.change(textarea, { target: { value: "hello" } })
+    expect(serializedLines(getByTestId)).toEqual([
+      "A",
+      "Bee",
+      "  - hello",
+      "  C",
+      "    D",
+      "  E",
+      "F",
+    ])
+    expect(zoomTitle(container)!.textContent).toBe("#Bee")
+  })
+
+  it("renaming the title is one undo step", () => {
+    const { container, getByTestId } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowUp" })
+    fireEvent.keyDown(zoomTitleButton(container), { key: "Enter" })
+    const input = zoomTitleInput(container)!
+    fireEvent.change(input, { target: { value: "Bee" } })
+    fireEvent.keyDown(input, { key: "Escape" }) // Escape reverts the field…
+    expect(zoomTitleButton(container).textContent).toBe("B")
+    fireEvent.keyDown(zoomTitleButton(container), { key: "Enter" })
+    fireEvent.change(zoomTitleInput(container)!, { target: { value: "Bee" } })
+    fireEvent.blur(zoomTitleInput(container)!) // …blur commits it.
+    expect(serializedLines(getByTestId)).toEqual(["A", "Bee", "  C", "    D", "  E", "F"])
+    // Undo (from the rows) takes the rename back.
+    fireEvent.keyDown(zoomTitleButton(container), { key: "ArrowDown" })
+    fireEvent.keyDown(root, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "  C", "    D", "  E", "F"])
   })
 
   it("the breadcrumb follows the path taken; Shift+F pops back along it", () => {
@@ -1145,42 +1212,59 @@ describe("zoom (focus mode)", () => {
     expect(highlightedText(container)).toBe("C")
   })
 
-  it("a zoomed block keeps its own marker and style — heading hash, quote ink", () => {
+  it("a zoomed block of any type reads as the title — only its text, at the title's scale", () => {
+    // The zoomed block is the page: its heading `#` or quote bar belongs to
+    // its row in the outline, not to the title (no row here draws it).
     const heading = ["# Section", "  id:: blk_h", "  - child", "    id:: blk_hc"].join("\n")
     const zoomHeading = render(<Harness initial={heading} zoomRootId="blk_h" />)
-    // The regular heading hash renders, exactly as un-zoomed — no promoted
-    // note-title variant exists any more.
-    expect(zoomHeading.queryByTestId("zoom-title-hash")).toBeNull()
-    expect(zoomHeading.queryAllByTestId("heading-hash").length).toBeGreaterThan(0)
-    const headingBody = zoomHeading
-      .getAllByTestId("block-body")
-      .find((el) => el.textContent === "Section")!
-    expect(headingBody.closest(".text-3xl")).toBeNull()
+    expect(zoomHeading.queryAllByTestId("heading-hash")).toHaveLength(0)
+    expect(zoomHeading.getAllByTestId("block-body").map((el) => el.textContent)).toEqual(["child"])
+    expect(zoomHeading.container.querySelector("h1")!.textContent).toBe("#Section")
     zoomHeading.unmount()
 
-    // A zoomed quote keeps its secondary ink at its normal scale.
     const quote = ["> Wise words", "  id:: blk_q", "  - child", "    id:: blk_qc"].join("\n")
     const zoomQuote = render(<Harness initial={quote} zoomRootId="blk_q" />)
-    const title = zoomQuote
-      .getAllByTestId("block-body")
-      .find((el) => el.textContent === "Wise words")!
-    expect(title.className).toContain("text-text-secondary")
-    expect(title.className).not.toContain("text-3xl")
+    const title = zoomQuote.container.querySelector("h1")!
+    expect(title.textContent).toBe("#Wise words")
+    expect(title.className).toContain("text-3xl")
+    expect(title.className).not.toContain("text-text-secondary")
   })
 
-  it("Mod+Enter on the zoomed title creates its FIRST child", () => {
+  it("a block whose text is more than one line has a read-only title", () => {
+    // The title is one plain line, as the note's is: a code block (or a
+    // caption, or text with line breaks) shows as the title but is edited in
+    // its own row, un-zoomed.
+    const code = ["```", "let x = 1", "let y = 2", "```", "  id:: blk_code", "  - child"].join("\n")
+    const { container } = render(<Harness initial={code} zoomRootId="blk_code" />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowUp" })
+    expect(document.activeElement).toBe(zoomTitleButton(container))
+    fireEvent.keyDown(zoomTitleButton(container), { key: "Enter" })
+    expect(zoomTitleInput(container)).toBeNull()
+    expect(zoomTitleButton(container).className).toContain("cursor-default")
+  })
+
+  it("Mod+Enter on the highlighted zoom title creates its FIRST child", () => {
     const { container, getByTestId } = render(<Harness initial={ZOOMABLE} zoomRootId="blk_b" />)
     const root = editorRoot(container)
     fireEvent.keyDown(root, { key: "ArrowUp" }) // C → title B
     expect(highlightedText(container)).toBe("B")
-    fireEvent.keyDown(root, { key: "Enter", metaKey: true })
+    fireEvent.keyDown(zoomTitleButton(container), { key: "Enter", metaKey: true })
     const textarea = container.querySelector("textarea")!
     expect(textarea).not.toBeNull()
     fireEvent.change(textarea, { target: { value: "hello" } })
-    expect(serializedLines(getByTestId)).toEqual(["A", "B", "  hello", "  C", "    D", "  E", "F"])
+    expect(serializedLines(getByTestId)).toEqual([
+      "A",
+      "B",
+      "  - hello",
+      "  C",
+      "    D",
+      "  E",
+      "F",
+    ])
   })
 
-  it("swallows arrow-up at the top of the zoomed view (no note-title exit)", () => {
+  it("↑ at the top of the zoomed view goes to the zoom title, never the note title", () => {
     const onExitTop = vi.fn()
     const { container } = render(
       <BlockEditor
@@ -1191,8 +1275,7 @@ describe("zoom (focus mode)", () => {
       />,
     )
     const root = editorRoot(container)
-    fireEvent.keyDown(root, { key: "ArrowUp" }) // C → title B
-    fireEvent.keyDown(root, { key: "ArrowUp" }) // swallowed
+    fireEvent.keyDown(root, { key: "ArrowUp" }) // C → the zoom title
     expect(highlightedText(container)).toBe("B")
     expect(onExitTop).not.toHaveBeenCalled()
   })
@@ -1204,11 +1287,11 @@ describe("zoom (focus mode)", () => {
     fireEvent.keyDown(root, { key: "a", metaKey: true })
     expect(highlightedAll(container)).toEqual(["C", "D"])
     fireEvent.keyDown(root, { key: "a", metaKey: true })
-    // The "page" rung is the zoomed view (title + subtree), nothing beyond.
-    expect(highlightedAll(container)).toEqual(["B", "C", "D", "E"])
+    // The "page" rung is the zoomed subtree — the rows — nothing beyond.
+    expect(highlightedAll(container)).toEqual(["C", "D", "E"])
     fireEvent.keyDown(root, { key: "a", metaKey: true })
-    expect(highlightedAll(container)).toEqual(["B", "C", "D", "E"])
-    // Delete on the page rung spares the title (its children are removed).
+    expect(highlightedAll(container)).toEqual(["C", "D", "E"])
+    // Delete on the page rung empties the view; the title takes the keyboard.
     fireEvent.keyDown(root, { key: "Backspace" })
     expect(highlightedText(container)).toBe("B")
   })
@@ -1802,91 +1885,6 @@ describe("rows of a shared block (selection by occurrence)", () => {
   })
 })
 
-describe("reveal requests (outline palette)", () => {
-  // jsdom's window.scrollTo only logs "Not implemented" — stub it so the
-  // cancel path's scroll restore stays quiet.
-  window.scrollTo = vi.fn()
-
-  type Reveal = BlockRevealRequest
-
-  /** Render with a fixed doc and return a helper that re-renders with a new
-   * reveal message — mirroring how the palette writes nonced requests. */
-  function renderWithReveal(initial: string) {
-    const doc = withStarter(parse(initial))
-    const view = render(<BlockEditor doc={doc} onChange={() => {}} />)
-    const sendReveal = (request: Reveal) =>
-      view.rerender(<BlockEditor doc={doc} onChange={() => {}} revealRequest={request} />)
-    return { ...view, sendReveal }
-  }
-
-  it("preview highlights the requested block", () => {
-    const { container, sendReveal } = renderWithReveal(ZOOMABLE)
-    expect(highlightedText(container)).toBe("A")
-    sendReveal({ type: "preview", id: "blk_c", nonce: 1 })
-    expect(highlightedText(container)).toBe("C")
-  })
-
-  it("re-fires for the same block when the nonce changes (the old ?heading= bug)", () => {
-    const scrollSpy = vi.fn()
-    Element.prototype.scrollIntoView = scrollSpy
-    try {
-      const { container, sendReveal } = renderWithReveal(ZOOMABLE)
-      scrollSpy.mockClear()
-      sendReveal({ type: "commit", id: "blk_c", nonce: 1 })
-      expect(highlightedText(container)).toBe("C")
-      const callsAfterFirst = scrollSpy.mock.calls.length
-      expect(callsAfterFirst).toBeGreaterThan(0)
-      // A re-render with the SAME nonce is not a new request…
-      sendReveal({ type: "commit", id: "blk_c", nonce: 1 })
-      expect(scrollSpy.mock.calls.length).toBe(callsAfterFirst)
-      // …but a new nonce for the same block scrolls it into view again.
-      sendReveal({ type: "preview", id: "blk_c", nonce: 2 })
-      expect(scrollSpy.mock.calls.length).toBeGreaterThan(callsAfterFirst)
-      expect(highlightedText(container)).toBe("C")
-    } finally {
-      // @ts-expect-error restore jsdom's (absent) implementation
-      delete Element.prototype.scrollIntoView
-    }
-  })
-
-  it("cancel restores the selection captured at the first preview", () => {
-    const { container, sendReveal } = renderWithReveal(ZOOMABLE)
-    const root = editorRoot(container)
-    fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
-    expect(highlightedText(container)).toBe("B")
-    sendReveal({ type: "preview", id: "blk_d", nonce: 1 })
-    expect(highlightedText(container)).toBe("D")
-    sendReveal({ type: "preview", id: "blk_f", nonce: 2 })
-    expect(highlightedText(container)).toBe("F")
-    sendReveal({ type: "cancel", nonce: 3 })
-    // Back to what the FIRST preview captured, not the last previewed block.
-    expect(highlightedText(container)).toBe("B")
-  })
-
-  it("commit keeps the selection on the target block", async () => {
-    const { container, sendReveal } = renderWithReveal(ZOOMABLE)
-    sendReveal({ type: "preview", id: "blk_e", nonce: 1 })
-    sendReveal({ type: "commit", id: "blk_e", nonce: 2 })
-    expect(highlightedText(container)).toBe("E")
-    // A cancel after a commit has no snapshot left to restore — it's a no-op.
-    sendReveal({ type: "cancel", nonce: 3 })
-    expect(highlightedText(container)).toBe("E")
-    // After the dialog's focus juggling settles, the container is the keyboard
-    // target again so arrows work from the landing block.
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(document.activeElement).toBe(editorRoot(container))
-  })
-
-  it("ignores a preview for a block that doesn't exist", () => {
-    const { container, sendReveal } = renderWithReveal(ZOOMABLE)
-    sendReveal({ type: "preview", id: "blk_nope", nonce: 1 })
-    expect(highlightedText(container)).toBe("A")
-    // No snapshot was captured, so a cancel is a no-op too.
-    sendReveal({ type: "cancel", nonce: 2 })
-    expect(highlightedText(container)).toBe("A")
-  })
-})
-
 describe("undo and what it discards", () => {
   it("undoing a duplicate hands the save the copies to discard, not to strand", () => {
     const hints: (ChangeHint | undefined)[] = []
@@ -2359,12 +2357,15 @@ describe("brand placeholder (empty block being edited)", () => {
       <Harness initial={"Parent\n  id:: blk_p\n  child"} zoomRootId="blk_p" />,
     )
     const root = editorRoot(container)
-    // Zoom lands on the first child; ArrowUp selects the title, Enter edits it.
+    // Zoom lands on the first child; ArrowUp selects the title, Enter edits
+    // it — in the title's own field, which carries the title's prompt.
     fireEvent.keyDown(root, { key: "ArrowUp" })
-    fireEvent.keyDown(root, { key: "Enter" })
-    const textarea = container.querySelector("textarea")!
-    expect(textarea.value).toBe("Parent")
-    expect(textarea.placeholder).toBe("")
+    fireEvent.keyDown(container.querySelector<HTMLElement>('h1 [role="button"]')!, {
+      key: "Enter",
+    })
+    const input = container.querySelector<HTMLInputElement>("h1 input")!
+    expect(input.value).toBe("Parent")
+    expect(input.placeholder).not.toBe(PLACEHOLDER)
   })
 })
 
@@ -3239,6 +3240,264 @@ describe("BlockEditor images", () => {
     })
     const lightbox = screen.getByTestId("image-lightbox")
     expect(lightbox.querySelector("img")!.alt).toBe("Wide")
+  })
+})
+
+describe("BlockEditor inline links", () => {
+  /** Hover `element` until the link's card opens. */
+  async function hover(element: Element): Promise<HTMLElement> {
+    await act(async () => {
+      fireEvent.pointerEnter(element, { pointerType: "mouse" })
+      fireEvent.mouseEnter(element)
+      fireEvent.mouseMove(element)
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    })
+    return screen.getByTestId("link-hover-card")
+  }
+  /** Hover the link in row `index`. */
+  const hoverLink = (container: HTMLElement, index: number) =>
+    hover(container.querySelectorAll("[data-occurrence]")[index]!.querySelector("a")!)
+  /** A paste of plain text into the textarea being edited. */
+  const pasteText = (textarea: Element, text: string) =>
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        files: [],
+        types: ["text/plain"],
+        getData: (type: string) => (type === "text/plain" ? text : ""),
+      },
+    })
+
+  it("a pasted address is written out as a link named for its host, the address kept whole", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    await act(async () => {
+      pasteText(textarea, "see https://www.example.com/a/b?c=1. and [kept](https://e.com/k)")
+    })
+    expect(serializedLines(getByTestId)).toEqual([
+      "see [example.com](https://www.example.com/a/b?c=1). and [kept](https://e.com/k)",
+    ])
+  })
+
+  it("the hover card is a pill — the address as a link, a copy, Edit — that opens to a panel", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) first"} />,
+    )
+    const card = await hoverLink(container, 0)
+    const address = within(card).getByTestId("link-card-address")
+    expect(address.getAttribute("href")).toBe("https://e.com/g")
+    expect(address.getAttribute("target")).toBe("_blank")
+    expect(within(card).getByLabelText("Copy address")).not.toBeNull()
+    expect(screen.queryByTestId("link-card-panel")).toBeNull()
+
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
+    expect((screen.getByTestId("link-card-url") as HTMLInputElement).value).toBe("https://e.com/g")
+    const field = screen.getByTestId("link-display-text") as HTMLInputElement
+    expect(field.value).toBe("the guide")
+    await act(async () => {
+      fireEvent.change(field, { target: { value: "the manual" } })
+      fireEvent.submit(field.closest("form")!)
+    })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the manual](https://e.com/g) first"])
+    // One undo step.
+    fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the guide](https://e.com/g) first"])
+  })
+
+  it("the panel points the link at a new address, and takes the link off", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) first"} />,
+    )
+    await hoverLink(container, 0)
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
+    const url = screen.getByTestId("link-card-url") as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(url, { target: { value: "docs.e.com/guide" } })
+      fireEvent.blur(url)
+    })
+    expect(serializedLines(getByTestId)).toEqual([
+      "Read [the guide](https://docs.e.com/guide) first",
+    ])
+
+    // The card stays at its panel after a save; hover again and it is
+    // there, or Edit brings it back.
+    await hoverLink(container, 0)
+    if (!screen.queryByTestId("link-card-panel")) {
+      await act(async () => {
+        fireEvent.click(getByTestId("link-card-edit"))
+      })
+    }
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-remove"))
+    })
+    expect(serializedLines(getByTestId)).toEqual(["Read the guide first"])
+    expect(container.querySelector("a")).toBeNull()
+  })
+
+  it("a field left unsaved is saved as the card closes, however it closes", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) first"} />,
+    )
+    await hoverLink(container, 0)
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
+    const field = screen.getByTestId("link-display-text") as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(field, { target: { value: "the manual" } })
+    })
+    // The pointer leaves; the card closes after its delay, with no blur
+    // (a click elsewhere takes the popup down before one could fire).
+    const anchor = container.querySelector("a")!
+    await act(async () => {
+      fireEvent.pointerLeave(anchor, { pointerType: "mouse" })
+      fireEvent.mouseLeave(anchor)
+      fireEvent.pointerLeave(screen.getByTestId("link-hover-card"), { pointerType: "mouse" })
+      fireEvent.mouseLeave(screen.getByTestId("link-hover-card"))
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    })
+    await waitFor(() => expect(screen.queryByTestId("link-hover-card")).toBeNull())
+    expect(serializedLines(getByTestId)).toEqual(["Read [the manual](https://e.com/g) first"])
+  })
+
+  it("both fields changed at once are one rewrite, and a field left alone is no change", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) first"} />,
+    )
+    await hoverLink(container, 0)
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("link-card-url"), {
+        target: { value: "https://docs.e.com/g" },
+      })
+      fireEvent.change(screen.getByTestId("link-display-text"), {
+        target: { value: "the manual" },
+      })
+      fireEvent.submit(screen.getByTestId("link-card-panel"))
+    })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the manual](https://docs.e.com/g) first"])
+    // One undo step for both.
+    fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the guide](https://e.com/g) first"])
+    // Opened and left alone: nothing is written.
+    await hoverLink(container, 0)
+    if (!screen.queryByTestId("link-card-panel")) {
+      await act(async () => {
+        fireEvent.click(getByTestId("link-card-edit"))
+      })
+    }
+    await act(async () => {
+      fireEvent.blur(screen.getByTestId("link-display-text"))
+    })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the guide](https://e.com/g) first"])
+  })
+
+  it("a typed address is offered its host as display text, and written out as a link", async () => {
+    const { container, getByTestId } = render(<Harness initial={"See https://www.e.com/x now"} />)
+    await hoverLink(container, 0)
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
+    const field = screen.getByTestId("link-display-text") as HTMLInputElement
+    expect(field.value).toBe("e.com")
+    await act(async () => {
+      fireEvent.submit(field.closest("form")!)
+    })
+    expect(serializedLines(getByTestId)).toEqual(["See [e.com](https://www.e.com/x) now"])
+  })
+
+  it("a space typed after an address writes it out as a link, the caret following", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "see https://www.e.com/x" } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["see https://www.e.com/x"])
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "see https://www.e.com/x " } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["see [e.com](https://www.e.com/x) "])
+    expect(textarea.selectionStart).toBe("see [e.com](https://www.e.com/x) ".length)
+    // Its own undo step: the bare address comes back.
+    fireEvent.keyDown(textarea, { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["see https://www.e.com/x"])
+  })
+
+  it("a name with a common ending is an address too: google.com, then a space", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "search google.com " } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["search [google.com](https://google.com) "])
+    await act(async () => {
+      fireEvent.change(textarea, {
+        target: { value: "search [google.com](https://google.com) not node.js " },
+      })
+    })
+    expect(serializedLines(getByTestId)).toEqual([
+      "search [google.com](https://google.com) not node.js ",
+    ])
+  })
+
+  it("leaving edit mode writes out a bare address left in the row", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")!
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "https://www.e.com/x" } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["https://www.e.com/x"])
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: "Escape" })
+    })
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(serializedLines(getByTestId)).toEqual(["[e.com](https://www.e.com/x)"])
+  })
+
+  it("the menu's Edit link opens a link's card without a hover, for a touch screen", async () => {
+    const { container } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) and https://e.com/x"} />,
+    )
+    const row = container.querySelector("[data-occurrence]")!
+    await act(async () => {
+      fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
+    })
+    const menu = screen.getByTestId("block-context-menu")
+    expect(menu.textContent).toContain("Edit link")
+    // Two links: a submenu names them by their text.
+    await act(async () => {
+      fireEvent.click(screen.getByText("Edit link"))
+    })
+    const submenu = await screen.findByTestId("edit-link-menu")
+    expect(submenu.textContent).toContain("the guide")
+    expect(submenu.textContent).toContain("https://e.com/x")
+    await act(async () => {
+      fireEvent.click(within(submenu).getByText("the guide"))
+    })
+    // Opened this way it is the panel straight away: there is no hover to
+    // reach Edit from.
+    await screen.findByTestId("link-card-panel")
+    expect((screen.getByTestId("link-card-url") as HTMLInputElement).value).toBe("https://e.com/g")
+    expect((screen.getByTestId("link-display-text") as HTMLInputElement).value).toBe("the guide")
+  })
+
+  it("a read-only row's link is only a link", async () => {
+    const { container } = render(
+      <BlockEditor doc={withStarter(parse("https://e.com/x"))} onChange={() => {}} readOnly />,
+    )
+    const anchor = container.querySelector("a")!
+    await act(async () => {
+      fireEvent.pointerEnter(anchor, { pointerType: "mouse" })
+      fireEvent.mouseEnter(anchor)
+      fireEvent.mouseMove(anchor)
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    })
+    expect(screen.queryByTestId("link-hover-card")).toBeNull()
   })
 })
 

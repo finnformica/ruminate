@@ -14,6 +14,7 @@ import {
 } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
+import { isBrowserOffline } from "../utils/network"
 import { trackReplicaAccess } from "./replica-access"
 import {
   storageDiagnosticsAtom,
@@ -48,7 +49,10 @@ import {
  *   `withAuthRetry`; a 401 refreshes once and retries).
  * - **Resilience.** A failed push merges its rows back into the pending diff
  *   (newer queued rows win) and retries with exponential backoff (2s → 60s);
- *   the browser's `online` event short-circuits the wait.
+ *   the browser's `online` event short-circuits the wait. While the browser
+ *   says it is offline (`navigator.onLine === false`) no push is attempted
+ *   at all — the rows wait for the `online` event, and nothing is recorded
+ *   as an error, because nothing failed.
  * - **Cursor.** A monotonic ms-timestamp cursor is sent with each push and
  *   confirmed by the push's own response, which echoes the cursor the batch
  *   committed. No second request.
@@ -404,6 +408,14 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
 
   async function runPush(): Promise<void> {
     if (stopped || !hasWork()) return
+    // No network, no attempt. The rows stay pending (the status reads
+    // "Offline", not "Sync failed") and the `online` event pushes them at
+    // once; the re-check is a backstop for a flag that flips without one.
+    if (isBrowserOffline()) {
+      useKeepalive = false
+      schedule(backoffMaxMs)
+      return
+    }
 
     // Snapshot and clear the pending state; a failure merges it back.
     const wasFullPush = fullPushRequested

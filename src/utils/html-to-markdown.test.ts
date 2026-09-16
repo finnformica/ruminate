@@ -61,6 +61,49 @@ describe("htmlToMarkdown", () => {
     expect(htmlToMarkdown(html)).toBe("> wise words")
   })
 
+  it("reads an <img> as a markdown image line", () => {
+    expect(htmlToMarkdown('<img src="https://e.com/a.png" alt="a cat">')).toBe(
+      "![a cat](https://e.com/a.png)",
+    )
+    expect(htmlToMarkdown('<p><img src="https://e.com/a.png"></p>')).toBe(
+      "![](https://e.com/a.png)",
+    )
+  })
+
+  it("reads a <figure> as its image, captioned by the alt or else the figcaption", () => {
+    expect(
+      htmlToMarkdown(
+        '<figure><img src="https://e.com/a.png" alt="alt"><figcaption>[image: alt]</figcaption></figure>',
+      ),
+    ).toBe("![alt](https://e.com/a.png)")
+    expect(
+      htmlToMarkdown(
+        '<figure><img src="https://e.com/a.png"><figcaption>from the <b>caption</b></figcaption></figure>',
+      ),
+    ).toBe("![from the **caption**](https://e.com/a.png)")
+  })
+
+  it("writes a same-origin picture as its path, so an upload reads back as one", () => {
+    const origin = window.location.origin
+    expect(htmlToMarkdown(`<img src="${origin}/api/images/img_abcdefghijkl" alt="mine">`)).toBe(
+      "![mine](/api/images/img_abcdefghijkl)",
+    )
+  })
+
+  it("keeps an image mid-sentence as an inline reference", () => {
+    expect(htmlToMarkdown('<p>see <img src="https://e.com/a.png" alt="this"> here</p>')).toBe(
+      "see ![this](https://e.com/a.png) here",
+    )
+  })
+
+  it("drops an image with no usable address, and keeps brackets out of a caption", () => {
+    expect(htmlToMarkdown('<img src="data:image/png;base64,AAAA" alt="inline">')).toBe("")
+    expect(htmlToMarkdown('<img alt="no src">')).toBe("")
+    expect(htmlToMarkdown('<img src="https://e.com/a.png" alt="a [b]\nc">')).toBe(
+      "![a b c](https://e.com/a.png)",
+    )
+  })
+
   it("turns <br> into a line break and separates paragraphs", () => {
     const html = "<p>one<br>two</p><p>three</p>"
     expect(htmlToMarkdown(html)).toBe("one\ntwo\n\nthree")

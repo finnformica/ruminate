@@ -4,6 +4,7 @@ import { useEvent, useNetworkState } from "react-use"
 import { githubUserAtom, signOutAtom } from "../global-state"
 import { sessionStatusAtom } from "../utils/github-session"
 import { requestAmbientDatabasePull, startDatabaseMode, stopDatabaseMode } from "./database-mode"
+import { refreshFeatures, resetFeatures } from "./features"
 import { requestAmbientSharesRefresh, startSharedMode, stopSharedMode } from "./shared-mode"
 
 /**
@@ -47,7 +48,11 @@ export function useDatabaseMode() {
     // The notes others shared with this identity ride alongside the user's
     // own corpus (src/data/shared-mode.ts) and stop with it.
     startSharedMode()
+    // The feature flags for this account (src/data/features.ts): what the
+    // Settings panels and the menus draw. Fetched once per sign-in.
+    void refreshFeatures()
     return () => {
+      resetFeatures()
       stopSharedMode()
       stopDatabaseMode()
     }

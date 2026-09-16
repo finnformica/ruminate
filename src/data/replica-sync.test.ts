@@ -180,6 +180,11 @@ function createTestSync(
 
 const replicaDiagnostics = () => getDefaultStore().get(storageDiagnosticsAtom).replica!
 
+/** Pretend the browser is (or is not) offline — `navigator.onLine`. */
+function setOnline(online: boolean) {
+  Object.defineProperty(window.navigator, "onLine", { configurable: true, get: () => online })
+}
+
 /** Fire due timers, then settle the sync's promise queue. */
 async function advance(handle: ReplicaSyncHandle, ms: number) {
   await vi.advanceTimersByTimeAsync(ms)
@@ -196,6 +201,7 @@ afterEach(async () => {
   for (const handle of handles) handle.stop()
   handles = []
   vi.useRealTimers()
+  delete (window.navigator as { onLine?: boolean }).onLine
   const store = getDefaultStore()
   store.set(storageDiagnosticsAtom, { ...store.get(storageDiagnosticsAtom), replica: null })
 })
@@ -349,6 +355,32 @@ describe("replica sync queue", () => {
     expect(replicaDiagnostics().pendingNotes).toBe(0)
     expect(replicaDiagnostics().lastError).toBeNull()
     expect(replicaDiagnostics().errorCount).toBe(5)
+  })
+
+  it("offline, nothing is attempted: the rows wait, and the online event pushes them", async () => {
+    // `navigator.onLine === false` means there is no network at all, so a
+    // push would only fail and read as "Sync failed" in the sidebar. Skip it:
+    // the rows stay pending (the status reads "Offline"), no error is
+    // recorded, and `online` pushes them at once.
+    const { handle, server } = createTestSync({ "a.md": "A\n" })
+    setOnline(false)
+    handle.notifyGraphChange(["a"], diffOf({ nodes: [node("a")] }))
+
+    await advance(handle, DEBOUNCE)
+    expect(server.puts()).toHaveLength(0)
+    expect(replicaDiagnostics().pendingNotes).toBe(1)
+    expect(replicaDiagnostics().lastError).toBeNull()
+    // The backstop re-check does not turn into an attempt while still offline.
+    await advance(handle, 60_000)
+    expect(server.puts()).toHaveLength(0)
+
+    setOnline(true)
+    window.dispatchEvent(new Event("online"))
+    await advance(handle, 0)
+    expect(server.puts()).toHaveLength(1)
+    expect(server.remoteNodes.has("a")).toBe(true)
+    expect(replicaDiagnostics().pendingNotes).toBe(0)
+    expect(replicaDiagnostics().errorCount).toBe(0)
   })
 
   it("a failed push's rows do not clobber newer rows queued during the flight", async () => {

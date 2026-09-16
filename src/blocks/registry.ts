@@ -75,13 +75,11 @@ export interface BlockTypeDef {
   /** Offered by the slash menu even though it is not a plain type change
    * (an image asks for a file); gated on context. */
   readonly slash?: (context: SlashContext) => boolean
-  /** How search names this type: the `type:` value people type, its
-   * aliases, and the description the qualifier picker shows. Null for a
-   * type that is never a search result (`note`). */
+  /** How search names this type: the `type:` value people type and its
+   * aliases. Null for a type that is never a search result (`note`). */
   readonly search: {
     readonly value: string
     readonly aliases?: readonly string[]
-    readonly description: string
   } | null
 }
 
@@ -106,7 +104,7 @@ const heading = (id: BlockType, level: 1 | 2 | 3): BlockTypeDef => ({
   listItem: false,
   marked: true,
   turnInto: level === 1,
-  search: { value: id, description: `heading level ${level}` },
+  search: { value: id },
 })
 
 // The `[ ]` marker: `[ ]`, `[x]`, `[X]`, and the shorthand `[]`.
@@ -115,8 +113,14 @@ const todoTyped = {
   re: TODO_TYPED_RE,
   type: (match: RegExpExecArray): BlockType => (match[1].toLowerCase() === "x" ? "done" : "todo"),
 }
+// The clipboard's html flavor writes the box as the literal `[ ]` / `[x]`
+// text, not an `<input type="checkbox">`: the composers that take the html
+// flavor over the plain one (Slack, Claude, Google Docs, mail) drop a form
+// control on paste, which left the item as its text behind a stray space.
+// The text survives everywhere, and reads back as a GFM task item (a list
+// item beginning `[ ]`) wherever markdown is understood, Ruminate included.
 const todoHtml = (checked: boolean) => (_block: unknown, inline: string) =>
-  `<input type="checkbox"${checked ? " checked" : ""} disabled> ${inline}`
+  `[${checked ? "x" : " "}] ${inline}`
 
 const ORDERED_RE = /^(0|[1-9]\d*)\. /
 
@@ -130,7 +134,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     listItem: false,
     marked: false,
     turnInto: true,
-    search: { value: "text", description: "paragraph" },
+    search: { value: "text" },
   },
   {
     id: "ul",
@@ -145,7 +149,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     marked: true,
     continues: "ul",
     turnInto: true,
-    search: { value: "bullet", aliases: ["ul"], description: "bullet item" },
+    search: { value: "bullet", aliases: ["ul"] },
   },
   {
     id: "ol",
@@ -167,7 +171,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     marked: true,
     continues: "ol",
     turnInto: true,
-    search: { value: "ordered", aliases: ["ol"], description: "numbered item" },
+    search: { value: "ordered", aliases: ["ol"] },
   },
   {
     id: "todo",
@@ -185,7 +189,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     marked: true,
     continues: "todo",
     turnInto: true,
-    search: { value: "todo", description: "unchecked to-do" },
+    search: { value: "todo" },
   },
   {
     id: "done",
@@ -201,7 +205,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     continues: "todo",
     splitsAs: "todo",
     turnInto: false,
-    search: { value: "done", description: "checked to-do" },
+    search: { value: "done" },
   },
   heading("h1", 1),
   heading("h2", 2),
@@ -218,7 +222,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     listItem: false,
     marked: true,
     turnInto: true,
-    search: { value: "quote", description: "quote" },
+    search: { value: "quote" },
   },
   {
     id: "code",
@@ -243,7 +247,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     marked: true,
     splitsAs: "text",
     turnInto: true,
-    search: { value: "code", description: "code" },
+    search: { value: "code" },
   },
   {
     id: "image",
@@ -254,6 +258,14 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     fromLine: (line) => parseImageLine(line),
     toLines: (block) => [imageLine(block)],
     html: (block) => {
+      // A figure: the picture, and beneath it a caption that says there is
+      // one — `[image: caption]`, or `[image]` uncaptioned. The bytes are
+      // never fetched at copy time; an app that can load the <img> shows it
+      // (an external picture; an uploaded one is behind the session, so
+      // only Ruminate can), and every other composer drops the <img> and
+      // keeps the caption, so a pasted note still shows where its pictures
+      // were and what they were of.
+      //
       // Same-origin asset paths are made absolute so the picture resolves
       // wherever the html lands (another app; Ruminate reads the payload).
       //
@@ -265,7 +277,12 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
       const url = imageUrlOfBlock(block)
       const origin = (globalThis as { location?: { origin?: string } }).location?.origin ?? ""
       const src = url.startsWith("/") ? origin + url : url
-      return `<img src="${escapeHtml(src)}" alt="${escapeHtml(block.text)}">`
+      const caption = block.text.trim()
+      const label = caption === "" ? "[image]" : `[image: ${caption}]`
+      return (
+        `<figure><img src="${escapeHtml(src)}" alt="${escapeHtml(block.text)}">` +
+        `<figcaption>${escapeHtml(label)}</figcaption></figure>`
+      )
     },
     listItem: false,
     // The picture is the marker: Backspace at the caption's start must not
@@ -276,7 +293,7 @@ export const BLOCK_TYPE_DEFS: readonly BlockTypeDef[] = [
     // slash menu offers it where uploads are on.
     turnInto: false,
     slash: (context) => context.images,
-    search: { value: "image", description: "image" },
+    search: { value: "image" },
   },
   {
     id: "note",
@@ -310,13 +327,12 @@ export function canonicalOf(type: BlockType): BlockType {
  * family groups (`task`, `heading`, `list`) alongside each type's own names. */
 interface SearchGroup {
   readonly value: string
-  readonly description: string
   readonly families: readonly BlockFamily[]
 }
 const SEARCH_GROUPS: readonly SearchGroup[] = [
-  { value: "task", description: "any to-do", families: ["todo"] },
-  { value: "heading", description: "any heading", families: ["heading"] },
-  { value: "list", description: "bullet or numbered item", families: ["bullet", "ordered"] },
+  { value: "task", families: ["todo"] },
+  { value: "heading", families: ["heading"] },
+  { value: "list", families: ["bullet", "ordered"] },
 ]
 
 /** The families in the order the search vocabulary lists them (the picker's
@@ -347,22 +363,37 @@ export function searchTypeValues(): Record<string, readonly BlockType[]> {
   return values
 }
 
-/** The qualifier picker's `type:` rows for blocks, in vocabulary order: a
- * family's members, with its group name beside them. */
-export function searchTypeOptions(): { value: string; description: string }[] {
-  const rows: { value: string; description: string }[] = []
+/** The markdown glyph the qualifier picker draws beside a `type:` row: the
+ * type's marker, or what stands for it where the marker is not a prefix
+ * (a numbered item's number, a code fence, an image's `![]`, a
+ * paragraph's pilcrow). */
+function searchGlyph(def: BlockTypeDef): string {
+  if (typeof def.marker === "function") return def.marker(1).trim()
+  if (def.marker.trim() !== "") return def.marker.trim()
+  return def.family === "code" ? "```" : def.family === "image" ? "![]" : "¶"
+}
+
+/** The qualifier picker's `type:` rows for blocks, in vocabulary order,
+ * each with its glyph and its name capitalised. Headings are offered as
+ * the one `heading` (its levels, `h1`…`h3`, stay typed values only); the
+ * to-dos as `todo`, `done` and then `task`; lists as `bullet` and
+ * `ordered` (the `list` group stays a typed value only). */
+export function searchTypeOptions(): { value: string; label: string; glyph: string }[] {
+  const rows: { value: string; label: string; glyph: string }[] = []
+  const row = (value: string, glyph: string) => ({
+    value,
+    label: value.charAt(0).toUpperCase() + value.slice(1),
+    glyph,
+  })
   for (const family of SEARCH_FAMILY_ORDER) {
     const members = BLOCK_TYPE_DEFS.filter((def) => def.family === family && def.search)
     const group = SEARCH_GROUPS.find((g) => g.families[0] === family)
-    // A group of one family reads "any …": after its members for to-dos
-    // (todo, done, task), before them for headings (heading, h1, h2, h3);
-    // the list group covers two families and leads them.
-    if (group && family !== "todo")
-      rows.push({ value: group.value, description: group.description })
-    for (const def of members)
-      rows.push({ value: def.search!.value, description: def.search!.description })
-    if (group && family === "todo")
-      rows.push({ value: group.value, description: group.description })
+    if (family === "heading" && group) {
+      rows.push(row(group.value, searchGlyph(members[0])))
+      continue
+    }
+    for (const def of members) rows.push(row(def.search!.value, searchGlyph(def)))
+    if (family === "todo" && group) rows.push(row(group.value, searchGlyph(members[0])))
   }
   return rows
 }

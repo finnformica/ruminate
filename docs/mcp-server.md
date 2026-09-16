@@ -447,7 +447,7 @@ The reasons, in order:
    check.
 2. **There is no third party.** Dynamic client registration, Client ID Metadata
    Documents, PKCE and consent screens exist so that an _unknown_ client can obtain a
-   _user's_ authorization. On a personal instance with an allowlist of a handful of
+   _user's_ authorization. On a personal instance with a handful of invited
    accounts, the user and the person configuring the client are the same person, at the
    same keyboard.
 3. **It stays reversible.** The resource server is the part that would be kept: token →

@@ -66,7 +66,7 @@ bill, paid:
    about tombstones, and any `DELETE` from them. The opt-outs are narrow and
    greppable: `includingDeleted()` for replication/trash/audit reads,
    `-- tenant-exempt: <reason>` for the rare statement with no tenant to name,
-   and `controlPlaneDriver` for `users`/`allowlist`, which are deliberately
+   and `controlPlaneDriver` for `users`/`invites`/`feature_flags`, which are deliberately
    not tenant data (the tenancy resolver has to look up an id that is not yet
    a tenant).
 4. **A CI gate with the same rules.** `npm run check:queries`
@@ -84,7 +84,7 @@ merely "no B rows in `nodes`": a since-pull now carries rows and a cursor and
 nothing else, so anything of B's appearing anywhere in it is a failure.
 
 **What survives untouched.** The control plane (§3) is unchanged — `users`,
-`allowlist`, `SIGNUP_MODE`, the `ALLOWED_GITHUB_ID` fail-closed bootstrap, and
+`invites`, `SIGNUP_MODE`, the `ALLOWED_GITHUB_ID` fail-closed bootstrap, and
 `requireSession`'s verification. The client (§5) still learns nothing: same
 URLs, same payloads, tenancy inferred server-side from credentials. §10's
 portability requirement holds and is arguably better served — the corpus
@@ -207,24 +207,60 @@ CREATE TABLE users (
   name       TEXT,
   status     TEXT NOT NULL DEFAULT 'active',  -- 'active' | 'blocked'
   created_at INTEGER NOT NULL,     -- ms epoch — attribution lives HERE (§7)
-  created_by TEXT NOT NULL DEFAULT 'signup',  -- 'signup' | 'allowlist' | 'admin'
+  created_by TEXT NOT NULL DEFAULT 'signup',  -- 'signup' | 'invite' | 'admin' ('allowlist' on rows from before 0014)
   last_seen_at INTEGER,
   email      TEXT NOT NULL     -- primary verified GitHub address, recorded at sign-in (0010, 0011)
 );
 
-CREATE TABLE allowlist (
-  github_id INTEGER PRIMARY KEY,   -- pre-approved ids while signups are gated
-  note TEXT
+CREATE TABLE invites (            -- 0014; replaced the allowlist
+  id          TEXT PRIMARY KEY,   -- inv_…, the public handle
+  token_hash  TEXT NOT NULL,      -- SHA-256 of the link's token; the secret is never stored
+  created_by  INTEGER NOT NULL,   -- the admin
+  note        TEXT,
+  created_at  INTEGER NOT NULL,
+  expires_at  INTEGER NOT NULL,
+  redeemed_at INTEGER, redeemed_by INTEGER,   -- who it let in
+  revoked_at  INTEGER
+);
+
+CREATE TABLE feature_flags (      -- 0013
+  key        TEXT PRIMARY KEY,    -- src/data/feature-flags.ts names the keys
+  audience   TEXT NOT NULL,       -- 'off' | 'admin' | 'everyone'
+  updated_at INTEGER NOT NULL, updated_by INTEGER NOT NULL
 );
 ```
 
-**Signup flow.** A `SIGNUP_MODE` var (`'allowlist'` initially, `'open'`
-later, absent = fail closed, preserving `replica.ts:70`'s spirit) decides
-what happens when a verified id has no `users` row: allowlist mode consults
-the `allowlist` table (seeded with `42536816` — `ALLOWED_GITHUB_ID` retires
-into it); open mode inserts the row on first authenticated request. A
-`status = 'blocked'` row always 403s. There is no separate signup screen —
-signing in _is_ signing up, exactly like today.
+**Signup flow.** A `SIGNUP_MODE` var (`'invite'` today, `'open'` if the door
+is ever opened, absent = fail closed, preserving `replica.ts:70`'s spirit)
+decides what happens when a verified id has no `users` row: invite mode
+admits the bootstrap owner (`ALLOWED_GITHUB_ID`) and a sign-in that arrived
+through a live invite link; open mode inserts the row on first authenticated
+request. A `status = 'blocked'` row always 403s. There is no separate signup
+screen — signing in _is_ signing up, exactly like today.
+
+**Invites** (`worker/invites.ts`, migration 0014) replaced the original
+`allowlist` table, which was keyed by GitHub id and written by hand — so
+admitting someone meant asking for their GitHub account first. An invite is a
+link (`/invite/<token>`) the admin mints on the admin page (`/admin`),
+single-use and expiring, its token stored only as a hash like an MCP token.
+The invite page's one button starts the ordinary GitHub sign-in with itself
+as the return URL, so the token reaches the sign-in callback in the OAuth
+`state`; the callback — the one place a `users` row can be written, since it
+alone has the address — redeems it and returns to the page with `?invite=`
+saying how it went (`accepted`, `member` for someone already in, `invalid`).
+An invite is claimed only when it admits someone: a sign-in that already has
+a row, or cannot be provisioned, leaves it live. The check and the claim are
+one `UPDATE … RETURNING`, so two sign-ins racing for a link cannot both win.
+
+**Feature flags** (`src/data/feature-flags.ts`, `worker/features.ts`) are the
+admin's switchboard for beta features: each registered feature has an
+audience — `off`, `admin` (the bootstrap owner alone) or `everyone` — set on
+the admin page and enforced by the Worker on the feature's own routes
+(minting MCP tokens and the `/mcp` endpoint; giving a share). The client
+reads `GET /api/features` once per sign-in to know what to draw; a feature
+with no row is at its registry default. The **admin** is exactly the
+bootstrap owner: `ALLOWED_GITHUB_ID` names the one account that may reach
+`/api/admin/*`; everyone else gets the 404 a missing route gets.
 
 **`requireSession` generalizes; it does not change shape.** Today: verify
 cookie + token, then compare the verified id to a constant. Tomorrow: verify

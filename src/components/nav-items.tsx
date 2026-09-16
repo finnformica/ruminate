@@ -2,8 +2,8 @@ import { Link, LinkComponentProps, useLocation } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
 import { useAtom, useAtomValue } from "jotai"
 import { createContext, useContext } from "react"
-import { useNetworkState } from "react-use"
 import { requestDatabasePull } from "../data/database-mode"
+import { useIsAdmin } from "../data/features"
 import {
   isBootingAtom,
   isHelpPanelOpenAtom,
@@ -28,10 +28,11 @@ import {
   CircleQuestionMarkFillIcon16,
   CircleQuestionMarkIcon16,
   CopyIcon16,
+  FlagFillIcon16,
+  FlagIcon16,
   MoreIcon16,
   NoteFillIcon16,
   NoteIcon16,
-  OfflineIcon16,
   PinFillIcon12,
   PinFillIcon16,
   PinIcon16,
@@ -44,6 +45,7 @@ import { NoteActionsMenu } from "./note-actions-menu"
 import { NoteFavicon } from "./note-favicon"
 import { beginGitHubSignIn } from "./github-auth"
 import { SyncStatusIcon, useSyncStatusMeta, useSyncStatusText } from "./sync-status"
+import { Tooltip } from "./tooltip"
 
 const SizeContext = createContext<"medium" | "large">("medium")
 
@@ -60,7 +62,6 @@ export function NavItems({
   const booting = useAtomValue(isBootingAtom)
   const syncText = useSyncStatusText()
   const syncMeta = useSyncStatusMeta()
-  const { online } = useNetworkState()
   const { pathname } = useLocation()
 
   const today = new Date()
@@ -72,6 +73,10 @@ export function NavItems({
 
   // Registered once by the app layout (src/hooks/app-update.ts).
   const { needRefresh, apply: applyUpdate } = useAtomValue(appUpdateAtom)
+
+  // The admin page (invites, feature flags) is the bootstrap owner's alone,
+  // as the server says (src/data/features.ts); nobody else sees the link.
+  const isAdmin = useIsAdmin()
 
   return (
     <SizeContext.Provider value={size}>
@@ -160,26 +165,56 @@ export function NavItems({
               Update Ruminate
             </button>
           ) : null}
-          {!online ? (
-            <div className="nav-item text-text-secondary" data-size={size}>
-              <OfflineIcon16 />
-              Offline
-            </div>
-          ) : null}
-          {syncText ? (
-            <button
-              className="nav-item text-text-secondary"
-              data-size={size}
-              title={syncMeta.tooltip}
-              onClick={() =>
-                // Pushes are automatic (write-behind); the button pulls the
-                // latest from D1 — or re-authenticates when the session died.
-                syncMeta.needsReauth ? beginGitHubSignIn() : requestDatabasePull()
-              }
+          {syncText === null ? null : (
+            <Tooltip>
+              <Tooltip.Trigger
+                render={
+                  syncMeta.action === null ? (
+                    // Offline: nothing a click could do, so the row only
+                    // states it — styled like its neighbours, with the
+                    // default cursor.
+                    <div className="nav-item text-text-secondary" data-size={size} data-static="">
+                      <SyncStatusIcon />
+                      {syncText}
+                    </div>
+                  ) : (
+                    <button
+                      className="nav-item text-text-secondary"
+                      data-size={size}
+                      onClick={() =>
+                        // Pushes are automatic (write-behind); the button
+                        // pulls the latest from D1 — or re-authenticates when
+                        // the session died.
+                        syncMeta.action === "reauth" ? beginGitHubSignIn() : requestDatabasePull()
+                      }
+                    >
+                      <SyncStatusIcon />
+                      {syncText}
+                    </button>
+                  )
+                }
+              />
+              {syncMeta.tooltip ? (
+                // The explanation behind the short label: a sentence, so it
+                // wraps rather than running the width of the screen.
+                <Tooltip.Content className="max-w-72 leading-snug text-balance">
+                  {syncMeta.tooltip}
+                </Tooltip.Content>
+              ) : null}
+            </Tooltip>
+          )}
+          {isAdmin ? (
+            <NavLink
+              to="/admin"
+              search={{ query: undefined }}
+              activeIcon={<FlagFillIcon16 />}
+              icon={<FlagIcon16 />}
+              className="text-text-secondary"
+              shortcut={formatCombo("g a")}
+              onNavigate={onNavigate}
             >
-              <SyncStatusIcon />
-              {syncText}
-            </button>
+              Admin
+            </NavLink>
           ) : null}
           <NavLink
             to="/settings"

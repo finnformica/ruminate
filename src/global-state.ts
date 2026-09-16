@@ -23,7 +23,6 @@ import { createNotesBuilder } from "./data/note-meta"
 import { sampleGraph } from "./data/sample-graph"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
 import { createBlockIndexer, searchBlocks, type BlockHit } from "./utils/block-search"
-import type { BlockRevealRequest, OutlineItem } from "./utils/note-outline"
 import { parseQuery, type Query } from "./utils/search"
 
 // -----------------------------------------------------------------------------
@@ -476,22 +475,6 @@ export const touchNoteAtom = atom(null, (get, set, noteId: NoteId, now: number =
   set(recentTouchesAtom, next)
   saveRecentTouches(typeof localStorage === "undefined" ? null : localStorage, next)
 })
-
-/**
- * The live outline (heading blocks) of the note open in the block editor,
- * published by `BlockNoteEditor` on every doc change and read by the command
- * palette's outline mode (⌘P). Null when no editable note is mounted. The
- * palette must check `noteId` against the current route — a stale outline
- * never navigates a different note.
- */
-export const noteOutlineAtom = atom<{ noteId: string; items: OutlineItem[] } | null>(null)
-
-/**
- * The outline palette's channel to the block editor: preview (highlight +
- * scroll behind the dialog), commit (Enter), or cancel (restore what the
- * first preview captured). See `BlockRevealRequest` in utils/note-outline.
- */
-export const blockRevealAtom = atom<BlockRevealRequest | null>(null)
 
 export const calendarLayoutAtom = atomWithStorage<"week" | "month">("calendar-layout", "week")
 

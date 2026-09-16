@@ -9,7 +9,9 @@ import { GitHubAvatar } from "../components/github-avatar"
 import { SettingsIcon16 } from "../components/icons"
 import { McpTokensSection } from "../components/mcp-tokens-section"
 import { PageLayout } from "../components/page-layout"
+import { SettingsSection } from "../components/settings-section"
 import { SharingSection } from "../components/sharing-section"
+import { useFeature } from "../data/features"
 import { recordedEmailAtom } from "../data/shared-mode"
 import { TextInput } from "../components/text-input"
 import {
@@ -43,6 +45,10 @@ export const Route = createFileRoute("/_appRoot/settings")({
 })
 
 function RouteComponent() {
+  // Feature flags (src/data/feature-flags.ts): a panel for a feature this
+  // account may not use is not drawn. The Worker refuses regardless.
+  const sharing = useFeature("sharing")
+  const mcp = useFeature("mcp")
   return (
     <PageLayout title="Settings" icon={<SettingsIcon16 />} disableGuard>
       <div className="p-4 pb-6">
@@ -50,8 +56,8 @@ function RouteComponent() {
           <AppearanceSection />
           <EditorSection />
           <StorageSection />
-          <SharingSection />
-          <McpTokensSection />
+          {sharing ? <SharingSection /> : null}
+          {mcp ? <McpTokensSection /> : null}
           <GitHubSection />
           <div className="flex flex-col items-center gap-1 self-center p-5 text-center text-text-tertiary">
             <span className="text-sm">
@@ -90,16 +96,6 @@ function RouteComponent() {
         </div>
       </div>
     </PageLayout>
-  )
-}
-
-function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <h3 className="font-bold leading-4">{title}</h3>
-      {/* Each child is one setting; the gap keeps them from reading as one. */}
-      <div className="card-1 flex flex-col gap-5 p-4">{children}</div>
-    </div>
   )
 }
 
