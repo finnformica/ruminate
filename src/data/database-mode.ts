@@ -204,6 +204,7 @@ let queue: Promise<void> = Promise.resolve()
 /** Serialize all SQL/pull work; one task's failure never breaks the chain. */
 function enqueue(task: () => Promise<void>) {
   queue = queue.then(task).catch((error) => recordWriteError(error))
+  return queue
 }
 
 const jotai = () => getDefaultStore()
@@ -441,15 +442,20 @@ export function databaseApplyOps(ops: readonly Op[]) {
   }, OPS_FLUSH_MS)
 }
 
-/** Write the coalesced ops now (⌘S, tab hidden). */
-export function requestDatabaseFlush() {
+/**
+ * Write the coalesced ops now (⌘S, tab hidden, before an update reload).
+ *
+ * Resolves once the write has landed, so a caller that is about to throw the
+ * page away (⌘⇧U) can wait for it; fire-and-forget callers ignore it.
+ */
+export function requestDatabaseFlush(): Promise<void> {
   const activation = runtime
-  if (!activation || activation.pendingOps.length === 0) return
+  if (!activation || activation.pendingOps.length === 0) return Promise.resolve()
   if (activation.opsFlushTimer !== null) {
     clearTimeout(activation.opsFlushTimer)
     activation.opsFlushTimer = null
   }
-  enqueue(() => flushOps(activation))
+  return enqueue(() => flushOps(activation))
 }
 
 function onPageHidden() {

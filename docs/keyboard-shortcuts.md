@@ -15,7 +15,14 @@ reference, complete with a filter box.
 | Save                            | <kbd>⌘</kbd> <kbd>S</kbd>              |
 | Toggle sidebar                  | <kbd>⌘</kbd> <kbd>B</kbd>              |
 | Toggle help panel               | <kbd>⌘</kbd> <kbd>/</kbd>              |
+| Update Ruminate                 | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>U</kbd> |
 | Shortcut reference              | <kbd>?</kbd>                           |
+
+<kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>U</kbd> takes a waiting update — the same thing as the
+sidebar's **Update Ruminate** item, which is only on screen when there is one.
+With nothing waiting the key does nothing. Pending edits are written to the
+store before the page reloads, so a mistyped chord cannot carry them off with
+the old copy.
 
 ## Navigation
 
