@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { emptyBlock } from "../../blocks/ops"
 import type { BlockDoc, ChangeHint } from "../../blocks/types"
 import { imagesEnabled, uploadImage } from "../../data/images"
+import { fetchLinkPreview } from "../../data/link-previews"
 import { deleteBlockOps, deleteSubtreeOps, parentCount } from "../../data/ops"
 import { useApplyOps } from "../../data/store"
 import { useCollapseState } from "../../data/view-state"
@@ -207,6 +208,10 @@ export function BlockNoteEditor({
   // corpus has nowhere to put bytes). Off, the editor never offers it.
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const onImageUpload = imagesEnabled && isDatabaseMode && !readOnly ? uploadImage : undefined
+  // Link blocks (docs/links.md): a link's preview is fetched through the
+  // Worker, which takes a session — signed out, a link block is made without
+  // one (the card shows the address's host) and offers no refresh.
+  const onLinkPreview = isDatabaseMode && !readOnly ? fetchLinkPreview : undefined
 
   // Developer mode (`src/hooks/is-developer.ts`): the debug readouts, and the
   // corpus index behind the "upstream" metadata. Both are inert — no corpus
@@ -262,6 +267,7 @@ export function BlockNoteEditor({
       onDeleteSubtree={noteId && rowRemoval === "delete" ? deleteSubtree : undefined}
       knownBlock={noteId ? knownBlock : undefined}
       onImageUpload={onImageUpload}
+      onLinkPreview={onLinkPreview}
       // The trailing blank is what keeps a block to type in; without it (the
       // basket) the last row may go, and the basket goes with it.
       emptyable={!trailingBlank}

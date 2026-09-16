@@ -83,6 +83,7 @@ Focus never leaves the box: keep typing to narrow the list, <kbd>↑</kbd>/<kbd>
 | `quote`         | quote                                                     |
 | `code`          | a code block (or a fenced line in old notes)              |
 | `image`         | an image block (docs/images.md); text matches its caption |
+| `link`          | a link block (docs/links.md); text matches its title      |
 | `text`          | plain paragraph                                           |
 
 Block queries compose with everything else: note-level qualifiers filter by the containing note (`type:todo area:work` = open todos in notes whose `area` property is `work`), `in:` scopes to a note or a block's subtree, fuzzy text matches the block's own text (`type:todo milk`), `-type:done` excludes, and `sort:updated` orders blocks by their note's last update, most recent first.

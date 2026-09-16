@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { parse } from "./parse"
 import { serialize } from "./serialize"
+import type { BlockDoc } from "./types"
 
 // Content is written verbatim: a heading keeps `# `, a bullet its single `- `,
 // a paragraph has no marker. Nesting is two-space indentation; each block's id
@@ -349,5 +350,43 @@ describe("image blocks", () => {
   it("an image mid-sentence stays text", () => {
     const doc = parse("See ![pic](/api/images/img_abcdefghijklmnop) here\n  id:: blk_a\n")
     expect(doc.blocks["blk_a"].type).toBe("text")
+  })
+})
+
+describe("link blocks", () => {
+  it("writes a link block as its link on a line, which reads back as the inline link", () => {
+    // The block is graph-only (docs/links.md): a card is the hover card's
+    // choice, never an import's guess, so the line comes back as text —
+    // the link kept, the card not.
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["blk_a", "blk_b"],
+      blocks: {
+        blk_a: {
+          id: "blk_a",
+          type: "link",
+          text: "Flight to Lisbon",
+          props: { url: "https://mail.example.com/u/0/#inbox/abc123", site: "Mail" },
+          children: [],
+        },
+        blk_b: {
+          id: "blk_b",
+          type: "link",
+          text: "",
+          props: { url: "https://e.com/r" },
+          children: [],
+        },
+      },
+    }
+    const md = serialize(doc)
+    expect(md).toBe(
+      "[Flight to Lisbon](https://mail.example.com/u/0/#inbox/abc123)\n  id:: blk_a\n[](https://e.com/r)\n  id:: blk_b\n",
+    )
+    const back = parse(md)
+    expect(back.blocks["blk_a"].type).toBe("text")
+    expect(back.blocks["blk_a"].text).toBe(
+      "[Flight to Lisbon](https://mail.example.com/u/0/#inbox/abc123)",
+    )
+    expect(back.blocks["blk_b"].type).toBe("text")
   })
 })

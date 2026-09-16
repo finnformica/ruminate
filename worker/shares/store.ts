@@ -17,7 +17,13 @@
 // never from an address the caller supplied.
 
 import type { SqlDriver } from "../../src/data/sql-driver"
-import { serializeSharePermissions, shareFromRow, type ShareGrant, type ShareRow } from "./grant"
+import {
+  serializeSharePermissions,
+  shareFromRow,
+  type Permission,
+  type ShareGrant,
+  type ShareRow,
+} from "./grant"
 
 /** `id` column: a short public handle. */
 const ID_BYTES = 15
@@ -45,6 +51,7 @@ export interface CreateShareOptions {
   /** Already normalized (`normalizeEmail`). */
   granteeEmail: string
   rootIds: string[]
+  permissions: Permission[]
   now?: number
 }
 
@@ -59,7 +66,7 @@ export async function createShare(
     owner_id: options.ownerId,
     grantee_email: options.granteeEmail,
     root_ids: JSON.stringify(options.rootIds),
-    permissions: serializeSharePermissions([]),
+    permissions: serializeSharePermissions(options.permissions),
     created_at: now,
     revoked_at: null,
   }

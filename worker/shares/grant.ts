@@ -9,11 +9,14 @@
 //    query param or body field can name an owner, a root or a verb.
 // 2. **Nothing is allowed by default.** A malformed row yields a grant that
 //    reaches no notes and permits no verbs.
-// 3. **Which NODES the grantee may see is not decided here**: a share names
-//    notes, and the slice beneath them is computed from the owner's rows on
-//    every request by `slice.ts`.
+// 3. **The checks are narrow and greppable.** `shareAllows` is the whole
+//    permission check. Which NODES the grantee may touch is not decided here:
+//    a share names notes, and the slice beneath them is computed from the
+//    owner's rows on every request by `slice.ts`.
 
 import { parsePermissions, serializePermissions, type Permission } from "../mcp/grant"
+
+export { PERMISSIONS, type Permission } from "../mcp/grant"
 
 /** One share's authority. Produced only by `shareFromRow`. */
 export interface ShareGrant {
@@ -26,7 +29,8 @@ export interface ShareGrant {
   /** The note ids the closure is walked from. Possibly empty (a row that did
    * not parse), in which case the slice is empty too. */
   readonly rootIds: ReadonlySet<string>
-  /** The verbs this share permits — `read`, and only `read`, today. */
+  /** The verbs this share permits. `read` is always among them on a row the
+   * create endpoint wrote; a row without it permits nothing readable. */
   readonly permissions: ReadonlySet<Permission>
   readonly createdAt: number
   readonly revokedAt: number | null
@@ -76,10 +80,12 @@ export function shareFromRow(row: ShareRow): ShareGrant {
   }
 }
 
+/** Does this share permit `permission`? A revoked share permits nothing. */
+export const shareAllows = (grant: ShareGrant, permission: Permission): boolean =>
+  grant.revokedAt === null && grant.permissions.has(permission)
+
 /** Storage form of a permission set, `read` forced in: a share that cannot
- * be read is not a share of anything. Every share is read-only today; the
- * column is kept in the storage form the MCP grant uses so that write and
- * delete can arrive without a migration. */
+ * be read is not a share of anything. */
 export const serializeSharePermissions = (permissions: Iterable<Permission>): string =>
   serializePermissions(new Set<Permission>(["read", ...permissions]))
 
