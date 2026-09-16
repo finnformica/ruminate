@@ -12,7 +12,7 @@ vi.mock("../../data/view-state", () => ({
 vi.mock("../../global-state", async () => {
   const { atom } = await import("jotai")
   return {
-    graphSnapshotAtom: atom({ nodes: new Map(), childLinks: new Map() }),
+    graphSnapshotAtom: atom({ nodes: new Map(), childLinks: new Map(), parentLinks: new Map() }),
     // Signed out: developer mode (`hooks/is-developer.ts`) stays off, and
     // image uploads have nowhere to go.
     githubUserAtom: atom(null),

@@ -49,6 +49,10 @@ export type Op =
   | { op: "unlink"; source: string; destination: string }
   | { op: "delete"; id: string }
 
+/** Parent order: by source id (unique per destination). */
+const byParent = (a: LinkRow, b: LinkRow) =>
+  a.source_id < b.source_id ? -1 : a.source_id > b.source_id ? 1 : 0
+
 /** Sibling order: by sort key, destination id breaking a tie. */
 const byOrder = (a: LinkRow, b: LinkRow) =>
   a.sort_key < b.sort_key
@@ -72,8 +76,12 @@ export function applyOps(snapshot: GraphSnapshot, ops: readonly Op[], now: numbe
   if (ops.length === 0) return snapshot
   const nodes = new Map(snapshot.nodes)
   const childLinks = new Map(snapshot.childLinks)
-  // Copy a source's list once per batch, however many of its links change.
+  const parentLinks = new Map(snapshot.parentLinks)
+  // Copy a list once per batch, however many of its links change. Both
+  // directions are kept in step per op: a link row lands in its source's
+  // child list and its destination's parent list, and leaves both together.
   const touched = new Set<string>()
+  const touchedParents = new Set<string>()
   const listOf = (source: string): LinkRow[] => {
     let list = childLinks.get(source)
     if (!list) {
@@ -86,6 +94,33 @@ export function applyOps(snapshot: GraphSnapshot, ops: readonly Op[], now: numbe
       touched.add(source)
     }
     return list
+  }
+  const parentsOf = (destination: string): LinkRow[] => {
+    let list = parentLinks.get(destination)
+    if (!list) {
+      list = []
+      parentLinks.set(destination, list)
+      touchedParents.add(destination)
+    } else if (!touchedParents.has(destination)) {
+      list = [...list]
+      parentLinks.set(destination, list)
+      touchedParents.add(destination)
+    }
+    return list
+  }
+  const dropChild = (source: string, destination: string) => {
+    if (!childLinks.has(source)) return
+    const list = listOf(source)
+    const at = list.findIndex((link) => link.destination_id === destination)
+    if (at !== -1) list.splice(at, 1)
+    if (list.length === 0) childLinks.delete(source)
+  }
+  const dropParent = (source: string, destination: string) => {
+    if (!parentLinks.has(destination)) return
+    const list = parentsOf(destination)
+    const at = list.findIndex((link) => link.source_id === source)
+    if (at !== -1) list.splice(at, 1)
+    if (list.length === 0) parentLinks.delete(destination)
   }
 
   for (const op of ops) {
@@ -113,52 +148,52 @@ export function applyOps(snapshot: GraphSnapshot, ops: readonly Op[], now: numbe
         break
       }
       case "link": {
-        const list = listOf(op.source)
-        const at = list.findIndex((link) => link.destination_id === op.destination)
-        if (at !== -1) list.splice(at, 1)
-        list.push({
+        const row: LinkRow = {
           source_id: op.source,
           destination_id: op.destination,
           kind: CHILD_KIND,
           sort_key: op.sortKey,
           updated_at: now,
-        })
-        list.sort(byOrder)
-        break
-      }
-      case "unlink": {
-        if (!childLinks.has(op.source)) break
+        }
         const list = listOf(op.source)
         const at = list.findIndex((link) => link.destination_id === op.destination)
         if (at !== -1) list.splice(at, 1)
-        if (list.length === 0) childLinks.delete(op.source)
+        list.push(row)
+        list.sort(byOrder)
+        const parents = parentsOf(op.destination)
+        const up = parents.findIndex((link) => link.source_id === op.source)
+        if (up !== -1) parents.splice(up, 1)
+        parents.push(row)
+        parents.sort(byParent)
+        break
+      }
+      case "unlink": {
+        dropChild(op.source, op.destination)
+        dropParent(op.source, op.destination)
         break
       }
       case "delete": {
         if (!nodes.delete(op.id)) break
+        // Its links go with it in both directions: the ones it holds leave
+        // their destinations' parent lists, the ones holding it leave their
+        // sources' child lists — each found through the index, never by scan.
+        for (const link of childLinks.get(op.id) ?? []) dropParent(op.id, link.destination_id)
+        for (const link of parentLinks.get(op.id) ?? []) dropChild(link.source_id, op.id)
         childLinks.delete(op.id)
-        for (const [source, list] of childLinks) {
-          if (!list.some((link) => link.destination_id === op.id)) continue
-          const kept = list.filter((link) => link.destination_id !== op.id)
-          if (kept.length === 0) childLinks.delete(source)
-          else childLinks.set(source, kept)
-        }
+        parentLinks.delete(op.id)
         break
       }
     }
   }
-  return { nodes, childLinks }
+  return { nodes, childLinks, parentLinks }
 }
 
-/** Every node's parents (sources of the child links into it). */
+/** Every node's parents (sources of the child links into it), as sets the
+ * caller may mutate while planning a batch (`partsToOps`). */
 export function parentsIndex(snapshot: GraphSnapshot): Map<string, Set<string>> {
   const parentsOf = new Map<string, Set<string>>()
-  for (const [source, list] of snapshot.childLinks) {
-    for (const link of list) {
-      let parents = parentsOf.get(link.destination_id)
-      if (!parents) parentsOf.set(link.destination_id, (parents = new Set()))
-      parents.add(source)
-    }
+  for (const [destination, list] of snapshot.parentLinks) {
+    parentsOf.set(destination, new Set(list.map((link) => link.source_id)))
   }
   return parentsOf
 }
@@ -210,11 +245,7 @@ export function deleteNoteOps(noteId: NoteId, snapshot: GraphSnapshot): Op[] {
 /** How many parents hold a block — the number of places it appears across
  * the corpus (0 for an unknown or orphaned node). */
 export function parentCount(snapshot: GraphSnapshot, id: string): number {
-  let count = 0
-  for (const list of snapshot.childLinks.values()) {
-    for (const link of list) if (link.destination_id === id) count += 1
-  }
-  return count
+  return snapshot.parentLinks.get(id)?.length ?? 0
 }
 
 /**
@@ -227,12 +258,11 @@ export function parentCount(snapshot: GraphSnapshot, id: string): number {
 export function deleteBlockOps(blockId: string, snapshot: GraphSnapshot): Op[] {
   const node = snapshot.nodes.get(blockId)
   if (!node || node.type === NOTE_TYPE) return []
-  const unlinks: Op[] = []
-  for (const [source, list] of snapshot.childLinks) {
-    if (list.some((link) => link.destination_id === blockId)) {
-      unlinks.push({ op: "unlink", source, destination: blockId })
-    }
-  }
+  const unlinks: Op[] = (snapshot.parentLinks.get(blockId) ?? []).map((link) => ({
+    op: "unlink",
+    source: link.source_id,
+    destination: blockId,
+  }))
   return [...unlinks, { op: "delete", id: blockId }]
 }
 
@@ -466,14 +496,6 @@ export function notesTouchedBy(snapshot: GraphSnapshot, ops: readonly Op[]): Set
       ids.add(op.destination)
     } else ids.add(op.id)
   }
-  const parentsOf = new Map<string, string[]>()
-  for (const [source, list] of snapshot.childLinks) {
-    for (const link of list) {
-      const parents = parentsOf.get(link.destination_id)
-      if (parents) parents.push(source)
-      else parentsOf.set(link.destination_id, [source])
-    }
-  }
   const notes = new Set<NoteId>()
   const seen = new Set<string>()
   const stack = [...ids]
@@ -482,7 +504,7 @@ export function notesTouchedBy(snapshot: GraphSnapshot, ops: readonly Op[]): Set
     if (seen.has(id)) continue
     seen.add(id)
     if (snapshot.nodes.get(id)?.type === NOTE_TYPE) notes.add(id)
-    for (const parent of parentsOf.get(id) ?? []) stack.push(parent)
+    for (const link of snapshot.parentLinks.get(id) ?? []) stack.push(link.source_id)
   }
   return notes
 }

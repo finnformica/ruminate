@@ -10,6 +10,7 @@ import {
   docToGraph,
   docToParts,
   noteDoc,
+  parentIdsOf,
   reconcileSortKeys,
   rollup,
   sortKeyBetween,
@@ -674,6 +675,47 @@ describe("docFromGraph (the walk, N roots)", () => {
           .map((l) => l.destination_id),
       )
     }
+  })
+})
+
+describe("the reverse index (parentLinks)", () => {
+  const graph = () =>
+    buildGraphSnapshot(
+      [
+        row("home", "note", "Home"),
+        row("other", "note", "Other"),
+        row("blk_a", "ul", "a"),
+        row("blk_s", "ol", "shared"),
+        { ...row("blk_gone", "text", "deleted"), deleted_at: 5 },
+      ],
+      [
+        edge("home", "blk_a", "a0"),
+        edge("other", "blk_s", "a0"),
+        edge("blk_a", "blk_s", "a1"),
+        // Not containment, tombstoned, and into a tombstoned node: none index.
+        edge("home", "blk_s", "a2", "reference"),
+        { ...edge("home", "blk_s", "a3"), deleted_at: 5 },
+        edge("home", "blk_gone", "a4"),
+      ],
+    )
+
+  it("holds every live child link a second time, by destination, in source-id order", () => {
+    const snapshot = graph()
+    expect(parentIdsOf(snapshot, "blk_s")).toEqual(["blk_a", "other"])
+    expect(parentIdsOf(snapshot, "blk_a")).toEqual(["home"])
+    expect(parentIdsOf(snapshot, "home")).toEqual([])
+    // The same row objects in both directions — one index, two keys.
+    const viaChild = snapshot.childLinks.get("blk_a")!.find((l) => l.destination_id === "blk_s")
+    expect(snapshot.parentLinks.get("blk_s")).toContain(viaChild)
+  })
+
+  it("applies read-time discard to both directions alike", () => {
+    const snapshot = graph()
+    // A tombstoned link, a non-child kind, and a link into a tombstoned node
+    // are absent from both indexes.
+    expect(snapshot.childLinks.get("home")!.map((l) => l.destination_id)).toEqual(["blk_a"])
+    expect(snapshot.parentLinks.has("blk_gone")).toBe(false)
+    expect(snapshot.parentLinks.get("blk_s")!.map((l) => l.kind)).toEqual(["child", "child"])
   })
 })
 

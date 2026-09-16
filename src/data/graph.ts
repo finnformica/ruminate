@@ -216,10 +216,40 @@ export interface GraphSnapshot {
   nodes: Map<string, NodeRow>
   /** Child links per source, sorted by sort key (destination id tiebreak). */
   childLinks: Map<string, LinkRow[]>
+  /**
+   * The same links per destination, sorted by source id: who holds a node.
+   * The reverse index is a by-product of building the snapshot, never
+   * computed by scanning it — `buildGraphSnapshot` fills both directions from
+   * one pass over the rows, `applyOps` maintains both per op, and every
+   * reader that needs a node's parents (the delete menu's place count, the
+   * basket's roots, the walk upstream) reads it in O(1).
+   */
+  parentLinks: Map<string, LinkRow[]>
+}
+
+/** Parent order: by source id — unique per destination, so never a tie. */
+const byParent = (a: LinkRow, b: LinkRow) =>
+  a.source_id < b.source_id ? -1 : a.source_id > b.source_id ? 1 : 0
+
+/** The reverse index of a set of child-link lists: the same rows keyed by
+ * destination, sorted by source id. Used wherever `childLinks` is built or
+ * merged wholesale, so the two directions cannot drift. */
+export function indexParents(childLinks: ReadonlyMap<string, LinkRow[]>): Map<string, LinkRow[]> {
+  const parentLinks = new Map<string, LinkRow[]>()
+  for (const list of childLinks.values()) {
+    for (const link of list) {
+      const parents = parentLinks.get(link.destination_id)
+      if (parents) parents.push(link)
+      else parentLinks.set(link.destination_id, [link])
+    }
+  }
+  for (const list of parentLinks.values()) list.sort(byParent)
+  return parentLinks
 }
 
 /**
- * Index rows for walking. Only `child` links participate in containment.
+ * Index rows for walking, in both directions (`childLinks` by source,
+ * `parentLinks` by destination). Only `child` links participate in containment.
  *
  * **Read-time discard is enforced here**, once, for every reader: a tombstoned
  * node is not in the snapshot at all, and a link is dropped if it is itself
@@ -261,12 +291,17 @@ export function buildGraphSnapshot(nodes: NodeRow[], links: LinkRow[]): GraphSna
             : 1,
     )
   }
-  return { nodes: nodeMap, childLinks }
+  return { nodes: nodeMap, childLinks, parentLinks: indexParents(childLinks) }
 }
 
 /** Ordered child ids of a node. */
 export function childIdsOf(graph: GraphSnapshot, id: string): string[] {
   return (graph.childLinks.get(id) ?? []).map((link) => link.destination_id)
+}
+
+/** The ids of the nodes holding a node (its parents), in source-id order. */
+export function parentIdsOf(graph: GraphSnapshot, id: string): string[] {
+  return (graph.parentLinks.get(id) ?? []).map((link) => link.source_id)
 }
 
 /** A node's props as an object, or null — tolerant of malformed JSON (a bad

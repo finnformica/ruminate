@@ -3,7 +3,7 @@ import { emptyBlock, insertAfter, updateText } from "../blocks/ops"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
-import { buildGraphSnapshot, docToGraph, noteDoc, type GraphSnapshot } from "./graph"
+import { buildGraphSnapshot, docToGraph, noteDoc, parentIdsOf, type GraphSnapshot } from "./graph"
 import {
   applyOps,
   deleteBlockOps,
@@ -320,9 +320,68 @@ describe("applyOps", () => {
     const next = applyOps(snapshot, [{ op: "delete", id: "blk_two0000000" }], NOW)
     expect(next.childLinks.get("a")!.map((l) => l.destination_id)).toEqual(["blk_one0000000"])
     expect(next.childLinks.has("blk_two0000000")).toBe(false)
+    expect(next.parentLinks.has("blk_two0000000")).toBe(false)
     // The orphan is still a node until something deletes it (the cascade is
     // `docToOps`'s job); the walk simply no longer reaches it.
     expect(next.nodes.has("blk_deep000000")).toBe(true)
+    // And no longer has a parent: its inbound link left the reverse index
+    // with the node that held it.
+    expect(parentIdsOf(next, "blk_deep000000")).toEqual([])
+  })
+
+  it("keeps the reverse index in step with the child lists, op by op", () => {
+    const snapshot = graphOf({ a: A, b: "- other\n  id:: blk_other00000\n" })
+    const next = applyOps(
+      snapshot,
+      [
+        // A second parent for `deep`, then the first one taken away.
+        { op: "link", source: "blk_other00000", destination: "blk_deep000000", sortKey: "a0" },
+        { op: "unlink", source: "blk_two0000000", destination: "blk_deep000000" },
+        // A link re-keyed: still one parent, not two rows.
+        { op: "link", source: "a", destination: "blk_one0000000", sortKey: "Zz" },
+      ],
+      NOW,
+    )
+    expect(parentIdsOf(next, "blk_deep000000")).toEqual(["blk_other00000"])
+    expect(parentIdsOf(next, "blk_one0000000")).toEqual(["a"])
+    expect(next.parentLinks.get("blk_one0000000")![0].sort_key).toBe("Zz")
+    // The input is untouched in both directions.
+    expect(parentIdsOf(snapshot, "blk_deep000000")).toEqual(["blk_two0000000"])
+  })
+
+  it("property: after any op sequence the reverse index equals a rebuild from the rows", () => {
+    // One parent predicate everywhere: whatever `applyOps` leaves in
+    // `parentLinks` must be exactly what `buildGraphSnapshot` would index
+    // from the same rows, so no reader can see the two directions disagree.
+    let seed = 7
+    const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+    const pick = <T>(xs: T[]): T => xs[Math.floor(rand() * xs.length)]
+    for (let run = 0; run < 100; run += 1) {
+      let snapshot = graphOf({ a: A, b: "- other\n  id:: blk_other00000\n" })
+      const ids = () => [...snapshot.nodes.keys()]
+      const ops: Op[] = []
+      for (let i = 0; i < 12; i += 1) {
+        const kind = pick(["link", "link", "unlink", "delete", "create"] as const)
+        if (kind === "create") {
+          ops.push({ op: "create", id: `blk_new${run}_${i}`, type: "text", text: "n", props: null })
+        } else if (kind === "link") {
+          ops.push({ op: "link", source: pick(ids()), destination: pick(ids()), sortKey: `a${i}` })
+        } else if (kind === "unlink") {
+          ops.push({ op: "unlink", source: pick(ids()), destination: pick(ids()) })
+        } else ops.push({ op: "delete", id: pick(ids()) })
+        snapshot = applyOps(snapshot, [ops[ops.length - 1]], NOW + i)
+      }
+      const rebuilt = buildGraphSnapshot(
+        [...snapshot.nodes.values()],
+        [...snapshot.childLinks.values()].flat(),
+      )
+      const shape = (index: Map<string, { source_id: string; destination_id: string }[]>) =>
+        [...index.entries()]
+          .map(([id, list]) => [id, list.map((l) => `${l.source_id}>${l.destination_id}`)])
+          .sort()
+      expect(shape(snapshot.parentLinks)).toEqual(shape(rebuilt.parentLinks))
+      expect(shape(snapshot.childLinks)).toEqual(shape(rebuilt.childLinks))
+    }
   })
 
   it("stamps every row it writes with `now`", () => {
