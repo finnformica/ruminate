@@ -624,6 +624,10 @@ export function UndoIcon16(props: IconProps) {
   )
 }
 
+export function RedoIcon16(props: IconProps) {
+  return <UndoIcon16 {...props} className={cx("-scale-x-100", props.className)} />
+}
+
 export function HistoryIcon16(props: IconProps) {
   return (
     <Icon size={16} {...props}>

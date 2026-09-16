@@ -106,3 +106,46 @@ export function caretLineFlags(textarea: HTMLTextAreaElement): {
     atLast: end - caret < lineHeight,
   }
 }
+
+/**
+ * The text offset under a point in a rendered block body — where a tap
+ * landed, so editing can open with the caret there rather than at the end.
+ * The body is the block's text drawn as inline markdown, so the offset
+ * counted through its text nodes matches the stored text only when the two
+ * are the same string (no `**bold**`, no link syntax); otherwise, or where
+ * the browser has no caret-from-point API (jsdom), the answer is null and
+ * the caller falls back to the end of the text.
+ */
+export function caretOffsetAtPoint(
+  body: HTMLElement,
+  text: string,
+  x: number,
+  y: number,
+): number | null {
+  if (body.textContent !== text) return null
+  const doc = body.ownerDocument
+  let node: Node | null = null
+  let offset = 0
+  const positioned = doc as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+  }
+  if (typeof positioned.caretPositionFromPoint === "function") {
+    const position = positioned.caretPositionFromPoint(x, y)
+    if (position) ({ offsetNode: node, offset } = position)
+  } else if (typeof doc.caretRangeFromPoint === "function") {
+    const range = doc.caretRangeFromPoint(x, y)
+    if (range) ({ startContainer: node, startOffset: offset } = range)
+  }
+  if (!node || !body.contains(node)) return null
+  // A point past the text's last line lands on an element, not a text node:
+  // that is "the end".
+  if (node.nodeType !== Node.TEXT_NODE) return text.length
+  // Count the text before this node, in document order.
+  const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT)
+  let before = 0
+  for (let current = walker.nextNode(); current; current = walker.nextNode()) {
+    if (current === node) return Math.min(text.length, before + offset)
+    before += current.textContent?.length ?? 0
+  }
+  return null
+}

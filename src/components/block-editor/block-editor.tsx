@@ -22,7 +22,9 @@ import {
 } from "../../data/images"
 import { imageAlignOf, imagePropsOf, withImageLayout, type ImageAlign } from "../../blocks/image"
 import { ImageLightbox } from "./image-lightbox"
+import { MobileEditBar } from "./mobile-edit-bar"
 import { NoteTitle } from "./note-title"
+import { useCoarsePointer } from "../../hooks/coarse-pointer"
 import {
   isHeading,
   leadingMarker,
@@ -440,6 +442,9 @@ export function BlockEditor({
   // A read-only view still owns the keyboard when it is browsed (`browse`,
   // or `onActivate`, which opens rows); one that is neither is inert display.
   const navigable = !readOnly || browse || onActivate !== undefined
+  // A touch screen (docs/mobile.md): a tap edits, an edit survives the
+  // keyboard going away, and the edit bar sits above the keyboard.
+  const coarse = useCoarsePointer()
 
   // ── Zoom state ────────────────────────────────────────────────────────────
   // Controlled by the caller (URL) when `onZoomNavigate` is given; otherwise
@@ -1070,11 +1075,11 @@ export function BlockEditor({
     zoomRoot.type !== "image" &&
     !zoomRoot.text.includes("\n")
 
-  const edit = (key: string, atStart = false) => {
+  const edit = (key: string, atStart = false, caret?: number) => {
     if (readOnly) return
     setAnchorKey(null)
     setSelected(key)
-    setFocus({ key, atStart })
+    setFocus({ key, atStart, caret })
   }
 
   // After restoring a snapshot, keep editing/selecting the same row if it
@@ -1280,14 +1285,15 @@ export function BlockEditor({
   }
   // Run a command by name on a row — what the context menu does, so a menu
   // item and its key do exactly the same thing.
-  const runOnRow = (name: CommandName, key: string) => {
+  const runOnRow = (name: CommandName, key: string, mode: Mode = "select", caret?: CaretInput) => {
     if (readOnly) return
     applyResult(
       runCommand(name, {
         doc,
         key,
-        mode: "select",
+        mode,
         visibleOrder,
+        caret,
         zoomRootId,
         zoomBackId,
         newBlockType: typeOfMarker(newBlockMarker),
@@ -1295,6 +1301,23 @@ export function BlockEditor({
         emptyable,
       }),
     )
+  }
+  // Run a command on the row being edited, in edit mode with its caret —
+  // what the touch screen's edit bar does, so its Indent is Tab's: the
+  // caret stays where it was on the row's new key.
+  const runOnEditing = (name: CommandName) => {
+    if (!focus) return
+    const el = containerRef.current?.querySelector("textarea")
+    const caret: CaretInput | undefined = el
+      ? {
+          value: el.value,
+          start: el.selectionStart,
+          end: el.selectionEnd,
+          atFirstLine: false,
+          atLastLine: false,
+        }
+      : undefined
+    runOnRow(name, focus.key, "edit", caret)
   }
 
   // ── The context menu ──────────────────────────────────────────────────────
@@ -1565,6 +1588,10 @@ export function BlockEditor({
     alignImage: (id, align) => setImageLayout(id, { align }),
     resetImageSize: (id) => setImageLayout(id, { size: null }),
     duplicate: (key) => runOnRow("duplicateBelow", key),
+    indent: (key) => runOnRow("indent", key),
+    outdent: (key) => runOnRow("outdent", key),
+    moveUp: (key) => runOnRow("moveBlockUp", key),
+    moveDown: (key) => runOnRow("moveBlockDown", key),
     toggleCollapse: (key) => toggleCollapse(key),
     zoomInto: (id) => navigateZoom(id),
     copy: (key) => copyRows([key]),
@@ -1617,6 +1644,7 @@ export function BlockEditor({
     // own the keyboard when focus is inside AND the last thing the user did
     // was not click on blank space (`pointerIdle`).
     keyboardActive: !navigable || (keyboardActive && !pointerIdle),
+    coarsePointer: coarse,
     fixedRoots,
     // Browsing: a click opens the row (BlockItem routes a read-only row's
     // click here).
@@ -2323,6 +2351,27 @@ export function BlockEditor({
         block={lightbox ? (doc.blocks[lightbox] ?? null) : null}
         onClose={() => setLightbox(null)}
       />
+      {coarse && !readOnly && focus ? (
+        <MobileEditBar
+          actions={{
+            indent: () => runOnEditing("indent"),
+            outdent: () => runOnEditing("outdent"),
+            moveUp: () => runOnEditing("moveBlockUp"),
+            moveDown: () => runOnEditing("moveBlockDown"),
+            undo,
+            redo,
+            // Done: the keyboard goes and the row stays highlighted, where
+            // a tap picks the edit back up.
+            done: () => {
+              const key = focus.key
+              setFocus(null)
+              setSelected(key)
+              setAnchorKey(null)
+              if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+            },
+          }}
+        />
+      ) : null}
     </>
   )
 }
