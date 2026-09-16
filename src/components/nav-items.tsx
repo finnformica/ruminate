@@ -30,6 +30,7 @@ import {
   CopyIcon16,
   FlagFillIcon16,
   FlagIcon16,
+  HistoryIcon16,
   MoreIcon16,
   NoteFillIcon16,
   NoteIcon16,
@@ -216,6 +217,16 @@ export function NavItems({
               Admin
             </NavLink>
           ) : null}
+          <NavLink
+            to="/changelog"
+            search={{ release: undefined }}
+            activeIcon={<HistoryIcon16 />}
+            icon={<HistoryIcon16 />}
+            className="text-text-secondary"
+            onNavigate={onNavigate}
+          >
+            What's new
+          </NavLink>
           <NavLink
             to="/settings"
             search={{ query: undefined }}

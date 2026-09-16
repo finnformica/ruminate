@@ -24,6 +24,9 @@
  * detail, shown on the changelog page.
  */
 
+import { addDays, parseISO } from "date-fns"
+import { MONTH_NAMES } from "./date"
+
 /** The categories an entry can sit under, in the order they are written. */
 const CATEGORIES = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"] as const
 
@@ -37,7 +40,7 @@ export const MAX_LEAD_LENGTH = 140
  * entry is documentation, and belongs in `docs/`. */
 export const MAX_ENTRY_LENGTH = 500
 
-type ChangelogEntry = {
+export type ChangelogEntry = {
   /** The first sentence: what changed, and why it matters. */
   lead: string
   /** Everything after the lead sentence; empty when the entry is one sentence. */
@@ -124,6 +127,97 @@ export function renderRelease(release: ChangelogRelease): string {
     )
     .join("\n\n")
   return `## ${release.week}\n\n${body}\n`
+}
+
+/**
+ * The days a release covers, as a reader would say them: the ISO week is how
+ * the file is keyed, but "2026-W38" is not a date anybody reads.
+ *
+ * @example
+ * formatReleaseDates("2026-W38") // "14–20 September 2026"
+ * formatReleaseDates("2026-W40") // "28 September – 4 October 2026"
+ * formatReleaseDates("2026-W40", { short: true }) // "28 Sep – 4 Oct 2026"
+ */
+export function formatReleaseDates(week: string, { short = false } = {}): string {
+  const start = parseISO(week)
+  if (Number.isNaN(start.getTime())) return week
+  const end = addDays(start, 6)
+  const day = (date: Date) => date.getDate()
+  const month = (date: Date) =>
+    short ? MONTH_NAMES[date.getMonth()].slice(0, 3) : MONTH_NAMES[date.getMonth()]
+  const year = (date: Date) => date.getFullYear()
+  if (year(start) !== year(end)) {
+    return `${day(start)} ${month(start)} ${year(start)} – ${day(end)} ${month(end)} ${year(end)}`
+  }
+  if (month(start) !== month(end)) {
+    return `${day(start)} ${month(start)} – ${day(end)} ${month(end)} ${year(end)}`
+  }
+  return `${day(start)}–${day(end)} ${month(end)} ${year(end)}`
+}
+
+/**
+ * A run of text, or a run of keys pressed together. An entry names shortcuts
+ * as `<kbd>` tags, and a keycap is drawn rather than written
+ * (`src/components/keys.tsx`), so the text is handed out in the pieces between
+ * them for markdown to render.
+ */
+export type EntrySegment = { type: "text"; text: string } | { type: "keys"; keys: string[] }
+
+/** Adjacent keycaps are one shortcut; a word between them starts a new run. */
+const KEY_RUN = /<kbd>[^<]*<\/kbd>(?:\s*<kbd>[^<]*<\/kbd>)*/g
+const KEY = /<kbd>([^<]*)<\/kbd>/g
+
+export function toSegments(text: string): EntrySegment[] {
+  const segments: EntrySegment[] = []
+  let at = 0
+  for (const match of text.matchAll(KEY_RUN)) {
+    const index = match.index ?? 0
+    if (index > at) segments.push({ type: "text", text: text.slice(at, index) })
+    segments.push({
+      type: "keys",
+      keys: [...match[0].matchAll(KEY)].map((key) => key[1]),
+    })
+    at = index + match[0].length
+  }
+  if (at < text.length) segments.push({ type: "text", text: text.slice(at) })
+  return segments
+}
+
+/**
+ * Fold a set of fragment sections into the release for `week`, creating that
+ * release at the front if the week has none yet.
+ *
+ * Shared by collation (`scripts/collate-changelog.ts`), which writes the
+ * result back to `CHANGELOG.md`, and by the app, which does the same thing in
+ * memory at build time so that entries still waiting to be folded are shown
+ * anyway. Both must agree, or what a reader sees before collation runs would
+ * differ from what they see after it.
+ *
+ * A fragment's entries go to the end of their category, after whatever the
+ * week already holds: neither caller can judge which change matters most, and
+ * the order entries landed in is at least a true one.
+ */
+export function mergeFragments(
+  releases: ChangelogRelease[],
+  sections: ChangelogSection[],
+  week: string,
+): ChangelogRelease[] {
+  if (sections.length === 0) return releases
+  const existing = releases.find((release) => release.week === week)
+  const merged: ChangelogRelease = existing
+    ? { ...existing, sections: existing.sections.map((section) => ({ ...section })) }
+    : { week, sections: [], line: 0 }
+
+  for (const section of sections) {
+    const target = merged.sections.find((held) => held.category === section.category)
+    if (target) target.entries = [...target.entries, ...section.entries]
+    else merged.sections.push({ ...section })
+  }
+  merged.sections.sort((a, b) => CATEGORIES.indexOf(a.category) - CATEGORIES.indexOf(b.category))
+
+  return existing
+    ? releases.map((release) => (release.week === week ? merged : release))
+    : [merged, ...releases]
 }
 
 const TITLE = "# Changelog"
