@@ -60,7 +60,9 @@ const TYPE_GLYPHS: Record<string, string> = {
   ol: "1.",
   todo: "[ ]",
   quote: ">",
-  code: "`",
+  // The fence, not the single backtick that also opens one: three read as
+  // a glyph at this size where one is a speck.
+  code: "```",
 }
 
 /** Every button is this wide, so the Turn into row's highlight can slide to
