@@ -1,16 +1,25 @@
 ---
 name: changelog
-description: Update CHANGELOG.md with user-facing changes from the current branch. Use when creating a pull request or when pushing changes to a branch that already has an open pull request. Analyzes the branch diff against main, identifies user-facing changes, and adds dated entries to CHANGELOG.md.
+description: Record the user-facing changes on the current branch as a changelog.d/ fragment, which is folded into CHANGELOG.md when the branch lands. Use when creating a pull request, or when pushing to a branch that already has an open pull request. Analyses the branch diff against main, identifies what a user would notice, and writes the entries. Never edit CHANGELOG.md on a branch.
 ---
 
 # Changelog
 
-Update `CHANGELOG.md` with the user-facing changes on the current branch.
+Record the user-facing changes on the current branch.
 
-`CHANGELOG.md` is not only a document: the app reads it. The changelog page and
-the "what's new" dialog shown after an update are both rendered from this file,
-parsed by `src/utils/changelog.ts`. A malformed entry is a broken page, so
-**`npm run check:changelog` must pass before you finish** — CI runs it too.
+**Never edit `CHANGELOG.md` on a branch.** A release goes at the top of that
+file, so every branch open in the same week wants the same few lines and they
+conflict over entries that have nothing to do with each other. Write a
+fragment in `changelog.d/` instead — one file, named after your branch. It is
+folded into the changelog automatically when the branch lands on `main`
+(`changelog.d/README.md`).
+
+The entries themselves are held to the same rules either way, because the app
+reads what they are folded into: the changelog page and the "what's new"
+dialog after an update are both rendered from `CHANGELOG.md`, parsed by
+`src/utils/changelog.ts`. A malformed entry is a broken page, so
+**`npm run check:changelog` must pass before you finish** — CI runs it too, on
+the fragment, in the branch that wrote it.
 
 That check enforces the mechanical rules below. It cannot judge whether an
 entry is worth a reader's attention, which is the part that matters most and
@@ -43,8 +52,8 @@ secret, a measurement, or a term of art from the code? If not, it is either not
 a user-facing change, or you have not yet worked out what the user-facing part
 of it is.
 
-If nothing on the branch is user-facing, say so and stop. An empty changelog
-entry is better than a padded one.
+If nothing on the branch is user-facing, say so and stop. No fragment at all
+is better than a padded one.
 
 ### 3. Write the entries
 
@@ -82,23 +91,33 @@ Rules the check cannot enforce, which matter just as much:
   withdraws something announced earlier in the same week, say so in the entry
   rather than leaving two bullets that disagree.
 
-### 4. Place them in the file
+### 4. Write the fragment
 
-Sections are ISO weeks, newest first, written `## 2026-W38`. Get the current
-week with `date +%G-W%V`.
+Create `changelog.d/<your-branch>.md` and write the entries into it as they
+will appear, category headings and all:
+
+```markdown
+### Added
+
+- Link blocks: a link as a card of its own. Hover a link and choose **Turn
+  into block** for a card of the page's title, description and picture.
+
+### Fixed
+
+- Pasting a link no longer drops its title.
+```
 
 Categories are Keep a Changelog's, and appear in this order, each at most once
-per week:
+per fragment:
 
 **Added**, **Changed**, **Deprecated**, **Removed**, **Fixed**, **Security**
 
-Only include a category that has entries.
+Only include a category that has entries. There is no week heading in a
+fragment: collation puts the entries into the release for the week the branch
+lands in, which is not necessarily the week you wrote them.
 
-- **If this week's heading exists**: merge into it. Add bullets under the
-  existing category headings, create a category only if it is missing, and skip
-  anything already recorded. Never add a second `### Added` to a week.
-- **If it does not exist**: start a new `## YYYY-Www` section directly below the
-  `# Changelog` title.
+If the branch already has a fragment, add to it rather than creating a second
+one.
 
 ### 5. Check it
 
@@ -107,5 +126,10 @@ npm run check:changelog
 npm run format
 ```
 
-The check reports a file and line for every problem. Fix them all: CI fails on
-any one of them.
+The check reports a file and line for every problem, in the fragment as well as
+in the changelog. Fix them all: CI fails on any one of them.
+
+To see what the release will look like once your branch lands, run
+`npm run changelog:collate` — but do not commit the result. Folding is `main`'s
+job, and a folded `CHANGELOG.md` on a branch is the merge conflict this whole
+arrangement exists to avoid.

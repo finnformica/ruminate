@@ -48,13 +48,13 @@ type ChangelogEntry = {
   line: number
 }
 
-type ChangelogSection = {
+export type ChangelogSection = {
   category: ChangelogCategory
   entries: ChangelogEntry[]
   line: number
 }
 
-type ChangelogRelease = {
+export type ChangelogRelease = {
   /** The ISO week the release is named by, e.g. `2026-W38`. */
   week: string
   sections: ChangelogSection[]
@@ -68,6 +68,62 @@ export type ParsedChangelog = {
   /** Structural faults. The parse keeps going regardless, so a bad file still
    * renders as much of itself as it can. */
   problems: ChangelogProblem[]
+}
+
+/** The lines the fragment wrapper adds, so a fault points at the fragment. */
+const FRAGMENT_OFFSET = 4
+
+/**
+ * Read one file from `changelog.d/` — a pull request's entries, waiting to be
+ * folded into a release. A fragment is a changelog with the week left off:
+ * category headings and their entries, nothing else.
+ *
+ * It is checked by wrapping it in the file it is destined for, so a fragment
+ * is held to exactly the rules the changelog is, and the line numbers are
+ * moved back onto the fragment for the report.
+ */
+export function parseFragment(source: string): {
+  sections: ChangelogSection[]
+  problems: ChangelogProblem[]
+} {
+  const { releases, problems } = parseChangelog(`# Changelog\n\n## 2000-W01\n\n${source.trim()}\n`)
+  return {
+    sections: (releases[0]?.sections ?? []).map((section) => ({
+      ...section,
+      line: section.line - FRAGMENT_OFFSET,
+      entries: section.entries.map((entry) => ({ ...entry, line: entry.line - FRAGMENT_OFFSET })),
+    })),
+    problems: problems.map((problem) => ({
+      ...problem,
+      line: Math.max(1, problem.line - FRAGMENT_OFFSET),
+    })),
+  }
+}
+
+/** The ISO week a date falls in, written the way a release heading is. */
+export function toReleaseWeek(date: Date): string {
+  const thursday = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  // ISO weeks are numbered by the Thursday in them, and week 1 is the one
+  // holding 4 January.
+  thursday.setUTCDate(thursday.getUTCDate() + 3 - ((thursday.getUTCDay() + 6) % 7))
+  const firstThursday = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 4))
+  firstThursday.setUTCDate(firstThursday.getUTCDate() + 3 - ((firstThursday.getUTCDay() + 6) % 7))
+  const week = 1 + Math.round((thursday.getTime() - firstThursday.getTime()) / (7 * 86400000))
+  return `${thursday.getUTCFullYear()}-W${String(week).padStart(2, "0")}`
+}
+
+/** A release written back out as the markdown it was read from. */
+export function renderRelease(release: ChangelogRelease): string {
+  const sections = [...release.sections].sort(
+    (a, b) => CATEGORIES.indexOf(a.category) - CATEGORIES.indexOf(b.category),
+  )
+  const body = sections
+    .map(
+      (section) =>
+        `### ${section.category}\n\n${section.entries.map((entry) => `- ${entry.text}`).join("\n")}`,
+    )
+    .join("\n\n")
+  return `## ${release.week}\n\n${body}\n`
 }
 
 const TITLE = "# Changelog"
