@@ -1,17 +1,19 @@
 import type { BlockDoc } from "./types"
-import { keyOf } from "./view"
+import { keyOf, type ExpandedRule } from "./view"
 
 /**
- * The default-expansion policy (docs/graph-schema-v2.md): a note opens with
- * `levels` levels visible beneath its top — a block that many levels down
- * that has children starts collapsed, whatever its type. Headings count like
- * any other block, so a note of headings over lists opens showing the
- * headings and folds the lists beneath them once the headings alone use up
- * the depth. The number is a preference (Settings → Editor,
- * `expandedLevelsAtom`; two by default). This is a seed, not a standing rule:
- * it is what a note opens as until the reader folds or unfolds something,
- * and from then on only their own folds are remembered (see
- * `src/data/view-state.ts`). There is no synced collapse state.
+ * The depth rule (docs/graph-schema-v2.md, "Default expansion"): an
+ * occurrence is open while it is fewer than `levels` levels below the top
+ * of the view — a note's roots are level 1, so two levels means the roots
+ * and their children show and a parent two down starts folded, whatever its
+ * type (headings count like any other block). The number is a preference
+ * (Settings → Editor, `expandedLevelsAtom`; two by default).
+ *
+ * This is a standing rule, not a seed: it decides every occurrence the
+ * reader has not folded or unfolded themselves, in every note, every time —
+ * so moving the setting moves every such row, a row the reader opened stays
+ * open, and a lazy walk (`walkGraph`) has an answer for a row it has only
+ * just reached. The reader's own folds sit over it (`src/data/view-state.ts`).
  */
 export const DEFAULT_EXPANDED_LEVELS = 2
 export const MIN_EXPANDED_LEVELS = 1
@@ -24,25 +26,36 @@ export function clampExpandedLevels(value: unknown): number {
   return Math.min(MAX_EXPANDED_LEVELS, Math.max(MIN_EXPANDED_LEVELS, n))
 }
 
-/** Occurrence keys collapsed by default for this document. Pure; O(rows). */
-export function defaultCollapsedKeys(doc: BlockDoc, levels = DEFAULT_EXPANDED_LEVELS): string[] {
-  const expanded = clampExpandedLevels(levels)
-  const collapsed: string[] = []
+/** The depth rule alone: open above `levels`, closed from it down. */
+export function expandedByDepth(levels: number = DEFAULT_EXPANDED_LEVELS): ExpandedRule {
+  const open = clampExpandedLevels(levels)
+  return (_key, level) => level < open
+}
 
-  // `level` = distance below the note root: direct children are level 1.
+/**
+ * The occurrence keys a rule closes in an eagerly walked doc — the folds a
+ * view that holds its whole doc (the basket, a standalone editor) draws,
+ * exactly the set a lazy walk of the same doc would report. Leaves are never
+ * closed. `startLevel` is the level of the roots (1 for a note's). Pure;
+ * O(rows).
+ */
+export function collapsedKeysOf(doc: BlockDoc, expanded: ExpandedRule, startLevel = 1): string[] {
+  const collapsed: string[] = []
   const path = new Set<string>()
   const walk = (ids: string[], parentKey: string | null, level: number) => {
     for (const id of ids) {
       const block = doc.blocks[id]
-      if (!block || path.has(id)) continue
+      if (!block || path.has(id) || block.children.length === 0) continue
       const key = keyOf(parentKey, id)
+      if (!expanded(key, level)) {
+        collapsed.push(key)
+        continue
+      }
       path.add(id)
-      if (level >= expanded && block.children.length > 0) collapsed.push(key)
       walk(block.children, key, level + 1)
       path.delete(id)
     }
   }
-  walk(doc.rootBlockIds, null, 1)
-
+  walk(doc.rootBlockIds, null, startLevel)
   return collapsed
 }

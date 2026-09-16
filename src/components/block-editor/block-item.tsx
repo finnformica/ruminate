@@ -25,7 +25,7 @@ import { IconButton } from "../icon-button"
 import { PinFillIcon12 } from "../icons"
 import { BlockContent } from "./block-content"
 import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext } from "./block-kinds"
-import { caretCoordinates, caretLineFlags } from "./caret"
+import { caretCoordinates, caretLineFlags, caretOffsetAtPoint } from "./caret"
 import { Hash } from "./hash"
 import { LinkActionsContext, type LinkActions } from "./link-actions"
 import { SLASH_MENU_WIDTH, SlashMenu } from "./slash-menu"
@@ -76,10 +76,18 @@ export interface BlockEditorApi {
    * highlight is display state, not a keyboard cursor).
    */
   keyboardActive: boolean
+  /**
+   * The primary pointer is a finger (docs/mobile.md): a tap on a row edits
+   * it where the tap landed (a click selects; a double-click edits), and
+   * the whole row is the tap target. The long-press menu is how a row is
+   * selected.
+   */
+  coarsePointer?: boolean
   /** Highlight a row (leaves edit mode, collapses any multi-selection). */
   select: (key: string) => void
-  /** Enter edit mode on a row. */
-  edit: (key: string, atStart?: boolean) => void
+  /** Enter edit mode on a row — at the end of its text, its start, or at
+   * an explicit caret offset (where a tap landed). */
+  edit: (key: string, atStart?: boolean, caret?: number) => void
   /** Fold or unfold a row (by occurrence key — folds are per row). */
   toggleCollapse: (key: string) => void
   setFocus: (focus: FocusRequest | null) => void
@@ -584,14 +592,15 @@ export function BlockItem({
         // IconButton's default radius is the 8px base — on a 20px square that
         // reads as a pill. The small radius (4px) keeps it a square.
         "rounded-sm",
-        // Coarse pointers get a 28px square to tap instead of IconButton's
+        // Coarse pointers get a 32px square to tap instead of IconButton's
         // 40px-tall padded bar (which would overlap neighbouring rows and
-        // squeeze the glyph); it still sits inside the surface.
-        "h-5 w-5 coarse:h-7 coarse:w-7 coarse:px-0",
+        // squeeze the glyph); it reaches a hair past the surface into the
+        // gap on either side, where no other control lives.
+        "h-5 w-5 coarse:h-8 coarse:w-8 coarse:px-0",
         // Beside a todo the square is a hit area only — no hover surface, so
         // it never clashes with the checkbox or the highlight it straddles;
         // the chevron's own fade-in is the whole reveal. It stays 20px wide
-        // on coarse pointers too: 28px would reach the checkbox.
+        // on coarse pointers too: wider would reach the checkbox.
         toggleBeside && "enabled:hover:bg-transparent enabled:active:bg-transparent coarse:w-5",
         pinned && "block-toggle-pinned",
       )}
@@ -605,6 +614,9 @@ export function BlockItem({
           // A quarter turn, long enough to read as a turn rather than a
           // swap, easing out to rest with no overshoot.
           "transition-transform duration-300 ease-[var(--ease-in-out)] motion-reduce:transition-none",
+          // A finger's chevron is the key itself (it never swaps in), so
+          // it is drawn a size up to be read as one.
+          "coarse:size-2.5",
           isCollapsed || looped ? "rotate-0" : "rotate-90",
         )}
       >
@@ -655,7 +667,8 @@ export function BlockItem({
           aria-label="Zoom into block"
           tabIndex={-1}
           onClick={() => api.zoomInto(block.id)}
-          className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-[background-color,transform] duration-150 hover:bg-bg-hover active:scale-90 motion-reduce:active:scale-100"
+          // An 18px hit area around the 6px dot; a finger gets 26px.
+          className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-[background-color,transform] duration-150 hover:bg-bg-hover active:scale-90 motion-reduce:active:scale-100 coarse:-m-2.5 coarse:p-2.5"
         >
           {/* Faint, like the chevron — pure chrome; content leads. */}
           <span aria-hidden className="block-glyph-fill size-1.5 rounded-full bg-text-tertiary" />
@@ -829,6 +842,11 @@ export function BlockItem({
         // appears in view mode or over content. The turn-into keys
         // live in the `?` reference, not here.
         placeholder={kind.placeholder ?? "Ruminate…"}
+        // Said outright, not left to the browser's default, so a phone's
+        // keyboard shifts for a new block's first letter and leaves code
+        // alone: no capitals, no autocorrect, in a code block.
+        autoCapitalize={type === "code" ? "off" : "sentences"}
+        autoCorrect={type === "code" ? "off" : "on"}
         onChange={handleTextareaChange}
         onKeyDown={handleEditKeyDown}
         // Caret moves that aren't edits (arrows, Home/End, a click)
@@ -844,7 +862,10 @@ export function BlockItem({
         onPaste={handlePaste}
         // Leaving the field ends the edit — unless it is the window that
         // went (a tab switch, another app): the browser brings focus back
-        // to this textarea when it returns, so the edit stays open.
+        // to this textarea when it returns, so the edit stays open. On a
+        // touch screen the keyboard being put away is a blur too (iOS's
+        // Done key), so it ends the edit the same way, and the row stays
+        // highlighted for the tap that starts the next one (docs/mobile.md).
         onBlur={(event) => {
           if (blurLeavesWindow(event.relatedTarget)) return
           api.setFocus(null)
@@ -894,10 +915,14 @@ export function BlockItem({
           : api.navigable
             ? { onClick: () => api.select(occurrence.key) }
             : {}
-        : {
-            onClick: () => api.select(occurrence.key),
-            onDoubleClick: () => api.edit(occurrence.key),
-          })}
+        : api.coarsePointer
+          ? // A finger's tap is handled by the row (`handleRowTap`): the
+            // whole row is the target, not just the text.
+            {}
+          : {
+              onClick: () => api.select(occurrence.key),
+              onDoubleClick: () => api.edit(occurrence.key),
+            })}
     >
       <LinkActionsContext.Provider value={linkActions}>
         {kind.body ? kind.body(block) : <BlockContent content={body} />}
@@ -905,12 +930,33 @@ export function BlockItem({
     </div>
   )
 
+  // A finger's tap on the row — anywhere in it that is not a control (the
+  // chevron, the checkbox, a link, the zoom dot) — edits it, with the caret
+  // where the tap landed when the body's text is the stored text as is
+  // (`caretOffsetAtPoint`), at the end otherwise. The row, not the body, so
+  // the marker gap and the row's padding count too: a short line's tap
+  // target is the row's whole width and height, not its few words. A tap on
+  // the row already being edited is the textarea's own (a caret move), and
+  // a press-and-hold never gets here: the editor withholds its click.
+  const handleRowTap = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (editing) return
+    const target = event.target instanceof Element ? event.target : null
+    if (target?.closest("button, input, a, textarea, [role='menu']")) return
+    const bodyEl = event.currentTarget.querySelector<HTMLElement>("[data-block-id]")
+    const caret =
+      bodyEl && !kind.body ? caretOffsetAtPoint(bodyEl, body, event.clientX, event.clientY) : null
+    api.edit(occurrence.key, false, caret ?? undefined)
+  }
+  const rowTap = !readOnly && api.coarsePointer ? { onClick: handleRowTap } : {}
+
   return (
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
     <div
       data-block-row={block.id}
       data-occurrence={occurrence.key}
       className="relative"
       style={{ paddingLeft: depth * INDENT, marginTop }}
+      {...rowTap}
     >
       {occurrence.guideKeys.map((guideKey, level) => (
         <span

@@ -8,7 +8,7 @@ vi.mock("../global-state", async () => {
   const { atom } = await import("jotai")
   return {
     githubUserAtom: atom<{ email: string } | null>(null),
-    graphSnapshotAtom: atom({ nodes: new Map(), childLinks: new Map() }),
+    graphSnapshotAtom: atom({ nodes: new Map(), childLinks: new Map(), parentLinks: new Map() }),
   }
 })
 

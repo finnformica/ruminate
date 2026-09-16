@@ -5,14 +5,19 @@ import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
 import { sampleGraph } from "./sample-graph"
 import {
+  blockView,
   buildGraphSnapshot,
   docFromGraph,
   docToGraph,
   docToParts,
   noteDoc,
+  noteView,
+  parentIdsOf,
+  pathToBlock,
   reconcileSortKeys,
   rollup,
   sortKeyBetween,
+  walkGraph,
 } from "./graph"
 
 /**
@@ -674,6 +679,145 @@ describe("docFromGraph (the walk, N roots)", () => {
           .map((l) => l.destination_id),
       )
     }
+  })
+})
+
+describe("the reverse index (parentLinks)", () => {
+  const graph = () =>
+    buildGraphSnapshot(
+      [
+        row("home", "note", "Home"),
+        row("other", "note", "Other"),
+        row("blk_a", "ul", "a"),
+        row("blk_s", "ol", "shared"),
+        { ...row("blk_gone", "text", "deleted"), deleted_at: 5 },
+      ],
+      [
+        edge("home", "blk_a", "a0"),
+        edge("other", "blk_s", "a0"),
+        edge("blk_a", "blk_s", "a1"),
+        // Not containment, tombstoned, and into a tombstoned node: none index.
+        edge("home", "blk_s", "a2", "reference"),
+        { ...edge("home", "blk_s", "a3"), deleted_at: 5 },
+        edge("home", "blk_gone", "a4"),
+      ],
+    )
+
+  it("holds every live child link a second time, by destination, in source-id order", () => {
+    const snapshot = graph()
+    expect(parentIdsOf(snapshot, "blk_s")).toEqual(["blk_a", "other"])
+    expect(parentIdsOf(snapshot, "blk_a")).toEqual(["home"])
+    expect(parentIdsOf(snapshot, "home")).toEqual([])
+    // The same row objects in both directions — one index, two keys.
+    const viaChild = snapshot.childLinks.get("blk_a")!.find((l) => l.destination_id === "blk_s")
+    expect(snapshot.parentLinks.get("blk_s")).toContain(viaChild)
+  })
+
+  it("applies read-time discard to both directions alike", () => {
+    const snapshot = graph()
+    // A tombstoned link, a non-child kind, and a link into a tombstoned node
+    // are absent from both indexes.
+    expect(snapshot.childLinks.get("home")!.map((l) => l.destination_id)).toEqual(["blk_a"])
+    expect(snapshot.parentLinks.has("blk_gone")).toBe(false)
+    expect(snapshot.parentLinks.get("blk_s")!.map((l) => l.kind)).toEqual(["child", "child"])
+  })
+})
+
+describe("walkGraph (the lazy walk)", () => {
+  // home > a > b > c > d, and home > e; `other` also holds b.
+  const graph = () =>
+    buildGraphSnapshot(
+      [
+        row("home", "note", "Home"),
+        row("other", "note", "Other"),
+        row("blk_a", "ul", "a"),
+        row("blk_b", "ul", "b"),
+        row("blk_c", "ul", "c"),
+        row("blk_d", "text", "d"),
+        row("blk_e", "text", "e"),
+      ],
+      [
+        edge("home", "blk_a", "a0"),
+        edge("home", "blk_e", "a1"),
+        edge("blk_a", "blk_b", "a0"),
+        edge("blk_b", "blk_c", "a0"),
+        edge("blk_c", "blk_d", "a0"),
+        edge("other", "blk_b", "a0"),
+        edge("blk_a", "blk_missing", "a1"),
+      ],
+    )
+  const byDepth =
+    (levels: number) =>
+    (_key: string, level: number): boolean =>
+      level < levels
+
+  it("descends only where the rule opens a row, and reports where it stopped", () => {
+    const { doc, collapsed } = noteView("home", graph(), byDepth(2))!
+    // Two levels: a and e (level 1) show; b (level 2) is a row with a
+    // chevron and nothing beneath it — its children's ids, not their blocks.
+    expect(doc.rootBlockIds).toEqual(["blk_a", "blk_e"])
+    expect(Object.keys(doc.blocks).sort()).toEqual(["blk_a", "blk_b", "blk_e"])
+    expect(doc.blocks.blk_b.children).toEqual(["blk_c"])
+    expect([...collapsed]).toEqual(["blk_a/blk_b"])
+    // A dangling link is dropped from the list, as the eager walk drops it.
+    expect(doc.blocks.blk_a.children).toEqual(["blk_b"])
+  })
+
+  it("opens one more level per fold the rule opens, by occurrence key", () => {
+    const open = new Set(["blk_a/blk_b"])
+    const rule = (key: string, level: number) => open.has(key) || level < 2
+    const { doc, collapsed } = noteView("home", graph(), rule)!
+    expect(Object.keys(doc.blocks).sort()).toEqual(["blk_a", "blk_b", "blk_c", "blk_e"])
+    expect([...collapsed]).toEqual(["blk_a/blk_b/blk_c"])
+  })
+
+  it("a leaf is never collapsed, and everything open is the eager walk", () => {
+    const { doc, collapsed } = noteView("home", graph(), () => true)!
+    expect(collapsed.size).toBe(0)
+    expect(doc).toEqual(noteDoc("home", graph()))
+    expect(walkGraph(["blk_c"], graph(), { expanded: byDepth(1) }).collapsed.size).toBe(1)
+    expect(walkGraph(["blk_d"], graph(), { expanded: byDepth(1) }).collapsed.size).toBe(0)
+  })
+
+  it("walks a block reached twice beneath the path that is open", () => {
+    // b is closed under a and open under `other`: one block, its children
+    // walked once, named beneath both.
+    const rule = (key: string) => key !== "blk_a/blk_b"
+    const { doc, collapsed } = walkGraph(["blk_a", "other"], graph(), { expanded: rule })
+    expect(Object.keys(doc.blocks).sort()).toEqual(["blk_a", "blk_b", "blk_c", "blk_d", "other"])
+    expect([...collapsed]).toEqual(["blk_a/blk_b"])
+    expect(doc.blocks.other.children).toEqual(["blk_b"])
+  })
+
+  it("ends where a loop closes, whatever the rule says", () => {
+    const snapshot = buildGraphSnapshot(
+      [row("p", "note", "p"), row("blk_x", "text", "x"), row("blk_y", "text", "y")],
+      [edge("p", "blk_x", "a0"), edge("blk_x", "blk_y", "a0"), edge("blk_y", "blk_x", "a0")],
+    )
+    const { doc, collapsed } = noteView("p", snapshot, () => true)!
+    expect(doc.blocks.blk_y.children).toEqual(["blk_x"])
+    expect(collapsed.size).toBe(0)
+  })
+
+  it("blockView: the block is the one root, at level 0, walked by the same rule", () => {
+    const { doc, collapsed } = blockView("blk_a", graph(), byDepth(2))!
+    expect(doc.rootBlockIds).toEqual(["blk_a"])
+    expect(doc.props).toBe(null)
+    // Level 0 (the title) and level 1 (b) open; c (level 2) folds.
+    expect(Object.keys(doc.blocks).sort()).toEqual(["blk_a", "blk_b", "blk_c"])
+    expect([...collapsed]).toEqual(["blk_a/blk_b/blk_c"])
+    // A note is opened as a note, and a missing block is nothing.
+    expect(blockView("home", graph())).toBe(null)
+    expect(blockView("blk_missing", graph())).toBe(null)
+  })
+
+  it("pathToBlock: the shortest chain of child links from a root down to a block", () => {
+    expect(pathToBlock(graph(), "home", "blk_d")).toEqual(["blk_a", "blk_b", "blk_c", "blk_d"])
+    expect(pathToBlock(graph(), "blk_a", "blk_c")).toEqual(["blk_b", "blk_c"])
+    expect(pathToBlock(graph(), "other", "blk_c")).toEqual(["blk_b", "blk_c"])
+    expect(pathToBlock(graph(), "blk_a", "blk_a")).toEqual([])
+    expect(pathToBlock(graph(), "other", "blk_a")).toBe(null)
+    expect(pathToBlock(graph(), "home", "blk_missing")).toBe(null)
   })
 })
 

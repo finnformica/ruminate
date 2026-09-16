@@ -49,9 +49,10 @@ key / touch / menu ─▶ entry point ─▶ resolveKey (keymap) ─▶ COMMANDS
 
 ### Why this shape
 
-- **One definition, many inputs.** A swipe-right on a block (planned for mobile)
-  dispatches the same `indent` command that <kbd>Tab</kbd> does. Touch would add
-  a second bindings table (gesture → command name) beside the keymap; the
+- **One definition, many inputs.** The touch screen's edit bar and block menu
+  (docs/mobile.md) dispatch the same `indent` command that <kbd>Tab</kbd> does,
+  through `runOnRow`; a swipe-right on a block (still planned) would add a
+  second bindings table (gesture → command name) beside the keymap; the
   command and doc-math layers don't change at all.
 - **It can't silently erode.** The behaviour lives as data (the keymap) and pure
   functions (the commands), both covered by tests, rather than as `if/else`

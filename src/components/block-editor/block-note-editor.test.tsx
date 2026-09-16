@@ -7,12 +7,12 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 // (src/data/view-state.ts) — these tests only exercise value propagation, and
 // no noteId is passed, so transient collapse state is all that's needed.
 vi.mock("../../data/view-state", () => ({
-  useCollapseState: () => ({ collapsed: new Set<string>(), toggleCollapse: () => {} }),
+  useFoldRule: () => ({ expanded: () => true, setFold: () => {} }),
 }))
 vi.mock("../../global-state", async () => {
   const { atom } = await import("jotai")
   return {
-    graphSnapshotAtom: atom({ nodes: new Map(), childLinks: new Map() }),
+    graphSnapshotAtom: atom({ nodes: new Map(), childLinks: new Map(), parentLinks: new Map() }),
     // Signed out: developer mode (`hooks/is-developer.ts`) stays off, and
     // image uploads have nowhere to go.
     githubUserAtom: atom(null),
