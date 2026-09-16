@@ -7,7 +7,7 @@ import { cx } from "../../utils/cx"
 import {
   ArrowLeftToLineIcon16,
   ArrowRightToLineIcon16,
-  ChevronLeftIcon16,
+  ChevronsLeftIcon16,
   ImageIcon16,
   KeyboardDownIcon16,
   LinkIcon16,
@@ -252,8 +252,8 @@ export function MobileEditBar({
       >
         {view === "format" ? (
           <>
-            <BarButton label="Back" onClick={() => setView("main")}>
-              <ChevronLeftIcon16 />
+            <BarButton label="Back" onClick={() => setView("main")} className="text-text">
+              <ChevronsLeftIcon16 />
             </BarButton>
             <Rule />
             <BarButton
@@ -291,8 +291,8 @@ export function MobileEditBar({
           </>
         ) : view === "turnInto" ? (
           <>
-            <BarButton label="Back" onClick={() => setView("main")}>
-              <ChevronLeftIcon16 />
+            <BarButton label="Back" onClick={() => setView("main")} className="text-text">
+              <ChevronsLeftIcon16 />
             </BarButton>
             <Rule />
             <div className="relative flex items-stretch">
@@ -334,14 +334,12 @@ export function MobileEditBar({
             <BarButton label="Turn into" onClick={() => setView("turnInto")}>
               <SwapIcon16 />
             </BarButton>
-            <Rule />
             <BarButton label="Outdent" onClick={actions.outdent} disabled={!state.canOutdent}>
               <ArrowLeftToLineIcon16 />
             </BarButton>
             <BarButton label="Indent" onClick={actions.indent} disabled={!state.canIndent}>
               <ArrowRightToLineIcon16 />
             </BarButton>
-            <Rule />
             <BarButton label="Undo" onClick={actions.undo} disabled={!state.canUndo}>
               <UndoIcon16 />
             </BarButton>
@@ -350,24 +348,19 @@ export function MobileEditBar({
                 <RedoIcon16 />
               </BarButton>
             ) : null}
-            <Rule />
             <BarButton label="Image" onClick={actions.image ?? noop} disabled={!actions.image}>
               <ImageIcon16 />
             </BarButton>
             {/* Delete keeps to the far right, away from the rest, as the
                 destructive one; the gap closes only when the row scrolls. */}
-            <Rule className="ml-auto" />
-            <BarButton label="Delete" onClick={actions.remove} className="text-text-danger">
+            <BarButton label="Delete" onClick={actions.remove} className="ml-auto text-text-danger">
               <TrashIcon16 />
             </BarButton>
           </>
         )}
       </div>
-      <BarButton
-        label="Hide keyboard"
-        onClick={actions.done}
-        className="w-[52px] border-l border-border-secondary text-text"
-      >
+      <Rule />
+      <BarButton label="Hide keyboard" onClick={actions.done} className="w-12 text-text">
         <KeyboardDownIcon16 />
       </BarButton>
     </div>,
@@ -375,9 +368,11 @@ export function MobileEditBar({
   )
 }
 
-/** A hairline between groups of buttons. */
-function Rule({ className }: { className?: string }) {
-  return <span aria-hidden className={cx("my-3.5 w-px shrink-0 bg-border-secondary", className)} />
+/** A divider, where one is needed at all: short, a hairline, and faint —
+ * after Back, which is not one of the row's actions, and before the
+ * keyboard button, which is not part of the row. */
+function Rule() {
+  return <span aria-hidden className="h-4 w-px shrink-0 self-center bg-[var(--neutral-a4)]" />
 }
 
 /** Keeps focus where it is: the pointer down is cancelled, so the textarea
