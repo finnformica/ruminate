@@ -1022,15 +1022,25 @@ export function BlockItem({
           ) : null}
           {kind.before?.(rowContext)}
           {kind.wrap ? kind.wrap(content, rowContext) : content}
-          {kind.after?.(rowContext)}
           {/* A pinned block says so, with the glyph the sidebar's Pinned
-              list and a pinned note's row use. (A note row draws its own,
-              in its kind's `after`.) */}
-          {block.type !== "note" && block.props?.pinned === true ? (
-            <PinFillIcon12
-              data-testid="block-pinned"
-              className="shrink-0 self-center text-text-pinned"
-            />
+              list uses — in a TRAILING SLOT that mirrors the marker slot:
+              the same 15px, on the first line (`h-[1lh]` at the line's own
+              typography, as the marker's), the glyph centred in it as the
+              bullet's dot is. So the pin's centre sits as far from the
+              surface's right edge as the dot's from its left (6px of
+              padding + half the slot), and the surface reads symmetric
+              instead of the glyph hugging the edge with the padding alone
+              between them. Anything else that trails the content goes
+              through the same slot, never beside it with its own offset. */}
+          {block.props?.pinned === true ? (
+            <span
+              className={cx(
+                "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
+                typo,
+              )}
+            >
+              <PinFillIcon12 data-testid="block-pinned" className="shrink-0 text-text-pinned" />
+            </span>
           ) : null}
           {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
         </div>

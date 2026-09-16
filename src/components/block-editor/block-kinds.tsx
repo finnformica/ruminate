@@ -6,7 +6,6 @@ import type { Block, BlockType } from "../../blocks/types"
 import type { Occurrence } from "../../blocks/view"
 import { cx } from "../../utils/cx"
 import { noteTypeOf } from "../../utils/note-type"
-import { PinFillIcon12 } from "../icons"
 import { NoteFavicon } from "../note-favicon"
 import type { BlockEditorApi } from "./block-item"
 import { LinkCard } from "./link-card"
@@ -88,8 +87,6 @@ export interface BlockKind {
   readonly bodyClass?: string
   /** Chrome before the content line (a quote's bar). */
   readonly before?: (context: RowContext) => ReactNode
-  /** Chrome after the content line (a note's pin). */
-  readonly after?: (context: RowContext) => ReactNode
   /** Wrap the content line (an image's picture above its caption, a code
    * block's panel). The line itself stays chrome-free: the row sizes its
    * textarea by its text alone, so a panel's padding and border belong
@@ -201,12 +198,6 @@ const note: BlockKind = {
   // before notes were drawn as blocks. Linked under a block in the editor it
   // keeps the editor's rhythm.
   roomy: ({ api, depth }) => !!api.fixedRoots && depth === 0,
-  // Pinned is the note's own state, so the row says it — the same glyph the
-  // sidebar and the note header use.
-  after: ({ block }) =>
-    block.props?.pinned === true ? (
-      <PinFillIcon12 data-testid="note-pinned" className="shrink-0 self-center text-text-pinned" />
-    ) : null,
 }
 
 export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {

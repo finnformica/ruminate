@@ -135,11 +135,16 @@
  * moves. The reach is the scale's own line box (font size × leading, as
  * `headingScale` sets them) plus the surface's 2px above and below, less the
  * 20px square, halved, less the 3.5px the square already has — so it follows
- * the touch-screen type scale too. Unlayered, so it wins over the line's
- * `-ml-0.5 pl-1.5` utilities. */
+ * the touch-screen type scale too. The right edge reaches by the same
+ * amount, so the surface's padding stays the same on both sides and what
+ * trails the heading's line (its pin, in the trailing slot that mirrors
+ * the marker's) sits as far from the right edge as the `#` from the left.
+ * Unlayered, so it wins over the line's `-mx-0.5 px-1.5` utilities. */
 [data-block-line][data-heading-scale] {
   margin-left: calc(-2px - var(--heading-reach));
+  margin-right: calc(-2px - var(--heading-reach));
   padding-left: calc(6px + var(--heading-reach));
+  padding-right: calc(6px + var(--heading-reach));
 }
 
 [data-block-line][data-heading-scale="2xl"] {

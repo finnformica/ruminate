@@ -103,6 +103,60 @@ export const Empty: Story = {
 }
 
 /**
+ * Pinned blocks (docs/metadata.md): a heading, a paragraph and two bullets
+ * each carry the pin glyph at the end of their line, in a trailing slot
+ * that mirrors the marker's: the glyph sits as far from the line's right
+ * edge as a bullet's dot from its left, on the first line of a wrapping
+ * row, whether the row is plain, hovered or selected. The heading's surface
+ * reaches as far on the right as on the left.
+ */
+export const Pinned: Story = {
+  args: {
+    initial: "",
+    initialDoc: {
+      props: null,
+      rootBlockIds: ["blk_h1", "blk_p1", "blk_b1", "blk_p2"],
+      blocks: {
+        blk_h1: {
+          id: "blk_h1",
+          type: "h1",
+          text: "A pinned heading",
+          props: { pinned: true },
+          children: [],
+        },
+        blk_p1: {
+          id: "blk_p1",
+          type: "text",
+          text: "A pinned paragraph, listed in the sidebar under Pinned",
+          props: { pinned: true },
+          children: [],
+        },
+        blk_b1: {
+          id: "blk_b1",
+          type: "ul",
+          text: "A pinned bullet",
+          props: { pinned: true },
+          children: ["blk_b2"],
+        },
+        blk_b2: {
+          id: "blk_b2",
+          type: "ul",
+          text: "A nested bullet that wraps onto a second line so the pin can be seen on the first line of a tall row",
+          props: { pinned: true },
+          children: [],
+        },
+        blk_p2: {
+          id: "blk_p2",
+          type: "text",
+          text: "An ordinary paragraph after them",
+          children: [],
+        },
+      },
+    },
+  },
+}
+
+/**
  * Code: a fenced block with a language, one without, one nested under a
  * bullet, one that is empty (as `\`\`\`` then Enter leaves it), one with a row
  * under it (so its collapse chevron takes the slot), and inline code in a
