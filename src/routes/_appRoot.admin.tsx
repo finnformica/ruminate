@@ -238,9 +238,11 @@ function InviteList({
                 {state === "redeemed" && invite.redeemedAt !== null
                   ? `Joined ${formatDate(invite.redeemedAt)}` +
                     (invite.redeemedBy?.login ? ` as ${invite.redeemedBy.login}` : "")
-                  : `Created ${formatDate(invite.createdAt)} · ${
-                      state === "expired" ? "Expired" : "Expires"
-                    } ${formatDate(invite.expiresAt)}`}
+                  : state === "revoked" && invite.revokedAt !== null
+                    ? `Created ${formatDate(invite.createdAt)} · Revoked ${formatDate(invite.revokedAt)}`
+                    : `Created ${formatDate(invite.createdAt)} · ${
+                        state === "expired" ? "Expired" : "Expires"
+                      } ${formatDate(invite.expiresAt)}`}
               </span>
             </div>
             {state === "live" ? (
