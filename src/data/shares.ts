@@ -1,3 +1,4 @@
+import type { GraphDiff } from "../../worker/handlers/replica-payload"
 import type {
   CreateShareBody,
   GivenShare,
@@ -13,9 +14,10 @@ export type {
   ReceivedShareSummary,
   SliceBody,
 } from "../../worker/shares/wire"
+export type SharePermission = "read" | "write" | "delete"
 
 /**
- * The client half of sharing (docs/sharing.md): the four requests behind the
+ * The client half of sharing (docs/sharing.md): the five requests behind the
  * Settings panel and the shared runtime (`shared-mode.ts`).
  *
  * Authenticated exactly as the replica calls are — same-origin, so the
@@ -40,6 +42,10 @@ class SharesError extends Error {
     this.name = "SharesError"
   }
 }
+
+/** Is this a refusal the server will repeat if asked again? */
+export const isSharesRefusal = (error: unknown): boolean =>
+  error instanceof SharesError && error.status >= 400 && error.status < 500
 
 async function request(
   path: string,
@@ -110,6 +116,25 @@ export async function pullShare(id: string, fetchImpl?: typeof fetch): Promise<S
   const body = (await request(`/${encodeURIComponent(id)}/notes`, { fetchImpl })) as SliceBody
   return { nodes: body.nodes ?? [], links: body.links ?? [] }
 }
+
+/** Push a row diff into a share I received. Refused as a whole when any row
+ * would leave the slice or needs a verb the share lacks. */
+export async function pushShare(
+  id: string,
+  diff: GraphDiff,
+  options: { keepalive?: boolean; fetchImpl?: typeof fetch } = {},
+): Promise<void> {
+  await request(`/${encodeURIComponent(id)}/notes`, {
+    method: "PUT",
+    body: JSON.stringify({ nodes: diff.nodes, links: diff.links }),
+    keepalive: options.keepalive,
+    fetchImpl: options.fetchImpl,
+  })
+}
+
+/** "read + write", for lists and summaries. */
+export const describeSharePermissions = (permissions: readonly SharePermission[]): string =>
+  (permissions.length === 0 ? ["read"] : permissions).join(" + ")
 
 /** A person's name for a share's owner: their display name, else their login. */
 export const shareOwnerName = (share: ReceivedShareSummary): string =>

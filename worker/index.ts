@@ -16,6 +16,7 @@ import { mcp, MCP_PATH } from "./handlers/mcp"
 import { mcpTokens, MCP_TOKENS_PREFIX } from "./handlers/mcp-tokens"
 import { replica } from "./handlers/replica"
 import { shares, SHARES_PREFIX } from "./handlers/shares"
+import { unfurl, UNFURL_PATH } from "./handlers/unfurl"
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -34,6 +35,7 @@ export default {
     if (pathname === "/api/images" || pathname.startsWith("/api/images/")) {
       return images(request, env)
     }
+    if (pathname === UNFURL_PATH) return unfurl(request, env)
     if (pathname === FEATURES_PATH) return features(request, env)
     if (pathname === ADMIN_PREFIX || pathname.startsWith(`${ADMIN_PREFIX}/`)) {
       return admin(request, env)

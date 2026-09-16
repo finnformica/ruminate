@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent, ClipboardEvent, CSSProperties, KeyboardEvent } from "react"
 import { cx } from "../../utils/cx"
 import type { Block, BlockDoc } from "../../blocks/types"
+import { linkifyPastedText, linkifyTypedAddress } from "../../blocks/link"
 import { leadingMarker } from "../../blocks/markers"
 import { defOf } from "../../blocks/registry"
 import type { BlockPatch } from "../../blocks/ops"
@@ -26,6 +27,7 @@ import { BlockContent } from "./block-content"
 import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext } from "./block-kinds"
 import { caretCoordinates, caretLineFlags } from "./caret"
 import { Hash } from "./hash"
+import { LinkActionsContext, type LinkActions } from "./link-actions"
 import { SLASH_MENU_WIDTH, SlashMenu } from "./slash-menu"
 
 /** A request to edit a row (an occurrence key — a block twice in the view is
@@ -105,6 +107,33 @@ export interface BlockEditorApi {
   requestImage?: (key: string) => void
   /** Expand an image block's picture (the lightbox). */
   openImage?: (id: string) => void
+  /** Make a link block of a link in this row's text (docs/links.md): the
+   * row itself when its text is nothing but the link, else a new row
+   * beneath it. Absent in read-only views. */
+  linkToBlock?: (key: string, href: string, title: string) => void
+  /** Change a link's display text and/or address in this row's text
+   * (docs/links.md): `[title](href)` becomes `[next.title](next.href)`; a
+   * bare address is written out as a link. Absent in read-only views. */
+  updateLink?: (
+    key: string,
+    href: string,
+    title: string,
+    next: { href?: string; title?: string },
+  ) => void
+  /** A link block back to a paragraph holding its link as text. */
+  linkToInline?: (id: string) => void
+  /** A link block's title and/or address changed in one step: a new
+   * address has its preview fetched afresh. */
+  updateLinkBlock?: (id: string, next: { href?: string; title?: string }) => void
+  /** Take a link in this row's text off, leaving its text as words. */
+  removeLink?: (key: string, href: string, title: string) => void
+  /** A link block's Remove link: the row goes, as ⌫ on it would. */
+  removeLinkBlock?: (key: string) => void
+  /** A link's card the reader asked to open from the menu ("Edit link",
+   * for a touch screen): the row and the address. */
+  linkCard?: { key: string; href: string } | null
+  /** That card closed. */
+  closeLinkCard?: () => void
   /**
    * Exit edit mode and take the first selection-ladder rung on this row
    * (Cmd/Ctrl+A pressed with the textarea's text already fully selected).
@@ -353,11 +382,18 @@ export function BlockItem({
       leading !== null && (type !== "code" || (leading.text === "" && leading.type !== "code"))
         ? leading
         : null
-    const text = typed !== null ? typed.text : newBody
+    // A space typed after a bare address writes it out as a link named for
+    // its host (docs/links.md), as a paste is; the caret follows. Not in a
+    // code block, where an address is code.
+    const linked = typed === null && type !== "code" ? linkifyTypedAddress(newBody, caret) : null
+    const text = typed !== null ? typed.text : linked !== null ? linked.text : newBody
     if (typed !== null) {
       // The marker left the visible text; keep the caret relative to it.
       pendingCaret.current = Math.max(0, caret - (newBody.length - text.length))
       api.onBlockChange(block.id, { type: typed.type, text })
+    } else if (linked !== null) {
+      pendingCaret.current = linked.caret
+      api.onBlockChange(block.id, { text }, "structural")
     } else {
       api.onBlockChange(block.id, { text })
     }
@@ -469,6 +505,12 @@ export function BlockItem({
         if (converted.trim() !== "") pasted = converted
       }
     }
+    // A bare address in the paste is written out as a link with its host
+    // for display text (docs/links.md), so a pasted URL reads as a name
+    // rather than a string of slashes; the address itself is kept whole.
+    // Done before the single-line shortcut below: a rewritten line is no
+    // longer the plain text, so it is inserted by hand as converted html is.
+    pasted = linkifyPastedText(pasted)
     if (!pasted.includes("\n")) {
       // Single-line paste: plain text falls through to the browser's ordinary
       // inline insertion; converted html (e.g. `**bold**`) is inserted manually.
@@ -750,6 +792,28 @@ export function BlockItem({
     depth === 0 && occurrence.index > 0 ? ROOT_GAP : 0,
   )
 
+  // What a link in the rendered text can do to this row: its hover card
+  // (`link-hover-card.tsx`) changes its display text and makes a block of
+  // it, in an editor that can write the change.
+  const linkToBlock = readOnly ? undefined : api.linkToBlock
+  const updateLink = readOnly ? undefined : api.updateLink
+  const removeLink = readOnly ? undefined : api.removeLink
+  const openHref = api.linkCard?.key === occurrence.key ? api.linkCard.href : null
+  const closeLinkCard = api.closeLinkCard
+  const linkActions = useMemo<LinkActions | null>(
+    () =>
+      linkToBlock && updateLink && removeLink
+        ? {
+            toBlock: (href, title) => linkToBlock(occurrence.key, href, title),
+            update: (href, title, next) => updateLink(occurrence.key, href, title, next),
+            remove: (href, title) => removeLink(occurrence.key, href, title),
+            openHref,
+            closeCard: () => closeLinkCard?.(),
+          }
+        : null,
+    [linkToBlock, updateLink, removeLink, occurrence.key, openHref, closeLinkCard],
+  )
+
   // The caption/body line: the textarea while editing, the rendered text
   // otherwise (an image row hangs it beneath the picture).
   const content = editing ? (
@@ -835,7 +899,9 @@ export function BlockItem({
             onDoubleClick: () => api.edit(occurrence.key),
           })}
     >
-      {kind.body ? kind.body(block) : <BlockContent content={body} />}
+      <LinkActionsContext.Provider value={linkActions}>
+        {kind.body ? kind.body(block) : <BlockContent content={body} />}
+      </LinkActionsContext.Provider>
     </div>
   )
 
@@ -956,15 +1022,25 @@ export function BlockItem({
           ) : null}
           {kind.before?.(rowContext)}
           {kind.wrap ? kind.wrap(content, rowContext) : content}
-          {kind.after?.(rowContext)}
           {/* A pinned block says so, with the glyph the sidebar's Pinned
-              list and a pinned note's row use. (A note row draws its own,
-              in its kind's `after`.) */}
-          {block.type !== "note" && block.props?.pinned === true ? (
-            <PinFillIcon12
-              data-testid="block-pinned"
-              className="shrink-0 self-center text-text-pinned"
-            />
+              list uses — in a TRAILING SLOT that mirrors the marker slot:
+              the same 15px, on the first line (`h-[1lh]` at the line's own
+              typography, as the marker's), the glyph centred in it as the
+              bullet's dot is. So the pin's centre sits as far from the
+              surface's right edge as the dot's from its left (6px of
+              padding + half the slot), and the surface reads symmetric
+              instead of the glyph hugging the edge with the padding alone
+              between them. Anything else that trails the content goes
+              through the same slot, never beside it with its own offset. */}
+          {block.props?.pinned === true ? (
+            <span
+              className={cx(
+                "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
+                typo,
+              )}
+            >
+              <PinFillIcon12 data-testid="block-pinned" className="shrink-0 text-text-pinned" />
+            </span>
           ) : null}
           {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
         </div>

@@ -20,7 +20,26 @@ import {
   releasePendingImage,
   type UploadedImage,
 } from "../../data/images"
-import { imageAlignOf, imagePropsOf, withImageLayout, type ImageAlign } from "../../blocks/image"
+import {
+  figureAlignOf,
+  figureLayoutOf,
+  isFigureType,
+  withFigureLayout,
+  type FigureAlign,
+} from "../../blocks/figure"
+import {
+  hostOf,
+  hrefOf,
+  isWebUrl,
+  linkPropsOf,
+  linkifyPastedText,
+  linksInText,
+  wholeTextLink,
+  withLinkPreview,
+  type LinkPreview,
+} from "../../blocks/link"
+import { LinkPreviewError } from "../../data/link-previews"
+import { openLink } from "./link-card"
 import { ImageLightbox } from "./image-lightbox"
 import { NoteTitle } from "./note-title"
 import {
@@ -123,6 +142,7 @@ import {
   updateBlock,
   updateType,
   subtreeIds,
+  type BlockPatch,
 } from "../../blocks/ops"
 import { htmlToMarkdown } from "../../utils/html-to-markdown"
 import {
@@ -321,6 +341,7 @@ export function BlockEditor({
   onDeleteSubtree,
   knownBlock,
   onImageUpload,
+  onLinkPreview,
   onActivate,
   fixedRoots = false,
   emptyable = false,
@@ -335,6 +356,13 @@ export function BlockEditor({
    * "Image".
    */
   onImageUpload?: (file: File) => Promise<UploadedImage>
+  /**
+   * Fetch what a page says about itself, for a link block's card
+   * (`src/data/link-previews.ts`). Absent = no session to fetch it through: a
+   * link block is still made, with its address alone, and the menu offers
+   * no "Refresh preview".
+   */
+  onLinkPreview?: (url: string) => Promise<LinkPreview>
   /** The note this doc belongs to — what "Copy link to block" links into. */
   noteId?: string
   /** How many places a block appears across the corpus (whether the context
@@ -1067,7 +1095,7 @@ export function BlockEditor({
   const zoomTitleEditable =
     zoomRoot !== null &&
     zoomRoot.type !== "code" &&
-    zoomRoot.type !== "image" &&
+    !isFigureType(zoomRoot.type) &&
     !zoomRoot.text.includes("\n")
 
   const edit = (key: string, atStart = false) => {
@@ -1317,10 +1345,15 @@ export function BlockEditor({
       collapsed: row.collapsed,
       places: parentCountOf ? Math.max(1, parentCountOf(row.id)) : 1,
       pinned: block.props?.pinned === true,
-      image:
-        block.type === "image"
-          ? { align: imageAlignOf(block), sized: imagePropsOf(block).size !== undefined }
-          : undefined,
+      figure: isFigureType(block.type)
+        ? { align: figureAlignOf(block), sized: figureLayoutOf(block).size !== undefined }
+        : undefined,
+      links:
+        block.type === "link"
+          ? [{ href: linkPropsOf(block).url, title: block.text }].filter((l) => l.href !== "")
+          : block.type === "code"
+            ? []
+            : linksInText(block.text),
     }
   }
   const openMenuOn = (target: BlockMenuTarget) => {
@@ -1518,11 +1551,147 @@ export function BlockEditor({
     if (key) void insertImages(key, files)
   }
 
-  /** Write an image block's layout (`src/blocks/image.ts`) as one undo step. */
-  const setImageLayout = (id: string, layout: { align?: ImageAlign; size?: number | null }) => {
+  /** Write a figure block's layout (`src/blocks/figure.ts`) as one undo step. */
+  const setFigureLayout = (id: string, layout: { align?: FigureAlign; size?: number | null }) => {
     const block = doc.blocks[id]
-    if (!block || block.type !== "image") return
-    const next = updateBlock(doc, id, { props: withImageLayout(block, layout) })
+    if (!block || !isFigureType(block.type)) return
+    const next = updateBlock(doc, id, { props: withFigureLayout(block, layout) })
+    if (next !== doc) history.commit(doc, next, { type: "structural" })
+  }
+
+  // ── Links ─────────────────────────────────────────────────────────────────
+  // A link in a row's text becomes a link block (docs/links.md) from its
+  // hover card. The block is made at once, with the address and the link's
+  // text for a title; its preview — what the page says about itself — is
+  // fetched behind it and written on without a history step, so the whole
+  // block is one undo, as a picture's upload is. A page that will not
+  // answer leaves the card with its address alone and says so in a toast:
+  // the block is still there to open, and Refresh preview asks again.
+  /**
+   * Fetch `url`'s preview and write it onto block `id`. An untitled block
+   * takes the page's title; a titled one keeps its own. Not a history
+   * step. Failure is said in a toast, with the page's host and why.
+   */
+  const previewInto = async (id: string, url: string) => {
+    if (!onLinkPreview) return
+    try {
+      const preview = await onLinkPreview(url)
+      const current = docRef.current
+      const block = current.blocks[id]
+      if (!block || block.type !== "link" || linkPropsOf(block).url !== url) return
+      const next: BlockDoc = {
+        ...current,
+        blocks: {
+          ...current.blocks,
+          [id]: {
+            ...block,
+            text: block.text.trim() === "" && preview.title ? preview.title : block.text,
+            props: withLinkPreview(block, preview),
+          },
+        },
+      }
+      docRef.current = next
+      onChange(next)
+    } catch (error) {
+      const why = error instanceof LinkPreviewError ? error.message : "Preview failed"
+      toast.error(`No preview for ${hostOf(url)}: ${why.charAt(0).toLowerCase()}${why.slice(1)}`)
+    }
+  }
+  /**
+   * The link block for the link `href` (titled `title`) in row `key`: the
+   * row itself becomes the block when its text is nothing but the link — a
+   * pasted address, a `[title](url)` on its own — and otherwise a new row
+   * goes in beneath it, so the sentence keeps its link. The new or changed
+   * row is selected; its preview is fetched behind it.
+   */
+  const linkToBlock = (key: string, href: string, title: string) => {
+    const current = docRef.current
+    const targetId = idOfKey(key)
+    const target = current.blocks[targetId]
+    if (!target) return
+    const whole = wholeTextLink(target.text)
+    const inPlace = whole !== null && whole.url === href && target.type !== "note"
+    const text = (inPlace ? whole.title : title).trim()
+    // A pinned row stays pinned; every other prop was the old type's.
+    const pinned = target.props?.pinned === true ? { pinned: true } : {}
+    let next: BlockDoc
+    let id: string
+    let nextKey: string
+    if (inPlace) {
+      id = targetId
+      nextKey = key
+      next = {
+        ...current,
+        blocks: {
+          ...current.blocks,
+          [id]: { ...target, type: "link", text, props: { ...pinned, url: href } },
+        },
+      }
+    } else {
+      const link: Block = { id: blockId(), type: "link", text, props: { url: href }, children: [] }
+      id = link.id
+      next = insertAfter(current, key, link)
+      nextKey = keyOf(parentKeyOf(key), link.id)
+    }
+    history.commit(current, next, { type: "structural" })
+    docRef.current = next
+    setAnchorKey(null)
+    setFocus(null)
+    setSelected(nextKey)
+    void previewInto(id, href)
+  }
+  /** Fetch a link block's preview again, and say so if the page will not. */
+  const refreshPreview = (id: string) => {
+    const block = doc.blocks[id]
+    if (!block || block.type !== "link") return
+    const { url } = linkPropsOf(block)
+    if (url) void previewInto(id, url)
+  }
+  /**
+   * A link block's title and/or address, changed in one step. A new
+   * address takes the old preview with it (it was the old page's) and has
+   * the new page's fetched behind; a scheme-less one is taken as https,
+   * and anything not a web address is refused. The layout and the pin are
+   * kept.
+   */
+  const updateLinkBlock = (id: string, next: { href?: string; title?: string }) => {
+    const block = doc.blocks[id]
+    if (!block || block.type !== "link") return
+    const { url } = linkPropsOf(block)
+    const target = next.href === undefined ? url : hrefOf(next.href.trim())
+    if (!isWebUrl(target)) return
+    const title = next.title?.trim()
+    const text = title !== undefined && title !== "" ? title : block.text
+    const moved = target !== url
+    const patch: BlockPatch = { text }
+    if (moved) {
+      const pinned = block.props?.pinned === true ? { pinned: true } : {}
+      const { align, size } = figureLayoutOf(block)
+      patch.props = {
+        ...pinned,
+        url: target,
+        ...(align ? { align } : {}),
+        ...(size !== undefined ? { size } : {}),
+      }
+    }
+    const updated = updateBlock(doc, id, patch)
+    if (updated === doc) return
+    history.commit(doc, updated, { type: "structural" })
+    // The fetch may land before the host has re-rendered with the change;
+    // the ref it reads the block through must already hold it.
+    docRef.current = updated
+    if (moved) void previewInto(id, target)
+  }
+  /** A link block back to a paragraph holding its link as text. */
+  const linkToInline = (id: string) => {
+    const block = doc.blocks[id]
+    if (!block || block.type !== "link") return
+    const { url } = linkPropsOf(block)
+    const next = updateBlock(doc, id, {
+      type: "text",
+      text: url ? `[${block.text}](${url})` : block.text,
+      props: block.props?.pinned === true ? { pinned: true } : null,
+    })
     if (next !== doc) history.commit(doc, next, { type: "structural" })
   }
 
@@ -1551,8 +1720,82 @@ export function BlockEditor({
     if (next !== doc) history.commit(doc, next, { type: "structural" })
   }
 
+  // ── Links ─────────────────────────────────────────────────────────────────
+  // Leaving a row's edit mode writes out any bare address in it as a link
+  // named for its host (docs/links.md), as a space typed after one does
+  // and a paste does — so an address typed and left by Escape, a click
+  // elsewhere or Enter reads as a name too. Its own undo step, so the bare
+  // address is one ⌘Z away. Never in a code block.
+  const lastEdited = useRef<string | null>(null)
+  useEffect(() => {
+    const previous = lastEdited.current
+    lastEdited.current = focus?.key ?? null
+    if (previous === null || previous === focus?.key || readOnly) return
+    const current = docRef.current
+    const block = current.blocks[idOfKey(previous)]
+    if (!block || block.type === "code" || block.type === "note") return
+    const text = linkifyPastedText(block.text)
+    if (text === block.text) return
+    history.commit(current, updateBlock(current, block.id, { text }), { type: "structural" })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus])
+  /** The link card the menu asked to open (a touch screen's "Edit link"):
+   * the row and the address; the row's rendered link opens its card. */
+  const [linkCard, setLinkCard] = useState<{ key: string; href: string } | null>(null)
+
+  /**
+   * A link's display text and/or address, changed in the row's text
+   * (docs/links.md) in one rewrite: `[title](href)` becomes
+   * `[next.title](next.href)`. A link that was a bare address, or an
+   * autolink written another way, is found by its address or its text and
+   * written out as a link; a new address without a scheme is taken as
+   * https, and anything not a web address is refused. The first
+   * occurrence is the one changed; one undo step.
+   */
+  const updateLink = (
+    key: string,
+    href: string,
+    title: string,
+    next: { href?: string; title?: string },
+  ) => {
+    const target = next.href === undefined ? href : hrefOf(next.href.trim())
+    if (!isWebUrl(target)) return
+    const typed = next.title?.trim()
+    const display =
+      typed !== undefined && typed !== ""
+        ? typed
+        : title === "" || title === href
+          ? hostOf(target)
+          : title
+    rewriteLink(key, href, title, `[${display}](${target})`)
+  }
+  /** A link taken off: `[title](href)` becomes `title`; a bare address
+   * stays as it is (there is nothing to take off it). */
+  const removeLink = (key: string, href: string, title: string) => {
+    if (title !== "" && title !== href) rewriteLink(key, href, title, title)
+  }
+  /** The first occurrence of the link in the row's text — written out, an
+   * autolink, a bare address, or its text — replaced by `replacement`. One
+   * undo step. */
+  const rewriteLink = (key: string, href: string, title: string, replacement: string) => {
+    const block = doc.blocks[idOfKey(key)]
+    if (!block) return
+    let text: string | null = null
+    for (const needle of [`[${title}](${href})`, `<${href}>`, href, title]) {
+      if (needle !== "" && block.text.includes(needle)) {
+        text = block.text.replace(needle, replacement)
+        break
+      }
+    }
+    if (text === null || text === block.text) return
+    const updated = updateBlock(doc, block.id, { text })
+    history.commit(doc, updated, { type: "structural" })
+  }
+
   const menuActions: BlockMenuActions = {
     edit: (key) => edit(key),
+    editLink: (key, href) => setLinkCard({ key, href }),
+    turnIntoLink: (key, href, title) => linkToBlock(key, href, title === href ? "" : title),
     openImage: (id) => setLightbox(id),
     downloadImage: (id) => {
       const block = doc.blocks[id]
@@ -1562,8 +1805,15 @@ export function BlockEditor({
       const next = updateBlock(doc, id, { type })
       if (next !== doc) history.commit(doc, next, { type: "structural" })
     },
-    alignImage: (id, align) => setImageLayout(id, { align }),
-    resetImageSize: (id) => setImageLayout(id, { size: null }),
+    openLink: (id) => {
+      const block = doc.blocks[id]
+      const url = block ? linkPropsOf(block).url : ""
+      if (url) openLink(url)
+    },
+    refreshPreview: onLinkPreview ? refreshPreview : undefined,
+    linkToInline,
+    alignFigure: (id, align) => setFigureLayout(id, { align }),
+    resetFigureSize: (id) => setFigureLayout(id, { size: null }),
     duplicate: (key) => runOnRow("duplicateBelow", key),
     toggleCollapse: (key) => toggleCollapse(key),
     zoomInto: (id) => navigateZoom(id),
@@ -1606,6 +1856,14 @@ export function BlockEditor({
       onImageUpload && !readOnly ? (key, files) => void insertImages(key, files) : undefined,
     requestImage: onImageUpload && !readOnly ? requestImage : undefined,
     openImage: (id) => setLightbox(id),
+    linkToBlock: readOnly ? undefined : linkToBlock,
+    updateLink: readOnly ? undefined : updateLink,
+    linkToInline: readOnly ? undefined : linkToInline,
+    updateLinkBlock: readOnly ? undefined : updateLinkBlock,
+    removeLinkBlock: readOnly ? undefined : (key) => runOnRow("deleteBlock", key),
+    removeLink: readOnly ? undefined : removeLink,
+    linkCard,
+    closeLinkCard: () => setLinkCard(null),
     focus,
     selected,
     selectedSet,

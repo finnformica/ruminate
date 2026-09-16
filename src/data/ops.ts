@@ -1,6 +1,7 @@
 import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import type { BlockDoc } from "../blocks/types"
 import type { NoteId } from "../schema"
+import { linkPropsOf } from "../blocks/link"
 import { imagePropsOf } from "../blocks/image"
 import {
   CHILD_KIND,
@@ -358,9 +359,10 @@ export function docToOps(
 /**
  * A block with nothing in it: no text but whitespace, nothing beneath it, and
  * no picture (an image row's text is its caption; its picture is in its
- * props, and a placeholder whose upload failed has none). Blank blocks are
- * what backing out of an empty line leaves behind, so the outline deletes
- * them rather than parking them in the basket.
+ * props, and a placeholder whose upload failed has none) or address (a
+ * link block's text is its title; its address is in its props). Blank blocks
+ * are what backing out of an empty line leaves behind, so the outline
+ * deletes them rather than parking them in the basket.
  */
 function isBlankNode(snapshot: GraphSnapshot, id: string): boolean {
   const node = snapshot.nodes.get(id)
@@ -370,6 +372,9 @@ function isBlankNode(snapshot: GraphSnapshot, id: string): boolean {
   if (node.type === "image") {
     const image = imagePropsOf({ props: parseProps(node.props) })
     if (image.image || image.src) return false
+  }
+  if (node.type === "link" && linkPropsOf({ props: parseProps(node.props) }).url !== "") {
+    return false
   }
   return true
 }

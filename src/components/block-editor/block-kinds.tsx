@@ -1,14 +1,14 @@
 import type React from "react"
 import type { ReactNode } from "react"
-import { imageAlignOf, type ImageAlign } from "../../blocks/image"
+import { figureAlignOf, type FigureAlign } from "../../blocks/figure"
 import { BLOCK_TYPE_DEFS } from "../../blocks/registry"
 import type { Block, BlockType } from "../../blocks/types"
 import type { Occurrence } from "../../blocks/view"
 import { cx } from "../../utils/cx"
 import { noteTypeOf } from "../../utils/note-type"
-import { PinFillIcon12 } from "../icons"
 import { NoteFavicon } from "../note-favicon"
 import type { BlockEditorApi } from "./block-item"
+import { LinkCard } from "./link-card"
 import { CodeHighlight } from "./code-highlight"
 import { CodeLanguage } from "./code-language"
 import { ImageFigure } from "./image-figure"
@@ -19,8 +19,8 @@ import { ImageFigure } from "./image-figure"
  * draws every row from one of these: which key stands in the marker slot,
  * the typography the view and the textarea share, any panel the text sits
  * in, and the chrome around the content line (a quote's bar, a code block's
- * panel, an image's picture). Adding a type is adding its entry here and
- * in the registry; the row itself never names a type.
+ * panel, an image's picture, a link block's card). Adding a type is adding
+ * its entry here and in the registry; the row itself never names a type.
  */
 
 /** What the row hands a kind's chrome. */
@@ -87,8 +87,6 @@ export interface BlockKind {
   readonly bodyClass?: string
   /** Chrome before the content line (a quote's bar). */
   readonly before?: (context: RowContext) => ReactNode
-  /** Chrome after the content line (a note's pin). */
-  readonly after?: (context: RowContext) => ReactNode
   /** Wrap the content line (an image's picture above its caption, a code
    * block's panel). The line itself stays chrome-free: the row sizes its
    * textarea by its text alone, so a panel's padding and border belong
@@ -200,12 +198,6 @@ const note: BlockKind = {
   // before notes were drawn as blocks. Linked under a block in the editor it
   // keeps the editor's rhythm.
   roomy: ({ api, depth }) => !!api.fixedRoots && depth === 0,
-  // Pinned is the note's own state, so the row says it — the same glyph the
-  // sidebar and the note header use.
-  after: ({ block }) =>
-    block.props?.pinned === true ? (
-      <PinFillIcon12 data-testid="note-pinned" className="shrink-0 self-center text-text-pinned" />
-    ) : null,
 }
 
 export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
@@ -300,7 +292,7 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     // typography so the view and the textarea agree — switching between
     // them never shifts a character.
     typography: (_depth, block) =>
-      cx("text-sm leading-relaxed text-text-secondary", CAPTION_ALIGN[imageAlignOf(block)]),
+      cx("text-sm leading-relaxed text-text-secondary", CAPTION_ALIGN[figureAlignOf(block)]),
     placeholder: "Add a caption…",
     // The picture above its caption, which is the block's text: the caption
     // line is the ordinary body (view or textarea), so every keyboard and
@@ -311,55 +303,100 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     // entirely rather than leaving a blank one under it — the row is then
     // just the picture. It comes back the moment the row is being edited, so
     // a caption can still be typed.
-    //
-    // The wrap is the block's own padding: the row's surface gives text 6px
-    // at the sides and 2px above and below, and the wrap tops that up so the
-    // picture sits 10px in from the surface's edge all round. Its empty
-    // space (beside a narrow picture, around the caption) is the block, so a
-    // click there selects the row and a double click edits the caption, as
-    // clicking text does — the picture itself keeps its own click (the
-    // lightbox) and stops it here.
-    wrap: (content, { block, occurrence, api, editing }) => {
-      const own = (event: React.MouseEvent) => event.target === event.currentTarget
-      const pointer = api.readOnly
-        ? api.activate
-          ? { onClick: (e: React.MouseEvent) => own(e) && api.activate?.(occurrence.key) }
-          : api.navigable
-            ? { onClick: (e: React.MouseEvent) => own(e) && api.select(occurrence.key) }
-            : {}
-        : {
-            onClick: (e: React.MouseEvent) => own(e) && api.select(occurrence.key),
-            onDoubleClick: (e: React.MouseEvent) => own(e) && api.edit(occurrence.key),
-          }
-      return (
-        // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
-        <div
-          data-testid="image-block"
-          className="flex min-w-0 flex-1 flex-col px-1 py-2"
-          {...pointer}
-        >
-          <ImageFigure
-            block={block}
-            occurrence={occurrence}
-            api={api}
-            caption={
-              editing || block.text.trim() !== "" ? (
-                // A row, like the content line itself: the body's `flex-1`
-                // then fills the width, and the textarea keeps the height
-                // it measured for its lines (in a column it would collapse
-                // to one).
-                <div className="flex min-w-0">{content}</div>
-              ) : null
-            }
-          />
-        </div>
-      )
-    },
+    wrap: figureWrap("image-block", (content, { block, occurrence, api, editing }) => (
+      <ImageFigure
+        block={block}
+        occurrence={occurrence}
+        api={api}
+        caption={editing || block.text.trim() !== "" ? lineOf(content) : null}
+      />
+    )),
+  },
+  link: {
+    // No marker slot, as a picture has none: the card starts at the row's
+    // edge.
+    slot: "none",
+    // The text is the title, set inside the card: body type, a touch heavier
+    // than the description beneath it.
+    typography: () => cx(BODY, "font-medium"),
+    placeholder: "Add a title…",
+    // The card (`LinkCard`) holds the title line — the block's text, the
+    // ordinary body (view or textarea) — with the page's description and
+    // byline beneath. An untitled link block drops the line rather than
+    // leaving a blank one in the card (the card decides what stands in);
+    // it comes back the moment the row is being edited, so a title can
+    // still be typed.
+    wrap: figureWrap("link-block", (content, context) => (
+      <LinkCard
+        block={context.block}
+        occurrence={context.occurrence}
+        api={context.api}
+        title={context.editing || context.block.text.trim() !== "" ? lineOf(content) : null}
+        editing={context.editing}
+        pointer={rowPointer(context)}
+      />
+    )),
   },
 }
 
+/** The content line as a row, like the content line itself: the body's
+ * `flex-1` then fills the width, and the textarea keeps the height it
+ * measured for its lines (in a column it would collapse to one). */
+const lineOf = (content: ReactNode) => <div className="flex min-w-0">{content}</div>
+
+type Pointer = Pick<React.HTMLAttributes<HTMLElement>, "onClick" | "onDoubleClick">
+
+/** What a click on the row does, off its text: select it and, double, edit
+ * it — or, read-only, open it (a search result) or select it (a navigable
+ * view), as the body's own click does. */
+function rowPointer({ occurrence, api }: RowContext): Pointer {
+  if (api.readOnly) {
+    if (api.activate) return { onClick: () => api.activate?.(occurrence.key) }
+    if (api.navigable) return { onClick: () => api.select(occurrence.key) }
+    return {}
+  }
+  return {
+    onClick: () => api.select(occurrence.key),
+    onDoubleClick: () => api.edit(occurrence.key),
+  }
+}
+
+/**
+ * A figure's wrap (a picture, a link block's card): the figure in place of the
+ * content line, with the line handed to it to place as its caption or
+ * title. The wrap is the block's own padding: the row's surface gives text
+ * 6px at the sides and 2px above and below, and the wrap tops that up so
+ * the figure sits 10px in from the surface's edge all round. Its empty
+ * space (beside a narrow figure, around a caption) is the block, so a click
+ * there selects the row and a double click edits the text, as clicking
+ * text does — the figure itself keeps its own clicks (a picture's lightbox,
+ * a card's links) and stops them there.
+ */
+function figureWrap(
+  testId: string,
+  figure: (content: ReactNode, context: RowContext) => ReactNode,
+): BlockKind["wrap"] {
+  return (content, context) => {
+    const pointer = rowPointer(context)
+    const own =
+      (handler?: React.MouseEventHandler<HTMLElement>) => (event: React.MouseEvent<HTMLElement>) =>
+        event.target === event.currentTarget && handler?.(event)
+    return (
+      // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
+      <div
+        data-testid={testId}
+        className="flex min-w-0 flex-1 flex-col px-1 py-2"
+        onClick={own(pointer.onClick)}
+        onDoubleClick={own(pointer.onDoubleClick)}
+      >
+        {figure(content, context)}
+      </div>
+    )
+  }
+}
+
 /** The caption's text alignment, by the picture's. */
-const CAPTION_ALIGN: Record<ImageAlign, string> = {
+const CAPTION_ALIGN: Record<FigureAlign, string> = {
   left: "text-left",
   center: "text-center",
   right: "text-right",

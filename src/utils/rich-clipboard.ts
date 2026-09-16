@@ -1,4 +1,5 @@
 import { blockId } from "../blocks/id"
+import { isFigureType } from "../blocks/figure"
 import { defOf } from "../blocks/registry"
 import { parse, parseLine } from "../blocks/parse"
 import { blockLines } from "../blocks/serialize"
@@ -97,7 +98,9 @@ function docToClipboardBlocks(doc: BlockDoc, declared: Set<string>): ClipboardBl
       type: block.type,
       text: block.text,
       ...(language ? { language } : {}),
-      ...(block.type === "image" && block.props ? { props: block.props } : {}),
+      // A figure's props are the block: where a picture is, a link block's
+      // address and preview (and either's layout) travel with it.
+      ...(isFigureType(block.type) && block.props ? { props: block.props } : {}),
       children,
     }
   }

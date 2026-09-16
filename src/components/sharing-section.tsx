@@ -3,6 +3,7 @@ import { useAtomValue } from "jotai"
 import React from "react"
 import { NOTE_TYPE } from "../data/graph"
 import {
+  describeSharePermissions,
   listShares,
   revokeShare,
   shareOwnerName,
@@ -17,8 +18,9 @@ import { TrashIcon16 } from "./icons"
 
 /**
  * Sharing, on the settings page (docs/sharing.md): the overview. The shares
- * this account has given (the address as typed, what was shared, and a
- * Revoke) and the shares it has received (who, and what). Sharing itself
+ * this account has given (the address as typed, the verbs, what was shared,
+ * and a Revoke) and the shares it has received (who, the verbs, and what).
+ * Sharing itself
  * happens where the note or block is — its menu — because the root is
  * chosen there (`share-note-dialog.tsx`).
  */
@@ -156,7 +158,7 @@ function GivenList({
                 {!live ? <span className="ml-2 text-sm text-text-secondary">(revoked)</span> : null}
               </span>
               <span className="truncate text-sm leading-5 text-text-secondary">
-                {share.granteeEmail}
+                {share.granteeEmail} · {describeSharePermissions(share.permissions)}
               </span>
             </div>
             {live ? (
@@ -200,7 +202,7 @@ function ReceivedList({ shares }: { shares: ReceivedShareSummary[] | null }) {
               ))}
             </span>
             <span className="text-sm leading-5 text-text-secondary">
-              Shared by {shareOwnerName(share)}
+              Shared by {shareOwnerName(share)} · {describeSharePermissions(share.permissions)}
             </span>
           </li>
         ))}
