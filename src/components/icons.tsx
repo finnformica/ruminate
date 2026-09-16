@@ -253,6 +253,23 @@ export function ChevronUpIcon16(props: IconProps) {
   return <ChevronLeftIcon16 {...props} className={cx("rotate-90", props.className)} />
 }
 
+/** Two chevrons: back out of a sub-row (the edit bar's Back). The set's
+ * chevron, drawn twice, 3px either side of centre. */
+export function ChevronsLeftIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path
+        transform="translate(-3 0)"
+        d="M9.73242 2.20695C10.0321 1.92131 10.5071 1.93284 10.793 2.23234C11.0786 2.53199 11.0671 3.007 10.7676 3.29289L5.83594 7.99992L10.7676 12.707C11.0671 12.9928 11.0786 13.4679 10.793 13.7675C10.5248 14.0484 10.0901 14.0761 9.79004 13.8427L9.73242 13.7929L4.23242 8.54289C4.08416 8.40137 4 8.20488 4 7.99992C4 7.79496 4.08416 7.59847 4.23242 7.45695L9.73242 2.20695Z"
+      />
+      <path
+        transform="translate(3 0)"
+        d="M9.73242 2.20695C10.0321 1.92131 10.5071 1.93284 10.793 2.23234C11.0786 2.53199 11.0671 3.007 10.7676 3.29289L5.83594 7.99992L10.7676 12.707C11.0671 12.9928 11.0786 13.4679 10.793 13.7675C10.5248 14.0484 10.0901 14.0761 9.79004 13.8427L9.73242 13.7929L4.23242 8.54289C4.08416 8.40137 4 8.20488 4 7.99992C4 7.79496 4.08416 7.59847 4.23242 7.45695L9.73242 2.20695Z"
+      />
+    </Icon>
+  )
+}
+
 export function ChevronDownIcon16(props: IconProps) {
   return <ChevronLeftIcon16 {...props} className={cx("-rotate-90", props.className)} />
 }
@@ -620,6 +637,38 @@ export function UndoIcon16(props: IconProps) {
   return (
     <Icon size={16} {...props}>
       <path d="M4.71967 1.71967C5.01256 1.42678 5.48732 1.42678 5.78022 1.71967C6.07311 2.01256 6.07311 2.48732 5.78022 2.78022L3.56049 4.99994H10.4999C12.9852 4.99994 14.9999 7.01466 14.9999 9.49994C14.9999 11.9852 12.9852 13.9999 10.4999 13.9999H9.74994C9.33573 13.9999 8.99994 13.6642 8.99994 13.2499C8.99994 12.8357 9.33573 12.4999 9.74994 12.4999H10.4999C12.1568 12.4999 13.4999 11.1568 13.4999 9.49994C13.4999 7.84309 12.1568 6.49994 10.4999 6.49994H3.56049L5.78022 8.71967L5.83197 8.77631C6.07228 9.07089 6.05482 9.50561 5.78022 9.78022C5.50561 10.0548 5.07089 10.0723 4.77631 9.83197L4.71967 9.78022L1.21967 6.28022C0.926777 5.98732 0.926777 5.51256 1.21967 5.21967L4.71967 1.71967Z" />
+    </Icon>
+  )
+}
+
+export function RedoIcon16(props: IconProps) {
+  return <UndoIcon16 {...props} className={cx("-scale-x-100", props.className)} />
+}
+
+/** Two arrows passing each other: one thing for another (the edit bar's
+ * Turn into). */
+export function SwapIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M10.22 1.22a.75.75 0 0 1 1.06 0l3 3a.75.75 0 0 1 0 1.06l-3 3a.75.75 0 1 1-1.06-1.06L11.94 5.5H2.75a.75.75 0 0 1 0-1.5h9.19l-1.72-1.72a.75.75 0 0 1 0-1.06ZM5.78 8.72a.75.75 0 0 1 0 1.06L4.06 11.5h9.19a.75.75 0 0 1 0 1.5H4.06l1.72 1.72a.75.75 0 1 1-1.06 1.06l-3-3a.75.75 0 0 1 0-1.06l3-3a.75.75 0 0 1 1.06 0Z" />
+    </Icon>
+  )
+}
+
+/** A keyboard with a chevron beneath: put the keyboard away. */
+export function KeyboardDownIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M2.5 1A2.5 2.5 0 0 0 0 3.5v5A2.5 2.5 0 0 0 2.5 11h11A2.5 2.5 0 0 0 16 8.5v-5A2.5 2.5 0 0 0 13.5 1h-11Zm0 1.5h11a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1ZM3 4h1.5v1.5H3V4Zm3 0h1.5v1.5H6V4Zm3 0h1.5v1.5H9V4Zm3 0h1.5v1.5H12V4ZM4.5 6.5h7V8h-7V6.5ZM5.22 12.72a.75.75 0 0 1 1.06 0L8 14.44l1.72-1.72a.75.75 0 1 1 1.06 1.06l-2.25 2.25a.75.75 0 0 1-1.06 0l-2.25-2.25a.75.75 0 0 1 0-1.06Z" />
+    </Icon>
+  )
+}
+
+/** A picture: a framed landscape. */
+export function ImageIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M2.5 1A2.5 2.5 0 0 0 0 3.5v9A2.5 2.5 0 0 0 2.5 15h11a2.5 2.5 0 0 0 2.5-2.5v-9A2.5 2.5 0 0 0 13.5 1h-11Zm0 1.5h11a1 1 0 0 1 1 1v6.19l-2.72-2.72a.75.75 0 0 0-1.06 0L6.5 11.19 4.78 9.47a.75.75 0 0 0-1.06 0L1.5 11.69V3.5a1 1 0 0 1 1-1Zm2.75 2a1.75 1.75 0 1 0 0 3.5 1.75 1.75 0 0 0 0-3.5Z" />
     </Icon>
   )
 }

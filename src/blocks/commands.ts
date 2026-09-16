@@ -294,6 +294,86 @@ function duplicate(direction: "above" | "below"): Command {
 }
 
 /**
+ * Wrap the edit selection in an inline markdown marker — `**` for bold, `_`
+ * for italic, a backtick for code — or take the marker off a selection that
+ * already has it, either side. With nothing selected the pair goes in at the
+ * caret and the caret lands between, ready to type. The text is the block's
+ * as stored (markdown), so this is a text edit like typing the marker: one
+ * coalescing undo step, the row still editing, the caret after the
+ * selection's new end. Edit mode only: select mode has no selection to wrap.
+ */
+export function wrapSelection(
+  value: string,
+  start: number,
+  end: number,
+  marker: string,
+): { text: string; start: number; end: number } {
+  const n = marker.length
+  const inside = value.slice(start, end)
+  // Already wrapped, marker inside the selection: `**bold**` → `bold`.
+  if (inside.length >= 2 * n && inside.startsWith(marker) && inside.endsWith(marker)) {
+    const bare = inside.slice(n, inside.length - n)
+    return {
+      text: value.slice(0, start) + bare + value.slice(end),
+      start,
+      end: start + bare.length,
+    }
+  }
+  // Already wrapped, marker just outside the selection: `**|bold|**` → `bold`.
+  if (
+    start >= n &&
+    value.slice(start - n, start) === marker &&
+    value.slice(end, end + n) === marker
+  ) {
+    return {
+      text: value.slice(0, start - n) + inside + value.slice(end + n),
+      start: start - n,
+      end: start - n + inside.length,
+    }
+  }
+  return {
+    text: value.slice(0, start) + marker + inside + marker + value.slice(end),
+    start: start + n,
+    end: start + n + inside.length,
+  }
+}
+
+/**
+ * Make the selection a markdown link, `[text](url)`, and put the caret where
+ * the missing half goes: after the text, in the parentheses, for the address
+ * to be typed; or, when the selection is itself an address, in the brackets,
+ * for its name (a bare address in a block names itself, so this is for
+ * choosing a name). With nothing selected the empty shape goes in with the
+ * caret in the brackets.
+ */
+export function linkSelection(
+  value: string,
+  start: number,
+  end: number,
+): { text: string; caret: number } {
+  const inside = value.slice(start, end)
+  const address = /^(https?:\/\/|www\.)\S+$/i.test(inside)
+  const link = address ? `[](${inside})` : `[${inside}]()`
+  const caret = address ? start + 1 : start + inside.length + 3
+  return { text: value.slice(0, start) + link + value.slice(end), caret }
+}
+
+function wrapWith(marker: string): Command {
+  return (input) => {
+    const { doc, key, mode, caret } = input
+    if (mode !== "edit" || !caret) return IGNORED
+    const id = idOfKey(key)
+    const wrapped = wrapSelection(caret.value, caret.start, caret.end, marker)
+    return {
+      handled: true,
+      doc: updateText(doc, id, wrapped.text),
+      op: { type: "text", blockId: id },
+      focus: { mode: "edit", key, caret: wrapped.end },
+    }
+  }
+}
+
+/**
  * Select-mode "turn into": toggle the block to the given type. Text and
  * children are never touched — this is a type change only, one structural
  * undo step. An *empty* block additionally opens editing (caret at the end) so
@@ -316,6 +396,12 @@ function turnInto(target: BlockType): Command {
 }
 
 export type CommandName =
+  | "wrapBold"
+  | "wrapItalic"
+  | "wrapStrike"
+  | "wrapCode"
+  | "wrapMath"
+  | "wrapLink"
   | "enterEdit"
   | "exitEdit"
   | "deselect"
@@ -592,6 +678,26 @@ export const COMMANDS: Record<CommandName, Command> = {
       doc: updateType(doc, block.id, type === "todo" ? "done" : "todo"),
       op: { type: "text", blockId: block.id },
       focus: keepFocus(mode, key),
+    }
+  },
+
+  /** Inline markdown around the selection (see `wrapWith`): the touch
+   * screen's edit bar, which has no Cmd to chord with. */
+  wrapBold: wrapWith("**"),
+  wrapItalic: wrapWith("_"),
+  wrapStrike: wrapWith("~~"),
+  wrapCode: wrapWith("`"),
+  wrapMath: wrapWith("$$"),
+  wrapLink: (input) => {
+    const { doc, key, mode, caret } = input
+    if (mode !== "edit" || !caret) return IGNORED
+    const id = idOfKey(key)
+    const linked = linkSelection(caret.value, caret.start, caret.end)
+    return {
+      handled: true,
+      doc: updateText(doc, id, linked.text),
+      op: { type: "text", blockId: id },
+      focus: { mode: "edit", key, caret: linked.caret },
     }
   },
 
