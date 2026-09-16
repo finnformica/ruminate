@@ -21,7 +21,7 @@ import {
   type UploadedImage,
 } from "../../data/images"
 import { imageAlignOf, imagePropsOf, withImageLayout, type ImageAlign } from "../../blocks/image"
-import { linkifyPastedText, linksInText } from "../../blocks/link"
+import { hostOf, hrefOf, isWebUrl, linkifyPastedText, linksInText } from "../../blocks/link"
 import { ImageLightbox } from "./image-lightbox"
 import { NoteTitle } from "./note-title"
 import {
@@ -1584,14 +1584,34 @@ export function BlockEditor({
    * changed; one undo step.
    */
   const renameLink = (key: string, href: string, title: string, next: string) => {
-    const block = doc.blocks[idOfKey(key)]
     const display = next.trim()
-    if (!block || display === "") return
-    const linked = `[${display}](${href})`
+    if (display !== "") rewriteLink(key, href, title, `[${display}](${href})`)
+  }
+  /** A link pointed at a new address: `[title](href)` becomes
+   * `[title](next)`, a bare address its host's link to the new one. A
+   * scheme-less address is taken as https; anything not a web address is
+   * refused. */
+  const retargetLink = (key: string, href: string, title: string, next: string) => {
+    const target = hrefOf(next.trim())
+    if (!isWebUrl(target)) return
+    const display = title === "" || title === href ? hostOf(target) : title
+    rewriteLink(key, href, title, `[${display}](${target})`)
+  }
+  /** A link taken off: `[title](href)` becomes `title`; a bare address
+   * stays as it is (there is nothing to take off it). */
+  const removeLink = (key: string, href: string, title: string) => {
+    if (title !== "" && title !== href) rewriteLink(key, href, title, title)
+  }
+  /** The first occurrence of the link in the row's text — written out, an
+   * autolink, a bare address, or its text — replaced by `replacement`. One
+   * undo step. */
+  const rewriteLink = (key: string, href: string, title: string, replacement: string) => {
+    const block = doc.blocks[idOfKey(key)]
+    if (!block) return
     let text: string | null = null
     for (const needle of [`[${title}](${href})`, `<${href}>`, href, title]) {
       if (needle !== "" && block.text.includes(needle)) {
-        text = block.text.replace(needle, linked)
+        text = block.text.replace(needle, replacement)
         break
       }
     }
@@ -1657,6 +1677,8 @@ export function BlockEditor({
     requestImage: onImageUpload && !readOnly ? requestImage : undefined,
     openImage: (id) => setLightbox(id),
     renameLink: readOnly ? undefined : renameLink,
+    retargetLink: readOnly ? undefined : retargetLink,
+    removeLink: readOnly ? undefined : removeLink,
     linkCard,
     closeLinkCard: () => setLinkCard(null),
     focus,

@@ -29,17 +29,54 @@ export function isWebUrl(url: string): boolean {
 /** What a paste leaves alone: a link or image already written out, an
  * autolink in angle brackets, a code span, a code fence. */
 const PROTECTED_RE = /(!?\[[^\]]*\]\([^)]*\)|<https?:\/\/[^>\s]+>|`[^`]*`|```[\s\S]*?(?:```|$))/g
-/** A bare address in prose. */
-const BARE_URL_RE = /https?:\/\/[^\s<>()[\]]+/g
+
+/**
+ * The endings a scheme-less address is recognised by: `google.com`,
+ * `bbc.co.uk`, `socket.io`. A short list on purpose — `node.js`, `file.txt`,
+ * `v1.2.3`, `links.md` and `e.g.` must stay words — of the endings that are
+ * overwhelmingly addresses when they appear in a note. A `www.` needs no
+ * list: it is an address whatever follows.
+ */
+const ENDINGS =
+  "com|org|net|io|dev|co|ai|app|edu|gov|me|info|co\\.uk|org\\.uk|ac\\.uk|gov\\.uk|uk|de|fr|nl|es|it|eu"
+
+/**
+ * A bare address in prose: one with a scheme, or one without — `www.`
+ * and anything, or a name with one of the endings above — that begins a
+ * word (not part of an email address, a path, or a longer address) and
+ * ends one — a full stop after it is the sentence's — with an optional
+ * path after it.
+ */
+const ADDRESS =
+  "https?:\\/\\/[^\\s<>()[\\]]+" +
+  "|(?<![\\w@./:-])(?:www\\.[a-z0-9-]+(?:\\.[a-z0-9-]+)*" +
+  `|[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.(?:${ENDINGS}))` +
+  "(?=[/?#]|[^\\w.-]|\\.(?:\\s|$)|$)(?:[/?#][^\\s<>()[\\]]*)?"
+const BARE_URL_RE = new RegExp(ADDRESS, "gi")
+const TYPED_ADDRESS_RE = new RegExp(`(?:${ADDRESS})$`, "i")
 /** Punctuation that ends the sentence rather than the address. */
 const TRAILING_RE = /[.,;:!?'"]+$/
+
+/** The address as a link's href: a scheme-less one is taken as https. */
+export function hrefOf(address: string): string {
+  return /^https?:\/\//i.test(address) ? address : `https://${address}`
+}
+
+/** A bare address found in text, less the punctuation that ended the
+ * sentence: the address, its href, and the punctuation to put back. */
+function bareAddress(found: string): { address: string; href: string; trail: string } {
+  const trail = TRAILING_RE.exec(found)?.[0] ?? ""
+  const address = trail ? found.slice(0, -trail.length) : found
+  return { address, href: hrefOf(address), trail }
+}
 
 /**
  * Pasted text with every bare address rewritten as a link whose display
  * text is the address's host: `see https://www.example.com/a?b=1.` becomes
- * `see [example.com](https://www.example.com/a?b=1).` The address itself is
- * kept whole — only how it reads changes. A link already written out, an
- * image, a code span and a code fence are left as they are.
+ * `see [example.com](https://www.example.com/a?b=1).` and `google.com`
+ * becomes `[google.com](https://google.com)`. The address itself is kept
+ * whole — only how it reads changes. A link already written out, an image,
+ * a code span and a code fence are left as they are.
  */
 export function linkifyPastedText(text: string): string {
   return text
@@ -48,9 +85,8 @@ export function linkifyPastedText(text: string): string {
       index % 2 === 1
         ? part
         : part.replace(BARE_URL_RE, (found) => {
-            const trail = TRAILING_RE.exec(found)?.[0] ?? ""
-            const url = trail ? found.slice(0, -trail.length) : found
-            return `[${hostOf(url)}](${url})${trail}`
+            const { href, trail } = bareAddress(found)
+            return `[${hostOf(href)}](${href})${trail}`
           }),
     )
     .join("")
@@ -73,7 +109,7 @@ export function linkifyTypedAddress(
 ): { text: string; caret: number } | null {
   if (caret < 2 || !/\s/.test(text[caret - 1])) return null
   const before = text.slice(0, caret - 1)
-  const match = /https?:\/\/[^\s<>()[\]]+$/i.exec(before)
+  const match = TYPED_ADDRESS_RE.exec(before)
   if (!match) return null
   const lead = before.slice(0, match.index)
   if (NOT_BARE_BEFORE.test(lead)) return null
@@ -89,14 +125,12 @@ export function linkifyTypedAddress(
  * bare address, as what the menu's "Edit link" offers. */
 export function linksInText(text: string): { href: string; title: string }[] {
   const links: { href: string; title: string }[] = []
-  for (const match of text.matchAll(
-    /\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s<>()[\]]+)/gi,
-  )) {
+  const re = new RegExp(`\\[([^\\]]*)\\]\\((https?:\\/\\/[^)\\s]+)\\)|(${ADDRESS})`, "gi")
+  for (const match of text.matchAll(re)) {
     if (match[2]) links.push({ href: match[2], title: match[1] })
     else if (match[3]) {
-      const trail = TRAILING_RE.exec(match[3])?.[0] ?? ""
-      const href = trail ? match[3].slice(0, -trail.length) : match[3]
-      links.push({ href, title: href })
+      const { address, href } = bareAddress(match[3])
+      links.push({ href, title: address })
     }
   }
   return links

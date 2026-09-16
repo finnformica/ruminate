@@ -111,6 +111,10 @@ export interface BlockEditorApi {
    * `[title](href)` becomes `[next](href)`; a bare address is written out
    * as a link. Absent in read-only views. */
   renameLink?: (key: string, href: string, title: string, next: string) => void
+  /** Point a link in this row's text at a new address. */
+  retargetLink?: (key: string, href: string, title: string, next: string) => void
+  /** Take a link in this row's text off, leaving its text as words. */
+  removeLink?: (key: string, href: string, title: string) => void
   /** A link's card the reader asked to open from the menu ("Edit link",
    * for a touch screen): the row and the address. */
   linkCard?: { key: string; href: string } | null
@@ -778,18 +782,22 @@ export function BlockItem({
   // (`link-hover-card.tsx`) changes its display text, in an editor that
   // can write the change.
   const renameLink = readOnly ? undefined : api.renameLink
+  const retargetLink = readOnly ? undefined : api.retargetLink
+  const removeLink = readOnly ? undefined : api.removeLink
   const openHref = api.linkCard?.key === occurrence.key ? api.linkCard.href : null
   const closeLinkCard = api.closeLinkCard
   const linkActions = useMemo<LinkActions | null>(
     () =>
-      renameLink
+      renameLink && retargetLink && removeLink
         ? {
             rename: (href, title, next) => renameLink(occurrence.key, href, title, next),
+            retarget: (href, title, next) => retargetLink(occurrence.key, href, title, next),
+            remove: (href, title) => removeLink(occurrence.key, href, title),
             openHref,
             closeCard: () => closeLinkCard?.(),
           }
         : null,
-    [renameLink, occurrence.key, openHref, closeLinkCard],
+    [renameLink, retargetLink, removeLink, occurrence.key, openHref, closeLinkCard],
   )
 
   // The caption/body line: the textarea while editing, the rendered text

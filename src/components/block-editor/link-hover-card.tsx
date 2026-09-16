@@ -1,36 +1,45 @@
 import { PreviewCard } from "@base-ui/react/preview-card"
+import copy from "copy-to-clipboard"
 import type React from "react"
 import { useEffect, useState } from "react"
 import { hostOf } from "../../blocks/link"
 import { cx } from "../../utils/cx"
 import { Button } from "../button"
-import { ExternalLinkIcon16, GlobeIcon16 } from "../icons"
+import { IconButton } from "../icon-button"
+import { CopyIcon16, GlobeIcon16, TrashIcon16 } from "../icons"
 
-/** Opens `url` in a new tab, always, as a link with `target="_blank"` does. */
-function openLink(url: string): void {
-  window.open(url, "_blank", "noopener,noreferrer")
+/** What the card can do to the link it is over. */
+export interface LinkCardActions {
+  /** Save a new display text (a block's title). */
+  rename: (next: string) => void
+  /** Point the link at a new address. */
+  retarget: (nextHref: string) => void
+  /** Take the link off: the text stays, as words. */
+  remove: () => void
+  /** Another form the link can take: its label and what makes the change. */
+  toggle?: { label: string; onClick: () => void }
 }
 
 /**
- * The card that opens over a link (docs/links.md): where it goes and
- * **Visit**, a field for its display text, and — when the link has another
- * form to take (`toggle`) — the button that switches it. Only in an
- * editable editor; elsewhere a link is only a link. Hover or focus the
- * link to open it; the card is a popup of its own, so the page's
- * hover-card provider need not be around it.
- *
- * The display text is saved on Enter, or on leaving the field with it
- * changed; an emptied field saves nothing.
+ * The card that opens over a link (docs/links.md), in Notion's shape. At
+ * first a pill: where the link goes — the address, itself a link that
+ * opens the page in a new tab — a button that copies it, and **Edit**.
+ * Edit opens the panel: the address and the link's title, each a field,
+ * and **Remove link**, with any other form the link can take
+ * (**Turn into block**, **Turn into inline**) beside it. A field saves on
+ * <kbd>↵</kbd>, or on leaving it with its value changed; an emptied field
+ * saves nothing. Only in an editable editor; elsewhere a link is only a
+ * link. Hover or focus the link to open it; the card is a popup of its
+ * own, so the page's hover-card provider need not be around it.
  *
  * A touch screen has nothing to hover with, so the row's context menu
- * offers **Edit link**, which opens the card outright (`open`); a tap
- * outside, or Escape, closes it and says so (`onClose`).
+ * offers **Edit link**, which opens the card outright (`open`) at its
+ * panel; a tap outside, or Escape, closes it and says so (`onClose`).
  */
 export function LinkHoverCard({
   href,
   title,
-  onRename,
-  toggle,
+  actions,
   open: forced = false,
   onClose,
   render,
@@ -39,28 +48,32 @@ export function LinkHoverCard({
   href: string
   /** The link's current display text (a block's title). */
   title: string
-  /** Save a new display text. */
-  onRename: (next: string) => void
-  /** Another form the link can take: its label and what makes the change. */
-  toggle?: { label: string; onClick: () => void }
-  /** Open the card now, without a hover (the menu's "Edit link"). */
+  actions: LinkCardActions
+  /** Open the card now, without a hover, at its panel (the menu's "Edit link"). */
   open?: boolean
   /** The card closed after being opened that way. */
   onClose?: () => void
-  /** The element the card opens over. */
+  /** The element the card opens over: the anchor, or the block's card. */
   render: React.ReactElement
   children: React.ReactNode
 }) {
   const [open, setOpen] = useState(forced)
+  const [editing, setEditing] = useState(forced)
   useEffect(() => {
-    if (forced) setOpen(true)
+    if (forced) {
+      setOpen(true)
+      setEditing(true)
+    }
   }, [forced])
   return (
     <PreviewCard.Root
       open={open}
       onOpenChange={(next) => {
         setOpen(next)
-        if (!next && forced) onClose?.()
+        if (!next) {
+          setEditing(false)
+          if (forced) onClose?.()
+        }
       }}
     >
       <PreviewCard.Trigger render={render} delay={400} closeDelay={150}>
@@ -71,31 +84,17 @@ export function LinkHoverCard({
           <PreviewCard.Popup
             data-testid="link-hover-card"
             className={cx(
-              "card-2 z-30 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-lg p-2 print:hidden",
+              "card-2 z-30 rounded-lg print:hidden",
               "origin-(--transform-origin) transition-[transform,scale,opacity]",
               "data-ending-style:scale-95 data-ending-style:opacity-0",
               "data-starting-style:scale-95 data-starting-style:opacity-0",
             )}
           >
-            <div className="flex items-center gap-2 pl-1">
-              <GlobeIcon16 className="shrink-0 text-text-tertiary" />
-              <span className="min-w-0 flex-1 truncate text-sm text-text-secondary" title={href}>
-                {hostOf(href)}
-                <span className="text-text-tertiary">{pathOf(href)}</span>
-              </span>
-              <Button
-                size="small"
-                className="shrink-0 gap-1"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  openLink(href)
-                }}
-              >
-                Visit
-                <ExternalLinkIcon16 className="-mr-0.5 size-3.5" />
-              </Button>
-            </div>
-            <DisplayText href={href} title={title} onRename={onRename} toggle={toggle} />
+            {editing ? (
+              <EditPanel href={href} title={title} actions={actions} />
+            ) : (
+              <Pill href={href} onEdit={() => setEditing(true)} />
+            )}
           </PreviewCard.Popup>
         </PreviewCard.Positioner>
       </PreviewCard.Portal>
@@ -103,68 +102,126 @@ export function LinkHoverCard({
   )
 }
 
-function DisplayText({
+/** The card at rest: the address, a copy of it, and the way to the panel. */
+function Pill({ href, onEdit }: { href: string; onEdit: () => void }) {
+  return (
+    <div className="flex max-w-[calc(100vw-2rem)] items-center gap-1 p-1 pl-2.5">
+      <GlobeIcon16 className="shrink-0 text-text-tertiary" />
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        data-testid="link-card-address"
+        onClick={(event) => event.stopPropagation()}
+        className="focus-ring min-w-0 max-w-72 truncate rounded-sm px-1 text-sm text-text-secondary hover:text-text"
+      >
+        {href}
+      </a>
+      <IconButton
+        size="small"
+        aria-label="Copy address"
+        tooltipSide="top"
+        onClick={(event) => {
+          event.stopPropagation()
+          copy(href)
+        }}
+      >
+        <CopyIcon16 />
+      </IconButton>
+      <Button
+        size="small"
+        data-testid="link-card-edit"
+        onClick={(event) => {
+          event.stopPropagation()
+          onEdit()
+        }}
+      >
+        Edit
+      </Button>
+    </div>
+  )
+}
+
+/** The card opened up: the address and the title, each a field, and what
+ * else can be done with the link. */
+function EditPanel({
   href,
   title,
-  onRename,
-  toggle,
+  actions,
 }: {
   href: string
   title: string
-  onRename: (next: string) => void
-  toggle?: { label: string; onClick: () => void }
+  actions: LinkCardActions
 }) {
+  const [address, setAddress] = useState(href)
   // A link whose text is its own address (a typed one, never rewritten)
   // is offered the host it would have been given on paste.
   const current = title.trim() === "" || title.trim() === href ? hostOf(href) : title
-  const [value, setValue] = useState(current)
-  const save = () => {
-    const next = value.trim()
-    if (next !== "" && next !== title) onRename(next)
+  const [text, setText] = useState(current)
+  const saveAddress = () => {
+    const next = address.trim()
+    if (next !== "" && next !== href) actions.retarget(next)
   }
+  const saveTitle = () => {
+    const next = text.trim()
+    if (next !== "" && next !== title) actions.rename(next)
+  }
+  const stop = (event: React.SyntheticEvent) => event.stopPropagation()
   return (
     <form
-      className="flex items-center gap-1.5"
+      data-testid="link-card-panel"
+      className="flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-3 p-3"
       onSubmit={(event) => {
         event.preventDefault()
-        save()
+        saveAddress()
+        saveTitle()
       }}
+      onClick={stop}
+      onKeyDown={stop}
     >
-      <input
-        aria-label="Display text"
-        data-testid="link-display-text"
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-        onBlur={save}
-        onClick={(event) => event.stopPropagation()}
-        onKeyDown={(event) => event.stopPropagation()}
-        className="focus-ring h-7 min-w-0 flex-1 rounded border border-border-secondary bg-transparent px-2 text-sm text-text placeholder:text-text-tertiary"
-        placeholder="Display text"
-      />
-      {toggle ? (
-        <Button
-          size="small"
+      <label className="flex flex-col gap-1.5">
+        <span className="text-xs text-text-secondary">URL</span>
+        <input
+          data-testid="link-card-url"
+          value={address}
+          onChange={(event) => setAddress(event.target.value)}
+          onBlur={saveAddress}
+          spellCheck={false}
+          placeholder="https://"
+          className={FIELD}
+        />
+      </label>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-xs text-text-secondary">Link title</span>
+        <input
+          data-testid="link-display-text"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          onBlur={saveTitle}
+          placeholder="Display text"
+          autoFocus
+          className={FIELD}
+        />
+      </label>
+      <div className="-mx-1 -mb-1 flex items-center justify-between border-t border-border-secondary pt-2">
+        <button
           type="button"
-          className="shrink-0"
-          onClick={(event) => {
-            event.stopPropagation()
-            toggle.onClick()
-          }}
+          data-testid="link-card-remove"
+          onClick={() => actions.remove()}
+          className="focus-ring flex h-7 items-center gap-2 rounded px-2 text-sm text-text-secondary hover:bg-bg-hover hover:text-text"
         >
-          {toggle.label}
-        </Button>
-      ) : null}
+          <TrashIcon16 />
+          Remove link
+        </button>
+        {actions.toggle ? (
+          <Button size="small" type="button" onClick={actions.toggle.onClick}>
+            {actions.toggle.label}
+          </Button>
+        ) : null}
+      </div>
     </form>
   )
 }
 
-/** The address after its host, `/` alone dropped. */
-function pathOf(href: string): string {
-  try {
-    const url = new URL(href)
-    const rest = url.pathname + url.search + url.hash
-    return rest === "/" ? "" : rest
-  } catch {
-    return ""
-  }
-}
+const FIELD =
+  "focus-ring h-8 min-w-0 rounded border border-border-secondary bg-transparent px-2 text-sm text-text placeholder:text-text-tertiary"

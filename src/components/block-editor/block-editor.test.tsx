@@ -3278,38 +3278,71 @@ describe("BlockEditor inline links", () => {
     ])
   })
 
-  it("the hover card names where a link goes, visits it in a new tab, and changes its display text", async () => {
-    const open = vi.fn()
-    vi.stubGlobal("open", open)
-    try {
-      const { container, getByTestId } = render(
-        <Harness initial={"Read [the guide](https://e.com/g) first"} />,
-      )
-      const card = await hoverLink(container, 0)
-      expect(card.textContent).toContain("e.com/g")
-      await act(async () => {
-        fireEvent.click(screen.getByText("Visit"))
-      })
-      expect(open).toHaveBeenCalledWith("https://e.com/g", "_blank", "noopener,noreferrer")
+  it("the hover card is a pill — the address as a link, a copy, Edit — that opens to a panel", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) first"} />,
+    )
+    const card = await hoverLink(container, 0)
+    const address = within(card).getByTestId("link-card-address")
+    expect(address.getAttribute("href")).toBe("https://e.com/g")
+    expect(address.getAttribute("target")).toBe("_blank")
+    expect(within(card).getByLabelText("Copy address")).not.toBeNull()
+    expect(screen.queryByTestId("link-card-panel")).toBeNull()
 
-      const field = screen.getByTestId("link-display-text") as HTMLInputElement
-      expect(field.value).toBe("the guide")
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
+    expect((screen.getByTestId("link-card-url") as HTMLInputElement).value).toBe("https://e.com/g")
+    const field = screen.getByTestId("link-display-text") as HTMLInputElement
+    expect(field.value).toBe("the guide")
+    await act(async () => {
+      fireEvent.change(field, { target: { value: "the manual" } })
+      fireEvent.submit(field.closest("form")!)
+    })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the manual](https://e.com/g) first"])
+    // One undo step.
+    fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["Read [the guide](https://e.com/g) first"])
+  })
+
+  it("the panel points the link at a new address, and takes the link off", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={"Read [the guide](https://e.com/g) first"} />,
+    )
+    await hoverLink(container, 0)
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
+    const url = screen.getByTestId("link-card-url") as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(url, { target: { value: "docs.e.com/guide" } })
+      fireEvent.blur(url)
+    })
+    expect(serializedLines(getByTestId)).toEqual([
+      "Read [the guide](https://docs.e.com/guide) first",
+    ])
+
+    // The card stays at its panel after a save; hover again and it is
+    // there, or Edit brings it back.
+    await hoverLink(container, 0)
+    if (!screen.queryByTestId("link-card-panel")) {
       await act(async () => {
-        fireEvent.change(field, { target: { value: "the manual" } })
-        fireEvent.submit(field.closest("form")!)
+        fireEvent.click(getByTestId("link-card-edit"))
       })
-      expect(serializedLines(getByTestId)).toEqual(["Read [the manual](https://e.com/g) first"])
-      // One undo step.
-      fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
-      expect(serializedLines(getByTestId)).toEqual(["Read [the guide](https://e.com/g) first"])
-    } finally {
-      vi.unstubAllGlobals()
     }
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-remove"))
+    })
+    expect(serializedLines(getByTestId)).toEqual(["Read the guide first"])
+    expect(container.querySelector("a")).toBeNull()
   })
 
   it("a typed address is offered its host as display text, and written out as a link", async () => {
     const { container, getByTestId } = render(<Harness initial={"See https://www.e.com/x now"} />)
     await hoverLink(container, 0)
+    await act(async () => {
+      fireEvent.click(getByTestId("link-card-edit"))
+    })
     const field = screen.getByTestId("link-display-text") as HTMLInputElement
     expect(field.value).toBe("e.com")
     await act(async () => {
@@ -3333,6 +3366,23 @@ describe("BlockEditor inline links", () => {
     // Its own undo step: the bare address comes back.
     fireEvent.keyDown(textarea, { key: "z", metaKey: true })
     expect(serializedLines(getByTestId)).toEqual(["see https://www.e.com/x"])
+  })
+
+  it("a name with a common ending is an address too: google.com, then a space", async () => {
+    const { container, getByTestId } = render(<Harness initial="" startEditing />)
+    const textarea = container.querySelector("textarea")! as HTMLTextAreaElement
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "search google.com " } })
+    })
+    expect(serializedLines(getByTestId)).toEqual(["search [google.com](https://google.com) "])
+    await act(async () => {
+      fireEvent.change(textarea, {
+        target: { value: "search [google.com](https://google.com) not node.js " },
+      })
+    })
+    expect(serializedLines(getByTestId)).toEqual([
+      "search [google.com](https://google.com) not node.js ",
+    ])
   })
 
   it("leaving edit mode writes out a bare address left in the row", async () => {
@@ -3369,8 +3419,10 @@ describe("BlockEditor inline links", () => {
     await act(async () => {
       fireEvent.click(within(submenu).getByText("the guide"))
     })
-    const card = await screen.findByTestId("link-hover-card")
-    expect(card.textContent).toContain("e.com/g")
+    // Opened this way it is the panel straight away: there is no hover to
+    // reach Edit from.
+    await screen.findByTestId("link-card-panel")
+    expect((screen.getByTestId("link-card-url") as HTMLInputElement).value).toBe("https://e.com/g")
     expect((screen.getByTestId("link-display-text") as HTMLInputElement).value).toBe("the guide")
   })
 

@@ -27,6 +27,28 @@ describe("linkifyPastedText", () => {
     )
   })
 
+  it("takes a www. address, or a name with a common ending, as an address too", () => {
+    expect(linkifyPastedText("try www.example.com/a?b=1 and google.com, or bbc.co.uk.")).toBe(
+      "try [example.com](https://www.example.com/a?b=1) and [google.com](https://google.com), or [bbc.co.uk](https://bbc.co.uk).",
+    )
+    expect(linkifyPastedText("socket.io/docs")).toBe("[socket.io](https://socket.io/docs)")
+    expect(linkifyPastedText("GOOGLE.COM")).toBe("[google.com](https://GOOGLE.COM)")
+  })
+
+  it("leaves words, files, versions, emails and paths alone", () => {
+    for (const text of [
+      "node.js and Next.js",
+      "open file.txt",
+      "v1.2.3 shipped, e.g. today",
+      "see docs/links.md",
+      "mail finn@gmail.com",
+      "a.b",
+      "sub.example.com.au",
+    ]) {
+      expect(linkifyPastedText(text), text).toBe(text)
+    }
+  })
+
   it("leaves links already written out, images, autolinks and code alone", () => {
     for (const text of [
       "[the guide](https://e.com/g) first",
@@ -66,19 +88,28 @@ describe("linkifyTypedAddress", () => {
       "see https://e.com/x",
       "plain words ",
       "(https://e.com/x ",
+      "node.js ",
+      "finn@gmail.com ",
     ]) {
       expect(linkifyTypedAddress(text, text.length), text).toBeNull()
     }
+    expect(linkifyTypedAddress("try google.com ", "try google.com ".length)).toEqual({
+      text: "try [google.com](https://google.com) ",
+      caret: "try [google.com](https://google.com) ".length,
+    })
   })
 })
 
 describe("linksInText", () => {
   it("lists a block's links in order, bare or written out", () => {
     expect(
-      linksInText("Read [the guide](https://e.com/g), then https://e.com/x. And [top](#top)."),
+      linksInText(
+        "Read [the guide](https://e.com/g), then https://e.com/x or bbc.co.uk. And [top](#top).",
+      ),
     ).toEqual([
       { href: "https://e.com/g", title: "the guide" },
       { href: "https://e.com/x", title: "https://e.com/x" },
+      { href: "https://bbc.co.uk", title: "bbc.co.uk" },
     ])
     expect(linksInText("no links")).toEqual([])
   })

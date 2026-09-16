@@ -112,7 +112,11 @@ function Link({
     <LinkHoverCard
       href={href}
       title={title}
-      onRename={(next) => actions.rename(href, title, next)}
+      actions={{
+        rename: (next) => actions.rename(href, title, next),
+        retarget: (next) => actions.retarget(href, title, next),
+        remove: () => actions.remove(href, title),
+      }}
       open={actions.openHref === href}
       onClose={actions.closeCard}
       render={anchor}
