@@ -1,56 +1,29 @@
-import {
-  mergeFragments,
-  parseChangelog,
-  parseFragment,
-  toReleaseWeek,
-  type ChangelogRelease,
-} from "./changelog"
+import { collateFiles, type ChangelogRelease } from "./changelog"
 
 /**
- * The changelog as the app reads it: the released weeks, plus whatever is
- * still sitting in `changelog.d/` waiting to be folded.
+ * The changelog as the app reads it: every file under `changelog/`, collated
+ * into releases at the point of reading.
  *
- * The pending fragments matter more than they look. A branch writes its entries
- * to `changelog.d/` and they are folded into `CHANGELOG.md` only once it lands
- * on `main` and the collation workflow runs. A build taken before that — or
- * while collation is blocked — would otherwise ship an app whose changelog
- * says nothing about the very changes in it, and the reader who has just
- * pressed **Update Ruminate** would be told there was nothing new.
- *
- * So the fold happens twice: for real on `main`, and here in memory at build
- * time, using the same `mergeFragments` both times. The two agree, so folding
- * later changes nothing a reader sees.
+ * There is no single changelog document in the repository, and nothing folds
+ * one together. Each change's entries stay in the file the branch that made it
+ * wrote, under the week it was written in, so two branches open at once write
+ * two different files and never conflict. What a reader sees is assembled
+ * here, which means it is always complete: there is no step between a change
+ * landing and its entry being readable, and so no window in which someone who
+ * has just pressed **Update Ruminate** is told nothing changed.
  */
 
-/** Bundled at build time, so a fragment written this morning is in tonight's
- * app. They are small; the changelog itself is fetched separately. */
-const PENDING = import.meta.glob("../../changelog.d/*.md", {
+/**
+ * Bundled at build time. They are plain text and small — the whole changelog
+ * is a fraction of one note — and being eager means the collation is a pure
+ * function of what shipped, with nothing to fetch and nothing to fail.
+ */
+const FILES = import.meta.glob("../../changelog/*/*.md", {
   query: "?raw",
   import: "default",
   eager: true,
 }) as Record<string, string>
 
-/** The directory's own explanation, which is not a fragment. */
-function isFragment(path: string): boolean {
-  return !path.endsWith("/README.md")
-}
-
-export async function loadChangelog(): Promise<ChangelogRelease[]> {
-  // Dynamic, so `CHANGELOG.md` lands in the chunk of whoever asked for it
-  // rather than in the app bundle. It only grows, and most visits never open
-  // a changelog at all.
-  const { default: source } = await import("../../CHANGELOG.md?raw")
-  const { releases } = parseChangelog(source)
-
-  const sections = Object.entries(PENDING)
-    .filter(([path]) => isFragment(path))
-    .sort(([a], [b]) => a.localeCompare(b))
-    // A fragment that does not parse is left out rather than allowed to break
-    // the page. CI refuses to let one through, so this is belt and braces.
-    .flatMap(([, text]) => {
-      const { sections, problems } = parseFragment(text)
-      return problems.length > 0 ? [] : sections
-    })
-
-  return mergeFragments(releases, sections, toReleaseWeek(new Date()))
+export function loadChangelog(): ChangelogRelease[] {
+  return collateFiles(Object.entries(FILES).map(([path, text]) => ({ path, text }))).releases
 }

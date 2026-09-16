@@ -28,8 +28,7 @@
     "test:vr:update": "concurrently -k -s first -n \"storybook,vr\" -c \"magenta,blue\" \"npm run build:storybook --quiet && npx http-server storybook-static --port 6011 --silent\" \"npx wait-on tcp:127.0.0.1:6011 && node e2e/visual-regression.mjs --update\"",
     "postinstall": "patch-package",
     "test:vr:accept": "node e2e/vr-accept.mjs",
-    "check:changelog": "vite-node scripts/check-changelog.ts",
-    "changelog:collate": "vite-node scripts/collate-changelog.ts"
+    "check:changelog": "vite-node scripts/check-changelog.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
