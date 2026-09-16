@@ -64,8 +64,9 @@ const TYPE_GLYPHS: Record<string, string> = {
 }
 
 /** Every button is this wide, so the Turn into row's highlight can slide to
- * the active one by index. */
-const BUTTON_WIDTH = 40
+ * the active one by index. 38px: eight of them, with their rules, fit a
+ * 390pt phone with the bar's insets and the keyboard segment taken out. */
+const BUTTON_WIDTH = 38
 /** The bar floats this far above the keyboard's top edge. */
 const LIFT = 8
 
@@ -436,7 +437,7 @@ function BarButton({
       onMouseDown={keepFocus}
       onClick={disabled ? undefined : onClick}
       className={cx(
-        "flex h-12 w-10 shrink-0 cursor-pointer select-none items-center justify-center text-text-secondary",
+        "flex h-12 w-[38px] shrink-0 cursor-pointer select-none items-center justify-center text-text-secondary",
         disabled ? "cursor-default text-text-tertiary opacity-50" : "active:text-text",
         pressed && "text-text",
         className,

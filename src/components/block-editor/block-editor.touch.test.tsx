@@ -340,11 +340,11 @@ describe("the edit bar", () => {
     // Back on the main row, still editing.
     expect(labels()[0]).toBe("Formatting")
     expect(container.querySelector("textarea")!.value).toBe("Alpha")
-    // Open again: the highlight has slid to the to-do, 40px a type.
+    // Open again: the highlight has slid to the to-do, a button's width a type.
     fireEvent.click(screen.getByLabelText("Turn into"))
     expect(screen.getByLabelText("To-do").getAttribute("aria-pressed")).toBe("true")
     const at = types.findIndex((def) => def.id === "todo")
-    expect(screen.getByTestId("edit-bar-thumb").style.transform).toBe(`translateX(${at * 40}px)`)
+    expect(screen.getByTestId("edit-bar-thumb").style.transform).toBe(`translateX(${at * 38}px)`)
     fireEvent.click(screen.getByLabelText("Back"))
     expect(labels()[0]).toBe("Formatting")
   })
