@@ -22,7 +22,19 @@
  * in a doc only when a view is built with a note root among its blocks.
  */
 export type BlockType =
-  "text" | "h1" | "h2" | "h3" | "todo" | "done" | "ul" | "ol" | "quote" | "code" | "image" | "note"
+  | "text"
+  | "h1"
+  | "h2"
+  | "h3"
+  | "todo"
+  | "done"
+  | "ul"
+  | "ol"
+  | "quote"
+  | "code"
+  | "image"
+  | "link"
+  | "note"
 
 export const BLOCK_TYPES: readonly BlockType[] = [
   "text",
@@ -36,6 +48,7 @@ export const BLOCK_TYPES: readonly BlockType[] = [
   "quote",
   "code",
   "image",
+  "link",
   "note",
 ]
 
@@ -61,7 +74,8 @@ export interface Block {
    * content and renders as such; a leading marker never is. */
   text: string
   /** Notes: metadata entries; code: `{ language }`; images: where the
-   * picture is (`src/blocks/image.ts`). Absent for most. */
+   * picture is (`src/blocks/image.ts`); link blocks: the address and
+   * its preview (`src/blocks/link.ts`). Absent for most. */
   props?: BlockProps | null
   /** Ordered ids of child blocks. */
   children: string[]

@@ -144,6 +144,7 @@ describe("every block type's html survives a foreign app", () => {
     h2: "a heading's level comes from its outline depth; the marker is `#` at any level",
     h3: "as h2",
     note: "a page's title, never a copied block",
+    link: "its html is the link in a paragraph, which reads back as the inline link — title and address kept; the hover card makes a block of it again",
   }
   const text = "some **bold** text"
   for (const def of BLOCK_TYPE_DEFS) {

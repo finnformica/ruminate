@@ -49,6 +49,11 @@ match.
 
 ## Layout
 
+A picture is a **figure** — a block whose row is a thing set in the text
+rather than a line of it — and its layout is the one every figure shares
+(`src/blocks/figure.ts`; a link block's card, docs/links.md, is laid out the
+same way by the same frame, `figure-frame.tsx`).
+
 A picture is, left to itself, its natural size: as wide as the row when it is
 wide enough, centred when it is not, and never taller than a screenful. When
 its pixel size is known (`width`/`height`, measured at upload) the row is
@@ -58,7 +63,7 @@ keep the picture's shape — so nothing moves when they land, and a fold that
 has just unfolded the row's nest (`fold-motion.ts` measures it the moment it
 mounts) is not short by a picture. A picture whose size is not known (an
 external URL pasted as markdown) is laid out as it loads. Two props change
-how it sits in the row (`src/blocks/image.ts`), Notion-style:
+how it sits in the row (`src/blocks/figure.ts`), Notion-style:
 
 | prop    | holds                                                                                                                                                         |
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |

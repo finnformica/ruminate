@@ -36,7 +36,18 @@ export interface LinkCardActions {
  * A touch screen has nothing to hover with, so the row's context menu
  * offers **Edit link**, which opens the card outright (`open`) at its
  * panel; a tap outside, or Escape, closes it and says so (`onClose`).
+ *
+ * The panel is a raised surface, and hover is not its business: it stays
+ * open while the pointer wanders (off the link, over the row below), and
+ * closes only on a press outside, Escape, or the reader's own action — as
+ * a menu or a dialog would, which Base UI makes modal for the same reason.
+ * And while any card's panel is open, no other card opens on hover, so a
+ * link block beneath cannot steal the pointer and take the panel down.
  */
+
+/** How many cards are at their panel, across the page. */
+let panelsOpen = 0
+
 export function LinkHoverCard({
   href,
   title,
@@ -68,10 +79,21 @@ export function LinkHoverCard({
       setEditing(true)
     }
   }, [forced])
+  useEffect(() => {
+    if (!editing) return
+    panelsOpen += 1
+    return () => {
+      panelsOpen -= 1
+    }
+  }, [editing])
   return (
     <PreviewCard.Root
       open={open}
-      onOpenChange={(next) => {
+      onOpenChange={(next, details) => {
+        const hover = details.reason === "trigger-hover"
+        // A pointer cannot open a card over another's panel, nor close a
+        // panel by leaving it.
+        if (hover && ((next && panelsOpen > 0 && !editing) || (!next && editing))) return
         if (!next) flush.current?.()
         setOpen(next)
         if (!next) {
