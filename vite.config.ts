@@ -1,4 +1,6 @@
 /// <reference types="vitest/config" />
+import { createHash } from "node:crypto"
+import { readFileSync } from "node:fs"
 import tailwindcss from "@tailwindcss/vite"
 import { TanStackRouterVite } from "@tanstack/router-plugin/vite"
 import react from "@vitejs/plugin-react"
@@ -11,8 +13,26 @@ import { nodePolyfills } from "vite-plugin-node-polyfills"
 import { VitePWA } from "vite-plugin-pwa"
 import { defaultExclude } from "vitest/config"
 
+/**
+ * What build of the changelog this is, as `<newest week>.<hash>`.
+ *
+ * The dialog after an update shows the releases a reader has not seen, which
+ * needs a stamp it can compare against the one it stored last time. The week
+ * is what the comparison is made on — it says which releases are new — and the
+ * hash is there so that two builds in the same week are not mistaken for one,
+ * which would leave the stamp stale until the following Monday.
+ */
+function changelogVersion(): string {
+  const source = readFileSync("CHANGELOG.md", "utf8")
+  const week = /^## (\d{4}-W\d{2})\s*$/m.exec(source)?.[1] ?? "0000-W00"
+  return `${week}.${createHash("sha256").update(source).digest("hex").slice(0, 8)}`
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
+  // A string small enough to sit in the app bundle, so the dialog can decide
+  // whether it has anything to show before fetching the changelog itself.
+  define: { __CHANGELOG_VERSION__: JSON.stringify(changelogVersion()) },
   test: {
     // Keep vitest out of transient agent worktrees (checked out under
     // `.claude/worktrees/` by Claude Code sessions), which otherwise get

@@ -15,6 +15,16 @@ shown after an update. This is how that works.
 | `scripts/collate-changelog.ts` | Folds fragments into a release, run on `main`.                                |
 | `.claude/skills/changelog`     | How to decide what belongs in an entry, and how to write it.                  |
 
+## What a reader sees
+
+Two surfaces, from the same file:
+
+- **The changelog page** (`/changelog`), reached from **What's new** in the
+  sidebar. Every release down the side, one open beside it, entries in full.
+- **The dialog after an update**, which greets a device running a build it has
+  not seen with the leads alone, capped at a dozen, and a way through to the
+  page for the rest.
+
 ## The format
 
 A release is an ISO week. Under it are Keep a Changelog categories — **Added**,
@@ -55,6 +65,30 @@ is what makes such a file loud.
 text out in the runs between them, and the keys are drawn as keycaps by
 `Keys` (`src/components/keys.tsx`) — the one way the app shows a shortcut,
 here as everywhere else.
+
+## How it decides you have not seen it
+
+`__CHANGELOG_VERSION__` is a stamp built into the app: the newest release's
+week and a hash of the file (vite.config.ts). The week is what the comparison
+is made on, since it says which releases are new; the hash is there so two
+builds in the same week are not mistaken for one.
+
+On boot, the dialog compares that stamp with the one this device stored last
+time. A device that has never stored one is on its first visit, so it stores
+the stamp and is shown nothing — a first visit has nothing to catch up on. A
+device whose stamp names an older week is shown the releases after it. A device
+whose stamp names the same week as the build, with a different hash, has read
+those entries already, so the stamp moves on without a word.
+
+The stamp is a string in the app bundle, so answering the question costs
+nothing: only a device that is actually behind fetches the changelog.
+
+**The dialog is not tied to the Update Ruminate button.** That button applies
+the waiting service worker and reloads (`src/hooks/app-update.ts`), so there is
+no moment between the click and the new build in which anything could be shown:
+the page is about to be torn down. Asking the question on every boot instead
+also catches the reader whose waiting worker activated on its own after they
+closed every tab, which the button never sees.
 
 ## Writing an entry
 

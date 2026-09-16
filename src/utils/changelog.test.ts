@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest"
 import {
   parseChangelog,
+  countEntries,
   parseFragment,
+  releasesSince,
+  takeEntries,
   renderRelease,
   formatReleaseDates,
   splitLead,
@@ -220,5 +223,66 @@ describe("toSegments", () => {
       { type: "keys", keys: ["`"] },
       { type: "text", text: " toggles code." },
     ])
+  })
+})
+
+describe("releasesSince", () => {
+  const releases = parseChangelog(
+    "# Changelog\n\n## 2026-W38\n\n### Added\n\n- Three.\n\n## 2026-W37\n\n### Added\n\n- Two.\n\n## 2026-W36\n\n### Added\n\n- One.\n",
+  ).releases
+
+  test("a first visit has nothing to catch up on", () => {
+    expect(releasesSince(releases, null)).toEqual([])
+  })
+
+  test("only the weeks after the one last seen", () => {
+    expect(releasesSince(releases, "2026-W36.abc").map((r) => r.week)).toEqual([
+      "2026-W38",
+      "2026-W37",
+    ])
+  })
+
+  test("a device on the newest week is shown nothing", () => {
+    expect(releasesSince(releases, "2026-W38.abc")).toEqual([])
+  })
+
+  test("a second build of a week already seen shows nothing, whatever its hash", () => {
+    expect(releasesSince(releases, "2026-W38.zzz")).toEqual([])
+  })
+
+  test("a device from a year behind gets every release since", () => {
+    expect(releasesSince(releases, "2025-W50.abc")).toHaveLength(3)
+  })
+})
+
+describe("takeEntries", () => {
+  const releases = parseChangelog(
+    "# Changelog\n\n## 2026-W38\n\n### Added\n\n- One.\n- Two.\n\n### Fixed\n\n- Three.\n\n## 2026-W37\n\n### Added\n\n- Four.\n",
+  ).releases
+
+  test("counts every entry across the releases", () => {
+    expect(countEntries(releases)).toBe(4)
+  })
+
+  test("takes the first entries and stops, keeping their release and category", () => {
+    const taken = takeEntries(releases, 2)
+    expect(countEntries(taken)).toBe(2)
+    expect(taken).toHaveLength(1)
+    expect(taken[0].sections).toHaveLength(1)
+    expect(taken[0].sections[0].category).toBe("Added")
+  })
+
+  test("a cut falling mid-release keeps the categories it reached", () => {
+    const taken = takeEntries(releases, 3)
+    expect(taken[0].sections.map((section) => section.category)).toEqual(["Added", "Fixed"])
+    expect(taken).toHaveLength(1)
+  })
+
+  test("a limit past the end takes everything, unchanged", () => {
+    expect(takeEntries(releases, 99)).toEqual(releases)
+  })
+
+  test("a limit of none takes nothing", () => {
+    expect(takeEntries(releases, 0)).toEqual([])
   })
 })

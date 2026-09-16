@@ -59,11 +59,12 @@ function Entry({ entry }: { entry: ChangelogEntry }) {
   )
 }
 
-/** An entry's text, markdown and keycaps alike.
+/** An entry's text, markdown and keycaps alike. The dialog after an update
+ * draws its leads with this too, so an entry reads the same in both places.
  *
  * Markdown between the keycaps: the `<kbd>` tags an entry names shortcuts
  * with are drawn as keys, and everything else is rendered as it is written. */
-function EntryText({ text }: { text: string }) {
+export function EntryText({ text }: { text: string }) {
   return (
     <>
       {toSegments(text).map((segment, index) =>

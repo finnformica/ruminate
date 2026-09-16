@@ -181,6 +181,70 @@ export function toSegments(text: string): EntrySegment[] {
   return segments
 }
 
+/**
+ * The week a build stamp names. A stamp is `<week>.<hash>` (vite.config.ts);
+ * the hash tells two builds of the same week apart, and the week is what says
+ * which releases are new.
+ */
+function weekOfVersion(version: string): string {
+  return version.split(".")[0]
+}
+
+/**
+ * The releases a reader has not seen, newest first.
+ *
+ * Nothing is new to a reader who has never been here: a first visit stores the
+ * stamp and shows no dialog, rather than opening on the whole history.
+ *
+ * Releases are compared by week, so entries added to a week already seen are
+ * not shown again. They are on the changelog page, which is the honest place
+ * for them — a dialog that reopened on a week you had read would be worse than
+ * one that missed a late entry.
+ */
+export function releasesSince(
+  releases: ChangelogRelease[],
+  version: string | null,
+): ChangelogRelease[] {
+  if (!version) return []
+  const seen = weekOfVersion(version)
+  return releases.filter((release) => release.week > seen)
+}
+
+/**
+ * The first `limit` entries across these releases, in the order they are
+ * written, with the releases and categories they came from kept around them.
+ *
+ * The dialog after an update is a greeting, not the changelog: a reader
+ * returning after a month should meet a dozen lines and a way in, not a
+ * hundred. Categories are written most-notable-first (`CATEGORIES`), so what
+ * survives the cut is what was added and changed rather than what was fixed.
+ */
+export function takeEntries(releases: ChangelogRelease[], limit: number): ChangelogRelease[] {
+  const taken: ChangelogRelease[] = []
+  let left = limit
+  for (const release of releases) {
+    if (left <= 0) break
+    const sections: ChangelogSection[] = []
+    for (const section of release.sections) {
+      if (left <= 0) break
+      const entries = section.entries.slice(0, left)
+      left -= entries.length
+      if (entries.length > 0) sections.push({ ...section, entries })
+    }
+    if (sections.length > 0) taken.push({ ...release, sections })
+  }
+  return taken
+}
+
+/** How many entries these releases hold altogether. */
+export function countEntries(releases: ChangelogRelease[]): number {
+  return releases.reduce(
+    (total, release) =>
+      total + release.sections.reduce((count, section) => count + section.entries.length, 0),
+    0,
+  )
+}
+
 const TITLE = "# Changelog"
 const WEEK_HEADING = /^## (\d{4}-W\d{2})\s*$/
 const CATEGORY_HEADING = /^### (.+?)\s*$/

@@ -10,6 +10,7 @@ import { HelpDrawer, HelpSidebar } from "./help-panel"
 import { NavBar } from "./nav-bar"
 import { Sidebar } from "./sidebar"
 import { SignInBanner } from "./sign-in-banner"
+import { WhatsNewDialog } from "./whats-new-dialog"
 
 type AppLayoutProps = {
   className?: string
@@ -42,6 +43,9 @@ export function AppLayout({ className, children }: AppLayoutProps) {
 
   return (
     <div className={cx("flex grow flex-col overflow-hidden print:overflow-visible", className)}>
+      {/* Shown on the first boot of a build this device has not seen
+          (src/components/whats-new-dialog.tsx). */}
+      <WhatsNewDialog />
       <div className="flex grow overflow-hidden">
         {sidebar === "expanded" ? (
           <div className="hidden w-56 shrink-0 sm:grid print:hidden">
