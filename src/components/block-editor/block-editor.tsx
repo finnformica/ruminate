@@ -1137,11 +1137,22 @@ export function BlockEditor({
       }
       return null
     }
-    setFocus((cur) => (cur && hasOccurrence(restored, cur.key) ? cur : null))
+    // A row whose key vanished but whose block is still there moved (an
+    // undone indent puts it back where it was): the edit, or the highlight,
+    // follows it to its new row rather than falling away — Cmd+Z after Tab
+    // keeps you typing, and the edit bar's Undo keeps the bar.
+    const movedTo = (key: string): string | null =>
+      hasOccurrence(restored, key) ? key : firstOccurrenceKey(restored, idOfKey(key))
+    setFocus((cur) => {
+      if (!cur) return null
+      const key = movedTo(cur.key)
+      return key === null ? null : key === cur.key ? cur : { ...cur, key }
+    })
     setSelected((cur) => {
-      if (cur && hasOccurrence(restored, cur)) return cur
-      const survivor = cur ? nearestSurvivor(cur) : null
-      return survivor ?? firstSelectable(restored)
+      if (!cur) return firstSelectable(restored)
+      const key = movedTo(cur)
+      if (key !== null) return key
+      return nearestSurvivor(cur) ?? firstSelectable(restored)
     })
   }
 
@@ -1329,6 +1340,19 @@ export function BlockEditor({
         emptyable,
       }),
     )
+  }
+  // Whether the structure moves would do anything on a row — what the edit
+  // bar greys its Outdent and Indent by. Indent needs a sibling above (the
+  // row nests under it); Outdent a parent that is not the zoom root (its
+  // children cannot leave the view).
+  const structureMoves = (key: string): { canIndent: boolean; canOutdent: boolean } => {
+    const parentKey = parentKeyOf(key)
+    const siblings =
+      parentKey === null ? doc.rootBlockIds : (doc.blocks[idOfKey(parentKey)]?.children ?? [])
+    const canIndent = siblings.indexOf(idOfKey(key)) > 0
+    const canOutdent =
+      parentKey !== null && (zoomRootId === null || idOfKey(parentKey) !== zoomRootId)
+    return { canIndent, canOutdent }
   }
   // Run a command on the row being edited, in edit mode with its caret —
   // what the touch screen's edit bar does, so its Indent is Tab's: the
@@ -2611,17 +2635,24 @@ export function BlockEditor({
       />
       {coarse && !readOnly && focus ? (
         <MobileEditBar
-          type={doc.blocks[idOfKey(focus.key)]?.type ?? "text"}
+          state={{
+            type: doc.blocks[idOfKey(focus.key)]?.type ?? "text",
+            ...structureMoves(focus.key),
+            canUndo: history.canUndo(),
+            canRedo: history.canRedo(),
+          }}
           actions={{
             turnInto: (type) => menuActions.setType(idOfKey(focus.key), type),
             bold: () => runOnEditing("wrapBold"),
             italic: () => runOnEditing("wrapItalic"),
+            strike: () => runOnEditing("wrapStrike"),
             code: () => runOnEditing("wrapCode"),
+            link: () => runOnEditing("wrapLink"),
+            math: () => runOnEditing("wrapMath"),
             indent: () => runOnEditing("indent"),
             outdent: () => runOnEditing("outdent"),
-            moveUp: () => runOnEditing("moveBlockUp"),
-            moveDown: () => runOnEditing("moveBlockDown"),
-            duplicate: () => runOnEditing("duplicateBelow"),
+            undo,
+            redo,
             remove: () => runOnRow("deleteBlock", focus.key),
             image: api.requestImage ? () => api.requestImage?.(focus.key) : undefined,
             // Done: the keyboard goes and the row stays highlighted, where

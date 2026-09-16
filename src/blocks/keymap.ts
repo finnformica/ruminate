@@ -170,7 +170,11 @@ export const KEYMAP: Binding[] = [
   // offers the same three).
   { mode: "edit", combo: "Mod+b", command: "wrapBold" },
   { mode: "edit", combo: "Mod+i", command: "wrapItalic" },
+  { mode: "edit", combo: "Mod+Shift+x", command: "wrapStrike" },
   { mode: "edit", combo: "Mod+e", command: "wrapCode" },
+  { mode: "edit", combo: "Mod+Shift+m", command: "wrapMath" },
+  // Not Mod+k: that is the palette's, everywhere.
+  { mode: "edit", combo: "Mod+Shift+k", command: "wrapLink" },
   // In a code block Enter is a newline (unbound: the textarea keeps it), and
   // Shift-Enter leaves with a fresh block below, like Cmd/Ctrl+Enter.
   { mode: "edit", combo: "Shift+Enter", when: inCode, command: "insertSiblingBelow" },

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  linkSelection,
   runCommand,
   wrapSelection,
   type CaretInput,
@@ -1127,5 +1128,45 @@ describe("wrapBold / wrapItalic / wrapCode", () => {
 
   it("does nothing in select mode", () => {
     expect(runCommand("wrapBold", input(fixture(), "a")).handled).toBe(false)
+  })
+})
+
+describe("wrapStrike / wrapMath / wrapLink", () => {
+  it("strike and maths wrap as the others do", () => {
+    const doc = fixture()
+    const strike = runCommand(
+      "wrapStrike",
+      input(doc, "a", { mode: "edit", caret: caret("Alpha", 0, 5) }),
+    )
+    expect(strike.doc!.blocks.a.text).toBe("~~Alpha~~")
+    const math = runCommand("wrapMath", input(doc, "a", { mode: "edit", caret: caret("x", 0, 1) }))
+    expect(math.doc!.blocks.a.text).toBe("$$x$$")
+    expect(math.focus).toEqual({ mode: "edit", key: "a", caret: 3 })
+  })
+
+  it("links the selection with the caret in the parentheses, for the address", () => {
+    expect(linkSelection("see Alpha now", 4, 9)).toEqual({ text: "see [Alpha]() now", caret: 12 })
+  })
+
+  it("links an address with the caret in the brackets, for its name", () => {
+    expect(linkSelection("https://example.com", 0, 19)).toEqual({
+      text: "[](https://example.com)",
+      caret: 1,
+    })
+  })
+
+  it("with nothing selected, puts the empty shape in with the caret in the brackets", () => {
+    expect(linkSelection("Alpha", 5, 5)).toEqual({ text: "Alpha[]()", caret: 8 })
+  })
+
+  it("wrapLink is a text op on the block, editing on", () => {
+    const result = runCommand(
+      "wrapLink",
+      input(fixture(), "a", { mode: "edit", caret: caret("Alpha", 0, 5) }),
+    )
+    expect(result.doc!.blocks.a.text).toBe("[Alpha]()")
+    expect(result.op).toEqual({ type: "text", blockId: "a" })
+    expect(result.focus).toEqual({ mode: "edit", key: "a", caret: 8 })
+    expect(runCommand("wrapLink", input(fixture(), "a")).handled).toBe(false)
   })
 })

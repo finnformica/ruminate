@@ -338,6 +338,26 @@ export function wrapSelection(
   }
 }
 
+/**
+ * Make the selection a markdown link, `[text](url)`, and put the caret where
+ * the missing half goes: after the text, in the parentheses, for the address
+ * to be typed; or, when the selection is itself an address, in the brackets,
+ * for its name (a bare address in a block names itself, so this is for
+ * choosing a name). With nothing selected the empty shape goes in with the
+ * caret in the brackets.
+ */
+export function linkSelection(
+  value: string,
+  start: number,
+  end: number,
+): { text: string; caret: number } {
+  const inside = value.slice(start, end)
+  const address = /^(https?:\/\/|www\.)\S+$/i.test(inside)
+  const link = address ? `[](${inside})` : `[${inside}]()`
+  const caret = address ? start + 1 : start + inside.length + 3
+  return { text: value.slice(0, start) + link + value.slice(end), caret }
+}
+
 function wrapWith(marker: string): Command {
   return (input) => {
     const { doc, key, mode, caret } = input
@@ -378,7 +398,10 @@ function turnInto(target: BlockType): Command {
 export type CommandName =
   | "wrapBold"
   | "wrapItalic"
+  | "wrapStrike"
   | "wrapCode"
+  | "wrapMath"
+  | "wrapLink"
   | "enterEdit"
   | "exitEdit"
   | "deselect"
@@ -662,7 +685,21 @@ export const COMMANDS: Record<CommandName, Command> = {
    * screen's edit bar, which has no Cmd to chord with. */
   wrapBold: wrapWith("**"),
   wrapItalic: wrapWith("_"),
+  wrapStrike: wrapWith("~~"),
   wrapCode: wrapWith("`"),
+  wrapMath: wrapWith("$$"),
+  wrapLink: (input) => {
+    const { doc, key, mode, caret } = input
+    if (mode !== "edit" || !caret) return IGNORED
+    const id = idOfKey(key)
+    const linked = linkSelection(caret.value, caret.start, caret.end)
+    return {
+      handled: true,
+      doc: updateText(doc, id, linked.text),
+      op: { type: "text", blockId: id },
+      focus: { mode: "edit", key, caret: linked.caret },
+    }
+  },
 
   /** Select-mode marker keys: toggle the block's type (see `turnInto`). */
   turnIntoHeading: turnInto("h1"),

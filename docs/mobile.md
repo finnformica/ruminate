@@ -31,29 +31,34 @@ keyboard that appears and disappears. The block editor
   blur, so the edit bar watches the visual viewport grow back by a keyboard's
   height and ends the edit itself. (Turning the phone from landscape to
   portrait grows it too, and ends the edit the same way.)
-- **The edit bar** (`mobile-edit-bar.tsx`) sits above the keyboard while a row
-  is edited, in Notion's shape: a row of actions that scrolls sideways, and a
-  Done pinned at the right. A phone's keyboard has no Tab, no Alt, no arrows
-  and no Cmd to chord with, so the bar carries what those keys do:
+- **The edit bar** (`mobile-edit-bar.tsx`) floats above the keyboard while a
+  row is edited, a pill in Notion's shape: a row of actions that scrolls
+  sideways under a fade, and a keyboard-down button in its own segment at the
+  right that puts the keyboard away. A phone's keyboard has no Tab, no Alt
+  and no Cmd to chord with, so the bar carries what those keys do; each action
+  runs the same command its key does (`src/blocks/commands.ts`), in edit mode
+  with the caret, so Indent by bar is Tab by key.
 
-  | Bar             | Does                                                            | Notion's        |
-  | --------------- | --------------------------------------------------------------- | --------------- |
-  | Aa (Turn into)  | A second row of block types, the current one marked             | Aa / turn into  |
-  | B, I, `<>`      | `**`, `_`, backticks around the selection (⌘B / ⌘I / ⌘E by key) | Aa's formatting |
-  | Outdent, Indent | `outdent`, `indent`                                             | ⇤ ⇥             |
-  | Move up, down   | `moveBlockUp`, `moveBlockDown`                                  | ↑ ↓             |
-  | Duplicate       | `duplicateBelow`, editing the copy                              | Duplicate       |
-  | Delete          | `deleteBlock` (the next row is highlighted)                     | Delete          |
-  | Image           | The picture picker (`requestImage`), where images are on        | Insert image    |
-  | Done            | Ends the edit and puts the keyboard away                        | Hide keyboard   |
+  | Main row        | Does                                                         | Notion's      |
+  | --------------- | ------------------------------------------------------------ | ------------- |
+  | Aa              | Swaps the row for the formatting row                         | Aa            |
+  | ⇄ Turn into     | Swaps the row for the block types                            | Turn into     |
+  | Outdent, Indent | `outdent`, `indent`; greyed where they would do nothing      | ⇤ ⇥           |
+  | Undo, Redo      | Redo shows only while there is something to redo             | Undo          |
+  | Image           | The picture picker (`requestImage`), where images are on     | Insert image  |
+  | Delete          | `deleteBlock`, in the danger colour; the next row highlights | Delete        |
+  | Keyboard down   | Ends the edit and puts the keyboard away                     | Keyboard down |
 
-  Left out of Notion's set, having no counterpart here: `+` add block (the
-  slash menu and Return do it), `@` mention, comment, text colour and
-  highlight. Undo and redo are not on the bar either: Notion leaves them to
-  the system (shake, the three-finger swipe), and they earn no space beside
-  the moves. Each action runs the same command its key does
-  (`src/blocks/commands.ts`), in edit mode with the caret, so Indent by bar is
-  Tab by key.
+  The formatting row (Back, then bold, italic, strikethrough, code, link,
+  maths) draws each button as the markdown renders it — a bold B, the inline
+  code chip, √x — and wraps the selection in the marker, or takes it off
+  again (`wrapBold` and the rest, ⌘B / ⌘I / ⌘⇧X / ⌘E / ⌘⇧K / ⌘⇧M by key).
+  The Turn into row (Back, then ¶ # - 1. [ ] > and a backtick, the glyphs
+  the query box's suggestions draw beside a type) slides one highlight to
+  the current type; a pick returns to the main row. Left out of Notion's set,
+  having no counterpart here: `+` add block (Return and the slash menu do
+  it), `@` mention, comment, text colour and highlight, underline (no
+  markdown for it), duplicate and move up / down (the block menu has them).
 
   Where the bar sits is the hard part. A `position: fixed` element lives in
   the _layout_ viewport, which an overlaying keyboard (iOS Safari) does not

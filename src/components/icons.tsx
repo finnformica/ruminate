@@ -628,6 +628,34 @@ export function RedoIcon16(props: IconProps) {
   return <UndoIcon16 {...props} className={cx("-scale-x-100", props.className)} />
 }
 
+/** Two arrows passing each other: one thing for another (the edit bar's
+ * Turn into). */
+export function SwapIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M10.22 1.22a.75.75 0 0 1 1.06 0l3 3a.75.75 0 0 1 0 1.06l-3 3a.75.75 0 1 1-1.06-1.06L11.94 5.5H2.75a.75.75 0 0 1 0-1.5h9.19l-1.72-1.72a.75.75 0 0 1 0-1.06ZM5.78 8.72a.75.75 0 0 1 0 1.06L4.06 11.5h9.19a.75.75 0 0 1 0 1.5H4.06l1.72 1.72a.75.75 0 1 1-1.06 1.06l-3-3a.75.75 0 0 1 0-1.06l3-3a.75.75 0 0 1 1.06 0Z" />
+    </Icon>
+  )
+}
+
+/** A keyboard with a chevron beneath: put the keyboard away. */
+export function KeyboardDownIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M2.5 1A2.5 2.5 0 0 0 0 3.5v5A2.5 2.5 0 0 0 2.5 11h11A2.5 2.5 0 0 0 16 8.5v-5A2.5 2.5 0 0 0 13.5 1h-11Zm0 1.5h11a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1ZM3 4h1.5v1.5H3V4Zm3 0h1.5v1.5H6V4Zm3 0h1.5v1.5H9V4Zm3 0h1.5v1.5H12V4ZM4.5 6.5h7V8h-7V6.5ZM5.22 12.72a.75.75 0 0 1 1.06 0L8 14.44l1.72-1.72a.75.75 0 1 1 1.06 1.06l-2.25 2.25a.75.75 0 0 1-1.06 0l-2.25-2.25a.75.75 0 0 1 0-1.06Z" />
+    </Icon>
+  )
+}
+
+/** A picture: a framed landscape. */
+export function ImageIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M2.5 1A2.5 2.5 0 0 0 0 3.5v9A2.5 2.5 0 0 0 2.5 15h11a2.5 2.5 0 0 0 2.5-2.5v-9A2.5 2.5 0 0 0 13.5 1h-11Zm0 1.5h11a1 1 0 0 1 1 1v6.19l-2.72-2.72a.75.75 0 0 0-1.06 0L6.5 11.19 4.78 9.47a.75.75 0 0 0-1.06 0L1.5 11.69V3.5a1 1 0 0 1 1-1Zm2.75 2a1.75 1.75 0 1 0 0 3.5 1.75 1.75 0 0 0 0-3.5Z" />
+    </Icon>
+  )
+}
+
 export function HistoryIcon16(props: IconProps) {
   return (
     <Icon size={16} {...props}>

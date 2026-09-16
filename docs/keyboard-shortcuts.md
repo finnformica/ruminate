@@ -231,24 +231,25 @@ format). With nothing selected (after <kbd>Esc</kbd>), <kbd>↓</kbd> /
 
 ### Edit mode (typing in a block)
 
-| Action                                    | Shortcut                                                                                                 |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Stop editing (back to highlight)          | <kbd>Esc</kbd>                                                                                           |
-| New block below (bullet by default)       | <kbd>↵</kbd>                                                                                             |
-| Split into a new block of the same type   | <kbd>⇧</kbd> <kbd>↵</kbd>                                                                                |
-| New block below, ignoring the caret       | <kbd>⌘</kbd> <kbd>↵</kbd>                                                                                |
-| Indent / outdent                          | <kbd>⇥</kbd> / <kbd>⇧</kbd> <kbd>⇥</kbd>                                                                 |
-| Move block (with its subtree)             | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> (or <kbd>⌘⇧</kbd> <kbd>↑/↓</kbd>)                               |
-| Duplicate block (keep editing the copy)   | <kbd>⇧</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                                    |
-| Bold / italic / code around the selection | <kbd>⌘</kbd> <kbd>B</kbd> / <kbd>⌘</kbd> <kbd>I</kbd> / <kbd>⌘</kbd> <kbd>E</kbd> (again to take it off) |
-| Jump across siblings (same level)         | <kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                                    |
-| Jump to top / bottom of the level         | <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                                                 |
-| Exit edit, select block above / below     | <kbd>↑</kbd> / <kbd>↓</kbd> at the first / last line                                                     |
-| Paste as plain text (newlines → spaces)   | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>                                                                   |
-| Select all text, then grow by structure   | <kbd>⌘</kbd> <kbd>A</kbd> (repeat — see the selection ladder)                                            |
-| Zoom into the block / exit zoom           | <kbd>⌘</kbd> <kbd>.</kbd> / <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>                                       |
-| Strip the block's marker → merge up       | <kbd>⌫</kbd> at line start                                                                               |
-| Slash menu (dates, turn into)             | <kbd>/</kbd> at the start of a word                                                                      |
+| Action                                            | Shortcut                                                                                                                 |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Stop editing (back to highlight)                  | <kbd>Esc</kbd>                                                                                                           |
+| New block below (bullet by default)               | <kbd>↵</kbd>                                                                                                             |
+| Split into a new block of the same type           | <kbd>⇧</kbd> <kbd>↵</kbd>                                                                                                |
+| New block below, ignoring the caret               | <kbd>⌘</kbd> <kbd>↵</kbd>                                                                                                |
+| Indent / outdent                                  | <kbd>⇥</kbd> / <kbd>⇧</kbd> <kbd>⇥</kbd>                                                                                 |
+| Move block (with its subtree)                     | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> (or <kbd>⌘⇧</kbd> <kbd>↑/↓</kbd>)                                               |
+| Duplicate block (keep editing the copy)           | <kbd>⇧</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                                                    |
+| Bold / italic / code around the selection         | <kbd>⌘</kbd> <kbd>B</kbd> / <kbd>⌘</kbd> <kbd>I</kbd> / <kbd>⌘</kbd> <kbd>E</kbd> (again to take it off)                 |
+| Strikethrough / maths / link around the selection | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>X</kbd> / <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>M</kbd> / <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>K</kbd> |
+| Jump across siblings (same level)                 | <kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                                                    |
+| Jump to top / bottom of the level                 | <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                                                                 |
+| Exit edit, select block above / below             | <kbd>↑</kbd> / <kbd>↓</kbd> at the first / last line                                                                     |
+| Paste as plain text (newlines → spaces)           | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>                                                                                   |
+| Select all text, then grow by structure           | <kbd>⌘</kbd> <kbd>A</kbd> (repeat — see the selection ladder)                                                            |
+| Zoom into the block / exit zoom                   | <kbd>⌘</kbd> <kbd>.</kbd> / <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>                                                       |
+| Strip the block's marker → merge up               | <kbd>⌫</kbd> at line start                                                                                               |
+| Slash menu (dates, turn into)                     | <kbd>/</kbd> at the start of a word                                                                                      |
 
 Enter from a heading nests the new block underneath it. A list item (bullet,
 numbered, to-do) continues its own list whatever the new-block setting says;

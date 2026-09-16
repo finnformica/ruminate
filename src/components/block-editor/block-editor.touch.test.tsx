@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useState } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { parse } from "../../blocks/parse"
+import { BLOCK_TYPE_DEFS } from "../../blocks/registry"
 import { serialize } from "../../blocks/serialize"
 import type { BlockDoc } from "../../blocks/types"
 import { BlockEditor } from "./block-editor"
@@ -199,26 +200,42 @@ describe("the edit bar", () => {
     expect(screen.queryByTestId("mobile-edit-bar")).toBeNull()
   })
 
-  it("carries Notion's actions and no undo", () => {
-    const { container } = render(<Harness initial={"Alpha"} />)
-    fireEvent.click(bodyOf(rows(container)[0]))
-    const bar = screen.getByTestId("mobile-edit-bar")
-    const labels = Array.from(bar.querySelectorAll("button")).map((b) =>
+  const labels = () =>
+    Array.from(screen.getByTestId("mobile-edit-bar").querySelectorAll("button")).map((b) =>
       b.getAttribute("aria-label"),
     )
-    expect(labels).toEqual([
+
+  it("carries the main row: Aa, Turn into, the structure moves, Undo, Delete, the keyboard", () => {
+    const { container } = render(<Harness initial={"Alpha"} />)
+    fireEvent.click(bodyOf(rows(container)[0]))
+    // No Redo (nothing to redo) and no Image (images off here).
+    expect(labels()).toEqual([
+      "Formatting",
       "Turn into",
-      "Bold",
-      "Italic",
-      "Code",
       "Outdent",
       "Indent",
-      "Move up",
-      "Move down",
-      "Duplicate",
+      "Undo",
       "Delete",
-      "Done",
+      "Hide keyboard",
     ])
+  })
+
+  it("greys a move that would do nothing, and Undo with nothing to undo", () => {
+    const { container } = render(<Harness initial={"Alpha\nBeta"} />)
+    fireEvent.click(bodyOf(rows(container)[0]))
+    // The first root: nothing above to nest under, nothing to lift out of.
+    expect(screen.getByLabelText("Indent").getAttribute("aria-disabled")).toBe("true")
+    expect(screen.getByLabelText("Outdent").getAttribute("aria-disabled")).toBe("true")
+    expect(screen.getByLabelText("Undo").getAttribute("aria-disabled")).toBe("true")
+    fireEvent.click(screen.getByLabelText("Indent"))
+    expect(container.querySelector("textarea")!.value).toBe("Alpha")
+    // The second root can nest under the first, but not lift out.
+    act(() => {
+      container.querySelector("textarea")!.blur()
+    })
+    fireEvent.click(bodyOf(rows(container)[1]))
+    expect(screen.getByLabelText("Indent").getAttribute("aria-disabled")).toBeNull()
+    expect(screen.getByLabelText("Outdent").getAttribute("aria-disabled")).toBe("true")
   })
 
   it("indents and outdents the edited row, keeping the edit and the caret", () => {
@@ -232,25 +249,43 @@ describe("the edit bar", () => {
     expect(moved.value).toBe("Beta")
     expect(document.activeElement).toBe(moved)
     expect(moved.selectionStart).toBe(2)
+    // Nested now: Outdent is live, Indent (no sibling above) is not.
+    expect(screen.getByLabelText("Outdent").getAttribute("aria-disabled")).toBeNull()
+    expect(screen.getByLabelText("Indent").getAttribute("aria-disabled")).toBe("true")
     fireEvent.click(screen.getByLabelText("Outdent"))
     expect(lines(getByTestId)).toEqual(["Alpha", "Beta"])
     expect(container.querySelector("textarea")!.value).toBe("Beta")
   })
 
-  it("moves the edited row up and down", () => {
-    const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta\nGamma"} />)
+  it("shows Redo beside Undo only while there is something to redo", () => {
+    const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta"} />)
     fireEvent.click(bodyOf(rows(container)[1]))
-    fireEvent.click(screen.getByLabelText("Move up"))
-    expect(lines(getByTestId)).toEqual(["Beta", "Alpha", "Gamma"])
-    expect(container.querySelector("textarea")!.value).toBe("Beta")
-    fireEvent.click(screen.getByLabelText("Move down"))
-    fireEvent.click(screen.getByLabelText("Move down"))
-    expect(lines(getByTestId)).toEqual(["Alpha", "Gamma", "Beta"])
+    expect(screen.queryByLabelText("Redo")).toBeNull()
+    fireEvent.click(screen.getByLabelText("Indent"))
+    expect(screen.getByLabelText("Undo").getAttribute("aria-disabled")).toBeNull()
+    expect(screen.queryByLabelText("Redo")).toBeNull()
+    fireEvent.click(screen.getByLabelText("Undo"))
+    expect(lines(getByTestId)).toEqual(["Alpha", "Beta"])
+    expect(labels()).toContain("Redo")
+    fireEvent.click(screen.getByLabelText("Redo"))
+    expect(lines(getByTestId)).toEqual(["Alpha", "  Beta"])
+    expect(screen.queryByLabelText("Redo")).toBeNull()
   })
 
-  it("wraps the selection in bold, italic or code markdown, and unwraps it again", () => {
+  it("Aa swaps the row for the formatting, which wraps the selection and unwraps it again", () => {
     const { container } = render(<Harness initial={"Alpha beta"} />)
     fireEvent.click(bodyOf(rows(container)[0]))
+    fireEvent.click(screen.getByLabelText("Formatting"))
+    expect(labels()).toEqual([
+      "Back",
+      "Bold",
+      "Italic",
+      "Strikethrough",
+      "Code",
+      "Link",
+      "Maths",
+      "Hide keyboard",
+    ])
     container.querySelector("textarea")!.setSelectionRange(0, 5)
     fireEvent.click(screen.getByLabelText("Bold"))
     let textarea = container.querySelector("textarea")!
@@ -262,56 +297,75 @@ describe("the edit bar", () => {
     textarea = container.querySelector("textarea")!
     expect(textarea.value).toBe("Alpha beta")
     textarea.setSelectionRange(6, 10)
-    fireEvent.click(screen.getByLabelText("Italic"))
-    expect(container.querySelector("textarea")!.value).toBe("Alpha _beta_")
-    // Nothing selected: the pair goes in and the caret sits between.
+    fireEvent.click(screen.getByLabelText("Strikethrough"))
+    expect(container.querySelector("textarea")!.value).toBe("Alpha ~~beta~~")
     textarea = container.querySelector("textarea")!
-    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
-    fireEvent.click(screen.getByLabelText("Code"))
-    textarea = container.querySelector("textarea")!
-    expect(textarea.value).toBe("Alpha _beta_``")
-    expect(textarea.selectionStart).toBe(textarea.value.length - 1)
+    textarea.setSelectionRange(0, 5)
+    fireEvent.click(screen.getByLabelText("Maths"))
+    expect(container.querySelector("textarea")!.value).toBe("$$Alpha$$ ~~beta~~")
+    // Still the formatting row, still editing.
+    expect(labels()[0]).toBe("Back")
+    fireEvent.click(screen.getByLabelText("Back"))
+    expect(labels()[0]).toBe("Formatting")
   })
 
-  it("turns the row into another type from a second row, marking the current one", () => {
+  it("Link makes the selection a link and puts the caret where the address goes", () => {
+    const { container } = render(<Harness initial={"Alpha beta"} />)
+    fireEvent.click(bodyOf(rows(container)[0]))
+    fireEvent.click(screen.getByLabelText("Formatting"))
+    container.querySelector("textarea")!.setSelectionRange(0, 5)
+    fireEvent.click(screen.getByLabelText("Link"))
+    const textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("[Alpha]() beta")
+    expect(textarea.selectionStart).toBe(8)
+  })
+
+  it("Turn into swaps the row for the types as glyphs, the highlight on the current one", () => {
     const { container, getByTestId } = render(<Harness initial={"Alpha"} />)
     fireEvent.click(bodyOf(rows(container)[0]))
     fireEvent.click(screen.getByLabelText("Turn into"))
-    const bar = screen.getByTestId("mobile-edit-bar")
-    expect(bar.querySelector('[aria-label="Text"]')!.getAttribute("aria-pressed")).toBe("true")
-    expect(bar.querySelector('[aria-label="To-do"]')!.getAttribute("aria-pressed")).toBe("false")
+    // The registry's types, in its order, as the block menu offers them.
+    const types = BLOCK_TYPE_DEFS.filter((def) => def.turnInto)
+    expect(labels()).toEqual(["Back", ...types.map((def) => def.label), "Hide keyboard"])
+    expect(screen.getByLabelText("Bullet list").textContent).toBe("-")
+    expect(screen.getByLabelText("To-do").textContent).toBe("[ ]")
+    expect(screen.getByLabelText("Text").getAttribute("aria-pressed")).toBe("true")
+    expect(screen.getByTestId("edit-bar-thumb").style.transform).toBe("translateX(0px)")
     fireEvent.click(screen.getByLabelText("To-do"))
     expect(lines(getByTestId)).toEqual(["[ ] Alpha"])
     // Back on the main row, still editing.
-    expect(screen.getByLabelText("Bold")).not.toBeNull()
+    expect(labels()[0]).toBe("Formatting")
     expect(container.querySelector("textarea")!.value).toBe("Alpha")
+    // Open again: the highlight has slid to the to-do, 40px a type.
     fireEvent.click(screen.getByLabelText("Turn into"))
+    expect(screen.getByLabelText("To-do").getAttribute("aria-pressed")).toBe("true")
+    const at = types.findIndex((def) => def.id === "todo")
+    expect(screen.getByTestId("edit-bar-thumb").style.transform).toBe(`translateX(${at * 40}px)`)
     fireEvent.click(screen.getByLabelText("Back"))
-    expect(screen.getByLabelText("Bold")).not.toBeNull()
+    expect(labels()[0]).toBe("Formatting")
   })
 
-  it("duplicates the edited row (editing the copy) and deletes it", () => {
+  it("deletes the edited row, leaving edit mode", () => {
     const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta"} />)
     fireEvent.click(bodyOf(rows(container)[0]))
-    fireEvent.click(screen.getByLabelText("Duplicate"))
-    expect(lines(getByTestId)).toEqual(["Alpha", "Alpha", "Beta"])
-    expect(container.querySelector("textarea")!.value).toBe("Alpha")
     fireEvent.click(screen.getByLabelText("Delete"))
-    expect(lines(getByTestId)).toEqual(["Alpha", "Beta"])
-    // A delete leaves edit mode: the next row is highlighted.
+    expect(lines(getByTestId)).toEqual(["Beta"])
     expect(container.querySelector("textarea")).toBeNull()
     expect(screen.queryByTestId("mobile-edit-bar")).toBeNull()
   })
 
-  it("pins itself to the visual viewport's bottom and pads the page by what it covers", () => {
+  it("pins itself above the visual viewport's bottom and pads the page by what it covers", () => {
     const { container } = render(<Harness initial={"Alpha\nBeta"} />)
     fireEvent.click(bodyOf(rows(container)[1]))
     const bar = screen.getByTestId("mobile-edit-bar")
     // jsdom has no visualViewport: the layout viewport's bottom stands in.
-    expect(bar.style.transform).toBe(`translateY(calc(${window.innerHeight}px - 100%))`)
+    expect(bar.style.transform).toBe(
+      `translateY(calc(${window.innerHeight}px - 100% - 8px - var(--edit-bar-lift)))`,
+    )
     expect(bar.getAttribute("data-keyboard")).toBe("down")
-    expect(document.documentElement.style.getPropertyValue("--edit-bar-inset")).toBe("0px")
-    fireEvent.click(screen.getByLabelText("Done"))
+    // jsdom lays nothing out: the bar is 0px tall, so the page pads by the lift alone.
+    expect(document.documentElement.style.getPropertyValue("--edit-bar-inset")).toBe("8px")
+    fireEvent.click(screen.getByLabelText("Hide keyboard"))
     expect(document.documentElement.style.getPropertyValue("--edit-bar-inset")).toBe("")
   })
 
@@ -323,10 +377,10 @@ describe("the edit bar", () => {
     expect(fireEvent.mouseDown(button)).toBe(false)
   })
 
-  it("Done ends the edit and leaves the row highlighted", () => {
+  it("Hide keyboard ends the edit and leaves the row highlighted", () => {
     const { container } = render(<Harness initial={"Alpha\nBeta"} />)
     fireEvent.click(bodyOf(rows(container)[1]))
-    fireEvent.click(screen.getByLabelText("Done"))
+    fireEvent.click(screen.getByLabelText("Hide keyboard"))
     expect(container.querySelector("textarea")).toBeNull()
     expect(screen.queryByTestId("mobile-edit-bar")).toBeNull()
     const highlighted = container.querySelector(".bg-bg-secondary")!

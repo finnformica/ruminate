@@ -55,5 +55,11 @@ export function useBlockHistory(
     [onChange],
   )
 
-  return { commit, undo: undoChange, redo: redoChange }
+  // Whether there is anything to take back or put back — read at render,
+  // which follows every commit (each one re-renders the editor), so a
+  // control that shows only while a redo is possible keeps up.
+  const canUndo = useCallback(() => historyRef.current.past.length > 0, [])
+  const canRedo = useCallback(() => historyRef.current.future.length > 0, [])
+
+  return { commit, undo: undoChange, redo: redoChange, canUndo, canRedo }
 }

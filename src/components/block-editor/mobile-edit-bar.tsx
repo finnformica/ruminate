@@ -5,14 +5,16 @@ import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
 import {
-  ArrowDownIcon16,
   ArrowLeftToLineIcon16,
   ArrowRightToLineIcon16,
-  ArrowUpIcon16,
   ChevronLeftIcon16,
-  CopyIcon16,
-  PaperclipIcon16,
+  ImageIcon16,
+  KeyboardDownIcon16,
+  LinkIcon16,
+  RedoIcon16,
+  SwapIcon16,
   TrashIcon16,
+  UndoIcon16,
 } from "../icons"
 
 /** What the bar can do to the row being edited: the same commands the keys
@@ -21,12 +23,14 @@ export interface MobileEditBarActions {
   turnInto: (type: BlockType) => void
   bold: () => void
   italic: () => void
+  strike: () => void
   code: () => void
+  link: () => void
+  math: () => void
   indent: () => void
   outdent: () => void
-  moveUp: () => void
-  moveDown: () => void
-  duplicate: () => void
+  undo: () => void
+  redo: () => void
   remove: () => void
   /** Add a picture at this row; absent where images are switched off. */
   image?: () => void
@@ -34,9 +38,35 @@ export interface MobileEditBarActions {
   done: () => void
 }
 
+/** What the row can take right now: a button whose command would do nothing
+ * is greyed, and Redo shows only while there is something to redo. */
+export interface MobileEditBarState {
+  type: BlockType
+  canIndent: boolean
+  canOutdent: boolean
+  canUndo: boolean
+  canRedo: boolean
+}
+
 /** The types a block can be turned into: the registry's, in its order (the
- * block menu's Turn into offers the same). */
+ * block menu's Turn into offers the same), each as its markdown glyph — the
+ * same glyphs the query box's suggestions draw beside a type. */
 const TYPES = BLOCK_TYPE_DEFS.filter((def) => def.turnInto)
+const TYPE_GLYPHS: Record<string, string> = {
+  text: "¶",
+  h1: "#",
+  ul: "-",
+  ol: "1.",
+  todo: "[ ]",
+  quote: ">",
+  code: "`",
+}
+
+/** Every button is this wide, so the Turn into row's highlight can slide to
+ * the active one by index. */
+const BUTTON_WIDTH = 40
+/** The bar floats this far above the keyboard's top edge. */
+const LIFT = 8
 
 /** A keyboard is at least this tall; the browser's own chrome (the address
  * bar coming and going, iOS 26.0's 24px that never comes back) moves the
@@ -134,7 +164,7 @@ function usePageInset(barRef: React.RefObject<HTMLDivElement | null>, bottom: nu
   useEffect(() => {
     const covered = Math.max(0, window.innerHeight - bottom)
     const bar = barRef.current?.offsetHeight ?? 0
-    document.documentElement.style.setProperty(INSET_VAR, `${covered + bar}px`)
+    document.documentElement.style.setProperty(INSET_VAR, `${covered + bar + LIFT}px`)
   }, [barRef, bottom])
   useEffect(
     () => () => {
@@ -144,15 +174,21 @@ function usePageInset(barRef: React.RefObject<HTMLDivElement | null>, bottom: nu
   )
 }
 
+type View = "main" | "format" | "turnInto"
+
 /**
  * The edit bar a touch screen gets above its keyboard while a block is being
- * edited — Notion's shape: a row of actions that scrolls sideways, and a
- * Done pinned at the right that puts the keyboard away. The actions are the
- * ones a virtual keyboard has no keys for: turn into (the block's type,
- * picked from a second row), bold / italic / code around the selection,
- * outdent and indent, move up and down, duplicate, delete, and a picture
- * where images are on. Each runs the same command its key does, in edit
- * mode with the caret, so Indent by bar is Tab by key.
+ * edited (docs/mobile.md) — a floating pill in Notion's shape: a row of
+ * actions that scrolls sideways, and a keyboard-down button in its own
+ * segment at the right that puts the keyboard away. The actions are the
+ * ones a virtual keyboard has no keys for. The main row: Aa, which swaps the
+ * row for the inline formatting (bold, italic, strikethrough, code, link,
+ * maths — each drawn as the markdown renders); Turn into, which swaps it for
+ * the block types as their markdown glyphs, a highlight sliding to the
+ * current one; outdent and indent, greyed where they would do nothing; undo,
+ * with redo beside it only while there is something to redo; a picture,
+ * where images are on; and delete. Each runs the same command its key does,
+ * in edit mode with the caret, so Indent by bar is Tab by key.
  *
  * Fixed to the bottom of the visual viewport, so it sits on the keyboard
  * whether the keyboard overlays the page (iOS) or shrinks it (Android).
@@ -163,106 +199,167 @@ function usePageInset(barRef: React.RefObject<HTMLDivElement | null>, bottom: nu
  * watches the viewport grow back and calls `done` itself.
  */
 export function MobileEditBar({
-  type,
+  state,
   actions,
 }: {
-  /** The edited block's type — the Turn into row marks it. */
-  type: BlockType
+  state: MobileEditBarState
   actions: MobileEditBarActions
 }) {
   const { bottom, keyboardUp } = useKeyboard(actions.done)
   const barRef = useRef<HTMLDivElement>(null)
   usePageInset(barRef, bottom)
-  const [view, setView] = useState<"main" | "turnInto">("main")
+  const [view, setView] = useState<View>("main")
   if (typeof document === "undefined") return null
+  const current = canonicalOf(state.type)
+  const activeType = Math.max(
+    0,
+    TYPES.findIndex((def) => def.id === current),
+  )
   return createPortal(
     <div
       ref={barRef}
       role="toolbar"
       aria-label="Editing"
       data-testid="mobile-edit-bar"
+      data-view={view}
       data-keyboard={keyboardUp ? "up" : "down"}
-      className="fixed inset-x-0 top-0 z-20 flex items-stretch border-t border-border-secondary bg-bg-overlay will-change-transform print:hidden"
+      // The card's ring and shadow on an opaque surface: the bar sits over
+      // the note as much as over the keyboard, and a blurred note showing
+      // through would muddle the glyphs.
+      className="fixed inset-x-3 top-0 z-20 flex h-12 items-stretch overflow-hidden rounded-full bg-bg-overlay shadow-2xl ring-1 ring-[var(--neutral-a3)] will-change-transform dark:ring-inset print:hidden"
       style={{
-        // The bar's bottom edge on the visual viewport's (see `useKeyboard`).
-        transform: `translateY(calc(${bottom}px - 100%))`,
-        // Under a keyboard the safe area is the keyboard's; without one the
-        // bar sits on the home indicator and keeps clear of it.
-        paddingBottom: keyboardUp ? 0 : "env(safe-area-inset-bottom)",
+        // The bar's bottom edge a little above the visual viewport's (see
+        // `useKeyboard`); with no keyboard, above the home indicator too.
+        transform: `translateY(calc(${bottom}px - 100% - ${LIFT}px - var(--edit-bar-lift)))`,
+        ["--edit-bar-lift" as string]: keyboardUp ? "0px" : "env(safe-area-inset-bottom)",
       }}
     >
-      <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {view === "turnInto" ? (
+      <div
+        className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        style={{
+          // The row runs off under a fade, so a row longer than the bar
+          // says so.
+          maskImage: "linear-gradient(90deg, #000 calc(100% - 28px), transparent)",
+        }}
+      >
+        {view === "format" ? (
           <>
             <BarButton label="Back" onClick={() => setView("main")}>
               <ChevronLeftIcon16 />
             </BarButton>
             <Rule />
-            {TYPES.map((def) => (
-              <BarButton
-                key={def.id}
-                label={def.label}
-                pressed={canonicalOf(type) === def.id}
-                onClick={() => {
-                  actions.turnInto(def.id)
-                  setView("main")
+            <BarButton
+              label="Bold"
+              onClick={actions.bold}
+              className="font-content text-lg font-bold"
+            >
+              B
+            </BarButton>
+            <BarButton
+              label="Italic"
+              onClick={actions.italic}
+              className="font-content text-lg italic"
+            >
+              I
+            </BarButton>
+            <BarButton
+              label="Strikethrough"
+              onClick={actions.strike}
+              className="font-content text-lg line-through"
+            >
+              S
+            </BarButton>
+            <BarButton label="Code" onClick={actions.code}>
+              <code className="rounded-sm border border-border-secondary bg-[var(--color-bg-code-block)] px-1.5 py-px font-mono text-[13px]">
+                {"<>"}
+              </code>
+            </BarButton>
+            <BarButton label="Link" onClick={actions.link}>
+              <LinkIcon16 />
+            </BarButton>
+            <BarButton label="Maths" onClick={actions.math} className="font-serif text-lg italic">
+              <span aria-hidden>√x</span>
+            </BarButton>
+          </>
+        ) : view === "turnInto" ? (
+          <>
+            <BarButton label="Back" onClick={() => setView("main")}>
+              <ChevronLeftIcon16 />
+            </BarButton>
+            <Rule />
+            <div className="relative flex items-stretch">
+              {/* The highlight: one pill that slides to the current type. */}
+              <span
+                aria-hidden
+                data-testid="edit-bar-thumb"
+                className="absolute top-2 h-8 rounded-full bg-bg-secondary transition-transform duration-200 ease-[var(--ease-in-out)] motion-reduce:transition-none"
+                style={{
+                  width: BUTTON_WIDTH,
+                  transform: `translateX(${activeType * BUTTON_WIDTH}px)`,
                 }}
-                className="px-3 text-sm"
-              >
-                {def.label}
-              </BarButton>
-            ))}
+              />
+              {TYPES.map((def) => (
+                <BarButton
+                  key={def.id}
+                  label={def.label}
+                  pressed={def.id === current}
+                  onClick={() => {
+                    actions.turnInto(def.id)
+                    setView("main")
+                  }}
+                  className="relative font-mono text-[15px] whitespace-pre"
+                >
+                  {TYPE_GLYPHS[def.id] ?? def.label}
+                </BarButton>
+              ))}
+            </div>
           </>
         ) : (
           <>
             <BarButton
-              label="Turn into"
-              onClick={() => setView("turnInto")}
-              className="font-medium"
+              label="Formatting"
+              onClick={() => setView("format")}
+              className="text-[15px] text-text"
             >
               Aa
             </BarButton>
-            <Rule />
-            <BarButton label="Bold" onClick={actions.bold} className="font-bold">
-              B
-            </BarButton>
-            <BarButton label="Italic" onClick={actions.italic} className="font-content italic">
-              I
-            </BarButton>
-            <BarButton label="Code" onClick={actions.code} className="font-mono text-sm">
-              {"<>"}
+            <BarButton label="Turn into" onClick={() => setView("turnInto")}>
+              <SwapIcon16 />
             </BarButton>
             <Rule />
-            <BarButton label="Outdent" onClick={actions.outdent}>
+            <BarButton label="Outdent" onClick={actions.outdent} disabled={!state.canOutdent}>
               <ArrowLeftToLineIcon16 />
             </BarButton>
-            <BarButton label="Indent" onClick={actions.indent}>
+            <BarButton label="Indent" onClick={actions.indent} disabled={!state.canIndent}>
               <ArrowRightToLineIcon16 />
             </BarButton>
-            <BarButton label="Move up" onClick={actions.moveUp}>
-              <ArrowUpIcon16 />
-            </BarButton>
-            <BarButton label="Move down" onClick={actions.moveDown}>
-              <ArrowDownIcon16 />
-            </BarButton>
             <Rule />
-            <BarButton label="Duplicate" onClick={actions.duplicate}>
-              <CopyIcon16 />
+            <BarButton label="Undo" onClick={actions.undo} disabled={!state.canUndo}>
+              <UndoIcon16 />
             </BarButton>
-            <BarButton label="Delete" onClick={actions.remove}>
-              <TrashIcon16 />
-            </BarButton>
-            {actions.image ? (
-              <BarButton label="Image" onClick={actions.image}>
-                <PaperclipIcon16 />
+            {state.canRedo ? (
+              <BarButton label="Redo" onClick={actions.redo}>
+                <RedoIcon16 />
               </BarButton>
             ) : null}
+            <Rule />
+            {actions.image ? (
+              <BarButton label="Image" onClick={actions.image}>
+                <ImageIcon16 />
+              </BarButton>
+            ) : null}
+            <BarButton label="Delete" onClick={actions.remove} className="text-text-danger">
+              <TrashIcon16 />
+            </BarButton>
           </>
         )}
       </div>
-      <Rule />
-      <BarButton label="Done" onClick={actions.done} className="px-4 font-semibold text-text">
-        Done
+      <BarButton
+        label="Hide keyboard"
+        onClick={actions.done}
+        className="w-[52px] border-l border-border-secondary text-text"
+      >
+        <KeyboardDownIcon16 />
       </BarButton>
     </div>,
     document.body,
@@ -271,7 +368,7 @@ export function MobileEditBar({
 
 /** A hairline between groups of buttons. */
 function Rule() {
-  return <span aria-hidden className="my-3 w-px shrink-0 bg-border-secondary" />
+  return <span aria-hidden className="my-3.5 w-px shrink-0 bg-border-secondary" />
 }
 
 /** Keeps focus where it is: the pointer down is cancelled, so the textarea
@@ -282,6 +379,7 @@ function BarButton({
   label,
   onClick,
   pressed,
+  disabled,
   className,
   children,
 }: {
@@ -289,6 +387,8 @@ function BarButton({
   onClick: () => void
   /** The row's current choice (the Turn into row's current type). */
   pressed?: boolean
+  /** Would do nothing right now: greyed, and inert, as its key would be. */
+  disabled?: boolean
   className?: string
   children: React.ReactNode
 }) {
@@ -297,13 +397,15 @@ function BarButton({
       type="button"
       aria-label={label}
       aria-pressed={pressed}
+      aria-disabled={disabled || undefined}
       tabIndex={-1}
       onPointerDown={keepFocus}
       onMouseDown={keepFocus}
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
       className={cx(
-        "flex h-11 min-w-11 shrink-0 cursor-pointer select-none items-center justify-center whitespace-nowrap text-text-secondary active:bg-bg-active",
-        pressed && "text-text-selected bg-bg-selected-faint",
+        "flex h-12 w-10 shrink-0 cursor-pointer select-none items-center justify-center text-text-secondary",
+        disabled ? "cursor-default text-text-tertiary opacity-50" : "active:text-text",
+        pressed && "text-text",
         className,
       )}
     >
