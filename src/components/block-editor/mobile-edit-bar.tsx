@@ -322,9 +322,9 @@ export function MobileEditBar({
                   }}
                   className="relative font-mono text-[15px] whitespace-pre"
                 >
-                  {/* Backticks hang high in the line; the fence is nudged down to
+                  {/* Backticks hang high in the line; the fence is nudged 5px down to
                       sit on the others' centre. */}
-                  <span className={def.id === "code" ? "translate-y-[3px]" : undefined}>
+                  <span className={def.id === "code" ? "translate-y-[5px]" : undefined}>
                     {TYPE_GLYPHS[def.id] ?? def.label}
                   </span>
                 </BarButton>
