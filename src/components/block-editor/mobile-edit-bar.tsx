@@ -64,8 +64,8 @@ const TYPE_GLYPHS: Record<string, string> = {
 }
 
 /** Every button is this wide, so the Turn into row's highlight can slide to
- * the active one by index. 38px: eight of them, with their rules, fit a
- * 390pt phone with the bar's insets and the keyboard segment taken out. */
+ * the active one by index. 38px: eight of them fit a 390pt phone with the
+ * bar's insets, its end padding and the keyboard button taken out. */
 const BUTTON_WIDTH = 38
 /** The bar floats this far above the keyboard's top edge. */
 const LIFT = 8
@@ -230,7 +230,10 @@ export function MobileEditBar({
       // The card's ring and shadow on an opaque surface: the bar sits over
       // the note as much as over the keyboard, and a blurred note showing
       // through would muddle the glyphs.
-      className="fixed inset-x-3 top-0 z-20 flex h-12 items-stretch overflow-hidden rounded-full bg-bg-overlay shadow-2xl ring-1 ring-[var(--neutral-a3)] will-change-transform dark:ring-inset print:hidden"
+      // 6px of padding at either end is the pill's, not a button's: the
+      // first and last glyphs sit clear of the rounded ends, and the row
+      // scrolls under it evenly.
+      className="fixed inset-x-3 top-0 z-20 flex h-12 items-stretch overflow-hidden rounded-full bg-bg-overlay px-1.5 shadow-2xl ring-1 ring-[var(--neutral-a3)] will-change-transform dark:ring-inset print:hidden"
       style={{
         // The bar's bottom edge a little above the visual viewport's (see
         // `useKeyboard`); with no keyboard, above the home indicator too.
