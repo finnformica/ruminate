@@ -4,6 +4,7 @@ import { blockId } from "../blocks/id"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import { asBlockType, type Block, type BlockDoc, type BlockProps } from "../blocks/types"
+import { keyOf, type ExpandedRule } from "../blocks/view"
 import type { NoteId } from "../schema"
 import { emittedNoteTitle } from "./note-identity"
 
@@ -318,35 +319,65 @@ export function parseProps(props: string | null): BlockProps | null {
   }
 }
 
+/** A walk's result: the doc, and the keys the fold rule closed — the rows
+ * drawn with a chevron and nothing beneath them. */
+export interface GraphView {
+  doc: BlockDoc
+  collapsed: Set<string>
+}
+
+/** Every occurrence open: the eager walk (export, search, the basket). */
+const EVERYTHING_OPEN: ExpandedRule = () => true
+
 /**
- * The walk: a `BlockDoc` of everything reachable from `rootIds` over child
- * links, in sort-key order — the typed slice of the graph a view renders.
+ * The walk: a `BlockDoc` of what `rootIds` reach over child links, in
+ * sort-key order — the typed slice of the graph a view renders — descended
+ * only where `expanded` says an occurrence is open.
+ *
+ * The walk is LAZY (the shape the results view pioneered, `resultsDoc`).
+ * Every block it touches carries its complete list of children's ids — the
+ * graph's, exactly, which is what draws the fold chevron and keeps a save
+ * diff to nothing — but the children themselves are walked in only beneath
+ * an occurrence the rule opens. A closed occurrence is a row with a chevron
+ * and nothing beneath it, and its key is in `collapsed`; opening it walks
+ * one more level. So the doc is O(what is on screen), however large the
+ * graph, and the same call serves a note (its children as the roots, level
+ * 1) and a zoomed block (the block as the root, level 0): a view from any
+ * root is the same walk.
  *
  * - A root that does not exist is skipped; the doc's `rootBlockIds` are the
  *   roots that do, in the order given.
- * - Every reachable node is in `blocks` once, however many parents name it;
- *   a dangling link (destination row missing) is dropped from its parent's
+ * - Every walked node is in `blocks` once, however many parents name it; a
+ *   block reached again by a second, open path is walked beneath it there.
+ *   A dangling link (destination row missing) is dropped from its parent's
  *   `children`, exactly as the rollup has always skipped it.
- * - A back-edge — a child that is also an ancestor on the current path, which
- *   only a corrupted (cyclic) graph can hold — is dropped, so the slice is a
- *   DAG that every walk over it (export, render, navigation) can finish.
+ * - A node already on the current path (a loop back to a node above) is
+ *   named where it is reached and never descended, so the walk ends where
+ *   the loop closes (docs/graph-schema-v2.md, "Loops").
  * - Unknown node types (a newer client's) become `text`, marker-free.
  *
  * The note node itself is not part of a note's doc (see `noteDoc`); pass a
  * note id as a root and it walks like any node — a note linked under a block
  * renders as a `note` block.
  */
-export function docFromGraph(rootIds: string[], graph: GraphSnapshot): BlockDoc {
+export function walkGraph(
+  rootIds: string[],
+  graph: GraphSnapshot,
+  {
+    expanded = EVERYTHING_OPEN,
+    startLevel = 1,
+  }: { expanded?: ExpandedRule; startLevel?: number } = {},
+): GraphView {
   const blocks: Record<string, Block> = {}
-  const onPath = new Set<string>()
+  const collapsed = new Set<string>()
+  const path = new Set<string>()
 
-  const visit = (id: string): boolean => {
+  // A block with its complete child list, built once — never walked here.
+  const blockOf = (id: string): Block | null => {
+    const known = blocks[id]
+    if (known) return known
     const node = graph.nodes.get(id)
-    if (!node) return false
-    // Reached again — by another path, or by a loop back to a node above:
-    // already built (or being built), and named again where it is reached.
-    if (blocks[id]) return true
-    onPath.add(id)
+    if (!node) return null
     const props = parseProps(node.props)
     // `props` only when there are any: a walked doc and a parsed one must be
     // the same object, key for key (the walk-equals-parse invariant).
@@ -355,18 +386,40 @@ export function docFromGraph(rootIds: string[], graph: GraphSnapshot): BlockDoc 
       type: asBlockType(node.type),
       text: node.text,
       ...(props ? { props } : {}),
-      children: [],
+      // A node listed as its own child (a corrupted row; the write side never
+      // makes one) is skipped: that loop has no closing row to show. So is a
+      // dangling link.
+      children: childIdsOf(graph, id).filter(
+        (childId) => childId !== id && graph.nodes.has(childId),
+      ),
     }
     blocks[id] = block
-    // A node listed as its own child (a corrupted row; the write side never
-    // makes one) is skipped: that loop has no closing row to show.
-    block.children = childIdsOf(graph, id).filter((childId) => childId !== id && visit(childId))
-    onPath.delete(id)
+    return block
+  }
+
+  const visit = (id: string, parentKey: string | null, level: number): boolean => {
+    const block = blockOf(id)
+    if (!block) return false
+    // Reached again from above: the loop closes here, as a leaf.
+    if (path.has(id) || block.children.length === 0) return true
+    const key = keyOf(parentKey, id)
+    if (!expanded(key, level)) {
+      collapsed.add(key)
+      return true
+    }
+    path.add(id)
+    for (const childId of block.children) visit(childId, key, level + 1)
+    path.delete(id)
     return true
   }
 
-  const rootBlockIds = rootIds.filter((id) => visit(id))
-  return { props: null, rootBlockIds, blocks }
+  const rootBlockIds = rootIds.filter((id) => visit(id, null, startLevel))
+  return { doc: { props: null, rootBlockIds, blocks }, collapsed }
+}
+
+/** The eager walk: everything `rootIds` reach, every occurrence open. */
+export function docFromGraph(rootIds: string[], graph: GraphSnapshot): BlockDoc {
+  return walkGraph(rootIds, graph).doc
 }
 
 /**
@@ -377,13 +430,78 @@ export function docFromGraph(rootIds: string[], graph: GraphSnapshot): BlockDoc 
  * node does not exist.
  */
 export function noteDoc(noteId: string, graph: GraphSnapshot): BlockDoc | null {
+  return noteView(noteId, graph)?.doc ?? null
+}
+
+/**
+ * A note's view: `noteDoc`, walked lazily by the reader's fold rule — the
+ * note page's doc, and the keys it folded. Null when the note node does not
+ * exist. Without a rule, every occurrence is open (`noteDoc`).
+ */
+export function noteView(
+  noteId: string,
+  graph: GraphSnapshot,
+  expanded?: ExpandedRule,
+): GraphView | null {
   const note = graph.nodes.get(noteId)
   if (!note || note.type !== NOTE_TYPE) return null
   const entries = noteEntries(note.props)
   const title = emittedNoteTitle(note.id, note.text)
   const props = title !== null ? { title, ...(entries ?? {}) } : entries
-  const doc = docFromGraph(childIdsOf(graph, noteId), graph)
-  return { ...doc, props }
+  const { doc, collapsed } = walkGraph(childIdsOf(graph, noteId), graph, { expanded })
+  return { doc: { ...doc, props }, collapsed }
+}
+
+/**
+ * A block's view — the zoomed page: the block as the doc's one root, at
+ * level 0 (always open; the editor draws it as the view's title), its
+ * children the rows at level 1, walked by the same rule as a note is. A view
+ * from any root is the same walk. Null when the block does not exist, or is
+ * a note (a note is opened as a note).
+ */
+export function blockView(
+  blockId: string,
+  graph: GraphSnapshot,
+  expanded?: ExpandedRule,
+): GraphView | null {
+  const node = graph.nodes.get(blockId)
+  if (!node || node.type === NOTE_TYPE) return null
+  return walkGraph([blockId], graph, { expanded, startLevel: 0 })
+}
+
+/**
+ * The ids from a root down to a block — the roots' child first, the block
+ * last — by the shortest chain of child links, or null when the root does
+ * not reach the block. Empty when the block IS the root. Found by walking
+ * UP from the block over the reverse index, so the cost tracks the block's
+ * depth, not the size of what the root holds; what a view uses to open the
+ * folds along the way to a block it must show (zooming out onto it).
+ */
+export function pathToBlock(
+  graph: GraphSnapshot,
+  rootId: string,
+  blockId: string,
+): string[] | null {
+  if (rootId === blockId) return []
+  if (!graph.nodes.has(blockId)) return null
+  // Breadth-first upward: the first time the root is met is a shortest chain.
+  const via = new Map<string, string>([[blockId, blockId]])
+  const queue = [blockId]
+  for (let i = 0; i < queue.length; i += 1) {
+    const id = queue[i]
+    for (const parent of parentIdsOf(graph, id)) {
+      if (via.has(parent)) continue
+      via.set(parent, id)
+      if (parent === rootId) {
+        const chain: string[] = []
+        for (let at = id; at !== blockId; at = via.get(at) as string) chain.push(at)
+        chain.push(blockId)
+        return chain
+      }
+      queue.push(parent)
+    }
+  }
+  return null
 }
 
 /** A note row's props as entries — an object even when empty, null for none

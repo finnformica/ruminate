@@ -6,7 +6,8 @@ import { imagesEnabled, uploadImage } from "../../data/images"
 import { fetchLinkPreview } from "../../data/link-previews"
 import { deleteBlockOps, deleteSubtreeOps, parentCount } from "../../data/ops"
 import { useApplyOps } from "../../data/store"
-import { useCollapseState } from "../../data/view-state"
+import { useFoldRule } from "../../data/view-state"
+import { collapsedKeysOf } from "../../blocks/default-collapsed"
 import { graphSnapshotAtom, isDatabaseModeAtom } from "../../global-state"
 import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
 import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
@@ -81,14 +82,23 @@ export function BlockNoteEditor({
   onZoomNavigate,
   noteTitle,
   collapseKey,
+  folds,
   onToggleCollapse,
   trailingBlank = true,
   rowRemoval = "unlink",
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc, hint?: ChangeHint) => void
-  /** Told after a block is folded or unfolded (the fold itself is kept
-   * here, per device) — the note page counts it as touching the note. */
+  /**
+   * The folds of a doc walked lazily by its owner (the note page,
+   * `useNoteDoc`): the keys the walk closed, and the toggle that records
+   * the reader's decision and re-walks. Absent, this editor keeps its own
+   * (the basket, standalone use): the reader's fold rule over the whole doc
+   * it was given.
+   */
+  folds?: { collapsed: ReadonlySet<string>; toggle: (key: string) => void }
+  /** Told after a block is folded or unfolded — the note page counts it as
+   * touching the note. */
   onToggleCollapse?: (key: string) => void
   /**
    * The note's id. When provided, the note's folds persist per-device in
@@ -152,9 +162,16 @@ export function BlockNoteEditor({
     setDoc(seedDoc(incoming))
   }
 
-  const { collapsed, toggleCollapse: toggleFold } = useCollapseState(collapseKey ?? noteId, doc)
+  // Folds: the owner's, or this editor's own rule over its whole doc.
+  const own = useFoldRule(folds ? undefined : (collapseKey ?? noteId))
+  const ownCollapsed = useMemo(
+    () => (folds ? null : new Set(collapsedKeysOf(doc, own.expanded))),
+    [folds, doc, own.expanded],
+  )
+  const collapsed = folds ? folds.collapsed : (ownCollapsed as Set<string>)
   const toggleCollapse = (key: string) => {
-    toggleFold(key)
+    if (folds) folds.toggle(key)
+    else own.setFold(key, collapsed.has(key))
     onToggleCollapse?.(key)
   }
 
@@ -247,8 +264,8 @@ export function BlockNoteEditor({
       doc={doc}
       onChange={handleChange}
       startEditing={startEditing}
-      collapsed={noteId ? collapsed : undefined}
-      onToggleCollapse={noteId ? toggleCollapse : undefined}
+      collapsed={collapsed as Set<string>}
+      onToggleCollapse={toggleCollapse}
       onExitTop={onExitTop}
       focusFirstSignal={focusFirstSignal}
       focusFirstMode={focusFirstMode}

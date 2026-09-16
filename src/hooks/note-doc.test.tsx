@@ -65,6 +65,55 @@ describe("useNoteDoc", () => {
     unsubscribe()
   })
 
+  it("zoomed, walks the block as the root, and an edit beneath it stamps the note", async () => {
+    const deep =
+      "- one\n  id:: blk_one0000000\n  - deep\n    id:: blk_deep000000\n- two\n  id:: blk_two0000000\n"
+    const { store, wrapper, unsubscribe } = await signedOutStore({ n: deep })
+    const { result } = renderHook(
+      () => useNoteDoc({ noteId: "n", defaultDoc: parse(""), zoomBlockId: "blk_one0000000" }),
+      { wrapper },
+    )
+    expect(result.current.exists).toBe(true)
+    expect(result.current.doc.rootBlockIds).toEqual(["blk_one0000000"])
+    expect(result.current.doc.props).toBe(null)
+
+    act(() => result.current.setDoc(updateText(result.current.doc, "blk_deep000000", "edited")))
+    const stored = noteDoc("n", store.get(sampleGraphAtom))!
+    expect(body(serialize(stored))).toBe(body(deep.replace("- deep", "- edited")))
+    expect(typeof stored.props?.updated_at).toBe("string")
+    // The note's own root order is untouched by the zoomed diff.
+    expect(stored.rootBlockIds).toEqual(["blk_one0000000", "blk_two0000000"])
+    unsubscribe()
+  })
+
+  it("zoomed into a block the graph lacks, falls back to the note", async () => {
+    const { wrapper, unsubscribe } = await signedOutStore({ n: NOTE })
+    const { result } = renderHook(
+      () => useNoteDoc({ noteId: "n", defaultDoc: parse(""), zoomBlockId: "blk_gone" }),
+      { wrapper },
+    )
+    expect(result.current.doc.rootBlockIds).toEqual(["blk_one0000000", "blk_two0000000"])
+    unsubscribe()
+  })
+
+  it("walks by the fold rule and reports what it folded", async () => {
+    const deep =
+      "- one\n  id:: blk_one0000000\n  - deep\n    id:: blk_deep000000\n    - deeper\n      id:: blk_deeper0000\n"
+    const { wrapper, unsubscribe } = await signedOutStore({ n: deep })
+    const { result } = renderHook(
+      () =>
+        useNoteDoc({
+          noteId: "n",
+          defaultDoc: parse(""),
+          expanded: (_key, level) => level < 2,
+        }),
+      { wrapper },
+    )
+    expect([...result.current.collapsed]).toEqual(["blk_one0000000/blk_deep000000"])
+    expect(result.current.doc.blocks.blk_deeper0000).toBeUndefined()
+    unsubscribe()
+  })
+
   it("a new note starts from the default doc and is created by its first real edit", async () => {
     const { store, wrapper, unsubscribe } = await signedOutStore({})
     const { result } = renderHook(
