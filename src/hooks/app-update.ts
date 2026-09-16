@@ -1,6 +1,9 @@
-import { atom, useSetAtom } from "jotai"
+import { atom, useAtomValue, useSetAtom } from "jotai"
 import { useEffect, useRef } from "react"
+import { useHotkeys } from "react-hotkeys-hook"
 import { useRegisterSW } from "virtual:pwa-register/react"
+import { requestDatabaseFlush } from "../data/database-mode"
+import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 
 /**
  * Whether a newer build of the app is waiting, and how to switch to it.
@@ -57,4 +60,27 @@ export function useRegisterAppUpdate() {
       },
     })
   }, [needRefresh, setAppUpdate])
+}
+
+/**
+ * ⌘⇧U takes a waiting update — the keyboard's version of the sidebar's
+ * "Update Ruminate" item, mounted once beside {@link useRegisterAppUpdate}.
+ *
+ * With nothing waiting it does nothing, exactly as that item is only on screen
+ * when there is something to take. Applying reloads the page and ops are
+ * written behind, so the pending ones are landed first (as ⌘S does) rather
+ * than letting a mistyped chord carry unsynced edits away with the old copy.
+ */
+export function useApplyUpdateShortcut() {
+  const { needRefresh, apply } = useAtomValue(appUpdateAtom)
+
+  useHotkeys(
+    APP_SHORTCUTS.applyUpdate,
+    () => {
+      if (!needRefresh) return
+      void requestDatabaseFlush().then(apply)
+    },
+    GLOBAL_HOTKEY_OPTIONS,
+    [needRefresh, apply],
+  )
 }

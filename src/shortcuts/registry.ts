@@ -50,6 +50,7 @@ export const APP_SHORTCUTS = {
   focusEditor: "i",
   toggleSidebar: "mod+b",
   helpPanel: "mod+/",
+  applyUpdate: "mod+shift+u",
   focusSearch: "/",
   historyBack: "mod+[",
   historyForward: "mod+]",
@@ -320,6 +321,13 @@ const GLOBAL_ENTRIES: Shortcut[] = [
     combos: [APP_SHORTCUTS.helpPanel],
     scope: "global",
     description: "Toggle the help panel",
+    group: "Global",
+  },
+  {
+    combos: [APP_SHORTCUTS.applyUpdate],
+    scope: "global",
+    description:
+      'Apply a waiting update (the sidebar\'s "Update Ruminate"); nothing if none is waiting',
     group: "Global",
   },
   {

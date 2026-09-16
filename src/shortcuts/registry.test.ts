@@ -114,6 +114,7 @@ describe("shortcut registry entries", () => {
       APP_SHORTCUTS.save,
       APP_SHORTCUTS.toggleSidebar,
       APP_SHORTCUTS.helpPanel,
+      APP_SHORTCUTS.applyUpdate,
     ]) {
       expect(combos.has(expected), `registry is missing "${expected}"`).toBe(true)
     }

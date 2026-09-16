@@ -3,7 +3,7 @@ import { useHotkeys } from "react-hotkeys-hook"
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels"
 import { useMedia } from "react-use"
 import { isHelpPanelOpenAtom, sidebarAtom } from "../global-state"
-import { useRegisterAppUpdate } from "../hooks/app-update"
+import { useApplyUpdateShortcut, useRegisterAppUpdate } from "../hooks/app-update"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { HelpDrawer, HelpSidebar } from "./help-panel"
@@ -21,8 +21,10 @@ export function AppLayout({ className, children }: AppLayoutProps) {
   const [isHelpPanelOpen, setHelpPanel] = useAtom(isHelpPanelOpenAtom)
   const isWideViewport = useMedia("(min-width: 1024px)")
   // The service worker registers here, once, for every surface that shows
-  // "an update is waiting" (sidebar item, phone nav-bar badge).
+  // "an update is waiting" (sidebar item, phone nav-bar badge) — and the
+  // keyboard's way of taking it (⌘⇧U).
   useRegisterAppUpdate()
+  useApplyUpdateShortcut()
   const showHelpSidebar = isHelpPanelOpen && isWideViewport
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "app-layout",
