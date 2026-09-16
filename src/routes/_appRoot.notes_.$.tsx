@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { useAtomValue } from "jotai"
+import { useAtomValue, useStore } from "jotai"
 import React, { useEffect, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import useResizeObserver from "use-resize-observer"
@@ -21,10 +21,13 @@ import { isSyncingAtom } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { sharedModeStatusAtom } from "../data/shared-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
-import { isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
+import { graphSnapshotAtom, isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
 import { useCreateNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
+import { pathToBlock } from "../data/graph"
+import { useFoldRule } from "../data/view-state"
+import { keyOf } from "../blocks/view"
 import { useNoteShare } from "../hooks/share"
 import { shareOwnerName } from "../data/shares"
 import { Width, fontSchema, widthSchema } from "../schema"
@@ -114,16 +117,43 @@ function NotePage() {
   // What a note that is not in the graph yet starts as: empty.
   const defaultDoc = React.useMemo(() => ({ ...parse(""), props: null }), [])
 
-  // The doc is the walk of the note over the live graph; every change the
-  // editor hands back becomes ops applied to the graph — see useNoteDoc.
+  // The doc is the walk of the note — or of the zoomed block — over the
+  // live graph, descended only where the reader's folds open a row
+  // (`useFoldRule`); every change the editor hands back becomes ops applied
+  // to the graph — see useNoteDoc.
+  const { expanded, setFold } = useFoldRule(noteId)
   const {
     doc: editorDoc,
+    collapsed,
     exists: noteExists,
     setDoc,
   } = useNoteDoc({
     noteId,
     defaultDoc,
+    zoomBlockId: zoomBlockId ?? null,
+    expanded,
   })
+  const jotaiStore = useStore()
+  // Leaving a zoom for a wider view — the note, or a block above — must
+  // show the block just left, so the reader lands back on it: the folds
+  // along one path from the new root to it are opened first (nothing to do
+  // when the walk already shows it).
+  const revealOnZoomOut = React.useCallback(
+    (target: string | null) => {
+      if (!noteId || !zoomBlockId || target === zoomBlockId) return
+      const graph = jotaiStore.get(graphSnapshotAtom)
+      const chain = pathToBlock(graph, target ?? noteId, zoomBlockId)
+      if (!chain) return
+      // Each ancestor's key and level, counted as the walk counts them: a
+      // note's roots are level 1, a zoomed block's children too.
+      let key: string | null = target
+      chain.slice(0, -1).forEach((id, index) => {
+        key = keyOf(key, id)
+        if (!expanded(key, index + 1)) setFold(key, true)
+      })
+    },
+    [noteId, zoomBlockId, jotaiStore, expanded, setFold],
+  )
   // A brand-new note opens ready to be written: the title editing when there
   // is one (naming it is the first thing to do, and naming it creates it —
   // `renameTo`), else the first block. Never while the notes are still
@@ -353,6 +383,7 @@ function NotePage() {
                   noteId={noteId}
                   doc={editorDoc}
                   onChange={setEditorDoc}
+                  folds={{ collapsed, toggle: (key) => setFold(key, collapsed.has(key)) }}
                   onToggleCollapse={touch}
                   startEditing={isNewNote && !showsTitle}
                   readOnly={readOnlyShare}
@@ -363,10 +394,11 @@ function NotePage() {
                   newRootSignal={newRootSignal}
                   refocusSignal={refocusSignal}
                   zoomBlockId={zoomBlockId ?? null}
-                  onZoomNavigate={touching((id) =>
+                  onZoomNavigate={touching((id) => {
+                    revealOnZoomOut(id)
                     // A plain push, so the back button undoes zoom naturally.
-                    navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) }),
-                  )}
+                    navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
+                  })}
                   noteTitle={note?.displayName ?? ""}
                 />
                 {noteId && noteExists && share === null ? (

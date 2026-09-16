@@ -5,7 +5,7 @@ import { buildGraphSnapshot, docFromGraph, noteDoc, rollup } from "../data/graph
 import { applyOps, docToOps } from "../data/ops"
 import { indexNoteBlocks } from "../utils/block-search"
 import { richClipboardFormats, extractClipboardBlocks } from "../utils/rich-clipboard"
-import { defaultCollapsedKeys } from "./default-collapsed"
+import { collapsedKeysOf, expandedByDepth } from "./default-collapsed"
 import { duplicateBlocks, subtreeIds } from "./ops"
 import { parse } from "./parse"
 import { serialize } from "./serialize"
@@ -76,8 +76,10 @@ describe("a doc that holds a loop", () => {
 
   it("folds, outlines, indexes and copies without hanging", () => {
     // The heading A folds like any other parent at depth 1; the loop's closing
-    // occurrence beneath B is a leaf, so nothing folds past it.
-    expect(defaultCollapsedKeys(looped(), 1)).toEqual(["a", "a/b"])
+    // occurrence beneath B is a leaf, so with everything open nothing folds
+    // past where the loop closes.
+    expect(collapsedKeysOf(looped(), expandedByDepth(1))).toEqual(["a"])
+    expect(collapsedKeysOf(looped(), expandedByDepth(10))).toEqual([])
     expect(subtreeIds(looped(), "a").sort()).toEqual(["a", "b", "c"])
     // A copy is a tree and ends where the loop closes: the payload holds A
     // once, B beneath it with nothing beneath B, and C.

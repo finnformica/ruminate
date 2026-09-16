@@ -3,7 +3,15 @@ import { emptyBlock, insertAfter, updateText } from "../blocks/ops"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
-import { buildGraphSnapshot, docToGraph, noteDoc, parentIdsOf, type GraphSnapshot } from "./graph"
+import {
+  blockView,
+  buildGraphSnapshot,
+  docToGraph,
+  noteDoc,
+  noteView,
+  parentIdsOf,
+  type GraphSnapshot,
+} from "./graph"
 import {
   applyOps,
   deleteBlockOps,
@@ -276,6 +284,57 @@ describe("docToOps", () => {
       expect(walk(next, "p")).toBe(serialize(doc))
       expect(docToOps("p", noteDoc("p", next)!, next)).toEqual([])
     }
+  })
+})
+
+describe("docToOps over a lazy or zoomed doc", () => {
+  const TWO =
+    "- one\n  id:: blk_one0000000\n  - deep\n    id:: blk_deep000000\n    - deeper\n      id:: blk_deeper0000\n- two\n  id:: blk_two0000000\n"
+
+  it("a lazy doc handed back unchanged is no ops: unwalked children keep their parent", () => {
+    const snapshot = graphOf({ a: TWO })
+    const { doc } = noteView("a", snapshot, (_key, level) => level < 2)!
+    expect(doc.blocks.blk_deep000000.children).toEqual(["blk_deeper0000"])
+    expect(doc.blocks.blk_deeper0000).toBeUndefined()
+    expect(docToOps("a", doc, snapshot)).toEqual([])
+  })
+
+  it("removing a folded row unlinks it alone; what it held, unwalked, stays with it", () => {
+    const snapshot = graphOf({ a: TWO })
+    const { doc } = noteView("a", snapshot, (_key, level) => level < 2)!
+    const next = {
+      ...doc,
+      blocks: { ...doc.blocks, blk_one0000000: { ...doc.blocks.blk_one0000000, children: [] } },
+    }
+    const ops = docToOps("a", next, snapshot)
+    expect(ops).toEqual([{ op: "unlink", source: "blk_one0000000", destination: "blk_deep000000" }])
+    const after = applyOps(snapshot, ops, NOW)
+    expect(parentIdsOf(after, "blk_deeper0000")).toEqual(["blk_deep000000"])
+  })
+
+  it("zoomed: the block's subtree is diffed and the note node and root order are left alone", () => {
+    const snapshot = graphOf({ a: TWO })
+    const { doc } = blockView("blk_one0000000", snapshot)!
+    // A rename of the zoom title, and a new child beneath it.
+    let next = updateText(doc, "blk_one0000000", "renamed")
+    next = insertAfter(next, "blk_one0000000/blk_deep000000", emptyBlock("ul", "added"))
+    const ops = docToOps("a", next, snapshot, undefined, "blk_one0000000")
+    expect(kinds(ops).sort()).toEqual(["create", "link", "setText"])
+    expect(ops.some((op) => "id" in op && op.id === "a")).toBe(false)
+    const after = applyOps(snapshot, ops, NOW)
+    expect(after.nodes.get("a")).toBe(snapshot.nodes.get("a"))
+    expect(after.childLinks.get("a")).toBe(snapshot.childLinks.get("a"))
+    expect(walk(after, "a")).toContain("- renamed")
+    expect(walk(after, "a")).toContain("  - added")
+    // The new block is written in the note.
+    const created = ops.find((op) => op.op === "create")
+    expect(created && "notesId" in created && created.notesId).toBe("a")
+  })
+
+  it("zoomed: an unchanged doc is no ops, and the zoom root cannot be unlinked from itself", () => {
+    const snapshot = graphOf({ a: TWO })
+    const { doc } = blockView("blk_one0000000", snapshot)!
+    expect(docToOps("a", doc, snapshot, undefined, "blk_one0000000")).toEqual([])
   })
 })
 

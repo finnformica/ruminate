@@ -29,6 +29,8 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 - `npm run format` - Format code with Prettier
 - `npm run knip` - Find unused files, dependencies and exports
 - `npm run check:queries` / `npm run check:worker` - Worker-side checks
+- `npm run check:changelog` - Check `CHANGELOG.md` and the pending `changelog.d/` fragments
+- `npm run changelog:collate` - Fold pending fragments into this week's release (runs on `main`, not on a branch)
 
 ### Storybook
 
@@ -83,6 +85,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 - `src/utils/` - Utility functions and helpers
 - `src/styles/` - CSS files and styling
 - `worker/` - Cloudflare Worker (serves the SPA + API routes)
+- `changelog.d/` - Pending changelog entries, one file per branch, folded into `CHANGELOG.md` on `main`
 - `migrations/` - D1 migrations, shared with the local store's schema ladder
 - `docs/` - Living design and reference docs
 - `e2e/` - Visual regression baselines and runner
@@ -105,7 +108,8 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 - Run `npm run format` to format code
 - Run `npm run lint` to check for errors
 - Run `npm run knip` to check for dead code (unused files, dependencies, exports)
-- Add user-facing changes to `CHANGELOG.md`
+- Record user-facing changes in a `changelog.d/<branch>.md` fragment, never by editing `CHANGELOG.md` directly (`changelog.d/README.md`, `.claude/skills/changelog`)
+- Run `npm run check:changelog` to check the changelog and any fragment
 
 ### Performance
 

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 // (src/data/view-state.ts) — these tests only exercise value propagation, and
 // no noteId is passed, so transient collapse state is all that's needed.
 vi.mock("../../data/view-state", () => ({
-  useCollapseState: () => ({ collapsed: new Set<string>(), toggleCollapse: () => {} }),
+  useFoldRule: () => ({ expanded: () => true, setFold: () => {} }),
 }))
 vi.mock("../../global-state", async () => {
   const { atom } = await import("jotai")

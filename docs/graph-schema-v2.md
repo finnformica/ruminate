@@ -231,16 +231,33 @@ invisible — each has a basket to be shown in. A block whose note is later
 deleted, but that another note holds, keeps a dead `notes_id`; it only
 matters if it is later orphaned, which a global "no note" view can cover.
 
-**Default expansion.** Expand **n=2** levels beneath the top of the note by
-default (Settings → Editor moves n), counting every block alike: a header is
-folded at depth n like any other parent, so a note of headers over lists opens
-as its headers. That policy is a **seed, not a layer**: the
-first time a note is opened on a device it fills in that note's collapsed set
-in localStorage (one set of node ids — collapsed means folded, everything else
-is open), and it is never consulted again. Afterwards a toggle simply adds or
-removes an id, nodes added later start expanded, and a device that loses its
-localStorage re-seeds. The renderer's depth cap doubles as the guard against
-pathologically deep transclusion chains.
+**Default expansion, and the lazy walk.** Expand **n=2** levels beneath the
+top of the view by default (Settings → Editor moves n), counting every block
+alike: a header is folded at depth n like any other parent, so a note of
+headers over lists opens as its headers. That policy is a **standing rule**
+(`expandedByDepth`, src/blocks/default-collapsed.ts): it decides every row
+the reader has not folded or unfolded themselves, in every note, every time,
+so moving the setting moves every such row. Over it sit the reader's own
+folds — the rows they closed _and_ the rows they opened, each remembered
+explicitly per occurrence key in localStorage (`src/data/view-state.ts`), so
+a row they opened stays open when the setting moves and a row they closed
+stays closed as the note grows. A device that loses its localStorage is back
+on the rule.
+
+The two together are the **fold rule** the walk descends by (`walkGraph`,
+src/data/graph.ts). The walk is lazy: every block it touches carries its
+complete list of children's ids — the graph's, exactly, which is what draws
+the fold chevron and keeps a save diff to nothing — but the children
+themselves are walked in only beneath an occurrence the rule opens. A closed
+row is a row with a chevron and nothing beneath it; opening it walks one more
+level. So the doc is O(what is on screen), however large the graph, and a
+view from any root is the same walk: a note (its children as the roots, level
+
+1. and a zoomed block (the block as the doc's one root, at level 0, its
+   children level 1) differ only in where the walk starts. Zooming out of a
+   block opens the folds along one path back to it first, so the reader lands
+   on the row they left. The renderer's depth cap doubles as the guard against
+   pathologically deep transclusion chains.
 
 ## Rollup test plan
 
