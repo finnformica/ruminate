@@ -342,12 +342,17 @@ export function MobileEditBar({
                 <RedoIcon16 />
               </BarButton>
             ) : null}
-            <Rule />
             {actions.image ? (
-              <BarButton label="Image" onClick={actions.image}>
-                <ImageIcon16 />
-              </BarButton>
+              <>
+                <Rule />
+                <BarButton label="Image" onClick={actions.image}>
+                  <ImageIcon16 />
+                </BarButton>
+              </>
             ) : null}
+            {/* Delete keeps to the far right, away from the rest, as the
+                destructive one; the gap closes only when the row scrolls. */}
+            <Rule className="ml-auto" />
             <BarButton label="Delete" onClick={actions.remove} className="text-text-danger">
               <TrashIcon16 />
             </BarButton>
@@ -367,8 +372,8 @@ export function MobileEditBar({
 }
 
 /** A hairline between groups of buttons. */
-function Rule() {
-  return <span aria-hidden className="my-3.5 w-px shrink-0 bg-border-secondary" />
+function Rule({ className }: { className?: string }) {
+  return <span aria-hidden className={cx("my-3.5 w-px shrink-0 bg-border-secondary", className)} />
 }
 
 /** Keeps focus where it is: the pointer down is cancelled, so the textarea
