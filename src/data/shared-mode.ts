@@ -1,5 +1,5 @@
 import { atom, getDefaultStore } from "jotai"
-import { NOTE_TYPE, buildGraphSnapshot, type GraphSnapshot } from "./graph"
+import { NOTE_TYPE, buildGraphSnapshot, indexParents, type GraphSnapshot } from "./graph"
 import type { NodeRow } from "../../worker/handlers/replica-payload"
 import type { Op } from "./ops"
 import { listShares, pullShare, type ReceivedShareSummary } from "./shares"
@@ -103,9 +103,14 @@ const jotai = () => getDefaultStore()
 export function mergeSnapshots(a: GraphSnapshot, b: GraphSnapshot): GraphSnapshot {
   if (b.nodes.size === 0 && b.childLinks.size === 0) return a
   if (a.nodes.size === 0 && a.childLinks.size === 0) return b
+  const childLinks = new Map([...a.childLinks, ...b.childLinks])
+  // The reverse index is rebuilt from the merged lists rather than merged by
+  // key: a node the user linked in from a slice is held by a source on each
+  // side, and only a rebuild keeps both parents.
   return {
     nodes: new Map([...a.nodes, ...b.nodes]),
-    childLinks: new Map([...a.childLinks, ...b.childLinks]),
+    childLinks,
+    parentLinks: indexParents(childLinks),
   }
 }
 

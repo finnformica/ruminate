@@ -125,8 +125,12 @@ Design notes, and why:
   siblings of one parent, a handful of rows).
 - **No stored upstream, no second direction.** `link_destination` _is_ the
   reverse edge — maintained atomically by the engine, zero drift risk. The
-  in-memory snapshot (`buildGraphSnapshot`) indexes the reverse direction, so
-  callers never care that one direction is an index scan.
+  in-memory snapshot holds the same rows twice, `childLinks` by source and
+  `parentLinks` by destination, filled from one pass in `buildGraphSnapshot`
+  and kept in step per op by `applyOps`, so "who holds this node" is a
+  lookup for every reader (the delete menu's place count, the basket's
+  roots, the walk upstream) and never a scan — and the two directions cannot
+  drift, because nothing computes one from the other after the fact.
 - **`kind` is `'child'` only, for now.** Wikilinks and tags were removed as
   features — `[[...]]` and `#word` in text are plain text and produce no
   edges (the v1 links table was a derived index). The `kind`

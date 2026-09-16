@@ -64,6 +64,20 @@ describe("mergeSnapshots", () => {
     expect([...merged.nodes.keys()].sort()).toEqual(["blk_a", "blk_note", "blk_x"])
     expect(merged.childLinks.get("blk_note")).toHaveLength(1)
   })
+
+  it("indexes parents across the seam: a shared block the user also holds has both", () => {
+    // The user linked a shared block into their own note, so it is held on
+    // both sides; a merge by key would keep one parent, a rebuild keeps both.
+    const own = buildGraphSnapshot([node("blk_x", "x", "note")], [link("blk_x", "blk_a")])
+    const shared = buildGraphSnapshot(SLICE.nodes, SLICE.links)
+    const merged = mergeSnapshots(own, shared)
+    expect(
+      merged.parentLinks
+        .get("blk_a")!
+        .map((l) => l.source_id)
+        .sort(),
+    ).toEqual(["blk_note", "blk_x"])
+  })
 })
 
 describe("asNotes", () => {

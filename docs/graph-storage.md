@@ -56,7 +56,9 @@ one D1 database behind the Worker                 ← the authoritative cross-de
 ### How the app is fed
 
 Everything above `src/data` reads one atom: `graphSnapshotAtom`, the
-`GraphSnapshot` of every live row (`nodes` by id, `childLinks` by parent).
+`GraphSnapshot` of every live row (`nodes` by id, `childLinks` by parent, and
+the same link rows again as `parentLinks` by child — the reverse index, a
+by-product of building the snapshot rather than a scan of it).
 `src/data/database-mode.ts` serves the SQL store's rows into
 `databaseGraphAtom`, and `graphSnapshotAtom` reads it whenever a user is
 signed in. `notesAtom` is derived from it per page (`src/data/note-meta.ts`:
