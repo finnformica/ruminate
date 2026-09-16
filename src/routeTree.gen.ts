@@ -14,6 +14,7 @@ import { Route as rootRoute } from './routes/__root'
 import { Route as AppRootImport } from './routes/_appRoot'
 import { Route as AppRootIndexImport } from './routes/_appRoot.index'
 import { Route as AppRootSettingsImport } from './routes/_appRoot.settings'
+import { Route as AppRootChangelogImport } from './routes/_appRoot.changelog'
 import { Route as AppRootAdminImport } from './routes/_appRoot.admin'
 import { Route as AppRootNotesIndexImport } from './routes/_appRoot.notes.index'
 import { Route as AppRootNotesSplatImport } from './routes/_appRoot.notes_.$'
@@ -35,6 +36,12 @@ const AppRootIndexRoute = AppRootIndexImport.update({
 const AppRootSettingsRoute = AppRootSettingsImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => AppRootRoute,
+} as any)
+
+const AppRootChangelogRoute = AppRootChangelogImport.update({
+  id: '/changelog',
+  path: '/changelog',
   getParentRoute: () => AppRootRoute,
 } as any)
 
@@ -80,6 +87,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRootAdminImport
       parentRoute: typeof AppRootImport
     }
+    '/_appRoot/changelog': {
+      id: '/_appRoot/changelog'
+      path: '/changelog'
+      fullPath: '/changelog'
+      preLoaderRoute: typeof AppRootChangelogImport
+      parentRoute: typeof AppRootImport
+    }
     '/_appRoot/settings': {
       id: '/_appRoot/settings'
       path: '/settings'
@@ -122,6 +136,7 @@ declare module '@tanstack/react-router' {
 
 interface AppRootRouteChildren {
   AppRootAdminRoute: typeof AppRootAdminRoute
+  AppRootChangelogRoute: typeof AppRootChangelogRoute
   AppRootSettingsRoute: typeof AppRootSettingsRoute
   AppRootIndexRoute: typeof AppRootIndexRoute
   AppRootInviteTokenRoute: typeof AppRootInviteTokenRoute
@@ -131,6 +146,7 @@ interface AppRootRouteChildren {
 
 const AppRootRouteChildren: AppRootRouteChildren = {
   AppRootAdminRoute: AppRootAdminRoute,
+  AppRootChangelogRoute: AppRootChangelogRoute,
   AppRootSettingsRoute: AppRootSettingsRoute,
   AppRootIndexRoute: AppRootIndexRoute,
   AppRootInviteTokenRoute: AppRootInviteTokenRoute,
@@ -144,6 +160,7 @@ const AppRootRouteWithChildren =
 export interface FileRoutesByFullPath {
   '': typeof AppRootRouteWithChildren
   '/admin': typeof AppRootAdminRoute
+  '/changelog': typeof AppRootChangelogRoute
   '/settings': typeof AppRootSettingsRoute
   '/': typeof AppRootIndexRoute
   '/invite/$token': typeof AppRootInviteTokenRoute
@@ -153,6 +170,7 @@ export interface FileRoutesByFullPath {
 
 export interface FileRoutesByTo {
   '/admin': typeof AppRootAdminRoute
+  '/changelog': typeof AppRootChangelogRoute
   '/settings': typeof AppRootSettingsRoute
   '/': typeof AppRootIndexRoute
   '/invite/$token': typeof AppRootInviteTokenRoute
@@ -164,6 +182,7 @@ export interface FileRoutesById {
   __root__: typeof rootRoute
   '/_appRoot': typeof AppRootRouteWithChildren
   '/_appRoot/admin': typeof AppRootAdminRoute
+  '/_appRoot/changelog': typeof AppRootChangelogRoute
   '/_appRoot/settings': typeof AppRootSettingsRoute
   '/_appRoot/': typeof AppRootIndexRoute
   '/_appRoot/invite/$token': typeof AppRootInviteTokenRoute
@@ -174,13 +193,28 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '' | '/admin' | '/settings' | '/' | '/invite/$token' | '/notes/$' | '/notes'
+    | ''
+    | '/admin'
+    | '/changelog'
+    | '/settings'
+    | '/'
+    | '/invite/$token'
+    | '/notes/$'
+    | '/notes'
   fileRoutesByTo: FileRoutesByTo
-  to: '/admin' | '/settings' | '/' | '/invite/$token' | '/notes/$' | '/notes'
+  to:
+    | '/admin'
+    | '/changelog'
+    | '/settings'
+    | '/'
+    | '/invite/$token'
+    | '/notes/$'
+    | '/notes'
   id:
     | '__root__'
     | '/_appRoot'
     | '/_appRoot/admin'
+    | '/_appRoot/changelog'
     | '/_appRoot/settings'
     | '/_appRoot/'
     | '/_appRoot/invite/$token'
@@ -214,6 +248,7 @@ export const routeTree = rootRoute
       "filePath": "_appRoot.tsx",
       "children": [
         "/_appRoot/admin",
+        "/_appRoot/changelog",
         "/_appRoot/settings",
         "/_appRoot/",
         "/_appRoot/invite/$token",
@@ -223,6 +258,10 @@ export const routeTree = rootRoute
     },
     "/_appRoot/admin": {
       "filePath": "_appRoot.admin.tsx",
+      "parent": "/_appRoot"
+    },
+    "/_appRoot/changelog": {
+      "filePath": "_appRoot.changelog.tsx",
       "parent": "/_appRoot"
     },
     "/_appRoot/settings": {

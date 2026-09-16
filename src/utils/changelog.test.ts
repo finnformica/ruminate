@@ -3,8 +3,10 @@ import {
   parseChangelog,
   parseFragment,
   renderRelease,
+  formatReleaseDates,
   splitLead,
   toReleaseWeek,
+  toSegments,
   visibleLength,
 } from "./changelog"
 
@@ -171,5 +173,52 @@ describe("renderRelease", () => {
     const source = "# Changelog\n\n## 2026-W38\n\n### Added\n\n- One. Detail.\n- Two.\n"
     const { releases } = parseChangelog(source)
     expect(parseChangelog(`# Changelog\n\n${renderRelease(releases[0])}`).problems).toEqual([])
+  })
+})
+
+describe("formatReleaseDates", () => {
+  test("a week inside one month reads as a span of days", () => {
+    expect(formatReleaseDates("2026-W38")).toBe("14–20 September 2026")
+  })
+
+  test("a week across two months names both", () => {
+    expect(formatReleaseDates("2026-W40")).toBe("28 September – 4 October 2026")
+  })
+
+  test("a week across two years names both", () => {
+    expect(formatReleaseDates("2026-W01")).toBe("29 December 2025 – 4 January 2026")
+  })
+
+  test("a week it cannot read is left as it was", () => {
+    expect(formatReleaseDates("not-a-week")).toBe("not-a-week")
+  })
+})
+
+describe("toSegments", () => {
+  test("text with no keys is one segment", () => {
+    expect(toSegments("Plain words.")).toEqual([{ type: "text", text: "Plain words." }])
+  })
+
+  test("keys pressed together are one run", () => {
+    expect(toSegments("Press <kbd>⌘</kbd> <kbd>K</kbd> to search.")).toEqual([
+      { type: "text", text: "Press " },
+      { type: "keys", keys: ["⌘", "K"] },
+      { type: "text", text: " to search." },
+    ])
+  })
+
+  test("a word between keys starts a new run, so a chord is not one keycap", () => {
+    expect(toSegments("<kbd>g</kbd> then <kbd>a</kbd>")).toEqual([
+      { type: "keys", keys: ["g"] },
+      { type: "text", text: " then " },
+      { type: "keys", keys: ["a"] },
+    ])
+  })
+
+  test("a backtick named as a key stays a key", () => {
+    expect(toSegments("<kbd>`</kbd> toggles code.")).toEqual([
+      { type: "keys", keys: ["`"] },
+      { type: "text", text: " toggles code." },
+    ])
   })
 })

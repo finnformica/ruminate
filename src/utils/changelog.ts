@@ -24,6 +24,9 @@
  * detail, shown on the changelog page.
  */
 
+import { addDays, parseISO } from "date-fns"
+import { MONTH_NAMES } from "./date"
+
 /** The categories an entry can sit under, in the order they are written. */
 const CATEGORIES = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"] as const
 
@@ -37,7 +40,7 @@ export const MAX_LEAD_LENGTH = 140
  * entry is documentation, and belongs in `docs/`. */
 export const MAX_ENTRY_LENGTH = 500
 
-type ChangelogEntry = {
+export type ChangelogEntry = {
   /** The first sentence: what changed, and why it matters. */
   lead: string
   /** Everything after the lead sentence; empty when the entry is one sentence. */
@@ -124,6 +127,58 @@ export function renderRelease(release: ChangelogRelease): string {
     )
     .join("\n\n")
   return `## ${release.week}\n\n${body}\n`
+}
+
+/**
+ * The days a release covers, as a reader would say them: the ISO week is how
+ * the file is keyed, but "2026-W38" is not a date anybody reads.
+ *
+ * @example
+ * formatReleaseDates("2026-W38") // "14–20 September 2026"
+ * formatReleaseDates("2026-W40") // "28 September – 4 October 2026"
+ */
+export function formatReleaseDates(week: string): string {
+  const start = parseISO(week)
+  if (Number.isNaN(start.getTime())) return week
+  const end = addDays(start, 6)
+  const day = (date: Date) => date.getDate()
+  const month = (date: Date) => MONTH_NAMES[date.getMonth()]
+  const year = (date: Date) => date.getFullYear()
+  if (year(start) !== year(end)) {
+    return `${day(start)} ${month(start)} ${year(start)} – ${day(end)} ${month(end)} ${year(end)}`
+  }
+  if (month(start) !== month(end)) {
+    return `${day(start)} ${month(start)} – ${day(end)} ${month(end)} ${year(end)}`
+  }
+  return `${day(start)}–${day(end)} ${month(end)} ${year(end)}`
+}
+
+/**
+ * A run of text, or a run of keys pressed together. An entry names shortcuts
+ * as `<kbd>` tags, and a keycap is drawn rather than written
+ * (`src/components/keys.tsx`), so the text is handed out in the pieces between
+ * them for markdown to render.
+ */
+export type EntrySegment = { type: "text"; text: string } | { type: "keys"; keys: string[] }
+
+/** Adjacent keycaps are one shortcut; a word between them starts a new run. */
+const KEY_RUN = /<kbd>[^<]*<\/kbd>(?:\s*<kbd>[^<]*<\/kbd>)*/g
+const KEY = /<kbd>([^<]*)<\/kbd>/g
+
+export function toSegments(text: string): EntrySegment[] {
+  const segments: EntrySegment[] = []
+  let at = 0
+  for (const match of text.matchAll(KEY_RUN)) {
+    const index = match.index ?? 0
+    if (index > at) segments.push({ type: "text", text: text.slice(at, index) })
+    segments.push({
+      type: "keys",
+      keys: [...match[0].matchAll(KEY)].map((key) => key[1]),
+    })
+    at = index + match[0].length
+  }
+  if (at < text.length) segments.push({ type: "text", text: text.slice(at) })
+  return segments
 }
 
 const TITLE = "# Changelog"
