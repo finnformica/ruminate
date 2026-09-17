@@ -8,7 +8,6 @@ import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
 import { useCoarsePointer } from "../../hooks/coarse-pointer"
 import { DropdownMenu } from "../dropdown-menu"
-import { CheckIcon16 } from "../icons"
 
 /**
  * The block's right-click menu: the standard actions on one row, the same
@@ -441,20 +440,32 @@ export function BlockMenuSheet({
                 return <div key={index} className="mx-3 my-1 h-px bg-border-secondary" />
               }
               if (entry.kind === "group") {
+                // A group's choices as chips in a row, the current one
+                // filled: seven block types read at a glance, where seven
+                // rows would push the rest of the sheet off the screen.
                 return (
-                  <div key={index} className="py-1">
-                    <div className="px-3 pt-2 pb-1 text-xs font-medium text-text-tertiary">
+                  <div key={index} className="py-1" data-testid={entry.testId}>
+                    <div className="px-3 pt-2 pb-1.5 text-xs font-medium text-text-tertiary">
                       {entry.label}
                     </div>
-                    {entry.items.map((it) => (
-                      <SheetRow
-                        key={it.key}
-                        onSelect={pick(it.onSelect)}
-                        trailing={it.selected ? <CheckIcon16 /> : undefined}
-                      >
-                        {it.label}
-                      </SheetRow>
-                    ))}
+                    <div className="flex flex-wrap gap-2 px-3 pb-1">
+                      {entry.items.map((it) => (
+                        <button
+                          key={it.key}
+                          type="button"
+                          aria-pressed={it.selected}
+                          onClick={pick(it.onSelect)}
+                          className={cx(
+                            "h-9 max-w-full cursor-pointer select-none truncate rounded-full px-3.5 text-[14px] ring-1 ring-inset active:bg-bg-active",
+                            it.selected
+                              ? "bg-bg-secondary text-text ring-transparent"
+                              : "text-text-secondary ring-border-secondary",
+                          )}
+                        >
+                          {it.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )
               }
