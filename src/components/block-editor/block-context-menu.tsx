@@ -456,7 +456,7 @@ export function BlockMenuSheet({
                           aria-pressed={it.selected}
                           onClick={pick(it.onSelect)}
                           className={cx(
-                            "h-9 max-w-full cursor-pointer select-none truncate rounded-full px-3.5 text-[14px] ring-1 ring-inset active:bg-bg-active",
+                            "h-9 max-w-full cursor-pointer select-none truncate rounded-full px-3 text-[14px] ring-1 ring-inset active:bg-bg-active",
                             it.selected
                               ? "bg-bg-secondary text-text ring-transparent"
                               : "text-text-secondary ring-border-secondary",
