@@ -52,8 +52,18 @@ export function ReleaseNotes({ release }: { release: ChangelogRelease }) {
             <span aria-hidden className="h-px flex-1 bg-border-secondary" />
           </h3>
           <ul className="flex flex-col gap-6">
-            {section.entries.map((entry) => (
-              <li key={entry.line}>
+            {/* Keyed by position, NOT by `entry.line`. A week is collated from
+                every file written that week (docs/changelog.md), and a line
+                number only means anything within the file it came from — so
+                each file's first bullet is line 3, and a week of seven files
+                handed React the same key seven times. It answered by
+                duplicating entries: switching weeks left the outgoing week's
+                entries behind, and a few switches showed the same change
+                three times over. A section's entries are a fixed list built
+                once from disk, never reordered or filtered, so where an entry
+                sits in it IS its identity. */}
+            {section.entries.map((entry, index) => (
+              <li key={index}>
                 <Entry entry={entry} />
               </li>
             ))}

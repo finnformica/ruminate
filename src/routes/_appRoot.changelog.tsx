@@ -1,6 +1,8 @@
-import { createFileRoute, Link } from "@tanstack/react-router"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef } from "react"
-import { HistoryIcon16 } from "../components/icons"
+import { Button } from "../components/button"
+import { DropdownMenu } from "../components/dropdown-menu"
+import { ChevronDownIcon16, HistoryIcon16 } from "../components/icons"
 import { PageLayout } from "../components/page-layout"
 import { ReleaseNotes } from "../components/release-notes"
 import { formatReleaseDates } from "../utils/changelog"
@@ -35,12 +37,16 @@ export const Route = createFileRoute("/_appRoot/changelog")({
  * The opening cost the lazy mounting was built to avoid is gone with it,
  * because one release is all that is ever drawn.
  *
- * A tab is an ordinary link, so it pushes: Back walks you out through the
+ * A week is an ordinary link, so it pushes: Back walks you out through the
  * weeks you read, and `?release=…` still links to one.
+ *
+ * The weeks are a rail beside the release where there is room for one, and a
+ * single menu button above it where there is not (`ReleasePicker`).
  */
 function RouteComponent() {
   const releases = Route.useLoaderData()
   const { release } = Route.useSearch()
+  const navigate = useNavigate()
   // An address naming a week that is not here — an old link, a typo — shows
   // the newest rather than nothing at all.
   const known = releases.some((entry) => entry.week === release)
@@ -76,39 +82,75 @@ function RouteComponent() {
             column is centred rather than pushed across — but it is the first
             thing given up: until there is width to spare the reading column
             takes it instead of leaving it blank beside a column that has
-            started to squeeze. Below 640px the rail lies down as a strip of
-            tabs above the release and the column has the width to itself.
+            started to squeeze. Below 640px the rail becomes one menu button
+            above the release and the column has the width to itself.
 
             640px is where a 11rem rail plus its gap still leaves a readable
             measure; it is also the step the note page changes at, so the two
             pages reflow together. */}
         <div className="mx-auto grid w-full max-w-[64rem] grid-cols-1 gap-6 @[640px]:grid-cols-[11rem_minmax(0,1fr)] @[640px]:gap-8 @[1152px]:grid-cols-[11rem_minmax(0,1fr)_11rem]">
-          <nav
-            aria-label="Releases"
-            className="-mx-4 flex gap-1 overflow-x-auto px-4 @[640px]:sticky @[640px]:top-8 @[640px]:mx-0 @[640px]:h-fit @[640px]:flex-col @[640px]:overflow-x-visible @[640px]:px-0"
-          >
-            {releases.map((entry) => {
-              const reading = entry.week === current
-              return (
-                <Link
-                  key={entry.week}
-                  to="/changelog"
-                  search={{ release: entry.week }}
-                  aria-current={reading ? "page" : undefined}
-                  className={cx(
-                    "focus-ring shrink-0 whitespace-nowrap rounded px-2 py-1 text-left text-sm",
-                    reading
-                      ? "bg-bg-secondary font-bold text-text"
-                      : "text-text-secondary hover:bg-bg-hover",
-                  )}
-                >
-                  {/* Short in the rail, which is narrow; the release's own
-                      heading says it in full. */}
-                  {formatReleaseDates(entry.week, { short: true })}
-                </Link>
-              )
-            })}
-          </nav>
+          <div className="@[640px]:sticky @[640px]:top-8 @[640px]:h-fit">
+            {/* Narrow, the weeks are a menu behind one button. They used to be
+                a strip of tabs scrolled sideways, which hides most of the list
+                off the edge of the screen and asks for a swipe to find out
+                what is even there — on the surface where a sideways swipe is
+                least wanted. A button that names the week you are reading says
+                more in less room, and opening it shows every week at once. */}
+            <DropdownMenu>
+              <DropdownMenu.Trigger
+                render={
+                  <Button
+                    aria-label="Choose a release"
+                    className="w-full justify-between @[640px]:hidden"
+                  >
+                    {formatReleaseDates(current ?? "", { short: true })}
+                    <ChevronDownIcon16 className="text-text-secondary" />
+                  </Button>
+                }
+              />
+              <DropdownMenu.Content align="start" width="var(--anchor-width)">
+                {releases.map((entry) => (
+                  <DropdownMenu.Item
+                    key={entry.week}
+                    selected={entry.week === current}
+                    href={`/changelog?release=${entry.week}`}
+                    // A real link, so it can be copied or opened in a tab —
+                    // but a plain click navigates in the app rather than
+                    // reloading it.
+                    onClick={(event) => {
+                      event.preventDefault()
+                      void navigate({ to: "/changelog", search: { release: entry.week } })
+                    }}
+                  >
+                    {formatReleaseDates(entry.week, { short: true })}
+                  </DropdownMenu.Item>
+                ))}
+              </DropdownMenu.Content>
+            </DropdownMenu>
+            <nav aria-label="Releases" className="hidden flex-col gap-1 @[640px]:flex">
+              {releases.map((entry) => {
+                const reading = entry.week === current
+                return (
+                  <Link
+                    key={entry.week}
+                    to="/changelog"
+                    search={{ release: entry.week }}
+                    aria-current={reading ? "page" : undefined}
+                    className={cx(
+                      "focus-ring shrink-0 whitespace-nowrap rounded px-2 py-1 text-left text-sm",
+                      reading
+                        ? "bg-bg-secondary font-bold text-text"
+                        : "text-text-secondary hover:bg-bg-hover",
+                    )}
+                  >
+                    {/* Short in the rail, which is narrow; the release's own
+                        heading says it in full. */}
+                    {formatReleaseDates(entry.week, { short: true })}
+                  </Link>
+                )
+              })}
+            </nav>
+          </div>
           <div ref={column} className="min-w-0">
             {showing ? (
               <ReleaseNotes release={showing} />
