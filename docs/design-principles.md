@@ -208,19 +208,29 @@ promote chrome over content.
 
 Zooming re-derives depth: the zoomed block's children start again at depth 0,
 so a level-4 heading reads as a top-level section inside its own zoomed view.
-The zoom title _is_ the note title: the zoomed block is the page, so the
-editor draws it with the same `NoteTitle` component the page draws the note's
-title with — 3xl, the hanging `#`, the same highlight and the same keys — fed
-the block's text instead of the note's. It is not a row: the rows are the
-block's children, from depth 0, and ↑ from the first hands the keyboard up to
-the title as it would to the note title (`exitTop`), Enter on the title makes
-the block's first child, and renaming it is a text edit of the block. Whatever
-the block's type, only its text reads as the title (its bullet, checkbox or
-heading `#` belongs to its row in the outline); a block whose text is more
-than one plain line — a code block, a picture's caption, text with line breaks
-— reads as the title but is edited in its own row, un-zoomed. It hangs into
-the gutter with the breadcrumb above it (`.note-header`), so its children
-read as indented beneath it.
+
+**Only a heading becomes the view's title** (`titlesZoom`, `src/blocks/markers.ts`).
+A heading already names what hangs beneath it, so the zoom title _is_ the note
+title: the editor draws it with the same `NoteTitle` component the page draws
+the note's title with — 3xl, the hanging `#`, the same highlight and the same
+keys — fed the block's text instead of the note's. It is not a row: the rows
+are the block's children, from depth 0, and ↑ from the first hands the
+keyboard up to the title as it would to the note title (`exitTop`), Enter on
+the title makes the block's first child, and renaming it is a text edit of the
+block. Only its text reads as the title — the heading `#` belongs to its row
+in the outline — and a heading whose text is more than one plain line reads as
+the title but is edited in its own row, un-zoomed. It hangs into the gutter
+with the breadcrumb above it (`.note-header`), so its children read as
+indented beneath it.
+
+**Every other type leads the view as its own first row.** A to-do, a picture,
+a quote, a code block, a paragraph: these are content, not names. Stripped of
+their marker and set in title type they say something they do not mean — a
+to-do stops looking done-able, a picture becomes its caption — and a code
+block has nothing a one-line field could edit. So the view draws no title at
+all: the focused block is the first row, at depth 0, exactly as it is drawn
+anywhere else, with its subtree indented beneath it. The breadcrumb alone says
+where you are, and everything below the leading row reads as it does un-zoomed.
 
 ## Spacing
 

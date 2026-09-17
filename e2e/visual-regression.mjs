@@ -37,8 +37,9 @@ const DEFAULT_MAX_DIFF_RATIO = 0
 const STORIES = [
   { id: "blockeditor--mixed", waitFor: '[data-testid="block-body"]' },
   { id: "blockeditor--nested-todo", waitFor: '[data-testid="block-body"]' },
+  // A zoom with no title: the bullet leads the view as its own first row.
   { id: "blockeditor--zoomed", waitFor: '[data-testid="zoom-breadcrumb"]' },
-  // A HEADING zoom (the plain zoomed story zooms a paragraph): covers the
+  // A HEADING zoom — the one family drawn as the view's title: covers the
   // hanging # and the depth re-derivation of the title's child headings.
   { id: "blockeditor--deep-headings-zoomed", waitFor: '[data-testid="zoom-breadcrumb"]' },
   { id: "blockeditor--selection-sweep", waitFor: '[data-testid="block-body"]' },

@@ -8,6 +8,7 @@ import { deleteBlockOps, deleteSubtreeOps, parentCount } from "../../data/ops"
 import { useApplyOps } from "../../data/store"
 import { useFoldRule } from "../../data/view-state"
 import { collapsedKeysOf } from "../../blocks/default-collapsed"
+import { titlesZoom } from "../../blocks/markers"
 import { graphSnapshotAtom, isDatabaseModeAtom } from "../../global-state"
 import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
 import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
@@ -43,10 +44,15 @@ function ensureTrailingBlank(doc: BlockDoc): BlockDoc {
  * instead we only make sure the zoom root has at least one child to edit when
  * the zoom *starts* (e.g. zooming into a leaf). Deleting the last child later
  * is allowed — the title alone is a valid view (Enter on it creates a child).
+ *
+ * Only where the block is drawn as the view's title (`titlesZoom`): a block
+ * that leads the view as its own first row is already something to edit, and
+ * minting a blank child under it would put a block in the note for nothing
+ * more than having looked at one.
  */
 function ensureZoomChild(doc: BlockDoc, zoomId: string): BlockDoc {
   const root = doc.blocks[zoomId]
-  if (!root || root.children.length > 0) return doc
+  if (!root || root.children.length > 0 || !titlesZoom(root.type)) return doc
   const block = emptyBlock()
   return {
     ...doc,
