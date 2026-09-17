@@ -143,10 +143,12 @@ export function BlockNoteEditor({
   rowRemoval?: "unlink" | "delete"
 }) {
   // Read-only history views are shown verbatim; only editable notes get the
-  // always-present trailing blank.
+  // always-present trailing blank — and not while zoomed, where the doc's
+  // one root is the zoomed block: a blank beside it would be a root the
+  // note never holds (`ensureZoomChild` is the zoomed rule).
   const seedDoc = (incoming: BlockDoc) => {
     const seeded = withStarterBlock(incoming)
-    return readOnly || !trailingBlank ? seeded : ensureTrailingBlank(seeded)
+    return readOnly || !trailingBlank || zoomBlockId ? seeded : ensureTrailingBlank(seeded)
   }
 
   const [doc, setDoc] = useState<BlockDoc>(() => seedDoc(incoming))

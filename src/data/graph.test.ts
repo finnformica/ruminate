@@ -821,6 +821,88 @@ describe("walkGraph (the lazy walk)", () => {
   })
 })
 
+describe("walkGraph upstream (the graph, not the tree)", () => {
+  // home > a > s; other > p > s; and other holds a block that holds home.
+  const graph = () =>
+    buildGraphSnapshot(
+      [
+        row("home", "note", "Home"),
+        row("other", "note", "Other"),
+        row("blk_a", "ul", "a"),
+        row("blk_s", "todo", "shared"),
+        row("blk_p", "ul", "p"),
+        row("blk_link", "text", "see home"),
+      ],
+      [
+        edge("home", "blk_a", "a0"),
+        edge("blk_a", "blk_s", "a0"),
+        edge("other", "blk_p", "a0"),
+        edge("blk_p", "blk_s", "a0"),
+        edge("other", "blk_link", "a1"),
+        edge("blk_link", "home", "a0"),
+      ],
+    )
+  const open = () => true
+
+  it("carries every block's parents, and walks only the ones not on the path", () => {
+    const { doc } = noteView("home", graph(), open, "both")!
+    // Complete lists, the graph's: a is held by home, s by a and p.
+    expect(doc.blocks.blk_a.upstream).toEqual(["home"])
+    expect(doc.blocks.blk_s.upstream).toEqual(["blk_a", "blk_p"])
+    // s's other parent p is walked in beneath it, and p's parent `other`
+    // beneath p; a's only parent is the note, on the path, so a's rows are
+    // the tree's.
+    expect(Object.keys(doc.blocks).sort()).toEqual(["blk_a", "blk_link", "blk_p", "blk_s", "other"])
+    expect(doc.blocks.blk_p.upstream).toEqual(["other"])
+    // The note's own parents are the doc's, after the roots.
+    expect(doc.upstream).toEqual(["blk_link"])
+    expect(doc.blocks.blk_link.upstream).toEqual(["other"])
+  })
+
+  it("downstream only carries no parents and equals the eager walk", () => {
+    const { doc } = noteView("home", graph(), open, "downstream")!
+    expect(doc.blocks.blk_s.upstream).toBeUndefined()
+    expect(doc.upstream).toBeUndefined()
+    expect(doc).toEqual(noteDoc("home", graph()))
+  })
+
+  it("upstream only keeps the roots and follows nothing down", () => {
+    const { doc } = noteView("home", graph(), open, "upstream")!
+    expect(doc.rootBlockIds).toEqual(["blk_a"])
+    expect(doc.blocks.blk_a.children).toEqual(["blk_s"])
+    expect(doc.blocks.blk_s).toBeUndefined()
+    expect(doc.upstream).toEqual(["blk_link"])
+  })
+
+  it("folds and levels apply upstream as they do down", () => {
+    const byDepth = (levels: number) => (_key: string, level: number) => level < levels
+    // Zoomed into s (level 0), one level: its parents a and p are level 1 —
+    // rows with a chevron (each has a parent of its own beneath it), not
+    // walked, so the notes above them are not built.
+    const one = blockView("blk_s", graph(), byDepth(1), "both")!
+    expect(one.doc.blocks.blk_s.upstream).toEqual(["blk_a", "blk_p"])
+    expect([...one.collapsed].sort()).toEqual(["blk_s/^blk_a", "blk_s/^blk_p"])
+    expect(one.doc.blocks.home).toBeUndefined()
+    // Two levels: the notes are rows at level 2, each with a chevron — Home
+    // is held by `link` (its one child, a, is the row it was reached up
+    // from, so not beneath it), Other also holds `link`.
+    const two = blockView("blk_s", graph(), byDepth(2), "both")!
+    expect(two.doc.blocks.home.type).toBe("note")
+    expect([...two.collapsed].sort()).toEqual(["blk_s/^blk_a/^home", "blk_s/^blk_p/^other"])
+  })
+
+  it("a two-block loop shows once per path and ends where it closes", () => {
+    const snapshot = buildGraphSnapshot(
+      [row("p", "note", "p"), row("blk_x", "text", "x"), row("blk_y", "text", "y")],
+      [edge("p", "blk_x", "a0"), edge("blk_x", "blk_y", "a0"), edge("blk_y", "blk_x", "a0")],
+    )
+    const { doc, collapsed } = noteView("p", snapshot, open, "both")!
+    expect(doc.blocks.blk_x.upstream).toEqual(["blk_y", "p"])
+    expect(doc.blocks.blk_y.upstream).toEqual(["blk_x"])
+    expect(collapsed.size).toBe(0)
+  })
+})
+
 describe("property: generated documents round-trip", () => {
   // Deterministic PRNG so failures reproduce.
   const mulberry32 = (seed: number) => () => {

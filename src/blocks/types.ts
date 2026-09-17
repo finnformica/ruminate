@@ -79,6 +79,16 @@ export interface Block {
   props?: BlockProps | null
   /** Ordered ids of child blocks. */
   children: string[]
+  /**
+   * The ids of the blocks holding this one — its parents, in the graph's
+   * order — when the view was walked upstream as well as down
+   * (`walkGraph`, `directions.up`). Drawn as rows beneath the block after
+   * its children, each an upstream occurrence (`src/blocks/view.ts`), and
+   * diffed on save into links the other way round (parent → this block).
+   * Absent when the view does not show upstream; never carried by a parsed
+   * or copied doc.
+   */
+  upstream?: string[]
 }
 
 /**
@@ -104,6 +114,13 @@ export interface BlockDoc {
   props: BlockProps | null
   /** Top-level block ids, in order. */
   rootBlockIds: string[]
+  /**
+   * The parents of the doc's own root, when that root is not a block in the
+   * doc (a note's doc: the blocks holding the note), walked upstream — rows
+   * at the top level after the roots. Absent otherwise; a zoomed doc's root
+   * is a block, and carries its own `upstream`.
+   */
+  upstream?: string[]
   /** Every block in the doc, keyed by id — each once, however many parents. */
   blocks: Record<string, Block>
 }

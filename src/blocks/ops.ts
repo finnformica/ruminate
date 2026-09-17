@@ -1,6 +1,6 @@
 import { blockId } from "./id"
 import type { Block, BlockDoc, BlockProps, BlockType } from "./types"
-import { hasOccurrence, idOfKey, keyOf, parentKeyOf } from "./view"
+import { hasOccurrence, idOfKey, keyOf, parentKeyOf, directionOfKey, type Direction } from "./view"
 
 /**
  * Immutable operations on a BlockDoc. Each returns a new doc; the original is
@@ -12,7 +12,16 @@ import { hasOccurrence, idOfKey, keyOf, parentKeyOf } from "./view"
  * indent, remove, duplicate — is addressed by **occurrence key** (the path of
  * ids from a root, `src/blocks/view.ts`), because a block reachable from two
  * parents has two positions and the key says which one is meant. The parent
- * is read off the key, never searched for.
+ * is read off the key, never searched for — and so is the **direction**: a
+ * row may be one of its parent row's parents (`^` in the key), in which case
+ * its sibling list is that row's `upstream`, not its `children`, and moving
+ * it moves which block it holds rather than which holds it.
+ *
+ * The two lists are mirrors of one edge — `P.children` names X exactly when
+ * `X.upstream` names P, wherever both blocks are in the doc — and every
+ * change to one here is reflected in the other (`setSiblingList`), so the
+ * save diff can read `children` as the truth and consult `upstream` only
+ * for a parent that has left the doc (`docToOps`).
  */
 
 export function emptyBlock(type: BlockType = "text", text = ""): Block {
@@ -31,35 +40,89 @@ function clone(doc: BlockDoc): BlockDoc {
   return {
     props: doc.props,
     rootBlockIds: [...doc.rootBlockIds],
+    ...(doc.upstream ? { upstream: [...doc.upstream] } : {}),
     blocks: { ...doc.blocks },
   }
 }
 
-/** The ordered children of a parent (null = the root list). */
-function siblingList(doc: BlockDoc, parentId: string | null): string[] {
-  return parentId === null ? doc.rootBlockIds : doc.blocks[parentId].children
+/** The ordered rows beneath a parent in one direction (null = the top
+ * level): its children, or the parents shown under it. */
+function siblingList(doc: BlockDoc, parentId: string | null, direction: Direction): string[] {
+  if (parentId === null) return direction === "up" ? (doc.upstream ?? []) : doc.rootBlockIds
+  const block = doc.blocks[parentId]
+  return direction === "up" ? (block.upstream ?? []) : block.children
 }
 
-/** Replace a parent's child list (null = the root list) in a cloned doc. */
-function setSiblingList(next: BlockDoc, parentId: string | null, list: string[]): void {
-  if (parentId === null) next.rootBlockIds = list
-  else next.blocks[parentId] = { ...next.blocks[parentId], children: list }
+/** Add or drop `other` from a block's list in `direction`, in place of the
+ * block — the mirror of an edge changed on the other side. A block the doc
+ * does not hold, or whose upstream was never walked, has nothing to mirror. */
+function mirror(next: BlockDoc, id: string, direction: Direction, other: string, add: boolean) {
+  const block = next.blocks[id]
+  if (!block) return
+  const list = direction === "up" ? block.upstream : block.children
+  if (list === undefined) return
+  const without = list.filter((x) => x !== other)
+  const updated = add ? [...without, other] : without
+  if (updated.length === list.length && !add) return
+  next.blocks[id] =
+    direction === "up" ? { ...block, upstream: updated } : { ...block, children: updated }
+}
+
+/**
+ * Replace a parent's list in one direction (null = the top level) in a
+ * cloned doc — and keep the mirrors: a child taken out of `P.children`
+ * loses P from its `upstream`, a parent added to `R.upstream` gains R in
+ * its `children`, so the doc never holds an edge in one list and not the
+ * other.
+ */
+function setSiblingList(
+  next: BlockDoc,
+  parentId: string | null,
+  direction: Direction,
+  list: string[],
+): void {
+  const before = siblingList(next, parentId, direction)
+  if (parentId === null) {
+    if (direction === "up") next.upstream = list
+    else next.rootBlockIds = list
+  } else {
+    next.blocks[parentId] =
+      direction === "up"
+        ? { ...next.blocks[parentId], upstream: list }
+        : { ...next.blocks[parentId], children: list }
+  }
+  // The other side of each edge that changed. At the top level the other
+  // end is the view's root, which is not a block in the doc: nothing there.
+  if (parentId === null) return
+  const was = new Set(before)
+  const now = new Set(list)
+  const other: Direction = direction === "up" ? "down" : "up"
+  for (const id of before) if (!now.has(id)) mirror(next, id, other, parentId, false)
+  for (const id of list) if (!was.has(id)) mirror(next, id, other, parentId, true)
 }
 
 /**
  * An occurrence's place in the tree: the key and id of its parent (null at
- * the root), the ordered ids of its sibling group, and its own index within
- * them. `null` when the key is not a path the document has.
+ * the root), which way it hangs off that parent, the ordered ids of its
+ * sibling group in that direction, and its own index within them. `null`
+ * when the key is not a path the document has.
  */
 export function siblingsOf(
   doc: BlockDoc,
   key: string,
-): { parentKey: string | null; parentId: string | null; siblings: string[]; index: number } | null {
+): {
+  parentKey: string | null
+  parentId: string | null
+  direction: Direction
+  siblings: string[]
+  index: number
+} | null {
   if (!hasOccurrence(doc, key)) return null
   const parentKey = parentKeyOf(key)
   const parentId = parentKey === null ? null : idOfKey(parentKey)
-  const siblings = siblingList(doc, parentId)
-  return { parentKey, parentId, siblings, index: siblings.indexOf(idOfKey(key)) }
+  const direction = directionOfKey(key)
+  const siblings = siblingList(doc, parentId, direction)
+  return { parentKey, parentId, direction, siblings, index: siblings.indexOf(idOfKey(key)) }
 }
 
 /** Replace a block's text (its type and children untouched). */
@@ -137,7 +200,7 @@ function insertRelative(doc: BlockDoc, refKey: string, block: Block, offset: 0 |
   next.blocks[block.id] = block
   const list = [...at.siblings]
   list.splice(at.index + offset, 0, block.id)
-  setSiblingList(next, at.parentId, list)
+  setSiblingList(next, at.parentId, at.direction, list)
   return next
 }
 
@@ -169,7 +232,7 @@ export function spliceBlocks(
 
   const list = [...at.siblings]
   list.splice(at.index, 1, ...sub.rootBlockIds)
-  setSiblingList(next, at.parentId, list)
+  setSiblingList(next, at.parentId, at.direction, list)
   return { doc: prune(next), lastId }
 }
 
@@ -190,7 +253,7 @@ export function insertBlocksAfter(
   for (const [bid, block] of Object.entries(sub.blocks)) next.blocks[bid] = block
   const list = [...at.siblings]
   list.splice(at.index + 1, 0, ...sub.rootBlockIds)
-  setSiblingList(next, at.parentId, list)
+  setSiblingList(next, at.parentId, at.direction, list)
   return { doc: next, lastId: sub.rootBlockIds[sub.rootBlockIds.length - 1] }
 }
 
@@ -254,6 +317,8 @@ function cloneSubtree(
   const fresh = blockId()
   cloned.set(id, fresh)
   const copy: Block = { ...block, id: fresh, children: [] }
+  // A copy is held only where it is put: the original's parents are not its.
+  delete copy.upstream
   into[fresh] = copy
   copy.children = block.children.map((child) => cloneSubtree(doc, child, into, cloned))
   return fresh
@@ -273,6 +338,9 @@ export function duplicateBlocks(
 ): { doc: BlockDoc; copies: string[] } | null {
   const known = keys.filter((key) => hasOccurrence(doc, key))
   if (known.length === 0) return null
+  // A parent row is a place the block is held, not a thing to copy: a copy
+  // of it would hold a copy of everything beneath it, this view included.
+  if (known.some((key) => directionOfKey(key) === "up")) return null
   const anchor = siblingsOf(doc, direction === "below" ? known[known.length - 1] : known[0])
   if (!anchor) return null
   const next = clone(doc)
@@ -281,7 +349,7 @@ export function duplicateBlocks(
   Object.assign(next.blocks, added)
   const list = [...anchor.siblings]
   list.splice(direction === "below" ? anchor.index + 1 : anchor.index, 0, ...copies)
-  setSiblingList(next, anchor.parentId, list)
+  setSiblingList(next, anchor.parentId, anchor.direction, list)
   return { doc: next, copies: copies.map((id) => keyOf(anchor.parentKey, id)) }
 }
 
@@ -295,6 +363,8 @@ export function moveBlocks(doc: BlockDoc, keys: string[], direction: "up" | "dow
   if (keys.length === 0) return doc
   const first = siblingsOf(doc, keys[0])
   if (!first) return doc
+  // Parents beneath a row have no order of their own to move within.
+  if (first.direction === "up") return doc
   for (const key of keys.slice(1)) if (parentKeyOf(key) !== first.parentKey) return doc
   const list = first.siblings
   const indices = keys.map((key) => list.indexOf(idOfKey(key))).sort((a, b) => a - b)
@@ -307,7 +377,7 @@ export function moveBlocks(doc: BlockDoc, keys: string[], direction: "up" | "dow
   const newList = [...list]
   const group = newList.splice(lo, indices.length)
   newList.splice(direction === "up" ? lo - 1 : lo + 1, 0, ...group)
-  setSiblingList(next, first.parentId, newList)
+  setSiblingList(next, first.parentId, "down", newList)
   return next
 }
 
@@ -342,9 +412,11 @@ function prune(doc: BlockDoc): BlockDoc {
       if (reachable.has(id) || !doc.blocks[id]) continue
       reachable.add(id)
       walk(doc.blocks[id].children)
+      walk(doc.blocks[id].upstream ?? [])
     }
   }
   walk(doc.rootBlockIds)
+  walk(doc.upstream ?? [])
   const dead = Object.keys(doc.blocks).filter((id) => !reachable.has(id))
   if (dead.length === 0) return doc
   const next = clone(doc)
@@ -367,9 +439,10 @@ export function removeBlock(
   if (!at) return { doc, focusKey: null }
   const next = clone(doc)
   const list = [...at.siblings]
-  const focusKey = at.index > 0 ? keyOf(at.parentKey, list[at.index - 1]) : at.parentKey
+  const focusKey =
+    at.index > 0 ? keyOf(at.parentKey, list[at.index - 1], at.direction) : at.parentKey
   list.splice(at.index, 1)
-  setSiblingList(next, at.parentId, list)
+  setSiblingList(next, at.parentId, at.direction, list)
   return { doc: prune(next), focusKey }
 }
 
@@ -385,13 +458,20 @@ export function indentBlock(doc: BlockDoc, key: string): { doc: BlockDoc; key: s
   const id = idOfKey(key)
   const prevId = at.siblings[at.index - 1]
   const prev = doc.blocks[prevId]
-  if (prev.children.includes(id) || subtreeIds(doc, id).includes(prevId)) return { doc, key }
+  const { direction } = at
+  // The edge the move makes: prev → id as a child; id → prev as a parent
+  // (a parent row indented under the parent row above it now holds that
+  // one instead). Refused when it is already there or would close a cycle.
+  const held = direction === "up" ? (prev.upstream ?? []) : prev.children
+  const cycle =
+    direction === "up" ? subtreeIds(doc, prevId).includes(id) : subtreeIds(doc, id).includes(prevId)
+  if (held.includes(id) || cycle) return { doc, key }
   const next = clone(doc)
   const list = [...at.siblings]
   list.splice(at.index, 1)
-  setSiblingList(next, at.parentId, list)
-  next.blocks[prevId] = { ...prev, children: [...prev.children, id] }
-  return { doc: next, key: keyOf(keyOf(at.parentKey, prevId), id) }
+  setSiblingList(next, at.parentId, direction, list)
+  setSiblingList(next, prevId, direction, [...held, id])
+  return { doc: next, key: keyOf(keyOf(at.parentKey, prevId, direction), id, direction) }
 }
 
 /**
@@ -405,14 +485,18 @@ export function outdentBlock(doc: BlockDoc, key: string): { doc: BlockDoc; key: 
   const id = idOfKey(key)
   const up = siblingsOf(doc, at.parentKey)
   if (!up || up.siblings.includes(id)) return { doc, key }
+  // A row hangs off its parent in one direction; lifted out, it hangs off
+  // the grandparent the way its parent does — a parent row lifted out of a
+  // parent row now holds the row above them both.
   const next = clone(doc)
   setSiblingList(
     next,
     at.parentId,
+    at.direction,
     at.siblings.filter((c) => c !== id),
   )
   const gList = [...up.siblings]
   gList.splice(up.index + 1, 0, id)
-  setSiblingList(next, up.parentId, gList)
-  return { doc: next, key: keyOf(up.parentKey, id) }
+  setSiblingList(next, up.parentId, up.direction, gList)
+  return { doc: next, key: keyOf(up.parentKey, id, up.direction) }
 }

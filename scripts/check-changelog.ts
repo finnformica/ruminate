@@ -3,22 +3,20 @@
  *
  *   npm run check:changelog
  *
- * `CHANGELOG.md` is read by the app — the changelog page, and the what's-new
- * card shown after an update — so a malformed file is a broken page, not just
- * an untidy document. This script parses it with the very module the app uses
- * (`src/utils/changelog.ts`), so CI and the app cannot disagree about what the
- * format is, and then applies the house rules on top: the shape of an entry,
- * and the words it may not use.
+ * The changelog is a folder of files — `changelog/<week>/<change>.md` — read by
+ * the app to build the changelog page and the what's-new card. A malformed
+ * entry is a broken page, not just an untidy document, so this parses them with
+ * the very module the app uses (`src/utils/changelog.ts`) and then applies the
+ * house rules on top: the shape of an entry, and the words it may not use.
  *
  * The rules exist because a changelog drifts towards being a commit log. They
  * are deliberately mechanical — whether an entry is worth a user's attention
  * at all is a judgement, and lives in `.claude/skills/changelog`.
  */
 import {
+  collateFiles,
   MAX_ENTRY_LENGTH,
   MAX_LEAD_LENGTH,
-  parseChangelog,
-  parseFragment,
   visibleLength,
   type ChangelogProblem,
   type ChangelogSection,
@@ -29,7 +27,7 @@ import {
 const builtin = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } }).process
   ?.getBuiltinModule as (id: string) => unknown
 const { readdirSync, readFileSync } = builtin("node:fs") as {
-  readdirSync: (path: string) => string[]
+  readdirSync: (path: string, options?: { withFileTypes: true }) => string[]
   readFileSync: (path: string, encoding: string) => string
 }
 
@@ -143,60 +141,65 @@ function checkSections(sections: ChangelogSection[], problems: ChangelogProblem[
   }
 }
 
-function checkChangelog(source: string): ChangelogProblem[] {
-  const { releases, problems } = parseChangelog(source)
-  for (const release of releases) {
-    if (release.sections.length === 0) {
-      problems.push({ line: release.line, message: `${release.week} has no categories.` })
+const CHANGELOG = "changelog"
+
+/** Every entry file, as `changelog/<week>/<change>.md`. */
+function changelogFiles(): { path: string; text: string }[] {
+  const files: { path: string; text: string }[] = []
+  for (const week of readdirSync(CHANGELOG).sort()) {
+    let names: string[]
+    try {
+      names = readdirSync(`${CHANGELOG}/${week}`).sort()
+    } catch {
+      // Not a folder — a stray file beside the weeks, which is reported below.
+      files.push({ path: `${CHANGELOG}/${week}`, text: "" })
+      continue
     }
-    checkSections(release.sections, problems, release.week)
+    for (const name of names) {
+      if (!name.endsWith(".md")) continue
+      const path = `${CHANGELOG}/${week}/${name}`
+      files.push({ path, text: readFileSync(path, "utf8") })
+    }
   }
-  return problems.sort((a, b) => a.line - b.line)
+  return files
 }
 
-/** A fragment is a release's entries with the week left off, so it answers to
- * the same rules — it is about to become part of the changelog. */
-function checkFragment(source: string): ChangelogProblem[] {
-  const { sections, problems } = parseFragment(source)
-  if (sections.length === 0 && problems.length === 0) {
-    problems.push({ line: 1, message: "The fragment holds no entries." })
-  }
-  checkSections(sections, problems, "this fragment")
-  return problems.sort((a, b) => a.line - b.line)
+const files = changelogFiles()
+const problems = new Map<string, ChangelogProblem[]>()
+const report = (path: string, found: ChangelogProblem[]) => {
+  if (found.length > 0) problems.set(path, [...(problems.get(path) ?? []), ...found])
 }
 
-const FRAGMENTS = "changelog.d"
-
-function fragmentPaths(): string[] {
-  try {
-    return readdirSync(FRAGMENTS)
-      .filter((name) => name.endsWith(".md") && name !== "README.md")
-      .sort()
-      .map((name) => `${FRAGMENTS}/${name}`)
-  } catch {
-    return []
-  }
+if (files.length === 0) {
+  report(CHANGELOG, [{ line: 1, message: "There are no changelog files at all." }])
 }
 
-const reports: [string, ChangelogProblem[]][] = [
-  ["CHANGELOG.md", checkChangelog(readFileSync("CHANGELOG.md", "utf8"))],
-  ...fragmentPaths().map((path): [string, ChangelogProblem[]] => [
-    path,
-    checkFragment(readFileSync(path, "utf8")),
-  ]),
-]
+// Each file on its own, so a fault is reported against the file that holds it.
+for (const file of files) {
+  const found: ChangelogProblem[] = []
+  const { releases } = collateFiles([file])
+  const week = releases[0]?.week
+  if (!week) {
+    found.push({
+      line: 1,
+      message: `Not in a week's folder. An entry file is "${CHANGELOG}/2026-W38/<change>.md".`,
+    })
+  }
+  found.push(...collateFiles([file]).problems)
+  checkSections(releases[0]?.sections ?? [], found, week ?? "this file")
+  report(
+    file.path,
+    found.sort((a, b) => a.line - b.line),
+  )
+}
 
-const total = reports.reduce((count, [, problems]) => count + problems.length, 0)
+const total = [...problems.values()].reduce((count, found) => count + found.length, 0)
 
 if (total === 0) {
-  const checked =
-    reports.length === 1
-      ? "CHANGELOG.md"
-      : `CHANGELOG.md and ${reports.length - 1} fragment${reports.length === 2 ? "" : "s"}`
-  console.log(`${checked} \u2014 no problems.`)
+  console.log(`${files.length} changelog file${files.length === 1 ? "" : "s"} \u2014 no problems.`)
 } else {
-  for (const [path, problems] of reports) {
-    for (const { line, message } of problems) console.error(`${path}:${line}  ${message}`)
+  for (const [path, found] of problems) {
+    for (const { line, message } of found) console.error(`${path}:${line}  ${message}`)
   }
   console.error(`\n${total} problem${total === 1 ? "" : "s"}.`)
   ;(globalThis as { process?: { exitCode?: number } }).process!.exitCode = 1

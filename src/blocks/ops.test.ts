@@ -79,12 +79,14 @@ describe("siblingsOf", () => {
     expect(siblingsOf(deepFixture(), "b/b1")).toEqual({
       parentKey: "b",
       parentId: "b",
+      direction: "down",
       siblings: ["b1", "b2"],
       index: 0,
     })
     expect(siblingsOf(deepFixture(), "c")).toEqual({
       parentKey: null,
       parentId: null,
+      direction: "down",
       siblings: ["a", "b", "c"],
       index: 2,
     })
@@ -584,5 +586,109 @@ describe("outdentBlock", () => {
     expect(next.doc.blocks["b"].children).toEqual([])
     expect(next.doc.blocks["b1"].children).toEqual(["b1a"])
     expect(next.key).toBe("a/b1")
+  })
+})
+
+/**
+ * A doc walked both ways: r holds x; r is held by p and q (parent rows
+ * beneath r); p is held by the note n (the doc's root, not a block here).
+ *   r            upstream: [p, q]
+ *     x
+ *     ^p         p.children: [r]   p.upstream: [n]
+ *     ^q         q.children: [r]
+ */
+function graphed(): BlockDoc {
+  return {
+    props: null,
+    rootBlockIds: ["r"],
+    upstream: [],
+    blocks: {
+      r: { id: "r", type: "text", text: "R", children: ["x"], upstream: ["p", "q"] },
+      x: { id: "x", type: "text", text: "X", children: [], upstream: ["r"] },
+      p: { id: "p", type: "text", text: "P", children: ["r"], upstream: ["n"] },
+      q: { id: "q", type: "text", text: "Q", children: ["r"], upstream: [] },
+    },
+  }
+}
+
+describe("upstream rows (parents beneath a block)", () => {
+  it("siblingsOf reads the parent list and direction off the key", () => {
+    expect(siblingsOf(graphed(), "r/^q")).toEqual({
+      parentKey: "r",
+      parentId: "r",
+      direction: "up",
+      siblings: ["p", "q"],
+      index: 1,
+    })
+    expect(siblingsOf(graphed(), "r/q")).toBe(null)
+  })
+
+  it("removing a parent row takes the edge out of both lists, and the parent with it", () => {
+    const { doc, focusKey } = removeBlock(graphed(), "r/^q")
+    expect(doc.blocks.r.upstream).toEqual(["p"])
+    // q is reached by nothing now: pruned. (Its own list is gone with it;
+    // the save diff reads r's parents for the unlink.)
+    expect(doc.blocks.q).toBeUndefined()
+    expect(focusKey).toBe("r/^p")
+    // A parent row whose parent list still names it stays.
+    const kept = removeBlock(graphed(), "r/^p")
+    expect(kept.doc.blocks.p).toBeUndefined()
+    expect(kept.focusKey).toBe("r")
+  })
+
+  it("a new row after a parent row is a new parent, mirrored into its children", () => {
+    const fresh = emptyBlock("text", "N")
+    const doc = insertAfter(graphed(), "r/^p", fresh)
+    expect(doc.blocks.r.upstream).toEqual(["p", fresh.id, "q"])
+    expect(doc.blocks[fresh.id].children).toEqual(["r"])
+    expect(doc.rootBlockIds).toEqual(["r"])
+  })
+
+  it("indenting a parent row makes it hold the parent row above it instead", () => {
+    const { doc, key } = indentBlock(graphed(), "r/^q")
+    expect(key).toBe("r/^p/^q")
+    expect(doc.blocks.r.upstream).toEqual(["p"])
+    expect(doc.blocks.p.upstream).toEqual(["n", "q"])
+    // Mirrors: q no longer holds r, and holds p.
+    expect(doc.blocks.q.children).toEqual(["p"])
+    // Undone by outdenting: q holds r again, after p.
+    const back = outdentBlock(doc, "r/^p/^q")
+    expect(back.key).toBe("r/^q")
+    expect(back.doc.blocks.r.upstream).toEqual(["p", "q"])
+    expect(back.doc.blocks.q.children).toEqual(["r"])
+    expect(back.doc.blocks.p.upstream).toEqual(["n"])
+  })
+
+  it("indenting a child under a sibling keeps the child's parent list in step", () => {
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a", "b"],
+      blocks: {
+        a: { id: "a", type: "text", text: "A", children: [], upstream: ["n"] },
+        b: { id: "b", type: "text", text: "B", children: [], upstream: ["n"] },
+      },
+    }
+    const { doc: next } = indentBlock(doc, "b")
+    expect(next.blocks.a.children).toEqual(["b"])
+    // At the top level the other end is the note, not a block: b's parent
+    // list gains a; the note's own root order is the top-level list.
+    expect(next.blocks.b.upstream).toEqual(["n", "a"])
+  })
+
+  it("refuses to duplicate or reorder a parent row", () => {
+    expect(duplicateBlocks(graphed(), ["r/^p"], "below")).toBe(null)
+    const doc = graphed()
+    expect(moveBlocks(doc, ["r/^q"], "up")).toBe(doc)
+  })
+
+  it("a copy carries no parents of its own", () => {
+    const { doc, copies } = duplicateBlocks(graphed(), ["r/x"], "below")!
+    expect(doc.blocks[copies[0].split("/")[1]].upstream).toBeUndefined()
+  })
+
+  it("prunes nothing a parent row still reaches", () => {
+    // Removing x leaves the parent rows, which the roots reach upstream.
+    const { doc } = removeBlock(graphed(), "r/x")
+    expect(Object.keys(doc.blocks).sort()).toEqual(["p", "q", "r"])
   })
 })

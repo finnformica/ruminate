@@ -189,6 +189,39 @@ belt-and-braces. Markdown is a tree, so a loop is written to where it closes
 and no further, and does not survive a markdown round trip (`parse` re-mints
 the repeated `id::`): the graph, not the markdown, holds it.
 
+**Upstream: the graph, not just the tree.** A walk from a root can follow
+links the other way as well (Settings → Editor, "Show links": downstream,
+upstream, or — the default — both). Walked both ways, every block in the
+doc carries its parents' ids beside its children's (`Block.upstream`,
+complete like `children`), and beneath an open row the walk continues into
+its parents after its children. Each is an **upstream occurrence**: a row
+drawn exactly like a child row, keyed by its path with the segment marked
+(`root/child/^parent`, src/blocks/view.ts), so folds, selection and loops
+stay per occurrence and a block that is both above and below another has
+two rows and two keys. The path guard applies in both directions: a parent
+already on the path above is skipped (a block's own parent is where the row
+came from, not something beneath it), which is what keeps a single-homed
+block's rows exactly the tree's and shows only the _other_ places a
+multi-homed block is held — the todos an "In progress" block was copied
+under, when it is zoomed into. A child on the path is skipped beneath a
+parent row for the same reason. The view's own root (the note) is on the
+path from the start, and the note's own parents, when it has any, are rows
+after its blocks (`BlockDoc.upstream`).
+
+A parent row edits as any row does: its text and type are the block's,
+wherever it shows. Structural edits on it move the link the other way
+round: a row added after it (Enter) is a new block that holds the block
+above; indenting it under the parent row before it makes it hold that block
+instead; removing it (⌫, Cut, Unlink) unlinks it from the block beneath
+which it showed; and its own children and parents open beneath it by the
+same rule. It cannot be duplicated (a copy of a place a block is held would
+copy the block too) or reordered (parents have no order of their own). The
+doc maths keep `children` and `upstream` as mirrors of one edge
+(src/blocks/ops.ts), so the save diff reads the child lists as the truth
+and consults a parent list only for a parent that has left the doc
+(`docToOps`). Markdown stays a tree: the rollup, the clipboard and the
+search index walk downstream only.
+
 **Remove = unlink; delete is explicit; nothing cascades.** Removing node X
 from the outline in the context of parent P (⌫ on the row, Cut, the menu's
 Unlink — `docToOps`):

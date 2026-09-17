@@ -26,10 +26,12 @@ import {
   type StorageDiagnostics,
 } from "../data/storage-diagnostics"
 import { MAX_EXPANDED_LEVELS, MIN_EXPANDED_LEVELS } from "../blocks/default-collapsed"
+import type { LinkDirections } from "../data/graph"
 import {
   AccentColor,
   accentAtom,
   expandedLevelsAtom,
+  linkDirectionsAtom,
   githubUserAtom,
   newBlockMarkerAtom,
   themeAtom,
@@ -193,12 +195,45 @@ const NEW_BLOCK_MARKER_PRESETS: Array<{ value: string; label: string }> = [
   { value: "> ", label: "Quote" },
 ]
 
+/** Which links a note's rows follow (`LinkDirections`). */
+const LINK_DIRECTION_OPTIONS: Array<{ value: LinkDirections; label: string; hint: string }> = [
+  { value: "both", label: "Both", hint: "what a block holds, and what holds it" },
+  { value: "downstream", label: "Downstream", hint: "what a block holds" },
+  { value: "upstream", label: "Upstream", hint: "what holds a block" },
+]
+
 function EditorSection() {
   const [newBlockMarker, setNewBlockMarker] = useAtom(newBlockMarkerAtom)
   const [expandedLevels, setExpandedLevels] = useAtom(expandedLevelsAtom)
+  const [linkDirections, setLinkDirections] = useAtom(linkDirectionsAtom)
 
   return (
     <SettingsSection title="Editor">
+      <div className="flex flex-col gap-2">
+        <span id="link-directions-label" className="text-sm leading-4 text-text-secondary">
+          Show links
+        </span>
+        <div role="group" aria-labelledby="link-directions-label" className="flex flex-wrap gap-1">
+          {LINK_DIRECTION_OPTIONS.map((option) => {
+            const isSelected = linkDirections === option.value
+            return (
+              <Button
+                key={option.value}
+                size="small"
+                aria-pressed={isSelected}
+                onClick={() => setLinkDirections(option.value)}
+                selected={isSelected}
+              >
+                {option.label}
+              </Button>
+            )
+          })}
+        </div>
+        <p className="text-sm text-text-secondary">
+          {LINK_DIRECTION_OPTIONS.find((option) => option.value === linkDirections)?.hint}: a block
+          held in more than one place lists its other parents beneath its children.
+        </p>
+      </div>
       <div className="flex flex-col gap-2">
         <label htmlFor="expanded-levels" className="text-sm leading-4 text-text-secondary">
           Default expand
