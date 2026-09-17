@@ -3,45 +3,33 @@ import { useEffect, useState } from "react"
 import {
   countEntries,
   formatReleaseDates,
-  releasesSince,
   takeEntries,
   type ChangelogRelease,
 } from "../utils/changelog"
 import { IconButton } from "./icon-button"
 import { XIcon16 } from "./icons"
 import { EntryText } from "./release-notes"
+import { lastSeenVersion, rememberVersion, takeUpdateRequest } from "../utils/whats-new"
 
 /**
- * The changelog build this device last saw (`<week>.<hash>`, vite.config.ts).
- * `null` means it has never seen one, which is a first visit rather than a
- * device that is behind.
+ * What this boot knows, read once.
  *
- * Read straight from storage rather than held in a storage atom: this is one
- * question asked once at boot, and a storage atom of this vintage reports its
- * default before the stored value reaches it — which here would tell every
- * device that it was up to date, and show this to nobody.
- *
- * Storage can be absent or throw (a private window, blocked site data), and
- * the honest answer there is that this device has seen nothing and should be
- * shown nothing.
+ * Both notes are one-shot — taking the update request clears it, and storing
+ * the build this device has now seen overwrites what it saw before — so they
+ * cannot be read from an effect that may run more than once. React's strict
+ * mode runs every effect twice on purpose, and a remount would do the same:
+ * the first pass consumed the request and the second found nothing, so the
+ * card never appeared. Reading them here ties the answer to the page load,
+ * which is what it is actually about.
  */
-const STORAGE_KEY = "changelog-last-seen"
+let boot: { asked: boolean; seen: string | null } | null = null
 
-function lastSeenVersion(): string | null {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY)
-  } catch {
-    return null
+function bootFacts() {
+  if (!boot) {
+    boot = { asked: takeUpdateRequest(), seen: lastSeenVersion() }
+    rememberVersion(__CHANGELOG_VERSION__)
   }
-}
-
-function rememberVersion(version: string) {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, version)
-  } catch {
-    // Nothing to be done, and nothing that needs saying: the reader sees this
-    // once more than they should, at worst.
-  }
+  return boot
 }
 
 /** How many entries the card shows before handing over to the page. It is a
@@ -49,7 +37,7 @@ function rememberVersion(version: string) {
 const MAX_ENTRIES = 6
 
 /**
- * What changed since the last time this device ran Ruminate, as a card in the
+ * What changed in the version just taken, as a card in the
  * corner.
  *
  * Deliberately not a dialog. Arriving at an app you have just updated to find
@@ -73,27 +61,24 @@ export function WhatsNewPopover() {
   const [unseen, setUnseen] = useState<ChangelogRelease[] | null>(null)
 
   useEffect(() => {
-    const seen = lastSeenVersion()
-    if (seen === __CHANGELOG_VERSION__) return
-    if (seen === null) {
-      // A first visit has nothing to catch up on. Remember where it came in,
-      // so the next build is the first thing it is ever shown.
-      rememberVersion(__CHANGELOG_VERSION__)
-      return
-    }
+    const { asked, seen } = bootFacts()
+
+    // Either the reader took an update a moment ago, or this device is running
+    // a build it has not seen — which is how the reader whose waiting worker
+    // activated on its own, after they closed every tab, is caught. A device
+    // that has never stored a build has nothing to compare and is shown
+    // nothing unless it asked.
+    if (!asked && (seen === null || seen === __CHANGELOG_VERSION__)) return
+
     let live = true
     void (async () => {
-      // The same source the changelog page reads, so entries still waiting in
-      // `changelog.d/` are shown here too. Without that, an update made before
-      // collation ran would greet the reader with nothing at all.
       const { loadChangelog } = await import("../utils/changelog-source")
-      const loaded = await loadChangelog()
+      const releases = loadChangelog()
       if (!live) return
-      const releases = releasesSince(loaded, seen)
-      // A build that adds no release of its own — a fix folded into a week
-      // this device has already read — moves the stamp on without a word.
-      if (releases.length === 0) rememberVersion(__CHANGELOG_VERSION__)
-      else setUnseen(releases)
+      // The newest release, and only that. What changed in the version you
+      // have just taken is the question being answered; the rest of the
+      // history is a click away on the page.
+      if (releases.length > 0) setUnseen(releases.slice(0, 1))
     })()
     return () => {
       live = false
@@ -107,9 +92,7 @@ export function WhatsNewPopover() {
   useEffect(() => {
     if (dismissed) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return
-      setUnseen(null)
-      rememberVersion(__CHANGELOG_VERSION__)
+      if (event.key === "Escape") setUnseen(null)
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
@@ -117,10 +100,7 @@ export function WhatsNewPopover() {
 
   if (dismissed) return null
 
-  const close = () => {
-    setUnseen(null)
-    rememberVersion(__CHANGELOG_VERSION__)
-  }
+  const close = () => setUnseen(null)
 
   const total = countEntries(unseen)
   const shown = takeEntries(unseen, MAX_ENTRIES)

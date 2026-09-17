@@ -2,6 +2,7 @@ import { atom, useAtomValue, useSetAtom } from "jotai"
 import { useEffect, useRef } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useRegisterSW } from "virtual:pwa-register/react"
+import { markUpdateRequested } from "../utils/whats-new"
 import { requestDatabaseFlush } from "../data/database-mode"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 
@@ -52,6 +53,10 @@ export function useRegisterAppUpdate() {
     setAppUpdate({
       needRefresh,
       apply: () => {
+        // Remember that this was asked for, so the boot on the other side of
+        // the reload knows to say what changed
+        // (src/components/whats-new-popover.tsx).
+        markUpdateRequested()
         // Apply the waiting service worker and reload to the new version.
         // Fall back to a hard reload if the worker never takes over (so the
         // button always refreshes the app).

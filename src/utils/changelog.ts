@@ -184,35 +184,6 @@ export function toSegments(text: string): EntrySegment[] {
 }
 
 /**
- * The week a build stamp names. A stamp is `<week>.<hash>` (vite.config.ts);
- * the hash tells two builds of the same week apart, and the week is what says
- * which releases are new.
- */
-function weekOfVersion(version: string): string {
-  return version.split(".")[0]
-}
-
-/**
- * The releases a reader has not seen, newest first.
- *
- * Nothing is new to a reader who has never been here: a first visit stores the
- * stamp and shows no card, rather than opening on the whole history.
- *
- * Releases are compared by week, so entries added to a week already seen are
- * not shown again. They are on the changelog page, which is the honest place
- * for them — a card that reopened on a week you had read would be worse than
- * one that missed a late entry.
- */
-export function releasesSince(
-  releases: ChangelogRelease[],
-  version: string | null,
-): ChangelogRelease[] {
-  if (!version) return []
-  const seen = weekOfVersion(version)
-  return releases.filter((release) => release.week > seen)
-}
-
-/**
  * The first `limit` entries across these releases, in the order they are
  * written, with the releases and categories they came from kept around them.
  *
