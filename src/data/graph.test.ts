@@ -5,6 +5,7 @@ import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
 import { sampleGraph } from "./sample-graph"
 import {
+  blockRollup,
   blockView,
   buildGraphSnapshot,
   docFromGraph,
@@ -380,6 +381,36 @@ describe("the title's ride through a note's doc", () => {
     const snapshot = buildGraphSnapshot(nodes, links)
     expect(noteDoc("blk_note00000", snapshot)?.props).toBeNull()
     expect(rollup("blk_note00000", snapshot)).toBe(body)
+  })
+})
+
+describe("blockRollup", () => {
+  const snapshot = () =>
+    buildGraphSnapshot(
+      [
+        row("p", "note", "Whole note"),
+        row("blk_a", "ul", "first"),
+        row("blk_deep", "text", "beneath first"),
+        row("blk_b", "ul", "second"),
+      ],
+      [edge("p", "blk_a", "a0"), edge("blk_a", "blk_deep", "a0"), edge("p", "blk_b", "a1")],
+    )
+
+  it("rolls up the block and everything beneath it, and nothing beside it", () => {
+    expect(blockRollup("blk_a", snapshot())).toBe(
+      "- first\n  id:: blk_a\n  beneath first\n    id:: blk_deep\n",
+    )
+  })
+
+  it("is the note's own rollup minus what the note holds elsewhere", () => {
+    const graph = snapshot()
+    expect(rollup("p", graph)).toContain("second")
+    expect(blockRollup("blk_a", graph)).not.toContain("second")
+  })
+
+  it("has nothing to say about a note node or a block the graph lost", () => {
+    expect(blockRollup("p", snapshot())).toBeNull()
+    expect(blockRollup("blk_gone", snapshot())).toBeNull()
   })
 })
 

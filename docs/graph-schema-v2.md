@@ -230,11 +230,21 @@ Unlink — `docToOps`):
 2. X's row stays. Held elsewhere, it lives on there; held nowhere, it is out
    of reach and shows in its note's basket (below) with everything beneath
    it still linked to it. The one exception is a **blank** X — no text but
-   whitespace, nothing beneath it, no picture (`isBlankNode`) — which is
+   whitespace, no picture, no address (`isBlankNode`) — which is
    tombstoned, so backing out of an empty line leaves nothing behind; and
    an undo taking back the step that made X (a duplicate, a paste, a new
    line — `ChangeHint.discard`, from the editor's history), which deletes
    X rather than strand a copy in the basket.
+
+**A blank block never reaches the basket** (`strandedBlankOps`). What a block
+holds is not what is in it: an empty line with a line indented under it is
+still an empty line, and parking one puts a blank row in the basket in front
+of the row that actually needed rescuing. So a blank block is tombstoned
+however it came to be let go — dropped from the outline, or set loose by a
+delete above it — and what it held stands in the basket in its own right,
+the same again down as far as the blanks go. Only blanks, and only ones
+nothing holds any more: a block with something in it, and a block another
+note still points at, are both left exactly where the rules above put them.
 
 Deleting X (the menu's Delete, `deleteBlockOps`; or removing its row in the
 basket, `basketToOps`) tombstones every inbound link and X's row. The
@@ -276,6 +286,13 @@ explicitly per occurrence key in localStorage (`src/data/view-state.ts`), so
 a row they opened stays open when the setting moves and a row they closed
 stays closed as the note grows. A device that loses its localStorage is back
 on the rule.
+
+Nesting a row under another is one of those explicit opens (`indent`, the
+command's `reveal`). A leaf becomes a parent the instant something goes under
+it, and from level n down the standing rule would close it on the spot,
+hiding the row just created — mid-edit, with the caret in it. Asking for a
+row to be indented under another is asking to see it, so the open is recorded
+as the reader's own rather than left to the rule.
 
 The two together are the **fold rule** the walk descends by (`walkGraph`,
 src/data/graph.ts). The walk is lazy: every block it touches carries its

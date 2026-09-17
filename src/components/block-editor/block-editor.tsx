@@ -322,6 +322,7 @@ export function BlockEditor({
   startEditing = false,
   collapsed: collapsedProp,
   onToggleCollapse,
+  onReveal,
   onExitTop,
   onExitBottom,
   focusFirstSignal,
@@ -390,6 +391,10 @@ export function BlockEditor({
    */
   collapsed?: Set<string>
   onToggleCollapse?: (key: string) => void
+  /** Record a row as open in its own right, over whatever the fold rule
+   * would say (`reveal`). Absent, a reveal falls back to the toggle, which
+   * is all transient local state needs. */
+  onReveal?: (key: string) => void
   /** Called when the user navigates up past the first block — lets the caller
    * move focus to whatever sits above the editor (e.g. the note title). */
   onExitTop?: () => void
@@ -1277,6 +1282,14 @@ export function BlockEditor({
     // `collapse` is the symmetric demand ("this row must be closed"): only
     // act when the row is actually open.
     if (result.collapse) setCollapsedState(result.collapse, true)
+    // `reveal` is the unconditional one: the row is about to become a parent,
+    // so it is not folded *yet* and the two demands above would both find
+    // nothing to do. Recorded as the reader's own open, which is what keeps
+    // the depth rule from closing it around the row just nested into it.
+    if (result.reveal) {
+      if (onReveal) onReveal(result.reveal)
+      else setCollapsedState(result.reveal, false)
+    }
     if (result.focus) applyFocus(result.focus)
     // Zoom changes navigate (URL state); the zoom-change effect then places the
     // selection (first child on zoom-in, the block zoomed out from on zoom-out).
@@ -1305,6 +1318,9 @@ export function BlockEditor({
       mode,
       visibleOrder,
       caret,
+      // Which character the key types, for the one command that depends on it
+      // (`wrapTyped`); every other command reads the resolved name alone.
+      typed: event.key,
       zoomRootId,
       zoomBackId,
       rootId: noteId ?? null,

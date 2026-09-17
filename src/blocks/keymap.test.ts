@@ -34,6 +34,42 @@ describe("keymap integrity", () => {
   })
 })
 
+describe("a wrapping character typed over a selection", () => {
+  const selected = (content: string, from: number, to: number) =>
+    input(content, "edit", caret(content, from, to))
+
+  it("resolves every opener to wrapTyped", () => {
+    for (const char of ["`", '"', "'", "(", "[", "{", "<", "*", "_", "~"]) {
+      const at = selected("Alpha beta", 0, 5)
+      expect(resolveKey("edit", key({ key: char, shiftKey: true }), at), char).toBe("wrapTyped")
+    }
+  })
+
+  it("leaves the character to type when nothing is selected", () => {
+    expect(resolveKey("edit", key({ key: "(" }), input("Alpha", "edit", caret("Alpha", 2)))).toBe(
+      null,
+    )
+  })
+
+  it("is not a closing bracket, which types as it always did", () => {
+    const at = selected("Alpha beta", 0, 5)
+    for (const char of [")", "]", "}", ">"]) {
+      expect(resolveKey("edit", key({ key: char }), at), char).toBe(null)
+    }
+  })
+
+  it("stands aside for Cmd, Ctrl and Alt chords", () => {
+    const at = selected("Alpha beta", 0, 5)
+    expect(resolveKey("edit", key({ key: "[", metaKey: true }), at)).toBe(null)
+    expect(resolveKey("edit", key({ key: "[", ctrlKey: true }), at)).toBe(null)
+    expect(resolveKey("edit", key({ key: "[", altKey: true }), at)).toBe(null)
+  })
+
+  it("never fires in select mode, where `[` still turns the block into a todo", () => {
+    expect(resolveKey("select", key({ key: "[" }), input("Alpha", "select"))).toBe("turnIntoTodo")
+  })
+})
+
 describe("comboFromEvent", () => {
   it("names plain keys, shift, and mod in a fixed order", () => {
     expect(comboFromEvent(key({ key: "Enter" }))).toBe("Enter")

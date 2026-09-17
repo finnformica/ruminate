@@ -3,6 +3,7 @@ import { KEYMAP } from "../blocks/keymap"
 import type { CommandName } from "../blocks/commands"
 import {
   APP_SHORTCUTS,
+  COMMANDS_WITHOUT_BINDINGS,
   EDITOR_COMMAND_DESCRIPTIONS,
   GROUP_ORDER,
   SHORTCUTS,
@@ -63,7 +64,21 @@ describe("shortcut registry ↔ keymap completeness", () => {
 
   it("every described editor command exists in KEYMAP (no stale descriptions)", () => {
     for (const command of Object.keys(EDITOR_COMMAND_DESCRIPTIONS)) {
+      // Except the handful the resolver reaches by the character typed
+      // rather than by a combo — they are listed in the registry by hand.
+      if (COMMANDS_WITHOUT_BINDINGS.has(command as CommandName)) continue
       expect(keymapCommands.has(command as CommandName), `"${command}" is not bound`).toBe(true)
+    }
+  })
+
+  it("lists every command with no binding of its own in the reference anyway", () => {
+    for (const command of COMMANDS_WITHOUT_BINDINGS) {
+      const description = EDITOR_COMMAND_DESCRIPTIONS[command]
+      expect(description, `"${command}" has no description`).toBeTruthy()
+      expect(
+        SHORTCUTS.some((shortcut) => shortcut.description === description),
+        `"${command}" is described but never shown`,
+      ).toBe(true)
     }
   })
 

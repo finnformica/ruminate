@@ -1,4 +1,4 @@
-import type { CommandInput, CommandName, Mode } from "./commands"
+import { WRAP_PAIRS, type CommandInput, type CommandName, type Mode } from "./commands"
 import { isListItem } from "./markers"
 import { defOf } from "./registry"
 import { idOfKey } from "./view"
@@ -221,11 +221,33 @@ export function comboFromEvent(event: KeyLike): string {
 }
 
 /**
+ * Whether this key is a wrapping character typed over a selection — `"`, a
+ * bracket, a backtick (`WRAP_PAIRS`) — which wraps the selection instead of
+ * replacing it (`wrapTyped`).
+ *
+ * The one rule the table below cannot hold. A binding matches an exact combo
+ * string, and which modifiers a bracket arrives with is a property of the
+ * keyboard layout, not of the editor: `(` is Shift+9 on a US layout, Shift+8
+ * on a German one, AltGr elsewhere. Ten characters times every spelling is a
+ * table nobody can read, and it would still be wrong on the next layout. So
+ * the character itself is matched, with Cmd/Ctrl/Alt excluded (those are
+ * other people's chords) — Shift is not, because most of these characters
+ * need it.
+ */
+function isTypedWrap(event: KeyLike, input: CommandInput): boolean {
+  if (event.metaKey || event.ctrlKey || event.altKey) return false
+  if (!(event.key in WRAP_PAIRS)) return false
+  const { caret } = input
+  return !!caret && caret.start !== caret.end
+}
+
+/**
  * Resolve a mode + event to a command name, honouring `when` guards. Returns
  * `null` when nothing is bound (the caller then lets the event do its default,
  * e.g. ordinary typing).
  */
 export function resolveKey(mode: Mode, event: KeyLike, input: CommandInput): CommandName | null {
+  if (mode === "edit" && isTypedWrap(event, input)) return "wrapTyped"
   const combo = comboFromEvent(event)
   for (const binding of KEYMAP) {
     if (binding.mode !== mode) continue

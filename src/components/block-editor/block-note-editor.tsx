@@ -96,7 +96,14 @@ export function BlockNoteEditor({
    * (the basket, standalone use): the reader's fold rule over the whole doc
    * it was given.
    */
-  folds?: { collapsed: ReadonlySet<string>; toggle: (key: string) => void }
+  folds?: {
+    collapsed: ReadonlySet<string>
+    toggle: (key: string) => void
+    /** Record a row as open in its own right (`reveal`), whatever the rule
+     * would say — a row that is about to become a parent has nothing folded
+     * to toggle. */
+    setOpen: (key: string) => void
+  }
   /** Told after a block is folded or unfolded — the note page counts it as
    * touching the note. */
   onToggleCollapse?: (key: string) => void
@@ -174,6 +181,11 @@ export function BlockNoteEditor({
   const toggleCollapse = (key: string) => {
     if (folds) folds.toggle(key)
     else own.setFold(key, collapsed.has(key))
+    onToggleCollapse?.(key)
+  }
+  const revealRow = (key: string) => {
+    if (folds) folds.setOpen(key)
+    else own.setFold(key, true)
     onToggleCollapse?.(key)
   }
 
@@ -268,6 +280,7 @@ export function BlockNoteEditor({
       startEditing={startEditing}
       collapsed={collapsed as Set<string>}
       onToggleCollapse={toggleCollapse}
+      onReveal={revealRow}
       onExitTop={onExitTop}
       focusFirstSignal={focusFirstSignal}
       focusFirstMode={focusFirstMode}

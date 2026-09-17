@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   linkSelection,
   runCommand,
+  surroundSelection,
   wrapSelection,
   type CaretInput,
   type CommandInput,
@@ -73,6 +74,43 @@ describe("indent / outdent", () => {
     const result = runCommand("indent", input(doc, "a"))
     expect(result.handled).toBe(true)
     expect(result.doc).toBeUndefined()
+  })
+
+  it("reveals the row it nested under, so the depth rule cannot fold it shut", () => {
+    // Two children of one root: `y` goes under `x`, which is a leaf until it
+    // does — nothing was folded, so neither fold demand has anything to act
+    // on, and the depth rule would close `x` the moment it gains a child.
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a"],
+      blocks: {
+        a: { id: "a", type: "text", text: "A", children: ["x", "y"] },
+        x: { id: "x", type: "text", text: "X", children: [] },
+        y: { id: "y", type: "text", text: "Y", children: [] },
+      },
+    }
+    const result = runCommand("indent", {
+      doc,
+      key: "a/y",
+      mode: "edit",
+      caret: caret("Y", 1),
+      visibleOrder: ["a", "a/x", "a/y"],
+    })
+    expect(result.focus).toEqual({ mode: "edit", key: "a/x/y", caret: 1 })
+    expect(result.reveal).toBe("a/x")
+    expect(result.expand).toBeUndefined()
+  })
+
+  it("names the row it went under, not the block, when a block repeats", () => {
+    const doc = fixture()
+    const result = runCommand("indent", input(doc, "c"))
+    expect(result.focus).toEqual({ mode: "select", key: "b/c" })
+    expect(result.reveal).toBe("b")
+  })
+
+  it("asks for no reveal when the indent did not happen", () => {
+    const doc = fixture()
+    expect(runCommand("indent", input(doc, "a")).reveal).toBeUndefined()
   })
 
   it("outdents a nested block to sibling of its parent", () => {
@@ -1128,6 +1166,58 @@ describe("wrapBold / wrapItalic / wrapCode", () => {
 
   it("does nothing in select mode", () => {
     expect(runCommand("wrapBold", input(fixture(), "a")).handled).toBe(false)
+  })
+})
+
+describe("wrapTyped", () => {
+  it("puts the selection inside the pair the character opens", () => {
+    expect(surroundSelection("Alpha beta", 0, 5, "(", ")")).toEqual({
+      text: "(Alpha) beta",
+      start: 1,
+      end: 6,
+    })
+  })
+
+  it("always adds, never takes off — unlike the formatting keys", () => {
+    // `wrapSelection` would strip these back to `Alpha`; typing a character
+    // types it.
+    expect(surroundSelection("(Alpha) beta", 0, 7, "(", ")").text).toBe("((Alpha)) beta")
+    expect(surroundSelection("`Alpha` beta", 0, 7, "`", "`").text).toBe("``Alpha`` beta")
+  })
+
+  it("wraps the selection in the character typed, as one text op", () => {
+    const doc = fixture()
+    const result = runCommand("wrapTyped", {
+      ...input(doc, "a", { mode: "edit", caret: caret("Alpha beta", 6, 10) }),
+      typed: '"',
+    })
+    expect(result.handled).toBe(true)
+    expect(result.doc!.blocks.a.text).toBe('Alpha "beta"')
+    expect(result.op).toEqual({ type: "text", blockId: "a" })
+    expect(result.focus).toEqual({ mode: "edit", key: "a", caret: 11 })
+  })
+
+  it("closes a bracket with its partner, not with itself", () => {
+    const doc = fixture()
+    const result = runCommand("wrapTyped", {
+      ...input(doc, "a", { mode: "edit", caret: caret("Alpha", 0, 5) }),
+      typed: "[",
+    })
+    expect(result.doc!.blocks.a.text).toBe("[Alpha]")
+  })
+
+  it("does nothing with an empty selection, in select mode, or for any other character", () => {
+    const doc = fixture()
+    const at = (over: Partial<CommandInput>) => ({
+      ...input(doc, "a", { mode: "edit", caret: caret("Alpha", 2, 4) }),
+      ...over,
+    })
+    expect(runCommand("wrapTyped", at({ caret: caret("Alpha", 2), typed: "(" })).handled).toBe(
+      false,
+    )
+    expect(runCommand("wrapTyped", at({ mode: "select", typed: "(" })).handled).toBe(false)
+    expect(runCommand("wrapTyped", at({ typed: "q" })).handled).toBe(false)
+    expect(runCommand("wrapTyped", at({})).handled).toBe(false)
   })
 })
 

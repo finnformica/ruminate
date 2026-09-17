@@ -32,6 +32,13 @@
       // and writes (docs/sharing.md).
       "/api/shares",
       "/api/shares/*",
+      // The two links people send — the app itself and an invite link — get
+      // their unfurl card written into the page's head on the way out
+      // (worker/handlers/social.ts). An unfurler runs no JavaScript, so the
+      // card cannot come from the app. Everything else is somebody's private
+      // note and is served straight from assets, with no card.
+      "/",
+      "/invite/*",
     ],
   },
   // The one database: the control plane (users, invites, feature flags —

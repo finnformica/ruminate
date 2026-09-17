@@ -4032,3 +4032,108 @@ describe("two editors on one page", () => {
     expect(document.activeElement).toBe(textarea)
   })
 })
+
+describe("reaching for a control never ends the edit", () => {
+  const NESTED =
+    "- parent\n  id:: blk_parent\n  - child\n    id:: blk_child\n- [ ] task\n  id:: blk_task\n"
+
+  it("keeps the caret where it was when the fold chevron is pressed", () => {
+    const { container } = render(<Harness initial={NESTED} startEditing />)
+    const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!
+    expect(document.activeElement).toBe(textarea)
+
+    // A press moves focus by default, and the blur would close the edit. The
+    // chevron drops that half of the press, so the row keeps typing.
+    const chevron = container.querySelector<HTMLElement>('[aria-label="Collapse"]')!
+    const press = fireEvent.mouseDown(chevron)
+    expect(press).toBe(false) // preventDefault: focus stays put
+    fireEvent.click(chevron)
+    expect(container.querySelector("textarea")).toBe(textarea)
+    expect(document.activeElement).toBe(textarea)
+    // And it really folded: the child is gone from the rows.
+    expect(container.querySelector('[data-block-row="blk_child"]')).toBeNull()
+  })
+
+  it("ticks a todo without ending the edit, and the tick still lands", () => {
+    const { container, getByTestId } = render(<Harness initial={NESTED} startEditing />)
+    const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!
+    const box = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+    expect(fireEvent.mouseDown(box)).toBe(false)
+    fireEvent.click(box)
+    expect(document.activeElement).toBe(textarea)
+    expect(serializedLines(getByTestId)).toContain("[x] task")
+  })
+})
+
+describe("Tab into a row that has just become a parent", () => {
+  it("asks for that row to be revealed, so a fold rule cannot hide the row just nested", () => {
+    // The row `y` goes under `x`, which was a leaf. A depth rule that folds
+    // from the second level down would close `x` the instant it gains a
+    // child, taking the row being typed in with it — so the editor is told
+    // to record `x` as open.
+    const reveal = vi.fn()
+    const doc: BlockDoc = {
+      props: null,
+      rootBlockIds: ["a"],
+      blocks: {
+        a: { id: "a", type: "text", text: "A", children: ["x", "y"] },
+        x: { id: "x", type: "text", text: "X", children: [] },
+        y: { id: "y", type: "text", text: "Y", children: [] },
+      },
+    }
+    const { container } = render(
+      <BlockEditor
+        doc={doc}
+        onChange={vi.fn()}
+        collapsed={new Set()}
+        onToggleCollapse={vi.fn()}
+        onReveal={reveal}
+      />,
+    )
+    const root = editorRoot(container)
+    act(() => root.focus())
+    fireEvent.keyDown(root, { key: "ArrowDown" })
+    fireEvent.keyDown(root, { key: "ArrowDown" })
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight `Y`
+    fireEvent.keyDown(root, { key: "Tab" })
+    expect(reveal).toHaveBeenCalledWith("a/x")
+  })
+})
+
+describe("wrapping the selection by typing", () => {
+  const selectAll = (textarea: HTMLTextAreaElement) => {
+    textarea.setSelectionRange(0, textarea.value.length)
+  }
+
+  it("puts the selection inside the character typed instead of replacing it", () => {
+    const { container, getByTestId } = render(<Harness initial={"- alpha"} startEditing />)
+    const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!
+    selectAll(textarea)
+    const typed = fireEvent.keyDown(textarea, { key: "(", shiftKey: true })
+    expect(typed).toBe(false) // handled: the character does not also type
+    expect(serializedLines(getByTestId)).toEqual(["- (alpha)"])
+  })
+
+  it("closes a quote and a backtick with themselves, a bracket with its partner", () => {
+    for (const [char, expected] of [
+      ['"', '- "alpha"'],
+      ["`", "- `alpha`"],
+      ["[", "- [alpha]"],
+      ["{", "- {alpha}"],
+    ] as const) {
+      const { container, getByTestId } = render(<Harness initial={"- alpha"} startEditing />)
+      const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!
+      selectAll(textarea)
+      fireEvent.keyDown(textarea, { key: char })
+      expect(serializedLines(getByTestId)).toEqual([expected])
+      cleanup()
+    }
+  })
+
+  it("leaves the character to type when nothing is selected", () => {
+    const { container } = render(<Harness initial={"- alpha"} startEditing />)
+    const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!
+    textarea.setSelectionRange(5, 5)
+    expect(fireEvent.keyDown(textarea, { key: "(" })).toBe(true)
+  })
+})
