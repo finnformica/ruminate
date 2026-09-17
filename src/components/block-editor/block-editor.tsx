@@ -146,6 +146,7 @@ import {
   subtreeIds,
   type BlockPatch,
 } from "../../blocks/ops"
+import { cx } from "../../utils/cx"
 import { htmlToMarkdown } from "../../utils/html-to-markdown"
 import {
   clipboardBlocksToDoc,
@@ -1508,8 +1509,22 @@ export function BlockEditor({
     window.clearTimeout(press.current.timer)
     press.current = null
   }
+  // A text selection the page is showing is dropped by a finger on the
+  // editor: the rows are unselectable under a finger (the container's
+  // `select-none`), so a selection is never one the person meant — it is
+  // what a press-and-hold left on some text outside the rows, or on a
+  // build before the rows were unselectable — and with nothing selectable
+  // to tap, iOS offers no way to be rid of it. A field's own selection (the
+  // textarea being edited) is the person's, and stays.
+  const dropPageSelection = () => {
+    const active = document.activeElement
+    if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) return
+    const selection = window.getSelection()
+    if (selection && !selection.isCollapsed) selection.removeAllRanges()
+  }
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!coarse || readOnly || event.pointerType === "mouse") return
+    dropPageSelection()
     const target = menuTargetAt(event.target)
     if (!target) return
     cancelPress()
@@ -1520,6 +1535,7 @@ export function BlockEditor({
       timer: window.setTimeout(() => {
         press.current = null
         heldOpen.current = true
+        dropPageSelection()
         openMenuOn(target)
         setSheetOpen(true)
         // A nudge where the device offers one (Android; iOS has no web API).
@@ -2663,7 +2679,16 @@ export function BlockEditor({
         <>
           {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
           <div
-            className="outline-none"
+            className={cx(
+              "outline-none",
+              // Under a finger a press-and-hold opens the block's menu, so
+              // nothing in the rows may start a selection: not a card's
+              // title, a caption, a badge or the gap beside a row. The
+              // textarea being edited takes selection back (`select-text`,
+              // said outright: iOS ignores a field under `select-none`).
+              // No callout either — iOS's own menu on a held link or image.
+              !readOnly && "coarse:select-none coarse:[-webkit-touch-callout:none]",
+            )}
             ref={containerRef}
             tabIndex={-1}
             data-block-editor=""
@@ -2713,7 +2738,16 @@ export function BlockEditor({
         >
           {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
           <div
-            className="outline-none"
+            className={cx(
+              "outline-none",
+              // Under a finger a press-and-hold opens the block's menu, so
+              // nothing in the rows may start a selection: not a card's
+              // title, a caption, a badge or the gap beside a row. The
+              // textarea being edited takes selection back (`select-text`,
+              // said outright: iOS ignores a field under `select-none`).
+              // No callout either — iOS's own menu on a held link or image.
+              !readOnly && "coarse:select-none coarse:[-webkit-touch-callout:none]",
+            )}
             ref={containerRef}
             tabIndex={-1}
             data-block-editor=""

@@ -192,6 +192,12 @@ const GUIDE_X = 11
  * 2px + 2px vertical padding). */
 const ROOT_GAP = 2
 
+/** How long a nameless key press (keyCode 229) at the start of a block is
+ * given to change the text before it is taken for a Backspace. A keyboard's
+ * own input arrives in the same turn as its keydown; the beat is slack for a
+ * slow device, not a wait. */
+const SILENT_KEY_BEAT = 50
+
 export function BlockItem({
   doc,
   block,
@@ -288,27 +294,36 @@ export function BlockItem({
     el.setSelectionRange(pos, pos)
   }, [editing, api.focus?.atStart, api.focus?.caret, type])
 
-  // Backspace at the very start of the block, heard as the DELETION rather
-  // than the key. A phone's keyboard does not always say which key was
-  // pressed: Android reports "Unidentified" (keyCode 229) through its
-  // input method, and iOS may say nothing at all for a delete on an empty
-  // field — so the keydown path above never sees a Backspace to strip a
-  // marker or merge the block upward, and the block cannot be deleted by
-  // the key. `beforeinput` names the intent instead (`deleteContentBackward`)
-  // and fires either way; at the start of the block it runs the same
-  // command the key would, and otherwise leaves the textarea to its own
-  // deletion. A keydown that was handled already cancelled the input, so
-  // the two never both run. A native listener: React's onBeforeInput is
-  // synthesised from text entry and never fires for a deletion.
+  // Backspace at the very start of the block, from a keyboard that does not
+  // say so. A phone's keyboard does not always name the key it pressed:
+  // Android's input method reports "Unidentified" (keyCode 229) for every
+  // key, and some report a bare keyCode 8 — so the keydown path above never
+  // sees a Backspace to strip a marker or merge the block upward, and the
+  // block cannot be deleted by the key. Three more ways of hearing it, each
+  // only at the very start of the text, where the textarea itself has
+  // nothing to delete and the command is the only thing the key can mean:
+  //
+  // - `beforeinput` names the intent (`deleteContentBackward`) where the
+  //   browser raises one for a deletion that would do nothing (Chromium).
+  //   WebKit does not: a delete with nothing before the caret returns before
+  //   any event is sent.
+  // - a keydown with keyCode 8 and no name is the key itself.
+  // - a keydown with no name at all (229) that is followed by no change to
+  //   the text — no input, no composition — within a beat. A named key, a
+  //   letter, a suggestion and a composition all change the text or say
+  //   what they are; a delete of nothing is the one that is silent.
+  //
+  // Native listeners: React's onBeforeInput is synthesised from text entry
+  // and never fires for a deletion, and the beat must be measured from the
+  // element's own events, before React's.
   const apiRef = useRef(api)
   apiRef.current = api
   useEffect(() => {
     if (!editing) return
     const el = textareaRef.current
     if (!el) return
-    const onBeforeInput = (event: InputEvent) => {
-      if (event.inputType !== "deleteContentBackward") return
-      if (el.selectionStart !== 0 || el.selectionEnd !== 0) return
+    const atStart = () => el.selectionStart === 0 && el.selectionEnd === 0
+    const backspace = (): boolean => {
       const key: KeyLike = {
         key: "Backspace",
         shiftKey: false,
@@ -323,10 +338,44 @@ export function BlockItem({
         atFirstLine: true,
         atLastLine: !el.value.includes("\n"),
       }
-      if (apiRef.current.dispatchKey("edit", occurrence.key, key, caret)) event.preventDefault()
+      return apiRef.current.dispatchKey("edit", occurrence.key, key, caret)
+    }
+    // A press being listened for: cleared by any event that says what it was.
+    let listening = false
+    const heard = () => {
+      listening = false
+    }
+    const onBeforeInput = (event: InputEvent) => {
+      heard()
+      if (event.inputType !== "deleteContentBackward" || !atStart()) return
+      if (backspace()) event.preventDefault()
+    }
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.isComposing || !atStart()) return
+      const unnamed = event.key === "Unidentified" || event.keyCode === 229
+      if (!unnamed) return
+      if (event.keyCode === 8) {
+        if (backspace()) event.preventDefault()
+        return
+      }
+      const value = el.value
+      listening = true
+      window.setTimeout(() => {
+        if (!listening) return
+        listening = false
+        if (el.isConnected && el.value === value && atStart()) backspace()
+      }, SILENT_KEY_BEAT)
     }
     el.addEventListener("beforeinput", onBeforeInput)
-    return () => el.removeEventListener("beforeinput", onBeforeInput)
+    el.addEventListener("keydown", onKeyDown)
+    el.addEventListener("input", heard)
+    el.addEventListener("compositionstart", heard)
+    return () => {
+      el.removeEventListener("beforeinput", onBeforeInput)
+      el.removeEventListener("keydown", onKeyDown)
+      el.removeEventListener("input", heard)
+      el.removeEventListener("compositionstart", heard)
+    }
   }, [editing, occurrence.key])
 
   // Resize on content change, and restore the caret after a marker shortcut
@@ -916,6 +965,9 @@ export function BlockItem({
           // line (`BlockKind.wrap`), so the height set above — `1lh` empty,
           // else the scroll height — is the text's alone.
           "min-w-0 flex-1 resize-none overflow-hidden border-none bg-transparent p-0 font-content leading-relaxed text-text outline-none [overflow-wrap:anywhere] placeholder:text-text-tertiary",
+          // Its own selection back, under the editor's `select-none` for a
+          // finger (block-editor.tsx): the one place a press may select text.
+          "coarse:select-text",
           typo,
         )}
       />

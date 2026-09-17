@@ -30,17 +30,28 @@ keyboard that appears and disappears. The block editor
   popup are one list (`menuEntries`) on two surfaces, so the structure moves —
   Indent, Outdent, Move up, Move down — are in both, with their keys shown
   beside them on the popup. Android's long press arrives as a `contextmenu`
-  event and opens the same sheet.
+  event and opens the same sheet. The hold selects no text: the editor's
+  container is `select-none` under a finger (every row, card title, caption
+  and gap), with the textarea being edited taking selection back for itself
+  (`select-text`, said outright — iOS ignores a field under a `select-none`
+  ancestor), and no touch callout. A selection the page shows anyway is
+  dropped by the next finger on the editor and as the sheet opens, since
+  with nothing selectable to tap iOS offers no way to be rid of one; a
+  field's own selection is the person's and stays.
 - **A highlight has no job on a touch screen.** There is no keyboard cursor
   for it to mark, so once an edit ends (the keyboard put away, a delete, a
   swap of rows) nothing stays lit; the one time a row is marked is while the
   sheet is open on it, and then quietly (the inactive ring).
-- **Backspace is heard as a deletion.** A phone's keyboard does not always say
-  which key was pressed — Android reports "Unidentified" through its input
-  method, and iOS may say nothing at all for a delete on an empty field — so
-  the block listens for the `beforeinput` deletion at the very start of its
-  text and runs the same command the key would: the marker goes, then the
-  block merges upward.
+- **Backspace is heard three more ways.** A phone's keyboard does not always
+  say which key was pressed — Android's input method reports "Unidentified"
+  (keyCode 229) for every key, some report a bare keyCode 8 — so at the very
+  start of a block, where the textarea has nothing of its own to delete, the
+  block also takes for a Backspace: a `beforeinput` deletion
+  (`deleteContentBackward`, which Chromium raises even for a deletion of
+  nothing; WebKit does not); a nameless keydown carrying keyCode 8; and a
+  nameless keydown that is followed by no change to the text — no input, no
+  composition — within a beat. Each runs the command the key would: the
+  marker goes, then the block merges upward.
 - **Delete, Undo and Redo keep the edit.** Run from the bar, a delete carries
   the edit on in the row that takes the deleted one's place, and an undo or
   redo keeps editing the row it lands on — the one that survived, moved, or

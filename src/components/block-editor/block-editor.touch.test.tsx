@@ -507,6 +507,56 @@ describe("the block menu on a touch screen", () => {
     expect(lines(getByTestId)).toEqual(["Alpha", "  Beta"])
   })
 
+  it("selects no text under the finger: the rows are unselectable, the textarea is not", () => {
+    const { container } = render(<Harness initial={"Alpha"} />)
+    expect(container.querySelector("[data-block-editor]")!.className).toContain(
+      "coarse:select-none",
+    )
+    fireEvent.click(bodyOf(rows(container)[0]))
+    expect(container.querySelector("textarea")!.className).toContain("coarse:select-text")
+  })
+
+  it("drops a selection the page is showing on the next finger, and as the sheet opens", () => {
+    vi.useFakeTimers()
+    const removeAllRanges = vi.fn()
+    const getSelection = vi
+      .spyOn(window, "getSelection")
+      .mockReturnValue({ isCollapsed: false, removeAllRanges } as unknown as Selection)
+    try {
+      const { container } = render(<Harness initial={"Alpha\nBeta"} />)
+      const row = rows(container)[1]
+      // A mouse is not a finger: its selections are its own.
+      fireEvent.pointerDown(row, { pointerType: "mouse", clientX: 20, clientY: 20 })
+      expect(removeAllRanges).not.toHaveBeenCalled()
+      fireEvent.pointerDown(row, { pointerType: "touch", clientX: 20, clientY: 20 })
+      expect(removeAllRanges).toHaveBeenCalledTimes(1)
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
+      expect(screen.getByTestId("block-menu-sheet")).toBeTruthy()
+      expect(removeAllRanges).toHaveBeenCalledTimes(2)
+    } finally {
+      getSelection.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it("leaves the textarea's own selection alone while it is being edited", () => {
+    const removeAllRanges = vi.fn()
+    const getSelection = vi
+      .spyOn(window, "getSelection")
+      .mockReturnValue({ isCollapsed: false, removeAllRanges } as unknown as Selection)
+    try {
+      const { container } = render(<Harness initial={"Alpha\nBeta"} />)
+      fireEvent.click(bodyOf(rows(container)[0]))
+      expect(document.activeElement).toBe(container.querySelector("textarea"))
+      fireEvent.pointerDown(rows(container)[1], { pointerType: "touch", clientX: 20, clientY: 20 })
+      expect(removeAllRanges).not.toHaveBeenCalled()
+    } finally {
+      getSelection.mockRestore()
+    }
+  })
+
   it("keeps the popup, with the same entries, for a mouse", async () => {
     coarse = false
     const { container } = render(<Harness initial={"Alpha\nBeta"} />)
@@ -518,5 +568,76 @@ describe("the block menu on a touch screen", () => {
     expect(menu.textContent).toContain("Indent")
     expect(menu.textContent).toContain("Move up")
     expect(screen.queryByTestId("block-menu-sheet")).toBeNull()
+  })
+})
+
+describe("Backspace from a keyboard that does not say so", () => {
+  /** Alpha, then an empty bullet beneath it, editing. */
+  const emptyBulletUnderAlpha = () => {
+    const rendered = render(<Harness initial={"Alpha"} />)
+    fireEvent.click(bodyOf(rows(rendered.container)[0]))
+    fireEvent.keyDown(rendered.container.querySelector("textarea")!, { key: "Enter" })
+    expect(lines(rendered.getByTestId)).toEqual(["Alpha", "- "])
+    return rendered
+  }
+  const textarea = (container: HTMLElement) => container.querySelector("textarea")!
+
+  it("takes a keyCode 8 with no name for the key: the marker goes, then the block", () => {
+    const { container } = emptyBulletUnderAlpha()
+    fireEvent.keyDown(textarea(container), { key: "Unidentified", keyCode: 8 })
+    expect(rows(container).length).toBe(2)
+    expect(textarea(container).value).toBe("")
+    fireEvent.keyDown(textarea(container), { key: "Unidentified", keyCode: 8 })
+    expect(rows(container).length).toBe(1)
+    expect(textarea(container).value).toBe("Alpha")
+  })
+
+  it("takes a nameless key (229) that changed nothing for a Backspace, after a beat", () => {
+    vi.useFakeTimers()
+    try {
+      const { container, getByTestId } = emptyBulletUnderAlpha()
+      fireEvent.keyDown(textarea(container), { key: "Unidentified", keyCode: 229 })
+      // Not yet: the keyboard's own input may still be on its way.
+      expect(lines(getByTestId)).toEqual(["Alpha", "- "])
+      act(() => {
+        vi.advanceTimersByTime(60)
+      })
+      // The marker went (a bullet no more), the text stayed empty.
+      expect(rows(container).length).toBe(2)
+      expect(lines(getByTestId)).toEqual(["Alpha"])
+      expect(textarea(container).value).toBe("")
+      fireEvent.keyDown(textarea(container), { key: "Unidentified", keyCode: 229 })
+      act(() => {
+        vi.advanceTimersByTime(60)
+      })
+      expect(rows(container).length).toBe(1)
+      expect(textarea(container).value).toBe("Alpha")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("leaves a nameless key that typed something alone", () => {
+    vi.useFakeTimers()
+    try {
+      const { container, getByTestId } = emptyBulletUnderAlpha()
+      fireEvent.keyDown(textarea(container), { key: "Unidentified", keyCode: 229 })
+      fireEvent.input(textarea(container), { target: { value: "a" } })
+      act(() => {
+        vi.advanceTimersByTime(60)
+      })
+      expect(lines(getByTestId)).toEqual(["Alpha", "- a"])
+      // And one heard mid-text, or with a name, is never a Backspace.
+      textarea(container).setSelectionRange(1, 1)
+      fireEvent.keyDown(textarea(container), { key: "Unidentified", keyCode: 229 })
+      textarea(container).setSelectionRange(0, 0)
+      fireEvent.keyDown(textarea(container), { key: "a" })
+      act(() => {
+        vi.advanceTimersByTime(60)
+      })
+      expect(lines(getByTestId)).toEqual(["Alpha", "- a"])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
