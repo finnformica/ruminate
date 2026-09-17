@@ -79,26 +79,26 @@ export interface CommandInput {
    * rather than on a binding of its own (see `WRAP_PAIRS`).
    */
   typed?: string
-  /** The block the editor is zoomed into ("focus mode"), or null/absent. While
-   * zoomed, the visible world is this block plus its subtree — commands must
-   * not move, delete, or navigate past that boundary. */
-  zoomRootId?: string | null
-  /** Zoomed: whether the root is drawn as the view's TITLE, above the rows
-   * (a heading — `titlesZoom`, src/blocks/markers.ts), rather than as the
+  /** The block the editor is focused on, or null/absent. In focus, the
+   * visible world is this block plus its subtree — commands must not move,
+   * delete, or navigate past that boundary. */
+  focusRootId?: string | null
+  /** In focus: whether the root is drawn as the view's TITLE, above the rows
+   * (a heading — `titlesFocus`, src/blocks/markers.ts), rather than as the
    * view's first row. Titled, moving up out of the rows hands the keyboard
    * to the title; untitled, the root is a row like any other and "up" from
    * one of its children simply lands on it. The boundary itself is the same
-   * either way — nothing leaves the zoomed subtree. */
-  zoomTitled?: boolean
+   * either way — nothing leaves the focused subtree. */
+  focusTitled?: boolean
   /** The id of the view's own root when it is not a block in the doc (the
    * note) — on the path above every row, so a row's parent that is the
    * note is never one of the rows beneath it (`rowsBeneath`). */
   rootId?: string | null
-  /** Where zooming out one level returns to: the previous entry in the zoom
+  /** Where stepping back one level returns to: the previous entry in the focus
    * navigation stack — the path the user actually took, which under the graph
    * model (multi-parent blocks) is the only honest "up". Null/absent when
-   * nothing is below on the stack; zoom-out then exits zoom entirely. */
-  zoomBackId?: string | null
+   * nothing is below on the stack; stepping back then leaves focus entirely. */
+  focusBackId?: string | null
   /**
    * The type a fresh block starts as when Enter creates one from a block that
    * isn't a list item (those continue their own list), and what an empty list
@@ -158,9 +158,11 @@ export interface CommandResult {
   /** Navigation tried to move below the last block — the caller may hand
    * focus to whatever sits below the editor (a second results list). */
   exitBottom?: boolean
-  /** Requested zoom change: `{ id: null }` exits zoom, `{ id }` zooms into a
-   * block. Absent = no change. The editor navigates (URL state) accordingly. */
-  zoom?: { id: string | null }
+  /** Requested change of focus ROOT — the block the whole view hangs from:
+   * `{ id: null }` leaves focus, `{ id }` focuses that block. Absent = no
+   * change. The editor navigates (URL state) accordingly. Distinct from
+   * `focus` above, which is where the caret or highlight lands. */
+  focusRoot?: { id: string | null }
   /** Why the command did nothing, for the reader (a toast). */
   notice?: string
 }
@@ -175,28 +177,28 @@ const blockOf = ({ doc, key }: CommandInput) => doc.blocks[idOfKey(key)]
 
 /** The keys of the rows beneath a row, in order: its children, then the
  * parents shown under it (`rowsBeneath`) — what a fold hides or shows. */
-function keysBeneath({ doc, key, rootId, zoomRootId }: CommandInput): string[] {
+function keysBeneath({ doc, key, rootId, focusRootId }: CommandInput): string[] {
   const path = new Set(pathIdsOf(key))
   if (rootId) path.add(rootId)
-  if (zoomRootId) path.add(zoomRootId)
+  if (focusRootId) path.add(focusRootId)
   const block = doc.blocks[idOfKey(key)] ?? null
   return rowsBeneath(doc, block, path, directionOfKey(key)).map((row) =>
     keyOf(key, row.id, row.direction),
   )
 }
 
-/** Does `parentKey` name the zoomed block — i.e. is this row a direct child
- * of the zoom root, at the top of the zoomed view? What the zoom boundary is
+/** Does `parentKey` name the focused block — i.e. is this row a direct child
+ * of the focus root, at the top of the focused view? What the focus boundary is
  * drawn at: its children cannot be lifted out of it (`outdent`). */
-const parentIsZoomRoot = (parentKey: string | null, zoomRootId: string | null | undefined) =>
-  !!zoomRootId && parentKey !== null && idOfKey(parentKey) === zoomRootId
+const parentIsFocusRoot = (parentKey: string | null, focusRootId: string | null | undefined) =>
+  !!focusRootId && parentKey !== null && idOfKey(parentKey) === focusRootId
 
-/** The same row, but only where the zoom root is the view's TITLE rather than
+/** The same row, but only where the focus root is the view's TITLE rather than
  * its first row: a move up from one of its children then leaves the rows for
  * the title — `exitTop`, as leaving the first row of a note does. Untitled,
  * the root is a row, so "up" just selects it like any other parent. */
-const parentIsZoomTitle = (parentKey: string | null, { zoomRootId, zoomTitled }: CommandInput) =>
-  zoomTitled !== false && parentIsZoomRoot(parentKey, zoomRootId)
+const parentIsFocusTitle = (parentKey: string | null, { focusRootId, focusTitled }: CommandInput) =>
+  focusTitled !== false && parentIsFocusRoot(parentKey, focusRootId)
 
 /** Up from the rows: the editor hands focus to the title above them. */
 const EXIT_TOP: CommandResult = { handled: true, exitTop: true }
@@ -250,7 +252,7 @@ function moveSelection(direction: "up" | "down"): Command {
     }
     const next = direction === "up" ? i - 1 : i + 1
     // Moving up past the first block hands focus to whatever's above the
-    // editor: the note title, or the zoom title while zoomed.
+    // editor: the note title, or the focus title while focused.
     if (next < 0) return EXIT_TOP
     // Past the last block it hands focus to whatever is below (`exitBottom`
     // — a second results list under this one); consumed either way, so the
@@ -475,7 +477,7 @@ function wrapWith(marker: string): Command {
  * children are never touched — this is a type change only, one structural
  * undo step. An *empty* block additionally opens editing (caret at the end) so
  * the marker key starts you typing that block type immediately. Allowed on the
- * zoomed title too (a type change never escapes the view).
+ * focused title too (a type change never escapes the view).
  */
 function turnInto(target: BlockType): Command {
   return (input) => {
@@ -540,9 +542,9 @@ export type CommandName =
   | "exitList"
   | "stripMarker"
   | "backspaceEmpty"
-  | "zoomIn"
-  | "zoomOut"
-  | "zoomExit"
+  | "focusBlock"
+  | "focusBack"
+  | "leaveFocus"
 
 export const COMMANDS: Record<CommandName, Command> = {
   /** Select → edit the highlighted row. */
@@ -578,13 +580,13 @@ export const COMMANDS: Record<CommandName, Command> = {
 
   /** Lift the row out to become a sibling of its parent. */
   outdent: (input) => {
-    const { doc, key, mode, caret, zoomRootId } = input
-    // Zoom boundary: outdenting a direct child of the zoom root (which would
+    const { doc, key, mode, caret, focusRootId } = input
+    // Focus boundary: outdenting a direct child of the focus root (which would
     // become the root's sibling and leave the view) is a no-op — as is
-    // outdenting the zoom root itself, where it leads the view as a row.
+    // outdenting the focus root itself, where it leads the view as a row.
     if (
-      parentIsZoomRoot(parentKeyOf(key), zoomRootId) ||
-      (zoomRootId && idOfKey(key) === zoomRootId)
+      parentIsFocusRoot(parentKeyOf(key), focusRootId) ||
+      (focusRootId && idOfKey(key) === focusRootId)
     ) {
       return { handled: true, focus: keepFocus(mode, key, caret) }
     }
@@ -609,7 +611,7 @@ export const COMMANDS: Record<CommandName, Command> = {
 
   /** w: previous sibling — or, at the FIRST sibling of a level, break out
    * upward to the parent. On the first root block (nothing above) it no-ops;
-   * on the first child of the zoomed view it steps up to the title. */
+   * on the first child of the focused view it steps up to the title. */
   treePrev: (input) => {
     const { doc, key, mode } = input
     const info = siblingsOf(doc, key)
@@ -621,18 +623,18 @@ export const COMMANDS: Record<CommandName, Command> = {
       }
     }
     // Top of the level: continue the traversal one level out, upward. A direct
-    // child of the zoom root lands on the title (its parent), above the rows.
+    // child of the focus root lands on the title (its parent), above the rows.
     if (info.parentKey === null) return { handled: true }
-    if (parentIsZoomTitle(info.parentKey, input)) return EXIT_TOP
+    if (parentIsFocusTitle(info.parentKey, input)) return EXIT_TOP
     return { handled: true, focus: keepFocus(mode, info.parentKey) }
   },
 
   /** s: next sibling — or, at the LAST sibling of a level, walk up the
    * ancestor chain until an ancestor has a next sibling and select it
    * (continue the traversal one level out, downward). At the end of the
-   * document — or of the zoomed subtree, which the walk never escapes — no-op. */
+   * document — or of the focused subtree, which the walk never escapes — no-op. */
   treeNext: (input) => {
-    const { doc, key, mode, zoomRootId } = input
+    const { doc, key, mode, focusRootId } = input
     let cur = key
     for (;;) {
       const info = siblingsOf(doc, cur)
@@ -643,21 +645,21 @@ export const COMMANDS: Record<CommandName, Command> = {
           focus: keepFocus(mode, siblingKey(cur, info.siblings[info.index + 1])),
         }
       }
-      // Last sibling: climb — but never past the zoom root or the document.
+      // Last sibling: climb — but never past the focus root or the document.
       if (info.parentKey === null) return { handled: true }
-      if (zoomRootId && info.parentId === zoomRootId) return { handled: true }
+      if (focusRootId && info.parentId === focusRootId) return { handled: true }
       cur = info.parentKey
     }
   },
 
   /** Step up the tree: select the parent (no-op on a root-level row). While
-   * zoomed the title *is* the local root: "up" from one of its children goes
+   * in focus the title *is* the local root: "up" from one of its children goes
    * to the title, above the rows. */
   selectParent: (input) => {
     const { key, mode } = input
     const parentKey = parentKeyOf(key)
     if (parentKey === null) return { handled: true }
-    if (parentIsZoomTitle(parentKey, input)) return EXIT_TOP
+    if (parentIsFocusTitle(parentKey, input)) return EXIT_TOP
     return { handled: true, focus: keepFocus(mode, parentKey) }
   },
 
@@ -682,23 +684,23 @@ export const COMMANDS: Record<CommandName, Command> = {
     const { key, mode, visibleOrder } = input
     const firstKey = keysBeneath(input)[0]
     if (!firstKey) return { handled: true }
-    // Collapsed: open it and stay put — the second press steps in. (The zoomed
+    // Collapsed: open it and stay put — the second press steps in. (The focused
     // title is always open on screen, so it steps straight into its children.)
     if (!visibleOrder.includes(firstKey)) return { handled: true, expand: key }
     return { handled: true, focus: keepFocus(mode, firstKey) }
   },
 
   /** ←: collapse an expanded row (staying on it); collapsed or leaf → step
-   * out to the parent. Root-level collapsed/leaf: no-op. Zoomed, a direct
+   * out to the parent. Root-level collapsed/leaf: no-op. In focus, a direct
    * child's "parent" is the title above the rows, so the fold walk never
-   * escapes the zoomed subtree. */
+   * escapes the focused subtree. */
   collapseOrParent: (input) => {
     const { key, mode, visibleOrder } = input
     const first = keysBeneath(input)[0]
     if (first && visibleOrder.includes(first)) return { handled: true, collapse: key }
     const parentKey = parentKeyOf(key)
     if (parentKey === null) return { handled: true }
-    if (parentIsZoomTitle(parentKey, input)) return EXIT_TOP
+    if (parentIsFocusTitle(parentKey, input)) return EXIT_TOP
     return { handled: true, focus: keepFocus(mode, parentKey) }
   },
 
@@ -712,7 +714,7 @@ export const COMMANDS: Record<CommandName, Command> = {
       return { handled: true, focus: keepFocus(mode, siblingKey(key, info.siblings[0])) }
     }
     if (info.parentKey === null) return { handled: true }
-    if (parentIsZoomTitle(info.parentKey, input)) return EXIT_TOP
+    if (parentIsFocusTitle(info.parentKey, input)) return EXIT_TOP
     return { handled: true, focus: keepFocus(mode, info.parentKey) }
   },
   /** Jump to the bottom of the current level (its last sibling). */
@@ -748,12 +750,12 @@ export const COMMANDS: Record<CommandName, Command> = {
    * that slides up from below — falling back to the row above when the
    * deleted row was last. */
   deleteBlock: (input) => {
-    const { doc, key, visibleOrder, zoomRootId, zoomTitled } = input
+    const { doc, key, visibleOrder, focusRootId, focusTitled } = input
     const id = idOfKey(key)
-    // The zoomed view's own root, where it leads the view as a row: removing
+    // The focused view's own root, where it leads the view as a row: removing
     // it from inside would take the view with it — say so rather than doing
     // nothing, since the row looks removable like any other.
-    if (zoomRootId && id === zoomRootId) {
+    if (focusRootId && id === focusRootId) {
       return { handled: true, notice: "Leave focus to remove the block you're focused on" }
     }
     const onlyBlock =
@@ -773,11 +775,11 @@ export const COMMANDS: Record<CommandName, Command> = {
     for (let i = at - 1; i >= 0 && !focusKey; i--) {
       if (hasOccurrence(next, visibleOrder[i])) focusKey = visibleOrder[i]
     }
-    // The zoomed view emptied: the title above the rows takes the keyboard
-    // (the zoomed block alone is a valid view — Enter on it makes a child).
+    // The focused view emptied: the title above the rows takes the keyboard
+    // (the focused block alone is a valid view — Enter on it makes a child).
     // Untitled there is no title to hand it to: the root row is still there,
     // and the fallback below lands on it.
-    if (!focusKey && zoomRootId && zoomTitled !== false) {
+    if (!focusKey && focusRootId && focusTitled !== false) {
       return { handled: true, doc: next, op: STRUCTURAL, exitTop: true }
     }
     return {
@@ -940,15 +942,15 @@ export const COMMANDS: Record<CommandName, Command> = {
 
   /** Backspace at the start of an empty block removes it, merging upward. */
   backspaceEmpty: (input) => {
-    const { doc, key, zoomRootId, zoomTitled } = input
+    const { doc, key, focusRootId, focusTitled } = input
     const id = idOfKey(key)
     if (doc.rootBlockIds.length === 1 && doc.rootBlockIds[0] === id && !input.emptyable) {
       return { handled: true }
     }
     const { doc: next, focusKey } = removeBlock(doc, key)
-    // Merging upward out of the zoomed view lands on its title. Untitled the
+    // Merging upward out of the focused view lands on its title. Untitled the
     // root is a row, so the merge lands on it like any other parent.
-    if (zoomTitled !== false && zoomRootId && (!focusKey || idOfKey(focusKey) === zoomRootId)) {
+    if (focusTitled !== false && focusRootId && (!focusKey || idOfKey(focusKey) === focusRootId)) {
       return { handled: true, doc: next, op: STRUCTURAL, exitTop: true }
     }
     return {
@@ -961,29 +963,31 @@ export const COMMANDS: Record<CommandName, Command> = {
     }
   },
 
-  // ── Zoom ("focus mode") ──────────────────────────────────────────────────
-  // Commands only *request* the zoom change; the editor navigates (the zoom
-  // lives in the URL) and then places the selection — first child on zoom-in,
-  // the block zoomed out from on zoom-out.
+  // ── Focus mode ───────────────────────────────────────────────────────────
+  // Commands only *request* the change of focus root; the editor navigates
+  // (the focus lives in the URL) and then places the selection — the focused
+  // block itself, or its first child under a title, on the way in; the block
+  // left behind on the way out.
 
-  /** Zoom into the row's block: its subtree becomes the whole view. */
-  zoomIn: (input) => ({ handled: true, zoom: { id: idOfKey(input.key) } }),
+  /** Focus on the row's block: its subtree becomes the whole view. */
+  focusBlock: (input) => ({ handled: true, focusRoot: { id: idOfKey(input.key) } }),
 
-  /** Zoom out one level — to the zoom root's parent, or fully at the top. */
-  zoomOut: ({ zoomRootId, zoomBackId }) => {
-    if (!zoomRootId) return IGNORED
-    return { handled: true, zoom: { id: zoomBackId ?? null } }
+  /** Step back one level — to the focus root's parent, or fully at the top. */
+  focusBack: ({ focusRootId, focusBackId }) => {
+    if (!focusRootId) return IGNORED
+    return { handled: true, focusRoot: { id: focusBackId ?? null } }
   },
 
-  /** Exit zoom entirely, back to the whole note. */
-  zoomExit: ({ zoomRootId }) => (zoomRootId ? { handled: true, zoom: { id: null } } : IGNORED),
+  /** Leave focus entirely, back to the whole note. */
+  leaveFocus: ({ focusRootId }) =>
+    focusRootId ? { handled: true, focusRoot: { id: null } } : IGNORED,
 }
 
 /** Run a named command. Unknown names are a no-op (defensive). */
 /**
  * The commands a **browse** view runs — a read-only editor the reader still
  * moves through (the notes list, a search's results): everything that moves
- * the highlight, folds a row or zooms, and nothing that writes. Enter is
+ * the highlight, folds a row or focuses, and nothing that writes. Enter is
  * the view's own (it opens the row rather than editing it), so `enterEdit`
  * is not here.
  */
@@ -1002,9 +1006,9 @@ export const BROWSE_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>([
   "jumpLevelTop",
   "jumpLevelBottom",
   "toggleCollapse",
-  "zoomIn",
-  "zoomOut",
-  "zoomExit",
+  "focusBlock",
+  "focusBack",
+  "leaveFocus",
 ])
 
 export function runCommand(name: CommandName, input: CommandInput): CommandResult {

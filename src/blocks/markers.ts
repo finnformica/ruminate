@@ -102,7 +102,7 @@ export const TURN_INTO_KEYS: Readonly<Record<string, BlockType>> = Object.fromEn
 export const isHeading = (type: BlockType): boolean => defOf(type).family === "heading"
 
 /**
- * Does a focused ("zoomed") view draw this block as its **title**, rather
+ * Does a focused view draw this block as its **title**, rather
  * than as its own first **row**?
  *
  * A heading already names what hangs beneath it, so the view takes it the
@@ -113,7 +113,7 @@ export const isHeading = (type: BlockType): boolean => defOf(type).family === "h
  * page — so the view leads with the block itself as the outline's root row
  * and everything beneath it is exactly where it was.
  */
-export const titlesZoom = (type: BlockType): boolean => isHeading(type)
+export const titlesFocus = (type: BlockType): boolean => isHeading(type)
 
 /** A list item: bullet, numbered, or a checkbox (Enter continues the list). */
 export const isListItem = (type: BlockType): boolean => defOf(type).listItem

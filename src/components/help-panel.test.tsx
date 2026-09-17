@@ -29,7 +29,7 @@ describe("shortcut reference (? / help panel)", () => {
     expect(screen.getByText("Toggle the command menu")).toBeTruthy()
     // Generated from the live KEYMAP
     expect(screen.getByText("Edit the highlighted block")).toBeTruthy()
-    expect(screen.getByText("Zoom into the block")).toBeTruthy()
+    expect(screen.getByText("Focus on the block")).toBeTruthy()
     // Imperative editor bindings
     expect(
       screen.getByText("Grow the selection one structural rung (block → subtree → parent → page)"),

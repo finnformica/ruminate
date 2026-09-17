@@ -181,8 +181,8 @@ export function insertBefore(doc: BlockDoc, refKey: string, block: Block): Block
   return insertRelative(doc, refKey, block, 0)
 }
 
-/** Insert `block` as the FIRST child of `parentId` (used by the zoom view,
- * where "below the title" means the top of the zoomed subtree). */
+/** Insert `block` as the FIRST child of `parentId` (used by the focus view,
+ * where "below the title" means the top of the focused subtree). */
 export function insertFirstChild(doc: BlockDoc, parentId: string, block: Block): BlockDoc {
   const parent = doc.blocks[parentId]
   if (!parent) return doc
@@ -259,7 +259,7 @@ export function insertBlocksAfter(
 
 /**
  * Insert `sub`'s root blocks as the leading children of `parentId`, merging
- * `sub.blocks` into the doc. The zoomed-view sibling of `insertBlocksAfter`:
+ * `sub.blocks` into the doc. The focused-view sibling of `insertBlocksAfter`:
  * pasting "after the title" means the top of its body. Returns the new doc and
  * the last inserted root id, or `null` if `parentId` is unknown or `sub` empty.
  */

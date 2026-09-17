@@ -81,7 +81,7 @@ export interface BlockAncestor {
 /**
  * One block-level search result: which block, in which note, and what the
  * query is tested against. The target is the note route with the `?block=`
- * zoom param (`/notes/$noteId?block=$blockId`); `note` is the containing
+ * focus param (`/notes/$noteId?block=$blockId`); `note` is the containing
  * note's metadata (note-level qualifiers). Block ids are minted per note and
  * can be *pinned* by an `id::` line, so the same id can legitimately appear
  * in two notes — a hit is always note-scoped.
@@ -232,7 +232,7 @@ function isScopeFilter(filter: Filter): boolean {
  * (by id): a row is in scope when it lives in that note, or when that block
  * is on its path from the note — so a block reachable by two paths is in
  * scope through the one that passes the scope block. The scoping block
- * itself is not in its own scope — `in:` is "inside", the way a zoomed
+ * itself is not in its own scope — `in:` is "inside", the way a focused
  * view's title is not one of the note's blocks. `-in:` excludes, comma lists
  * OR, like any qualifier.
  *

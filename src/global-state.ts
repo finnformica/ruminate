@@ -366,11 +366,11 @@ export const searchBlocksAtom = atom((get) => {
  * and the note to open it in. Pinning a note puts it at the top of the
  * sidebar's notes; pinning a block puts the block in the sidebar's
  * **Pinned** list (and the palette's Pinned group), from where it opens
- * zoomed into — a focused view of that one block and what is beneath it.
+ * focused on — a focused view of that one block and what is beneath it.
  */
 export interface PinnedBlock {
   id: string
-  /** The note the block opens in, zoomed: the note it was written in
+  /** The note the block opens in, focused: the note it was written in
    * while that note still reaches it, else the first note (in
    * `sortedNotesAtom` order) that does — a block can be held in several —
    * else, for a block no note reaches (one in a note's Unassigned basket),

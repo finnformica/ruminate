@@ -67,7 +67,7 @@ by the page's row identities), search and the block index read those notes,
 and the open note's editor walks its page straight off the snapshot
 (`noteView` via `useNoteDoc` — lazily, descending only where the reader's
 folds open a row, and in the directions the reader chose, upstream as well
-as down by default; zoomed, the same walk from the block, `blockView`). Markdown is a projection at the edges only —
+as down by default; in focus, the same walk from the block, `blockView`). Markdown is a projection at the edges only —
 the rollup for copy, share and export, `parse` for pasted or imported text.
 
 A small XState machine (`src/global-state.ts`) handles the rest: auth

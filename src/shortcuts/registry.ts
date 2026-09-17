@@ -19,7 +19,7 @@ import { WRAP_PAIRS, type CommandName } from "../blocks/commands"
  * both render from this table.
  */
 
-type ShortcutScope = "global" | "select" | "edit" | "palette" | "zoom" | "title"
+type ShortcutScope = "global" | "select" | "edit" | "palette" | "focus" | "title"
 
 export interface Shortcut {
   /**
@@ -86,7 +86,7 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   nextSibling: "Jump to the next sibling (skipping children)",
   treePrev: "Previous sibling (or the parent at the top of a level)",
   treeNext: "Next sibling (or the next block one level out at the end)",
-  selectParent: "Select the parent block (on the zoomed title: zoom out)",
+  selectParent: "Select the parent block (on the focused title: step back)",
   selectFirstChild: "Select the first child (auto-expands a collapsed block)",
   expandOrFirstChild: "Expand the block (already open: select its first child)",
   collapseOrParent: "Collapse the block (already closed, or a leaf: select the parent)",
@@ -120,9 +120,9 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   exitList: "Exit the list (on an empty list item)",
   stripMarker: "Strip the block's marker (at line start)",
   backspaceEmpty: "Merge into the block above (empty block, at line start)",
-  zoomIn: "Zoom into the block",
-  zoomOut: "Zoom out one level",
-  zoomExit: "Exit zoom entirely",
+  focusBlock: "Focus on the block",
+  focusBack: "Step back one level",
+  leaveFocus: "Leave focus entirely",
 }
 
 /**
@@ -134,8 +134,8 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
  */
 export const COMMANDS_WITHOUT_BINDINGS = new Set<CommandName>(["wrapTyped"])
 
-/** Zoom commands render under their own group, whichever mode binds them. */
-const ZOOM_COMMANDS = new Set<CommandName>(["zoomIn", "zoomOut", "zoomExit"])
+/** Focus commands render under their own group, whichever mode binds them. */
+const FOCUS_COMMANDS = new Set<CommandName>(["focusBlock", "focusBack", "leaveFocus"])
 
 /**
  * Combos that exist only as alternate spellings of another binding (layouts
@@ -158,8 +158,8 @@ function editorEntries(): Shortcut[] {
   const entries: Shortcut[] = []
   const byKey = new Map<string, Shortcut>()
   for (const binding of KEYMAP) {
-    const zoom = ZOOM_COMMANDS.has(binding.command)
-    const scope: ShortcutScope = zoom ? "zoom" : binding.mode
+    const focus = FOCUS_COMMANDS.has(binding.command)
+    const scope: ShortcutScope = focus ? "focus" : binding.mode
     const key = `${scope}:${binding.command}`
     let entry = byKey.get(key)
     if (!entry) {
@@ -167,7 +167,7 @@ function editorEntries(): Shortcut[] {
         combos: [],
         scope,
         description: EDITOR_COMMAND_DESCRIPTIONS[binding.command],
-        group: zoom ? "Zoom" : binding.mode === "select" ? "Select mode" : "Edit mode",
+        group: focus ? "Focus" : binding.mode === "select" ? "Select mode" : "Edit mode",
       }
       byKey.set(key, entry)
       entries.push(entry)
@@ -388,13 +388,13 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   {
     combos: [APP_SHORTCUTS.focusSearch],
     scope: "global",
-    description: "Focus the search input (notes list)",
+    description: "Jump to the search input (notes list)",
     group: "Navigation",
   },
   {
     combos: [APP_SHORTCUTS.focusEditor],
     scope: "global",
-    description: "Focus the editor, restoring the last selected block",
+    description: "Return to the editor, restoring the last selected block",
     group: "Navigation",
   },
   {
@@ -436,7 +436,7 @@ const SEARCH_RESULT_ENTRIES: Shortcut[] = [
   {
     combos: ["Enter"],
     scope: "global",
-    description: "Open the highlighted result (its note, zoomed to a block)",
+    description: "Open the highlighted result (its note, focused on a block)",
     group: "Search results",
   },
   {
@@ -514,7 +514,7 @@ export const GROUP_ORDER = [
   "Multi-select",
   "Selection ladder",
   "History",
-  "Zoom",
+  "Focus",
   "Palette",
   "Note title",
 ] as const

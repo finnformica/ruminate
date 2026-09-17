@@ -33,16 +33,16 @@ describe("useTouchNote", () => {
     expect(touched(store)).toEqual([])
   })
 
-  it("a zoom (or a fold, or an edit) touches: `touching` notes the touch and runs the callback", () => {
+  it("a focus (or a fold, or an edit) touches: `touching` notes the touch and runs the callback", () => {
     vi.useFakeTimers()
     try {
       const { store, result } = mount("a")
       // A second later (the open's touch has aged past the coalescing window).
       vi.setSystemTime(Date.now() + 2000)
       const navigate = vi.fn()
-      const zoom = result.current.touching((id: string | null) => navigate(id))
+      const focus = result.current.touching((id: string | null) => navigate(id))
       const before = store.get(recentTouchesAtom)
-      act(() => zoom("blk_1"))
+      act(() => focus("blk_1"))
       expect(navigate).toHaveBeenCalledWith("blk_1")
       const after = store.get(recentTouchesAtom)
       expect(after).not.toBe(before)

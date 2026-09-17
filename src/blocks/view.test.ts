@@ -16,7 +16,7 @@ import {
   pathIdsOf,
   rowsBeneath,
   siblingKey,
-  zoomRootKey,
+  focusRootKeyOf,
 } from "./view"
 
 const NONE: ReadonlySet<string> = new Set()
@@ -73,9 +73,9 @@ describe("occurrence keys", () => {
     expect(isWithin("a", "a/b")).toBe(false)
   })
 
-  it("address the zoomed block by its first occurrence", () => {
-    expect(zoomRootKey(shared, "s")).toBe("p/s")
-    expect(zoomRootKey(shared, "nope")).toBe("nope")
+  it("address the focused block by its first occurrence", () => {
+    expect(focusRootKeyOf(shared, "s")).toBe("p/s")
+    expect(focusRootKeyOf(shared, "nope")).toBe("nope")
   })
 
   it("enumerate every occurrence, depth-first", () => {
@@ -188,22 +188,22 @@ describe("buildRows", () => {
     ])
   })
 
-  it("zoomed: the rows are the root's children, from depth 0 — the root is the title, not a row", () => {
-    const rows = buildRows(outline, { zoomRootId: "b", folds: NONE })
+  it("focused: the rows are the root's children, from depth 0 — the root is the title, not a row", () => {
+    const rows = buildRows(outline, { focusRootId: "b", folds: NONE })
     expect(summary(rows)).toEqual(["a/b/c"])
     expect(rows[0]).toMatchObject({ depth: 0, parentKey: "a/b", guideKeys: [] })
-    // Deeper rows count their guides from the zoom root's children, not the note.
-    const deep = buildRows(outline, { zoomRootId: "a", folds: NONE })
+    // Deeper rows count their guides from the focus root's children, not the note.
+    const deep = buildRows(outline, { focusRootId: "a", folds: NONE })
     expect(deep.find((row) => row.key === "a/b/c")).toMatchObject({ depth: 1, guideKeys: ["a/b"] })
   })
 
-  it("zoomed: the title is always open, and folds made here are the note's folds", () => {
-    const rows = buildRows(outline, { zoomRootId: "a", folds: new Set(["a", "a/b"]) })
+  it("focused: the title is always open, and folds made here are the note's folds", () => {
+    const rows = buildRows(outline, { focusRootId: "a", folds: new Set(["a", "a/b"]) })
     expect(summary(rows)).toEqual(["a/b ▸", "a/d", "a/e"])
   })
 
-  it("untitled: the zoom root leads the rows, its subtree indented beneath it", () => {
-    const rows = buildRows(outline, { zoomRootId: "b", zoomTitled: false, folds: NONE })
+  it("untitled: the focus root leads the rows, its subtree indented beneath it", () => {
+    const rows = buildRows(outline, { focusRootId: "b", focusTitled: false, folds: NONE })
     expect(summary(rows)).toEqual(["a/b", "  a/b/c"])
     // The root is the view's own: nothing above it on screen, whatever path
     // its key spells out in the document.
@@ -221,15 +221,17 @@ describe("buildRows", () => {
 
   it("untitled: the leading row folds like any other, and a leaf leads alone", () => {
     expect(
-      summary(buildRows(outline, { zoomRootId: "b", zoomTitled: false, folds: new Set(["a/b"]) })),
+      summary(
+        buildRows(outline, { focusRootId: "b", focusTitled: false, folds: new Set(["a/b"]) }),
+      ),
     ).toEqual(["a/b ▸"])
-    const leaf = buildRows(outline, { zoomRootId: "c", zoomTitled: false, folds: NONE })
+    const leaf = buildRows(outline, { focusRootId: "c", focusTitled: false, folds: NONE })
     expect(summary(leaf)).toEqual(["a/b/c"])
     expect(leaf[0]).toMatchObject({ hasChildren: false, collapsed: false })
   })
 
-  it("zoomed into an unknown block: the whole note", () => {
-    expect(buildRows(outline, { zoomRootId: "nope", folds: NONE })).toHaveLength(6)
+  it("focused on an unknown block: the whole note", () => {
+    expect(buildRows(outline, { focusRootId: "nope", folds: NONE })).toHaveLength(6)
   })
 })
 
@@ -306,15 +308,15 @@ describe("upstream occurrences", () => {
     expect(summary(buildRows(graphed, { folds: NONE }))).toContain("  a/^n")
   })
 
-  it("buildRows folds an upstream row like any other, and zoomed shows the root's parents", () => {
+  it("buildRows folds an upstream row like any other, and focused shows the root's parents", () => {
     const folded = buildRows(graphed, { folds: new Set(["a/s/^p"]), rootId: "n" })
     expect(summary(folded)).toEqual(["a", "  a/s", "    a/s/^p ▸", "b"])
-    // Zoomed into s: its parents are all the rows, a and p alike, each with
-    // its note beneath — a fresh path starts at the zoom root. Beneath the
+    // Focused on s: its parents are all the rows, a and p alike, each with
+    // its note beneath — a fresh path starts at the focus root. Beneath the
     // note, the row it was reached up from (a) is not listed, its other
     // block (b) is: the graph around the block, as far as it is open.
-    const zoomed = buildRows(graphed, { folds: NONE, zoomRootId: "s" })
-    expect(summary(zoomed)).toEqual([
+    const focused = buildRows(graphed, { folds: NONE, focusRootId: "s" })
+    expect(summary(focused)).toEqual([
       "a/s/^a",
       "  a/s/^a/^n",
       "    a/s/^a/^n/b",

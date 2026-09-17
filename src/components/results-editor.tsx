@@ -13,11 +13,11 @@ import { BlockEditor } from "./block-editor/block-editor"
  * header above (a search box, a note's title), never the rows.
  *
  * Read-only, the reader still browses (`BlockEditor.onActivate`): the
- * highlight moves, `space` / `→` / `←` fold and unfold, `f` zooms, and Enter
- * or a click opens the row — the note, or the note zoomed to the block.
+ * highlight moves, `space` / `→` / `←` fold and unfold, `f` focuses, and Enter
+ * or a click opens the row — the note, or the note focused on the block.
  * Editable, the rows edit as they do in their notes and the change lands in
- * the graph (`useResultsDoc`); zooming opens the note instead, since a
- * results view has no zoomed view of its own. Either way the roots are the
+ * the graph (`useResultsDoc`); focusing opens the note instead, since a
+ * results view has no focus view of its own. Either way the roots are the
  * view's (`fixedRoots`): nothing is added beside a root or taken from the
  * list here.
  */
@@ -38,7 +38,7 @@ export function ResultsEditor({
   resetKey: string
   /** Browse only: rows open rather than edit. */
   readOnly?: boolean
-  /** Open a note — zoomed to a block, when one is given. */
+  /** Open a note — focused on a block, when one is given. */
   onOpen: (noteId: NoteId, blockId?: string) => void
   /** Bump to highlight the first row (↓ from the search box). */
   focusFirstSignal?: number
@@ -61,9 +61,9 @@ export function ResultsEditor({
     },
     [noteOf, onOpen],
   )
-  // Zoom is controlled and never set: a results view has no zoomed view of
-  // its own, so zooming into a row is opening it.
-  const onZoomNavigate = React.useCallback(
+  // The focus root is controlled and never set: a results view has no focus
+  // view of its own, so focusing on a row is opening it.
+  const onFocusNavigate = React.useCallback(
     (id: string | null) => {
       if (id !== null) open(id)
     },
@@ -80,8 +80,8 @@ export function ResultsEditor({
       fixedRoots
       collapsed={collapsed}
       onToggleCollapse={toggleCollapse}
-      zoomRootId={null}
-      onZoomNavigate={onZoomNavigate}
+      focusRootId={null}
+      onFocusNavigate={onFocusNavigate}
       focusFirstSignal={focusFirstSignal}
       focusLastSignal={focusLastSignal}
       onExitTop={onExitTop}

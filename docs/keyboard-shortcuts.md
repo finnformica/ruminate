@@ -43,9 +43,9 @@ key navigates. The chords work from the block editor's select mode too.
 
 <kbd>⌘</kbd> <kbd>P</kbd> opens the same <kbd>⌘</kbd> <kbd>K</kbd> palette
 with two filters already set — `type:heading` and `in:` the open note (or
-the block you have zoomed into) — so the results are that note's headings in
+the block you have focused on) — so the results are that note's headings in
 document order, and typing narrows them. <kbd>↵</kbd> on a highlighted
-heading opens the note zoomed into it. There is no separate outline mode:
+heading opens the note focused on it. There is no separate outline mode:
 take the pills off and it is the ordinary search.
 
 ## The notes list and search results
@@ -54,7 +54,7 @@ The notes list (`/`) and the full results view (`/?query=…`) are the block
 editor over a set of roots — every note, or the matched blocks — so the keys
 are the editor's own (see "Block editor" above): the arrows and <kbd>w</kbd> /
 <kbd>s</kbd> / <kbd>a</kbd> / <kbd>d</kbd> move the highlight, <kbd>space</kbd>
-/ <kbd>→</kbd> / <kbd>←</kbd> fold and unfold, <kbd>f</kbd> zooms — which,
+/ <kbd>→</kbd> / <kbd>←</kbd> fold and unfold, <kbd>f</kbd> focuses — which,
 here, opens the note at that block. Opening a row loads only that row's
 blocks; a child opens the next level the same way.
 
@@ -81,12 +81,12 @@ The palette's results — the matching **blocks** at any depth and the notes
 whose title matched, ranked together by score; or, with nothing typed, the
 **Recent** notes — the five most recently touched: edited or created (the
 graph's timestamp, the same on every device) merged with opened, edited,
-a block folded or unfolded, or zoomed into on this device (a list of at
+a block folded or unfolded, or a block focused on, on this device (a list of at
 most five note ids and timestamps, under one browser-storage key that
 overwrites itself); selecting, focusing or arrowing through a note never
 counts — with the
 **Pinned** notes beneath, less any already listed as recent, and the pinned
-blocks after them (docs/metadata.md), each opening its note zoomed into
+blocks after them (docs/metadata.md), each opening its note focused on
 it; both give way
 to results the moment you type — are the same block editor, browsed, under
 the same count line as the notes page. The
@@ -104,15 +104,15 @@ from the very first row, or <kbd>Esc</kbd>, returns to the query. Typing
 never moves the keyboard: the rows change under the query, and the query
 keeps it.
 
-| Action                                    | Shortcut                                 |
-| ----------------------------------------- | ---------------------------------------- |
-| Move between the palette's items          | <kbd>↑</kbd> / <kbd>↓</kbd>              |
-| Past the last item: into the result rows  | <kbd>↓</kbd>                             |
-| From the first row: back to the query     | <kbd>↑</kbd> / <kbd>Esc</kbd>            |
-| Open the highlighted result (note + zoom) | <kbd>↵</kbd>                             |
-| See all results for the query             | <kbd>↵</kbd> with no item highlighted    |
-| Pick the highlighted item                 | <kbd>↵</kbd>                             |
-| Create a note titled with the query       | <kbd>⌘</kbd> <kbd>↵</kbd>, or the footer |
+| Action                                     | Shortcut                                 |
+| ------------------------------------------ | ---------------------------------------- |
+| Move between the palette's items           | <kbd>↑</kbd> / <kbd>↓</kbd>              |
+| Past the last item: into the result rows   | <kbd>↓</kbd>                             |
+| From the first row: back to the query      | <kbd>↑</kbd> / <kbd>Esc</kbd>            |
+| Open the highlighted result (note + focus) | <kbd>↵</kbd>                             |
+| See all results for the query              | <kbd>↵</kbd> with no item highlighted    |
+| Pick the highlighted item                  | <kbd>↵</kbd>                             |
+| Create a note titled with the query        | <kbd>⌘</kbd> <kbd>↵</kbd>, or the footer |
 
 Opening a row loads only that row's blocks; a child opens the next level the
 same way.
@@ -155,9 +155,9 @@ declaratively in `src/blocks/keymap.ts` and dispatched through the command layer
 | Turn into: heading / bullet / todo       | <kbd>#</kbd> / <kbd>-</kbd> / <kbd>[</kbd>                                 |
 | Turn into: quote / numbered item         | <kbd>></kbd> / <kbd>1</kbd>                                                |
 | Turn into: code block                    | <kbd>`</kbd>                                                               |
-| Zoom into the block (see Zoom below)     | <kbd>F</kbd> (or <kbd>⌘</kbd> <kbd>.</kbd>)                                |
-| Zoom out one level                       | <kbd>⇧</kbd> <kbd>F</kbd>                                                  |
-| Exit zoom entirely                       | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>                                     |
+| Focus on the block (see Focus below)     | <kbd>F</kbd> (or <kbd>⌘</kbd> <kbd>.</kbd>)                                |
+| Step back one level                      | <kbd>⇧</kbd> <kbd>F</kbd>                                                  |
+| Leave focus entirely                     | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>                                     |
 | Focus the note title (from first block)  | <kbd>↑</kbd>                                                               |
 
 **Tree navigation** maps the tree spatially onto <kbd>w</kbd> <kbd>a</kbd>
@@ -168,18 +168,18 @@ first child), <kbd>w</kbd> / <kbd>s</kbd> walk siblings at the same level
 the last sibling continues at the next block one level out (climbing until an
 ancestor has a next sibling). Only the true start / end of the tree no-ops.
 <kbd>d</kbd> on a collapsed block expands it and selects its first child in
-one press; while zoomed the traversal never leaves the zoomed subtree, and
-<kbd>a</kbd> on the title zooms out one level ("up the tree" keeps holding
-across the zoom boundary — <kbd>w</kbd> on the title stays put). (`g` chords
+one press; while focused the traversal never leaves the focused subtree, and
+<kbd>a</kbd> on the title steps back one level ("up the tree" keeps holding
+across the focus boundary — <kbd>w</kbd> on the title stays put). (`g` chords
 still work: an armed chord's second key wins over these bindings.)
 
 <kbd>←</kbd> / <kbd>→</kbd> **fold** the way file trees do: <kbd>→</kbd> on a
 collapsed block expands it (staying put), and pressed again steps into the
 first child; <kbd>←</kbd> on an expanded block collapses it (staying put), and
 on a collapsed block or a leaf steps out to the parent. A root-level collapsed
-block or leaf no-ops. While zoomed, <kbd>←</kbd> on a direct child selects the
-title, and on the title itself it's a no-op — zooming out stays <kbd>a</kbd>'s
-job, and the fold walk never leaves the zoomed subtree. In edit mode
+block or leaf no-ops. While focused, <kbd>←</kbd> on a direct child selects the
+title, and on the title itself it's a no-op — stepping back stays <kbd>a</kbd>'s
+job, and the fold walk never leaves the focused subtree. In edit mode
 <kbd>←</kbd> / <kbd>→</kbd> stay ordinary caret keys.
 
 **Turn into**: select mode never types text, so the markdown marker keys are
@@ -255,7 +255,7 @@ format). With nothing selected (after <kbd>Esc</kbd>), <kbd>↓</kbd> /
 | Exit edit, select block above / below             | <kbd>↑</kbd> / <kbd>↓</kbd> at the first / last line                                                                                   |
 | Paste as plain text (newlines → spaces)           | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>                                                                                                 |
 | Select all text, then grow by structure           | <kbd>⌘</kbd> <kbd>A</kbd> (repeat — see the selection ladder)                                                                          |
-| Zoom into the block / exit zoom                   | <kbd>⌘</kbd> <kbd>.</kbd> / <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>                                                                     |
+| Focus on the block / exit focus                   | <kbd>⌘</kbd> <kbd>.</kbd> / <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>                                                                     |
 | Strip the block's marker → merge up               | <kbd>⌫</kbd> at line start                                                                                                             |
 | Slash menu (dates, turn into)                     | <kbd>/</kbd> at the start of a word                                                                                                    |
 
@@ -304,14 +304,14 @@ the last visual line highlights the block below (on the very last block it
 highlights the block itself). <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd> collapses
 newlines to single spaces because a block is one line in the serialized format.
 
-### Zoom (focus mode)
+### Focus
 
-Zoom makes one block's subtree the whole editor view, with a breadcrumb
-tracing the full path (`Note title › ancestor › … › zoomed block`; every crumb
-is clickable, the note-title crumb exits fully). The zoom lives in the URL
+Focus makes one block's subtree the whole editor view, with a breadcrumb
+tracing the full path (`Note title › ancestor › … › focused block`; every crumb
+is clickable, the note-title crumb exits fully). The focus lives in the URL
 (`?block=…`), so the browser back button undoes it.
 
-A zoomed **heading** renders as an editable title at the top, its children
+A focused **heading** renders as an editable title at the top, its children
 below it — a heading already names what hangs beneath it. **Every other type**
 is content rather than a name, so it simply leads the view as its own first
 row, drawn as it is anywhere else, with its subtree indented beneath it and no
@@ -321,28 +321,28 @@ cannot be deleted or outdented out of its own view.
 
 | Action                        | Trigger                                             |
 | ----------------------------- | --------------------------------------------------- |
-| Zoom into the selected block  | <kbd>F</kbd> (select mode)                          |
-| Zoom out one level            | <kbd>⇧</kbd> <kbd>F</kbd> (select mode)             |
-| Zoom into the current block   | <kbd>⌘</kbd> <kbd>.</kbd> (both modes)              |
-| Exit zoom entirely            | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd> (both modes) |
-| Zoom into a list item         | click its bullet / number                           |
-| Zoom into any other block     | press F or Cmd+. with the block selected            |
+| Focus on the selected block   | <kbd>F</kbd> (select mode)                          |
+| Step back one level           | <kbd>⇧</kbd> <kbd>F</kbd> (select mode)             |
+| Focus on the current block    | <kbd>⌘</kbd> <kbd>.</kbd> (both modes)              |
+| Leave focus entirely          | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd> (both modes) |
+| Focus on a list item          | click its bullet / number                           |
+| Focus on any other block      | press F or Cmd+. with the block selected            |
 | Navigate to a shallower level | click its breadcrumb crumb                          |
 
-Rules while zoomed:
+Rules while focused:
 
-- Zooming **in** selects the first child under a title, or the leading row
-  itself where there is none; zooming **out** lands on the block you zoomed
-  out from.
+- Focusing **in** selects the first child under a title, or the leading row
+  itself where there is none; **stepping back** lands on the block you came
+  from.
 - <kbd>↵</kbd> / <kbd>⌘</kbd> <kbd>↵</kbd> on the title create its **first
   child** (title + body), never a sibling outside the view.
 - The title can't be deleted, moved, duplicated, indented, outdented, or
   collapsed from inside its own view; outdenting a top-level block of the view
   (which would eject it) is a no-op, and <kbd>↑</kbd> at the title stays put
   rather than exiting to the note title.
-- The <kbd>⌘</kbd> <kbd>A</kbd> ladder's "page" rung is the zoomed subtree.
-- If the zoomed block disappears (an undo, a stale link), the editor exits the
-  zoom gracefully and cleans the URL.
+- The <kbd>⌘</kbd> <kbd>A</kbd> ladder's "page" rung is the focused subtree.
+- If the focused block disappears (an undo, a stale link), the editor exits the
+  focus gracefully and cleans the URL.
 
 ### Note title
 

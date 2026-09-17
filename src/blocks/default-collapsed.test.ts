@@ -87,7 +87,7 @@ describe("collapsedKeysOf, by depth", () => {
     expect(collapsedContents(markdown, 10)).toEqual([])
   })
 
-  it("counts levels from where the walk starts: a zoomed root at 0", () => {
+  it("counts levels from where the walk starts: a focused root at 0", () => {
     const markdown = ["- root", "  - middle", "    - deep", "      - deeper", ""].join("\n")
     // Rooted at the block itself (level 0), its children are level 1 and
     // `deep`, at level 2, is the first to fold — one level further than

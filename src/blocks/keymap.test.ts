@@ -120,12 +120,12 @@ describe("select mode", () => {
     [{ key: ">" }, "turnIntoQuote"],
     [{ key: ">", shiftKey: true }, "turnIntoQuote"],
     [{ key: "1" }, "turnIntoOrdered"],
-    [{ key: "f" }, "zoomIn"],
-    [{ key: "F", shiftKey: true }, "zoomOut"],
-    [{ key: ".", metaKey: true }, "zoomIn"],
-    [{ key: ".", metaKey: true, shiftKey: true }, "zoomExit"],
+    [{ key: "f" }, "focusBlock"],
+    [{ key: "F", shiftKey: true }, "focusBack"],
+    [{ key: ".", metaKey: true }, "focusBlock"],
+    [{ key: ".", metaKey: true, shiftKey: true }, "leaveFocus"],
     // With Shift held, some layouts report the shifted character.
-    [{ key: ">", metaKey: true, shiftKey: true }, "zoomExit"],
+    [{ key: ">", metaKey: true, shiftKey: true }, "leaveFocus"],
   ]
   it.each(cases)("%o → %s", (evt, command) => {
     expect(resolveKey("select", key(evt), input("A", "select"))).toBe(command)
@@ -183,10 +183,10 @@ describe("edit mode modifier arrows", () => {
     [{ key: "ArrowDown", metaKey: true, shiftKey: true }, "moveBlockDown"],
     [{ key: "ArrowUp", altKey: true, shiftKey: true }, "duplicateAbove"],
     [{ key: "ArrowDown", altKey: true, shiftKey: true }, "duplicateBelow"],
-    // The zoom family aliases work while typing (single-key f stays typeable).
-    [{ key: ".", metaKey: true }, "zoomIn"],
-    [{ key: ".", metaKey: true, shiftKey: true }, "zoomExit"],
-    [{ key: ">", metaKey: true, shiftKey: true }, "zoomExit"],
+    // The focus family aliases work while typing (single-key f stays typeable).
+    [{ key: ".", metaKey: true }, "focusBlock"],
+    [{ key: ".", metaKey: true, shiftKey: true }, "leaveFocus"],
+    [{ key: ">", metaKey: true, shiftKey: true }, "leaveFocus"],
   ]
   it.each(cases)("%o → %s", (evt, command) => {
     expect(resolveKey("edit", key(evt), input("A", "edit", caret("A", 0)))).toBe(command)

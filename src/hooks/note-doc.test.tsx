@@ -65,12 +65,12 @@ describe("useNoteDoc", () => {
     unsubscribe()
   })
 
-  it("zoomed, walks the block as the root, and an edit beneath it stamps the note", async () => {
+  it("focused, walks the block as the root, and an edit beneath it stamps the note", async () => {
     const deep =
       "- one\n  id:: blk_one0000000\n  - deep\n    id:: blk_deep000000\n- two\n  id:: blk_two0000000\n"
     const { store, wrapper, unsubscribe } = await signedOutStore({ n: deep })
     const { result } = renderHook(
-      () => useNoteDoc({ noteId: "n", defaultDoc: parse(""), zoomBlockId: "blk_one0000000" }),
+      () => useNoteDoc({ noteId: "n", defaultDoc: parse(""), focusBlockId: "blk_one0000000" }),
       { wrapper },
     )
     expect(result.current.exists).toBe(true)
@@ -81,15 +81,15 @@ describe("useNoteDoc", () => {
     const stored = noteDoc("n", store.get(sampleGraphAtom))!
     expect(body(serialize(stored))).toBe(body(deep.replace("- deep", "- edited")))
     expect(typeof stored.props?.updated_at).toBe("string")
-    // The note's own root order is untouched by the zoomed diff.
+    // The note's own root order is untouched by the focused diff.
     expect(stored.rootBlockIds).toEqual(["blk_one0000000", "blk_two0000000"])
     unsubscribe()
   })
 
-  it("zoomed into a block the graph lacks, falls back to the note", async () => {
+  it("focused on a block the graph lacks, falls back to the note", async () => {
     const { wrapper, unsubscribe } = await signedOutStore({ n: NOTE })
     const { result } = renderHook(
-      () => useNoteDoc({ noteId: "n", defaultDoc: parse(""), zoomBlockId: "blk_gone" }),
+      () => useNoteDoc({ noteId: "n", defaultDoc: parse(""), focusBlockId: "blk_gone" }),
       { wrapper },
     )
     expect(result.current.doc.rootBlockIds).toEqual(["blk_one0000000", "blk_two0000000"])

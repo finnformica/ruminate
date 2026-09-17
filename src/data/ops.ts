@@ -367,7 +367,7 @@ export function deleteSubtreeOps(blockId: string, snapshot: GraphSnapshot): Op[]
  * walked in still carries their ids, so its child order is the graph's and
  * reconciles to nothing, and the blocks beneath it, absent from `nodes`,
  * keep their parent and are never dropped. `rootId` names the doc's root
- * when it is a block rather than the note (the zoomed page).
+ * when it is a block rather than the note (the focused page).
  */
 export function docToOps(
   noteId: NoteId,
@@ -383,9 +383,9 @@ export function docToOps(
     reservedNoteIds(snapshot, noteId),
   )
   if (rootId !== noteId) {
-    // A doc rooted at a block (the zoomed page, `blockView`): its one root is
+    // A doc rooted at a block (the focused page, `blockView`): its one root is
     // the block, walked as a block, so its own text and children are diffed
-    // like any other's — a rename of the zoom title is a `setText` on it.
+    // like any other's — a rename of the focus title is a `setText` on it.
     // The note node and the note's root order are not this doc's to say
     // anything about: dropped, as the basket drops them (`basketToOps`).
     const blocks = nodes.filter((node) => node.id !== noteId)
