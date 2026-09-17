@@ -273,7 +273,17 @@ export function deleteBlockOps(blockId: string, snapshot: GraphSnapshot): Op[] {
     source: link.source_id,
     destination: blockId,
   }))
-  return [...unlinks, { op: "delete", id: blockId }]
+  // What it held goes to the basket — except the blank ones, which have
+  // nothing in them to rescue (`strandedBlankOps`).
+  const parents = parentLookup(snapshot)
+  for (const link of snapshot.parentLinks.get(blockId) ?? [])
+    parents(blockId).delete(link.source_id)
+  const deleted = new Set([blockId])
+  return [
+    ...unlinks,
+    { op: "delete", id: blockId },
+    ...strandedBlankOps(snapshot, parents, deleted),
+  ]
 }
 
 /**
@@ -322,7 +332,12 @@ export function deleteSubtreeOps(blockId: string, snapshot: GraphSnapshot): Op[]
       }
     }
   }
-  return [...unlinks, ...[...doomed].map((id) => ({ op: "delete", id }) as Op)]
+  // The survivors these deletes set loose head for the basket; the blank
+  // ones do not (`strandedBlankOps`).
+  const parents = parentLookup(snapshot)
+  const deleted = new Set(doomed)
+  const blanks = strandedBlankOps(snapshot, parents, deleted, kept)
+  return [...unlinks, ...[...doomed].map((id) => ({ op: "delete", id }) as Op), ...blanks]
 }
 /**
  * The batch that makes the graph hold `doc` as note `noteId`'s content:
@@ -399,18 +414,24 @@ export function docToOps(
 }
 
 /**
- * A block with nothing in it: no text but whitespace, nothing beneath it, and
- * no picture (an image row's text is its caption; its picture is in its
- * props, and a placeholder whose upload failed has none) or address (a
- * link block's text is its title; its address is in its props). Blank blocks
- * are what backing out of an empty line leaves behind, so the outline
- * deletes them rather than parking them in the basket.
+ * A block with nothing in it: no text but whitespace, and no picture (an
+ * image row's text is its caption; its picture is in its props, and a
+ * placeholder whose upload failed has none) or address (a link block's text
+ * is its title; its address is in its props). Blank blocks are what backing
+ * out of an empty line leaves behind, so the outline deletes them rather
+ * than parking them in the basket.
+ *
+ * What a block HOLDS is not what is in it. A blank block that holds
+ * something is still blank — an empty line that happens to have a line
+ * indented under it — and parking one in the basket puts an empty row
+ * there, saying nothing, with the rows that actually needed rescuing hidden
+ * beneath it. `strandedBlankOps` deletes it and lets what it held stand in
+ * the basket in its own right.
  */
 function isBlankNode(snapshot: GraphSnapshot, id: string): boolean {
   const node = snapshot.nodes.get(id)
   if (!node) return true
   if (node.text.trim() !== "") return false
-  if ((snapshot.childLinks.get(id)?.length ?? 0) > 0) return false
   if (node.type === "image") {
     const image = imagePropsOf({ props: parseProps(node.props) })
     if (image.image || image.src) return false
@@ -419,6 +440,59 @@ function isBlankNode(snapshot: GraphSnapshot, id: string): boolean {
     return false
   }
   return true
+}
+
+/**
+ * The deletes that keep a batch from stranding blank blocks in the basket.
+ *
+ * A delete takes the node's links with it, so every block a batch deletes
+ * sets loose whatever it held: those blocks keep their note and show in its
+ * Unassigned basket, which is exactly the rescue the basket is for. A blank
+ * block is not worth rescuing — there is nothing in it — so it is deleted
+ * instead, and what IT held is considered in turn, down as far as the blanks
+ * go. A block anything still holds, and a block with something in it, are
+ * both left alone: only blanks, and only ones nothing holds.
+ *
+ * `parentsOf` is what holds each block once the batch's own links are
+ * applied (mutated as these deletes take more links away), `deleted` what
+ * the batch already deletes (added to here, so nothing is deleted twice) and
+ * `kept` the blocks the caller's document still names.
+ */
+function strandedBlankOps(
+  snapshot: GraphSnapshot,
+  parentsOf: (id: string) => Set<string>,
+  deleted: Set<string>,
+  kept: ReadonlySet<string> = new Set(),
+): Op[] {
+  const ops: Op[] = []
+  const loose: string[] = []
+  const loosen = (id: string) => {
+    for (const link of snapshot.childLinks.get(id) ?? []) {
+      parentsOf(link.destination_id).delete(id)
+      loose.push(link.destination_id)
+    }
+  }
+  for (const id of [...deleted]) loosen(id)
+  for (let i = 0; i < loose.length; i += 1) {
+    const id = loose[i]
+    if (deleted.has(id) || kept.has(id) || !snapshot.nodes.has(id)) continue
+    if (parentsOf(id).size > 0 || !isBlankNode(snapshot, id)) continue
+    deleted.add(id)
+    ops.push({ op: "delete", id })
+    loosen(id)
+  }
+  return ops
+}
+
+/** The mutable parent index a batch plans against: `parentsIndex`, with a
+ * reader that makes an entry for a block that had no parents. */
+function parentLookup(snapshot: GraphSnapshot): (id: string) => Set<string> {
+  const index = parentsIndex(snapshot)
+  return (id: string): Set<string> => {
+    let set = index.get(id)
+    if (!set) index.set(id, (set = new Set()))
+    return set
+  }
 }
 
 /** Every other note's id — ids a block row must never take (`docToParts`). */
@@ -490,12 +564,7 @@ export function partsToOps(
 
   // Parents after this batch: the snapshot's links, minus what is unlinked
   // here, plus what is linked — what decides the deletes below.
-  const parentsOf = parentsIndex(snapshot)
-  const parents = (id: string): Set<string> => {
-    let set = parentsOf.get(id)
-    if (!set) parentsOf.set(id, (set = new Set()))
-    return set
-  }
+  const parents = parentLookup(snapshot)
 
   for (const [parentId, wanted] of childrenOf) {
     // A block under itself is the one loop refused: it has no closing row to
@@ -548,12 +617,15 @@ export function partsToOps(
   // store retains them, the walk skips them) and their note, and turn up in
   // the basket.
   const kept = new Set(nodes.map((node) => node.id))
+  const deleted = new Set<string>()
   for (const id of reachedBefore) {
     if (kept.has(id) || !snapshot.nodes.has(id) || parents(id).size > 0) continue
-    if (dropped === "delete" || discard.has(id) || isBlankNode(snapshot, id)) {
-      deletes.push({ op: "delete", id })
-    }
+    if (dropped === "delete" || discard.has(id) || isBlankNode(snapshot, id)) deleted.add(id)
   }
+  for (const id of deleted) deletes.push({ op: "delete", id })
+  // The blocks those deletes set loose: blank ones go too, rather than
+  // standing in the basket in front of what they held.
+  deletes.push(...strandedBlankOps(snapshot, parents, deleted, kept))
 
   return [...creates, ...sets, ...linkOps, ...deletes]
 }

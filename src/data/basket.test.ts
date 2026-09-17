@@ -44,6 +44,40 @@ describe("the Unassigned basket", () => {
     expect(serialize(noteDoc("a", next)!)).toBe("- two\n  id:: blk_two0000000\n")
   })
 
+  it("never shows a blank row: a deleted block's blank children go with it", () => {
+    // Deleting `one` sets loose what it held. `under one` is rescued; an
+    // empty line beside it has nothing to rescue, so it is not parked here
+    // as a blank row.
+    const withBlank = applyOps(
+      graphOf({ a: A }),
+      [
+        { op: "create", id: "blk_empty00000", type: "text", text: "  ", props: null, notesId: "a" },
+        { op: "link", source: "blk_one0000000", destination: "blk_empty00000", sortKey: "a1" },
+      ],
+      NOW,
+    )
+    const next = applyOps(withBlank, deleteBlockOps("blk_one0000000", withBlank), NOW + 1)
+    expect(next.nodes.has("blk_empty00000")).toBe(false)
+    expect(basketRootIds("a", next)).toEqual(["blk_under00000"])
+  })
+
+  it("keeps a blank block that something else still holds", () => {
+    // Only a block nothing holds any more is swept: one that another note
+    // (or another row) still points at is that note's business.
+    const shared = applyOps(
+      graphOf({ a: A, b: "- b\n  id:: blk_b000000000\n" }),
+      [
+        { op: "create", id: "blk_empty00000", type: "text", text: "", props: null, notesId: "a" },
+        { op: "link", source: "blk_one0000000", destination: "blk_empty00000", sortKey: "a1" },
+        { op: "link", source: "blk_b000000000", destination: "blk_empty00000", sortKey: "a0" },
+      ],
+      NOW,
+    )
+    const next = applyOps(shared, deleteBlockOps("blk_one0000000", shared), NOW + 1)
+    expect(next.nodes.has("blk_empty00000")).toBe(true)
+    expect(basketRootIds("a", next)).toEqual(["blk_under00000"])
+  })
+
   it("shows a loop that nothing reaches, promoting one member as its root", () => {
     const snapshot = graphOf({ a: A })
     // deeper → under: a loop below `one`.

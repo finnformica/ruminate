@@ -72,6 +72,13 @@ export interface CommandInput {
   visibleOrder: string[]
   /** Present in edit mode; absent in select mode. */
   caret?: CaretInput
+  /**
+   * The character the key would type, when it types one (`KeyboardEvent.key`).
+   * Set by the dispatcher for every key; read only by `wrapTyped`, which is
+   * the one command whose behaviour depends on *which* character arrived
+   * rather than on a binding of its own (see `WRAP_PAIRS`).
+   */
+  typed?: string
   /** The block the editor is zoomed into ("focus mode"), or null/absent. While
    * zoomed, the visible world is this block (rendered as a title) plus its
    * subtree — commands must not move, delete, or navigate past that boundary. */
@@ -131,6 +138,13 @@ export interface CommandResult {
   /** Row that must end up collapsed — the symmetric demand to `expand`: the
    * editor folds the row only if it is currently open. */
   collapse?: string
+  /** Row that must be open *whatever the fold rule would say* — recorded as
+   * the reader's own, the way opening it by hand would be. `expand` cannot
+   * do this: it acts only on a row that is folded right now, and the row
+   * this names is one that is about to become a parent for the first time
+   * (nothing beneath it yet, so nothing folded), which the depth rule would
+   * otherwise close the instant it gains a child. */
+  reveal?: string
   /** Navigation tried to move above the first block — the caller may hand focus
    * to whatever sits above the editor (e.g. the note title). */
   exitTop?: boolean
@@ -365,6 +379,50 @@ export function wrapSelection(
 }
 
 /**
+ * The characters that wrap a selection when they are typed over one, each
+ * paired with what closes it. Symmetric marks (a quote, a backtick, `*`)
+ * close with themselves; a bracket closes with its partner. Typing the
+ * closing character of a pair is not a wrap — it types, as it always did —
+ * so only the openers are listed.
+ *
+ * `**` for bold and `_` for italic have keys of their own
+ * (<kbd>⌘</kbd><kbd>B</kbd>, <kbd>⌘</kbd><kbd>I</kbd>) which *toggle*; the
+ * characters here only ever add, which is what typing a character should do.
+ * Wrapping `(foo)` in parentheses again gives `((foo))`, never `foo`.
+ */
+export const WRAP_PAIRS: Readonly<Record<string, string>> = {
+  "`": "`",
+  '"': '"',
+  "'": "'",
+  "(": ")",
+  "[": "]",
+  "{": "}",
+  "<": ">",
+  "*": "*",
+  _: "_",
+  "~": "~",
+}
+
+/**
+ * Put `open` before the selection and `close` after it — the typed wrap,
+ * which never takes a wrap off (see `WRAP_PAIRS`). Returns the text and where
+ * the selection now sits inside it.
+ */
+export function surroundSelection(
+  value: string,
+  start: number,
+  end: number,
+  open: string,
+  close: string,
+): { text: string; start: number; end: number } {
+  return {
+    text: value.slice(0, start) + open + value.slice(start, end) + close + value.slice(end),
+    start: start + open.length,
+    end: start + open.length + (end - start),
+  }
+}
+
+/**
  * Make the selection a markdown link, `[text](url)`, and put the caret where
  * the missing half goes: after the text, in the parentheses, for the address
  * to be typed; or, when the selection is itself an address, in the brackets,
@@ -428,6 +486,7 @@ export type CommandName =
   | "wrapCode"
   | "wrapMath"
   | "wrapLink"
+  | "wrapTyped"
   | "enterEdit"
   | "exitEdit"
   | "deselect"
@@ -483,14 +542,25 @@ export const COMMANDS: Record<CommandName, Command> = {
   deselect: () => ({ handled: true, focus: { mode: "select", key: null } }),
 
   /** Nest the row under its previous sibling; keeps the current mode/focus
-   * (and, when editing, the caret position) — on the row's new key. */
+   * (and, when editing, the caret position) — on the row's new key. The row
+   * it goes under is revealed: a leaf that has just become a parent sits at
+   * whatever level it sits at, and from the depth rule's second level down
+   * that rule would fold it the moment it gains a child — hiding the row
+   * just indented, mid-edit. Nesting something under a row is asking to see
+   * it, so the open is recorded as the reader's own. */
   indent: (input) => {
     const { doc, key, mode, caret } = input
     const next = indentBlock(doc, key)
     // Consume the key even when it can't indent (no previous sibling), so Tab
     // never escapes the editor.
     if (next.doc === doc) return { handled: true, focus: keepFocus(mode, key, caret) }
-    return { handled: true, doc: next.doc, op: STRUCTURAL, focus: keepFocus(mode, next.key, caret) }
+    return {
+      handled: true,
+      doc: next.doc,
+      op: STRUCTURAL,
+      reveal: parentKeyOf(next.key) ?? undefined,
+      focus: keepFocus(mode, next.key, caret),
+    }
   },
 
   /** Lift the row out to become a sibling of its parent. */
@@ -713,6 +783,28 @@ export const COMMANDS: Record<CommandName, Command> = {
   wrapStrike: wrapWith("~~"),
   wrapCode: wrapWith("`"),
   wrapMath: wrapWith("$$"),
+  /**
+   * A wrapping character typed over a selection puts the selection inside it
+   * rather than replacing it: select a phrase, press <kbd>(</kbd>, and it is
+   * in parentheses. Which character arrived decides the pair (`WRAP_PAIRS`),
+   * so this is one command rather than ten — the keymap resolves every
+   * opener to it (`resolveKey`). With nothing selected there is nothing to
+   * wrap and the character simply types.
+   */
+  wrapTyped: (input) => {
+    const { doc, key, mode, caret, typed } = input
+    if (mode !== "edit" || !caret || caret.start === caret.end) return IGNORED
+    const close = typed === undefined ? undefined : WRAP_PAIRS[typed]
+    if (typed === undefined || close === undefined) return IGNORED
+    const id = idOfKey(key)
+    const wrapped = surroundSelection(caret.value, caret.start, caret.end, typed, close)
+    return {
+      handled: true,
+      doc: updateText(doc, id, wrapped.text),
+      op: { type: "text", blockId: id },
+      focus: { mode: "edit", key, caret: wrapped.end },
+    }
+  },
   wrapLink: (input) => {
     const { doc, key, mode, caret } = input
     if (mode !== "edit" || !caret) return IGNORED

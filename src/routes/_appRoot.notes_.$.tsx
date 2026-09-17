@@ -328,6 +328,7 @@ function NotePage() {
                 width: resolvedWidth,
                 onWidth: updateWidth,
                 onDeleted: () => navigate({ to: "/", search: { query: undefined }, replace: true }),
+                zoomBlockId: zoomBlockId ?? null,
               }}
             />
           </div>
@@ -390,7 +391,11 @@ function NotePage() {
                   noteId={noteId}
                   doc={editorDoc}
                   onChange={setEditorDoc}
-                  folds={{ collapsed, toggle: (key) => setFold(key, collapsed.has(key)) }}
+                  folds={{
+                    collapsed,
+                    toggle: (key) => setFold(key, collapsed.has(key)),
+                    setOpen: (key) => setFold(key, true),
+                  }}
                   onToggleCollapse={touch}
                   startEditing={isNewNote && !showsTitle}
                   readOnly={readOnlyShare}

@@ -8,6 +8,12 @@
     />
     <link rel="apple-touch-icon" href="/apple-touch-icon-512.png" />
     <meta name="theme-color" content="" />
+    <!-- The page a crawler sees before any JavaScript runs. The router sets
+         the title per route once the app mounts (`Route.head`), and the
+         Worker writes the unfurl card into this head for the two links people
+         send (worker/handlers/social.ts). -->
+    <title>Ruminate</title>
+    <meta name="description" content="A block-based note-taking app for better thinking." />
     <script>
       // Apply the persisted accent color and colour scheme before first paint
       // (see accentAtom and themeAtom; src/hooks/color-scheme.ts takes over

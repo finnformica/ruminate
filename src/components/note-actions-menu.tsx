@@ -3,7 +3,7 @@ import copy from "copy-to-clipboard"
 import { useAtom, useAtomValue, useSetAtom, useStore } from "jotai"
 import { graphSnapshotAtom, isSignedOutAtom } from "../global-state"
 import { useFeature } from "../data/features"
-import { rollup } from "../data/graph"
+import { blockRollup, rollup } from "../data/graph"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
 import { useDeleteNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
@@ -33,6 +33,12 @@ interface EditorActions {
   onWidth?: (width: Width) => void
   /** Called after the open note is deleted, so the page can navigate away. */
   onDeleted?: () => void
+  /**
+   * The block the page is zoomed into, if any. What the menu copies follows
+   * the view: zoomed in, **Copy markdown** takes that block and everything
+   * beneath it — what is on screen — rather than the whole note behind it.
+   */
+  zoomBlockId?: string | null
 }
 
 /**
@@ -88,6 +94,15 @@ export function NoteActionsMenu({
   const isViewing = openNoteId === noteId
 
   const togglePin = () => setNoteProps(noteId, { pinned: pinned ? null : true })
+
+  // Copy what the view holds, not what the note holds: zoomed into a block,
+  // that block and everything beneath it. A zoomed block the graph has since
+  // lost falls back to the note, which is what the page itself falls back to.
+  const copyMarkdown = () => {
+    const graph = jotaiStore.get(graphSnapshotAtom)
+    const zoomed = editor?.zoomBlockId ? blockRollup(editor.zoomBlockId, graph) : null
+    copyAsMarkdown(zoomed ?? rollup(noteId, graph) ?? "")
+  }
 
   // Renaming sets the note's title (docs/graph-storage.md). The id and
   // the URL are untouched, so there is nothing to navigate to afterwards and
@@ -155,10 +170,7 @@ export function NoteActionsMenu({
             {pinned ? "Unpin" : "Pin"}
           </DropdownMenu.Item>
         ) : null}
-        <DropdownMenu.Item
-          icon={<CopyIcon16 />}
-          onClick={() => copyAsMarkdown(rollup(noteId, jotaiStore.get(graphSnapshotAtom)) ?? "")}
-        >
+        <DropdownMenu.Item icon={<CopyIcon16 />} onClick={copyMarkdown}>
           Copy markdown
         </DropdownMenu.Item>
         <DropdownMenu.Item icon={<CopyIcon16 />} onClick={() => copy(noteId)}>

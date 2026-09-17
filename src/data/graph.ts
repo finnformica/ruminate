@@ -618,3 +618,17 @@ export function rollup(noteId: string, graph: GraphSnapshot): string | null {
   const doc = noteDoc(noteId, graph)
   return doc ? serialize(doc) : null
 }
+
+/**
+ * The same projection from a block root — the rollup of the zoomed page: the
+ * block's own line, then everything beneath it, exactly the rows that view
+ * shows. Zoomed in, this is what a note-level action works on, so what is
+ * copied is what is on screen rather than the whole note it came from.
+ * Returns null for a block the graph does not hold, or for a note node (a
+ * note's rollup is `rollup`).
+ */
+export function blockRollup(blockId: string, graph: GraphSnapshot): string | null {
+  const node = graph.nodes.get(blockId)
+  if (!node || node.type === NOTE_TYPE) return null
+  return serialize(docFromGraph([blockId], graph))
+}
