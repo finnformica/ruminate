@@ -143,6 +143,26 @@ function checkSections(sections: ChangelogSection[], problems: ChangelogProblem[
 
 const CHANGELOG = "changelog"
 
+/**
+ * Where entries used to go, before the changelog became a folder of per-week
+ * files. A branch opened before that change still writes here, and its file is
+ * then read by nothing at all: the entries are not lost from the repository,
+ * but they are invisible in the app and to this check, which is worse than
+ * losing them loudly. One landed that way already.
+ */
+const OLD_DIRECTORY = "changelog.d"
+
+function strandedEntries(): string[] {
+  try {
+    return readdirSync(OLD_DIRECTORY)
+      .filter((name) => name.endsWith(".md") && name !== "README.md")
+      .sort()
+      .map((name) => `${OLD_DIRECTORY}/${name}`)
+  } catch {
+    return []
+  }
+}
+
 /** Every entry file, as `changelog/<week>/<change>.md`. */
 function changelogFiles(): { path: string; text: string }[] {
   const files: { path: string; text: string }[] = []
@@ -172,6 +192,15 @@ const report = (path: string, found: ChangelogProblem[]) => {
 
 if (files.length === 0) {
   report(CHANGELOG, [{ line: 1, message: "There are no changelog files at all." }])
+}
+
+for (const path of strandedEntries()) {
+  report(path, [
+    {
+      line: 1,
+      message: `Nothing reads "${OLD_DIRECTORY}/" any more. Move this to "${CHANGELOG}/<week>/" — \`date +%G-W%V\` gives the week — or its entries are in the repository but in neither the app nor this check.`,
+    },
+  ])
 }
 
 // Each file on its own, so a fault is reported against the file that holds it.
