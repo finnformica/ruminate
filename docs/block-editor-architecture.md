@@ -63,6 +63,17 @@ key / touch / menu ─▶ entry point ─▶ resolveKey (keymap) ─▶ COMMANDS
 This mirrors how CodeMirror 6 and ProseMirror are built (commands +
 keymaps), and how VS Code dispatches everything through named command ids.
 
+## Rows, keys and direction
+
+A row is an occurrence: a block at one path from the view's root
+(`src/blocks/view.ts`). Walked upstream as well as down (docs/graph-schema-v2.md,
+"Upstream"), a row can be one of the row above's parents, and its key says so
+with a marked segment (`a/b/^p`). The doc maths (`siblingsOf`, insert, remove,
+indent, outdent) read the direction off the key and act on the matching list —
+`children` or `upstream` — keeping the two as mirrors of one edge; commands
+address siblings with `siblingKey` and what lies beneath a row with
+`rowsBeneath`, so none of them branch on direction themselves.
+
 ## Adding a behaviour
 
 1. If it needs a new doc transform, add a pure function to `ops.ts` (+ test).

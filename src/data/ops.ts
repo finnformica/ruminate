@@ -9,6 +9,7 @@ import {
   docToParts,
   parseProps,
   reconcileSortKeys,
+  sortKeyBetween,
   type GraphSnapshot,
 } from "./graph"
 
@@ -198,17 +199,26 @@ export function parentsIndex(snapshot: GraphSnapshot): Map<string, Set<string>> 
   return parentsOf
 }
 
-/** Ids reachable from `rootIds` through child links (the roots excluded
- * unless reached again). Path-safe: a node is visited once. */
-export function reachableFrom(snapshot: GraphSnapshot, rootIds: Iterable<string>): Set<string> {
+/** Ids reachable from `rootIds` through child links — down, what the roots
+ * hold; or up, what holds them — the roots excluded unless reached again.
+ * Path-safe: a node is visited once. The one reachability helper: the
+ * basket, deletes, the notes a batch touches and the walk's guards all
+ * ask this. */
+export function reachableFrom(
+  snapshot: GraphSnapshot,
+  rootIds: Iterable<string>,
+  direction: "down" | "up" = "down",
+): Set<string> {
   const seen = new Set<string>()
   const stack = [...rootIds]
   while (stack.length > 0) {
     const id = stack.pop() as string
-    for (const link of snapshot.childLinks.get(id) ?? []) {
-      if (seen.has(link.destination_id)) continue
-      seen.add(link.destination_id)
-      stack.push(link.destination_id)
+    const links = direction === "down" ? snapshot.childLinks.get(id) : snapshot.parentLinks.get(id)
+    for (const link of links ?? []) {
+      const next = direction === "down" ? link.destination_id : link.source_id
+      if (seen.has(next)) continue
+      seen.add(next)
+      stack.push(next)
     }
   }
   return seen
@@ -351,7 +361,12 @@ export function docToOps(
   discard?: Iterable<string>,
   rootId: string = noteId,
 ): Op[] {
-  const { nodes, childrenOf } = docToParts(noteId, doc, 0, reservedNoteIds(snapshot, noteId))
+  const { nodes, childrenOf, upstreamOf } = docToParts(
+    noteId,
+    doc,
+    0,
+    reservedNoteIds(snapshot, noteId),
+  )
   if (rootId !== noteId) {
     // A doc rooted at a block (the zoomed page, `blockView`): its one root is
     // the block, walked as a block, so its own text and children are diffed
@@ -368,6 +383,7 @@ export function docToOps(
       reachableFrom(snapshot, [rootId]),
       "keep",
       new Set(discard ?? []),
+      upstreamOf,
     )
   }
   return partsToOps(
@@ -378,6 +394,7 @@ export function docToOps(
     reachableFrom(snapshot, [noteId]),
     "keep",
     new Set(discard ?? []),
+    upstreamOf,
   )
 }
 
@@ -429,6 +446,14 @@ export function reservedNoteIds(snapshot: GraphSnapshot, noteId: string): Set<st
  *   unlink it from, and the basket is where a block is deleted for good.
  *
  * Either way only that block is touched: never what it holds.
+ *
+ * `upstreamOf` is what each block walked upstream names as its parents
+ * (`Block.upstream`). The child lists are the truth of an edge wherever
+ * both ends are in the doc — the doc maths keep the two lists as mirrors
+ * (src/blocks/ops.ts) — so a parent list only speaks for a parent whose
+ * own child list is not here to speak: a parent row removed from beneath
+ * a block, and gone from the doc with it, is unlinked from it; a parent
+ * named that the doc does not hold is linked, after its last child.
  */
 export function partsToOps(
   noteId: NoteId,
@@ -438,6 +463,7 @@ export function partsToOps(
   reachedBefore: Set<string>,
   dropped: "keep" | "delete",
   discard: ReadonlySet<string> = new Set(),
+  upstreamOf: Map<string, string[]> = new Map(),
 ): Op[] {
   const creates: Op[] = []
   const sets: Op[] = []
@@ -496,6 +522,27 @@ export function partsToOps(
     }
   }
 
+  for (const [id, wanted] of upstreamOf) {
+    const wantedSet = new Set(wanted.filter((parentId) => parentId !== id))
+    const existing = (snapshot.parentLinks.get(id) ?? []).map((link) => link.source_id)
+    for (const parentId of existing) {
+      if (wantedSet.has(parentId) || childrenOf.has(parentId)) continue
+      linkOps.push({ op: "unlink", source: parentId, destination: id })
+      parents(id).delete(parentId)
+    }
+    for (const parentId of wantedSet) {
+      if (existing.includes(parentId) || childrenOf.has(parentId)) continue
+      const last = snapshot.childLinks.get(parentId)?.at(-1)?.sort_key ?? null
+      linkOps.push({
+        op: "link",
+        source: parentId,
+        destination: id,
+        sortKey: sortKeyBetween(last, null),
+      })
+      parents(id).add(parentId)
+    }
+  }
+
   // What was reached before, is no longer named, and nothing holds: dropped.
   // No cascade — a deleted block's children keep their links from it (the
   // store retains them, the walk skips them) and their note, and turn up in
@@ -522,14 +569,8 @@ export function notesTouchedBy(snapshot: GraphSnapshot, ops: readonly Op[]): Set
     } else ids.add(op.id)
   }
   const notes = new Set<NoteId>()
-  const seen = new Set<string>()
-  const stack = [...ids]
-  while (stack.length > 0) {
-    const id = stack.pop() as string
-    if (seen.has(id)) continue
-    seen.add(id)
+  for (const id of [...ids, ...reachableFrom(snapshot, ids, "up")]) {
     if (snapshot.nodes.get(id)?.type === NOTE_TYPE) notes.add(id)
-    for (const link of snapshot.parentLinks.get(id) ?? []) stack.push(link.source_id)
   }
   return notes
 }

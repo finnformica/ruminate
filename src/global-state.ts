@@ -11,7 +11,7 @@ import {
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
 import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
-import { NOTE_TYPE, parseProps, type GraphSnapshot } from "./data/graph"
+import { NOTE_TYPE, parseProps, type GraphSnapshot, type LinkDirections } from "./data/graph"
 import {
   mergeSnapshots,
   receivedSharesAtom,
@@ -495,6 +495,20 @@ export const newBlockMarkerAtom = atomWithStorage<string>(
  * reader folds or unfolds something themselves (Settings → Editor; see
  * `defaultCollapsedKeys`). Stored on this device.
  */
+/**
+ * Which links a note's view follows from a row (Settings → Editor, "Show
+ * links" — `LinkDirections`): the tree beneath it, the parents holding it,
+ * or both — the graph, by default. Stored on this device.
+ */
+const storedLinkDirectionsAtom = atomWithStorage<string>("link-directions", "both")
+export const linkDirectionsAtom = atom(
+  (get): LinkDirections => {
+    const stored = get(storedLinkDirectionsAtom)
+    return stored === "downstream" || stored === "upstream" ? stored : "both"
+  },
+  (_get, set, value: LinkDirections) => set(storedLinkDirectionsAtom, value),
+)
+
 const storedExpandedLevelsAtom = atomWithStorage<number>("expanded-levels", DEFAULT_EXPANDED_LEVELS)
 export const expandedLevelsAtom = atom(
   (get) => clampExpandedLevels(get(storedExpandedLevelsAtom)),

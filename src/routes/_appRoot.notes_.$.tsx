@@ -21,7 +21,12 @@ import { isSyncingAtom } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { sharedModeStatusAtom } from "../data/shared-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
-import { graphSnapshotAtom, isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
+import {
+  graphSnapshotAtom,
+  isDatabaseModeAtom,
+  isSignedOutAtom,
+  linkDirectionsAtom,
+} from "../global-state"
 import { useCreateNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
@@ -122,6 +127,7 @@ function NotePage() {
   // (`useFoldRule`); every change the editor hands back becomes ops applied
   // to the graph — see useNoteDoc.
   const { expanded, setFold } = useFoldRule(noteId)
+  const directions = useAtomValue(linkDirectionsAtom)
   const {
     doc: editorDoc,
     collapsed,
@@ -132,6 +138,7 @@ function NotePage() {
     defaultDoc,
     zoomBlockId: zoomBlockId ?? null,
     expanded,
+    directions,
   })
   const jotaiStore = useStore()
   // Leaving a zoom for a wider view — the note, or a block above — must

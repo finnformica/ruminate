@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { emptyBlock, insertAfter, updateText } from "../blocks/ops"
+import { emptyBlock, indentBlock, insertAfter, removeBlock, updateText } from "../blocks/ops"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
@@ -335,6 +335,95 @@ describe("docToOps over a lazy or zoomed doc", () => {
     const snapshot = graphOf({ a: TWO })
     const { doc } = blockView("blk_one0000000", snapshot)!
     expect(docToOps("a", doc, snapshot, undefined, "blk_one0000000")).toEqual([])
+  })
+})
+
+describe("docToOps over a doc walked upstream", () => {
+  // Note a holds `shared` under `one`; note b holds it under `other`.
+  const A2 = "- one\n  id:: blk_one0000000\n  - shared\n    id:: blk_shared0000\n"
+  const B2 = "- other\n  id:: blk_other00000\n  - shared\n    id:: blk_shared0000\n"
+  const both = () => graphOf({ a: A2, b: B2 })
+  const view = (snapshot: GraphSnapshot) => noteView("a", snapshot, () => true, "both")!.doc
+
+  it("an unchanged doc is no ops, however far upstream it was walked", () => {
+    const snapshot = both()
+    const doc = view(snapshot)
+    expect(doc.blocks.blk_shared0000.upstream).toEqual(["blk_one0000000", "blk_other00000"])
+    expect(doc.blocks.blk_other00000).toBeDefined()
+    expect(docToOps("a", doc, snapshot)).toEqual([])
+  })
+
+  it("removing a parent row unlinks that parent — the block stays everywhere else", () => {
+    const snapshot = both()
+    const { doc } = removeBlock(view(snapshot), "blk_one0000000/blk_shared0000/^blk_other00000")
+    const ops = docToOps("a", doc, snapshot)
+    expect(ops).toEqual([{ op: "unlink", source: "blk_other00000", destination: "blk_shared0000" }])
+    const after = applyOps(snapshot, ops, NOW)
+    expect(walk(after, "a")).toBe(walk(snapshot, "a"))
+    expect(walk(after, "b")).toBe("- other\n  id:: blk_other00000\n")
+  })
+
+  it("editing a parent row's text is one setText on it, in its own note", () => {
+    const snapshot = both()
+    const doc = updateText(view(snapshot), "blk_other00000", "renamed")
+    expect(docToOps("a", doc, snapshot)).toEqual([
+      { op: "setText", id: "blk_other00000", text: "renamed" },
+    ])
+  })
+
+  it("a new row after a parent row is a new block holding the shared one", () => {
+    const snapshot = both()
+    const fresh = emptyBlock("ul", "third")
+    const doc = insertAfter(view(snapshot), "blk_one0000000/blk_shared0000/^blk_other00000", fresh)
+    const ops = docToOps("a", doc, snapshot)
+    expect(kinds(ops).sort()).toEqual(["create", "link"])
+    expect(ops[1]).toMatchObject({ op: "link", source: fresh.id, destination: "blk_shared0000" })
+    const after = applyOps(snapshot, ops, NOW)
+    expect(parentIdsOf(after, "blk_shared0000").sort()).toEqual(
+      ["blk_one0000000", "blk_other00000", fresh.id].sort(),
+    )
+    // The new block is written in this note, held by nothing else: it is in
+    // note a's basket, not on note a's page.
+    expect(after.nodes.get(fresh.id)?.notes_id).toBe("a")
+  })
+
+  it("indenting a parent row re-points which block it holds", () => {
+    // Note b holds `shared` under p and, by a second link, under q.
+    const snapshot = applyOps(
+      graphOf({
+        a: A2,
+        b: "- p\n  id:: blk_p000000000\n  - shared\n    id:: blk_shared0000\n- q\n  id:: blk_q000000000\n",
+      }),
+      [{ op: "link", source: "blk_q000000000", destination: "blk_shared0000", sortKey: "a0" }],
+      1,
+    )
+    const doc = view(snapshot)
+    const key = "blk_one0000000/blk_shared0000/^blk_q000000000"
+    const { doc: next } = indentBlock(doc, key)
+    expect(next.blocks.blk_q000000000.children).toEqual(["blk_p000000000"])
+    const ops = docToOps("a", next, snapshot)
+    expect(ops).toEqual([
+      { op: "unlink", source: "blk_q000000000", destination: "blk_shared0000" },
+      { op: "link", source: "blk_q000000000", destination: "blk_p000000000", sortKey: "a0" },
+    ])
+    // And walking the result of those ops back gives the doc handed in.
+    const after = applyOps(snapshot, ops, NOW)
+    expect(docToOps("a", next, after)).toEqual([])
+  })
+
+  it("an undo across a parent-row edit reconciles both lists to the same ops", () => {
+    const snapshot = both()
+    const before = view(snapshot)
+    const { doc: edited } = removeBlock(before, "blk_one0000000/blk_shared0000/^blk_other00000")
+    const after = applyOps(snapshot, docToOps("a", edited, snapshot), NOW)
+    // Undo hands the old doc back against the new graph: the parent returns.
+    const undo = docToOps("a", before, after)
+    expect(undo).toHaveLength(1)
+    expect(undo[0]).toMatchObject({
+      op: "link",
+      source: "blk_other00000",
+      destination: "blk_shared0000",
+    })
   })
 })
 

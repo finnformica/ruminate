@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest"
 import { parse } from "./parse"
 import type { BlockDoc } from "./types"
 import {
+  walkDoc,
   ancestorKeys,
   buildRows,
+  directionOfKey,
   firstOccurrenceKey,
   hasOccurrence,
   idOfKey,
@@ -11,6 +13,9 @@ import {
   keyOf,
   occurrenceKeys,
   parentKeyOf,
+  pathIdsOf,
+  rowsBeneath,
+  siblingKey,
   zoomRootKey,
 } from "./view"
 
@@ -199,5 +204,112 @@ describe("buildRows", () => {
 
   it("zoomed into an unknown block: the whole note", () => {
     expect(buildRows(outline, { zoomRootId: "nope", folds: NONE })).toHaveLength(6)
+  })
+})
+
+/**
+ * A doc walked both ways (`walkGraph`, directions "both") from note `n`:
+ *   n > a > s        s is also held by p (in another note), and p by q.
+ *   n > b
+ * Every block carries its parents; `n` itself is the doc's root and is on
+ * the path, so it is never listed beneath its own children.
+ */
+const graphed: BlockDoc = {
+  props: null,
+  rootBlockIds: ["a", "b"],
+  upstream: [],
+  blocks: {
+    n: { id: "n", type: "note", text: "Note", children: ["a", "b"], upstream: [] },
+    a: { id: "a", type: "ul", text: "a", children: ["s"], upstream: ["n"] },
+    b: { id: "b", type: "ul", text: "b", children: [], upstream: ["n"] },
+    s: { id: "s", type: "todo", text: "shared", children: [], upstream: ["a", "p"] },
+    p: { id: "p", type: "ul", text: "p", children: ["s"], upstream: ["q"] },
+    q: { id: "q", type: "note", text: "Other", children: ["p"], upstream: [] },
+  },
+}
+
+describe("upstream occurrences", () => {
+  it("mark the segment, and every helper reads the direction off the key", () => {
+    expect(keyOf("a/s", "p", "up")).toBe("a/s/^p")
+    expect(keyOf(null, "p", "up")).toBe("^p")
+    expect(idOfKey("a/s/^p")).toBe("p")
+    expect(idOfKey("^p")).toBe("p")
+    expect(parentKeyOf("a/s/^p")).toBe("a/s")
+    expect(directionOfKey("a/s/^p")).toBe("up")
+    expect(directionOfKey("a/s")).toBe("down")
+    expect(pathIdsOf("a/s/^p/^q")).toEqual(["a", "s", "p", "q"])
+    // A sibling of a parent row is another parent row.
+    expect(siblingKey("a/s/^p", "x")).toBe("a/s/^x")
+    expect(siblingKey("a/s", "x")).toBe("a/x")
+  })
+
+  it("are real paths only when the parent's upstream names the block", () => {
+    expect(hasOccurrence(graphed, "a/s/^p")).toBe(true)
+    expect(hasOccurrence(graphed, "a/s/^p/^q")).toBe(true)
+    expect(hasOccurrence(graphed, "a/s/p")).toBe(false)
+    expect(hasOccurrence(graphed, "a/^s")).toBe(false)
+    expect(hasOccurrence(graphed, "^q")).toBe(false)
+    expect(hasOccurrence({ ...graphed, upstream: ["q"] }, "^q")).toBe(true)
+  })
+
+  it("rowsBeneath: children first, then the parents not already on the path", () => {
+    expect(rowsBeneath(graphed, graphed.blocks.s, new Set(["n", "a", "s"]))).toEqual([
+      { id: "p", direction: "up" },
+    ])
+    expect(rowsBeneath(graphed, graphed.blocks.a, new Set(["n", "a"]))).toEqual([
+      { id: "s", direction: "down" },
+    ])
+    expect(rowsBeneath(graphed, null, new Set(["n"]))).toEqual([
+      { id: "a", direction: "down" },
+      { id: "b", direction: "down" },
+    ])
+  })
+
+  it("buildRows lists a block's other parents beneath its children, with the root on the path", () => {
+    const rows = buildRows(graphed, { folds: NONE, rootId: "n" })
+    expect(summary(rows)).toEqual(["a", "  a/s", "    a/s/^p", "      a/s/^p/^q", "b"])
+    const p = rows.find((row) => row.key === "a/s/^p")!
+    expect(p.direction).toBe("up")
+    expect(p.depth).toBe(2)
+    expect(p.hasChildren).toBe(true)
+    // The parent q, a note, has nothing beneath it here: its child p is on
+    // the path, and it has no parents.
+    expect(rows.find((row) => row.key === "a/s/^p/^q")!.hasChildren).toBe(false)
+    // Without the root on the path, the note's own parents would be listed
+    // under its children: the view's root must be named.
+    expect(summary(buildRows(graphed, { folds: NONE }))).toContain("  a/^n")
+  })
+
+  it("buildRows folds an upstream row like any other, and zoomed shows the root's parents", () => {
+    const folded = buildRows(graphed, { folds: new Set(["a/s/^p"]), rootId: "n" })
+    expect(summary(folded)).toEqual(["a", "  a/s", "    a/s/^p ▸", "b"])
+    // Zoomed into s: its parents are all the rows, a and p alike, each with
+    // its note beneath — a fresh path starts at the zoom root. Beneath the
+    // note, the row it was reached up from (a) is not listed, its other
+    // block (b) is: the graph around the block, as far as it is open.
+    const zoomed = buildRows(graphed, { folds: NONE, zoomRootId: "s" })
+    expect(summary(zoomed)).toEqual([
+      "a/s/^a",
+      "  a/s/^a/^n",
+      "    a/s/^a/^n/b",
+      "a/s/^p",
+      "  a/s/^p/^q",
+    ])
+  })
+
+  it("walkDoc visits upstream occurrences after the children, marked", () => {
+    const seen: string[] = []
+    walkDoc(
+      graphed,
+      graphed.rootBlockIds,
+      ({ key, direction }) => {
+        seen.push(`${direction === "up" ? "↑" : ""}${key}`)
+      },
+      null,
+      0,
+      new Set(["n"]),
+    )
+    expect(seen).toEqual(["a", "a/s", "↑a/s/^p", "↑a/s/^p/^q", "b"])
+    expect(occurrenceKeys({ ...graphed, upstream: ["q"] })).toContain("^q")
   })
 })

@@ -44,6 +44,9 @@ interface GraphParts {
   nodes: NodeRow[]
   /** Ordered child ids per parent; the note id keys the root list. */
   childrenOf: Map<string, string[]>
+  /** The parents each block names beneath it, for blocks walked upstream
+   * (`Block.upstream`); the note id keys the doc's own `upstream`. */
+  upstreamOf: Map<string, string[]>
 }
 
 export const propsJson = (props: BlockProps | null | undefined): string | null =>
@@ -71,6 +74,9 @@ export function docToParts(
   const rename = new Map<string, string>()
   for (const id of Object.keys(doc.blocks)) {
     if (id !== noteId && !reservedIds?.has(id)) continue
+    // Another note walked into this doc as a row (upstream) IS that note,
+    // not a block wearing its id: it keeps it.
+    if (doc.blocks[id].type === NOTE_TYPE && id !== noteId) continue
     let fresh = blockId()
     while (doc.blocks[fresh] !== undefined || fresh === noteId || reservedIds?.has(fresh)) {
       fresh = blockId()
@@ -101,30 +107,42 @@ export function docToParts(
     },
   ]
   const childrenOf = new Map<string, string[]>()
+  const upstreamOf = new Map<string, string[]>()
 
   // Depth-first from the roots: node rows in document order, and each block's
   // child order once (a block reached from two parents is one row, and its
-  // children are the same wherever it is).
+  // children are the same wherever it is). A block walked upstream (a parent
+  // shown beneath a row) is visited the same way, so its own row and lists
+  // take part in the diff.
   const seen = new Set<string>()
-  const walk = (parentId: string, ids: string[]) => {
-    childrenOf.set(parentId, ids.map(safeId))
-    for (const id of ids) {
-      const block = doc.blocks[id]
-      if (!block || seen.has(id)) continue
-      seen.add(id)
-      nodes.push({
-        id: safeId(id),
-        type: block.type,
-        text: block.text,
-        props: propsJson(block.props),
-        updated_at: updatedAt,
-      })
-      walk(safeId(id), block.children)
+  const visit = (id: string) => {
+    const block = doc.blocks[id]
+    if (!block || seen.has(id)) return
+    seen.add(id)
+    nodes.push({
+      id: safeId(id),
+      type: block.type,
+      text: block.text,
+      props: propsJson(block.props),
+      updated_at: updatedAt,
+    })
+    walk(safeId(id), block.children)
+    if (block.upstream) {
+      upstreamOf.set(safeId(id), block.upstream.map(safeId))
+      for (const parentId of block.upstream) visit(parentId)
     }
   }
+  const walk = (parentId: string, ids: string[]) => {
+    childrenOf.set(parentId, ids.map(safeId))
+    for (const id of ids) visit(id)
+  }
   walk(noteId, doc.rootBlockIds)
+  if (doc.upstream) {
+    upstreamOf.set(noteId, doc.upstream.map(safeId))
+    for (const parentId of doc.upstream) visit(parentId)
+  }
 
-  return { nodes, childrenOf }
+  return { nodes, childrenOf, upstreamOf }
 }
 
 /**
@@ -326,8 +344,31 @@ export interface GraphView {
   collapsed: Set<string>
 }
 
+/**
+ * Which links a view follows from a row (Settings → Editor, "Show links"):
+ * downstream — what a block holds, the tree; upstream — what holds it, its
+ * parents shown beneath it after its children; or both, the graph
+ * (docs/graph-schema-v2.md, "Upstream").
+ */
+export type LinkDirections = "downstream" | "upstream" | "both"
+
 /** Every occurrence open: the eager walk (export, search, the basket). */
 const EVERYTHING_OPEN: ExpandedRule = () => true
+
+/** The options a walk takes. */
+export interface WalkOptions {
+  /** The fold rule; absent = every occurrence open. */
+  expanded?: ExpandedRule
+  /** The level of the roots (1 for a note's children; 0 for a zoomed block). */
+  startLevel?: number
+  /** Which links to follow; `"downstream"` by default — the tree. */
+  directions?: LinkDirections
+  /** The id of the view's own root when it is not a block in the doc (the
+   * note): on the path from the start, so a root's parent that is the note
+   * is never listed beneath it. With `directions` upstream, the root's own
+   * parents are the doc's `upstream`, rows after the roots. */
+  rootId?: string
+}
 
 /**
  * The walk: a `BlockDoc` of what `rootIds` reach over child links, in
@@ -359,6 +400,16 @@ const EVERYTHING_OPEN: ExpandedRule = () => true
  * The note node itself is not part of a note's doc (see `noteDoc`); pass a
  * note id as a root and it walks like any node — a note linked under a block
  * renders as a `note` block.
+ *
+ * Walked **upstream** as well (`directions`), every block also carries the
+ * complete list of its parents' ids (`upstream`), and beneath an open row
+ * the walk continues into its parents after its children — each an upstream
+ * occurrence (`^` in the key, src/blocks/view.ts), walked on by the same
+ * rule in both directions. A parent already on the path above is skipped
+ * (a block's own parent is where the row came from, not something beneath
+ * it), which is what keeps a single-homed block's rows exactly the tree's
+ * and shows only the *other* places a multi-homed block is held. The view
+ * is then the graph around the root, as far as the folds open it.
  */
 export function walkGraph(
   rootIds: string[],
@@ -366,13 +417,27 @@ export function walkGraph(
   {
     expanded = EVERYTHING_OPEN,
     startLevel = 1,
-  }: { expanded?: ExpandedRule; startLevel?: number } = {},
+    directions = "downstream",
+    rootId,
+  }: WalkOptions = {},
 ): GraphView {
+  const down = directions !== "upstream"
+  const up = directions !== "downstream"
   const blocks: Record<string, Block> = {}
   const collapsed = new Set<string>()
   const path = new Set<string>()
+  if (rootId) path.add(rootId)
 
-  // A block with its complete child list, built once — never walked here.
+  // The live ids a node holds, and (upstream) the live ids holding it.
+  const childrenOf = (id: string) =>
+    // A node listed as its own child (a corrupted row; the write side never
+    // makes one) is skipped: that loop has no closing row to show. So is a
+    // dangling link.
+    childIdsOf(graph, id).filter((childId) => childId !== id && graph.nodes.has(childId))
+  const parentsOf = (id: string) =>
+    parentIdsOf(graph, id).filter((parentId) => parentId !== id && graph.nodes.has(parentId))
+
+  // A block with its complete lists, built once — never walked here.
   const blockOf = (id: string): Block | null => {
     const known = blocks[id]
     if (known) return known
@@ -386,35 +451,52 @@ export function walkGraph(
       type: asBlockType(node.type),
       text: node.text,
       ...(props ? { props } : {}),
-      // A node listed as its own child (a corrupted row; the write side never
-      // makes one) is skipped: that loop has no closing row to show. So is a
-      // dangling link.
-      children: childIdsOf(graph, id).filter(
-        (childId) => childId !== id && graph.nodes.has(childId),
-      ),
+      children: childrenOf(id),
+      ...(up ? { upstream: parentsOf(id) } : {}),
     }
     blocks[id] = block
     return block
   }
 
-  const visit = (id: string, parentKey: string | null, level: number): boolean => {
+  const visit = (
+    id: string,
+    parentKey: string | null,
+    level: number,
+    direction: "down" | "up",
+  ): boolean => {
+    // Reached again from above (or the view's own root): the loop closes
+    // here, as a leaf — named, not built again, never descended.
+    if (path.has(id)) return graph.nodes.has(id)
     const block = blockOf(id)
     if (!block) return false
-    // Reached again from above: the loop closes here, as a leaf.
-    if (path.has(id) || block.children.length === 0) return true
-    const key = keyOf(parentKey, id)
+    const key = keyOf(parentKey, id, direction)
+    // Beneath a parent row, the block it was reached up from is not a row.
+    const beneathDown = !down
+      ? []
+      : direction === "up"
+        ? block.children.filter((childId) => !path.has(childId))
+        : block.children
+    const beneathUp = up ? (block.upstream ?? []).filter((parentId) => !path.has(parentId)) : []
+    if (beneathDown.length === 0 && beneathUp.length === 0) return true
     if (!expanded(key, level)) {
       collapsed.add(key)
       return true
     }
     path.add(id)
-    for (const childId of block.children) visit(childId, key, level + 1)
+    for (const childId of beneathDown) visit(childId, key, level + 1, "down")
+    for (const parentId of beneathUp) visit(parentId, key, level + 1, "up")
     path.delete(id)
     return true
   }
 
-  const rootBlockIds = rootIds.filter((id) => visit(id, null, startLevel))
-  return { doc: { props: null, rootBlockIds, blocks }, collapsed }
+  const rootBlockIds = rootIds.filter((id) => visit(id, null, startLevel, "down"))
+  const doc: BlockDoc = { props: null, rootBlockIds, blocks }
+  if (up && rootId) {
+    // The root's own parents: rows after the roots, at the roots' level.
+    const upstream = parentsOf(rootId)
+    doc.upstream = upstream.filter((parentId) => visit(parentId, null, startLevel, "up"))
+  }
+  return { doc, collapsed }
 }
 
 /** The eager walk: everything `rootIds` reach, every occurrence open. */
@@ -442,13 +524,20 @@ export function noteView(
   noteId: string,
   graph: GraphSnapshot,
   expanded?: ExpandedRule,
+  directions: LinkDirections = "downstream",
 ): GraphView | null {
   const note = graph.nodes.get(noteId)
   if (!note || note.type !== NOTE_TYPE) return null
   const entries = noteEntries(note.props)
   const title = emittedNoteTitle(note.id, note.text)
   const props = title !== null ? { title, ...(entries ?? {}) } : entries
-  const { doc, collapsed } = walkGraph(childIdsOf(graph, noteId), graph, { expanded })
+  // Upstream only, the note's blocks are still the roots — a root is always
+  // shown — but nothing beneath them is followed down.
+  const { doc, collapsed } = walkGraph(childIdsOf(graph, noteId), graph, {
+    expanded,
+    directions,
+    rootId: noteId,
+  })
   return { doc: { ...doc, props }, collapsed }
 }
 
@@ -463,10 +552,11 @@ export function blockView(
   blockId: string,
   graph: GraphSnapshot,
   expanded?: ExpandedRule,
+  directions: LinkDirections = "downstream",
 ): GraphView | null {
   const node = graph.nodes.get(blockId)
   if (!node || node.type === NOTE_TYPE) return null
-  return walkGraph([blockId], graph, { expanded, startLevel: 0 })
+  return walkGraph([blockId], graph, { expanded, startLevel: 0, directions })
 }
 
 /**

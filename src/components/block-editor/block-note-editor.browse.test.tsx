@@ -17,6 +17,7 @@ vi.mock("../../global-state", async () => {
 })
 
 import { parse } from "../../blocks/parse"
+import type { BlockDoc } from "../../blocks/types"
 import { BlockNoteEditor } from "./block-note-editor"
 
 Element.prototype.scrollIntoView = vi.fn()
@@ -108,5 +109,42 @@ describe("a shared note (read-only, browsed)", () => {
     cleanup()
     const again = renderShared()
     expect(rows(again.container)).toEqual(["one", "five"])
+  })
+})
+
+describe("a note walked upstream", () => {
+  /** n > a > shared; shared is also held by p, in another note. */
+  const graphed: BlockDoc = {
+    props: null,
+    rootBlockIds: ["a", "b"],
+    upstream: [],
+    blocks: {
+      a: { id: "a", type: "ul", text: "a", children: ["shared"], upstream: ["n"] },
+      b: { id: "b", type: "ul", text: "b", children: [], upstream: ["n"] },
+      shared: { id: "shared", type: "todo", text: "shared", children: [], upstream: ["a", "p"] },
+      p: { id: "p", type: "ul", text: "from elsewhere", children: ["shared"], upstream: [] },
+    },
+  }
+
+  it("draws a block's other parent beneath it, as a row like any other", () => {
+    const folds = { collapsed: new Set<string>(), toggle: vi.fn() }
+    const { container } = render(
+      <BlockNoteEditor doc={graphed} onChange={vi.fn()} noteId="n" folds={folds} readOnly browse />,
+    )
+    expect(rows(container)).toEqual(["a", "shared", "from elsewhere", "b"])
+    const parent = container.querySelector('[data-occurrence="a/shared/^p"]')
+    expect(parent).not.toBeNull()
+  })
+
+  it("folds a parent row like any other, and the toggle names its key", () => {
+    const folds = { collapsed: new Set(["a/shared"]), toggle: vi.fn() }
+    const { container } = render(
+      <BlockNoteEditor doc={graphed} onChange={vi.fn()} noteId="n" folds={folds} readOnly browse />,
+    )
+    expect(rows(container)).toEqual(["a", "shared", "b"])
+    const root = editor(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" })
+    fireEvent.keyDown(root, { key: "ArrowRight" })
+    expect(folds.toggle).toHaveBeenCalledWith("a/shared")
   })
 })

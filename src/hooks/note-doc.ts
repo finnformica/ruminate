@@ -4,7 +4,7 @@ import { isEmptyDoc } from "../blocks/ops"
 import type { BlockDoc, ChangeHint } from "../blocks/types"
 import type { ExpandedRule } from "../blocks/view"
 import { basketDoc, basketToOps } from "../data/basket"
-import { NOTE_TYPE, blockView, noteView, type GraphView } from "../data/graph"
+import { NOTE_TYPE, blockView, noteView, type GraphView, type LinkDirections } from "../data/graph"
 import { notePropsOps } from "../data/note-meta"
 import { docToOps } from "../data/ops"
 import { useApplyOps } from "../data/store"
@@ -46,6 +46,7 @@ export function useNoteDoc({
   defaultDoc,
   zoomBlockId = null,
   expanded,
+  directions = "downstream",
 }: {
   noteId: NoteId | undefined
   /** What a note not in the graph starts as (`?content=`, or empty). */
@@ -56,6 +57,8 @@ export function useNoteDoc({
   zoomBlockId?: string | null
   /** The fold rule the walk descends by; absent = walk everything. */
   expanded?: ExpandedRule
+  /** Which links the walk follows (Settings → Editor, "Show links"). */
+  directions?: LinkDirections
 }) {
   const snapshot = useAtomValue(graphSnapshotAtom)
   const store = useStore()
@@ -63,9 +66,9 @@ export function useNoteDoc({
 
   const view = useMemo<GraphView | null>(() => {
     if (noteId === undefined) return null
-    const zoomed = zoomBlockId ? blockView(zoomBlockId, snapshot, expanded) : null
-    return zoomed ?? noteView(noteId, snapshot, expanded)
-  }, [noteId, zoomBlockId, snapshot, expanded])
+    const zoomed = zoomBlockId ? blockView(zoomBlockId, snapshot, expanded, directions) : null
+    return zoomed ?? noteView(noteId, snapshot, expanded, directions)
+  }, [noteId, zoomBlockId, snapshot, expanded, directions])
   // Whether the doc is rooted at the zoomed block (the note node is then not
   // this doc's to write).
   const rootId = zoomBlockId && view?.doc.rootBlockIds[0] === zoomBlockId ? zoomBlockId : null

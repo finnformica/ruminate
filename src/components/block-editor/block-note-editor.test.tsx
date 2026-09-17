@@ -23,6 +23,7 @@ vi.mock("../../global-state", async () => {
 })
 
 import { parse } from "../../blocks/parse"
+import type { BlockDoc } from "../../blocks/types"
 import { serialize } from "../../blocks/serialize"
 import { BlockNoteEditor } from "./block-note-editor"
 
@@ -160,5 +161,37 @@ describe("the last row of a doc without a trailing blank (the basket)", () => {
     expect(container.querySelectorAll("[data-occurrence]")).toHaveLength(1)
     fireEvent.keyDown(editorRoot(container), { key: "Backspace" })
     expect(container.querySelectorAll("[data-occurrence]")).toHaveLength(1)
+  })
+})
+
+describe("zoomed", () => {
+  it("seeds no trailing blank beside the zoomed root, and adds a first child only to a leaf", () => {
+    const rooted: BlockDoc = {
+      props: null,
+      rootBlockIds: ["r"],
+      blocks: {
+        r: { id: "r", type: "text", text: "R", children: ["x"] },
+        x: { id: "x", type: "text", text: "X", children: [] },
+      },
+    }
+    const onChange = vi.fn()
+    const { container } = render(
+      <BlockNoteEditor doc={rooted} onChange={onChange} noteId="n" zoomBlockId="r" />,
+    )
+    // The rows are r's children alone; nothing was written.
+    expect(
+      Array.from(container.querySelectorAll("[data-occurrence]")).map(
+        (el) => (el as HTMLElement).dataset.occurrence,
+      ),
+    ).toEqual(["r/x"])
+    expect(onChange).not.toHaveBeenCalled()
+
+    const leaf: BlockDoc = { ...rooted, blocks: { r: { ...rooted.blocks.r, children: [] } } }
+    const onLeafChange = vi.fn()
+    render(<BlockNoteEditor doc={leaf} onChange={onLeafChange} noteId="n" zoomBlockId="r" />)
+    expect(onLeafChange).toHaveBeenCalledTimes(1)
+    const ensured = onLeafChange.mock.calls[0][0] as BlockDoc
+    expect(ensured.rootBlockIds).toEqual(["r"])
+    expect(ensured.blocks.r.children).toHaveLength(1)
   })
 })
