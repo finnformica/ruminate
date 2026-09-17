@@ -20,10 +20,30 @@ keyboard that appears and disappears. The block editor
   marker gap and the row's padding, not only the words — so a short line is as
   easy to hit as a long one. The chevron, the checkbox, the zoom dot and links
   keep their own taps.
-- **Selecting is the long press.** A press-and-hold opens the block menu on the
-  row and highlights it (`block-context-menu.tsx`), which is where the row-level
-  actions live. On a touch screen the menu also carries the structure moves —
-  Indent, Outdent, Move up, Move down — which a mouse's menu leaves to the keys.
+- **The block menu is a sheet, on a long press.** A press-and-hold (a finger
+  down on a row that stays put for 450ms, timed by the editor itself) opens
+  `BlockMenuSheet`, a sheet from the bottom of the screen with the row's text
+  at its top and the same entries the pointer's popup has, laid out for a
+  thumb; a pick closes it, so does a swipe down. The popup anchored under the
+  finger that came before was fragile — it opened as the press registered and
+  shut on the lift, or on the scroll the same finger began. On a touch screen
+  the entries also carry the structure moves — Indent, Outdent, Move up, Move
+  down — which a mouse's menu leaves to the keys. Android's long press arrives
+  as a `contextmenu` event and opens the same sheet.
+- **A highlight has no job on a touch screen.** There is no keyboard cursor
+  for it to mark, so once an edit ends (the keyboard put away, a delete, a
+  swap of rows) nothing stays lit; the one time a row is marked is while the
+  sheet is open on it, and then quietly (the inactive ring).
+- **Backspace is heard as a deletion.** A phone's keyboard does not always say
+  which key was pressed — Android reports "Unidentified" through its input
+  method, and iOS may say nothing at all for a delete on an empty field — so
+  the block listens for the `beforeinput` deletion at the very start of its
+  text and runs the same command the key would: the marker goes, then the
+  block merges upward.
+- **Delete, Undo and Redo keep the edit.** Run from the bar, a delete carries
+  the edit on in the row that takes the deleted one's place, and an undo or
+  redo keeps editing the row it lands on — the one that survived, moved, or
+  came back — so the keyboard and the bar stay up for the next one.
 - **The keyboard going away ends the edit.** Putting the keyboard away
   (iOS's Done key, the bar's Done) blurs the textarea, which ends the edit as
   a click away does on a desktop, and the row stays highlighted for the tap
@@ -114,6 +134,26 @@ keyboard that appears and disappears. The block editor
   touch screen (`query-box.tsx`).
 - PWA: `display: standalone` in the manifest, an apple-touch-icon, the
   `theme-color` kept in step with the page background.
+
+## Offline, on a phone
+
+Two things a phone does that a desktop rarely does: it is closed and reopened
+with no network, and it is handed the app as a home-screen install. Both go
+through the service worker's precache (`vite.config.ts`), which must hold
+everything a cold start needs — including the SQL store's worker chunk and
+the sqlite wasm it loads, which are the notes themselves when signed in.
+Without them a start offline never opens the store: nothing loads, and
+nothing written is kept. The feature flags (`src/data/features.ts`) are
+remembered per account on the device and stand from the start, so the Admin
+page and the panels are as they were last time rather than hidden behind a
+request that cannot return; the server is asked again when the network comes
+back. What the flags gate on the server (the Admin page's own lists) still
+needs the network to load.
+
+Not a bug, though it can look like one: Enter on an _empty_ list item leaves
+the list, as it does on a desktop — the block becomes a paragraph when the
+default new-block type is that very list. Two quick Enters on a phone land
+there.
 
 ## Gaps
 

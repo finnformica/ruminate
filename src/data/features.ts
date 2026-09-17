@@ -15,11 +15,14 @@ import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github
  * flags on each feature's own routes; this is only what the client draws —
  * the Settings panels, the Share… menu items, the Admin link.
  *
- * Until the request has answered (or when it cannot: offline, a Worker
- * ahead of its migration) the registry DEFAULTS stand, evaluated for a
- * non-admin. So a panel that is on for everyone is never hidden by a
- * request that has not returned, and one that is off is at worst shown to a
- * caller the server will refuse.
+ * Until the request has answered, the last answer this account got on this
+ * device stands (`seedFeatures`, from localStorage), and before there has
+ * been one the registry DEFAULTS do, evaluated for a non-admin. So a start
+ * with no network — the app reopened on a phone, offline — keeps the admin's
+ * page and everyone's panels as they were, rather than hiding them behind a
+ * request that cannot return; and a panel that is off is at worst shown to
+ * a caller the server will refuse. The request runs again when the network
+ * comes back (use-database-mode.ts).
  */
 
 const DEFAULTS: FeaturesBody = {
@@ -29,8 +32,48 @@ const DEFAULTS: FeaturesBody = {
   ) as EnabledFeatures,
 }
 
-/** Null = not fetched for the current sign-in. */
+/** Null = nothing known for the current sign-in. */
 const featuresAtom = atom<FeaturesBody | null>(null)
+
+/** Where the last answer for an account is kept on this device. */
+const cacheKey = (owner: string) => `features:${owner}`
+
+function readCache(owner: string): FeaturesBody | null {
+  try {
+    const raw = localStorage.getItem(cacheKey(owner))
+    if (!raw) return null
+    const body = JSON.parse(raw) as Partial<FeaturesBody> | null
+    if (!body || typeof body.features !== "object" || body.features === null) return null
+    return {
+      admin: body.admin === true,
+      features: { ...DEFAULTS.features, ...body.features },
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeCache(owner: string, body: FeaturesBody): void {
+  try {
+    localStorage.setItem(cacheKey(owner), JSON.stringify(body))
+  } catch {
+    // A full or unavailable localStorage: the flags still stand in memory.
+  }
+}
+
+/** The account the flags are for, so a fetched answer is remembered under it. */
+let currentOwner: string | null = null
+
+/**
+ * Start from what this account was last told on this device, if anything,
+ * so a start with no network is not a start as a stranger. Called on
+ * sign-in, before `refreshFeatures` asks the server.
+ */
+export function seedFeatures(owner: string): void {
+  currentOwner = owner
+  const cached = readCache(owner)
+  if (cached) getDefaultStore().set(featuresAtom, cached)
+}
 
 const effectiveFeaturesAtom = atom((get) => get(featuresAtom) ?? DEFAULTS)
 
@@ -72,7 +115,7 @@ export async function refreshFeatures(fetchImpl: typeof fetch = fetch): Promise<
     if (!response.ok) return
     const body = (await response.json()) as Partial<FeaturesBody> | null
     if (!body || typeof body.features !== "object" || body.features === null) return
-    store.set(featuresAtom, {
+    const next: FeaturesBody = {
       admin: body.admin === true,
       features: {
         ...DEFAULTS.features,
@@ -83,13 +126,19 @@ export async function refreshFeatures(fetchImpl: typeof fetch = fetch): Promise<
           ]),
         ),
       },
-    })
+    }
+    store.set(featuresAtom, next)
+    if (currentOwner !== null) writeCache(currentOwner, next)
   } catch {
-    // Left at the defaults; see the module note.
+    // Left as they were — the cached answer, or the defaults; see the
+    // module note.
   }
 }
 
-/** Forget the flags — on sign-out, so the next account starts from the defaults. */
+/** Forget the flags — on sign-out, so the next account starts from the
+ * defaults. The device's memory of each account's answer is kept, under
+ * that account, for its next sign-in. */
 export function resetFeatures(): void {
+  currentOwner = null
   getDefaultStore().set(featuresAtom, null)
 }

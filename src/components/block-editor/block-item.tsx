@@ -288,6 +288,41 @@ export function BlockItem({
     el.setSelectionRange(pos, pos)
   }, [editing, api.focus?.atStart, api.focus?.caret, type])
 
+  // Backspace at the very start of the block, heard as the DELETION rather
+  // than the key. A phone's keyboard does not always say which key was
+  // pressed: Android reports "Unidentified" (keyCode 229) through its
+  // input method, and iOS may say nothing at all for a delete on an empty
+  // field — so the keydown path above never sees a Backspace to strip a
+  // marker or merge the block upward, and the block cannot be deleted by
+  // the key. `beforeinput` names the intent instead (`deleteContentBackward`)
+  // and fires either way; at the start of the block it runs the same
+  // command the key would, and otherwise leaves the textarea to its own
+  // deletion. A keydown that was handled already cancelled the input, so
+  // the two never both run. A native listener: React's onBeforeInput is
+  // synthesised from text entry and never fires for a deletion.
+  const apiRef = useRef(api)
+  apiRef.current = api
+  useEffect(() => {
+    if (!editing) return
+    const el = textareaRef.current
+    if (!el) return
+    const onBeforeInput = (event: InputEvent) => {
+      if (event.inputType !== "deleteContentBackward") return
+      if (el.selectionStart !== 0 || el.selectionEnd !== 0) return
+      const key: KeyLike = { key: "Backspace", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false }
+      const caret: CaretInput = {
+        value: el.value,
+        start: 0,
+        end: 0,
+        atFirstLine: true,
+        atLastLine: !el.value.includes("\n"),
+      }
+      if (apiRef.current.dispatchKey("edit", occurrence.key, key, caret)) event.preventDefault()
+    }
+    el.addEventListener("beforeinput", onBeforeInput)
+    return () => el.removeEventListener("beforeinput", onBeforeInput)
+  }, [editing, occurrence.key])
+
   // Resize on content change, and restore the caret after a marker shortcut
   // reshaped the visible text (e.g. typing `# ` promoted the block to a
   // heading and the `# ` moved out of the textarea).

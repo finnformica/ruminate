@@ -376,11 +376,18 @@ describe("BlockEditor focus + keyboard", () => {
     fireEvent.keyDown(textarea, { key: "Enter" }) // create a block below B
     expect(container.querySelector("textarea")!.value).toBe("")
     fireEvent.keyDown(container.querySelector("textarea")!, { key: "z", metaKey: true }) // undo
-    // Not the first block in the note — the block Enter was pressed on.
-    expect(container.querySelector("textarea")).toBeNull()
-    expect(highlightedText(container)).toBe("B")
-    // Redo brings the created block back and re-highlights it.
-    fireEvent.keyDown(root, { key: "z", metaKey: true, shiftKey: true })
+    // Not the first block in the note — the block Enter was pressed on; and
+    // still editing it, since the undo was made mid-edit.
+    expect(container.querySelector("textarea")!.value).toBe("B")
+    // Redo brings the created block back and lands editing it.
+    fireEvent.keyDown(container.querySelector("textarea")!, {
+      key: "z",
+      metaKey: true,
+      shiftKey: true,
+    })
+    expect(container.querySelector("textarea")!.value).toBe("")
+    // Out of the edit, the highlight is on the block that came back.
+    fireEvent.keyDown(container.querySelector("textarea")!, { key: "Escape" })
     expect(highlightedAll(container)).toHaveLength(1)
     expect(highlightedText(container)).not.toBe("B")
   })
@@ -392,6 +399,9 @@ describe("BlockEditor focus + keyboard", () => {
     fireEvent.keyDown(root, { key: "Enter", metaKey: true }) // insert below B, editing
     const textarea = container.querySelector("textarea")!
     fireEvent.keyDown(textarea, { key: "z", metaKey: true }) // undo the insert
+    // Mid-edit, so the undo keeps you editing: now B itself.
+    expect(container.querySelector("textarea")!.value).toBe("B")
+    fireEvent.keyDown(container.querySelector("textarea")!, { key: "Escape" })
     expect(highlightedText(container)).toBe("B")
   })
 

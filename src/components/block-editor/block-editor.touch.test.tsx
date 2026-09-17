@@ -140,7 +140,7 @@ describe("a touch screen's tap", () => {
 })
 
 describe("a touch screen's edit", () => {
-  it("ends when the keyboard goes away (focus to nothing), leaving the row highlighted", () => {
+  it("ends when the keyboard goes away (focus to nothing), with nothing left highlighted", () => {
     const { container } = render(<Harness initial={"Alpha\nBeta"} />)
     fireEvent.click(bodyOf(rows(container)[1]))
     const textarea = container.querySelector("textarea")!
@@ -152,7 +152,8 @@ describe("a touch screen's edit", () => {
     })
     hasFocus.mockRestore()
     expect(container.querySelector("textarea")).toBeNull()
-    expect(container.querySelector(".bg-bg-secondary")!.textContent).toContain("Beta")
+    // A touch screen's highlight has no keyboard to serve: nothing stays lit.
+    expect(container.querySelector(".bg-bg-secondary")).toBeNull()
   })
 
   it("moves from row to row as taps land", () => {
@@ -351,15 +352,6 @@ describe("the edit bar", () => {
     expect(labels()[0]).toBe("Formatting")
   })
 
-  it("deletes the edited row, leaving edit mode", () => {
-    const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta"} />)
-    fireEvent.click(bodyOf(rows(container)[0]))
-    fireEvent.click(screen.getByLabelText("Delete"))
-    expect(lines(getByTestId)).toEqual(["Beta"])
-    expect(container.querySelector("textarea")).toBeNull()
-    expect(screen.queryByTestId("mobile-edit-bar")).toBeNull()
-  })
-
   it("pins itself above the visual viewport's bottom and pads the page by what it covers", () => {
     const { container } = render(<Harness initial={"Alpha\nBeta"} />)
     fireEvent.click(bodyOf(rows(container)[1]))
@@ -383,43 +375,147 @@ describe("the edit bar", () => {
     expect(fireEvent.mouseDown(button)).toBe(false)
   })
 
-  it("Hide keyboard ends the edit and leaves the row highlighted", () => {
+  it("Hide keyboard ends the edit, and leaves nothing highlighted", () => {
     const { container } = render(<Harness initial={"Alpha\nBeta"} />)
     fireEvent.click(bodyOf(rows(container)[1]))
     fireEvent.click(screen.getByLabelText("Hide keyboard"))
     expect(container.querySelector("textarea")).toBeNull()
     expect(screen.queryByTestId("mobile-edit-bar")).toBeNull()
-    const highlighted = container.querySelector(".bg-bg-secondary")!
-    expect(highlighted.textContent).toContain("Beta")
+    expect(container.querySelector(".bg-bg-secondary")).toBeNull()
+  })
+
+  it("Delete keeps editing, on the row that takes the deleted one's place", () => {
+    const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta\nGamma"} />)
+    fireEvent.click(bodyOf(rows(container)[1]))
+    fireEvent.click(screen.getByLabelText("Delete"))
+    expect(lines(getByTestId)).toEqual(["Alpha", "Gamma"])
+    // The keyboard, and the bar, stay up for the next delete.
+    const textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("Gamma")
+    expect(document.activeElement).toBe(textarea)
+    expect(screen.getByTestId("mobile-edit-bar")).not.toBeNull()
+  })
+
+  it("Undo of a delete keeps editing, on the row that came back", () => {
+    const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta\nGamma"} />)
+    fireEvent.click(bodyOf(rows(container)[1]))
+    fireEvent.click(screen.getByLabelText("Delete"))
+    fireEvent.click(screen.getByLabelText("Undo"))
+    expect(lines(getByTestId)).toEqual(["Alpha", "Beta", "Gamma"])
+    expect(container.querySelector("textarea")!.value).toBe("Beta")
+    expect(screen.getByTestId("mobile-edit-bar")).not.toBeNull()
+    fireEvent.click(screen.getByLabelText("Redo"))
+    expect(lines(getByTestId)).toEqual(["Alpha", "Gamma"])
+    expect(container.querySelector("textarea")).not.toBeNull()
+  })
+
+  it("Backspace heard as a deletion (a keyboard that names no key) merges an empty block up", () => {
+    const { container, getByTestId } = render(<Harness initial={"Alpha"} />)
+    fireEvent.click(bodyOf(rows(container)[0]))
+    // Return makes an empty block beneath, editing.
+    fireEvent.keyDown(container.querySelector("textarea")!, { key: "Enter" })
+    expect(container.querySelector("textarea")!.value).toBe("")
+    // A bullet, by the default new-block type.
+    expect(lines(getByTestId)).toEqual(["Alpha", "- "])
+    const backspace = () => {
+      const event = new InputEvent("beforeinput", {
+        inputType: "deleteContentBackward",
+        cancelable: true,
+        bubbles: true,
+      })
+      act(() => {
+        container.querySelector("textarea")!.dispatchEvent(event)
+      })
+      return event.defaultPrevented
+    }
+    // As the key does: first the marker goes, then the block merges up.
+    expect(backspace()).toBe(true)
+    expect(rows(container).length).toBe(2)
+    expect(container.querySelector("textarea")!.value).toBe("")
+    expect(backspace()).toBe(true)
+    expect(rows(container).length).toBe(1)
+    expect(container.querySelector("textarea")!.value).toBe("Alpha")
+    // Mid-text, the textarea's own deletion is left alone.
+    container.querySelector("textarea")!.setSelectionRange(3, 3)
+    expect(backspace()).toBe(false)
   })
 })
 
 describe("the block menu on a touch screen", () => {
-  async function openMenuOn(container: HTMLElement, index: number): Promise<HTMLElement> {
-    const row = rows(container)[index]
-    await act(async () => {
-      fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
-    })
-    return screen.getByTestId("block-context-menu")
-  }
-
-  it("carries the structure moves a finger has no keys for", async () => {
-    const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta"} />)
-    const menu = await openMenuOn(container, 1)
-    for (const label of ["Indent", "Outdent", "Move up", "Move down"]) {
-      expect(menu.textContent).toContain(label)
+  it("is a sheet, opened by a press-and-hold on the row, carrying the structure moves", async () => {
+    vi.useFakeTimers()
+    try {
+      const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta"} />)
+      const row = rows(container)[1]
+      fireEvent.pointerDown(row, { pointerType: "touch", clientX: 20, clientY: 20 })
+      // A finger that stays put for 450ms.
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
+      const sheet = screen.getByTestId("block-menu-sheet")
+      expect(sheet.textContent).toContain("Beta")
+      for (const label of ["Indent", "Outdent", "Move up", "Move down", "Turn into", "Delete"]) {
+        expect(sheet.textContent).toContain(label)
+      }
+      // The row the sheet is for is marked, quietly.
+      expect(container.querySelector(".bg-bg-secondary")!.textContent).toContain("Beta")
+      fireEvent.click(screen.getByText("Indent"))
+      expect(lines(getByTestId)).toEqual(["Alpha", "  Beta"])
+      // Closed on the pick, and nothing left lit.
+      act(() => {
+        vi.runAllTimers()
+      })
+      expect(container.querySelector(".bg-bg-secondary")).toBeNull()
+    } finally {
+      vi.useRealTimers()
     }
+  })
+
+  it("does not open on a finger that moves (a scroll) or lifts early", () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(<Harness initial={"Alpha\nBeta"} />)
+      const row = rows(container)[1]
+      fireEvent.pointerDown(row, { pointerType: "touch", clientX: 20, clientY: 20 })
+      fireEvent.pointerMove(row, { pointerType: "touch", clientX: 20, clientY: 60 })
+      act(() => {
+        vi.advanceTimersByTime(600)
+      })
+      expect(screen.queryByTestId("block-menu-sheet")).toBeNull()
+      fireEvent.pointerDown(row, { pointerType: "touch", clientX: 20, clientY: 20 })
+      fireEvent.pointerUp(row, { pointerType: "touch" })
+      act(() => {
+        vi.advanceTimersByTime(600)
+      })
+      expect(screen.queryByTestId("block-menu-sheet")).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("opens the sheet on a contextmenu too (Android's long press), never the popup", async () => {
+    const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta"} />)
+    await act(async () => {
+      fireEvent.contextMenu(rows(container)[1], { clientX: 10, clientY: 10 })
+    })
+    expect(screen.queryByTestId("block-context-menu")).toBeNull()
+    const sheet = screen.getByTestId("block-menu-sheet")
+    expect(sheet.textContent).toContain("Outdent")
     await act(async () => {
       fireEvent.click(screen.getByText("Indent"))
     })
     expect(lines(getByTestId)).toEqual(["Alpha", "  Beta"])
   })
 
-  it("keeps them off a mouse's menu, where Tab does the job", async () => {
+  it("keeps the popup, without the moves, for a mouse", async () => {
     coarse = false
     const { container } = render(<Harness initial={"Alpha\nBeta"} />)
-    const menu = await openMenuOn(container, 1)
+    await act(async () => {
+      fireEvent.contextMenu(rows(container)[1], { clientX: 10, clientY: 10 })
+    })
+    const menu = screen.getByTestId("block-context-menu")
     expect(menu.textContent).not.toContain("Indent")
     expect(menu.textContent).not.toContain("Move up")
+    expect(screen.queryByTestId("block-menu-sheet")).toBeNull()
   })
 })

@@ -155,7 +155,12 @@ import {
   writeRichClipboard,
   type ClipboardBlock,
 } from "../../utils/rich-clipboard"
-import { BlockContextMenu, type BlockMenuActions, type BlockMenuTarget } from "./block-context-menu"
+import {
+  BlockContextMenu,
+  BlockMenuSheet,
+  type BlockMenuActions,
+  type BlockMenuTarget,
+} from "./block-context-menu"
 import {
   BlockItem,
   type BlockDebugOptions,
@@ -470,8 +475,8 @@ export function BlockEditor({
   // A read-only view still owns the keyboard when it is browsed (`browse`,
   // or `onActivate`, which opens rows); one that is neither is inert display.
   const navigable = !readOnly || browse || onActivate !== undefined
-  // A touch screen (docs/mobile.md): a tap edits, an edit survives the
-  // keyboard going away, and the edit bar sits above the keyboard.
+  // A touch screen (docs/mobile.md): a tap edits, the edit bar sits above
+  // the keyboard, and a highlight has no job once the edit ends.
   const coarse = useCoarsePointer()
 
   // ── Zoom state ────────────────────────────────────────────────────────────
@@ -1116,9 +1121,13 @@ export function BlockEditor({
     setAnchorKey(null)
     // If a block reappeared (e.g. undo of a delete), highlight it so the thing
     // you brought back is where your focus lands.
+    // Undoing or redoing mid-edit keeps you editing — on the same row where
+    // it survives, else on the row that reappeared or the nearest one left —
+    // so the keyboard, and the touch screen's edit bar above it, stay up.
+    const wasEditing = focus !== null
     const reappeared = findReappeared(doc, restored)
     if (reappeared) {
-      setFocus(null)
+      setFocus(wasEditing ? { key: reappeared } : null)
       setSelected(reappeared)
       return
     }
@@ -1143,17 +1152,18 @@ export function BlockEditor({
     // keeps you typing, and the edit bar's Undo keeps the bar.
     const movedTo = (key: string): string | null =>
       hasOccurrence(restored, key) ? key : firstOccurrenceKey(restored, idOfKey(key))
+    const landing = (cur: string | null): string | null => {
+      if (!cur) return firstSelectable(restored)
+      return movedTo(cur) ?? nearestSurvivor(cur) ?? firstSelectable(restored)
+    }
     setFocus((cur) => {
       if (!cur) return null
       const key = movedTo(cur.key)
-      return key === null ? null : key === cur.key ? cur : { ...cur, key }
+      if (key !== null) return key === cur.key ? cur : { ...cur, key }
+      const next = landing(cur.key)
+      return next === null ? null : { key: next }
     })
-    setSelected((cur) => {
-      if (!cur) return firstSelectable(restored)
-      const key = movedTo(cur)
-      if (key !== null) return key
-      return nearestSurvivor(cur) ?? firstSelectable(restored)
-    })
+    setSelected(landing)
   }
 
   const undo = () => {
@@ -1377,6 +1387,15 @@ export function BlockEditor({
   // so the keyboard follows). Empty space beneath the rows gets the browser's
   // own menu: the event is stopped before the menu's trigger sees it.
   const [menuTarget, setMenuTarget] = useState<BlockMenuTarget | null>(null)
+  // A touch screen's highlight has no keyboard to serve: once an edit ends
+  // (the keyboard put away, a delete, a swap of rows), nothing stays lit —
+  // unless the block menu is open on the row, which the highlight names.
+  useEffect(() => {
+    if (!coarse || focus !== null || menuTarget !== null) return
+    setSelected(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coarse, focus, menuTarget])
+
   /** The menu target for the row an element sits in, or null off the rows. */
   const menuTargetAt = (el: EventTarget | null): BlockMenuTarget | null => {
     if (!(el instanceof Element)) return null
@@ -1429,6 +1448,16 @@ export function BlockEditor({
       event.stopPropagation()
       return
     }
+    if (coarse) {
+      // Android's long press arrives as a contextmenu: the sheet, and never
+      // the browser's own menu.
+      event.preventDefault()
+      event.stopPropagation()
+      cancelPress()
+      openMenuOn(target)
+      setSheetOpen(true)
+      return
+    }
     openMenuOn(target)
   }
   // A touch long-press: the menu opens itself (no `contextmenu` event on a
@@ -1458,6 +1487,48 @@ export function BlockEditor({
     heldOpen.current = false
     if (event.cancelable) event.preventDefault()
   }
+  // On a touch screen the menu is a sheet from the bottom (`BlockMenuSheet`),
+  // opened by a press-and-hold the editor times itself: a finger down on a
+  // row that stays put for 450ms, and has not lifted. A popup anchored under
+  // the finger was fragile — it opened as the press registered and shut on
+  // the lift, or on the scroll the same finger began — where a sheet holds
+  // still and is dismissed on purpose. The popup's own press detection is
+  // not mounted on a touch screen at all.
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const press = useRef<{ timer: number; x: number; y: number } | null>(null)
+  const cancelPress = () => {
+    if (press.current === null) return
+    window.clearTimeout(press.current.timer)
+    press.current = null
+  }
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!coarse || readOnly || event.pointerType === "mouse") return
+    const target = menuTargetAt(event.target)
+    if (!target) return
+    cancelPress()
+    const { clientX: x, clientY: y } = event
+    press.current = {
+      x,
+      y,
+      timer: window.setTimeout(() => {
+        press.current = null
+        heldOpen.current = true
+        openMenuOn(target)
+        setSheetOpen(true)
+        // A nudge where the device offers one (Android; iOS has no web API).
+        navigator.vibrate?.(10)
+      }, 450),
+    }
+  }
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const p = press.current
+    if (p && Math.hypot(event.clientX - p.x, event.clientY - p.y) > 8) cancelPress()
+  }
+  const closeSheet = () => {
+    setSheetOpen(false)
+    setMenuTarget(null)
+  }
+  useEffect(() => cancelPress, [])
   // ── Images ────────────────────────────────────────────────────────────────
   // A pasted, dropped or picked picture is uploaded first and only then
   // becomes a block (a failed upload leaves the doc as it was and says so),
@@ -1925,7 +1996,9 @@ export function BlockEditor({
     // are plain display state — never demote them to "inactive". The rest
     // own the keyboard when focus is inside AND the last thing the user did
     // was not click on blank space (`pointerIdle`).
-    keyboardActive: !navigable || (keyboardActive && !pointerIdle),
+    // A touch screen has no keyboard cursor to claim: its highlight is
+    // always the quiet one, and only while a menu is open on the row.
+    keyboardActive: !navigable || (keyboardActive && !pointerIdle && !coarse),
     coarsePointer: coarse,
     fixedRoots,
     // Browsing: a click opens the row (BlockItem routes a read-only row's
@@ -2579,45 +2652,94 @@ export function BlockEditor({
           />
         </div>
       ) : null}
-      <BlockContextMenu
-        target={readOnly ? null : menuTarget}
-        actions={menuActions}
-        onOpenChange={handleMenuOpenChange}
-      >
-        {/* The container holds keyboard focus for select mode (tabIndex -1 =
-          focusable only programmatically), so arrows/shortcuts work no matter
-          which block is highlighted. outline-none hides the focus ring. */}
-        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
-        <div
-          className="outline-none"
-          ref={containerRef}
-          tabIndex={-1}
-          data-block-editor=""
-          onKeyDown={handleKeyDown}
-          onFocus={handleContainerFocus}
-          onBlur={handleContainerBlur}
-          onCopy={handleCopy}
-          onPaste={handleContainerPaste}
-          onCut={handleCut}
-          onMouseOver={handleMouseOver}
-          onMouseLeave={() => setHotGuides(null)}
-          onContextMenuCapture={handleContextMenuCapture}
-          onTouchEndCapture={handleTouchEndCapture}
-          onTouchCancelCapture={handleTouchEndCapture}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-        >
-          {/* The view is a flat list: one row per occurrence, indented by its
+      {coarse ? (
+        <>
+          {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+          <div
+            className="outline-none"
+            ref={containerRef}
+            tabIndex={-1}
+            data-block-editor=""
+            onKeyDown={handleKeyDown}
+            onFocus={handleContainerFocus}
+            onBlur={handleContainerBlur}
+            onCopy={handleCopy}
+            onPaste={handleContainerPaste}
+            onCut={handleCut}
+            onMouseOver={handleMouseOver}
+            onMouseLeave={() => setHotGuides(null)}
+            onContextMenuCapture={handleContextMenuCapture}
+            onTouchEndCapture={handleTouchEndCapture}
+            onTouchCancelCapture={handleTouchEndCapture}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={cancelPress}
+            onPointerCancel={cancelPress}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+          >
+            {/* The view is a flat list: one row per occurrence, indented by its
             depth. Zoomed, the rows are the zoomed block's children, from
             depth 0, under its title above. */}
-          {renderRows(
-            rows.filter((row) => {
-              const parent = parentKeyOf(row.key)
-              return parent === null || !rowKeys.has(parent)
-            }),
-          )}
-        </div>
-      </BlockContextMenu>
+            {renderRows(
+              rows.filter((row) => {
+                const parent = parentKeyOf(row.key)
+                return parent === null || !rowKeys.has(parent)
+              }),
+            )}
+          </div>
+          <BlockMenuSheet
+            target={readOnly ? null : menuTarget}
+            title={menuTarget ? (doc.blocks[menuTarget.id]?.text ?? "") : ""}
+            actions={menuActions}
+            open={sheetOpen && menuTarget !== null}
+            onOpenChange={(open) => {
+              if (!open) closeSheet()
+            }}
+          />
+        </>
+      ) : (
+        <BlockContextMenu
+          target={readOnly ? null : menuTarget}
+          actions={menuActions}
+          onOpenChange={handleMenuOpenChange}
+        >
+          {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+          <div
+            className="outline-none"
+            ref={containerRef}
+            tabIndex={-1}
+            data-block-editor=""
+            onKeyDown={handleKeyDown}
+            onFocus={handleContainerFocus}
+            onBlur={handleContainerBlur}
+            onCopy={handleCopy}
+            onPaste={handleContainerPaste}
+            onCut={handleCut}
+            onMouseOver={handleMouseOver}
+            onMouseLeave={() => setHotGuides(null)}
+            onContextMenuCapture={handleContextMenuCapture}
+            onTouchEndCapture={handleTouchEndCapture}
+            onTouchCancelCapture={handleTouchEndCapture}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={cancelPress}
+            onPointerCancel={cancelPress}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+          >
+            {/* The view is a flat list: one row per occurrence, indented by its
+            depth. Zoomed, the rows are the zoomed block's children, from
+            depth 0, under its title above. */}
+            {renderRows(
+              rows.filter((row) => {
+                const parent = parentKeyOf(row.key)
+                return parent === null || !rowKeys.has(parent)
+              }),
+            )}
+          </div>
+        </BlockContextMenu>
+      )}
       {onImageUpload ? (
         <input
           ref={imageInputRef}
@@ -2653,7 +2775,9 @@ export function BlockEditor({
             outdent: () => runOnEditing("outdent"),
             undo,
             redo,
-            remove: () => runOnRow("deleteBlock", focus.key),
+            // In edit mode, so the edit carries on in the row that takes
+            // the deleted one's place and the keyboard stays up.
+            remove: () => runOnEditing("deleteBlock"),
             image: api.requestImage ? () => api.requestImage?.(focus.key) : undefined,
             // Done: the keyboard goes and the row stays highlighted, where
             // a tap starts the next edit. The blur ends the edit itself;

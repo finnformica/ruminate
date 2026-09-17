@@ -94,11 +94,12 @@ export default defineConfig({
         display: "standalone",
       },
       workbox: {
-        globPatterns: ["**/*.{html,css,js,woff2}"],
-        // The experimental SQL store's worker chunk (plus the sqlite wasm it
-        // fetches) is only loaded when the storage flag is on — keep it out of
-        // the precache so flag-off users never download it.
-        globIgnores: ["**/sql-worker-*.js", "**/sqlite3-*.js"],
+        // The SQL store's worker chunk and the sqlite wasm it loads are
+        // precached with the rest: they ARE the notes when signed in, and a
+        // cold start offline (the app closed and reopened on a phone) has
+        // nowhere else to get them — without them the store never opens,
+        // nothing loads, and nothing written is kept.
+        globPatterns: ["**/*.{html,css,js,woff2,wasm}"],
         ignoreURLParametersMatching: [/^utm_/, /^fbclid$/],
         // No `skipWaiting` here: with registerType "prompt" the new service
         // worker must *wait* until the user clicks "Update Ruminate", which

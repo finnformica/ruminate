@@ -1,12 +1,14 @@
 import { ContextMenu } from "@base-ui/react/context-menu"
 import { Menu } from "@base-ui/react/menu"
 import React from "react"
+import { Drawer } from "vaul"
 import { FIGURE_ALIGNS, type FigureAlign } from "../../blocks/figure"
 import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
 import { useCoarsePointer } from "../../hooks/coarse-pointer"
 import { DropdownMenu } from "../dropdown-menu"
+import { CheckIcon16 } from "../icons"
 
 /**
  * The block's right-click menu: the standard actions on one row, the same
@@ -171,201 +173,331 @@ export function BlockContextMenu({
   )
 }
 
-function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMenuActions }) {
+/**
+ * What the menu holds for a row, as data: one list for both renderers — the
+ * pointer's popup (`Items`) and the touch screen's sheet (`BlockMenuSheet`).
+ * Each entry is an action, a rule between groups, or a group of choices
+ * (the popup's submenu; the sheet's inline group).
+ */
+export type MenuEntry =
+  | {
+      kind: "item"
+      label: string
+      onSelect: () => void
+      shortcut?: string[]
+      danger?: boolean
+      selected?: boolean
+      trailing?: React.ReactNode
+    }
+  | { kind: "separator" }
+  | {
+      kind: "group"
+      label: string
+      testId?: string
+      width?: number
+      items: { label: React.ReactNode; onSelect: () => void; selected?: boolean; key: string }[]
+    }
+
+function menuEntries(
+  target: BlockMenuTarget,
+  actions: BlockMenuActions,
+  { coarse }: { coarse: boolean },
+): MenuEntry[] {
   const { key, id } = target
   const shared = target.places > 1
   const image = target.type === "image"
-  const coarse = useCoarsePointer()
   const link = target.type === "link"
   const figure = target.figure !== undefined
   const links = target.links ?? []
+  const entries: MenuEntry[] = []
+  const item = (e: Omit<Extract<MenuEntry, { kind: "item" }>, "kind">) =>
+    entries.push({ kind: "item", ...e })
+  const rule = () => entries.push({ kind: "separator" })
+
+  item({
+    label: image ? "Edit caption" : link ? "Edit title" : "Edit",
+    shortcut: ["↵"],
+    onSelect: () => actions.edit(key),
+  })
+  // A link's card, for a screen with nothing to hover with: the one link
+  // straight away, several by their display text.
+  if (links.length === 1 && actions.editLink) {
+    item({ label: "Edit link", onSelect: () => actions.editLink?.(key, links[0].href) })
+  } else if (links.length > 1 && actions.editLink) {
+    entries.push({
+      kind: "group",
+      label: "Edit link",
+      testId: "edit-link-menu",
+      width: 200,
+      items: links.map((l, index) => ({
+        key: `${index}:${l.href}`,
+        label: <span className="truncate">{l.title}</span>,
+        onSelect: () => actions.editLink?.(key, l.href),
+      })),
+    })
+  }
+  if (image && actions.openImage)
+    item({ label: "Open image", onSelect: () => actions.openImage?.(id) })
+  if (image && actions.downloadImage)
+    item({ label: "Download image", onSelect: () => actions.downloadImage?.(id) })
+  if (link && actions.openLink) item({ label: "Open link", onSelect: () => actions.openLink?.(id) })
+  if (link && actions.refreshPreview)
+    item({ label: "Refresh preview", onSelect: () => actions.refreshPreview?.(id) })
+  // A figure's layout: the side it keeps to (the frame's own toolbar offers
+  // the same), and its natural width back after a drag.
+  if (figure && actions.alignFigure) {
+    entries.push({
+      kind: "group",
+      label: "Align",
+      testId: "figure-align-menu",
+      width: 160,
+      items: FIGURE_ALIGNS.map((align) => ({
+        key: align,
+        label: ALIGN_LABELS[align],
+        selected: target.figure?.align === align,
+        onSelect: () => actions.alignFigure?.(id, align),
+      })),
+    })
+  }
+  if (figure && target.figure?.sized && actions.resetFigureSize) {
+    item({
+      label: image ? "Original size" : "Full width",
+      onSelect: () => actions.resetFigureSize?.(id),
+    })
+  }
+  // A figure is its picture or its page: "turn into" would only keep the
+  // caption or the title. A link block goes back to the inline link it was
+  // made from instead.
+  if (link && actions.linkToInline)
+    item({ label: "Turn into inline", onSelect: () => actions.linkToInline?.(id) })
+  if (!figure) {
+    entries.push({
+      kind: "group",
+      label: "Turn into",
+      width: 200,
+      items: [
+        ...TYPES.map((def) => ({
+          key: def.id,
+          label: def.label,
+          // A checked todo is a to-do for the tick; every heading level is
+          // a heading.
+          selected: canonicalOf(target.type) === def.id,
+          onSelect: () => actions.setType(id, def.id),
+        })),
+        // Not a type change: the row's first link becomes a link block, in
+        // place or beneath (docs/links.md). Offered only where there is a
+        // link to make it of.
+        ...(links.length > 0 && actions.turnIntoLink
+          ? [
+              {
+                key: "link",
+                label: "Link",
+                onSelect: () => actions.turnIntoLink?.(key, links[0].href, links[0].title),
+              },
+            ]
+          : []),
+      ],
+    })
+  }
+  rule()
+  item({ label: "Duplicate", shortcut: ["⌥", "⇧", "↓"], onSelect: () => actions.duplicate(key) })
+  if (coarse) {
+    rule()
+    item({ label: "Indent", onSelect: () => actions.indent(key) })
+    item({ label: "Outdent", onSelect: () => actions.outdent(key) })
+    item({ label: "Move up", onSelect: () => actions.moveUp(key) })
+    item({ label: "Move down", onSelect: () => actions.moveDown(key) })
+  }
+  rule()
+  if (target.hasChildren) {
+    item({
+      label: target.collapsed ? "Expand" : "Collapse",
+      shortcut: ["Space"],
+      onSelect: () => actions.toggleCollapse(key),
+    })
+  }
+  item({ label: "Zoom into", shortcut: ["F"], onSelect: () => actions.zoomInto(id) })
+  item({ label: "Copy", shortcut: ["⌘", "C"], onSelect: () => actions.copy(key) })
+  if (actions.copyLink)
+    item({ label: "Copy link to block", onSelect: () => actions.copyLink?.(id) })
+  if (actions.pin)
+    item({ label: target.pinned ? "Unpin" : "Pin", onSelect: () => actions.pin?.(id) })
+  if (actions.share) item({ label: "Share…", onSelect: () => actions.share?.(id) })
+  rule()
+  if (actions.deleteEverywhere) {
+    item({ label: "Unlink", shortcut: ["⌫"], onSelect: () => actions.remove(key) })
+    item({
+      label: "Delete",
+      danger: true,
+      trailing: shared ? (
+        <span className="text-sm text-text-secondary">{target.places} places</span>
+      ) : undefined,
+      onSelect: () => actions.deleteEverywhere?.(id),
+    })
+  } else {
+    item({ label: "Delete", danger: true, shortcut: ["⌫"], onSelect: () => actions.remove(key) })
+    if (actions.deleteSubtree && target.hasChildren) {
+      item({
+        label: "Delete with contents",
+        danger: true,
+        onSelect: () => actions.deleteSubtree?.(id),
+      })
+    }
+  }
+  return entries
+}
+
+/** The pointer's popup: the entries as Base UI menu items and submenus. */
+function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMenuActions }) {
+  const coarse = useCoarsePointer()
+  const entries = menuEntries(target, actions, { coarse })
   return (
     <>
-      <DropdownMenu.Item shortcut={["↵"]} onClick={() => actions.edit(key)}>
-        {image ? "Edit caption" : link ? "Edit title" : "Edit"}
-      </DropdownMenu.Item>
-      {/* A link's card, for a screen with nothing to hover with: the one
-          link straight away, several by their display text. */}
-      {links.length === 1 && actions.editLink ? (
-        <DropdownMenu.Item onClick={() => actions.editLink?.(key, links[0].href)}>
-          Edit link
-        </DropdownMenu.Item>
-      ) : links.length > 1 && actions.editLink ? (
-        <Menu.SubmenuRoot>
-          <SubmenuTrigger>Edit link</SubmenuTrigger>
-          <Menu.Portal>
-            <Menu.Positioner side="right" align="start" sideOffset={4}>
-              <Menu.Popup className={popupClass} style={{ width: 200 }}>
-                <div className="grid p-1" data-testid="edit-link-menu">
-                  {links.map((link, index) => (
-                    <DropdownMenu.Item
-                      key={`${index}:${link.href}`}
-                      onClick={() => actions.editLink?.(key, link.href)}
-                    >
-                      <span className="truncate">{link.title}</span>
-                    </DropdownMenu.Item>
-                  ))}
-                </div>
-              </Menu.Popup>
-            </Menu.Positioner>
-          </Menu.Portal>
-        </Menu.SubmenuRoot>
-      ) : null}
-      {image && actions.openImage ? (
-        <DropdownMenu.Item onClick={() => actions.openImage?.(id)}>Open image</DropdownMenu.Item>
-      ) : null}
-      {image && actions.downloadImage ? (
-        <DropdownMenu.Item onClick={() => actions.downloadImage?.(id)}>
-          Download image
-        </DropdownMenu.Item>
-      ) : null}
-      {link && actions.openLink ? (
-        <DropdownMenu.Item onClick={() => actions.openLink?.(id)}>Open link</DropdownMenu.Item>
-      ) : null}
-      {link && actions.refreshPreview ? (
-        <DropdownMenu.Item onClick={() => actions.refreshPreview?.(id)}>
-          Refresh preview
-        </DropdownMenu.Item>
-      ) : null}
-      {/* A figure's layout: the side it keeps to (the frame's own toolbar
-          offers the same), and its natural width back after a drag. */}
-      {figure && actions.alignFigure ? (
-        <Menu.SubmenuRoot>
-          <SubmenuTrigger>Align</SubmenuTrigger>
-          <Menu.Portal>
-            <Menu.Positioner side="right" align="start" sideOffset={4}>
-              <Menu.Popup className={popupClass} style={{ width: 160 }}>
-                <div className="grid p-1" data-testid="figure-align-menu">
-                  {FIGURE_ALIGNS.map((align) => (
-                    <DropdownMenu.Item
-                      key={align}
-                      selected={target.figure?.align === align}
-                      onClick={() => actions.alignFigure?.(id, align)}
-                    >
-                      {ALIGN_LABELS[align]}
-                    </DropdownMenu.Item>
-                  ))}
-                </div>
-              </Menu.Popup>
-            </Menu.Positioner>
-          </Menu.Portal>
-        </Menu.SubmenuRoot>
-      ) : null}
-      {figure && target.figure?.sized && actions.resetFigureSize ? (
-        <DropdownMenu.Item onClick={() => actions.resetFigureSize?.(id)}>
-          {image ? "Original size" : "Full width"}
-        </DropdownMenu.Item>
-      ) : null}
-      {/* A figure is its picture or its page: "turn into" would only keep
-          the caption or the title. A link block goes back to the inline
-          link it was made from instead. */}
-      {link && actions.linkToInline ? (
-        <DropdownMenu.Item onClick={() => actions.linkToInline?.(id)}>
-          Turn into inline
-        </DropdownMenu.Item>
-      ) : null}
-      {figure ? null : (
-        <Menu.SubmenuRoot>
-          <SubmenuTrigger>Turn into</SubmenuTrigger>
-          <Menu.Portal>
-            <Menu.Positioner side="right" align="start" sideOffset={4}>
-              <Menu.Popup className={popupClass} style={{ width: 200 }}>
-                <div className="grid p-1">
-                  {TYPES.map((def) => (
-                    <DropdownMenu.Item
-                      key={def.id}
-                      // A checked todo is a to-do for the tick; every heading
-                      // level is a heading.
-                      selected={canonicalOf(target.type) === def.id}
-                      onClick={() => actions.setType(id, def.id)}
-                    >
-                      {def.label}
-                    </DropdownMenu.Item>
-                  ))}
-                  {/* Not a type change: the row's first link becomes a link
-                      block, in place or beneath (docs/links.md). Offered only
-                      where there is a link to make it of. */}
-                  {links.length > 0 && actions.turnIntoLink ? (
-                    <DropdownMenu.Item
-                      onClick={() => actions.turnIntoLink?.(key, links[0].href, links[0].title)}
-                    >
-                      Link
-                    </DropdownMenu.Item>
-                  ) : null}
-                </div>
-              </Menu.Popup>
-            </Menu.Positioner>
-          </Menu.Portal>
-        </Menu.SubmenuRoot>
-      )}
-      <DropdownMenu.Separator />
-      <DropdownMenu.Item shortcut={["⌥", "⇧", "↓"]} onClick={() => actions.duplicate(key)}>
-        Duplicate
-      </DropdownMenu.Item>
-      {coarse ? (
-        <>
-          <DropdownMenu.Separator />
-          <DropdownMenu.Item onClick={() => actions.indent(key)}>Indent</DropdownMenu.Item>
-          <DropdownMenu.Item onClick={() => actions.outdent(key)}>Outdent</DropdownMenu.Item>
-          <DropdownMenu.Item onClick={() => actions.moveUp(key)}>Move up</DropdownMenu.Item>
-          <DropdownMenu.Item onClick={() => actions.moveDown(key)}>Move down</DropdownMenu.Item>
-        </>
-      ) : null}
-      <DropdownMenu.Separator />
-      {target.hasChildren ? (
-        <DropdownMenu.Item shortcut={["Space"]} onClick={() => actions.toggleCollapse(key)}>
-          {target.collapsed ? "Expand" : "Collapse"}
-        </DropdownMenu.Item>
-      ) : null}
-      <DropdownMenu.Item shortcut={["F"]} onClick={() => actions.zoomInto(id)}>
-        Zoom into
-      </DropdownMenu.Item>
-      <DropdownMenu.Item shortcut={["⌘", "C"]} onClick={() => actions.copy(key)}>
-        Copy
-      </DropdownMenu.Item>
-      {actions.copyLink ? (
-        <DropdownMenu.Item onClick={() => actions.copyLink?.(id)}>
-          Copy link to block
-        </DropdownMenu.Item>
-      ) : null}
-      {actions.pin ? (
-        <DropdownMenu.Item onClick={() => actions.pin?.(id)}>
-          {target.pinned ? "Unpin" : "Pin"}
-        </DropdownMenu.Item>
-      ) : null}
-      {actions.share ? (
-        <DropdownMenu.Item onClick={() => actions.share?.(id)}>Share…</DropdownMenu.Item>
-      ) : null}
-      <DropdownMenu.Separator />
-      {actions.deleteEverywhere ? (
-        <>
-          <DropdownMenu.Item shortcut={["⌫"]} onClick={() => actions.remove(key)}>
-            Unlink
-          </DropdownMenu.Item>
+      {entries.map((entry, index) => {
+        if (entry.kind === "separator") return <DropdownMenu.Separator key={index} />
+        if (entry.kind === "group") {
+          return (
+            <Menu.SubmenuRoot key={index}>
+              <SubmenuTrigger>{entry.label}</SubmenuTrigger>
+              <Menu.Portal>
+                <Menu.Positioner side="right" align="start" sideOffset={4}>
+                  <Menu.Popup className={popupClass} style={{ width: entry.width ?? 200 }}>
+                    <div className="grid p-1" data-testid={entry.testId}>
+                      {entry.items.map((it) => (
+                        <DropdownMenu.Item
+                          key={it.key}
+                          selected={it.selected}
+                          onClick={it.onSelect}
+                        >
+                          {it.label}
+                        </DropdownMenu.Item>
+                      ))}
+                    </div>
+                  </Menu.Popup>
+                </Menu.Positioner>
+              </Menu.Portal>
+            </Menu.SubmenuRoot>
+          )
+        }
+        return (
           <DropdownMenu.Item
-            variant="danger"
-            trailingVisual={
-              shared ? (
-                <span className="text-sm text-text-secondary">{target.places} places</span>
-              ) : undefined
-            }
-            onClick={() => actions.deleteEverywhere?.(id)}
+            key={index}
+            shortcut={entry.shortcut}
+            variant={entry.danger ? "danger" : undefined}
+            trailingVisual={entry.trailing}
+            onClick={entry.onSelect}
           >
-            Delete
+            {entry.label}
           </DropdownMenu.Item>
-        </>
-      ) : (
-        <>
-          <DropdownMenu.Item variant="danger" shortcut={["⌫"]} onClick={() => actions.remove(key)}>
-            Delete
-          </DropdownMenu.Item>
-          {actions.deleteSubtree && target.hasChildren ? (
-            <DropdownMenu.Item variant="danger" onClick={() => actions.deleteSubtree?.(id)}>
-              Delete with contents
-            </DropdownMenu.Item>
-          ) : null}
-        </>
-      )}
+        )
+      })}
     </>
+  )
+}
+
+/**
+ * The touch screen's block menu: a sheet that rises from the bottom
+ * (docs/mobile.md), opened by the editor on a press-and-hold, where a popup
+ * anchored under a finger opened and shut again as the finger lifted. The
+ * same entries, laid out for a thumb: 44px rows, groups inline under a
+ * small heading with the current choice marked, the row's text at the top
+ * so it is clear which block the sheet is for. A pick closes the sheet;
+ * so does a swipe down or a tap on the page.
+ */
+export function BlockMenuSheet({
+  target,
+  title,
+  actions,
+  open,
+  onOpenChange,
+}: {
+  target: BlockMenuTarget | null
+  /** The block's text, for the sheet's heading. */
+  title: string
+  actions: BlockMenuActions
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const entries = target ? menuEntries(target, actions, { coarse: true }) : []
+  const pick = (run: () => void) => () => {
+    onOpenChange(false)
+    run()
+  }
+  return (
+    <Drawer.Root open={open} onOpenChange={onOpenChange} shouldScaleBackground={false}>
+      <Drawer.Portal>
+        <Drawer.Overlay className="fixed inset-0 z-30 bg-linear-to-t from-[#000000] to-[#00000000]" />
+        <Drawer.Content
+          data-testid="block-menu-sheet"
+          className="fixed bottom-0 left-0 right-0 z-30 flex max-h-[85svh] flex-col rounded-t-xl bg-bg-overlay pb-[env(safe-area-inset-bottom)] outline-none"
+        >
+          <div aria-hidden className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-border" />
+          <Drawer.Title className="truncate px-5 pt-3 pb-1 text-sm text-text-secondary">
+            {title.trim() || "Block"}
+          </Drawer.Title>
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+            {entries.map((entry, index) => {
+              if (entry.kind === "separator") {
+                return <div key={index} className="mx-3 my-1 h-px bg-border-secondary" />
+              }
+              if (entry.kind === "group") {
+                return (
+                  <div key={index} className="py-1">
+                    <div className="px-3 pt-2 pb-1 text-xs font-medium text-text-tertiary">
+                      {entry.label}
+                    </div>
+                    {entry.items.map((it) => (
+                      <SheetRow
+                        key={it.key}
+                        onSelect={pick(it.onSelect)}
+                        trailing={it.selected ? <CheckIcon16 /> : undefined}
+                      >
+                        {it.label}
+                      </SheetRow>
+                    ))}
+                  </div>
+                )
+              }
+              return (
+                <SheetRow
+                  key={index}
+                  danger={entry.danger}
+                  onSelect={pick(entry.onSelect)}
+                  trailing={entry.trailing}
+                >
+                  {entry.label}
+                </SheetRow>
+              )
+            })}
+          </div>
+        </Drawer.Content>
+      </Drawer.Portal>
+    </Drawer.Root>
+  )
+}
+
+function SheetRow({
+  children,
+  onSelect,
+  danger,
+  trailing,
+}: {
+  children: React.ReactNode
+  onSelect: () => void
+  danger?: boolean
+  trailing?: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cx(
+        "flex h-11 w-full cursor-pointer select-none items-center gap-3 rounded px-3 text-left text-[15px] active:bg-bg-active",
+        danger ? "text-text-danger" : "text-text",
+      )}
+    >
+      <span className="min-w-0 grow truncate">{children}</span>
+      {trailing}
+    </button>
   )
 }
