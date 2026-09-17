@@ -202,6 +202,32 @@ describe("buildRows", () => {
     expect(summary(rows)).toEqual(["a/b ▸", "a/d", "a/e"])
   })
 
+  it("untitled: the zoom root leads the rows, its subtree indented beneath it", () => {
+    const rows = buildRows(outline, { zoomRootId: "b", zoomTitled: false, folds: NONE })
+    expect(summary(rows)).toEqual(["a/b", "  a/b/c"])
+    // The root is the view's own: nothing above it on screen, whatever path
+    // its key spells out in the document.
+    expect(rows[0]).toMatchObject({
+      id: "b",
+      depth: 0,
+      index: 0,
+      parentKey: null,
+      guideKeys: [],
+      hasChildren: true,
+      collapsed: false,
+    })
+    expect(rows[1]).toMatchObject({ depth: 1, parentKey: "a/b", guideKeys: ["a/b"] })
+  })
+
+  it("untitled: the leading row folds like any other, and a leaf leads alone", () => {
+    expect(
+      summary(buildRows(outline, { zoomRootId: "b", zoomTitled: false, folds: new Set(["a/b"]) })),
+    ).toEqual(["a/b ▸"])
+    const leaf = buildRows(outline, { zoomRootId: "c", zoomTitled: false, folds: NONE })
+    expect(summary(leaf)).toEqual(["a/b/c"])
+    expect(leaf[0]).toMatchObject({ hasChildren: false, collapsed: false })
+  })
+
   it("zoomed into an unknown block: the whole note", () => {
     expect(buildRows(outline, { zoomRootId: "nope", folds: NONE })).toHaveLength(6)
   })

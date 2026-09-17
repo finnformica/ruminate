@@ -328,6 +328,7 @@ function NotePage() {
                 width: resolvedWidth,
                 onWidth: updateWidth,
                 onDeleted: () => navigate({ to: "/", search: { query: undefined }, replace: true }),
+                zoomBlockId: zoomBlockId ?? null,
               }}
             />
           </div>
@@ -390,12 +391,20 @@ function NotePage() {
                   noteId={noteId}
                   doc={editorDoc}
                   onChange={setEditorDoc}
-                  folds={{ collapsed, toggle: (key) => setFold(key, collapsed.has(key)) }}
+                  folds={{
+                    collapsed,
+                    toggle: (key) => setFold(key, collapsed.has(key)),
+                    setOpen: (key) => setFold(key, true),
+                  }}
                   onToggleCollapse={touch}
                   startEditing={isNewNote && !showsTitle}
                   readOnly={readOnlyShare}
                   browse={readOnlyShare}
-                  onExitTop={() => setTitleFocusSignal((n) => n + 1)}
+                  // Only where there IS a title above the editor to take the
+                  // keyboard: a daily note has none, and a zoomed one carries
+                  // its name in the breadcrumb instead (the zoomed heading's
+                  // own title is the editor's to hand focus to, not ours).
+                  onExitTop={showsTitle ? () => setTitleFocusSignal((n) => n + 1) : undefined}
                   focusFirstSignal={focusFirstSignal}
                   focusFirstMode={focusFirstMode}
                   newRootSignal={newRootSignal}

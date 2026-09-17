@@ -26,8 +26,9 @@ export default {
   component: ReleaseNotes,
 }
 
-/** A release as the changelog page draws it: the lead sentence carrying the
- * weight, the detail quieter behind it, and shortcuts drawn as keycaps. */
+/** A release as the changelog page draws it: the date as the page's heading,
+ * a category as a label over a rule, and each entry as its lead sentence
+ * headed over the detail beneath. Shortcuts are drawn as keycaps. */
 export const Release = {
   render: () => (
     <div style={{ width: 640, padding: 16 }}>

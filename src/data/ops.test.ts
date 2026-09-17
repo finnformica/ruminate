@@ -109,6 +109,7 @@ describe("docToOps", () => {
     type = "text",
     props: string | null = null,
     children: string[] = [],
+    childText = "kid",
   ) => {
     const snapshot = graphOf({ a: A })
     const ops: Op[] = [
@@ -116,7 +117,14 @@ describe("docToOps", () => {
       { op: "link", source: "a", destination: id, sortKey: "zz" },
     ]
     for (const [i, child] of children.entries()) {
-      ops.push({ op: "create", id: child, type: "text", text: "kid", props: null, notesId: "a" })
+      ops.push({
+        op: "create",
+        id: child,
+        type: "text",
+        text: childText,
+        props: null,
+        notesId: "a",
+      })
       ops.push({ op: "link", source: id, destination: child, sortKey: `a${i}` })
     }
     return applyOps(snapshot, ops, NOW)
@@ -134,13 +142,31 @@ describe("docToOps", () => {
     }
   })
 
-  it("a blank block that holds something is kept, with what it holds", () => {
+  it("a blank block that holds something goes; what it held takes its place", () => {
+    // Holding a row is not having something in it — an empty line with a
+    // line indented under it is still an empty line. Keeping it would put a
+    // blank row in the basket in front of the row that actually needed
+    // rescuing.
     const snapshot = withRoot("blk_blank00000", "", "text", null, ["blk_kid0000000"])
     const ops = docToOps("a", parse(A), snapshot)
-    expect(ops).toEqual([{ op: "unlink", source: "a", destination: "blk_blank00000" }])
+    expect(ops).toEqual([
+      { op: "unlink", source: "a", destination: "blk_blank00000" },
+      { op: "delete", id: "blk_blank00000" },
+    ])
     const next = applyOps(snapshot, ops, NOW)
-    expect(next.nodes.has("blk_blank00000")).toBe(true)
-    expect([...unassignedIds(next)].sort()).toEqual(["blk_blank00000", "blk_kid0000000"])
+    expect(next.nodes.has("blk_blank00000")).toBe(false)
+    expect([...unassignedIds(next)]).toEqual(["blk_kid0000000"])
+  })
+
+  it("follows a blank block's blank children down, leaving nothing behind", () => {
+    const snapshot = withRoot("blk_blank00000", "", "text", null, ["blk_alsoblank0"], "")
+    const ops = docToOps("a", parse(A), snapshot)
+    expect(ops).toEqual([
+      { op: "unlink", source: "a", destination: "blk_blank00000" },
+      { op: "delete", id: "blk_blank00000" },
+      { op: "delete", id: "blk_alsoblank0" },
+    ])
+    expect(unassignedIds(applyOps(snapshot, ops, NOW)).size).toBe(0)
   })
 
   it("a dropped block named to discard (an undo of its creation) is deleted, not kept", () => {

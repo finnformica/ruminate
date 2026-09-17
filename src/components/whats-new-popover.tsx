@@ -152,9 +152,15 @@ export function WhatsNewPopover() {
         <section key={release.week} className="flex flex-col gap-1.5">
           <h3 className="text-sm text-text-secondary">{formatReleaseDates(release.week)}</h3>
           <ul className="flex flex-col gap-2">
+            {/* Keyed by category and position, never by `entry.line`: a week
+                is collated from every file written that week, so a line
+                number is only unique within its own file — and this list
+                flattens the categories together, where two files' line 3
+                would meet. React answers a repeated key by duplicating or
+                dropping rows (see the same note in release-notes.tsx). */}
             {release.sections.flatMap((section) =>
-              section.entries.map((entry) => (
-                <li key={entry.line} className="text-sm leading-snug">
+              section.entries.map((entry, index) => (
+                <li key={`${section.category}-${index}`} className="text-sm leading-snug">
                   {/* The category leads the line, quietly, so a fix is not
                       read as a feature at a glance. */}
                   <span className="text-text-secondary">{section.category}</span>{" "}

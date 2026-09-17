@@ -1,5 +1,5 @@
 import { KEYMAP } from "../blocks/keymap"
-import type { CommandName } from "../blocks/commands"
+import { WRAP_PAIRS, type CommandName } from "../blocks/commands"
 
 /**
  * The app's **shortcut registry**: one declarative table of every keyboard
@@ -109,6 +109,7 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   wrapCode: "Make the selection inline code (backticks; again to take them off)",
   wrapMath: "Set the selection as maths ($$ around it; again to take it off)",
   wrapLink: "Make the selection a link ([text](url), caret in the parentheses)",
+  wrapTyped: "Wrap the selection in the character typed (a bracket closes with its partner)",
   deleteBlock: "Remove the block from here (it keeps its place elsewhere, or goes to Unassigned)",
   toggleTodo: "Toggle the checkbox (todo blocks)",
   toggleCollapse: "Collapse / expand children",
@@ -123,6 +124,15 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   zoomOut: "Zoom out one level",
   zoomExit: "Exit zoom entirely",
 }
+
+/**
+ * Commands the resolver reaches without a row in `KEYMAP`, because *which*
+ * key runs them is a property of the character typed rather than of a fixed
+ * combo (`resolveKey`, and the layout problem its comment describes). They
+ * are described above like any other command and listed by hand below; the
+ * completeness test knows not to look for a binding.
+ */
+export const COMMANDS_WITHOUT_BINDINGS = new Set<CommandName>(["wrapTyped"])
 
 /** Zoom commands render under their own group, whichever mode binds them. */
 const ZOOM_COMMANDS = new Set<CommandName>(["zoomIn", "zoomOut", "zoomExit"])
@@ -211,6 +221,16 @@ const CLIPBOARD_HISTORY_ENTRIES: Shortcut[] = [
     scope: "select",
     description: "Redo",
     group: "History",
+  },
+]
+
+/** The wrapping characters, listed as the keys they are (`WRAP_PAIRS`). */
+const TYPED_WRAP_ENTRIES: Shortcut[] = [
+  {
+    combos: Object.keys(WRAP_PAIRS),
+    scope: "edit",
+    description: EDITOR_COMMAND_DESCRIPTIONS.wrapTyped,
+    group: "Edit mode",
   },
 ]
 
@@ -506,6 +526,7 @@ export const SHORTCUTS: Shortcut[] = [
   ...SEARCH_RESULT_ENTRIES,
   ...editorEntries(),
   ...CLIPBOARD_HISTORY_ENTRIES,
+  ...TYPED_WRAP_ENTRIES,
   ...SLASH_MENU_ENTRIES,
   ...MULTI_SELECT_ENTRIES,
   ...LADDER_ENTRIES,

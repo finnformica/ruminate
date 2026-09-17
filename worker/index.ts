@@ -16,11 +16,12 @@ import { mcp, MCP_PATH } from "./handlers/mcp"
 import { mcpTokens, MCP_TOKENS_PREFIX } from "./handlers/mcp-tokens"
 import { replica } from "./handlers/replica"
 import { shares, SHARES_PREFIX } from "./handlers/shares"
+import { isSocialPath, withSocialMeta } from "./handlers/social"
 import { unfurl, UNFURL_PATH } from "./handlers/unfurl"
 
 export default {
   async fetch(request, env): Promise<Response> {
-    const { pathname } = new URL(request.url)
+    const { origin, pathname } = new URL(request.url)
 
     if (pathname === "/github-auth") return githubAuth(request, env)
     if (pathname === "/github-refresh") return githubRefresh(request, env)
@@ -39,6 +40,13 @@ export default {
     if (pathname === FEATURES_PATH) return features(request, env)
     if (pathname === ADMIN_PREFIX || pathname.startsWith(`${ADMIN_PREFIX}/`)) {
       return admin(request, env)
+    }
+
+    // The two links people send — the app and an invite — carry an unfurl
+    // card, written into the SPA's head on the way out (`social.ts`). They
+    // reach this Worker at all because `run_worker_first` lists them.
+    if (isSocialPath(pathname)) {
+      return withSocialMeta(await env.ASSETS.fetch(request), origin, pathname)
     }
 
     // Everything else: static assets (index.html fallback for SPA routes).

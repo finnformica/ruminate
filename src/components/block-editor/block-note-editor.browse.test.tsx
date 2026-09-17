@@ -127,7 +127,7 @@ describe("a note walked upstream", () => {
   }
 
   it("draws a block's other parent beneath it, as a row like any other", () => {
-    const folds = { collapsed: new Set<string>(), toggle: vi.fn() }
+    const folds = { collapsed: new Set<string>(), toggle: vi.fn(), setOpen: vi.fn() }
     const { container } = render(
       <BlockNoteEditor doc={graphed} onChange={vi.fn()} noteId="n" folds={folds} readOnly browse />,
     )
@@ -137,7 +137,7 @@ describe("a note walked upstream", () => {
   })
 
   it("folds a parent row like any other, and the toggle names its key", () => {
-    const folds = { collapsed: new Set(["a/shared"]), toggle: vi.fn() }
+    const folds = { collapsed: new Set(["a/shared"]), toggle: vi.fn(), setOpen: vi.fn() }
     const { container } = render(
       <BlockNoteEditor doc={graphed} onChange={vi.fn()} noteId="n" folds={folds} readOnly browse />,
     )

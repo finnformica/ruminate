@@ -30,6 +30,18 @@ import { Hash } from "./hash"
 import { LinkActionsContext, type LinkActions } from "./link-actions"
 import { SLASH_MENU_WIDTH, SlashMenu } from "./slash-menu"
 
+/**
+ * Drop the focus half of a press, keeping it wherever it already is.
+ *
+ * The controls in a row's marker slot — the fold chevron, a todo's box — are
+ * things you reach for *while* writing, so they must not close the edit they
+ * are reached from. A press moves focus by default, the textarea's blur ends
+ * the edit, and the row shuts mid-sentence. Preventing the mousedown default
+ * stops only the focus (and any text selection); the click, and so the
+ * control's own behaviour, is untouched.
+ */
+const keepEditing = (event: React.MouseEvent) => event.preventDefault()
+
 /** A request to edit a row (an occurrence key — a block twice in the view is
  * two rows, and only the one asked for opens). */
 export interface FocusRequest {
@@ -673,6 +685,12 @@ export function BlockItem({
       tooltipSide="top"
       aria-disabled={looped || undefined}
       tabIndex={-1}
+      // Folding never ends an edit: the press is stopped from taking focus,
+      // so the textarea keeps it and the caret stays where it was. Without
+      // this the blur below closes the edit, and reaching for a chevron
+      // mid-sentence costs you your place. Click still fires — only the
+      // focus half of the press default is dropped.
+      onMouseDown={keepEditing}
       onClick={looped ? undefined : () => api.toggleCollapse(occurrence.key)}
       className={cx(
         "block-toggle absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shrink-0 p-0 text-text-tertiary transition-[opacity,transform] duration-150",
@@ -824,6 +842,10 @@ export function BlockItem({
           type="checkbox"
           checked={type === "done"}
           disabled={readOnly}
+          // Ticking never ends an edit either (see the chevron's `keepEditing`):
+          // a box you can only reach by stopping typing is a box you stop
+          // typing to reach.
+          onMouseDown={keepEditing}
           onClick={(event) => event.stopPropagation()}
           // Checked is a TYPE (docs/graph-schema-v2.md): ticking is `todo` ↔ `done`.
           onChange={() => api.onBlockChange(block.id, { type: type === "done" ? "todo" : "done" })}

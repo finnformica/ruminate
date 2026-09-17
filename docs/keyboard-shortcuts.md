@@ -238,25 +238,34 @@ format). With nothing selected (after <kbd>Esc</kbd>), <kbd>↓</kbd> /
 
 ### Edit mode (typing in a block)
 
-| Action                                            | Shortcut                                                                                                                 |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Stop editing (back to highlight)                  | <kbd>Esc</kbd>                                                                                                           |
-| New block below (bullet by default)               | <kbd>↵</kbd>                                                                                                             |
-| Split into a new block of the same type           | <kbd>⇧</kbd> <kbd>↵</kbd>                                                                                                |
-| New block below, ignoring the caret               | <kbd>⌘</kbd> <kbd>↵</kbd>                                                                                                |
-| Indent / outdent                                  | <kbd>⇥</kbd> / <kbd>⇧</kbd> <kbd>⇥</kbd>                                                                                 |
-| Move block (with its subtree)                     | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> (or <kbd>⌘⇧</kbd> <kbd>↑/↓</kbd>)                                               |
-| Duplicate block (keep editing the copy)           | <kbd>⇧</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                                                    |
-| Bold / italic / code around the selection         | <kbd>⌘</kbd> <kbd>B</kbd> / <kbd>⌘</kbd> <kbd>I</kbd> / <kbd>⌘</kbd> <kbd>E</kbd> (again to take it off)                 |
-| Strikethrough / maths / link around the selection | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>X</kbd> / <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>M</kbd> / <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>K</kbd> |
-| Jump across siblings (same level)                 | <kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                                                    |
-| Jump to top / bottom of the level                 | <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                                                                 |
-| Exit edit, select block above / below             | <kbd>↑</kbd> / <kbd>↓</kbd> at the first / last line                                                                     |
-| Paste as plain text (newlines → spaces)           | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>                                                                                   |
-| Select all text, then grow by structure           | <kbd>⌘</kbd> <kbd>A</kbd> (repeat — see the selection ladder)                                                            |
-| Zoom into the block / exit zoom                   | <kbd>⌘</kbd> <kbd>.</kbd> / <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>                                                       |
-| Strip the block's marker → merge up               | <kbd>⌫</kbd> at line start                                                                                               |
-| Slash menu (dates, turn into)                     | <kbd>/</kbd> at the start of a word                                                                                      |
+| Action                                            | Shortcut                                                                                                                               |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Stop editing (back to highlight)                  | <kbd>Esc</kbd>                                                                                                                         |
+| New block below (bullet by default)               | <kbd>↵</kbd>                                                                                                                           |
+| Split into a new block of the same type           | <kbd>⇧</kbd> <kbd>↵</kbd>                                                                                                              |
+| New block below, ignoring the caret               | <kbd>⌘</kbd> <kbd>↵</kbd>                                                                                                              |
+| Indent / outdent                                  | <kbd>⇥</kbd> / <kbd>⇧</kbd> <kbd>⇥</kbd>                                                                                               |
+| Move block (with its subtree)                     | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> (or <kbd>⌘⇧</kbd> <kbd>↑/↓</kbd>)                                                             |
+| Duplicate block (keep editing the copy)           | <kbd>⇧</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                                                                  |
+| Bold / italic / code around the selection         | <kbd>⌘</kbd> <kbd>B</kbd> / <kbd>⌘</kbd> <kbd>I</kbd> / <kbd>⌘</kbd> <kbd>E</kbd> (again to take it off)                               |
+| Strikethrough / maths / link around the selection | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>X</kbd> / <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>M</kbd> / <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>K</kbd>               |
+| Wrap the selection in the character typed         | <kbd>`</kbd> <kbd>"</kbd> <kbd>'</kbd> <kbd>(</kbd> <kbd>[</kbd> <kbd>{</kbd> <kbd>&lt;</kbd> <kbd>\*</kbd> <kbd>\_</kbd> <kbd>~</kbd> |
+| Jump across siblings (same level)                 | <kbd>⌘</kbd> <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                                                                  |
+| Jump to top / bottom of the level                 | <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                                                                               |
+| Exit edit, select block above / below             | <kbd>↑</kbd> / <kbd>↓</kbd> at the first / last line                                                                                   |
+| Paste as plain text (newlines → spaces)           | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>                                                                                                 |
+| Select all text, then grow by structure           | <kbd>⌘</kbd> <kbd>A</kbd> (repeat — see the selection ladder)                                                                          |
+| Zoom into the block / exit zoom                   | <kbd>⌘</kbd> <kbd>.</kbd> / <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd>                                                                     |
+| Strip the block's marker → merge up               | <kbd>⌫</kbd> at line start                                                                                                             |
+| Slash menu (dates, turn into)                     | <kbd>/</kbd> at the start of a word                                                                                                    |
+
+With text selected, typing one of the wrapping characters puts the selection
+inside it rather than replacing it: select a phrase, press <kbd>(</kbd>, and it
+is in parentheses. A bracket closes with its partner (`[` gives `[…]`); a
+quote, a backtick, `*`, `_` and `~` close with themselves. Unlike the
+formatting keys above, these only ever **add** — wrapping `(a)` again gives
+`((a))`, never `a` — because that is what typing a character should do. With
+nothing selected the character simply types, as it always has.
 
 Enter from a heading nests the new block underneath it. A list item (bullet,
 numbered, to-do) continues its own list whatever the new-block setting says;
@@ -297,11 +306,18 @@ newlines to single spaces because a block is one line in the serialized format.
 
 ### Zoom (focus mode)
 
-Zoom makes one block's subtree the whole editor view — the block renders as an
-editable title at the top, its children below it, with a breadcrumb tracing the
-full path (`Note title › ancestor › … › zoomed block`; every crumb is
-clickable, the note-title crumb exits fully). The zoom lives in the URL
+Zoom makes one block's subtree the whole editor view, with a breadcrumb
+tracing the full path (`Note title › ancestor › … › zoomed block`; every crumb
+is clickable, the note-title crumb exits fully). The zoom lives in the URL
 (`?block=…`), so the browser back button undoes it.
+
+A zoomed **heading** renders as an editable title at the top, its children
+below it — a heading already names what hangs beneath it. **Every other type**
+is content rather than a name, so it simply leads the view as its own first
+row, drawn as it is anywhere else, with its subtree indented beneath it and no
+title above. The rules below that mention "the title" apply to the first
+kind; in the second the leading row behaves like any other row, except that it
+cannot be deleted or outdented out of its own view.
 
 | Action                        | Trigger                                             |
 | ----------------------------- | --------------------------------------------------- |
@@ -315,8 +331,9 @@ clickable, the note-title crumb exits fully). The zoom lives in the URL
 
 Rules while zoomed:
 
-- Zooming **in** selects the first child (not the title); zooming **out** lands
-  on the block you zoomed out from.
+- Zooming **in** selects the first child under a title, or the leading row
+  itself where there is none; zooming **out** lands on the block you zoomed
+  out from.
 - <kbd>↵</kbd> / <kbd>⌘</kbd> <kbd>↵</kbd> on the title create its **first
   child** (title + body), never a sibling outside the view.
 - The title can't be deleted, moved, duplicated, indented, outdented, or
