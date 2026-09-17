@@ -105,27 +105,37 @@ text out in the runs between them, and the keys are drawn as keycaps by `Keys`
 (`src/components/keys.tsx`) — the one way the app shows a shortcut, here as
 everywhere else.
 
-## How the card knows you have not seen it
+## When the card appears
 
-`__CHANGELOG_VERSION__` is a stamp built into the app: the newest week's folder
-and a hash of every entry file (vite.config.ts). The week is what the
-comparison is made on, since it says which releases are new; the hash is there
-so two builds in the same week are not mistaken for one. A new entry moves the
-stamp the moment it is written.
+Two things bring it up, and it always shows the same thing: the newest release.
 
-On boot, the card compares that stamp with the one this device stored last
-time. A device that has never stored one is on its first visit, so it stores
-the stamp and is shown nothing — a first visit has nothing to catch up on. A
-device whose stamp names an older week is shown the releases after it. A device
-whose stamp names the same week with a different hash has read those entries
-already, so the stamp moves on without a word.
+**The reader took an update.** **Update Ruminate** records that before it
+reloads (`src/utils/whats-new.ts`), and the boot on the other side of the
+reload finds the note and says what changed. This is the case the feature
+exists for, and it is why the card is keyed to the update itself rather than
+to what the device remembers: a device arriving from a build that predates the
+card has nothing stored to compare against, so keying it to memory alone meant
+the first update after it shipped showed nothing at all, to everybody.
 
-**The card is not tied to the Update Ruminate button.** That button applies the
-waiting service worker and reloads (`src/hooks/app-update.ts`), so there is no
-moment between the click and the new build in which anything could be shown:
-the page is about to be torn down. Asking the question on every boot instead
-also catches the reader whose waiting worker activated on its own after they
-closed every tab, which the button never sees.
+**The build changed without being asked for.** `__CHANGELOG_VERSION__` is a
+stamp built into the app: the newest week's folder and a hash of every entry
+file (vite.config.ts). A device whose stored stamp names a different build is
+running something it has not seen — which is how the reader whose waiting
+worker activated on its own, after they closed every tab, is caught. A device
+that has never stored a stamp has nothing to compare and is shown nothing
+unless it asked.
+
+Both notes are one-shot: taking the update request clears it, and storing the
+build overwrites what was stored before. They are therefore read **once per
+page load**, not from an effect — React's strict mode runs effects twice on
+purpose and a remount would do the same, and the first pass consuming the
+request left the second with nothing to show.
+
+**The card is not a dialog, and not tied to the button's click handler.** That
+button applies the waiting service worker and reloads
+(`src/hooks/app-update.ts`), so there is no moment between the click and the
+new build in which anything could be shown: the page is about to be torn down.
+The note that outlives the reload is what carries the intent across.
 
 ## What never goes in
 
