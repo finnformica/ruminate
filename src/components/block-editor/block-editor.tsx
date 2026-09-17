@@ -47,6 +47,7 @@ import { useCoarsePointer } from "../../hooks/coarse-pointer"
 import {
   isHeading,
   leadingMarker,
+  titlesZoom,
   toggleType,
   TURN_INTO_KEYS,
   typeOfMarker,
@@ -512,25 +513,36 @@ export function BlockEditor({
     else setZoomInternal(id)
   }
   const zoomRoot = zoomRootId ? (doc.blocks[zoomRootId] ?? null) : null
+  // How the zoomed block is drawn (`titlesZoom`, src/blocks/markers.ts): a
+  // heading is the view's TITLE, above the rows, as the note's own title is
+  // (the same `NoteTitle`, fed the block's text) — leaving the first row
+  // upward (`exitTop`) selects it, and its children are the rows. Anything
+  // else is content rather than a name, so it leads the view as its first
+  // ROW and the outline below it is untouched.
+  const zoomTitled = zoomRoot !== null && titlesZoom(zoomRoot.type)
   // The zoomed block's key — its first occurrence in the document — which
-  // its children's row keys hang off. Zoomed, the block itself is not a row:
-  // it is the view's title, drawn above the rows as the note title is (the
-  // same `NoteTitle`, fed the block's text), and leaving the first row upward
-  // (`exitTop`) selects it, as it would the note title.
+  // its children's row keys hang off (and which is its own row's key, where
+  // it has one).
   const zoomKey = useMemo(() => (zoomRoot ? zoomRootKey(doc, zoomRoot.id) : null), [doc, zoomRoot])
+  // The same key, but only where it names the title rather than a row: what
+  // the rules that hold for "there is something above the rows" key off.
+  const zoomTitleKey = zoomTitled ? zoomKey : null
   const [zoomTitleFocus, setZoomTitleFocus] = useState(0)
 
   // Everything positional — the selection, its anchor, edit focus — is a row:
   // an occurrence key (`src/blocks/view.ts`), so a block that appears twice
   // in the note is two places to be. The block itself is by id.
 
-  // The first selectable row: while zoomed, the zoom root's first child (the
-  // title is not a row; a childless zoom has no row to land on).
+  // The first selectable row: zoomed under a title, the zoom root's first
+  // child (the title is not a row; a childless zoom has no row to land on);
+  // zoomed without one, the zoom root's own row.
   const firstKey =
     zoomRoot && zoomKey
-      ? zoomRoot.children[0]
-        ? keyOf(zoomKey, zoomRoot.children[0])
-        : null
+      ? !zoomTitled
+        ? zoomKey
+        : zoomRoot.children[0]
+          ? keyOf(zoomKey, zoomRoot.children[0])
+          : null
       : (doc.rootBlockIds[0] ?? null)
   const [focus, setFocus] = useState<FocusRequest | null>(() =>
     startEditing && firstKey ? { key: firstKey } : null,
@@ -565,17 +577,19 @@ export function BlockEditor({
     : rawHistory
 
   // The view: the rows on screen, in order, indented by depth, folds applied
-  // (`buildRows`). Zoomed, the zoomed block leads as the view's editable
-  // title (so arrow-up from the first child selects it) and its children
-  // always render — the root's own fold is ignored while zoomed.
+  // (`buildRows`). Zoomed under a title, the zoomed block leads as the view's
+  // editable title (so arrow-up from the first child selects it) and its
+  // children always render — the root's own fold is ignored. Without one, the
+  // block is simply the first row, its subtree beneath it.
   const rows = useMemo(
     () =>
       buildRows(doc, {
         zoomRootId: zoomRoot ? zoomRoot.id : null,
+        zoomTitled,
         folds: collapsed,
         rootId: noteId ?? null,
       }),
-    [doc, collapsed, zoomRoot, noteId],
+    [doc, collapsed, zoomRoot, zoomTitled, noteId],
   )
   // The rows' keys in the order they appear on screen — what up/down
   // navigation and a Shift+Arrow range walk.
@@ -660,9 +674,10 @@ export function BlockEditor({
   }, [zoomRootId, doc])
 
   // Place the selection when the zoom level changes: zooming IN lands on the
-  // first child (not the title, avoiding accidental edits of the root);
-  // zooming OUT lands on the block you zoomed out FROM (it's visible in the
-  // wider view). Covers F/Shift+F, crumb clicks, and the browser back button.
+  // block itself where it leads the view as a row, else on its first child
+  // (not the title, avoiding accidental edits of the root); zooming OUT lands
+  // on the block you zoomed out FROM (it's visible in the wider view). Covers
+  // F/Shift+F, crumb clicks, and the browser back button.
   const prevZoomRef = useRef(zoomRootId)
   useEffect(() => {
     const prev = prevZoomRef.current
@@ -683,6 +698,8 @@ export function BlockEditor({
           ? undefined
           : occurrenceKeys(current).find((key) => isWithin(key, rootKey) && idOfKey(key) === prev)
       if (back) setSelected(back)
+      // Untitled: the block is the view's first row — land on it.
+      else if (!titlesZoom(root.type)) setSelected(rootKey)
       else if (root.children[0]) setSelected(keyOf(rootKey, root.children[0]))
       // Nothing beneath the block yet: the title takes the keyboard, so Enter
       // on it makes the first child.
@@ -731,12 +748,13 @@ export function BlockEditor({
       if (!selectedSet.has(key)) continue
       const prev = i > 0 ? visibleOrder[i - 1] : null
       const next = i + 1 < visibleOrder.length ? visibleOrder[i + 1] : null
-      const top = prev !== null && selectedSet.has(prev) && !headingAt(key) && prev !== zoomKey
-      const bottom = next !== null && selectedSet.has(next) && !headingAt(next) && key !== zoomKey
+      const top = prev !== null && selectedSet.has(prev) && !headingAt(key) && prev !== zoomTitleKey
+      const bottom =
+        next !== null && selectedSet.has(next) && !headingAt(next) && key !== zoomTitleKey
       if (top || bottom) edges.set(key, { top, bottom })
     }
     return edges
-  }, [selectedSet, visibleOrder, doc, zoomKey])
+  }, [selectedSet, visibleOrder, doc, zoomTitleKey])
 
   const select = (key: string) => {
     setFocus(null)
@@ -858,6 +876,8 @@ export function BlockEditor({
   const firstSelectable = (d: BlockDoc): string | null => {
     if (zoomRootId && d.blocks[zoomRootId]) {
       const rootKey = zoomRootKey(d, zoomRootId)
+      // Untitled, the zoomed block's own row leads the view.
+      if (!zoomTitled) return rootKey
       const child = d.blocks[zoomRootId].children[0]
       return child ? keyOf(rootKey, child) : null
     }
@@ -909,6 +929,10 @@ export function BlockEditor({
     let next = doc
     for (const key of structuralRoots()) {
       if (!hasOccurrence(next, key)) continue
+      // The zoomed view's own root row: removing it would take the view with
+      // it (`deleteBlock` refuses the same thing on one row, with a notice —
+      // a sweep over a range that happens to include it just passes it by).
+      if (zoomRootId && idOfKey(key) === zoomRootId) continue
       next = removeBlock(next, key).doc
     }
     if (next === doc) return
@@ -1104,14 +1128,11 @@ export function BlockEditor({
     docRef.current = next
     return true
   }
-  // The title is one plain line, as the note's is: a block whose text is more
-  // than that (a code block, a caption under a picture, text with line
-  // breaks) reads as the title but is edited in its own row, un-zoomed.
-  const zoomTitleEditable =
-    zoomRoot !== null &&
-    zoomRoot.type !== "code" &&
-    !isFigureType(zoomRoot.type) &&
-    !zoomRoot.text.includes("\n")
+  // The title is one plain line, as the note's is: a heading whose text is
+  // more than that (line breaks) reads as the title but is edited in its own
+  // row, un-zoomed. (Every other type leads the view as a row already, so it
+  // never reaches the title at all — `titlesZoom`.)
+  const zoomTitleEditable = zoomTitled && zoomRoot !== null && !zoomRoot.text.includes("\n")
 
   const edit = (key: string, atStart = false, caret?: number) => {
     if (readOnly) return
@@ -1249,19 +1270,29 @@ export function BlockEditor({
   // to the title — the zoom title here, or whatever the page put above the
   // editor (the note title).
   const exitTop = () => {
+    // Nothing above the rows to hand the keyboard to — a zoom whose root is
+    // its first row, on a page with no note title of its own (a daily note,
+    // or a zoomed one, where the breadcrumb carries the name instead). The
+    // top row keeps it rather than the highlight falling away.
+    if (!zoomTitled && !onExitTop) return
     setFocus(null)
     setSelected(null)
     setAnchorKey(null)
-    if (zoomRoot) setZoomTitleFocus((n) => n + 1)
+    if (zoomTitled) setZoomTitleFocus((n) => n + 1)
     else onExitTop?.()
   }
   const applyFocus = (intent: FocusIntent) => {
     // Any single-target command collapses a multi-row selection.
     setAnchorKey(null)
     // Zoomed, a target outside the view (the zoomed block itself, or a root
-    // the view does not show — where a delete falls back to) is the title.
+    // the view does not show — where a delete falls back to) is the title —
+    // or, where there is none, the view's own root row.
     if (intent.key !== null && zoomKey && !isWithin(intent.key, zoomKey)) {
-      exitTop()
+      if (zoomTitled) exitTop()
+      else {
+        setFocus(null)
+        setSelected(zoomKey)
+      }
       return
     }
     if (intent.mode === "select") {
@@ -1322,6 +1353,7 @@ export function BlockEditor({
       // (`wrapTyped`); every other command reads the resolved name alone.
       typed: event.key,
       zoomRootId,
+      zoomTitled,
       zoomBackId,
       rootId: noteId ?? null,
       newBlockType: typeOfMarker(newBlockMarker),
@@ -1356,6 +1388,7 @@ export function BlockEditor({
         visibleOrder,
         caret,
         zoomRootId,
+        zoomTitled,
         zoomBackId,
         rootId: noteId ?? null,
         newBlockType: typeOfMarker(newBlockMarker),
@@ -2584,12 +2617,13 @@ export function BlockEditor({
           </span>
         </nav>
       ) : null}
-      {zoomRoot ? (
-        // The zoomed block is the page: its text is the title, drawn by the
+      {zoomRoot && zoomTitled ? (
+        // A zoomed HEADING is the page: its text is the title, drawn by the
         // component the page draws the note's title with, and edited there
         // as a title is — a rename of the block. The rows beneath are its
         // children; ↑ from the first hands the keyboard up here, ↓ and Enter
-        // hand it back down.
+        // hand it back down. Every other type has no title: it is the first
+        // row instead (`titlesZoom`), and the rows read as they do un-zoomed.
         <div className="mb-3">
           <NoteTitle
             title={zoomRoot.text}
@@ -2631,8 +2665,9 @@ export function BlockEditor({
           onDrop={handleDrop}
         >
           {/* The view is a flat list: one row per occurrence, indented by its
-            depth. Zoomed, the rows are the zoomed block's children, from
-            depth 0, under its title above. */}
+            depth. Zoomed under a title, the rows are the zoomed block's
+            children, from depth 0, under its title above; without one, the
+            zoomed block leads them as the first row. */}
           {renderRows(
             rows.filter((row) => {
               const parent = parentKeyOf(row.key)

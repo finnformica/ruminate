@@ -101,6 +101,20 @@ export const TURN_INTO_KEYS: Readonly<Record<string, BlockType>> = Object.fromEn
 
 export const isHeading = (type: BlockType): boolean => defOf(type).family === "heading"
 
+/**
+ * Does a focused ("zoomed") view draw this block as its **title**, rather
+ * than as its own first **row**?
+ *
+ * A heading already names what hangs beneath it, so the view takes it the
+ * way the note page takes a note's name: drawn above the rows, editable
+ * there, with its children starting the outline. Every other block is
+ * content, not a name — a to-do stripped of its box, a picture flattened to
+ * its caption, a paragraph set in title type all read wrong at the top of a
+ * page — so the view leads with the block itself as the outline's root row
+ * and everything beneath it is exactly where it was.
+ */
+export const titlesZoom = (type: BlockType): boolean => isHeading(type)
+
 /** A list item: bullet, numbered, or a checkbox (Enter continues the list). */
 export const isListItem = (type: BlockType): boolean => defOf(type).listItem
 

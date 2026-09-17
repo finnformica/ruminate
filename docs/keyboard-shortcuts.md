@@ -306,11 +306,18 @@ newlines to single spaces because a block is one line in the serialized format.
 
 ### Zoom (focus mode)
 
-Zoom makes one block's subtree the whole editor view — the block renders as an
-editable title at the top, its children below it, with a breadcrumb tracing the
-full path (`Note title › ancestor › … › zoomed block`; every crumb is
-clickable, the note-title crumb exits fully). The zoom lives in the URL
+Zoom makes one block's subtree the whole editor view, with a breadcrumb
+tracing the full path (`Note title › ancestor › … › zoomed block`; every crumb
+is clickable, the note-title crumb exits fully). The zoom lives in the URL
 (`?block=…`), so the browser back button undoes it.
+
+A zoomed **heading** renders as an editable title at the top, its children
+below it — a heading already names what hangs beneath it. **Every other type**
+is content rather than a name, so it simply leads the view as its own first
+row, drawn as it is anywhere else, with its subtree indented beneath it and no
+title above. The rules below that mention "the title" apply to the first
+kind; in the second the leading row behaves like any other row, except that it
+cannot be deleted or outdented out of its own view.
 
 | Action                        | Trigger                                             |
 | ----------------------------- | --------------------------------------------------- |
@@ -324,8 +331,9 @@ clickable, the note-title crumb exits fully). The zoom lives in the URL
 
 Rules while zoomed:
 
-- Zooming **in** selects the first child (not the title); zooming **out** lands
-  on the block you zoomed out from.
+- Zooming **in** selects the first child under a title, or the leading row
+  itself where there is none; zooming **out** lands on the block you zoomed
+  out from.
 - <kbd>↵</kbd> / <kbd>⌘</kbd> <kbd>↵</kbd> on the title create its **first
   child** (title + body), never a sibling outside the view.
 - The title can't be deleted, moved, duplicated, indented, outdented, or

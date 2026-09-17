@@ -165,25 +165,28 @@ describe("the last row of a doc without a trailing blank (the basket)", () => {
 })
 
 describe("zoomed", () => {
-  it("seeds no trailing blank beside the zoomed root, and adds a first child only to a leaf", () => {
-    const rooted: BlockDoc = {
-      props: null,
-      rootBlockIds: ["r"],
-      blocks: {
-        r: { id: "r", type: "text", text: "R", children: ["x"] },
-        x: { id: "x", type: "text", text: "X", children: [] },
-      },
-    }
+  const occurrences = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll("[data-occurrence]")).map(
+      (el) => (el as HTMLElement).dataset.occurrence,
+    )
+  /** A doc of one root holding one child, with the root's type to hand. */
+  const rootedDoc = (type: "text" | "h1"): BlockDoc => ({
+    props: null,
+    rootBlockIds: ["r"],
+    blocks: {
+      r: { id: "r", type, text: "R", children: ["x"] },
+      x: { id: "x", type: "text", text: "X", children: [] },
+    },
+  })
+
+  it("seeds no trailing blank beside the zoomed root, and adds a first child only to a leaf heading", () => {
+    const rooted = rootedDoc("h1")
     const onChange = vi.fn()
     const { container } = render(
       <BlockNoteEditor doc={rooted} onChange={onChange} noteId="n" zoomBlockId="r" />,
     )
-    // The rows are r's children alone; nothing was written.
-    expect(
-      Array.from(container.querySelectorAll("[data-occurrence]")).map(
-        (el) => (el as HTMLElement).dataset.occurrence,
-      ),
-    ).toEqual(["r/x"])
+    // Titled: the rows are r's children alone; nothing was written.
+    expect(occurrences(container)).toEqual(["r/x"])
     expect(onChange).not.toHaveBeenCalled()
 
     const leaf: BlockDoc = { ...rooted, blocks: { r: { ...rooted.blocks.r, children: [] } } }
@@ -193,5 +196,26 @@ describe("zoomed", () => {
     const ensured = onLeafChange.mock.calls[0][0] as BlockDoc
     expect(ensured.rootBlockIds).toEqual(["r"])
     expect(ensured.blocks.r.children).toHaveLength(1)
+  })
+
+  it("writes nothing at all where the zoomed block leads the view as a row", () => {
+    const rooted = rootedDoc("text")
+    const onChange = vi.fn()
+    const { container } = render(
+      <BlockNoteEditor doc={rooted} onChange={onChange} noteId="n" zoomBlockId="r" />,
+    )
+    // Untitled: the block itself is the first row, its child beneath it.
+    expect(occurrences(container)).toEqual(["r", "r/x"])
+    expect(onChange).not.toHaveBeenCalled()
+
+    // A leaf needs no blank child either — the block is already the row to
+    // edit, so merely looking at one never mints a block.
+    const leaf: BlockDoc = { ...rooted, blocks: { r: { ...rooted.blocks.r, children: [] } } }
+    const onLeafChange = vi.fn()
+    const leafView = render(
+      <BlockNoteEditor doc={leaf} onChange={onLeafChange} noteId="n" zoomBlockId="r" />,
+    )
+    expect(onLeafChange).not.toHaveBeenCalled()
+    expect(occurrences(leafView.container)).toEqual(["r"])
   })
 })

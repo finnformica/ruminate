@@ -256,19 +256,33 @@ function olPositions(doc: BlockDoc, ids: string[]): number[] {
  * The rows of a view: depth-first from the roots (or from the zoomed block),
  * with folds applied — a collapsed occurrence's children are not rows.
  *
- * Zoomed, the zoom root leads as the view's title and its children start
- * again at depth 0, so the zoomed subtree reads as a note of its own. The
- * root's key is its first occurrence in the document, so a fold made while
- * zoomed is the same fold un-zoomed.
+ * Zoomed, the view takes the zoomed block one of two ways (`titlesZoom`,
+ * src/blocks/markers.ts, is the rule; `zoomTitled` carries its answer here):
+ *
+ * - **Titled** — a heading, which already names what hangs beneath it: the
+ *   root is not a row but the view's title, drawn above the rows, and its
+ *   children start again at depth 0, so the zoomed subtree reads as a note
+ *   of its own.
+ * - **Untitled** — everything else, which is content rather than a name:
+ *   the block leads as the view's first row, at depth 0, with what it holds
+ *   indented beneath it — the outline exactly as it reads un-zoomed,
+ *   starting here.
+ *
+ * Either way the root's key is its first occurrence in the document, so a
+ * fold made while zoomed is the same fold un-zoomed.
  */
 export function buildRows(
   doc: BlockDoc,
   {
     zoomRootId = null,
+    zoomTitled = true,
     folds,
     rootId = null,
   }: {
     zoomRootId?: string | null
+    /** Zoomed: is the root the view's title (a heading) rather than its
+     * first row? See the note above. */
+    zoomTitled?: boolean
     folds: ReadonlySet<string>
     /** The id of the view's own root when it is not a block in the doc (the
      * note): on the path from the start, so a block's parent that is the
@@ -324,13 +338,39 @@ export function buildRows(
   }
 
   const zoomRoot = zoomRootId ? doc.blocks[zoomRootId] : undefined
-  if (zoomRoot) {
-    // Zoomed, the rows are the zoom root's children (and parents), from
-    // depth 0: the root itself is not a row but the view's title (the
+  if (zoomRoot && zoomTitled) {
+    // Titled: the rows are the zoom root's children (and parents), from
+    // depth 0 — the root itself is not a row but the view's title (the
     // editor draws it as the note title, above the rows), always open.
     const key = zoomRootKey(doc, zoomRoot.id)
     path.add(zoomRoot.id)
     walk(zoomRoot, key, 0, [], "down")
+  } else if (zoomRoot) {
+    // Untitled: the zoomed block is the view's first row, its own subtree
+    // indented beneath it — a row like any other, fold and all.
+    const key = zoomRootKey(doc, zoomRoot.id)
+    const hasChildren = rowsBeneath(doc, zoomRoot, path, "down").length > 0
+    const collapsed = hasChildren && folds.has(key)
+    rows.push({
+      key,
+      id: zoomRoot.id,
+      direction: "down",
+      // The view's own root: nothing above it on screen, whatever path its
+      // key spells out in the document it was reached through.
+      parentKey: null,
+      depth: 0,
+      index: 0,
+      // A numbered item leading a view is the first of its run.
+      olNumber: zoomRoot.type === "ol" ? 1 : 0,
+      hasChildren,
+      collapsed,
+      guideKeys: [],
+    })
+    if (hasChildren && !collapsed) {
+      path.add(zoomRoot.id)
+      walk(zoomRoot, key, 1, [key], "down")
+      path.delete(zoomRoot.id)
+    }
   } else {
     if (rootId) path.add(rootId)
     walk(null, null, 0, [], "down")

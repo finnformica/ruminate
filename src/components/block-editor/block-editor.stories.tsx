@@ -479,9 +479,10 @@ export const DeepHeadings: Story = {
   args: { initial: DEEP_HEADINGS },
 }
 
-/** Zoomed into a deep heading: its children's heading sizes re-derive from the
- * zoom root (depth restarts at 0), so a level-4 heading reads like a top-level
- * section inside the zoomed view. */
+/** Zoomed into a deep HEADING — the one family a zoom draws as the view's
+ * title: its children's heading sizes re-derive from the zoom root (depth
+ * restarts at 0), so a level-4 heading reads like a top-level section inside
+ * the zoomed view. */
 export const DeepHeadingsZoomed: Story = {
   args: { initial: DEEP_HEADINGS, zoomRootId: "blk_dh3" },
 }
@@ -580,8 +581,9 @@ export const TodoShortcut: Story = {
   },
 }
 
-/** The editor zoomed into a block: its subtree is the whole view, the block
- * itself is the editable title, and a breadcrumb traces the path. */
+/** The editor zoomed into a BULLET: its subtree is the whole view, the block
+ * itself leads it as the first row (only a heading is drawn as a title), and a
+ * breadcrumb traces the path. */
 export const Zoomed: Story = {
   args: { initial: SAMPLE, zoomRootId: "blk_b1" },
 }
