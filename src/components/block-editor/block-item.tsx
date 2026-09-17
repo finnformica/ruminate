@@ -309,7 +309,13 @@ export function BlockItem({
     const onBeforeInput = (event: InputEvent) => {
       if (event.inputType !== "deleteContentBackward") return
       if (el.selectionStart !== 0 || el.selectionEnd !== 0) return
-      const key: KeyLike = { key: "Backspace", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false }
+      const key: KeyLike = {
+        key: "Backspace",
+        shiftKey: false,
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+      }
       const caret: CaretInput = {
         value: el.value,
         start: 0,
