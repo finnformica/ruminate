@@ -52,8 +52,12 @@ for. Now an entry is readable the moment it is written.
 Two surfaces, from the same files:
 
 - **The changelog page** (`/changelog`), reached from **What's new** in the
-  sidebar. One continuous page of every release, entries in full, with the
-  weeks down the side marking the one being read and jumping to any other.
+  sidebar. **One release at a time**, entries in full, with the weeks down the
+  side to pick from and `?release=…` naming the one on screen. It used to run
+  every release together into one endless page, mounted a couple at a time as
+  you came down it, with the rail following your scroll — in service of a
+  document nobody reads end to end. You come for what changed this week, or
+  for one particular week; the page is now that.
 - **The what's-new card**, which greets a device running a build it has not
   seen with the leads alone, a handful of them, and a way through to the page
   for the rest. It sits in the bottom corner beside the sidebar's own **What's
@@ -77,8 +81,9 @@ file: the folder says which week it is.
 **An entry is a lead sentence and the detail behind it.** The lead runs to the
 first full stop and must stand on its own, because the what's-new card shows
 leads alone: an entry whose first sentence needs the rest of the bullet reads
-there as a fragment. The page shows both, the lead carrying the weight and the
-detail quieter beneath it, so a release can be read at either depth.
+there as a fragment. The page shows both, the lead as a small
+heading and the detail as its paragraph, so a release can be read at either
+depth: skim the leads for what changed, or read on for what it means.
 
 Limits are measured as a reader sees them, not as characters in the file. A
 lead naming four shortcuts is short to read and long to store, and it is the
