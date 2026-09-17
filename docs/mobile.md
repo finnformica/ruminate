@@ -26,10 +26,11 @@ keyboard that appears and disappears. The block editor
   at its top and the same entries the pointer's popup has, laid out for a
   thumb; a pick closes it, so does a swipe down. The popup anchored under the
   finger that came before was fragile — it opened as the press registered and
-  shut on the lift, or on the scroll the same finger began. On a touch screen
-  the entries also carry the structure moves — Indent, Outdent, Move up, Move
-  down — which a mouse's menu leaves to the keys. Android's long press arrives
-  as a `contextmenu` event and opens the same sheet.
+  shut on the lift, or on the scroll the same finger began. The sheet and the
+  popup are one list (`menuEntries`) on two surfaces, so the structure moves —
+  Indent, Outdent, Move up, Move down — are in both, with their keys shown
+  beside them on the popup. Android's long press arrives as a `contextmenu`
+  event and opens the same sheet.
 - **A highlight has no job on a touch screen.** There is no keyboard cursor
   for it to mark, so once an edit ends (the keyboard put away, a delete, a
   swap of rows) nothing stays lit; the one time a row is marked is while the

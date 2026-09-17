@@ -2635,9 +2635,9 @@ describe("BlockEditor context menu", () => {
     // alone, with nothing to unlink from.
     expect(menu.textContent).not.toContain("Unlink")
     expect(menu.textContent).not.toContain("places")
-    // Structure moves stay on the keyboard.
+    // The structure moves are in the menu on every surface, keys beside them.
     for (const label of ["Indent", "Outdent", "Move up", "Move down"]) {
-      expect(menu.textContent).not.toContain(label)
+      expect(menu.textContent).toContain(label)
     }
   })
 

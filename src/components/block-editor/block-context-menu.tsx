@@ -6,7 +6,6 @@ import { FIGURE_ALIGNS, type FigureAlign } from "../../blocks/figure"
 import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
-import { useCoarsePointer } from "../../hooks/coarse-pointer"
 import { DropdownMenu } from "../dropdown-menu"
 
 /**
@@ -28,10 +27,10 @@ import { DropdownMenu } from "../dropdown-menu"
  * **Pin** puts the block in the sidebar's Pinned list (docs/metadata.md),
  * from where it opens zoomed into; on a pinned block the item reads Unpin.
  *
- * Structure moves (indent, outdent, move up/down) are keyboard-only: the
- * menu is for what a pointer cannot already do. A finger cannot (no Tab on
- * a phone's keyboard), so on a touch screen the menu carries them too —
- * the edit bar above the keyboard is the other way (docs/mobile.md).
+ * The structure moves (indent, outdent, move up/down) are in the menu with
+ * their keys beside them. A mouse could leave them to the keyboard, but a
+ * finger cannot (no Tab on a phone's keyboard), and the popup and the sheet
+ * are one list on two surfaces — so every surface carries every action.
  */
 
 /** The row the menu was opened on. */
@@ -197,11 +196,7 @@ export type MenuEntry =
       items: { label: React.ReactNode; onSelect: () => void; selected?: boolean; key: string }[]
     }
 
-function menuEntries(
-  target: BlockMenuTarget,
-  actions: BlockMenuActions,
-  { coarse }: { coarse: boolean },
-): MenuEntry[] {
+function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEntry[] {
   const { key, id } = target
   const shared = target.places > 1
   const image = target.type === "image"
@@ -300,13 +295,11 @@ function menuEntries(
   }
   rule()
   item({ label: "Duplicate", shortcut: ["⌥", "⇧", "↓"], onSelect: () => actions.duplicate(key) })
-  if (coarse) {
-    rule()
-    item({ label: "Indent", onSelect: () => actions.indent(key) })
-    item({ label: "Outdent", onSelect: () => actions.outdent(key) })
-    item({ label: "Move up", onSelect: () => actions.moveUp(key) })
-    item({ label: "Move down", onSelect: () => actions.moveDown(key) })
-  }
+  rule()
+  item({ label: "Indent", shortcut: ["⇥"], onSelect: () => actions.indent(key) })
+  item({ label: "Outdent", shortcut: ["⇧", "⇥"], onSelect: () => actions.outdent(key) })
+  item({ label: "Move up", shortcut: ["⌥", "↑"], onSelect: () => actions.moveUp(key) })
+  item({ label: "Move down", shortcut: ["⌥", "↓"], onSelect: () => actions.moveDown(key) })
   rule()
   if (target.hasChildren) {
     item({
@@ -348,8 +341,7 @@ function menuEntries(
 
 /** The pointer's popup: the entries as Base UI menu items and submenus. */
 function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMenuActions }) {
-  const coarse = useCoarsePointer()
-  const entries = menuEntries(target, actions, { coarse })
+  const entries = menuEntries(target, actions)
   return (
     <>
       {entries.map((entry, index) => {
@@ -417,7 +409,7 @@ export function BlockMenuSheet({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const entries = target ? menuEntries(target, actions, { coarse: true }) : []
+  const entries = target ? menuEntries(target, actions) : []
   const pick = (run: () => void) => () => {
     onOpenChange(false)
     run()

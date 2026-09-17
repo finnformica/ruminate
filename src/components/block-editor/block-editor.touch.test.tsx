@@ -507,15 +507,16 @@ describe("the block menu on a touch screen", () => {
     expect(lines(getByTestId)).toEqual(["Alpha", "  Beta"])
   })
 
-  it("keeps the popup, without the moves, for a mouse", async () => {
+  it("keeps the popup, with the same entries, for a mouse", async () => {
     coarse = false
     const { container } = render(<Harness initial={"Alpha\nBeta"} />)
     await act(async () => {
       fireEvent.contextMenu(rows(container)[1], { clientX: 10, clientY: 10 })
     })
     const menu = screen.getByTestId("block-context-menu")
-    expect(menu.textContent).not.toContain("Indent")
-    expect(menu.textContent).not.toContain("Move up")
+    // One list on two surfaces: the moves are here too, keys beside them.
+    expect(menu.textContent).toContain("Indent")
+    expect(menu.textContent).toContain("Move up")
     expect(screen.queryByTestId("block-menu-sheet")).toBeNull()
   })
 })
