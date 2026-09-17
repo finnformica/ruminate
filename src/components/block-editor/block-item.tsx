@@ -69,7 +69,7 @@ export interface BlockEditorApi {
   /**
    * Whether the editor moves through its rows at all (`BlockEditor`): every
    * editable one does, and a read-only one that is browsed. A read-only row
-   * of a browsed editor highlights on click and zooms from its bullet, as
+   * of a browsed editor highlights on click and focuses from its bullet, as
    * an editable one does; one of an inert editor does nothing.
    */
   navigable?: boolean
@@ -117,8 +117,8 @@ export interface BlockEditorApi {
    * was consumed (so the caller can `preventDefault`).
    */
   dispatchKey: (mode: Mode, key: string, event: KeyLike, caret?: CaretInput) => boolean
-  /** Zoom into a block: its subtree becomes the whole editor view. */
-  zoomInto: (id: string) => void
+  /** Focus on a block: its subtree becomes the whole editor view. */
+  focusBlock: (id: string) => void
   /** Image files pasted or dropped on a row: upload them and add image blocks
    * there. Absent where images are switched off (the paste is left alone). */
   onImageFiles?: (key: string, files: File[]) => void
@@ -265,7 +265,7 @@ export function BlockItem({
   // Whether this block owns a collapse toggle at all: parents only. The
   // row that closes a loop keeps its chevron too — the block has children,
   // they are simply above it — pinned, greyed and inert, with the reason in
-  // its tooltip (zoom in to go round again).
+  // its tooltip (focus on it to go round again).
   const looped = !!occurrence.looped
   const hasToggle = hasChildren || looped
   // A marker slot is drawn unless the type has none AND nothing needs one.
@@ -658,11 +658,11 @@ export function BlockItem({
   // beside, and hovering the checkbox must mean the checkbox.
   const slotClass = hasToggle && !toggleBeside ? "block-toggle-slot" : undefined
 
-  // List markers double as zoom targets (Logseq-style: click the bullet to
+  // List markers double as focus targets (Logseq-style: click the bullet to
   // make this block the note) — on leaves. A parent's key is its collapse
-  // toggle, so zoom stays on F / Cmd+. there. The negative-margin padding
+  // toggle, so focus stays on F / Cmd+. there. The negative-margin padding
   // enlarges the hit area without shifting the marker's layout size.
-  const zoomable = (!readOnly || api.navigable) && !hasToggle
+  const canFocus = (!readOnly || api.navigable) && !hasToggle
   // Every marker occupies the same 15px slot, so body text starts at one
   // column across every block type and the markers read as one chrome
   // family: dots centre in it; text glyphs (`#`, number, `>`) right-align
@@ -670,7 +670,7 @@ export function BlockItem({
   // so a swapped-in chevron centres on it, and carries `slotClass` so
   // hovering it reveals the chevron.
   //
-  // The bullet's dot: on a leaf it zooms; on a parent it is the key that
+  // The bullet's dot: on a leaf it focuses; on a parent it is the key that
   // swaps for the chevron.
   const dotSlot = (
     <span
@@ -679,12 +679,12 @@ export function BlockItem({
         slotClass,
       )}
     >
-      {zoomable ? (
+      {canFocus ? (
         <button
           type="button"
-          aria-label="Zoom into block"
+          aria-label="Focus on block"
           tabIndex={-1}
-          onClick={() => api.zoomInto(block.id)}
+          onClick={() => api.focusBlock(block.id)}
           // An 18px hit area around the 6px dot; a finger gets 26px.
           className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-[background-color,transform] duration-150 hover:bg-bg-hover active:scale-90 motion-reduce:active:scale-100 coarse:-m-2.5 coarse:p-2.5"
         >
@@ -705,7 +705,7 @@ export function BlockItem({
   // slot, like the dot and the checkbox, not right-aligned like `#` and the
   // numbers: `>` is a narrow glyph, and right-aligned its ink sat 3px right
   // of the dot's centre (and of the guide line that hangs from it). Never a
-  // zoom button (zoom stays on F / Cmd+. and bullet/number clicks); on a
+  // focus button (focus stays on F / Cmd+. and bullet/number clicks); on a
   // parent it swaps for the collapse chevron. The empty paragraph slot keeps
   // its width so the text stays in the shared column, and still hosts a
   // parent's chevron.
@@ -765,7 +765,7 @@ export function BlockItem({
     ) : kind.slot === "dot" ? (
       dotSlot
     ) : kind.slot === "hash" ? (
-      // Headings hang the same grey `#` as the note / zoom titles — the shared
+      // Headings hang the same grey `#` as the note / focus titles — the shared
       // `Hash`, at the heading's own scale: the slot carries the heading's
       // size + weight (headingScale + bold, no underline — that lives in
       // `typo`) and the glyph inherits it, so the hash always matches the text
@@ -775,7 +775,7 @@ export function BlockItem({
       // overflows LEFT, past the surface's edge — the text column never
       // moves. The slot's `h-[1lh]` (resolved at the heading's scale) centres
       // the glyph on the heading's first line. A static glyph, like the note
-      // title's — never a zoom button (zoom stays on F / Cmd+. and
+      // title's — never a focus button (focus stays on F / Cmd+. and
       // bullet/number clicks); on a parent it swaps for the collapse chevron.
       <span
         data-testid="heading-hash"
@@ -797,12 +797,12 @@ export function BlockItem({
           slotClass,
         )}
       >
-        {zoomable ? (
+        {canFocus ? (
           <button
             type="button"
-            aria-label="Zoom into block"
+            aria-label="Focus on block"
             tabIndex={-1}
-            onClick={() => api.zoomInto(block.id)}
+            onClick={() => api.focusBlock(block.id)}
             className="-mx-0.5 cursor-pointer rounded-sm px-0.5 transition-[background-color,transform] duration-150 hover:bg-bg-hover active:scale-95 motion-reduce:active:scale-100"
           >
             {olNumber}.
@@ -953,7 +953,7 @@ export function BlockItem({
   )
 
   // A finger's tap on the row — anywhere in it that is not a control (the
-  // chevron, the checkbox, a link, the zoom dot) — edits it, with the caret
+  // chevron, the checkbox, a link, the focus dot) — edits it, with the caret
   // where the tap landed when the body's text is the stored text as is
   // (`caretOffsetAtPoint`), at the end otherwise. The row, not the body, so
   // the marker gap and the row's padding count too: a short line's tap

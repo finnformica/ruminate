@@ -1,7 +1,7 @@
 import { cx } from "../../utils/cx"
 
 /**
- * The grey `#` glyph shared by the note title, the zoom title, and section
+ * The grey `#` glyph shared by the note title, the focus title, and section
  * heading markers — one vernacular, one component.
  *
  * Deliberately dumb: it carries **no typography of its own** (no size, weight,

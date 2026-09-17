@@ -87,7 +87,7 @@ describe("shortcut registry ↔ keymap completeness", () => {
       if (HIDDEN_COMBOS.has(binding.combo)) continue
       const found = SHORTCUTS.some(
         (shortcut) =>
-          (shortcut.scope === binding.mode || shortcut.scope === "zoom") &&
+          (shortcut.scope === binding.mode || shortcut.scope === "focus") &&
           shortcut.combos.includes(binding.combo) &&
           shortcut.description === EDITOR_COMMAND_DESCRIPTIONS[binding.command],
       )

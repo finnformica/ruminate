@@ -22,15 +22,15 @@ function Harness({
   initial,
   initialDoc,
   startEditing,
-  zoomRootId,
+  focusRootId,
   deferCollapse,
 }: {
   initial: string
   /** A doc built by hand, for what markdown cannot say (an image's layout). */
   initialDoc?: BlockDoc
   startEditing?: boolean
-  /** Start zoomed into this block (transient local zoom — no router). */
-  zoomRootId?: string | null
+  /** Start focused on this block (transient local focus — no router). */
+  focusRootId?: string | null
   /** Control the folds and commit each toggle this many milliseconds after
    * the click, the way the app's store-backed folds land a render or two
    * later: the fold's motion must wait for the change, not run ahead of it
@@ -46,7 +46,7 @@ function Harness({
         doc={doc}
         onChange={setDoc}
         startEditing={startEditing}
-        zoomRootId={zoomRootId}
+        focusRootId={focusRootId}
         noteTitle="My note"
         collapsed={deferred ? collapsed : undefined}
         onToggleCollapse={
@@ -479,12 +479,12 @@ export const DeepHeadings: Story = {
   args: { initial: DEEP_HEADINGS },
 }
 
-/** Zoomed into a deep HEADING — the one family a zoom draws as the view's
- * title: its children's heading sizes re-derive from the zoom root (depth
+/** Focused on a deep HEADING — the one family a focus draws as the view's
+ * title: its children's heading sizes re-derive from the focus root (depth
  * restarts at 0), so a level-4 heading reads like a top-level section inside
- * the zoomed view. */
-export const DeepHeadingsZoomed: Story = {
-  args: { initial: DEEP_HEADINGS, zoomRootId: "blk_dh3" },
+ * the focused view. */
+export const DeepHeadingsFocused: Story = {
+  args: { initial: DEEP_HEADINGS, focusRootId: "blk_dh3" },
 }
 
 /** A brand-new note opens with the first block already in edit mode. */
@@ -581,33 +581,33 @@ export const TodoShortcut: Story = {
   },
 }
 
-/** The editor zoomed into a BULLET: its subtree is the whole view, the block
+/** The editor focused on a BULLET: its subtree is the whole view, the block
  * itself leads it as the first row (only a heading is drawn as a title), and a
  * breadcrumb traces the path. */
-export const Zoomed: Story = {
-  args: { initial: SAMPLE, zoomRootId: "blk_b1" },
+export const Focused: Story = {
+  args: { initial: SAMPLE, focusRootId: "blk_b1" },
 }
 
-/** F zooms into the selected block; Shift+F zooms back out, landing on it. */
-export const ZoomKeys: Story = {
+/** F focuses the selected block; Shift+F focuses back out, landing on it. */
+export const FocusKeys: Story = {
   args: { initial: SAMPLE },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
 
-    // Select the bullet (it has a nested child) and zoom in with F.
+    // Select the bullet (it has a nested child) and focus in with F.
     await userEvent.click(canvas.getByText("A bullet point"))
     await userEvent.keyboard("f")
-    const crumb = await within(canvasElement).findByTestId("zoom-breadcrumb")
+    const crumb = await within(canvasElement).findByTestId("focus-breadcrumb")
     expect(crumb.textContent).toContain("A bullet point")
-    // Only the zoomed subtree renders; the heading is gone…
+    // Only the focused subtree renders; the heading is gone…
     expect(canvas.queryByText("Project ideas")).not.toBeInTheDocument()
     // …and the first child is selected, ready for arrows.
     expect(canvas.getByText("A nested bullet")).toBeInTheDocument()
 
-    // Shift+F zooms back out: the whole note again, no breadcrumb.
+    // Shift+F focuses back out: the whole note again, no breadcrumb.
     await userEvent.keyboard("{Shift>}F{/Shift}")
     await waitFor(() =>
-      expect(within(canvasElement).queryByTestId("zoom-breadcrumb")).not.toBeInTheDocument(),
+      expect(within(canvasElement).queryByTestId("focus-breadcrumb")).not.toBeInTheDocument(),
     )
     expect(await canvas.findByText("Project ideas")).toBeInTheDocument()
   },

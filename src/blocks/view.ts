@@ -49,7 +49,7 @@ export interface Occurrence {
   /**
    * This occurrence closes a loop: the block is already on the path above it
    * (`a/b/a`). It is shown once here, as a leaf — nothing beneath it is
-   * walked, so the outline ends where the loop closes. Zooming into it starts
+   * walked, so the outline ends where the loop closes. Focusing on it starts
    * a fresh path, which is how a reader descends deliberately.
    */
   looped?: boolean
@@ -57,7 +57,7 @@ export interface Occurrence {
 
 /**
  * The fold rule a walk descends by: is the occurrence `key`, `level` steps
- * below the walk's root, open? A note's roots are level 1; a zoomed block is
+ * below the walk's root, open? A note's roots are level 1; a focused block is
  * level 0 and its children level 1. The rule is the reader's explicit folds
  * over the depth setting (`src/data/view-state.ts`), and the graph walk
  * (`walkGraph`, src/data/graph.ts) only descends where it says so.
@@ -232,11 +232,11 @@ export function firstOccurrenceKey(doc: BlockDoc, id: string): string | null {
   return null
 }
 
-/** The key the zoomed block is addressed by: its first occurrence in the
- * document (so a fold made while zoomed is the same fold un-zoomed), or its
+/** The key the focused block is addressed by: its first occurrence in the
+ * document (so a fold made while focused is the same fold outside focus), or its
  * bare id when the document does not reach it. */
-export function zoomRootKey(doc: BlockDoc, zoomRootId: string): string {
-  return firstOccurrenceKey(doc, zoomRootId) ?? zoomRootId
+export function focusRootKeyOf(doc: BlockDoc, focusRootId: string): string {
+  return firstOccurrenceKey(doc, focusRootId) ?? focusRootId
 }
 
 /**
@@ -253,36 +253,36 @@ function olPositions(doc: BlockDoc, ids: string[]): number[] {
 }
 
 /**
- * The rows of a view: depth-first from the roots (or from the zoomed block),
+ * The rows of a view: depth-first from the roots (or from the focused block),
  * with folds applied — a collapsed occurrence's children are not rows.
  *
- * Zoomed, the view takes the zoomed block one of two ways (`titlesZoom`,
- * src/blocks/markers.ts, is the rule; `zoomTitled` carries its answer here):
+ * In focus, the view takes the focused block one of two ways (`titlesFocus`,
+ * src/blocks/markers.ts, is the rule; `focusTitled` carries its answer here):
  *
  * - **Titled** — a heading, which already names what hangs beneath it: the
  *   root is not a row but the view's title, drawn above the rows, and its
- *   children start again at depth 0, so the zoomed subtree reads as a note
+ *   children start again at depth 0, so the focused subtree reads as a note
  *   of its own.
  * - **Untitled** — everything else, which is content rather than a name:
  *   the block leads as the view's first row, at depth 0, with what it holds
- *   indented beneath it — the outline exactly as it reads un-zoomed,
+ *   indented beneath it — the outline exactly as it reads outside focus,
  *   starting here.
  *
  * Either way the root's key is its first occurrence in the document, so a
- * fold made while zoomed is the same fold un-zoomed.
+ * fold made while focused is the same fold outside focus.
  */
 export function buildRows(
   doc: BlockDoc,
   {
-    zoomRootId = null,
-    zoomTitled = true,
+    focusRootId = null,
+    focusTitled = true,
     folds,
     rootId = null,
   }: {
-    zoomRootId?: string | null
-    /** Zoomed: is the root the view's title (a heading) rather than its
+    focusRootId?: string | null
+    /** Focused: is the root the view's title (a heading) rather than its
      * first row? See the note above. */
-    zoomTitled?: boolean
+    focusTitled?: boolean
     folds: ReadonlySet<string>
     /** The id of the view's own root when it is not a block in the doc (the
      * note): on the path from the start, so a block's parent that is the
@@ -309,7 +309,7 @@ export function buildRows(
       if (!row) return
       // The block is already on the path above: this row closes a loop. It is
       // a leaf here — no toggle, nothing beneath — so the outline ends where
-      // the loop closes (zoom into it to go round again).
+      // the loop closes (focus on it to go round again).
       const looped = path.has(id)
       const key = keyOf(parentKey, id, direction)
       path.add(id)
@@ -337,23 +337,23 @@ export function buildRows(
     })
   }
 
-  const zoomRoot = zoomRootId ? doc.blocks[zoomRootId] : undefined
-  if (zoomRoot && zoomTitled) {
-    // Titled: the rows are the zoom root's children (and parents), from
+  const focusRoot = focusRootId ? doc.blocks[focusRootId] : undefined
+  if (focusRoot && focusTitled) {
+    // Titled: the rows are the focus root's children (and parents), from
     // depth 0 — the root itself is not a row but the view's title (the
     // editor draws it as the note title, above the rows), always open.
-    const key = zoomRootKey(doc, zoomRoot.id)
-    path.add(zoomRoot.id)
-    walk(zoomRoot, key, 0, [], "down")
-  } else if (zoomRoot) {
-    // Untitled: the zoomed block is the view's first row, its own subtree
+    const key = focusRootKeyOf(doc, focusRoot.id)
+    path.add(focusRoot.id)
+    walk(focusRoot, key, 0, [], "down")
+  } else if (focusRoot) {
+    // Untitled: the focused block is the view's first row, its own subtree
     // indented beneath it — a row like any other, fold and all.
-    const key = zoomRootKey(doc, zoomRoot.id)
-    const hasChildren = rowsBeneath(doc, zoomRoot, path, "down").length > 0
+    const key = focusRootKeyOf(doc, focusRoot.id)
+    const hasChildren = rowsBeneath(doc, focusRoot, path, "down").length > 0
     const collapsed = hasChildren && folds.has(key)
     rows.push({
       key,
-      id: zoomRoot.id,
+      id: focusRoot.id,
       direction: "down",
       // The view's own root: nothing above it on screen, whatever path its
       // key spells out in the document it was reached through.
@@ -361,15 +361,15 @@ export function buildRows(
       depth: 0,
       index: 0,
       // A numbered item leading a view is the first of its run.
-      olNumber: zoomRoot.type === "ol" ? 1 : 0,
+      olNumber: focusRoot.type === "ol" ? 1 : 0,
       hasChildren,
       collapsed,
       guideKeys: [],
     })
     if (hasChildren && !collapsed) {
-      path.add(zoomRoot.id)
-      walk(zoomRoot, key, 1, [key], "down")
-      path.delete(zoomRoot.id)
+      path.add(focusRoot.id)
+      walk(focusRoot, key, 1, [key], "down")
+      path.delete(focusRoot.id)
     }
   } else {
     if (rootId) path.add(rootId)

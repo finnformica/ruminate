@@ -17,7 +17,7 @@ const NOTHING_COLLAPSED: ReadonlySet<string> = new Set()
  * The note's doc, straight from the graph — and the way back.
  *
  * `doc` is the walk of the note (`noteView`) over the live snapshot — or,
- * zoomed, the walk of the zoomed block (`blockView`): the same walk from a
+ * in focus, the walk of the focused block (`blockView`): the same walk from a
  * different root, the block as the doc's one root — so a pull bringing
  * another device's edits, an edit made through another note that shares a
  * block, or our own change a moment ago all show the instant the snapshot
@@ -34,7 +34,7 @@ const NOTHING_COLLAPSED: ReadonlySet<string> = new Set()
  * (`docToOps`: a new block is one `create` and one `link`, typing is one
  * `setText`) applied to the graph at once and written behind. The note's
  * `updated_at` is stamped on every change — what orders the notes list and
- * drives the replica's incremental pulls (docs/graph-storage.md); zoomed,
+ * drives the replica's incremental pulls (docs/graph-storage.md); in focus,
  * where the doc says nothing about the note node, as its own `setProps`.
  *
  * A note that is not in the graph yet (a new one) starts from `defaultDoc`
@@ -44,17 +44,17 @@ const NOTHING_COLLAPSED: ReadonlySet<string> = new Set()
 export function useNoteDoc({
   noteId,
   defaultDoc,
-  zoomBlockId = null,
+  focusBlockId = null,
   expanded,
   directions = "downstream",
 }: {
   noteId: NoteId | undefined
   /** What a note not in the graph starts as (`?content=`, or empty). */
   defaultDoc: BlockDoc
-  /** The block the page is zoomed into, if any: the walk's root instead of
+  /** The block the page is focused on, if any: the walk's root instead of
    * the note. A block the graph lacks falls back to the note's view (the
-   * editor then clears the zoom). */
-  zoomBlockId?: string | null
+   * editor then clears the focus). */
+  focusBlockId?: string | null
   /** The fold rule the walk descends by; absent = walk everything. */
   expanded?: ExpandedRule
   /** Which links the walk follows (Settings → Editor, "Show links"). */
@@ -66,12 +66,12 @@ export function useNoteDoc({
 
   const view = useMemo<GraphView | null>(() => {
     if (noteId === undefined) return null
-    const zoomed = zoomBlockId ? blockView(zoomBlockId, snapshot, expanded, directions) : null
-    return zoomed ?? noteView(noteId, snapshot, expanded, directions)
-  }, [noteId, zoomBlockId, snapshot, expanded, directions])
-  // Whether the doc is rooted at the zoomed block (the note node is then not
+    const focused = focusBlockId ? blockView(focusBlockId, snapshot, expanded, directions) : null
+    return focused ?? noteView(noteId, snapshot, expanded, directions)
+  }, [noteId, focusBlockId, snapshot, expanded, directions])
+  // Whether the doc is rooted at the focused block (the note node is then not
   // this doc's to write).
-  const rootId = zoomBlockId && view?.doc.rootBlockIds[0] === zoomBlockId ? zoomBlockId : null
+  const rootId = focusBlockId && view?.doc.rootBlockIds[0] === focusBlockId ? focusBlockId : null
   const exists =
     noteId !== undefined &&
     (rootId ? snapshot.nodes.get(noteId)?.type === NOTE_TYPE : view !== null)
@@ -90,7 +90,7 @@ export function useNoteDoc({
         if (isEmptyDoc(next)) return // nothing worth creating a note for
       }
       if (rootId) {
-        // Zoomed: the block's subtree is diffed; the note itself is only
+        // In focus: the block's subtree is diffed; the note itself is only
         // stamped, and only when something changed.
         const ops = docToOps(noteId, next, current, hint?.discard, rootId)
         if (ops.length > 0) apply([...ops, ...notePropsOps(noteId, {}, current)])

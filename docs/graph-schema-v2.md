@@ -183,7 +183,7 @@ closes, as a leaf — no toggle, nothing beneath — and never descended
 (`walkDoc`, src/blocks/view.ts, and the same rule inline in the serializer,
 the display markdown, the outline, the search index, the clipboard payload
 and the copy). A block reached by two _different_ paths is still two rows,
-as before. Zooming into the closing row starts a fresh path, which is how a
+as before. Focusing on the closing row starts a fresh path, which is how a
 reader descends deliberately. The renderer keeps a hard depth cap as
 belt-and-braces. Markdown is a tree, so a loop is written to where it closes
 and no further, and does not survive a markdown round trip (`parse` re-mints
@@ -203,7 +203,7 @@ already on the path above is skipped (a block's own parent is where the row
 came from, not something beneath it), which is what keeps a single-homed
 block's rows exactly the tree's and shows only the _other_ places a
 multi-homed block is held — the todos an "In progress" block was copied
-under, when it is zoomed into. A child on the path is skipped beneath a
+under, when you focus on it. A child on the path is skipped beneath a
 parent row for the same reason. The view's own root (the note) is on the
 path from the start, and the note's own parents, when it has any, are rows
 after its blocks (`BlockDoc.upstream`).
@@ -303,9 +303,9 @@ row is a row with a chevron and nothing beneath it; opening it walks one more
 level. So the doc is O(what is on screen), however large the graph, and a
 view from any root is the same walk: a note (its children as the roots, level
 
-1. and a zoomed block (the block as the doc's one root, at level 0, its
-   children level 1) differ only in where the walk starts. Zooming out of a
-   block opens the folds along one path back to it first, so the reader lands
+1. and a focused block (the block as the doc's one root, at level 0, its
+   children level 1) differ only in where the walk starts. Leaving a block's
+   focus opens the folds along one path back to it first, so the reader lands
    on the row they left. The renderer's depth cap doubles as the guard against
    pathologically deep transclusion chains.
 

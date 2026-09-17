@@ -34,11 +34,11 @@ interface EditorActions {
   /** Called after the open note is deleted, so the page can navigate away. */
   onDeleted?: () => void
   /**
-   * The block the page is zoomed into, if any. What the menu copies follows
-   * the view: zoomed in, **Copy markdown** takes that block and everything
+   * The block the page is focused on, if any. What the menu copies follows
+   * the view: focused in, **Copy markdown** takes that block and everything
    * beneath it — what is on screen — rather than the whole note behind it.
    */
-  zoomBlockId?: string | null
+  focusBlockId?: string | null
 }
 
 /**
@@ -95,13 +95,13 @@ export function NoteActionsMenu({
 
   const togglePin = () => setNoteProps(noteId, { pinned: pinned ? null : true })
 
-  // Copy what the view holds, not what the note holds: zoomed into a block,
-  // that block and everything beneath it. A zoomed block the graph has since
+  // Copy what the view holds, not what the note holds: focused on a block,
+  // that block and everything beneath it. A focused block the graph has since
   // lost falls back to the note, which is what the page itself falls back to.
   const copyMarkdown = () => {
     const graph = jotaiStore.get(graphSnapshotAtom)
-    const zoomed = editor?.zoomBlockId ? blockRollup(editor.zoomBlockId, graph) : null
-    copyAsMarkdown(zoomed ?? rollup(noteId, graph) ?? "")
+    const focused = editor?.focusBlockId ? blockRollup(editor.focusBlockId, graph) : null
+    copyAsMarkdown(focused ?? rollup(noteId, graph) ?? "")
   }
 
   // Renaming sets the note's title (docs/graph-storage.md). The id and

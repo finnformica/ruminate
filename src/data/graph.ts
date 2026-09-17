@@ -359,7 +359,7 @@ const EVERYTHING_OPEN: ExpandedRule = () => true
 export interface WalkOptions {
   /** The fold rule; absent = every occurrence open. */
   expanded?: ExpandedRule
-  /** The level of the roots (1 for a note's children; 0 for a zoomed block). */
+  /** The level of the roots (1 for a note's children; 0 for a focused block). */
   startLevel?: number
   /** Which links to follow; `"downstream"` by default — the tree. */
   directions?: LinkDirections
@@ -383,7 +383,7 @@ export interface WalkOptions {
  * and nothing beneath it, and its key is in `collapsed`; opening it walks
  * one more level. So the doc is O(what is on screen), however large the
  * graph, and the same call serves a note (its children as the roots, level
- * 1) and a zoomed block (the block as the root, level 0): a view from any
+ * 1) and a focused block (the block as the root, level 0): a view from any
  * root is the same walk.
  *
  * - A root that does not exist is skipped; the doc's `rootBlockIds` are the
@@ -542,7 +542,7 @@ export function noteView(
 }
 
 /**
- * A block's view — the zoomed page: the block as the doc's one root, at
+ * A block's view — the focused page: the block as the doc's one root, at
  * level 0 (always open; the editor draws it as the view's title), its
  * children the rows at level 1, walked by the same rule as a note is. A view
  * from any root is the same walk. Null when the block does not exist, or is
@@ -565,7 +565,7 @@ export function blockView(
  * not reach the block. Empty when the block IS the root. Found by walking
  * UP from the block over the reverse index, so the cost tracks the block's
  * depth, not the size of what the root holds; what a view uses to open the
- * folds along the way to a block it must show (zooming out onto it).
+ * folds along the way to a block it must show (stepping back onto it).
  */
 export function pathToBlock(
   graph: GraphSnapshot,
@@ -620,9 +620,9 @@ export function rollup(noteId: string, graph: GraphSnapshot): string | null {
 }
 
 /**
- * The same projection from a block root — the rollup of the zoomed page: the
+ * The same projection from a block root — the rollup of the focused page: the
  * block's own line, then everything beneath it, exactly the rows that view
- * shows. Zoomed in, this is what a note-level action works on, so what is
+ * shows. Focused in, this is what a note-level action works on, so what is
  * copied is what is on screen rather than the whole note it came from.
  * Returns null for a block the graph does not hold, or for a note node (a
  * note's rollup is `rollup`).

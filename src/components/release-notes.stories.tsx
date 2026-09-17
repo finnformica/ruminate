@@ -7,7 +7,7 @@ const SOURCE = `# Changelog
 
 ### Added
 
-- Pin a block. **Pin** in a block's right-click menu lists it in the sidebar under **Pinned**, and the row opens the note zoomed into that block.
+- Pin a block. **Pin** in a block's right-click menu lists it in the sidebar under **Pinned**, and the row opens the note focused on that block.
 
 ### Changed
 

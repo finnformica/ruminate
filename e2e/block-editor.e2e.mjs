@@ -527,28 +527,31 @@ await story("blockeditor--mixed")
   await page.keyboard.press("Escape")
 }
 
-// --- Zoom: a zoomed story shows only the subtree, with a breadcrumb ---
-await story("blockeditor--zoomed")
+// --- Focus: a focused story shows only the subtree, with a breadcrumb ---
+await story("blockeditor--focused")
 {
-  await page.screenshot({ path: `${OUT}/07-zoomed.png` })
-  check("zoom: breadcrumb renders", await page.getByTestId("zoom-breadcrumb").isVisible())
-  check("zoom: blocks outside the subtree are hidden", (await block("Project ideas").count()) === 0)
+  await page.screenshot({ path: `${OUT}/07-focused.png` })
+  check("focus: breadcrumb renders", await page.getByTestId("focus-breadcrumb").isVisible())
   check(
-    "zoom: the zoomed block renders as the title",
+    "focus: blocks outside the subtree are hidden",
+    (await block("Project ideas").count()) === 0,
+  )
+  check(
+    "focus: the focused block renders as the title",
     await page.locator("h1").filter({ hasText: "A bullet point" }).isVisible(),
   )
-  check("zoom: its child renders below", await block("A nested bullet").isVisible())
+  check("focus: its child renders below", await block("A nested bullet").isVisible())
 }
 
-// --- Zoom flow: F in, edit a child, Shift+F out — content + selection intact ---
+// --- Focus flow: F in, edit a child, Shift+F out — content + selection intact ---
 await story("blockeditor--mixed")
 {
   await block("A bullet point").click()
   await page.keyboard.press("f")
-  await page.getByTestId("zoom-breadcrumb").waitFor({ timeout: 5000 })
-  check("F zooms into the selected block", (await block("A todo").count()) === 0)
+  await page.getByTestId("focus-breadcrumb").waitFor({ timeout: 5000 })
+  check("F focuses the selected block", (await block("A todo").count()) === 0)
 
-  // Edit the nested child while zoomed.
+  // Edit the nested child while focused.
   await block("A nested bullet").click()
   await page.keyboard.press("Enter")
   await page.locator("textarea").first().waitFor()
@@ -560,17 +563,17 @@ await story("blockeditor--mixed")
   await page.keyboard.press("Shift+F")
   await page.waitForTimeout(120)
   check(
-    "Shift+F zooms back out",
-    (await page.getByTestId("zoom-breadcrumb").count()) === 0 &&
+    "Shift+F steps back out",
+    (await page.getByTestId("focus-breadcrumb").count()) === 0 &&
       (await block("Project ideas").isVisible()),
   )
   const md = await serialized()
-  check("the zoomed-in edit survived", md.includes("A nested bullet EDITED"))
+  check("the edit made in focus survived", md.includes("A nested bullet EDITED"))
   const highlighted = await page.evaluate(
     () => document.querySelector("[data-block-line].bg-bg-secondary")?.textContent ?? "",
   )
   check(
-    "zoom-out selects the block zoomed out from",
+    "leaving focus selects the block left behind",
     highlighted.includes("A bullet point"),
     highlighted,
   )

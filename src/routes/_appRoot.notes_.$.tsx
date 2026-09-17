@@ -42,7 +42,7 @@ import { isValidDateString, isValidWeekString, toDateString } from "../utils/dat
 
 type RouteSearch = {
   query: string | undefined
-  /** Block id the editor is zoomed into ("focus mode"); absent = un-zoomed. */
+  /** Block id the editor is focused on; absent = outside focus. */
   block?: string
 }
 
@@ -77,7 +77,7 @@ function RouteComponent() {
 function NotePage() {
   // Router
   const { _splat: noteId } = Route.useParams()
-  const { block: zoomBlockId } = Route.useSearch()
+  const { block: focusBlockId } = Route.useSearch()
   const navigate = Route.useNavigate()
 
   // Global state
@@ -112,7 +112,7 @@ function NotePage() {
   const useBlockEditor = !isReadOnlyDailyNote
   // An id no live note claims falls through to the new-note editor below —
   // renames never leave a dead id behind, since the id never changes.
-  const showsTitle = !isDailyNote && !isWeeklyNote && !zoomBlockId
+  const showsTitle = !isDailyNote && !isWeeklyNote && !focusBlockId
 
   // Show "Saving…" the instant a change is dispatched, rather than waiting for
   // the debounced sync to actually start. Cleared when the sync finishes (or a
@@ -122,7 +122,7 @@ function NotePage() {
   // What a note that is not in the graph yet starts as: empty.
   const defaultDoc = React.useMemo(() => ({ ...parse(""), props: null }), [])
 
-  // The doc is the walk of the note — or of the zoomed block — over the
+  // The doc is the walk of the note — or of the focused block — over the
   // live graph, descended only where the reader's folds open a row
   // (`useFoldRule`); every change the editor hands back becomes ops applied
   // to the graph — see useNoteDoc.
@@ -136,30 +136,30 @@ function NotePage() {
   } = useNoteDoc({
     noteId,
     defaultDoc,
-    zoomBlockId: zoomBlockId ?? null,
+    focusBlockId: focusBlockId ?? null,
     expanded,
     directions,
   })
   const jotaiStore = useStore()
-  // Leaving a zoom for a wider view — the note, or a block above — must
+  // Leaving a focus for a wider view — the note, or a block above — must
   // show the block just left, so the reader lands back on it: the folds
   // along one path from the new root to it are opened first (nothing to do
   // when the walk already shows it).
-  const revealOnZoomOut = React.useCallback(
+  const revealOnLeaveFocus = React.useCallback(
     (target: string | null) => {
-      if (!noteId || !zoomBlockId || target === zoomBlockId) return
+      if (!noteId || !focusBlockId || target === focusBlockId) return
       const graph = jotaiStore.get(graphSnapshotAtom)
-      const chain = pathToBlock(graph, target ?? noteId, zoomBlockId)
+      const chain = pathToBlock(graph, target ?? noteId, focusBlockId)
       if (!chain) return
       // Each ancestor's key and level, counted as the walk counts them: a
-      // note's roots are level 1, a zoomed block's children too.
+      // note's roots are level 1, a focused block's children too.
       let key: string | null = target
       chain.slice(0, -1).forEach((id, index) => {
         key = keyOf(key, id)
         if (!expanded(key, index + 1)) setFold(key, true)
       })
     },
-    [noteId, zoomBlockId, jotaiStore, expanded, setFold],
+    [noteId, focusBlockId, jotaiStore, expanded, setFold],
   )
   // A brand-new note opens ready to be written: the title editing when there
   // is one (naming it is the first thing to do, and naming it creates it —
@@ -168,8 +168,8 @@ function NotePage() {
   const isNewNote = !noteExists && notesLoaded && share === null
   // The note is TOUCHED — for the palette's Recent list — exactly when it
   // is opened, edited (an edit lands through `setEditorDoc`), a block in it
-  // folded or unfolded (`onToggleCollapse`) or zoomed into
-  // (`onZoomNavigate`). Never by selecting, focusing or arrowing through
+  // folded or unfolded (`onToggleCollapse`) or focused on
+  // (`onFocusNavigate`). Never by selecting, focusing or arrowing through
   // it: reading a note is not touching it. One seam (`useTouchNote`), no
   // calls inside the editor.
   const { touch, touching } = useTouchNote(noteId)
@@ -328,7 +328,7 @@ function NotePage() {
                 width: resolvedWidth,
                 onWidth: updateWidth,
                 onDeleted: () => navigate({ to: "/", search: { query: undefined }, replace: true }),
-                zoomBlockId: zoomBlockId ?? null,
+                focusBlockId: focusBlockId ?? null,
               }}
             />
           </div>
@@ -336,7 +336,7 @@ function NotePage() {
       }
     >
       <div ref={containerRef} className="@container">
-        {/* --note-header-pull: how far the title, zoom breadcrumb and zoom
+        {/* --note-header-pull: how far the title, focus breadcrumb and focus
             title hang into the gutter (`.note-header`, block-editor.css) —
             the full marker-slot offset, but only once the gutter is 40px, as
             the hanging # needs the room. */}
@@ -369,7 +369,7 @@ function NotePage() {
 
             {useBlockEditor ? (
               <div className="flex flex-col gap-3">
-                {/* While zoomed, the breadcrumb (inside the editor) carries the
+                {/* While focused, the breadcrumb (inside the editor) carries the
                     note title as its first crumb — hide the standalone title to
                     avoid doubling it. */}
                 {showsTitle ? (
@@ -401,18 +401,18 @@ function NotePage() {
                   readOnly={readOnlyShare}
                   browse={readOnlyShare}
                   // Only where there IS a title above the editor to take the
-                  // keyboard: a daily note has none, and a zoomed one carries
-                  // its name in the breadcrumb instead (the zoomed heading's
+                  // keyboard: a daily note has none, and a focused one carries
+                  // its name in the breadcrumb instead (the focused heading's
                   // own title is the editor's to hand focus to, not ours).
                   onExitTop={showsTitle ? () => setTitleFocusSignal((n) => n + 1) : undefined}
                   focusFirstSignal={focusFirstSignal}
                   focusFirstMode={focusFirstMode}
                   newRootSignal={newRootSignal}
                   refocusSignal={refocusSignal}
-                  zoomBlockId={zoomBlockId ?? null}
-                  onZoomNavigate={touching((id) => {
-                    revealOnZoomOut(id)
-                    // A plain push, so the back button undoes zoom naturally.
+                  focusBlockId={focusBlockId ?? null}
+                  onFocusNavigate={touching((id) => {
+                    revealOnLeaveFocus(id)
+                    // A plain push, so the back button undoes focus naturally.
                     navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
                   })}
                   noteTitle={note?.displayName ?? ""}

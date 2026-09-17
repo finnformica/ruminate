@@ -313,7 +313,7 @@ describe("docToOps", () => {
   })
 })
 
-describe("docToOps over a lazy or zoomed doc", () => {
+describe("docToOps over a lazy or focused doc", () => {
   const TWO =
     "- one\n  id:: blk_one0000000\n  - deep\n    id:: blk_deep000000\n    - deeper\n      id:: blk_deeper0000\n- two\n  id:: blk_two0000000\n"
 
@@ -338,10 +338,10 @@ describe("docToOps over a lazy or zoomed doc", () => {
     expect(parentIdsOf(after, "blk_deeper0000")).toEqual(["blk_deep000000"])
   })
 
-  it("zoomed: the block's subtree is diffed and the note node and root order are left alone", () => {
+  it("focused: the block's subtree is diffed and the note node and root order are left alone", () => {
     const snapshot = graphOf({ a: TWO })
     const { doc } = blockView("blk_one0000000", snapshot)!
-    // A rename of the zoom title, and a new child beneath it.
+    // A rename of the focus title, and a new child beneath it.
     let next = updateText(doc, "blk_one0000000", "renamed")
     next = insertAfter(next, "blk_one0000000/blk_deep000000", emptyBlock("ul", "added"))
     const ops = docToOps("a", next, snapshot, undefined, "blk_one0000000")
@@ -357,7 +357,7 @@ describe("docToOps over a lazy or zoomed doc", () => {
     expect(created && "notesId" in created && created.notesId).toBe("a")
   })
 
-  it("zoomed: an unchanged doc is no ops, and the zoom root cannot be unlinked from itself", () => {
+  it("focused: an unchanged doc is no ops, and the focus root cannot be unlinked from itself", () => {
     const snapshot = graphOf({ a: TWO })
     const { doc } = blockView("blk_one0000000", snapshot)!
     expect(docToOps("a", doc, snapshot, undefined, "blk_one0000000")).toEqual([])

@@ -6,7 +6,7 @@ import { touchNoteAtom } from "../global-state"
  * The note page's one seam for TOUCHING a note — what the palette's Recent
  * list is built from (`touchNoteAtom`, coalesced there). A note is touched
  * exactly when it is opened (this hook's mount, or `noteId` changing),
- * edited, a block in it folded or unfolded, or zoomed into — each an
+ * edited, a block in it folded or unfolded, or focused on — each an
  * editor callback the page wraps with `touching`. Never by selecting,
  * focusing or arrowing through it: reading a note is not touching it.
  */

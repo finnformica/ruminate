@@ -69,7 +69,7 @@ export function CommandMenu() {
   // on this device (`recentTouchesAtom`) — at most five; then the pinned
   // notes beneath, less any already listed as recent, so nothing is there
   // twice, and the pinned blocks after them (docs/metadata.md), each a row
-  // that opens its note zoomed into it.
+  // that opens its note focused on it.
   const sortedNotes = useAtomValue(sortedNotesAtom)
   const touches = useAtomValue(recentTouchesAtom)
   const recentNotes = useMemo(() => recentTouched(touches, sortedNotes), [touches, sortedNotes])
@@ -91,13 +91,13 @@ export function CommandMenu() {
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
 
   // The open note, if any: it leads the `in:` suggestions, and ⌘P searches
-  // its headings — or, zoomed into a block, the headings under that block.
+  // its headings — or, focused on a block, the headings under that block.
   const noteMatch = useMatch({ from: "/_appRoot/notes_/$", shouldThrow: false })
   const noteId = noteMatch?.params._splat
-  const zoomBlockId = noteMatch?.search?.block
+  const focusBlockId = noteMatch?.search?.block
   const headingsQuery = useMemo(
-    () => composeQuery(["type:heading", ...(noteId ? [`in:${zoomBlockId ?? noteId}`] : [])], ""),
-    [noteId, zoomBlockId],
+    () => composeQuery(["type:heading", ...(noteId ? [`in:${focusBlockId ?? noteId}`] : [])], ""),
+    [noteId, focusBlockId],
   )
 
   // Refs
@@ -282,7 +282,7 @@ export function CommandMenu() {
     return true
   }, [query, openResultsView])
 
-  // Open a result: the note, or the note zoomed to the block.
+  // Open a result: the note, or the note focused on the block.
   const openResult = useCallback(
     (noteId: string, blockId?: string) => {
       leave()

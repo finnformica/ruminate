@@ -169,11 +169,11 @@ describe("⌘P: the open note's headings", () => {
     })
   })
 
-  it("zoomed into a block, the headings under that block", () => {
-    mocks.match = { params: { _splat: "note-1" }, search: { block: "blk_zoom" } }
+  it("focused on a block, the headings under that block", () => {
+    mocks.match = { params: { _splat: "note-1" }, search: { block: "blk_focus" } }
     renderMenu()
     pressCmdP()
-    expect(pills()).toEqual(["type:heading", "blk_zoom"])
+    expect(pills()).toEqual(["type:heading", "blk_focus"])
   })
 
   it("with no note open, every heading", () => {
@@ -425,7 +425,7 @@ describe("block results", () => {
     expect(pills()).toEqual(["note-1"])
   })
 
-  it("↓ past the items hands the keyboard to the rows; Enter opens the note zoomed to the block", async () => {
+  it("↓ past the items hands the keyboard to the rows; Enter opens the note focused on the block", async () => {
     await openWithBlocks([NVIDIA])
     handOffToRows()
     // The first row is the highlight, as in a note.
@@ -640,7 +640,7 @@ describe("note results", () => {
   it("Pinned lists the pinned blocks after the pinned notes, each a row of its own", () => {
     // `journal` is pinned; so is the block `blk_ship` inside it. Nothing is
     // recent, so Pinned is the only group — and the block is a row that
-    // opens its note zoomed into it.
+    // opens its note focused on it.
     const journal = { ...makeNote("journal"), pinned: true }
     const ship = { id: "blk_ship", noteId: "journal", text: "ship it", note: journal }
     renderMenu({ open: true, notes: [journal], pinned: [journal], pinnedBlocks: [ship] })
@@ -797,7 +797,7 @@ describe("note results", () => {
     expect(rowIds()).toEqual(["research"])
   })
 
-  it("Enter on a note row opens the note whole — not zoomed to a block", async () => {
+  it("Enter on a note row opens the note whole — not focused on a block", async () => {
     await openWithNotes([RESEARCH])
     handOffToRows()
     fireEvent.keyDown(editor(), { key: "Enter" })

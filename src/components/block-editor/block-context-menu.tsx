@@ -25,7 +25,7 @@ import { DropdownMenu } from "../dropdown-menu"
  * its plain Delete leaves what the block held as new basket roots.
  *
  * **Pin** puts the block in the sidebar's Pinned list (docs/metadata.md),
- * from where it opens zoomed into; on a pinned block the item reads Unpin.
+ * from where it opens focused on; on a pinned block the item reads Unpin.
  *
  * Structure moves (indent, outdent, move up/down) are keyboard-only: the
  * menu is for what a pointer cannot already do. A finger cannot (no Tab on
@@ -63,12 +63,12 @@ export interface BlockMenuActions {
   moveUp: (key: string) => void
   moveDown: (key: string) => void
   toggleCollapse: (key: string) => void
-  zoomInto: (id: string) => void
+  focusBlock: (id: string) => void
   copy: (key: string) => void
   /** Absent when the editor has no note to link into (Storybook, tests). */
   copyLink?: (id: string) => void
   /** Pin this block — or unpin it, when it is (`target.pinned`): a pinned
-   * block is listed in the sidebar under Pinned and opens zoomed into.
+   * block is listed in the sidebar under Pinned and opens focused on.
    * Absent where the rows are not the user's own to pin. */
   pin?: (id: string) => void
   /** Share this block — and everything beneath it — with someone
@@ -317,8 +317,8 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
           {target.collapsed ? "Expand" : "Collapse"}
         </DropdownMenu.Item>
       ) : null}
-      <DropdownMenu.Item shortcut={["F"]} onClick={() => actions.zoomInto(id)}>
-        Zoom into
+      <DropdownMenu.Item shortcut={["F"]} onClick={() => actions.focusBlock(id)}>
+        Focus on
       </DropdownMenu.Item>
       <DropdownMenu.Item shortcut={["⌘", "C"]} onClick={() => actions.copy(key)}>
         Copy
