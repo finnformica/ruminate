@@ -248,20 +248,14 @@ export function countEntries(releases: ChangelogRelease[]): number {
 }
 
 /**
- * Fold a set of fragment sections into the release for `week`, creating that
- * release at the front if the week has none yet.
+ * Gather a set of sections into the release for `week`, creating that release
+ * at the front if the week has none yet.
  *
- * Shared by collation (`scripts/collate-changelog.ts`), which writes the
- * result back to `CHANGELOG.md`, and by the app, which does the same thing in
- * memory at build time so that entries still waiting to be folded are shown
- * anyway. Both must agree, or what a reader sees before collation runs would
- * differ from what they see after it.
- *
- * A fragment's entries go to the end of their category, after whatever the
- * week already holds: neither caller can judge which change matters most, and
- * the order entries landed in is at least a true one.
+ * Entries go to the end of their category, after whatever the week already
+ * holds: nothing here can judge which change matters most, and the order the
+ * files sort in is at least a stable one.
  */
-export function mergeFragments(
+function mergeFragments(
   releases: ChangelogRelease[],
   sections: ChangelogSection[],
   week: string,
@@ -282,6 +276,49 @@ export function mergeFragments(
   return existing
     ? releases.map((release) => (release.week === week ? merged : release))
     : [merged, ...releases]
+}
+
+/** The week a changelog file belongs to, taken from the folder holding it. */
+const WEEK_IN_PATH = /(\d{4}-W\d{2})/
+
+/**
+ * Collate the changelog files into releases, newest week first.
+ *
+ * Every entry lives in the file the branch that made the change wrote, under
+ * the week it was written in — `changelog/2026-W38/link-blocks.md`. Nothing is
+ * ever folded into a shared file, so two branches open at once write two
+ * different files and have nothing to conflict over. The single document a
+ * reader sees is made here, at the point of reading, rather than by a step
+ * somebody has to run.
+ *
+ * Within a week, files are taken in the order their names sort, and their
+ * categories merged into one of each. A file that does not parse is left out
+ * with its faults reported rather than allowed to break the page — CI refuses
+ * to let one through, so that is belt and braces.
+ */
+export function collateFiles(files: { path: string; text: string }[]): ParsedChangelog {
+  const problems: ChangelogProblem[] = []
+  const byWeek = new Map<string, ChangelogSection[]>()
+
+  for (const { path, text } of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
+    const week = WEEK_IN_PATH.exec(path)?.[1]
+    if (!week) {
+      problems.push({ line: 1, message: `"${path}" is not in a week's folder, so it is not read.` })
+      continue
+    }
+    const fragment = parseFragment(text)
+    if (fragment.problems.length > 0) {
+      problems.push(...fragment.problems)
+      continue
+    }
+    byWeek.set(week, [...(byWeek.get(week) ?? []), ...fragment.sections])
+  }
+
+  const releases = [...byWeek.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([week, sections]) => mergeFragments([], sections, week)[0])
+
+  return { releases, problems }
 }
 
 const TITLE = "# Changelog"

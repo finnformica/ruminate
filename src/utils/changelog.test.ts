@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest"
 import {
+  collateFiles,
   parseChangelog,
   countEntries,
   parseFragment,
@@ -289,5 +290,58 @@ describe("takeEntries", () => {
 
   test("a limit of none takes nothing", () => {
     expect(takeEntries(releases, 0)).toEqual([])
+  })
+})
+
+describe("collateFiles", () => {
+  const file = (path: string, text: string) => ({ path, text })
+
+  test("gathers each week's files into one release, newest week first", () => {
+    const { releases, problems } = collateFiles([
+      file("changelog/2026-W37/old.md", "### Added\n\n- Older thing.\n"),
+      file("changelog/2026-W38/a.md", "### Added\n\n- One thing.\n"),
+      file("changelog/2026-W38/b.md", "### Fixed\n\n- A fix.\n"),
+    ])
+    expect(problems).toEqual([])
+    expect(releases.map((release) => release.week)).toEqual(["2026-W38", "2026-W37"])
+    expect(releases[0].sections.map((section) => section.category)).toEqual(["Added", "Fixed"])
+  })
+
+  test("two files sharing a category are merged into one, in filename order", () => {
+    const { releases } = collateFiles([
+      file("changelog/2026-W38/b.md", "### Added\n\n- Second.\n"),
+      file("changelog/2026-W38/a.md", "### Added\n\n- First.\n"),
+    ])
+    expect(releases[0].sections).toHaveLength(1)
+    expect(releases[0].sections[0].entries.map((entry) => entry.lead)).toEqual([
+      "First.",
+      "Second.",
+    ])
+  })
+
+  test("categories come out in their canonical order, whatever the files say", () => {
+    const { releases } = collateFiles([
+      file("changelog/2026-W38/a.md", "### Fixed\n\n- A fix.\n"),
+      file("changelog/2026-W38/b.md", "### Added\n\n- A feature.\n"),
+    ])
+    expect(releases[0].sections.map((section) => section.category)).toEqual(["Added", "Fixed"])
+  })
+
+  test("a file outside a week's folder is reported, not read", () => {
+    const { releases, problems } = collateFiles([
+      file("changelog/stray.md", "### Added\n\n- Nowhere.\n"),
+    ])
+    expect(releases).toEqual([])
+    expect(problems[0].message).toContain("not in a week's folder")
+  })
+
+  test("a file that does not parse is left out, with its faults reported", () => {
+    const { releases, problems } = collateFiles([
+      file("changelog/2026-W38/bad.md", "### Improved\n\n- Wrong category.\n"),
+      file("changelog/2026-W38/good.md", "### Added\n\n- Fine.\n"),
+    ])
+    expect(problems[0].message).toContain("is not a category")
+    expect(releases).toHaveLength(1)
+    expect(releases[0].sections[0].entries[0].lead).toBe("Fine.")
   })
 })

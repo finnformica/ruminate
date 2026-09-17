@@ -1,26 +1,59 @@
 # The changelog
 
-`CHANGELOG.md` is a document and an interface. People read it on GitHub, and
-the app renders it: the changelog page at `/changelog`, and the what's-new
-card shown after an update. This is how that works.
+The changelog is a folder, not a file. Every change's entries live in the file
+the branch that made them wrote, under the week it was written in:
+
+```
+changelog/
+  2026-W38/
+    history.md          the week's entries as they stood at the migration
+    link-blocks.md      one branch's entries
+    whats-new-card.md   another's
+  2026-W37/
+    history.md
+```
+
+Nothing is ever folded, merged or moved. The single document a reader sees is
+assembled at the point of reading.
+
+## Why a folder
+
+A changelog that everybody appends to is a changelog everybody conflicts over.
+A release goes at the top of the file, so every branch open in the same week
+wants the same few lines, and two of them collide over entries that have
+nothing to do with each other — a merge conflict carrying no information, on a
+document whose whole purpose is to be read.
+
+Writing one file per change removes the shared lines, so the conflict cannot
+arise. Collating them at read time removes the step that would otherwise have
+to put them back together, and with it the machinery that step needed: a
+workflow, a bot, a token, and an argument with branch protection. There is
+nothing to run and nothing to remember.
+
+It also closes a gap. When entries had to be folded before they could be read,
+a build taken before the fold shipped an app whose changelog said nothing about
+the changes in it — and the reader who had just pressed **Update Ruminate**
+was told there was nothing new, which is the one moment the whole thing exists
+for. Now an entry is readable the moment it is written.
 
 ## The pieces
 
-|                                |                                                                               |
-| ------------------------------ | ----------------------------------------------------------------------------- |
-| `CHANGELOG.md`                 | The releases, newest first. The only source the app reads.                    |
-| `changelog.d/`                 | Entries waiting for a release, one file per branch (`changelog.d/README.md`). |
-| `src/utils/changelog.ts`       | The format as data: the parse, the limits, and the presentation helpers.      |
-| `scripts/check-changelog.ts`   | The CI gate over the changelog and every pending fragment.                    |
-| `scripts/collate-changelog.ts` | Folds fragments into a release, run on `main`.                                |
-| `.claude/skills/changelog`     | How to decide what belongs in an entry, and how to write it.                  |
+|                                 |                                                              |
+| ------------------------------- | ------------------------------------------------------------ |
+| `changelog/<week>/*.md`         | The entries. The only source.                                |
+| `src/utils/changelog.ts`        | The format as data: the parse, the limits, the collation.    |
+| `src/utils/changelog-source.ts` | The files, bundled at build time and collated.               |
+| `scripts/check-changelog.ts`    | The CI gate over every file.                                 |
+| `.claude/skills/changelog`      | How to decide what belongs in an entry, and how to write it. |
+| `CHANGELOG.md`                  | A stub pointing here. Nothing appends to it.                 |
 
 ## What a reader sees
 
-Two surfaces, from the same file:
+Two surfaces, from the same files:
 
 - **The changelog page** (`/changelog`), reached from **What's new** in the
-  sidebar. Every release down the side, one open beside it, entries in full.
+  sidebar. One continuous page of every release, entries in full, with the
+  weeks down the side marking the one being read and jumping to any other.
 - **The what's-new card**, which greets a device running a build it has not
   seen with the leads alone, a handful of them, and a way through to the page
   for the rest. It sits in the bottom corner beside the sidebar's own **What's
@@ -30,85 +63,61 @@ Two surfaces, from the same file:
 
 ## The format
 
-A release is an ISO week. Under it are Keep a Changelog categories — **Added**,
-**Changed**, **Deprecated**, **Removed**, **Fixed**, **Security** — each at
-most once, in that order, and under those the entries.
+A file holds Keep a Changelog categories — **Added**, **Changed**,
+**Deprecated**, **Removed**, **Fixed**, **Security** — each at most once, in
+that order, and under those the entries. There is no week heading inside a
+file: the folder says which week it is.
 
 ```markdown
-## 2026-W38
-
 ### Added
 
 - Pin a block. **Pin** in a block's right-click menu lists it in the sidebar.
 ```
 
 **An entry is a lead sentence and the detail behind it.** The lead runs to the
-first full stop and must stand on its own, because the what's-new card
-shows leads alone: an entry whose first sentence needs the rest of the bullet
-reads there as a fragment. The page shows both, the lead carrying the weight
-and the detail quieter beneath it, so a release can be read at either depth.
+first full stop and must stand on its own, because the what's-new card shows
+leads alone: an entry whose first sentence needs the rest of the bullet reads
+there as a fragment. The page shows both, the lead carrying the weight and the
+detail quieter beneath it, so a release can be read at either depth.
 
 Limits are measured as a reader sees them, not as characters in the file. A
 lead naming four shortcuts is short to read and long to store, and it is the
 reading the limits are about, so `<kbd>` keycaps, emphasis marks and a link's
 address do not count (`visibleLength`).
 
-## Entries that have not been folded yet
+## How they are collated
 
-A branch writes its entries to `changelog.d/`, and they reach `CHANGELOG.md`
-only once it lands on `main` and collation runs. A build taken before that —
-or while collation is blocked — would otherwise ship an app whose changelog
-says nothing about the very changes in it, and the reader who has just pressed
-**Update Ruminate** would be told there was nothing new. Which is the one
-moment the whole feature exists for.
+Files are grouped by the week in their path, taken in the order their names
+sort, and their categories merged into one of each in the canonical order.
+Weeks come out newest first.
 
-So the fold happens twice. For real on `main`, and again in memory at build
-time (`src/utils/changelog-source.ts`), where the pending fragments are
-bundled with the app and merged into the current week. Both use the same
-`mergeFragments`, so folding for real later changes nothing a reader sees: the
-same entries, in the same order, under the same week.
-
-Pending fragments count towards the build stamp too, week as well as hash. A
-stamp naming the older week would tell a device it had already seen entries it
-is about to be shown, and then show them a second time once collation folded
-them for real.
-
-## How it reaches the page
-
-`CHANGELOG.md` is imported for its text (`?raw`) in the route's loader, so it
-lands in that route's own chunk rather than in the app: it is a document nobody
-opens on most visits, and it only grows.
-
-The parse is lenient by design. It collects faults rather than throwing, and
-two headings for one category are reported once and then merged, so a file with
-a problem renders as much of itself as it can instead of blanking the page. CI
-is what makes such a file loud.
+The parse is lenient by design. It collects faults rather than throwing, and a
+file that does not parse is left out with its faults reported rather than
+allowed to break the page. CI is what makes such a file loud.
 
 `<kbd>` tags are not given to the markdown renderer. `toSegments` hands the
-text out in the runs between them, and the keys are drawn as keycaps by
-`Keys` (`src/components/keys.tsx`) — the one way the app shows a shortcut,
-here as everywhere else.
+text out in the runs between them, and the keys are drawn as keycaps by `Keys`
+(`src/components/keys.tsx`) — the one way the app shows a shortcut, here as
+everywhere else.
 
-## How it decides you have not seen it
+## How the card knows you have not seen it
 
-`__CHANGELOG_VERSION__` is a stamp built into the app: the newest release's
-week and a hash of the file (vite.config.ts). The week is what the comparison
-is made on, since it says which releases are new; the hash is there so two
-builds in the same week are not mistaken for one.
+`__CHANGELOG_VERSION__` is a stamp built into the app: the newest week's folder
+and a hash of every entry file (vite.config.ts). The week is what the
+comparison is made on, since it says which releases are new; the hash is there
+so two builds in the same week are not mistaken for one. A new entry moves the
+stamp the moment it is written.
 
 On boot, the card compares that stamp with the one this device stored last
 time. A device that has never stored one is on its first visit, so it stores
 the stamp and is shown nothing — a first visit has nothing to catch up on. A
 device whose stamp names an older week is shown the releases after it. A device
-whose stamp names the same week as the build, with a different hash, has read
-those entries already, so the stamp moves on without a word.
+whose stamp names the same week with a different hash has read those entries
+already, so the stamp moves on without a word.
 
-The stamp is a string in the app bundle, so answering the question costs
-nothing: only a device that is actually behind fetches the changelog.
-
-**The card is not tied to the Update Ruminate button.** That button applies
-the waiting service worker and reloads (`src/hooks/app-update.ts`), so there is
-no moment between the click and the new build in which anything could be shown:
+**The card is not tied to the Update Ruminate button.** That button applies the
+waiting service worker and reloads (`src/hooks/app-update.ts`), so there is no
+moment between the click and the new build in which anything could be shown:
 the page is about to be torn down. Asking the question on every boot instead
 also catches the reader whose waiting worker activated on its own after they
 closed every tab, which the button never sees.
@@ -120,17 +129,15 @@ flags and their audiences are not the changelog's business: almost nobody
 reading it is the admin, so an entry about them tells the overwhelming
 majority of readers about a door they cannot open, and quietly advertises
 where the controls are. `npm run check:changelog` fails on `admin`,
-`allowlist` and `feature flag`, in the changelog and in any pending fragment,
-so it is caught in the branch that wrote it. Such a change belongs in `docs/`
-or in its own pull request.
+`allowlist` and `feature flag`. Such a change belongs in `docs/` or in its own
+pull request.
 
 ## Writing an entry
 
-Never edit `CHANGELOG.md` on a branch: a release goes at the top of it, so two
-branches open in the same week conflict over entries that have nothing to do
-with each other. Write `changelog.d/<branch>.md` instead, and it is folded into
-the current week when the branch lands on `main`.
+Create `changelog/<week>/<your-branch>.md` — `date +%G-W%V` gives the week —
+and write the entries into it. Nothing else changes, and nothing needs folding
+afterwards.
 
-`npm run check:changelog` holds the changelog and every pending fragment to the
-same rules. `.claude/skills/changelog` is the guidance the rules cannot carry:
-what a reader would notice, and what belongs in `docs/` instead.
+`npm run check:changelog` holds every file to the same rules.
+`.claude/skills/changelog` is the guidance the rules cannot carry: what a
+reader would notice, and what belongs in `docs/` instead.
