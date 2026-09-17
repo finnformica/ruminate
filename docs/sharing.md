@@ -198,7 +198,7 @@ someone else's rows does not belong in it. So shared notes live in memory
 - **Reading a share without write**: the same block editor as the reader's
   own notes, with editing off (`BlockEditor.browse`): the highlight moves, a
   click highlights, folds open and close and are kept per device, the
-  default depth applies, `f` zooms. Nothing writes.
+  default depth applies, `f` focuses. Nothing writes.
 - **The note page is one page.** A shared note is the same components as
   the reader's own — `NoteTitle` and `BlockNoteEditor`, told they are
   read-only — never a second rendering of the title or the outline. What

@@ -127,7 +127,7 @@ export function NavItems({
           {/* The user's pinned BLOCKS (docs/metadata.md), between their notes
               and the notes shared with them: a pinned note is already at
               the top of the notes above, so this list is for blocks — each
-              opens its note zoomed into the block. */}
+              opens its note focused on the block. */}
           {pinnedBlocks.length > 0 ? (
             <div className="flex flex-col gap-1 pt-2">
               <SectionHeading>Pinned</SectionHeading>
@@ -321,7 +321,7 @@ function RowActions({ size, children }: { size: "medium" | "large"; children: Re
  * renders no inline markdown), or a stand-in for none. */
 const pinnedBlockLabel = (block: PinnedBlock): string => inlineText(block.text) || "Untitled block"
 
-/** The pinned blocks, as rows: each opens its note zoomed into the block. */
+/** The pinned blocks, as rows: each opens its note focused on the block. */
 function PinnedBlockRows({
   blocks,
   size,
@@ -351,7 +351,7 @@ function PinnedBlockRows({
 }
 
 /** A pinned block's row: the pin, and the block's text, with the note it
- * opens in as the row's tooltip. Current while its note is open zoomed
+ * opens in as the row's tooltip. Current while its note is open focused
  * into it — the row's own link, exactly. */
 function PinnedBlockNavItem({
   block,

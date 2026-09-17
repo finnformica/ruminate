@@ -46,7 +46,7 @@ export function ResultsList({
   query: string
   results: SearchResults
   /** What to list with no query at all (the palette's recent notes, or its
-   * pinned notes and blocks — a block root opens its note zoomed into it);
+   * pinned notes and blocks — a block root opens its note focused on it);
    * left out, every note the empty query resolved to. */
   browseRoots?: readonly ResultRoot[]
   /** How many rows to draw before **Load more**. */
@@ -58,7 +58,7 @@ export function ResultsList({
   /** The count line's inset: the page's flush line, or the palette's item
    * gutter. */
   variant?: "page" | "palette"
-  /** Open a note — zoomed to a block, when one is given. */
+  /** Open a note — focused on a block, when one is given. */
   onOpen: (noteId: NoteId, blockId?: string) => void
   /** Bump to highlight the first row (↓ from the query box). */
   focusFirstSignal?: number

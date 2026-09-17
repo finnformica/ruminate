@@ -25,7 +25,7 @@ import { DropdownMenu } from "../dropdown-menu"
  * its plain Delete leaves what the block held as new basket roots.
  *
  * **Pin** puts the block in the sidebar's Pinned list (docs/metadata.md),
- * from where it opens zoomed into; on a pinned block the item reads Unpin.
+ * from where it opens focused on; on a pinned block the item reads Unpin.
  *
  * The structure moves (indent, outdent, move up/down) are in the menu with
  * their keys beside them. A mouse could leave them to the keyboard, but a
@@ -63,12 +63,12 @@ export interface BlockMenuActions {
   moveUp: (key: string) => void
   moveDown: (key: string) => void
   toggleCollapse: (key: string) => void
-  zoomInto: (id: string) => void
+  focusBlock: (id: string) => void
   copy: (key: string) => void
   /** Absent when the editor has no note to link into (Storybook, tests). */
   copyLink?: (id: string) => void
   /** Pin this block — or unpin it, when it is (`target.pinned`): a pinned
-   * block is listed in the sidebar under Pinned and opens zoomed into.
+   * block is listed in the sidebar under Pinned and opens focused on.
    * Absent where the rows are not the user's own to pin. */
   pin?: (id: string) => void
   /** Share this block — and everything beneath it — with someone
@@ -308,7 +308,7 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
       onSelect: () => actions.toggleCollapse(key),
     })
   }
-  item({ label: "Zoom into", shortcut: ["F"], onSelect: () => actions.zoomInto(id) })
+  item({ label: "Focus on", shortcut: ["F"], onSelect: () => actions.focusBlock(id) })
   item({ label: "Copy", shortcut: ["⌘", "C"], onSelect: () => actions.copy(key) })
   if (actions.copyLink)
     item({ label: "Copy link to block", onSelect: () => actions.copyLink?.(id) })

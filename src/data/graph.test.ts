@@ -907,7 +907,7 @@ describe("walkGraph upstream (the graph, not the tree)", () => {
 
   it("folds and levels apply upstream as they do down", () => {
     const byDepth = (levels: number) => (_key: string, level: number) => level < levels
-    // Zoomed into s (level 0), one level: its parents a and p are level 1 —
+    // Focused on s (level 0), one level: its parents a and p are level 1 —
     // rows with a chevron (each has a parent of its own beneath it), not
     // walked, so the notes above them are not built.
     const one = blockView("blk_s", graph(), byDepth(1), "both")!

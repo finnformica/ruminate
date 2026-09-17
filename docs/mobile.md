@@ -18,7 +18,7 @@ keyboard that appears and disappears. The block editor
   `caret.ts`); where the rendered text differs from the stored text (`**bold**`,
   a link) the caret goes to the end. The whole row is the tap target — the
   marker gap and the row's padding, not only the words — so a short line is as
-  easy to hit as a long one. The chevron, the checkbox, the zoom dot and links
+  easy to hit as a long one. The chevron, the checkbox, the focus dot and links
   keep their own taps.
 - **The block menu is a sheet, on a long press.** A press-and-hold (a finger
   down on a row that stays put for 450ms, timed by the editor itself) opens
@@ -123,7 +123,7 @@ keyboard that appears and disappears. The block editor
   is WebKit not re-reading the attribute when focus is moved by script while
   the keyboard is already up — a known quirk with no page-side fix.)
 - **Chrome is sized for a finger.** The collapse chevron always shows (nothing
-  to hover with) at a 10px glyph on a 32px square; the zoom dot's hit area is
+  to hover with) at a 10px glyph on a 32px square; the focus dot's hit area is
   26px; the todo checkbox grows its hit area through a pseudo-element; the
   type scale steps body text up and display sizes down
   (`src/styles/variables.css`).
@@ -171,11 +171,11 @@ there.
 
 Found while working through the editor; none is fixed here.
 
-1. **Pinch zoom is disabled.** The viewport meta says `user-scalable=no`, which
-   also suppresses Safari's zoom-on-focus for inputs under 16px. WCAG 1.4.4
-   asks for zoom; the usual replacement is `touch-action: manipulation` on the
-   editor (kills the double-tap zoom delay) with scaling allowed and inputs at
-   16px or more, so the focus zoom never fires.
+1. **Pinch focus is disabled.** The viewport meta says `user-scalable=no`, which
+   also suppresses Safari's focus-on-focus for inputs under 16px. WCAG 1.4.4
+   asks for focus; the usual replacement is `touch-action: manipulation` on the
+   editor (kills the double-tap focus delay) with scaling allowed and inputs at
+   16px or more, so the focus focus never fires.
 2. **Popups under the keyboard.** The slash menu hangs beneath the `/`, and the
    ⌘K dialog is `max-h-[75vh]` from the top. With an overlaying keyboard (iOS)
    either can sit under it. Both would want to be positioned against the

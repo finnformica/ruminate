@@ -328,7 +328,7 @@
 }
 
 /* ── Header pull ─────────────────────────────────────────────────────────────
- * The note's header — its title, the zoom breadcrumb and the zoom title —
+ * The note's header — its title, the focus breadcrumb and the focus title —
  * hangs into the page gutter, so the outline reads as indented beneath it
  * rather than the title as one more row at the text column. The page says
  * how far (`--note-header-pull`, set on its padded wrapper; unset means the

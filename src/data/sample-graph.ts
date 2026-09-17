@@ -51,7 +51,7 @@ const NOTES: SampleNote[] = [
       b(
         "blk_welcome003",
         "ul",
-        "🌱 **Plant**: Capture notes as blocks — an outline you can fold, zoom into and rearrange. Your data is never locked in.",
+        "🌱 **Plant**: Capture notes as blocks — an outline you can fold, focus on and rearrange. Your data is never locked in.",
       ),
       b(
         "blk_welcome004",
@@ -62,7 +62,13 @@ const NOTES: SampleNote[] = [
         "blk_welcome005",
         "ul",
         "🧑‍🌾 **Harvest**: Access your notes from any device, even offline. Use Ruminate's flexible search syntax to find what you're looking for.",
-        [b("blk_welcome006", "todo", "Try folding this list, or press F on a block to zoom in")],
+        [
+          b(
+            "blk_welcome006",
+            "todo",
+            "Try folding this list, or press F on a block to focus on it",
+          ),
+        ],
       ),
       b(
         "blk_welcome007",

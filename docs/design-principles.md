@@ -155,7 +155,7 @@ asks for it.
    column, in the glyph ink with rounded ends, and pushes the quote's text
    10px in — the one block whose text is set in from the column.
    The grey `#` is one component (`Hash`) everywhere it appears — note title,
-   zoom title, section headings — with no typography of its own: it inherits
+   focus title, section headings — with no typography of its own: it inherits
    its parent's scale (the titles' 3xl, each heading's depth size and bold),
    so the hash is always the same size as the text beside it, only recolored
    to tertiary. A large heading's hash outgrows the slot and overflows left,
@@ -171,7 +171,7 @@ asks for it.
    Controls (checkbox, chevron) keep their own. The note title's
    hash sits in the same slot, so the title is set exactly as the outline's
    top heading — but the title is not a row. On a wide page the whole header
-   (title, zoom breadcrumb, zoom title) hangs into the page gutter by the
+   (title, focus breadcrumb, focus title) hangs into the page gutter by the
    marker-slot offset (`.note-header` + `--note-header-pull`,
    block-editor.css; the page sets it with its padding), so the header's
    text sits at the content column's edge, the hash in the gutter beside it,
@@ -179,8 +179,8 @@ asks for it.
    as one more row. The pull is the page's to grant: it needs the 40px
    gutter, so a narrow page (16–20px) leaves the header at the text column.
    The rows never take it — the text column does not move. Unlike the bullet
-   and number the hash is NOT a zoom target — it reads as typography, and
-   zoom stays on F / Cmd+. and the bullet/number clicks (on leaves; a
+   and number the hash is NOT a focus target — it reads as typography, and
+   focus stays on F / Cmd+. and the bullet/number clicks (on leaves; a
    parent's key is its collapse toggle).
 
 ## Type scale
@@ -202,15 +202,15 @@ outline depth, not by `#` count:
 The deepest heading keeps a soft underline (`--neutral-a6`, offset 4px) so it
 still reads as a heading at body size without shouting. The floor is
 deliberately **uniform**: every heading at depth 3+ renders identically, and
-the 24px indent (plus breadcrumbs when zoomed) carries the hierarchy from
+the 24px indent (plus breadcrumbs when focused) carries the hierarchy from
 there — piling on case/color/weight steps at the bottom of the outline would
 promote chrome over content.
 
-Zooming re-derives depth: the zoomed block's children start again at depth 0,
-so a level-4 heading reads as a top-level section inside its own zoomed view.
+Focusing re-derives depth: the focused block's children start again at depth 0,
+so a level-4 heading reads as a top-level section inside its own focused view.
 
-**Only a heading becomes the view's title** (`titlesZoom`, `src/blocks/markers.ts`).
-A heading already names what hangs beneath it, so the zoom title _is_ the note
+**Only a heading becomes the view's title** (`titlesFocus`, `src/blocks/markers.ts`).
+A heading already names what hangs beneath it, so the focus title _is_ the note
 title: the editor draws it with the same `NoteTitle` component the page draws
 the note's title with — 3xl, the hanging `#`, the same highlight and the same
 keys — fed the block's text instead of the note's. It is not a row: the rows
@@ -219,7 +219,7 @@ keyboard up to the title as it would to the note title (`exitTop`), Enter on
 the title makes the block's first child, and renaming it is a text edit of the
 block. Only its text reads as the title — the heading `#` belongs to its row
 in the outline — and a heading whose text is more than one plain line reads as
-the title but is edited in its own row, un-zoomed. It hangs into the gutter
+the title but is edited in its own row, outside focus. It hangs into the gutter
 with the breadcrumb above it (`.note-header`), so its children read as
 indented beneath it.
 
@@ -230,7 +230,7 @@ to-do stops looking done-able, a picture becomes its caption — and a code
 block has nothing a one-line field could edit. So the view draws no title at
 all: the focused block is the first row, at depth 0, exactly as it is drawn
 anywhere else, with its subtree indented beneath it. The breadcrumb alone says
-where you are, and everything below the leading row reads as it does un-zoomed.
+where you are, and everything below the leading row reads as it does outside focus.
 
 ## Spacing
 
@@ -251,13 +251,13 @@ where you are, and everything below the leading row reads as it does un-zoomed.
   square sits evenly inside. Block
   rhythm is untouched: the surface borrows the space between rows, it never
   adds any. The text column is sacred; surfaces flex around it.
-- **Header pull:** the note title, the zoom breadcrumb and the zoom title
+- **Header pull:** the note title, the focus breadcrumb and the focus title
   hang into the page gutter by `--note-header-pull` (`.note-header`,
   block-editor.css): 27px — the marker-slot offset — once the page's gutter
   is 40px (`@[640px]`), else 0. A plain negative margin on the header alone,
   so the header's text moves to the column's edge and nothing in the rows
   does. The breadcrumb hangs by the same amount, so its first crumb's text
-  keeps starting where the marker slot does — the zoom title's `#`.
+  keeps starting where the marker slot does — the focus title's `#`.
 - **Vertical extension is conditional, per side.** The inter-row gap is 4px
   between nested rows and 6px between roots, so surfaces may only grow as far
   as their neighbour's paint allows. By default each side extends 2px
@@ -279,7 +279,7 @@ where you are, and everything below the leading row reads as it does un-zoomed.
   surface (the wash is computed-solid, so the overlap is seamless): corners where two selected surfaces meet go straight (the same
   `selectionRunEdges` map in `block-editor.tsx` drives both the extension and
   the squared corners), rounded only at the run's top and bottom. A heading's
-  top margin (or the zoom title's bottom margin) keeps a real gap, so those
+  top margin (or the focus title's bottom margin) keeps a real gap, so those
   boundaries stay rounded — and those sides fall back to the 2px extension.
 
 ## Radius family
@@ -403,7 +403,7 @@ An empty block **being edited** carries a ghost placeholder — “Ruminate…�
 at placeholder rank (`--color-text-tertiary`), as the textarea's native
 `placeholder`. It is a quiet brand prompt, not teaching — the turn-into keys
 live in the `?` reference — and it appears only there: never in view mode,
-never in read-only views, never on the zoomed title (a page title, not a
+never in read-only views, never on the focused title (a page title, not a
 block). It must not move layout — the empty row is clamped to one line
 (`1lh`), so a placeholder that would wrap on a narrow screen clips instead of
 growing the row.
@@ -416,7 +416,7 @@ Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`,
 | What                                    | How                                                                                                                                            |
 | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | Hover affordances                       | opacity 150ms ease-out                                                                                                                         |
-| Hover surfaces (crumbs, marker zoom)    | background/color 150ms ease                                                                                                                    |
+| Hover surfaces (crumbs, focus dot)      | background/color 150ms ease                                                                                                                    |
 | Block line hover (neutral)              | background-color 100ms ease                                                                                                                    |
 | Selection highlight                     | background-color + color + box-shadow 100ms ease                                                                                               |
 | Chevron rotation                        | transform 300ms ease-in-out, in step with the fold                                                                                             |
@@ -463,7 +463,7 @@ row, always show. Reduced motion swaps the motion for a short fade.
 **What never animates:**
 
 - Anything keyboard-initiated that repeats constantly: moving the selection with
-  arrows gets only the 100ms color fade (perceptually instant), zoom (`F`)
+  arrows gets only the 100ms color fade (perceptually instant), focus (`F`)
   swaps views instantly, the command palette opens with no entrance
   animation.
 - Layout. Only `opacity`, `transform` and colors transition — never

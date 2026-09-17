@@ -42,7 +42,7 @@ export function NoteTitle({
   /** The note's current title; empty means untitled. */
   title: string
   onRename: (name: string) => boolean
-  /** What the field is, for assistive tech — the zoom title names the block. */
+  /** What the field is, for assistive tech — the focus title names the block. */
   label?: string
   /**
    * Down-arrow returns focus to the editor below. The mode mirrors the title's

@@ -199,7 +199,7 @@ describe("ResultsEditor (browsing the notes list)", () => {
     press("ArrowDown")
     press("ArrowRight")
     expect(rowIds()).toEqual(["research", "blk_semis", "blk_gpus", "blk_milk", "journal"])
-    // Enter opens the note zoomed to the highlighted block…
+    // Enter opens the note focused on the highlighted block…
     press("Enter")
     expect(onOpen).toHaveBeenLastCalledWith("research", "blk_semis")
     // …and on the note row, the note whole.

@@ -117,7 +117,7 @@ export interface BlockDoc {
   /**
    * The parents of the doc's own root, when that root is not a block in the
    * doc (a note's doc: the blocks holding the note), walked upstream — rows
-   * at the top level after the roots. Absent otherwise; a zoomed doc's root
+   * at the top level after the roots. Absent otherwise; a focused doc's root
    * is a block, and carries its own `upstream`.
    */
   upstream?: string[]

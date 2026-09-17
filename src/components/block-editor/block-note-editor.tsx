@@ -8,7 +8,7 @@ import { deleteBlockOps, deleteSubtreeOps, parentCount } from "../../data/ops"
 import { useApplyOps } from "../../data/store"
 import { useFoldRule } from "../../data/view-state"
 import { collapsedKeysOf } from "../../blocks/default-collapsed"
-import { titlesZoom } from "../../blocks/markers"
+import { titlesFocus } from "../../blocks/markers"
 import { graphSnapshotAtom, isDatabaseModeAtom } from "../../global-state"
 import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
 import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
@@ -39,24 +39,24 @@ function ensureTrailingBlank(doc: BlockDoc): BlockDoc {
 }
 
 /**
- * The zoomed-view stand-in for `ensureTrailingBlank`: while zoomed we don't
- * append root-level blanks (they'd be invisible below the zoomed subtree);
- * instead we only make sure the zoom root has at least one child to edit when
- * the zoom *starts* (e.g. zooming into a leaf). Deleting the last child later
+ * The focused-view stand-in for `ensureTrailingBlank`: while focused we don't
+ * append root-level blanks (they'd be invisible below the focused subtree);
+ * instead we only make sure the focus root has at least one child to edit when
+ * the focus *starts* (e.g. focusing on a leaf). Deleting the last child later
  * is allowed — the title alone is a valid view (Enter on it creates a child).
  *
- * Only where the block is drawn as the view's title (`titlesZoom`): a block
+ * Only where the block is drawn as the view's title (`titlesFocus`): a block
  * that leads the view as its own first row is already something to edit, and
  * minting a blank child under it would put a block in the note for nothing
  * more than having looked at one.
  */
-function ensureZoomChild(doc: BlockDoc, zoomId: string): BlockDoc {
-  const root = doc.blocks[zoomId]
-  if (!root || root.children.length > 0 || !titlesZoom(root.type)) return doc
+function ensureFocusChild(doc: BlockDoc, focusId: string): BlockDoc {
+  const root = doc.blocks[focusId]
+  if (!root || root.children.length > 0 || !titlesFocus(root.type)) return doc
   const block = emptyBlock()
   return {
     ...doc,
-    blocks: { ...doc.blocks, [block.id]: block, [zoomId]: { ...root, children: [block.id] } },
+    blocks: { ...doc.blocks, [block.id]: block, [focusId]: { ...root, children: [block.id] } },
   }
 }
 
@@ -84,8 +84,8 @@ export function BlockNoteEditor({
   refocusSignal,
   readOnly = false,
   browse = false,
-  zoomBlockId = null,
-  onZoomNavigate,
+  focusBlockId = null,
+  onFocusNavigate,
   noteTitle,
   collapseKey,
   folds,
@@ -133,14 +133,14 @@ export function BlockNoteEditor({
   refocusSignal?: number
   /** Display-only: render the note as read-only blocks (e.g. past-day history). */
   readOnly?: boolean
-  /** Read-only, but still the reader's to move through, fold and zoom — a
+  /** Read-only, but still the reader's to move through, fold and focus — a
    * note someone shared with them (`BlockEditor.browse`). */
   browse?: boolean
-  /** Block id the editor is zoomed into (`?block=` search param), or null. */
-  zoomBlockId?: string | null
-  /** Zoom navigation (crumbs, F/Shift+F, bullet clicks) — updates the URL. */
-  onZoomNavigate?: (id: string | null) => void
-  /** The note's title, shown as the breadcrumb's first crumb while zoomed. */
+  /** Block id the editor is focused on (`?block=` search param), or null. */
+  focusBlockId?: string | null
+  /** Focus navigation (crumbs, F/Shift+F, bullet clicks) — updates the URL. */
+  onFocusNavigate?: (id: string | null) => void
+  /** The note's title, shown as the breadcrumb's first crumb while focused. */
   noteTitle?: string
   /** Where this editor's folds are kept, when not under the note's own id —
    * a second editor on the page (the Unassigned basket) keeps its own. */
@@ -156,12 +156,12 @@ export function BlockNoteEditor({
   rowRemoval?: "unlink" | "delete"
 }) {
   // Read-only history views are shown verbatim; only editable notes get the
-  // always-present trailing blank — and not while zoomed, where the doc's
-  // one root is the zoomed block: a blank beside it would be a root the
-  // note never holds (`ensureZoomChild` is the zoomed rule).
+  // always-present trailing blank — and not while focused, where the doc's
+  // one root is the focused block: a blank beside it would be a root the
+  // note never holds (`ensureFocusChild` is the focus rule).
   const seedDoc = (incoming: BlockDoc) => {
     const seeded = withStarterBlock(incoming)
-    return readOnly || !trailingBlank || zoomBlockId ? seeded : ensureTrailingBlank(seeded)
+    return readOnly || !trailingBlank || focusBlockId ? seeded : ensureTrailingBlank(seeded)
   }
 
   const [doc, setDoc] = useState<BlockDoc>(() => seedDoc(incoming))
@@ -196,10 +196,10 @@ export function BlockNoteEditor({
   }
 
   const handleChange = (next: BlockDoc, hint?: ChangeHint) => {
-    // While zoomed, the trailing-blank rule is suspended (a root-level blank
-    // would be invisible below the zoomed subtree) — see `ensureZoomChild`.
+    // While focused, the trailing-blank rule is suspended (a root-level blank
+    // would be invisible below the focused subtree) — see `ensureFocusChild`.
     const withBlank =
-      readOnly || !trailingBlank ? next : zoomBlockId ? next : ensureTrailingBlank(next)
+      readOnly || !trailingBlank ? next : focusBlockId ? next : ensureTrailingBlank(next)
     setDoc(withBlank)
     setLastDoc(withBlank)
     onChange(withBlank, hint)
@@ -264,20 +264,20 @@ export function BlockNoteEditor({
     }
   }, [debugFlags, upstreamIndex])
 
-  // Entering a zoom (mount-with-param or navigation) on a childless block adds
+  // Entering a focus (mount-with-param or navigation) on a childless block adds
   // one empty child so there's something to edit under the title.
   const docRef = useRef(doc)
   docRef.current = doc
   useEffect(() => {
-    if (readOnly || !zoomBlockId) return
+    if (readOnly || !focusBlockId) return
     const current = docRef.current
-    const ensured = ensureZoomChild(current, zoomBlockId)
+    const ensured = ensureFocusChild(current, focusBlockId)
     if (ensured === current) return
     setDoc(ensured)
     setLastDoc(ensured)
     onChange(ensured)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zoomBlockId, readOnly])
+  }, [focusBlockId, readOnly])
 
   return (
     <BlockEditor
@@ -294,8 +294,8 @@ export function BlockNoteEditor({
       refocusSignal={refocusSignal}
       readOnly={readOnly}
       browse={browse}
-      zoomRootId={zoomBlockId}
-      onZoomNavigate={onZoomNavigate}
+      focusRootId={focusBlockId}
+      onFocusNavigate={onFocusNavigate}
       noteTitle={noteTitle}
       resolveBlocks={resolveBlocks}
       debug={debug}

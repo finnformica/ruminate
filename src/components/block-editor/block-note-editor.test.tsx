@@ -96,21 +96,21 @@ describe("BlockNoteEditor onToggleCollapse", () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it("a zoom reaches the page through onZoomNavigate — which the page counts as a touch", () => {
-    const onZoomNavigate = vi.fn()
+  it("a focus reaches the page through onFocusNavigate — which the page counts as a touch", () => {
+    const onFocusNavigate = vi.fn()
     const { container, getByText } = render(
       <BlockNoteEditor
         noteId="n"
         doc={parse(OUTLINE)}
         onChange={() => {}}
-        onZoomNavigate={onZoomNavigate}
+        onFocusNavigate={onFocusNavigate}
       />,
     )
     fireEvent.click(getByText("parent"))
     const editor = container.querySelector<HTMLElement>("[data-block-editor]")!
     fireEvent.keyDown(editor, { key: "f" })
-    expect(onZoomNavigate).toHaveBeenCalledTimes(1)
-    expect(typeof onZoomNavigate.mock.calls[0][0]).toBe("string")
+    expect(onFocusNavigate).toHaveBeenCalledTimes(1)
+    expect(typeof onFocusNavigate.mock.calls[0][0]).toBe("string")
   })
 
   it("is not told of a selection — a click on a row, or the arrows through it", () => {
@@ -164,7 +164,7 @@ describe("the last row of a doc without a trailing blank (the basket)", () => {
   })
 })
 
-describe("zoomed", () => {
+describe("focused", () => {
   const occurrences = (container: HTMLElement) =>
     Array.from(container.querySelectorAll("[data-occurrence]")).map(
       (el) => (el as HTMLElement).dataset.occurrence,
@@ -179,11 +179,11 @@ describe("zoomed", () => {
     },
   })
 
-  it("seeds no trailing blank beside the zoomed root, and adds a first child only to a leaf heading", () => {
+  it("seeds no trailing blank beside the focused root, and adds a first child only to a leaf heading", () => {
     const rooted = rootedDoc("h1")
     const onChange = vi.fn()
     const { container } = render(
-      <BlockNoteEditor doc={rooted} onChange={onChange} noteId="n" zoomBlockId="r" />,
+      <BlockNoteEditor doc={rooted} onChange={onChange} noteId="n" focusBlockId="r" />,
     )
     // Titled: the rows are r's children alone; nothing was written.
     expect(occurrences(container)).toEqual(["r/x"])
@@ -191,18 +191,18 @@ describe("zoomed", () => {
 
     const leaf: BlockDoc = { ...rooted, blocks: { r: { ...rooted.blocks.r, children: [] } } }
     const onLeafChange = vi.fn()
-    render(<BlockNoteEditor doc={leaf} onChange={onLeafChange} noteId="n" zoomBlockId="r" />)
+    render(<BlockNoteEditor doc={leaf} onChange={onLeafChange} noteId="n" focusBlockId="r" />)
     expect(onLeafChange).toHaveBeenCalledTimes(1)
     const ensured = onLeafChange.mock.calls[0][0] as BlockDoc
     expect(ensured.rootBlockIds).toEqual(["r"])
     expect(ensured.blocks.r.children).toHaveLength(1)
   })
 
-  it("writes nothing at all where the zoomed block leads the view as a row", () => {
+  it("writes nothing at all where the focused block leads the view as a row", () => {
     const rooted = rootedDoc("text")
     const onChange = vi.fn()
     const { container } = render(
-      <BlockNoteEditor doc={rooted} onChange={onChange} noteId="n" zoomBlockId="r" />,
+      <BlockNoteEditor doc={rooted} onChange={onChange} noteId="n" focusBlockId="r" />,
     )
     // Untitled: the block itself is the first row, its child beneath it.
     expect(occurrences(container)).toEqual(["r", "r/x"])
@@ -213,7 +213,7 @@ describe("zoomed", () => {
     const leaf: BlockDoc = { ...rooted, blocks: { r: { ...rooted.blocks.r, children: [] } } }
     const onLeafChange = vi.fn()
     const leafView = render(
-      <BlockNoteEditor doc={leaf} onChange={onLeafChange} noteId="n" zoomBlockId="r" />,
+      <BlockNoteEditor doc={leaf} onChange={onLeafChange} noteId="n" focusBlockId="r" />,
     )
     expect(onLeafChange).not.toHaveBeenCalled()
     expect(occurrences(leafView.container)).toEqual(["r"])
