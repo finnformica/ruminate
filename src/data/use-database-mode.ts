@@ -4,7 +4,7 @@ import { useEvent, useNetworkState } from "react-use"
 import { githubUserAtom, signOutAtom } from "../global-state"
 import { sessionStatusAtom } from "../utils/github-session"
 import { requestAmbientDatabasePull, startDatabaseMode, stopDatabaseMode } from "./database-mode"
-import { refreshFeatures, resetFeatures } from "./features"
+import { refreshFeatures, resetFeatures, seedFeatures } from "./features"
 import { requestAmbientSharesRefresh, startSharedMode, stopSharedMode } from "./shared-mode"
 
 /**
@@ -49,7 +49,10 @@ export function useDatabaseMode() {
     // own corpus (src/data/shared-mode.ts) and stop with it.
     startSharedMode()
     // The feature flags for this account (src/data/features.ts): what the
-    // Settings panels and the menus draw. Fetched once per sign-in.
+    // Settings panels, the menus and the Admin link draw. The last answer
+    // stands from the start — offline, that is all there is — and the
+    // server's is fetched once per sign-in, again when the network returns.
+    seedFeatures(owner)
     void refreshFeatures()
     return () => {
       resetFeatures()
@@ -84,6 +87,7 @@ export function useDatabaseMode() {
     if (active) {
       requestAmbientDatabasePull()
       requestAmbientSharesRefresh()
+      void refreshFeatures()
     }
   })
 }

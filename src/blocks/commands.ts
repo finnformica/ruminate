@@ -782,12 +782,15 @@ export const COMMANDS: Record<CommandName, Command> = {
     if (!focusKey && focusRootId && focusTitled !== false) {
       return { handled: true, doc: next, op: STRUCTURAL, exitTop: true }
     }
-    return {
-      handled: true,
-      doc: next,
-      op: STRUCTURAL,
-      focus: { mode: "select", key: focusKey ?? next.rootBlockIds[0] ?? null },
-    }
+    const landing = focusKey ?? next.rootBlockIds[0] ?? null
+    // Run while editing (the touch screen's edit bar), the edit carries on
+    // in the row that takes the deleted one's place — the keyboard stays up
+    // for the next delete — rather than dropping to a highlight.
+    const focus: FocusIntent =
+      landing !== null && input.mode === "edit"
+        ? { mode: "edit", key: landing }
+        : { mode: "select", key: landing }
+    return { handled: true, doc: next, op: STRUCTURAL, focus }
   },
 
   /** Toggle a todo's checkbox from select mode (no-op on other blocks):
