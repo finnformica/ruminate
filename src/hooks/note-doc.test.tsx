@@ -85,6 +85,33 @@ describe("useNoteDoc, filtered", () => {
     unsubscribe()
   })
 
+  it("speaks the whole query language, because the search engine answers it", async () => {
+    const { wrapper, unsubscribe } = await signedOutStore(NOTE)
+    const read = (filter: string) => {
+      const { result } = renderNote(wrapper, filter)
+      return rows(result.current.doc, result.current.context)
+    }
+    // `type:` on the block, an exclusion, a comma list, and free text — each
+    // meaning here exactly what it means in the search box.
+    expect(read("type:task")).toEqual(["~Shopping", "  milk", "  bread"])
+    expect(read("type:task -type:done")).toEqual(["~Shopping", "  milk"])
+    expect(read("type:todo,done")).toEqual(["~Shopping", "  milk", "  bread"])
+    expect(read("book")).toEqual(["~Reading", "  a book"])
+    // `in:` scopes to a subtree, as it does in a search.
+    expect(read("type:task in:blk_shop000000")).toEqual(["~Shopping", "  milk", "  bread"])
+    expect(read("type:task in:blk_read000000")).toEqual([])
+    unsubscribe()
+  })
+
+  it("keeps a note-level qualifier honest: the whole note, or none of it", async () => {
+    const { wrapper, unsubscribe } = await signedOutStore(NOTE)
+    const { result: hit } = renderNote(wrapper, "type:todo title:Note")
+    expect(rows(hit.current.doc, hit.current.context)).toEqual(["~Shopping", "  milk"])
+    const { result: miss } = renderNote(wrapper, "type:todo title:Nothing")
+    expect(rows(miss.current.doc, miss.current.context)).toEqual([])
+    unsubscribe()
+  })
+
   it("leaves the note whole when nothing is filtered", async () => {
     const { wrapper, unsubscribe } = await signedOutStore(NOTE)
     const { result } = renderNote(wrapper)

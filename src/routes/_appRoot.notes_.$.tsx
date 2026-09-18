@@ -430,6 +430,11 @@ function NotePage() {
                 </Button>
               </div>
             ) : null}
+            <SortMenu
+              sort={sort}
+              onSortChange={(next) => setNarrowing({ sort: next })}
+              dirty={sortDirty}
+            />
             <FilterMenu
               filter={filter}
               onFilterChange={(next) => setNarrowing({ filter: next })}
@@ -440,11 +445,6 @@ function NotePage() {
                 navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
               })}
               dirty={filterDirty}
-            />
-            <SortMenu
-              sort={sort}
-              onSortChange={(next) => setNarrowing({ sort: next })}
-              dirty={sortDirty}
             />
             <NoteActionsMenu
               noteId={noteId ?? ""}

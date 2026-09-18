@@ -129,8 +129,10 @@ describe("the qualifier popover", () => {
   it("sort: picks the key, then the direction, then lands as a pill", () => {
     const { input, onChange } = renderBox()
     type(input, "sort:")
-    expect(options().map((row) => row.textContent)).toEqual(["Title", "Updated at"])
-    fireEvent.keyDown(input, { key: "ArrowDown" })
+    expect(options().map((row) => row.textContent)).toEqual(["Text", "Type", "Title", "Updated at"])
+    // Narrow to the one key, then take it.
+    type(input, "sort:up")
+    expect(options().map((row) => row.textContent)).toEqual(["Updated at"])
     fireEvent.keyDown(input, { key: "Enter" })
     // The key is half a value: it stays in the line, and the picker moves
     // on to the directions.

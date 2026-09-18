@@ -9,7 +9,8 @@ import { NOTE_TYPE, blockView, noteView, type LinkDirections } from "../data/gra
 import { notePropsOps } from "../data/note-meta"
 import { docToOps } from "../data/ops"
 import { useApplyOps } from "../data/store"
-import { graphSnapshotAtom } from "../global-state"
+import { blockIndexAtom, graphSnapshotAtom } from "../global-state"
+import { viewNarrowing } from "../utils/view-narrowing"
 import type { NoteId } from "../schema"
 
 const NOTHING_COLLAPSED: ReadonlySet<string> = new Set()
@@ -74,7 +75,15 @@ export function useNoteDoc({
   const store = useStore()
   const apply = useApplyOps()
 
-  const narrowed = isNarrowed({ filter, sort })
+  // What the filter and the sort come to, answered by the SEARCH engine —
+  // one vocabulary and one comparator for the header's menus and the query
+  // box alike (`src/utils/view-narrowing.ts`).
+  const index = useAtomValue(blockIndexAtom)
+  const narrowing = useMemo(
+    () => viewNarrowing({ filter, sort, noteId, index }),
+    [filter, sort, noteId, index],
+  )
+  const narrowed = isNarrowed(narrowing)
   const view = useMemo<FilteredView | null>(() => {
     if (noteId === undefined) return null
     // A narrowed view is walked EAGERLY: whether a branch survives depends on
@@ -88,8 +97,8 @@ export function useNoteDoc({
     // Focused, the root block is the view's title rather than one of its
     // rows, so the filter runs over what is inside it and never takes it
     // away (`keepRoots`).
-    return filteredView(base, { filter, sort, keepRoots: focused !== null })
-  }, [noteId, focusBlockId, snapshot, expanded, directions, narrowed, filter, sort])
+    return filteredView(base, narrowing, { keepRoots: focused !== null })
+  }, [noteId, focusBlockId, snapshot, expanded, directions, narrowed, narrowing])
   // Whether the doc is rooted at the focused block (the note node is then not
   // this doc's to write).
   const rootId = focusBlockId && view?.doc.rootBlockIds[0] === focusBlockId ? focusBlockId : null

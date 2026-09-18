@@ -148,7 +148,15 @@ function named(value: string): QualifierOption {
 
 /** The keys a query can sort by, as the picker offers them. `id` still
  * works typed; it is not offered, an id being opaque (docs/graph-storage.md). */
-const SORT_KEYS = ["title", "updated_at"]
+/**
+ * The sort keys that order a BLOCK by something of its own — what a note's
+ * Sort menu offers (`src/components/view-controls.tsx`), and what
+ * `compareBlockHits` implements directly. The rest below belong to the
+ * containing note, so within one note they tie and reorder nothing.
+ */
+export const BLOCK_SORT_KEYS: readonly string[] = ["text", "type"]
+
+const SORT_KEYS = [...BLOCK_SORT_KEYS, "title", "updated_at"]
 
 /**
  * The `sort:` rows, in two steps. Before a colon in the partial, the keys

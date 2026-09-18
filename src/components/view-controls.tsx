@@ -1,25 +1,31 @@
+import React from "react"
 import { cx } from "../utils/cx"
 import {
-  FILTER_TYPE_OPTIONS,
-  SORT_KEYS,
+  clearFilterKey,
+  describeBranch,
   describeFilter,
   describeSort,
-  filterTypes,
-  toggleFilterType,
+  filterBranches,
+  filterValues,
+  sortBranches,
+  sortDirections,
+  toggleFilterValue,
 } from "../utils/view-filter"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
 import { FilterIcon16, NoteIcon16, SortAlphabetAscIcon16 } from "./icons"
 
 /**
- * **The note header's Filter and Sort, beside its ⋯ menu.**
+ * **The note header's Sort and Filter, beside its ⋯ menu.**
  *
  * Both write the query language (docs/query-language.md): Filter sets the
  * view's `filter` (`type:todo`), Sort its `sort` (`text:desc`), and the page
- * narrows the walk by them (`src/data/filter-view.ts`). Each menu branches
- * the way typing branches — a top-level row per qualifier, its values in the
- * submenu — so the menu and the query box offer the same vocabulary and a
- * filter set here can be read, and typed, by hand.
+ * narrows the walk by them through the search engine
+ * (`src/utils/view-narrowing.ts`). Each menu branches the way typing
+ * branches — a top-level row per qualifier, its values in the submenu — and
+ * both the keys and the values are read from the query box's own picker
+ * vocabulary (`src/utils/view-filter.ts`), so the menu and the box can never
+ * offer different things.
  *
  * A button carries a **dot** when what is on screen differs from what the
  * block's pin saved (docs/metadata.md): the view is showing something the
@@ -43,6 +49,17 @@ function DirtyDot() {
   )
 }
 
+/** A value row: its markdown glyph where it has one (a `type:` row), so the
+ * menu reads as the query box's picker does. */
+function ValueGlyph({ glyph }: { glyph?: string }) {
+  if (!glyph) return null
+  return (
+    <span aria-hidden className="w-6 shrink-0 whitespace-nowrap font-mono text-text-tertiary">
+      {glyph}
+    </span>
+  )
+}
+
 export function FilterMenu({
   filter,
   onFilterChange,
@@ -63,8 +80,10 @@ export function FilterMenu({
   /** Whether this differs from what the pin saved. */
   dirty?: boolean
 }) {
-  const types = filterTypes(filter)
+  // Built once a render: `date:` resolves its shortcuts against the clock.
+  const branches = React.useMemo(() => filterBranches(), [])
   const summary = describeFilter(filter)
+  const active = summary !== ""
   const rootedAt = roots.find((root) => root.id === focusBlockId)
 
   return (
@@ -75,52 +94,49 @@ export function FilterMenu({
             aria-label={summary ? `Filter: ${summary}` : "Filter"}
             size="small"
             disableTooltip
-            className={cx("relative shrink-0", types.length > 0 && "text-text")}
+            className="relative shrink-0"
           >
-            <FilterIcon16 className={cx(types.length > 0 && "text-text")} />
+            <FilterIcon16 className={cx(active && "text-text")} />
             {dirty ? <DirtyDot /> : null}
           </IconButton>
         }
       />
       <DropdownMenu.Content align="end">
-        {/* `type:` — which kinds of row the view keeps. Several at once is a
-            comma list, exactly as it is typed. */}
-        <DropdownMenu.Submenu>
-          <DropdownMenu.SubmenuTrigger
-            icon={<FilterIcon16 />}
-            value={types.length > 0 ? describeFilter(filter) : "Any"}
-          >
-            Type
-          </DropdownMenu.SubmenuTrigger>
-          <DropdownMenu.Content align="start" side="left">
-            <DropdownMenu.Item
-              selected={types.length === 0}
-              closeOnClick={false}
-              onClick={() => onFilterChange("")}
-            >
-              Any
-            </DropdownMenu.Item>
-            <DropdownMenu.Separator />
-            {FILTER_TYPE_OPTIONS.map((option) => (
-              <DropdownMenu.Item
-                key={option.value}
-                selected={types.includes(option.value)}
-                closeOnClick={false}
-                icon={
-                  <span
-                    aria-hidden
-                    className="w-6 shrink-0 whitespace-nowrap font-mono text-text-tertiary"
+        {/* One branch per qualifier the query language has — the query box's
+            own keys and values, in its own order. */}
+        {branches.map((branch) => {
+          const chosen = filterValues(filter, branch.key)
+          return (
+            <DropdownMenu.Submenu key={branch.key}>
+              <DropdownMenu.SubmenuTrigger value={describeBranch(filter, branch) || "Any"}>
+                {branch.label}
+              </DropdownMenu.SubmenuTrigger>
+              <DropdownMenu.Content align="start" side="left">
+                <DropdownMenu.Item
+                  selected={chosen.length === 0}
+                  closeOnClick={false}
+                  onClick={() => onFilterChange(clearFilterKey(filter, branch.key))}
+                >
+                  Any
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator />
+                {branch.options.map((option) => (
+                  <DropdownMenu.Item
+                    key={option.value}
+                    selected={chosen.includes(option.value)}
+                    closeOnClick={false}
+                    icon={option.glyph ? <ValueGlyph glyph={option.glyph} /> : undefined}
+                    onClick={() =>
+                      onFilterChange(toggleFilterValue(filter, branch.key, option.value))
+                    }
                   >
-                    {option.glyph}
-                  </span>
-                }
-                onClick={() => onFilterChange(toggleFilterType(filter, option.value))}
-              >
-                {option.label ?? option.value}
-              </DropdownMenu.Item>
-            ))}
-          </DropdownMenu.Content>
-        </DropdownMenu.Submenu>
+                    {option.label ?? option.value}
+                  </DropdownMenu.Item>
+                ))}
+              </DropdownMenu.Content>
+            </DropdownMenu.Submenu>
+          )
+        })}
 
         {/* `in:` — where the view starts. Inside a note that is focusing, so
             picking one is the same navigation the bullet and `f` do. */}
@@ -169,7 +185,7 @@ export function SortMenu({
   dirty?: boolean
 }) {
   const summary = describeSort(sort)
-  const active = sort.trim() !== ""
+  const active = summary !== ""
   const [key, direction] = sort
     .trim()
     .replace(/^sort:/, "")
@@ -197,27 +213,31 @@ export function SortMenu({
         </DropdownMenu.Item>
         <DropdownMenu.Separator />
         {/* One branch per key, its directions inside — the two steps the
-            query box's `sort:` picker walks through. */}
-        {SORT_KEYS.map((option) => (
+            query box's `sort:` picker walks through, from the same source. */}
+        {sortBranches().map((option) => (
           <DropdownMenu.Submenu key={option.value}>
             <DropdownMenu.SubmenuTrigger
-              value={key === option.value ? (direction === "desc" ? "Z–A" : "A–Z") : undefined}
+              value={
+                key === option.value
+                  ? direction === "desc"
+                    ? "Descending"
+                    : "Ascending"
+                  : undefined
+              }
             >
-              {option.label}
+              {option.label ?? option.value}
             </DropdownMenu.SubmenuTrigger>
-            <DropdownMenu.Content align="start" side="left" width={180}>
-              <DropdownMenu.Item
-                selected={key === option.value && direction !== "desc"}
-                onClick={() => onSortChange(option.value)}
-              >
-                Ascending
-              </DropdownMenu.Item>
-              <DropdownMenu.Item
-                selected={key === option.value && direction === "desc"}
-                onClick={() => onSortChange(`${option.value}:desc`)}
-              >
-                Descending
-              </DropdownMenu.Item>
+            <DropdownMenu.Content align="start" side="left" width={200}>
+              {sortDirections(option.value).map((step) => (
+                <DropdownMenu.Item
+                  key={step.value}
+                  selected={sort.trim().replace(/^sort:/, "") === step.value}
+                  icon={<ValueGlyph glyph={step.glyph} />}
+                  onClick={() => onSortChange(step.value)}
+                >
+                  {step.label ?? step.value}
+                </DropdownMenu.Item>
+              ))}
             </DropdownMenu.Content>
           </DropdownMenu.Submenu>
         ))}

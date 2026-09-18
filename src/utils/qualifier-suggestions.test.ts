@@ -118,6 +118,10 @@ describe("sort: and date: vocabularies", () => {
   test("sort: offers the keys first, and a picked key opens on its directions", () => {
     const keys = sortQualifierOptions("")
     expect(keys.map((option) => [option.value, option.label])).toEqual([
+      // The block's own keys first (`BLOCK_SORT_KEYS` — what a note's Sort
+      // menu offers too), then the containing note's.
+      ["text", "Text"],
+      ["type", "Type"],
       ["title", "Title"],
       ["updated_at", "Updated at"],
     ])
@@ -125,7 +129,7 @@ describe("sort: and date: vocabularies", () => {
     // A key is half a value: the pick writes it with a colon and no space,
     // so the picker stays open on the second step.
     const atKey = atEnd("sort:up")
-    expect(applyQualifierOption("sort:up", atKey!, keys[1])).toEqual({
+    expect(applyQualifierOption("sort:up", atKey!, keys[3])).toEqual({
       value: "sort:updated_at:",
       caret: 16,
     })

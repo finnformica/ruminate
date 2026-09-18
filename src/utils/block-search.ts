@@ -215,19 +215,6 @@ export function createBlockIndexer(
   }
 }
 
-/** Is `value` block vocabulary — a `type:` value that names block types
- * (`todo`, `heading`, `list`…) rather than a note type (`daily`)? */
-export function isBlockTypeValue(value: string): boolean {
-  return value in BLOCK_TYPE_VALUES
-}
-
-/** Does a block of type `type` match the `type:` query value `value`? The
- * one table behind the qualifier, the corpus index and the in-note filter
- * (`src/data/filter-view.ts`). */
-export function blockTypeMatches(value: string, type: BlockType): boolean {
-  return BLOCK_TYPE_VALUES[value]?.includes(type) ?? false
-}
-
 function testBlockTypeFilter(filter: Filter, hit: BlockHit): boolean {
   const match = filter.values.some((value) => BLOCK_TYPE_VALUES[value]?.includes(hit.type) ?? false)
   return filter.exclude ? !match : match
@@ -267,12 +254,23 @@ const collator = new Intl.Collator(undefined, {
   ignorePunctuation: true,
 })
 
-function compareBlockHits(a: BlockHit, b: BlockHit, sorts: Sort[]): number {
+/**
+ * Two block hits on a list of sort keys, left to right — the one comparator
+ * behind a search's `sort:` and a note's Sort menu
+ * (`src/utils/view-narrowing.ts`), so a key means the same thing in both.
+ */
+export function compareBlockHits(a: BlockHit, b: BlockHit, sorts: Sort[]): number {
   for (const sort of sorts) {
     let result = 0
     switch (sort.key) {
       case "text":
         result = collator.compare(a.text, b.text)
+        break
+      case "type":
+        // Groups the to-dos together, then the headings, then the rest —
+        // ordered by the stored type's name, which is the one the `type:`
+        // vocabulary is built from.
+        result = collator.compare(a.type, b.type)
         break
       case "updated":
       case "updated_at":
