@@ -369,7 +369,14 @@ function PinnedBlockNavItem({
     <Link
       to="/notes/$"
       params={{ _splat: block.noteId }}
-      search={{ query: undefined, block: block.id }}
+      // The pin opens the block WITH what it saved: a pinned view comes
+      // back as it was left, filter and sort included (docs/metadata.md).
+      search={{
+        query: undefined,
+        block: block.id,
+        filter: block.filter || undefined,
+        sort: block.sort || undefined,
+      }}
       activeOptions={{ exact: true, includeSearch: true }}
       data-size={size}
       className={cx("nav-item", className)}

@@ -66,6 +66,23 @@ The rows are just the values, capitalised (a block type beside its glyph): no he
 
 Focus never leaves the box: keep typing to narrow the list, <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>↵</kbd> or <kbd>Tab</kbd> to pick (a note lands as its id; a value with spaces is quoted), <kbd>Esc</kbd> to leave what you typed. `-type:` and comma lists (`type:todo,done`) work the same way. On a phone, or in a narrow box, the popover takes the box's full width instead of hanging at the token.
 
+## Filtering a note in place
+
+The query language also narrows a note **where it stands**, rather than resolving to a list of results elsewhere. **Filter** and **Sort** sit beside the **⋯** menu at the top right of a note (and of a focused block):
+
+- The rows that match stay. The rows above a match are kept as **context** and drawn dimmed — so you can see which heading a to-do lives under without that heading pretending to be a result. A branch holding no match is dropped.
+- Everything beneath a match is kept as context too: a to-do you filtered to is still the to-do with its notes underneath.
+- It is drawn by the block editor, from the note's own doc, so the markers, the typography, the folds and the keys are the note page's — a filtered note is the note, shorter, never a second kind of list.
+- The filter and the sort live in the URL (`?filter=type:todo&sort=text:desc`), so a narrowed view is a link, and the back button takes the narrowing off.
+
+**What a filter may say.** Only the qualifiers that mean something about a block itself: `type:` with a block-type value (`type:todo`, `-type:done`, `type:todo,done`) and free text, which fuzzy-matches the block's own text at the same threshold corpus-wide search uses. Note-level qualifiers (`date:`, a property, `has:` / `no:`) are ignored — every row in the view is in the same note, so they would match all of it or none of it. `in:` is not a filter here either: it names the view's **root**, which the menu applies by focusing on that block.
+
+**What a sort may say.** `text` and `type`, each `:asc` (the default) or `:desc`, several comma-separated and applied left to right. A sort reorders each parent's **children** and leaves the nesting alone: a filtered outline is still an outline, and a single order over a tree is not something a reader can follow. Document order is the default, and the absence of a sort. A row with nothing to sort on goes last whichever way the sort runs.
+
+**A narrowed view edits its rows, not the note's shape.** Tick a to-do, retype a line, change a block's properties — those land in the graph as they always do. Structure does not: a narrowed view holds only the rows that survived, in the order the sort put them, so reconciling it against the graph would read every hidden row as removed. New rows, indents, removals and reorders belong to the note, which is one click away with the filter cleared. For the same reason a narrowed view has no trailing blank row to type into.
+
+A pinned block can save a filter and a sort of its own, so a pin becomes a view — see [metadata.md](./metadata.md).
+
 ## Block types
 
 `type:` with a block-type value resolves the query at _block_ granularity. For example, `type:todo` finds every unchecked checkbox in your notes.
