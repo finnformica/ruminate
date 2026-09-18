@@ -24,7 +24,9 @@ Date-valued properties put the note on the calendar for that date. Any property 
 
 A pinned block can also carry a `filter` and a `sort` — the narrowing a note's header applies (see [query-language.md](./query-language.md), "Filtering a note in place"). With them the pin is not just a place but a **view**: "the open to-dos under this heading" rather than "this heading". Opening the row from the sidebar applies them, so it comes back as it was left.
 
-They are only ever written on purpose. Changing the filter or sort of a pinned block puts a dot on the button that moved and offers **Update to default** (write what is on screen onto the pin) and **Reset to default** (put the pin's own back) — so a filter tried out in passing never overwrites the saved one. Both keys are absent when the pin saved none, and removed again by updating with the view cleared.
+They are only ever written on purpose. Changing the filter or sort of a pinned block puts a dot on the header button that moved, and that button's menu grows a footer offering **Update to default** (write what is on screen onto the pin) and **Reset to default** (put the pin's own back) — so a filter tried out in passing never overwrites the saved one.
+
+The dot says which half moved; the buttons act on the **whole view**. A pin holds one view, so settling it from the Sort menu keeps whatever the filter is set to, and the other way round. Both keys are absent when the pin saved none, and removed again by updating with the view cleared.
 
 ## No frontmatter
 

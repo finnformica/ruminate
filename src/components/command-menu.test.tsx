@@ -848,7 +848,8 @@ describe("qualifier suggestions", () => {
     // Picked: the filter is a pill, the line is clear for the words, the
     // picker is gone.
     expect(input.value).toBe("")
-    expect(pills()).toEqual(["type:done"])
+    // One row down from the first (`text`, `SEARCH_FAMILY_ORDER`).
+    expect(pills()).toEqual(["type:todo"])
     expect(mocks.navigate).not.toHaveBeenCalled()
     expect(screen.queryByTestId("qualifier-suggestions")).toBeNull()
   })

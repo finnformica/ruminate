@@ -95,6 +95,7 @@ A pinned block can save a filter and a sort of its own, so a pin becomes a view 
 
 | Value           | Matches                                                   |
 | :-------------- | :-------------------------------------------------------- |
+| `text`          | plain paragraph                                           |
 | `todo`          | unchecked checkbox                                        |
 | `done`          | checked checkbox                                          |
 | `task`          | any checkbox, checked or not                              |
@@ -107,7 +108,6 @@ A pinned block can save a filter and a sort of its own, so a pin becomes a view 
 | `code`          | a code block (or a fenced line in old notes)              |
 | `image`         | an image block (docs/images.md); text matches its caption |
 | `link`          | a link block (docs/links.md); text matches its title      |
-| `text`          | plain paragraph                                           |
 
 Block queries compose with everything else: note-level qualifiers filter by the containing note (`type:todo area:work` = open todos in notes whose `area` property is `work`), `in:` scopes to a note or a block's subtree, fuzzy text matches the block's own text (`type:todo milk`), `-type:done` excludes, and `sort:updated` orders blocks by their note's last update, most recent first.
 

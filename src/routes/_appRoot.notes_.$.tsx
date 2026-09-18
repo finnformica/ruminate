@@ -3,7 +3,6 @@ import { useAtomValue, useStore } from "jotai"
 import React, { useEffect, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import useResizeObserver from "use-resize-observer"
-import { Button } from "../components/button"
 import { Calendar } from "../components/calendar"
 import { CalendarHeader } from "../components/calendar-header"
 import { DaysOfWeek } from "../components/days-of-week"
@@ -350,6 +349,13 @@ function NotePage() {
     if (!pinnedDefaults) return
     setNarrowing({ filter: pinnedDefaults.filter, sort: pinnedDefaults.sort })
   }, [pinnedDefaults, setNarrowing])
+  // Both menus are handed the same pair: a pin holds ONE view, so settling
+  // it from the Sort menu must keep the filter that is set, and the other
+  // way round. Only the dot differs, which says which half moved.
+  const pinnedActions = React.useMemo(
+    () => ({ onUpdateDefault: updatePinnedDefault, onResetDefault: resetToPinnedDefault }),
+    [updatePinnedDefault, resetToPinnedDefault],
+  )
 
   // Retitle the current note. Since ids are minted, this sets one property and
   // nothing else moves — no new id, no navigation, no broken links. Returns
@@ -417,23 +423,10 @@ function NotePage() {
           ) : null}
 
           <div className="flex items-center">
-            {/* The pin's filter and sort are only ever changed on purpose:
-                while the view differs from what it saved, the header says so
-                and offers both ways out. */}
-            {filterDirty || sortDirty ? (
-              <div className="flex items-center gap-1 pr-1 print:hidden">
-                <Button size="small" onClick={updatePinnedDefault}>
-                  Update to default
-                </Button>
-                <Button size="small" onClick={resetToPinnedDefault}>
-                  Reset to default
-                </Button>
-              </div>
-            ) : null}
             <SortMenu
               sort={sort}
               onSortChange={(next) => setNarrowing({ sort: next })}
-              dirty={sortDirty}
+              pinned={pinnedDefaults ? { ...pinnedActions, dirty: sortDirty } : undefined}
             />
             <FilterMenu
               filter={filter}
@@ -444,7 +437,7 @@ function NotePage() {
                 revealOnLeaveFocus(id)
                 navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
               })}
-              dirty={filterDirty}
+              pinned={pinnedDefaults ? { ...pinnedActions, dirty: filterDirty } : undefined}
             />
             <NoteActionsMenu
               noteId={noteId ?? ""}

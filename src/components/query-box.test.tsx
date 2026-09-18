@@ -188,8 +188,11 @@ describe("the qualifier popover", () => {
       ordered: "1.",
       quote: ">",
       code: "```",
-      image: "![]",
-      link: "[]()",
+      // An image and a link block show an ICON instead: their markdown is
+      // punctuation (`![]`, `[]()`) rather than a marker, which reads as
+      // noise in a list of markers.
+      image: null,
+      link: null,
       text: "¶",
       note: null,
       daily: null,
@@ -384,7 +387,8 @@ describe("the box around the query", () => {
     type(input, "type:")
     fireEvent.keyDown(input, { key: "Enter" })
     expect(onSubmit).not.toHaveBeenCalled()
-    expect(pillTokens()).toEqual(["type:todo"])
+    // The first row of the `type:` picker — a plain paragraph.
+    expect(pillTokens()).toEqual(["type:text"])
     fireEvent.keyDown(input, { key: "Enter" })
     expect(onSubmit).toHaveBeenCalledTimes(1)
   })

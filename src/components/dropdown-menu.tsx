@@ -12,6 +12,13 @@ type ContentProps = {
   width?: number | string
   children?: React.ReactNode
   className?: string
+  /**
+   * A strip pinned beneath the items, outside the scroller — for an action
+   * about the menu as a whole rather than one of its rows (the note
+   * header's **Update to default** / **Reset to default**). Left out, the
+   * menu is its items and nothing else.
+   */
+  footer?: React.ReactNode
 }
 
 function Content({
@@ -22,6 +29,7 @@ function Content({
   width = 256,
   children,
   className,
+  footer,
 }: ContentProps) {
   return (
     <Menu.Portal>
@@ -35,6 +43,7 @@ function Content({
           style={{ width }}
         >
           <div className="grid max-h-[45svh] scroll-py-1 overflow-auto p-1">{children}</div>
+          {footer ? <div className="border-t border-border-secondary p-1.5">{footer}</div> : null}
         </Menu.Popup>
       </Menu.Positioner>
     </Menu.Portal>
@@ -151,7 +160,9 @@ const SubmenuTrigger = React.forwardRef<HTMLDivElement, SubmenuTriggerProps>(
         {icon ? <div className="flex text-text-secondary">{icon}</div> : null}
         <span className="grow truncate">{children}</span>
       </div>
-      {value ? <span className="shrink-0 truncate text-text-secondary">{value}</span> : null}
+      {value ? (
+        <span className="min-w-0 max-w-[55%] shrink truncate text-text-secondary">{value}</span>
+      ) : null}
       <ChevronRightIcon12 className="shrink-0 text-text-tertiary" />
     </Menu.SubmenuTrigger>
   ),

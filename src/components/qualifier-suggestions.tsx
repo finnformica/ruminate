@@ -14,7 +14,7 @@ import {
   type QualifierOption,
   type QualifierTrigger,
 } from "../utils/qualifier-suggestions"
-import { CalendarIcon16, NoteIcon16 } from "./icons"
+import { CalendarIcon16, ImageIcon16, LinkIcon16, NoteIcon16 } from "./icons"
 import { NoteFavicon } from "./note-favicon"
 
 /**
@@ -193,13 +193,68 @@ export function useQualifierSuggestions({
   }
 }
 
-/** The note types' icons for the `type:` picker, where a block type shows
- * its markdown glyph. */
-const NOTE_TYPE_ICONS: Record<string, React.ReactNode> = {
+/**
+ * The `type:` values that show an ICON rather than a markdown glyph: the
+ * note types, which have no markdown at all, and the two block types whose
+ * markdown is punctuation rather than a marker — an image and a link block,
+ * drawn with the icons the mobile edit bar uses for them, since `![]` and
+ * `[]()` read as noise in a list of markers.
+ */
+const TYPE_VALUE_ICONS: Record<string, React.ReactNode> = {
   note: <NoteIcon16 />,
   template: <NoteIcon16 />,
   daily: <CalendarIcon16 />,
   weekly: <CalendarIcon16 />,
+  image: <ImageIcon16 />,
+  link: <LinkIcon16 />,
+}
+
+/**
+ * What a row shows in its leading slot: a note's favicon, a `type:` value's
+ * icon where it has one, else its markdown glyph (a block type's marker, a
+ * sort direction's arrow). Null when the row has no picture.
+ *
+ * The one place this is decided, for the query box's picker and the note
+ * header's Filter menu alike (`src/components/view-controls.tsx`).
+ */
+function qualifierPicture(item: SuggestionItem, qualifierKey: string): React.ReactNode {
+  if (item.note) return <NoteFavicon note={item.note} />
+  if (qualifierKey === "type" && TYPE_VALUE_ICONS[item.value]) return TYPE_VALUE_ICONS[item.value]
+  if (item.glyph)
+    return (
+      <span aria-hidden data-glyph={item.glyph} className="font-mono text-text-tertiary">
+        {item.glyph}
+      </span>
+    )
+  return null
+}
+
+/** Whether any row of `items` has a picture — the slot is drawn on every row
+ * or on none, so the labels line up. */
+export function anyQualifierPicture(
+  items: readonly SuggestionItem[],
+  qualifierKey: string,
+): boolean {
+  return items.some((item) => qualifierPicture(item, qualifierKey) !== null)
+}
+
+/**
+ * The leading slot itself: one fixed box with its content CENTRED, so a
+ * three-character glyph (`[x]`), a one-character one (`#`) and a 16px icon
+ * all sit on the same axis down the list.
+ */
+export function QualifierPicture({
+  item,
+  qualifierKey,
+}: {
+  item: SuggestionItem
+  qualifierKey: string
+}) {
+  return (
+    <span className="grid h-4 w-6 shrink-0 place-items-center text-sm text-text-secondary">
+      {qualifierPicture(item, qualifierKey)}
+    </span>
+  )
 }
 
 /** The DOM id of one row of the listbox. */
@@ -297,9 +352,7 @@ export function QualifierPopover({
 
   // Whether any row has something for the leading slot: the slot is drawn
   // on every row or on none, so the labels line up.
-  const pictured = items.some(
-    (item) => item.note || item.glyph || (trigger.key === "type" && NOTE_TYPE_ICONS[item.value]),
-  )
+  const pictured = anyQualifierPicture(items, trigger.key)
 
   return (
     <div
@@ -322,15 +375,6 @@ export function QualifierPopover({
     >
       {items.map((item, index) => {
         const active = index === activeIndex
-        const picture = item.note ? (
-          <NoteFavicon note={item.note} />
-        ) : item.glyph ? (
-          <span aria-hidden data-glyph={item.glyph} className="font-mono text-text-tertiary">
-            {item.glyph}
-          </span>
-        ) : trigger.key === "type" ? (
-          NOTE_TYPE_ICONS[item.value]
-        ) : null
         return (
           // Keyboard handling lives on the input (arrows / Enter / Esc); a row
           // only needs the pointer.
@@ -353,11 +397,7 @@ export function QualifierPopover({
                 glyph, a note type's icon, a sort direction's arrow. A list
                 with no pictures at all (`has:`, the sort keys) has no slot,
                 so its labels start at the edge. */}
-            {pictured ? (
-              <span className="grid h-4 w-6 shrink-0 place-items-center text-sm text-text-secondary">
-                {picture}
-              </span>
-            ) : null}
+            {pictured ? <QualifierPicture item={item} qualifierKey={trigger.key} /> : null}
             <span className="min-w-0 grow truncate">{item.label ?? item.value}</span>
           </div>
         )
