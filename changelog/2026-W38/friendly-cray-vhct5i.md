@@ -7,4 +7,6 @@
 
 - Notes are sorted by name rather than by when you last touched them. Sorting by recent activity meant the note you were typing in climbed to the top while you were looking at it, so both lists reshuffled as you worked. Choose **Recently updated** in the new sort control to have the old behaviour back.
 - The notes page splits your notes into the same sections as the sidebar. **Pinned**, **Notes** and **Shared** were one undifferentiated list, with nothing to tell your own notes from the ones shared with you. Searching still returns a single list, ranked by how well each result matches.
+- **Pinned** heads both the sidebar and the notes page, and holds pinned notes and pinned blocks together. Pinned notes used to sit at the top of the notes with a marker, while pinned blocks had a list of their own further down — so what you had kept to hand was in two places, neither of them first.
+- A pinned note keeps its place in the notes list as well. Pinning no longer lifts a note to the top, so the order is entirely the one you sorted or dragged into, and any note can be dragged anywhere.
 - **What's new** is called **Changelog**, and sits with **Help** at the foot of the sidebar. The two of them explain the app, so they are together now, below the places you can go.

@@ -451,8 +451,14 @@ are all of its call sites:
 The sort itself is a preference, not data: **Name** (the default), **Recently
 updated** and **Manual**, shared by the sidebar and the notes page so the two
 never disagree about where a note is. Manual is two bands — the notes the root
-holds, then the ones it does not, in the name order beneath them. Pinned notes
-lead the list in every sort.
+holds, then the ones it does not, in the name order beneath them.
+
+**A pin does not steer the order.** Pinned notes are listed on their own under
+**Pinned**, above the notes and alongside the pinned blocks, and they keep
+their sorted place in the notes list as well — a pin is a second place to
+reach a note, never a note lifted out of the order. That is what lets the
+order be wholly the user's: no band interrupts the manual sequence, and a drag
+has no boundary to be stopped at.
 
 ## Cross-file block-id dedup
 

@@ -54,6 +54,7 @@ vi.mock("../global-state", async (importOriginal) => {
     isBootingAtom: atom(false),
     isSignedOutAtom: atom(false),
     pinnedBlocksAtom: atom([]),
+    pinnedNotesAtom: atom([]),
     sharedNotesAtom: atom([]),
     // Derived from the graph in the real module; a plain writable atom here,
     // so a test can state the rows and be about the list rather than the sort.
@@ -62,7 +63,13 @@ vi.mock("../global-state", async (importOriginal) => {
   }
 })
 
-import { noteSortAtom, ownSortedNotesAtom, type NoteSort } from "../global-state"
+import {
+  noteSortAtom,
+  ownSortedNotesAtom,
+  pinnedBlocksAtom,
+  pinnedNotesAtom,
+  type NoteSort,
+} from "../global-state"
 import { NavItems } from "./nav-items"
 
 const noteOf = (id: string, name: string, pinned = false): Note =>
@@ -83,9 +90,21 @@ const noteOf = (id: string, name: string, pinned = false): Note =>
 afterEach(cleanup)
 beforeEach(() => mocks.moveNote.mockClear())
 
-function renderSidebar({ notes, sort = "manual" }: { notes: Note[]; sort?: NoteSort }) {
+function renderSidebar({
+  notes,
+  sort = "manual",
+  pinnedNotes = [],
+  pinnedBlocks = [],
+}: {
+  notes: Note[]
+  sort?: NoteSort
+  pinnedNotes?: Note[]
+  pinnedBlocks?: { id: string; noteId: string; text: string; note: Note }[]
+}) {
   const store = createStore()
   store.set(noteSortAtom, sort)
+  store.set(pinnedNotesAtom as never, pinnedNotes as never)
+  store.set(pinnedBlocksAtom as never, pinnedBlocks as never)
   // The sidebar reads its rows from `ownSortedNotesAtom`; pinning them into
   // the store keeps this about the list's behaviour rather than the sort.
   store.set(ownSortedNotesAtom as never, notes as never)
@@ -163,8 +182,9 @@ describe("the sidebar's Notes list", () => {
     expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull()
   })
 
-  it("ignores a drag that would carry a note across the pinned boundary", () => {
-    // Pinned leads the list in every sort, so the row would spring back.
+  it("has no pinned band to be stopped at — a pinned row drags like any other", () => {
+    // A pin lists a note under Pinned above; it does not move the note or
+    // fence off part of the list, so every row may go anywhere.
     renderSidebar({ notes: [noteOf("p", "Pinned one", true), ...THREE] })
     const rows = noteRows()
     const transfer = { effectAllowed: "", dropEffect: "", setData: vi.fn(), getData: () => "" }
@@ -172,19 +192,48 @@ describe("the sidebar's Notes list", () => {
     fireEvent.dragStart(rows[1], { dataTransfer: transfer })
     fireEvent.dragOver(rows[0], { dataTransfer: transfer, clientY: 0 })
     fireEvent.drop(rows[0], { dataTransfer: transfer, clientY: 0 })
-    expect(mocks.moveNote).not.toHaveBeenCalled()
+    expect(mocks.moveNote).toHaveBeenCalledWith("a", ["a", "p", "b", "c"])
   })
 
-  it("offers no menu move across the pinned boundary either", async () => {
-    // Pinned leads the list whatever the sort, so a move out of the band
-    // would spring back — the menu does not offer it.
+  it("offers the menu move to a pinned row too", async () => {
     renderSidebar({ notes: [noteOf("p", "Pinned one", true), ...THREE] })
     const rows = noteRows()
     fireEvent.click(within(rows[1]).getByRole("button", { name: "Note actions" }))
     await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
-    expect(screen.getByRole("menuitem", { name: "Move up" }).getAttribute("aria-disabled")).toBe(
-      "true",
-    )
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move up" }))
+    expect(mocks.moveNote).toHaveBeenCalledWith("a", ["a", "p", "b", "c"])
+  })
+})
+
+describe("the sidebar's Pinned list", () => {
+  it("is not drawn when nothing is pinned", () => {
+    renderSidebar({ notes: THREE })
+    const headings = screen.getAllByTestId("section-heading").map((el) => el.textContent?.trim())
+    expect(headings).toEqual(["Notes"])
+  })
+
+  it("holds the pinned notes and the pinned blocks together, above Notes", () => {
+    const pinnedNote = noteOf("p", "Pinned one", true)
+    renderSidebar({
+      notes: [pinnedNote, ...THREE],
+      pinnedNotes: [pinnedNote],
+      pinnedBlocks: [{ id: "blk_x", noteId: "a", text: "A pinned block", note: THREE[0] }],
+    })
+    const headings = screen.getAllByTestId("section-heading").map((el) => el.textContent?.trim())
+    expect(headings).toEqual(["Pinned", "Notes"])
+    // Both kinds are in the one band.
+    expect(screen.getAllByText("Pinned one")).toHaveLength(2)
+    expect(screen.getByText("A pinned block")).toBeTruthy()
+  })
+
+  it("leaves the pinned note in its sorted place in Notes", () => {
+    const pinnedNote = noteOf("b2", "Bravo two", true)
+    renderSidebar({
+      notes: [THREE[0], pinnedNote, THREE[1]],
+      pinnedNotes: [pinnedNote],
+    })
+    // The pin does not float it: Notes keeps the order it was given.
+    expect(rowNames()).toEqual(["Alpha", "Bravo two", "Bravo"])
   })
 })
 

@@ -10,6 +10,7 @@ import {
   noteSortAtom,
   ownSortedNotesAtom,
   pinnedBlocksAtom,
+  pinnedNotesAtom,
   sharedNotesAtom,
   type NoteSort,
   type PinnedBlock,
@@ -64,6 +65,7 @@ export function NavItems({
   onNavigate?: () => void
 }) {
   const notes = useAtomValue(ownSortedNotesAtom)
+  const pinnedNotes = useAtomValue(pinnedNotesAtom)
   const pinnedBlocks = useAtomValue(pinnedBlocksAtom)
   const sharedNotes = useAtomValue(sharedNotesAtom)
   const booting = useAtomValue(isBootingAtom)
@@ -119,26 +121,41 @@ export function NavItems({
               </NavLink>
             </li>
           </ul>
-          {/* The lists, each under its own heading — Notes, Pinned, Shared —
+          {/* The lists, each under its own heading — Pinned, Notes, Shared —
               with one rule above them all, setting them off from the links
-              above. */}
-          {notes.length > 0 ? (
+              above.
+
+              Pinned leads: it is what you keep to hand, and it holds both
+              kinds of pin (docs/metadata.md) — the notes first, then the
+              blocks, each of which opens its note focused on it. A pinned
+              note is ALSO still in Notes below, in its sorted place: the pin
+              is somewhere else to reach it, not somewhere it has gone. */}
+          {pinnedNotes.length > 0 || pinnedBlocks.length > 0 ? (
             <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
+              <SectionHeading>Pinned</SectionHeading>
+              {pinnedNotes.length > 0 ? (
+                <NoteRows notes={pinnedNotes} size={size} onNavigate={onNavigate} />
+              ) : null}
+              {pinnedBlocks.length > 0 ? (
+                <PinnedBlockRows blocks={pinnedBlocks} size={size} onNavigate={onNavigate} />
+              ) : null}
+            </div>
+          ) : null}
+          {notes.length > 0 ? (
+            <div
+              className={cx(
+                "flex flex-col gap-1",
+                // The rule belongs to whichever list is first.
+                pinnedNotes.length > 0 || pinnedBlocks.length > 0
+                  ? "pt-2"
+                  : "border-t border-border-secondary pt-3",
+              )}
+            >
               <SectionHeading action={<NoteSortMenu />}>Notes</SectionHeading>
               <OwnNoteRows notes={notes} size={size} onNavigate={onNavigate} />
             </div>
           ) : booting ? (
             <NavListSkeleton />
-          ) : null}
-          {/* The user's pinned BLOCKS (docs/metadata.md), between their notes
-              and the notes shared with them: a pinned note is already at
-              the top of the notes above, so this list is for blocks — each
-              opens its note focused on the block. */}
-          {pinnedBlocks.length > 0 ? (
-            <div className="flex flex-col gap-1 pt-2">
-              <SectionHeading>Pinned</SectionHeading>
-              <PinnedBlockRows blocks={pinnedBlocks} size={size} onNavigate={onNavigate} />
-            </div>
           ) : null}
           {/* Notes other people shared with this account (docs/sharing.md):
               one list, whoever shared them, with who did in each row's
@@ -273,6 +290,7 @@ function SectionHeading({
   return (
     <div
       className="flex h-6 items-center gap-2 px-2 text-sm text-text-secondary coarse:px-3"
+      data-testid="section-heading"
       title={title}
     >
       <span className="truncate">{children}</span>
@@ -331,10 +349,10 @@ function NoteSortMenu() {
  * is a row in someone else's corpus, so there is no link of ours to key it by
  * (docs/sharing.md).
  *
- * Dragging is live only in the manual sort, and only over the notes the drag
- * can actually rearrange — the pinned band leads the list whatever the sort,
- * so a note dragged across that boundary would spring back. Each band
- * reorders within itself.
+ * Dragging is live only in the manual sort: in an automatic one the next
+ * render would undo it. There is no band within the list to be stopped at —
+ * a pin lists a note under **Pinned** above, and leaves its place here
+ * untouched — so any row may be dropped anywhere.
  */
 function OwnNoteRows({
   notes,
@@ -349,40 +367,15 @@ function OwnNoteRows({
   const moveNote = useMoveNote()
   const manual = sort === "manual"
 
-  // The band a drag may rearrange — pinned or unpinned, whichever the dragged
-  // row is in. `sortedNotesAtom` puts the pinned first, so the two bands are
-  // contiguous and a move within one is a move within the whole list.
   const ids = React.useMemo(() => notes.map((note) => note.id), [notes])
-  const pinnedOf = React.useMemo(
-    () => new Map(notes.map((note) => [note.id, note.pinned])),
-    [notes],
-  )
-  const onMove = React.useCallback(
-    (id: NoteId, next: NoteId[]) => {
-      // A drop that would carry a note across the pinned boundary is ignored
-      // rather than written: the pinned band leads the list in every sort, so
-      // the row would spring straight back to the band it came from — with a
-      // key saying it belongs somewhere it cannot be drawn.
-      let seenUnpinned = false
-      for (const other of next) {
-        if (pinnedOf.get(other)) {
-          if (seenUnpinned) return
-        } else {
-          seenUnpinned = true
-        }
-      }
-      moveNote(id, next)
-    },
-    [moveNote, pinnedOf],
-  )
+  const onMove = React.useCallback((id: NoteId, next: NoteId[]) => moveNote(id, next), [moveNote])
   const reorder = useDragReorder({ ids, onMove, enabled: manual })
 
   // The keyboard's way to the same move (`NoteActionsMenu`), swapping a row
-  // with its neighbour in the same band.
+  // with its neighbour.
   const swap = (index: number, delta: number) => {
     const target = index + delta
     if (target < 0 || target >= notes.length) return undefined
-    if (notes[index].pinned !== notes[target].pinned) return undefined
     return () => {
       const next = [...ids]
       const [moved] = next.splice(index, 1)

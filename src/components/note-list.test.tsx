@@ -29,10 +29,15 @@ vi.mock("./query-box", () => ({ QueryBox: () => <div /> }))
 vi.mock("../global-state", async (importOriginal) => {
   const original = await importOriginal<typeof import("../global-state")>()
   const { atom } = await import("jotai")
-  return { ...original, ownSortedNotesAtom: atom([]), sharedNotesAtom: atom([]) }
+  return {
+    ...original,
+    ownSortedNotesAtom: atom([]),
+    sharedNotesAtom: atom([]),
+    pinnedRootsAtom: atom([]),
+  }
 })
 
-import { ownSortedNotesAtom, sharedNotesAtom } from "../global-state"
+import { ownSortedNotesAtom, pinnedRootsAtom, sharedNotesAtom } from "../global-state"
 import { NoteList } from "./note-list"
 
 const noteOf = (id: string, name: string, pinned = false): Note =>
@@ -58,15 +63,19 @@ beforeEach(() => {
 function renderList({
   own = [],
   shared = [],
+  pinned = [],
   query = "",
 }: {
   own?: Note[]
   shared?: Note[]
+  /** The Pinned band's roots — notes and blocks alike (`pinnedRootsAtom`). */
+  pinned?: { id: string; noteId: string }[]
   query?: string
 }) {
   const store = createStore()
   store.set(ownSortedNotesAtom as never, own as never)
   store.set(sharedNotesAtom as never, shared.map((note) => ({ note, share: {} })) as never)
+  store.set(pinnedRootsAtom as never, pinned as never)
   render(
     <Provider store={store}>
       <NoteList query={query} onQueryChange={() => {}} />
@@ -82,9 +91,25 @@ describe("the notes page listing", () => {
     renderList({
       own: [noteOf("p", "Pinned", true), noteOf("a", "Alpha"), noteOf("b", "Bravo")],
       shared: [noteOf("s", "Shared one")],
+      pinned: [{ id: "p", noteId: "p" }],
     })
     expect(headings()).toEqual(["Pinned", "Notes", "Shared"])
-    expect(bands()).toEqual(["p", "a,b", "s"])
+    // The pinned note leads under Pinned AND keeps its place in Notes.
+    expect(bands()).toEqual(["p", "p,a,b", "s"])
+  })
+
+  it("draws the pinned blocks under Pinned, not just the pinned notes", () => {
+    // The sidebar's Pinned list holds both kinds; the page's must match, or
+    // a pinned block is reachable from one surface and not the other.
+    renderList({
+      own: [noteOf("a", "Alpha")],
+      pinned: [
+        { id: "a", noteId: "a" },
+        { id: "blk_x", noteId: "a" },
+      ],
+    })
+    expect(headings()).toEqual(["Pinned", "Notes"])
+    expect(bands()).toEqual(["a,blk_x", "a"])
   })
 
   it("draws no heading over a list that is the whole corpus", () => {
@@ -94,8 +119,14 @@ describe("the notes page listing", () => {
   })
 
   it("leaves out a band with nothing in it", () => {
-    renderList({ own: [noteOf("p", "Pinned", true), noteOf("a", "Alpha")] })
+    renderList({ own: [noteOf("a", "Alpha")], pinned: [{ id: "a", noteId: "a" }] })
     expect(headings()).toEqual(["Pinned", "Notes"])
+  })
+
+  it("draws no Pinned band when nothing is pinned", () => {
+    renderList({ own: [noteOf("a", "Alpha"), noteOf("b", "Bravo")] })
+    expect(headings()).toEqual([])
+    expect(bands()).toEqual(["a,b"])
   })
 
   it("keeps a shared note out of your own band", () => {
@@ -111,7 +142,11 @@ describe("the notes page listing", () => {
       titleMatches: [],
       rows: [{ id: "blk_x", noteId: "a" }],
     }
-    renderList({ own: [noteOf("p", "Pinned", true), noteOf("a", "Alpha")], query: "alpha" })
+    renderList({
+      own: [noteOf("p", "Pinned", true), noteOf("a", "Alpha")],
+      pinned: [{ id: "p", noteId: "p" }],
+      query: "alpha",
+    })
     expect(headings()).toEqual([])
     expect(screen.getAllByTestId("results")).toHaveLength(1)
   })

@@ -291,16 +291,19 @@ const NO_ORDER: readonly NoteId[] = []
 const noteOrderAtom = atom((get) => orderedNoteIds(get(graphSnapshotAtom)))
 
 /**
- * Every note, pinned first and then in the chosen order (`noteSortAtom`).
+ * Every note, in the chosen order (`noteSortAtom`).
  *
- * Pinned always leads, whatever the sort — including manual: a pin is a note
- * you want to hand, and a sort that could bury it would make pinning mean
- * nothing. Within the pinned band and beneath it the chosen order applies.
+ * **A pin does not steer this.** Pinned notes are listed on their own under
+ * **Pinned**, above the list, and they stay in their sorted place here too —
+ * so a pin is a second place to reach a note, never a note taken out of the
+ * order or floated above it. That is what lets the order be wholly the
+ * user's: nothing interrupts the manual sequence, and a drag has no band
+ * boundary to be stopped at.
  *
  * Manual is two bands rather than one: the notes the corpus root holds, in
  * their dragged order, then the notes it does not — which is every note until
  * something is dragged, so switching to manual on a fresh corpus shows the
- * title order rather than an empty list.
+ * name order rather than an empty list.
  */
 export const sortedNotesAtom = atom((get) => {
   const notes = [...get(notesAtom).values()]
@@ -311,7 +314,6 @@ export const sortedNotesAtom = atom((get) => {
   const rank = new Map(placed.map((id, index) => [id, index]))
 
   return notes.sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
     // The manual band leads the notes with no position of their own; among
     // the placed, the dragged order decides.
     const aRank = rank.get(a.id)
@@ -345,12 +347,33 @@ export const sharedNotesAtom = atom((get) => {
   })
 })
 
-/** The pinned notes, in `sortedNotesAtom`'s order (they lead it): the
- * palette's **Pinned** group with nothing typed. */
+/** The pinned notes, in `sortedNotesAtom`'s order: the **Pinned** list that
+ * heads the sidebar and the notes page, and the palette's **Pinned** group
+ * with nothing typed. They keep their place in the notes list too — a pin
+ * adds somewhere to reach a note, it does not move the note. */
 export const pinnedNotesAtom = atom((get) => {
-  const sortedNotes = get(sortedNotesAtom)
-  return sortedNotes.filter((note) => note.pinned)
+  // The user's OWN only, as the pinned blocks are: a note someone shared
+  // carries the owner's pin, not theirs (docs/sharing.md), so the owner
+  // pinning it must not put it at the head of this user's sidebar.
+  return get(ownSortedNotesAtom).filter((note) => note.pinned)
 })
+
+/**
+ * **The Pinned list**: the pinned notes, then the pinned blocks — what the
+ * sidebar and the notes page draw under **Pinned**, above the notes.
+ *
+ * One list for both kinds, because a pin means one thing — *keep this to
+ * hand* — and which kind of thing was pinned is a detail the row itself
+ * shows (a note's favicon, a block's pin). Two headings would have made the
+ * reader sort out a distinction the pin does not draw.
+ *
+ * Each entry is a root the results editor can walk: a note opens itself, a
+ * block opens its note focused on it.
+ */
+export const pinnedRootsAtom = atom((get) => [
+  ...get(pinnedNotesAtom).map((note) => ({ id: note.id, noteId: note.id })),
+  ...get(pinnedBlocksAtom).map((block) => ({ id: block.id, noteId: block.noteId })),
+])
 
 export const noteSearcherAtom = atom((get) => {
   const sortedNotes = get(sortedNotesAtom)

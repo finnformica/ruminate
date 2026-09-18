@@ -4,7 +4,7 @@ import React, { useState } from "react"
 import { useDebounce } from "use-debounce"
 import { useSearchResults } from "../hooks/search-results"
 import type { ResultRoot } from "../hooks/results-doc"
-import { ownSortedNotesAtom, sharedNotesAtom } from "../global-state"
+import { ownSortedNotesAtom, pinnedRootsAtom, sharedNotesAtom } from "../global-state"
 import type { Note, NoteId } from "../schema"
 import { pluralize } from "../utils/pluralize"
 import { QueryBox } from "./query-box"
@@ -40,8 +40,11 @@ export const QUERY_DEBOUNCE_MS = 150
  * **With no query the listing is split into the sidebar's sections** —
  * Pinned, Notes, Shared — because one undifferentiated list of everything
  * gave no way to tell your own note from one someone shared with you, or to
- * find a pinned note among the rest. The sections and their order are the
- * sidebar's exactly, so the two surfaces read the same way.
+ * find a pinned note among the rest. The sections, their order and their
+ * contents are the sidebar's exactly, so the two surfaces read the same
+ * way — **Pinned** included, which means the pinned blocks as well as the
+ * pinned notes (`pinnedRootsAtom`). A pinned note is in **Notes** below as
+ * well, in its sorted place.
  *
  * A query is *not* sectioned: results are ranked by score across the whole
  * corpus (docs/query-language.md), and cutting that ranking into bands would
@@ -62,6 +65,7 @@ export function NoteList({
 
   const ownNotes = useAtomValue(ownSortedNotesAtom)
   const sharedNotes = useAtomValue(sharedNotesAtom)
+  const pinnedRoots = useAtomValue(pinnedRootsAtom)
 
   // The keyboard hand-off between the search box and the rows.
   const inputRef = React.useRef<HTMLInputElement>(null)
@@ -81,21 +85,26 @@ export function NoteList({
   )
 
   // The three bands, each the roots its own results block draws. Pinned
-  // leads (it leads the sidebar too), then the rest of your own notes, then
-  // what other people shared with you.
+  // leads (it leads the sidebar too) and holds both kinds of pin; then all
+  // of your own notes in the chosen sort — the pinned ones among them, since
+  // a pin adds a place to reach a note rather than moving it; then what
+  // other people shared with you.
   const sections = React.useMemo(() => {
     if (!browsing) return []
-    const pinned = ownNotes.filter((note) => note.pinned)
-    const rest = ownNotes.filter((note) => !note.pinned)
+    const rootsOf = (notes: Note[]) => notes.map((note) => ({ id: note.id, noteId: note.id }))
     const shared = sharedNotes.map(({ note }) => note)
     return [
-      { key: "pinned", heading: "Pinned", notes: pinned },
+      { key: "pinned", heading: "Pinned", roots: pinnedRoots },
       // Named "Notes" only when it is one band among several; on its own it
       // is the whole list and a heading over it says nothing.
-      { key: "own", heading: pinned.length + shared.length > 0 ? "Notes" : null, notes: rest },
-      { key: "shared", heading: "Shared", notes: shared },
-    ].filter((section) => section.notes.length > 0)
-  }, [browsing, ownNotes, sharedNotes])
+      {
+        key: "own",
+        heading: pinnedRoots.length + shared.length > 0 ? "Notes" : null,
+        roots: rootsOf(ownNotes),
+      },
+      { key: "shared", heading: "Shared", roots: rootsOf(shared) },
+    ].filter((section) => section.roots.length > 0)
+  }, [browsing, ownNotes, sharedNotes, pinnedRoots])
 
   return (
     <div className="flex flex-col gap-4">
@@ -134,7 +143,9 @@ interface NoteSection {
   key: string
   /** Null for a band that is the whole list, which needs no name. */
   heading: string | null
-  notes: Note[]
+  /** What the band draws — notes, or (under Pinned) blocks too, each opening
+   * its note focused on it. */
+  roots: readonly ResultRoot[]
 }
 
 /**
@@ -174,7 +185,6 @@ function NoteSections({
       {sections.map((section, index) => {
         const previous = sections[index - 1]
         const next = sections[index + 1]
-        const roots: ResultRoot[] = section.notes.map((note) => ({ id: note.id, noteId: note.id }))
         return (
           <div key={section.key} className="flex flex-col gap-2">
             {section.heading ? (
@@ -183,7 +193,7 @@ function NoteSections({
             <ResultsList
               query=""
               results={emptyResults}
-              browseRoots={roots}
+              browseRoots={section.roots}
               limit={PAGE_SIZE}
               more
               readOnly
