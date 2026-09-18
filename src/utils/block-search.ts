@@ -215,6 +215,19 @@ export function createBlockIndexer(
   }
 }
 
+/** Is `value` block vocabulary — a `type:` value that names block types
+ * (`todo`, `heading`, `list`…) rather than a note type (`daily`)? */
+export function isBlockTypeValue(value: string): boolean {
+  return value in BLOCK_TYPE_VALUES
+}
+
+/** Does a block of type `type` match the `type:` query value `value`? The
+ * one table behind the qualifier, the corpus index and the in-note filter
+ * (`src/data/filter-view.ts`). */
+export function blockTypeMatches(value: string, type: BlockType): boolean {
+  return BLOCK_TYPE_VALUES[value]?.includes(type) ?? false
+}
+
 function testBlockTypeFilter(filter: Filter, hit: BlockHit): boolean {
   const match = filter.values.some((value) => BLOCK_TYPE_VALUES[value]?.includes(hit.type) ?? false)
   return filter.exclude ? !match : match

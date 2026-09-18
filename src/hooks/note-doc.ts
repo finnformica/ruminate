@@ -4,7 +4,8 @@ import { isEmptyDoc } from "../blocks/ops"
 import type { BlockDoc, ChangeHint } from "../blocks/types"
 import type { ExpandedRule } from "../blocks/view"
 import { basketDoc, basketToOps } from "../data/basket"
-import { NOTE_TYPE, blockView, noteView, type GraphView, type LinkDirections } from "../data/graph"
+import { filteredView, isNarrowed, type FilteredView } from "../data/filter-view"
+import { NOTE_TYPE, blockView, noteView, type LinkDirections } from "../data/graph"
 import { notePropsOps } from "../data/note-meta"
 import { docToOps } from "../data/ops"
 import { useApplyOps } from "../data/store"
@@ -12,6 +13,7 @@ import { graphSnapshotAtom } from "../global-state"
 import type { NoteId } from "../schema"
 
 const NOTHING_COLLAPSED: ReadonlySet<string> = new Set()
+const NO_CONTEXT: ReadonlySet<string> = new Set()
 
 /**
  * The note's doc, straight from the graph — and the way back.
@@ -47,6 +49,8 @@ export function useNoteDoc({
   focusBlockId = null,
   expanded,
   directions = "downstream",
+  filter = "",
+  sort = "",
 }: {
   noteId: NoteId | undefined
   /** What a note not in the graph starts as (`?content=`, or empty). */
@@ -59,16 +63,33 @@ export function useNoteDoc({
   expanded?: ExpandedRule
   /** Which links the walk follows (Settings → Editor, "Show links"). */
   directions?: LinkDirections
+  /** Narrow the view to the blocks this query matches, their ancestors kept
+   * as context (`src/data/filter-view.ts`). Empty = the whole view. */
+  filter?: string
+  /** Order each parent's children by this key (`text`, `text:desc`, …), the
+   * nesting untouched. Empty = document order. */
+  sort?: string
 }) {
   const snapshot = useAtomValue(graphSnapshotAtom)
   const store = useStore()
   const apply = useApplyOps()
 
-  const view = useMemo<GraphView | null>(() => {
+  const narrowed = isNarrowed({ filter, sort })
+  const view = useMemo<FilteredView | null>(() => {
     if (noteId === undefined) return null
-    const focused = focusBlockId ? blockView(focusBlockId, snapshot, expanded, directions) : null
-    return focused ?? noteView(noteId, snapshot, expanded, directions)
-  }, [noteId, focusBlockId, snapshot, expanded, directions])
+    // A narrowed view is walked EAGERLY: whether a branch survives depends on
+    // what is beneath it, and a sort must see every sibling to order them,
+    // neither of which a lazy walk can answer. The reader's folds stand
+    // aside while it is on and come back untouched the moment it clears.
+    const rule = narrowed ? undefined : expanded
+    const focused = focusBlockId ? blockView(focusBlockId, snapshot, rule, directions) : null
+    const base = focused ?? noteView(noteId, snapshot, rule, directions)
+    if (!base) return null
+    // Focused, the root block is the view's title rather than one of its
+    // rows, so the filter runs over what is inside it and never takes it
+    // away (`keepRoots`).
+    return filteredView(base, { filter, sort, keepRoots: focused !== null })
+  }, [noteId, focusBlockId, snapshot, expanded, directions, narrowed, filter, sort])
   // Whether the doc is rooted at the focused block (the note node is then not
   // this doc's to write).
   const rootId = focusBlockId && view?.doc.rootBlockIds[0] === focusBlockId ? focusBlockId : null
@@ -89,6 +110,22 @@ export function useNoteDoc({
         if (seenRef.current) return // deleted underneath: let it stay deleted
         if (isEmptyDoc(next)) return // nothing worth creating a note for
       }
+      if (narrowed) {
+        // **A narrowed view is a SELECTION of the note, not the note.** Its
+        // doc holds only the rows that survived the filter, in the order the
+        // sort put them — so reconciling it against the graph would read
+        // every hidden row as removed and every reordered one as moved, and
+        // an unlink is how a row leaves a note. Only the ops that change a
+        // row's own value are kept: ticking a to-do, retyping a line, a
+        // block's props. Structure — new rows, indents, removals, reorders —
+        // belongs to the note itself, which is one click away with the
+        // filter cleared.
+        const ops = docToOps(noteId, next, current, hint?.discard, rootId ?? undefined).filter(
+          (op) => op.op === "setText" || op.op === "setType" || op.op === "setProps",
+        )
+        if (ops.length > 0) apply([...ops, ...notePropsOps(noteId, {}, current)])
+        return
+      }
       if (rootId) {
         // In focus: the block's subtree is diffed; the note itself is only
         // stamped, and only when something changed.
@@ -102,12 +139,16 @@ export function useNoteDoc({
       }
       apply(docToOps(noteId, stamped, current, hint?.discard))
     },
-    [noteId, rootId, store, apply],
+    [noteId, rootId, narrowed, store, apply],
   )
 
   return {
     doc: view?.doc ?? defaultDoc,
     collapsed: view?.collapsed ?? NOTHING_COLLAPSED,
+    /** The rows kept only as context by the filter — drawn dimmed. */
+    context: view?.context ?? NO_CONTEXT,
+    /** How many rows the filter matched; null when nothing is filtered. */
+    matches: view?.matches ?? null,
     exists,
     setDoc,
   }

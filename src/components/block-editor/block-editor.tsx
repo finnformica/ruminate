@@ -355,6 +355,7 @@ export function BlockEditor({
   onActivate,
   fixedRoots = false,
   emptyable = false,
+  context,
 }: {
   doc: BlockDoc
   /** The next doc, and what the change means beyond it (`ChangeHint`). */
@@ -446,6 +447,13 @@ export function BlockEditor({
    * edits as it does in its note.
    */
   fixedRoots?: boolean
+  /**
+   * Rows the view keeps only as context — the unmatched ancestors of a
+   * filtered view's matches (`src/data/filter-view.ts`), drawn dimmed. The
+   * doc is otherwise the note's own, so a filtered view edits, folds and
+   * navigates exactly as the note does.
+   */
+  context?: ReadonlySet<string>
   /**
    * Whether the doc may be left with no blocks at all. Off, the only root
    * cannot be removed (⌫ on it does nothing): a note always keeps a block to
@@ -2079,6 +2087,7 @@ export function BlockEditor({
     keyboardActive: !navigable || (keyboardActive && !pointerIdle && !coarse),
     coarsePointer: coarse,
     fixedRoots,
+    context,
     // Browsing: a click opens the row (BlockItem routes a read-only row's
     // click here).
     activate: readOnly && onActivate ? (key) => onActivate(idOfKey(key)) : undefined,
