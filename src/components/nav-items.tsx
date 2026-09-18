@@ -1,21 +1,24 @@
 import { Link, LinkComponentProps, useLocation } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
 import { useAtom, useAtomValue } from "jotai"
-import { createContext, useContext } from "react"
+import React, { createContext, useContext } from "react"
 import { requestDatabasePull } from "../data/database-mode"
 import { useIsAdmin } from "../data/features"
 import {
   isBootingAtom,
   isHelpPanelOpenAtom,
+  noteSortAtom,
   ownSortedNotesAtom,
   pinnedBlocksAtom,
   sharedNotesAtom,
+  type NoteSort,
   type PinnedBlock,
 } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
-import { useSetBlockProps } from "../hooks/note"
+import { useMoveNote, useSetBlockProps } from "../hooks/note"
+import { useDragReorder } from "../hooks/drag-reorder"
 import { shareOwnerName } from "../data/shares"
-import type { Note } from "../schema"
+import type { Note, NoteId } from "../schema"
 import { APP_SHORTCUTS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { inlineText } from "../utils/inline-text"
@@ -31,6 +34,7 @@ import {
   FlagFillIcon16,
   FlagIcon16,
   HistoryIcon16,
+  ListIcon16,
   MoreIcon16,
   NoteFillIcon16,
   NoteIcon16,
@@ -39,6 +43,8 @@ import {
   PinIcon16,
   SettingsFillIcon16,
   SettingsIcon16,
+  SortAlphabetAscIcon16,
+  SortNumberDescIcon16,
 } from "./icons"
 import { Keys } from "./keys"
 import { NavListSkeleton } from "./skeleton"
@@ -90,7 +96,7 @@ export function NavItems({
                 search={{ query: undefined }}
                 activeIcon={<NoteFillIcon16 />}
                 icon={<NoteIcon16 />}
-                shortcut={formatCombo("g n")}
+                shortcut={formatCombo(APP_SHORTCUTS.goNotes)}
                 onNavigate={onNavigate}
               >
                 Notes
@@ -106,7 +112,7 @@ export function NavItems({
                 activeIcon={<CalendarDateFillIcon16 date={today.getDate()} />}
                 icon={<CalendarDateIcon16 date={today.getDate()} />}
                 forceActive={isCalendarActive}
-                shortcut={formatCombo("g d")}
+                shortcut={formatCombo(APP_SHORTCUTS.goCalendar)}
                 onNavigate={onNavigate}
               >
                 Calendar
@@ -118,8 +124,8 @@ export function NavItems({
               above. */}
           {notes.length > 0 ? (
             <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
-              <SectionHeading>Notes</SectionHeading>
-              <NoteRows notes={notes} size={size} onNavigate={onNavigate} />
+              <SectionHeading action={<NoteSortMenu />}>Notes</SectionHeading>
+              <OwnNoteRows notes={notes} size={size} onNavigate={onNavigate} />
             </div>
           ) : booting ? (
             <NavListSkeleton />
@@ -204,6 +210,22 @@ export function NavItems({
               ) : null}
             </Tooltip>
           )}
+          {/* The places you go — each with the chord that gets there — then,
+              set off beneath them, the two that explain the app: what it can
+              do (Help) and what it just started doing (Changelog). They were
+              interleaved with Settings and Admin before, which put the one
+              row with no shortcut in the middle of the ones that had them. */}
+          <NavLink
+            to="/settings"
+            search={{ query: undefined }}
+            activeIcon={<SettingsFillIcon16 />}
+            icon={<SettingsIcon16 />}
+            className="text-text-secondary"
+            shortcut={formatCombo(APP_SHORTCUTS.goSettings)}
+            onNavigate={onNavigate}
+          >
+            Settings
+          </NavLink>
           {isAdmin ? (
             <NavLink
               to="/admin"
@@ -211,49 +233,200 @@ export function NavItems({
               activeIcon={<FlagFillIcon16 />}
               icon={<FlagIcon16 />}
               className="text-text-secondary"
-              shortcut={formatCombo("g a")}
+              shortcut={formatCombo(APP_SHORTCUTS.goAdmin)}
               onNavigate={onNavigate}
             >
               Admin
             </NavLink>
           ) : null}
-          <NavLink
-            to="/changelog"
-            search={{ release: undefined }}
-            activeIcon={<HistoryIcon16 />}
-            icon={<HistoryIcon16 />}
-            className="text-text-secondary"
-            onNavigate={onNavigate}
-          >
-            What's new
-          </NavLink>
-          <NavLink
-            to="/settings"
-            search={{ query: undefined }}
-            activeIcon={<SettingsFillIcon16 />}
-            icon={<SettingsIcon16 />}
-            className="text-text-secondary"
-            shortcut={formatCombo("g s")}
-            onNavigate={onNavigate}
-          >
-            Settings
-          </NavLink>
-          <HelpNavItem size={size} />
+          <div className="mt-1 flex flex-col gap-1 border-t border-border-secondary pt-2">
+            <NavLink
+              to="/changelog"
+              search={{ release: undefined }}
+              activeIcon={<HistoryIcon16 />}
+              icon={<HistoryIcon16 />}
+              className="text-text-secondary"
+              shortcut={formatCombo(APP_SHORTCUTS.goChangelog)}
+              onNavigate={onNavigate}
+            >
+              Changelog
+            </NavLink>
+            <HelpNavItem size={size} />
+          </div>
         </div>
       </div>
     </SizeContext.Provider>
   )
 }
 
-/** A sidebar list's heading: quiet, in the row's inset. */
-function SectionHeading({ title, children }: { title?: string; children: React.ReactNode }) {
+/** A sidebar list's heading: quiet, in the row's inset, with room at its end
+ * for a control belonging to the list beneath it (the Notes sort). */
+function SectionHeading({
+  title,
+  action,
+  children,
+}: {
+  title?: string
+  action?: React.ReactNode
+  children: React.ReactNode
+}) {
   return (
     <div
       className="flex h-6 items-center gap-2 px-2 text-sm text-text-secondary coarse:px-3"
       title={title}
     >
       <span className="truncate">{children}</span>
+      {action ? <span className="ml-auto shrink-0">{action}</span> : null}
     </div>
+  )
+}
+
+/** What each sort is called, and the icon that stands for it. */
+const NOTE_SORTS: { value: NoteSort; label: string; icon: React.ReactNode }[] = [
+  { value: "title", label: "Name", icon: <SortAlphabetAscIcon16 /> },
+  { value: "updated", label: "Recently updated", icon: <SortNumberDescIcon16 /> },
+  { value: "manual", label: "Manual", icon: <ListIcon16 /> },
+]
+
+/**
+ * The Notes list's sort, over the heading: one preference for the sidebar and
+ * the notes page both (`noteSortAtom`), so the two never disagree about where
+ * a note is. **Manual** is what turns dragging on — a drag in an automatic
+ * sort would be undone by the next render, so the rows are only draggable
+ * once the order is the user's to set.
+ */
+function NoteSortMenu() {
+  const [sort, setSort] = useAtom(noteSortAtom)
+  const current = NOTE_SORTS.find((entry) => entry.value === sort) ?? NOTE_SORTS[0]
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenu.Trigger
+        render={
+          <IconButton aria-label={`Sort notes by ${current.label.toLowerCase()}`} size="small">
+            {current.icon}
+          </IconButton>
+        }
+      />
+      <DropdownMenu.Content align="end">
+        <DropdownMenu.Group>
+          <DropdownMenu.GroupLabel>Sort notes</DropdownMenu.GroupLabel>
+          {NOTE_SORTS.map((entry) => (
+            <DropdownMenu.Item
+              key={entry.value}
+              icon={entry.icon}
+              selected={sort === entry.value}
+              onClick={() => setSort(entry.value)}
+            >
+              {entry.label}
+            </DropdownMenu.Item>
+          ))}
+        </DropdownMenu.Group>
+      </DropdownMenu.Content>
+    </DropdownMenu>
+  )
+}
+
+/**
+ * The user's own notes, which are the only rows that reorder: a shared note
+ * is a row in someone else's corpus, so there is no link of ours to key it by
+ * (docs/sharing.md).
+ *
+ * Dragging is live only in the manual sort, and only over the notes the drag
+ * can actually rearrange — the pinned band leads the list whatever the sort,
+ * so a note dragged across that boundary would spring back. Each band
+ * reorders within itself.
+ */
+function OwnNoteRows({
+  notes,
+  size,
+  onNavigate,
+}: {
+  notes: Note[]
+  size: "medium" | "large"
+  onNavigate?: () => void
+}) {
+  const sort = useAtomValue(noteSortAtom)
+  const moveNote = useMoveNote()
+  const manual = sort === "manual"
+
+  // The band a drag may rearrange — pinned or unpinned, whichever the dragged
+  // row is in. `sortedNotesAtom` puts the pinned first, so the two bands are
+  // contiguous and a move within one is a move within the whole list.
+  const ids = React.useMemo(() => notes.map((note) => note.id), [notes])
+  const pinnedOf = React.useMemo(
+    () => new Map(notes.map((note) => [note.id, note.pinned])),
+    [notes],
+  )
+  const onMove = React.useCallback(
+    (id: NoteId, next: NoteId[]) => {
+      // A drop that would carry a note across the pinned boundary is ignored
+      // rather than written: the pinned band leads the list in every sort, so
+      // the row would spring straight back to the band it came from — with a
+      // key saying it belongs somewhere it cannot be drawn.
+      let seenUnpinned = false
+      for (const other of next) {
+        if (pinnedOf.get(other)) {
+          if (seenUnpinned) return
+        } else {
+          seenUnpinned = true
+        }
+      }
+      moveNote(id, next)
+    },
+    [moveNote, pinnedOf],
+  )
+  const reorder = useDragReorder({ ids, onMove, enabled: manual })
+
+  // The keyboard's way to the same move (`NoteActionsMenu`), swapping a row
+  // with its neighbour in the same band.
+  const swap = (index: number, delta: number) => {
+    const target = index + delta
+    if (target < 0 || target >= notes.length) return undefined
+    if (notes[index].pinned !== notes[target].pinned) return undefined
+    return () => {
+      const next = [...ids]
+      const [moved] = next.splice(index, 1)
+      next.splice(target, 0, moved)
+      moveNote(ids[index], next)
+    }
+  }
+
+  return (
+    <ul
+      className="flex flex-col gap-1"
+      data-testid="note-rows"
+      {...(manual ? reorder.listProps : {})}
+    >
+      {notes.map((note, index) => {
+        const rowProps = manual ? reorder.rowProps(note.id) : null
+        return (
+          <li
+            key={note.id}
+            className={cx(
+              "note-row group/note relative",
+              manual && "data-[dragging]:opacity-40",
+              reorder.dropBefore === note.id &&
+                "before:absolute before:-top-0.5 before:inset-x-0 before:h-0.5 before:rounded-full before:bg-border-focus",
+              reorder.dropBefore === "end" &&
+                index === notes.length - 1 &&
+                "after:absolute after:-bottom-0.5 after:inset-x-0 after:h-0.5 after:rounded-full after:bg-border-focus",
+            )}
+            {...rowProps}
+          >
+            <NoteNavItem note={note} size={size} onNavigate={onNavigate} className="w-full" />
+            <RowActions size={size}>
+              <NoteActionsMenu
+                noteId={note.id}
+                pinned={note.pinned}
+                reorder={
+                  manual ? { onMoveUp: swap(index, -1), onMoveDown: swap(index, 1) } : undefined
+                }
+              />
+            </RowActions>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 

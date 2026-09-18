@@ -12,6 +12,7 @@ import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
 import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
 import { NOTE_TYPE, parseProps, type GraphSnapshot, type LinkDirections } from "./data/graph"
+import { orderedNoteIds } from "./data/note-order"
 import {
   mergeSnapshots,
   receivedSharesAtom,
@@ -245,33 +246,80 @@ export const isBootingAtom = atom((get) => {
   )
 })
 
+/**
+ * How the notes lists are ordered — the sidebar's and the notes page's, which
+ * share this one preference so the two never disagree about where a note is.
+ *
+ * - **title**: A–Z. The default, and stable: nothing moves while you read.
+ * - **updated**: most recently changed first. What this used to do always,
+ *   which is why it is no longer the default — `updated_at` is stamped on
+ *   every edit (`src/hooks/note-doc.ts`), so the note you are typing in
+ *   climbs to the top of both lists while you are looking at them.
+ * - **manual**: the order you dragged the sidebar into (`src/data/note-order.ts`).
+ *   Notes you have never dragged have no manual position and follow in the
+ *   title order beneath the ones you have.
+ */
+export type NoteSort = "title" | "updated" | "manual"
+
+export const noteSortAtom = atomWithStorage<NoteSort>("note-sort", "title")
+
+/** A–Z by the name on the row, with the opaque id breaking an exact tie so
+ * the order is total (two notes can share a display name). */
+const byDisplayName = (a: Note, b: Note) => {
+  const byName = a.displayName.localeCompare(b.displayName)
+  return byName !== 0 ? byName : a.id.localeCompare(b.id)
+}
+
+/** Most recently updated first; a note with no timestamp at all sorts to the
+ * bottom, by name among its fellows. */
+const byUpdatedAt = (a: Note, b: Note) => {
+  if (a.updatedAt !== null && b.updatedAt !== null) {
+    if (a.updatedAt !== b.updatedAt) return b.updatedAt - a.updatedAt
+  } else if (a.updatedAt !== null) {
+    return -1
+  } else if (b.updatedAt !== null) {
+    return 1
+  }
+  return byDisplayName(a, b)
+}
+
+const NO_ORDER: readonly NoteId[] = []
+
+/** The manual note order as the graph holds it (`src/data/note-order.ts`):
+ * the ids the corpus root holds, live ones only, in sort-key order. Read only
+ * by the sort below — the lists take their order from `sortedNotesAtom`. */
+const noteOrderAtom = atom((get) => orderedNoteIds(get(graphSnapshotAtom)))
+
+/**
+ * Every note, pinned first and then in the chosen order (`noteSortAtom`).
+ *
+ * Pinned always leads, whatever the sort — including manual: a pin is a note
+ * you want to hand, and a sort that could bury it would make pinning mean
+ * nothing. Within the pinned band and beneath it the chosen order applies.
+ *
+ * Manual is two bands rather than one: the notes the corpus root holds, in
+ * their dragged order, then the notes it does not — which is every note until
+ * something is dragged, so switching to manual on a fresh corpus shows the
+ * title order rather than an empty list.
+ */
 export const sortedNotesAtom = atom((get) => {
-  const notes = get(notesAtom)
+  const notes = [...get(notesAtom).values()]
+  const sort = get(noteSortAtom)
 
-  // Sort notes by updatedAt in descending order (most recent first)
-  return [...notes.values()].sort((a, b) => {
-    // Pinned notes first
-    if (a.pinned && !b.pinned) return -1
-    if (!a.pinned && b.pinned) return 1
+  const compare = sort === "updated" ? byUpdatedAt : byDisplayName
+  const placed = sort === "manual" ? get(noteOrderAtom) : NO_ORDER
+  const rank = new Map(placed.map((id, index) => [id, index]))
 
-    // Then by updatedAt descending (most recent first)
-    // Notes without updatedAt (null) sort to bottom
-    if (a.updatedAt !== null && b.updatedAt !== null) {
-      if (a.updatedAt !== b.updatedAt) {
-        return b.updatedAt - a.updatedAt
-      }
-    } else if (a.updatedAt !== null) {
-      return -1 // a has timestamp, b doesn't -> a first
-    } else if (b.updatedAt !== null) {
-      return 1 // b has timestamp, a doesn't -> b first
-    }
-
-    // Last resort, for notes with no timestamp at all: order by name, which is
-    // at least meaningful to a human. (Ids used to carry a hint — a numeric id
-    // was a creation timestamp — but minted ids are opaque, so ordering by
-    // them would be arbitrary as well as unstable across a rename.)
-    const byName = a.displayName.localeCompare(b.displayName)
-    return byName !== 0 ? byName : a.id.localeCompare(b.id)
+  return notes.sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
+    // The manual band leads the notes with no position of their own; among
+    // the placed, the dragged order decides.
+    const aRank = rank.get(a.id)
+    const bRank = rank.get(b.id)
+    if (aRank !== undefined && bRank !== undefined) return aRank - bRank
+    if (aRank !== undefined) return -1
+    if (bRank !== undefined) return 1
+    return compare(a, b)
   })
 })
 
