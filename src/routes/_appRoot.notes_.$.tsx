@@ -36,9 +36,8 @@ import {
 } from "../hooks/note"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
-import { noteDoc, parseProps, pathToBlock } from "../data/graph"
-import { inlineText } from "../utils/inline-text"
-import { FilterMenu, SortMenu, type RootOption } from "../components/view-controls"
+import { parseProps, pathToBlock } from "../data/graph"
+import { FilterMenu, SortMenu } from "../components/view-controls"
 import { useFoldRule } from "../data/view-state"
 import { keyOf } from "../blocks/view"
 import { useNoteShare } from "../hooks/share"
@@ -280,43 +279,21 @@ function NotePage() {
     [setProp],
   )
 
-  // The rows the `in:` branch offers to root the view at: every block in the
-  // note that holds something, which is the only kind worth being a root.
-  // Read off the note's own walk, never the filtered one — the menu must
-  // still offer the sections a filter has hidden.
-  const rootOptions = React.useMemo<RootOption[]>(() => {
-    if (!noteId) return []
-    const doc = noteDoc(noteId, graph)
-    if (!doc) return []
-    const options: RootOption[] = []
-    const seen = new Set<string>()
-    const walk = (ids: string[]) => {
-      for (const id of ids) {
-        const block = doc.blocks[id]
-        if (!block || seen.has(id)) continue
-        seen.add(id)
-        if (block.children.length > 0) options.push({ id, text: inlineText(block.text) })
-        walk(block.children)
-      }
-    }
-    walk(doc.rootBlockIds)
-    return options
-  }, [noteId, graph])
-
   // A pinned block may carry a filter and a sort of its own (docs/metadata.md):
   // what the sidebar opens it with, and what the header offers to update when
   // the view has moved away from it. Only the user's own pin — a shared
   // block's props are its owner's.
   const setBlockProps = useSetBlockProps()
   const pinnedDefaults = React.useMemo(() => {
-    if (!focusBlockId || share !== null) return null
-    const props = parseProps(graph.nodes.get(focusBlockId)?.props ?? null)
+    const rootId = focusBlockId ?? noteId
+    if (!rootId || share !== null) return null
+    const props = parseProps(graph.nodes.get(rootId)?.props ?? null)
     if (props?.pinned !== true) return null
     return {
       filter: typeof props.filter === "string" ? props.filter : "",
       sort: typeof props.sort === "string" ? props.sort : "",
     }
-  }, [focusBlockId, share, graph])
+  }, [focusBlockId, noteId, share, graph])
   const filterDirty = pinnedDefaults !== null && pinnedDefaults.filter !== filter
   const sortDirty = pinnedDefaults !== null && pinnedDefaults.sort !== sort
 
@@ -341,10 +318,14 @@ function NotePage() {
   // Neither happens on its own — a filter tried out in passing must never
   // quietly overwrite the one that was saved.
   const updatePinnedDefault = React.useCallback(() => {
-    if (!focusBlockId) return
-    setBlockProps(focusBlockId, { filter: filter || null, sort: sort || null })
+    // The view's root is what remembers it: the focused block, or the note
+    // itself when the whole note is the view. Both are nodes with props, and
+    // both can be pinned (docs/metadata.md).
+    const patch = { filter: filter || null, sort: sort || null }
+    if (focusBlockId) setBlockProps(focusBlockId, patch)
+    else if (noteId) setNoteProps(noteId, patch)
     requestDatabaseFlush()
-  }, [focusBlockId, filter, sort, setBlockProps])
+  }, [focusBlockId, noteId, filter, sort, setBlockProps, setNoteProps])
   const resetToPinnedDefault = React.useCallback(() => {
     if (!pinnedDefaults) return
     setNarrowing({ filter: pinnedDefaults.filter, sort: pinnedDefaults.sort })
@@ -431,12 +412,6 @@ function NotePage() {
             <FilterMenu
               filter={filter}
               onFilterChange={(next) => setNarrowing({ filter: next })}
-              roots={rootOptions}
-              focusBlockId={focusBlockId ?? null}
-              onFocusBlock={touching((id) => {
-                revealOnLeaveFocus(id)
-                navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
-              })}
               pinned={pinnedDefaults ? { ...pinnedActions, dirty: filterDirty } : undefined}
             />
             <NoteActionsMenu

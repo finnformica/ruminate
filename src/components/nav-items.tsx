@@ -516,7 +516,13 @@ function NoteNavItem({
     <Link
       to="/notes/$"
       params={{ _splat: note.id }}
-      search={{ query: undefined }}
+      // A pinned note, like a pinned block, opens with the view it saved
+      // (docs/metadata.md): its filter and its sort, or neither.
+      search={{
+        query: undefined,
+        filter: typeof note.props.filter === "string" ? note.props.filter || undefined : undefined,
+        sort: typeof note.props.sort === "string" ? note.props.sort || undefined : undefined,
+      }}
       activeOptions={{ exact: true, includeSearch: false }}
       data-size={size}
       className={cx("nav-item", className)}

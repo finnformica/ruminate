@@ -7,6 +7,8 @@ import {
   describeSort,
   filterBranches,
   filterValues,
+  SCOPE_LABELS,
+  type FilterBranch,
   sortBranches,
   sortDirections,
   toggleFilterValue,
@@ -14,7 +16,7 @@ import {
 import { Button } from "./button"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
-import { FilterIcon16, NoteIcon16, SortAlphabetAscIcon16 } from "./icons"
+import { FilterIcon16, SortAlphabetAscIcon16 } from "./icons"
 import { QualifierPicture, anyQualifierPicture } from "./qualifier-suggestions"
 
 /**
@@ -27,7 +29,15 @@ import { QualifierPicture, anyQualifierPicture } from "./qualifier-suggestions"
  * branches — a top-level row per qualifier, its values in the submenu — and
  * both the keys and the values are read from the query box's own picker
  * vocabulary (`src/utils/view-filter.ts`), so the menu and the box can never
- * offer different things.
+ * offer different things. The branches are grouped by WHAT they test — the
+ * rows, or the note holding them — because a note-level qualifier inside one
+ * note holds for every row or for none, and a menu that did not say so would
+ * be offering a puzzle.
+ *
+ * `in:` has no branch. It names the view's root, which is what focusing
+ * already does (a bullet, `f`, the breadcrumb), and listing every block that
+ * could be a root means walking the whole note on every render to build a
+ * menu nobody opens.
  *
  * A button carries a **dot** when what is on screen differs from what the
  * block's pin saved (docs/metadata.md), and the menu behind it grows a
@@ -35,13 +45,6 @@ import { QualifierPicture, anyQualifierPicture } from "./qualifier-suggestions"
  * act on the WHOLE view, because a pin holds one view and saving half of it
  * would leave the other half behind.
  */
-
-/** A row that can be the view's root — what `in:` names. */
-export interface RootOption {
-  id: string
-  /** How the row reads: the block's own text. */
-  text: string
-}
 
 /** The dot on a button whose value is not the pinned default's. */
 function DirtyDot() {
@@ -83,29 +86,27 @@ function DefaultFooter({ onUpdateDefault, onResetDefault }: PinnedDefaultActions
 export function FilterMenu({
   filter,
   onFilterChange,
-  roots,
-  focusBlockId,
-  onFocusBlock,
   pinned,
 }: {
   /** The view's filter, as the query language writes it. */
   filter: string
   onFilterChange: (filter: string) => void
-  /** The blocks the view could be rooted at — what the `in:` branch offers. */
-  roots: readonly RootOption[]
-  /** The block the page is rooted at now, or null for the whole note. */
-  focusBlockId: string | null
-  /** Root the view at a block, or at the note (`null`). */
-  onFocusBlock: (id: string | null) => void
-  /** The pin's saved view, when this block has one; absent = nothing saved,
-   * so there is nothing to settle. */
+  /** The saved view this one is measured against, when there is one. */
   pinned?: PinnedDefaultActions
 }) {
   // Built once a render: `date:` resolves its shortcuts against the clock.
-  const branches = React.useMemo(() => filterBranches(), [])
+  // Gathered by what they test, in the order the branches came in.
+  const scopes = React.useMemo(() => {
+    const groups: { scope: FilterBranch["scope"]; branches: FilterBranch[] }[] = []
+    for (const branch of filterBranches()) {
+      const last = groups[groups.length - 1]
+      if (last && last.scope === branch.scope) last.branches.push(branch)
+      else groups.push({ scope: branch.scope, branches: [branch] })
+    }
+    return groups
+  }, [])
   const summary = describeFilter(filter)
   const active = summary !== ""
-  const rootedAt = roots.find((root) => root.id === focusBlockId)
 
   return (
     <DropdownMenu modal={false}>
@@ -128,73 +129,53 @@ export function FilterMenu({
         footer={pinned?.dirty ? <DefaultFooter {...pinned} /> : undefined}
       >
         {/* One branch per qualifier the query language has — the query box's
-            own keys and values, in its own order. */}
-        {branches.map((branch) => {
-          const chosen = filterValues(filter, branch.key)
-          return (
-            <DropdownMenu.Submenu key={branch.key}>
-              <DropdownMenu.SubmenuTrigger value={describeBranch(filter, branch) || "Any"}>
-                {branch.label}
-              </DropdownMenu.SubmenuTrigger>
-              <DropdownMenu.Content align="start" side="left">
-                <DropdownMenu.Item
-                  selected={chosen.length === 0}
-                  closeOnClick={false}
-                  onClick={() => onFilterChange(clearFilterKey(filter, branch.key))}
-                >
-                  Any
-                </DropdownMenu.Item>
-                <DropdownMenu.Separator />
-                {branch.options.map((option) => (
-                  <DropdownMenu.Item
-                    key={option.value}
-                    selected={chosen.includes(option.value)}
-                    closeOnClick={false}
-                    // The query box picker's own leading slot: a fixed,
-                    // centred box, so a three-character glyph, a
-                    // one-character one and a 16px icon share an axis.
-                    icon={
-                      anyQualifierPicture(branch.options, branch.key) ? (
-                        <QualifierPicture item={option} qualifierKey={branch.key} />
-                      ) : undefined
-                    }
-                    onClick={() =>
-                      onFilterChange(toggleFilterValue(filter, branch.key, option.value))
-                    }
-                  >
-                    {option.label ?? option.value}
-                  </DropdownMenu.Item>
-                ))}
-              </DropdownMenu.Content>
-            </DropdownMenu.Submenu>
-          )
-        })}
-
-        {/* `in:` — where the view starts. Inside a note that is focusing, so
-            picking one is the same navigation the bullet and `f` do. */}
-        <DropdownMenu.Submenu>
-          <DropdownMenu.SubmenuTrigger
-            icon={<NoteIcon16 />}
-            value={rootedAt ? rootedAt.text : "Whole note"}
-          >
-            In
-          </DropdownMenu.SubmenuTrigger>
-          <DropdownMenu.Content align="start" side="left">
-            <DropdownMenu.Item selected={focusBlockId === null} onClick={() => onFocusBlock(null)}>
-              Whole note
-            </DropdownMenu.Item>
-            {roots.length > 0 ? <DropdownMenu.Separator /> : null}
-            {roots.map((root) => (
-              <DropdownMenu.Item
-                key={root.id}
-                selected={root.id === focusBlockId}
-                onClick={() => onFocusBlock(root.id)}
-              >
-                {root.text || "Untitled block"}
-              </DropdownMenu.Item>
-            ))}
-          </DropdownMenu.Content>
-        </DropdownMenu.Submenu>
+            own keys and values, in its own order — gathered under a heading
+            saying what that group of branches tests. */}
+        {scopes.map(({ scope, branches: group }) => (
+          <DropdownMenu.Group key={scope}>
+            <DropdownMenu.GroupLabel>{SCOPE_LABELS[scope]}</DropdownMenu.GroupLabel>
+            {group.map((branch) => {
+              const chosen = filterValues(filter, branch.key)
+              return (
+                <DropdownMenu.Submenu key={branch.key}>
+                  <DropdownMenu.SubmenuTrigger value={describeBranch(filter, branch) || "Any"}>
+                    {branch.label}
+                  </DropdownMenu.SubmenuTrigger>
+                  <DropdownMenu.Content align="start" side="left">
+                    <DropdownMenu.Item
+                      selected={chosen.length === 0}
+                      closeOnClick={false}
+                      onClick={() => onFilterChange(clearFilterKey(filter, branch.key))}
+                    >
+                      Any
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Separator />
+                    {branch.options.map((option) => (
+                      <DropdownMenu.Item
+                        key={option.value}
+                        selected={chosen.includes(option.value)}
+                        closeOnClick={false}
+                        // The query box picker's own leading slot: a fixed,
+                        // centred box, so a three-character glyph, a
+                        // one-character one and a 16px icon share an axis.
+                        icon={
+                          anyQualifierPicture(branch.options, branch.key) ? (
+                            <QualifierPicture item={option} qualifierKey={branch.key} />
+                          ) : undefined
+                        }
+                        onClick={() =>
+                          onFilterChange(toggleFilterValue(filter, branch.key, option.value))
+                        }
+                      >
+                        {option.label ?? option.value}
+                      </DropdownMenu.Item>
+                    ))}
+                  </DropdownMenu.Content>
+                </DropdownMenu.Submenu>
+              )
+            })}
+          </DropdownMenu.Group>
+        ))}
 
         <DropdownMenu.Separator />
         <DropdownMenu.Item disabled={filter === ""} onClick={() => onFilterChange("")}>

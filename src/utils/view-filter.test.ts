@@ -31,6 +31,18 @@ describe("filterBranches", () => {
     expect(keys).not.toContain("in")
   })
 
+  it("says what each branch tests, and spells the wording out", () => {
+    const branches = filterBranches()
+    expect(branches.map((branch) => [branch.key, branch.label, branch.scope])).toEqual([
+      // "Has" alone says nothing about what has it, so each is spelt out and
+      // grouped by whether it tests the rows or the note holding them.
+      ["type", "Block type", "rows"],
+      ["has", "Has", "note"],
+      ["no", "Does not have", "note"],
+      ["date", "Dated", "note"],
+    ])
+  })
+
   it("takes each branch's values from the picker, not from a copy", () => {
     const type = filterBranches().find((branch) => branch.key === "type")
     const values = type?.options.map((option) => option.value) ?? []
@@ -39,7 +51,11 @@ describe("filterBranches", () => {
     expect(values).toContain("heading")
     expect(values).toContain("daily")
     const has = filterBranches().find((branch) => branch.key === "has")
-    expect(has?.options.map((option) => option.value)).toEqual(["dates", "tasks", "title"])
+    expect(has?.options.map((option) => [option.value, option.label])).toEqual([
+      ["dates", "A date"],
+      ["tasks", "Tasks"],
+      ["title", "A title"],
+    ])
   })
 })
 

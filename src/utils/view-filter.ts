@@ -26,9 +26,28 @@ import { composeQuery, parseQuery, splitQuery, type Sort } from "./search"
 export interface FilterBranch {
   /** The qualifier this branch writes (`type`, `has`, `no`, `date`). */
   key: string
-  /** How the branch reads — the key, capitalised. */
+  /** How the branch reads. Spelt out rather than named after the qualifier:
+   * "Has" alone says nothing about WHAT has it. */
   label: string
+  /**
+   * What the branch tests — the rows themselves, or the note holding them.
+   * A note-level qualifier inside one note holds for every row or for none
+   * (docs/query-language.md), so the menu groups them apart and says so.
+   */
+  scope: "rows" | "note"
   options: readonly QualifierOption[]
+}
+
+/**
+ * How each qualifier reads as a menu row, and what it tests. Only the
+ * wording is here: which keys exist, and what values each takes, still come
+ * from the query box's picker.
+ */
+const BRANCH_LABELS: Record<string, { label: string; scope: FilterBranch["scope"] }> = {
+  type: { label: "Block type", scope: "rows" },
+  has: { label: "Has", scope: "note" },
+  no: { label: "Does not have", scope: "note" },
+  date: { label: "Dated", scope: "note" },
 }
 
 /**
@@ -50,13 +69,28 @@ function keyLabel(key: string): string {
  * query box would open a picker for.
  */
 export function filterBranches(now: Date = new Date()): FilterBranch[] {
+  const described = (key: string, options: readonly QualifierOption[]): FilterBranch => ({
+    key,
+    label: BRANCH_LABELS[key]?.label ?? keyLabel(key),
+    // A key the query language gains before this map does still gets a
+    // branch; it is simply assumed to be about the rows.
+    scope: BRANCH_LABELS[key]?.scope ?? "rows",
+    options,
+  })
   const branches: FilterBranch[] = []
   for (const [key, options] of Object.entries(STATIC_QUALIFIER_OPTIONS)) {
     if (NOT_FILTER_KEYS.has(key)) continue
-    branches.push({ key, label: keyLabel(key), options })
+    branches.push(described(key, options))
   }
-  branches.push({ key: "date", label: "Date", options: dateQualifierOptions(now) })
+  branches.push(described("date", dateQualifierOptions(now)))
   return branches
+}
+
+/** The group headings the menu puts above each scope, saying what the
+ * branches beneath it test. */
+export const SCOPE_LABELS: Record<FilterBranch["scope"], string> = {
+  rows: "Match rows by",
+  note: "Match the whole note by",
 }
 
 /** The sort keys a note's rows can actually be ordered by, as the query
