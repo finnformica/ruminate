@@ -408,6 +408,58 @@ changed here, and it is invisible from outside:
   unlink-plus-rescue is still right once deletes are recoverable is a separate
   decision, and there is no restore UI yet — only data that supports one.
 
+## Ordering notes
+
+Sibling order for a block is a fractional `sort_key` on the `child` link from
+its parent (graph-schema-v2.md). Notes had no such key, because a note is a
+**root** — `noteIds` finds one by its `note` type, and nothing links to it —
+so there was no edge to hang an order on. The notes lists ordered by
+`updated_at` instead, which every edit stamps: the note you were typing in
+climbed to the top of the sidebar while you were looking at it.
+
+A **corpus root** supplies the missing edge. It is one node per corpus, typed
+`corpus_root` at the fixed id `corpus_root`, whose `child` links hold the
+notes the user has dragged into an order. Nothing about the mechanism is
+note-specific: the keys are the same fractional indices from the same
+`sortKeyBetween`, so moving a note rewrites one link row exactly as moving a
+block does (`src/data/note-order.ts`).
+
+The root is **ordering-only**, and that is the whole of its contract:
+
+- A note is still a note because its node is typed `note`. The root never
+  decides what exists, only what sits where — so a note it does not hold is an
+  ordinary note with no manual position, and there is nothing to backfill.
+- It is minted on the first drag, not at boot. A corpus nobody has reordered
+  carries no root row at all.
+- The walk, the rollup, sharing, the replica and the MCP server are untouched.
+  Reachability already starts _from_ the note ids, so the root is never walked
+  into, and its rows replicate like any others.
+- A delete needs no order bookkeeping: deletes do not cascade to links, so the
+  root's link to a deleted note is retained (as every link to a tombstone is),
+  and the order filters against the live nodes when it is read.
+
+It is neither a note nor a block, so the three passes that sweep every node
+looking for one or the other skip it — `isCorpusRoot` is that check, and these
+are all of its call sites:
+
+- `unassignedIds`: nothing reaches the root, so the Unassigned basket would
+  claim it.
+- `deleteBlockOps`: the root is parentless, so the delete-rescue would walk
+  from it, reach every note, and conclude that nothing may be deleted.
+- `walkGraph`'s upstream pass: the root would show above a note as its parent.
+
+The sort itself is a preference, not data: **Name** (the default), **Recently
+updated** and **Manual**, shared by the sidebar and the notes page so the two
+never disagree about where a note is. Manual is two bands — the notes the root
+holds, then the ones it does not, in the name order beneath them.
+
+**A pin does not steer the order.** Pinned notes are listed on their own under
+**Pinned**, above the notes and alongside the pinned blocks, and they keep
+their sorted place in the notes list as well — a pin is a second place to
+reach a note, never a note lifted out of the order. That is what lets the
+order be wholly the user's: no band interrupts the manual sequence, and a drag
+has no boundary to be stopped at.
+
 ## Cross-file block-id dedup
 
 `parse.ts` regenerates duplicate ids _within_ one document; across notes, a

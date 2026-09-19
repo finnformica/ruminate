@@ -52,6 +52,13 @@ export const APP_SHORTCUTS = {
   helpPanel: "mod+/",
   applyUpdate: "mod+shift+u",
   focusSearch: "/",
+  /** The `g` chords, which `GChordMachine` binds and the sidebar labels its
+   * rows with — so a destination's key is written once, here. */
+  goCalendar: "g d",
+  goNotes: "g n",
+  goSettings: "g s",
+  goAdmin: "g a",
+  goChangelog: "g c",
   historyBack: "mod+[",
   historyForward: "mod+]",
   /** DEV builds only — deliberately not listed in the `?` reference. */
@@ -362,25 +369,31 @@ const GLOBAL_ENTRIES: Shortcut[] = [
 
 const NAVIGATION_ENTRIES: Shortcut[] = [
   {
-    combos: ["g d"],
+    combos: [APP_SHORTCUTS.goCalendar],
     scope: "global",
     description: "Go to today's daily note (press g, then d)",
     group: "Navigation",
   },
   {
-    combos: ["g n"],
+    combos: [APP_SHORTCUTS.goNotes],
     scope: "global",
     description: "Go to the notes list (press g, then n)",
     group: "Navigation",
   },
   {
-    combos: ["g s"],
+    combos: [APP_SHORTCUTS.goSettings],
     scope: "global",
     description: "Go to settings (press g, then s)",
     group: "Navigation",
   },
   {
-    combos: ["g a"],
+    combos: [APP_SHORTCUTS.goChangelog],
+    scope: "global",
+    description: "Go to the changelog (press g, then c)",
+    group: "Navigation",
+  },
+  {
+    combos: [APP_SHORTCUTS.goAdmin],
     scope: "global",
     description: "Go to the admin page (press g, then a; the admin only)",
     group: "Navigation",

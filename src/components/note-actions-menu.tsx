@@ -14,6 +14,8 @@ import { cx } from "../utils/cx"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
 import {
+  ArrowDownIcon16,
+  ArrowUpIcon16,
   CopyIcon16,
   EditIcon16,
   MoreIcon16,
@@ -25,6 +27,17 @@ import {
   WidthFixedIcon16,
   WidthFullIcon16,
 } from "./icons"
+
+/**
+ * The row's place in the manual order, when the list it sits in has one
+ * (`src/data/note-order.ts`). Reordering by drag alone would be reachable by
+ * pointer alone, so the sidebar hands the menu the same two moves — which is
+ * also the only way to reorder on a touch screen.
+ */
+interface ReorderActions {
+  onMoveUp?: () => void
+  onMoveDown?: () => void
+}
 
 /** Editor-context actions, shown only when the note is open in the editor. */
 interface EditorActions {
@@ -53,12 +66,14 @@ export function NoteActionsMenu({
   className,
   align = "start",
   editor,
+  reorder,
 }: {
   noteId: string
   pinned?: boolean
   className?: string
   align?: "start" | "end"
   editor?: EditorActions
+  reorder?: ReorderActions
 }) {
   const navigate = useNavigate()
   const location = useLocation()
@@ -169,6 +184,24 @@ export function NoteActionsMenu({
           >
             {pinned ? "Unpin" : "Pin"}
           </DropdownMenu.Item>
+        ) : null}
+        {reorder ? (
+          <>
+            <DropdownMenu.Item
+              icon={<ArrowUpIcon16 />}
+              disabled={!reorder.onMoveUp}
+              onClick={() => reorder.onMoveUp?.()}
+            >
+              Move up
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              icon={<ArrowDownIcon16 />}
+              disabled={!reorder.onMoveDown}
+              onClick={() => reorder.onMoveDown?.()}
+            >
+              Move down
+            </DropdownMenu.Item>
+          </>
         ) : null}
         <DropdownMenu.Item icon={<CopyIcon16 />} onClick={copyMarkdown}>
           Copy markdown

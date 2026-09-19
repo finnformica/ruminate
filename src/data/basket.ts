@@ -1,6 +1,6 @@
 import type { BlockDoc } from "../blocks/types"
 import type { NoteId } from "../schema"
-import { docFromGraph, docToParts, NOTE_TYPE, type GraphSnapshot } from "./graph"
+import { docFromGraph, docToParts, isCorpusRoot, NOTE_TYPE, type GraphSnapshot } from "./graph"
 import { noteIds, parentsIndex, partsToOps, reachableFrom, reservedNoteIds, type Op } from "./ops"
 
 /**
@@ -26,6 +26,9 @@ export function unassignedIds(snapshot: GraphSnapshot): Set<string> {
   const reached = reachableFrom(snapshot, noteIds(snapshot))
   const out = new Set<string>()
   for (const node of snapshot.nodes.values()) {
+    // The corpus root is reached by nothing — it holds notes rather than
+    // being held (see ROOT_TYPE) — so the basket would otherwise claim it.
+    if (isCorpusRoot(node)) continue
     if (node.type !== NOTE_TYPE && !reached.has(node.id)) out.add(node.id)
   }
   return out
