@@ -226,6 +226,36 @@ describe("the sidebar's Pinned list", () => {
     expect(screen.getByText("A pinned block")).toBeTruthy()
   })
 
+  it("draws a note row and a block row identically — same icon, same classes", () => {
+    const pinnedNote = noteOf("p", "Pinned one", true)
+    renderSidebar({
+      notes: [pinnedNote, ...THREE],
+      pinnedNotes: [pinnedNote],
+      pinnedBlocks: [{ id: "blk_x", noteId: "a", text: "A pinned block", note: THREE[0] }],
+    })
+    const band = screen
+      .getAllByTestId("section-heading")
+      .find((h) => h.textContent?.trim() === "Pinned")!.parentElement!
+    const icons = [...band.querySelectorAll("li .nav-item")].map((row) => {
+      const icon = row.querySelector(".nav-item-icon:not(.hidden)")
+      return `${icon?.className} ${icon?.querySelector("svg")?.innerHTML}`
+    })
+    expect(icons).toHaveLength(2)
+    // The pin, both times — the note's own icon does not appear under Pinned.
+    expect(new Set(icons).size).toBe(1)
+  })
+
+  it("keeps the pin marker out of Pinned and in Notes, where it is news", () => {
+    const pinnedNote = noteOf("p", "Pinned one", true)
+    renderSidebar({ notes: [pinnedNote, ...THREE], pinnedNotes: [pinnedNote] })
+    const band = screen
+      .getAllByTestId("section-heading")
+      .find((h) => h.textContent?.trim() === "Pinned")!.parentElement!
+    expect(band.querySelectorAll(".text-text-pinned")).toHaveLength(0)
+    // The same note's row in Notes below still carries it.
+    expect(noteRows()[0].querySelectorAll(".text-text-pinned")).toHaveLength(1)
+  })
+
   it("leaves the pinned note in its sorted place in Notes", () => {
     const pinnedNote = noteOf("b2", "Bravo two", true)
     renderSidebar({

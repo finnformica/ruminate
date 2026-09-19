@@ -134,7 +134,7 @@ export function NavItems({
             <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
               <SectionHeading>Pinned</SectionHeading>
               {pinnedNotes.length > 0 ? (
-                <NoteRows notes={pinnedNotes} size={size} onNavigate={onNavigate} />
+                <NoteRows notes={pinnedNotes} pinned size={size} onNavigate={onNavigate} />
               ) : null}
               {pinnedBlocks.length > 0 ? (
                 <PinnedBlockRows blocks={pinnedBlocks} size={size} onNavigate={onNavigate} />
@@ -423,16 +423,44 @@ function OwnNoteRows({
   )
 }
 
+/**
+ * A nav row's leading icon: both variants are rendered and the row's
+ * `aria-current` picks one, so the current row shows the filled icon in the
+ * selected tint (`.nav-item-icon`, index.css) exactly as a nav link does.
+ *
+ * Every row in the sidebar's lists draws its icon through here, which is what
+ * keeps a note row and a block row identical but for the glyph.
+ */
+function NavRowIcon({ icon, filled }: { icon: React.ReactNode; filled: React.ReactNode }) {
+  return (
+    <>
+      <span className="nav-item-icon hidden shrink-0 [[aria-current=page]>&]:flex">{filled}</span>
+      <span className="nav-item-icon flex shrink-0 text-text-secondary [[aria-current=page]>&]:hidden">
+        {icon}
+      </span>
+    </>
+  )
+}
+
+/** What a row under **Pinned** leads with — a note and a block alike, so the
+ * one list reads as one list. */
+const pinRowIcon = <NavRowIcon icon={<PinIcon16 />} filled={<PinFillIcon16 />} />
+
 /** The note rows of one list: the user's own, or the shared ones. */
 function NoteRows({
   notes,
   titleOf,
+  pinned = false,
   size,
   onNavigate,
 }: {
   notes: Note[]
   /** A row's tooltip, where a list has one (who shared the note). */
   titleOf?: (note: Note) => string | undefined
+  /** This is the **Pinned** list: the rows lead with the pin rather than the
+   * note's own icon, and drop the pin marker beside the name — every row here
+   * is pinned, so naming it on each one says nothing. */
+  pinned?: boolean
   size: "medium" | "large"
   onNavigate?: () => void
 }) {
@@ -454,6 +482,7 @@ function NoteRows({
           <NoteNavItem
             note={note}
             title={titleOf?.(note)}
+            pinned={pinned}
             size={size}
             onNavigate={onNavigate}
             className="w-full"
@@ -544,13 +573,12 @@ function PinnedBlockNavItem({
         if (!event.defaultPrevented) onNavigate?.()
       }}
     >
-      <span className="nav-item-icon hidden shrink-0 [[aria-current=page]>&]:flex">
-        <PinFillIcon16 />
+      {pinRowIcon}
+      {/* The same wrapper a note row's name sits in, so the two line up to
+          the pixel down the list. */}
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="truncate">{label}</span>
       </span>
-      <span className="nav-item-icon flex shrink-0 text-text-secondary [[aria-current=page]>&]:hidden">
-        <PinIcon16 />
-      </span>
-      <span className="truncate">{label}</span>
     </Link>
   )
 }
@@ -661,12 +689,15 @@ function NavLink({
 function NoteNavItem({
   note,
   title,
+  pinned = false,
   size,
   onNavigate,
   className,
 }: {
   note: Note
   title?: string
+  /** Drawn as a row of the **Pinned** list (see `NoteRows`). */
+  pinned?: boolean
   size: "medium" | "large"
   onNavigate?: () => void
   className?: string
@@ -684,18 +715,18 @@ function NoteNavItem({
         if (!event.defaultPrevented) onNavigate?.()
       }}
     >
-      {/* Current, the row shows the filled icon in its own tint
-          (`.nav-item-icon`, index.css), exactly as a nav link swaps to its
-          filled icon: both variants are rendered and the row's
-          `aria-current` picks one. */}
-      <span className="nav-item-icon hidden shrink-0 [[aria-current=page]>&]:flex">
-        <NoteFavicon note={note} filled />
-      </span>
-      <span className="nav-item-icon flex shrink-0 text-text-secondary [[aria-current=page]>&]:hidden">
-        <NoteFavicon note={note} />
-      </span>
+      {pinned ? (
+        pinRowIcon
+      ) : (
+        <NavRowIcon
+          icon={<NoteFavicon note={note} />}
+          filled={<NoteFavicon note={note} filled />}
+        />
+      )}
       <span className="flex min-w-0 items-center gap-1.5">
-        {note.pinned ? <PinFillIcon12 className="shrink-0 text-text-pinned" /> : null}
+        {/* The pin marker belongs to the lists where being pinned is news.
+            Under **Pinned** every row is, and the row's own icon says so. */}
+        {note.pinned && !pinned ? <PinFillIcon12 className="shrink-0 text-text-pinned" /> : null}
         {/* Show the note's name, matching the page header. Ids are minted and
             opaque now (docs/graph-storage.md), so the name is the
             title — which is what `displayName` resolves. */}
