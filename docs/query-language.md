@@ -12,17 +12,17 @@ Search your notes with Ruminate's [GitHub-style](https://docs.github.com/en/sear
 
 ## Qualifiers
 
-| Key     | Example                                                                                                                                                                                                                                                                    |
-| :------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`    | `id:1652342106359` matches the note with ID `1652342106359`.                                                                                                                                                                                                               |
-| `date`  | `date:2021-07-11` matches notes with the date `2021-07-11`.                                                                                                                                                                                                                |
-| `dates` | `dates:>1` matches notes with more than one date.                                                                                                                                                                                                                          |
-| `tasks` | `tasks:>0` matches notes with at least one open task.                                                                                                                                                                                                                      |
-| `no`    | `no:dates` matches notes without a date. `no` can be used with any filter qualifier key or property key.                                                                                                                                                                   |
-| `has`   | `has:dates` matches notes with one or more date. `has` can be used with any filter qualifier key or property key.                                                                                                                                                          |
-| `type`  | `type:daily` matches daily notes (`note`, `daily`, `weekly`, `template`). With a block-type value it matches _blocks_ instead — see below.                                                                                                                                 |
-| `in`    | `in:1652342106359` scopes the query to what is _inside_ a note (by id, or by name: `in:"Reading list"`); with a block id, to the blocks under that block. See "Scoping with `in:`" below.                                                                                  |
-| `sort`  | `sort:title`, `sort:id:desc`, `sort:updated_at,title:desc`. Supports `id`, `title`, `updated_at`, and any property key. Use `:asc` or `:desc`. Default is `asc` for `id` and `title`. `updated_at` defaults to `desc`. Multiple comma-separated sorts apply left-to-right. |
+| Key     | Example                                                                                                                                                                                                                                                                                                       |
+| :------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`    | `id:1652342106359` matches the note with ID `1652342106359`.                                                                                                                                                                                                                                                  |
+| `date`  | `date:2021-07-11` matches notes with the date `2021-07-11`.                                                                                                                                                                                                                                                   |
+| `dates` | `dates:>1` matches notes with more than one date.                                                                                                                                                                                                                                                             |
+| `tasks` | `tasks:>0` matches notes with at least one open task.                                                                                                                                                                                                                                                         |
+| `no`    | `no:dates` matches notes without a date. `no` can be used with any filter qualifier key or property key.                                                                                                                                                                                                      |
+| `has`   | `has:dates` matches notes with one or more date. `has` can be used with any filter qualifier key or property key.                                                                                                                                                                                             |
+| `type`  | `type:daily` matches daily notes (`note`, `daily`, `weekly`, `template`). With a block-type value it matches _blocks_ instead — see below.                                                                                                                                                                    |
+| `in`    | `in:1652342106359` scopes the query to what is _inside_ a note (by id, or by name: `in:"Reading list"`); with a block id, to the blocks under that block. See "Scoping with `in:`" below.                                                                                                                     |
+| `sort`  | `sort:title`, `sort:id:desc`, `sort:updated_at,title:desc`. Supports `text` and `type` (a block's own), `id`, `title`, `updated_at`, and any property key. Use `:asc` or `:desc`. Default is `asc` for `id` and `title`. `updated_at` defaults to `desc`. Multiple comma-separated sorts apply left-to-right. |
 
 Unrecognized qualifier keys are assumed to be [property](/docs/metadata.md) keys. For example, `read:true` matches notes whose `read` property is `true`.
 
@@ -59,12 +59,39 @@ Typing a qualifier whose values are a known set opens a popover beside the token
 - `type:` — the block types below, each beside its markdown glyph, then the note types. Headings are offered as the one `heading` and lists as `bullet` and `ordered`; `h1`…`h3` and `list` still work typed.
 - `in:` — your notes, by name, most recent first (the open note leads, even before it exists).
 - `has:` / `no:` — `dates`, `tasks`, `title`.
-- `sort:` — in two steps: the key (Title, Updated at), then, once the key and its colon are there, Ascending or Descending, written in full (`sort:title:asc`, `sort:updated_at:desc`). Typing `sort:title:` goes straight to the second step. (`sort:id` still works typed; an id is opaque, so it is not offered.)
+- `sort:` — in two steps: the key (Text, Type, Title, Updated at), then, once the key and its colon are there, Ascending or Descending, written in full (`sort:title:asc`, `sort:updated_at:desc`). Typing `sort:title:` goes straight to the second step. (`sort:id` still works typed; an id is opaque, so it is not offered.) `text` and `type` sort blocks by their own text and their own type; the rest sort by the containing note.
 - `date:` — the slash menu's date shortcuts (Today, Tomorrow, Yesterday, Next week, Last week — `dateShortcuts` in `src/blocks/slash-menu.ts`, the one source for both). The day is what lands in the query (`date:2026-09-14`), exactly as the slash menu writes a day into a note; type a word (`date:tomorrow`) to keep a query relative.
 
 The rows are just the values, capitalised (a block type beside its glyph): no header, no glosses, no key hints. ↑/↓ move, ↵ or Tab pick, Esc closes.
 
 Focus never leaves the box: keep typing to narrow the list, <kbd>↑</kbd>/<kbd>↓</kbd> to move, <kbd>↵</kbd> or <kbd>Tab</kbd> to pick (a note lands as its id; a value with spaces is quoted), <kbd>Esc</kbd> to leave what you typed. `-type:` and comma lists (`type:todo,done`) work the same way. On a phone, or in a narrow box, the popover takes the box's full width instead of hanging at the token.
+
+## Filtering a note in place
+
+The query language also narrows a note **where it stands**, rather than resolving to a list of results elsewhere. **Filter** and **Sort** sit beside the **⋯** menu at the top right of a note (and of a focused block):
+
+- The rows that match stay. The rows above a match are kept as **context** and drawn dimmed — so you can see which heading a to-do lives under without that heading pretending to be a result. A branch holding no match is dropped.
+- Everything beneath a match is kept as context too: a to-do you filtered to is still the to-do with its notes underneath.
+- It is drawn by the block editor, from the note's own doc, so the markers, the typography, the folds and the keys are the note page's — a filtered note is the note, shorter, never a second kind of list.
+- The filter and the sort live in the URL (`?filter=type:todo&sort=text:desc`), so a narrowed view is a link, and the back button takes the narrowing off.
+
+**What a filter may say: everything.** A note's filter is run by the same engine that runs a search — `searchBlocks`, scoped to the note (`src/utils/view-narrowing.ts`) — so every qualifier above works here on the day it works in the box: `type:` on the block, `in:` on its ancestry, `has:` / `no:` / `date:` / a property on the containing note, `-` to exclude, comma lists to OR, and free text fuzzy-matched over the block's own text. Nothing is reimplemented, so the two cannot drift.
+
+A note-level qualifier behaves honestly rather than being ignored: inside one note it holds for every row or for none, so `area:work` shows the whole note or nothing at all — which is exactly what the same query means in a search.
+
+**The menu offers `type:` and nothing else.** The rest of the vocabulary is note-level, and inside a single note a note-level qualifier holds for every row or for none — so as a menu item it is not a filter but a switch between the whole note and a blank page. `in:` is left out for a different reason: it names the view's **root**, which is what focusing already does (a bullet, <kbd>f</kbd>, the breadcrumb). Both still work typed into a filter by hand, and mean there exactly what they mean in a search.
+
+The block types the menu lists are the query box's own picker vocabulary (`STATIC_QUALIFIER_OPTIONS`), so a block type added to the registry appears in the note header with it.
+
+**What a sort may say.** The **Sort** menu offers the keys that order a block by something of its own — `text` and `type` — each `:asc` (the default) or `:desc`, taken from the same two-step `sort:` picker the query box walks through. Several comma-separated keys apply left to right. `title` and `updated_at` remain in the language and in the box, but belong to the containing note, so inside one note they tie and reorder nothing; the menu does not offer them for that reason. Ordering is the search's own comparator (`compareBlockHits`), so `sort:text:desc` orders a note's rows exactly as it orders results.
+
+A sort reorders each parent's **children** and leaves the nesting alone: a filtered outline is still an outline, and a single order over a tree is not something a reader can follow. Document order is the default, and the absence of a sort.
+
+A filter that matches nothing shows an empty page, not a blank row to type in: a narrowed view writes no structure, so a row offered there could not be written.
+
+**A narrowed view edits its rows, not the note's shape.** Tick a to-do, retype a line, change a block's properties — those land in the graph as they always do. Structure does not: a narrowed view holds only the rows that survived, in the order the sort put them, so reconciling it against the graph would read every hidden row as removed. New rows, indents, removals and reorders belong to the note, which is one click away with the filter cleared. For the same reason a narrowed view has no trailing blank row to type into.
+
+A pinned block can save a filter and a sort of its own, so a pin becomes a view — see [metadata.md](./metadata.md).
 
 ## Block types
 
@@ -72,6 +99,7 @@ Focus never leaves the box: keep typing to narrow the list, <kbd>↑</kbd>/<kbd>
 
 | Value           | Matches                                                   |
 | :-------------- | :-------------------------------------------------------- |
+| `text`          | plain paragraph                                           |
 | `todo`          | unchecked checkbox                                        |
 | `done`          | checked checkbox                                          |
 | `task`          | any checkbox, checked or not                              |
@@ -84,7 +112,6 @@ Focus never leaves the box: keep typing to narrow the list, <kbd>↑</kbd>/<kbd>
 | `code`          | a code block (or a fenced line in old notes)              |
 | `image`         | an image block (docs/images.md); text matches its caption |
 | `link`          | a link block (docs/links.md); text matches its title      |
-| `text`          | plain paragraph                                           |
 
 Block queries compose with everything else: note-level qualifiers filter by the containing note (`type:todo area:work` = open todos in notes whose `area` property is `work`), `in:` scopes to a note or a block's subtree, fuzzy text matches the block's own text (`type:todo milk`), `-type:done` excludes, and `sort:updated` orders blocks by their note's last update, most recent first.
 

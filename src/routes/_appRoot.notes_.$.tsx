@@ -27,10 +27,17 @@ import {
   isSignedOutAtom,
   linkDirectionsAtom,
 } from "../global-state"
-import { useCreateNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
+import {
+  useCreateNote,
+  useNoteById,
+  useRenameNote,
+  useSetBlockProps,
+  useSetNoteProps,
+} from "../hooks/note"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
-import { pathToBlock } from "../data/graph"
+import { parseProps, pathToBlock } from "../data/graph"
+import { FilterMenu, SortMenu } from "../components/view-controls"
 import { useFoldRule } from "../data/view-state"
 import { keyOf } from "../blocks/view"
 import { useNoteShare } from "../hooks/share"
@@ -44,6 +51,15 @@ type RouteSearch = {
   query: string | undefined
   /** Block id the editor is focused on; absent = outside focus. */
   block?: string
+  /**
+   * The view's filter, in the query language (`type:todo`): the rows that
+   * match stay, their ancestors are kept as dimmed context and everything
+   * else goes (`src/data/filter-view.ts`). Absent = every row.
+   */
+  filter?: string
+  /** How each parent's children are ordered (`text`, `text:desc`), the
+   * nesting untouched. Absent = the note's own order. */
+  sort?: string
 }
 
 export const Route = createFileRoute("/_appRoot/notes_/$")({
@@ -51,6 +67,8 @@ export const Route = createFileRoute("/_appRoot/notes_/$")({
     return {
       query: typeof search.query === "string" ? search.query : undefined,
       block: typeof search.block === "string" ? search.block : undefined,
+      filter: typeof search.filter === "string" ? search.filter : undefined,
+      sort: typeof search.sort === "string" ? search.sort : undefined,
     }
   },
   component: RouteComponent,
@@ -77,8 +95,12 @@ function RouteComponent() {
 function NotePage() {
   // Router
   const { _splat: noteId } = Route.useParams()
-  const { block: focusBlockId } = Route.useSearch()
+  const { block: focusBlockId, filter: filterParam, sort: sortParam } = Route.useSearch()
   const navigate = Route.useNavigate()
+  // The view's narrowing, from the URL — so a filtered view is a link, the
+  // back button undoes it, and a pinned block can carry one (docs/metadata.md).
+  const filter = filterParam ?? ""
+  const sort = sortParam ?? ""
 
   // Global state
   const isSignedOut = useAtomValue(isSignedOutAtom)
@@ -131,6 +153,7 @@ function NotePage() {
   const {
     doc: editorDoc,
     collapsed,
+    context,
     exists: noteExists,
     setDoc,
   } = useNoteDoc({
@@ -139,8 +162,11 @@ function NotePage() {
     focusBlockId: focusBlockId ?? null,
     expanded,
     directions,
+    filter,
+    sort,
   })
   const jotaiStore = useStore()
+  const graph = useAtomValue(graphSnapshotAtom)
   // Leaving a focus for a wider view — the note, or a block above — must
   // show the block just left, so the reader lands back on it: the folds
   // along one path from the new root to it are opened first (nothing to do
@@ -253,6 +279,65 @@ function NotePage() {
     [setProp],
   )
 
+  // A pinned block may carry a filter and a sort of its own (docs/metadata.md):
+  // what the sidebar opens it with, and what the header offers to update when
+  // the view has moved away from it. Only the user's own pin — a shared
+  // block's props are its owner's.
+  const setBlockProps = useSetBlockProps()
+  const pinnedDefaults = React.useMemo(() => {
+    const rootId = focusBlockId ?? noteId
+    if (!rootId || share !== null) return null
+    const props = parseProps(graph.nodes.get(rootId)?.props ?? null)
+    if (props?.pinned !== true) return null
+    return {
+      filter: typeof props.filter === "string" ? props.filter : "",
+      sort: typeof props.sort === "string" ? props.sort : "",
+    }
+  }, [focusBlockId, noteId, share, graph])
+  const filterDirty = pinnedDefaults !== null && pinnedDefaults.filter !== filter
+  const sortDirty = pinnedDefaults !== null && pinnedDefaults.sort !== sort
+
+  // Writing to the URL, so every narrowing is a link and the back button
+  // undoes it. `replace`, so a menu is not a step in the history.
+  const setNarrowing = React.useCallback(
+    (patch: { filter?: string; sort?: string }) => {
+      navigate({
+        search: (prev) => ({
+          ...prev,
+          ...("filter" in patch ? { filter: patch.filter || undefined } : {}),
+          ...("sort" in patch ? { sort: patch.sort || undefined } : {}),
+        }),
+        replace: true,
+      })
+    },
+    [navigate],
+  )
+
+  // The save is explicit, both ways: **Update to default** writes what is on
+  // screen onto the pin, **Reset to default** puts back what the pin holds.
+  // Neither happens on its own — a filter tried out in passing must never
+  // quietly overwrite the one that was saved.
+  const updatePinnedDefault = React.useCallback(() => {
+    // The view's root is what remembers it: the focused block, or the note
+    // itself when the whole note is the view. Both are nodes with props, and
+    // both can be pinned (docs/metadata.md).
+    const patch = { filter: filter || null, sort: sort || null }
+    if (focusBlockId) setBlockProps(focusBlockId, patch)
+    else if (noteId) setNoteProps(noteId, patch)
+    requestDatabaseFlush()
+  }, [focusBlockId, noteId, filter, sort, setBlockProps, setNoteProps])
+  const resetToPinnedDefault = React.useCallback(() => {
+    if (!pinnedDefaults) return
+    setNarrowing({ filter: pinnedDefaults.filter, sort: pinnedDefaults.sort })
+  }, [pinnedDefaults, setNarrowing])
+  // Both menus are handed the same pair: a pin holds ONE view, so settling
+  // it from the Sort menu must keep the filter that is set, and the other
+  // way round. Only the dot differs, which says which half moved.
+  const pinnedActions = React.useMemo(
+    () => ({ onUpdateDefault: updatePinnedDefault, onResetDefault: resetToPinnedDefault }),
+    [updatePinnedDefault, resetToPinnedDefault],
+  )
+
   // Retitle the current note. Since ids are minted, this sets one property and
   // nothing else moves — no new id, no navigation, no broken links. Returns
   // whether anything changed (so the inline editor can revert a no-op).
@@ -319,6 +404,16 @@ function NotePage() {
           ) : null}
 
           <div className="flex items-center">
+            <SortMenu
+              sort={sort}
+              onSortChange={(next) => setNarrowing({ sort: next })}
+              pinned={pinnedDefaults ? { ...pinnedActions, dirty: sortDirty } : undefined}
+            />
+            <FilterMenu
+              filter={filter}
+              onFilterChange={(next) => setNarrowing({ filter: next })}
+              pinned={pinnedDefaults ? { ...pinnedActions, dirty: filterDirty } : undefined}
+            />
             <NoteActionsMenu
               noteId={noteId ?? ""}
               pinned={note?.pinned ?? false}
@@ -416,6 +511,12 @@ function NotePage() {
                     navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
                   })}
                   noteTitle={note?.displayName ?? ""}
+                  context={context}
+                  // Narrowed, there is no blank row to type into: a new
+                  // block is structure, and structure belongs to the note
+                  // rather than to a selection of it (`useNoteDoc`). A row
+                  // that swallowed typing would be a lie.
+                  trailingBlank={filter === "" && sort === ""}
                 />
                 {noteId && noteExists && share === null ? (
                   <UnassignedBasket noteId={noteId} />

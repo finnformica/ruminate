@@ -14,7 +14,8 @@ import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
 import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
 import { BlockEditor, type BlockDebugOptions } from "./block-editor"
 
-/** Ensure a parsed doc always has at least one block to edit. */
+/** Ensure a parsed doc always has at least one block to edit. Not for a view
+ * that may legitimately be empty — see `seedDoc`. */
 function withStarterBlock(doc: BlockDoc): BlockDoc {
   if (doc.rootBlockIds.length > 0) return doc
   const block = emptyBlock()
@@ -92,6 +93,7 @@ export function BlockNoteEditor({
   onToggleCollapse,
   trailingBlank = true,
   rowRemoval = "unlink",
+  context,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc, hint?: ChangeHint) => void
@@ -154,14 +156,23 @@ export function BlockNoteEditor({
    * the basket (`basketToOps`): the removal is the delete, so the menu
    * offers only that. */
   rowRemoval?: "unlink" | "delete"
+  /** Rows the view keeps only as context — a filter's unmatched ancestors
+   * (`src/data/filter-view.ts`), drawn dimmed. */
+  context?: ReadonlySet<string>
 }) {
   // Read-only history views are shown verbatim; only editable notes get the
   // always-present trailing blank — and not while focused, where the doc's
   // one root is the focused block: a blank beside it would be a root the
   // note never holds (`ensureFocusChild` is the focus rule).
+  //
+  // A view that may legitimately hold nothing gets no starter either: a
+  // filter that matched nothing, and the basket, would otherwise show one
+  // empty row that cannot be typed into (a narrowed view writes no structure
+  // — `useNoteDoc`) and that reads as "this note is empty" when it is not.
   const seedDoc = (incoming: BlockDoc) => {
+    if (!trailingBlank) return incoming
     const seeded = withStarterBlock(incoming)
-    return readOnly || !trailingBlank || focusBlockId ? seeded : ensureTrailingBlank(seeded)
+    return readOnly || focusBlockId ? seeded : ensureTrailingBlank(seeded)
   }
 
   const [doc, setDoc] = useState<BlockDoc>(() => seedDoc(incoming))
@@ -309,6 +320,7 @@ export function BlockNoteEditor({
       // The trailing blank is what keeps a block to type in; without it (the
       // basket) the last row may go, and the basket goes with it.
       emptyable={!trailingBlank}
+      context={context}
     />
   )
 }

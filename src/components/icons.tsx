@@ -441,6 +441,18 @@ export function SortAlphabetAscIcon16(props: IconProps) {
   )
 }
 
+/** Three bars of decreasing width: narrowing a view down to what you asked
+ * for (the note header's Filter). */
+export function FilterIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <rect x="1" y="2.5" width="14" height="1.5" rx="0.75" />
+      <rect x="3" y="7.25" width="10" height="1.5" rx="0.75" />
+      <rect x="5.5" y="12" width="5" height="1.5" rx="0.75" />
+    </Icon>
+  )
+}
+
 export function ListIcon16(props: IconProps) {
   return (
     <Icon size={16} {...props}>

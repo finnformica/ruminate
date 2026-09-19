@@ -451,6 +451,14 @@ export interface PinnedBlock {
   text: string
   /** The note it opens in. */
   note: Note
+  /**
+   * The filter the pin saved (`src/data/filter-view.ts`), applied when the
+   * row is opened — so a pin can be "the open to-dos under this heading",
+   * not just the heading. Empty when the pin saved none.
+   */
+  filter: string
+  /** The sort the pin saved; empty for the note's own order. */
+  sort: string
 }
 
 const NO_PINNED_BLOCKS: PinnedBlock[] = []
@@ -484,9 +492,17 @@ export const pinnedBlocksAtom = atom((get) => {
     const held = homes.get(hit.blockId)
     if (!held || (hit.noteId === written && held.noteId !== written)) homes.set(hit.blockId, hit)
   }
+  // What each pin saved alongside `pinned`, if anything.
+  const narrowingOf = (id: string): { filter: string; sort: string } => {
+    const props = parseProps(graph.nodes.get(id)?.props ?? null)
+    return {
+      filter: typeof props?.filter === "string" ? props.filter : "",
+      sort: typeof props?.sort === "string" ? props.sort : "",
+    }
+  }
   const blocks: PinnedBlock[] = []
   for (const [id, hit] of homes) {
-    blocks.push({ id, noteId: hit.noteId, text: hit.text, note: hit.note })
+    blocks.push({ id, noteId: hit.noteId, text: hit.text, note: hit.note, ...narrowingOf(id) })
   }
   const notes = get(notesAtom)
   for (const id of pinnedIds) {
@@ -494,7 +510,7 @@ export const pinnedBlocksAtom = atom((get) => {
     const node = graph.nodes.get(id)
     const note = node?.notes_id ? notes.get(node.notes_id) : undefined
     if (!node || !note) continue
-    blocks.push({ id, noteId: note.id, text: node.text, note })
+    blocks.push({ id, noteId: note.id, text: node.text, note, ...narrowingOf(id) })
   }
   return blocks
 })

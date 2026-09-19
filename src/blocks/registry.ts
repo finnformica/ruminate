@@ -364,8 +364,10 @@ const SEARCH_GROUPS: readonly SearchGroup[] = [
 ]
 
 /** The families in the order the search vocabulary lists them (the picker's
- * order, and the docs'): to-dos and headings first, as the most searched. */
+ * order, and the docs'): a plain paragraph first, being the commonest block
+ * there is, then to-dos and headings as the most searched. */
 const SEARCH_FAMILY_ORDER: readonly BlockFamily[] = [
+  "text",
   "todo",
   "heading",
   "bullet",
@@ -374,7 +376,6 @@ const SEARCH_FAMILY_ORDER: readonly BlockFamily[] = [
   "code",
   "image",
   "link",
-  "text",
 ]
 
 /** Every `type:` value that names blocks, and the types each matches. */

@@ -129,8 +129,10 @@ describe("the qualifier popover", () => {
   it("sort: picks the key, then the direction, then lands as a pill", () => {
     const { input, onChange } = renderBox()
     type(input, "sort:")
-    expect(options().map((row) => row.textContent)).toEqual(["Title", "Updated at"])
-    fireEvent.keyDown(input, { key: "ArrowDown" })
+    expect(options().map((row) => row.textContent)).toEqual(["Text", "Type", "Title", "Updated at"])
+    // Narrow to the one key, then take it.
+    type(input, "sort:up")
+    expect(options().map((row) => row.textContent)).toEqual(["Updated at"])
     fireEvent.keyDown(input, { key: "Enter" })
     // The key is half a value: it stays in the line, and the picker moves
     // on to the directions.
@@ -186,8 +188,11 @@ describe("the qualifier popover", () => {
       ordered: "1.",
       quote: ">",
       code: "```",
-      image: "![]",
-      link: "[]()",
+      // An image and a link block show an ICON instead: their markdown is
+      // punctuation (`![]`, `[]()`) rather than a marker, which reads as
+      // noise in a list of markers.
+      image: null,
+      link: null,
       text: "¶",
       note: null,
       daily: null,
@@ -382,7 +387,8 @@ describe("the box around the query", () => {
     type(input, "type:")
     fireEvent.keyDown(input, { key: "Enter" })
     expect(onSubmit).not.toHaveBeenCalled()
-    expect(pillTokens()).toEqual(["type:todo"])
+    // The first row of the `type:` picker — a plain paragraph.
+    expect(pillTokens()).toEqual(["type:text"])
     fireEvent.keyDown(input, { key: "Enter" })
     expect(onSubmit).toHaveBeenCalledTimes(1)
   })
