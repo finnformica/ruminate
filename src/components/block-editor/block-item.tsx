@@ -24,13 +24,7 @@ import { blurLeavesWindow } from "../../utils/window-blur"
 import { IconButton } from "../icon-button"
 import { PinFillIcon12 } from "../icons"
 import { BlockContent } from "./block-content"
-import {
-  LISTED_HEADING_DEPTH,
-  headingScale,
-  kindOf,
-  wearsPinAsKey,
-  type RowContext,
-} from "./block-kinds"
+import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext } from "./block-kinds"
 import { caretCoordinates, caretLineFlags, caretOffsetAtPoint } from "./caret"
 import { Hash } from "./hash"
 import { LinkActionsContext, type LinkActions } from "./link-actions"
@@ -283,11 +277,6 @@ export function BlockItem({
   // A marker slot is drawn unless the type has none AND nothing needs one.
   const slotted = kind.slot !== "none" || hasToggle
   const rowContext: RowContext = { block, occurrence, api, depth, editing, slotted }
-  // The row's rendered key, where its kind has one (a note's favicon, a
-  // pinned row's pin), built once so the trailing pin marker below can stand
-  // down when the key already carries it.
-  const glyphNode = kind.glyphNode?.(rowContext) ?? null
-  const pinnedInKey = wearsPinAsKey(rowContext)
   const roomy = kind.roomy?.(rowContext) ?? false
   // A ROOT of a results view (`api.fixedRoots`): its surface is set in by
   // the same 8.5px at the sides a listed note's is all round, so every
@@ -818,11 +807,12 @@ export function BlockItem({
         slotClass,
       )}
     >
-      {glyphNode ? (
-        // A rendered key (a note's favicon, a pinned row's pin). Not
-        // `aria-hidden`: unlike the typographic keys it can carry meaning of
-        // its own.
-        <span className={cx("block-glyph flex items-center", keyClass)}>{glyphNode}</span>
+      {kind.glyphNode ? (
+        // A rendered key (a note's favicon). Not `aria-hidden`: unlike the
+        // typographic keys it can carry meaning of its own.
+        <span className={cx("block-glyph flex items-center", keyClass)}>
+          {kind.glyphNode(block)}
+        </span>
       ) : glyph ? (
         <span aria-hidden className={cx("block-glyph select-none text-text-tertiary", keyClass)}>
           {glyph}
@@ -1203,7 +1193,7 @@ export function BlockItem({
               instead of the glyph hugging the edge with the padding alone
               between them. Anything else that trails the content goes
               through the same slot, never beside it with its own offset. */}
-          {block.props?.pinned === true && !pinnedInKey ? (
+          {block.props?.pinned === true ? (
             <span
               className={cx(
                 "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center",

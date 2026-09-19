@@ -456,11 +456,18 @@ function NavRowIcon({
  * **What a pinned row leads with**, a note and a block alike: the pin, in the
  * pinned tint.
  *
- * It replaces the row's own icon rather than sitting beside it. A note's
- * favicon says which kind of note it is, which earns a slot in a list of
- * notes; on a row you pinned, that it is pinned is the more useful thing, and
- * two glyphs to say one row is a crowded way to say it. The notes page draws
- * its pinned rows the same way (`block-kinds.tsx`).
+ * It replaces the row's own icon rather than sitting beside it. A nav row is
+ * a name and one glyph; the glyph is the only thing there to carry the state,
+ * and a favicon saying which kind of note this is earns the slot rather less
+ * than the pin does. Two glyphs to say one row would be a crowded way to say
+ * it.
+ *
+ * **The leading pin is the sidebar's alone.** Where the block editor draws a
+ * row — the notes page, the palette, a search result — the pin trails the
+ * content instead (`block-item.tsx`, docs/metadata.md): those rows are
+ * blocks, drawn to one rhythm with a shared text column, and the head slot is
+ * already spoken for by the marker that says what the row is, or by the fold
+ * chevron the moment it has anything in it.
  */
 const pinRowIcon = (
   <NavRowIcon icon={<PinIcon16 />} filled={<PinFillIcon16 />} tint="text-text-pinned" />
