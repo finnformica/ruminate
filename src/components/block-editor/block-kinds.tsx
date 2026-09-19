@@ -6,6 +6,7 @@ import type { Block, BlockType } from "../../blocks/types"
 import type { Occurrence } from "../../blocks/view"
 import { cx } from "../../utils/cx"
 import { noteTypeOf } from "../../utils/note-type"
+import { PinFillIcon12 } from "../icons"
 import { NoteFavicon } from "../note-favicon"
 import type { BlockEditorApi } from "./block-item"
 import { LinkCard } from "./link-card"
@@ -51,9 +52,11 @@ export interface BlockKind {
   readonly glyph?: string | null
   /** A RENDERED key for a `glyph` slot, where the key depends on the block
    * rather than being one fixed character — a note's favicon, which says
-   * whether it is a day, a week or an ordinary note. Takes precedence over
-   * `glyph`; like it, a parent's chevron swaps in for it on hover. */
-  readonly glyphNode?: (block: Block) => ReactNode
+   * whether it is a day, a week or an ordinary note, or the pin a pinned row
+   * wears in its place. Takes precedence over `glyph`; like it, a parent's
+   * chevron swaps in for it on hover. Given the row's context, as `roomy` is,
+   * so a key can depend on where the row is drawn. */
+  readonly glyphNode?: (context: RowContext) => ReactNode
   /** The empty/glyph slot's test id. */
   readonly slotTestId?: string
   /** A parent's collapse chevron sits beside the marker rather than
@@ -116,10 +119,38 @@ const BODY = "text-base leading-relaxed"
  * its `#` slot) is drawn at. */
 export const LISTED_HEADING_DEPTH = 3
 
+/**
+ * **Does this row wear the pin as its key?** — the one answer the key slot
+ * and the trailing marker both read, so a row can never show two pins or
+ * none (`block-item.tsx` stands the trailing marker down when this is true).
+ *
+ * A pinned **note** always does, wherever it is listed: the sidebar's rows
+ * make the same swap (`nav-items.tsx`), so a note looks the same on every
+ * surface. Its favicon says which kind of note it is, which earns the slot in
+ * a list of notes; on a row you pinned, being pinned is the more useful thing
+ * for the one slot to say.
+ *
+ * A pinned **block** does only where it is a row of its own — the notes
+ * page's **Pinned** band, the palette's — and only in the empty key slot a
+ * paragraph keeps for the text column. Inside a note the pin stays where it
+ * has always been, trailing the content, and a key that already means
+ * something — a to-do's checkbox, a bullet's dot, a heading's `#` — is never
+ * displaced by it.
+ */
+export function wearsPinAsKey({ block, api, depth }: RowContext): boolean {
+  if (block.props?.pinned !== true) return false
+  if (block.type === "note") return true
+  return !!api.fixedRoots && depth === 0 && BLOCK_KINDS[block.type].slot === "glyph"
+}
+
+/** The pin a row wears in its key slot. */
+const pinKey = <PinFillIcon12 className="shrink-0 text-text-pinned" />
+
 const text: BlockKind = {
   slot: "glyph",
   glyph: null,
   slotTestId: "paragraph-slot",
+  glyphNode: (context) => (wearsPinAsKey(context) ? pinKey : null),
   typography: () => BODY,
 }
 
@@ -186,9 +217,20 @@ const note: BlockKind = {
   // (The beside-placement is for a to-do, whose slot holds a checkbox — a
   // control, which a swap would leave un-tickable. A favicon is nothing of
   // the kind.)
-  glyphNode: (block) => (
-    <NoteFavicon note={{ id: block.id, type: noteTypeOf(block.id) }} className="size-[15px]" />
-  ),
+  // Pinned, the note wears the PIN in place of its favicon — the same swap
+  // the sidebar's rows make (`nav-items.tsx`), so a note looks the same
+  // wherever it is listed. The favicon says which kind of note this is, which
+  // earns the slot in a list of notes; on a row you pinned, being pinned is
+  // the more useful thing for the one slot to say.
+  glyphNode: (context) =>
+    wearsPinAsKey(context) ? (
+      pinKey
+    ) : (
+      <NoteFavicon
+        note={{ id: context.block.id, type: noteTypeOf(context.block.id) }}
+        className="size-[15px]"
+      />
+    ),
   // A note's title is a NAME, not content: it is set in the interface font
   // the sidebar and the note header use for it, not the content font the
   // blocks inside it are set in.

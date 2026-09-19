@@ -245,15 +245,34 @@ describe("the sidebar's Pinned list", () => {
     expect(new Set(icons).size).toBe(1)
   })
 
-  it("keeps the pin marker out of Pinned and in Notes, where it is news", () => {
+  it("gives a pinned note the pin in Notes too, in place of its own icon", () => {
     const pinnedNote = noteOf("p", "Pinned one", true)
     renderSidebar({ notes: [pinnedNote, ...THREE], pinnedNotes: [pinnedNote] })
+    const iconOf = (row: Element) => {
+      const icon = row.querySelector(".nav-item-icon:not(.hidden)")
+      return `${icon?.className} ${icon?.querySelector("svg")?.innerHTML}`
+    }
+    const rows = noteRows()
+    // The pinned note's row in Notes wears the pin, tinted as a pin...
+    expect(iconOf(rows[0])).toContain("text-text-pinned")
+    // ...and it is the same icon the row under Pinned wears.
     const band = screen
       .getAllByTestId("section-heading")
       .find((h) => h.textContent?.trim() === "Pinned")!.parentElement!
-    expect(band.querySelectorAll(".text-text-pinned")).toHaveLength(0)
-    // The same note's row in Notes below still carries it.
-    expect(noteRows()[0].querySelectorAll(".text-text-pinned")).toHaveLength(1)
+    expect(iconOf(rows[0])).toBe(iconOf(band.querySelector("li .nav-item")!))
+    // An unpinned note keeps its own icon.
+    expect(iconOf(rows[1])).not.toContain("text-text-pinned")
+  })
+
+  it("draws no second pin beside the name — the row's icon is the one", () => {
+    const pinnedNote = noteOf("p", "Pinned one", true)
+    renderSidebar({ notes: [pinnedNote, ...THREE], pinnedNotes: [pinnedNote] })
+    // The name sits on its own: the marker that used to precede it is gone,
+    // because the row's icon already says the note is pinned.
+    const row = noteRows()[0].querySelector(".nav-item")!
+    const name = row.querySelector("span.flex.min-w-0")!
+    expect(name.querySelectorAll("svg")).toHaveLength(0)
+    expect(name.textContent).toBe("Pinned one")
   })
 
   it("leaves the pinned note in its sorted place in Notes", () => {
