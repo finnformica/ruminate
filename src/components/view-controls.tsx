@@ -2,13 +2,10 @@ import React from "react"
 import { cx } from "../utils/cx"
 import {
   clearFilterKey,
-  describeBranch,
   describeFilter,
   describeSort,
-  filterBranches,
+  FILTER_TYPE_OPTIONS,
   filterValues,
-  SCOPE_LABELS,
-  type FilterBranch,
   sortBranches,
   sortDirections,
   toggleFilterValue,
@@ -17,7 +14,7 @@ import { Button } from "./button"
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
 import { FilterIcon16, SortAlphabetAscIcon16 } from "./icons"
-import { QualifierPicture, anyQualifierPicture } from "./qualifier-suggestions"
+import { QualifierPicture } from "./qualifier-suggestions"
 
 /**
  * **The note header's Sort and Filter, beside its ⋯ menu.**
@@ -26,18 +23,18 @@ import { QualifierPicture, anyQualifierPicture } from "./qualifier-suggestions"
  * view's `filter` (`type:todo`), Sort its `sort` (`text:desc`), and the page
  * narrows the walk by them through the search engine
  * (`src/utils/view-narrowing.ts`). Each menu branches the way typing
- * branches — a top-level row per qualifier, its values in the submenu — and
- * both the keys and the values are read from the query box's own picker
- * vocabulary (`src/utils/view-filter.ts`), so the menu and the box can never
- * offer different things. The branches are grouped by WHAT they test — the
- * rows, or the note holding them — because a note-level qualifier inside one
- * note holds for every row or for none, and a menu that did not say so would
- * be offering a puzzle.
+ * branches the way typing branches, and the values are read from the query
+ * box's own picker vocabulary (`src/utils/view-filter.ts`), so the menu and
+ * the box can never offer different things.
  *
- * `in:` has no branch. It names the view's root, which is what focusing
- * already does (a bullet, `f`, the breadcrumb), and listing every block that
- * could be a root means walking the whole note on every render to build a
- * menu nobody opens.
+ * **Filter offers `type:` and nothing else**, though a filter typed by hand
+ * understands the whole language. The rest of the vocabulary is note-level:
+ * inside a single note it holds for every row or for none, so as a menu item
+ * it is not a filter but a switch between the whole note and a blank page.
+ * `in:` is left out too — it names the view's root, which is what focusing
+ * already does (a bullet, `f`, the breadcrumb). With one qualifier left the
+ * menu lists its values directly: a submenu would be a click that asks a
+ * question with one answer.
  *
  * A button carries a **dot** when what is on screen differs from what the
  * block's pin saved (docs/metadata.md), and the menu behind it grows a
@@ -94,19 +91,9 @@ export function FilterMenu({
   /** The saved view this one is measured against, when there is one. */
   pinned?: PinnedDefaultActions
 }) {
-  // Built once a render: `date:` resolves its shortcuts against the clock.
-  // Gathered by what they test, in the order the branches came in.
-  const scopes = React.useMemo(() => {
-    const groups: { scope: FilterBranch["scope"]; branches: FilterBranch[] }[] = []
-    for (const branch of filterBranches()) {
-      const last = groups[groups.length - 1]
-      if (last && last.scope === branch.scope) last.branches.push(branch)
-      else groups.push({ scope: branch.scope, branches: [branch] })
-    }
-    return groups
-  }, [])
   const summary = describeFilter(filter)
   const active = summary !== ""
+  const chosen = filterValues(filter, "type")
 
   return (
     <DropdownMenu modal={false}>
@@ -128,53 +115,29 @@ export function FilterMenu({
         width={pinned?.dirty ? 320 : undefined}
         footer={pinned?.dirty ? <DefaultFooter {...pinned} /> : undefined}
       >
-        {/* One branch per qualifier the query language has — the query box's
-            own keys and values, in its own order — gathered under a heading
-            saying what that group of branches tests. */}
-        {scopes.map(({ scope, branches: group }) => (
-          <DropdownMenu.Group key={scope}>
-            <DropdownMenu.GroupLabel>{SCOPE_LABELS[scope]}</DropdownMenu.GroupLabel>
-            {group.map((branch) => {
-              const chosen = filterValues(filter, branch.key)
-              return (
-                <DropdownMenu.Submenu key={branch.key}>
-                  <DropdownMenu.SubmenuTrigger value={describeBranch(filter, branch) || "Any"}>
-                    {branch.label}
-                  </DropdownMenu.SubmenuTrigger>
-                  <DropdownMenu.Content align="start" side="left">
-                    <DropdownMenu.Item
-                      selected={chosen.length === 0}
-                      closeOnClick={false}
-                      onClick={() => onFilterChange(clearFilterKey(filter, branch.key))}
-                    >
-                      Any
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Separator />
-                    {branch.options.map((option) => (
-                      <DropdownMenu.Item
-                        key={option.value}
-                        selected={chosen.includes(option.value)}
-                        closeOnClick={false}
-                        // The query box picker's own leading slot: a fixed,
-                        // centred box, so a three-character glyph, a
-                        // one-character one and a 16px icon share an axis.
-                        icon={
-                          anyQualifierPicture(branch.options, branch.key) ? (
-                            <QualifierPicture item={option} qualifierKey={branch.key} />
-                          ) : undefined
-                        }
-                        onClick={() =>
-                          onFilterChange(toggleFilterValue(filter, branch.key, option.value))
-                        }
-                      >
-                        {option.label ?? option.value}
-                      </DropdownMenu.Item>
-                    ))}
-                  </DropdownMenu.Content>
-                </DropdownMenu.Submenu>
-              )
-            })}
-          </DropdownMenu.Group>
+        {/* The block types, straight from the query box's picker. Several at
+            once is a comma list, exactly as it is typed. */}
+        <DropdownMenu.Item
+          selected={chosen.length === 0}
+          closeOnClick={false}
+          onClick={() => onFilterChange(clearFilterKey(filter, "type"))}
+        >
+          Any block
+        </DropdownMenu.Item>
+        <DropdownMenu.Separator />
+        {FILTER_TYPE_OPTIONS.map((option) => (
+          <DropdownMenu.Item
+            key={option.value}
+            selected={chosen.includes(option.value)}
+            closeOnClick={false}
+            // The picker's own leading slot: a fixed, centred box, so a
+            // three-character glyph, a one-character one and a 16px icon
+            // share an axis.
+            icon={<QualifierPicture item={option} qualifierKey="type" />}
+            onClick={() => onFilterChange(toggleFilterValue(filter, "type", option.value))}
+          >
+            {option.label ?? option.value}
+          </DropdownMenu.Item>
         ))}
 
         <DropdownMenu.Separator />

@@ -1,7 +1,6 @@
 import {
   BLOCK_SORT_KEYS,
   STATIC_QUALIFIER_OPTIONS,
-  dateQualifierOptions,
   sortQualifierOptions,
   type QualifierOption,
 } from "./qualifier-suggestions"
@@ -15,82 +14,28 @@ import { composeQuery, parseQuery, splitQuery, type Sort } from "./search"
  * read, and typed, by hand, and is answered by the same engine
  * (`src/utils/view-narrowing.ts`).
  *
- * The menus offer the SAME vocabulary the query box's picker offers, read
- * from the same place (`STATIC_QUALIFIER_OPTIONS`, `dateQualifierOptions`,
- * `sortQualifierOptions`). Nothing about which qualifiers exist, or what
- * their values are, is written twice: a key added to the query language
- * appears in the note header's menus with it.
+ * **The menu offers `type:` and nothing else**, though the filter understands
+ * everything the language does. The rest of the vocabulary is note-level
+ * (`has:`, `no:`, `date:`, a property): inside a single note it holds for
+ * every row or for none, so as a menu item it is not a filter but a switch
+ * between the whole note and a blank page. Typed by hand it still works,
+ * and means there exactly what it means in a search.
+ *
+ * `in:` is left out for a different reason: it names the view's ROOT, which
+ * is what focusing already does.
+ *
+ * The values come from the query box's own picker
+ * (`STATIC_QUALIFIER_OPTIONS`), so a block type added to the registry
+ * appears in the note header with it.
  */
 
-/** One branch of the Filter menu: a qualifier, and the values it offers. */
-export interface FilterBranch {
-  /** The qualifier this branch writes (`type`, `has`, `no`, `date`). */
-  key: string
-  /** How the branch reads. Spelt out rather than named after the qualifier:
-   * "Has" alone says nothing about WHAT has it. */
-  label: string
-  /**
-   * What the branch tests — the rows themselves, or the note holding them.
-   * A note-level qualifier inside one note holds for every row or for none
-   * (docs/query-language.md), so the menu groups them apart and says so.
-   */
-  scope: "rows" | "note"
-  options: readonly QualifierOption[]
-}
+/** The `type:` values the Filter menu offers — the picker's list, verbatim. */
+export const FILTER_TYPE_OPTIONS: readonly QualifierOption[] = STATIC_QUALIFIER_OPTIONS.type
 
-/**
- * How each qualifier reads as a menu row, and what it tests. Only the
- * wording is here: which keys exist, and what values each takes, still come
- * from the query box's picker.
- */
-const BRANCH_LABELS: Record<string, { label: string; scope: FilterBranch["scope"] }> = {
-  type: { label: "Block type", scope: "rows" },
-  has: { label: "Has", scope: "note" },
-  no: { label: "Does not have", scope: "note" },
-  date: { label: "Dated", scope: "note" },
-}
-
-/**
- * `sort:` is the Sort menu's, not a filter; `in:` names the view's ROOT,
- * which the header applies by focusing rather than by writing a qualifier.
- * Everything else the query language offers is a filter branch.
- */
-const NOT_FILTER_KEYS = new Set(["sort", "in"])
-
-/** A key as a menu row reads it: `updated_at` → "Updated at". */
+/** A sort key as a menu row reads it: `updated_at` → "Updated at". */
 function keyLabel(key: string): string {
   const words = key.replace(/_/g, " ")
   return words.charAt(0).toUpperCase() + words.slice(1)
-}
-
-/**
- * The Filter menu's branches, in the query language's own order: the static
- * qualifier sets, then the ones built on demand. One entry per qualifier the
- * query box would open a picker for.
- */
-export function filterBranches(now: Date = new Date()): FilterBranch[] {
-  const described = (key: string, options: readonly QualifierOption[]): FilterBranch => ({
-    key,
-    label: BRANCH_LABELS[key]?.label ?? keyLabel(key),
-    // A key the query language gains before this map does still gets a
-    // branch; it is simply assumed to be about the rows.
-    scope: BRANCH_LABELS[key]?.scope ?? "rows",
-    options,
-  })
-  const branches: FilterBranch[] = []
-  for (const [key, options] of Object.entries(STATIC_QUALIFIER_OPTIONS)) {
-    if (NOT_FILTER_KEYS.has(key)) continue
-    branches.push(described(key, options))
-  }
-  branches.push(described("date", dateQualifierOptions(now)))
-  return branches
-}
-
-/** The group headings the menu puts above each scope, saying what the
- * branches beneath it test. */
-export const SCOPE_LABELS: Record<FilterBranch["scope"], string> = {
-  rows: "Match rows by",
-  note: "Match the whole note by",
 }
 
 /** The sort keys a note's rows can actually be ordered by, as the query
@@ -145,21 +90,19 @@ export function clearFilterKey(filter: string, key: string): string {
   return withFilterValues(filter, key, [])
 }
 
-/** How one branch reads in its row — "Todo, Done", or nothing. */
-export function describeBranch(filter: string, branch: FilterBranch): string {
-  return filterValues(filter, branch.key)
-    .map((value) => branch.options.find((option) => option.value === value)?.label ?? value)
-    .join(", ")
-}
-
-/** How a whole filter reads in a sentence — every qualifier it names, then
- * the text it is searching for. */
-export function describeFilter(filter: string, now?: Date): string {
-  const parts = filterBranches(now)
-    .map((branch) => describeBranch(filter, branch))
-    .filter(Boolean)
-  const { text } = splitQuery(filter)
-  return [...parts, ...(text ? [`“${text}”`] : [])].join(", ")
+/**
+ * How a filter reads in a sentence — the block types it names, then the text
+ * it is searching for, then anything else it carries (a qualifier typed by
+ * hand) as written, so the button never claims a filter is empty when it is
+ * not.
+ */
+export function describeFilter(filter: string): string {
+  const types = filterValues(filter, "type").map(
+    (value) => FILTER_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? value,
+  )
+  const { qualifiers, text } = splitQuery(filter)
+  const others = qualifiers.filter((q) => !q.startsWith("type:"))
+  return [...types, ...(text ? [`“${text}”`] : []), ...others].join(", ")
 }
 
 /**

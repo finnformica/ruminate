@@ -79,13 +79,15 @@ The query language also narrows a note **where it stands**, rather than resolvin
 
 A note-level qualifier behaves honestly rather than being ignored: inside one note it holds for every row or for none, so `area:work` shows the whole note or nothing at all — which is exactly what the same query means in a search.
 
-The **Filter** menu branches on those same keys, and offers the same values, read from the query box's own picker vocabulary (`STATIC_QUALIFIER_OPTIONS`, `dateQualifierOptions`). A key added to the query language appears in the menu with it. Its branches are gathered under **Match rows by** (`type:`) and **Match the whole note by** (`has:`, `no:`, `date:`), because the second group holds for every row or for none and a menu that did not say so would be offering a puzzle.
+**The menu offers `type:` and nothing else.** The rest of the vocabulary is note-level, and inside a single note a note-level qualifier holds for every row or for none — so as a menu item it is not a filter but a switch between the whole note and a blank page. `in:` is left out for a different reason: it names the view's **root**, which is what focusing already does (a bullet, <kbd>f</kbd>, the breadcrumb). Both still work typed into a filter by hand, and mean there exactly what they mean in a search.
 
-`in:` has no branch. It names the view's **root**, which is what focusing already does — a bullet, <kbd>f</kbd>, the breadcrumb — and listing every block that could be a root would mean walking the whole note to build a menu. Typed into a filter by hand it scopes the ordinary way.
+The block types the menu lists are the query box's own picker vocabulary (`STATIC_QUALIFIER_OPTIONS`), so a block type added to the registry appears in the note header with it.
 
 **What a sort may say.** The **Sort** menu offers the keys that order a block by something of its own — `text` and `type` — each `:asc` (the default) or `:desc`, taken from the same two-step `sort:` picker the query box walks through. Several comma-separated keys apply left to right. `title` and `updated_at` remain in the language and in the box, but belong to the containing note, so inside one note they tie and reorder nothing; the menu does not offer them for that reason. Ordering is the search's own comparator (`compareBlockHits`), so `sort:text:desc` orders a note's rows exactly as it orders results.
 
 A sort reorders each parent's **children** and leaves the nesting alone: a filtered outline is still an outline, and a single order over a tree is not something a reader can follow. Document order is the default, and the absence of a sort.
+
+A filter that matches nothing shows an empty page, not a blank row to type in: a narrowed view writes no structure, so a row offered there could not be written.
 
 **A narrowed view edits its rows, not the note's shape.** Tick a to-do, retype a line, change a block's properties — those land in the graph as they always do. Structure does not: a narrowed view holds only the rows that survived, in the order the sort put them, so reconciling it against the graph would read every hidden row as removed. New rows, indents, removals and reorders belong to the note, which is one click away with the filter cleared. For the same reason a narrowed view has no trailing blank row to type into.
 

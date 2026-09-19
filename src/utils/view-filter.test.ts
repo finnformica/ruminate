@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest"
+import { STATIC_QUALIFIER_OPTIONS } from "./qualifier-suggestions"
 import {
   clearFilterKey,
   describeFilter,
   describeSort,
-  filterBranches,
+  FILTER_TYPE_OPTIONS,
   filterValues,
   sortBranches,
   sortDirections,
@@ -15,47 +16,20 @@ import {
  * so what they set can be read, and typed, by hand. These hold that: a
  * toggle changes one qualifier's list and leaves everything else as written.
  *
- * They also hold the single source of truth: the branches the Filter menu
+ * They also hold the single source of truth: the values the Filter menu
  * offers are the query box's picker vocabulary, not a copy of it.
  */
 
-describe("filterBranches", () => {
-  it("offers the query box's own qualifier keys", () => {
-    const keys = filterBranches(new Date("2026-09-18T00:00:00Z")).map((branch) => branch.key)
-    expect(keys).toEqual(["type", "has", "no", "date"])
+describe("FILTER_TYPE_OPTIONS", () => {
+  it("is the query box's own `type:` list, not a copy of it", () => {
+    expect(FILTER_TYPE_OPTIONS).toBe(STATIC_QUALIFIER_OPTIONS.type)
   })
 
-  it("does not offer sort (the Sort menu's) or in (the view's root)", () => {
-    const keys = filterBranches().map((branch) => branch.key)
-    expect(keys).not.toContain("sort")
-    expect(keys).not.toContain("in")
-  })
-
-  it("says what each branch tests, and spells the wording out", () => {
-    const branches = filterBranches()
-    expect(branches.map((branch) => [branch.key, branch.label, branch.scope])).toEqual([
-      // "Has" alone says nothing about what has it, so each is spelt out and
-      // grouped by whether it tests the rows or the note holding them.
-      ["type", "Block type", "rows"],
-      ["has", "Has", "note"],
-      ["no", "Does not have", "note"],
-      ["date", "Dated", "note"],
-    ])
-  })
-
-  it("takes each branch's values from the picker, not from a copy", () => {
-    const type = filterBranches().find((branch) => branch.key === "type")
-    const values = type?.options.map((option) => option.value) ?? []
-    // The block types the registry declares, and the note types beside them.
+  it("leads with a plain paragraph and carries the note types too", () => {
+    const values = FILTER_TYPE_OPTIONS.map((option) => option.value)
+    expect(values[0]).toBe("text")
     expect(values).toContain("todo")
-    expect(values).toContain("heading")
     expect(values).toContain("daily")
-    const has = filterBranches().find((branch) => branch.key === "has")
-    expect(has?.options.map((option) => [option.value, option.label])).toEqual([
-      ["dates", "A date"],
-      ["tasks", "Tasks"],
-      ["title", "A title"],
-    ])
   })
 })
 
@@ -107,7 +81,9 @@ describe("describeFilter", () => {
   it("reads every qualifier out in words, then the text", () => {
     expect(describeFilter("type:todo")).toBe("Todo")
     expect(describeFilter("type:todo,done")).toBe("Todo, Done")
-    expect(describeFilter("type:todo has:tasks")).toBe("Todo, Tasks")
+    // A qualifier the menu does not offer is still reported, as written, so
+    // the button never claims an empty filter when one is set.
+    expect(describeFilter("type:todo has:tasks")).toBe("Todo, has:tasks")
     expect(describeFilter("type:todo milk")).toBe("Todo, “milk”")
     expect(describeFilter("milk")).toBe("“milk”")
   })

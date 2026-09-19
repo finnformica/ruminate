@@ -230,11 +230,9 @@ function qualifierPicture(item: SuggestionItem, qualifierKey: string): React.Rea
 }
 
 /** Whether any row of `items` has a picture — the slot is drawn on every row
- * or on none, so the labels line up. */
-export function anyQualifierPicture(
-  items: readonly SuggestionItem[],
-  qualifierKey: string,
-): boolean {
+ * or on none, so the labels line up. (The note header's Filter menu draws it
+ * on every row: its values are all `type:`, which always has one.) */
+function anyQualifierPicture(items: readonly SuggestionItem[], qualifierKey: string): boolean {
   return items.some((item) => qualifierPicture(item, qualifierKey) !== null)
 }
 

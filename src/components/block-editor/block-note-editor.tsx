@@ -14,7 +14,8 @@ import { upstreamIndexAtom, useDeveloperDebug } from "../../hooks/is-developer"
 import { resolveBlockSubtrees } from "../../utils/resolve-blocks"
 import { BlockEditor, type BlockDebugOptions } from "./block-editor"
 
-/** Ensure a parsed doc always has at least one block to edit. */
+/** Ensure a parsed doc always has at least one block to edit. Not for a view
+ * that may legitimately be empty — see `seedDoc`. */
 function withStarterBlock(doc: BlockDoc): BlockDoc {
   if (doc.rootBlockIds.length > 0) return doc
   const block = emptyBlock()
@@ -163,9 +164,15 @@ export function BlockNoteEditor({
   // always-present trailing blank — and not while focused, where the doc's
   // one root is the focused block: a blank beside it would be a root the
   // note never holds (`ensureFocusChild` is the focus rule).
+  //
+  // A view that may legitimately hold nothing gets no starter either: a
+  // filter that matched nothing, and the basket, would otherwise show one
+  // empty row that cannot be typed into (a narrowed view writes no structure
+  // — `useNoteDoc`) and that reads as "this note is empty" when it is not.
   const seedDoc = (incoming: BlockDoc) => {
+    if (!trailingBlank) return incoming
     const seeded = withStarterBlock(incoming)
-    return readOnly || !trailingBlank || focusBlockId ? seeded : ensureTrailingBlank(seeded)
+    return readOnly || focusBlockId ? seeded : ensureTrailingBlank(seeded)
   }
 
   const [doc, setDoc] = useState<BlockDoc>(() => seedDoc(incoming))

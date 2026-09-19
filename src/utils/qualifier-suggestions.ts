@@ -136,15 +136,8 @@ export function filterQualifierOptions(
 export const STATIC_QUALIFIER_OPTIONS: Readonly<Record<string, readonly QualifierOption[]>> = {
   // The block types, each with its markdown glyph, then the note types.
   type: [...searchTypeOptions(), named("note"), named("daily"), named("weekly"), named("template")],
-  // Spelt out: after `has:` or `no:`, a bare "Dates" does not say whether it
-  // means one date or a date field.
-  has: [dated("dates", "A date"), dated("tasks", "Tasks"), dated("title", "A title")],
-  no: [dated("dates", "A date"), dated("tasks", "Tasks"), dated("title", "A title")],
-}
-
-/** A row whose wording is given rather than derived from its value. */
-function dated(value: string, label: string): QualifierOption {
-  return { value, label }
+  has: [named("dates"), named("tasks"), named("title")],
+  no: [named("dates"), named("tasks"), named("title")],
 }
 
 /** A row that reads as its value, capitalised, an underscore a space. */
