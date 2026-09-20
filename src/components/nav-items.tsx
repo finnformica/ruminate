@@ -597,6 +597,8 @@ function PinnedBlockNavItem({
     <Link
       to="/notes/$"
       params={{ _splat: block.noteId }}
+      // The block's own saved view (docs/metadata.md) is applied by the note
+      // page from the block's props, so the link carries only where to go.
       search={{ query: undefined, block: block.id }}
       activeOptions={{ exact: true, includeSearch: true }}
       data-size={size}

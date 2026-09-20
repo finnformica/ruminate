@@ -1,7 +1,7 @@
 import { Menu } from "@base-ui/react/menu"
 import React from "react"
 import { cx } from "../utils/cx"
-import { CheckIcon16 } from "./icons"
+import { CheckIcon16, ChevronRightIcon12 } from "./icons"
 import { Keys } from "./keys"
 
 type ContentProps = {
@@ -12,6 +12,13 @@ type ContentProps = {
   width?: number | string
   children?: React.ReactNode
   className?: string
+  /**
+   * A strip pinned beneath the items, outside the scroller — for an action
+   * about the menu as a whole rather than one of its rows (the note
+   * header's **Update to default** / **Reset to default**). Left out, the
+   * menu is its items and nothing else.
+   */
+  footer?: React.ReactNode
 }
 
 function Content({
@@ -22,6 +29,7 @@ function Content({
   width = 256,
   children,
   className,
+  footer,
 }: ContentProps) {
   return (
     <Menu.Portal>
@@ -35,6 +43,7 @@ function Content({
           style={{ width }}
         >
           <div className="grid max-h-[45svh] scroll-py-1 overflow-auto p-1">{children}</div>
+          {footer ? <div className="border-t border-border-secondary p-1.5">{footer}</div> : null}
         </Menu.Popup>
       </Menu.Positioner>
     </Menu.Portal>
@@ -122,6 +131,43 @@ const Item = React.forwardRef<HTMLDivElement, ItemProps>(
   },
 )
 
+/**
+ * A nested menu: `<DropdownMenu.Submenu>` wraps a `SubmenuTrigger` (the row
+ * that opens it) and a `Content` (its items). The trigger is an ordinary
+ * item with a chevron, so a menu that branches reads as one menu.
+ */
+const Submenu = Menu.SubmenuRoot
+
+type SubmenuTriggerProps = Omit<Menu.SubmenuTrigger.Props, "render"> & {
+  icon?: React.ReactNode
+  /** What the branch is currently set to, shown after the label. */
+  value?: React.ReactNode
+}
+
+const SubmenuTrigger = React.forwardRef<HTMLDivElement, SubmenuTriggerProps>(
+  ({ className, icon, value, children, ...props }, ref) => (
+    <Menu.SubmenuTrigger
+      ref={ref}
+      className={cx(
+        "group flex h-8 cursor-pointer select-none items-center gap-3 rounded px-3 outline-hidden focus:bg-bg-hover focus:outline-hidden active:bg-bg-active coarse:h-10",
+        "data-[popup-open]:bg-bg-hover",
+        "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
+        className,
+      )}
+      {...props}
+    >
+      <div className="flex w-0 grow items-center gap-3">
+        {icon ? <div className="flex text-text-secondary">{icon}</div> : null}
+        <span className="grow truncate">{children}</span>
+      </div>
+      {value ? (
+        <span className="min-w-0 max-w-[55%] shrink truncate text-text-secondary">{value}</span>
+      ) : null}
+      <ChevronRightIcon12 className="shrink-0 text-text-tertiary" />
+    </Menu.SubmenuTrigger>
+  ),
+)
+
 function Separator() {
   return <Menu.Separator className="mx-3 my-1 h-px bg-border-secondary" />
 }
@@ -148,4 +194,6 @@ export const DropdownMenu = Object.assign(Menu.Root, {
   Separator,
   Group,
   GroupLabel,
+  Submenu,
+  SubmenuTrigger,
 })

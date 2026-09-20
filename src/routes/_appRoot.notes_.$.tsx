@@ -27,10 +27,18 @@ import {
   isSignedOutAtom,
   linkDirectionsAtom,
 } from "../global-state"
-import { useCreateNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
+import {
+  useCreateNote,
+  useNoteById,
+  useRenameNote,
+  useSetBlockProps,
+  useSetNoteProps,
+} from "../hooks/note"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
-import { pathToBlock } from "../data/graph"
+import { parseProps, pathToBlock } from "../data/graph"
+import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
+import { FilterMenu, SortMenu } from "../components/view-controls"
 import { useFoldRule } from "../data/view-state"
 import { keyOf } from "../blocks/view"
 import { useNoteShare } from "../hooks/share"
@@ -40,10 +48,50 @@ import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
 
+/** What a note or block saved as its default view (docs/metadata.md), and
+ * whether this session may write one. */
+interface SavedView {
+  filter: string
+  sort: string
+  /** Whether the header may offer to save: the user's own note, never one
+   * shared with them (its props are its owner's). */
+  writable: boolean
+}
+
+const NO_SAVED_VIEW: SavedView = { filter: "", sort: "", writable: false }
+
+/**
+ * The saved view of whatever the page is rooted at — the focused block, else
+ * the note. Both are nodes with props, so both remember a view the same way
+ * and neither has to be pinned for it.
+ */
+function useSavedView(focusBlockId: string | null, noteId: string | undefined, shared: boolean) {
+  const graph = useAtomValue(graphSnapshotAtom)
+  return React.useMemo<SavedView>(() => {
+    const rootId = focusBlockId ?? noteId
+    if (!rootId || shared) return NO_SAVED_VIEW
+    const props = parseProps(graph.nodes.get(rootId)?.props ?? null)
+    return {
+      filter: typeof props?.filter === "string" ? props.filter : "",
+      sort: typeof props?.sort === "string" ? props.sort : "",
+      writable: true,
+    }
+  }, [focusBlockId, noteId, shared, graph])
+}
+
 type RouteSearch = {
   query: string | undefined
   /** Block id the editor is focused on; absent = outside focus. */
   block?: string
+  /**
+   * The view's filter, in the query language (`type:todo`): the rows that
+   * match stay, their ancestors are kept as dimmed context and everything
+   * else goes (`src/data/filter-view.ts`). Absent = every row.
+   */
+  filter?: string
+  /** How each parent's children are ordered (`text`, `text:desc`), the
+   * nesting untouched. Absent = the note's own order. */
+  sort?: string
 }
 
 export const Route = createFileRoute("/_appRoot/notes_/$")({
@@ -51,6 +99,8 @@ export const Route = createFileRoute("/_appRoot/notes_/$")({
     return {
       query: typeof search.query === "string" ? search.query : undefined,
       block: typeof search.block === "string" ? search.block : undefined,
+      filter: typeof search.filter === "string" ? search.filter : undefined,
+      sort: typeof search.sort === "string" ? search.sort : undefined,
     }
   },
   component: RouteComponent,
@@ -77,7 +127,7 @@ function RouteComponent() {
 function NotePage() {
   // Router
   const { _splat: noteId } = Route.useParams()
-  const { block: focusBlockId } = Route.useSearch()
+  const { block: focusBlockId, filter: filterParam, sort: sortParam } = Route.useSearch()
   const navigate = Route.useNavigate()
 
   // Global state
@@ -101,6 +151,14 @@ function NotePage() {
   // slice does not carry. The page is otherwise the same page: the title and
   // the editor are the same components, told what they may do.
   const share = useNoteShare(noteId)
+  // The view's narrowing: the URL where it speaks, else what this note or
+  // block saved as its default view (docs/metadata.md, `resolveNarrowing`).
+  // So a narrowed view is a link and the back button undoes it, and a note
+  // opens the way it was left.
+  const savedView = useSavedView(focusBlockId ?? null, noteId, share !== null)
+  const filter = resolveNarrowing(filterParam, savedView.filter)
+  const sort = resolveNarrowing(sortParam, savedView.sort)
+
   const readOnlyShare = share !== null && !share.canWrite
   const isDailyNote = isValidDateString(noteId ?? "")
   const isWeeklyNote = isValidWeekString(noteId ?? "")
@@ -131,6 +189,7 @@ function NotePage() {
   const {
     doc: editorDoc,
     collapsed,
+    context,
     exists: noteExists,
     setDoc,
   } = useNoteDoc({
@@ -139,6 +198,8 @@ function NotePage() {
     focusBlockId: focusBlockId ?? null,
     expanded,
     directions,
+    filter,
+    sort,
   })
   const jotaiStore = useStore()
   // Leaving a focus for a wider view — the note, or a block above — must
@@ -253,6 +314,60 @@ function NotePage() {
     [setProp],
   )
 
+  // What the header offers when the view has moved away from what was saved.
+  // Any note or block can save one — nothing has to be pinned — so the
+  // buttons appear wherever a view can be kept, which is everywhere the
+  // user's own notes are.
+  const setBlockProps = useSetBlockProps()
+  // Measured against what is saved, which may be nothing: filtering a note
+  // that has saved no view IS a difference from it, and is how the first one
+  // gets saved.
+  const filterDirty = savedView.writable && savedView.filter !== filter
+  const sortDirty = savedView.writable && savedView.sort !== sort
+
+  // Writing to the URL, so every narrowing is a link and the back button
+  // undoes it. `replace`, so a menu is not a step in the history.
+  const setNarrowing = React.useCallback(
+    (patch: { filter?: string; sort?: string }) => {
+      navigate({
+        search: (prev) => ({
+          ...prev,
+          ...("filter" in patch
+            ? { filter: narrowingParam(patch.filter ?? "", savedView.filter) }
+            : {}),
+          ...("sort" in patch ? { sort: narrowingParam(patch.sort ?? "", savedView.sort) } : {}),
+        }),
+        replace: true,
+      })
+    },
+    [navigate, savedView],
+  )
+
+  // The save is explicit, both ways: **Update to default** writes what is on
+  // screen onto the note or block the view is rooted at, **Reset to default**
+  // puts back what it holds. Neither happens on its own — a filter tried out
+  // in passing must never quietly overwrite the one that was saved.
+  const saveDefaultView = React.useCallback(() => {
+    // The view's root is what remembers it: the focused block, or the note
+    // itself when the whole note is the view. Both are nodes with props.
+    const patch = { filter: filter || null, sort: sort || null }
+    if (focusBlockId) setBlockProps(focusBlockId, patch)
+    else if (noteId) setNoteProps(noteId, patch)
+    // The URL has nothing left to say now that the node says it.
+    navigate({ search: (prev) => ({ ...prev, filter: undefined, sort: undefined }), replace: true })
+    requestDatabaseFlush()
+  }, [focusBlockId, noteId, filter, sort, setBlockProps, setNoteProps, navigate])
+  const resetToDefaultView = React.useCallback(() => {
+    navigate({ search: (prev) => ({ ...prev, filter: undefined, sort: undefined }), replace: true })
+  }, [navigate])
+  // Both menus are handed the same pair: a node holds ONE view, so settling
+  // it from the Sort menu must keep the filter that is set, and the other
+  // way round. Only the dot differs, which says which half moved.
+  const savedViewActions = React.useMemo(
+    () => ({ onUpdateDefault: saveDefaultView, onResetDefault: resetToDefaultView }),
+    [saveDefaultView, resetToDefaultView],
+  )
+
   // Retitle the current note. Since ids are minted, this sets one property and
   // nothing else moves — no new id, no navigation, no broken links. Returns
   // whether anything changed (so the inline editor can revert a no-op).
@@ -319,6 +434,16 @@ function NotePage() {
           ) : null}
 
           <div className="flex items-center">
+            <SortMenu
+              sort={sort}
+              onSortChange={(next) => setNarrowing({ sort: next })}
+              saved={savedView.writable ? { ...savedViewActions, dirty: sortDirty } : undefined}
+            />
+            <FilterMenu
+              filter={filter}
+              onFilterChange={(next) => setNarrowing({ filter: next })}
+              saved={savedView.writable ? { ...savedViewActions, dirty: filterDirty } : undefined}
+            />
             <NoteActionsMenu
               noteId={noteId ?? ""}
               pinned={note?.pinned ?? false}
@@ -416,6 +541,12 @@ function NotePage() {
                     navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
                   })}
                   noteTitle={note?.displayName ?? ""}
+                  context={context}
+                  // Narrowed, there is no blank row to type into: a new
+                  // block is structure, and structure belongs to the note
+                  // rather than to a selection of it (`useNoteDoc`). A row
+                  // that swallowed typing would be a lie.
+                  trailingBlank={filter === "" && sort === ""}
                 />
                 {noteId && noteExists && share === null ? (
                   <UnassignedBasket noteId={noteId} />

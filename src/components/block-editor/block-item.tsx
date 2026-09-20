@@ -80,6 +80,14 @@ export interface BlockEditorApi {
    */
   fixedRoots?: boolean
   /**
+   * Rows kept only to say where a match lives — the unmatched ancestors of
+   * a filtered view's matches (`src/data/filter-view.ts`). Drawn dimmed, so
+   * the rows the filter actually found are the ones that read as found;
+   * they edit, fold and select like any other row. Empty or absent when
+   * nothing is filtered.
+   */
+  context?: ReadonlySet<string>
+  /**
    * Whether the editor owns the keyboard: focus is inside its container and
    * the user's last act was not a click on blank space (a key press hands it
    * back). While false, selected rows demote to the quiet inactive-selection
@@ -284,6 +292,8 @@ export function BlockItem({
   // one the page's search box sits on (the view pads by the reach). The
   // margin still nets the text to the shared 4px column.
   const wide = !!api.fixedRoots && depth === 0
+  // Kept as context by a filter, not found by it (`BlockEditorApi.context`).
+  const dimmed = api.context?.has(block.id) ?? false
 
   // Focus and place the caret when editing starts — and again when the
   // block's TYPE changes mid-edit: a type whose chrome wraps the line (a
@@ -1156,6 +1166,12 @@ export function BlockItem({
             // already editing, and selection (accent) always wins because
             // the class is simply absent on selected rows.
             (!readOnly || api.navigable) && !editing && !selected && "block-hoverable",
+            // An unmatched ancestor in a filtered view: quietened so the
+            // matches stand out, never hidden — it is what says where the
+            // match lives. Additive only, and dropped while the row is
+            // edited or selected, so working on it is never done through a
+            // veil.
+            dimmed && !editing && !selected && "opacity-55",
           )}
         >
           {marker}
