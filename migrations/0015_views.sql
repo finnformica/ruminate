@@ -38,6 +38,12 @@
 -- could take a number a view already holds and an incremental pull would step
 -- over it. The expression lives in one constant there for that reason.
 --
+-- The keys themselves are retired by 0016, not here. Backfilling and
+-- retiring in one step would mean a window where the replica had removed the
+-- props but the clients still reading them had not been replaced — every pin
+-- would vanish until the deploy caught up. 0015 is additive and safe on its
+-- own; 0016 ships with the client that reads the table.
+--
 -- `id` is minted per view rather than being the root's id, so a node may
 -- carry several views later without another migration. The backfill below
 -- uses the root's id, which keeps it deterministic and re-runnable.
@@ -92,20 +98,3 @@ WHERE n.deleted_at IS NULL
     OR json_extract(n.props, '$.sort') IS NOT NULL
   )
 ON CONFLICT (user_id, id) DO NOTHING;
-
--- Retire the keys. `updated_at` is bumped so the cleaned row travels on the
--- next incremental pull: a client still holding the old props would otherwise
--- push them back on its next edit and last-writer-wins would restore them.
--- The notes list is ordered by the `updated_at` INSIDE props (docs/metadata.md),
--- which this does not touch, so nothing visibly reorders.
-UPDATE nodes
-SET props = json_remove(props, '$.pinned', '$.filter', '$.sort'),
-    updated_at = updated_at + 1
-WHERE deleted_at IS NULL
-  AND props IS NOT NULL
-  AND json_valid(props)
-  AND (
-    json_extract(props, '$.pinned') IS NOT NULL
-    OR json_extract(props, '$.filter') IS NOT NULL
-    OR json_extract(props, '$.sort') IS NOT NULL
-  );

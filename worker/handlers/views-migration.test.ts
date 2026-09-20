@@ -1,5 +1,6 @@
 import { expect, test } from "vitest"
 import migration0015 from "../../migrations/0015_views.sql?raw"
+import migration0016 from "../../migrations/0016_retire_view_props.sql?raw"
 import { createTenantTestDriver } from "./sqlite-test-driver"
 
 /**
@@ -24,7 +25,7 @@ async function v4Driver() {
   return driver
 }
 
-test("0015 backfills a view per node that had one, and retires the keys", async () => {
+test("0015 backfills a view per node that had one, leaving the props alone", async () => {
   const driver = await v4Driver()
   const node = (user: number, id: string, type: string, props: string | null) =>
     // tenant-exempt: the point of the fixture is that it holds TWO tenants,
@@ -77,11 +78,28 @@ test("0015 backfills a view per node that had one, and retires the keys", async 
     { user_id: 2, id: "n5", root_id: "n5", filter: null, sort: null, pinned: 1, sort_key: null },
   ])
 
+  // 0015 is additive: the props it copied FROM are untouched, so a client
+  // that has not been replaced yet still works.
   // tenant-exempt: as above — every tenant's rows, deliberately.
-  const nodes = await driver.exec("SELECT id, props, updated_at FROM nodes ORDER BY id")
-  expect(nodes).toEqual([
-    // The three keys gone, everything else kept, and stamped so the cleaned
-    // row travels on the next incremental pull.
+  const afterBackfill = await driver.exec("SELECT id, props, updated_at FROM nodes ORDER BY id")
+  expect(afterBackfill).toEqual([
+    {
+      id: "n1",
+      props: '{"title":"Shopping","pinned":true,"filter":"type:todo","sort":"text:desc"}',
+      updated_at: 100,
+    },
+    { id: "n2", props: null, updated_at: 100 },
+    { id: "n3", props: '{"language":"ts"}', updated_at: 100 },
+    { id: "n4", props: '{"filter":"type:task"}', updated_at: 100 },
+    { id: "n5", props: '{"pinned":true}', updated_at: 100 },
+  ])
+
+  // 0016 is the other half, applied with the release whose client reads the
+  // table: the keys go, and the row is stamped so the cleaned version travels.
+  await driver.execScript(migration0016)
+  // tenant-exempt: as above.
+  const afterRetire = await driver.exec("SELECT id, props, updated_at FROM nodes ORDER BY id")
+  expect(afterRetire).toEqual([
     { id: "n1", props: '{"title":"Shopping"}', updated_at: 101 },
     { id: "n2", props: null, updated_at: 100 },
     // A node that carried none of them is not touched at all.
