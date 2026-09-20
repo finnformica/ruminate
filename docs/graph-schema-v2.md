@@ -190,8 +190,9 @@ and no further, and does not survive a markdown round trip (`parse` re-mints
 the repeated `id::`): the graph, not the markdown, holds it.
 
 **Upstream: the graph, not just the tree.** A walk from a root can follow
-links the other way as well (Settings → Editor, "Show links": downstream,
-upstream, or — the default — both). Walked both ways, every block in the
+links the other way as well (Settings → Editor, "Show links": downstream —
+the default, the outline as it has always read — upstream, or both). Walked
+both ways, every block in the
 doc carries its parents' ids beside its children's (`Block.upstream`,
 complete like `children`), and beneath an open row the walk continues into
 its parents after its children. Each is an **upstream occurrence**: a row

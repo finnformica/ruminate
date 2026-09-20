@@ -568,14 +568,16 @@ export const newBlockMarkerAtom = atomWithStorage<string>(
  */
 /**
  * Which links a note's view follows from a row (Settings → Editor, "Show
- * links" — `LinkDirections`): the tree beneath it, the parents holding it,
- * or both — the graph, by default. Stored on this device.
+ * links" — `LinkDirections`): the tree beneath it — the default, and the
+ * outline as it has always read — the parents holding it, or both, the
+ * graph. Stored on this device.
  */
-const storedLinkDirectionsAtom = atomWithStorage<string>("link-directions", "both")
+const DEFAULT_LINK_DIRECTIONS: LinkDirections = "downstream"
+const storedLinkDirectionsAtom = atomWithStorage<string>("link-directions", DEFAULT_LINK_DIRECTIONS)
 export const linkDirectionsAtom = atom(
   (get): LinkDirections => {
     const stored = get(storedLinkDirectionsAtom)
-    return stored === "downstream" || stored === "upstream" ? stored : "both"
+    return stored === "both" || stored === "upstream" ? stored : DEFAULT_LINK_DIRECTIONS
   },
   (_get, set, value: LinkDirections) => set(storedLinkDirectionsAtom, value),
 )

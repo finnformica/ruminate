@@ -14,6 +14,7 @@ import {
   signOutAtom,
   graphSnapshotAtom,
   isSignedOutAtom,
+  linkDirectionsAtom,
   notesAtom,
   ownSortedNotesAtom,
   pinnedBlocksAtom,
@@ -114,6 +115,23 @@ describe("graphSnapshotAtom", () => {
     expect(store.get(notesAtom).get("readme")!.text).toContain("edited")
 
     unsubscribe()
+  })
+})
+
+describe("linkDirectionsAtom", () => {
+  it("follows downstream links by default, so a note reads as its outline", () => {
+    const store = createStore()
+    expect(store.get(linkDirectionsAtom)).toBe("downstream")
+  })
+
+  it("keeps a chosen direction, and falls back to the default on an unknown value", () => {
+    const store = createStore()
+    store.set(linkDirectionsAtom, "both")
+    expect(store.get(linkDirectionsAtom)).toBe("both")
+    store.set(linkDirectionsAtom, "upstream")
+    expect(store.get(linkDirectionsAtom)).toBe("upstream")
+    localStorage.setItem("link-directions", JSON.stringify("sideways"))
+    expect(createStore().get(linkDirectionsAtom)).toBe("downstream")
   })
 })
 
