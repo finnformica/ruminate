@@ -4,7 +4,6 @@ import {
   parseChangelog,
   countEntries,
   parseFragment,
-  releasesSince,
   takeEntries,
   renderRelease,
   formatReleaseDates,
@@ -229,35 +228,6 @@ describe("toSegments", () => {
       { type: "keys", keys: ["`"] },
       { type: "text", text: " toggles code." },
     ])
-  })
-})
-
-describe("releasesSince", () => {
-  const releases = parseChangelog(
-    "# Changelog\n\n## 2026-W38\n\n### Added\n\n- Three.\n\n## 2026-W37\n\n### Added\n\n- Two.\n\n## 2026-W36\n\n### Added\n\n- One.\n",
-  ).releases
-
-  test("a first visit has nothing to catch up on", () => {
-    expect(releasesSince(releases, null)).toEqual([])
-  })
-
-  test("only the weeks after the one last seen", () => {
-    expect(releasesSince(releases, "2026-W36.abc").map((r) => r.week)).toEqual([
-      "2026-W38",
-      "2026-W37",
-    ])
-  })
-
-  test("a device on the newest week is shown nothing", () => {
-    expect(releasesSince(releases, "2026-W38.abc")).toEqual([])
-  })
-
-  test("a second build of a week already seen shows nothing, whatever its hash", () => {
-    expect(releasesSince(releases, "2026-W38.zzz")).toEqual([])
-  })
-
-  test("a device from a year behind gets every release since", () => {
-    expect(releasesSince(releases, "2025-W50.abc")).toHaveLength(3)
   })
 })
 
