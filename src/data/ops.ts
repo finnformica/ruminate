@@ -7,6 +7,7 @@ import {
   CHILD_KIND,
   NOTE_TYPE,
   docToParts,
+  isCorpusRoot,
   parseProps,
   reconcileSortKeys,
   sortKeyBetween,
@@ -306,6 +307,10 @@ export function deleteSubtreeOps(blockId: string, snapshot: GraphSnapshot): Op[]
   const roots = noteIds(snapshot).filter((id) => id !== blockId)
   for (const other of snapshot.nodes.values()) {
     if (other.id === blockId || other.type === NOTE_TYPE) continue
+    // The corpus root is parentless by construction (see ROOT_TYPE), so it
+    // would walk in here as a rescue root — and since it holds every note,
+    // walking from it would rescue the entire corpus and delete nothing.
+    if (isCorpusRoot(other)) continue
     if ((parentsOf.get(other.id)?.size ?? 0) === 0) roots.push(other.id)
   }
   const kept = new Set<string>()

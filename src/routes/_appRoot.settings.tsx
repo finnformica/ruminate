@@ -196,10 +196,10 @@ const NEW_BLOCK_MARKER_PRESETS: Array<{ value: string; label: string }> = [
 ]
 
 /** Which links a note's rows follow (`LinkDirections`). */
-const LINK_DIRECTION_OPTIONS: Array<{ value: LinkDirections; label: string; hint: string }> = [
-  { value: "both", label: "Both", hint: "what a block holds, and what holds it" },
-  { value: "downstream", label: "Downstream", hint: "what a block holds" },
-  { value: "upstream", label: "Upstream", hint: "what holds a block" },
+const LINK_DIRECTION_OPTIONS: Array<{ value: LinkDirections; label: string }> = [
+  { value: "both", label: "Both" },
+  { value: "downstream", label: "Downstream" },
+  { value: "upstream", label: "Upstream" },
 ]
 
 function EditorSection() {
@@ -229,10 +229,6 @@ function EditorSection() {
             )
           })}
         </div>
-        <p className="text-sm text-text-secondary">
-          {LINK_DIRECTION_OPTIONS.find((option) => option.value === linkDirections)?.hint}: a block
-          held in more than one place lists its other parents beneath its children.
-        </p>
       </div>
       <div className="flex flex-col gap-2">
         <label htmlFor="expanded-levels" className="text-sm leading-4 text-text-secondary">

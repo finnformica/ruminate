@@ -130,8 +130,15 @@ body:has([data-resizing="true"]) * {
 
 /* The current note's icon leans with its label: the favicon and its wrapper
  * set the secondary ink explicitly, so the row's selected colour has to be
- * handed down to them. A nav link's filled icon inherits it already. */
-.nav-item[aria-current] :is(.nav-item-icon, .nav-item-icon *) {
+ * handed down to them. A nav link's filled icon inherits it already.
+ *
+ * `.nav-item-tint` opts out. An icon that REPORTS something about the row —
+ * the pin, which says the row is pinned — is a state, not a label, and it is
+ * no less true on the row you are reading, so it keeps its own colour instead
+ * of dissolving into the selection. Only an icon that merely names the row
+ * leans with the label. */
+.nav-item[aria-current]
+  :is(.nav-item-icon, .nav-item-icon *):not(:is(.nav-item-tint, .nav-item-tint *)) {
   color: inherit;
 }
 

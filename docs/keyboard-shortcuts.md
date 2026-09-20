@@ -34,6 +34,7 @@ key navigates. The chords work from the block editor's select mode too.
 | Go to today's daily note          | <kbd>g</kbd> then <kbd>d</kbd>                        |
 | Go to the notes list              | <kbd>g</kbd> then <kbd>n</kbd>                        |
 | Go to settings                    | <kbd>g</kbd> then <kbd>s</kbd>                        |
+| Go to the changelog               | <kbd>g</kbd> then <kbd>c</kbd>                        |
 | Go to the admin page (admin only) | <kbd>g</kbd> then <kbd>a</kbd>                        |
 | Focus the search (notes list)     | <kbd>/</kbd>                                          |
 | `i`                               | Focus the editor, restoring the last selected block   |

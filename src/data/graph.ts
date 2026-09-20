@@ -40,6 +40,51 @@ import { emittedNoteTitle } from "./note-identity"
 export const CHILD_KIND = "child"
 export const NOTE_TYPE = "note"
 
+/**
+ * The **corpus root**: one node per corpus whose `child` links carry the
+ * user's manual note order (`src/global-state.ts`, `noteOrderAtom`).
+ *
+ * Notes are graph roots — nothing links to them — so before this there was no
+ * edge to hang a `sort_key` on, and a manual order had nowhere uniform to
+ * live. The root supplies that edge and nothing else: a note is still a note
+ * because its node is typed `note` (`noteIds`), never because the root holds
+ * it. So the root is **ordering-only** — a note it does not hold is an
+ * ordinary note that simply has no manual position yet, which is what lets
+ * this arrive with no backfill and leaves the walk, the rollup, sharing, the
+ * replica and the MCP server untouched.
+ *
+ * It is not a block and not a note, so the handful of passes that sweep every
+ * node looking for one or the other skip it explicitly — `isCorpusRoot` is
+ * that check, and its call sites are the whole of the special-casing:
+ * `unassignedIds` (it is reached by nothing, so the basket would claim it),
+ * `deleteBlockOps` (it is parentless, so the delete-rescue would walk from it
+ * and rescue the entire corpus) and `walkGraph`'s upstream pass (it would
+ * show above a note as that note's parent).
+ *
+ * The id is fixed rather than minted: there is exactly one per corpus, and a
+ * well-known id means finding it is a map lookup instead of a scan. D1 keys
+ * rows by `(user_id, id)`, so one id per user collides with nothing.
+ */
+export const ROOT_TYPE = "corpus_root"
+export const CORPUS_ROOT_ID = "corpus_root"
+
+/** Is this node the corpus root (see {@link ROOT_TYPE})? Neither a note nor a
+ * block: every pass that scans for one or the other skips it. */
+export function isCorpusRoot(node: { id: string; type: string }): boolean {
+  return node.type === ROOT_TYPE
+}
+
+/**
+ * The manual note order: the ids the corpus root holds, in sort-key order.
+ * Empty when no order has been set (nothing has been dragged yet), and it may
+ * name notes that no longer exist — a delete leaves its link row behind so a
+ * restore comes back to the same place (see the module header), so callers
+ * filter against the live nodes.
+ */
+export function noteOrderIds(graph: GraphSnapshot): string[] {
+  return childIdsOf(graph, CORPUS_ROOT_ID)
+}
+
 interface GraphParts {
   nodes: NodeRow[]
   /** Ordered child ids per parent; the note id keys the root list. */
@@ -435,7 +480,12 @@ export function walkGraph(
     // dangling link.
     childIdsOf(graph, id).filter((childId) => childId !== id && graph.nodes.has(childId))
   const parentsOf = (id: string) =>
-    parentIdsOf(graph, id).filter((parentId) => parentId !== id && graph.nodes.has(parentId))
+    parentIdsOf(graph, id).filter((parentId) => {
+      const parent = graph.nodes.get(parentId)
+      // The corpus root holds notes only to order them (see ROOT_TYPE); it is
+      // not a place a note appears, so it never shows as one upstream.
+      return parentId !== id && parent !== undefined && !isCorpusRoot(parent)
+    })
 
   // A block with its complete lists, built once — never walked here.
   const blockOf = (id: string): Block | null => {
