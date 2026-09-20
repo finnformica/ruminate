@@ -49,12 +49,39 @@ export interface CorpusMigrations {
    * gains the column without the backfill (`LOCAL_V4_SQL`): a cache re-pulls
    * the note ids the replica computed. */
   notesId?: string
+  /** migrations/0015_views.sql — required in `"columns"` mode. The local store
+   * gets the table without the backfill (`LOCAL_V5_SQL`): a cache re-pulls the
+   * view rows the replica holds. */
+  views?: string
 }
 
 /** Which v3 shape the ladder should produce (see the module header). */
 export type CorpusTenancy = "single" | "columns"
 
-const CORPUS_SCHEMA_VERSION = "4"
+const CORPUS_SCHEMA_VERSION = "5"
+
+/**
+ * The single-tenant v5 step: the `views` table (migrations/0015) — the
+ * entrypoints into the graph, as rows. No `user_id` for the same reason
+ * nothing else here has one, and no backfill: the local store is a cache, so
+ * the rows the replica backfilled arrive with the next pull
+ * (`CACHE_GENERATION`, database-mode.ts).
+ */
+const LOCAL_V5_SQL = `
+CREATE TABLE views (
+  id         TEXT PRIMARY KEY,
+  root_id    TEXT NOT NULL,
+  filter     TEXT,
+  sort       TEXT,
+  pinned     INTEGER NOT NULL DEFAULT 0,
+  sort_key   TEXT,
+  updated_at INTEGER NOT NULL,
+  deleted_at INTEGER
+);
+CREATE INDEX views_root ON views (root_id);
+CREATE INDEX views_pinned ON views (pinned, sort_key);
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '5');
+`
 
 /**
  * The single-tenant v4 step: `notes_id` on nodes (migrations/0006) and nothing
@@ -80,6 +107,7 @@ INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '3');
 /** Drop everything either migration creates, so an incompatible schema can be
  * rebuilt from scratch — safe because a corpus can be re-pulled/re-pushed. */
 const RESET_SQL = `
+DROP TABLE IF EXISTS views;
 DROP TABLE IF EXISTS link;
 DROP TABLE IF EXISTS nodes;
 DROP TABLE IF EXISTS links;
@@ -123,6 +151,21 @@ async function applyV4(
   await driver.execScript(migrations.notesId)
 }
 
+async function applyV5(
+  driver: SqlDriver,
+  migrations: CorpusMigrations,
+  tenancy: CorpusTenancy,
+): Promise<void> {
+  if (tenancy === "single") {
+    await driver.execScript(LOCAL_V5_SQL)
+    return
+  }
+  if (!migrations.views) {
+    throw new Error('ensureCorpusSchema: "columns" tenancy needs migrations.views (0015)')
+  }
+  await driver.execScript(migrations.views)
+}
+
 /**
  * Bring `driver`'s database to the current corpus schema: apply the full
  * migration ladder when empty, migrate a v1/v2/v3 database in place, and
@@ -147,6 +190,7 @@ export async function ensureCorpusSchema(
     await driver.execScript(full)
     await applyV3(driver, migrations, tenancy)
     await applyV4(driver, migrations, tenancy)
+    await applyV5(driver, migrations, tenancy)
   } else {
     // In "columns" mode `meta` is keyed by (user_id, key), so this can see more
     // than one row — every tenant shares one DDL version, so any of them
@@ -157,15 +201,21 @@ export async function ensureCorpusSchema(
       await driver.execScript(migrations.nodes)
       await applyV3(driver, migrations, tenancy)
       await applyV4(driver, migrations, tenancy)
+      await applyV5(driver, migrations, tenancy)
     } else if (version === "2") {
       await applyV3(driver, migrations, tenancy)
       await applyV4(driver, migrations, tenancy)
+      await applyV5(driver, migrations, tenancy)
     } else if (version === "3") {
       await applyV4(driver, migrations, tenancy)
+      await applyV5(driver, migrations, tenancy)
+    } else if (version === "4") {
+      await applyV5(driver, migrations, tenancy)
     } else if (version !== CORPUS_SCHEMA_VERSION) {
       await driver.execScript(RESET_SQL + full)
       await applyV3(driver, migrations, tenancy)
       await applyV4(driver, migrations, tenancy)
+      await applyV5(driver, migrations, tenancy)
     }
   }
 }

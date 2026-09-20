@@ -13,6 +13,7 @@ import migration0002 from "../../migrations/0002_nodes.sql?raw"
 import migration0004 from "../../migrations/0004_tenant_columns.sql?raw"
 import migration0005 from "../../migrations/0005_row_seq.sql?raw"
 import migration0006 from "../../migrations/0006_notes_id.sql?raw"
+import migration0015 from "../../migrations/0015_views.sql?raw"
 import migration0003 from "../../migrations/0003_control_plane.sql?raw"
 import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import migration0011 from "../../migrations/0011_user_email_required.sql?raw"
@@ -89,6 +90,7 @@ export async function createTenantTestDriver(): Promise<SqlDriver> {
       tenantColumns: migration0004,
       rowSeq: migration0005,
       notesId: migration0006,
+      views: migration0015,
     },
     "columns",
   )
