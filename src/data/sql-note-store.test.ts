@@ -92,13 +92,13 @@ describe("openSqlNoteStore", () => {
     await seed(store, "a", content)
     // An identical doc diffs to no ops at all, so nothing reaches the rows.
     const diff = await seed(store, "a", content)
-    expect(diff).toEqual({ nodes: [], links: [], deleteNodes: [], deleteLinks: [] })
+    expect(diff).toEqual({ nodes: [], links: [], views: [], deleteNodes: [], deleteLinks: [] })
   })
 
   it("drops a set on a node it does not hold (deleted underneath)", async () => {
     const { store } = await makeStoreWithDriver()
     const diff = await store.applyOps([{ op: "setText", id: "blk_ghost00000", text: "boo" }])
-    expect(diff).toEqual({ nodes: [], links: [], deleteNodes: [], deleteLinks: [] })
+    expect(diff).toEqual({ nodes: [], links: [], views: [], deleteNodes: [], deleteLinks: [] })
   })
 
   it("removing a block from a note tombstones its link row and keeps its node (diffed)", async () => {
@@ -333,6 +333,7 @@ describe("openSqlNoteStore", () => {
     await store.applyPull({
       nodes: [{ id: "blk_aaaaaaaaaa", type: "ul", text: "remote", props: null, updated_at: 42 }],
       links: [],
+      views: [],
       deleteNodes: [],
       deleteLinks: [],
     })
@@ -341,7 +342,7 @@ describe("openSqlNoteStore", () => {
     ).toEqual([{ text: "remote", updated_at: 42 }])
     expect(await noteOf(store, "a")).toBe("- remote\n  id:: blk_aaaaaaaaaa\n")
 
-    await store.applyPull({ nodes: [], links: [], deleteNodes: ["a"], deleteLinks: [] })
+    await store.applyPull({ nodes: [], links: [], views: [], deleteNodes: ["a"], deleteLinks: [] })
     expect(await noteOf(store, "a")).toBeNull()
   })
 
@@ -464,6 +465,7 @@ describe("soft deletes", () => {
         },
       ],
       links: [],
+      views: [],
       deleteNodes: [],
       deleteLinks: [],
     })

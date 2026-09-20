@@ -25,6 +25,7 @@ import {
   planReplicaPut,
   toLinkRow,
   toNodeRow,
+  toViewRow,
   type LinkRow,
   type NodeRow,
   type ReplicaChangesBody,
@@ -32,6 +33,7 @@ import {
   type ReplicaPutPayload,
   type ReplicaPutResult,
   type ReplicaStatusBody,
+  type ViewRow,
 } from "./replica-payload"
 
 /**
@@ -47,14 +49,15 @@ import {
  * Null means "nothing new": the client keeps the cursor it already had, which
  * is exactly right, and the next `seq > ?` stays a single index seek.
  */
-function cursorOf(nodes: NodeRow[], links: LinkRow[]): string | null {
+function cursorOf(nodes: NodeRow[], links: LinkRow[], views: ViewRow[]): string | null {
   let max = 0
   for (const node of nodes) if ((node.seq ?? 0) > max) max = node.seq ?? 0
   for (const link of links) if ((link.seq ?? 0) > max) max = link.seq ?? 0
+  for (const view of views) if ((view.seq ?? 0) > max) max = view.seq ?? 0
   return max === 0 ? null : String(max)
 }
 
-/** Full pull: every row of both tables, plus the sequence they reach. */
+/** Full pull: every row of all three tables, plus the sequence they reach. */
 export async function corpusPullFull(tenant: TenantDb): Promise<ReplicaCorpusBody> {
   const all = tenant.includingDeleted()
   const nodes = (
@@ -70,14 +73,22 @@ export async function corpusPullFull(tenant: TenantDb): Promise<ReplicaCorpusBod
         "WHERE user_id = :tenant /* includes-deleted: replication carries tombstones */",
     )
   ).map(toLinkRow)
-  return { nodes, links, cursor: cursorOf(nodes, links) }
+  const views = (
+    await all.exec(
+      "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, seq " +
+        "FROM views " +
+        "WHERE user_id = :tenant /* includes-deleted: replication carries tombstones */",
+    )
+  ).map(toViewRow)
+  return { nodes, links, views, cursor: cursorOf(nodes, links, views) }
 }
 
 /**
  * Incremental pull: rows with `seq > since` (tombstones included — a delete
  * takes a sequence value like any other write, so it arrives as an ordinary
  * change), and nothing else. Two index seeks on `nodes_tenant_seq` /
- * `link_tenant_seq`, so a quiet pull reads one row per table.
+ * `link_tenant_seq` / `views_tenant_seq`, so a quiet pull reads one row per
+ * table.
  *
  * `seq` is assigned by the replica (`planReplicaPut`), so `>` is EXACT: no
  * device clock is involved, nothing can land with a stamp behind the cursor,
@@ -115,7 +126,16 @@ export async function corpusPullSince(
       [since],
     )
   ).map(toLinkRow)
-  return { nodes, links, cursor: cursorOf(nodes, links) }
+  const views = (
+    await all.exec(
+      "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, seq " +
+        "FROM views " +
+        "WHERE user_id = :tenant AND seq > ?1 " +
+        "/* includes-deleted: a tombstoned row IS the change being pulled */",
+      [since],
+    )
+  ).map(toViewRow)
+  return { nodes, links, views, cursor: cursorOf(nodes, links, views) }
 }
 
 /**

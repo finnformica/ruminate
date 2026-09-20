@@ -525,6 +525,9 @@ function scheduleRepair(activation: DatabaseModeRuntime) {
     await activation.store.applyPull({
       nodes: [...graph.nodes.values()],
       links: [...graph.childLinks.values()].flat(),
+      // The rebuild replays the in-memory GRAPH; views are not part of it and
+      // were never cleared, so there is nothing to put back.
+      views: [],
       deleteNodes: [],
       deleteLinks: [],
     })

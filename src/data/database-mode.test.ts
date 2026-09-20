@@ -60,7 +60,7 @@ function stubSource(responses: {
     pullFull: async () => {
       calls.full += 1
       if (responses.fail) throw new Error("offline")
-      const full = responses.full ?? { nodes: [], links: [], cursor: null }
+      const full = responses.full ?? { nodes: [], links: [], views: [], cursor: null }
       return typeof full === "function" ? full() : full
     },
     pullSince: async (cursor) => {
@@ -75,7 +75,7 @@ function stubSource(responses: {
 
 /** Remote row corpus built from note markdown — what a real replica holds. */
 function remoteCorpus(notes: Record<string, string>, updatedAt = 1, cursor: string | null = null) {
-  const body: ReplicaCorpusBody = { nodes: [], links: [], cursor }
+  const body: ReplicaCorpusBody = { nodes: [], links: [], views: [], cursor }
   for (const [id, markdown] of Object.entries(notes)) {
     const { nodes, links } = docToGraph(id, markdown, updatedAt)
     body.nodes.push(...nodes)
@@ -103,6 +103,7 @@ function remoteDeletion(
   return {
     nodes: body.nodes.map((node) => ({ ...node, deleted_at: updatedAt })),
     links: body.links.map((link) => ({ ...link, deleted_at: updatedAt })),
+    views: [],
     cursor,
   }
 }
@@ -562,7 +563,7 @@ describe("cache generation", () => {
     const seeded = await seededStore({ "note-a": NOTE_A }, "500", "1")
     await seeded.setMeta("store_owner", "42")
 
-    const { source } = stubSource({ full: { nodes: [], links: [], cursor: null } })
+    const { source } = stubSource({ full: { nodes: [], links: [], views: [], cursor: null } })
     const store = await boot({ store: seeded, source, owner: "42" })
 
     expect(await store.getMeta("store_owner")).toBe("42")
@@ -594,7 +595,9 @@ describe("owner binding", () => {
     // A different account signs in on this browser: the previous owner's
     // rows and cursor are gone, the pull starts from scratch (and for a
     // non-owner the replica would 403 — an empty corpus, never leaked notes).
-    const { source, calls } = stubSource({ full: { nodes: [], links: [], cursor: null } })
+    const { source, calls } = stubSource({
+      full: { nodes: [], links: [], views: [], cursor: null },
+    })
     const store = await boot({ store: seeded, source, owner: "7" })
     expect(await store.getMeta("store_owner")).toBe("7")
     expect(calls.full).toBe(1)

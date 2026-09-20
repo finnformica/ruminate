@@ -197,7 +197,7 @@ describe("planPullApplication", () => {
       remoteLinks: [link("a", "blk_a1", 999, "b0")],
       pendingNodeIds: pending,
     })
-    expect(plan).toEqual({ nodes: [], links: [], deleteNodes: [], deleteLinks: [] })
+    expect(plan).toEqual({ nodes: [], links: [], views: [], deleteNodes: [], deleteLinks: [] })
   })
 
   it("skips rows whose local copy already matches (equal updated_at)", () => {
@@ -208,6 +208,6 @@ describe("planPullApplication", () => {
       remoteLinks: [link("a", "blk_1", 5)],
       pendingNodeIds: new Set(),
     })
-    expect(plan).toEqual({ nodes: [], links: [], deleteNodes: [], deleteLinks: [] })
+    expect(plan).toEqual({ nodes: [], links: [], views: [], deleteNodes: [], deleteLinks: [] })
   })
 })

@@ -139,12 +139,14 @@ describe("mergeDiffs", () => {
       {
         nodes: [node("blk_a", "old")],
         links: [link("blk_note", "blk_a", "a0")],
+        views: [],
         deleteNodes: [],
         deleteLinks: [],
       },
       {
         nodes: [node("blk_a", "new"), node("blk_b", "b")],
         links: [link("blk_note", "blk_a", "a1")],
+        views: [],
         deleteNodes: [],
         deleteLinks: [],
       },
