@@ -85,7 +85,7 @@ describe("denial plumbing through the real fetch paths", () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ error: "blocked" }, 403))
     const handle = startReplicaSync({
       getNoteCount: () => 0,
-      getAllRows: async () => ({ nodes: [], links: [] }),
+      getAllRows: async () => ({ nodes: [], links: [], views: [] }),
       fetchImpl: fetchImpl as unknown as typeof fetch,
       auth: stubAuth,
       debounceMs: 0,

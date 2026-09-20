@@ -1,6 +1,5 @@
 import { expect, test } from "vitest"
 import migration0015 from "../../migrations/0015_views.sql?raw"
-import migration0016 from "../../migrations/0016_retire_view_props.sql?raw"
 import { createTenantTestDriver } from "./sqlite-test-driver"
 
 /**
@@ -79,7 +78,9 @@ test("0015 backfills a view per node that had one, leaving the props alone", asy
   ])
 
   // 0015 is additive: the props it copied FROM are untouched, so a client
-  // that has not been replaced yet still works.
+  // that has not been replaced yet still works. Retiring them is a later
+  // migration, shipped WITH the client that reads the table — applying both
+  // in one release would blank every pin while old clients were still up.
   // tenant-exempt: as above — every tenant's rows, deliberately.
   const afterBackfill = await driver.exec("SELECT id, props, updated_at FROM nodes ORDER BY id")
   expect(afterBackfill).toEqual([
@@ -92,20 +93,6 @@ test("0015 backfills a view per node that had one, leaving the props alone", asy
     { id: "n3", props: '{"language":"ts"}', updated_at: 100 },
     { id: "n4", props: '{"filter":"type:task"}', updated_at: 100 },
     { id: "n5", props: '{"pinned":true}', updated_at: 100 },
-  ])
-
-  // 0016 is the other half, applied with the release whose client reads the
-  // table: the keys go, and the row is stamped so the cleaned version travels.
-  await driver.execScript(migration0016)
-  // tenant-exempt: as above.
-  const afterRetire = await driver.exec("SELECT id, props, updated_at FROM nodes ORDER BY id")
-  expect(afterRetire).toEqual([
-    { id: "n1", props: '{"title":"Shopping"}', updated_at: 101 },
-    { id: "n2", props: null, updated_at: 100 },
-    // A node that carried none of them is not touched at all.
-    { id: "n3", props: '{"language":"ts"}', updated_at: 100 },
-    { id: "n4", props: "{}", updated_at: 101 },
-    { id: "n5", props: "{}", updated_at: 101 },
   ])
 })
 

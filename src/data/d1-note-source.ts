@@ -6,6 +6,7 @@ import {
   type LinkKey,
   type LinkRow,
   type NodeRow,
+  type ViewRow,
   type ReplicaChangesBody,
   type ReplicaCorpusBody,
 } from "../../worker/handlers/replica-payload"
@@ -150,16 +151,20 @@ export function expandPendingNodeIds(
 export function planPullApplication(params: {
   localNodes: NodeRow[]
   localLinks: LinkRow[]
+  localViews: ViewRow[]
   remoteNodes: NodeRow[]
   remoteLinks: LinkRow[]
+  remoteViews: ViewRow[]
   /** Node ids with unpushed local changes (notes + their subtrees). */
   pendingNodeIds: Set<string>
 }): GraphDiff {
-  const { localNodes, localLinks, remoteNodes, remoteLinks, pendingNodeIds } = params
+  const { localNodes, localLinks, localViews, remoteNodes, remoteLinks, remoteViews } = params
+  const { pendingNodeIds } = params
   const plan = emptyGraphDiff()
 
   const localNodeById = new Map(localNodes.map((node) => [node.id, node]))
   const localLinkByKey = new Map(localLinks.map((link) => [linkKeyString(linkKeyOf(link)), link]))
+  const localViewById = new Map(localViews.map((view) => [view.id, view]))
 
   for (const node of remoteNodes) {
     if (pendingNodeIds.has(node.id)) continue
@@ -173,6 +178,16 @@ export function planPullApplication(params: {
     const local = localLinkByKey.get(linkKeyString(linkKeyOf(link)))
     if (local && local.updated_at >= link.updated_at) continue
     plan.links.push(link)
+  }
+
+  // Views are not note-scoped, so `pendingNodeIds` has nothing to say about
+  // them; last-writer-wins alone guards a local write still on its way out,
+  // because that write carries a newer `updated_at` than anything the
+  // replica can answer with.
+  for (const view of remoteViews) {
+    const local = localViewById.get(view.id)
+    if (local && local.updated_at >= view.updated_at) continue
+    plan.views.push(view)
   }
 
   return plan

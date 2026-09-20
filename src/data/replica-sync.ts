@@ -11,6 +11,7 @@ import {
   type ReplicaPutPayload,
   type ReplicaPutResult,
   type ReplicaStatusBody,
+  type ViewRow,
 } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
@@ -100,8 +101,10 @@ export interface ReplicaSyncOptions {
   /** How many notes the local graph holds — compared against the replica's
    * note count to notice a replica left drastically behind. */
   getNoteCount: () => number
-  /** Every current row of both tables — the full-push source (the store). */
-  getAllRows: () => Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
+  /** Every current row of every corpus table — the full-push source (the
+   * store). Views included: a delete only reaches other devices if its
+   * tombstone travels, and a full push is how a repaired replica catches up. */
+  getAllRows: () => Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>
   /** Injectable for tests; default global fetch (same-origin URLs). */
   fetchImpl?: typeof fetch
   /** Injectable for tests; default the real github-session helpers. */
@@ -153,6 +156,9 @@ const linkKeyString = (key: LinkKey) => key.join("\x1f")
 interface PendingDiff {
   nodes: Map<string, NodeRow>
   links: Map<string, LinkRow>
+  /** Keyed by view id. No delete channel to cancel against: a view's delete
+   * is a tombstoned row, so it is just the latest state of that key. */
+  views: Map<string, ViewRow>
   deleteNodes: Set<string>
   deleteLinks: Map<string, LinkKey>
 }
@@ -160,6 +166,7 @@ interface PendingDiff {
 const emptyPending = (): PendingDiff => ({
   nodes: new Map(),
   links: new Map(),
+  views: new Map(),
   deleteNodes: new Set(),
   deleteLinks: new Map(),
 })
@@ -167,6 +174,7 @@ const emptyPending = (): PendingDiff => ({
 const pendingIsEmpty = (pending: PendingDiff) =>
   pending.nodes.size === 0 &&
   pending.links.size === 0 &&
+  pending.views.size === 0 &&
   pending.deleteNodes.size === 0 &&
   pending.deleteLinks.size === 0
 
@@ -180,6 +188,7 @@ function mergeDiffInto(pending: PendingDiff, diff: GraphDiff) {
     pending.deleteLinks.delete(key)
     pending.links.set(key, link)
   }
+  for (const view of diff.views) pending.views.set(view.id, view)
   for (const id of diff.deleteNodes) {
     pending.nodes.delete(id)
     pending.deleteNodes.add(id)
@@ -198,6 +207,9 @@ function restoreSnapshot(pending: PendingDiff, snapshot: PendingDiff) {
   }
   for (const [key, link] of snapshot.links) {
     if (!pending.links.has(key) && !pending.deleteLinks.has(key)) pending.links.set(key, link)
+  }
+  for (const [id, view] of snapshot.views) {
+    if (!pending.views.has(id)) pending.views.set(id, view)
   }
   for (const id of snapshot.deleteNodes) {
     if (!pending.nodes.has(id)) pending.deleteNodes.add(id)
@@ -380,10 +392,14 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   }
 
   /** Split rows into payload chunks: every node row precedes every link row
-   * (links reference nodes), deletes ride the first chunk, cursor the last. */
+   * (links reference nodes), views follow both (they name a node by id with
+   * no key to satisfy, so they need nothing to land first — they go last only
+   * to keep the order the reader expects), deletes ride the first chunk,
+   * cursor the last. */
   function buildPayloads(
     nodes: NodeRow[],
     links: LinkRow[],
+    views: ViewRow[],
     deleteNodes: string[],
     deleteLinks: LinkKey[],
     cursor: string,
@@ -391,14 +407,24 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     const payloads: ReplicaPutPayload[] = []
     let nodeIndex = 0
     let linkIndex = 0
+    let viewIndex = 0
     do {
       const chunkNodes = nodes.slice(nodeIndex, nodeIndex + chunkRows)
       nodeIndex += chunkNodes.length
       const room = chunkRows - chunkNodes.length
       const chunkLinks = nodeIndex >= nodes.length ? links.slice(linkIndex, linkIndex + room) : []
       linkIndex += chunkLinks.length
-      payloads.push({ nodes: chunkNodes, links: chunkLinks })
-    } while (nodeIndex < nodes.length || linkIndex < links.length)
+      const roomAfterLinks = room - chunkLinks.length
+      const chunkViews =
+        nodeIndex >= nodes.length && linkIndex >= links.length
+          ? views.slice(viewIndex, viewIndex + roomAfterLinks)
+          : []
+      viewIndex += chunkViews.length
+      const payload: ReplicaPutPayload = { nodes: chunkNodes, links: chunkLinks }
+      // Optional on the wire, so absent when empty, as the delete channels are.
+      if (chunkViews.length > 0) payload.views = chunkViews
+      payloads.push(payload)
+    } while (nodeIndex < nodes.length || linkIndex < links.length || viewIndex < views.length)
 
     if (deleteNodes.length > 0) payloads[0].deleteNodes = deleteNodes
     if (deleteLinks.length > 0) payloads[0].deleteLinks = deleteLinks
@@ -432,15 +458,18 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     try {
       let nodes = [...snapshot.nodes.values()]
       let links = [...snapshot.links.values()]
+      let views = [...snapshot.views.values()]
       if (wasFullPush) {
         const all = await options.getAllRows()
         nodes = all.nodes
         links = all.links
+        views = all.views
       }
       const cursor = nextCursor()
       const payloads = buildPayloads(
         nodes,
         links,
+        views,
         [...snapshot.deleteNodes],
         [...snapshot.deleteLinks.values()],
         cursor,

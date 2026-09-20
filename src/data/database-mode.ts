@@ -646,13 +646,20 @@ function runPull(activation: DatabaseModeRuntime) {
       const plan = planPullApplication({
         localNodes: local.nodes,
         localLinks: local.links,
+        localViews: local.views,
         remoteNodes: body.nodes,
         remoteLinks: body.links,
+        remoteViews: body.views,
         pendingNodeIds: expandPendingNodeIds(pendingNoteIds, local.links),
       })
 
+      // Views count too: a pull that changed only a pin must still be applied.
       const planSize =
-        plan.nodes.length + plan.links.length + plan.deleteNodes.length + plan.deleteLinks.length
+        plan.nodes.length +
+        plan.links.length +
+        plan.views.length +
+        plan.deleteNodes.length +
+        plan.deleteLinks.length
       if (planSize > 0) {
         await store.applyPull(plan)
         await refreshGraph(activation)
