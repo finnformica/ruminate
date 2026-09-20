@@ -226,6 +226,30 @@ describe("the sidebar's Pinned list", () => {
     expect(screen.getByText("A pinned block")).toBeTruthy()
   })
 
+  it("tints BOTH pin variants, so the current row's filled pin stays a pin", () => {
+    // The filled variant is the one the current row shows. Untinted, it took
+    // the row's selected ink and the pin stopped looking like a pin; the
+    // `nav-item-tint` class is what exempts it from that (index.css).
+    const pinnedNote = noteOf("p", "Pinned one", true)
+    renderSidebar({ notes: [pinnedNote, ...THREE], pinnedNotes: [pinnedNote] })
+    const row = noteRows()[0].querySelector(".nav-item")!
+    const icons = [...row.querySelectorAll(".nav-item-icon")]
+    expect(icons).toHaveLength(2)
+    for (const icon of icons) {
+      expect(icon.className).toContain("text-text-pinned")
+      expect(icon.className).toContain("nav-item-tint")
+    }
+  })
+
+  it("leaves an unpinned row's icon to lean with the label", () => {
+    // A favicon NAMES the row, so it hands itself to the selected ink — only
+    // an icon reporting something about the row opts out.
+    renderSidebar({ notes: THREE })
+    const icons = [...noteRows()[0].querySelectorAll(".nav-item-icon")]
+    expect(icons.length).toBeGreaterThan(0)
+    for (const icon of icons) expect(icon.className).not.toContain("nav-item-tint")
+  })
+
   it("draws a note row and a block row identically — same icon, same classes", () => {
     const pinnedNote = noteOf("p", "Pinned one", true)
     renderSidebar({

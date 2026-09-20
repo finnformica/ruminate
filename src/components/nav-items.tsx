@@ -433,19 +433,31 @@ function OwnNoteRows({
 function NavRowIcon({
   icon,
   filled,
-  tint = "text-text-secondary",
+  tint,
 }: {
   icon: React.ReactNode
   filled: React.ReactNode
-  /** The resting colour. A pin takes the pinned tint; everything else is
-   * ordinary secondary ink. Current, the row's own colour wins either way
-   * (`.nav-item[aria-current] .nav-item-icon`, index.css). */
+  /**
+   * A colour the icon keeps **in both states**, current row included — for an
+   * icon that reports something about the row rather than naming it. Left
+   * out, the icon is ordinary secondary ink and hands itself to the row's own
+   * colour when the row is current, as a favicon does.
+   *
+   * `nav-item-tint` is what exempts it from that hand-over (index.css); the
+   * class and the colour always travel together, which is why the caller
+   * passes a colour rather than setting the class itself.
+   */
   tint?: string
 }) {
+  // Both variants take the tint: the filled one is what the CURRENT row
+  // shows, which is exactly the case a tint exists to survive.
+  const tinted = tint ? cx(tint, "nav-item-tint") : "text-text-secondary"
   return (
     <>
-      <span className="nav-item-icon hidden shrink-0 [[aria-current=page]>&]:flex">{filled}</span>
-      <span className={cx("nav-item-icon flex shrink-0", tint, "[[aria-current=page]>&]:hidden")}>
+      <span className={cx("nav-item-icon hidden shrink-0", tinted, "[[aria-current=page]>&]:flex")}>
+        {filled}
+      </span>
+      <span className={cx("nav-item-icon flex shrink-0", tinted, "[[aria-current=page]>&]:hidden")}>
         {icon}
       </span>
     </>
@@ -725,7 +737,14 @@ function NoteNavItem({
       to="/notes/$"
       params={{ _splat: note.id }}
       search={{ query: undefined }}
-      activeOptions={{ exact: true, includeSearch: false }}
+      // Current only at the note's ROOT. Focus is a place of its own — the
+      // route calls `?block=` "the block the editor is focused on; absent =
+      // outside focus" — and focused in, you are reading that block, not the
+      // note whole. Matching the search is what draws that line: with no
+      // block the searches are equal and the row is current; with one they
+      // differ and it is not, so a pinned block's row is the only thing lit
+      // rather than the block and its note at once.
+      activeOptions={{ exact: true, includeSearch: true }}
       data-size={size}
       className={cx("nav-item", className)}
       title={title}
