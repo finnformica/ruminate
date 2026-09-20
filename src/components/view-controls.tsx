@@ -23,18 +23,19 @@ import { QualifierPicture } from "./qualifier-suggestions"
  * view's `filter` (`type:todo`), Sort its `sort` (`text:desc`), and the page
  * narrows the walk by them through the search engine
  * (`src/utils/view-narrowing.ts`). Each menu branches the way typing
- * branches the way typing branches, and the values are read from the query
- * box's own picker vocabulary (`src/utils/view-filter.ts`), so the menu and
- * the box can never offer different things.
+ * branches — a row per qualifier, its values in the submenu — and the values
+ * are read from the query box's own picker vocabulary
+ * (`src/utils/view-filter.ts`), so the menu and the box can never offer
+ * different things.
  *
  * **Filter offers `type:` and nothing else**, though a filter typed by hand
  * understands the whole language. The rest of the vocabulary is note-level:
  * inside a single note it holds for every row or for none, so as a menu item
  * it is not a filter but a switch between the whole note and a blank page.
  * `in:` is left out too — it names the view's root, which is what focusing
- * already does (a bullet, `f`, the breadcrumb). With one qualifier left the
- * menu lists its values directly: a submenu would be a click that asks a
- * question with one answer.
+ * already does (a bullet, `f`, the breadcrumb). The one branch still sits in
+ * a submenu: it keeps the shape a second qualifier would need, and keeps the
+ * top of the menu a list of what can be filtered rather than of block types.
  *
  * A button carries a **dot** when what is on screen differs from what the
  * block's pin saved (docs/metadata.md), and the menu behind it grows a
@@ -115,30 +116,38 @@ export function FilterMenu({
         width={pinned?.dirty ? 320 : undefined}
         footer={pinned?.dirty ? <DefaultFooter {...pinned} /> : undefined}
       >
-        {/* The block types, straight from the query box's picker. Several at
-            once is a comma list, exactly as it is typed. */}
-        <DropdownMenu.Item
-          selected={chosen.length === 0}
-          closeOnClick={false}
-          onClick={() => onFilterChange(clearFilterKey(filter, "type"))}
-        >
-          Any block
-        </DropdownMenu.Item>
-        <DropdownMenu.Separator />
-        {FILTER_TYPE_OPTIONS.map((option) => (
-          <DropdownMenu.Item
-            key={option.value}
-            selected={chosen.includes(option.value)}
-            closeOnClick={false}
-            // The picker's own leading slot: a fixed, centred box, so a
-            // three-character glyph, a one-character one and a 16px icon
-            // share an axis.
-            icon={<QualifierPicture item={option} qualifierKey="type" />}
-            onClick={() => onFilterChange(toggleFilterValue(filter, "type", option.value))}
-          >
-            {option.label ?? option.value}
-          </DropdownMenu.Item>
-        ))}
+        {/* One branch per qualifier the menu offers. The block types come
+            straight from the query box's picker; several at once is a comma
+            list, exactly as it is typed. */}
+        <DropdownMenu.Submenu>
+          <DropdownMenu.SubmenuTrigger value={describeFilter(filter) || "Any"}>
+            Type
+          </DropdownMenu.SubmenuTrigger>
+          <DropdownMenu.Content align="start" side="left">
+            <DropdownMenu.Item
+              selected={chosen.length === 0}
+              closeOnClick={false}
+              onClick={() => onFilterChange(clearFilterKey(filter, "type"))}
+            >
+              Any
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+            {FILTER_TYPE_OPTIONS.map((option) => (
+              <DropdownMenu.Item
+                key={option.value}
+                selected={chosen.includes(option.value)}
+                closeOnClick={false}
+                // The picker's own leading slot: a fixed, centred box, so a
+                // three-character glyph, a one-character one and a 16px icon
+                // share an axis.
+                icon={<QualifierPicture item={option} qualifierKey="type" />}
+                onClick={() => onFilterChange(toggleFilterValue(filter, "type", option.value))}
+              >
+                {option.label ?? option.value}
+              </DropdownMenu.Item>
+            ))}
+          </DropdownMenu.Content>
+        </DropdownMenu.Submenu>
 
         <DropdownMenu.Separator />
         <DropdownMenu.Item disabled={filter === ""} onClick={() => onFilterChange("")}>

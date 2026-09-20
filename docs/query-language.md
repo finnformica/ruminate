@@ -79,7 +79,7 @@ The query language also narrows a note **where it stands**, rather than resolvin
 
 A note-level qualifier behaves honestly rather than being ignored: inside one note it holds for every row or for none, so `area:work` shows the whole note or nothing at all — which is exactly what the same query means in a search.
 
-**The menu offers `type:` and nothing else.** The rest of the vocabulary is note-level, and inside a single note a note-level qualifier holds for every row or for none — so as a menu item it is not a filter but a switch between the whole note and a blank page. `in:` is left out for a different reason: it names the view's **root**, which is what focusing already does (a bullet, <kbd>f</kbd>, the breadcrumb). Both still work typed into a filter by hand, and mean there exactly what they mean in a search.
+**The menu offers `type:` and nothing else**, in a **Type** submenu — the shape a second qualifier would need, and it keeps the top of the menu a list of what can be filtered rather than of block types. The rest of the vocabulary is note-level, and inside a single note a note-level qualifier holds for every row or for none — so as a menu item it is not a filter but a switch between the whole note and a blank page. `in:` is left out for a different reason: it names the view's **root**, which is what focusing already does (a bullet, <kbd>f</kbd>, the breadcrumb). Both still work typed into a filter by hand, and mean there exactly what they mean in a search.
 
 The block types the menu lists are the query box's own picker vocabulary (`STATIC_QUALIFIER_OPTIONS`), so a block type added to the registry appears in the note header with it.
 
