@@ -91,7 +91,7 @@ A filter that matches nothing shows an empty page, not a blank row to type in: a
 
 **A narrowed view edits its rows, not the note's shape.** Tick a to-do, retype a line, change a block's properties — those land in the graph as they always do. Structure does not: a narrowed view holds only the rows that survived, in the order the sort put them, so reconciling it against the graph would read every hidden row as removed. New rows, indents, removals and reorders belong to the note, which is one click away with the filter cleared. For the same reason a narrowed view has no trailing blank row to type into.
 
-A pinned block can save a filter and a sort of its own, so a pin becomes a view — see [metadata.md](./metadata.md).
+Any note or block can save a filter and a sort of its own, so that it opens the way it was left — see [metadata.md](./metadata.md), "Saved views".
 
 ## Block types
 

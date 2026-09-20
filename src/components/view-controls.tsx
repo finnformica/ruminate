@@ -37,10 +37,10 @@ import { QualifierPicture } from "./qualifier-suggestions"
  * a submenu: it keeps the shape a second qualifier would need, and keeps the
  * top of the menu a list of what can be filtered rather than of block types.
  *
- * A button carries a **dot** when what is on screen differs from what the
- * block's pin saved (docs/metadata.md), and the menu behind it grows a
- * footer offering to settle it. The dot says which half moved; the buttons
- * act on the WHOLE view, because a pin holds one view and saving half of it
+ * A button carries a **dot** when what is on screen differs from the view
+ * this note or block saved (docs/metadata.md), and the menu behind it grows
+ * a footer offering to settle it. The dot says which half moved; the buttons
+ * act on the WHOLE view, because a node holds one view and saving half of it
  * would leave the other half behind.
  */
 
@@ -55,20 +55,20 @@ function DirtyDot() {
 }
 
 /**
- * What the pin's saved view is worth doing about, when the view has moved
- * away from it. Both act on the whole view — filter and sort together — so
- * settling one from the Sort menu keeps whatever the Filter is set to.
+ * What a saved view is worth doing about, when the view has moved away from
+ * it. Both act on the whole view — filter and sort together — so settling
+ * one from the Sort menu keeps whatever the Filter is set to.
  */
-export interface PinnedDefaultActions {
-  /** Whether THIS menu's half differs from the pin (drives the dot). */
+export interface SavedViewActions {
+  /** Whether THIS menu's half differs from what was saved (drives the dot). */
   dirty: boolean
-  /** Write the whole view onto the pin. */
+  /** Write the whole view onto the note or block it is rooted at. */
   onUpdateDefault: () => void
-  /** Put the pin's whole view back. */
+  /** Put the whole saved view back. */
   onResetDefault: () => void
 }
 
-function DefaultFooter({ onUpdateDefault, onResetDefault }: PinnedDefaultActions) {
+function DefaultFooter({ onUpdateDefault, onResetDefault }: SavedViewActions) {
   return (
     <div className="flex items-center gap-1.5">
       <Button size="small" className="w-0 grow whitespace-nowrap" onClick={onUpdateDefault}>
@@ -84,13 +84,13 @@ function DefaultFooter({ onUpdateDefault, onResetDefault }: PinnedDefaultActions
 export function FilterMenu({
   filter,
   onFilterChange,
-  pinned,
+  saved,
 }: {
   /** The view's filter, as the query language writes it. */
   filter: string
   onFilterChange: (filter: string) => void
-  /** The saved view this one is measured against, when there is one. */
-  pinned?: PinnedDefaultActions
+  /** The note or block's saved view, when this session may write one. */
+  saved?: SavedViewActions
 }) {
   const summary = describeFilter(filter)
   const active = summary !== ""
@@ -107,14 +107,14 @@ export function FilterMenu({
             className="relative shrink-0"
           >
             <FilterIcon16 className={cx(active && "text-text")} />
-            {pinned?.dirty ? <DirtyDot /> : null}
+            {saved?.dirty ? <DirtyDot /> : null}
           </IconButton>
         }
       />
       <DropdownMenu.Content
         align="end"
-        width={pinned?.dirty ? 320 : undefined}
-        footer={pinned?.dirty ? <DefaultFooter {...pinned} /> : undefined}
+        width={saved?.dirty ? 320 : undefined}
+        footer={saved?.dirty ? <DefaultFooter {...saved} /> : undefined}
       >
         {/* One branch per qualifier the menu offers. The block types come
             straight from the query box's picker; several at once is a comma
@@ -161,13 +161,13 @@ export function FilterMenu({
 export function SortMenu({
   sort,
   onSortChange,
-  pinned,
+  saved,
 }: {
   /** The view's sort (`text`, `text:desc`), or empty for document order. */
   sort: string
   onSortChange: (sort: string) => void
-  /** The pin's saved view, when this block has one. */
-  pinned?: PinnedDefaultActions
+  /** The note or block's saved view, when this session may write one. */
+  saved?: SavedViewActions
 }) {
   const summary = describeSort(sort)
   const active = summary !== ""
@@ -187,14 +187,14 @@ export function SortMenu({
             className="relative shrink-0"
           >
             <SortAlphabetAscIcon16 className={cx(active && "text-text")} />
-            {pinned?.dirty ? <DirtyDot /> : null}
+            {saved?.dirty ? <DirtyDot /> : null}
           </IconButton>
         }
       />
       <DropdownMenu.Content
         align="end"
-        width={pinned?.dirty ? 320 : undefined}
-        footer={pinned?.dirty ? <DefaultFooter {...pinned} /> : undefined}
+        width={saved?.dirty ? 320 : undefined}
+        footer={saved?.dirty ? <DefaultFooter {...saved} /> : undefined}
       >
         {/* Document order is the note's own order, and the absence of a sort. */}
         <DropdownMenu.Item selected={!active} onClick={() => onSortChange("")}>

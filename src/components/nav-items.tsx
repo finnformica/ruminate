@@ -369,14 +369,9 @@ function PinnedBlockNavItem({
     <Link
       to="/notes/$"
       params={{ _splat: block.noteId }}
-      // The pin opens the block WITH what it saved: a pinned view comes
-      // back as it was left, filter and sort included (docs/metadata.md).
-      search={{
-        query: undefined,
-        block: block.id,
-        filter: block.filter || undefined,
-        sort: block.sort || undefined,
-      }}
+      // The block's own saved view (docs/metadata.md) is applied by the note
+      // page from the block's props, so the link carries only where to go.
+      search={{ query: undefined, block: block.id }}
       activeOptions={{ exact: true, includeSearch: true }}
       data-size={size}
       className={cx("nav-item", className)}
@@ -516,13 +511,7 @@ function NoteNavItem({
     <Link
       to="/notes/$"
       params={{ _splat: note.id }}
-      // A pinned note, like a pinned block, opens with the view it saved
-      // (docs/metadata.md): its filter and its sort, or neither.
-      search={{
-        query: undefined,
-        filter: typeof note.props.filter === "string" ? note.props.filter || undefined : undefined,
-        sort: typeof note.props.sort === "string" ? note.props.sort || undefined : undefined,
-      }}
+      search={{ query: undefined }}
       activeOptions={{ exact: true, includeSearch: false }}
       data-size={size}
       className={cx("nav-item", className)}

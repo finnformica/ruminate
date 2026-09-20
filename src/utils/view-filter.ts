@@ -106,6 +106,32 @@ export function describeFilter(filter: string): string {
 }
 
 /**
+ * **What the view is narrowed by, and what to write when it changes.**
+ *
+ * A note or a block may have saved a default view onto its node
+ * (docs/metadata.md), and the URL may say something else. The URL wins where
+ * it speaks — that is what makes a narrowed view a link — and the saved
+ * default fills the silence:
+ *
+ * - the param ABSENT means "nothing said", so the saved default applies;
+ * - the param EMPTY (`?filter=`) means "explicitly none", which is how a
+ *   filter is cleared on something whose default is not empty. Without the
+ *   distinction, clearing would drop the param and the default would come
+ *   straight back, and there would be no way to see the whole note again.
+ */
+export function resolveNarrowing(param: string | undefined, saved: string): string {
+  return param ?? saved
+}
+
+/** What to put in the URL for `next`, given what the node saved. Nothing to
+ * say is said by leaving the param out — unless leaving it out would mean
+ * the saved default, in which case the emptiness has to be written down. */
+export function narrowingParam(next: string, saved: string): string | undefined {
+  if (next !== "") return next
+  return saved === "" ? undefined : ""
+}
+
+/**
  * The sort as the header's menu writes it: `text`, `text:desc`, or several
  * comma-separated (`type,text:desc`). The query language's own `sort:` form
  * is accepted too, so a sort copied out of the search box works here.

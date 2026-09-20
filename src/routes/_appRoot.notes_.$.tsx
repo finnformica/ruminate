@@ -37,6 +37,7 @@ import {
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
 import { parseProps, pathToBlock } from "../data/graph"
+import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
 import { FilterMenu, SortMenu } from "../components/view-controls"
 import { useFoldRule } from "../data/view-state"
 import { keyOf } from "../blocks/view"
@@ -46,6 +47,37 @@ import { Width, fontSchema, widthSchema } from "../schema"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
+
+/** What a note or block saved as its default view (docs/metadata.md), and
+ * whether this session may write one. */
+interface SavedView {
+  filter: string
+  sort: string
+  /** Whether the header may offer to save: the user's own note, never one
+   * shared with them (its props are its owner's). */
+  writable: boolean
+}
+
+const NO_SAVED_VIEW: SavedView = { filter: "", sort: "", writable: false }
+
+/**
+ * The saved view of whatever the page is rooted at — the focused block, else
+ * the note. Both are nodes with props, so both remember a view the same way
+ * and neither has to be pinned for it.
+ */
+function useSavedView(focusBlockId: string | null, noteId: string | undefined, shared: boolean) {
+  const graph = useAtomValue(graphSnapshotAtom)
+  return React.useMemo<SavedView>(() => {
+    const rootId = focusBlockId ?? noteId
+    if (!rootId || shared) return NO_SAVED_VIEW
+    const props = parseProps(graph.nodes.get(rootId)?.props ?? null)
+    return {
+      filter: typeof props?.filter === "string" ? props.filter : "",
+      sort: typeof props?.sort === "string" ? props.sort : "",
+      writable: true,
+    }
+  }, [focusBlockId, noteId, shared, graph])
+}
 
 type RouteSearch = {
   query: string | undefined
@@ -97,10 +129,6 @@ function NotePage() {
   const { _splat: noteId } = Route.useParams()
   const { block: focusBlockId, filter: filterParam, sort: sortParam } = Route.useSearch()
   const navigate = Route.useNavigate()
-  // The view's narrowing, from the URL — so a filtered view is a link, the
-  // back button undoes it, and a pinned block can carry one (docs/metadata.md).
-  const filter = filterParam ?? ""
-  const sort = sortParam ?? ""
 
   // Global state
   const isSignedOut = useAtomValue(isSignedOutAtom)
@@ -123,6 +151,14 @@ function NotePage() {
   // slice does not carry. The page is otherwise the same page: the title and
   // the editor are the same components, told what they may do.
   const share = useNoteShare(noteId)
+  // The view's narrowing: the URL where it speaks, else what this note or
+  // block saved as its default view (docs/metadata.md, `resolveNarrowing`).
+  // So a narrowed view is a link and the back button undoes it, and a note
+  // opens the way it was left.
+  const savedView = useSavedView(focusBlockId ?? null, noteId, share !== null)
+  const filter = resolveNarrowing(filterParam, savedView.filter)
+  const sort = resolveNarrowing(sortParam, savedView.sort)
+
   const readOnlyShare = share !== null && !share.canWrite
   const isDailyNote = isValidDateString(noteId ?? "")
   const isWeeklyNote = isValidWeekString(noteId ?? "")
@@ -166,7 +202,6 @@ function NotePage() {
     sort,
   })
   const jotaiStore = useStore()
-  const graph = useAtomValue(graphSnapshotAtom)
   // Leaving a focus for a wider view — the note, or a block above — must
   // show the block just left, so the reader lands back on it: the folds
   // along one path from the new root to it are opened first (nothing to do
@@ -279,23 +314,16 @@ function NotePage() {
     [setProp],
   )
 
-  // A pinned block may carry a filter and a sort of its own (docs/metadata.md):
-  // what the sidebar opens it with, and what the header offers to update when
-  // the view has moved away from it. Only the user's own pin — a shared
-  // block's props are its owner's.
+  // What the header offers when the view has moved away from what was saved.
+  // Any note or block can save one — nothing has to be pinned — so the
+  // buttons appear wherever a view can be kept, which is everywhere the
+  // user's own notes are.
   const setBlockProps = useSetBlockProps()
-  const pinnedDefaults = React.useMemo(() => {
-    const rootId = focusBlockId ?? noteId
-    if (!rootId || share !== null) return null
-    const props = parseProps(graph.nodes.get(rootId)?.props ?? null)
-    if (props?.pinned !== true) return null
-    return {
-      filter: typeof props.filter === "string" ? props.filter : "",
-      sort: typeof props.sort === "string" ? props.sort : "",
-    }
-  }, [focusBlockId, noteId, share, graph])
-  const filterDirty = pinnedDefaults !== null && pinnedDefaults.filter !== filter
-  const sortDirty = pinnedDefaults !== null && pinnedDefaults.sort !== sort
+  // Measured against what is saved, which may be nothing: filtering a note
+  // that has saved no view IS a difference from it, and is how the first one
+  // gets saved.
+  const filterDirty = savedView.writable && savedView.filter !== filter
+  const sortDirty = savedView.writable && savedView.sort !== sort
 
   // Writing to the URL, so every narrowing is a link and the back button
   // undoes it. `replace`, so a menu is not a step in the history.
@@ -304,38 +332,40 @@ function NotePage() {
       navigate({
         search: (prev) => ({
           ...prev,
-          ...("filter" in patch ? { filter: patch.filter || undefined } : {}),
-          ...("sort" in patch ? { sort: patch.sort || undefined } : {}),
+          ...("filter" in patch
+            ? { filter: narrowingParam(patch.filter ?? "", savedView.filter) }
+            : {}),
+          ...("sort" in patch ? { sort: narrowingParam(patch.sort ?? "", savedView.sort) } : {}),
         }),
         replace: true,
       })
     },
-    [navigate],
+    [navigate, savedView],
   )
 
   // The save is explicit, both ways: **Update to default** writes what is on
-  // screen onto the pin, **Reset to default** puts back what the pin holds.
-  // Neither happens on its own — a filter tried out in passing must never
-  // quietly overwrite the one that was saved.
-  const updatePinnedDefault = React.useCallback(() => {
+  // screen onto the note or block the view is rooted at, **Reset to default**
+  // puts back what it holds. Neither happens on its own — a filter tried out
+  // in passing must never quietly overwrite the one that was saved.
+  const saveDefaultView = React.useCallback(() => {
     // The view's root is what remembers it: the focused block, or the note
-    // itself when the whole note is the view. Both are nodes with props, and
-    // both can be pinned (docs/metadata.md).
+    // itself when the whole note is the view. Both are nodes with props.
     const patch = { filter: filter || null, sort: sort || null }
     if (focusBlockId) setBlockProps(focusBlockId, patch)
     else if (noteId) setNoteProps(noteId, patch)
+    // The URL has nothing left to say now that the node says it.
+    navigate({ search: (prev) => ({ ...prev, filter: undefined, sort: undefined }), replace: true })
     requestDatabaseFlush()
-  }, [focusBlockId, noteId, filter, sort, setBlockProps, setNoteProps])
-  const resetToPinnedDefault = React.useCallback(() => {
-    if (!pinnedDefaults) return
-    setNarrowing({ filter: pinnedDefaults.filter, sort: pinnedDefaults.sort })
-  }, [pinnedDefaults, setNarrowing])
-  // Both menus are handed the same pair: a pin holds ONE view, so settling
+  }, [focusBlockId, noteId, filter, sort, setBlockProps, setNoteProps, navigate])
+  const resetToDefaultView = React.useCallback(() => {
+    navigate({ search: (prev) => ({ ...prev, filter: undefined, sort: undefined }), replace: true })
+  }, [navigate])
+  // Both menus are handed the same pair: a node holds ONE view, so settling
   // it from the Sort menu must keep the filter that is set, and the other
   // way round. Only the dot differs, which says which half moved.
-  const pinnedActions = React.useMemo(
-    () => ({ onUpdateDefault: updatePinnedDefault, onResetDefault: resetToPinnedDefault }),
-    [updatePinnedDefault, resetToPinnedDefault],
+  const savedViewActions = React.useMemo(
+    () => ({ onUpdateDefault: saveDefaultView, onResetDefault: resetToDefaultView }),
+    [saveDefaultView, resetToDefaultView],
   )
 
   // Retitle the current note. Since ids are minted, this sets one property and
@@ -407,12 +437,12 @@ function NotePage() {
             <SortMenu
               sort={sort}
               onSortChange={(next) => setNarrowing({ sort: next })}
-              pinned={pinnedDefaults ? { ...pinnedActions, dirty: sortDirty } : undefined}
+              saved={savedView.writable ? { ...savedViewActions, dirty: sortDirty } : undefined}
             />
             <FilterMenu
               filter={filter}
               onFilterChange={(next) => setNarrowing({ filter: next })}
-              pinned={pinnedDefaults ? { ...pinnedActions, dirty: filterDirty } : undefined}
+              saved={savedView.writable ? { ...savedViewActions, dirty: filterDirty } : undefined}
             />
             <NoteActionsMenu
               noteId={noteId ?? ""}

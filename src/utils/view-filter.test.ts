@@ -6,6 +6,8 @@ import {
   describeSort,
   FILTER_TYPE_OPTIONS,
   filterValues,
+  narrowingParam,
+  resolveNarrowing,
   sortBranches,
   sortDirections,
   toggleFilterValue,
@@ -90,6 +92,32 @@ describe("describeFilter", () => {
 
   it("says nothing about nothing", () => {
     expect(describeFilter("")).toBe("")
+  })
+})
+
+describe("resolveNarrowing / narrowingParam", () => {
+  it("lets the URL win where it speaks, and the saved view fill the silence", () => {
+    expect(resolveNarrowing(undefined, "type:todo")).toBe("type:todo")
+    expect(resolveNarrowing("type:done", "type:todo")).toBe("type:done")
+    expect(resolveNarrowing(undefined, "")).toBe("")
+  })
+
+  it("reads an empty param as an explicit none, not as nothing said", () => {
+    // Otherwise clearing the filter on a note with a saved one would drop the
+    // param, the default would come back, and the whole note would be
+    // unreachable.
+    expect(resolveNarrowing("", "type:todo")).toBe("")
+  })
+
+  it("writes emptiness down only when the silence would mean something else", () => {
+    expect(narrowingParam("type:todo", "")).toBe("type:todo")
+    expect(narrowingParam("", "")).toBe(undefined)
+    expect(narrowingParam("", "type:todo")).toBe("")
+  })
+
+  it("round-trips: clearing a saved view shows the whole note", () => {
+    const saved = "type:todo"
+    expect(resolveNarrowing(narrowingParam("", saved), saved)).toBe("")
   })
 })
 
