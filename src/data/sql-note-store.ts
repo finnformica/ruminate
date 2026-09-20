@@ -4,9 +4,11 @@ import {
   emptyGraphDiff,
   toLinkRow,
   toNodeRow,
+  toViewRow,
   type GraphDiff,
   type LinkRow,
   type NodeRow,
+  type ViewRow,
 } from "../../worker/handlers/replica-payload"
 import { ensureCorpusSchema } from "./corpus-schema"
 import { CHILD_KIND, buildGraphSnapshot } from "./graph"
@@ -83,7 +85,15 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
       }
       for (const node of plan.nodes) statements.push(upsertNodeStatement(node))
       for (const link of plan.links) statements.push(upsertLinkStatement(link))
+      for (const view of plan.views) statements.push(upsertViewStatement(view))
       if (statements.length > 0) await driver.batch(statements)
+    },
+
+    getViews: () => loadViews(driver),
+
+    applyViews: async (views) => {
+      if (views.length === 0) return
+      await driver.batch(views.map(upsertViewStatement))
     },
 
     clear: async () => {
@@ -94,6 +104,8 @@ export async function openSqlNoteStore(driver: SqlDriver): Promise<NoteStore> {
         { sql: "DELETE FROM link" },
         // tenant-exempt: as above.
         { sql: "DELETE FROM nodes" },
+        // tenant-exempt: as above.
+        { sql: "DELETE FROM views" },
       ])
     },
 
@@ -152,8 +164,10 @@ async function loadMemGraph(driver: SqlDriver): Promise<MemGraph> {
 }
 
 /** Every row, tombstones included — what replication has to carry. */
-async function loadAllRows(driver: SqlDriver): Promise<{ nodes: NodeRow[]; links: LinkRow[] }> {
-  const [nodeRows, linkRows] = await Promise.all([
+async function loadAllRows(
+  driver: SqlDriver,
+): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }> {
+  const [nodeRows, linkRows, viewRows] = await Promise.all([
     driver.exec(
       "SELECT id, type, text, props, updated_at, deleted_at, notes_id FROM nodes " +
         "/* includes-deleted: the full-push source; a delete only reaches other " +
@@ -163,8 +177,52 @@ async function loadAllRows(driver: SqlDriver): Promise<{ nodes: NodeRow[]; links
       "SELECT source_id, destination_id, kind, sort_key, updated_at, deleted_at FROM link " +
         "/* includes-deleted: as above */",
     ),
+    driver.exec(
+      "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at FROM views " +
+        "/* includes-deleted: as above */",
+    ),
   ])
-  return { nodes: nodeRows.map(toNodeRow), links: linkRows.map(toLinkRow) }
+  return {
+    nodes: nodeRows.map(toNodeRow),
+    links: linkRows.map(toLinkRow),
+    views: viewRows.map(toViewRow),
+  }
+}
+
+/** Every LIVE view row — the entrypoints the sidebar and the note page read
+ * (migrations/0015). Tombstones are for replication, not for reading. */
+async function loadViews(driver: SqlDriver): Promise<ViewRow[]> {
+  const rows = await driver.exec(
+    "SELECT id, root_id, filter, sort, pinned, sort_key, updated_at FROM views " +
+      "WHERE deleted_at IS NULL",
+  )
+  return rows.map(toViewRow)
+}
+
+/** Upsert one view row, last-writer-wins, as the replica does. A delete is a
+ * row carrying `deleted_at`, so it goes through here too. */
+function upsertViewStatement(view: ViewRow): SqlStatement {
+  return {
+    // tenant-exempt: the local store is one user per browser profile; there is
+    // no second tenant in an OPFS database (src/data/corpus-schema.ts).
+    sql:
+      "INSERT INTO views (id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
+      "ON CONFLICT (id) DO UPDATE SET root_id = excluded.root_id, filter = excluded.filter, " +
+      "sort = excluded.sort, pinned = excluded.pinned, sort_key = excluded.sort_key, " +
+      "updated_at = excluded.updated_at, deleted_at = excluded.deleted_at " +
+      "WHERE excluded.updated_at >= views.updated_at",
+    params: [
+      view.id,
+      view.root_id,
+      view.filter,
+      view.sort,
+      view.pinned ? 1 : 0,
+      view.sort_key,
+      view.updated_at,
+      view.deleted_at ?? null,
+    ],
+  }
 }
 
 /**

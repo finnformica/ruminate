@@ -1,4 +1,4 @@
-import type { GraphDiff, LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
+import type { GraphDiff, LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
 import type { GraphSnapshot } from "./graph"
 import type { Op } from "./ops"
 
@@ -30,13 +30,26 @@ export interface NoteStore {
    * row-level diff (what the replica queue pushes).
    */
   applyOps(ops: readonly Op[]): Promise<GraphDiff>
-  /** Every row of both tables, **tombstones included** — the replica
+  /** Every row of every corpus table, **tombstones included** — the replica
    * full-push source, and a delete only reaches other devices if it travels. */
-  getAllRows(): Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
+  getAllRows(): Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>
+  /**
+   * The live view rows (migrations/0015): the entrypoints into the graph —
+   * where a view starts, what it keeps, how it lays that out, and whether it
+   * is pinned. Not part of the graph, and not derivable from it: a view may
+   * name a node somebody else owns, which is the whole reason it is a table.
+   */
+  getViews(): Promise<ViewRow[]>
+  /**
+   * Upsert view rows, last-writer-wins. A delete is a row carrying
+   * `deleted_at`, as everywhere else, so it goes through here too and
+   * replicates like any other change.
+   */
+  applyViews(views: readonly ViewRow[]): Promise<void>
   /** Apply a planned pull (row upserts + deletes) in one transaction. Rows
    * land verbatim — remote `updated_at` and `deleted_at` are preserved. */
   applyPull(plan: GraphDiff): Promise<void>
-  /** Wipe every node and link row (meta is kept). A cache reset, not a
+  /** Wipe every corpus row — nodes, links and views (meta is kept). A cache reset, not a
    * delete: nothing is tombstoned, so nothing replicates. */
   clear(): Promise<void>
   /** Read a `meta` key (e.g. the D1 pull cursor), or null when unset. */

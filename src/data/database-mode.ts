@@ -353,7 +353,7 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
           () => noteCount(jotai().get(databaseGraphAtom)),
           () => {
             const store = activation.store
-            if (!store) return Promise.resolve({ nodes: [], links: [] })
+            if (!store) return Promise.resolve({ nodes: [], links: [], views: [] })
             return store.getAllRows()
           },
         )
