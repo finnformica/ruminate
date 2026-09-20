@@ -737,7 +737,14 @@ function NoteNavItem({
       to="/notes/$"
       params={{ _splat: note.id }}
       search={{ query: undefined }}
-      activeOptions={{ exact: true, includeSearch: false }}
+      // Current only at the note's ROOT. Focus is a place of its own — the
+      // route calls `?block=` "the block the editor is focused on; absent =
+      // outside focus" — and focused in, you are reading that block, not the
+      // note whole. Matching the search is what draws that line: with no
+      // block the searches are equal and the row is current; with one they
+      // differ and it is not, so a pinned block's row is the only thing lit
+      // rather than the block and its note at once.
+      activeOptions={{ exact: true, includeSearch: true }}
       data-size={size}
       className={cx("nav-item", className)}
       title={title}

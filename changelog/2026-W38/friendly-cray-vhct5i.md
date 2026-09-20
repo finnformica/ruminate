@@ -11,3 +11,8 @@
 - A pinned note shows the pin in place of its own icon throughout the sidebar. It used to keep its icon and carry a small pin beside its name, so a row said the same thing twice; one glance down the sidebar now says which notes are pinned.
 - A pinned note keeps its place in the notes list as well. Pinning no longer lifts a note to the top, so the order is entirely the one you sorted or dragged into, and any note can be dragged anywhere.
 - **What's new** is called **Changelog**, and sits with **Help** at the foot of the sidebar. The two of them explain the app, so they are together now, below the places you can go.
+
+### Fixed
+
+- The sidebar no longer highlights a note while you are focused on a block inside it. Focusing on a pinned block lit both the block's row and its note's, which read as being in two places at once; the row you are actually on is now the only one lit. A pinned note open at its top is still lit in both **Pinned** and **Notes** — those two rows are the same note, and each saying so is worth knowing.
+- A pinned row's pin keeps its colour when you open it. It used to take on the colour of the selected row, so the one mark that says a row is pinned stopped looking like a pin exactly where you were reading.
