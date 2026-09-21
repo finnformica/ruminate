@@ -4,6 +4,7 @@ import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panel
 import { useMedia } from "react-use"
 import { isHelpPanelOpenAtom, sidebarAtom } from "../global-state"
 import { useApplyUpdateShortcut, useRegisterAppUpdate } from "../hooks/app-update"
+import { usePresence } from "../hooks/presence"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { HelpDrawer, HelpSidebar } from "./help-panel"
@@ -27,9 +28,12 @@ export function AppLayout({ className, children }: AppLayoutProps) {
   useRegisterAppUpdate()
   useApplyUpdateShortcut()
   const showHelpSidebar = isHelpPanelOpen && isWideViewport
+  // The panel stays in the layout while its contents slide out; only then
+  // does the page take the width back (src/hooks/presence.ts).
+  const helpPresent = usePresence(showHelpSidebar)
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "app-layout",
-    panelIds: showHelpSidebar ? ["content", "help"] : ["content"],
+    panelIds: helpPresent ? ["content", "help"] : ["content"],
     storage: window.localStorage,
   })
 
@@ -72,7 +76,7 @@ export function AppLayout({ className, children }: AppLayoutProps) {
               <NavBar />
             </div>
           </Panel>
-          {showHelpSidebar ? (
+          {helpPresent ? (
             <>
               <Separator className="relative w-px bg-border-secondary print:hidden outline-none">
                 <div className="absolute inset-y-0 -left-1.5 -right-1.5 z-raised" />
@@ -84,7 +88,7 @@ export function AppLayout({ className, children }: AppLayoutProps) {
                 minSize="25%"
                 maxSize="40%"
               >
-                <HelpSidebar />
+                <HelpSidebar open={showHelpSidebar} />
               </Panel>
             </>
           ) : null}

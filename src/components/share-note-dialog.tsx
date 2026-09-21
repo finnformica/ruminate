@@ -2,7 +2,7 @@ import { atom, useAtom, useAtomValue } from "jotai"
 import React from "react"
 import { toast } from "sonner"
 import { NOTE_TYPE } from "../data/graph"
-import { createShare, describeSharePermissions, type SharePermission } from "../data/shares"
+import { createShare, type SharePermission } from "../data/shares"
 import { sharedOriginAtom } from "../data/shared-mode"
 import { githubUserAtom, graphSnapshotAtom, notesAtom } from "../global-state"
 import { Button } from "./ui/button"
@@ -23,6 +23,23 @@ import { TextInput } from "./ui/text-input"
  * not open for anything else.
  */
 export const shareDialogAtom = atom<string | null>(null)
+
+/** What each permission lets be done to the note, said of the note. */
+const DONE_TO_IT: Record<SharePermission, string> = {
+  read: "read",
+  write: "edited",
+  delete: "deleted",
+}
+
+/** "read", "read and edited", "read, edited and deleted". */
+function describeGrant(verbs: readonly SharePermission[]): string {
+  const words = (["read", "write", "delete"] as const)
+    .filter((verb) => verb === "read" || verbs.includes(verb))
+    .map((verb) => DONE_TO_IT[verb])
+  return words.length <= 1
+    ? words.join("")
+    : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`
+}
 
 const VERB_OPTIONS: { value: SharePermission; label: string; detail: string }[] = [
   { value: "write", label: "Edit", detail: "Change it, and add blocks beneath it" },
@@ -118,10 +135,9 @@ function ShareForm({
             autoFocus
             onChange={(event) => setEmail(event.target.value)}
           />
-          <span className="text-sm leading-5 text-text-secondary">Their GitHub sign-in email.</span>
         </div>
         <fieldset className="flex flex-col gap-2 border-0 p-0">
-          <legend className="text-sm leading-4 text-text-secondary">They can</legend>
+          <legend className="sr-only">Permissions</legend>
           {VERB_OPTIONS.map((option) => (
             <div key={option.value} className="flex items-start gap-2 leading-4">
               <Checkbox
@@ -140,11 +156,11 @@ function ShareForm({
             </div>
           ))}
         </fieldset>
-        {/* What is about to be granted, in a sentence — read before the
-            button that grants it. */}
+        {/* What is about to be granted, in a sentence about the note rather
+            than the person — read before the button that grants it. */}
         <p className="leading-5 text-text-secondary">
-          They can <span className="text-text">{describeSharePermissions(["read", ...verbs])}</span>{" "}
-          this {isNote ? "note" : "block"} and what is beneath it.
+          Shared {isNote ? "note" : "block"} and what is beneath it can be{" "}
+          <span className="text-text">{describeGrant(verbs)}</span>.
         </p>
         {error ? <p className="text-text-danger">{error}</p> : null}
         <div className="flex gap-2">

@@ -1,4 +1,5 @@
 import { useAtom } from "jotai"
+import { cx } from "../utils/cx"
 import { Fragment, useMemo, useState } from "react"
 import { isHelpPanelOpenAtom } from "../global-state"
 import {
@@ -179,11 +180,30 @@ function HelpContent({
   )
 }
 
-export function HelpSidebar() {
+/**
+ * The help panel on a wide screen: a resizable panel beside the page.
+ *
+ * The panel's width belongs to the layout and changes at once; what moves is
+ * the panel's contents, sliding in from the page's edge and back out of it —
+ * a transform and a fade, never the width (docs/design-principles.md, "What
+ * never animates"), so the note beside it is never laid out mid-motion.
+ * Under reduced motion the slide goes and the fade stays. While `open` is
+ * false the contents are on their way out; the layout lets the panel go once
+ * they have gone (src/components/app-layout.tsx).
+ */
+export function HelpSidebar({ open }: { open: boolean }) {
   const [, setHelpPanel] = useAtom(isHelpPanelOpenAtom)
   return (
     <div className="grid grid-rows-[1fr] overflow-hidden h-full">
-      <HelpContent onClose={() => setHelpPanel(false)} />
+      <div
+        className={cx(
+          "h-full min-w-0 transition-[translate,opacity] duration-slow ease-[var(--ease-in-out)]",
+          "starting:opacity-0 motion-safe:starting:translate-x-full",
+          !open && "opacity-0 motion-safe:translate-x-full",
+        )}
+      >
+        <HelpContent onClose={() => setHelpPanel(false)} />
+      </div>
     </div>
   )
 }
