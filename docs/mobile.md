@@ -71,15 +71,16 @@ keyboard that appears and disappears. The block editor
   runs the same command its key does (`src/blocks/commands.ts`), in edit mode
   with the caret, so Indent by bar is Tab by key.
 
-  | Main row        | Does                                                         | Notion's      |
-  | --------------- | ------------------------------------------------------------ | ------------- |
-  | Aa              | Swaps the row for the formatting row                         | Aa            |
-  | ⇄ Turn into     | Swaps the row for the block types                            | Turn into     |
-  | Outdent, Indent | `outdent`, `indent`; greyed where they would do nothing      | ⇤ ⇥           |
-  | Undo, Redo      | Redo shows only while there is something to redo             | Undo          |
-  | Image           | The picture picker (`requestImage`), where images are on     | Insert image  |
-  | Delete          | `deleteBlock`, in the danger colour; the next row highlights | Delete        |
-  | Keyboard down   | Ends the edit and puts the keyboard away                     | Keyboard down |
+  | Main row        | Does                                                          | Notion's      |
+  | --------------- | ------------------------------------------------------------- | ------------- |
+  | Aa              | Swaps the row for the formatting row                          | Aa            |
+  | ⇄ Turn into     | Swaps the row for the block types                             | Turn into     |
+  | Outdent, Indent | `outdent`, `indent`; greyed where they would do nothing       | ⇤ ⇥           |
+  | Focus on        | `focusBlock`: the block becomes the whole view, the edit ends | —             |
+  | Undo, Redo      | Redo shows only while there is something to redo              | Undo          |
+  | Image           | The picture picker (`requestImage`), where images are on      | Insert image  |
+  | Delete          | `deleteBlock`, in the danger colour; the next row highlights  | Delete        |
+  | Keyboard down   | Ends the edit and puts the keyboard away                      | Keyboard down |
 
   The formatting row (Back, then bold, italic, strikethrough, code, link,
   maths) draws each button as the markdown renders it — a bold B, the inline
@@ -91,6 +92,13 @@ keyboard that appears and disappears. The block editor
   having no counterpart here: `+` add block (Return and the slash menu do
   it), `@` mention, comment, text colour and highlight, underline (no
   markdown for it), duplicate and move up / down (the block menu has them).
+  Focus on is Ruminate's own: a phone has no <kbd>F</kbd> or <kbd>⌘</kbd>
+  <kbd>.</kbd> to press, and only a leaf's bullet to tap (a parent's is its
+  chevron), so the bar is how any block — a paragraph, a heading, a parent —
+  is focused on in two taps. The change of view ends the edit, so the
+  keyboard goes and the subtree is there to read; on the block already
+  focused on the button is greyed, there being nowhere further in. The
+  breadcrumb and the nav bar's Back lead out again.
 
   Where the bar sits is the hard part. A `position: fixed` element lives in
   the _layout_ viewport, which an overlaying keyboard (iOS Safari) does not
