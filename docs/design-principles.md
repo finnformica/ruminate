@@ -310,6 +310,11 @@ and the radius, so no component picks a shadow or a radius for itself:
 | `popup` | floats over the page: menus, tooltips, hover cards, listboxes, the what's-new card | `bg-overlay-backdrop` blurred, `--shadow-popup`      | `lg` 12px |
 | `modal` | floats over everything: dialogs, the palette                                       | `bg-overlay-backdrop` blurred more, `--shadow-modal` | `xl` 16px |
 
+A modal also draws a scrim over the page (`--color-bg-scrim`: a fifth of black
+in the light, half in the dark, where a light dim reads as haze), so the page
+steps back and the window comes forward; the dialog's fades with it, the
+palette's is simply there. A dialog sits centred on the page.
+
 Every tier shares the same hairline ring for an edge (`--neutral-a3`, inset in
 the dark), which is what makes them read as one family at three heights.
 

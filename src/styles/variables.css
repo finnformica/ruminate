@@ -83,6 +83,9 @@
   --color-bg-overlay: white;
   --color-bg-backdrop: #fcfcfccc;
   --color-bg-overlay-backdrop: #ffffffcc;
+  /* What a modal draws over the page: a little darker, so the page steps back
+     and the dialog comes forward. */
+  --color-bg-scrim: rgb(0 0 0 / 0.2);
   --color-bg-secondary: var(--neutral-a3);
   --color-bg-secondary-hover: var(--neutral-a4);
   --color-bg-secondary-active: var(--neutral-a5);
@@ -225,6 +228,7 @@
   --color-bg-overlay: var(--neutral-3);
   --color-bg-backdrop: #111111cc;
   --color-bg-overlay-backdrop: #222222cc;
+  --color-bg-scrim: rgb(0 0 0 / 0.5);
   --color-bg-code-block: var(--neutral-a2);
 
   /* Selected colors: the same wash over a white-LIFTED background. The
