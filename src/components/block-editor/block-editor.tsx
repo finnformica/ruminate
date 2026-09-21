@@ -8,7 +8,7 @@ import { isDatabaseModeAtom, newBlockMarkerAtom } from "../../global-state"
 import { useFeature } from "../../data/features"
 import { sharedOriginAtom } from "../../data/shared-mode"
 import { shareDialogAtom } from "../share-note-dialog"
-import type { Block, BlockDoc, ChangeHint } from "../../blocks/types"
+import type { Block, BlockDoc, BlockType, ChangeHint } from "../../blocks/types"
 import type { BlockOp } from "../../blocks/history"
 import { blockId } from "../../blocks/id"
 import {
@@ -42,6 +42,7 @@ import { LinkPreviewError } from "../../data/link-previews"
 import { openLink } from "./link-card"
 import { ImageLightbox } from "./image-lightbox"
 import { MobileEditBar } from "./mobile-edit-bar"
+import { SelectionBar } from "./selection-bar"
 import { NoteTitle } from "./note-title"
 import { useCoarsePointer } from "../../hooks/coarse-pointer"
 import { useWriteView } from "../../hooks/views"
@@ -300,6 +301,17 @@ const ARROWS_KEEP_TO_THEMSELVES = `${UNDO_KEEPS_TO_ITSELF}, [role="listbox"], [r
  * and is deliberately absent, so a click in its gaps is blank. */
 const BLANK_CLICK_EXCLUDES =
   'a[href], button, input, textarea, select, [contenteditable="true"], [tabindex]:not([tabindex="-1"])'
+
+/** Whether the editor still owns the keyboard with focus on `active`: inside
+ * its container, or on the selection bar or a menu — the bar's, or the block
+ * menu — which act on the very selection the highlight shows, so it stays
+ * lit while they are used. */
+function ownsFocus(container: HTMLElement, active: Element | null): boolean {
+  if (!active) return false
+  return (
+    container.contains(active) || active.closest('[data-selection-bar], [role="menu"]') !== null
+  )
+}
 
 /** Keys that are only modifiers: pressing one alone is not "using the keyboard". */
 const MODIFIER_KEYS = new Set(["Shift", "Meta", "Control", "Alt", "CapsLock"])
@@ -669,7 +681,7 @@ export function BlockEditor({
     keyboardIdleRaf.current = requestAnimationFrame(() => {
       keyboardIdleRaf.current = null
       const el = containerRef.current
-      if (!el || !el.contains(document.activeElement)) setKeyboardActive(false)
+      if (!el || !ownsFocus(el, document.activeElement)) setKeyboardActive(false)
     })
   }
   useEffect(() => cancelKeyboardIdleCheck, [])
@@ -777,14 +789,54 @@ export function BlockEditor({
     return edges
   }, [selectedSet, visibleOrder, doc, focusTitleKey])
 
-  const select = (key: string) => {
+  const select = (key: string, extend = false) => {
     setFocus(null)
-    setAnchorKey(null)
+    // Shift+click: the run from the selection's anchor (or its one row) to
+    // the clicked row, as Shift+Arrow would have walked it.
+    if (extend && selected) setAnchorKey(anchorKey ?? selected)
+    else setAnchorKey(null)
     setSelected(key)
     // Grab keyboard focus so arrows work immediately, even re-clicking the block
     // that's already highlighted (which wouldn't trigger the focus effect).
     focusContainer()
   }
+
+  // A pointer's sweep across the rows: the text selection it leaves is
+  // turned into a selection of the rows it touched — the first to the last,
+  // the anchor at the end the drag began — so what looks selected is
+  // selected, and Tab, delete, the bar and the rest act on all of it. Before
+  // this a Tab after such a sweep indented only the row the press landed
+  // on. A sweep inside one row is left alone: that is text being selected.
+  // Heard on the document, not the container: a sweep to the end of a note
+  // lets go below its last row, outside the editor.
+  const handleSweepEnd = () => {
+    if (coarse || !navigable || focus) return
+    const selection = window.getSelection()
+    if (!selection || selection.isCollapsed) return
+    const { keys } = pickSelectedRows(selection)
+    if (keys.length < 2) return
+    const first = keys[0]
+    const last = keys[keys.length - 1]
+    const startedAtEnd =
+      selection.anchorNode instanceof Node &&
+      Boolean(
+        containerRef.current
+          ?.querySelector(`[data-occurrence="${last}"]`)
+          ?.contains(selection.anchorNode),
+      )
+    selection.removeAllRanges()
+    setPointerIdle(false)
+    setAnchorKey(startedAtEnd ? last : first)
+    setSelected(startedAtEnd ? first : last)
+    focusContainer()
+  }
+  const sweepEndRef = useRef(handleSweepEnd)
+  sweepEndRef.current = handleSweepEnd
+  useEffect(() => {
+    const onMouseUp = () => sweepEndRef.current()
+    document.addEventListener("mouseup", onMouseUp)
+    return () => document.removeEventListener("mouseup", onMouseUp)
+  }, [])
 
   // Extend the multi-selection by moving the head one row along, keeping the
   // anchor fixed (starting a range from the current head if there isn't one).
@@ -917,7 +969,33 @@ export function BlockEditor({
     setSelected(follow)
     setAnchorKey(follow)
   }
+  // Whether the structure moves would do anything on the selection — what
+  // the selection bar greys its buttons by, and what Tab and Shift+Tab check
+  // first. Indent moves the selection as one: every root needs a sibling
+  // above it, or nothing moves (a root left behind would have the rest nest
+  // under it — under a selected row, reshaping the very selection). Outdent
+  // lifts whichever roots can be lifted. The group moves need the roots to
+  // be a run of siblings with room to move (`moveBlocks`).
+  const selectionMoves = () => {
+    const roots = structuralRoots()
+    const moves = roots.map(structureMoves)
+    const parentKey = roots.length > 0 ? parentKeyOf(roots[0]) : null
+    const siblings =
+      parentKey === null ? doc.rootBlockIds : (doc.blocks[idOfKey(parentKey)]?.children ?? [])
+    const indices = roots.map((key) => siblings.indexOf(idOfKey(key)))
+    const run =
+      roots.length > 0 &&
+      roots.every((key) => parentKeyOf(key) === parentKey) &&
+      indices.every((index, k) => index !== -1 && index === indices[0] + k)
+    return {
+      canIndent: moves.length > 0 && moves.every((move) => move.canIndent),
+      canOutdent: moves.some((move) => move.canOutdent),
+      canMoveUp: run && indices[0] > 0,
+      canMoveDown: run && indices[indices.length - 1] < siblings.length - 1,
+    }
+  }
   const indentSelection = () => {
+    if (!selectionMoves().canIndent) return
     let next = doc
     const moved: [string, string][] = []
     // In document order: each row's new previous sibling is the one the group
@@ -945,6 +1023,34 @@ export function BlockEditor({
     if (next === doc) return
     history.commit(doc, next, { type: "structural" })
     followMoved(moved)
+  }
+  // The whole contiguous selection, one position among its shared parent's
+  // children (a no-op across parents).
+  const moveSelection = (direction: "up" | "down") => {
+    const next = moveBlocks(doc, structuralRoots(), direction)
+    if (next !== doc) history.commit(doc, next, { type: "structural" })
+  }
+  // The selection roots copied as one group, above or below it, and the
+  // copies selected.
+  const duplicateSelection = (direction: "above" | "below") => {
+    const result = duplicateBlocks(doc, structuralRoots(), direction)
+    if (!result) return
+    history.commit(doc, result.doc, { type: "structural" })
+    setFocus(null)
+    setAnchorKey(result.copies[0])
+    setSelected(result.copies[result.copies.length - 1])
+  }
+  // Every selected root to one type (marker swap only — content and children
+  // untouched). One structural commit = one undo step. The type is the
+  // block's, so a block selected in two rows changes once. `toggle` is the
+  // marker keys' way: a root already of the kind goes back to text.
+  const turnSelectionInto = (target: BlockType, toggle = false) => {
+    let next = doc
+    for (const rootId of new Set(selectionRoots().map(idOfKey))) {
+      const block = next.blocks[rootId]
+      if (block) next = updateType(next, rootId, toggle ? toggleType(block.type, target) : target)
+    }
+    if (next !== doc) history.commit(doc, next, { type: "structural" })
   }
   const removeSelection = () => {
     let next = doc
@@ -2293,17 +2399,7 @@ export function BlockEditor({
       // selects the copies.
       if (isArrow && event.altKey && event.shiftKey && !mod) {
         event.preventDefault()
-        const result = duplicateBlocks(
-          doc,
-          structuralRoots(),
-          direction === "up" ? "above" : "below",
-        )
-        if (result) {
-          history.commit(doc, result.doc, { type: "structural" })
-          setFocus(null)
-          setAnchorKey(result.copies[0])
-          setSelected(result.copies[result.copies.length - 1])
-        }
+        duplicateSelection(direction === "up" ? "above" : "below")
         return
       }
       // Alt+Arrow / Mod+Shift+Arrow move the whole contiguous selection one
@@ -2313,8 +2409,7 @@ export function BlockEditor({
         ((event.altKey && !event.shiftKey && !mod) || (mod && event.shiftKey && !event.altKey))
       ) {
         event.preventDefault()
-        const next = moveBlocks(doc, structuralRoots(), direction)
-        if (next !== doc) history.commit(doc, next, { type: "structural" })
+        moveSelection(direction)
         return
       }
       if (event.key === "Tab") {
@@ -2334,20 +2429,13 @@ export function BlockEditor({
         return
       }
       // Marker keys "turn into" across the whole selection: toggle each root
-      // to the kind (marker swap only — content and children untouched). One
-      // structural commit = one undo step. Shift AND Alt are fine — # and >
-      // need Shift on many layouts, and non-US Macs type symbols with Option
-      // (UK # is Alt+3). Only Mod combos stay the browser's. The type is the
-      // block's, so a block selected in two rows toggles once.
+      // to the kind. Shift AND Alt are fine — # and > need Shift on many
+      // layouts, and non-US Macs type symbols with Option (UK # is Alt+3).
+      // Only Mod combos stay the browser's.
       const target = TURN_INTO_KEYS[event.key]
       if (target && !mod) {
         event.preventDefault()
-        let next = doc
-        for (const rootId of new Set(selectionRoots().map(idOfKey))) {
-          const block = next.blocks[rootId]
-          if (block) next = updateType(next, rootId, toggleType(block.type, target))
-        }
-        if (next !== doc) history.commit(doc, next, { type: "structural" })
+        turnSelectionInto(target, true)
         return
       }
     }
@@ -2860,6 +2948,29 @@ export function BlockEditor({
         block={lightbox ? (doc.blocks[lightbox] ?? null) : null}
         onClose={() => setLightbox(null)}
       />
+      {!coarse && !readOnly && navigable ? (
+        <SelectionBar
+          open={selectedKeys.length > 1 && keyboardActive}
+          count={selectedKeys.length}
+          state={selectionMoves()}
+          finalFocus={containerRef}
+          actions={{
+            indent: indentSelection,
+            outdent: outdentSelection,
+            moveUp: () => moveSelection("up"),
+            moveDown: () => moveSelection("down"),
+            duplicate: () => duplicateSelection("below"),
+            turnInto: (type) => turnSelectionInto(type),
+            copy: copySelection,
+            cut: cutSelection,
+            remove: removeSelection,
+            // Back to the head row alone, as Escape does.
+            clear: () => {
+              if (selected) select(selected)
+            },
+          }}
+        />
+      ) : null}
       {coarse && !readOnly && focus ? (
         <MobileEditBar
           state={{

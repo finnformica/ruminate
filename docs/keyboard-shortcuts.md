@@ -199,6 +199,19 @@ selected blocks share a parent), duplicate (<kbd>⇧⌥↑/↓</kbd>), and the
 turn-into marker keys act on the whole selection; <kbd>Esc</kbd> collapses
 back to one.
 
+A mouse selects a run of blocks too: sweeping across rows selects every row the
+sweep touched (the anchor stays at the end the sweep began, so <kbd>⇧</kbd>
+<kbd>↑/↓</kbd> grows it from the other), and <kbd>⇧</kbd>-click extends the
+selection to the clicked row. Indent moves the selection as one: when a
+selected block has nothing above it to nest under, nothing moves — rather than
+the rest nesting under it.
+
+While more than one block is selected, a bar rises at the bottom of the window
+with the count, Indent / Outdent / Remove, and an **Actions** menu holding
+every action above (turn into, duplicate, move, copy, cut, remove), each
+acting on the whole selection. Its buttons grey where the action would do
+nothing, and it sinks away when the selection collapses.
+
 #### Selection ladder
 
 Repeated <kbd>⌘</kbd> <kbd>A</kbd> grows the selection one structural rung at a

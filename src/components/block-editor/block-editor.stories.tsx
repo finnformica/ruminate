@@ -474,6 +474,26 @@ export const SelectionSweep: Story = {
   args: { initial: SWEEP_SAMPLE },
 }
 
+/**
+ * The selection bar: a run of rows selected with the keyboard (a mouse sweep
+ * or Shift+click leaves the same selection), and the bar risen at the bottom
+ * of the window with the count and the bulk actions.
+ */
+export const SelectionBar: Story = {
+  args: { initial: SWEEP_SAMPLE },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const second = canvas.getAllByTestId("block-body")[1]
+    await userEvent.click(second)
+    await userEvent.keyboard("{Shift>}{ArrowDown}{ArrowDown}{/Shift}")
+    await waitFor(() =>
+      expect(document.querySelector('[data-testid="selection-count"]')?.textContent).toBe(
+        "3 selected",
+      ),
+    )
+  },
+}
+
 /** Headings nested seven levels deep — each with a paragraph + bullet child —
  * plus a heading reached through non-heading ancestors (bullet > bullet >
  * heading). The fixture for auditing how the depth-based heading scale
