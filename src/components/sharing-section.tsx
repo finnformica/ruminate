@@ -13,7 +13,7 @@ import {
 import { recordedEmailAtom } from "../data/shared-mode"
 import { githubUserAtom, graphSnapshotAtom, notesAtom } from "../global-state"
 import { cx } from "../utils/cx"
-import { Button } from "./button"
+import { Button } from "./ui/button"
 import { TrashIcon16 } from "./icons"
 
 /**

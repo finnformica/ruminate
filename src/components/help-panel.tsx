@@ -9,12 +9,12 @@ import {
   isMacPlatform,
   type Shortcut,
 } from "../shortcuts/registry"
-import { IconButton } from "./icon-button"
+import { IconButton } from "./ui/icon-button"
 import { CircleQuestionMarkIcon16, XIcon16 } from "./icons"
-import { Keys } from "./keys"
+import { Keys } from "./ui/keys"
 import { BlockContent } from "./block-editor/block-content"
-import { Details } from "./details"
-import { HoverCard } from "./hover-card"
+import { Details } from "./ui/details"
+import { HoverCard } from "./ui/hover-card"
 import { SearchInput } from "./search-input"
 
 function HelpSection({ title, children }: { title: string; children: React.ReactNode }) {

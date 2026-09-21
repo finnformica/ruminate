@@ -1,5 +1,5 @@
 import { Note } from "../schema"
-import { HoverCard } from "./hover-card"
+import { HoverCard } from "./ui/hover-card"
 import { NotePreview } from "./note-preview"
 
 export type NoteHoverCardProps = {

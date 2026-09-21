@@ -1,8 +1,8 @@
-import * as RadixDialog from "@radix-ui/react-dialog"
-import { useImageSrc } from "../../data/images"
+import { Dialog } from "@base-ui/react/dialog"
 import type { Block } from "../../blocks/types"
-import { IconButton } from "../icon-button"
+import { useImageSrc } from "../../data/images"
 import { XIcon16 } from "../icons"
+import { IconButton } from "../ui/icon-button"
 
 /**
  * The expanded view of an image block: the picture at its full size over a
@@ -10,31 +10,36 @@ import { XIcon16 } from "../icons"
  */
 export function ImageLightbox({ block, onClose }: { block: Block | null; onClose: () => void }) {
   return (
-    <RadixDialog.Root open={block !== null} onOpenChange={(open) => !open && onClose()}>
-      <RadixDialog.Portal>
-        <RadixDialog.Overlay className="fixed inset-0 z-modal bg-[#000000cc] backdrop-blur-sm" />
-        <RadixDialog.Content
+    <Dialog.Root open={block !== null} onOpenChange={(open) => !open && onClose()}>
+      <Dialog.Portal>
+        {/* The scrim and the picture fade in and out together: this is a
+            view of the page rather than a surface raised over it, so no
+            scale. */}
+        <Dialog.Backdrop className="fixed inset-0 z-modal bg-[#000000cc] backdrop-blur-sm transition-opacity duration-base data-ending-style:opacity-0 data-starting-style:opacity-0" />
+        <Dialog.Popup
           data-testid="image-lightbox"
-          className="fixed inset-0 z-modal flex flex-col items-center justify-center gap-3 p-4 outline-none"
+          className="fixed inset-0 z-modal flex flex-col items-center justify-center gap-3 p-4 outline-none transition-opacity duration-base data-ending-style:opacity-0 data-starting-style:opacity-0"
           onClick={onClose}
         >
-          <RadixDialog.Title className="sr-only">{block?.text.trim() || "Image"}</RadixDialog.Title>
-          <RadixDialog.Description className="sr-only">
+          <Dialog.Title className="sr-only">{block?.text.trim() || "Image"}</Dialog.Title>
+          <Dialog.Description className="sr-only">
             Click anywhere or press Escape to close
-          </RadixDialog.Description>
-          <RadixDialog.Close asChild>
-            <IconButton
-              aria-label="Close"
-              className="absolute right-3 top-3 text-[#ffffff] hover:bg-[#ffffff22]"
-              disableTooltip
-            >
-              <XIcon16 />
-            </IconButton>
-          </RadixDialog.Close>
+          </Dialog.Description>
+          <Dialog.Close
+            render={
+              <IconButton
+                aria-label="Close"
+                className="absolute right-3 top-3 text-[#ffffff] hover:bg-[#ffffff22]"
+                disableTooltip
+              />
+            }
+          >
+            <XIcon16 />
+          </Dialog.Close>
           {block ? <LightboxImage block={block} /> : null}
-        </RadixDialog.Content>
-      </RadixDialog.Portal>
-    </RadixDialog.Root>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }
 

@@ -3,7 +3,7 @@ import { useAtom, useAtomValue } from "jotai"
 import { useEffect } from "react"
 import { useNetworkState } from "react-use"
 import { DEFAULT_NEW_BLOCK_MARKER } from "../blocks/markers"
-import { Button } from "../components/button"
+import { Button } from "../components/ui/button"
 import { useSignOut } from "../components/github-auth"
 import { GitHubAvatar } from "../components/github-avatar"
 import { SettingsIcon16 } from "../components/icons"
@@ -13,7 +13,7 @@ import { SettingsSection } from "../components/settings-section"
 import { SharingSection } from "../components/sharing-section"
 import { useFeature } from "../data/features"
 import { recordedEmailAtom } from "../data/shared-mode"
-import { TextInput } from "../components/text-input"
+import { TextInput } from "../components/ui/text-input"
 import {
   databaseModeStatusAtom,
   refreshDatabaseReplicaStatus,

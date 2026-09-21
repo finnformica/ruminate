@@ -1,6 +1,6 @@
 import React from "react"
 import { cx } from "../utils/cx"
-import { Button } from "./button"
+import { Button } from "./ui/button"
 import { ErrorIcon16 } from "./icons"
 
 type NoticeTone = "info" | "warning"

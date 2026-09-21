@@ -7,7 +7,7 @@ import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
 import { Surface } from "../ui/surface"
-import { DropdownMenu } from "../dropdown-menu"
+import { DropdownMenu } from "../ui/dropdown-menu"
 
 /**
  * The block's right-click menu: the standard actions on one row, the same

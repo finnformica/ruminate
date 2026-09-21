@@ -1,7 +1,7 @@
 import { Button } from "./button"
 import { Dialog } from "./dialog"
 import { IconButton } from "./icon-button"
-import { ShareIcon16 } from "./icons"
+import { ShareIcon16 } from "../icons"
 
 export default {
   title: "Dialog",
@@ -15,10 +15,8 @@ export const Default = {
   render: () => {
     return (
       <Dialog>
-        <Dialog.Trigger>
-          <IconButton aria-label="Share">
-            <ShareIcon16 />
-          </IconButton>
+        <Dialog.Trigger render={<IconButton aria-label="Share" />}>
+          <ShareIcon16 />
         </Dialog.Trigger>
         <Dialog.Content title="Share">
           <div className="grid gap-2">

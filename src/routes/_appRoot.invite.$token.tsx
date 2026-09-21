@@ -4,7 +4,7 @@ import { beginGitHubSignIn } from "../components/github-auth"
 import { GitHubIcon16, NoteIcon16 } from "../components/icons"
 import { PageLayout } from "../components/page-layout"
 import { SettingsSection } from "../components/settings-section"
-import { Button } from "../components/button"
+import { Button } from "../components/ui/button"
 import { githubUserAtom } from "../global-state"
 import type { InviteOutcome } from "../../worker/admin-wire"
 

@@ -1,8 +1,8 @@
 import { Menu } from "@base-ui/react/menu"
 import React from "react"
-import { cx } from "../utils/cx"
-import { Surface } from "./ui/surface"
-import { CheckIcon16, ChevronRightIcon12 } from "./icons"
+import { cx } from "../../utils/cx"
+import { Surface } from "./surface"
+import { CheckIcon16, ChevronRightIcon12 } from "../icons"
 import { Keys } from "./keys"
 
 type ContentProps = {

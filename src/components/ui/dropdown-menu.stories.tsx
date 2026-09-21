@@ -1,6 +1,6 @@
 import { DropdownMenu } from "./dropdown-menu"
 import { IconButton } from "./icon-button"
-import { EditIcon16, ExternalLinkIcon16, MoreIcon16, TrashIcon16 } from "./icons"
+import { EditIcon16, ExternalLinkIcon16, MoreIcon16, TrashIcon16 } from "../icons"
 
 export default {
   title: "DropdownMenu",

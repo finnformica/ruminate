@@ -23,7 +23,7 @@ import { clipboardBlocksToMarkdown, extractClipboardBlocks } from "../../utils/r
 import { imageFilesOf } from "../../data/images"
 import { pinnedRootIdsAtom } from "../../data/views"
 import { blurLeavesWindow } from "../../utils/window-blur"
-import { IconButton } from "../icon-button"
+import { IconButton } from "../ui/icon-button"
 import { PinFillIcon12 } from "../icons"
 import { BlockContent } from "./block-content"
 import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext } from "./block-kinds"

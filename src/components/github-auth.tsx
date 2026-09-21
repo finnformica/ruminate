@@ -1,7 +1,7 @@
 import { useSetAtom } from "jotai"
 import urlcat from "urlcat"
 import { signInAtom, signOutAtom } from "../global-state"
-import { Button, ButtonProps } from "./button"
+import { Button, ButtonProps } from "./ui/button"
 import { GitHubIcon16 } from "./icons"
 
 /**

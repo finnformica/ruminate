@@ -26,8 +26,8 @@ import {
   toDateString,
   toWeekString,
 } from "../utils/date"
-import { DropdownMenu } from "./dropdown-menu"
-import { IconButton } from "./icon-button"
+import { DropdownMenu } from "./ui/dropdown-menu"
+import { IconButton } from "./ui/icon-button"
 import { ChevronDownIcon16, ChevronUpIcon16, MoreIcon16, UndoIcon16 } from "./icons"
 import { NoteHoverCard } from "./note-hover-card"
 

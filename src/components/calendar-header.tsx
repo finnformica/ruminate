@@ -10,8 +10,8 @@ import {
   toDateString,
   toWeekString,
 } from "../utils/date"
-import { Button } from "./button"
-import { IconButton } from "./icon-button"
+import { Button } from "./ui/button"
+import { IconButton } from "./ui/icon-button"
 import { ChevronLeftIcon16, ChevronRightIcon16 } from "./icons"
 
 type CalendarHeaderProps = {

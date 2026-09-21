@@ -5,10 +5,10 @@ import { NOTE_TYPE } from "../data/graph"
 import { createShare, describeSharePermissions, type SharePermission } from "../data/shares"
 import { sharedOriginAtom } from "../data/shared-mode"
 import { githubUserAtom, graphSnapshotAtom, notesAtom } from "../global-state"
-import { Button } from "./button"
-import { Checkbox } from "./checkbox"
-import { Dialog } from "./dialog"
-import { TextInput } from "./text-input"
+import { Button } from "./ui/button"
+import { Checkbox } from "./ui/checkbox"
+import { Dialog } from "./ui/dialog"
+import { TextInput } from "./ui/text-input"
 
 /**
  * "Share…" from a note's menu, or from a block's right-click menu

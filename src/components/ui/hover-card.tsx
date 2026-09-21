@@ -1,5 +1,5 @@
 import { PreviewCard } from "@base-ui/react/preview-card"
-import { Surface } from "./ui/surface"
+import { Surface } from "./surface"
 
 type Payload = {
   content: React.ReactNode

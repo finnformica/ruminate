@@ -1,4 +1,4 @@
-import { cx } from "../utils/cx"
+import { cx } from "../../utils/cx"
 
 /**
  * Keyboard keys, drawn as keycaps: **the one way the app shows a shortcut**,
