@@ -24,7 +24,7 @@ import { DropdownMenu } from "../dropdown-menu"
  * **Delete with contents** on a block that holds something, since
  * its plain Delete leaves what the block held as new basket roots.
  *
- * **Pin** puts the block in the sidebar's Pinned list (docs/metadata.md),
+ * **Pin** puts the block in the sidebar's Views list (docs/metadata.md),
  * from where it opens focused on; on a pinned block the item reads Unpin.
  *
  * The structure moves (indent, outdent, move up/down) are in the menu with
@@ -42,7 +42,7 @@ export interface BlockMenuTarget {
   collapsed: boolean
   /** How many places the block appears across the corpus (1 = only here). */
   places: number
-  /** Pinned (docs/metadata.md): listed in the sidebar's Pinned list. */
+  /** Pinned (docs/metadata.md): listed in the sidebar's Views list. */
   pinned: boolean
   /** A figure row's layout (`src/blocks/figure.ts`): the side its picture
    * or card keeps to, and whether it has been dragged to a size of its own. */

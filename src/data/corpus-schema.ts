@@ -53,12 +53,16 @@ export interface CorpusMigrations {
    * gets the table without the backfill (`LOCAL_V5_SQL`): a cache re-pulls the
    * view rows the replica holds. */
   views?: string
+  /** migrations/0016: the three view keys retired from node props — a data
+   * migration, so the local ladder only bumps its version and the cache
+   * re-pulls (`LOCAL_V6_SQL`). */
+  retireViewProps?: string
 }
 
 /** Which v3 shape the ladder should produce (see the module header). */
 export type CorpusTenancy = "single" | "columns"
 
-const CORPUS_SCHEMA_VERSION = "5"
+const CORPUS_SCHEMA_VERSION = "6"
 
 /**
  * The single-tenant v5 step: the `views` table (migrations/0015) — the
@@ -81,6 +85,16 @@ CREATE TABLE views (
 CREATE INDEX views_root ON views (root_id);
 CREATE INDEX views_pinned ON views (pinned, sort_key);
 INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '5');
+`
+
+/**
+ * The single-tenant v6 step: nothing but the version. migrations/0016 is a
+ * data migration — it retires the three view keys from node props — and
+ * data migrations run once, against D1; the local store is a cache and
+ * re-pulls the cleaned rows (`CACHE_GENERATION`, database-mode.ts).
+ */
+const LOCAL_V6_SQL = `
+INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '6');
 `
 
 /**
@@ -166,6 +180,21 @@ async function applyV5(
   await driver.execScript(migrations.views)
 }
 
+async function applyV6(
+  driver: SqlDriver,
+  migrations: CorpusMigrations,
+  tenancy: CorpusTenancy,
+): Promise<void> {
+  if (tenancy === "single") {
+    await driver.execScript(LOCAL_V6_SQL)
+    return
+  }
+  if (!migrations.retireViewProps) {
+    throw new Error('ensureCorpusSchema: "columns" tenancy needs migrations.retireViewProps (0016)')
+  }
+  await driver.execScript(migrations.retireViewProps)
+}
+
 /**
  * Bring `driver`'s database to the current corpus schema: apply the full
  * migration ladder when empty, migrate a v1/v2/v3 database in place, and
@@ -191,6 +220,7 @@ export async function ensureCorpusSchema(
     await applyV3(driver, migrations, tenancy)
     await applyV4(driver, migrations, tenancy)
     await applyV5(driver, migrations, tenancy)
+    await applyV6(driver, migrations, tenancy)
   } else {
     // In "columns" mode `meta` is keyed by (user_id, key), so this can see more
     // than one row — every tenant shares one DDL version, so any of them
@@ -202,20 +232,30 @@ export async function ensureCorpusSchema(
       await applyV3(driver, migrations, tenancy)
       await applyV4(driver, migrations, tenancy)
       await applyV5(driver, migrations, tenancy)
+      await applyV6(driver, migrations, tenancy)
+      await applyV6(driver, migrations, tenancy)
     } else if (version === "2") {
       await applyV3(driver, migrations, tenancy)
       await applyV4(driver, migrations, tenancy)
       await applyV5(driver, migrations, tenancy)
+      await applyV6(driver, migrations, tenancy)
+      await applyV6(driver, migrations, tenancy)
     } else if (version === "3") {
       await applyV4(driver, migrations, tenancy)
       await applyV5(driver, migrations, tenancy)
+      await applyV6(driver, migrations, tenancy)
+      await applyV6(driver, migrations, tenancy)
     } else if (version === "4") {
       await applyV5(driver, migrations, tenancy)
+      await applyV6(driver, migrations, tenancy)
+      await applyV6(driver, migrations, tenancy)
     } else if (version !== CORPUS_SCHEMA_VERSION) {
       await driver.execScript(RESET_SQL + full)
       await applyV3(driver, migrations, tenancy)
       await applyV4(driver, migrations, tenancy)
       await applyV5(driver, migrations, tenancy)
+      await applyV6(driver, migrations, tenancy)
+      await applyV6(driver, migrations, tenancy)
     }
   }
 }

@@ -1,22 +1,23 @@
 import { expect, test } from "vitest"
 import migration0015 from "../../migrations/0015_views.sql?raw"
+import migration0016 from "../../migrations/0016_retire_view_props.sql?raw"
 import { createTenantTestDriver } from "./sqlite-test-driver"
 
 /**
- * 0015 against the **exact shape production D1 is in** (the real ladder, as
- * `createTenantTestDriver` builds it). A migration that would fail on the
- * deployed database fails here first.
+ * 0015 and 0016 against the **exact shape production D1 is in** (the real
+ * ladder, as `createTenantTestDriver` builds it). A migration that would
+ * fail on the deployed database fails here first.
  *
- * What it has to get right: one view per node that carried any of the three
- * retired keys, the keys gone from `props` afterwards, the row's `updated_at`
- * bumped so the cleaned version travels, and every one of those things done
- * per tenant.
+ * What the pair has to get right: one view per node that carried any of the
+ * three retired keys (0015), the keys gone from `props` afterwards and the
+ * row's `updated_at` bumped so the cleaned version travels (0016), and every
+ * one of those things done per tenant.
  */
 /**
  * A database in the shape 0015 will actually meet: the full ladder, wound
- * back one rung. The ladder applies 0015 on creation (against an empty
- * corpus, so both its data halves are no-ops); dropping the table it made
- * puts us at v4 with rows, which is the state production was in.
+ * back one rung. The ladder applies 0015 and 0016 on creation (against an
+ * empty corpus, so both their data halves are no-ops); dropping the table
+ * 0015 made puts us at v4 with rows, which is the state production was in.
  */
 async function v4Driver() {
   const driver = await createTenantTestDriver()
@@ -78,9 +79,8 @@ test("0015 backfills a view per node that had one, leaving the props alone", asy
   ])
 
   // 0015 is additive: the props it copied FROM are untouched, so a client
-  // that has not been replaced yet still works. Retiring them is a later
-  // migration, shipped WITH the client that reads the table — applying both
-  // in one release would blank every pin while old clients were still up.
+  // that has not been replaced yet still works. Retiring them is 0016's job,
+  // shipped WITH the client that reads the table (below).
   // tenant-exempt: as above — every tenant's rows, deliberately.
   const afterBackfill = await driver.exec("SELECT id, props, updated_at FROM nodes ORDER BY id")
   expect(afterBackfill).toEqual([
@@ -116,4 +116,61 @@ test("0015 is re-runnable: applying it twice changes nothing", async () => {
   )
   // tenant-exempt: a fixture read.
   expect(await driver.exec("SELECT * FROM views")).toEqual(first)
+})
+
+test("0016 retires the three keys from props, bumps updated_at, and leaves other props alone", async () => {
+  const driver = await v4Driver()
+  const node = (user: number, id: string, props: string | null) =>
+    // tenant-exempt: two tenants on purpose, as above.
+    driver.exec(
+      "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at) " +
+        "VALUES (?, ?, 'note', ?, ?, 100, NULL)",
+      [user, id, id, props],
+    )
+  await node(1, "n1", '{"title":"Shopping","pinned":true,"filter":"type:todo","width":"full"}')
+  await node(1, "n2", null)
+  await node(1, "n3", '{"language":"ts"}')
+  await node(1, "n4", '{"sort":"text:desc"}')
+  await node(2, "n5", '{"pinned":true}')
+
+  await driver.execScript(migration0015)
+  await driver.execScript(migration0016)
+
+  // tenant-exempt: every tenant's rows, deliberately.
+  const after = await driver.exec("SELECT id, props, updated_at FROM nodes ORDER BY id")
+  expect(after).toEqual([
+    // The other keys stay, in their order; the row is the newer version.
+    { id: "n1", props: '{"title":"Shopping","width":"full"}', updated_at: 101 },
+    { id: "n2", props: null, updated_at: 100 },
+    { id: "n3", props: '{"language":"ts"}', updated_at: 100 },
+    // A row left with nothing reads as no props: NULL, not `{}`.
+    { id: "n4", props: null, updated_at: 101 },
+    { id: "n5", props: null, updated_at: 101 },
+  ])
+  // What 0015 copied out is still there to be read.
+  // tenant-exempt: as above.
+  const views = await driver.exec("SELECT id, filter, sort, pinned FROM views ORDER BY user_id, id")
+  expect(views).toEqual([
+    { id: "n1", filter: "type:todo", sort: null, pinned: 1 },
+    { id: "n4", filter: null, sort: "text:desc", pinned: 0 },
+    { id: "n5", filter: null, sort: null, pinned: 1 },
+  ])
+})
+
+test("0016 is re-runnable: a second pass matches no row", async () => {
+  const driver = await v4Driver()
+  await driver.exec(
+    // tenant-exempt: a fixture row for a fixed tenant.
+    "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at) " +
+      "VALUES (1, 'n1', 'note', 'x', ?, 100, NULL)",
+    ['{"pinned":true,"title":"x"}'],
+  )
+  await driver.execScript(migration0015)
+  await driver.execScript(migration0016)
+  // tenant-exempt: a fixture read.
+  const first = await driver.exec("SELECT id, props, updated_at FROM nodes")
+  await driver.execScript(migration0016)
+  // tenant-exempt: a fixture read.
+  expect(await driver.exec("SELECT id, props, updated_at FROM nodes")).toEqual(first)
+  expect(first).toEqual([{ id: "n1", props: '{"title":"x"}', updated_at: 101 }])
 })

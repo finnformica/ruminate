@@ -2,7 +2,7 @@ import { useAtomValue, useStore } from "jotai"
 import { selectAtom } from "jotai/utils"
 import React from "react"
 import { NOTE_TYPE, propsJson } from "../data/graph"
-import { blockPropsOps, notePropsOps } from "../data/note-meta"
+import { notePropsOps } from "../data/note-meta"
 import { deleteNoteOps, type Op } from "../data/ops"
 import { moveNoteOps } from "../data/note-order"
 import { emittedNoteTitle } from "../data/note-identity"
@@ -74,23 +74,6 @@ export function useMoveNote() {
   return React.useCallback(
     (noteId: NoteId, ids: NoteId[]) => {
       apply(moveNoteOps(noteId, ids, store.get(graphSnapshotAtom)))
-    },
-    [store, apply],
-  )
-}
-
-/**
- * Set props on a block (pin, unpin): the current props with the patch
- * applied — a `null` value removes the key — as one `setProps` op, with no
- * `updated_at` (`blockPropsOps`). Refused on a shared block, as every
- * write to one is (`useApplyOps`).
- */
-export function useSetBlockProps() {
-  const store = useStore()
-  const apply = useApplyOps()
-  return React.useCallback(
-    (id: string, patch: Record<string, unknown>) => {
-      apply(blockPropsOps(id, patch, store.get(graphSnapshotAtom)))
     },
     [store, apply],
   )

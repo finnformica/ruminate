@@ -141,6 +141,7 @@ describe("planPullApplication", () => {
       localViews: [],
       remoteViews: [],
       pendingNodeIds: new Set(),
+      pendingViewIds: new Set(),
     })
     expect(plan.nodes).toEqual([node("blk_1", 200, "newer")])
     expect(plan.links).toEqual([]) // remote link is older — local wins
@@ -157,6 +158,7 @@ describe("planPullApplication", () => {
       localViews: [],
       remoteViews: [],
       pendingNodeIds: new Set(),
+      pendingViewIds: new Set(),
     })
     expect(plan.nodes).toEqual([node("fresh", 1)])
   })
@@ -174,6 +176,7 @@ describe("planPullApplication", () => {
       localViews: [],
       remoteViews: [],
       pendingNodeIds: new Set(),
+      pendingViewIds: new Set(),
     })
     expect(plan.nodes).toEqual([tombstone])
     expect(plan.deleteNodes).toEqual([])
@@ -190,6 +193,7 @@ describe("planPullApplication", () => {
       remoteNodes: [],
       remoteViews: [],
       pendingNodeIds: new Set(),
+      pendingViewIds: new Set(),
     })
     expect(plan.links).toEqual([tombstone])
   })
@@ -206,6 +210,7 @@ describe("planPullApplication", () => {
       localViews: [],
       remoteViews: [],
       pendingNodeIds: pending,
+      pendingViewIds: new Set(),
     })
     expect(plan).toEqual({ nodes: [], links: [], views: [], deleteNodes: [], deleteLinks: [] })
   })
@@ -219,6 +224,7 @@ describe("planPullApplication", () => {
       localViews: [],
       remoteViews: [],
       pendingNodeIds: new Set(),
+      pendingViewIds: new Set(),
     })
     expect(plan).toEqual({ nodes: [], links: [], views: [], deleteNodes: [], deleteLinks: [] })
   })
@@ -244,6 +250,7 @@ describe("planPullApplication, views", () => {
       remoteLinks: [],
       remoteViews: [view("v_old", 200), view("v_new", 50)],
       pendingNodeIds: new Set(),
+      pendingViewIds: new Set(),
     })
     // A views-only pull is still a pull with something in it.
     expect(plan.views.map((v) => [v.id, v.updated_at])).toEqual([
@@ -251,6 +258,20 @@ describe("planPullApplication, views", () => {
       ["v_new", 50],
     ])
     expect(plan.nodes).toEqual([])
+  })
+
+  it("never touches a view still pending a push, whatever the stamps say", () => {
+    const plan = planPullApplication({
+      localNodes: [],
+      localLinks: [],
+      localViews: [view("v_1", 100)],
+      remoteNodes: [],
+      remoteLinks: [],
+      remoteViews: [view("v_1", 9999)],
+      pendingNodeIds: new Set(),
+      pendingViewIds: new Set(["v_1"]),
+    })
+    expect(plan.views).toEqual([])
   })
 
   it("keeps a local view that is at least as new — a write still on its way out", () => {
@@ -262,6 +283,7 @@ describe("planPullApplication, views", () => {
       remoteLinks: [],
       remoteViews: [view("v", 300), view("v", 100)],
       pendingNodeIds: new Set(),
+      pendingViewIds: new Set(),
     })
     expect(plan.views).toEqual([])
   })

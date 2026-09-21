@@ -38,11 +38,11 @@ export const QUERY_DEBOUNCE_MS = 150
  * is browsed (for now — it could edit too).
  *
  * **With no query the listing is split into the sidebar's sections** —
- * Pinned, Notes, Shared — because one undifferentiated list of everything
+ * Views, Notes, Shared — because one undifferentiated list of everything
  * gave no way to tell your own note from one someone shared with you, or to
  * find a pinned note among the rest. The sections, their order and their
  * contents are the sidebar's exactly, so the two surfaces read the same
- * way — **Pinned** included, which means the pinned blocks as well as the
+ * way — **Views** included, which means the pinned blocks as well as the
  * pinned notes (`pinnedRootsAtom`). A pinned note is in **Notes** below as
  * well, in its sorted place.
  *
@@ -84,7 +84,7 @@ export function NoteList({
     [navigate],
   )
 
-  // The three bands, each the roots its own results block draws. Pinned
+  // The three bands, each the roots its own results block draws. Views
   // leads (it leads the sidebar too) and holds both kinds of pin; then all
   // of your own notes in the chosen sort — the pinned ones among them, since
   // a pin adds a place to reach a note rather than moving it; then what
@@ -94,7 +94,7 @@ export function NoteList({
     const rootsOf = (notes: Note[]) => notes.map((note) => ({ id: note.id, noteId: note.id }))
     const shared = sharedNotes.map(({ note }) => note)
     return [
-      { key: "pinned", heading: "Pinned", roots: pinnedRoots },
+      { key: "views", heading: "Views", roots: pinnedRoots },
       // Named "Notes" only when it is one band among several; on its own it
       // is the whole list and a heading over it says nothing.
       {
@@ -143,7 +143,7 @@ interface NoteSection {
   key: string
   /** Null for a band that is the whole list, which needs no name. */
   heading: string | null
-  /** What the band draws — notes, or (under Pinned) blocks too, each opening
+  /** What the band draws — notes, or (under Views) blocks too, each opening
    * its note focused on it. */
   roots: readonly ResultRoot[]
 }
@@ -154,7 +154,7 @@ interface NoteSection {
  * The keyboard walks them as one list: `↓` past the last row of a band hands
  * the highlight to the first row of the next, `↑` past the first row hands it
  * back to the band above — and out of the top band, back to the query box.
- * This is how the ⌘K palette chains its Recent and Pinned lists
+ * This is how the ⌘K palette chains its Recent and Views lists
  * (`command-menu.tsx`); the signals are the same ones.
  */
 function NoteSections({

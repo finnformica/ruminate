@@ -44,6 +44,8 @@ import { ImageLightbox } from "./image-lightbox"
 import { MobileEditBar } from "./mobile-edit-bar"
 import { NoteTitle } from "./note-title"
 import { useCoarsePointer } from "../../hooks/coarse-pointer"
+import { useWriteView } from "../../hooks/views"
+import { pinnedRootIdsAtom } from "../../data/views"
 import {
   isHeading,
   leadingMarker,
@@ -1481,7 +1483,7 @@ export function BlockEditor({
       hasChildren: row.hasChildren,
       collapsed: row.collapsed,
       places: parentCountOf ? Math.max(1, parentCountOf(row.id)) : 1,
-      pinned: block.props?.pinned === true,
+      pinned: pinnedRoots.has(block.id),
       figure: isFigureType(block.type)
         ? { align: figureAlignOf(block), sized: figureLayoutOf(block).size !== undefined }
         : undefined,
@@ -1816,8 +1818,6 @@ export function BlockEditor({
     const whole = wholeTextLink(target.text)
     const inPlace = whole !== null && whole.url === href && target.type !== "note"
     const text = (inPlace ? whole.title : title).trim()
-    // A pinned row stays pinned; every other prop was the old type's.
-    const pinned = target.props?.pinned === true ? { pinned: true } : {}
     let next: BlockDoc
     let id: string
     let nextKey: string
@@ -1828,7 +1828,7 @@ export function BlockEditor({
         ...current,
         blocks: {
           ...current.blocks,
-          [id]: { ...target, type: "link", text, props: { ...pinned, url: href } },
+          [id]: { ...target, type: "link", text, props: { url: href } },
         },
       }
     } else {
@@ -1855,8 +1855,8 @@ export function BlockEditor({
    * A link block's title and/or address, changed in one step. A new
    * address takes the old preview with it (it was the old page's) and has
    * the new page's fetched behind; a scheme-less one is taken as https,
-   * and anything not a web address is refused. The layout and the pin are
-   * kept.
+   * and anything not a web address is refused. The layout is kept (and the
+   * pin needs no keeping: it is a view of the block's id, which stays).
    */
   const updateLinkBlock = (id: string, next: { href?: string; title?: string }) => {
     const block = doc.blocks[id]
@@ -1869,10 +1869,8 @@ export function BlockEditor({
     const moved = target !== url
     const patch: BlockPatch = { text }
     if (moved) {
-      const pinned = block.props?.pinned === true ? { pinned: true } : {}
       const { align, size } = figureLayoutOf(block)
       patch.props = {
-        ...pinned,
         url: target,
         ...(align ? { align } : {}),
         ...(size !== undefined ? { size } : {}),
@@ -1894,7 +1892,7 @@ export function BlockEditor({
     const next = updateBlock(doc, id, {
       type: "text",
       text: url ? `[${block.text}](${url})` : block.text,
-      props: block.props?.pinned === true ? { pinned: true } : null,
+      props: null,
     })
     if (next !== doc) history.commit(doc, next, { type: "structural" })
   }
@@ -1907,22 +1905,15 @@ export function BlockEditor({
   const sharingEnabled = useFeature("sharing")
   const canShare =
     noteId !== undefined && isDatabaseMode && sharingEnabled && !sharedOrigin.has(noteId)
-  // A block is the user's own to pin when the editor has a note of theirs
-  // behind it — signed out too, where the sample notes are theirs to play
-  // with — and never in a note someone shared with them: the pin is a prop
-  // on the block, which is the owner's row.
-  const canPin = noteId !== undefined && !sharedOrigin.has(noteId)
-  // Pinning is a prop on the block (docs/metadata.md), so it goes through
-  // the doc like a change to its text and undoes the same way.
-  const togglePin = (id: string) => {
-    const block = doc.blocks[id]
-    if (!block) return
-    const props = { ...(block.props ?? {}) }
-    if (props.pinned === true) delete props.pinned
-    else props.pinned = true
-    const next = updateBlock(doc, id, { props: Object.keys(props).length > 0 ? props : null })
-    if (next !== doc) history.commit(doc, next, { type: "structural" })
-  }
+  // A block can be pinned wherever the editor has a note behind it — signed
+  // out too, where the sample notes are there to play with, and in a note
+  // someone shared: the pin is a view of this user's own
+  // (`src/data/views.ts`), not a prop on the owner's row. It is not a
+  // change to the doc, so it is not an undo step either.
+  const canPin = noteId !== undefined
+  const pinnedRoots = useAtomValue(pinnedRootIdsAtom)
+  const writeView = useWriteView()
+  const togglePin = (id: string) => writeView(id, { pinned: !pinnedRoots.has(id) })
 
   // ── Links ─────────────────────────────────────────────────────────────────
   // Leaving a row's edit mode writes out any bare address in it as a link

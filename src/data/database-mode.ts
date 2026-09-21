@@ -1,7 +1,9 @@
 import { atom, getDefaultStore } from "jotai"
 import {
   LEGACY_TIMESTAMP_CURSOR_FLOOR,
+  emptyGraphDiff,
   type ReplicaChangesBody,
+  type ViewRow,
 } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { SessionExpiredError } from "../utils/github-token"
@@ -17,6 +19,8 @@ import { resetReplicaAccess } from "./replica-access"
 import type { ReplicaSyncHandle } from "./replica-sync"
 import type { NoteStore } from "./note-store"
 import { isBrowserOffline } from "../utils/network"
+import { sampleViews } from "./sample-graph"
+import { applyViewRows, deletedIdsOf, orphanedViews, viewMapOf, viewsAtom } from "./views"
 import {
   OFF_STORAGE_DIAGNOSTICS,
   storageDiagnosticsAtom,
@@ -195,6 +199,9 @@ interface DatabaseModeRuntime {
   /** Notes those ops touched — whose rollups the flush refreshes. */
   pendingNoteIds: Set<NoteId>
   opsFlushTimer: ReturnType<typeof setTimeout> | null
+  /** View rows on the atom and not yet written to the store: a refresh from
+   * the store re-applies them, as it re-applies `pendingOps`. */
+  pendingViews: ViewRow[]
 }
 
 let runtime: DatabaseModeRuntime | null = null
@@ -287,8 +294,12 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
     pendingOps: [],
     pendingNoteIds: new Set(),
     opsFlushTimer: null,
+    pendingViews: [],
   }
   runtime = activation
+  // The sample corpus's views are the signed-out screen's; signed in, the
+  // store's arrive with the graph below.
+  jotai().set(viewsAtom, new Map())
   // Backgrounding the tab must not strand a coalescing run of ops.
   if (typeof window !== "undefined") {
     window.addEventListener("pagehide", onPageHidden)
@@ -341,8 +352,10 @@ export function startDatabaseMode(options: DatabaseModeOptions = {}) {
       }
 
       const graph = await opened.store.getGraph()
+      const views = await opened.store.getViews()
       if (runtime !== activation) return
       jotai().set(databaseGraphAtom, graph)
+      jotai().set(viewsAtom, viewMapOf(views))
       patchStatus({ status: "ready" })
       patchDiagnostics({ status: "ready", notes: noteCount(graph) })
 
@@ -404,6 +417,7 @@ export function stopDatabaseMode() {
   const store = jotai()
   store.set(databaseModeStatusAtom, OFF_STATUS)
   store.set(databaseGraphAtom, EMPTY_GRAPH)
+  store.set(viewsAtom, viewMapOf(sampleViews()))
   store.set(storageDiagnosticsAtom, OFF_STORAGE_DIAGNOSTICS)
   // A denial belongs to the account that was refused; the signed-out screen
   // (and any next sign-in) starts clean.
@@ -434,6 +448,9 @@ export function databaseApplyOps(ops: readonly Op[]) {
   for (const note of notesTouchedBy(after, ops)) activation.pendingNoteIds.add(note)
   activation.pendingOps.push(...ops)
   patchStatus({ emptyOffline: false })
+  // A deleted node takes its view with it: the one place the graph reaches
+  // into the views table (`src/data/views.ts`).
+  databaseApplyViews(orphanedViews(store.get(viewsAtom), deletedIdsOf(ops), Date.now()))
 
   if (activation.opsFlushTimer !== null) clearTimeout(activation.opsFlushTimer)
   activation.opsFlushTimer = setTimeout(() => {
@@ -448,6 +465,32 @@ export function databaseApplyOps(ops: readonly Op[]) {
  * Resolves once the write has landed, so a caller that is about to throw the
  * page away (⌘⇧U) can wait for it; fire-and-forget callers ignore it.
  */
+/**
+ * Land view rows (`src/data/views.ts`) — a pin, a saved filter, a tombstone
+ * — the way ops land: the atom at once, the store and the replica behind it.
+ * Views are not ops and never coalesce with them: a row is the whole change,
+ * so it is written as it comes, and the replica takes it from the same
+ * `notifyGraphChange` a graph diff goes through.
+ */
+export function databaseApplyViews(views: readonly ViewRow[]) {
+  const activation = runtime
+  if (!activation || views.length === 0) return
+  const store = jotai()
+  store.set(viewsAtom, applyViewRows(store.get(viewsAtom), views))
+  activation.pendingViews.push(...views)
+  enqueue(async () => {
+    if (runtime !== activation || !activation.store) return
+    try {
+      await activation.store.applyViews(views)
+      activation.pendingViews = activation.pendingViews.filter((row) => !views.includes(row))
+      activation.replica?.notifyGraphChange([], { ...emptyGraphDiff(), views: [...views] })
+    } catch (error) {
+      recordWriteError(error)
+      scheduleRepair(activation)
+    }
+  })
+}
+
 export function requestDatabaseFlush(): Promise<void> {
   const activation = runtime
   if (!activation || activation.pendingOps.length === 0) return Promise.resolve()
@@ -491,8 +534,10 @@ async function flushOps(activation: DatabaseModeRuntime) {
 async function refreshGraph(activation: DatabaseModeRuntime) {
   if (runtime !== activation || !activation.store) return
   const graph = await activation.store.getGraph()
+  const views = await activation.store.getViews()
   if (runtime !== activation) return
   jotai().set(databaseGraphAtom, applyOps(graph, activation.pendingOps, Date.now()))
+  jotai().set(viewsAtom, applyViewRows(viewMapOf(views), activation.pendingViews))
 }
 
 /** Settings action: replicate the full corpus to D1 now. No-op unless the
@@ -520,14 +565,15 @@ function scheduleRepair(activation: DatabaseModeRuntime) {
     // land through the rebuild).
     activation.pendingOps = []
     activation.pendingNoteIds = new Set()
+    activation.pendingViews = []
     const graph = jotai().get(databaseGraphAtom)
     await activation.store.clear()
     await activation.store.applyPull({
       nodes: [...graph.nodes.values()],
       links: [...graph.childLinks.values()].flat(),
-      // The rebuild replays the in-memory GRAPH; views are not part of it and
-      // were never cleared, so there is nothing to put back.
-      views: [],
+      // The views the atom holds — live rows only; a tombstone not yet pushed
+      // is lost here exactly as a node's is, and for the same reason.
+      views: [...jotai().get(viewsAtom).values()],
       deleteNodes: [],
       deleteLinks: [],
     })
@@ -643,6 +689,10 @@ function runPull(activation: DatabaseModeRuntime) {
 
       const local = await store.getAllRows()
       const pendingNoteIds = activation.replica?.pendingNoteIds?.() ?? new Set<string>()
+      const pendingViewIds = new Set([
+        ...(activation.replica?.pendingViewIds?.() ?? []),
+        ...activation.pendingViews.map((row) => row.id),
+      ])
       const plan = planPullApplication({
         localNodes: local.nodes,
         localLinks: local.links,
@@ -651,6 +701,7 @@ function runPull(activation: DatabaseModeRuntime) {
         remoteLinks: body.links,
         remoteViews: body.views,
         pendingNodeIds: expandPendingNodeIds(pendingNoteIds, local.links),
+        pendingViewIds,
       })
 
       // Views count too: a pull that changed only a pin must still be applied.

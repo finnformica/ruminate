@@ -86,7 +86,7 @@ a block folded or unfolded, or a block focused on, on this device (a list of at
 most five note ids and timestamps, under one browser-storage key that
 overwrites itself); selecting, focusing or arrowing through a note never
 counts — with the
-**Pinned** notes beneath, less any already listed as recent, and the pinned
+**Views** — the pinned notes — beneath, less any already listed as recent, and the pinned
 blocks after them (docs/metadata.md), each opening its note focused on
 it; both give way
 to results the moment you type — are the same block editor, browsed, under
@@ -99,7 +99,7 @@ the date item, if there is one) hands the keyboard to the rows, whose keys
 are then the editor's (fold with <kbd>space</kbd> / <kbd>→</kbd> /
 <kbd>←</kbd>, walk with <kbd>w</kbd> <kbd>s</kbd> <kbd>a</kbd> <kbd>d</kbd>,
 open with <kbd>↵</kbd> or <kbd>f</kbd>). With nothing typed, Recent and
-Pinned are walked as one list: <kbd>↓</kbd> past the last recent row lands on
+Views are walked as one list: <kbd>↓</kbd> past the last recent row lands on
 the first pinned one, <kbd>↑</kbd> walks back the same way. <kbd>↑</kbd>
 from the very first row, or <kbd>Esc</kbd>, returns to the query. Typing
 never moves the keyboard: the rows change under the query, and the query

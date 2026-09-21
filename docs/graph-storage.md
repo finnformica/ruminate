@@ -274,7 +274,7 @@ schema doc (`note`, `text`, `h1`–`h3`, `todo`, `done`, `ul`, `ol`, `quote`,
 `code`); checked state is a type (`todo` ↔ `done`), so a checkbox toggle is a
 generic type transition. `text` is marker-free. `props` is JSON: a page node
 carries its metadata as **individual entries** (e.g.
-`{"updated_at": "…", "pinned": true}`, docs/metadata.md). There is no
+`{"updated_at": "…", "width": "full"}`, docs/metadata.md). There is no
 frontmatter: the rollup writes blocks only, and `parse` drops a leading YAML
 block rather than reading it. A row still in the retired raw-YAML shape
 (`{"frontmatter": "…"}`, written before entries existed) reads as no
@@ -294,6 +294,24 @@ just two link rows pointing at one node; the same-parent duplicate is
 unrepresentable by the primary key. `kind` reserves the slot for other edge
 kinds. (Wikilinks and tags were removed as features; `[[...]]` and `#word` in
 text are plain text.)
+
+### `views` (id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at)
+
+The entrypoints into the graph (docs/metadata.md, "Views"; `migrations/0015`):
+a node to start at, what of its subgraph to keep, how to lay it out, and
+whether it is pinned. Not part of the graph and not derivable from it — a
+view may name a node another tenant owns (a share), which no prop on that
+node could record — so a table of its own, replicated exactly as the other
+two are: per-row last-writer-wins on `updated_at`, a delete as a row carrying
+`deleted_at`, and a `seq` drawn from the same per-tenant sequence, so the one
+pull cursor covers all three tables. `root_id` has no foreign key for the
+same reason link targets have none. One view per root for now, minted under
+the root's own id, so two devices pinning the same note apart converge on one
+row. The client keeps the rows in `viewsAtom` (`src/data/views.ts`) beside
+the graph atom, written through `databaseApplyViews` the way ops are written
+through `databaseApplyOps`, and a delete op tombstones the view rooted at the
+node it deletes. `migrations/0016` retired the props the three fields used to
+be.
 
 ### `meta` (key/value)
 
@@ -454,7 +472,7 @@ never disagree about where a note is. Manual is two bands — the notes the root
 holds, then the ones it does not, in the name order beneath them.
 
 **A pin does not steer the order.** Pinned notes are listed on their own under
-**Pinned**, above the notes and alongside the pinned blocks, and they keep
+**Views**, above the notes and alongside the pinned blocks, and they keep
 their sorted place in the notes list as well — a pin is a second place to
 reach a note, never a note lifted out of the order. That is what lets the
 order be wholly the user's: no band interrupts the manual sequence, and a drag

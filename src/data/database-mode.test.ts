@@ -15,6 +15,7 @@ import {
   databaseGraphAtom,
   databaseModeStatusAtom,
   databaseApplyOps,
+  databaseApplyViews,
   flushDatabaseMode,
   isDatabaseModeActive,
   requestAmbientDatabasePull,
@@ -28,6 +29,7 @@ import type { ReplicaSyncHandle } from "./replica-sync"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import type { NoteStore } from "./note-store"
 import { openSqlNoteStore } from "./sql-note-store"
+import { pinnedRootIdsAtom, viewsAtom, type ViewRow } from "./views"
 
 /**
  * Boot-flow tests for database-authoritative mode, at the highest level the
@@ -35,13 +37,14 @@ import { openSqlNoteStore } from "./sql-note-store"
  * production), with only the network (D1 source) and the push loop stubbed.
  */
 
-function stubReplica(pending: NoteId[] = []) {
+function stubReplica(pending: NoteId[] = [], pendingViews: string[] = []) {
   const calls = { changes: [] as { noteIds: NoteId[]; diff: GraphDiff }[], stopped: false }
   const handle: ReplicaSyncHandle = {
     notifyGraphChange: (noteIds, diff) => calls.changes.push({ noteIds, diff }),
     requestFullPush: () => {},
     refreshRemoteStatus: () => {},
     pendingNoteIds: () => new Set(pending),
+    pendingViewIds: () => new Set(pendingViews),
     stop: () => {
       calls.stopped = true
     },
@@ -717,5 +720,122 @@ describe("ambient pull coalescing", () => {
     requestDatabasePull()
     await flushDatabaseMode()
     expect(calls.since).toHaveLength(1)
+  })
+})
+
+/**
+ * Views (`src/data/views.ts`) through the runtime: the atom at once, the
+ * store and the replica behind it, and a pull that lands on the store also
+ * lands on the atom — the same promises the ops have.
+ */
+describe("database mode views", () => {
+  const viewRow = (over: Partial<ViewRow> = {}): ViewRow => ({
+    id: "note-a",
+    root_id: "note-a",
+    filter: null,
+    sort: null,
+    pinned: true,
+    sort_key: null,
+    updated_at: 50,
+    ...over,
+  })
+  const views = () => [...jotai.get(viewsAtom).values()]
+
+  it("boots with the store's views, and a pull brings the replica's", async () => {
+    const { source } = stubSource({
+      full: { ...remoteCorpus({ "note-a": NOTE_A }), views: [viewRow()] },
+    })
+    const store = await boot({ source, replica: stubReplica().handle })
+    expect(views()).toEqual([viewRow()])
+    expect(await store.getViews()).toEqual([viewRow()])
+    expect([...jotai.get(pinnedRootIdsAtom)]).toEqual(["note-a"])
+  })
+
+  it("a write lands on the atom at once, then in the store and the push queue", async () => {
+    const { source } = stubSource({ full: remoteCorpus({ "note-a": NOTE_A }) })
+    const { handle, calls } = stubReplica()
+    const store = await boot({ source, replica: handle })
+
+    databaseApplyViews([viewRow({ filter: "type:todo" })])
+    expect(views()).toEqual([viewRow({ filter: "type:todo" })]) // optimistic, pre-flush
+    await flushDatabaseMode()
+
+    expect(await store.getViews()).toEqual([viewRow({ filter: "type:todo" })])
+    const diff = calls.changes.at(-1)!.diff
+    expect(diff.views).toEqual([viewRow({ filter: "type:todo" })])
+    expect(diff.nodes).toEqual([])
+  })
+
+  it("deleting a node tombstones the view rooted at it, and the tombstone travels", async () => {
+    const { source } = stubSource({
+      full: { ...remoteCorpus({ "note-a": NOTE_A }), views: [viewRow()] },
+    })
+    const { handle, calls } = stubReplica()
+    const store = await boot({ source, replica: handle })
+    expect(views()).toHaveLength(1)
+
+    databaseApplyOps(deleteNoteOps("note-a", jotai.get(databaseGraphAtom)))
+    expect(views()).toEqual([]) // gone from the sidebar at once
+    await flushDatabaseMode()
+
+    expect(await store.getViews()).toEqual([])
+    const pushed = calls.changes.flatMap((change) => change.diff.views)
+    expect(pushed).toHaveLength(1)
+    expect(pushed[0].id).toBe("note-a")
+    expect(pushed[0].deleted_at).toBeGreaterThan(50)
+    // The store keeps the tombstone for the push, as it keeps a node's.
+    expect((await store.getAllRows()).views.map((row) => row.deleted_at)).toEqual([
+      pushed[0].deleted_at,
+    ])
+  })
+
+  it("a pull that changed only a view still lands, on the store and the atom", async () => {
+    const { source } = stubSource({
+      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
+      since: () => ({ nodes: [], links: [], views: [viewRow({ updated_at: 500 })], cursor: "200" }),
+    })
+    const store = await boot({ source, replica: stubReplica().handle })
+    expect(views()).toEqual([])
+
+    requestDatabasePull()
+    await flushDatabaseMode()
+
+    expect(await store.getViews()).toEqual([viewRow({ updated_at: 500 })])
+    expect(views()).toEqual([viewRow({ updated_at: 500 })])
+  })
+
+  it("a pull never clobbers a view still on its way out", async () => {
+    const { source } = stubSource({
+      full: remoteCorpus({ "note-a": NOTE_A }, 1, "100"),
+      // The replica answers with a newer stamp than the local write's.
+      since: () => ({
+        nodes: [],
+        links: [],
+        views: [viewRow({ pinned: false, updated_at: 9999 })],
+        cursor: "200",
+      }),
+    })
+    const { handle } = stubReplica([], ["note-a"])
+    const store = await boot({ source, replica: handle })
+
+    databaseApplyViews([viewRow({ updated_at: 60 })])
+    await flushDatabaseMode()
+    requestDatabasePull()
+    await flushDatabaseMode()
+
+    expect(await store.getViews()).toEqual([viewRow({ updated_at: 60 })])
+    expect(views()).toEqual([viewRow({ updated_at: 60 })])
+  })
+
+  it("stop puts the sample views back for the signed-out screen", async () => {
+    const { source } = stubSource({
+      full: { ...remoteCorpus({ "note-a": NOTE_A }), views: [viewRow()] },
+    })
+    await boot({ source, replica: stubReplica().handle })
+    expect(views().map((row) => row.id)).toEqual(["note-a"])
+
+    stopDatabaseMode()
+    await flushDatabaseMode()
+    expect(views().map((row) => row.id)).toEqual(["readme"])
   })
 })

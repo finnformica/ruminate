@@ -4,7 +4,8 @@ import { useAtomValue, useStore } from "jotai"
 import React from "react"
 import { rollup } from "../data/graph"
 import { graphSnapshotAtom, isSignedOutAtom } from "../global-state"
-import { useDeleteNote, useNoteById, useSetNoteProps } from "../hooks/note"
+import { useDeleteNote, useNoteById } from "../hooks/note"
+import { useIsPinned, useWriteView } from "../hooks/views"
 import { NoteId } from "../schema"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { cx } from "../utils/cx"
@@ -20,7 +21,8 @@ type NoteCardProps = {
 export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProps) {
   const note = useNoteById(id)
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  const setNoteProps = useSetNoteProps()
+  const pinned = useIsPinned(id)
+  const writeView = useWriteView()
   const jotaiStore = useStore()
   const deleteNote = useDeleteNote()
   const [isDropdownOpen, setIsDropdownOpen] = React.useState(false)
@@ -54,19 +56,19 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
       <div
         className={cx(
           "absolute right-1.5 top-1.5 rounded bg-bg-card opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 coarse:opacity-100",
-          note.pinned && "opacity-100!",
+          pinned && "opacity-100!",
         )}
       >
         <IconButton
-          aria-label={note.pinned ? "Unpin" : "Pin"}
+          aria-label={pinned ? "Unpin" : "Pin"}
           tooltipSide="left"
           disabled={isSignedOut}
           onClick={() => {
             if (isSignedOut) return
-            setNoteProps(id, { pinned: note.pinned ? null : true })
+            writeView(id, { pinned: !pinned })
           }}
         >
-          {note.pinned ? <PinFillIcon16 className="text-text-pinned" /> : <PinIcon16 />}
+          {pinned ? <PinFillIcon16 className="text-text-pinned" /> : <PinIcon16 />}
         </IconButton>
       </div>
       {note ? (

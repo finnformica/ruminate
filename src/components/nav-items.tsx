@@ -16,7 +16,8 @@ import {
   type PinnedBlock,
 } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
-import { useMoveNote, useSetBlockProps } from "../hooks/note"
+import { useMoveNote } from "../hooks/note"
+import { useIsPinned, useWriteView } from "../hooks/views"
 import { useDragReorder } from "../hooks/drag-reorder"
 import { shareOwnerName } from "../data/shares"
 import type { Note, NoteId } from "../schema"
@@ -120,18 +121,18 @@ export function NavItems({
               </NavLink>
             </li>
           </ul>
-          {/* The lists, each under its own heading — Pinned, Notes, Shared —
+          {/* The lists, each under its own heading — Views, Notes, Shared —
               with one rule above them all, setting them off from the links
               above.
 
-              Pinned leads: it is what you keep to hand, and it holds both
+              Views leads: it is what you keep to hand, and it holds both
               kinds of pin (docs/metadata.md) — the notes first, then the
               blocks, each of which opens its note focused on it. A pinned
               note is ALSO still in Notes below, in its sorted place: the pin
               is somewhere else to reach it, not somewhere it has gone. */}
           {pinnedNotes.length > 0 || pinnedBlocks.length > 0 ? (
             <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
-              <SectionHeading>Pinned</SectionHeading>
+              <SectionHeading>Views</SectionHeading>
               {pinnedNotes.length > 0 ? (
                 <NoteRows notes={pinnedNotes} size={size} onNavigate={onNavigate} />
               ) : null}
@@ -350,7 +351,7 @@ function NoteSortMenu() {
  *
  * Dragging is live only in the manual sort: in an automatic one the next
  * render would undo it. There is no band within the list to be stopped at —
- * a pin lists a note under **Pinned** above, and leaves its place here
+ * a pin lists a note under **Views** above, and leaves its place here
  * untouched — so any row may be dropped anywhere.
  */
 function OwnNoteRows({
@@ -409,7 +410,6 @@ function OwnNoteRows({
             <RowActions size={size}>
               <NoteActionsMenu
                 noteId={note.id}
-                pinned={note.pinned}
                 reorder={
                   manual ? { onMoveUp: swap(index, -1), onMoveDown: swap(index, 1) } : undefined
                 }
@@ -521,7 +521,7 @@ function NoteRows({
             className="w-full"
           />
           <RowActions size={size}>
-            <NoteActionsMenu noteId={note.id} pinned={note.pinned} />
+            <NoteActionsMenu noteId={note.id} />
           </RowActions>
         </li>
       ))}
@@ -620,7 +620,7 @@ function PinnedBlockNavItem({
 
 /** A pinned block's row menu: unpin it, or copy a link to it. */
 function PinnedBlockActionsMenu({ block }: { block: PinnedBlock }) {
-  const setBlockProps = useSetBlockProps()
+  const writeView = useWriteView()
   return (
     <DropdownMenu modal={false}>
       <DropdownMenu.Trigger
@@ -633,7 +633,7 @@ function PinnedBlockActionsMenu({ block }: { block: PinnedBlock }) {
       <DropdownMenu.Content align="start">
         <DropdownMenu.Item
           icon={<PinFillIcon16 className="text-text-pinned" />}
-          onClick={() => setBlockProps(block.id, { pinned: null })}
+          onClick={() => writeView(block.id, { pinned: false })}
         >
           Unpin
         </DropdownMenu.Item>
@@ -734,6 +734,7 @@ function NoteNavItem({
   onNavigate?: () => void
   className?: string
 }) {
+  const pinned = useIsPinned(note.id)
   return (
     <Link
       to="/notes/$"
@@ -755,9 +756,9 @@ function NoteNavItem({
       }}
     >
       {/* Pinned, the row wears the pin instead of its favicon — in every
-          list, not just under **Pinned**, so a note looks the same wherever
+          list, not just under **Views**, so a note looks the same wherever
           it is listed and one glance says which notes are pinned. */}
-      {note.pinned ? (
+      {pinned ? (
         pinRowIcon
       ) : (
         <NavRowIcon

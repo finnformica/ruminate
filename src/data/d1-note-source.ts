@@ -157,9 +157,12 @@ export function planPullApplication(params: {
   remoteViews: ViewRow[]
   /** Node ids with unpushed local changes (notes + their subtrees). */
   pendingNodeIds: Set<string>
+  /** View ids with unpushed local changes — the same guard, by the row's
+   * own id, since a view is scoped to nothing but itself. */
+  pendingViewIds: Set<string>
 }): GraphDiff {
   const { localNodes, localLinks, localViews, remoteNodes, remoteLinks, remoteViews } = params
-  const { pendingNodeIds } = params
+  const { pendingNodeIds, pendingViewIds } = params
   const plan = emptyGraphDiff()
 
   const localNodeById = new Map(localNodes.map((node) => [node.id, node]))
@@ -180,11 +183,11 @@ export function planPullApplication(params: {
     plan.links.push(link)
   }
 
-  // Views are not note-scoped, so `pendingNodeIds` has nothing to say about
-  // them; last-writer-wins alone guards a local write still on its way out,
-  // because that write carries a newer `updated_at` than anything the
-  // replica can answer with.
+  // A view is not note-scoped, so it has a pending set of its own: a pin
+  // still on its way out is never reverted by a pull, whatever the clocks
+  // say — the same promise the nodes have.
   for (const view of remoteViews) {
+    if (pendingViewIds.has(view.id)) continue
     const local = localViewById.get(view.id)
     if (local && local.updated_at >= view.updated_at) continue
     plan.views.push(view)

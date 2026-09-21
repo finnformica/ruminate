@@ -127,6 +127,9 @@ export interface ReplicaSyncHandle {
    * implementation always provides it.)
    */
   pendingNoteIds?(): Set<NoteId>
+  /** The same, for views (`src/data/views.ts`): the ids of rows queued or in
+   * flight, which a pull must leave alone. */
+  pendingViewIds?(): Set<string>
   /** Queue a full-corpus push (after a repair, or from the Settings action). */
   requestFullPush(): void
   /**
@@ -232,6 +235,8 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   const dirtyNoteIds = new Set<NoteId>()
   /** Ids snapshotted into a push that has not finished yet (see `pendingNoteIds`). */
   let inFlightNoteIds = new Set<NoteId>()
+  const dirtyViewIds = new Set<string>()
+  let inFlightViewIds = new Set<string>()
   let fullPushRequested = false
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -451,6 +456,9 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     const snapshotNoteIds = new Set(dirtyNoteIds)
     dirtyNoteIds.clear()
     inFlightNoteIds = snapshotNoteIds
+    const snapshotViewIds = new Set(dirtyViewIds)
+    dirtyViewIds.clear()
+    inFlightViewIds = snapshotViewIds
     const keepalive = useKeepalive
     useKeepalive = false
     reportPending()
@@ -480,6 +488,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       for (const payload of payloads) committedCursor = await putPayload(payload, keepalive)
 
       inFlightNoteIds = new Set()
+      inFlightViewIds = new Set()
       lastSentCursor = cursor
       backoffMs = null
       patchDiagnostics({
@@ -501,9 +510,11 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       // Merge the snapshot back and retry with backoff. Never touches the
       // local store.
       inFlightNoteIds = new Set()
+      inFlightViewIds = new Set()
       if (wasFullPush) fullPushRequested = true
       restoreSnapshot(pending, snapshot)
       for (const id of snapshotNoteIds) dirtyNoteIds.add(id)
+      for (const id of snapshotViewIds) dirtyViewIds.add(id)
       reportPending()
       recordError(error)
       backoffMs = backoffMs === null ? backoffStartMs : Math.min(backoffMs * 2, backoffMaxMs)
@@ -542,6 +553,8 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       if (stopped || isEmptyGraphDiff(diff)) return
       mergeDiffInto(pending, diff)
       for (const id of noteIds) dirtyNoteIds.add(id)
+      // A view names itself: no note scoping to expand, its id is the guard.
+      for (const view of diff.views) dirtyViewIds.add(view.id)
       reportPending()
       schedule(debounceMs)
     },
@@ -553,6 +566,9 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     },
     pendingNoteIds() {
       return new Set([...dirtyNoteIds, ...inFlightNoteIds])
+    },
+    pendingViewIds() {
+      return new Set([...dirtyViewIds, ...inFlightViewIds])
     },
     refreshRemoteStatus() {
       if (stopped) return

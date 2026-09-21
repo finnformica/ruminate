@@ -6,6 +6,7 @@ import { buildGraphSnapshot, docToGraph, noteDoc, rollup } from "./data/graph"
 import { serialize } from "./blocks/serialize"
 import { applyOps } from "./data/ops"
 import { receivedSharesAtom, sharedOriginAtom } from "./data/shared-mode"
+import { viewMapOf, viewsAtom } from "./data/views"
 import {
   blockIndexAtom,
   githubUserAtom,
@@ -17,6 +18,7 @@ import {
   notesAtom,
   ownSortedNotesAtom,
   pinnedBlocksAtom,
+  pinnedNotesAtom,
   recentTouchesAtom,
   sampleGraphAtom,
   searchBlocksAtom,
@@ -102,7 +104,8 @@ describe("graphSnapshotAtom", () => {
     const readme = notes.get("readme")!
     // The readme's title and props come from the note node, not markdown.
     expect(readme.title).toBe("👋 Welcome to Ruminate")
-    expect(readme.pinned).toBe(true)
+    // The welcome note is pinned by a sample VIEW, not by a prop.
+    expect(store.get(pinnedNotesAtom).map((note) => note.id)).toEqual(["readme"])
     expect(rollup("readme", snapshot)).toBe(serialize(noteDoc("readme", snapshot)!))
 
     // An edit signed out applies to the sample graph in memory, and the
@@ -118,35 +121,39 @@ describe("graphSnapshotAtom", () => {
 })
 
 describe("pinnedBlocksAtom", () => {
-  const pin = (id: string) => ({
-    op: "setProps" as const,
-    id,
-    props: JSON.stringify({ pinned: true }),
-  })
+  /** Pin a block: a VIEW rooted at it (src/data/views.ts), never a prop. */
+  const pin = (store: ReturnType<typeof createStore>, ...ids: string[]) =>
+    store.set(
+      viewsAtom,
+      viewMapOf(
+        ids.map((id) => ({
+          id,
+          root_id: id,
+          filter: null,
+          sort: null,
+          pinned: true,
+          sort_key: null,
+          updated_at: 2,
+        })),
+      ),
+    )
 
-  it("lists the blocks with a pinned prop, each with the note it opens in, in index order", async () => {
+  it("lists the blocks with a pinned view, each with the note it opens in, in index order", async () => {
     const { store, unsubscribe } = await signedInStore(FILES)
+    store.set(viewsAtom, new Map())
     expect(store.get(pinnedBlocksAtom)).toEqual([])
 
-    store.set(databaseGraphAtom, applyOps(store.get(databaseGraphAtom), [pin("blk_milk")], 2))
+    pin(store, "blk_milk")
     expect(store.get(pinnedBlocksAtom)).toMatchObject([
       { id: "blk_milk", noteId: "tasks", text: "buy milk", note: { id: "tasks" } },
     ])
 
-    // Index order: the notes' sorted order ("misc" before "Today"), then
-    // document order within a note.
-    store.set(databaseGraphAtom, applyOps(store.get(databaseGraphAtom), [pin("blk_plants")], 3))
+    // Index order: `misc` (plants) is indexed before `tasks` (milk).
+    pin(store, "blk_milk", "blk_plants")
     expect(store.get(pinnedBlocksAtom).map((block) => block.id)).toEqual(["blk_plants", "blk_milk"])
 
     // Unpinned, the block is gone from the list.
-    store.set(
-      databaseGraphAtom,
-      applyOps(
-        store.get(databaseGraphAtom),
-        [{ op: "setProps", id: "blk_plants", props: null }],
-        4,
-      ),
-    )
+    pin(store, "blk_milk")
     expect(store.get(pinnedBlocksAtom).map((block) => block.id)).toEqual(["blk_milk"])
     unsubscribe()
   })
@@ -170,19 +177,26 @@ describe("pinnedBlocksAtom", () => {
           },
           { op: "link", source: "misc", destination: "blk_both", sortKey: "a0" },
           { op: "link", source: "tasks", destination: "blk_both", sortKey: "a0" },
-          pin("blk_both"),
         ],
         2,
       ),
     )
+    pin(store, "blk_both")
     expect(store.get(pinnedBlocksAtom)).toMatchObject([{ id: "blk_both", noteId: "tasks" }])
     unsubscribe()
   })
 
-  it("leaves out a block in a note someone shared with the user — the owner's pin, not theirs", async () => {
+  it("lists a block in a note someone shared with the user — the view is theirs, not the owner's", async () => {
     const { store, unsubscribe } = await signedInStore(FILES)
-    store.set(databaseGraphAtom, applyOps(store.get(databaseGraphAtom), [pin("blk_milk")], 2))
+    pin(store, "blk_milk")
     store.set(sharedOriginAtom, new Map([["blk_milk", "share-1"]]))
+    expect(store.get(pinnedBlocksAtom).map((block) => block.id)).toEqual(["blk_milk"])
+    unsubscribe()
+  })
+
+  it("leaves out a view whose root the graph no longer holds", async () => {
+    const { store, unsubscribe } = await signedInStore(FILES)
+    pin(store, "blk_gone")
     expect(store.get(pinnedBlocksAtom)).toEqual([])
     unsubscribe()
   })

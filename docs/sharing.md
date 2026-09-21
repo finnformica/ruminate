@@ -114,8 +114,11 @@ named, and it is designed so the app never becomes a directory:
 The write/delete line follows the app's own (docs/graph-storage.md, "Remove =
 unlink, delete is explicit"): removing a row from the outline is an unlink and
 the block survives in the owner's Unassigned basket, so it is a `write`;
-retiring the row itself is a `delete`. Pinning and width are props on the note
-node — the owner's node, and the owner's pin — so a shared note has neither.
+retiring the row itself is a `delete`. Width is a prop on the note node — the
+owner's node — so a shared note has none. A pin is not: it is a view
+(docs/metadata.md), the grantee's own row about the owner's node, so a shared
+note or block can be pinned, filtered and sorted from the grantee's side, and
+none of it reaches the owner.
 
 ### The write boundary
 
@@ -131,8 +134,8 @@ any row would leave the slice:
   be a write to a row the grantee cannot see.
 - A link row must have both ends in the closure or among those new ids.
 - A row keeps its shape. A slice node keeps its type, its home note
-  (`notes_id` lands only on a new row) and the owner's own props — `pinned`,
-  `font`, `width` (docs/metadata.md) — which a push may carry unchanged but
+  (`notes_id` lands only on a new row) and the owner's own props — `font`,
+  `width` (docs/metadata.md) — which a push may carry unchanged but
   never change; a new row is never a note and never carries them. The verbs
   say what a grantee may write, not what the owner's rows are.
 - Time is the server's: a pushed `updated_at` or `deleted_at` is clamped to
@@ -188,7 +191,8 @@ someone else's rows does not belong in it. So shared notes live in memory
   under Notes and the notes shared with them under **Shared** (who shared each
   is the row's tooltip, and the page header's first crumb), and the note page
   shows a notice with the owner and the verbs, renders read-only without
-  `write`, and hides Rename, Pin, Delete and the basket as the verbs dictate.
+  `write`, and hides Rename, Delete and the basket as the verbs dictate (Pin
+  stays: the pin is the grantee's own view, docs/metadata.md).
 - **A shared block is a note here.** A root may be a block, and a block has
   no page of its own to open; so on the way into the snapshot a root that is
   not a note is given the note type. It lists in the sidebar, opens at

@@ -513,3 +513,34 @@ describe("views ride the push", () => {
     expect(server.puts().at(-1)?.body?.views).toEqual([{ ...view, pinned: false, updated_at: 2 }])
   })
 })
+
+describe("pendingViewIds", () => {
+  const view = {
+    id: "view_1",
+    root_id: "blk_a",
+    filter: null,
+    sort: null,
+    pinned: true,
+    sort_key: null,
+    updated_at: 100,
+  }
+  const diff = { nodes: [], links: [], views: [view], deleteNodes: [], deleteLinks: [] }
+
+  it("names a queued view until its push is confirmed, then forgets it", async () => {
+    const { handle } = createTestSync({})
+    expect(handle.pendingViewIds!()).toEqual(new Set())
+    handle.notifyGraphChange([], diff)
+    // Queued: the pull side must leave it alone.
+    expect(handle.pendingViewIds!()).toEqual(new Set(["view_1"]))
+    await advance(handle, DEBOUNCE)
+    expect(handle.pendingViewIds!()).toEqual(new Set())
+  })
+
+  it("keeps naming a view whose push failed — it is still on its way out", async () => {
+    const { handle, server } = createTestSync({})
+    server.failNext.push(500)
+    handle.notifyGraphChange([], diff)
+    await advance(handle, DEBOUNCE)
+    expect(handle.pendingViewIds!()).toEqual(new Set(["view_1"]))
+  })
+})
