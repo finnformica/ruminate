@@ -429,6 +429,19 @@ Press feedback lives on the **control**, never the content: collapsing a
 subtree gives the chevron a pressed scale and hover surface. Pressed scale is
 removed under `prefers-reduced-motion`.
 
+**Raised surfaces arrive and leave alike.** A menu, tooltip, hover card or
+context menu is a Base UI popup: it fades in from a slight scale about the
+point it is anchored to, and fades back out the same way — a transition rather
+than an animation, so one closed while it is still opening reverses smoothly
+instead of jumping. The classes are `POPUP_MOTION`
+(src/components/popup-motion.ts), shared by every popup rather than repeated at
+each. The what's-new card is the one raised surface Base UI does not hold, so
+it says the same thing in the browser's own words — `@starting-style` for the
+arrival, a discrete `display` transition for the departure, no bookkeeping in
+JavaScript — and grows out of the corner it sits in rather than an anchor. The
+fade is unconditional and the scale is `motion-safe`, so reduced motion keeps
+the one and is spared the other.
+
 **The fold moves, but never lays out.** Rows render as nested subtrees
 (`Subtree`, block-editor.tsx), and folding or unfolding is laid over the
 state change afterwards (fold-motion.ts, the FLIP technique on the Web

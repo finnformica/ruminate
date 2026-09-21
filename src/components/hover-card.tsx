@@ -1,5 +1,6 @@
 import { PreviewCard } from "@base-ui/react/preview-card"
 import { cx } from "../utils/cx"
+import { POPUP_MOTION } from "./popup-motion"
 
 type Payload = {
   content: React.ReactNode
@@ -37,7 +38,7 @@ function Provider({
                   "card-2 z-30 print:hidden no-hover:hidden",
                   // The origin is the caller's: a card hanging off a word in a
                   // line points at the word, not at the line.
-                  "popup-motion",
+                  POPUP_MOTION,
                   payload?.popupClassName,
                 )}
                 style={{

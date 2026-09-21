@@ -89,32 +89,6 @@ body:has([data-resizing="true"]) * {
   @apply card bg-bg-overlay-backdrop shadow-2xl backdrop-blur-xl;
 }
 
-/* Popup motion */
-
-/* How a raised surface arrives and leaves: a small scale and a fade, at
- * Tailwind's default pace, between the styles Base UI marks a popup with while
- * it is coming (`data-starting-style`) and going (`data-ending-style`). Every
- * menu, tooltip, hover card and context menu wears this, and so does the
- * what's-new card, which marks itself because it is anchored to a corner
- * rather than to a trigger.
- *
- * The origin is not here: it belongs to the surface, which knows where it is
- * growing from — the anchor it points at, or the corner it sits in. */
-@utility popup-motion {
-  @apply transition-[transform,scale,opacity] data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0;
-
-  /* Reduced motion keeps the fade and drops the movement
-   * (docs/design-principles.md). Written out rather than applied as a
-   * `motion-reduce:` variant so that it lands after the styles it overrides,
-   * which is what decides it: the two selectors match with equal weight. */
-  @media (prefers-reduced-motion: reduce) {
-    &[data-starting-style],
-    &[data-ending-style] {
-      scale: 1;
-    }
-  }
-}
-
 /* Nav item */
 
 .nav-item {

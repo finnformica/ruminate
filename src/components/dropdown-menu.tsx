@@ -1,6 +1,7 @@
 import { Menu } from "@base-ui/react/menu"
 import React from "react"
 import { cx } from "../utils/cx"
+import { POPUP_MOTION } from "./popup-motion"
 import { CheckIcon16, ChevronRightIcon12 } from "./icons"
 import { Keys } from "./keys"
 
@@ -37,7 +38,8 @@ function Content({
         <Menu.Popup
           className={cx(
             "card-2 z-20 grid place-items-stretch overflow-hidden rounded-lg print:hidden outline-hidden",
-            "popup-motion origin-(--transform-origin)",
+            POPUP_MOTION,
+            "origin-(--transform-origin)",
             className,
           )}
           style={{ width }}

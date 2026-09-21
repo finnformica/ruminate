@@ -1,5 +1,6 @@
 import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip"
 import { cx } from "../utils/cx"
+import { POPUP_MOTION } from "./popup-motion"
 
 type ContentProps = {
   side?: "top" | "bottom" | "left" | "right"
@@ -29,7 +30,8 @@ function Content({
         <BaseTooltip.Popup
           className={cx(
             "card-2 z-20 px-2.5 py-2 leading-none text-text",
-            "popup-motion origin-(--transform-origin)",
+            POPUP_MOTION,
+            "origin-(--transform-origin)",
             className,
           )}
         >

@@ -38,18 +38,6 @@ function bootFacts() {
 const MAX_ENTRIES = 6
 
 /**
- * Where the card is in its arrival or its departure.
- *
- * Every other raised surface in the app is a Base UI popup, and Base UI marks
- * a popup `data-starting-style` on the frame it appears and `data-ending-style`
- * while it is going, which is what the scale-and-fade classes hang off. This
- * card is anchored to a corner rather than to a trigger, so there is no
- * popup to do that for it — it says the same two things about itself, and
- * wears the same classes, so it moves like the menus and tooltips do.
- */
-type Phase = "starting" | "open" | "ending"
-
-/**
  * What changed in the version just taken, as a card in the
  * corner.
  *
@@ -72,7 +60,7 @@ type Phase = "starting" | "open" | "ending"
  */
 export function WhatsNewPopover() {
   const [unseen, setUnseen] = useState<ChangelogRelease[] | null>(null)
-  const [phase, setPhase] = useState<Phase>("starting")
+  const [dismissed, setDismissed] = useState(false)
 
   useEffect(() => {
     const { asked, seen } = bootFacts()
@@ -99,46 +87,22 @@ export function WhatsNewPopover() {
     }
   }, [])
 
-  const dismissed = unseen === null || unseen.length === 0
-
-  // Two frames, then the starting style comes off. The first paints the card
-  // small and clear, the second lets the browser see it change — set in one
-  // frame the two styles are coalesced and nothing animates at all.
-  useEffect(() => {
-    if (dismissed) return
-    let second = 0
-    const first = requestAnimationFrame(() => {
-      second = requestAnimationFrame(() => setPhase("open"))
-    })
-    return () => {
-      cancelAnimationFrame(first)
-      cancelAnimationFrame(second)
-    }
-  }, [dismissed])
-
-  // Dismissing plays the exit and the card leaves when it has finished. A
-  // browser that runs no transitions fires no event, so a timer takes it away
-  // regardless rather than leaving an invisible card holding the corner.
-  useEffect(() => {
-    if (phase !== "ending") return
-    const timer = setTimeout(() => setUnseen(null), 1000)
-    return () => clearTimeout(timer)
-  }, [phase])
+  const nothingToSay = unseen === null || unseen.length === 0
 
   // <kbd>Esc</kbd> puts it away, as it does every other transient surface in
   // the app — but only while it is there, so it never swallows the key.
   useEffect(() => {
-    if (dismissed) return
+    if (nothingToSay || dismissed) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPhase("ending")
+      if (event.key === "Escape") setDismissed(true)
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [dismissed])
+  }, [nothingToSay, dismissed])
 
-  if (dismissed) return null
+  if (nothingToSay) return null
 
-  const close = () => setPhase("ending")
+  const close = () => setDismissed(true)
 
   const total = countEntries(unseen)
   const shown = takeEntries(unseen, MAX_ENTRIES)
@@ -159,23 +123,20 @@ export function WhatsNewPopover() {
       role="complementary"
       aria-label="What's new"
       className={cx(
-        "whats-new-card card-2 absolute inset-x-3 bottom-3 z-20 flex flex-col gap-3 rounded-xl! p-4 sm:right-auto sm:w-[21rem] print:hidden",
-        // The motion every raised surface here shares (src/styles/index.css).
-        // This one grows out of the corner it occupies, which is what an
-        // anchor's `--transform-origin` comes to for something with no trigger
-        // to point at. One addition of its own: a card on its way out takes no
-        // clicks, or the link under a fading card would still navigate.
-        "popup-motion origin-bottom data-ending-style:pointer-events-none sm:origin-bottom-left",
+        "card-2 absolute inset-x-3 bottom-3 z-20 flex flex-col gap-3 rounded-xl! p-4 sm:right-auto sm:w-[21rem] print:hidden",
+        // The same arrival as every popup (popup-motion.ts) in the browser's
+        // own words rather than Base UI's, since no Base UI component is
+        // holding this one: `@starting-style` is where it comes from, and
+        // `display` transitioning discretely is what keeps it on screen long
+        // enough to leave — it is taken away at the end of the fade rather
+        // than the moment it is dismissed. Nothing to time in JavaScript, and
+        // a hidden card takes no clicks, so the link under one on its way out
+        // cannot still be followed.
+        "origin-bottom transition-discrete transition-[opacity,scale,display] starting:opacity-0 motion-safe:starting:scale-95 sm:origin-bottom-left",
+        // Dismissed: the card fades and shrinks back into its corner, and the
+        // browser hides it once that has played.
+        dismissed && "hidden opacity-0 motion-safe:scale-95",
       )}
-      data-starting-style={phase === "starting" ? "" : undefined}
-      data-ending-style={phase === "ending" ? "" : undefined}
-      onTransitionEnd={(event) => {
-        // Opacity is the one property that always moves, reduced motion
-        // included, and only this element's own transition counts — the
-        // entries inside it have their own.
-        if (phase !== "ending" || event.target !== event.currentTarget) return
-        if (event.propertyName === "opacity") setUnseen(null)
-      }}
     >
       <div className="flex items-center justify-between gap-2">
         <h2 className="font-bold">What's new</h2>

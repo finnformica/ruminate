@@ -6,6 +6,7 @@ import { FIGURE_ALIGNS, type FigureAlign } from "../../blocks/figure"
 import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
+import { POPUP_MOTION } from "../popup-motion"
 import { DropdownMenu } from "../dropdown-menu"
 
 /**
@@ -130,7 +131,8 @@ const TYPES = BLOCK_TYPE_DEFS.filter((def) => def.turnInto)
 
 const popupClass = cx(
   "card-2 z-20 grid place-items-stretch overflow-hidden rounded-lg print:hidden outline-hidden",
-  "popup-motion origin-(--transform-origin)",
+  POPUP_MOTION,
+  "origin-(--transform-origin)",
 )
 
 export function BlockContextMenu({

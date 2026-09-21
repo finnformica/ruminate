@@ -4,6 +4,7 @@ import type React from "react"
 import { useEffect, useRef, useState } from "react"
 import { hostOf } from "../../blocks/link"
 import { cx } from "../../utils/cx"
+import { POPUP_MOTION } from "../popup-motion"
 import { Button } from "../button"
 import { IconButton } from "../icon-button"
 import { CopyIcon16, GlobeIcon16, TrashIcon16 } from "../icons"
@@ -111,7 +112,8 @@ export function LinkHoverCard({
             data-testid="link-hover-card"
             className={cx(
               "card-2 z-30 rounded-lg print:hidden",
-              "popup-motion origin-(--transform-origin)",
+              POPUP_MOTION,
+              "origin-(--transform-origin)",
             )}
           >
             {editing ? (
