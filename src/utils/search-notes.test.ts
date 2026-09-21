@@ -14,7 +14,6 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     displayName: "",
     props: {},
     title: "",
-    pinned: false,
     updatedAt: null,
     dates: [],
     tasks: [],

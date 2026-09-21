@@ -6,6 +6,7 @@ import {
   type LinkKey,
   type LinkRow,
   type NodeRow,
+  type ViewRow,
   type ReplicaChangesBody,
   type ReplicaCorpusBody,
 } from "../../worker/handlers/replica-payload"
@@ -150,16 +151,23 @@ export function expandPendingNodeIds(
 export function planPullApplication(params: {
   localNodes: NodeRow[]
   localLinks: LinkRow[]
+  localViews: ViewRow[]
   remoteNodes: NodeRow[]
   remoteLinks: LinkRow[]
+  remoteViews: ViewRow[]
   /** Node ids with unpushed local changes (notes + their subtrees). */
   pendingNodeIds: Set<string>
+  /** View ids with unpushed local changes — the same guard, by the row's
+   * own id, since a view is scoped to nothing but itself. */
+  pendingViewIds: Set<string>
 }): GraphDiff {
-  const { localNodes, localLinks, remoteNodes, remoteLinks, pendingNodeIds } = params
+  const { localNodes, localLinks, localViews, remoteNodes, remoteLinks, remoteViews } = params
+  const { pendingNodeIds, pendingViewIds } = params
   const plan = emptyGraphDiff()
 
   const localNodeById = new Map(localNodes.map((node) => [node.id, node]))
   const localLinkByKey = new Map(localLinks.map((link) => [linkKeyString(linkKeyOf(link)), link]))
+  const localViewById = new Map(localViews.map((view) => [view.id, view]))
 
   for (const node of remoteNodes) {
     if (pendingNodeIds.has(node.id)) continue
@@ -173,6 +181,16 @@ export function planPullApplication(params: {
     const local = localLinkByKey.get(linkKeyString(linkKeyOf(link)))
     if (local && local.updated_at >= link.updated_at) continue
     plan.links.push(link)
+  }
+
+  // A view is not note-scoped, so it has a pending set of its own: a pin
+  // still on its way out is never reverted by a pull, whatever the clocks
+  // say — the same promise the nodes have.
+  for (const view of remoteViews) {
+    if (pendingViewIds.has(view.id)) continue
+    const local = localViewById.get(view.id)
+    if (local && local.updated_at >= view.updated_at) continue
+    plan.views.push(view)
   }
 
   return plan

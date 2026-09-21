@@ -251,6 +251,7 @@ describe("corpus operations over the real D1 schema", () => {
     expect(await corpusPullFull(tenant)).toEqual({
       nodes: [withSeq(nodes[0], 1), withSeq(nodes[1], 2)],
       links: [withSeq(links[0], 3)],
+      views: [],
       cursor: "3",
     })
   })
@@ -272,6 +273,7 @@ describe("corpus operations over the real D1 schema", () => {
     expect(body).toEqual({
       nodes: [withSeq({ ...nodes[1], text: "A2", updated_at: 301 }, 4)],
       links: [],
+      views: [],
       cursor: "4",
     })
   })
@@ -297,7 +299,12 @@ describe("corpus operations over the real D1 schema", () => {
     const tenant = await openTenant(1)
     await corpusPut(tenant, { nodes, links }, NOW)
     // Nothing newer means nothing to say: the client keeps the cursor it has.
-    expect(await corpusPullSince(tenant, 3)).toEqual({ nodes: [], links: [], cursor: null })
+    expect(await corpusPullSince(tenant, 3)).toEqual({
+      nodes: [],
+      links: [],
+      views: [],
+      cursor: null,
+    })
   })
 
   it("a push echoes the cursor it committed, so no status call is needed", async () => {
@@ -316,7 +323,12 @@ describe("corpus operations over the real D1 schema", () => {
 
   it("a fresh corpus pulls empty, with no cursor to report", async () => {
     const tenant = await openTenant(1)
-    expect(await corpusPullFull(tenant)).toEqual({ nodes: [], links: [], cursor: null })
+    expect(await corpusPullFull(tenant)).toEqual({
+      nodes: [],
+      links: [],
+      views: [],
+      cursor: null,
+    })
   })
 
   it("status reports LIVE counts, schema version, and cursor", async () => {
@@ -589,6 +601,19 @@ describe("tenant scoping — the adversarial suite", () => {
       { id: "blk_noteaaaaaa", type: "note", text: "alice's note", props: null, updated_at: 100 },
       { id: "blk_secret0001", type: "text", text: "alice's secret", props: null, updated_at: 100 },
     ],
+    // A view of Alice's too, so the cross-tenant suite covers the third
+    // corpus table rather than only the two it was written for.
+    views: [
+      {
+        id: "view_alice001",
+        root_id: "blk_noteaaaaaa",
+        filter: "type:todo",
+        sort: null,
+        pinned: true,
+        sort_key: "a0",
+        updated_at: 100,
+      },
+    ],
     links: [
       {
         source_id: "blk_noteaaaaaa",
@@ -706,7 +731,7 @@ describe("tenant scoping — the adversarial suite", () => {
     const body = (await (
       await get(env, "bob-token", "/api/replica/notes")
     ).json()) as ReplicaCorpusBody
-    expect(body).toEqual({ nodes: [], links: [], cursor: null })
+    expect(body).toEqual({ nodes: [], links: [], views: [], cursor: null })
   })
 
   it("B's since-pull contains none of A's rows", async () => {
@@ -715,8 +740,9 @@ describe("tenant scoping — the adversarial suite", () => {
       await get(env, "bob-token", "/api/replica/notes?since=0")
     ).json()) as ReplicaChangesBody
     // Exhaustive, because a since-pull now carries nothing BUT rows: any of
-    // A's ids appearing here would be a cross-tenant disclosure.
-    expect(body).toEqual({ nodes: [], links: [], cursor: null })
+    // A's ids appearing here would be a cross-tenant disclosure — her views
+    // included, which is where a pin on a note she shared would live.
+    expect(body).toEqual({ nodes: [], links: [], views: [], cursor: null })
   })
 
   it("B's status counts none of A's rows", async () => {

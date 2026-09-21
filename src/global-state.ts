@@ -11,7 +11,7 @@ import {
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
 import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
-import { NOTE_TYPE, parseProps, type GraphSnapshot, type LinkDirections } from "./data/graph"
+import { NOTE_TYPE, type GraphSnapshot, type LinkDirections } from "./data/graph"
 import { orderedNoteIds } from "./data/note-order"
 import {
   mergeSnapshots,
@@ -22,6 +22,7 @@ import {
 import type { ReceivedShareSummary } from "./data/shares"
 import { createNotesBuilder } from "./data/note-meta"
 import { sampleGraph } from "./data/sample-graph"
+import { pinnedRootIdsAtom } from "./data/views"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
 import { createBlockIndexer, searchBlocks, type BlockHit } from "./utils/block-search"
 import { parseQuery, type Query } from "./utils/search"
@@ -347,20 +348,23 @@ export const sharedNotesAtom = atom((get) => {
   })
 })
 
-/** The pinned notes, in `sortedNotesAtom`'s order: the **Pinned** list that
- * heads the sidebar and the notes page, and the palette's **Pinned** group
+/** The pinned notes, in `sortedNotesAtom`'s order: the **Views** list that
+ * heads the sidebar and the notes page, and the palette's **Views** group
  * with nothing typed. They keep their place in the notes list too — a pin
- * adds somewhere to reach a note, it does not move the note. */
+ * adds somewhere to reach a note, it does not move the note. A note someone
+ * shared is here when THIS user pinned it: the pin is a view of their own
+ * (`src/data/views.ts`), not a prop of the owner's node. */
 export const pinnedNotesAtom = atom((get) => {
-  // The user's OWN only, as the pinned blocks are: a note someone shared
-  // carries the owner's pin, not theirs (docs/sharing.md), so the owner
-  // pinning it must not put it at the head of this user's sidebar.
-  return get(ownSortedNotesAtom).filter((note) => note.pinned)
+  const pinned = get(pinnedRootIdsAtom)
+  if (pinned.size === 0) return NO_NOTES
+  return get(sortedNotesAtom).filter((note) => pinned.has(note.id))
 })
 
+const NO_NOTES: Note[] = []
+
 /**
- * **The Pinned list**: the pinned notes, then the pinned blocks — what the
- * sidebar and the notes page draw under **Pinned**, above the notes.
+ * **The Views list**: the pinned notes, then the pinned blocks — what the
+ * sidebar and the notes page draw under **Views**, above the notes.
  *
  * One list for both kinds, because a pin means one thing — *keep this to
  * hand* — and which kind of thing was pinned is a detail the row itself
@@ -433,10 +437,10 @@ export const searchBlocksAtom = atom((get) => {
 })
 
 /**
- * A pinned BLOCK (docs/metadata.md): a block with `pinned` in its props,
- * and the note to open it in. Pinning a note puts it at the top of the
+ * A pinned BLOCK (docs/metadata.md): a block with a pinned view rooted at
+ * it, and the note to open it in. Pinning a note puts it at the top of the
  * sidebar's notes; pinning a block puts the block in the sidebar's
- * **Pinned** list (and the palette's Pinned group), from where it opens
+ * **Views** list (and the palette's Views group), from where it opens
  * focused on — a focused view of that one block and what is beneath it.
  */
 export interface PinnedBlock {
@@ -457,20 +461,18 @@ const NO_PINNED_BLOCKS: PinnedBlock[] = []
 
 /**
  * The pinned blocks, in the block index's order (the notes'
- * `sortedNotesAtom` order, document order within a note) — the user's own
- * only: a block in a note someone shared with them carries the owner's pin,
- * not theirs. Blocks no note reaches come last.
+ * `sortedNotesAtom` order, document order within a note). A block in a note
+ * someone shared is here when this user pinned it, as a note is. A view
+ * whose root the graph no longer holds — deleted elsewhere, a share taken
+ * back — is left out rather than drawn as a row that opens nothing. Blocks
+ * no note reaches come last.
  */
 export const pinnedBlocksAtom = atom((get) => {
   const graph = get(graphSnapshotAtom)
-  const origin = get(sharedOriginAtom)
-  // The cheap pass: a pinned block's props JSON names the key, so nothing
-  // else is parsed.
   const pinnedIds = new Set<string>()
-  for (const node of graph.nodes.values()) {
-    if (node.type === NOTE_TYPE || node.props === null || !node.props.includes('"pinned"')) continue
-    if (origin.has(node.id)) continue
-    if (parseProps(node.props)?.pinned === true) pinnedIds.add(node.id)
+  for (const id of get(pinnedRootIdsAtom)) {
+    const node = graph.nodes.get(id)
+    if (node && node.type !== NOTE_TYPE) pinnedIds.add(id)
   }
   if (pinnedIds.size === 0) return NO_PINNED_BLOCKS
 

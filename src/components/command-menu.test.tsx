@@ -232,7 +232,6 @@ function makeNote(id: string) {
     displayName: id,
     props: {},
     title: id,
-    pinned: false,
     updatedAt: null,
     dates: [],
     tasks: [],
@@ -617,16 +616,16 @@ describe("note results", () => {
 
   it("lists the pinned notes beneath the recent ones — a note in both shows once, as recent", () => {
     // `research` is recent AND pinned: it is listed under Recent only.
-    // `journal` (never edited, never touched) is pinned only: Pinned holds
+    // `journal` (never edited, never touched) is pinned only: Views holds
     // it, beneath.
-    const research = { ...edited("research", 5000), pinned: true }
-    const journal = { ...makeNote("journal"), pinned: true }
+    const research = edited("research", 5000)
+    const journal = makeNote("journal")
     renderMenu({ open: true, notes: [research, journal], pinned: [research, journal] })
     const groups = Array.from(document.querySelectorAll("[cmdk-group]")).filter((group) =>
-      ["Recent", "Pinned"].includes(group.querySelector("[cmdk-group-heading]")?.textContent ?? ""),
+      ["Recent", "Views"].includes(group.querySelector("[cmdk-group-heading]")?.textContent ?? ""),
     )
     expect(groups.map((group) => group.querySelector("[cmdk-group-heading]")?.textContent)).toEqual(
-      ["Recent", "Pinned"],
+      ["Recent", "Views"],
     )
     const idsIn = (group: Element) =>
       Array.from(group.querySelectorAll<HTMLElement>("[data-block-row]")).map(
@@ -637,15 +636,15 @@ describe("note results", () => {
     expect(rowIds()).toEqual(["research", "journal"])
   })
 
-  it("Pinned lists the pinned blocks after the pinned notes, each a row of its own", () => {
+  it("Views lists the pinned blocks after the pinned notes, each a row of its own", () => {
     // `journal` is pinned; so is the block `blk_ship` inside it. Nothing is
-    // recent, so Pinned is the only group — and the block is a row that
+    // recent, so Views is the only group — and the block is a row that
     // opens its note focused on it.
-    const journal = { ...makeNote("journal"), pinned: true }
+    const journal = makeNote("journal")
     const ship = { id: "blk_ship", noteId: "journal", text: "ship it", note: journal }
     renderMenu({ open: true, notes: [journal], pinned: [journal], pinnedBlocks: [ship] })
     expect(screen.queryByText("Recent")).toBeNull()
-    expect(screen.getByText("Pinned")).toBeTruthy()
+    expect(screen.getByText("Views")).toBeTruthy()
     expect(rowIds()).toEqual(["journal", "blk_ship"])
     // ↓ twice from the query lands on the block's row; ↵ opens it.
     fireEvent.keyDown(commandsInput(), { key: "ArrowDown" })
@@ -676,13 +675,13 @@ describe("note results", () => {
     ).not.toContain("text-2xl")
   })
 
-  it("Pinned holds the pinned notes that are not recent, and goes with Recent when typing", async () => {
+  it("Views holds the pinned notes that are not recent, and goes with Recent when typing", async () => {
     // Six newer notes keep `journal` out of Recent; pinned, it is listed
     // beneath.
     const notes = [
       ...["n1", "n2", "n3", "n4", "n5"].map((id, i) => edited(id, 9000 - i)),
       edited("research", 8000),
-      { ...edited("journal", 100), pinned: true },
+      edited("journal", 100),
     ]
     mocks.results = {
       mode: "blocks",
@@ -693,21 +692,21 @@ describe("note results", () => {
     }
     renderMenu({ open: true, notes, pinned: [notes[6]] })
     expect(screen.getByText("Recent")).toBeTruthy()
-    expect(screen.getByText("Pinned")).toBeTruthy()
+    expect(screen.getByText("Views")).toBeTruthy()
     expect(rowIds()).toEqual(["journal"])
     expect(document.querySelector('[cmdk-item][aria-selected="true"]')).toBeNull()
     fireEvent.change(commandsInput(), { target: { value: "milk" } })
     await waitFor(() => {
-      expect(screen.queryByText("Pinned")).toBeNull()
+      expect(screen.queryByText("Views")).toBeNull()
     })
     expect(screen.queryByText("Recent")).toBeNull()
     expect(rowIds()).toEqual(["blk_milk"])
   })
 
-  it("↓ and ↑ walk Recent and then Pinned as one list, and ↑ from the first row returns to the query", () => {
+  it("↓ and ↑ walk Recent and then Views as one list, and ↑ from the first row returns to the query", () => {
     // `research` recent; `journal` pinned only. Nothing typed.
     const research = edited("research", 5000)
-    const journal = { ...makeNote("journal"), pinned: true }
+    const journal = makeNote("journal")
     renderMenu({ open: true, notes: [research, journal], pinned: [journal] })
     const input = commandsInput()
     input.focus()
@@ -753,7 +752,7 @@ describe("note results", () => {
     // back in the query, typing swapped the lists for the results, whose
     // fresh editor mounted under the already-bumped signal and took focus
     // mid-word.
-    const journal = { ...makeNote("journal"), pinned: true }
+    const journal = makeNote("journal")
     mocks.results = {
       mode: "blocks",
       hits: [NVIDIA],
@@ -779,10 +778,10 @@ describe("note results", () => {
   it("with nothing recent, ↓ from the query lands in the pinned rows", () => {
     // A note never edited (no timestamp) and never touched is not recent —
     // pinned, it is the only listing.
-    const journal = { ...makeNote("journal"), pinned: true }
+    const journal = makeNote("journal")
     renderMenu({ open: true, notes: [journal], pinned: [journal] })
     expect(screen.queryByText("Recent")).toBeNull()
-    expect(screen.getByText("Pinned")).toBeTruthy()
+    expect(screen.getByText("Views")).toBeTruthy()
     expect(rowIds()).toEqual(["journal"])
     handOffToRows()
     expect(rowOf("journal")?.querySelector(".block-highlight")).not.toBeNull()

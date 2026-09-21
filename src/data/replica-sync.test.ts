@@ -7,6 +7,7 @@ import {
   type GraphDiff,
   type LinkRow,
   type NodeRow,
+  type ViewRow,
 } from "../../worker/handlers/replica-payload"
 import {
   isReplicaDrasticallyBehind,
@@ -154,7 +155,11 @@ const DEBOUNCE = 2_000
 
 function createTestSync(
   initialFiles: Record<string, string>,
-  allRows: { nodes: NodeRow[]; links: LinkRow[] } = { nodes: [], links: [] },
+  allRows: { nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] } = {
+    nodes: [],
+    links: [],
+    views: [],
+  },
   overrides: Partial<Parameters<typeof startReplicaSync>[0]> = {},
 ) {
   const server = createTestServer()
@@ -262,7 +267,11 @@ describe("replica sync queue", () => {
         ? new Response(JSON.stringify({ ok: true }), { status: 200 })
         : response
     }) as typeof fetch
-    const { handle } = createTestSync({ "a.md": "A\n" }, { nodes: [], links: [] }, { fetchImpl })
+    const { handle } = createTestSync(
+      { "a.md": "A\n" },
+      { nodes: [], links: [], views: [] },
+      { fetchImpl },
+    )
 
     // Spend the session's one status check up front (as opening the Settings
     // panel does), so what the push reports comes from the push alone.
@@ -294,6 +303,7 @@ describe("replica sync queue", () => {
     const rows = {
       nodes: Array.from({ length: 5 }, (_, i) => node(`note-${i}`)),
       links: [link("note-0", "note-1")], // shape only — content irrelevant
+      views: [],
     }
     const { handle, server } = createTestSync({ "a.md": "A\n" }, rows, { chunkRows: 2 })
     handle.notifyGraphChange(["gone"], diffOf({ deleteNodes: ["gone"] }))
@@ -327,7 +337,7 @@ describe("replica sync queue", () => {
   it("keeps failed pushes pending and retries with exponential backoff", async () => {
     const { handle, server } = createTestSync(
       { "a.md": "A\n" },
-      { nodes: [], links: [] },
+      { nodes: [], links: [], views: [] },
       { backoffStartMs: 1_000, backoffMaxMs: 4_000 },
     )
     server.failNext.push("network", 500, "network", "network", "network")
@@ -402,7 +412,11 @@ describe("replica sync queue", () => {
     const files = Object.fromEntries(
       Array.from({ length: 20 }, (_, i) => [`note-${i}.md`, `Note ${i}\n`]),
     )
-    const rows = { nodes: Array.from({ length: 20 }, (_, i) => node(`note-${i}`)), links: [] }
+    const rows = {
+      nodes: Array.from({ length: 20 }, (_, i) => node(`note-${i}`)),
+      links: [],
+      views: [],
+    }
     const { handle, server } = createTestSync(files, rows)
 
     handle.refreshRemoteStatus() // remote is empty → drastically behind
@@ -449,5 +463,84 @@ describe("isReplicaDrasticallyBehind", () => {
     expect(isReplicaDrasticallyBehind(1000, 900)).toBe(false)
     expect(isReplicaDrasticallyBehind(1000, 899)).toBe(true)
     expect(isReplicaDrasticallyBehind(10, 15)).toBe(false) // ahead ≠ behind
+  })
+})
+
+describe("views ride the push", () => {
+  const view = {
+    id: "view_1",
+    root_id: "blk_a",
+    filter: "type:todo",
+    sort: null,
+    pinned: true,
+    sort_key: "a0",
+    updated_at: 100,
+  }
+
+  it("pushes a queued view; before this the pending state had no room for one", async () => {
+    const { handle, server } = createTestSync({})
+    handle.notifyGraphChange([], {
+      nodes: [],
+      links: [],
+      views: [view],
+      deleteNodes: [],
+      deleteLinks: [],
+    })
+    await advance(handle, DEBOUNCE)
+    const put = server.puts().at(-1)
+    expect(put?.body?.views).toEqual([view])
+  })
+
+  it("a full push carries every view the store holds", async () => {
+    const { handle, server } = createTestSync({}, { nodes: [], links: [], views: [view] })
+    handle.requestFullPush()
+    await advance(handle, DEBOUNCE)
+    expect(server.puts().at(-1)?.body?.views).toEqual([view])
+  })
+
+  it("a view queued twice pushes its latest state once", async () => {
+    const { handle, server } = createTestSync({})
+    const diff = (pinned: boolean, updated_at: number) => ({
+      nodes: [],
+      links: [],
+      views: [{ ...view, pinned, updated_at }],
+      deleteNodes: [],
+      deleteLinks: [],
+    })
+    handle.notifyGraphChange([], diff(true, 1))
+    handle.notifyGraphChange([], diff(false, 2))
+    await advance(handle, DEBOUNCE)
+    expect(server.puts().at(-1)?.body?.views).toEqual([{ ...view, pinned: false, updated_at: 2 }])
+  })
+})
+
+describe("pendingViewIds", () => {
+  const view = {
+    id: "view_1",
+    root_id: "blk_a",
+    filter: null,
+    sort: null,
+    pinned: true,
+    sort_key: null,
+    updated_at: 100,
+  }
+  const diff = { nodes: [], links: [], views: [view], deleteNodes: [], deleteLinks: [] }
+
+  it("names a queued view until its push is confirmed, then forgets it", async () => {
+    const { handle } = createTestSync({})
+    expect(handle.pendingViewIds!()).toEqual(new Set())
+    handle.notifyGraphChange([], diff)
+    // Queued: the pull side must leave it alone.
+    expect(handle.pendingViewIds!()).toEqual(new Set(["view_1"]))
+    await advance(handle, DEBOUNCE)
+    expect(handle.pendingViewIds!()).toEqual(new Set())
+  })
+
+  it("keeps naming a view whose push failed — it is still on its way out", async () => {
+    const { handle, server } = createTestSync({})
+    server.failNext.push(500)
+    handle.notifyGraphChange([], diff)
+    await advance(handle, DEBOUNCE)
+    expect(handle.pendingViewIds!()).toEqual(new Set(["view_1"]))
   })
 })

@@ -11,6 +11,7 @@ import {
   type ReplicaPutPayload,
   type ReplicaPutResult,
   type ReplicaStatusBody,
+  type ViewRow,
 } from "../../worker/handlers/replica-payload"
 import type { NoteId } from "../schema"
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
@@ -100,8 +101,10 @@ export interface ReplicaSyncOptions {
   /** How many notes the local graph holds — compared against the replica's
    * note count to notice a replica left drastically behind. */
   getNoteCount: () => number
-  /** Every current row of both tables — the full-push source (the store). */
-  getAllRows: () => Promise<{ nodes: NodeRow[]; links: LinkRow[] }>
+  /** Every current row of every corpus table — the full-push source (the
+   * store). Views included: a delete only reaches other devices if its
+   * tombstone travels, and a full push is how a repaired replica catches up. */
+  getAllRows: () => Promise<{ nodes: NodeRow[]; links: LinkRow[]; views: ViewRow[] }>
   /** Injectable for tests; default global fetch (same-origin URLs). */
   fetchImpl?: typeof fetch
   /** Injectable for tests; default the real github-session helpers. */
@@ -124,6 +127,9 @@ export interface ReplicaSyncHandle {
    * implementation always provides it.)
    */
   pendingNoteIds?(): Set<NoteId>
+  /** The same, for views (`src/data/views.ts`): the ids of rows queued or in
+   * flight, which a pull must leave alone. */
+  pendingViewIds?(): Set<string>
   /** Queue a full-corpus push (after a repair, or from the Settings action). */
   requestFullPush(): void
   /**
@@ -153,6 +159,9 @@ const linkKeyString = (key: LinkKey) => key.join("\x1f")
 interface PendingDiff {
   nodes: Map<string, NodeRow>
   links: Map<string, LinkRow>
+  /** Keyed by view id. No delete channel to cancel against: a view's delete
+   * is a tombstoned row, so it is just the latest state of that key. */
+  views: Map<string, ViewRow>
   deleteNodes: Set<string>
   deleteLinks: Map<string, LinkKey>
 }
@@ -160,6 +169,7 @@ interface PendingDiff {
 const emptyPending = (): PendingDiff => ({
   nodes: new Map(),
   links: new Map(),
+  views: new Map(),
   deleteNodes: new Set(),
   deleteLinks: new Map(),
 })
@@ -167,6 +177,7 @@ const emptyPending = (): PendingDiff => ({
 const pendingIsEmpty = (pending: PendingDiff) =>
   pending.nodes.size === 0 &&
   pending.links.size === 0 &&
+  pending.views.size === 0 &&
   pending.deleteNodes.size === 0 &&
   pending.deleteLinks.size === 0
 
@@ -180,6 +191,7 @@ function mergeDiffInto(pending: PendingDiff, diff: GraphDiff) {
     pending.deleteLinks.delete(key)
     pending.links.set(key, link)
   }
+  for (const view of diff.views) pending.views.set(view.id, view)
   for (const id of diff.deleteNodes) {
     pending.nodes.delete(id)
     pending.deleteNodes.add(id)
@@ -198,6 +210,9 @@ function restoreSnapshot(pending: PendingDiff, snapshot: PendingDiff) {
   }
   for (const [key, link] of snapshot.links) {
     if (!pending.links.has(key) && !pending.deleteLinks.has(key)) pending.links.set(key, link)
+  }
+  for (const [id, view] of snapshot.views) {
+    if (!pending.views.has(id)) pending.views.set(id, view)
   }
   for (const id of snapshot.deleteNodes) {
     if (!pending.nodes.has(id)) pending.deleteNodes.add(id)
@@ -220,6 +235,8 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   const dirtyNoteIds = new Set<NoteId>()
   /** Ids snapshotted into a push that has not finished yet (see `pendingNoteIds`). */
   let inFlightNoteIds = new Set<NoteId>()
+  const dirtyViewIds = new Set<string>()
+  let inFlightViewIds = new Set<string>()
   let fullPushRequested = false
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -380,10 +397,14 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
   }
 
   /** Split rows into payload chunks: every node row precedes every link row
-   * (links reference nodes), deletes ride the first chunk, cursor the last. */
+   * (links reference nodes), views follow both (they name a node by id with
+   * no key to satisfy, so they need nothing to land first — they go last only
+   * to keep the order the reader expects), deletes ride the first chunk,
+   * cursor the last. */
   function buildPayloads(
     nodes: NodeRow[],
     links: LinkRow[],
+    views: ViewRow[],
     deleteNodes: string[],
     deleteLinks: LinkKey[],
     cursor: string,
@@ -391,14 +412,24 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     const payloads: ReplicaPutPayload[] = []
     let nodeIndex = 0
     let linkIndex = 0
+    let viewIndex = 0
     do {
       const chunkNodes = nodes.slice(nodeIndex, nodeIndex + chunkRows)
       nodeIndex += chunkNodes.length
       const room = chunkRows - chunkNodes.length
       const chunkLinks = nodeIndex >= nodes.length ? links.slice(linkIndex, linkIndex + room) : []
       linkIndex += chunkLinks.length
-      payloads.push({ nodes: chunkNodes, links: chunkLinks })
-    } while (nodeIndex < nodes.length || linkIndex < links.length)
+      const roomAfterLinks = room - chunkLinks.length
+      const chunkViews =
+        nodeIndex >= nodes.length && linkIndex >= links.length
+          ? views.slice(viewIndex, viewIndex + roomAfterLinks)
+          : []
+      viewIndex += chunkViews.length
+      const payload: ReplicaPutPayload = { nodes: chunkNodes, links: chunkLinks }
+      // Optional on the wire, so absent when empty, as the delete channels are.
+      if (chunkViews.length > 0) payload.views = chunkViews
+      payloads.push(payload)
+    } while (nodeIndex < nodes.length || linkIndex < links.length || viewIndex < views.length)
 
     if (deleteNodes.length > 0) payloads[0].deleteNodes = deleteNodes
     if (deleteLinks.length > 0) payloads[0].deleteLinks = deleteLinks
@@ -425,6 +456,9 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     const snapshotNoteIds = new Set(dirtyNoteIds)
     dirtyNoteIds.clear()
     inFlightNoteIds = snapshotNoteIds
+    const snapshotViewIds = new Set(dirtyViewIds)
+    dirtyViewIds.clear()
+    inFlightViewIds = snapshotViewIds
     const keepalive = useKeepalive
     useKeepalive = false
     reportPending()
@@ -432,15 +466,18 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     try {
       let nodes = [...snapshot.nodes.values()]
       let links = [...snapshot.links.values()]
+      let views = [...snapshot.views.values()]
       if (wasFullPush) {
         const all = await options.getAllRows()
         nodes = all.nodes
         links = all.links
+        views = all.views
       }
       const cursor = nextCursor()
       const payloads = buildPayloads(
         nodes,
         links,
+        views,
         [...snapshot.deleteNodes],
         [...snapshot.deleteLinks.values()],
         cursor,
@@ -451,6 +488,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       for (const payload of payloads) committedCursor = await putPayload(payload, keepalive)
 
       inFlightNoteIds = new Set()
+      inFlightViewIds = new Set()
       lastSentCursor = cursor
       backoffMs = null
       patchDiagnostics({
@@ -472,9 +510,11 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       // Merge the snapshot back and retry with backoff. Never touches the
       // local store.
       inFlightNoteIds = new Set()
+      inFlightViewIds = new Set()
       if (wasFullPush) fullPushRequested = true
       restoreSnapshot(pending, snapshot)
       for (const id of snapshotNoteIds) dirtyNoteIds.add(id)
+      for (const id of snapshotViewIds) dirtyViewIds.add(id)
       reportPending()
       recordError(error)
       backoffMs = backoffMs === null ? backoffStartMs : Math.min(backoffMs * 2, backoffMaxMs)
@@ -513,6 +553,8 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
       if (stopped || isEmptyGraphDiff(diff)) return
       mergeDiffInto(pending, diff)
       for (const id of noteIds) dirtyNoteIds.add(id)
+      // A view names itself: no note scoping to expand, its id is the guard.
+      for (const view of diff.views) dirtyViewIds.add(view.id)
       reportPending()
       schedule(debounceMs)
     },
@@ -524,6 +566,9 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
     },
     pendingNoteIds() {
       return new Set([...dirtyNoteIds, ...inFlightNoteIds])
+    },
+    pendingViewIds() {
+      return new Set([...dirtyViewIds, ...inFlightViewIds])
     },
     refreshRemoteStatus() {
       if (stopped) return

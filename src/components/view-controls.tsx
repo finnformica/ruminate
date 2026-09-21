@@ -44,7 +44,7 @@ import { QualifierPicture } from "./qualifier-suggestions"
  * would leave the other half behind.
  */
 
-/** The dot on a button whose value is not the pinned default's. */
+/** The dot on a button whose value is not the saved view's. */
 function DirtyDot() {
   return (
     <span

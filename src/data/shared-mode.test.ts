@@ -139,12 +139,14 @@ describe("mergeDiffs", () => {
       {
         nodes: [node("blk_a", "old")],
         links: [link("blk_note", "blk_a", "a0")],
+        views: [],
         deleteNodes: [],
         deleteLinks: [],
       },
       {
         nodes: [node("blk_a", "new"), node("blk_b", "b")],
         links: [link("blk_note", "blk_a", "a1")],
+        views: [],
         deleteNodes: [],
         deleteLinks: [],
       },
@@ -361,5 +363,35 @@ describe("shared mode", () => {
     expect(store.get(sharedGraphAtom).nodes.size).toBe(0)
     expect(store.get(sharedOriginAtom).size).toBe(0)
     expect(store.get(sharedModeStatusAtom).status).toBe("off")
+  })
+})
+
+describe("mergeDiffs, views", () => {
+  it("keeps queued views, the later state of a key winning", () => {
+    const view = (id: string, pinned: boolean, updated_at: number) => ({
+      id,
+      root_id: "blk_a",
+      filter: null,
+      sort: null,
+      pinned,
+      sort_key: null,
+      updated_at,
+    })
+    const merged = mergeDiffs(
+      {
+        nodes: [],
+        links: [],
+        views: [view("v1", true, 1), view("v2", true, 1)],
+        deleteNodes: [],
+        deleteLinks: [],
+      },
+      { nodes: [], links: [], views: [view("v1", false, 2)], deleteNodes: [], deleteLinks: [] },
+    )
+    // Before this, a merge rebuilt the diff from nodes and links alone and a
+    // queued pin was silently dropped on coalesce.
+    expect(merged.views.map((v) => [v.id, v.pinned, v.updated_at])).toEqual([
+      ["v1", false, 2],
+      ["v2", true, 1],
+    ])
   })
 })

@@ -206,7 +206,14 @@ export function mergeDiffs(pending: GraphDiff, next: GraphDiff): GraphDiff {
   for (const row of next.nodes) nodes.set(row.id, row)
   const links = new Map(pending.links.map((row) => [linkKeyOf(row).join("\x1f"), row]))
   for (const row of next.links) links.set(linkKeyOf(row).join("\x1f"), row)
-  return { ...emptyGraphDiff(), nodes: [...nodes.values()], links: [...links.values()] }
+  const views = new Map(pending.views.map((row) => [row.id, row]))
+  for (const row of next.views) views.set(row.id, row)
+  return {
+    ...emptyGraphDiff(),
+    nodes: [...nodes.values()],
+    links: [...links.values()],
+    views: [...views.values()],
+  }
 }
 
 /** The slice's rows with every root that is a block presented as a note. */

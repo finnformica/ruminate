@@ -66,7 +66,7 @@ describe("denial plumbing through the real fetch paths", () => {
   it("a refused pull sets the status; an admitted pull clears it", async () => {
     const responses = [
       jsonResponse({ error: "signup_closed" }, 403),
-      jsonResponse({ nodes: [], links: [], cursor: null }),
+      jsonResponse({ nodes: [], links: [], views: [], cursor: null }),
     ]
     const fetchImpl = vi.fn(async () => responses.shift() as Response)
     const source = createD1NoteSource({
@@ -85,7 +85,7 @@ describe("denial plumbing through the real fetch paths", () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ error: "blocked" }, 403))
     const handle = startReplicaSync({
       getNoteCount: () => 0,
-      getAllRows: async () => ({ nodes: [], links: [] }),
+      getAllRows: async () => ({ nodes: [], links: [], views: [] }),
       fetchImpl: fetchImpl as unknown as typeof fetch,
       auth: stubAuth,
       debounceMs: 0,
@@ -95,6 +95,7 @@ describe("denial plumbing through the real fetch paths", () => {
       handle.notifyGraphChange(["a"], {
         nodes: [{ id: "a", type: "note", text: "a", props: null, updated_at: 1 }],
         links: [],
+        views: [],
         deleteNodes: [],
         deleteLinks: [],
       })

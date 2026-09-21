@@ -1,4 +1,4 @@
-import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
+import type { LinkRow, NodeRow, ViewRow } from "../../worker/handlers/replica-payload"
 import { generateNKeysBetween } from "fractional-indexing"
 import type { BlockType } from "../blocks/types"
 import { CHILD_KIND, NOTE_TYPE, buildGraphSnapshot, propsJson, type GraphSnapshot } from "./graph"
@@ -36,7 +36,6 @@ const NOTES: SampleNote[] = [
   {
     id: "readme",
     title: "👋 Welcome to Ruminate",
-    props: { pinned: true },
     blocks: [
       b(
         "blk_welcome001",
@@ -121,4 +120,23 @@ function sampleRows(now = 0): { nodes: NodeRow[]; links: LinkRow[] } {
 export function sampleGraph(): GraphSnapshot {
   const { nodes, links } = sampleRows()
   return buildGraphSnapshot(nodes, links)
+}
+
+/**
+ * The signed-out views (`src/data/views.ts`): the welcome note is pinned, so
+ * the sidebar's **Views** has something in it before anyone signs in. Edits
+ * to these are as fleeting as edits to the sample graph.
+ */
+export function sampleViews(): ViewRow[] {
+  return [
+    {
+      id: "readme",
+      root_id: "readme",
+      filter: null,
+      sort: null,
+      pinned: true,
+      sort_key: null,
+      updated_at: 0,
+    },
+  ]
 }

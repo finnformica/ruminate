@@ -92,13 +92,13 @@ describe("openSqlNoteStore", () => {
     await seed(store, "a", content)
     // An identical doc diffs to no ops at all, so nothing reaches the rows.
     const diff = await seed(store, "a", content)
-    expect(diff).toEqual({ nodes: [], links: [], deleteNodes: [], deleteLinks: [] })
+    expect(diff).toEqual({ nodes: [], links: [], views: [], deleteNodes: [], deleteLinks: [] })
   })
 
   it("drops a set on a node it does not hold (deleted underneath)", async () => {
     const { store } = await makeStoreWithDriver()
     const diff = await store.applyOps([{ op: "setText", id: "blk_ghost00000", text: "boo" }])
-    expect(diff).toEqual({ nodes: [], links: [], deleteNodes: [], deleteLinks: [] })
+    expect(diff).toEqual({ nodes: [], links: [], views: [], deleteNodes: [], deleteLinks: [] })
   })
 
   it("removing a block from a note tombstones its link row and keeps its node (diffed)", async () => {
@@ -194,11 +194,13 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect((await store.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "4" },
+      { value: "6" },
     ])
     expect(
       await driver.exec("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"),
-    ).toEqual([{ name: "link" }, { name: "meta" }, { name: "nodes" }])
+      // The v1 tables are gone and v5's `views` is there — the ladder ran to
+      // the top, not just to 0002.
+    ).toEqual([{ name: "link" }, { name: "meta" }, { name: "nodes" }, { name: "views" }])
   })
 
   it("adds the soft-delete columns to a v2 database in place, keeping its rows", async () => {
@@ -217,7 +219,7 @@ describe("openSqlNoteStore", () => {
     // columns, it never rewrites rows.
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "4" },
+      { value: "6" },
     ])
     // The row is live: a nullable column means NULL = never deleted.
     expect(await driver.exec("SELECT deleted_at FROM nodes WHERE id = ?", ["a"])).toEqual([
@@ -243,7 +245,7 @@ describe("openSqlNoteStore", () => {
     const store = await openSqlNoteStore(driver)
     expect(await noteOf(store, "a")).toBe("\n")
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "4" },
+      { value: "6" },
     ])
     // No note id until a pull brings the replica's backfill down.
     expect(await driver.exec("SELECT notes_id FROM nodes WHERE id = ?", ["a"])).toEqual([
@@ -271,7 +273,7 @@ describe("openSqlNoteStore", () => {
     const reopened = await openSqlNoteStore(driver)
     expect((await reopened.getGraph()).nodes.size).toBe(0)
     expect(await driver.exec("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([
-      { value: "4" },
+      { value: "6" },
     ])
   })
 
@@ -331,6 +333,7 @@ describe("openSqlNoteStore", () => {
     await store.applyPull({
       nodes: [{ id: "blk_aaaaaaaaaa", type: "ul", text: "remote", props: null, updated_at: 42 }],
       links: [],
+      views: [],
       deleteNodes: [],
       deleteLinks: [],
     })
@@ -339,7 +342,7 @@ describe("openSqlNoteStore", () => {
     ).toEqual([{ text: "remote", updated_at: 42 }])
     expect(await noteOf(store, "a")).toBe("- remote\n  id:: blk_aaaaaaaaaa\n")
 
-    await store.applyPull({ nodes: [], links: [], deleteNodes: ["a"], deleteLinks: [] })
+    await store.applyPull({ nodes: [], links: [], views: [], deleteNodes: ["a"], deleteLinks: [] })
     expect(await noteOf(store, "a")).toBeNull()
   })
 
@@ -462,6 +465,7 @@ describe("soft deletes", () => {
         },
       ],
       links: [],
+      views: [],
       deleteNodes: [],
       deleteLinks: [],
     })

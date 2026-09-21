@@ -221,7 +221,7 @@ export function CommandMenu() {
     : recentNotes.length > 0 || pinnedRoots.length > 0
 
   // The keyboard's way through the rows. With nothing typed there are two
-  // lists, Recent and then Pinned, walked as one: ↓ from the query lands on
+  // lists, Recent and then Views, walked as one: ↓ from the query lands on
   // the first row of the first list there is; ↓ past the last recent row
   // lands on the first pinned row (`recentToPinned`); ↑ past the first
   // pinned row lands on the last recent row (`pinnedToRecent`); ↑ past the
@@ -440,7 +440,7 @@ export function CommandMenu() {
               // second results block, browsed the same way, walked into
               // from the recent rows and back out of them (or, with
               // nothing recent, straight from the query).
-              <Command.Group heading="Pinned">
+              <Command.Group heading="Views">
                 <ResultsList
                   variant="palette"
                   query=""

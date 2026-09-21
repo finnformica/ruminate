@@ -25,7 +25,6 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("../hooks/note", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../hooks/note")>()),
   useMoveNote: () => mocks.moveNote,
-  useSetBlockProps: () => vi.fn(),
   useNoteById: () => undefined,
   useRenameNote: () => vi.fn(),
   useDeleteNote: () => vi.fn(),
@@ -70,16 +69,16 @@ import {
   pinnedNotesAtom,
   type NoteSort,
 } from "../global-state"
+import { viewsAtom, viewMapOf } from "../data/views"
 import { NavItems } from "./nav-items"
 
-const noteOf = (id: string, name: string, pinned = false): Note =>
+const noteOf = (id: string, name: string): Note =>
   ({
     id,
     type: "note",
     displayName: name,
     title: name,
     props: {},
-    pinned,
     updatedAt: null,
     dates: [],
     tasks: [],
@@ -105,6 +104,24 @@ function renderSidebar({
   store.set(noteSortAtom, sort)
   store.set(pinnedNotesAtom as never, pinnedNotes as never)
   store.set(pinnedBlocksAtom as never, pinnedBlocks as never)
+  // What is pinned is a VIEW (src/data/views.ts): the row's pin glyph reads
+  // the views, so the pinned lists above are also written as views here.
+  store.set(
+    viewsAtom,
+    viewMapOf(
+      [...pinnedNotes.map((note) => note.id), ...pinnedBlocks.map((block) => block.id)].map(
+        (id) => ({
+          id,
+          root_id: id,
+          filter: null,
+          sort: null,
+          pinned: true,
+          sort_key: null,
+          updated_at: 1,
+        }),
+      ),
+    ),
+  )
   // The sidebar reads its rows from `ownSortedNotesAtom`; pinning them into
   // the store keeps this about the list's behaviour rather than the sort.
   store.set(ownSortedNotesAtom as never, notes as never)
@@ -183,9 +200,9 @@ describe("the sidebar's Notes list", () => {
   })
 
   it("has no pinned band to be stopped at — a pinned row drags like any other", () => {
-    // A pin lists a note under Pinned above; it does not move the note or
+    // A pin lists a note under Views above; it does not move the note or
     // fence off part of the list, so every row may go anywhere.
-    renderSidebar({ notes: [noteOf("p", "Pinned one", true), ...THREE] })
+    renderSidebar({ notes: [noteOf("p", "Pinned one"), ...THREE] })
     const rows = noteRows()
     const transfer = { effectAllowed: "", dropEffect: "", setData: vi.fn(), getData: () => "" }
     // Drag `Alpha` (unpinned) above the pinned row.
@@ -196,7 +213,7 @@ describe("the sidebar's Notes list", () => {
   })
 
   it("offers the menu move to a pinned row too", async () => {
-    renderSidebar({ notes: [noteOf("p", "Pinned one", true), ...THREE] })
+    renderSidebar({ notes: [noteOf("p", "Pinned one"), ...THREE] })
     const rows = noteRows()
     fireEvent.click(within(rows[1]).getByRole("button", { name: "Note actions" }))
     await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
@@ -205,7 +222,7 @@ describe("the sidebar's Notes list", () => {
   })
 })
 
-describe("the sidebar's Pinned list", () => {
+describe("the sidebar's Views list", () => {
   it("is not drawn when nothing is pinned", () => {
     renderSidebar({ notes: THREE })
     const headings = screen.getAllByTestId("section-heading").map((el) => el.textContent?.trim())
@@ -213,14 +230,14 @@ describe("the sidebar's Pinned list", () => {
   })
 
   it("holds the pinned notes and the pinned blocks together, above Notes", () => {
-    const pinnedNote = noteOf("p", "Pinned one", true)
+    const pinnedNote = noteOf("p", "Pinned one")
     renderSidebar({
       notes: [pinnedNote, ...THREE],
       pinnedNotes: [pinnedNote],
       pinnedBlocks: [{ id: "blk_x", noteId: "a", text: "A pinned block", note: THREE[0] }],
     })
     const headings = screen.getAllByTestId("section-heading").map((el) => el.textContent?.trim())
-    expect(headings).toEqual(["Pinned", "Notes"])
+    expect(headings).toEqual(["Views", "Notes"])
     // Both kinds are in the one band.
     expect(screen.getAllByText("Pinned one")).toHaveLength(2)
     expect(screen.getByText("A pinned block")).toBeTruthy()
@@ -230,7 +247,7 @@ describe("the sidebar's Pinned list", () => {
     // The filled variant is the one the current row shows. Untinted, it took
     // the row's selected ink and the pin stopped looking like a pin; the
     // `nav-item-tint` class is what exempts it from that (index.css).
-    const pinnedNote = noteOf("p", "Pinned one", true)
+    const pinnedNote = noteOf("p", "Pinned one")
     renderSidebar({ notes: [pinnedNote, ...THREE], pinnedNotes: [pinnedNote] })
     const row = noteRows()[0].querySelector(".nav-item")!
     const icons = [...row.querySelectorAll(".nav-item-icon")]
@@ -251,7 +268,7 @@ describe("the sidebar's Pinned list", () => {
   })
 
   it("draws a note row and a block row identically — same icon, same classes", () => {
-    const pinnedNote = noteOf("p", "Pinned one", true)
+    const pinnedNote = noteOf("p", "Pinned one")
     renderSidebar({
       notes: [pinnedNote, ...THREE],
       pinnedNotes: [pinnedNote],
@@ -259,18 +276,18 @@ describe("the sidebar's Pinned list", () => {
     })
     const band = screen
       .getAllByTestId("section-heading")
-      .find((h) => h.textContent?.trim() === "Pinned")!.parentElement!
+      .find((h) => h.textContent?.trim() === "Views")!.parentElement!
     const icons = [...band.querySelectorAll("li .nav-item")].map((row) => {
       const icon = row.querySelector(".nav-item-icon:not(.hidden)")
       return `${icon?.className} ${icon?.querySelector("svg")?.innerHTML}`
     })
     expect(icons).toHaveLength(2)
-    // The pin, both times — the note's own icon does not appear under Pinned.
+    // The pin, both times — the note's own icon does not appear under Views.
     expect(new Set(icons).size).toBe(1)
   })
 
   it("gives a pinned note the pin in Notes too, in place of its own icon", () => {
-    const pinnedNote = noteOf("p", "Pinned one", true)
+    const pinnedNote = noteOf("p", "Pinned one")
     renderSidebar({ notes: [pinnedNote, ...THREE], pinnedNotes: [pinnedNote] })
     const iconOf = (row: Element) => {
       const icon = row.querySelector(".nav-item-icon:not(.hidden)")
@@ -279,17 +296,17 @@ describe("the sidebar's Pinned list", () => {
     const rows = noteRows()
     // The pinned note's row in Notes wears the pin, tinted as a pin...
     expect(iconOf(rows[0])).toContain("text-text-pinned")
-    // ...and it is the same icon the row under Pinned wears.
+    // ...and it is the same icon the row under Views wears.
     const band = screen
       .getAllByTestId("section-heading")
-      .find((h) => h.textContent?.trim() === "Pinned")!.parentElement!
+      .find((h) => h.textContent?.trim() === "Views")!.parentElement!
     expect(iconOf(rows[0])).toBe(iconOf(band.querySelector("li .nav-item")!))
     // An unpinned note keeps its own icon.
     expect(iconOf(rows[1])).not.toContain("text-text-pinned")
   })
 
   it("draws no second pin beside the name — the row's icon is the one", () => {
-    const pinnedNote = noteOf("p", "Pinned one", true)
+    const pinnedNote = noteOf("p", "Pinned one")
     renderSidebar({ notes: [pinnedNote, ...THREE], pinnedNotes: [pinnedNote] })
     // The name sits on its own: the marker that used to precede it is gone,
     // because the row's icon already says the note is pinned.
@@ -300,7 +317,7 @@ describe("the sidebar's Pinned list", () => {
   })
 
   it("leaves the pinned note in its sorted place in Notes", () => {
-    const pinnedNote = noteOf("b2", "Bravo two", true)
+    const pinnedNote = noteOf("b2", "Bravo two")
     renderSidebar({
       notes: [THREE[0], pinnedNote, THREE[1]],
       pinnedNotes: [pinnedNote],

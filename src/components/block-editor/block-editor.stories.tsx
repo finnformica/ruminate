@@ -1,10 +1,12 @@
 import { StoryObj } from "@storybook/react"
 import { expect, userEvent, waitFor, within } from "@storybook/test"
+import { getDefaultStore } from "jotai"
 import { useState } from "react"
 import { emptyBlock } from "../../blocks/ops"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
 import type { BlockDoc } from "../../blocks/types"
+import { viewMapOf, viewsAtom } from "../../data/views"
 import { BlockEditor } from "./block-editor"
 
 /** Ensure a parsed doc always has at least one block to edit. */
@@ -24,10 +26,14 @@ function Harness({
   startEditing,
   focusRootId,
   deferCollapse,
+  pinned,
 }: {
   initial: string
   /** A doc built by hand, for what markdown cannot say (an image's layout). */
   initialDoc?: BlockDoc
+  /** The blocks with a pinned view (src/data/views.ts): the pin is a row
+   * about the block, not a prop of it, so the story states it here. */
+  pinned?: string[]
   startEditing?: boolean
   /** Start focused on this block (transient local focus — no router). */
   focusRootId?: string | null
@@ -38,6 +44,22 @@ function Harness({
   deferCollapse?: number
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarterBlock(parse(initial)))
+  useState(() => {
+    getDefaultStore().set(
+      viewsAtom,
+      viewMapOf(
+        (pinned ?? []).map((id) => ({
+          id,
+          root_id: id,
+          filter: null,
+          sort: null,
+          pinned: true,
+          sort_key: null,
+          updated_at: 1,
+        })),
+      ),
+    )
+  })
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const deferred = deferCollapse !== undefined
   return (
@@ -113,6 +135,7 @@ export const Empty: Story = {
 export const Pinned: Story = {
   args: {
     initial: "",
+    pinned: ["blk_h1", "blk_p1", "blk_b1", "blk_b2"],
     initialDoc: {
       props: null,
       rootBlockIds: ["blk_h1", "blk_p1", "blk_b1", "blk_p2"],
@@ -121,28 +144,24 @@ export const Pinned: Story = {
           id: "blk_h1",
           type: "h1",
           text: "A pinned heading",
-          props: { pinned: true },
           children: [],
         },
         blk_p1: {
           id: "blk_p1",
           type: "text",
           text: "A pinned paragraph, listed in the sidebar under Pinned",
-          props: { pinned: true },
           children: [],
         },
         blk_b1: {
           id: "blk_b1",
           type: "ul",
           text: "A pinned bullet",
-          props: { pinned: true },
           children: ["blk_b2"],
         },
         blk_b2: {
           id: "blk_b2",
           type: "ul",
           text: "A nested bullet that wraps onto a second line so the pin can be seen on the first line of a tall row",
-          props: { pinned: true },
           children: [],
         },
         blk_p2: {

@@ -27,16 +27,12 @@ import {
   isSignedOutAtom,
   linkDirectionsAtom,
 } from "../global-state"
-import {
-  useCreateNote,
-  useNoteById,
-  useRenameNote,
-  useSetBlockProps,
-  useSetNoteProps,
-} from "../hooks/note"
+import { useCreateNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
+import { useWriteView } from "../hooks/views"
+import { viewByRootAtom } from "../data/views"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
-import { parseProps, pathToBlock } from "../data/graph"
+import { pathToBlock } from "../data/graph"
 import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
 import { FilterMenu, SortMenu } from "../components/view-controls"
 import { useFoldRule } from "../data/view-state"
@@ -53,8 +49,9 @@ import { isValidDateString, isValidWeekString, toDateString } from "../utils/dat
 interface SavedView {
   filter: string
   sort: string
-  /** Whether the header may offer to save: the user's own note, never one
-   * shared with them (its props are its owner's). */
+  /** Whether the header may offer to save: there is something to root a
+   * view at. A note shared with the user included — the view is the user's
+   * own row (`src/data/views.ts`), whoever owns the note. */
   writable: boolean
 }
 
@@ -62,21 +59,17 @@ const NO_SAVED_VIEW: SavedView = { filter: "", sort: "", writable: false }
 
 /**
  * The saved view of whatever the page is rooted at — the focused block, else
- * the note. Both are nodes with props, so both remember a view the same way
- * and neither has to be pinned for it.
+ * the note: the view row rooted there (docs/metadata.md, "Views"). Nothing
+ * has to be pinned for it; the pin is one field of the same row.
  */
-function useSavedView(focusBlockId: string | null, noteId: string | undefined, shared: boolean) {
-  const graph = useAtomValue(graphSnapshotAtom)
+function useSavedView(focusBlockId: string | null, noteId: string | undefined) {
+  const byRoot = useAtomValue(viewByRootAtom)
   return React.useMemo<SavedView>(() => {
     const rootId = focusBlockId ?? noteId
-    if (!rootId || shared) return NO_SAVED_VIEW
-    const props = parseProps(graph.nodes.get(rootId)?.props ?? null)
-    return {
-      filter: typeof props?.filter === "string" ? props.filter : "",
-      sort: typeof props?.sort === "string" ? props.sort : "",
-      writable: true,
-    }
-  }, [focusBlockId, noteId, shared, graph])
+    if (!rootId) return NO_SAVED_VIEW
+    const view = byRoot.get(rootId)
+    return { filter: view?.filter ?? "", sort: view?.sort ?? "", writable: true }
+  }, [focusBlockId, noteId, byRoot])
 }
 
 type RouteSearch = {
@@ -146,16 +139,16 @@ function NotePage() {
   // Note data
   const note = useNoteById(noteId)
   // A note someone shared with the user (docs/sharing.md): read-only unless
-  // the owner granted `write`; never renamed without it, pinned or given a
-  // basket here — those are the owner's, and the basket holds blocks the
-  // slice does not carry. The page is otherwise the same page: the title and
-  // the editor are the same components, told what they may do.
+  // the owner granted `write`; never renamed without it or given a basket
+  // here — those are the owner's, and the basket holds blocks the slice does
+  // not carry. The page is otherwise the same page: the title and the editor
+  // are the same components, told what they may do.
   const share = useNoteShare(noteId)
   // The view's narrowing: the URL where it speaks, else what this note or
   // block saved as its default view (docs/metadata.md, `resolveNarrowing`).
   // So a narrowed view is a link and the back button undoes it, and a note
   // opens the way it was left.
-  const savedView = useSavedView(focusBlockId ?? null, noteId, share !== null)
+  const savedView = useSavedView(focusBlockId ?? null, noteId)
   const filter = resolveNarrowing(filterParam, savedView.filter)
   const sort = resolveNarrowing(sortParam, savedView.sort)
 
@@ -316,9 +309,8 @@ function NotePage() {
 
   // What the header offers when the view has moved away from what was saved.
   // Any note or block can save one — nothing has to be pinned — so the
-  // buttons appear wherever a view can be kept, which is everywhere the
-  // user's own notes are.
-  const setBlockProps = useSetBlockProps()
+  // buttons appear wherever a view can be rooted, which is every note.
+  const writeView = useWriteView()
   // Measured against what is saved, which may be nothing: filtering a note
   // that has saved no view IS a difference from it, and is how the first one
   // gets saved.
@@ -349,14 +341,13 @@ function NotePage() {
   // in passing must never quietly overwrite the one that was saved.
   const saveDefaultView = React.useCallback(() => {
     // The view's root is what remembers it: the focused block, or the note
-    // itself when the whole note is the view. Both are nodes with props.
-    const patch = { filter: filter || null, sort: sort || null }
-    if (focusBlockId) setBlockProps(focusBlockId, patch)
-    else if (noteId) setNoteProps(noteId, patch)
-    // The URL has nothing left to say now that the node says it.
+    // itself when the whole note is the view. One row, either way.
+    const rootId = focusBlockId ?? noteId
+    if (!rootId) return
+    writeView(rootId, { filter, sort })
+    // The URL has nothing left to say now that the view says it.
     navigate({ search: (prev) => ({ ...prev, filter: undefined, sort: undefined }), replace: true })
-    requestDatabaseFlush()
-  }, [focusBlockId, noteId, filter, sort, setBlockProps, setNoteProps, navigate])
+  }, [focusBlockId, noteId, filter, sort, writeView, navigate])
   const resetToDefaultView = React.useCallback(() => {
     navigate({ search: (prev) => ({ ...prev, filter: undefined, sort: undefined }), replace: true })
   }, [navigate])
@@ -446,7 +437,6 @@ function NotePage() {
             />
             <NoteActionsMenu
               noteId={noteId ?? ""}
-              pinned={note?.pinned ?? false}
               align="end"
               editor={{
                 showWidth: containerWidth > 800,

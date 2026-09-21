@@ -6,8 +6,9 @@ import { useFeature } from "../data/features"
 import { blockRollup, rollup } from "../data/graph"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
-import { useDeleteNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
+import { useDeleteNote, useNoteById, useRenameNote } from "../hooks/note"
 import { useNoteShare } from "../hooks/share"
+import { useIsPinned, useWriteView } from "../hooks/views"
 import { shareDialogAtom } from "./share-note-dialog"
 import type { Width } from "../schema"
 import { cx } from "../utils/cx"
@@ -62,14 +63,12 @@ interface EditorActions {
  */
 export function NoteActionsMenu({
   noteId,
-  pinned = false,
   className,
   align = "start",
   editor,
   reorder,
 }: {
   noteId: string
-  pinned?: boolean
   className?: string
   align?: "start" | "end"
   editor?: EditorActions
@@ -78,7 +77,6 @@ export function NoteActionsMenu({
   const navigate = useNavigate()
   const location = useLocation()
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  const setNoteProps = useSetNoteProps()
   const note = useNoteById(noteId)
   const jotaiStore = useStore()
   const renameNote = useRenameNote()
@@ -89,9 +87,12 @@ export function NoteActionsMenu({
   const [debug, setDebug] = useAtom(developerDebugPreferenceAtom)
   // A note someone shared with the user (docs/sharing.md): its rows are the
   // owner's, so the verbs the owner granted decide what the menu offers.
-  // Pinning and width are props on the note node — the owner's node, and
-  // the owner's pin — so a shared note has neither.
+  // Width is a prop on the note node — the owner's — so a shared note has
+  // none; the pin is a view of this user's own (`src/data/views.ts`), so a
+  // shared note can be pinned like any other.
   const share = useNoteShare(noteId)
+  const pinned = useIsPinned(noteId)
+  const writeView = useWriteView()
   const canRename = !isSignedOut && (share === null || share.canWrite)
   const canDelete = !isSignedOut && (share === null || share.canDelete)
   // Sharing is the owner's: an own note, signed in (docs/sharing.md), and
@@ -108,7 +109,7 @@ export function NoteActionsMenu({
     : ""
   const isViewing = openNoteId === noteId
 
-  const togglePin = () => setNoteProps(noteId, { pinned: pinned ? null : true })
+  const togglePin = () => writeView(noteId, { pinned: !pinned })
 
   // Copy what the view holds, not what the note holds: focused on a block,
   // that block and everything beneath it. A focused block the graph has since

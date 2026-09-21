@@ -75,6 +75,19 @@ CREATE INDEX link_tenant_destination ON link (user_id, destination_id);
 -- Since-cursor pulls read changed link rows the same way as changed nodes.
 CREATE INDEX link_tenant_updated ON link (user_id, updated_at);
 
+CREATE TABLE views (             -- migrations/0015: the entrypoints (docs/metadata.md)
+  user_id    INTEGER NOT NULL,   -- the VIEWER's; root_id may be another tenant's node
+  id         TEXT NOT NULL,      -- minted; the root's id while one view per root
+  root_id    TEXT NOT NULL,      -- no foreign key, as link targets have none
+  filter     TEXT,               -- query language; NULL = the whole subgraph
+  sort       TEXT,               -- NULL = document order
+  pinned     INTEGER NOT NULL DEFAULT 0,
+  sort_key   TEXT,               -- fractional index for the sidebar; NULL = unordered yet
+  updated_at INTEGER NOT NULL,
+  deleted_at INTEGER,
+  PRIMARY KEY (user_id, id)
+);
+
 CREATE TABLE meta (
   user_id INTEGER NOT NULL,  -- per-tenant: each has its own cursor and versions
   key TEXT NOT NULL,         -- schema_version = '3', replica_cursor

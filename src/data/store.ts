@@ -5,6 +5,7 @@ import { isDatabaseModeAtom, sampleGraphAtom } from "../global-state"
 import { databaseApplyOps, databaseGraphAtom } from "./database-mode"
 import { applyOps, type Op } from "./ops"
 import { namesOwnNodes, routeOps, sharedApplyOps, sharedOriginAtom } from "./shared-mode"
+import { applyViewRows, deletedIdsOf, orphanedViews, viewsAtom } from "./views"
 
 /**
  * The storage seam: every change to the graph goes through here as a batch
@@ -22,7 +23,11 @@ export function useApplyOps() {
     React.useCallback((get, set, ops: readonly Op[]) => {
       if (ops.length === 0) return
       if (!get(isDatabaseModeAtom)) {
-        set(sampleGraphAtom, applyOps(get(sampleGraphAtom), ops, Date.now()))
+        const now = Date.now()
+        set(sampleGraphAtom, applyOps(get(sampleGraphAtom), ops, now))
+        // As the runtime does: a deleted node takes its view with it.
+        const views = get(viewsAtom)
+        set(viewsAtom, applyViewRows(views, orphanedViews(views, deletedIdsOf(ops), now)))
         return
       }
       const origin = get(sharedOriginAtom)
