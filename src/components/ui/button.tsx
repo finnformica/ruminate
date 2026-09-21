@@ -1,10 +1,13 @@
 import { cva, type VariantProps } from "class-variance-authority"
 import React from "react"
 import { cx } from "../../utils/cx"
+import { LoadingIcon16 } from "../icons"
 import { Keys } from "./keys"
 
 const button = cva(
-  "focus-ring inline-flex cursor-pointer select-none items-center justify-center gap-2 whitespace-nowrap rounded leading-4 disabled:cursor-not-allowed disabled:opacity-50 coarse:h-10 coarse:px-4",
+  // A busy button is disabled but not dimmed: it is working, not unavailable,
+  // and its spinner says so (docs/design-principles.md, "Busy controls").
+  "focus-ring inline-flex cursor-pointer select-none items-center justify-center gap-2 whitespace-nowrap rounded leading-4 disabled:cursor-not-allowed disabled:opacity-50 disabled:data-loading:cursor-progress disabled:data-loading:opacity-100 coarse:h-10 coarse:px-4",
   {
     variants: {
       variant: {
@@ -49,17 +52,35 @@ export type ButtonProps = React.ComponentPropsWithoutRef<"button"> &
      * See "Selection has its own color" in docs/design-principles.md.
      */
     selected?: boolean
+    /** A leading icon, before the label. Its slot is where the spinner goes. */
+    icon?: React.ReactNode
+    /**
+     * The action the button starts is still in flight: the button is disabled
+     * against a second press and says so (`aria-busy`), and its icon slot
+     * spins — in place of its icon, or before the label if it has none — so
+     * the label stays and the button keeps its width. Every control that
+     * starts a request shows this until the request has settled; hold the
+     * flag with `usePending` (src/hooks/pending.ts).
+     */
+    loading?: boolean
   }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ variant, size, shortcut, selected, className, children, ...props }, ref) => {
+  (
+    { variant, size, shortcut, selected, icon, loading, disabled, className, children, ...props },
+    ref,
+  ) => {
     return (
       <button
         ref={ref}
         type="button"
         className={cx(button({ variant, size, selected: Boolean(selected) }), className)}
+        disabled={disabled || loading}
+        aria-busy={loading || undefined}
+        data-loading={loading || undefined}
         {...props}
       >
+        {loading ? <LoadingIcon16 /> : icon}
         {children}
         {shortcut ? (
           <span className="coarse:hidden">

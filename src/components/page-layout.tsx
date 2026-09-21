@@ -5,6 +5,7 @@ import { storageDiagnosticsAtom } from "../data/storage-diagnostics"
 import { isBootingAtom, isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
 import { cx } from "../utils/cx"
+import { AsyncButton } from "./ui/async-button"
 import { Button } from "./ui/button"
 import { PageHeader, PageHeaderProps } from "./page-header"
 import { HoverCard } from "./ui/hover-card"
@@ -89,7 +90,7 @@ export function PageLayout({
                   variant="warning"
                   actions={
                     accessDenied === "client_too_old" ? (
-                      <Button onClick={applyUpdate}>Update Ruminate</Button>
+                      <AsyncButton onClick={applyUpdate}>Update Ruminate</AsyncButton>
                     ) : undefined
                   }
                 >

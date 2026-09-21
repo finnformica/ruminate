@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useAtomValue } from "jotai"
-import { beginGitHubSignIn } from "../components/github-auth"
-import { GitHubIcon16, NoteIcon16 } from "../components/icons"
+import { SignInButton } from "../components/github-auth"
+import { NoteIcon16 } from "../components/icons"
 import { PageLayout } from "../components/page-layout"
 import { SettingsSection } from "../components/settings-section"
 import { Button } from "../components/ui/button"
@@ -72,14 +72,7 @@ function RouteComponent() {
                   you&rsquo;ll have a private notes database of your own — GitHub is used for
                   identity only; your notes never touch a repository.
                 </p>
-                <Button
-                  variant="primary"
-                  className="self-start"
-                  onClick={() => beginGitHubSignIn()}
-                >
-                  <GitHubIcon16 />
-                  Sign in with GitHub to join
-                </Button>
+                <SignInButton className="self-start">Sign in with GitHub to join</SignInButton>
               </>
             )}
           </SettingsSection>

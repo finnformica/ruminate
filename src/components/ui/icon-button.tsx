@@ -1,11 +1,13 @@
 import { cva, type VariantProps } from "class-variance-authority"
 import React from "react"
 import { cx } from "../../utils/cx"
+import { LoadingIcon16 } from "../icons"
 import { Keys } from "./keys"
 import { Tooltip } from "./tooltip"
 
 const iconButton = cva(
-  "focus-ring inline-flex cursor-pointer select-none items-center justify-center rounded text-text-secondary enabled:hover:bg-bg-hover enabled:active:bg-bg-active data-[popup-open]:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50 coarse:h-10 coarse:px-3",
+  // Busy: disabled but not dimmed, as on Button.
+  "focus-ring inline-flex cursor-pointer select-none items-center justify-center rounded text-text-secondary enabled:hover:bg-bg-hover enabled:active:bg-bg-active data-[popup-open]:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50 disabled:data-loading:cursor-progress disabled:data-loading:opacity-100 coarse:h-10 coarse:px-3",
   {
     variants: {
       size: {
@@ -25,6 +27,11 @@ export type IconButtonProps = React.ComponentPropsWithoutRef<"button"> &
     tooltipAlign?: "start" | "center" | "end"
     tooltipSideOffset?: number
     disableTooltip?: boolean
+    /**
+     * The action it starts is still in flight: disabled, `aria-busy`, and the
+     * spinner in place of its icon (see Button).
+     */
+    loading?: boolean
   }
 
 export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
@@ -38,13 +45,23 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
       tooltipAlign = "center",
       tooltipSideOffset,
       disableTooltip = false,
+      loading,
+      disabled,
       ...props
     },
     ref,
   ) => {
     const trigger = (
-      <button ref={ref} type="button" className={cx(iconButton({ size }), className)} {...props}>
-        {children}
+      <button
+        ref={ref}
+        type="button"
+        className={cx(iconButton({ size }), className)}
+        disabled={disabled || loading}
+        aria-busy={loading || undefined}
+        data-loading={loading || undefined}
+        {...props}
+      >
+        {loading ? <LoadingIcon16 /> : children}
       </button>
     )
 

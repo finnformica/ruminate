@@ -1,4 +1,5 @@
 import { Button } from "./button"
+import { GitHubIcon16 } from "../icons"
 
 export default {
   title: "Button",
@@ -45,5 +46,24 @@ export const Small = {
     children: "Button",
     variant: "secondary",
     size: "small",
+  },
+}
+
+export const WithIcon = {
+  args: {
+    children: "Sign in with GitHub",
+    icon: <GitHubIcon16 />,
+    variant: "primary",
+    size: "medium",
+  },
+}
+
+export const Loading = {
+  args: {
+    children: "Sign in with GitHub",
+    icon: <GitHubIcon16 />,
+    loading: true,
+    variant: "primary",
+    size: "medium",
   },
 }

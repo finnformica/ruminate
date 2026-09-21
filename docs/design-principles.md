@@ -430,6 +430,30 @@ trace in a note's header) marks an action in flight, not a page. Skeletons
 never stand in for an empty corpus that is really empty — that state says
 what it is (the offline notice, an empty list).
 
+### Busy controls
+
+A spinner marks an **action in flight**, and it sits on the control that
+started the action. Every control that starts a request — signing in,
+sharing, revoking, applying an update, pushing a full copy — is busy from the
+press until the request has settled, however it settles:
+
+- **Disabled** against a second press, and said to be busy (`aria-busy`).
+- **Spinning in its icon slot**: the spinner takes the place of the control's
+  icon, or goes before the label if it has none. The label stays as it was —
+  never "Sharing…" — so the control keeps its words and its width.
+- **Not dimmed.** A disabled control is unavailable and fades to say so; a
+  busy one is working, and its spinner says so at full strength.
+
+This is `loading` on `Button` and `IconButton`. A lone control whose click
+is the request is an `AsyncButton`, busy for as long as the promise its
+click returns; a control whose flight is held elsewhere — a form's submit,
+a state the data layer reports (the replica's full push) — passes `loading`
+itself, with `usePending` (`src/hooks/pending.ts`) to hold a flight. A
+request that ends in leaving the page (signing in, taking an update) stays
+busy until the page has gone, since on this page it has no after. The
+"Saving…" trace in a note's header is the same rule on a surface rather
+than a control.
+
 ## Empty-block placeholder
 
 An empty block **being edited** carries a ghost placeholder — “Ruminate…” —

@@ -16,6 +16,7 @@ import {
   type PinnedEntry,
 } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
+import { usePending } from "../hooks/pending"
 import { useMoveNote } from "../hooks/note"
 import { useIsPinned, useReorderPinned, useWriteView } from "../hooks/views"
 import { useDragReorder } from "../hooks/drag-reorder"
@@ -39,6 +40,7 @@ import {
   FlagIcon16,
   HistoryIcon16,
   ListIcon16,
+  LoadingIcon16,
   MoreIcon16,
   NoteFillIcon16,
   NoteIcon16,
@@ -82,7 +84,10 @@ export function NavItems({
   const isCalendarActive = isValidDateString(noteId) || isValidWeekString(noteId)
 
   // Registered once by the app layout (src/hooks/app-update.ts).
-  const { needRefresh, apply: applyUpdate } = useAtomValue(appUpdateAtom)
+  const { needRefresh, apply } = useAtomValue(appUpdateAtom)
+  // Busy from the press until the reload: the waiting-update dot becomes the
+  // spinner (docs/design-principles.md, "Busy controls").
+  const [applyUpdate, updating] = usePending(apply)
 
   // The admin page (invites, feature flags) is the bootstrap owner's alone,
   // as the server says (src/data/features.ts); nobody else sees the link.
@@ -176,11 +181,21 @@ export function NavItems({
         </div>
         <div className="flex flex-col gap-1">
           {needRefresh ? (
-            <button className="nav-item" data-size={size} onClick={applyUpdate}>
-              <div className="grid size-4 place-items-center [&>*]:row-span-full [&>*]:col-span-full">
-                <div className="size-3 rounded-full bg-border-focus opacity-50 animate-ping" />
-                <div className="size-2 rounded-full bg-border-focus" />
-              </div>
+            <button
+              className="nav-item"
+              data-size={size}
+              disabled={updating}
+              aria-busy={updating || undefined}
+              onClick={applyUpdate}
+            >
+              {updating ? (
+                <LoadingIcon16 />
+              ) : (
+                <div className="grid size-4 place-items-center [&>*]:row-span-full [&>*]:col-span-full">
+                  <div className="size-3 rounded-full bg-border-focus opacity-50 animate-ping" />
+                  <div className="size-2 rounded-full bg-border-focus" />
+                </div>
+              )}
               Update Ruminate
             </button>
           ) : null}

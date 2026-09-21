@@ -421,7 +421,11 @@ function ReplicaDiagnosticsPanel({ replica }: { replica: ReplicaDiagnostics }) {
           {formatDiagnosticTime(replica.lastError.at)} · {replica.lastError.message}
         </span>
       ) : null}
-      <Button className="self-start" onClick={() => requestDatabaseFullPush()}>
+      <Button
+        className="self-start"
+        loading={replica.fullPushPending}
+        onClick={() => requestDatabaseFullPush()}
+      >
         Push full copy to the cloud now
       </Button>
     </div>

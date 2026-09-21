@@ -15,10 +15,19 @@ import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
  * and the badge on the phone nav bar's menu button, which is on screen when
  * the drawer holding the sidebar items is not.
  */
-export const appUpdateAtom = atom<{ needRefresh: boolean; apply: () => void }>({
+export const appUpdateAtom = atom<{ needRefresh: boolean; apply: () => Promise<void> }>({
   needRefresh: false,
-  apply: () => window.location.reload(),
+  apply: () => {
+    window.location.reload()
+    return NEVER
+  },
 })
+
+/**
+ * Applying an update ends in a reload, so on this page it never settles: the
+ * control that applied it stays busy until the page is torn down.
+ */
+const NEVER = new Promise<void>(() => {})
 
 /** Register the service worker and publish its "update waiting" state. Call
  * once, from a component that stays mounted for the app's whole life. */
@@ -62,6 +71,7 @@ export function useRegisterAppUpdate() {
         // button always refreshes the app).
         void update.current(true)
         window.setTimeout(() => window.location.reload(), 3000)
+        return NEVER
       },
     })
   }, [needRefresh, setAppUpdate])

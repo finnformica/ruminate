@@ -15,7 +15,7 @@ import type { ShareView } from "../data/shares"
 import { describeFilter, describeSort } from "../utils/view-filter"
 import { githubUserAtom, graphSnapshotAtom, notesAtom } from "../global-state"
 import { cx } from "../utils/cx"
-import { Button } from "./ui/button"
+import { AsyncButton } from "./ui/async-button"
 import { TrashIcon16 } from "./icons"
 import { SettingsSection } from "./settings-section"
 
@@ -167,14 +167,14 @@ function GivenList({
               </span>
             </div>
             {live ? (
-              <Button
+              <AsyncButton
                 className="shrink-0"
                 aria-label={`Revoke the share with ${share.granteeEmail}`}
-                onClick={() => void onRevoke(share.id)}
+                icon={<TrashIcon16 />}
+                onClick={() => onRevoke(share.id)}
               >
-                <TrashIcon16 />
                 Revoke
-              </Button>
+              </AsyncButton>
             ) : null}
           </li>
         )
