@@ -35,9 +35,9 @@ function Provider({
               <PreviewCard.Popup
                 className={cx(
                   "card-2 z-30 print:hidden no-hover:hidden",
-                  "transition-[transform,scale,opacity]",
-                  "data-[ending-style]:scale-95 data-[ending-style]:opacity-0",
-                  "data-[starting-style]:scale-95 data-[starting-style]:opacity-0",
+                  // The origin is the caller's: a card hanging off a word in a
+                  // line points at the word, not at the line.
+                  "popup-motion",
                   payload?.popupClassName,
                 )}
                 style={{

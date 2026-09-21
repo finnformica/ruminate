@@ -160,14 +160,12 @@ export function WhatsNewPopover() {
       aria-label="What's new"
       className={cx(
         "whats-new-card card-2 absolute inset-x-3 bottom-3 z-20 flex flex-col gap-3 rounded-xl! p-4 sm:right-auto sm:w-[21rem] print:hidden",
-        // The popups' own motion, copied as it stands (dropdown-menu.tsx and
-        // its neighbours) — including its silence about duration and easing,
-        // since Tailwind's defaults are the pace every other surface here
-        // moves at. The card grows out of the corner it occupies, which is
-        // what `--transform-origin` comes to for something with no trigger to
-        // point at. One addition: a card on its way out takes no clicks, or
-        // the link under a fading card would still navigate.
-        "origin-bottom transition-[transform,scale,opacity] data-ending-style:pointer-events-none data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 sm:origin-bottom-left",
+        // The motion every raised surface here shares (src/styles/index.css).
+        // This one grows out of the corner it occupies, which is what an
+        // anchor's `--transform-origin` comes to for something with no trigger
+        // to point at. One addition of its own: a card on its way out takes no
+        // clicks, or the link under a fading card would still navigate.
+        "popup-motion origin-bottom data-ending-style:pointer-events-none sm:origin-bottom-left",
       )}
       data-starting-style={phase === "starting" ? "" : undefined}
       data-ending-style={phase === "ending" ? "" : undefined}
