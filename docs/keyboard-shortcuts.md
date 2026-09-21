@@ -328,6 +328,7 @@ cannot be deleted or outdented out of its own view.
 | Leave focus entirely          | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>.</kbd> (both modes) |
 | Focus on a list item          | click its bullet / number                           |
 | Focus on any other block      | press F or Cmd+. with the block selected            |
+| Focus on a block by finger    | **Focus on** in the edit bar (docs/mobile.md)       |
 | Navigate to a shallower level | click its breadcrumb crumb                          |
 
 Rules while focused:

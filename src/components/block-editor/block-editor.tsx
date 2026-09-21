@@ -2865,6 +2865,9 @@ export function BlockEditor({
           state={{
             type: doc.blocks[idOfKey(focus.key)]?.type ?? "text",
             ...structureMoves(focus.key),
+            // The focused block leads its own view: focusing on it again
+            // would go nowhere.
+            canFocus: idOfKey(focus.key) !== focusRootId,
             canUndo: history.canUndo(),
             canRedo: history.canRedo(),
           }}
@@ -2878,6 +2881,10 @@ export function BlockEditor({
             math: () => runOnEditing("wrapMath"),
             indent: () => runOnEditing("indent"),
             outdent: () => runOnEditing("outdent"),
+            // What ⌘. does while typing: the block becomes the whole view.
+            // The change of focus root ends the edit (the focus-change
+            // effect), so the keyboard goes and the view is there to read.
+            focus: () => runOnEditing("focusBlock"),
             undo,
             redo,
             // In edit mode, so the edit carries on in the row that takes

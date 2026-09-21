@@ -667,6 +667,16 @@ export function SwapIcon16(props: IconProps) {
   )
 }
 
+/** A bullet in a ring: focus on the block (the edit bar's Focus on) — the
+ * dot a mouse clicks to focus, marked out. */
+export function FocusIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M8 .75a7.25 7.25 0 1 1 0 14.5A7.25 7.25 0 0 1 8 .75Zm0 1.5a5.75 5.75 0 1 0 0 11.5A5.75 5.75 0 0 0 8 2.25ZM8 5.5a2.5 2.5 0 1 1 0 5a2.5 2.5 0 0 1 0-5Z" />
+    </Icon>
+  )
+}
+
 /** A keyboard with a chevron beneath: put the keyboard away. */
 export function KeyboardDownIcon16(props: IconProps) {
   return (

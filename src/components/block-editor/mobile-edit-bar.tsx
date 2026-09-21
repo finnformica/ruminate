@@ -8,6 +8,7 @@ import {
   ArrowLeftToLineIcon16,
   ArrowRightToLineIcon16,
   ChevronsLeftIcon16,
+  FocusIcon16,
   ImageIcon16,
   KeyboardDownIcon16,
   LinkIcon16,
@@ -29,6 +30,9 @@ export interface MobileEditBarActions {
   math: () => void
   indent: () => void
   outdent: () => void
+  /** Focus on the row's block: it becomes the whole view, and the edit ends
+   * with it (docs/keyboard-shortcuts.md, Focus). */
+  focus: () => void
   undo: () => void
   redo: () => void
   remove: () => void
@@ -45,6 +49,8 @@ export interface MobileEditBarState {
   type: BlockType
   canIndent: boolean
   canOutdent: boolean
+  /** False on the block already focused on: there is nowhere further in. */
+  canFocus: boolean
   canUndo: boolean
   canRedo: boolean
 }
@@ -67,7 +73,8 @@ const TYPE_GLYPHS: Record<string, string> = {
 
 /** Every button is this wide, so the Turn into row's highlight can slide to
  * the active one by index. 38px: eight of them fit a 390pt phone with the
- * bar's insets, its end padding and the keyboard button taken out. */
+ * bar's insets, its end padding and the keyboard button taken out — the main
+ * row exactly, until Redo grows in and it scrolls under its fade. */
 const BUTTON_WIDTH = 38
 /** The bar floats this far above the keyboard's top edge. */
 const LIFT = 8
@@ -189,10 +196,12 @@ type View = "main" | "format" | "turnInto"
  * row for the inline formatting (bold, italic, strikethrough, code, link,
  * maths — each drawn as the markdown renders); Turn into, which swaps it for
  * the block types as their markdown glyphs, a highlight sliding to the
- * current one; outdent and indent, greyed where they would do nothing; undo,
- * with redo beside it only while there is something to redo; a picture,
- * where images are on; and delete. Each runs the same command its key does,
- * in edit mode with the caret, so Indent by bar is Tab by key.
+ * current one; outdent and indent, greyed where they would do nothing; focus
+ * on, which makes the row's block the whole view (a phone has no F to press,
+ * and only a leaf's bullet to tap), greyed on the block already focused on;
+ * undo, with redo beside it only while there is something to redo; a
+ * picture, where images are on; and delete. Each runs the same command its
+ * key does, in edit mode with the caret, so Indent by bar is Tab by key.
  *
  * Fixed to the bottom of the visual viewport, so it sits on the keyboard
  * whether the keyboard overlays the page (iOS) or shrinks it (Android).
@@ -407,9 +416,18 @@ export function MobileEditBar({
               <ArrowRightToLineIcon16 />
             </BarButton>
             <BarButton
-              label="Undo"
+              label="Focus on block"
               enter="cascade"
               index={3}
+              onClick={actions.focus}
+              disabled={!state.canFocus}
+            >
+              <FocusIcon16 />
+            </BarButton>
+            <BarButton
+              label="Undo"
+              enter="cascade"
+              index={4}
               onClick={actions.undo}
               disabled={!state.canUndo}
             >
@@ -426,14 +444,14 @@ export function MobileEditBar({
               )}
               style={{ width: state.canRedo ? BUTTON_WIDTH : 0 }}
             >
-              <BarButton label="Redo" enter="cascade" index={4} onClick={actions.redo}>
+              <BarButton label="Redo" enter="cascade" index={5} onClick={actions.redo}>
                 <RedoIcon16 />
               </BarButton>
             </span>
             <BarButton
               label="Image"
               enter="cascade"
-              index={5}
+              index={6}
               onClick={actions.image ?? noop}
               disabled={!actions.image}
             >
@@ -444,7 +462,7 @@ export function MobileEditBar({
             <BarButton
               label="Delete"
               enter="cascade"
-              index={6}
+              index={7}
               onClick={actions.remove}
               className="ml-auto text-text-danger"
             >

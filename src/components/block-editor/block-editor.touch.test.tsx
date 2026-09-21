@@ -208,7 +208,7 @@ describe("the edit bar", () => {
       .filter((b) => !b.closest("[aria-hidden='true']"))
       .map((b) => b.getAttribute("aria-label"))
 
-  it("carries the main row: Aa, Turn into, the structure moves, Undo, Delete, the keyboard", () => {
+  it("carries the main row: Aa, Turn into, the structure moves, Focus, Undo, Delete, the keyboard", () => {
     const { container } = render(<Harness initial={"Alpha"} />)
     fireEvent.click(bodyOf(rows(container)[0]))
     // No Redo (nothing to redo); Image is there but greyed (images off here).
@@ -217,6 +217,7 @@ describe("the edit bar", () => {
       "Turn into",
       "Outdent",
       "Indent",
+      "Focus on block",
       "Undo",
       "Image",
       "Delete",
@@ -382,6 +383,36 @@ describe("the edit bar", () => {
     expect(container.querySelector("textarea")).toBeNull()
     expect(screen.queryByTestId("mobile-edit-bar")).toBeNull()
     expect(container.querySelector(".bg-bg-secondary")).toBeNull()
+  })
+
+  it("Focus on block makes the edited block the whole view, and ends the edit", () => {
+    const { container } = render(<Harness initial={"Alpha\n  Beta\nGamma"} />)
+    fireEvent.click(bodyOf(rows(container)[0]))
+    expect(screen.getByLabelText("Focus on block").getAttribute("aria-disabled")).toBeNull()
+    fireEvent.click(screen.getByLabelText("Focus on block"))
+    // Alpha leads its own view, Beta beneath it; Gamma is outside it.
+    expect(screen.getByTestId("focus-breadcrumb")).not.toBeNull()
+    expect(Array.from(rows(container)).map((row) => bodyOf(row).textContent)).toEqual([
+      "Alpha",
+      "Beta",
+    ])
+    // The view changed to be read: the keyboard goes, and the bar with it.
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(screen.queryByTestId("mobile-edit-bar")).toBeNull()
+    expect(container.querySelector(".bg-bg-secondary")).toBeNull()
+    // Editing the focused block itself: there is nowhere further in.
+    fireEvent.click(bodyOf(rows(container)[0]))
+    expect(screen.getByLabelText("Focus on block").getAttribute("aria-disabled")).toBe("true")
+    fireEvent.click(screen.getByLabelText("Focus on block"))
+    expect(container.querySelector("textarea")!.value).toBe("Alpha")
+    // A child can be focused on in turn.
+    act(() => {
+      container.querySelector("textarea")!.blur()
+    })
+    fireEvent.click(bodyOf(rows(container)[1]))
+    expect(screen.getByLabelText("Focus on block").getAttribute("aria-disabled")).toBeNull()
+    fireEvent.click(screen.getByLabelText("Focus on block"))
+    expect(Array.from(rows(container)).map((row) => bodyOf(row).textContent)).toEqual(["Beta"])
   })
 
   it("Delete keeps editing, on the row that takes the deleted one's place", () => {
