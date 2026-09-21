@@ -11,8 +11,9 @@
 //    reaches no notes and permits no verbs.
 // 3. **The checks are narrow and greppable.** `shareAllows` is the whole
 //    permission check. Which NODES the grantee may touch is not decided here:
-//    a share names notes, and the slice beneath them is computed from the
-//    owner's rows on every request by `slice.ts`.
+//    a share names the owner's VIEW (migrations/0017), the view names a root,
+//    and the slice beneath it is computed from the owner's rows on every
+//    request by `slice.ts`.
 
 import { parsePermissions, serializePermissions, type Permission } from "../mcp/grant"
 
@@ -26,9 +27,11 @@ export interface ShareGrant {
   /** The address the share is for, lowercased. Shown to the owner (who typed
    * it) and never to anyone else. */
   readonly granteeEmail: string
-  /** The note ids the closure is walked from. Possibly empty (a row that did
-   * not parse), in which case the slice is empty too. */
-  readonly rootIds: ReadonlySet<string>
+  /** The owner's view this share is of (`views.id` in the owner's
+   * partition): its root is what is shared, its filter and sort how the
+   * grantee opens it. Empty on a row that did not parse, which is a share
+   * over nothing. */
+  readonly viewId: string
   /** The verbs this share permits. `read` is always among them on a row the
    * create endpoint wrote; a row without it permits nothing readable. */
   readonly permissions: ReadonlySet<Permission>
@@ -41,28 +44,10 @@ export interface ShareRow {
   id: string
   owner_id: number
   grantee_email: string
-  root_ids: string
+  view_id: string
   permissions: string
   created_at: number
   revoked_at: number | null
-}
-
-/**
- * Parse the stored root list: a JSON array of note ids. Anything else —
- * malformed JSON, a non-array, a non-string entry — yields the EMPTY set: a
- * row we cannot read is a share over nothing, never over everything.
- */
-export function parseRootIds(stored: string): Set<string> {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(stored)
-  } catch {
-    return new Set()
-  }
-  if (!Array.isArray(parsed)) return new Set()
-  const ids = new Set<string>()
-  for (const entry of parsed) if (typeof entry === "string" && entry.length > 0) ids.add(entry)
-  return ids
 }
 
 /** Mint a `ShareGrant` from a row — the ONE mint there is. A revoked row is
@@ -73,7 +58,8 @@ export function shareFromRow(row: ShareRow): ShareGrant {
     id: row.id,
     ownerId: row.owner_id,
     granteeEmail: row.grantee_email,
-    rootIds: parseRootIds(row.root_ids),
+    // A row we cannot read is a share over nothing, never over everything.
+    viewId: typeof row.view_id === "string" ? row.view_id : "",
     permissions: parsePermissions(row.permissions),
     createdAt: row.created_at,
     revokedAt: row.revoked_at ?? null,

@@ -2,6 +2,7 @@ import { atom, useAtom, useAtomValue } from "jotai"
 import React from "react"
 import { toast } from "sonner"
 import { NOTE_TYPE } from "../data/graph"
+import { requestDatabasePull } from "../data/database-mode"
 import { createShare, describeSharePermissions, type SharePermission } from "../data/shares"
 import { sharedOriginAtom } from "../data/shared-mode"
 import { githubUserAtom, graphSnapshotAtom, notesAtom } from "../global-state"
@@ -83,7 +84,10 @@ function ShareForm({
     setBusy(true)
     setError(null)
     try {
-      await createShare({ email: email.trim(), rootIds: [rootId], permissions: verbs })
+      await createShare({ email: email.trim(), rootId, permissions: verbs })
+      // The share is a view of the node, made for the owner where they had
+      // none (docs/sharing.md): pull, so this device holds the row too.
+      requestDatabasePull()
       toast(`Shared “${label}” with ${email.trim().toLowerCase()}.`)
       onDone()
     } catch (caught) {

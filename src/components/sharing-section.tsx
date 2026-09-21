@@ -11,6 +11,8 @@ import {
   type ReceivedShareSummary,
 } from "../data/shares"
 import { recordedEmailAtom } from "../data/shared-mode"
+import type { ShareView } from "../data/shares"
+import { describeFilter, describeSort } from "../utils/view-filter"
 import { githubUserAtom, graphSnapshotAtom, notesAtom } from "../global-state"
 import { cx } from "../utils/cx"
 import { Button } from "./button"
@@ -127,6 +129,15 @@ function useRootLabel() {
   )
 }
 
+/** How a share opens, in words — its view's filter and sort, when it has
+ * either: "Todo, sorted by Text". Nothing for the whole subtree in document
+ * order, which needs no saying. */
+function describeShareView(view: ShareView): string {
+  const filter = describeFilter(view.filter ?? "")
+  const sort = describeSort(view.sort ?? "")
+  return [filter, sort ? `sorted by ${sort}` : ""].filter(Boolean).join(", ")
+}
+
 function GivenList({
   shares,
   onRevoke,
@@ -143,7 +154,8 @@ function GivenList({
     <ul className="flex list-none flex-col gap-3 p-0">
       {shares.map((share) => {
         const live = share.revokedAt === null
-        const names = share.rootIds.map(labelOf).join(", ")
+        const names = labelOf(share.view.rootId)
+        const opensAs = describeShareView(share.view)
         return (
           <li
             key={share.id}
@@ -159,6 +171,7 @@ function GivenList({
               </span>
               <span className="truncate text-sm leading-5 text-text-secondary">
                 {share.granteeEmail} · {describeSharePermissions(share.permissions)}
+                {opensAs ? ` · ${opensAs}` : ""}
               </span>
             </div>
             {live ? (
@@ -189,20 +202,18 @@ function ReceivedList({ shares }: { shares: ReceivedShareSummary[] | null }) {
           <li key={share.id} className="flex flex-col gap-1">
             <span className="flex flex-wrap gap-x-2 leading-4">
               {/* A shared block opens as a note of its own (shared-mode.ts). */}
-              {share.rootIds.map((id) => (
-                <Link
-                  key={id}
-                  to="/notes/$"
-                  params={{ _splat: id }}
-                  search={{ query: undefined }}
-                  className="link"
-                >
-                  {labelOf(id)}
-                </Link>
-              ))}
+              <Link
+                to="/notes/$"
+                params={{ _splat: share.view.rootId }}
+                search={{ query: undefined }}
+                className="link"
+              >
+                {labelOf(share.view.rootId)}
+              </Link>
             </span>
             <span className="text-sm leading-5 text-text-secondary">
               Shared by {shareOwnerName(share)} · {describeSharePermissions(share.permissions)}
+              {describeShareView(share.view) ? ` · ${describeShareView(share.view)}` : ""}
             </span>
           </li>
         ))}

@@ -4,17 +4,21 @@ Share a subgraph of your notes with another Ruminate user. From a note's or a
 block's menu, type the email address they sign in to GitHub with; they see
 that root and everything beneath it — including blocks you add later — under
 a **Shared** heading in their sidebar, and can edit or delete there only
-if you said so.
+if you said so. **A share is a view shared with someone** (docs/metadata.md,
+"Views"): the share row holds the grant — who, which view, which verbs — and
+the view holds what is shared and how it opens. Save a filter or a sort on
+the note you shared and the person you shared it with opens it that way.
 
-|                |                                                                          |
-| -------------- | ------------------------------------------------------------------------ |
-| The unit       | A **scoped grant**: owner, roots (notes or blocks), grantee address      |
-| What is shared | The reachability closure beneath the roots, computed per request         |
-| Who            | An email address, matched to the primary verified GitHub email           |
-| Verbs          | `read` (always), `write`, `delete`                                       |
-| Endpoints      | `/api/shares`, `/api/shares/:id`, `/api/shares/:id/notes`                |
-| Storage        | Control plane: `shares` (migrations/0012), `users.email` (0010, 0011)    |
-| Where it lives | `worker/shares/`, `worker/handlers/shares.ts`, `src/data/shared-mode.ts` |
+|                |                                                                                                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------- |
+| The unit       | A **scoped grant** on a view: owner, `view_id`, grantee address, verbs                                     |
+| What is shared | The reachability closure beneath the view's root, computed per request                                     |
+| How it opens   | The view's filter and sort — presentation; the slice is the whole subtree                                  |
+| Who            | An email address, matched to the primary verified GitHub email                                             |
+| Verbs          | `read` (always), `write`, `delete`                                                                         |
+| Endpoints      | `/api/shares`, `/api/shares/:id`, `/api/shares/:id/notes`                                                  |
+| Storage        | Control plane: `shares` (0012, 0017), `users.email` (0010, 0011); the view is a corpus row (`views`, 0015) |
+| Where it lives | `worker/shares/`, `worker/handlers/shares.ts`, `src/data/shared-mode.ts`                                   |
 
 ---
 
@@ -29,11 +33,24 @@ grant, and that choice decides everything else:
 - **The data never moves.** A shared note is still the owner's rows, in the
   owner's partition, replicated to the owner's devices as before. The grantee
   reads and writes those rows through a second door.
-- **The slice is computed, never stored.** A share names root notes. What is
-  visible beneath them is derived from the owner's rows on every request:
+- **The share names a view, and the view names the root.** `shares.view_id`
+  is the id of the owner's row in `views` (migrations/0017): the root is what
+  is shared, the filter and sort are how the grantee opens it. The create
+  endpoint makes the owner an empty view where they have none — unpinned,
+  unfiltered, under the root's own id, which is the id the client mints
+  (src/data/views.ts), so a filter the owner saves later lands on that very
+  row and changes the share without a write to it. A view is only ever
+  tombstoned, never removed, and a tombstone still names its root; so the
+  reference cannot dangle, and a cleared view serves the whole subtree in
+  document order until the owner saves one again. The filter is
+  **presentation, not permission**: the slice is the whole subtree either
+  way, and the grantee may clear the filter or save a view of their own,
+  which wins over the share's on their side.
+- **The slice is computed, never stored.** What is visible beneath the root
+  is derived from the owner's rows on every request:
 
-  > A node is in the slice when it is a granted root that is a live note, or
-  > when it is reachable from one through live child links.
+  > A node is in the slice when it is the granted root and a live node, or
+  > when it is reachable from it through live child links.
 
   So the share is _live by construction_ — a block added under a shared note
   is in the share the moment it is linked; a block unlinked from it leaves —
@@ -214,7 +231,13 @@ someone else's rows does not belong in it. So shared notes live in memory
   overview: what this account has shared and with whom (with Revoke), and
   what has been shared with it. Each row leads with the note or block — a
   block as `Note › text`, by the note it was written in — and the address,
-  or the person who shared it, is its subtext.
+  or the person who shared it, is its subtext, with how the share opens
+  ("Todo, sorted by Text") when its view says so.
+- **How a shared note opens**: the slice comes with the owner's view, and
+  the note page reads it behind the reader's own (`sharedViewByRootAtom`,
+  `useSavedView`): a filter the reader saves on the shared note is theirs
+  and wins; with none, the owner's applies, and the header's dot and
+  **Reset to default** measure against it.
 
 ## 5. Decisions, and what was not built
 
@@ -224,7 +247,12 @@ someone else's rows does not belong in it. So shared notes live in memory
   sequenced log — the same trade the app already makes across devices.
 - **Roots are notes or blocks.** The closure walk is root-agnostic; the
   client presents a block root as a note so the grantee has somewhere to
-  open it.
+  open it. One root per share, because a share is one view and a view has
+  one root; sharing two things is two shares.
+- **The filter is not a boundary.** Enforcing the owner's filter in the slice
+  walk would make a row leave the grantee's view the moment their own edit
+  stopped it matching, and would need the query language in the worker on
+  every pull. A share is the subtree; the view is how it opens.
 - **Email, resolved by the server from GitHub.** The alternative — sharing by
   GitHub login — would need a lookup box that confirms who exists. An address
   the owner already knows, matched against what GitHub reports, reveals
