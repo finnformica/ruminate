@@ -15,12 +15,15 @@ type Payload = {
 function Provider({
   children,
   container,
+  open,
 }: {
   children: React.ReactNode
   container?: HTMLElement | null
+  /** Holds the card open — for a story or a test; the app never sets it. */
+  open?: boolean
 }) {
   return (
-    <PreviewCard.Root<Payload>>
+    <PreviewCard.Root<Payload> open={open}>
       {({ payload }) => (
         <>
           {children}
