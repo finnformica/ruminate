@@ -3,7 +3,7 @@ import copy from "copy-to-clipboard"
 import type React from "react"
 import { useEffect, useRef, useState } from "react"
 import { hostOf } from "../../blocks/link"
-import { cx } from "../../utils/cx"
+import { Surface } from "../ui/surface"
 import { Button } from "../button"
 import { IconButton } from "../icon-button"
 import { CopyIcon16, GlobeIcon16, TrashIcon16 } from "../icons"
@@ -106,15 +106,10 @@ export function LinkHoverCard({
         {children}
       </PreviewCard.Trigger>
       <PreviewCard.Portal>
-        <PreviewCard.Positioner side="bottom" sideOffset={6} align="start">
+        <PreviewCard.Positioner className="z-popup" side="bottom" sideOffset={6} align="start">
           <PreviewCard.Popup
             data-testid="link-hover-card"
-            className={cx(
-              "card-2 z-30 rounded-lg print:hidden",
-              "origin-(--transform-origin) transition-[transform,scale,opacity]",
-              "data-ending-style:scale-95 data-ending-style:opacity-0",
-              "data-starting-style:scale-95 data-starting-style:opacity-0",
-            )}
+            render={<Surface className="print:hidden" />}
           >
             {editing ? (
               <EditPanel href={href} title={title} actions={actions} flush={flush} />

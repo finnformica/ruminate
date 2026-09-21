@@ -185,6 +185,27 @@
   /* An accordion's curve: gathers pace, then settles. The fold and its
      chevron share it, so they move as one. */
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  /* Durations: quick is a colour changing under the pointer, base is a
+     surface arriving or leaving, slow is the fold (docs/design-principles.md). */
+  --duration-quick: 100ms;
+  --duration-base: 150ms;
+  --duration-slow: 300ms;
+
+  /* Elevation — the shadow of each tier of raised surface (src/components/ui/surface.tsx).
+     A card sits on the page, a popup floats over it, a modal floats over
+     everything; the shadow grows with the distance. */
+  --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-popup: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-modal: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+
+  /* Layers — the stacking order of everything that floats, from the bottom
+     up. Nothing sets a z-index by number: it names its layer. Tooltips sit
+     above modals because a tooltip belongs to the control under the pointer,
+     wherever that control is. */
+  --z-raised: 10;
+  --z-popup: 20;
+  --z-modal: 30;
+  --z-tooltip: 40;
 
   /* Icons */
   --icon-size: 16px;

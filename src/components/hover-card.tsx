@@ -1,5 +1,5 @@
 import { PreviewCard } from "@base-ui/react/preview-card"
-import { cx } from "../utils/cx"
+import { Surface } from "./ui/surface"
 
 type Payload = {
   content: React.ReactNode
@@ -26,6 +26,7 @@ function Provider({
           {children}
           <PreviewCard.Portal container={container}>
             <PreviewCard.Positioner
+              className="z-popup"
               side={payload?.side ?? "bottom"}
               sideOffset={payload?.sideOffset ?? 4}
               align={payload?.align ?? "start"}
@@ -33,13 +34,10 @@ function Provider({
               anchor={payload?.anchor}
             >
               <PreviewCard.Popup
-                className={cx(
-                  "card-2 z-30 print:hidden no-hover:hidden",
-                  "transition-[transform,scale,opacity]",
-                  "data-[ending-style]:scale-95 data-[ending-style]:opacity-0",
-                  "data-[starting-style]:scale-95 data-[starting-style]:opacity-0",
-                  payload?.popupClassName,
-                )}
+                render={<Surface className="print:hidden no-hover:hidden" />}
+                className={payload?.popupClassName}
+                // The origin is the caller's: a card hanging off a word in a
+                // line points at the word, not at the line.
                 style={{
                   transformOrigin: payload?.transformOrigin ?? "var(--transform-origin)",
                 }}
