@@ -45,6 +45,23 @@ body:has([data-resizing="true"]) * {
   pointer-events: none;
 }
 
+/* Panel motion: a panel's share of the app layout's width transitions when a
+ * panel opens or closes (the help panel expanding from, and collapsing to,
+ * nothing), so its edge travels with its contents. This is the one width the
+ * app animates — the exception noted under "What never animates" in
+ * docs/design-principles.md — and it is off while a separator is being
+ * dragged and under reduced motion. The group switches it on once its first
+ * layout has settled (src/components/app-layout.tsx). */
+[data-panel-motion="true"] > [data-panel] {
+  transition: flex-grow var(--duration-slow) var(--ease-in-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-panel-motion="true"] > [data-panel] {
+    transition: none;
+  }
+}
+
 /* Focus styles for buttons, inputs, etc. */
 @utility focus-ring {
   @apply focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus;

@@ -1,9 +1,11 @@
 import { useAtom, useAtomValue } from "jotai"
 import { useHotkeys } from "react-hotkeys-hook"
-import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels"
 import { useMedia } from "react-use"
 import { isHelpPanelOpenAtom, sidebarAtom } from "../global-state"
 import { useApplyUpdateShortcut, useRegisterAppUpdate } from "../hooks/app-update"
+import { usePresence } from "../hooks/presence"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { HelpDrawer, HelpSidebar } from "./help-panel"
@@ -27,11 +29,61 @@ export function AppLayout({ className, children }: AppLayoutProps) {
   useRegisterAppUpdate()
   useApplyUpdateShortcut()
   const showHelpSidebar = isHelpPanelOpen && isWideViewport
+  // The help panel is always in the layout on a wide screen, collapsed to
+  // nothing when closed, and opens and closes by expanding and collapsing —
+  // which is what lets its share of the width transition (index.css, "Panel
+  // motion"), so its edge travels with its contents instead of jumping to
+  // where they are going. The separator is kept until the contents have
+  // gone (src/hooks/presence.ts).
+  const helpPanel = usePanelRef()
+  const helpPresent = usePresence(showHelpSidebar)
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "app-layout",
-    panelIds: showHelpSidebar ? ["content", "help"] : ["content"],
+    panelIds: isWideViewport ? ["content", "help"] : ["content"],
     storage: window.localStorage,
   })
+  // The layout the group mounts with is the closed one when the panel is
+  // closed, and otherwise the remembered one — so that it is right from
+  // its first paint, with no correcting afterwards; only a toggle is an
+  // imperative resize. The width is only ever remembered open, for the
+  // panel to open back to.
+  const helpWidth = defaultLayout?.help || 30
+  const mountLayout = useMemo(
+    () => (isWideViewport && !isHelpPanelOpen ? { content: 100, help: 0 } : defaultLayout),
+    [isWideViewport, isHelpPanelOpen, defaultLayout],
+  )
+  const rememberLayout = useCallback(
+    (layout: Record<string, number>) => {
+      if (layout.help !== 0) onLayoutChanged(layout)
+    },
+    [onLayoutChanged],
+  )
+  useEffect(() => {
+    const panel = helpPanel.current
+    if (!panel) return
+    if (showHelpSidebar) panel.resize(`${helpWidth}%`)
+    else panel.collapse()
+  }, [showHelpSidebar, isWideViewport, helpWidth, helpPanel])
+  // Nor must that first layout play as motion: the transition is switched on
+  // a frame later.
+  const [panelMotion, setPanelMotion] = useState(false)
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setPanelMotion(true))
+    return () => cancelAnimationFrame(frame)
+  }, [])
+  // Never while the reader is dragging the separator, or the panel would
+  // trail the pointer.
+  const [dragging, setDragging] = useState(false)
+  useEffect(() => {
+    if (!dragging) return
+    const done = () => setDragging(false)
+    window.addEventListener("pointerup", done)
+    window.addEventListener("pointercancel", done)
+    return () => {
+      window.removeEventListener("pointerup", done)
+      window.removeEventListener("pointercancel", done)
+    }
+  }, [dragging])
 
   // Toggle help panel with Cmd/Ctrl + / (plain ? also toggles it — see
   // src/shortcuts/global-shortcuts.tsx)
@@ -54,8 +106,9 @@ export function AppLayout({ className, children }: AppLayoutProps) {
         <Group
           orientation="horizontal"
           className="grow overflow-hidden"
-          defaultLayout={defaultLayout}
-          onLayoutChanged={onLayoutChanged}
+          data-panel-motion={panelMotion && !dragging}
+          defaultLayout={mountLayout}
+          onLayoutChanged={rememberLayout}
         >
           <Panel id="content" className="grid grid-rows-[1fr_auto] overflow-hidden">
             {/* The page, and hung off it the what's-new card
@@ -72,19 +125,34 @@ export function AppLayout({ className, children }: AppLayoutProps) {
               <NavBar />
             </div>
           </Panel>
-          {showHelpSidebar ? (
+          {isWideViewport ? (
             <>
-              <Separator className="relative w-px bg-border-secondary print:hidden outline-none">
+              <Separator
+                className={cx(
+                  "relative w-px bg-border-secondary outline-none print:hidden",
+                  !helpPresent && "hidden",
+                )}
+                onPointerDown={() => setDragging(true)}
+              >
                 <div className="absolute inset-y-0 -left-1.5 -right-1.5 z-raised" />
               </Separator>
               <Panel
                 id="help"
                 className="print:hidden"
+                panelRef={helpPanel}
+                collapsible
                 defaultSize="30%"
                 minSize="25%"
                 maxSize="40%"
+                // Dragged shut — below its minimum it collapses — the panel
+                // is closed, as the keyboard would have closed it. Only under
+                // the pointer: the layout also reports the collapsed size on
+                // its way open, which must not close it again.
+                onResize={(size) => {
+                  if (dragging && size.asPercentage === 0 && isHelpPanelOpen) setHelpPanel(false)
+                }}
               >
-                <HelpSidebar />
+                <HelpSidebar open={showHelpSidebar} />
               </Panel>
             </>
           ) : null}

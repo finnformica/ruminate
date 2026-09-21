@@ -17,14 +17,14 @@ const filterInput = () => screen.getByPlaceholderText("Filter shortcuts…") as 
 
 describe("shortcut reference (? / help panel)", () => {
   it("renders every group from the registry", () => {
-    render(<HelpSidebar />)
+    render(<HelpSidebar open />)
     for (const title of GROUP_ORDER) {
       expect(screen.getByText(title), `group "${title}" not rendered`).toBeTruthy()
     }
   })
 
   it("renders entries from all three registry sources", () => {
-    render(<HelpSidebar />)
+    render(<HelpSidebar open />)
     // App-level hotkey (consumed by useHotkeys call sites)
     expect(screen.getByText("Toggle the command menu")).toBeTruthy()
     // Generated from the live KEYMAP
@@ -39,7 +39,7 @@ describe("shortcut reference (? / help panel)", () => {
   })
 
   it("the filter narrows the list", () => {
-    render(<HelpSidebar />)
+    render(<HelpSidebar open />)
     fireEvent.change(filterInput(), { target: { value: "sidebar" } })
     expect(screen.getByText("Toggle the sidebar")).toBeTruthy()
     expect(screen.queryByText("Edit the highlighted block")).toBeNull()
@@ -47,13 +47,13 @@ describe("shortcut reference (? / help panel)", () => {
   })
 
   it("shows an empty state when nothing matches", () => {
-    render(<HelpSidebar />)
+    render(<HelpSidebar open />)
     fireEvent.change(filterInput(), { target: { value: "xyzzy-no-such-shortcut" } })
     expect(screen.getByText("No shortcuts match your filter")).toBeTruthy()
   })
 
   it("keeps the markdown formatting reference below the shortcuts", () => {
-    render(<HelpSidebar />)
+    render(<HelpSidebar open />)
     expect(screen.getByText("Formatting")).toBeTruthy()
   })
 })

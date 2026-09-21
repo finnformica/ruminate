@@ -553,7 +553,25 @@ export const themeAtom = atomWithStorage<Theme>("theme", "system")
 
 export const sidebarAtom = atomWithStorage<"expanded" | "collapsed">("sidebar", "expanded")
 
-export const isHelpPanelOpenAtom = atomWithStorage<boolean>("help-panel", false)
+/**
+ * A stored flag, read now rather than when the atom mounts: the layout is
+ * built for the help panel's real state from its first render, since the
+ * app-layout opens the panel with motion when this changes, and a reload
+ * is not a change.
+ */
+function storedFlag(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw === null ? fallback : JSON.parse(raw) === true
+  } catch {
+    return fallback
+  }
+}
+
+export const isHelpPanelOpenAtom = atomWithStorage<boolean>(
+  "help-panel",
+  storedFlag("help-panel", false),
+)
 
 /**
  * The notes recently TOUCHED on this device — opened, a block in them

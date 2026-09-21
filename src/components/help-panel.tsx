@@ -1,4 +1,5 @@
 import { useAtom } from "jotai"
+import { cx } from "../utils/cx"
 import { Fragment, useMemo, useState } from "react"
 import { isHelpPanelOpenAtom } from "../global-state"
 import {
@@ -179,11 +180,29 @@ function HelpContent({
   )
 }
 
-export function HelpSidebar() {
+/**
+ * The help panel on a wide screen: a resizable panel beside the page.
+ *
+ * The panel expands and collapses in the layout (src/components/app-layout.tsx)
+ * and its contents slide in from the page's edge and back out with a fade,
+ * so the edge and what is behind it move together. Under reduced motion the
+ * slide goes and the fade stays. Once the contents have gone they are also
+ * invisible — out of the tab order and the accessibility tree — since the
+ * collapsed panel keeps them in the DOM.
+ */
+export function HelpSidebar({ open }: { open: boolean }) {
   const [, setHelpPanel] = useAtom(isHelpPanelOpenAtom)
   return (
     <div className="grid grid-rows-[1fr] overflow-hidden h-full">
-      <HelpContent onClose={() => setHelpPanel(false)} />
+      <div
+        className={cx(
+          "h-full min-w-0 transition-[translate,opacity,visibility] duration-slow ease-[var(--ease-in-out)]",
+          "starting:opacity-0 motion-safe:starting:translate-x-full",
+          !open && "invisible opacity-0 motion-safe:translate-x-full",
+        )}
+      >
+        <HelpContent onClose={() => setHelpPanel(false)} />
+      </div>
     </div>
   )
 }
