@@ -6,6 +6,7 @@ import {
   takeEntries,
   type ChangelogRelease,
 } from "../utils/changelog"
+import { cx } from "../utils/cx"
 import { IconButton } from "./icon-button"
 import { XIcon16 } from "./icons"
 import { EntryText } from "./release-notes"
@@ -37,6 +38,18 @@ function bootFacts() {
 const MAX_ENTRIES = 6
 
 /**
+ * Where the card is in its arrival or its departure.
+ *
+ * Every other raised surface in the app is a Base UI popup, and Base UI marks
+ * a popup `data-starting-style` on the frame it appears and `data-ending-style`
+ * while it is going, which is what the scale-and-fade classes hang off. This
+ * card is anchored to a corner rather than to a trigger, so there is no
+ * popup to do that for it — it says the same two things about itself, and
+ * wears the same classes, so it moves like the menus and tooltips do.
+ */
+type Phase = "starting" | "open" | "ending"
+
+/**
  * What changed in the version just taken, as a card in the
  * corner.
  *
@@ -59,6 +72,7 @@ const MAX_ENTRIES = 6
  */
 export function WhatsNewPopover() {
   const [unseen, setUnseen] = useState<ChangelogRelease[] | null>(null)
+  const [phase, setPhase] = useState<Phase>("starting")
 
   useEffect(() => {
     const { asked, seen } = bootFacts()
@@ -87,12 +101,36 @@ export function WhatsNewPopover() {
 
   const dismissed = unseen === null || unseen.length === 0
 
+  // Two frames, then the starting style comes off. The first paints the card
+  // small and clear, the second lets the browser see it change — set in one
+  // frame the two styles are coalesced and nothing animates at all.
+  useEffect(() => {
+    if (dismissed) return
+    let second = 0
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => setPhase("open"))
+    })
+    return () => {
+      cancelAnimationFrame(first)
+      cancelAnimationFrame(second)
+    }
+  }, [dismissed])
+
+  // Dismissing plays the exit and the card leaves when it has finished. A
+  // browser that runs no transitions fires no event, so a timer takes it away
+  // regardless rather than leaving an invisible card holding the corner.
+  useEffect(() => {
+    if (phase !== "ending") return
+    const timer = setTimeout(() => setUnseen(null), 1000)
+    return () => clearTimeout(timer)
+  }, [phase])
+
   // <kbd>Esc</kbd> puts it away, as it does every other transient surface in
   // the app — but only while it is there, so it never swallows the key.
   useEffect(() => {
     if (dismissed) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setUnseen(null)
+      if (event.key === "Escape") setPhase("ending")
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
@@ -100,7 +138,7 @@ export function WhatsNewPopover() {
 
   if (dismissed) return null
 
-  const close = () => setUnseen(null)
+  const close = () => setPhase("ending")
 
   const total = countEntries(unseen)
   const shown = takeEntries(unseen, MAX_ENTRIES)
@@ -120,7 +158,26 @@ export function WhatsNewPopover() {
     <div
       role="complementary"
       aria-label="What's new"
-      className="whats-new-card card-2 absolute inset-x-3 bottom-3 z-20 flex flex-col gap-3 rounded-xl! p-4 sm:right-auto sm:w-[21rem] print:hidden"
+      className={cx(
+        "whats-new-card card-2 absolute inset-x-3 bottom-3 z-20 flex flex-col gap-3 rounded-xl! p-4 sm:right-auto sm:w-[21rem] print:hidden",
+        // The popups' own motion, copied as it stands (dropdown-menu.tsx and
+        // its neighbours) — including its silence about duration and easing,
+        // since Tailwind's defaults are the pace every other surface here
+        // moves at. The card grows out of the corner it occupies, which is
+        // what `--transform-origin` comes to for something with no trigger to
+        // point at. One addition: a card on its way out takes no clicks, or
+        // the link under a fading card would still navigate.
+        "origin-bottom transition-[transform,scale,opacity] data-ending-style:pointer-events-none data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 sm:origin-bottom-left",
+      )}
+      data-starting-style={phase === "starting" ? "" : undefined}
+      data-ending-style={phase === "ending" ? "" : undefined}
+      onTransitionEnd={(event) => {
+        // Opacity is the one property that always moves, reduced motion
+        // included, and only this element's own transition counts — the
+        // entries inside it have their own.
+        if (phase !== "ending" || event.target !== event.currentTarget) return
+        if (event.propertyName === "opacity") setUnseen(null)
+      }}
     >
       <div className="flex items-center justify-between gap-2">
         <h2 className="font-bold">What's new</h2>

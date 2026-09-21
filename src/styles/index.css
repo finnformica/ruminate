@@ -257,30 +257,6 @@ body,
     animation-range: 0 32px;
   }
 
-  /* The what's-new card (src/components/whats-new-popover.tsx), arriving in the
- * corner on the first boot of a build this device has not seen. It rises a
- * little as it fades in, so it reads as having arrived rather than as having
- * been there all along and missed. */
-  @keyframes whats-new-in {
-    from {
-      opacity: 0;
-      transform: translateY(0.5rem);
-    }
-  }
-
-  .whats-new-card {
-    animation: whats-new-in 200ms ease-out;
-  }
-
-  /* Reduced motion keeps the fade and drops the movement. */
-  @media (prefers-reduced-motion: reduce) {
-    @keyframes whats-new-in {
-      from {
-        opacity: 0;
-      }
-    }
-  }
-
   @keyframes mask-height-grow {
     from {
       --mask-height: 0px;
@@ -288,6 +264,24 @@ body,
     to {
       --mask-height: 32px;
     }
+  }
+}
+
+/* What's new card */
+
+/* The card (src/components/whats-new-popover.tsx) arrives and leaves on the
+ * same motion as every other raised surface: the scale and fade that Base UI's
+ * popups get from `data-starting-style` / `data-ending-style`, which the card
+ * sets for itself because it is anchored to a corner rather than to a trigger.
+ * The motion itself is on the element, in Tailwind classes, alongside them.
+ *
+ * All that is left here is reduced motion, which the utilities cannot express
+ * in the right order: the fade stays, the movement goes (docs/design-principles.md).
+ * Unlayered, so it outranks the utility it overrides whatever the source order. */
+@media (prefers-reduced-motion: reduce) {
+  .whats-new-card[data-starting-style],
+  .whats-new-card[data-ending-style] {
+    scale: 1;
   }
 }
 
