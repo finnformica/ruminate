@@ -474,6 +474,12 @@ export const SelectionSweep: Story = {
   args: { initial: SWEEP_SAMPLE },
 }
 
+/** Six plain rows: the fixture the multi-select keys are driven over in a
+ * real browser (e2e/multi-select.e2e.mjs, `npm run test:select`). */
+export const MultiSelect: Story = {
+  args: { initial: "A\nB\nC\nD\nE\nF" },
+}
+
 /**
  * The selection bar: a run of rows selected with the keyboard (a mouse sweep
  * or Shift+click leaves the same selection), and the bar risen at the bottom

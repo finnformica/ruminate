@@ -22,6 +22,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 - `npm test` - Run all tests once
 - `npm run test:watch` - Run tests in watch mode
 - `npm run test:vr` - Visual regression against the committed baselines (CI's platform is authoritative; see docs/visual-regression.md)
+- `npm run test:fold` / `npm run test:select` - The fold's motion, and the multi-block selection's keys, in a real browser over the Storybook build (`e2e/`)
 
 ### Code Quality
 

@@ -48,7 +48,6 @@ function selectRange(container: HTMLElement, from: number, to: number) {
   for (let i = from; i < to; i++)
     fireEvent.keyDown(root(container), { key: "ArrowDown", shiftKey: true })
 }
-const button = (name: string) => screen.getByRole<HTMLButtonElement>("button", { name })
 
 /** A DOM text selection (what a mouse sweep leaves) that covers the given
  * rows in full, anchored in the row the sweep began in. */
@@ -144,21 +143,6 @@ describe("the selection bar", () => {
     expect(screen.getByTestId("selection-count").textContent).toBe("2 selected")
   })
 
-  it("indents, outdents and removes every selected row", () => {
-    const { container } = render(<Harness initial={"A\nB\nC\nD"} />)
-    selectRange(container, 1, 2)
-    fireEvent.click(screen.getByRole("button", { name: "Indent" }))
-    expect(lines(container)).toEqual(["A", "  B", "  C", "D"])
-    // Nested first under A, B cannot nest further: the button greys.
-    expect(button("Indent").disabled).toBe(true)
-    fireEvent.click(screen.getByRole("button", { name: "Outdent" }))
-    expect(lines(container)).toEqual(["A", "B", "C", "D"])
-    expect(button("Outdent").disabled).toBe(true)
-    fireEvent.click(screen.getByRole("button", { name: "Remove" }))
-    expect(lines(container)).toEqual(["A", "D"])
-    expect(barOpen()).toBe(false)
-  })
-
   it("clears back to one row", () => {
     const { container } = render(<Harness initial={"A\nB\nC"} />)
     selectRange(container, 0, 2)
@@ -181,7 +165,17 @@ describe("the selection bar", () => {
         fireEvent.click(screen.getByText(label))
       })
     }
+    const item = (label: string) => screen.getByText(label).closest("[role='menuitem']")!
     await open()
+    await pick("Indent")
+    expect(lines(container)).toEqual(["A", "  B", "  C", "D"])
+    // Nested first under A, B cannot nest further: the item greys.
+    await open()
+    expect(item("Indent").getAttribute("aria-disabled")).toBe("true")
+    await pick("Outdent")
+    expect(lines(container)).toEqual(["A", "B", "C", "D"])
+    await open()
+    expect(item("Outdent").getAttribute("aria-disabled")).toBe("true")
     await pick("Move down")
     expect(lines(container)).toEqual(["A", "D", "B", "C"])
     expect(highlighted(container)).toEqual(["B", "C"])
@@ -195,11 +189,10 @@ describe("the selection bar", () => {
     expect(lines(container)).toEqual(["A", "D", "B", "C", "[ ] B", "[ ] C"])
     // Move up is greyed where the run has no room; here it has.
     await open()
-    expect(
-      screen.getByText("Move up").closest("[role='menuitem']")?.getAttribute("aria-disabled"),
-    ).not.toBe("true")
+    expect(item("Move up").getAttribute("aria-disabled")).not.toBe("true")
     await pick("Remove")
     expect(lines(container)).toEqual(["A", "D", "B", "C"])
+    expect(barOpen()).toBe(false)
   })
 
   it("is not offered while browsing", () => {

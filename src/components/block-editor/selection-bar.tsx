@@ -5,13 +5,7 @@ import type React from "react"
 import { BLOCK_TYPE_DEFS } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
-import {
-  ArrowLeftToLineIcon16,
-  ArrowRightToLineIcon16,
-  ChevronDownIcon16,
-  TrashIcon16,
-  XIcon16,
-} from "../icons"
+import { ChevronDownIcon16, XIcon16 } from "../icons"
 import { Button } from "../ui/button"
 import { DropdownMenu } from "../ui/dropdown-menu"
 import { IconButton } from "../ui/icon-button"
@@ -34,8 +28,8 @@ export interface SelectionBarActions {
   clear: () => void
 }
 
-/** What the selection can take right now: a button whose action would do
- * nothing is greyed, as on the touch screen's edit bar. */
+/** What the selection can take right now: a menu item whose action would
+ * do nothing is greyed, as on the touch screen's edit bar. */
 export interface SelectionBarState {
   canIndent: boolean
   canOutdent: boolean
@@ -54,9 +48,8 @@ const keepFocus = (event: React.MouseEvent) => event.preventDefault()
 
 /**
  * The floating bar over a multi-row selection: how many rows are selected,
- * the structural moves as buttons, and every bulk action in one menu — for
- * a pointer that selected a run of blocks and has no key to hand for what
- * comes next. It sits at the bottom of the window, centred, clear of the
+ * a way out, and every bulk action in one menu — for a pointer that
+ * selected a run of blocks and has no key to hand for what comes next. It sits at the bottom of the window, centred, clear of the
  * rows it is about, and rises into place from just below its resting spot
  * under a fade — and sinks back out the same way when the selection
  * collapses — the way a toolbar for a selection does in Linear.
@@ -120,39 +113,6 @@ export function SelectionBar({
           onClick={actions.clear}
         >
           <XIcon16 />
-        </IconButton>
-        <Rule />
-        <IconButton
-          size="small"
-          aria-label="Indent"
-          shortcut={["⇥"]}
-          tooltipSide="top"
-          disabled={!state.canIndent}
-          onMouseDown={keepFocus}
-          onClick={actions.indent}
-        >
-          <ArrowRightToLineIcon16 />
-        </IconButton>
-        <IconButton
-          size="small"
-          aria-label="Outdent"
-          shortcut={["⇧", "⇥"]}
-          tooltipSide="top"
-          disabled={!state.canOutdent}
-          onMouseDown={keepFocus}
-          onClick={actions.outdent}
-        >
-          <ArrowLeftToLineIcon16 />
-        </IconButton>
-        <IconButton
-          size="small"
-          aria-label="Remove"
-          shortcut={["⌫"]}
-          tooltipSide="top"
-          onMouseDown={keepFocus}
-          onClick={actions.remove}
-        >
-          <TrashIcon16 />
         </IconButton>
         <Rule />
         <DropdownMenu>

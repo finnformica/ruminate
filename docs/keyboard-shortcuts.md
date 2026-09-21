@@ -207,10 +207,10 @@ selected block has nothing above it to nest under, nothing moves — rather than
 the rest nesting under it.
 
 While more than one block is selected, a bar rises at the bottom of the window
-with the count, Indent / Outdent / Remove, and an **Actions** menu holding
-every action above (turn into, duplicate, move, copy, cut, remove), each
-acting on the whole selection. Its buttons grey where the action would do
-nothing, and it sinks away when the selection collapses.
+with the count, a way out, and an **Actions** menu holding every action above
+(turn into, duplicate, indent, outdent, move, copy, cut, remove), each acting
+on the whole selection. An item greys where the action would do nothing, and
+the bar sinks away when the selection collapses.
 
 #### Selection ladder
 
