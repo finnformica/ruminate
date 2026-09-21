@@ -1,7 +1,9 @@
 # Visual regression testing
 
-Screenshot-diff checks over the key block-editor Storybook stories (light +
-dark), run as the `visual-regression` job in CI. If a story's rendering
+Screenshot-diff checks over the key block-editor Storybook stories and every
+primitive in `src/components/ui/` (light + dark), run as the
+`visual-regression` job in CI. A new atom gets a story and a line in the
+`STORIES` table, so its baseline is captured from the day it lands. If a story's rendering
 changes beyond a tiny threshold, CI fails and uploads readable
 actual/expected/diff images in the `vr-output` artifact.
 
