@@ -242,7 +242,7 @@ export function MobileEditBar({
       // 6px of padding at either end is the pill's, not a button's: the
       // first and last glyphs sit clear of the rounded ends, and the row
       // scrolls under it evenly.
-      className="fixed inset-x-3 top-0 z-20 flex h-12 items-stretch overflow-hidden rounded-full bg-bg-overlay px-1.5 shadow-2xl ring-1 ring-[var(--neutral-a3)] will-change-transform dark:ring-inset print:hidden"
+      className="fixed inset-x-3 top-0 z-popup flex h-12 items-stretch overflow-hidden rounded-full bg-bg-overlay px-1.5 shadow-2xl ring-1 ring-[var(--neutral-a3)] will-change-transform dark:ring-inset print:hidden"
       style={{
         // The bar's bottom edge a little above the visual viewport's (see
         // `useKeyboard`); with no keyboard, above the home indicator too.

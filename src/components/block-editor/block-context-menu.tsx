@@ -6,7 +6,7 @@ import { FIGURE_ALIGNS, type FigureAlign } from "../../blocks/figure"
 import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
-import { POPUP_MOTION } from "../popup-motion"
+import { Surface } from "../ui/surface"
 import { DropdownMenu } from "../dropdown-menu"
 
 /**
@@ -129,10 +129,10 @@ function SubmenuTrigger({ children }: { children: React.ReactNode }) {
 /** The types a block can be turned into: the registry's, in its order. */
 const TYPES = BLOCK_TYPE_DEFS.filter((def) => def.turnInto)
 
-const popupClass = cx(
-  "card-2 z-20 grid place-items-stretch overflow-hidden rounded-lg print:hidden outline-hidden",
-  POPUP_MOTION,
-  "origin-(--transform-origin)",
+/** The menu and its submenus are drawn on the same surface as every other
+ * menu in the app (src/components/ui/surface.tsx). */
+const popup = (
+  <Surface className="grid place-items-stretch overflow-hidden print:hidden outline-hidden" />
 )
 
 export function BlockContextMenu({
@@ -155,11 +155,7 @@ export function BlockContextMenu({
       <ContextMenu.Trigger>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Positioner className="outline-none">
-          <ContextMenu.Popup
-            data-testid="block-context-menu"
-            className={popupClass}
-            style={{ width: 240 }}
-          >
+          <ContextMenu.Popup data-testid="block-context-menu" render={popup} style={{ width: 240 }}>
             {/* A pointer's menu keeps to a modest height; a phone's, with 40px
                 rows, would otherwise hide the last items (Unlink, Delete) in a
                 scroll no one finds — it may take most of the screen instead. */}
@@ -354,7 +350,7 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
               <SubmenuTrigger>{entry.label}</SubmenuTrigger>
               <Menu.Portal>
                 <Menu.Positioner side="right" align="start" sideOffset={4}>
-                  <Menu.Popup className={popupClass} style={{ width: entry.width ?? 200 }}>
+                  <Menu.Popup render={popup} style={{ width: entry.width ?? 200 }}>
                     <div className="grid p-1" data-testid={entry.testId}>
                       {entry.items.map((it) => (
                         <DropdownMenu.Item
@@ -419,10 +415,10 @@ export function BlockMenuSheet({
   return (
     <Drawer.Root open={open} onOpenChange={onOpenChange} shouldScaleBackground={false}>
       <Drawer.Portal>
-        <Drawer.Overlay className="fixed inset-0 z-30 bg-linear-to-t from-[#000000] to-[#00000000]" />
+        <Drawer.Overlay className="fixed inset-0 z-modal bg-linear-to-t from-[#000000] to-[#00000000]" />
         <Drawer.Content
           data-testid="block-menu-sheet"
-          className="fixed bottom-0 left-0 right-0 z-30 flex max-h-[85svh] flex-col rounded-t-xl bg-bg-overlay pb-[env(safe-area-inset-bottom)] outline-none"
+          className="fixed bottom-0 left-0 right-0 z-modal flex max-h-[85svh] flex-col rounded-t-xl bg-bg-overlay pb-[env(safe-area-inset-bottom)] outline-none"
         >
           <div aria-hidden className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-border" />
           <Drawer.Title className="truncate px-5 pt-3 pb-1 text-sm text-text-secondary">

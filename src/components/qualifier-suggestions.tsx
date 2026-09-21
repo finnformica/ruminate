@@ -3,6 +3,7 @@ import React from "react"
 import { sortedNotesAtom } from "../global-state"
 import type { Note } from "../schema"
 import { cx } from "../utils/cx"
+import { Surface } from "./ui/surface"
 import {
   SUGGESTED_QUALIFIER_KEYS,
   STATIC_QUALIFIER_OPTIONS,
@@ -353,7 +354,7 @@ export function QualifierPopover({
   const pictured = anyQualifierPicture(items, trigger.key)
 
   return (
-    <div
+    <Surface
       ref={listRef}
       id={id}
       role="listbox"
@@ -368,7 +369,9 @@ export function QualifierPopover({
         minWidth: placement.full ? undefined : QUALIFIER_POPOVER_MIN_WIDTH,
         maxWidth: placement.maxWidth,
       }}
-      className="card-2 absolute z-30 max-h-[45svh] overflow-auto rounded-lg p-1 font-sans text-base font-normal leading-normal text-text"
+      // Opened by typing and used constantly, so it does not arrive: it is there.
+      motion={false}
+      className="absolute max-h-[45svh] overflow-auto p-1 font-sans text-base font-normal leading-normal text-text"
       onMouseDown={(event) => event.preventDefault()}
     >
       {items.map((item, index) => {
@@ -400,6 +403,6 @@ export function QualifierPopover({
           </div>
         )
       })}
-    </div>
+    </Surface>
   )
 }

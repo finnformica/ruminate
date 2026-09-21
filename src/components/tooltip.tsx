@@ -1,6 +1,5 @@
 import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip"
-import { cx } from "../utils/cx"
-import { POPUP_MOTION } from "./popup-motion"
+import { Surface } from "./ui/surface"
 
 type ContentProps = {
   side?: "top" | "bottom" | "left" | "right"
@@ -28,12 +27,10 @@ function Content({
         alignOffset={alignOffset}
       >
         <BaseTooltip.Popup
-          className={cx(
-            "card-2 z-20 px-2.5 py-2 leading-none text-text",
-            POPUP_MOTION,
-            "origin-(--transform-origin)",
-            className,
-          )}
+          // The tooltip layer, above the popups and the modals alike: a
+          // tooltip belongs to the control under the pointer, wherever it is.
+          render={<Surface layer="tooltip" className="px-2.5 py-2 leading-none text-text" />}
+          className={className}
         >
           {children}
         </BaseTooltip.Popup>

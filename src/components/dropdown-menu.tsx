@@ -1,7 +1,7 @@
 import { Menu } from "@base-ui/react/menu"
 import React from "react"
 import { cx } from "../utils/cx"
-import { POPUP_MOTION } from "./popup-motion"
+import { Surface } from "./ui/surface"
 import { CheckIcon16, ChevronRightIcon12 } from "./icons"
 import { Keys } from "./keys"
 
@@ -36,12 +36,10 @@ function Content({
     <Menu.Portal>
       <Menu.Positioner side={side} sideOffset={sideOffset} align={align} alignOffset={alignOffset}>
         <Menu.Popup
-          className={cx(
-            "card-2 z-20 grid place-items-stretch overflow-hidden rounded-lg print:hidden outline-hidden",
-            POPUP_MOTION,
-            "origin-(--transform-origin)",
-            className,
-          )}
+          render={
+            <Surface className="grid place-items-stretch overflow-hidden print:hidden outline-hidden" />
+          }
+          className={className}
           style={{ width }}
         >
           <div className="grid max-h-[45svh] scroll-py-1 overflow-auto p-1">{children}</div>

@@ -193,8 +193,8 @@ export function HelpDrawer() {
   return (
     <Drawer.Root open={isOpen} onOpenChange={setIsOpen} shouldScaleBackground={false}>
       <Drawer.Portal>
-        <Drawer.Overlay className="fixed inset-0 bg-linear-to-t from-[#000000] to-[#00000000]" />
-        <Drawer.Content className="fixed bottom-0 left-0 right-0 flex h-[80%] flex-col bg-bg-overlay rounded-t-xl outline-none">
+        <Drawer.Overlay className="fixed inset-0 z-modal bg-linear-to-t from-[#000000] to-[#00000000]" />
+        <Drawer.Content className="fixed bottom-0 left-0 right-0 z-modal flex h-[80%] flex-col bg-bg-overlay rounded-t-xl outline-none">
           <Drawer.Title className="sr-only">Help</Drawer.Title>
           <div className="flex-1 overflow-hidden">
             <HelpContent onClose={() => setIsOpen(false)} size="medium" />

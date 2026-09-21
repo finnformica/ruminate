@@ -12,10 +12,10 @@ export function ImageLightbox({ block, onClose }: { block: Block | null; onClose
   return (
     <RadixDialog.Root open={block !== null} onOpenChange={(open) => !open && onClose()}>
       <RadixDialog.Portal>
-        <RadixDialog.Overlay className="fixed inset-0 z-30 bg-[#000000cc] backdrop-blur-sm" />
+        <RadixDialog.Overlay className="fixed inset-0 z-modal bg-[#000000cc] backdrop-blur-sm" />
         <RadixDialog.Content
           data-testid="image-lightbox"
-          className="fixed inset-0 z-30 flex flex-col items-center justify-center gap-3 p-4 outline-none"
+          className="fixed inset-0 z-modal flex flex-col items-center justify-center gap-3 p-4 outline-none"
           onClick={onClose}
         >
           <RadixDialog.Title className="sr-only">{block?.text.trim() || "Image"}</RadixDialog.Title>

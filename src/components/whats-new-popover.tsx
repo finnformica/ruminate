@@ -8,6 +8,7 @@ import {
 } from "../utils/changelog"
 import { cx } from "../utils/cx"
 import { IconButton } from "./icon-button"
+import { Surface } from "./ui/surface"
 import { XIcon16 } from "./icons"
 import { EntryText } from "./release-notes"
 import { lastSeenVersion, rememberVersion, takeUpdateRequest } from "../utils/whats-new"
@@ -119,23 +120,17 @@ export function WhatsNewPopover() {
     // what keeps it clear of the bottom chrome on every screen. `aria-live` is
     // off: this is not news worth interrupting a screen reader mid-sentence
     // for, and it is reachable in the reading order like anything else.
-    <div
+    <Surface
       role="complementary"
       aria-label="What's new"
+      // A popup that no Base UI component holds, so `open` is what puts it
+      // away: the surface plays its exit and the browser hides it after.
+      open={!dismissed}
       className={cx(
-        "card-2 absolute inset-x-3 bottom-3 z-20 flex flex-col gap-3 rounded-xl! p-4 sm:right-auto sm:w-[21rem] print:hidden",
-        // The same arrival as every popup (popup-motion.ts) in the browser's
-        // own words rather than Base UI's, since no Base UI component is
-        // holding this one: `@starting-style` is where it comes from, and
-        // `display` transitioning discretely is what keeps it on screen long
-        // enough to leave — it is taken away at the end of the fade rather
-        // than the moment it is dismissed. Nothing to time in JavaScript, and
-        // a hidden card takes no clicks, so the link under one on its way out
-        // cannot still be followed.
-        "origin-bottom transition-discrete transition-[opacity,scale,display] starting:opacity-0 motion-safe:starting:scale-95 sm:origin-bottom-left",
-        // Dismissed: the card fades and shrinks back into its corner, and the
-        // browser hides it once that has played.
-        dismissed && "hidden opacity-0 motion-safe:scale-95",
+        "absolute inset-x-3 bottom-3 flex flex-col gap-3 rounded-xl p-4 sm:right-auto sm:w-[21rem] print:hidden",
+        // It grows out of the corner it sits in — what an anchor's
+        // `--transform-origin` comes to for something with no anchor.
+        "origin-bottom sm:origin-bottom-left",
       )}
     >
       <div className="flex items-center justify-between gap-2">
@@ -178,6 +173,6 @@ export function WhatsNewPopover() {
         </Link>
         {rest > 0 ? <span className="text-sm text-text-secondary">+{rest} more</span> : null}
       </div>
-    </div>
+    </Surface>
   )
 }

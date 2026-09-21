@@ -75,7 +75,7 @@ export function AppLayout({ className, children }: AppLayoutProps) {
           {showHelpSidebar ? (
             <>
               <Separator className="relative w-px bg-border-secondary print:hidden outline-none">
-                <div className="absolute inset-y-0 -left-1.5 -right-1.5 z-10" />
+                <div className="absolute inset-y-0 -left-1.5 -right-1.5 z-raised" />
               </Separator>
               <Panel
                 id="help"

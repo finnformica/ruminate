@@ -14,6 +14,25 @@ module.exports = {
         bold: "var(--font-weight-bold)",
       },
       size: {},
+      // Elevation, layering and pace are tokens (src/styles/variables.css),
+      // so a surface names its tier rather than picking a shadow, a number
+      // or a number of milliseconds.
+      boxShadow: {
+        card: "var(--shadow-card)",
+        popup: "var(--shadow-popup)",
+        modal: "var(--shadow-modal)",
+      },
+      zIndex: {
+        raised: "var(--z-raised)",
+        popup: "var(--z-popup)",
+        modal: "var(--z-modal)",
+        tooltip: "var(--z-tooltip)",
+      },
+      transitionDuration: {
+        quick: "var(--duration-quick)",
+        base: "var(--duration-base)",
+        slow: "var(--duration-slow)",
+      },
     },
     fontFamily: {
       sans: "var(--font-family-sans)",

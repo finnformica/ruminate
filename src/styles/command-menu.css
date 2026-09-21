@@ -2,11 +2,11 @@
  * itself is the shared query box (query-box.tsx), dressed for the palette
  * there. */
 [cmdk-overlay] {
-  @apply fixed inset-0 z-20;
+  @apply fixed inset-0 z-modal;
 }
 
 [cmdk-dialog] {
-  @apply fixed left-1/2 top-3 z-20 w-[calc(100vw-24px)] max-w-2xl -translate-x-1/2 sm:top-[10vh];
+  @apply fixed left-1/2 top-3 z-modal w-[calc(100vw-24px)] max-w-2xl -translate-x-1/2 sm:top-[10vh];
 }
 
 [cmdk-dialog] [cmdk-list] {

@@ -76,6 +76,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 ### File Structure
 
 - `src/blocks/` - Block types (`registry.ts`), parse/serialize, doc operations, keymap and commands
+- `src/components/ui/` - The primitives everything else is built from (`Surface` first; the atoms and Base UI wrappers move in as they are reworked)
 - `src/components/block-editor/` - The block/outline editor
 - `src/components/` - React components with Storybook stories
 - `src/data/` - Graph, ops, store, database runtime, note metadata

@@ -298,6 +298,29 @@ family with it. (There is no intermediate 6px step any more — line surfaces
 share the control radius; the old `--border-radius-md` read as too sharp on a
 full-width highlight.)
 
+## Elevation
+
+Everything raised is a `Surface` (src/components/ui/surface.tsx) and says
+which of three tiers it is. The tier decides the edge, the fill, the shadow,
+the radius and the layer, so no component picks a shadow or a z-index for
+itself:
+
+| Tier    | What                                                                               | Fill and shadow                                      | Radius    | Layer   |
+| ------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------- | --------- | ------- |
+| `card`  | part of the page: settings sections, previews                                      | `bg-card`, `--shadow-card`                           | `lg` 12px | none    |
+| `popup` | floats over the page: menus, tooltips, hover cards, listboxes, the what's-new card | `bg-overlay-backdrop` blurred, `--shadow-popup`      | `lg` 12px | `popup` |
+| `modal` | floats over everything: dialogs, the palette                                       | `bg-overlay-backdrop` blurred more, `--shadow-modal` | `xl` 16px | `modal` |
+
+Every tier shares the same hairline ring for an edge (`--neutral-a3`, inset in
+the dark), which is what makes them read as one family at three heights.
+
+**Layers** are named, never numbered (`--z-raised` 10, `--z-popup` 20,
+`--z-modal` 30, `--z-tooltip` 40 in variables.css; `z-raised` … `z-tooltip` in
+Tailwind). A surface floats in its tier's layer unless it asks otherwise; the
+tooltip does, because a tooltip belongs to the control under the pointer
+wherever that control is, and so sits above the modals too. Drawers and the
+lightbox, which are not surfaces, name the `modal` layer themselves.
+
 ## Color roles
 
 | Role         | Light / dark token                                              | Used for                                                                                                                                                                                                        |
@@ -429,18 +452,19 @@ Press feedback lives on the **control**, never the content: collapsing a
 subtree gives the chevron a pressed scale and hover surface. Pressed scale is
 removed under `prefers-reduced-motion`.
 
-**Raised surfaces arrive and leave alike.** A menu, tooltip, hover card or
-context menu is a Base UI popup: it fades in from a slight scale about the
-point it is anchored to, and fades back out the same way — a transition rather
-than an animation, so one closed while it is still opening reverses smoothly
-instead of jumping. The classes are `POPUP_MOTION`
-(src/components/popup-motion.ts), shared by every popup rather than repeated at
-each. The what's-new card is the one raised surface Base UI does not hold, so
-it says the same thing in the browser's own words — `@starting-style` for the
-arrival, a discrete `display` transition for the departure, no bookkeeping in
-JavaScript — and grows out of the corner it sits in rather than an anchor. The
-fade is unconditional and the scale is `motion-safe`, so reduced motion keeps
-the one and is spared the other.
+**Raised surfaces arrive and leave alike.** Every popup and modal is drawn
+on `Surface` (src/components/ui/surface.tsx), and the motion is the surface's:
+a fade from a slight scale about the point it is anchored to, and the same
+back — a transition rather than an animation, so one dismissed while it is
+still opening turns back smoothly instead of jumping. Written once, in both
+vocabularies: Base UI marks a popup it holds `data-starting-style` and
+`data-ending-style`; a surface nothing holds (the what's-new card) gets the
+same two moments from the browser, `@starting-style` for the arrival and a
+discrete `display` transition for the departure, with nothing to time in
+JavaScript. The fade is unconditional and the scale is `motion-safe`, so
+reduced motion keeps the one and is spared the other. Not everything raised
+moves: the palette and the slash menu are opened by keys and used constantly,
+and ask for `motion={false}`.
 
 **The fold moves, but never lays out.** Rows render as nested subtrees
 (`Subtree`, block-editor.tsx), and folding or unfolding is laid over the

@@ -21,6 +21,7 @@ import { generateNoteId } from "../utils/note-id"
 import { composeQuery, parseQuery } from "../utils/search"
 import { CalendarDateIcon16, PlusIcon16 } from "./icons"
 import { Keys } from "./keys"
+import { Surface } from "./ui/surface"
 import { QUERY_DEBOUNCE_MS } from "./note-list"
 import { QueryBox } from "./query-box"
 import { ResultsList } from "./results-list"
@@ -371,7 +372,8 @@ export function CommandMenu() {
         }}
         onPointerMoveCapture={noteInteraction}
       >
-        <div className="card-3 overflow-hidden rounded-xl!">
+        {/* The palette opens with no entrance (docs/design-principles.md). */}
+        <Surface tier="modal" motion={false} className="overflow-hidden">
           <QueryBox
             variant="palette"
             inputRef={inputRef}
@@ -475,7 +477,7 @@ export function CommandMenu() {
               <Keys keys={formatCombo("Mod+Enter")} className="coarse:hidden" />
             </button>
           </div>
-        </div>
+        </Surface>
       </div>
     </Command.Dialog>
   )

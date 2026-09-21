@@ -81,13 +81,9 @@ body:has([data-resizing="true"]) * {
   @apply card bg-bg-card shadow-sm;
 }
 
-@utility card-2 {
-  @apply card bg-bg-overlay-backdrop shadow-lg backdrop-blur-lg;
-}
-
-@utility card-3 {
-  @apply card bg-bg-overlay-backdrop shadow-2xl backdrop-blur-xl;
-}
+/* The raised tiers — popups and modals — are `Surface`
+ * (src/components/ui/surface.tsx); `card-1` stays until the in-page cards
+ * move over. */
 
 /* Nav item */
 
