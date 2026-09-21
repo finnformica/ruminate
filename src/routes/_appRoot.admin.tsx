@@ -20,7 +20,9 @@ import {
   type FeatureKey,
 } from "../data/feature-flags"
 import { refreshFeatures, useIsAdmin } from "../data/features"
+import { AsyncButton } from "../components/ui/async-button"
 import { Button } from "../components/ui/button"
+import { usePending } from "../hooks/pending"
 import { DropdownMenu } from "../components/ui/dropdown-menu"
 import {
   CheckIcon16,
@@ -130,8 +132,7 @@ function InvitesSection() {
           }}
         />
       ) : (
-        <Button className="self-start" onClick={() => setComposing(true)}>
-          <PlusIcon16 />
+        <Button className="self-start" icon={<PlusIcon16 />} onClick={() => setComposing(true)}>
           New invite
         </Button>
       )}
@@ -246,14 +247,14 @@ function InviteList({
               </span>
             </div>
             {state === "live" ? (
-              <Button
+              <AsyncButton
                 className="shrink-0"
                 aria-label={`Revoke ${invite.note ?? "invite"}`}
-                onClick={() => void onRevoke(invite.id)}
+                icon={<TrashIcon16 />}
+                onClick={() => onRevoke(invite.id)}
               >
-                <TrashIcon16 />
                 Revoke
-              </Button>
+              </AsyncButton>
             ) : null}
           </li>
         )
@@ -328,8 +329,8 @@ function MintInviteForm({
       {error ? <p className="text-text-danger">{error}</p> : null}
 
       <div className="flex gap-2">
-        <Button variant="primary" disabled={busy} onClick={() => void submit()}>
-          {busy ? "Creating…" : "Create invite"}
+        <Button variant="primary" loading={busy} onClick={() => void submit()}>
+          Create invite
         </Button>
         <Button onClick={onCancel}>Cancel</Button>
       </div>
@@ -380,7 +381,7 @@ function FeaturesSection() {
             <AudienceMenu
               label={feature.label}
               value={audiences[feature.key]}
-              onChange={(audience) => void update(feature.key, audience)}
+              onChange={(audience) => update(feature.key, audience)}
             />
           </div>
         ))
@@ -389,7 +390,8 @@ function FeaturesSection() {
   )
 }
 
-/** The Off / Admin / Everyone pick, as a dropdown on a button. */
+/** The Off / Admin / Everyone pick, as a dropdown on a button — busy, with
+ * the label it still has, while the change is out. */
 function AudienceMenu({
   label,
   value,
@@ -397,13 +399,18 @@ function AudienceMenu({
 }: {
   label: string
   value: Audience
-  onChange: (audience: Audience) => void
+  onChange: (audience: Audience) => Promise<void>
 }) {
+  const [change, changing] = usePending(onChange)
   return (
     <DropdownMenu modal={false}>
       <DropdownMenu.Trigger
         render={
-          <Button className="shrink-0" aria-label={`${label}: ${AUDIENCE_LABELS[value]}`}>
+          <Button
+            className="shrink-0"
+            aria-label={`${label}: ${AUDIENCE_LABELS[value]}`}
+            loading={changing}
+          >
             {AUDIENCE_LABELS[value]}
             <ChevronDownIcon16 />
           </Button>
@@ -414,7 +421,7 @@ function AudienceMenu({
           <DropdownMenu.Item
             key={audience}
             selected={audience === value}
-            onClick={() => onChange(audience)}
+            onClick={() => change(audience)}
           >
             {AUDIENCE_LABELS[audience]}
           </DropdownMenu.Item>

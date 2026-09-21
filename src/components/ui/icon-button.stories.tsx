@@ -1,5 +1,5 @@
 import { IconButton } from "./icon-button"
-import { MoreIcon16, SearchIcon16 } from "../icons"
+import { MoreIcon16, SearchIcon16, ShareIcon16 } from "../icons"
 
 export default {
   title: "IconButton",
@@ -29,5 +29,13 @@ export const Small = {
     "aria-label": "More actions",
     children: <MoreIcon16 />,
     size: "small",
+  },
+}
+
+export const Loading = {
+  args: {
+    "aria-label": "Share",
+    children: <ShareIcon16 />,
+    loading: true,
   },
 }

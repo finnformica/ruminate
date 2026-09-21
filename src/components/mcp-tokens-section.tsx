@@ -13,6 +13,7 @@ import {
 } from "../data/mcp-tokens"
 import { githubUserAtom, notesAtom } from "../global-state"
 import { cx } from "../utils/cx"
+import { AsyncButton } from "./ui/async-button"
 import { Button } from "./ui/button"
 import { Checkbox } from "./ui/checkbox"
 import { CheckIcon16, CopyIcon16, PlusIcon16, TrashIcon16 } from "./icons"
@@ -123,8 +124,7 @@ export function McpTokensSection() {
           }}
         />
       ) : (
-        <Button className="self-start" onClick={() => setComposing(true)}>
-          <PlusIcon16 />
+        <Button className="self-start" icon={<PlusIcon16 />} onClick={() => setComposing(true)}>
           New token
         </Button>
       )}
@@ -265,14 +265,14 @@ function TokenList({
               </span>
             </div>
             {state === "live" ? (
-              <Button
+              <AsyncButton
                 className="shrink-0"
                 aria-label={`Revoke ${token.name}`}
-                onClick={() => void onRevoke(token.id)}
+                icon={<TrashIcon16 />}
+                onClick={() => onRevoke(token.id)}
               >
-                <TrashIcon16 />
                 Revoke
-              </Button>
+              </AsyncButton>
             ) : null}
           </li>
         )
@@ -466,8 +466,8 @@ function MintForm({
       {error ? <p className="text-text-danger">{error}</p> : null}
 
       <div className="flex gap-2">
-        <Button variant="primary" disabled={!ready || busy} onClick={() => void submit()}>
-          {busy ? "Creating…" : "Create token"}
+        <Button variant="primary" disabled={!ready} loading={busy} onClick={() => void submit()}>
+          Create token
         </Button>
         <Button onClick={onCancel}>Cancel</Button>
       </div>

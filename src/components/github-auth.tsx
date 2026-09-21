@@ -1,15 +1,21 @@
 import { useSetAtom } from "jotai"
 import urlcat from "urlcat"
 import { signInAtom, signOutAtom } from "../global-state"
-import { Button, ButtonProps } from "./ui/button"
+import { AsyncButton, type AsyncButtonProps } from "./ui/async-button"
 import { GitHubIcon16 } from "./icons"
 
 /**
  * Kick off the GitHub OAuth flow (also used to re-authenticate from the sync
  * status when the session has expired). `state` carries the current URL so the
  * worker redirects back here after the token exchange.
+ *
+ * Leaving for GitHub takes a moment, and the page is live until it has gone:
+ * the promise stays open for that moment, so the control that began it stays
+ * busy — and settles if the page comes back (the reader pressing Back into
+ * this one, restored as it was), so that control is pressable again. Opened
+ * in a new tab, nothing is in flight here, and it settles at once.
  */
-export function beginGitHubSignIn() {
+export function beginGitHubSignIn(): Promise<void> {
   const authUrl = urlcat("https://github.com/login/oauth/authorize", {
     client_id: import.meta.env.VITE_GITHUB_CLIENT_ID,
     state: window.location.href,
@@ -26,16 +32,24 @@ export function beginGitHubSignIn() {
   const isInIframe = window.self !== window.top
   if (isInIframe) {
     window.open(authUrl, "_blank", "noopener")
-  } else {
-    window.location.href = authUrl
+    return Promise.resolve()
   }
+  window.location.href = authUrl
+  return new Promise((resolve) => {
+    window.addEventListener("pageshow", () => resolve(), { once: true })
+  })
 }
 
-export function SignInButton(props: ButtonProps) {
+/**
+ * The "Sign in with GitHub" button, busy from the press until the page has
+ * left for GitHub. Its children replace the label.
+ */
+export function SignInButton({ children, ...props }: Partial<AsyncButtonProps>) {
   const signIn = useSetAtom(signInAtom)
   return (
-    <Button
+    <AsyncButton
       variant="primary"
+      icon={<GitHubIcon16 />}
       {...props}
       onClick={async (event) => {
         // Sign in with a personal access token in local development
@@ -50,13 +64,13 @@ export function SignInButton(props: ButtonProps) {
           return
         }
 
-        beginGitHubSignIn()
-        props.onClick?.(event)
+        const left = beginGitHubSignIn()
+        await props.onClick?.(event)
+        await left
       }}
     >
-      <GitHubIcon16 />
-      Sign in with GitHub
-    </Button>
+      {children ?? "Sign in with GitHub"}
+    </AsyncButton>
   )
 }
 

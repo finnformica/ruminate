@@ -168,8 +168,8 @@ function ShareForm({
         </p>
         {error ? <p className="text-text-danger">{error}</p> : null}
         <div className="flex gap-2">
-          <Button type="submit" variant="primary" disabled={!ready}>
-            {busy ? "Sharing…" : "Share"}
+          <Button type="submit" variant="primary" disabled={!ready} loading={busy}>
+            Share
           </Button>
           <Button type="button" onClick={onDone}>
             Cancel

@@ -49,9 +49,9 @@ const MAX_ENTRIES = 6
  * counts as read, since it does not come back.
  *
  * The **Update Ruminate** button applies the waiting service worker and
- * reloads (`src/hooks/app-update.ts`), so there is no moment between the click
- * and the new build in which anything could be shown: the page is about to be
- * torn down. This is therefore not tied to the button at all. It asks, on
+ * reloads (`src/hooks/app-update.ts`); between the click and the new build
+ * the page is on its way down, and all it shows is the button's own busy
+ * state. This is therefore not tied to the button at all. It asks, on
  * every boot, whether the build it is running is newer than the one this
  * device last saw, which also catches the reader whose waiting worker
  * activated on its own after they closed every tab.
