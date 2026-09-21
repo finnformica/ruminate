@@ -183,13 +183,12 @@ function HelpContent({
 /**
  * The help panel on a wide screen: a resizable panel beside the page.
  *
- * The panel's width belongs to the layout and changes at once; what moves is
- * the panel's contents, sliding in from the page's edge and back out of it —
- * a transform and a fade, never the width (docs/design-principles.md, "What
- * never animates"), so the note beside it is never laid out mid-motion.
- * Under reduced motion the slide goes and the fade stays. While `open` is
- * false the contents are on their way out; the layout lets the panel go once
- * they have gone (src/components/app-layout.tsx).
+ * The panel expands and collapses in the layout (src/components/app-layout.tsx)
+ * and its contents slide in from the page's edge and back out with a fade,
+ * so the edge and what is behind it move together. Under reduced motion the
+ * slide goes and the fade stays. Once the contents have gone they are also
+ * invisible — out of the tab order and the accessibility tree — since the
+ * collapsed panel keeps them in the DOM.
  */
 export function HelpSidebar({ open }: { open: boolean }) {
   const [, setHelpPanel] = useAtom(isHelpPanelOpenAtom)
@@ -197,9 +196,9 @@ export function HelpSidebar({ open }: { open: boolean }) {
     <div className="grid grid-rows-[1fr] overflow-hidden h-full">
       <div
         className={cx(
-          "h-full min-w-0 transition-[translate,opacity] duration-slow ease-[var(--ease-in-out)]",
+          "h-full min-w-0 transition-[translate,opacity,visibility] duration-slow ease-[var(--ease-in-out)]",
           "starting:opacity-0 motion-safe:starting:translate-x-full",
-          !open && "opacity-0 motion-safe:translate-x-full",
+          !open && "invisible opacity-0 motion-safe:translate-x-full",
         )}
       >
         <HelpContent onClose={() => setHelpPanel(false)} />
