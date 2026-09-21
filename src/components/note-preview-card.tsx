@@ -13,6 +13,7 @@ import { DropdownMenu } from "./ui/dropdown-menu"
 import { IconButton } from "./ui/icon-button"
 import { CopyIcon16, MoreIcon16, PinFillIcon16, PinIcon16, TrashIcon16 } from "./icons"
 import { NotePreview } from "./note-preview"
+import { surface } from "./ui/surface"
 
 type NoteCardProps = {
   id: NoteId
@@ -38,7 +39,8 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
           query: undefined,
         }}
         className={cx(
-          "card-1 rounded-[calc(var(--border-radius-base)+6px)]! relative block w-full cursor-pointer overflow-hidden -outline-offset-1",
+          surface({ tier: "card" }),
+          "rounded-[calc(var(--border-radius-base)+6px)]! relative block w-full cursor-pointer overflow-hidden -outline-offset-1",
           "focus-visible:outline-hidden",
           "focus-visible:outline-2",
           "focus-visible:outline",

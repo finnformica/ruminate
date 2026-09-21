@@ -316,7 +316,10 @@ steps back and the window comes forward; the dialog's fades with it, the
 palette's is simply there. A dialog sits centred on the page.
 
 Every tier shares the same hairline ring for an edge (`--neutral-a3`, inset in
-the dark), which is what makes them read as one family at three heights.
+the dark), which is what makes them read as one family at three heights. An
+in-page card renders `<Surface tier="card">` like the rest; the two elements
+that cannot be a `Surface` — a router `Link`, the calendar's own container —
+take the recipe, `surface({ tier: "card" })`, so there is still one definition.
 
 **Layers** are named, never numbered (`--z-raised` 10, `--z-popup` 20,
 `--z-modal` 30, `--z-tooltip` 40 in variables.css; `z-raised` … `z-tooltip` in

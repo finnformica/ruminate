@@ -30,7 +30,11 @@ import { cx } from "../../utils/cx"
  * used directly, and `open` puts it away.
  */
 
-const surface = cva(
+/**
+ * The recipe, for the few elements a surface cannot be: a router `Link`, a
+ * story's plain box. Everything else renders `<Surface>` itself.
+ */
+export const surface = cva(
   // The edge every tier shares: a hairline ring rather than a border, so it
   // never takes up room, drawn inside in the dark where an outer ring would
   // read as a halo.
@@ -50,34 +54,42 @@ const surface = cva(
         modal: "rounded-xl bg-bg-overlay-backdrop shadow-modal backdrop-blur-xl",
       },
       /**
-       * Whether it arrives and leaves, or is simply there.
-       *
-       * The motion is a fade from a slight scale about the point the surface
-       * is anchored to — a transition rather than an animation, as Base UI's
-       * animation guide recommends, so a surface dismissed mid-arrival turns
-       * back smoothly instead of jumping. It is written in both vocabularies
-       * at once: Base UI marks a popup it holds `data-starting-style` and
-       * `data-ending-style`, and for a surface nothing holds the browser has
-       * `@starting-style` for the arrival and a discrete `display` transition
-       * for the departure, which keeps the surface on screen until the fade
-       * has played. The scale is `motion-safe` and the fade is not, so a
-       * reader who has asked for less motion keeps the fade that tells them
-       * something arrived and is spared the movement.
-       *
-       * Not everything raised should move. The palette and the slash menu
-       * are opened by keys and used constantly, and would be a beat slower
-       * every time (docs/design-principles.md, "What never animates").
+       * Whether it arrives and leaves, or is simply there. A card never
+       * moves: it is part of the page. Not everything raised should either —
+       * the palette and the slash menu are opened by keys and used
+       * constantly, and would be a beat slower every time
+       * (docs/design-principles.md, "What never animates").
        */
       motion: {
-        true: cx(
+        true: "",
+        false: "",
+      },
+    },
+    compoundVariants: [
+      {
+        tier: ["popup", "modal"],
+        motion: true,
+        /**
+         * A fade from a slight scale about the point the surface is anchored
+         * to — a transition rather than an animation, as Base UI's animation
+         * guide recommends, so a surface dismissed mid-arrival turns back
+         * smoothly instead of jumping. Written in both vocabularies at once:
+         * Base UI marks a popup it holds `data-starting-style` and
+         * `data-ending-style`, and for a surface nothing holds the browser
+         * has `@starting-style` for the arrival and a discrete `display`
+         * transition for the departure, which keeps the surface on screen
+         * until the fade has played. The scale is `motion-safe` and the fade
+         * is not, so a reader who has asked for less motion keeps the fade
+         * that tells them something arrived and is spared the movement.
+         */
+        class: cx(
           "origin-(--transform-origin) transition-[opacity,scale,display] duration-base transition-discrete",
           "starting:opacity-0 motion-safe:starting:scale-95",
           "data-starting-style:opacity-0 motion-safe:data-starting-style:scale-95",
           "data-ending-style:opacity-0 motion-safe:data-ending-style:scale-95",
         ),
-        false: "",
       },
-    },
+    ],
     defaultVariants: {
       tier: "popup",
       motion: true,
@@ -105,8 +117,7 @@ export const Surface = React.forwardRef<HTMLDivElement, SurfaceProps>(function S
     <div
       ref={ref}
       className={cx(
-        // A card is part of the page, so it does not arrive.
-        surface({ tier, motion: motion ?? (tier ?? "popup") !== "card" }),
+        surface({ tier, motion }),
         className,
         // Last, so that it wins over a caller's own `display` — a card that
         // is `flex` while it is there is still hidden when it is not. Hidden

@@ -30,6 +30,7 @@ import { DropdownMenu } from "./ui/dropdown-menu"
 import { IconButton } from "./ui/icon-button"
 import { ChevronDownIcon16, ChevronUpIcon16, MoreIcon16, UndoIcon16 } from "./icons"
 import { NoteHoverCard } from "./note-hover-card"
+import { surface } from "./ui/surface"
 
 const CalendarContainerContext = React.createContext<React.RefObject<HTMLDivElement | null> | null>(
   null,
@@ -108,7 +109,10 @@ export function Calendar({
 
   return (
     <CalendarContainerContext.Provider value={containerRef}>
-      <div ref={containerRef} className={cx("card-1 overflow-hidden rounded-xl!", className)}>
+      <div
+        ref={containerRef}
+        className={cx(surface({ tier: "card" }), "overflow-hidden rounded-xl!", className)}
+      >
         <div className="flex flex-col gap-2 overflow-hidden">
           <div className="flex items-center justify-between pt-2 px-2">
             <span className="font-content px-2">

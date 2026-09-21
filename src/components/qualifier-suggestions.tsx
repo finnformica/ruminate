@@ -2,7 +2,7 @@ import { useAtomValue } from "jotai"
 import React from "react"
 import { sortedNotesAtom } from "../global-state"
 import type { Note } from "../schema"
-import { cx } from "../utils/cx"
+import { listRow } from "./ui/list"
 import { Surface } from "./ui/surface"
 import {
   SUGGESTED_QUALIFIER_KEYS,
@@ -387,10 +387,7 @@ export function QualifierPopover({
             aria-selected={active}
             tabIndex={-1}
             data-suggestion={item.value}
-            className={cx(
-              "flex h-8 cursor-pointer select-none items-center gap-3 rounded px-2",
-              active && "bg-bg-hover",
-            )}
+            className={listRow({ active })}
             onMouseEnter={() => onHover(index)}
             onClick={() => onPick(item)}
           >

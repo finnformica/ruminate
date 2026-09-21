@@ -71,19 +71,7 @@ body:has([data-resizing="true"]) * {
   margin-left: 2px;
 }
 
-/* Card */
-
-@utility card {
-  @apply rounded-lg border-0 ring-1 ring-[var(--neutral-a3)] dark:ring-inset;
-}
-
-@utility card-1 {
-  @apply card bg-bg-card shadow-sm;
-}
-
-/* The raised tiers — popups and modals — are `Surface`
- * (src/components/ui/surface.tsx); `card-1` stays until the in-page cards
- * move over. */
+/* Cards, popups and modals are all `Surface` (src/components/ui/surface.tsx). */
 
 /* Nav item */
 

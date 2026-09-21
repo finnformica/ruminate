@@ -1,13 +1,13 @@
 import { ContextMenu } from "@base-ui/react/context-menu"
 import { Menu } from "@base-ui/react/menu"
 import React from "react"
-import { Drawer } from "vaul"
 import { FIGURE_ALIGNS, type FigureAlign } from "../../blocks/figure"
 import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
-import { Surface } from "../ui/surface"
 import { DropdownMenu } from "../ui/dropdown-menu"
+import { Sheet } from "../ui/sheet"
+import { Surface } from "../ui/surface"
 
 /**
  * The block's right-click menu: the standard actions on one row, the same
@@ -110,20 +110,6 @@ const ALIGN_LABELS: Record<FigureAlign, string> = {
   left: "Left",
   center: "Centre",
   right: "Right",
-}
-
-/** A submenu trigger row: the same shape as an item, with a chevron. */
-function SubmenuTrigger({ children }: { children: React.ReactNode }) {
-  return (
-    <Menu.SubmenuTrigger className="group flex h-8 cursor-pointer select-none items-center gap-3 rounded px-3 outline-hidden focus:bg-bg-hover data-[popup-open]:bg-bg-hover coarse:h-10">
-      <div className="flex w-0 grow items-center gap-3">
-        <span className="grow truncate">{children}</span>
-      </div>
-      <span aria-hidden className="text-text-tertiary">
-        ›
-      </span>
-    </Menu.SubmenuTrigger>
-  )
 }
 
 /** The types a block can be turned into: the registry's, in its order. */
@@ -347,7 +333,7 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
         if (entry.kind === "group") {
           return (
             <Menu.SubmenuRoot key={index}>
-              <SubmenuTrigger>{entry.label}</SubmenuTrigger>
+              <DropdownMenu.SubmenuTrigger>{entry.label}</DropdownMenu.SubmenuTrigger>
               <Menu.Portal>
                 <Menu.Positioner className="z-popup" side="right" align="start" sideOffset={4}>
                   <Menu.Popup render={popup} style={{ width: entry.width ?? 200 }}>
@@ -413,67 +399,63 @@ export function BlockMenuSheet({
     run()
   }
   return (
-    <Drawer.Root open={open} onOpenChange={onOpenChange} shouldScaleBackground={false}>
-      <Drawer.Portal>
-        <Drawer.Overlay className="fixed inset-0 z-modal bg-linear-to-t from-[#000000] to-[#00000000]" />
-        <Drawer.Content
-          data-testid="block-menu-sheet"
-          className="fixed bottom-0 left-0 right-0 z-modal flex max-h-[85svh] flex-col rounded-t-xl bg-bg-overlay pb-[env(safe-area-inset-bottom)] outline-none"
-        >
-          <div aria-hidden className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-border" />
-          <Drawer.Title className="truncate px-5 pt-3 pb-1 text-sm text-text-secondary">
-            {title.trim() || "Block"}
-          </Drawer.Title>
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-            {entries.map((entry, index) => {
-              if (entry.kind === "separator") {
-                return <div key={index} className="mx-3 my-1 h-px bg-border-secondary" />
-              }
-              if (entry.kind === "group") {
-                // A group's choices as chips in a row, the current one
-                // filled: seven block types read at a glance, where seven
-                // rows would push the rest of the sheet off the screen.
-                return (
-                  <div key={index} className="py-1" data-testid={entry.testId}>
-                    <div className="px-3 pt-2 pb-1.5 text-xs font-medium text-text-tertiary">
-                      {entry.label}
-                    </div>
-                    <div className="flex flex-wrap gap-2 px-3 pb-1">
-                      {entry.items.map((it) => (
-                        <button
-                          key={it.key}
-                          type="button"
-                          aria-pressed={it.selected}
-                          onClick={pick(it.onSelect)}
-                          className={cx(
-                            "h-9 max-w-full cursor-pointer select-none truncate rounded-full px-3 text-[14px] ring-1 ring-inset active:bg-bg-active",
-                            it.selected
-                              ? "bg-bg-secondary text-text ring-transparent"
-                              : "text-text-secondary ring-border-secondary",
-                          )}
-                        >
-                          {it.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )
-              }
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <Sheet.Content
+        data-testid="block-menu-sheet"
+        size="fit"
+        handle
+        titleVisible
+        title={title.trim() || "Block"}
+      >
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+          {entries.map((entry, index) => {
+            if (entry.kind === "separator") {
+              return <div key={index} className="mx-3 my-1 h-px bg-border-secondary" />
+            }
+            if (entry.kind === "group") {
+              // A group's choices as chips in a row, the current one
+              // filled: seven block types read at a glance, where seven
+              // rows would push the rest of the sheet off the screen.
               return (
-                <SheetRow
-                  key={index}
-                  danger={entry.danger}
-                  onSelect={pick(entry.onSelect)}
-                  trailing={entry.trailing}
-                >
-                  {entry.label}
-                </SheetRow>
+                <div key={index} className="py-1" data-testid={entry.testId}>
+                  <div className="px-3 pt-2 pb-1.5 text-xs font-medium text-text-tertiary">
+                    {entry.label}
+                  </div>
+                  <div className="flex flex-wrap gap-2 px-3 pb-1">
+                    {entry.items.map((it) => (
+                      <button
+                        key={it.key}
+                        type="button"
+                        aria-pressed={it.selected}
+                        onClick={pick(it.onSelect)}
+                        className={cx(
+                          "h-9 max-w-full cursor-pointer select-none truncate rounded-full px-3 text-[14px] ring-1 ring-inset active:bg-bg-active",
+                          it.selected
+                            ? "bg-bg-secondary text-text ring-transparent"
+                            : "text-text-secondary ring-border-secondary",
+                        )}
+                      >
+                        {it.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )
-            })}
-          </div>
-        </Drawer.Content>
-      </Drawer.Portal>
-    </Drawer.Root>
+            }
+            return (
+              <SheetRow
+                key={index}
+                danger={entry.danger}
+                onSelect={pick(entry.onSelect)}
+                trailing={entry.trailing}
+              >
+                {entry.label}
+              </SheetRow>
+            )
+          })}
+        </div>
+      </Sheet.Content>
+    </Sheet>
   )
 }
 

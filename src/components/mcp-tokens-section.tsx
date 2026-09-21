@@ -17,6 +17,7 @@ import { Button } from "./ui/button"
 import { Checkbox } from "./ui/checkbox"
 import { CheckIcon16, CopyIcon16, PlusIcon16, TrashIcon16 } from "./icons"
 import { TextInput } from "./ui/text-input"
+import { SettingsSection } from "./settings-section"
 
 /**
  * MCP access, on the settings page (docs/mcp-server.md).
@@ -70,14 +71,14 @@ export function McpTokensSection() {
 
   if (!githubUser) {
     return (
-      <Section>
+      <SettingsSection title="MCP access">
         <div className="text-text-secondary">Sign in to give an agent access to your notes.</div>
-      </Section>
+      </SettingsSection>
     )
   }
 
   return (
-    <Section>
+    <SettingsSection title="MCP access">
       <div className="flex flex-col gap-2">
         <p className="leading-5 text-text-secondary">
           Give an AI agent access to your notes over the{" "}
@@ -127,16 +128,7 @@ export function McpTokensSection() {
           New token
         </Button>
       )}
-    </Section>
-  )
-}
-
-function Section({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <h3 className="font-bold leading-4">MCP access</h3>
-      <div className="card-1 flex flex-col gap-5 p-4">{children}</div>
-    </div>
+    </SettingsSection>
   )
 }
 

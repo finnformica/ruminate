@@ -17,6 +17,7 @@ import { githubUserAtom, graphSnapshotAtom, notesAtom } from "../global-state"
 import { cx } from "../utils/cx"
 import { Button } from "./ui/button"
 import { TrashIcon16 } from "./icons"
+import { SettingsSection } from "./settings-section"
 
 /**
  * Sharing, on the settings page (docs/sharing.md): the overview. The shares
@@ -51,14 +52,14 @@ export function SharingSection() {
 
   if (!githubUser) {
     return (
-      <Section>
+      <SettingsSection title="Sharing">
         <div className="text-text-secondary">Sign in to share notes with someone.</div>
-      </Section>
+      </SettingsSection>
     )
   }
 
   return (
-    <Section>
+    <SettingsSection title="Sharing">
       <div className="flex flex-col gap-1">
         <p className="leading-5 text-text-secondary">
           Share a note or block from its menu, by their GitHub sign-in email.
@@ -88,16 +89,7 @@ export function SharingSection() {
           <ReceivedList shares={received} />
         </>
       )}
-    </Section>
-  )
-}
-
-function Section({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <h3 className="font-bold leading-4">Sharing</h3>
-      <div className="card-1 flex flex-col gap-5 p-4">{children}</div>
-    </div>
+    </SettingsSection>
   )
 }
 
