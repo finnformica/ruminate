@@ -197,9 +197,9 @@ const NEW_BLOCK_MARKER_PRESETS: Array<{ value: string; label: string }> = [
 
 /** Which links a note's rows follow (`LinkDirections`). */
 const LINK_DIRECTION_OPTIONS: Array<{ value: LinkDirections; label: string }> = [
-  { value: "both", label: "Both" },
   { value: "downstream", label: "Downstream" },
   { value: "upstream", label: "Upstream" },
+  { value: "both", label: "Both" },
 ]
 
 function EditorSection() {
