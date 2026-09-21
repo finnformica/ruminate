@@ -446,17 +446,18 @@ growing the row.
 Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`,
 `--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1)`):
 
-| What                                    | How                                                                                                                                            |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hover affordances                       | opacity 150ms ease-out                                                                                                                         |
-| Hover surfaces (crumbs, focus dot)      | background/color 150ms ease                                                                                                                    |
-| Block line hover (neutral)              | background-color 100ms ease                                                                                                                    |
-| Selection highlight                     | background-color + color + box-shadow 100ms ease                                                                                               |
-| Chevron rotation                        | transform 300ms ease-in-out, in step with the fold                                                                                             |
-| Unfold (collapsed → open)               | the subtree's box's bottom edge sweeps down to reveal it, the rows below slide down, all transforms, 300ms ease-in-out, no fade: an accordion  |
-| Fold (open → collapsed)                 | the box, out of the flow, its edge sweeping up to cover it as the rows below slide up over it, 300ms ease-in-out; its rows linger inert for it |
-| Todo check → text mutes                 | color 200ms ease                                                                                                                               |
-| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms                                                                                                         |
+| What                                    | How                                                                                                                                              |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Hover affordances                       | opacity 150ms ease-out                                                                                                                           |
+| Hover surfaces (crumbs, focus dot)      | background/color 150ms ease                                                                                                                      |
+| Block line hover (neutral)              | background-color 100ms ease                                                                                                                      |
+| Selection highlight                     | background-color + color + box-shadow 100ms ease                                                                                                 |
+| Chevron rotation                        | transform 300ms ease-in-out, in step with the fold                                                                                               |
+| Unfold (collapsed → open)               | the subtree's box's bottom edge sweeps down to reveal it, the rows below slide down, all transforms, 300ms ease-in-out, no fade: an accordion    |
+| Fold (open → collapsed)                 | the box, out of the flow, its edge sweeping up to cover it as the rows below slide up over it, 300ms ease-in-out; its rows linger inert for it   |
+| Todo check → text mutes                 | color 200ms ease                                                                                                                                 |
+| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms                                                                                                           |
+| Help panel (wide screen)                | its contents translate in from the page's edge and back out, with a fade, 300ms ease-in-out; the panel's width changes at once, never mid-motion |
 
 Press feedback lives on the **control**, never the content: collapsing a
 subtree gives the chevron a pressed scale and hover surface. Pressed scale is
