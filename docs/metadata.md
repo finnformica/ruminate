@@ -25,7 +25,7 @@ A **view** is a way into the graph: a node to start at, what of its subgraph to 
 
 A pinned block's row opens its note focused on that block — a focused view of the block and what is beneath it — and the row's **⋯** menu unpins it or copies a link to it. A block held in several notes opens in the note it was written in while that note still reaches it, otherwise in the first note that does. A view whose root the graph no longer holds — deleted on another device, a share taken back — is left out of the list rather than drawn as a row that opens nothing. Pinning is not an edit to the note, so it is not an undo step.
 
-The list's order is the notes' sort, then the blocks in index order; the `sort_key` column that will let it be dragged into an order of its own is in the table and unread for now.
+**The list is yours to order.** Drag a row in the sidebar's Views, or use **Move up** and **Move down** in its menu, and it stays where you put it: the order is the views' `sort_key`, the same fractional index a block's child link carries, so a move rewrites one row. Nothing is keyed until the first drag — until then the list is the pinned notes in the notes' sort, then the pinned blocks in index order — and a view pinned later joins the end of what has been ordered rather than jumping the queue. Notes and blocks are one list and one order.
 
 ## Saved views
 

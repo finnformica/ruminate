@@ -5,12 +5,7 @@ import { atom, useAtom, useAtomValue } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
-import {
-  pinnedBlocksAtom,
-  pinnedNotesAtom,
-  recentTouchesAtom,
-  sortedNotesAtom,
-} from "../global-state"
+import { pinnedEntriesAtom, recentTouchesAtom, sortedNotesAtom } from "../global-state"
 import type { ResultRoot } from "../hooks/results-doc"
 import { recentNotes as recentTouched } from "../utils/recent-notes"
 import { useCreateNote } from "../hooks/note"
@@ -77,16 +72,15 @@ export function CommandMenu() {
     () => recentNotes.map((note) => ({ id: note.id, noteId: note.id })),
     [recentNotes],
   )
-  const pinned = useAtomValue(pinnedNotesAtom)
-  const pinnedBlocks = useAtomValue(pinnedBlocksAtom)
+  const pinnedEntries = useAtomValue(pinnedEntriesAtom)
   const pinnedRoots = useMemo<ResultRoot[]>(
-    () => [
-      ...pinned
-        .filter((note) => !recentNotes.some((recent) => recent.id === note.id))
-        .map((note) => ({ id: note.id, noteId: note.id })),
-      ...pinnedBlocks.map((block) => ({ id: block.id, noteId: block.noteId })),
-    ],
-    [pinned, pinnedBlocks, recentNotes],
+    () =>
+      pinnedEntries
+        .filter(
+          (entry) => entry.kind !== "note" || !recentNotes.some((recent) => recent.id === entry.id),
+        )
+        .map(({ id, noteId }) => ({ id, noteId })),
+    [pinnedEntries, recentNotes],
   )
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
 

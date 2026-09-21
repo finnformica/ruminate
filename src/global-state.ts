@@ -22,7 +22,7 @@ import {
 import type { ReceivedShareSummary } from "./data/shares"
 import { createNotesBuilder } from "./data/note-meta"
 import { sampleGraph } from "./data/sample-graph"
-import { pinnedRootIdsAtom } from "./data/views"
+import { orderPinned, pinnedRootIdsAtom, viewByRootAtom } from "./data/views"
 import { GITHUB_USER_STORAGE_KEY, clearSession, seedSession } from "./utils/github-session"
 import { createBlockIndexer, searchBlocks, type BlockHit } from "./utils/block-search"
 import { parseQuery, type Query } from "./utils/search"
@@ -362,22 +362,49 @@ export const pinnedNotesAtom = atom((get) => {
 
 const NO_NOTES: Note[] = []
 
+/** One row of the Views list: a pinned note, or a pinned block. */
+export type PinnedEntry =
+  | { kind: "note"; id: NoteId; noteId: NoteId; note: Note }
+  | { kind: "block"; id: string; noteId: NoteId; block: PinnedBlock }
+
 /**
- * **The Views list**: the pinned notes, then the pinned blocks — what the
- * sidebar and the notes page draw under **Views**, above the notes.
+ * **The Views list**: the pinned notes and the pinned blocks, in the order
+ * the user dragged them into (`orderPinned`: the views' `sort_key`, then
+ * whatever has not been dragged yet — the notes in their sort, then the
+ * blocks in index order) — what the sidebar and the notes page draw under
+ * **Views**, above the notes, and the palette's Views group.
  *
  * One list for both kinds, because a pin means one thing — *keep this to
  * hand* — and which kind of thing was pinned is a detail the row itself
  * shows (a note's favicon, a block's pin). Two headings would have made the
- * reader sort out a distinction the pin does not draw.
- *
- * Each entry is a root the results editor can walk: a note opens itself, a
- * block opens its note focused on it.
+ * reader sort out a distinction the pin does not draw, and would have made
+ * the order two orders.
  */
-export const pinnedRootsAtom = atom((get) => [
-  ...get(pinnedNotesAtom).map((note) => ({ id: note.id, noteId: note.id })),
-  ...get(pinnedBlocksAtom).map((block) => ({ id: block.id, noteId: block.noteId })),
-])
+export const pinnedEntriesAtom = atom((get): PinnedEntry[] =>
+  orderPinned(
+    [
+      ...get(pinnedNotesAtom).map((note): PinnedEntry => ({
+        kind: "note",
+        id: note.id,
+        noteId: note.id,
+        note,
+      })),
+      ...get(pinnedBlocksAtom).map((block): PinnedEntry => ({
+        kind: "block",
+        id: block.id,
+        noteId: block.noteId,
+        block,
+      })),
+    ],
+    get(viewByRootAtom),
+  ),
+)
+
+/** The Views list as roots the results editor can walk: a note opens
+ * itself, a block opens its note focused on it. */
+export const pinnedRootsAtom = atom((get) =>
+  get(pinnedEntriesAtom).map(({ id, noteId }) => ({ id, noteId })),
+)
 
 export const noteSearcherAtom = atom((get) => {
   const sortedNotes = get(sortedNotesAtom)
