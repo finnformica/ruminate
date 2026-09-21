@@ -9,15 +9,15 @@ import {
   isHelpPanelOpenAtom,
   noteSortAtom,
   ownSortedNotesAtom,
-  pinnedBlocksAtom,
-  pinnedNotesAtom,
+  pinnedEntriesAtom,
   sharedNotesAtom,
   type NoteSort,
   type PinnedBlock,
+  type PinnedEntry,
 } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
 import { useMoveNote } from "../hooks/note"
-import { useIsPinned, useWriteView } from "../hooks/views"
+import { useIsPinned, useReorderPinned, useWriteView } from "../hooks/views"
 import { useDragReorder } from "../hooks/drag-reorder"
 import { shareOwnerName } from "../data/shares"
 import type { Note, NoteId } from "../schema"
@@ -28,6 +28,8 @@ import { isValidDateString, isValidWeekString, toDateString } from "../utils/dat
 import { DropdownMenu } from "./ui/dropdown-menu"
 import { IconButton } from "./ui/icon-button"
 import {
+  ArrowDownIcon16,
+  ArrowUpIcon16,
   CalendarDateFillIcon16,
   CalendarDateIcon16,
   CircleQuestionMarkFillIcon16,
@@ -65,8 +67,7 @@ export function NavItems({
   onNavigate?: () => void
 }) {
   const notes = useAtomValue(ownSortedNotesAtom)
-  const pinnedNotes = useAtomValue(pinnedNotesAtom)
-  const pinnedBlocks = useAtomValue(pinnedBlocksAtom)
+  const pinned = useAtomValue(pinnedEntriesAtom)
   const sharedNotes = useAtomValue(sharedNotesAtom)
   const booting = useAtomValue(isBootingAtom)
   const syncText = useSyncStatusText()
@@ -126,19 +127,15 @@ export function NavItems({
               above.
 
               Views leads: it is what you keep to hand, and it holds both
-              kinds of pin (docs/metadata.md) — the notes first, then the
-              blocks, each of which opens its note focused on it. A pinned
-              note is ALSO still in Notes below, in its sorted place: the pin
-              is somewhere else to reach it, not somewhere it has gone. */}
-          {pinnedNotes.length > 0 || pinnedBlocks.length > 0 ? (
+              kinds of pin (docs/metadata.md) — notes and blocks in one list,
+              in the order it was dragged into, a block opening its note
+              focused on it. A pinned note is ALSO still in Notes below, in
+              its sorted place: the pin is somewhere else to reach it, not
+              somewhere it has gone. */}
+          {pinned.length > 0 ? (
             <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
               <SectionHeading>Views</SectionHeading>
-              {pinnedNotes.length > 0 ? (
-                <NoteRows notes={pinnedNotes} size={size} onNavigate={onNavigate} />
-              ) : null}
-              {pinnedBlocks.length > 0 ? (
-                <PinnedBlockRows blocks={pinnedBlocks} size={size} onNavigate={onNavigate} />
-              ) : null}
+              <ViewRows entries={pinned} size={size} onNavigate={onNavigate} />
             </div>
           ) : null}
           {notes.length > 0 ? (
@@ -146,9 +143,7 @@ export function NavItems({
               className={cx(
                 "flex flex-col gap-1",
                 // The rule belongs to whichever list is first.
-                pinnedNotes.length > 0 || pinnedBlocks.length > 0
-                  ? "pt-2"
-                  : "border-t border-border-secondary pt-3",
+                pinned.length > 0 ? "pt-2" : "border-t border-border-secondary pt-3",
               )}
             >
               <SectionHeading action={<NoteSortMenu />}>Notes</SectionHeading>
@@ -549,31 +544,86 @@ function RowActions({ size, children }: { size: "medium" | "large"; children: Re
  * renders no inline markdown), or a stand-in for none. */
 const pinnedBlockLabel = (block: PinnedBlock): string => inlineText(block.text) || "Untitled block"
 
-/** The pinned blocks, as rows: each opens its note focused on the block. */
-function PinnedBlockRows({
-  blocks,
+/**
+ * **The Views list**: the pinned notes and blocks as one list of rows, in
+ * the order it was dragged into (`pinnedEntriesAtom`). Dragging is always
+ * live here — the list has no sort but the user's own — and the first drag
+ * is what keys the list (docs/metadata.md); the row's menu moves it up and
+ * down for the keyboard and for a touch screen, through the same write.
+ */
+function ViewRows({
+  entries,
   size,
   onNavigate,
 }: {
-  blocks: PinnedBlock[]
+  entries: PinnedEntry[]
   size: "medium" | "large"
   onNavigate?: () => void
 }) {
+  const reorderPinned = useReorderPinned()
+  const ids = React.useMemo(() => entries.map((entry) => entry.id), [entries])
+  const onMove = React.useCallback(
+    (_id: string, next: string[]) => reorderPinned(next),
+    [reorderPinned],
+  )
+  const reorder = useDragReorder({ ids, onMove })
+
+  const swap = (index: number, delta: number) => {
+    const target = index + delta
+    if (target < 0 || target >= entries.length) return undefined
+    return () => {
+      const next = [...ids]
+      const [moved] = next.splice(index, 1)
+      next.splice(target, 0, moved)
+      reorderPinned(next)
+    }
+  }
+
   return (
-    <ul className="flex flex-col gap-1" data-testid="pinned-blocks">
-      {blocks.map((block) => (
-        <li key={block.id} className="note-row group/note relative">
-          <PinnedBlockNavItem
-            block={block}
-            size={size}
-            onNavigate={onNavigate}
-            className="w-full"
-          />
-          <RowActions size={size}>
-            <PinnedBlockActionsMenu block={block} />
-          </RowActions>
-        </li>
-      ))}
+    <ul className="flex flex-col gap-1" data-testid="view-rows" {...reorder.listProps}>
+      {entries.map((entry, index) => {
+        const moves = { onMoveUp: swap(index, -1), onMoveDown: swap(index, 1) }
+        return (
+          <li
+            key={entry.id}
+            className={cx(
+              "note-row group/note relative data-[dragging]:opacity-40",
+              reorder.dropBefore === entry.id &&
+                "before:absolute before:-top-0.5 before:inset-x-0 before:h-0.5 before:rounded-full before:bg-border-focus",
+              reorder.dropBefore === "end" &&
+                index === entries.length - 1 &&
+                "after:absolute after:-bottom-0.5 after:inset-x-0 after:h-0.5 after:rounded-full after:bg-border-focus",
+            )}
+            {...reorder.rowProps(entry.id)}
+          >
+            {entry.kind === "note" ? (
+              <>
+                <NoteNavItem
+                  note={entry.note}
+                  size={size}
+                  onNavigate={onNavigate}
+                  className="w-full"
+                />
+                <RowActions size={size}>
+                  <NoteActionsMenu noteId={entry.id} reorder={moves} />
+                </RowActions>
+              </>
+            ) : (
+              <>
+                <PinnedBlockNavItem
+                  block={entry.block}
+                  size={size}
+                  onNavigate={onNavigate}
+                  className="w-full"
+                />
+                <RowActions size={size}>
+                  <PinnedBlockActionsMenu block={entry.block} reorder={moves} />
+                </RowActions>
+              </>
+            )}
+          </li>
+        )
+      })}
     </ul>
   )
 }
@@ -618,8 +668,15 @@ function PinnedBlockNavItem({
   )
 }
 
-/** A pinned block's row menu: unpin it, or copy a link to it. */
-function PinnedBlockActionsMenu({ block }: { block: PinnedBlock }) {
+/** A pinned block's row menu: move it within Views (the keyboard's and a
+ * touch screen's way to reorder), unpin it, or copy a link to it. */
+function PinnedBlockActionsMenu({
+  block,
+  reorder,
+}: {
+  block: PinnedBlock
+  reorder?: { onMoveUp?: () => void; onMoveDown?: () => void }
+}) {
   const writeView = useWriteView()
   return (
     <DropdownMenu modal={false}>
@@ -631,6 +688,25 @@ function PinnedBlockActionsMenu({ block }: { block: PinnedBlock }) {
         }
       />
       <DropdownMenu.Content align="start">
+        {reorder ? (
+          <>
+            <DropdownMenu.Item
+              icon={<ArrowUpIcon16 />}
+              disabled={!reorder.onMoveUp}
+              onClick={() => reorder.onMoveUp?.()}
+            >
+              Move up
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              icon={<ArrowDownIcon16 />}
+              disabled={!reorder.onMoveDown}
+              onClick={() => reorder.onMoveDown?.()}
+            >
+              Move down
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+          </>
+        ) : null}
         <DropdownMenu.Item
           icon={<PinFillIcon16 className="text-text-pinned" />}
           onClick={() => writeView(block.id, { pinned: false })}

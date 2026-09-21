@@ -6,6 +6,7 @@ import {
   applyViewRows,
   patchedView,
   pinnedRootIdsAtom,
+  reorderedViews,
   viewByRootAtom,
   viewsAtom,
   type ViewPatch,
@@ -26,6 +27,22 @@ export function useWriteView() {
       const row = patchedView(get(viewByRootAtom).get(rootId), rootId, patch, Date.now())
       if (get(isDatabaseModeAtom)) databaseApplyViews([row])
       else set(viewsAtom, applyViewRows(get(viewsAtom), [row]))
+    }, []),
+  )
+}
+
+/**
+ * Put the Views list in a new order (`reorderedViews`): the rows whose key
+ * has to change go the same way a pin does. Handed the whole list as
+ * dropped, so a drag and the menu's Move up / Move down are one write path.
+ */
+export function useReorderPinned() {
+  return useAtomCallback(
+    React.useCallback((get, set, nextRootIds: readonly string[]) => {
+      const rows = reorderedViews(get(viewByRootAtom), nextRootIds, Date.now())
+      if (rows.length === 0) return
+      if (get(isDatabaseModeAtom)) databaseApplyViews(rows)
+      else set(viewsAtom, applyViewRows(get(viewsAtom), rows))
     }, []),
   )
 }

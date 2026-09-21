@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
   normalizeEmail,
-  parseRootIds,
   serializeSharePermissions,
   shareAllows,
   shareFromRow,
@@ -12,16 +11,16 @@ const row: ShareRow = {
   id: "shr_1",
   owner_id: 7,
   grantee_email: "bob@example.com",
-  root_ids: '["blk_a","blk_b"]',
+  view_id: "blk_a",
   permissions: "read,write",
   created_at: 1,
   revoked_at: null,
 }
 
 describe("shareFromRow", () => {
-  it("reads the roots and verbs off the row", () => {
+  it("reads the view and verbs off the row", () => {
     const grant = shareFromRow(row)
-    expect([...grant.rootIds]).toEqual(["blk_a", "blk_b"])
+    expect(grant.viewId).toBe("blk_a")
     expect([...grant.permissions]).toEqual(["read", "write"])
     expect(shareAllows(grant, "write")).toBe(true)
     expect(shareAllows(grant, "delete")).toBe(false)
@@ -32,10 +31,8 @@ describe("shareFromRow", () => {
     expect(shareAllows(grant, "read")).toBe(false)
   })
 
-  it("reads a broken root list as NO notes, never every note", () => {
-    expect(parseRootIds("{")).toEqual(new Set())
-    expect(parseRootIds('"blk_a"')).toEqual(new Set())
-    expect(parseRootIds('["blk_a", 3, ""]')).toEqual(new Set(["blk_a"]))
+  it("reads a row with no view as a share over nothing, never over everything", () => {
+    expect(shareFromRow({ ...row, view_id: undefined as unknown as string }).viewId).toBe("")
   })
 })
 

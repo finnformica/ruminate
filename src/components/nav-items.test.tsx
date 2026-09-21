@@ -52,8 +52,7 @@ vi.mock("../global-state", async (importOriginal) => {
     graphSnapshotAtom: atom(buildGraphSnapshot([], [])),
     isBootingAtom: atom(false),
     isSignedOutAtom: atom(false),
-    pinnedBlocksAtom: atom([]),
-    pinnedNotesAtom: atom([]),
+    pinnedEntriesAtom: atom([]),
     sharedNotesAtom: atom([]),
     // Derived from the graph in the real module; a plain writable atom here,
     // so a test can state the rows and be about the list rather than the sort.
@@ -62,13 +61,7 @@ vi.mock("../global-state", async (importOriginal) => {
   }
 })
 
-import {
-  noteSortAtom,
-  ownSortedNotesAtom,
-  pinnedBlocksAtom,
-  pinnedNotesAtom,
-  type NoteSort,
-} from "../global-state"
+import { noteSortAtom, ownSortedNotesAtom, pinnedEntriesAtom, type NoteSort } from "../global-state"
 import { viewsAtom, viewMapOf } from "../data/views"
 import { NavItems } from "./nav-items"
 
@@ -102,8 +95,20 @@ function renderSidebar({
 }) {
   const store = createStore()
   store.set(noteSortAtom, sort)
-  store.set(pinnedNotesAtom as never, pinnedNotes as never)
-  store.set(pinnedBlocksAtom as never, pinnedBlocks as never)
+  // One ordered list: the notes first, then the blocks — what the real atom
+  // yields until something is dragged.
+  store.set(
+    pinnedEntriesAtom as never,
+    [
+      ...pinnedNotes.map((note) => ({ kind: "note", id: note.id, noteId: note.id, note })),
+      ...pinnedBlocks.map((block) => ({
+        kind: "block",
+        id: block.id,
+        noteId: block.noteId,
+        block,
+      })),
+    ] as never,
+  )
   // What is pinned is a VIEW (src/data/views.ts): the row's pin glyph reads
   // the views, so the pinned lists above are also written as views here.
   store.set(
@@ -223,6 +228,47 @@ describe("the sidebar's Notes list", () => {
 })
 
 describe("the sidebar's Views list", () => {
+  it("is dragged into an order of its own: the drop keys every view, blocks and notes alike", () => {
+    const pinnedNote = noteOf("p", "Pinned one")
+    const store = renderSidebar({
+      notes: [pinnedNote, ...THREE],
+      pinnedNotes: [pinnedNote],
+      pinnedBlocks: [{ id: "blk_x", noteId: "a", text: "A pinned block", note: THREE[0] }],
+    })
+    const rows = within(screen.getByTestId("view-rows")).getAllByRole("listitem")
+    expect(rows).toHaveLength(2)
+    const transfer = { effectAllowed: "", dropEffect: "", setData: vi.fn(), getData: () => "" }
+    // Drag the block above the note.
+    fireEvent.dragStart(rows[1], { dataTransfer: transfer })
+    fireEvent.dragOver(rows[0], { dataTransfer: transfer, clientY: 0 })
+    fireEvent.drop(rows[0], { dataTransfer: transfer, clientY: 0 })
+    // Nothing was keyed before, so the first drag keys the whole list, in
+    // the dropped order; the notes list's own move is not involved.
+    const keys = ["blk_x", "p"].map((id) => store.get(viewsAtom).get(id)?.sort_key)
+    expect(keys.every((key) => typeof key === "string")).toBe(true)
+    expect(keys[0]! < keys[1]!).toBe(true)
+    expect(mocks.moveNote).not.toHaveBeenCalled()
+  })
+
+  it("moves a block row from its menu, for the keyboard", async () => {
+    const pinnedNote = noteOf("p", "Pinned one")
+    const store = renderSidebar({
+      notes: [pinnedNote, ...THREE],
+      pinnedNotes: [pinnedNote],
+      pinnedBlocks: [{ id: "blk_x", noteId: "a", text: "A pinned block", note: THREE[0] }],
+    })
+    const rows = within(screen.getByTestId("view-rows")).getAllByRole("listitem")
+    fireEvent.click(within(rows[1]).getByRole("button", { name: "Pinned block actions" }))
+    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
+    // Last row: nothing below it to move past.
+    expect(screen.getByRole("menuitem", { name: "Move down" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    )
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move up" }))
+    const keys = ["blk_x", "p"].map((id) => store.get(viewsAtom).get(id)?.sort_key)
+    expect(keys[0]! < keys[1]!).toBe(true)
+  })
+
   it("is not drawn when nothing is pinned", () => {
     renderSidebar({ notes: THREE })
     const headings = screen.getAllByTestId("section-heading").map((el) => el.textContent?.trim())

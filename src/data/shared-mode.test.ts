@@ -46,7 +46,7 @@ const link = (source: string, destination: string, sortKey = "a0"): LinkRow => (
 const SHARE: ReceivedShareSummary = {
   id: "shr_1",
   owner: { login: "ada", name: "Ada" },
-  rootIds: ["blk_note"],
+  view: { id: "blk_note", rootId: "blk_note", filter: null, sort: null },
   permissions: ["read", "write"],
   createdAt: 1,
 }
@@ -54,6 +54,7 @@ const SHARE: ReceivedShareSummary = {
 const SLICE: SliceBody = {
   nodes: [node("blk_note", "Plan", "note"), node("blk_a", "one", "ul", "blk_note")],
   links: [link("blk_note", "blk_a")],
+  view: SHARE.view,
 }
 
 // -----------------------------------------------------------------------------
@@ -249,8 +250,12 @@ describe("shared mode", () => {
   it("pushes a block root back with its own type, not the note it is shown as", async () => {
     vi.useFakeTimers()
     const stub = stubServer()
-    stub.received = [{ ...SHARE, rootIds: ["blk_a"] }]
-    stub.slice = { nodes: [node("blk_a", "one", "ul")], links: [] }
+    stub.received = [{ ...SHARE, view: { id: "blk_a", rootId: "blk_a", filter: null, sort: null } }]
+    stub.slice = {
+      nodes: [node("blk_a", "one", "ul")],
+      links: [],
+      view: { id: "blk_a", rootId: "blk_a", filter: null, sort: null },
+    }
     startSharedMode({ fetchImpl: stub.fetch })
     await flushSharedMode()
     expect(store.get(sharedGraphAtom).nodes.get("blk_a")?.type).toBe("note")

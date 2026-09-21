@@ -152,7 +152,7 @@ describe("the share slice", () => {
       id: "shr_test",
       owner_id: OWNER,
       grantee_email: "someone@example.com",
-      root_ids: JSON.stringify(["blk_shared"]),
+      view_id: "blk_shared",
       permissions: "read",
       created_at: 1,
       revoked_at: null,
