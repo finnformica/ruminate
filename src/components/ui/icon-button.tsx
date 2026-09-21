@@ -1,8 +1,7 @@
 import React from "react"
-import { cx } from "../utils/cx"
+import { cx } from "../../utils/cx"
 import { Keys } from "./keys"
 import { Tooltip } from "./tooltip"
-import { Slot } from "@radix-ui/react-slot"
 
 export type IconButtonProps = React.ComponentPropsWithoutRef<"button"> & {
   "aria-label": string // Required for accessibility
@@ -12,7 +11,6 @@ export type IconButtonProps = React.ComponentPropsWithoutRef<"button"> & {
   tooltipAlign?: "start" | "center" | "end"
   tooltipSideOffset?: number
   disableTooltip?: boolean
-  asChild?: boolean
 }
 
 export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
@@ -26,14 +24,12 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
       tooltipAlign = "center",
       tooltipSideOffset,
       disableTooltip = false,
-      asChild = false,
       ...props
     },
     ref,
   ) => {
-    const Component = asChild ? Slot : "button"
     const trigger = (
-      <Component
+      <button
         ref={ref}
         type="button"
         className={cx(
@@ -42,14 +38,12 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
           "coarse:h-10 coarse:px-3",
           size === "small" && "h-6 px-2",
           size === "medium" && "h-8 px-2",
-          // If we're not rendering a button, we need to add hover and active styles without the `enabled:` prefix
-          asChild && "hover:bg-bg-hover active:bg-bg-active",
           className,
         )}
         {...props}
       >
         {children}
-      </Component>
+      </button>
     )
 
     return (

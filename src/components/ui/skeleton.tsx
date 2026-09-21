@@ -1,4 +1,4 @@
-import { cx } from "../utils/cx"
+import { cx } from "../../utils/cx"
 
 /**
  * Loading placeholders — see "Loading" in docs/design-principles.md.

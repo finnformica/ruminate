@@ -5,9 +5,9 @@ import { APP_SHORTCUTS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { composeQuery, extractQualifiers, splitQuery } from "../utils/search"
 import { caretCoordinates } from "./block-editor/caret"
-import { IconButton } from "./icon-button"
+import { IconButton } from "./ui/icon-button"
 import { ClearIcon16, SearchIcon16 } from "./icons"
-import { Keys } from "./keys"
+import { Keys } from "./ui/keys"
 import {
   QUALIFIER_POPOVER_MAX_WIDTH,
   QUALIFIER_POPOVER_MIN_WIDTH,

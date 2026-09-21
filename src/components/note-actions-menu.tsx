@@ -12,8 +12,8 @@ import { useIsPinned, useWriteView } from "../hooks/views"
 import { shareDialogAtom } from "./share-note-dialog"
 import type { Width } from "../schema"
 import { cx } from "../utils/cx"
-import { DropdownMenu } from "./dropdown-menu"
-import { IconButton } from "./icon-button"
+import { DropdownMenu } from "./ui/dropdown-menu"
+import { IconButton } from "./ui/icon-button"
 import {
   ArrowDownIcon16,
   ArrowUpIcon16,

@@ -1,6 +1,6 @@
 import { useCallback } from "react"
-import { cx } from "../utils/cx"
-import { ChevronRightIcon12 } from "./icons"
+import { cx } from "../../utils/cx"
+import { ChevronRightIcon12 } from "../icons"
 
 function Root({
   children,

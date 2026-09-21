@@ -70,13 +70,13 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 - **State**: Jotai
 - **Storage**: sqlite-wasm (OPFS) locally, Cloudflare D1 remotely, replicated per row with last-writer-wins
 - **Routing**: TanStack Router (file-based)
-- **UI**: Radix UI primitives + Base UI
+- **UI**: Base UI (headless) under the app's own primitives in `src/components/ui/` — every raised surface is `Surface` (docs/design-principles.md, Elevation)
 - **Markdown**: react-markdown with remark-gfm and remark-math/rehype-katex, inline-only, for block bodies
 
 ### File Structure
 
 - `src/blocks/` - Block types (`registry.ts`), parse/serialize, doc operations, keymap and commands
-- `src/components/ui/` - The primitives everything else is built from (`Surface` first; the atoms and Base UI wrappers move in as they are reworked)
+- `src/components/ui/` - The primitives everything else is built from: `Surface`, the Base UI wrappers (Dialog, DropdownMenu, Tooltip, HoverCard, Checkbox) and the atoms (Button, IconButton, PillButton, TextInput, Keys, Skeleton, Details)
 - `src/components/block-editor/` - The block/outline editor
 - `src/components/` - React components with Storybook stories
 - `src/data/` - Graph, ops, store, database runtime, note metadata

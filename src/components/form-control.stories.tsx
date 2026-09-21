@@ -1,5 +1,5 @@
 import { FormControl } from "./form-control"
-import { TextInput } from "./text-input"
+import { TextInput } from "./ui/text-input"
 
 export default {
   title: "FormControl",

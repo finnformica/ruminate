@@ -25,8 +25,8 @@ import { APP_SHORTCUTS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { inlineText } from "../utils/inline-text"
 import { isValidDateString, isValidWeekString, toDateString } from "../utils/date"
-import { DropdownMenu } from "./dropdown-menu"
-import { IconButton } from "./icon-button"
+import { DropdownMenu } from "./ui/dropdown-menu"
+import { IconButton } from "./ui/icon-button"
 import {
   ArrowDownIcon16,
   ArrowUpIcon16,
@@ -49,13 +49,13 @@ import {
   SortAlphabetAscIcon16,
   SortNumberDescIcon16,
 } from "./icons"
-import { Keys } from "./keys"
-import { NavListSkeleton } from "./skeleton"
+import { Keys } from "./ui/keys"
+import { NavListSkeleton } from "./ui/skeleton"
 import { NoteActionsMenu } from "./note-actions-menu"
 import { NoteFavicon } from "./note-favicon"
 import { beginGitHubSignIn } from "./github-auth"
 import { SyncStatusIcon, useSyncStatusMeta, useSyncStatusText } from "./sync-status"
-import { Tooltip } from "./tooltip"
+import { Tooltip } from "./ui/tooltip"
 
 const SizeContext = createContext<"medium" | "large">("medium")
 

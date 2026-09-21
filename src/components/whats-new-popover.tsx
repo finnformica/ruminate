@@ -7,7 +7,7 @@ import {
   type ChangelogRelease,
 } from "../utils/changelog"
 import { cx } from "../utils/cx"
-import { IconButton } from "./icon-button"
+import { IconButton } from "./ui/icon-button"
 import { Surface } from "./ui/surface"
 import { XIcon16 } from "./icons"
 import { EntryText } from "./release-notes"

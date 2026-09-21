@@ -10,9 +10,9 @@ import {
   sortDirections,
   toggleFilterValue,
 } from "../utils/view-filter"
-import { Button } from "./button"
-import { DropdownMenu } from "./dropdown-menu"
-import { IconButton } from "./icon-button"
+import { Button } from "./ui/button"
+import { DropdownMenu } from "./ui/dropdown-menu"
+import { IconButton } from "./ui/icon-button"
 import { FilterIcon16, SortAlphabetAscIcon16 } from "./icons"
 import { QualifierPicture } from "./qualifier-suggestions"
 

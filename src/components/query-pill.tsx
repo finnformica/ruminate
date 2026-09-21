@@ -5,7 +5,7 @@ import { useNoteById } from "../hooks/note"
 import { parseQualifierToken } from "../utils/search"
 import { XIcon12 } from "./icons"
 import { NoteFavicon } from "./note-favicon"
-import { PillButton } from "./pill-button"
+import { PillButton } from "./ui/pill-button"
 
 /**
  * One qualifier of the query as a removable pill beneath the query box —

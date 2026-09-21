@@ -1,5 +1,5 @@
 import React from "react"
-import { cx } from "../utils/cx"
+import { cx } from "../../utils/cx"
 
 type TextInputProps = React.ComponentPropsWithoutRef<"input"> & {
   invalid?: boolean

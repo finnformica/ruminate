@@ -6,7 +6,7 @@ import {
   type ChangelogEntry,
   type ChangelogRelease,
 } from "../utils/changelog"
-import { Keys } from "./keys"
+import { Keys } from "./ui/keys"
 
 /**
  * One release, drawn from the changelog (docs/changelog.md).

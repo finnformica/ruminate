@@ -5,11 +5,11 @@ import { storageDiagnosticsAtom } from "../data/storage-diagnostics"
 import { isBootingAtom, isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
 import { cx } from "../utils/cx"
-import { Button } from "./button"
+import { Button } from "./ui/button"
 import { PageHeader, PageHeaderProps } from "./page-header"
-import { HoverCard } from "./hover-card"
+import { HoverCard } from "./ui/hover-card"
 import { Notice } from "./notice"
-import { PageSkeleton, Skeleton } from "./skeleton"
+import { PageSkeleton, Skeleton } from "./ui/skeleton"
 
 type PageLayoutProps = PageHeaderProps & {
   className?: string

@@ -20,8 +20,8 @@ import {
   type FeatureKey,
 } from "../data/feature-flags"
 import { refreshFeatures, useIsAdmin } from "../data/features"
-import { Button } from "../components/button"
-import { DropdownMenu } from "../components/dropdown-menu"
+import { Button } from "../components/ui/button"
+import { DropdownMenu } from "../components/ui/dropdown-menu"
 import {
   CheckIcon16,
   ChevronDownIcon16,
@@ -32,7 +32,7 @@ import {
 } from "../components/icons"
 import { PageLayout } from "../components/page-layout"
 import { SettingsSection } from "../components/settings-section"
-import { TextInput } from "../components/text-input"
+import { TextInput } from "../components/ui/text-input"
 import { cx } from "../utils/cx"
 
 /**

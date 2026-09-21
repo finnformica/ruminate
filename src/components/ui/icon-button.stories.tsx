@@ -1,5 +1,5 @@
 import { IconButton } from "./icon-button"
-import { MoreIcon16, SearchIcon16 } from "./icons"
+import { MoreIcon16, SearchIcon16 } from "../icons"
 
 export default {
   title: "IconButton",

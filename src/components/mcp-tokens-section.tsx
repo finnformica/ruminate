@@ -13,10 +13,10 @@ import {
 } from "../data/mcp-tokens"
 import { githubUserAtom, notesAtom } from "../global-state"
 import { cx } from "../utils/cx"
-import { Button } from "./button"
-import { Checkbox } from "./checkbox"
+import { Button } from "./ui/button"
+import { Checkbox } from "./ui/checkbox"
 import { CheckIcon16, CopyIcon16, PlusIcon16, TrashIcon16 } from "./icons"
-import { TextInput } from "./text-input"
+import { TextInput } from "./ui/text-input"
 
 /**
  * MCP access, on the settings page (docs/mcp-server.md).

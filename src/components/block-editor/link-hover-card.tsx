@@ -4,8 +4,8 @@ import type React from "react"
 import { useEffect, useRef, useState } from "react"
 import { hostOf } from "../../blocks/link"
 import { Surface } from "../ui/surface"
-import { Button } from "../button"
-import { IconButton } from "../icon-button"
+import { Button } from "../ui/button"
+import { IconButton } from "../ui/icon-button"
 import { CopyIcon16, GlobeIcon16, TrashIcon16 } from "../icons"
 
 /** What the card can do to the link it is over. */

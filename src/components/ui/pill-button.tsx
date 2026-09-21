@@ -1,19 +1,16 @@
-import { Slot } from "@radix-ui/react-slot"
 import React from "react"
-import { cx } from "../utils/cx"
+import { cx } from "../../utils/cx"
 
 type PillButtonProps = React.ComponentPropsWithoutRef<"button"> & {
   children: React.ReactNode
-  asChild?: boolean
   className?: string
   variant?: "primary" | "secondary" | "dashed"
 }
 
 export const PillButton = React.forwardRef<HTMLButtonElement, PillButtonProps>(
-  ({ children, asChild, className, variant = "secondary", ...props }, ref) => {
-    const Component = asChild ? Slot : "button"
+  ({ children, className, variant = "secondary", ...props }, ref) => {
     return (
-      <Component
+      <button
         ref={ref}
         className={cx(
           // `focus-ring` is the app-wide focus treatment (a 2px inset accent
@@ -34,7 +31,7 @@ export const PillButton = React.forwardRef<HTMLButtonElement, PillButtonProps>(
         {...props}
       >
         {children}
-      </Component>
+      </button>
     )
   },
 )

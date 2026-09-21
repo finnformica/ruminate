@@ -3,9 +3,9 @@ import { useHotkeys } from "react-hotkeys-hook"
 import { useValueRef } from "../hooks/value-ref"
 import { APP_SHORTCUTS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
-import { IconButton } from "./icon-button"
+import { IconButton } from "./ui/icon-button"
 import { ClearIcon16, SearchIcon16 } from "./icons"
-import { Keys } from "./keys"
+import { Keys } from "./ui/keys"
 
 type SearchInputProps = Omit<React.ComponentPropsWithoutRef<"input">, "onChange"> & {
   shortcut?: string[]

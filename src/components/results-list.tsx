@@ -5,7 +5,7 @@ import type { SearchResults } from "../hooks/search-results"
 import type { NoteId } from "../schema"
 import { cx } from "../utils/cx"
 import { pluralize } from "../utils/pluralize"
-import { Button } from "./button"
+import { Button } from "./ui/button"
 import { ResultsEditor } from "./results-editor"
 
 /**

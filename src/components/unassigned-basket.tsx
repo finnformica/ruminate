@@ -1,5 +1,5 @@
 import { BlockNoteEditor } from "./block-editor/block-note-editor"
-import { Details } from "./details"
+import { Details } from "./ui/details"
 import { useBasketDoc } from "../hooks/note-doc"
 import type { NoteId } from "../schema"
 

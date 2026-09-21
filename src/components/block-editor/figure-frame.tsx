@@ -13,7 +13,7 @@ import {
 import type { Block } from "../../blocks/types"
 import type { Occurrence } from "../../blocks/view"
 import { cx } from "../../utils/cx"
-import { IconButton } from "../icon-button"
+import { IconButton } from "../ui/icon-button"
 import { AlignCenterIcon16, AlignLeftIcon16, AlignRightIcon16 } from "../icons"
 import type { BlockEditorApi } from "./block-item"
 

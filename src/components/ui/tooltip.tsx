@@ -1,5 +1,5 @@
 import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip"
-import { Surface } from "./ui/surface"
+import { Surface } from "./surface"
 
 type ContentProps = {
   side?: "top" | "bottom" | "left" | "right"

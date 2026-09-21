@@ -15,7 +15,7 @@ import type { ShareView } from "../data/shares"
 import { describeFilter, describeSort } from "../utils/view-filter"
 import { githubUserAtom, graphSnapshotAtom, notesAtom } from "../global-state"
 import { cx } from "../utils/cx"
-import { Button } from "./button"
+import { Button } from "./ui/button"
 import { TrashIcon16 } from "./icons"
 
 /**

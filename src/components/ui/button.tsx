@@ -1,6 +1,6 @@
 import React from "react"
 import { Keys } from "./keys"
-import { cx } from "../utils/cx"
+import { cx } from "../../utils/cx"
 
 export type ButtonProps = React.ComponentPropsWithoutRef<"button"> & {
   variant?: "secondary" | "primary"
