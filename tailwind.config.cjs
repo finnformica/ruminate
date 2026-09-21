@@ -73,6 +73,7 @@ module.exports = {
         overlay: "var(--color-bg-overlay)",
         backdrop: "var(--color-bg-backdrop)",
         "overlay-backdrop": "var(--color-bg-overlay-backdrop)",
+        scrim: "var(--color-bg-scrim)",
         secondary: "var(--color-bg-secondary)",
         "secondary-hover": "var(--color-bg-secondary-hover)",
         "secondary-active": "var(--color-bg-secondary-active)",
