@@ -19,7 +19,9 @@ import {
   notesAtom,
   ownSortedNotesAtom,
   pinnedBlocksAtom,
+  pinnedEntriesAtom,
   pinnedNotesAtom,
+  pinnedRootsAtom,
   recentTouchesAtom,
   sampleGraphAtom,
   searchBlocksAtom,
@@ -216,6 +218,52 @@ describe("pinnedBlocksAtom", () => {
     const { store, unsubscribe } = await signedInStore(FILES)
     pin(store, "blk_gone")
     expect(store.get(pinnedBlocksAtom)).toEqual([])
+    unsubscribe()
+  })
+})
+
+describe("pinnedEntriesAtom", () => {
+  const pinnedView = (id: string, sort_key: string | null) => ({
+    id,
+    root_id: id,
+    filter: null,
+    sort: null,
+    pinned: true,
+    sort_key,
+    updated_at: 2,
+  })
+
+  it("lists the notes then the blocks until something is dragged", async () => {
+    const { store, unsubscribe } = await signedInStore(FILES)
+    store.set(viewsAtom, viewMapOf([pinnedView("blk_milk", null), pinnedView("tasks", null)]))
+    expect(store.get(pinnedEntriesAtom).map((entry) => `${entry.kind}:${entry.id}`)).toEqual([
+      "note:tasks",
+      "block:blk_milk",
+    ])
+    unsubscribe()
+  })
+
+  it("puts keyed views in key order, blocks above notes if that is where they were dragged", async () => {
+    const { store, unsubscribe } = await signedInStore(FILES)
+    store.set(
+      viewsAtom,
+      viewMapOf([
+        pinnedView("blk_milk", "a0"),
+        pinnedView("tasks", "a1"),
+        // Pinned after the drag: no key, so it joins the end.
+        pinnedView("misc", null),
+      ]),
+    )
+    expect(store.get(pinnedEntriesAtom).map((entry) => entry.id)).toEqual([
+      "blk_milk",
+      "tasks",
+      "misc",
+    ])
+    expect(store.get(pinnedRootsAtom)).toEqual([
+      { id: "blk_milk", noteId: "tasks" },
+      { id: "tasks", noteId: "tasks" },
+      { id: "misc", noteId: "misc" },
+    ])
     unsubscribe()
   })
 })

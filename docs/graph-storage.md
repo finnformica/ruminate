@@ -476,7 +476,11 @@ holds, then the ones it does not, in the name order beneath them.
 their sorted place in the notes list as well — a pin is a second place to
 reach a note, never a note lifted out of the order. That is what lets the
 order be wholly the user's: no band interrupts the manual sequence, and a drag
-has no boundary to be stopped at.
+has no boundary to be stopped at. The Views list has an order of its own, on
+the views' `sort_key` (`orderPinned`, `reorderedViews` in
+`src/data/views.ts`): the same fractional keys, reconciled by the same
+`reconcileSortKeys`, so a drag there rewrites one view row, and the first
+drag keys the list.
 
 ## Cross-file block-id dedup
 

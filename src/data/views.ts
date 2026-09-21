@@ -1,5 +1,6 @@
 import { atom } from "jotai"
 import type { ViewRow } from "../../worker/handlers/replica-payload"
+import { reconcileSortKeys } from "./graph"
 import type { Op } from "./ops"
 import { sampleViews } from "./sample-graph"
 
@@ -57,6 +58,8 @@ export interface ViewPatch {
   filter?: string | null
   sort?: string | null
   pinned?: boolean
+  /** Where the view sits in the Views list (`orderPinned`). */
+  sort_key?: string | null
 }
 
 const textOrNull = (value: string | null | undefined, fallback: string | null) => {
@@ -85,7 +88,7 @@ export function patchedView(
     filter: textOrNull(patch.filter, current?.filter ?? null),
     sort: textOrNull(patch.sort, current?.sort ?? null),
     pinned: patch.pinned ?? current?.pinned ?? false,
-    sort_key: current?.sort_key ?? null,
+    sort_key: patch.sort_key !== undefined ? patch.sort_key : (current?.sort_key ?? null),
     updated_at: Math.max(now, (current?.updated_at ?? 0) + 1),
   }
   if (!next.pinned && next.filter === null && next.sort === null) {
@@ -140,4 +143,58 @@ export function orphanedViews(
     tombstones.push({ ...view, updated_at: at, deleted_at: at })
   }
   return tombstones
+}
+
+/**
+ * **The Views list's order.** A pinned view with a `sort_key` sits where the
+ * key puts it — the same fractional index a `child` link uses for sibling
+ * order, so a drag rewrites one row — and the rest follow in the order the
+ * caller drew them (the notes in their sort, then the blocks in index
+ * order), which is where a view sits until it is dragged: keys are assigned
+ * on the first drag, not at pin time, so a corpus nobody has reordered
+ * carries none, and a view pinned later joins the end rather than jumping
+ * the queue. Ties on a key break on the root id, as sibling links do.
+ */
+export function orderPinned<T extends { id: string }>(
+  entries: readonly T[],
+  viewByRoot: ReadonlyMap<string, ViewRow>,
+): T[] {
+  const keyed: { entry: T; key: string }[] = []
+  const unkeyed: T[] = []
+  for (const entry of entries) {
+    const key = viewByRoot.get(entry.id)?.sort_key
+    if (typeof key === "string") keyed.push({ entry, key })
+    else unkeyed.push(entry)
+  }
+  if (keyed.length === 0) return [...entries]
+  keyed.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : a.entry.id < b.entry.id ? -1 : 1))
+  return [...keyed.map(({ entry }) => entry), ...unkeyed]
+}
+
+/**
+ * The rows a drag of the Views list writes: the pinned views in `nextRootIds`
+ * order, keyed the way `reconcileSortKeys` keys siblings — every key that
+ * still fits the new order is kept, so an ordinary drag rewrites one row,
+ * and the first drag ever (no keys yet) keys the whole list. A root with no
+ * pinned view is skipped rather than invented.
+ */
+export function reorderedViews(
+  viewByRoot: ReadonlyMap<string, ViewRow>,
+  nextRootIds: readonly string[],
+  now: number,
+): ViewRow[] {
+  const desired = nextRootIds.filter((id) => viewByRoot.get(id)?.pinned === true)
+  const existing = desired.flatMap((id) => {
+    const key = viewByRoot.get(id)?.sort_key
+    return typeof key === "string" ? [{ id, sortKey: key }] : []
+  })
+  const keys = reconcileSortKeys(existing, desired)
+  const rows: ViewRow[] = []
+  for (const id of desired) {
+    const view = viewByRoot.get(id) as ViewRow
+    const key = keys.get(id)
+    if (key === undefined || key === view.sort_key) continue
+    rows.push(patchedView(view, id, { sort_key: key }, now))
+  }
+  return rows
 }

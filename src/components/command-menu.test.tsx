@@ -83,20 +83,14 @@ vi.mock("../global-state", async (importOriginal) => {
     isDatabaseModeAtom: atom(false),
     notesAtom: atom(new Map()),
     sortedNotesAtom: atom([]),
-    pinnedNotesAtom: atom([]),
-    pinnedBlocksAtom: atom([]),
+    pinnedEntriesAtom: atom([]),
     recentTouchesAtom: atom([]),
     // The block index only serves the scope pill's label here.
     blockIndexAtom: atom({ hits: [], getBlock: () => undefined }),
   }
 })
 
-import {
-  pinnedBlocksAtom,
-  pinnedNotesAtom,
-  recentTouchesAtom,
-  sortedNotesAtom,
-} from "../global-state"
+import { pinnedEntriesAtom, recentTouchesAtom, sortedNotesAtom } from "../global-state"
 import { CommandMenu, isCommandMenuOpenAtom } from "./command-menu"
 
 // cmdk scrolls the selected item into view and measures its list with a
@@ -134,8 +128,23 @@ function renderMenu({
   // are the mock's plain, writable ones.
   store.set(sortedNotesAtom as never, notes as never)
   store.set(recentTouchesAtom as never, touches as never)
-  store.set(pinnedNotesAtom as never, pinned as never)
-  store.set(pinnedBlocksAtom as never, pinnedBlocks as never)
+  store.set(
+    pinnedEntriesAtom as never,
+    [
+      ...(pinned as { id: string }[]).map((note) => ({
+        kind: "note",
+        id: note.id,
+        noteId: note.id,
+        note,
+      })),
+      ...(pinnedBlocks as { id: string; noteId: string }[]).map((block) => ({
+        kind: "block",
+        id: block.id,
+        noteId: block.noteId,
+        block,
+      })),
+    ] as never,
+  )
   if (open) store.set(isCommandMenuOpenAtom, true)
   render(
     <Provider store={store}>

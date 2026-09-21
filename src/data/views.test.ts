@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest"
 import {
   applyViewRows,
   deletedIdsOf,
+  orderPinned,
   orphanedViews,
   patchedView,
   pinnedRootIdsAtom,
+  reorderedViews,
   viewByRootAtom,
   viewMapOf,
   viewsAtom,
@@ -120,5 +122,69 @@ describe("the atoms", () => {
     )
     expect(store.get(viewByRootAtom).get("blk_a")?.filter).toBe("type:todo")
     expect([...store.get(pinnedRootIdsAtom)]).toEqual(["n"])
+  })
+})
+
+describe("orderPinned", () => {
+  const entry = (id: string) => ({ id })
+  const byRoot = (rows: ViewRow[]) => new Map(rows.map((row) => [row.root_id, row]))
+
+  it("keeps the drawn order while nothing is keyed", () => {
+    const entries = [entry("n1"), entry("n2"), entry("b1")]
+    expect(orderPinned(entries, byRoot([view({ id: "n1", root_id: "n1" })]))).toEqual(entries)
+  })
+
+  it("puts keyed views first by key, and the unkeyed after in their drawn order", () => {
+    const views = byRoot([
+      view({ id: "n1", root_id: "n1", sort_key: "a2" }),
+      view({ id: "b1", root_id: "b1", sort_key: "a1" }),
+      view({ id: "n2", root_id: "n2" }),
+    ])
+    expect(
+      orderPinned([entry("n1"), entry("n2"), entry("b1"), entry("n3")], views).map((e) => e.id),
+    ).toEqual(["b1", "n1", "n2", "n3"])
+  })
+})
+
+describe("reorderedViews", () => {
+  const byRoot = (rows: ViewRow[]) => new Map(rows.map((row) => [row.root_id, row]))
+  const pinnedAt = (id: string, sort_key: string | null = null) =>
+    view({ id, root_id: id, sort_key })
+
+  it("keys the whole list on the first drag, in the dropped order", () => {
+    const rows = reorderedViews(
+      byRoot([pinnedAt("a"), pinnedAt("b"), pinnedAt("c")]),
+      ["c", "a", "b"],
+      500,
+    )
+    expect(rows.map((row) => row.id)).toEqual(["c", "a", "b"])
+    const keys = rows.map((row) => row.sort_key as string)
+    expect([...keys].sort()).toEqual(keys)
+    expect(rows.every((row) => row.updated_at === 500)).toBe(true)
+  })
+
+  it("rewrites one row once the list is keyed, and the list then reads in the dropped order", () => {
+    const views = byRoot([pinnedAt("a", "a0"), pinnedAt("b", "a1"), pinnedAt("c", "a2")])
+    const rows = reorderedViews(views, ["a", "c", "b"], 500)
+    // The reconciler keeps every key that still fits and rewrites the rest:
+    // one row, whichever of the two swapped it picks.
+    expect(rows).toHaveLength(1)
+    const next = new Map(views)
+    for (const row of rows) next.set(row.root_id, row)
+    expect(orderPinned([{ id: "a" }, { id: "b" }, { id: "c" }], next).map((e) => e.id)).toEqual([
+      "a",
+      "c",
+      "b",
+    ])
+  })
+
+  it("writes nothing for a drop that changes nothing, and skips roots with no pinned view", () => {
+    const views = byRoot([
+      pinnedAt("a", "a0"),
+      pinnedAt("b", "a1"),
+      view({ id: "x", root_id: "x", pinned: false }),
+    ])
+    expect(reorderedViews(views, ["a", "b"], 500)).toEqual([])
+    expect(reorderedViews(views, ["b", "x", "a"], 500).map((row) => row.id)).toEqual(["a"])
   })
 })
