@@ -7,13 +7,16 @@ import {
   netChanges,
   opsToEvents,
   planRestore,
+  rowsToEvents,
   stateAt,
   viewChangeToEvent,
+  type CurrentRows,
   type EventContext,
   type RuminateEvent,
 } from "./events"
 import { buildGraphSnapshot } from "./graph"
 import type { Op } from "./ops"
+import type { LinkRow, NodeRow } from "../../worker/handlers/replica-payload"
 import type { ViewRow } from "./views"
 
 function context(device = "tab", at = 1_000): EventContext {
@@ -206,5 +209,145 @@ describe("viewChangeToEvent", () => {
     expect(viewChangeToEvent(view, { ...view, deleted_at: 9 }, ctx)?.action).toBe("delete")
     expect(viewChangeToEvent({ ...view, deleted_at: 9 }, view, ctx)?.action).toBe("restore")
     expect(viewChangeToEvent(view, { ...view }, ctx)).toBeNull()
+  })
+})
+
+describe("rowsToEvents", () => {
+  const held = (rows: {
+    nodes?: NodeRow[]
+    links?: LinkRow[]
+    views?: ViewRow[]
+  }): CurrentRows => ({
+    nodes: new Map((rows.nodes ?? []).map((row) => [row.id, row])),
+    links: new Map(
+      (rows.links ?? []).map((row) => [linkEntityId(row.source_id, row.destination_id), row]),
+    ),
+    views: new Map((rows.views ?? []).map((row) => [row.id, row])),
+  })
+  const ctx = { batch: "apd", device: "tab", now: 9_000 }
+  const a: NodeRow = { id: "a", type: "text", text: "A", props: null, updated_at: 100, seq: 7 }
+  const dead: NodeRow = { ...a, deleted_at: 100 }
+  const terse = (events: RuminateEvent[]) =>
+    events.map((e) => [`${e.entity}.${e.action}`, e.patch, e.at])
+
+  it("a row the replica does not hold is a create — dead on arrival if it arrives dead", () => {
+    const events = rowsToEvents(
+      held({}),
+      {
+        nodes: [
+          { ...a, notes_id: "note" },
+          { ...dead, id: "b" },
+        ],
+        links: [],
+      },
+      ctx,
+    )
+    expect(terse(events)).toEqual([
+      ["block.create", { type: "text", text: "A", props: null, notes_id: "note" }, 100],
+      [
+        "block.create",
+        { type: "text", text: "A", props: null, notes_id: null, deleted_at: 100 },
+        100,
+      ],
+    ])
+    expect(events.map((e) => e.id)).toEqual(["apd:0", "apd:1"])
+  })
+
+  it("last writer wins: a stale row, and a row that changes nothing, are no event at all", () => {
+    const current = held({ nodes: [{ ...a, updated_at: 500 }] })
+    expect(
+      rowsToEvents(current, { nodes: [{ ...a, text: "older", updated_at: 400 }], links: [] }, ctx),
+    ).toEqual([])
+    expect(rowsToEvents(current, { nodes: [{ ...a, updated_at: 900 }], links: [] }, ctx)).toEqual(
+      [],
+    )
+  })
+
+  it("an update carries only what differs, and what the writer believed it was changing", () => {
+    const [event] = rowsToEvents(
+      held({ nodes: [a] }),
+      { nodes: [{ ...a, text: "A!", updated_at: 200 }], links: [] },
+      ctx,
+    )
+    expect(event).toMatchObject({ action: "update", patch: { text: "A!" }, base_seq: 7, at: 200 })
+  })
+
+  it("a delete keeps the last words; a restore sets what differs; an edit under a tombstone stays under it", () => {
+    const deleting = rowsToEvents(
+      held({ nodes: [a] }),
+      { nodes: [{ ...a, text: "last", updated_at: 300, deleted_at: 300 }], links: [] },
+      ctx,
+    )
+    expect(terse(deleting)).toEqual([
+      ["block.update", { text: "last" }, 300],
+      ["block.delete", { deleted_at: 300 }, 300],
+    ])
+    const restoring = rowsToEvents(
+      held({ nodes: [dead] }),
+      { nodes: [{ ...a, text: "back", updated_at: 400 }], links: [] },
+      ctx,
+    )
+    expect(terse(restoring)).toEqual([["block.restore", { text: "back" }, 400]])
+    const under = rowsToEvents(
+      held({ nodes: [dead] }),
+      { nodes: [{ ...dead, text: "edited", updated_at: 400 }], links: [] },
+      ctx,
+    )
+    expect(terse(under)).toEqual([["block.update", { text: "edited" }, 400]])
+  })
+
+  it("a row pushed without a note id says nothing about it; one that names it sets it", () => {
+    const current = held({ nodes: [{ ...a, notes_id: "note" }] })
+    expect(rowsToEvents(current, { nodes: [{ ...a, updated_at: 200 }], links: [] }, ctx)).toEqual(
+      [],
+    )
+    const [event] = rowsToEvents(
+      current,
+      { nodes: [{ ...a, notes_id: "other", updated_at: 200 }], links: [] },
+      ctx,
+    )
+    expect(event.patch).toEqual({ notes_id: "other" })
+  })
+
+  it("orders as the row planner did — delete channels, nodes, views, links — stamping the channels now", () => {
+    const link: LinkRow = {
+      source_id: "note",
+      destination_id: "a",
+      kind: "child",
+      sort_key: "a0",
+      updated_at: 100,
+      seq: 8,
+    }
+    const view: ViewRow = {
+      id: "v",
+      root_id: "note",
+      filter: null,
+      sort: null,
+      pinned: false,
+      sort_key: null,
+      updated_at: 100,
+    }
+    const events = rowsToEvents(
+      held({ nodes: [a, { ...a, id: "gone" }], links: [link] }),
+      {
+        nodes: [{ ...a, text: "A2", updated_at: 200 }],
+        links: [{ ...link, sort_key: "a5", updated_at: 200 }],
+        views: [{ ...view, pinned: true }],
+        deleteNodes: ["gone", "never-held"],
+        deleteLinks: [["note", "a", "child"]],
+      },
+      ctx,
+    )
+    expect(terse(events)).toEqual([
+      ["link.delete", {}, 9_000],
+      ["block.delete", {}, 9_000],
+      ["block.update", { text: "A2" }, 200],
+      [
+        "view.create",
+        { root_id: "note", filter: null, sort: null, pinned: true, sort_key: null },
+        100,
+      ],
+      ["link.update", { sort_key: "a5" }, 200],
+    ])
   })
 })

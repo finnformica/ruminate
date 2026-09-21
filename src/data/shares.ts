@@ -7,6 +7,7 @@ import type {
   SliceBody,
 } from "../../worker/shares/wire"
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
+import { writerHeaders } from "./writer-identity"
 
 export type {
   CreateShareBody,
@@ -128,6 +129,7 @@ export async function pushShare(
 ): Promise<void> {
   await request(`/${encodeURIComponent(id)}/notes`, {
     method: "PUT",
+    headers: writerHeaders(),
     body: JSON.stringify({ nodes: diff.nodes, links: diff.links }),
     keepalive: options.keepalive,
     fetchImpl: options.fetchImpl,

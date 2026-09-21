@@ -80,13 +80,8 @@ import { noteFromNode } from "../../src/data/note-meta"
 import { opsToRows } from "../../src/data/ops-rows"
 import { noteIds, parentsIndex, reachableFrom, type Op } from "../../src/data/ops"
 import type { Note } from "../../src/schema"
-import {
-  planReplicaPut,
-  toLinkRow,
-  toNodeRow,
-  type LinkRow,
-  type NodeRow,
-} from "../handlers/replica-payload"
+import { toLinkRow, toNodeRow, type LinkRow, type NodeRow } from "../handlers/replica-payload"
+import { writeRows } from "../handlers/event-log"
 import type { TenantDb } from "../tenancy-db"
 import {
   linksAbove,
@@ -573,11 +568,12 @@ export const propsOf = (graph: ScopedGraph, id: string): Record<string, unknown>
  * Persist a batch of ops.
  *
  * Everything a write tool does converges here, and it goes out through the
- * SAME planner the replica push does (`planReplicaPut`): per-row
- * last-writer-wins, one atomic batch, and a fresh server `seq` on every row.
- * That last part is what makes an agent's edit arrive in the browser — the
- * next `?since=` pull reads it like any other change, with no second sync
- * path to keep correct.
+ * SAME door the replica push does (`writeRows`, event-log.ts): the rows
+ * become events in the tenant's log — `origin: "mcp"`, so a history can say
+ * an agent wrote this — per-row last-writer-wins, one atomic batch, and a
+ * fresh server `seq` on every row. That last part is what makes an agent's
+ * edit arrive in the browser — the next `?since=` pull reads it like any
+ * other change, with no second sync path to keep correct.
  *
  * No `cursor` is passed: `meta.replica_cursor` is the CLIENT's marker of what
  * it has pushed, and an agent writing through a different door must not move
@@ -591,7 +587,10 @@ export async function applyOpsToReplica(
 ): Promise<{ nodes: number; links: number }> {
   if (ops.length === 0) return { nodes: 0, links: 0 }
   const diff = opsToRows(snapshot, ops, now)
-  const statements = planReplicaPut({ nodes: diff.nodes, links: diff.links }, now)
-  if (statements.length > 0) await tenant.batch(statements)
+  await writeRows(
+    tenant,
+    { nodes: diff.nodes, links: diff.links },
+    { actor: tenant.userId, origin: "mcp", device: "mcp", now },
+  )
   return { nodes: diff.nodes.length, links: diff.links.length }
 }

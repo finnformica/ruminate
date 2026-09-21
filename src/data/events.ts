@@ -1,9 +1,11 @@
-// SPIKE — the event log's vocabulary and its arithmetic (docs/event-sourcing.md).
+// The event log's vocabulary and its arithmetic (docs/event-sourcing.md).
 //
 // Pure, like `ops.ts` and `replica-payload.ts`: no SQL, no clock, no ids of its
 // own making. The Worker imports it to validate and roll up what it appends
-// (`worker/handlers/event-log.ts`); the client will import it to turn a batch
-// of ops into the events it pushes. Same repo, same file, no drift.
+// (`worker/handlers/event-log.ts`), and to derive events from the rows every
+// writer pushes (`rowsToEvents`); a client that speaks events itself turns its
+// ops into them with the same vocabulary (`opsToEvents`). Same repo, same
+// file, no drift.
 //
 // ## The model
 //
@@ -113,14 +115,19 @@ type EventOf<E extends Entity, A extends Action, P> = EventEnvelope & {
   patch: P
 }
 
-/** A `create` holds every field. Only genesis (migrations-spike/events_genesis.sql) may add
- * `deleted_at`: a tombstoned row has a final state and no history. */
+/** A `create` holds every field. It may add `deleted_at` when the entity
+ * arrives already tombstoned — a snapshot of a row that was (`planReconcile`),
+ * or a block made and deleted before its device next pushed: there is a final
+ * state to record and no history to replay. */
 type CreatePatch<E extends Entity> = FieldsOf<E> & { deleted_at?: number | null }
+/** A `delete` sets no field; it may carry the tombstone's stamp when that is
+ * not the event's own `at`. */
+type DeletePatch = { deleted_at?: number | null }
 
 type EventsFor<E extends Entity> =
   | EventOf<E, "create", CreatePatch<E>>
   | EventOf<E, "update", Partial<FieldsOf<E>>>
-  | EventOf<E, "delete", Record<string, never>>
+  | EventOf<E, "delete", DeletePatch>
   | EventOf<E, "restore", Partial<FieldsOf<E>>>
 
 type BlockEvent = EventsFor<"block">
@@ -215,11 +222,10 @@ function applyEvent(state: LogState, raw: RuminateEvent): void {
     }
     case "delete": {
       if (!current) return void state.rejected.push({ event, reason: "delete-on-missing" })
-      if (current.deleted) return
       table.set(event.entity_id, {
         ...current,
         deleted: true,
-        deleted_at: event.at,
+        deleted_at: (event.patch as DeletePatch).deleted_at ?? event.at,
         seq,
         at: event.at,
       })
@@ -317,6 +323,8 @@ export interface NetChange {
   set: Record<string, unknown>
   /** true = ends deleted, false = ends live (created/restored), null = untouched. */
   deleted: boolean | null
+  /** The tombstone's stamp, when it ends deleted. */
+  deleted_at: number | null
   /** The last event of the run: whose `seq` the projection row takes. */
   last_event: string
   at: number
@@ -341,6 +349,7 @@ export function netChanges(events: readonly RuminateEvent[]): NetChange[] {
         created: null,
         set: {},
         deleted: null,
+        deleted_at: null,
         last_event: event.id,
         at: event.at,
       }
@@ -350,14 +359,21 @@ export function netChanges(events: readonly RuminateEvent[]): NetChange[] {
     change.at = event.at
     if (event.action === "delete") {
       change.deleted = true
+      change.deleted_at = (event.patch as DeletePatch).deleted_at ?? event.at
       continue
     }
     const { deleted_at, ...fields } = event.patch as Record<string, unknown>
     if (event.action === "create") change.created = { ...(change.created ?? {}), ...fields }
     else if (change.created) Object.assign(change.created, fields)
     Object.assign(change.set, fields)
-    if (event.action === "create") change.deleted = typeof deleted_at === "number"
-    if (event.action === "restore") change.deleted = false
+    if (event.action === "create") {
+      change.deleted = typeof deleted_at === "number"
+      change.deleted_at = typeof deleted_at === "number" ? deleted_at : null
+    }
+    if (event.action === "restore") {
+      change.deleted = false
+      change.deleted_at = null
+    }
   }
   return [...net.values()]
 }
@@ -608,9 +624,10 @@ export function viewChangeToEvent(
 }
 
 // -----------------------------------------------------------------------------
-// Restore
+// Rows → events (the replica's write path)
 // -----------------------------------------------------------------------------
 
+/** The fields of `then` that `now` does not share, at `then`'s values. */
 const differing = <F extends object>(then: F, now: F): Partial<F> => {
   const patch: Partial<F> = {}
   for (const key of Object.keys(then) as (keyof F)[]) {
@@ -618,6 +635,185 @@ const differing = <F extends object>(then: F, now: F): Partial<F> => {
   }
   return patch
 }
+
+/** The rows a write names, as the replica holds them now (tombstones included). */
+export interface CurrentRows {
+  nodes: ReadonlyMap<string, NodeRow>
+  /** Keyed by `linkEntityId`. */
+  links: ReadonlyMap<string, LinkRow>
+  views: ReadonlyMap<string, ViewRow>
+}
+
+/** What a writer pushes: the `ReplicaPutPayload` shape, minus the cursor. */
+export interface RowWrite {
+  nodes: readonly NodeRow[]
+  links: readonly LinkRow[]
+  views?: readonly ViewRow[]
+  /** Legacy delete channels: ids/keys to tombstone, stamped by the replica. */
+  deleteNodes?: readonly string[]
+  deleteLinks?: readonly (readonly [string, string, string])[]
+}
+
+const isTombstoned = (row: { deleted_at?: number | null }) =>
+  row.deleted_at !== undefined && row.deleted_at !== null
+
+/**
+ * The events a pushed set of ROWS amounts to, against the rows the replica
+ * holds — how every writer's change becomes events without any writer having
+ * to speak events.
+ *
+ * Every door into the corpus hands over rows: the browser's push, a share's
+ * grantee, an MCP tool, and every cached bundle of the app still in the wild.
+ * Deriving the events HERE, at the one place all of them pass, is what makes
+ * "every change is an event" a property of the replica rather than a promise
+ * each writer keeps. A writer that does speak events (`opsToEvents`) can be
+ * let in beside this later; nothing about the log changes when it is.
+ *
+ * The rule a row lands by is the one the row planner it replaced always applied —
+ * per-row last-writer-wins on the writer's `updated_at` — so a stale row
+ * yields no event, exactly as it used to write no row:
+ *
+ *   no row held            → `create` (carrying `deleted_at` if it arrives dead)
+ *   held live, pushed live → `update` of the fields that differ; none = no event
+ *   held live, pushed dead → `update` of what differs, then `delete`
+ *   held dead, pushed live → `restore`, setting what differs
+ *   held dead, pushed dead → `update` of what differs, under the tombstone
+ *
+ * Order matches the old planner's — delete channels, nodes, views, links — so
+ * rows take the same sequence numbers they always would have. `at` is the
+ * row's own `updated_at`, which the projection writes back, so the browser's
+ * pull (which compares `updated_at`) sees the rows it always did.
+ */
+export function rowsToEvents(
+  current: CurrentRows,
+  write: RowWrite,
+  ctx: { batch: string; device: string; cause?: string; now: number },
+): RuminateEvent[] {
+  const events: RuminateEvent[] = []
+  const stamp = (at: number, baseSeq: number | null): EventEnvelope => ({
+    id: `${ctx.batch}:${events.length}`,
+    batch: ctx.batch,
+    device: ctx.device,
+    ...(ctx.cause ? { cause: ctx.cause } : {}),
+    base_seq: baseSeq,
+    at,
+    v: EVENT_VERSION,
+  })
+  const emit = (
+    entity: Entity,
+    id: string,
+    action: Action,
+    patch: object,
+    at: number,
+    base: number | null,
+  ) => events.push({ ...stamp(at, base), entity, entity_id: id, action, patch } as RuminateEvent)
+
+  const land = <F extends object>(
+    entity: Entity,
+    id: string,
+    held: {
+      fields: F
+      row: { updated_at: number; deleted_at?: number | null; seq?: number }
+    } | null,
+    pushed: { fields: Partial<F>; row: { updated_at: number; deleted_at?: number | null } },
+  ) => {
+    const at = pushed.row.updated_at
+    const dead = isTombstoned(pushed.row)
+    if (!held) {
+      emit(
+        entity,
+        id,
+        "create",
+        { ...pushed.fields, ...(dead ? { deleted_at: pushed.row.deleted_at } : {}) },
+        at,
+        null,
+      )
+      return
+    }
+    if (at < held.row.updated_at) return // stale: last writer wins, and this is not the last
+    const base = held.row.seq ?? null
+    const patch = differing(pushed.fields as F, held.fields)
+    const changed = Object.keys(patch).length > 0
+    const wasDead = isTombstoned(held.row)
+    if (wasDead && !dead) return void emit(entity, id, "restore", patch, at, base)
+    if (changed) emit(entity, id, "update", patch, at, base)
+    if (!wasDead && dead)
+      emit(entity, id, "delete", { deleted_at: pushed.row.deleted_at }, at, base)
+  }
+
+  for (const [source, destination, kind] of write.deleteLinks ?? []) {
+    const id = linkEntityId(source, destination, kind)
+    const held = current.links.get(id)
+    if (held && !isTombstoned(held)) emit("link", id, "delete", {}, ctx.now, held.seq ?? null)
+  }
+  for (const id of write.deleteNodes ?? []) {
+    const held = current.nodes.get(id)
+    if (held && !isTombstoned(held)) emit("block", id, "delete", {}, ctx.now, held.seq ?? null)
+  }
+
+  for (const node of write.nodes) {
+    const held = current.nodes.get(node.id)
+    land<BlockFields>(
+      "block",
+      node.id,
+      held
+        ? {
+            fields: {
+              type: held.type,
+              text: held.text,
+              props: held.props,
+              notes_id: held.notes_id ?? null,
+            },
+            row: held,
+          }
+        : null,
+      {
+        // A row pushed without a note id says nothing about it (a client that
+        // predates 0006): the held one stands, as `COALESCE` used to have it.
+        fields: {
+          type: node.type,
+          text: node.text,
+          props: node.props,
+          ...(held && node.notes_id === undefined ? {} : { notes_id: node.notes_id ?? null }),
+        },
+        row: node,
+      },
+    )
+  }
+  const viewFields = (view: ViewRow): ViewFields => ({
+    root_id: view.root_id,
+    filter: view.filter,
+    sort: view.sort,
+    pinned: view.pinned,
+    sort_key: view.sort_key,
+  })
+  for (const view of write.views ?? []) {
+    const held = current.views.get(view.id)
+    land<ViewFields>("view", view.id, held ? { fields: viewFields(held), row: held } : null, {
+      fields: viewFields(view),
+      row: view,
+    })
+  }
+  const linkFields = (link: LinkRow): LinkFields => ({
+    source_id: link.source_id,
+    destination_id: link.destination_id,
+    kind: link.kind,
+    sort_key: link.sort_key,
+  })
+  for (const link of write.links) {
+    const id = linkEntityId(link.source_id, link.destination_id, link.kind)
+    const held = current.links.get(id)
+    land<LinkFields>("link", id, held ? { fields: linkFields(held), row: held } : null, {
+      fields: linkFields(link),
+      row: link,
+    })
+  }
+  return events
+}
+
+// -----------------------------------------------------------------------------
+// Restore
+// -----------------------------------------------------------------------------
 
 /**
  * The `restore` events that return one entity to its state as of `asOfSeq`.

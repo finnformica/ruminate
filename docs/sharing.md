@@ -161,7 +161,7 @@ any row would leave the slice:
 - The owner's `replica_cursor` is theirs: a cursor in the payload is ignored.
   The legacy purge channel is refused.
 
-What lands runs through `planReplicaPut` — the same statements a replica push
+What lands runs through `writeRows` (docs/event-sourcing.md) — the same door a replica push
 runs, per-row last-writer-wins on `updated_at`, `seq` assigned by the
 database — into the **owner's** partition. The owner's devices pick it up on
 their next since-pull like any edit; two people editing one block converge

@@ -1,223 +1,235 @@
-# Event sourcing (spike)
+# Event sourcing
 
-**Status: spike, not wired in.** Branch `spike/event-sourcing`. The log, its
-fold, the server append and its projections exist and are tested; the client
-still pushes rows. This document is the design, what the spike proved, and the
-decisions still open.
+Every change to a block, a link or a view is stored as an **event**, in one
+append-only log per tenant. The log is the truth; `nodes`, `link` and `views`
+are what folding it yields, kept current in the same transaction as every
+append. Code: `src/data/events.ts` (the vocabulary and the fold),
+`worker/handlers/event-log.ts` (append, reconcile, reading the past),
+`migrations/0018_events.sql`.
 
 ## Why
 
 On 2026-09-19 a tester lost a heading and two bullets typed during a call.
 Nothing was broken: fifteen seconds of ordinary edits (text cleared, markers
-stripped, blocks unlinked) were pushed and accepted. The corpus tables are
-written last-writer-wins, so a row holds its final state and an overwrite
-destroys what it replaces. Two things followed:
+stripped, blocks unlinked) were pushed and accepted. The corpus tables were
+written last-writer-wins, so a row held its final state and an overwrite
+destroyed what it replaced. Two things followed:
 
 - **Recovery** needed D1 Time Travel, which restores _in place_. Reading the
   lost text meant rolling production back for ten seconds.
-- **Diagnosis** was inference from gaps in `seq`. There is no record of which
-  command ran, from which tab, believing what about the row.
+- **Diagnosis** was inference from gaps in `seq`. There was no record of what
+  changed, in what order, from which tab, running which build.
 
-An event log answers both with a `SELECT`, and turns restore into an append.
-It does **not** prevent the wipe — the events would have recorded it
-faithfully. That needs an editor fix, separately.
+With the log both are a `SELECT`, and putting something back is an append. It
+does **not** prevent the wipe — the events record it faithfully. That is the
+editor's to fix, separately.
 
-## The decision: the log is the truth
+## The shape
 
-`events` is append-only and authoritative. `nodes`, `link` and `views` become
-**projections**: the value of folding the log, kept current by applying each
-append to them _in the same transaction_. Everything that reads the corpus —
-pulls, MCP, shares, search, the D1 console — goes on reading the tables it
-always has. This is the standard shape (Fowler's _Event Sourcing_; CQRS read
-models; LiveStore's "materializers" are the same idea on the same stack).
+`events` is authoritative and append-only. `nodes`, `link` and `views` are
+**projections**: read models, written in exactly one place
+(`planEventAppend`), inside the batch that appends the events they follow
+from. Everything that reads the corpus — pulls, MCP, shares, search, the D1
+console — reads the tables it always has, and a row's `seq` is the `seq` of
+the last event applied to it, so **the since-cursor pull is unchanged**.
 
-The test that pins it: **fold(events) == tables**, after every append, and
-after genesis on a copy of the production corpus (3,711 rows, four tenants,
-exact match).
+The property everything rests on, pinned by tests and checkable in production
+(`GET /api/replica/verify`): **fold(events) == tables**.
 
-## The model
+### One event = one change to one entity
 
-One event = one change to one entity.
+|           | `create`                                | `update`             | `delete`  | `restore`                                  |
+| --------- | --------------------------------------- | -------------------- | --------- | ------------------------------------------ |
+| **block** | type, text, props, notes_id             | any of those         | tombstone | fields to set back + `ref_seq`; live again |
+| **link**  | source, destination, kind, sort_key     | sort_key (= reorder) | unlink    | sort_key + live again                      |
+| **view**  | root_id, filter, sort, pinned, sort_key | any of those         | tombstone | fields + live again                        |
 
-|           | `create`                                | `update`                   | `delete`  | `restore`                                  |
-| --------- | --------------------------------------- | -------------------------- | --------- | ------------------------------------------ |
-| **block** | type, text, props, notes_id             | any of type / text / props | tombstone | fields to set back + `ref_seq`; live again |
-| **link**  | source, destination, kind, sort_key     | sort_key (= reorder)       | unlink    | sort_key + live again                      |
-| **view**  | root_id, filter, sort, pinned, sort_key | any of those               | tombstone | fields + live again                        |
-
-Envelope: `id` (writer-minted, idempotency key), `seq` (replica-assigned total
-order per tenant), `batch` (one gesture), `device`, `cause` (the command:
-`backspaceEmpty`, `undo`, `mcp:append_block`), `actor` (verified user — not
-always the owner, since shares), `base_seq` (the entity's seq as the writer
-last saw it), `ref_seq` (restore only), `at` (writer's clock, informational),
-`received_at`, `v` (event schema version).
-
-### Three decisions inside that table
-
-**Patches are absolute values, never relative diffs.** "text is now X", not
-"insert X at 4". This is what makes everything else cheap: an event means the
-same thing wherever it is replayed; a run of events rolls up by "last value of
-each field wins"; a typing run coalesces to its last event. The cost is that
-two people typing in the _same block_ at once is last-writer-wins on the whole
-text — which is what the app does today, and the right trade until real-time
-co-editing is a goal (that is a CRDT/OT project, and a different one).
+**Patches are absolute values, never relative diffs** — "text is now X", not
+"insert X at 4". An event means the same thing wherever it is replayed, and a
+run of events rolls up to "the last value of each field" (`netChanges`), which
+is what lets an append of any size project in a fixed number of statements.
+The cost: two people typing in the _same block_ at once is last-writer-wins on
+the whole text, as it is today. Real-time co-editing would be a CRDT project.
 
 **Reordering is a `link` update, not a block update.** A block can sit under
-several parents (multi-homing) and has a position under each, so position is
-`link.sort_key`, where it already lives. Reorder = `link.update`; move =
-`link.delete` + `link.create`. A block update is type, text or props. The UI
-can still _present_ a move as "block moved" — that is a rendering of the
-history, not the shape of the log.
+several parents and has a position under each, so position is
+`link.sort_key`, where it always lived. Reorder = `link.update`; move =
+`link.delete` + `link.create`. A history UI can still _say_ "block moved".
 
 **`restore` is an event, never a rewind.** It carries the fields to set and
-the `seq` it returns to. So a restore replicates by the ordinary pull, shows
-in the history, and can itself be undone. One action covers both "undelete"
-and "revert to the version of 11:06".
+the `seq` it returns to, so it replicates by the ordinary pull, shows in the
+history, and can itself be undone. One action covers "undelete" and "revert".
 
-## "Rolling up" means four different things
+### What is stored beside the change
 
-1. **The fold** (`fold`, `stateAt`, `historyOf`) — log → state. `stateAt` is
-   time travel; `historyOf` is a block's version history.
-2. **Net change per append** (`netChanges`) — many events → one change per
-   entity, so an append projects in a fixed number of statements.
-3. **Typing coalescing** (`coalesceTyping`) — on the client, before push:
-   consecutive text-only edits to one block from one device within 30s become
-   the last one. Without it the log grows a row per 150ms of typing.
-4. **Compaction** — _not built._ Old typing runs thinned further, or a
-   snapshot event replacing a long prefix. Needed eventually; see Open.
+| column        | why                                                                                                 |
+| ------------- | --------------------------------------------------------------------------------------------------- |
+| `seq`         | The tenant's total order. Assigned in SQL at append. The only thing that orders events.             |
+| `received_at` | The **replica's** clock. "As of 11:06" is answered as the last event received by then. Indexed.     |
+| `at`          | The writer's clock (the row's `updated_at`). Informational, and written back to the projection.     |
+| `v`           | The shape the patch was written in, so a reader years on can upcast it. Events are never rewritten. |
+| `actor`       | The verified user who wrote it — a share's grantee writes into the _owner's_ log.                   |
+| `origin`      | The door: `replica`, `mcp`, `share`, `system`.                                                      |
+| `device`      | `<device>.<tab>` from `X-Ruminate-Device` (`src/data/writer-identity.ts`). Two tabs differ.         |
+| `client`      | The build, from `X-Ruminate-Build` (the changelog version).                                         |
+| `batch`       | One push. Groups the events that arrived together.                                                  |
+| `cause`       | The command, when a writer names one (`snapshot`, `restore`, `share:ensure-view` today).            |
+| `base_seq`    | The entity's `seq` as the writer last saw it — what it believed it was changing.                    |
+| `ref_seq`     | On a restore: the moment being returned to.                                                         |
+| `append`      | The request that appended it (idempotency of the projections).                                      |
 
-## The write path
+Nothing else needs storing for a past moment to be viewable. Block content is
+entirely in `type`/`text`/`props`; images live in R2 under ids held in
+`props` and are **never deleted**, so an image block of last month still
+resolves. Two things a past view does _not_ contain, by design: another
+tenant's nodes reached through a share (their past is theirs), and link-card
+previews (`/api/unfurl` is a cache of the live web).
 
-`planEventAppend` (worker/handlers/event-log.ts) returns **seven statements
-for any number of events**, run as one `TenantDb.batch`:
+## One door: rows in, events appended
 
-1. `INSERT INTO events … SELECT … FROM json_each(?1) … ON CONFLICT DO NOTHING`
-   — `seq = MAX(seq) + position`.
-   2–7. Per table, an insert for what the append creates and an `UPDATE … FROM
-json_each(?1)` for what it changes. Absent key = keep the column; JSON
-   `null` = clear it (`json_type` tells them apart). Each row takes the `seq`
-   of its last event, so **the existing since-cursor pull keeps working**.
+Every writer hands over **rows** — the browser's push, a share's grantee, an
+MCP tool, and every cached bundle of the app still in the wild. They all land
+in `writeRows`:
 
-Set-based because D1's free plan allows 50 queries per invocation and a paste
-can create hundreds of blocks.
+1. read the rows the write names (three primary-key lookups),
+2. derive the events the difference amounts to (`rowsToEvents`),
+3. reconcile + append + project, in one atomic batch.
 
-**Idempotent.** A retried push (the `pagehide` keepalive flush does this)
-inserts nothing, and projections apply a change only if its last event was
-inserted _by this append_ — so an old change can never be laid over newer rows.
+The rule a row lands by is the one the row planner always applied — per-row
+last-writer-wins on the writer's `updated_at`:
 
-**Append-only, structurally.** Triggers refuse `UPDATE`, and refuse `DELETE`
-unless the tenant is named in `event_purges` — the door for account erasure.
+| held    | pushed | events                                              |
+| ------- | ------ | --------------------------------------------------- |
+| nothing | any    | `create` (carrying `deleted_at` if it arrives dead) |
+| newer   | any    | none — stale, exactly as it used to write no row    |
+| live    | live   | `update` of the fields that differ; none = no event |
+| live    | dead   | `update` of what differs, then `delete`             |
+| dead    | live   | `restore`, setting what differs                     |
+| dead    | dead   | `update` of what differs, under the tombstone       |
 
-## Ordering and conflicts
+Deriving events **at the replica** is deliberate. It makes "every change is an
+event" a property of the one place all writers pass, rather than a promise
+each writer keeps — so there was no protocol bump, no client that must update
+before its edits are recorded, and no way to write around the log: nothing
+else in the Worker holds an `INSERT` or `UPDATE` against those tables. The
+price is granularity: an event is "what one push changed in one row" (the
+client flushes ~2s after a change), not "what one keystroke or command did".
+A client that speaks events itself (`opsToEvents`, already written) can be
+let in beside this later to carry a `cause` per command; the log does not
+change when it is.
 
-Order is **arrival order at the replica** (`seq`), not client clocks — the
-model Linear and Replicache use. This quietly fixes something: today's LWW
-compares client-stamped `updated_at`, so a device with a wrong clock wins or
-loses forever. Under the log, conflict resolution becomes **per field by seq**
-instead of per row by clock: one device retyping a block while another edits
-its text no longer clobber each other.
+One difference from the row planner, inside one window: rows are read _before_
+the batch (D1 has no interactive transactions), so two writers racing on one
+row both derive against the same held row and the later **append** wins,
+where the later `updated_at` used to. The fold and the tables agree either
+way.
 
-`base_seq` records what the writer believed it was changing. The spike
-**records but does not enforce** it. Enforcing (reject or flag when
-`base_seq` is stale for that field) is how an offline device's week-old edit
-stops silently overwriting newer work. Decide before the client ships.
+### Cost, by construction
 
-## Genesis
+- **A fixed number of statements**: 1 reconcile + 7 per append (one insert
+  over `json_each`, then insert-created / update-changed per table), however
+  many events. D1's free plan allows 50 queries per invocation.
+- **Reads what it touches.** `UPDATE t … FROM json_each(?) WHERE t.id = …`
+  _looks_ like a lookup and is a walk of every row the tenant has; hinting the
+  key fixes that and leaves each row re-scanning the JSON for its values (n²
+  — D1 flagged 92,100 rows read for a 300-block push). The changes are
+  materialised as a table and the statement is driven _from_ it: one seek per
+  change. A row the append's own INSERT just wrote is not updated again.
+  `event-log.test.ts` pins every plan with `EXPLAIN QUERY PLAN`, because the
+  slow forms return exactly the same rows and nothing else would notice.
+- **Under D1's 2 MB bound-value cap**: an append is cut into runs of ≤750 KB,
+  all in the one batch, sequence contiguous across them.
+- **Idempotent**: re-sent rows equal held rows, so they derive no events.
+  Re-sent _events_ insert nothing (`id` is unique) and project nothing (a
+  change applies only if its last event was inserted by this append).
+- Measured locally on a copy of production (3,711 rows): genesis ≈10 ms for the
+  largest tenant; the log roughly 1.5× the size of the tables it describes.
+  D1 bills index entries as rows written — an event is ~5 (row + 4 indexes).
 
-`events_genesis.sql` seeds the log with one `create` per existing row, **under the seq the
-row already holds**, so no cursor moves and the next event lands at MAX+1.
-Tombstoned rows become a `create` carrying `deleted_at` — the only place that
-is allowed: they have a final state and no history.
+## Reconcile: no backfill, and the log heals itself
 
-Running it on production's export found a real bug: **4 of 7 `views` rows have
-`seq = 0`** (0015's backfill used the column default). A `seq > cursor` pull
-can never deliver them, and they collide in the log's primary key. `events_genesis.sql`
-numbers them first. Worth fixing on `main` regardless of this work.
+A projection row's `seq` names the event it came from, so a row the log does
+not know is recognisable: it holds a `seq` above anything in the log.
+`planReconcile` runs **first in every write's batch** and records each such
+row as a snapshot `create` under the `seq` it already holds (no cursor moves).
 
-## Cost, measured
+- **Genesis is just the first reconcile.** There is no backfill migration,
+  because `npm run deploy` applies migrations _before_ uploading the Worker:
+  rows the old Worker wrote in between would be missing from a log seeded by
+  SQL. A tenant's first write — or first read of its log — seeds it instead.
+- **A write around the log is repaired by the next write**, not left to
+  drift: the old Worker during a rollout, a statement run in the console.
+- What it cannot see is a row changed _without_ taking a new `seq`. That is
+  what `verify` is for.
 
-- Genesis took the production export from 0.98 MB to 2.48 MB. Expect the log
-  to be the larger part of the database from then on. Limits: 500 MB (free),
-  10 GB (paid) per database.
-- D1 bills rows written _including index entries_: today's 8-row restore
-  reported 48 rows written. An event is ~4 (row, primary key, two indexes) on
-  top of the projection write it causes. Free tier is 100k rows written/day.
-  Coalescing is what keeps this sane.
+History therefore begins at each tenant's snapshot. Earlier states were never
+recorded; a moment before it is answered as the snapshot, and the response
+says so (`earliest`).
 
-## What the spike contains
+`0018` also renumbers the views that 0015/0017 deliberately left at `seq = 0`:
+reconcile finds rows by `seq`, so a row at 0 would never enter the log. Each
+device pulls those few rows once.
 
-- `migrations-spike/events.sql`, `events_genesis.sql` — outside `migrations/` on purpose: a
-  merge to main runs `migrate:remote`, and they take real numbers only at cutover
-- `src/data/events.ts` — types, `opsToEvents`, `viewChangeToEvent`, `fold`,
-  `stateAt`, `historyOf`, `projectRows`, `netChanges`, `coalesceTyping`,
-  `planRestore`, `planRestoreSubtree`, `upcast`
-- `worker/handlers/event-log.ts` — `parseEvent`, `planEventAppend`,
-  `appendEvents`, `readEventsSince`, `readEntityHistory`
-- Tests, including the 19 September incident replayed: the wipe is appended,
-  the block's history shows each step with its cause, and
-  `planRestoreSubtree` puts the section back by appending `restore` events.
+## Reading the past
 
-## Not built — the path to production
+All under `/api/replica/*`, session-guarded and tenant-scoped like the rest:
 
-1. **Client write path.** `database-mode.ts` turns each op batch into events
-   (`opsToEvents`), keeps an **outbox table** in the local store (durable
-   across reloads — today's pending queue is in memory), coalesces, pushes to
-   `PUT /api/replica/events`. Protocol bump to 3.
-2. **`cause` plumbing.** Commands must pass their name down to `applyOps`.
-   This is most of the diagnostic value and touches the editor.
-3. **Every writer goes through the log.** MCP tools, shares' grantee writes,
-   admin fixes. A row written around the log makes fold ≠ tables. Make
-   `planReplicaPut` unreachable once cut over, and add `events` to the
-   tenancy guard's table list.
-4. **Cutover order.** Deploy Worker that appends → run the genesis migration → raise
-   `MIN_REPLICA_PROTOCOL`. Rows written between genesis and the new Worker
-   would be missing from the log, so the window must be closed (brief
-   read-only, or dual-write first).
-5. **Pull.** Rows-since-cursor keeps working and is the cheaper way to catch
-   up. An event-shaped pull is only needed for history UI — fetch on demand.
-6. **A verifier.** A scheduled job that folds each tenant's log and compares
-   with the tables. Drift is the failure mode of this architecture; find it
-   before a user does.
-7. **History / restore UI.** The user-facing point of all this.
+- `GET /events?since=<seq>&limit=<n>` — the log, oldest first.
+  `&entity=block&entity_id=<id>` — one entity's version history.
+- `GET /at?seq=<seq>` or `?at=<ms>` — the corpus as it stood: the pull's shape
+  (`nodes`, `links`, `views`), folded from the log. Read-only.
+- `POST /restore` `{ "block": "<id>", "seq": <n> }` — put a block, everything
+  beneath it and its place under its parents back the way they were, by
+  appending `restore` events. Links made since are left alone (a restore
+  brings things back; it does not take later work away), so a block moved
+  since can end up in both places.
+- `GET /verify` — does folding the log still yield the tables? Reads
+  everything; a diagnostic.
 
-## Open decisions
+There is no UI for these yet. With a token in hand:
 
-- **Schema evolution.** Events are forever; this repo has shipped 17
-  migrations in three weeks. Rule: never rewrite events, add an `upcast` case
-  per shape change, keep every old shape readable. Field renames get
-  expensive — this is the real long-term tax (Greg Young, _Versioning in an
-  Event Sourced System_).
-- **Erasure.** "Delete for good" and GDPR erasure vs an immutable log.
-  Tenant-level purge is built. Per-block erasure is not: options are
-  crypto-shredding (per-block key, delete the key) or a redaction event plus a
-  compaction that drops the payloads. Images in R2 need the same answer.
-- **Retention / compaction.** Keep everything forever, or thin typing runs
-  older than N days and snapshot long prefixes? Decide before the log is big.
-- **`base_seq` enforcement** (above).
-- **Restore semantics.** `planRestoreSubtree` brings back what was there and
-  leaves later links alone, so a block moved since can end up in two places.
-  Alternative: restore also removes links created since. Pick per UI intent.
-- **Undo.** The editor's undo is in-memory doc snapshots. It could become
-  inverse events — durable across reloads, and the same machinery as restore.
-- **Sequencer.** `MAX(seq)+n` inside a D1 batch is correct because D1
-  serialises writes per database. A Durable Object per tenant is the natural
-  sequencer (and gives websockets for live sync) — LiveStore's Cloudflare
-  provider does exactly this — but it was deliberately reversed here for D1
-  console visibility. The log design does not depend on the choice.
-- **Build vs adopt.** LiveStore is this architecture as a library (SQLite in
-  OPFS, event log, materializers, Cloudflare sync). Adopting it means
-  rewriting the store and sync layers around its model; building means owning
-  the hard parts above. Worth an afternoon's evaluation before step 1.
+```sh
+curl -s "$ORIGIN/api/replica/events?entity=block&entity_id=blk_…" \
+  -H "Authorization: Bearer $TOKEN" -H "Cookie: gh_refresh=…" -H "X-Replica-Protocol: 2"
+```
+
+## Append-only, structurally
+
+Triggers refuse `UPDATE` on `events`, and refuse `DELETE` unless the tenant is
+named in `event_purges` — the one door, for erasing an account.
+
+## Rolling back
+
+Safe in both directions. The table is additive, so the previous Worker runs
+beside it untouched; whatever it writes meanwhile goes around the log, and the
+first write after this Worker returns reconciles it. Nothing needs undoing.
+
+## Open
+
+- **A history / restore UI**, and `cause` per command (the client speaking
+  events) — the user-facing point of all this.
+- **Schema evolution.** Events are forever and this repo migrates weekly.
+  Rule: never rewrite an event; add an `upcast` case per shape change.
+- **Per-block erasure.** Tenant purge exists. "Delete this block for good"
+  against an immutable log needs crypto-shredding or a redaction event plus
+  compaction.
+- **Compaction / retention.** Each push that touches a note also re-stamps the
+  note row (`props.updated_at`), so typing yields two events per push. Fine at
+  today's scale; thin old typing runs before the log is large. Folding a whole
+  log for `/at` is O(events) — checkpoints when that starts to matter.
+- **`base_seq` is recorded, not enforced.** Enforcing it is how an offline
+  device's week-old edit would be flagged rather than win.
+- **Undo** could become inverse events — durable across reloads, and the same
+  machinery as restore.
 
 ## Prior art
 
 - Martin Fowler, [Event Sourcing](https://martinfowler.com/eaaDev/EventSourcing.html)
-- [LiveStore: event sourcing](https://docs.livestore.dev/evaluation/event-sourcing/) and its
-  [Cloudflare sync provider](https://docs.livestore.dev/sync-providers/cloudflare/)
+- [LiveStore](https://docs.livestore.dev/evaluation/event-sourcing/) — the same
+  architecture as a library (SQLite, event log, materializers, a
+  [Cloudflare sync provider](https://docs.livestore.dev/sync-providers/cloudflare/))
 - [Reverse engineering Linear's sync engine](https://github.com/wzhudev/reverse-linear-sync-engine)
-  — monotonically increasing sync ids, server order, LWW; no CRDTs
-- Figma, [How multiplayer works](https://www.figma.com/blog/how-figmas-multiplayer-technology-works/)
-  — property-level last-writer-wins, server as the ordering authority
+  — monotonically increasing sync ids, server order, last-writer-wins; no CRDTs
 - Greg Young, [Versioning in an Event Sourced System](https://leanpub.com/esversioning)
 - Cloudflare D1 [limits](https://developers.cloudflare.com/d1/platform/limits/) and
   [Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/)

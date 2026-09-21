@@ -37,7 +37,7 @@ export interface NodeRow {
   /**
    * Server-assigned row sequence (migrations/0005). Present on rows the
    * replica hands OUT; absent on rows a client pushes IN, because only the
-   * replica may assign one — `planReplicaPut` never reads this field.
+   * replica may assign one — `rowsToEvents` never reads this field.
    */
   seq?: number
   /**
@@ -64,7 +64,7 @@ export interface LinkRow {
   /**
    * Server-assigned row sequence (migrations/0005). Present on rows the
    * replica hands OUT; absent on rows a client pushes IN, because only the
-   * replica may assign one — `planReplicaPut` never reads this field.
+   * replica may assign one — `rowsToEvents` never reads this field.
    */
   seq?: number
 }
@@ -266,12 +266,6 @@ export interface ReplicaStatusBody {
   replica_cursor: string | null
 }
 
-/** A planned SQL statement: the pure, D1-free representation of the write. */
-export interface SqlStatement {
-  sql: string
-  params: (string | number | null)[]
-}
-
 const isString = (x: unknown): x is string => typeof x === "string"
 
 /** `deleted_at`: absent, null, or a number. Returns the value to store on the
@@ -425,154 +419,6 @@ export function parseReplicaPayload(body: unknown): ReplicaPutPayload | null {
     deleteLinks: (raw.deleteLinks as LinkKey[] | undefined)?.map((key) => [...key] as LinkKey),
     cursor: raw.cursor as string | undefined,
   }
-}
-
-/**
- * Plan the SQL for one replica push. Pure: returns statements + bind params;
- * `TenantDb` binds `:tenant` and runs them as a single batch (one
- * transaction).
- *
- * Per-row last-writer-wins: an upsert only lands when the incoming
- * `updated_at` is not older than the stored row, so replays are idempotent and
- * a stale push cannot clobber a newer row. `deleted_at` rides along as an
- * ordinary column, so a tombstone replicates — and a revive clears — under the
- * same rule.
- *
- * The legacy `deleteNodes`/`deleteLinks` channel becomes a tombstone stamp:
- * nothing is hard-deleted, every row a single push retires shares the one
- * `now` stamp, and a node's link rows are deliberately NOT touched (a link to
- * a tombstoned node is retained so a restore can put the node back in place;
- * the walk skips it at read time).
- *
- * Statement order: tombstones first, then node upserts before link upserts.
- */
-/**
- * Build the statements for one push.
- *
- * **The sequence expression is written out in each statement, not shared.**
- * `check:queries` reads SQL string LITERALS, so a statement assembled around a
- * named constant is a statement the guard cannot see — the same reason every
- * query in `replica-corpus.ts` is spelled out in full. The repetition is the
- * price of the guard being able to prove what actually runs.
- *
- * What it does: takes the tenant's highest `seq` across both tables and adds
- * one. Evaluated by the database inside the write transaction, so it cannot
- * disagree with a concurrent writer — D1 runs a `batch()` as one transaction
- * and serializes writes, and each statement sees what the previous ones wrote.
- * A batch of twenty upserts therefore takes twenty consecutive values with no
- * counter row, no lock and no round trip. Each half is an index seek on
- * `(user_id, seq)` (migrations/0005), so it reads two rows, not two tables.
- *
- * Tombstones are included deliberately: a delete is a change that has to
- * replicate, so it takes a sequence value like any other write.
- */
-export function planReplicaPut(payload: ReplicaPutPayload, now: number): SqlStatement[] {
-  const statements: SqlStatement[] = []
-
-  for (const [source, destination, kind] of payload.deleteLinks ?? []) {
-    statements.push({
-      sql:
-        "UPDATE link SET deleted_at = ?4, updated_at = ?4, seq = (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM views WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */)) " +
-        "WHERE user_id = :tenant " +
-        "AND source_id = ?1 AND destination_id = ?2 AND kind = ?3 AND deleted_at IS NULL",
-      params: [source, destination, kind, now],
-    })
-  }
-  for (const id of payload.deleteNodes ?? []) {
-    statements.push({
-      sql:
-        "UPDATE nodes SET deleted_at = ?2, updated_at = ?2, seq = (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM views WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */)) " +
-        "WHERE user_id = :tenant AND id = ?1 AND deleted_at IS NULL",
-      params: [id, now],
-    })
-  }
-
-  for (const node of payload.nodes) {
-    statements.push({
-      sql:
-        "INSERT INTO nodes (user_id, id, type, text, props, updated_at, deleted_at, notes_id, seq) " +
-        "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM views WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */))) " +
-        "ON CONFLICT (user_id, id) DO UPDATE SET type = excluded.type, text = excluded.text, " +
-        "props = excluded.props, updated_at = excluded.updated_at, " +
-        "deleted_at = excluded.deleted_at, " +
-        // A note id is set once; a push from a client that predates it (no
-        // `notes_id` on its rows) must not clear the one the replica holds.
-        "notes_id = COALESCE(excluded.notes_id, nodes.notes_id), " +
-        "seq = (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM views WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */)) " +
-        "WHERE excluded.updated_at >= nodes.updated_at",
-      params: [
-        node.id,
-        node.type,
-        node.text,
-        node.props,
-        node.updated_at,
-        node.deleted_at ?? null,
-        node.notes_id ?? null,
-      ],
-    })
-  }
-  // Views (migrations/0015) upsert under the same last-writer-wins rule as
-  // everything else, and a tombstone rides in as an ordinary column. The
-  // sequence expression is spelled out here for the reason the header gives:
-  // `check:queries` reads literals, not constants.
-  for (const view of payload.views ?? []) {
-    statements.push({
-      sql:
-        "INSERT INTO views " +
-        "(user_id, id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, seq) " +
-        "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, " +
-        "(SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM views WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */))" +
-        ") " +
-        "ON CONFLICT (user_id, id) DO UPDATE SET root_id = excluded.root_id, " +
-        "filter = excluded.filter, sort = excluded.sort, pinned = excluded.pinned, " +
-        "sort_key = excluded.sort_key, updated_at = excluded.updated_at, " +
-        "deleted_at = excluded.deleted_at, seq = " +
-        "(SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM views WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */))" +
-        " WHERE excluded.updated_at >= views.updated_at",
-      params: [
-        view.id,
-        view.root_id,
-        view.filter,
-        view.sort,
-        view.pinned ? 1 : 0,
-        view.sort_key,
-        view.updated_at,
-        view.deleted_at ?? null,
-      ],
-    })
-  }
-
-  for (const link of payload.links) {
-    statements.push({
-      sql:
-        "INSERT INTO link " +
-        "(user_id, source_id, destination_id, kind, sort_key, updated_at, deleted_at, seq) " +
-        "VALUES (:tenant, ?1, ?2, ?3, ?4, ?5, ?6, (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM views WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */))) " +
-        "ON CONFLICT (user_id, source_id, destination_id, kind) DO UPDATE SET " +
-        "sort_key = excluded.sort_key, updated_at = excluded.updated_at, " +
-        "deleted_at = excluded.deleted_at, seq = (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM views WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */)) " +
-        "WHERE excluded.updated_at >= link.updated_at",
-      params: [
-        link.source_id,
-        link.destination_id,
-        link.kind,
-        link.sort_key,
-        link.updated_at,
-        link.deleted_at ?? null,
-      ],
-    })
-  }
-
-  if (payload.cursor !== undefined) {
-    statements.push({
-      sql:
-        "INSERT INTO meta (user_id, key, value) VALUES (:tenant, 'replica_cursor', ?1) " +
-        "ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value",
-      params: [payload.cursor],
-    })
-  }
-
-  return statements
 }
 
 /**
