@@ -26,6 +26,7 @@ function Provider({
           {children}
           <PreviewCard.Portal container={container}>
             <PreviewCard.Positioner
+              className="z-popup"
               side={payload?.side ?? "bottom"}
               sideOffset={payload?.sideOffset ?? 4}
               align={payload?.align ?? "start"}

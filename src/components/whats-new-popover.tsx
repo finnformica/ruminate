@@ -127,7 +127,7 @@ export function WhatsNewPopover() {
       // away: the surface plays its exit and the browser hides it after.
       open={!dismissed}
       className={cx(
-        "absolute inset-x-3 bottom-3 flex flex-col gap-3 rounded-xl p-4 sm:right-auto sm:w-[21rem] print:hidden",
+        "absolute inset-x-3 bottom-3 z-popup flex flex-col gap-3 p-4 sm:right-auto sm:w-[21rem] print:hidden",
         // It grows out of the corner it sits in — what an anchor's
         // `--transform-origin` comes to for something with no anchor.
         "origin-bottom sm:origin-bottom-left",

@@ -154,7 +154,7 @@ export function BlockContextMenu({
     <ContextMenu.Root onOpenChange={(open, details) => onOpenChange?.(open, details.event)}>
       <ContextMenu.Trigger>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
-        <ContextMenu.Positioner className="outline-none">
+        <ContextMenu.Positioner className="z-popup outline-none">
           <ContextMenu.Popup data-testid="block-context-menu" render={popup} style={{ width: 240 }}>
             {/* A pointer's menu keeps to a modest height; a phone's, with 40px
                 rows, would otherwise hide the last items (Unlink, Delete) in a
@@ -349,7 +349,7 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
             <Menu.SubmenuRoot key={index}>
               <SubmenuTrigger>{entry.label}</SubmenuTrigger>
               <Menu.Portal>
-                <Menu.Positioner side="right" align="start" sideOffset={4}>
+                <Menu.Positioner className="z-popup" side="right" align="start" sideOffset={4}>
                   <Menu.Popup render={popup} style={{ width: entry.width ?? 200 }}>
                     <div className="grid p-1" data-testid={entry.testId}>
                       {entry.items.map((it) => (

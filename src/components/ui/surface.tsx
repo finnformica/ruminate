@@ -7,10 +7,18 @@ import { cx } from "../../utils/cx"
  * listbox, dialog and palette in the app is drawn on.
  *
  * It owns what those have in common and used to spell out for themselves:
- * the edge, the fill, the shadow and the radius of a tier of elevation; the
- * layer it floats in; and the motion it arrives and leaves with. A component
- * that needs a surface says which tier it is and nothing more. The tokens
- * behind the tiers live in src/styles/variables.css.
+ * the edge, the fill, the shadow and the radius of a tier of elevation, and
+ * the motion it arrives and leaves with. A component that needs a surface
+ * says which tier it is and nothing more. The tokens behind the tiers live in
+ * src/styles/variables.css.
+ *
+ * What it does not own is the layer it floats in. Stacking belongs to the
+ * element that is positioned — a Base UI `Positioner`, a fixed dialog, the
+ * card's own absolutely placed box — because a z-index inside a positioned,
+ * transformed wrapper orders nothing outside that wrapper. So the layer is
+ * named there, from the same tokens (`z-popup`, `z-modal`, `z-tooltip`),
+ * which is also where Material UI puts its `zIndex` and shadcn its `z-50`:
+ * on the positioner, never on the paper.
  *
  * Under a Base UI popup it goes in through the `render` prop, which is how
  * Base UI composes a part with a component of your own — the part's props,
@@ -40,17 +48,6 @@ const surface = cva(
         card: "rounded-lg bg-bg-card shadow-card",
         popup: "rounded-lg bg-bg-overlay-backdrop shadow-popup backdrop-blur-lg",
         modal: "rounded-xl bg-bg-overlay-backdrop shadow-modal backdrop-blur-xl",
-      },
-      /**
-       * Which layer it floats in. Left out, a popup floats with the popups
-       * and a modal with the modals; a tooltip asks for the tooltip layer,
-       * which is above both, because it belongs to whatever control the
-       * pointer is on, wherever that control is.
-       */
-      layer: {
-        popup: "z-popup",
-        modal: "z-modal",
-        tooltip: "z-tooltip",
       },
       /**
        * Whether it arrives and leaves, or is simply there.
@@ -101,20 +98,15 @@ type SurfaceProps = React.ComponentPropsWithoutRef<"div"> &
   }
 
 export const Surface = React.forwardRef<HTMLDivElement, SurfaceProps>(function Surface(
-  { tier, layer, motion, open, className, ...props },
+  { tier, motion, open, className, ...props },
   ref,
 ) {
-  // A card is part of the page: it floats in no layer and does not arrive.
-  const isCard = (tier ?? "popup") === "card"
   return (
     <div
       ref={ref}
       className={cx(
-        surface({
-          tier,
-          layer: layer ?? (isCard ? undefined : tier === "modal" ? "modal" : "popup"),
-          motion: motion ?? !isCard,
-        }),
+        // A card is part of the page, so it does not arrive.
+        surface({ tier, motion: motion ?? (tier ?? "popup") !== "card" }),
         className,
         // Last, so that it wins over a caller's own `display` — a card that
         // is `flex` while it is there is still hidden when it is not. Hidden

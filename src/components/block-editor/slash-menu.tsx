@@ -75,7 +75,7 @@ export function SlashMenu({
       style={{ width: SLASH_MENU_WIDTH, ...style }}
       // Opened by a key and used constantly, so it does not arrive: it is there.
       motion={false}
-      className="absolute max-h-[45svh] overflow-auto p-1 font-sans text-base font-normal leading-normal tracking-normal text-text no-underline"
+      className="absolute z-popup max-h-[45svh] overflow-auto p-1 font-sans text-base font-normal leading-normal tracking-normal text-text no-underline"
       onMouseDown={(event) => event.preventDefault()}
     >
       {items.map((item, index) => {

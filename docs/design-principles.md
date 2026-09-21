@@ -301,25 +301,27 @@ full-width highlight.)
 ## Elevation
 
 Everything raised is a `Surface` (src/components/ui/surface.tsx) and says
-which of three tiers it is. The tier decides the edge, the fill, the shadow,
-the radius and the layer, so no component picks a shadow or a z-index for
-itself:
+which of three tiers it is. The tier decides the edge, the fill, the shadow
+and the radius, so no component picks a shadow or a radius for itself:
 
-| Tier    | What                                                                               | Fill and shadow                                      | Radius    | Layer   |
-| ------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------- | --------- | ------- |
-| `card`  | part of the page: settings sections, previews                                      | `bg-card`, `--shadow-card`                           | `lg` 12px | none    |
-| `popup` | floats over the page: menus, tooltips, hover cards, listboxes, the what's-new card | `bg-overlay-backdrop` blurred, `--shadow-popup`      | `lg` 12px | `popup` |
-| `modal` | floats over everything: dialogs, the palette                                       | `bg-overlay-backdrop` blurred more, `--shadow-modal` | `xl` 16px | `modal` |
+| Tier    | What                                                                               | Fill and shadow                                      | Radius    |
+| ------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------- | --------- |
+| `card`  | part of the page: settings sections, previews                                      | `bg-card`, `--shadow-card`                           | `lg` 12px |
+| `popup` | floats over the page: menus, tooltips, hover cards, listboxes, the what's-new card | `bg-overlay-backdrop` blurred, `--shadow-popup`      | `lg` 12px |
+| `modal` | floats over everything: dialogs, the palette                                       | `bg-overlay-backdrop` blurred more, `--shadow-modal` | `xl` 16px |
 
 Every tier shares the same hairline ring for an edge (`--neutral-a3`, inset in
 the dark), which is what makes them read as one family at three heights.
 
 **Layers** are named, never numbered (`--z-raised` 10, `--z-popup` 20,
 `--z-modal` 30, `--z-tooltip` 40 in variables.css; `z-raised` … `z-tooltip` in
-Tailwind). A surface floats in its tier's layer unless it asks otherwise; the
-tooltip does, because a tooltip belongs to the control under the pointer
-wherever that control is, and so sits above the modals too. Drawers and the
-lightbox, which are not surfaces, name the `modal` layer themselves.
+Tailwind), and the layer is named by the element that is _positioned_, not by
+the surface: a Base UI `Positioner`, a fixed dialog, a drawer, the what's-new
+card's own box. A z-index on a surface inside a positioned, transformed
+wrapper orders nothing outside that wrapper — which is why Material UI puts
+`zIndex` on the popover and not the paper, and shadcn puts `z-50` on the
+positioner. Tooltips take the layer above the modals, because a tooltip
+belongs to the control under the pointer wherever that control is.
 
 ## Color roles
 

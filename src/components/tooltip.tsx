@@ -21,15 +21,16 @@ function Content({
   return (
     <BaseTooltip.Portal>
       <BaseTooltip.Positioner
+        // The tooltip layer, above the popups and the modals alike: a tooltip
+        // belongs to the control under the pointer, wherever that control is.
+        className="z-tooltip"
         side={side}
         sideOffset={sideOffset}
         align={align}
         alignOffset={alignOffset}
       >
         <BaseTooltip.Popup
-          // The tooltip layer, above the popups and the modals alike: a
-          // tooltip belongs to the control under the pointer, wherever it is.
-          render={<Surface layer="tooltip" className="px-2.5 py-2 leading-none text-text" />}
+          render={<Surface className="px-2.5 py-2 leading-none text-text" />}
           className={className}
         >
           {children}

@@ -34,7 +34,13 @@ function Content({
 }: ContentProps) {
   return (
     <Menu.Portal>
-      <Menu.Positioner side={side} sideOffset={sideOffset} align={align} alignOffset={alignOffset}>
+      <Menu.Positioner
+        className="z-popup"
+        side={side}
+        sideOffset={sideOffset}
+        align={align}
+        alignOffset={alignOffset}
+      >
         <Menu.Popup
           render={
             <Surface className="grid place-items-stretch overflow-hidden print:hidden outline-hidden" />

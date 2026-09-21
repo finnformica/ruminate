@@ -27,7 +27,7 @@ const Content = React.forwardRef<HTMLDivElement, DialogContentProps>(
             tier="modal"
             motion={false}
             className={cx(
-              "fixed left-1/2 top-3 max-h-[75vh] w-[calc(100vw-24px)] max-w-md -translate-x-1/2 focus:outline-hidden sm:top-[10vh] overflow-hidden grid grid-rows-[auto_1fr]",
+              "fixed left-1/2 top-3 z-modal max-h-[75vh] w-[calc(100vw-24px)] max-w-md -translate-x-1/2 focus:outline-hidden sm:top-[10vh] overflow-hidden grid grid-rows-[auto_1fr]",
               className,
             )}
           >

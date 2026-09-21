@@ -371,7 +371,7 @@ export function QualifierPopover({
       }}
       // Opened by typing and used constantly, so it does not arrive: it is there.
       motion={false}
-      className="absolute max-h-[45svh] overflow-auto p-1 font-sans text-base font-normal leading-normal text-text"
+      className="absolute z-popup max-h-[45svh] overflow-auto p-1 font-sans text-base font-normal leading-normal text-text"
       onMouseDown={(event) => event.preventDefault()}
     >
       {items.map((item, index) => {

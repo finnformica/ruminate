@@ -106,7 +106,7 @@ export function LinkHoverCard({
         {children}
       </PreviewCard.Trigger>
       <PreviewCard.Portal>
-        <PreviewCard.Positioner side="bottom" sideOffset={6} align="start">
+        <PreviewCard.Positioner className="z-popup" side="bottom" sideOffset={6} align="start">
           <PreviewCard.Popup
             data-testid="link-hover-card"
             render={<Surface className="print:hidden" />}
