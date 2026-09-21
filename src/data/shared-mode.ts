@@ -16,6 +16,7 @@ import {
   pullShare,
   pushShare,
   type ReceivedShareSummary,
+  type ShareView,
   type SharePermission,
 } from "./shares"
 
@@ -72,6 +73,22 @@ export const sharedOriginAtom = atom<ReadonlyMap<string, string>>(EMPTY_ORIGIN)
 
 /** The shares addressed to me, as the server describes them. */
 export const receivedSharesAtom = atom<ReceivedShareSummary[]>([])
+
+/**
+ * The view each share opens its root with (docs/metadata.md, "Views"): the
+ * OWNER's filter and sort, by root, for the note page to fall back on when
+ * the reader has saved no view of their own. Presentation only — the slice
+ * is the whole subtree either way.
+ */
+export const sharedViewByRootAtom = atom((get) => {
+  const byRoot = new Map<string, ShareView>()
+  for (const share of get(receivedSharesAtom)) {
+    if (share.view.rootId !== "" && !byRoot.has(share.view.rootId)) {
+      byRoot.set(share.view.rootId, share.view)
+    }
+  }
+  return byRoot
+})
 
 /**
  * The address shares reach me at, as the server has it recorded
@@ -234,15 +251,20 @@ function rootTypesOf(nodes: NodeRow[], rootIds: readonly string[]): Map<string, 
   return types
 }
 
-/** A slice from the rows the server sent. */
+/** A slice from the rows the server sent. The view rides with the rows, so
+ * a pull follows the owner's edits to what the share opens as. */
 const sliceOf = (
-  share: ReceivedShareSummary,
-  rows: { nodes: NodeRow[]; links: LinkRowsOf },
-): Slice => ({
-  share,
-  graph: buildGraphSnapshot(asNotes(rows.nodes, share.rootIds), rows.links),
-  rootTypes: rootTypesOf(rows.nodes, share.rootIds),
-})
+  summary: ReceivedShareSummary,
+  rows: { nodes: NodeRow[]; links: LinkRowsOf; view?: ShareView },
+): Slice => {
+  const share = rows.view ? { ...summary, view: rows.view } : summary
+  const roots = [share.view.rootId]
+  return {
+    share,
+    graph: buildGraphSnapshot(asNotes(rows.nodes, roots), rows.links),
+    rootTypes: rootTypesOf(rows.nodes, roots),
+  }
+}
 type LinkRowsOf = Parameters<typeof buildGraphSnapshot>[1]
 
 /** The verbs a share grants, as flags. */

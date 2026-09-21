@@ -12,6 +12,7 @@ export type {
   CreateShareBody,
   GivenShare,
   ReceivedShareSummary,
+  ShareView,
   SliceBody,
 } from "../../worker/shares/wire"
 export type SharePermission = "read" | "write" | "delete"
@@ -111,10 +112,11 @@ export async function revokeShare(id: string): Promise<void> {
   await request(`/${encodeURIComponent(id)}`, { method: "DELETE" })
 }
 
-/** The slice of a share I received: every live node and link beneath its roots. */
+/** The slice of a share I received: every live node and link beneath its
+ * root, and the owner's view of it as it stands now. */
 export async function pullShare(id: string, fetchImpl?: typeof fetch): Promise<SliceBody> {
   const body = (await request(`/${encodeURIComponent(id)}/notes`, { fetchImpl })) as SliceBody
-  return { nodes: body.nodes ?? [], links: body.links ?? [] }
+  return { nodes: body.nodes ?? [], links: body.links ?? [], view: body.view }
 }
 
 /** Push a row diff into a share I received. Refused as a whole when any row

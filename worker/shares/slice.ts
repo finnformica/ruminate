@@ -1,12 +1,15 @@
 // The slice: which of the owner's rows a share reaches, and what a grantee's
 // write to them may contain (docs/sharing.md).
 //
-// A share names ROOTS — notes, or blocks. What the grantee may see beneath
-// them is derived from the owner's rows on every request, never sent by
-// anyone:
+// A share names the owner's VIEW (migrations/0017), and the view names a
+// ROOT — a note, or a block. What the grantee may see beneath it is derived
+// from the owner's rows on every request, never sent by anyone:
 //
-// > A node is in the slice when it is a granted root that is live, or when
-// > it is reachable from one through live child links.
+// > A node is in the slice when it is the granted root and live, or when it
+// > is reachable from it through live child links.
+//
+// The view's filter and sort ride along as presentation — how the grantee
+// opens the root — and never narrow the slice.
 //
 // That is the reachability closure, and it is why the share is live by
 // construction: a block added under a shared note joins the slice the moment
@@ -34,13 +37,7 @@ import {
 } from "../handlers/replica-payload"
 import type { TenantDb } from "../tenancy-db"
 import { shareAllows, type Permission, type ShareGrant } from "./grant"
-
-/**
- * How many roots a share may name. D1 binds at most 100 parameters per
- * statement and the closure walk names every root in one statement (plus
- * the note type and the tenant), so this stays well under.
- */
-export const MAX_SHARE_ROOTS = 50
+import type { ShareView } from "./wire"
 
 /** `?1, ?2, …` for `count` parameters. */
 const holes = (count: number): string =>
@@ -48,15 +45,16 @@ const holes = (count: number): string =>
 
 /**
  * The recursive walk, as a CTE prefix every slice statement shares:
- * `granted` is the roots that are live, `visible` everything reachable from
- * them. Written out in full in each statement rather than assembled at
- * runtime, so the string the guard checks is the string that runs.
+ * `granted` is the root if it is live, `visible` everything reachable from
+ * it. Written out in full in each statement rather than assembled at
+ * runtime, so the string the guard checks is the string that runs. The
+ * root is `?1`.
  */
-const closureCte = (rootCount: number) =>
+const closureCte =
   `WITH RECURSIVE granted (id) AS ( ` +
   `SELECT n.id FROM nodes n ` +
   `WHERE n.user_id = :tenant AND n.deleted_at IS NULL ` +
-  `AND n.id IN (${holes(rootCount)}) ), ` +
+  `AND n.id = ?1 ), ` +
   `visible (id) AS ( ` +
   `SELECT id FROM granted ` +
   `UNION ` +
@@ -66,8 +64,55 @@ const closureCte = (rootCount: number) =>
   `JOIN nodes c ON c.user_id = :tenant AND c.id = l.destination_id ` +
   `AND c.deleted_at IS NULL ) `
 
-/** The roots as a bindable list, capped. An empty grant walks nothing. */
-const rootsOf = (grant: ShareGrant): string[] => [...grant.rootIds].slice(0, MAX_SHARE_ROOTS)
+/**
+ * A view as it resolves when the owner has no row under that id: rooted at
+ * the id itself, since a view's id IS its root's (src/data/views.ts), and
+ * showing everything. The create endpoint writes the row, so this is for a
+ * share older than the row, not the ordinary case.
+ */
+const bareView = (id: string): ShareView => ({ id, rootId: id, filter: null, sort: null })
+
+/**
+ * The owner's views by id — what each share is of. Read INCLUDING tombstones:
+ * a view the owner cleared (unpinned, nothing saved) is a tombstone that
+ * still names its root, and the share it backs keeps serving that root, in
+ * document order, until a view is saved again and revives the row. Only a
+ * live row lends its filter and sort.
+ */
+export async function resolveShareViews(
+  owner: TenantDb,
+  viewIds: readonly string[],
+): Promise<Map<string, ShareView>> {
+  const views = new Map<string, ShareView>()
+  const wanted = [...new Set(viewIds)].filter((id) => id !== "")
+  const all = owner.includingDeleted()
+  for (let at = 0; at < wanted.length; at += 80) {
+    const batch = wanted.slice(at, at + 80)
+    const rows = await all.exec(
+      `SELECT id, root_id, filter, sort, deleted_at FROM views ` +
+        `WHERE user_id = :tenant AND id IN (${holes(batch.length)}) ` +
+        `/* includes-deleted: a cleared view still names the root its share is of */`,
+      batch,
+    )
+    for (const row of rows) {
+      const live = row.deleted_at === null || row.deleted_at === undefined
+      views.set(String(row.id), {
+        id: String(row.id),
+        rootId: String(row.root_id),
+        filter: live && typeof row.filter === "string" ? row.filter : null,
+        sort: live && typeof row.sort === "string" ? row.sort : null,
+      })
+    }
+  }
+  for (const id of wanted) if (!views.has(id)) views.set(id, bareView(id))
+  return views
+}
+
+/** The view one share is of. Null for a grant that names no view at all. */
+async function shareView(owner: TenantDb, grant: ShareGrant): Promise<ShareView | null> {
+  if (grant.viewId === "") return null
+  return (await resolveShareViews(owner, [grant.viewId])).get(grant.viewId) ?? null
+}
 
 /** What a slice node is now — the parts of it a push may not change. */
 export interface SliceNode {
@@ -76,20 +121,21 @@ export interface SliceNode {
   props: string | null
 }
 
-/** Every node in the slice, by id, and which of them are the live roots. */
+/** Every node in the slice, by id, and which of them is the live root (a
+ * set, for the write planner: empty when the root is not live). */
 export async function closureIds(
   owner: TenantDb,
   grant: ShareGrant,
 ): Promise<{ nodes: Map<string, SliceNode>; roots: Set<string> }> {
-  const roots = rootsOf(grant)
-  if (roots.length === 0) return { nodes: new Map(), roots: new Set() }
+  const view = await shareView(owner, grant)
+  if (view === null) return { nodes: new Map(), roots: new Set() }
   const rows = await owner.exec(
-    closureCte(roots.length) +
+    closureCte +
       `SELECT v.id AS id, n.type, n.notes_id, n.props, (g.id IS NOT NULL) AS is_root ` +
       `FROM visible v ` +
       `JOIN nodes n ON n.user_id = :tenant AND n.id = v.id AND n.deleted_at IS NULL ` +
       `LEFT JOIN granted g ON g.id = v.id`,
-    [...roots],
+    [view.rootId],
   )
   const nodes = new Map<string, SliceNode>()
   const liveRoots = new Set<string>()
@@ -106,17 +152,18 @@ export async function closureIds(
 }
 
 /** The slice as rows: every live node in it, and every live child link
- * with BOTH ends in it. Nothing else is ever serialized for a grantee. */
+ * with BOTH ends in it, and the view it is of. Nothing else is ever
+ * serialized for a grantee. Null for a grant that names no view. */
 export async function sliceRows(
   owner: TenantDb,
   grant: ShareGrant,
-): Promise<{ nodes: NodeRow[]; links: LinkRow[] }> {
-  const roots = rootsOf(grant)
-  if (roots.length === 0) return { nodes: [], links: [] }
-  const params = [...roots]
+): Promise<{ nodes: NodeRow[]; links: LinkRow[]; view: ShareView } | null> {
+  const view = await shareView(owner, grant)
+  if (view === null) return null
+  const params = [view.rootId]
   const nodes = (
     await owner.exec(
-      closureCte(roots.length) +
+      closureCte +
         // `notes_id` names where a block was born, which can be a note outside
         // the share (a block the owner mirrored in from elsewhere). An id
         // outside the closure is never serialized, so it is blanked here.
@@ -129,7 +176,7 @@ export async function sliceRows(
   ).map(toNodeRow)
   const links = (
     await owner.exec(
-      closureCte(roots.length) +
+      closureCte +
         `SELECT l.source_id, l.destination_id, l.kind, l.sort_key, l.updated_at ` +
         `FROM visible a CROSS JOIN link l ON l.source_id = a.id ` +
         `JOIN visible b ON b.id = l.destination_id ` +
@@ -137,7 +184,7 @@ export async function sliceRows(
       params,
     )
   ).map(toLinkRow)
-  return { nodes, links }
+  return { nodes, links, view }
 }
 
 /** Which of these ids already exist in the owner's partition, live OR
@@ -180,11 +227,12 @@ const isTombstone = (row: { deleted_at?: number }) =>
 const NOTE_TYPE = "note"
 
 /**
- * The props that are the OWNER's to set (docs/metadata.md): where a note
- * sits in their sidebar and how it is laid out. A push may carry them
- * unchanged — every row carries its props whole — but never change them.
+ * The props that are the OWNER's to set (docs/metadata.md): how a note is
+ * laid out. A push may carry them unchanged — every row carries its props
+ * whole — but never change them. (A pin is a view, not a prop, since
+ * migrations/0016, and the grantee's own to set.)
  */
-const OWNER_PROPS = ["pinned", "font", "width"] as const
+const OWNER_PROPS = ["font", "width"] as const
 
 const propsOf = (raw: string | null | undefined): Record<string, unknown> => {
   if (raw === null || raw === undefined) return {}

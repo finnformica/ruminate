@@ -2,6 +2,7 @@
 // tombstones included) on purpose: that is how it proves the slice holds.
 import { beforeEach, describe, expect, it } from "vitest"
 import migration0012 from "../../migrations/0012_shares.sql?raw"
+import migration0017 from "../../migrations/0017_share_views.sql?raw"
 import { setFeatureAudience } from "../features"
 import { createMcpTestEnv, type McpTestEnv } from "../mcp/test-support"
 import type { SharesListBody, SliceBody } from "../shares/wire"
@@ -121,10 +122,10 @@ async function seedOwner() {
 
 async function share(
   permissions: string[] = ["read"],
-  rootIds: string[] = [NOTE_A],
+  rootId: string = NOTE_A,
   email = "u8@example.com",
 ): Promise<string> {
-  const response = await send(apiRequest("POST", "", { email, rootIds, permissions }))
+  const response = await send(apiRequest("POST", "", { email, rootId, permissions }))
   expect(response.status).toBe(201)
   return (await bodyOf(response)).share.id as string
 }
@@ -148,6 +149,7 @@ async function ownerNode(id: string): Promise<Record<string, unknown> | undefine
 beforeEach(async () => {
   harness = await createMcpTestEnv()
   await harness.control.execScript(migration0012)
+  await harness.control.execScript(migration0017)
   // `addUser` records `u<id>@example.com` — what the sign-in callback would.
   await harness.addUser(OWNER)
   await harness.addUser(GRANTEE)
@@ -187,8 +189,8 @@ describe("the address column", () => {
     // the assertion below reads.
     const insert = async (email: string) =>
       harness.control.exec(
-        "INSERT INTO shares (id, owner_id, grantee_email, root_ids, permissions, created_at) " +
-          "VALUES ('shr_x', ?1, ?2, '[]', 'read', 1)",
+        "INSERT INTO shares (id, owner_id, grantee_email, view_id, permissions, created_at) " +
+          "VALUES ('shr_x', ?1, ?2, 'blk_x', 'read', 1)",
         [OWNER, email],
       )
     for (const bad of ["Bob@Example.com", "bob", "bob@x", "bob @example.com", " bob@example.com"]) {
@@ -201,18 +203,19 @@ describe("the address column", () => {
 describe("create", () => {
   it("stores the share and answers with it, and nothing about the address", async () => {
     const response = await send(
-      apiRequest("POST", "", { email: " U8@Example.com ", rootIds: [NOTE_A], permissions: [] }),
+      apiRequest("POST", "", { email: " U8@Example.com ", rootId: NOTE_A, permissions: [] }),
     )
     expect(response.status).toBe(201)
     const { share: created } = await bodyOf(response)
     expect(created.id).toMatch(/^shr_/)
     expect(created.granteeEmail).toBe("u8@example.com")
-    expect(created.rootIds).toEqual([NOTE_A])
+    // The view the share is of: made for the owner on the spot, empty.
+    expect(created.view).toEqual({ id: NOTE_A, rootId: NOTE_A, filter: null, sort: null })
     expect(created.permissions).toEqual(["read"])
     expect(created.revokedAt).toBeNull()
     // The same answer for an address nobody has signed in with.
     const unknown = await send(
-      apiRequest("POST", "", { email: "nobody@example.com", rootIds: [NOTE_A] }),
+      apiRequest("POST", "", { email: "nobody@example.com", rootId: NOTE_A }),
     )
     expect(unknown.status).toBe(201)
   })
@@ -225,25 +228,27 @@ describe("create", () => {
 
   it("needs an address that looks like one", async () => {
     for (const email of ["", "   ", "bob", "bob@", "@example.com", 7, null]) {
-      const response = await send(apiRequest("POST", "", { email, rootIds: [NOTE_A] }))
+      const response = await send(apiRequest("POST", "", { email, rootId: NOTE_A }))
       expect(response.status).toBe(400)
       expect((await bodyOf(response)).detail).toMatch(/email/)
     }
   })
 
-  it("refuses an empty root list rather than reading it as 'every note'", async () => {
-    const response = await send(apiRequest("POST", "", { email: "u8@example.com", rootIds: [] }))
-    expect(response.status).toBe(400)
-    expect((await bodyOf(response)).detail).toMatch(/at least one note/)
+  it("refuses a missing root rather than reading it as 'every note'", async () => {
+    for (const rootId of [undefined, "", ["x"]]) {
+      const response = await send(apiRequest("POST", "", { email: "u8@example.com", rootId }))
+      expect(response.status).toBe(400)
+      expect((await bodyOf(response)).detail).toMatch(/note or block/)
+    }
   })
 
   it("refuses roots that are not the caller's, without telling ghosts from others'", async () => {
     await harness.seedNote(GRANTEE, { id: "blk_theirs", title: "Theirs", markdown: "- x\n" })
     const ghost = await send(
-      apiRequest("POST", "", { email: "u8@example.com", rootIds: ["blk_ghost"] }),
+      apiRequest("POST", "", { email: "u8@example.com", rootId: "blk_ghost" }),
     )
     const theirs = await send(
-      apiRequest("POST", "", { email: "u8@example.com", rootIds: ["blk_theirs"] }),
+      apiRequest("POST", "", { email: "u8@example.com", rootId: "blk_theirs" }),
     )
     for (const response of [ghost, theirs]) {
       expect(response.status).toBe(400)
@@ -251,21 +256,19 @@ describe("create", () => {
     }
     // A block of the caller's own is a fine root.
     expect(
-      (await send(apiRequest("POST", "", { email: "u8@example.com", rootIds: [A1] }))).status,
+      (await send(apiRequest("POST", "", { email: "u8@example.com", rootId: A1 }))).status,
     ).toBe(201)
   })
 
   it("refuses a permission it does not know", async () => {
     const response = await send(
-      apiRequest("POST", "", { email: "u8@example.com", rootIds: [NOTE_A], permissions: ["sudo"] }),
+      apiRequest("POST", "", { email: "u8@example.com", rootId: NOTE_A, permissions: ["sudo"] }),
     )
     expect(response.status).toBe(400)
   })
 
   it("refuses sharing with yourself", async () => {
-    const response = await send(
-      apiRequest("POST", "", { email: "U7@example.com", rootIds: [NOTE_A] }),
-    )
+    const response = await send(apiRequest("POST", "", { email: "U7@example.com", rootId: NOTE_A }))
     expect(response.status).toBe(400)
     expect((await bodyOf(response)).detail).toMatch(/your own address/)
   })
@@ -290,9 +293,7 @@ describe("the sharing feature flag", () => {
   it("refuses to give a share when the feature is off for the caller; what was given still reads", async () => {
     const id = await share()
     await setFeatureAudience(harness.control, "sharing", "off", 1)
-    const refused = await send(
-      apiRequest("POST", "", { email: "u8@example.com", rootIds: [NOTE_A] }),
-    )
+    const refused = await send(apiRequest("POST", "", { email: "u8@example.com", rootId: NOTE_A }))
     expect(refused.status).toBe(403)
     expect((await bodyOf(refused)).error).toBe("feature_off")
     // The grantee still reads the share, and the owner still sees and can revoke it.
@@ -328,7 +329,7 @@ describe("list", () => {
       {
         id,
         owner: { login: "user-7", name: null },
-        rootIds: [NOTE_A],
+        view: { id: NOTE_A, rootId: NOTE_A, filter: null, sort: null },
         permissions: ["read", "write"],
         createdAt: expect.any(Number),
       },
@@ -339,7 +340,7 @@ describe("list", () => {
   })
 
   it("resolves the grantee by address, case-insensitively, and only them", async () => {
-    await share(["read"], [NOTE_A], "U8@EXAMPLE.COM")
+    await share(["read"], NOTE_A, "U8@EXAMPLE.COM")
     const grantee: SharesListBody = await bodyOf(
       await send(apiRequest("GET", "", undefined, "grantee")),
     )
@@ -419,6 +420,134 @@ describe("slice", () => {
     expect(sliceIds(body)).not.toContain(A3)
   })
 
+  it("is the owner's view of the root: their filter and sort ride along, and follow their edits", async () => {
+    // The owner saved a view of NOTE_A before sharing it.
+    await corpusPut(
+      harness.tenant(OWNER),
+      {
+        nodes: [],
+        links: [],
+        views: [
+          {
+            id: NOTE_A,
+            root_id: NOTE_A,
+            filter: "type:todo",
+            sort: null,
+            pinned: true,
+            sort_key: null,
+            updated_at: T0 + 1,
+          },
+        ],
+      },
+      T0 + 1,
+    )
+    const id = await share()
+    // Creating the share kept the view the owner had, and answers with it.
+    const listed: SharesListBody = await bodyOf(await send(apiRequest("GET")))
+    expect(listed.given[0].view).toEqual({
+      id: NOTE_A,
+      rootId: NOTE_A,
+      filter: "type:todo",
+      sort: null,
+    })
+    // The grantee sees the same view, on the listing and on the slice —
+    // and the whole subtree beneath it: the filter is how it opens, not
+    // what it holds.
+    const theirs: SharesListBody = await bodyOf(
+      await send(apiRequest("GET", "", undefined, "grantee")),
+    )
+    expect(theirs.received[0].view.filter).toBe("type:todo")
+    let body: SliceBody = await bodyOf(await slice(id))
+    expect(body.view).toEqual({ id: NOTE_A, rootId: NOTE_A, filter: "type:todo", sort: null })
+    expect(sliceIds(body)).toEqual([A1, A2, A3, SHARED_TWICE, NOTE_A].sort())
+
+    // The owner changes their view: the share follows, with no write to it.
+    await corpusPut(
+      harness.tenant(OWNER),
+      {
+        nodes: [],
+        links: [],
+        views: [
+          {
+            id: NOTE_A,
+            root_id: NOTE_A,
+            filter: null,
+            sort: "text:desc",
+            pinned: true,
+            sort_key: null,
+            updated_at: T0 + 2,
+          },
+        ],
+      },
+      T0 + 2,
+    )
+    body = await bodyOf(await slice(id))
+    expect(body.view).toEqual({ id: NOTE_A, rootId: NOTE_A, filter: null, sort: "text:desc" })
+  })
+
+  it("makes the owner's view where they had none, with a seq their devices will pull", async () => {
+    const before = await harness.control.exec(
+      "SELECT id FROM views WHERE user_id = ?1 AND id = ?2",
+      [OWNER, NOTE_A],
+    )
+    expect(before).toEqual([])
+    await share()
+    const after = await harness.control.exec(
+      "SELECT id, root_id, filter, sort, pinned, seq, deleted_at FROM views WHERE user_id = ?1 AND id = ?2",
+      [OWNER, NOTE_A],
+    )
+    expect(after).toEqual([
+      {
+        id: NOTE_A,
+        root_id: NOTE_A,
+        filter: null,
+        sort: null,
+        pinned: 0,
+        // Past every row the corpus holds, so a since-pull steps onto it.
+        seq: expect.any(Number),
+        deleted_at: null,
+      },
+    ])
+    const [{ top }] = await harness.control.exec(
+      "SELECT MAX(seq) AS top FROM nodes WHERE user_id = ?1",
+      [OWNER],
+    )
+    expect(Number(after[0].seq)).toBeGreaterThan(Number(top))
+    // Sharing the same node again writes nothing over it.
+    await share(["read"], NOTE_A, "u9@example.com")
+    expect(
+      await harness.control.exec("SELECT COUNT(*) AS n FROM views WHERE user_id = ?1", [OWNER]),
+    ).toEqual([{ n: 1 }])
+  })
+
+  it("keeps serving the subtree when the owner clears their view (a tombstone still names the root)", async () => {
+    const id = await share()
+    await corpusPut(
+      harness.tenant(OWNER),
+      {
+        nodes: [],
+        links: [],
+        views: [
+          {
+            id: NOTE_A,
+            root_id: NOTE_A,
+            filter: "type:todo",
+            sort: null,
+            pinned: false,
+            sort_key: null,
+            updated_at: T0 + 3,
+            deleted_at: T0 + 3,
+          },
+        ],
+      },
+      T0 + 3,
+    )
+    const body: SliceBody = await bodyOf(await slice(id))
+    expect(sliceIds(body)).toEqual([A1, A2, A3, SHARED_TWICE, NOTE_A].sort())
+    // ...in document order: a cleared view lends no filter.
+    expect(body.view).toEqual({ id: NOTE_A, rootId: NOTE_A, filter: null, sort: null })
+  })
+
   it("skips tombstoned nodes and the links through them", async () => {
     const id = await share()
     await corpusPut(
@@ -439,11 +568,16 @@ describe("slice", () => {
       T0 + 1,
     )
     const body: SliceBody = await bodyOf(await slice(id))
-    expect(body).toEqual({ nodes: [], links: [] })
+    // The view is still answered — it is the share's, whatever the root's fate.
+    expect(body).toEqual({
+      nodes: [],
+      links: [],
+      view: { id: NOTE_A, rootId: NOTE_A, filter: null, sort: null },
+    })
   })
 
   it("can be rooted at a block: that block and what is beneath it", async () => {
-    const id = await share(["read"], [A1])
+    const id = await share(["read"], A1)
     const body: SliceBody = await bodyOf(await slice(id))
     expect(sliceIds(body)).toEqual([A1, A2].sort())
     expect(body.links.map((row) => `${row.source_id}>${row.destination_id}`)).toEqual([
@@ -617,12 +751,12 @@ describe("write", () => {
     expect(retyped.status).toBe(403)
     expect((await ownerNode(A1))?.type).toBe("ul")
 
-    const pinned = await push(id, {
-      nodes: [{ ...edit(A1, "one"), props: '{"pinned":true}' }],
+    const widened = await push(id, {
+      nodes: [{ ...edit(A1, "one"), props: '{"width":"wide"}' }],
       links: [],
     })
-    expect(pinned.status).toBe(403)
-    expect((await bodyOf(pinned)).detail).toContain("pinned")
+    expect(widened.status).toBe(403)
+    expect((await bodyOf(widened)).detail).toContain("width")
     expect((await ownerNode(A1))?.props).toBeNull()
 
     const madeNote = await push(id, {

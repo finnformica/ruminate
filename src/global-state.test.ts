@@ -227,7 +227,7 @@ describe("sharedNotesAtom", () => {
     const share = {
       id: "share-1",
       owner: { login: "octocat", name: "John Smith" },
-      rootIds: ["misc"],
+      view: { id: "misc", rootId: "misc", filter: null, sort: null },
       permissions: ["read" as const],
       createdAt: 1,
     }

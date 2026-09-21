@@ -50,7 +50,8 @@ export interface CreateShareOptions {
   ownerId: number
   /** Already normalized (`normalizeEmail`). */
   granteeEmail: string
-  rootIds: string[]
+  /** The owner's view being shared — a row the handler has made sure exists. */
+  viewId: string
   permissions: Permission[]
   now?: number
 }
@@ -65,26 +66,26 @@ export async function createShare(
     id: `shr_${randomBase64url(ID_BYTES)}`,
     owner_id: options.ownerId,
     grantee_email: options.granteeEmail,
-    root_ids: JSON.stringify(options.rootIds),
+    view_id: options.viewId,
     permissions: serializeSharePermissions(options.permissions),
     created_at: now,
     revoked_at: null,
   }
   await driver.exec(
-    "INSERT INTO shares (id, owner_id, grantee_email, root_ids, permissions, created_at) " +
+    "INSERT INTO shares (id, owner_id, grantee_email, view_id, permissions, created_at) " +
       "VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-    [row.id, row.owner_id, row.grantee_email, row.root_ids, row.permissions, row.created_at],
+    [row.id, row.owner_id, row.grantee_email, row.view_id, row.permissions, row.created_at],
   )
   return shareFromRow(row)
 }
 
-const SHARE_COLUMNS = "id, owner_id, grantee_email, root_ids, permissions, created_at, revoked_at"
+const SHARE_COLUMNS = "id, owner_id, grantee_email, view_id, permissions, created_at, revoked_at"
 
 const asRow = (row: Record<string, unknown>): ShareRow => ({
   id: String(row.id),
   owner_id: Number(row.owner_id),
   grantee_email: String(row.grantee_email),
-  root_ids: String(row.root_ids),
+  view_id: String(row.view_id ?? ""),
   permissions: String(row.permissions ?? ""),
   created_at: Number(row.created_at),
   revoked_at:
@@ -125,7 +126,7 @@ export async function listReceivedShares(
   granteeId: number,
 ): Promise<ReceivedShare[]> {
   const rows = await driver.exec(
-    `SELECT s.id, s.owner_id, s.grantee_email, s.root_ids, s.permissions, s.created_at, ` +
+    `SELECT s.id, s.owner_id, s.grantee_email, s.view_id, s.permissions, s.created_at, ` +
       `s.revoked_at, u.login AS owner_login, u.name AS owner_name ` +
       `FROM shares s ` +
       `JOIN users g ON g.github_id = ?1 AND g.email = s.grantee_email ` +

@@ -13,7 +13,7 @@ const grantWith = (permissions: string): ShareGrant =>
     id: "shr_1",
     owner_id: 7,
     grantee_email: "bob@example.com",
-    root_ids: '["blk_note"]',
+    view_id: "blk_note",
     permissions,
     created_at: 1,
     revoked_at: null,
@@ -145,15 +145,17 @@ describe("planSliceWrite", () => {
 
   it("keeps the owner's props: carried unchanged, never changed or introduced", () => {
     const root = (props: string | null) => node("blk_note", { type: "note", props })
-    // The row as the grantee holds it — the owner's pin and width intact,
-    // their own edit stamped beside them.
+    // The row as the grantee holds it — the owner's width intact, their own
+    // edit stamped beside it. (A `pinned` key is nobody's since 0016: a pin
+    // is a view, and the grantee's own to set; the key passes as any prop.)
     expect(plan("read,write", [root('{"width":"wide","pinned":true,"updated_at":"x"}')]).ok).toBe(
       true,
     )
-    for (const props of ['{"pinned":false,"width":"wide"}', '{"width":"wide"}', null]) {
+    expect(plan("read,write", [root('{"width":"wide","pinned":false}')]).ok).toBe(true)
+    for (const props of ['{"pinned":true,"width":"narrow"}', '{"pinned":true}', null]) {
       expect(plan("read,write", [root(props)])).toMatchObject({
         ok: false,
-        refusal: { error: "permission_denied", detail: expect.stringContaining("pinned") },
+        refusal: { error: "permission_denied", detail: expect.stringContaining("width") },
       })
     }
     expect(
@@ -165,10 +167,10 @@ describe("planSliceWrite", () => {
     expect(
       plan(
         "read,write",
-        [node("blk_new", { props: '{"pinned":true}' })],
+        [node("blk_new", { props: '{"width":"wide"}' })],
         [link("blk_a", "blk_new")],
       ),
-    ).toMatchObject({ ok: false, refusal: { detail: expect.stringContaining("pinned") } })
+    ).toMatchObject({ ok: false, refusal: { detail: expect.stringContaining("width") } })
   })
 
   it("lands notes_id only on a new row, and clamps every clock to the server's", () => {

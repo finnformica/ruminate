@@ -6,22 +6,35 @@
 import type { LinkRow, NodeRow } from "../handlers/replica-payload"
 import type { Permission } from "../mcp/grant"
 
-/** A share as its OWNER sees it: the address they typed, the roots, the verbs. */
+/**
+ * The view a share is of (migrations/0017): the owner's row, as the share
+ * resolves it at request time — where it starts, and the filter and sort
+ * the grantee opens it with (docs/metadata.md, "Views"). Presentation, not
+ * permission: the slice is the whole subtree beneath the root.
+ */
+export interface ShareView {
+  id: string
+  rootId: string
+  filter: string | null
+  sort: string | null
+}
+
+/** A share as its OWNER sees it: the address they typed, the view, the verbs. */
 export interface GivenShare {
   id: string
   granteeEmail: string
-  rootIds: string[]
+  view: ShareView
   permissions: Permission[]
   createdAt: number
   revokedAt: number | null
 }
 
 /** A share as its GRANTEE sees it: who shared it (login and display name,
- * never an address), the roots, the verbs. */
+ * never an address), the view, the verbs. */
 export interface ReceivedShareSummary {
   id: string
   owner: { login: string; name: string | null }
-  rootIds: string[]
+  view: ShareView
   permissions: Permission[]
   createdAt: number
 }
@@ -34,15 +47,18 @@ export interface SharesListBody {
   received: ReceivedShareSummary[]
 }
 
-/** Body of `POST /api/shares`. */
+/** Body of `POST /api/shares`: the node to share (the view rooted at it is
+ * made if the owner has none) and the verbs. */
 export interface CreateShareBody {
   email: string
-  rootIds: string[]
+  rootId: string
   permissions: Permission[]
 }
 
-/** Body of `GET /api/shares/:id/notes` — the slice, live rows only. */
+/** Body of `GET /api/shares/:id/notes` — the slice, live rows only, and the
+ * view it is of as it stands now, so a pull follows the owner's edits to it. */
 export interface SliceBody {
   nodes: NodeRow[]
   links: LinkRow[]
+  view: ShareView
 }

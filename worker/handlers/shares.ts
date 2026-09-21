@@ -1,10 +1,13 @@
 // Sharing — `/api/shares` (docs/sharing.md).
 //
-// A share is a scoped grant: an owner names a set of root notes and an email,
-// and the person GitHub reports that email for reads — and, with the verbs the
-// owner ticked, edits or deletes — the slice of the owner's corpus beneath
-// those roots. The slice is computed here on every request from the owner's
-// rows (`worker/shares/slice.ts`), so it is live and least-privilege by
+// A share is a view shared with someone: an owner names a note or block and
+// an email, and the person GitHub reports that email for reads — and, with
+// the verbs the owner ticked, edits or deletes — the slice of the owner's
+// corpus beneath that root. The share row holds the grant; the root, and the
+// filter and sort the grantee opens it with, are the owner's VIEW of the node
+// (migrations/0017, docs/metadata.md), read at request time. The slice is
+// computed here on every request from the owner's rows
+// (`worker/shares/slice.ts`), so it is live and least-privilege by
 // construction.
 //
 // Reached by a browser, so every route authenticates like the replica does —
@@ -32,10 +35,10 @@ import { controlPlaneDriver, corpusDriver, forTenant } from "../tenancy-db"
 import type { Env } from "../types"
 import { PERMISSIONS, normalizeEmail, type Permission, type ShareGrant } from "../shares/grant"
 import {
-  MAX_SHARE_ROOTS,
   applySliceWrite,
   closureIds,
   planSliceWrite,
+  resolveShareViews,
   sliceRows,
   takenIds,
 } from "../shares/slice"
@@ -49,7 +52,7 @@ import {
   revokeShare,
   type ReceivedShare,
 } from "../shares/store"
-import type { GivenShare, ReceivedShareSummary, SharesListBody } from "../shares/wire"
+import type { GivenShare, ReceivedShareSummary, ShareView, SharesListBody } from "../shares/wire"
 import { featureAllows, featureRefusal } from "../features"
 import { parseReplicaPayload } from "./replica-payload"
 import { requireSession } from "./replica"
@@ -67,22 +70,51 @@ const json = (body: unknown, status = 200): Response =>
     headers: { "Content-Type": "application/json" },
   })
 
-const asGiven = (grant: ShareGrant): GivenShare => ({
+const asGiven = (grant: ShareGrant, view: ShareView): GivenShare => ({
   id: grant.id,
   granteeEmail: grant.granteeEmail,
-  rootIds: [...grant.rootIds],
+  view,
   permissions: PERMISSIONS.filter((permission) => grant.permissions.has(permission)),
   createdAt: grant.createdAt,
   revokedAt: grant.revokedAt,
 })
 
-const asReceived = ({ grant, owner }: ReceivedShare): ReceivedShareSummary => ({
+const asReceived = ({ grant, owner }: ReceivedShare, view: ShareView): ReceivedShareSummary => ({
   id: grant.id,
   owner: { login: owner.login, name: owner.name },
-  rootIds: [...grant.rootIds],
+  view,
   permissions: PERMISSIONS.filter((permission) => grant.permissions.has(permission)),
   createdAt: grant.createdAt,
 })
+
+/** A tenant handle for an owner named by a share row — the one handle in
+ * the app that is not the caller's own (see the header comment). */
+const ownerHandle = (env: Env, ownerId: number) =>
+  forTenant(corpusDriver(env), { id: ownerId, login: String(ownerId), name: null })
+
+/** The view behind each received share, resolved under its owner's handle —
+ * one query per owner, since shares from one person come from one partition. */
+async function receivedViews(env: Env, received: ReceivedShare[]): Promise<Map<string, ShareView>> {
+  const byOwner = new Map<number, string[]>()
+  for (const { grant } of received) {
+    const ids = byOwner.get(grant.ownerId) ?? []
+    ids.push(grant.viewId)
+    byOwner.set(grant.ownerId, ids)
+  }
+  const views = new Map<string, ShareView>()
+  for (const [ownerId, ids] of byOwner) {
+    const resolved = await resolveShareViews(ownerHandle(env, ownerId), ids)
+    for (const { grant } of received) {
+      if (grant.ownerId !== ownerId) continue
+      const view = resolved.get(grant.viewId)
+      if (view) views.set(grant.id, view)
+    }
+  }
+  return views
+}
+
+/** A view nothing resolved — a grant naming no view at all. */
+const NO_VIEW: ShareView = { id: "", rootId: "", filter: null, sort: null }
 
 /** Route `/api/shares[/<id>[/notes]]`. Every route is session-guarded. */
 export async function shares(
@@ -119,13 +151,24 @@ export async function shares(
           503,
         )
       }
+      // Each share's view, read where it lives: the caller's own partition
+      // for what they gave, each owner's for what they received.
+      const givenViews = await resolveShareViews(
+        forTenant(corpusDriver(env), session),
+        listing.given.map((grant) => grant.viewId),
+      )
+      const views = await receivedViews(env, listing.received)
       const body: SharesListBody = {
         // The caller's OWN address, so Settings can say which address others
         // may share with — read back from the row, which is what shares are
         // resolved against, rather than from whatever the client remembers.
         me: { email: listing.email },
-        given: listing.given.map(asGiven),
-        received: listing.received.map(asReceived),
+        given: listing.given.map((grant) =>
+          asGiven(grant, givenViews.get(grant.viewId) ?? NO_VIEW),
+        ),
+        received: listing.received.map((entry) =>
+          asReceived(entry, views.get(entry.grant.id) ?? NO_VIEW),
+        ),
       }
       return json(body)
     }
@@ -161,13 +204,14 @@ export async function shares(
 
     // THE tenant-scoping invariant (see the header comment): the only input
     // to the owner's handle is the owner id on the share row.
-    const owner = forTenant(corpusDriver(env), {
-      id: received.grant.ownerId,
-      login: String(received.grant.ownerId),
-      name: null,
-    })
+    const owner = ownerHandle(env, received.grant.ownerId)
 
-    if (request.method === "GET") return json(await sliceRows(owner, received.grant))
+    if (request.method === "GET") {
+      const rows = await sliceRows(owner, received.grant)
+      // A grant naming no view is a share over nothing: the same 404 as a
+      // share that is not the caller's.
+      return rows === null ? json({ error: "not_found" }, 404) : json(rows)
+    }
     if (request.method === "PUT") return write(request, owner, received.grant)
     return json({ error: "method_not_allowed" }, 405)
   }
@@ -177,7 +221,7 @@ export async function shares(
 
 interface ParsedCreate {
   email: string
-  rootIds: string[]
+  rootId: string
   permissions: Permission[]
 }
 
@@ -190,16 +234,9 @@ function parseCreateBody(raw: unknown): ParsedCreate | string {
   const email = normalizeEmail(body.email)
   if (email === null) return "Enter the email address the person signs in to GitHub with."
 
-  if (!Array.isArray(body.rootIds) || body.rootIds.length === 0) {
-    return "Pick at least one note or block to share."
-  }
-  if (body.rootIds.length > MAX_SHARE_ROOTS) {
-    return `Share at most ${MAX_SHARE_ROOTS} roots at a time.`
-  }
-  const unique = new Set<string>()
-  for (const entry of body.rootIds) {
-    if (typeof entry !== "string" || entry.length === 0) return "`rootIds` must be node ids."
-    unique.add(entry)
+  // One root per share: a share is one view, and a view has one root.
+  if (typeof body.rootId !== "string" || body.rootId.length === 0) {
+    return "Pick a note or block to share."
   }
 
   const permissions: Permission[] = ["read"]
@@ -213,24 +250,37 @@ function parseCreateBody(raw: unknown): ParsedCreate | string {
     }
   }
 
-  return { email, rootIds: [...unique], permissions }
+  return { email, rootId: body.rootId, permissions }
 }
 
-/** Which of these ids are live nodes — notes or blocks — in the caller's own
- * corpus. */
-async function ownNodeIds(
-  env: Env,
-  session: VerifiedIdentity,
-  ids: string[],
-): Promise<Set<string>> {
-  const tenant = forTenant(corpusDriver(env), session)
-  const placeholders = ids.map((_, index) => `?${index + 1}`).join(", ")
+/** Is this id a live node — a note or a block — in the caller's own corpus? */
+async function ownsNode(tenant: ReturnType<typeof forTenant>, id: string): Promise<boolean> {
   const rows = await tenant.exec(
-    `SELECT id FROM nodes WHERE user_id = :tenant AND deleted_at IS NULL ` +
-      `AND id IN (${placeholders})`,
-    ids,
+    `SELECT id FROM nodes WHERE user_id = :tenant AND deleted_at IS NULL AND id = ?1`,
+    [id],
   )
-  return new Set(rows.map((row) => String(row.id)))
+  return rows.length > 0
+}
+
+/**
+ * The owner's view of the node being shared, made where they have none: an
+ * empty one — unpinned, unfiltered — under the root's own id, which is the
+ * id the client mints too (src/data/views.ts), so the owner saving a filter
+ * later lands on this very row. It carries a `seq` like any replica write,
+ * so the owner's devices pull it, and it never overwrites a view the owner
+ * has: the view IS the share, and what they saved is what is shared.
+ */
+async function ensureView(
+  tenant: ReturnType<typeof forTenant>,
+  rootId: string,
+  now: number,
+): Promise<void> {
+  await tenant.exec(
+    "INSERT INTO views (user_id, id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, seq) " +
+      "VALUES (:tenant, ?1, ?1, NULL, NULL, 0, NULL, ?2, NULL, (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM views WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */))) " +
+      "ON CONFLICT (user_id, id) DO NOTHING",
+    [rootId, now],
+  )
 }
 
 async function create(request: Request, env: Env, session: VerifiedIdentity): Promise<Response> {
@@ -260,31 +310,33 @@ async function create(request: Request, env: Env, session: VerifiedIdentity): Pr
     )
   }
 
-  // A share is only worth storing if it names rows that exist and are the
-  // caller's. Checked through a `TenantDb`, so "are they the caller's" is the
+  // A share is only worth storing if it names a row that exists and is the
+  // caller's. Checked through a `TenantDb`, so "is it the caller's" is the
   // same question the corpus answers everywhere else — and naming someone
   // else's id is indistinguishable from naming one that does not exist.
-  const own = await ownNodeIds(env, session, parsed.rootIds)
-  const missing = parsed.rootIds.filter((id) => !own.has(id))
-  if (missing.length > 0) {
+  const tenant = forTenant(corpusDriver(env), session)
+  if (!(await ownsNode(tenant, parsed.rootId))) {
     return json(
-      {
-        error: "invalid_request",
-        detail: `These are not in your notes: ${missing.join(", ")}.`,
-      },
+      { error: "invalid_request", detail: `This is not in your notes: ${parsed.rootId}.` },
       400,
     )
   }
 
+  // The view is the share: make sure the owner has one of this node, then
+  // record the grant against it.
+  const now = Date.now()
+  await ensureView(tenant, parsed.rootId, now)
   const grant = await createShare(control, {
     ownerId: session.id,
     granteeEmail: parsed.email,
-    rootIds: parsed.rootIds,
+    viewId: parsed.rootId,
     permissions: parsed.permissions,
+    now,
   })
+  const view = (await resolveShareViews(tenant, [grant.viewId])).get(grant.viewId) ?? NO_VIEW
   // The response says what was stored and nothing about the address: whether
   // it belongs to a Ruminate user is not this endpoint's to reveal.
-  return json({ share: asGiven(grant) }, 201)
+  return json({ share: asGiven(grant, view) }, 201)
 }
 
 async function write(
