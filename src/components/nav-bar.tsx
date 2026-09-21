@@ -1,12 +1,12 @@
 import { useNavigate, useRouter } from "@tanstack/react-router"
 import { useAtomValue, useSetAtom } from "jotai"
 import { forwardRef, useState } from "react"
-import { Drawer } from "vaul"
 import { appUpdateAtom } from "../hooks/app-update"
 import { cx } from "../utils/cx"
 import { generateNoteId } from "../utils/note-id"
 import { isCommandMenuOpenAtom } from "./command-menu"
 import { IconButton, IconButtonProps } from "./ui/icon-button"
+import { Sheet } from "./ui/sheet"
 import { ArrowLeftIcon16, ArrowRightIcon16, MenuIcon16, ComposeIcon16, SearchIcon16 } from "./icons"
 import { NavItems } from "./nav-items"
 import { SignInBanner } from "./sign-in-banner"
@@ -38,12 +38,8 @@ export function NavBar() {
     <div className="border-t border-border-secondary">
       <SignInBanner />
       <div className="flex h-(--height-nav-bar) items-stretch  p-2 [&>button]:h-full">
-        <Drawer.Root
-          open={isDrawerOpen}
-          onOpenChange={setIsDrawerOpen}
-          shouldScaleBackground={false}
-        >
-          <Drawer.Trigger asChild>
+        <Sheet open={isDrawerOpen} onOpenChange={setIsDrawerOpen}>
+          <Sheet.Trigger asChild>
             <NavButton
               aria-label={
                 badgeLabel ? `Open navigation menu (${badgeLabel})` : "Open navigation menu"
@@ -66,17 +62,13 @@ export function NavBar() {
                 ) : null}
               </span>
             </NavButton>
-          </Drawer.Trigger>
-          <Drawer.Portal>
-            <Drawer.Overlay className="fixed inset-0 z-modal bg-linear-to-t from-[#000000] to-[#00000000]" />
-            <Drawer.Content className="fixed bottom-0 left-0 right-0 z-modal flex h-[80%] flex-col bg-bg-overlay rounded-t-xl outline-none">
-              <div className="grid flex-1 scroll-py-2 grid-rows-[auto_1fr] overflow-y-auto p-3 pb-[max(env(safe-area-inset-bottom),12px)]">
-                <Drawer.Title className="sr-only">Navigation</Drawer.Title>
-                <NavItems size="large" onNavigate={() => setIsDrawerOpen(false)} />
-              </div>
-            </Drawer.Content>
-          </Drawer.Portal>
-        </Drawer.Root>
+          </Sheet.Trigger>
+          <Sheet.Content title="Navigation">
+            <div className="grid flex-1 scroll-py-2 grid-rows-[auto_1fr] overflow-y-auto p-3 pb-[max(env(safe-area-inset-bottom),12px)]">
+              <NavItems size="large" onNavigate={() => setIsDrawerOpen(false)} />
+            </div>
+          </Sheet.Content>
+        </Sheet>
         <NavButton aria-label="Go back" onClick={() => router.history.back()}>
           <ArrowLeftIcon16 />
         </NavButton>

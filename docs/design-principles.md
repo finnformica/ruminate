@@ -311,7 +311,10 @@ and the radius, so no component picks a shadow or a radius for itself:
 | `modal` | floats over everything: dialogs, the palette                                       | `bg-overlay-backdrop` blurred more, `--shadow-modal` | `xl` 16px |
 
 Every tier shares the same hairline ring for an edge (`--neutral-a3`, inset in
-the dark), which is what makes them read as one family at three heights.
+the dark), which is what makes them read as one family at three heights. An
+in-page card renders `<Surface tier="card">` like the rest; the two elements
+that cannot be a `Surface` — a router `Link`, the calendar's own container —
+take the recipe, `surface({ tier: "card" })`, so there is still one definition.
 
 **Layers** are named, never numbered (`--z-raised` 10, `--z-popup` 20,
 `--z-modal` 30, `--z-tooltip` 40 in variables.css; `z-raised` … `z-tooltip` in

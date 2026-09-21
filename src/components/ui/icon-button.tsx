@@ -1,17 +1,31 @@
+import { cva, type VariantProps } from "class-variance-authority"
 import React from "react"
 import { cx } from "../../utils/cx"
 import { Keys } from "./keys"
 import { Tooltip } from "./tooltip"
 
-export type IconButtonProps = React.ComponentPropsWithoutRef<"button"> & {
-  "aria-label": string // Required for accessibility
-  size?: "small" | "medium"
-  shortcut?: string[]
-  tooltipSide?: "top" | "bottom" | "left" | "right"
-  tooltipAlign?: "start" | "center" | "end"
-  tooltipSideOffset?: number
-  disableTooltip?: boolean
-}
+const iconButton = cva(
+  "focus-ring inline-flex cursor-pointer select-none items-center justify-center rounded text-text-secondary enabled:hover:bg-bg-hover enabled:active:bg-bg-active data-[popup-open]:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50 coarse:h-10 coarse:px-3",
+  {
+    variants: {
+      size: {
+        small: "h-6 px-2",
+        medium: "h-8 px-2",
+      },
+    },
+    defaultVariants: { size: "medium" },
+  },
+)
+
+export type IconButtonProps = React.ComponentPropsWithoutRef<"button"> &
+  VariantProps<typeof iconButton> & {
+    "aria-label": string // Required for accessibility
+    shortcut?: string[]
+    tooltipSide?: "top" | "bottom" | "left" | "right"
+    tooltipAlign?: "start" | "center" | "end"
+    tooltipSideOffset?: number
+    disableTooltip?: boolean
+  }
 
 export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
   (
@@ -19,7 +33,7 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
       className,
       children,
       shortcut,
-      size = "medium",
+      size,
       tooltipSide = "bottom",
       tooltipAlign = "center",
       tooltipSideOffset,
@@ -29,19 +43,7 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
     ref,
   ) => {
     const trigger = (
-      <button
-        ref={ref}
-        type="button"
-        className={cx(
-          "focus-ring inline-flex cursor-pointer select-none items-center justify-center rounded text-text-secondary enabled:hover:bg-bg-hover enabled:active:bg-bg-active data-[popup-open]:bg-bg-hover",
-          "disabled:cursor-not-allowed disabled:opacity-50",
-          "coarse:h-10 coarse:px-3",
-          size === "small" && "h-6 px-2",
-          size === "medium" && "h-8 px-2",
-          className,
-        )}
-        {...props}
-      >
+      <button ref={ref} type="button" className={cx(iconButton({ size }), className)} {...props}>
         {children}
       </button>
     )

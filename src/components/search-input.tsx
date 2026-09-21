@@ -2,10 +2,10 @@ import React from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useValueRef } from "../hooks/value-ref"
 import { APP_SHORTCUTS } from "../shortcuts/registry"
-import { cx } from "../utils/cx"
-import { IconButton } from "./ui/icon-button"
 import { ClearIcon16, SearchIcon16 } from "./icons"
+import { IconButton } from "./ui/icon-button"
 import { Keys } from "./ui/keys"
+import { SearchField } from "./ui/search-field"
 
 type SearchInputProps = Omit<React.ComponentPropsWithoutRef<"input">, "onChange"> & {
   shortcut?: string[]
@@ -61,13 +61,9 @@ export function SearchInput({
       <div className="absolute inset-y-0 left-0 grid aspect-square place-items-center text-text-secondary">
         <SearchIcon16 />
       </div>
-      <input
+      <SearchField
         ref={ref}
-        className={cx(
-          "focus-ring h-10 w-full rounded-lg bg-bg-secondary pl-10 [-webkit-appearance:none] [font-variant-numeric:inherit] placeholder:text-text-secondary coarse:h-12 coarse:pl-11 [&:not(:focus-visible)]:hover:ring-1 [&:not(:focus-visible)]:hover:ring-inset [&:not(:focus-visible)]:hover:ring-border-secondary",
-          value ? "pr-10 coarse:pr-12" : "pr-3 coarse:pr-4",
-        )}
-        type="search"
+        trailing={Boolean(value)}
         value={inputValue}
         placeholder={placeholder}
         onChange={handleChange}

@@ -75,7 +75,7 @@ export function PageLayout({
             {otherTabHasDatabase && !disableGuard ? (
               <div className="p-4">
                 <Notice
-                  tone="warning"
+                  variant="warning"
                   actions={<Button onClick={() => window.location.reload()}>Reload</Button>}
                 >
                   Ruminate is open in another tab — this tab is using a temporary in-memory copy.
@@ -86,7 +86,7 @@ export function PageLayout({
             {accessDenied !== null && !isSignedOut && !disableGuard ? (
               <div className="p-4">
                 <Notice
-                  tone="warning"
+                  variant="warning"
                   actions={
                     accessDenied === "client_too_old" ? (
                       <Button onClick={applyUpdate}>Update Ruminate</Button>
@@ -103,7 +103,7 @@ export function PageLayout({
             ) : null}
             {databaseStatus.emptyOffline && !disableGuard ? (
               <div className="p-4">
-                <Notice tone="info">
+                <Notice variant="info">
                   No notes yet — this device hasn’t been able to reach the notes database. They’ll
                   load automatically once you’re back online, and anything you write now is kept
                   locally and synced later.

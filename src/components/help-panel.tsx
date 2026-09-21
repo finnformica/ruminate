@@ -1,6 +1,5 @@
 import { useAtom } from "jotai"
 import { Fragment, useMemo, useState } from "react"
-import { Drawer } from "vaul"
 import { isHelpPanelOpenAtom } from "../global-state"
 import {
   APP_SHORTCUTS,
@@ -15,6 +14,7 @@ import { Keys } from "./ui/keys"
 import { BlockContent } from "./block-editor/block-content"
 import { Details } from "./ui/details"
 import { HoverCard } from "./ui/hover-card"
+import { Sheet } from "./ui/sheet"
 import { SearchInput } from "./search-input"
 
 function HelpSection({ title, children }: { title: string; children: React.ReactNode }) {
@@ -191,16 +191,12 @@ export function HelpSidebar() {
 export function HelpDrawer() {
   const [isOpen, setIsOpen] = useAtom(isHelpPanelOpenAtom)
   return (
-    <Drawer.Root open={isOpen} onOpenChange={setIsOpen} shouldScaleBackground={false}>
-      <Drawer.Portal>
-        <Drawer.Overlay className="fixed inset-0 z-modal bg-linear-to-t from-[#000000] to-[#00000000]" />
-        <Drawer.Content className="fixed bottom-0 left-0 right-0 z-modal flex h-[80%] flex-col bg-bg-overlay rounded-t-xl outline-none">
-          <Drawer.Title className="sr-only">Help</Drawer.Title>
-          <div className="flex-1 overflow-hidden">
-            <HelpContent onClose={() => setIsOpen(false)} size="medium" />
-          </div>
-        </Drawer.Content>
-      </Drawer.Portal>
-    </Drawer.Root>
+    <Sheet open={isOpen} onOpenChange={setIsOpen}>
+      <Sheet.Content title="Help">
+        <div className="flex-1 overflow-hidden">
+          <HelpContent onClose={() => setIsOpen(false)} size="medium" />
+        </div>
+      </Sheet.Content>
+    </Sheet>
   )
 }

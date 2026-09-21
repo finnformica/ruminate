@@ -14,6 +14,7 @@ import { SharingSection } from "../components/sharing-section"
 import { useFeature } from "../data/features"
 import { recordedEmailAtom } from "../data/shared-mode"
 import { TextInput } from "../components/ui/text-input"
+import { IconButton } from "../components/ui/icon-button"
 import {
   databaseModeStatusAtom,
   refreshDatabaseReplicaStatus,
@@ -152,14 +153,11 @@ function AppearanceSection() {
           {ACCENT_OPTIONS.map((option) => {
             const isSelected = accent === option.value
             return (
-              <button
+              <IconButton
                 key={option.value}
-                type="button"
                 aria-label={option.label}
                 aria-pressed={isSelected}
-                title={option.label}
                 onClick={() => setAccent(option.value)}
-                className="focus-ring flex h-8 w-8 items-center justify-center rounded hover:bg-bg-hover active:bg-bg-active coarse:h-10 coarse:w-10"
               >
                 {/* The documented exception to "chosen is a fill": a swatch IS
                   a fill, so the choice has to be drawn around it. The ring is
@@ -175,7 +173,7 @@ function AppearanceSection() {
                   )}
                   style={{ backgroundColor: option.swatchColor }}
                 />
-              </button>
+              </IconButton>
             )
           })}
         </div>

@@ -1,6 +1,7 @@
 import { Menu } from "@base-ui/react/menu"
 import React from "react"
 import { cx } from "../../utils/cx"
+import { listHeading, listRow } from "./list"
 import { Surface } from "./surface"
 import { CheckIcon16, ChevronRightIcon12 } from "../icons"
 import { Keys } from "./keys"
@@ -122,11 +123,7 @@ const Item = React.forwardRef<HTMLDivElement, ItemProps>(
     return (
       <Menu.Item
         ref={ref}
-        className={cx(
-          "group flex h-8 cursor-pointer select-none items-center gap-3 rounded px-3 outline-hidden focus:bg-bg-hover focus:outline-hidden active:bg-bg-active coarse:h-10",
-          "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:focus:bg-transparent data-[disabled]:active:bg-transparent",
-          className,
-        )}
+        className={cx(listRow(), className)}
         // eslint-disable-next-line jsx-a11y/anchor-has-content -- content is provided via children
         render={href ? <a href={href} target={target} rel={rel} /> : undefined}
         {...props}
@@ -152,16 +149,7 @@ type SubmenuTriggerProps = Omit<Menu.SubmenuTrigger.Props, "render"> & {
 
 const SubmenuTrigger = React.forwardRef<HTMLDivElement, SubmenuTriggerProps>(
   ({ className, icon, value, children, ...props }, ref) => (
-    <Menu.SubmenuTrigger
-      ref={ref}
-      className={cx(
-        "group flex h-8 cursor-pointer select-none items-center gap-3 rounded px-3 outline-hidden focus:bg-bg-hover focus:outline-hidden active:bg-bg-active coarse:h-10",
-        "data-[popup-open]:bg-bg-hover",
-        "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
-        className,
-      )}
-      {...props}
-    >
+    <Menu.SubmenuTrigger ref={ref} className={cx(listRow(), className)} {...props}>
       <div className="flex w-0 grow items-center gap-3">
         {icon ? <div className="flex text-text-secondary">{icon}</div> : null}
         <span className="grow truncate">{children}</span>
@@ -182,14 +170,7 @@ const Group = Menu.Group
 
 const GroupLabel = React.forwardRef<HTMLDivElement, Menu.GroupLabel.Props>(
   ({ className, ...props }, ref) => (
-    <Menu.GroupLabel
-      ref={ref}
-      className={cx(
-        "flex h-8 select-none items-center px-3 text-sm text-text-secondary coarse:h-9",
-        className,
-      )}
-      {...props}
-    />
+    <Menu.GroupLabel ref={ref} className={cx(listHeading(), className)} {...props} />
   ),
 )
 
