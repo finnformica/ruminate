@@ -71,8 +71,8 @@ export interface BlockEditorApi {
   /**
    * Whether the editor moves through its rows at all (`BlockEditor`): every
    * editable one does, and a read-only one that is browsed. A read-only row
-   * of a browsed editor highlights on click and focuses from its bullet, as
-   * an editable one does; one of an inert editor does nothing.
+   * of a browsed editor highlights on click, as an editable one does; one of
+   * an inert editor does nothing.
    */
   navigable?: boolean
   /**
@@ -129,8 +129,6 @@ export interface BlockEditorApi {
    * was consumed (so the caller can `preventDefault`).
    */
   dispatchKey: (mode: Mode, key: string, event: KeyLike, caret?: CaretInput) => boolean
-  /** Focus on a block: its subtree becomes the whole editor view. */
-  focusBlock: (id: string) => void
   /** Image files pasted or dropped on a row: upload them and add image blocks
    * there. Absent where images are switched off (the paste is left alone). */
   onImageFiles?: (key: string, files: File[]) => void
@@ -764,11 +762,13 @@ export function BlockItem({
   // beside, and hovering the checkbox must mean the checkbox.
   const slotClass = hasToggle && !toggleBeside ? "block-toggle-slot" : undefined
 
-  // List markers double as focus targets (Logseq-style: click the bullet to
-  // make this block the note) — on leaves. A parent's key is its collapse
-  // toggle, so focus stays on F / Cmd+. there. The negative-margin padding
-  // enlarges the hit area without shifting the marker's layout size.
-  const canFocus = (!readOnly || api.navigable) && !hasToggle
+  // No marker is a focus target. A bullet once was (Logseq-style: click the
+  // dot to make the block the note), but a finger reaching for a row's text
+  // landed on the dot often enough that the note kept swapping for one
+  // block, and on a desktop nobody meant the click either. Focus stays on
+  // F / Cmd+., the block menu and the phone's edit bar (docs/mobile.md);
+  // a parent's key is its collapse toggle.
+  //
   // Every marker occupies the same 15px slot, so body text starts at one
   // column across every block type and the markers read as one chrome
   // family: dots centre in it; text glyphs (`#`, number, `>`) right-align
@@ -776,8 +776,8 @@ export function BlockItem({
   // so a swapped-in chevron centres on it, and carries `slotClass` so
   // hovering it reveals the chevron.
   //
-  // The bullet's dot: on a leaf it focuses; on a parent it is the key that
-  // swaps for the chevron.
+  // The bullet's dot: faint, like the chevron — pure chrome; content leads.
+  // On a parent it is the key that swaps for the chevron.
   const dotSlot = (
     <span
       className={cx(
@@ -785,24 +785,10 @@ export function BlockItem({
         slotClass,
       )}
     >
-      {canFocus ? (
-        <button
-          type="button"
-          aria-label="Focus on block"
-          tabIndex={-1}
-          onClick={() => api.focusBlock(block.id)}
-          // An 18px hit area around the 6px dot; a finger gets 26px.
-          className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-[background-color,transform] duration-150 hover:bg-bg-hover active:scale-90 motion-reduce:active:scale-100 coarse:-m-2.5 coarse:p-2.5"
-        >
-          {/* Faint, like the chevron — pure chrome; content leads. */}
-          <span aria-hidden className="block-glyph-fill size-1.5 rounded-full bg-text-tertiary" />
-        </button>
-      ) : (
-        <span
-          aria-hidden
-          className={cx("block-glyph-fill size-1.5 rounded-full bg-text-tertiary", keyClass)}
-        />
-      )}
+      <span
+        aria-hidden
+        className={cx("block-glyph-fill size-1.5 rounded-full bg-text-tertiary", keyClass)}
+      />
       {toggle}
     </span>
   )
@@ -811,8 +797,8 @@ export function BlockItem({
   // slot, like the dot and the checkbox, not right-aligned like `#` and the
   // numbers: `>` is a narrow glyph, and right-aligned its ink sat 3px right
   // of the dot's centre (and of the guide line that hangs from it). Never a
-  // focus button (focus stays on F / Cmd+. and bullet/number clicks); on a
-  // parent it swaps for the collapse chevron. The empty paragraph slot keeps
+  // focus button (no marker is; focus stays on F / Cmd+. and the edit bar);
+  // on a parent it swaps for the collapse chevron. The empty paragraph slot keeps
   // its width so the text stays in the shared column, and still hosts a
   // parent's chevron.
   const glyphSlot = (glyph: string | null, testId: string) => (
@@ -881,8 +867,8 @@ export function BlockItem({
       // overflows LEFT, past the surface's edge — the text column never
       // moves. The slot's `h-[1lh]` (resolved at the heading's scale) centres
       // the glyph on the heading's first line. A static glyph, like the note
-      // title's — never a focus button (focus stays on F / Cmd+. and
-      // bullet/number clicks); on a parent it swaps for the collapse chevron.
+      // title's — never a focus button (no marker is; focus stays on F /
+      // Cmd+. and the edit bar); on a parent it swaps for the collapse chevron.
       <span
         data-testid="heading-hash"
         className={cx(
@@ -903,21 +889,9 @@ export function BlockItem({
           slotClass,
         )}
       >
-        {canFocus ? (
-          <button
-            type="button"
-            aria-label="Focus on block"
-            tabIndex={-1}
-            onClick={() => api.focusBlock(block.id)}
-            className="-mx-0.5 cursor-pointer rounded-sm px-0.5 transition-[background-color,transform] duration-150 hover:bg-bg-hover active:scale-95 motion-reduce:active:scale-100"
-          >
-            {olNumber}.
-          </button>
-        ) : (
-          <span aria-hidden className={keyClass}>
-            {olNumber}.
-          </span>
-        )}
+        <span aria-hidden className={keyClass}>
+          {olNumber}.
+        </span>
         {toggle}
       </span>
     ) : (

@@ -268,6 +268,15 @@ function subtreeDoc(doc: BlockDoc, id: string): BlockDoc {
   return { props: null, rootBlockIds: [id], blocks }
 }
 
+/** One step of the focus navigation stack: the block focused on, with the
+ * text it was last seen with (the breadcrumb's label for it once the view has
+ * moved on to a block beneath it). */
+interface FocusHop {
+  id: string
+  text: string
+}
+const hopOf = (doc: BlockDoc, id: string): FocusHop => ({ id, text: doc.blocks[id]?.text ?? "" })
+
 /**
  * A controlled block outliner. `doc` is owned by the caller (which serializes
  * and saves it); this component manages only transient UI state and emits new
@@ -515,25 +524,45 @@ export function BlockEditor({
   const [focusInternal, setFocusInternal] = useState<string | null>(focusRootIdProp)
   const focusRootId = onFocusNavigate ? focusRootIdProp : focusInternal
 
-  // The focus NAVIGATION stack: the ids focused on, in the order the user took
-  // — the breadcrumb and Shift+F follow this path, not the tree ancestry
+  // The focus NAVIGATION stack: the blocks focused on, in the order the user
+  // took — the breadcrumb and Shift+F follow this path, not the tree ancestry
   // (under the graph model a block can live in several places, so "the path
   // you took" is the only honest trail). Reconciled from focusRootId so every
-  // way of changing focus (keyboard, bullet click, crumb click, browser back,
+  // way of changing focus (keyboard, the edit bar, crumb click, browser back,
   // deep link) keeps it consistent: navigating to an id already on the stack
   // truncates back to it; anything else is a new hop and pushes.
-  const [focusStack, setFocusStack] = useState<string[]>(() => (focusRootId ? [focusRootId] : []))
+  //
+  // Each hop keeps the text it was seen with. In focus the page hands the
+  // editor the focused block's own view (`useNoteDoc`), so the blocks focused
+  // on before it are not in the doc to be read — and the crumbs still have
+  // to name them. The texts are refreshed from whatever doc does hold them
+  // (a deep link's doc can arrive after its hop), without a new stack for an
+  // edit that changes none of them.
+  const [focusStack, setFocusStack] = useState<FocusHop[]>(() =>
+    focusRootId ? [hopOf(doc, focusRootId)] : [],
+  )
   useEffect(() => {
     setFocusStack((stack) => {
       if (!focusRootId) return stack.length === 0 ? stack : []
-      const at = stack.indexOf(focusRootId)
-      if (at === stack.length - 1 && at !== -1) return stack
-      if (at !== -1) return stack.slice(0, at + 1)
-      return [...stack, focusRootId]
+      const at = stack.findIndex((hop) => hop.id === focusRootId)
+      const next =
+        at === -1
+          ? [...stack, hopOf(doc, focusRootId)]
+          : at === stack.length - 1
+            ? stack
+            : stack.slice(0, at + 1)
+      let changed = next !== stack
+      const refreshed = next.map((hop) => {
+        const text = doc.blocks[hop.id]?.text
+        if (text === undefined || text === hop.text) return hop
+        changed = true
+        return { id: hop.id, text }
+      })
+      return changed ? refreshed : stack
     })
-  }, [focusRootId])
+  }, [focusRootId, doc])
   // Where Shift+F returns to: one step back along the path (null leaves focus).
-  const focusBackId = focusStack.length > 1 ? focusStack[focusStack.length - 2] : null
+  const focusBackId = focusStack.length > 1 ? focusStack[focusStack.length - 2].id : null
   // What Enter puts in a fresh block — a user preference (Settings → Editor).
   const newBlockMarker = useAtomValue(newBlockMarkerAtom)
 
@@ -2232,9 +2261,6 @@ export function BlockEditor({
       setFocus({ key: lastKey, caret })
     },
     dispatchKey,
-    focusBlock: (id) => {
-      if (navigable) navigateFocus(id)
-    },
     startSelectionLadder: (key) => {
       if (readOnly) return
       // Called from edit mode (Cmd/Ctrl+A with the textarea already fully
@@ -2724,17 +2750,20 @@ export function BlockEditor({
     event.preventDefault()
   }
 
-  // Breadcrumb while focused: the navigation stack minus the current root —
-  // the hops the user actually took, in order (levels are never dropped —
-  // long labels truncate with CSS instead). Clicking a crumb truncates the
-  // stack back to it via the reconciliation effect.
-  const crumbIds = useMemo(
-    () => (focusRootId ? focusStack.slice(0, -1).filter((id) => doc.blocks[id]) : []),
-    [doc, focusRootId, focusStack],
-  )
-  const crumbLabel = (id: string): string => {
-    const text = (doc.blocks[id]?.text ?? "").trim()
-    return text === "" ? "…" : text
+  // Breadcrumb while focused: the hops before the current root — the path
+  // the user actually took, in order (levels are never dropped — long labels
+  // truncate with CSS instead). Read up to the root rather than off the end,
+  // so the frame between a focus change and the stack's reconciliation shows
+  // the trail it will settle on. Clicking a crumb truncates the stack back to
+  // it via the reconciliation effect.
+  const crumbs = useMemo(() => {
+    if (!focusRootId) return []
+    const at = focusStack.findIndex((hop) => hop.id === focusRootId)
+    return at === -1 ? focusStack : focusStack.slice(0, at)
+  }, [focusRootId, focusStack])
+  const crumbLabel = (text: string): string => {
+    const trimmed = text.trim()
+    return trimmed === "" ? "…" : trimmed
   }
   // `focus-ring`: a crumb is a real button and had no focus style at all, so
   // a keyboard user walking the focus trail could not see where they were.
@@ -2782,13 +2811,13 @@ export function BlockEditor({
           <button type="button" className={crumbClass} onClick={() => navigateFocus(null)}>
             {noteTitle?.trim() || "Note"}
           </button>
-          {crumbIds.map((id) => (
-            <Fragment key={id}>
+          {crumbs.map((hop) => (
+            <Fragment key={hop.id}>
               <span aria-hidden className="text-text-tertiary">
                 ›
               </span>
-              <button type="button" className={crumbClass} onClick={() => navigateFocus(id)}>
-                {crumbLabel(id)}
+              <button type="button" className={crumbClass} onClick={() => navigateFocus(hop.id)}>
+                {crumbLabel(hop.text)}
               </button>
             </Fragment>
           ))}
@@ -2796,7 +2825,7 @@ export function BlockEditor({
             ›
           </span>
           <span aria-current="page" className="min-w-0 max-w-48 truncate px-1 text-text">
-            {crumbLabel(focusRoot.id)}
+            {crumbLabel(focusRoot.text)}
           </span>
         </nav>
       ) : null}

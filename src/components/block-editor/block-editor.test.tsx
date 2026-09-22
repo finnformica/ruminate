@@ -1511,8 +1511,8 @@ describe("heading hash marker", () => {
 
   it("is a static glyph, never a focus button, in every view", () => {
     // The hash reads as typography (like the note title's), not a control —
-    // focus stays on F / Cmd+. and the bullet/number click targets. (A parent
-    // heading's slot also hosts the collapse chevron; that is not a focus.)
+    // focus stays on F / Cmd+. and the edit bar. (A parent heading's slot
+    // also hosts the collapse chevron; that is not a focus.)
     for (const readOnly of [false, true]) {
       const { container, unmount } = render(
         <BlockEditor doc={parse(NESTED)} onChange={() => {}} readOnly={readOnly} />,
@@ -1592,11 +1592,16 @@ describe("collapse toggle", () => {
     expect(hashSlot.querySelector(".block-key")?.textContent).toBe("#")
   })
 
-  it("a leaf bullet still focuses on click", () => {
+  it("a leaf's bullet is a static glyph too: no marker focuses on click", () => {
+    // The dot used to be a focus button on leaves. A finger reaching for the
+    // text kept landing on it, so the markers are all chrome now — focus
+    // stays on F / Cmd+., the block menu and the edit bar.
     const { container } = render(<Harness initial={OUTLINE} />)
     const line = lineOf(container, "blk_leaf")
-    expect(line.querySelector('button[aria-label="Focus on block"]')).not.toBeNull()
+    expect(line.querySelector("button")).toBeNull()
+    expect(line.querySelector(".block-glyph-fill")).not.toBeNull()
     expect(line.querySelector(".block-key")).toBeNull()
+    expect(container.querySelector('button[aria-label="Focus on block"]')).toBeNull()
   })
 
   it("a todo parent keeps its checkbox in the slot and takes the chevron beside it", () => {

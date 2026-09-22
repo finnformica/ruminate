@@ -178,10 +178,10 @@ asks for it.
    and the outline reads as indented beneath the title rather than the title
    as one more row. The pull is the page's to grant: it needs the 40px
    gutter, so a narrow page (16–20px) leaves the header at the text column.
-   The rows never take it — the text column does not move. Unlike the bullet
-   and number the hash is NOT a focus target — it reads as typography, and
-   focus stays on F / Cmd+. and the bullet/number clicks (on leaves; a
-   parent's key is its collapse toggle).
+   The rows never take it — the text column does not move. The hash is NOT a
+   focus target, and neither is the bullet or the number — the markers read
+   as typography, and focus stays on F / Cmd+., the block menu and the
+   phone's edit bar (a parent's key is its collapse toggle).
 
 ## Type scale
 
