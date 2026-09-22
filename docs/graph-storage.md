@@ -512,7 +512,7 @@ shared `SqlDriver` seam.
   `nodes`/`links`; the older `deleteNodes`/`deleteLinks` channel is kept and
   turned into tombstone stamps (one timestamp for the whole push), never
   removals. Payloads are validated (`parseReplicaPayload`) and planned
-  (`planReplicaPut`) by pure, unit-tested functions.
+  (`rowsToEvents`, `planEventAppend`) by pure, unit-tested functions.
 - `GET /api/replica/notes` — row pull, the read half:
   - Full: `{ nodes, links, cursor }` — every row of both tables, tombstones
     included.

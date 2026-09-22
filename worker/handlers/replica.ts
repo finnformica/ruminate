@@ -7,10 +7,20 @@
 // with per-row last-writer-wins on `updated_at`. Every user's corpus lives in
 // one D1 database, in the rows whose `user_id` is theirs.
 //
+// What a push writes is EVENTS (docs/event-sourcing.md): the rows are diffed
+// against what the replica holds, the difference is appended to the tenant's
+// log, and the tables follow from the log in the same transaction. The wire
+// is unchanged — a client pushes and pulls rows as it always has — so every
+// cached bundle of the app still in the wild writes events too.
+//
 // Routes (wired in worker/index.ts under /api/replica/*):
 //   PUT /api/replica/notes  — batch row upserts + deletes, one atomic batch
 //   GET /api/replica/notes  — row pull (full, or ?since=<cursor> incremental)
 //   GET /api/replica/status — row counts + schema_version + replica_cursor
+//   GET /api/replica/events — the event log, or one entity's history
+//   GET /api/replica/at     — the corpus as it stood at a seq or a time
+//   GET /api/replica/verify — does folding the log still yield the tables?
+//   POST /api/replica/restore — put a block back the way it was, by appending
 //
 // The wire format, validation, and SQL planning live in `replica-payload.ts`
 // (shared with the client); the queries run through `replica-corpus.ts`
@@ -42,6 +52,14 @@ import {
   type TenantDb,
 } from "../tenancy-db"
 import type { Env } from "../types"
+import {
+  corpusAt,
+  readEvents,
+  reconcileLog,
+  restoreSubtree,
+  verifyLog,
+  writerOf,
+} from "./event-log"
 import { corpusPullFull, corpusPullSince, corpusPut, corpusStatus } from "./replica-corpus"
 import {
   LEGACY_TIMESTAMP_CURSOR_FLOOR,
@@ -176,7 +194,11 @@ export async function replica(
   const method = request.method
   const known =
     (pathname === "/api/replica/notes" && (method === "PUT" || method === "GET")) ||
-    (pathname === "/api/replica/status" && method === "GET")
+    (pathname === "/api/replica/status" && method === "GET") ||
+    (pathname === "/api/replica/events" && method === "GET") ||
+    (pathname === "/api/replica/at" && method === "GET") ||
+    (pathname === "/api/replica/verify" && method === "GET") ||
+    (pathname === "/api/replica/restore" && method === "POST")
   if (!known) return jsonResponse({ error: "not_found" }, 404)
 
   // THE tenant-scoping invariant (see the header comment): the only input to
@@ -186,7 +208,86 @@ export async function replica(
 
   if (pathname === "/api/replica/notes" && method === "PUT") return replicaPut(request, tenant)
   if (pathname === "/api/replica/notes") return replicaPull(request, tenant)
+  if (pathname === "/api/replica/events") return replicaEvents(request, tenant)
+  if (pathname === "/api/replica/at") return replicaAt(request, tenant)
+  if (pathname === "/api/replica/verify") return jsonResponse(await verifyLog(tenant))
+  if (pathname === "/api/replica/restore") return replicaRestore(request, tenant)
   return jsonResponse(await corpusStatus(tenant))
+}
+
+// -----------------------------------------------------------------------------
+// The log (docs/event-sourcing.md): history, a past moment, and the way back
+// -----------------------------------------------------------------------------
+
+/** A non-negative integer query value, or null when absent or malformed. */
+const count = (raw: string | null): number | null =>
+  raw !== null && /^\d{1,15}$/.test(raw) ? Number(raw) : null
+
+const ENTITIES = new Set(["block", "link", "view"])
+/** The most events one response carries; a caller pages with `since`. */
+const MAX_EVENTS = 5000
+
+/**
+ * `GET /api/replica/events?since=<seq>&limit=<n>` — the log, oldest first.
+ * With `entity` + `entity_id`, one entity's events: its version history.
+ */
+async function replicaEvents(request: Request, tenant: TenantDb): Promise<Response> {
+  const query = new URL(request.url).searchParams
+  const entity = query.get("entity")
+  const entityId = query.get("entity_id")
+  if ((entity === null) !== (entityId === null) || (entity !== null && !ENTITIES.has(entity))) {
+    return jsonResponse({ error: "invalid_entity" }, 400)
+  }
+  // A tenant who has not written since the log began has an empty one until
+  // something reconciles it; a reader should never be the one to find that.
+  await reconcileLog(tenant)
+  const events = await readEvents(tenant, {
+    since: count(query.get("since")) ?? 0,
+    limit: Math.min(count(query.get("limit")) ?? 1000, MAX_EVENTS),
+    ...(entity !== null && entityId !== null ? { entity, entityId } : {}),
+  })
+  return jsonResponse({ events, cursor: events.at(-1)?.seq ?? null })
+}
+
+/**
+ * `GET /api/replica/at?seq=<seq>` or `?at=<ms>` — the corpus as it stood: the
+ * pull's shape (`nodes`, `links`, `views`), folded from the log, plus the
+ * `seq` served and where the log begins (`earliest`). Read-only; the tables
+ * are not consulted and nothing is written.
+ */
+async function replicaAt(request: Request, tenant: TenantDb): Promise<Response> {
+  const query = new URL(request.url).searchParams
+  const seq = count(query.get("seq"))
+  const at = count(query.get("at"))
+  if ((seq === null) === (at === null)) return jsonResponse({ error: "invalid_moment" }, 400)
+  return jsonResponse(await corpusAt(tenant, seq !== null ? { seq } : { at: at as number }))
+}
+
+/**
+ * `POST /api/replica/restore` `{ block, seq }` — return a block, everything
+ * beneath it and its place under its parents to how they stood at `seq`. A
+ * restore is appended, never a rewind: it replicates by the ordinary pull and
+ * shows in the history as what it was.
+ */
+async function replicaRestore(request: Request, tenant: TenantDb): Promise<Response> {
+  const body = (await request.json().catch(() => null)) as { block?: unknown; seq?: unknown } | null
+  if (
+    body === null ||
+    typeof body.block !== "string" ||
+    body.block.length === 0 ||
+    typeof body.seq !== "number" ||
+    !Number.isSafeInteger(body.seq) ||
+    body.seq < 0
+  ) {
+    return jsonResponse({ error: "invalid_restore" }, 400)
+  }
+  const restored = await restoreSubtree(tenant, body.block, body.seq, {
+    actor: tenant.userId,
+    origin: "replica",
+    cause: "restore",
+    ...writerOf(request),
+  })
+  return jsonResponse({ ok: true, ...restored })
 }
 
 /**
@@ -233,7 +334,7 @@ async function replicaPut(request: Request, tenant: TenantDb): Promise<Response>
   const payload = parseReplicaPayload(body)
   if (!payload) return jsonResponse({ error: "invalid_payload" }, 400)
 
-  return jsonResponse(await corpusPut(tenant, payload))
+  return jsonResponse(await corpusPut(tenant, payload, Date.now(), writerOf(request)))
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

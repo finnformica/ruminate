@@ -13,6 +13,7 @@ import {
   type ReplicaStatusBody,
   type ViewRow,
 } from "../../worker/handlers/replica-payload"
+import { writerHeaders } from "./writer-identity"
 import type { NoteId } from "../schema"
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
 import { isBrowserOffline } from "../utils/network"
@@ -343,6 +344,7 @@ export function startReplicaSync(options: ReplicaSyncOptions): ReplicaSyncHandle
         credentials: "same-origin",
         headers: {
           ...REPLICA_PROTOCOL_HEADERS,
+          ...writerHeaders(),
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },

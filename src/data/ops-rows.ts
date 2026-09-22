@@ -13,7 +13,7 @@ import type { Op } from "./ops"
  * `applyOps` (ops.ts) says what a batch means to the *snapshot* — what the
  * screen shows next. This says what the same batch means to *storage*: the
  * node and link rows whose values change, as a `GraphDiff`, which is exactly
- * the shape `planReplicaPut` turns into SQL.
+ * the shape `writeRows` (worker/handlers/event-log.ts) turns into events.
  *
  * The browser has had this step all along, inlined in its store
  * (`planOp`/`emitWrite`, sql-note-store.ts) where it emits single-tenant

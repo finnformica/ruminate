@@ -21,8 +21,8 @@
 // runs is the one a reader sees.
 
 import type { TenantDb } from "../tenancy-db"
+import { writeRows } from "./event-log"
 import {
-  planReplicaPut,
   toLinkRow,
   toNodeRow,
   toViewRow,
@@ -90,7 +90,7 @@ export async function corpusPullFull(tenant: TenantDb): Promise<ReplicaCorpusBod
  * `link_tenant_seq` / `views_tenant_seq`, so a quiet pull reads one row per
  * table.
  *
- * `seq` is assigned by the replica (`planReplicaPut`), so `>` is EXACT: no
+ * `seq` is assigned by the replica (`planEventAppend`), so `>` is EXACT: no
  * device clock is involved, nothing can land with a stamp behind the cursor,
  * and the client no longer asks for a ten-minute overlap to cover the
  * possibility. That window was costing a full re-read of every row the device
@@ -139,19 +139,38 @@ export async function corpusPullSince(
 }
 
 /**
- * Apply one validated push as a single atomic batch (per-row LWW — see
- * `planReplicaPut`). The payload must already have passed
- * `parseReplicaPayload`; validation stays at the HTTP boundary. `now` stamps
- * the legacy delete channel: one timestamp for the whole push, so the rows a
- * single delete retires share a stamp and can be revived together.
+ * Apply one validated push as a single atomic batch: the rows become events
+ * (per-row LWW — see `rowsToEvents`), the events are appended, and the tables
+ * follow from them (`writeRows`, event-log.ts). The payload must already have
+ * passed `parseReplicaPayload`; validation stays at the HTTP boundary. `now`
+ * stamps the legacy delete channel: one timestamp for the whole push, so the
+ * rows a single delete retires share a stamp and can be revived together.
+ *
+ * The browser's `replica_cursor` stamp rides in the same transaction.
  */
 export async function corpusPut(
   tenant: TenantDb,
   payload: ReplicaPutPayload,
   now: number = Date.now(),
+  writer: { device?: string; client?: string | null } = {},
 ): Promise<ReplicaPutResult> {
-  const statements = planReplicaPut(payload, now)
-  if (statements.length > 0) await tenant.batch(statements)
+  const cursor =
+    payload.cursor === undefined
+      ? []
+      : [
+          {
+            sql:
+              "INSERT INTO meta (user_id, key, value) VALUES (:tenant, 'replica_cursor', ?1) " +
+              "ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value",
+            params: [payload.cursor],
+          },
+        ]
+  await writeRows(
+    tenant,
+    payload,
+    { actor: tenant.userId, origin: "replica", now, ...writer },
+    cursor,
+  )
   return {
     ok: true,
     nodes: payload.nodes.length,

@@ -2,15 +2,16 @@
 // tombstones included) on purpose: that is how it proves the scoping works.
 import { describe, expect, it } from "vitest"
 import migration0008 from "../../migrations/0008_note_type.sql?raw"
+import { rowsToEvents } from "../../src/data/events"
 import type { SqlDriver } from "../../src/data/sql-driver"
 import { ensureTenantMeta, forTenant, type TenantDb } from "../tenancy-db"
 import type { Env } from "../types"
+import { planEventAppend, planReconcile } from "./event-log"
 import { corpusPullFull, corpusPullSince, corpusPut, corpusStatus } from "./replica-corpus"
 import {
   REPLICA_PROTOCOL_HEADERS,
   parseReplicaPayload,
   parseSinceCursor,
-  planReplicaPut,
   type LinkRow,
   type NodeRow,
   type ReplicaChangesBody,
@@ -119,91 +120,30 @@ describe("parseReplicaPayload", () => {
   })
 })
 
-describe("planReplicaPut", () => {
-  it("plans tombstones first, then node upserts before link upserts", () => {
-    const statements = planReplicaPut(
-      {
-        nodes: [node],
-        links: [link],
-        deleteNodes: ["blk_gone000000"],
-        deleteLinks: [["blk_noteaaaaaa", "blk_gone000000", "child"]],
-        cursor: "c1",
-      },
-      NOW,
-    )
-    expect(statements.map((s) => s.sql.split(" ").slice(0, 3).join(" "))).toEqual([
-      "UPDATE link SET",
-      "UPDATE nodes SET",
-      "INSERT INTO nodes",
-      "INSERT INTO link",
-      "INSERT INTO meta",
-    ])
-    expect(statements[2].params).toEqual(["blk_aaaaaaaaaa", "ul", "Hi", null, 123, null, null])
-    expect(statements[3].params).toEqual([
-      "blk_noteaaaaaa",
-      "blk_aaaaaaaaaa",
-      "child",
-      "a0",
-      123,
-      null,
-    ])
-  })
+describe("the planned write", () => {
+  const write = { actor: 111, origin: "replica" as const, client: null, now: NOW, appendId: "apd" }
+  const events = rowsToEvents(
+    { nodes: new Map(), links: new Map(), views: new Map() },
+    { nodes: [node], links: [link] },
+    { batch: "apd", device: "tab", now: NOW },
+  )
 
   it("every statement names its tenant with the :tenant token, never a parameter", () => {
-    const statements = planReplicaPut(
-      { nodes: [node], links: [link], deleteNodes: ["x"], cursor: "c" },
-      NOW,
-    )
+    const statements = [planReconcile(write), ...planEventAppend(events, write)]
+    expect(statements).toHaveLength(8)
     for (const statement of statements) {
       expect(statement.sql).toContain("user_id")
       expect(statement.sql).toContain(":tenant")
-      // No planned parameter is a user id — there is nowhere to put one.
-      expect(statement.params).not.toContain(42536816)
     }
+    // The one user id among the parameters is the ACTOR — who wrote, recorded
+    // beside the event — and never which tenant's rows are written.
+    const [append, ...projections] = planEventAppend(events, write)
+    expect(append.params).toContain(111)
+    for (const statement of projections) expect(statement.params).not.toContain(111)
   })
 
-  it("upserts with per-row LWW: stale rows cannot clobber newer ones", () => {
-    const statements = planReplicaPut({ nodes: [node], links: [link] }, NOW)
-    expect(statements[0].sql).toContain("WHERE excluded.updated_at >= nodes.updated_at")
-    expect(statements[1].sql).toContain("WHERE excluded.updated_at >= link.updated_at")
-  })
-
-  it("carries deleted_at through an upsert, so a tombstone (and a revive) replicates", () => {
-    const [tombstone] = planReplicaPut({ nodes: [{ ...node, deleted_at: 500 }], links: [] }, NOW)
-    expect(tombstone.sql).toContain("deleted_at = excluded.deleted_at")
-    expect(tombstone.params[5]).toBe(500)
-    const [revive] = planReplicaPut({ nodes: [node], links: [] }, NOW)
-    expect(revive.params[5]).toBeNull()
-  })
-
-  it("the legacy delete channel stamps tombstones and leaves link rows alone", () => {
-    const statements = planReplicaPut({ nodes: [], links: [], deleteNodes: ["gone"] }, NOW)
-    // No cascade: a link pointing at a deleted node is retained, so a restore
-    // has somewhere to put the node back.
-    expect(statements).toHaveLength(1)
-    expect(statements[0].sql).toContain("UPDATE nodes SET deleted_at = ?2, updated_at = ?2")
-    expect(statements[0].params).toEqual(["gone", NOW])
-  })
-
-  it("gives every row one delete retires the SAME stamp", () => {
-    const statements = planReplicaPut(
-      {
-        nodes: [],
-        links: [],
-        deleteNodes: ["a", "b"],
-        deleteLinks: [["p", "a", "child"]],
-      },
-      NOW,
-    )
-    expect(statements.map((s) => s.params[s.params.length - 1])).toEqual([NOW, NOW, NOW])
-  })
-
-  it("updates the replica cursor only when provided", () => {
-    expect(planReplicaPut({ nodes: [], links: [] }, NOW)).toEqual([])
-    const statements = planReplicaPut({ nodes: [], links: [], cursor: "sha-1234" }, NOW)
-    expect(statements).toHaveLength(1)
-    expect(statements[0].sql).toContain("INSERT INTO meta (user_id, key, value)")
-    expect(statements[0].params).toEqual(["sha-1234"])
+  it("plans nothing to append for a write that changes nothing", () => {
+    expect(planEventAppend([], write)).toEqual([])
   })
 })
 
@@ -834,6 +774,153 @@ describe("tenant scoping — the adversarial suite", () => {
     const { env } = await testEnv()
     const response = await get(env, "alice-token", "/api/replica/nope")
     expect(response.status).toBe(404)
+  })
+
+  // The log is corpus data like any other: it is the tenant's, it names who
+  // wrote it, and nobody else's token reaches it.
+  describe("the event log over HTTP", () => {
+    const post = (env: Env, token: string, path: string, body: unknown) =>
+      replica(
+        new Request(`https://example.com${path}`, {
+          method: "POST",
+          headers: clientHeaders(token),
+          body: JSON.stringify(body),
+        }),
+        env,
+        github,
+      )
+
+    it("a push is events, carrying the device and build the writer named", async () => {
+      const { env } = await testEnv()
+      const response = await replica(
+        new Request("https://example.com/api/replica/notes", {
+          method: "PUT",
+          headers: {
+            ...clientHeaders("alice-token"),
+            "X-Ruminate-Device": "dev12345.tab001",
+            "X-Ruminate-Build": "2026-W39.abc",
+          },
+          body: JSON.stringify(aliceRows),
+        }),
+        env,
+        github,
+      )
+      expect(response.status).toBe(200)
+      const { events, cursor } = (await (
+        await get(env, "alice-token", "/api/replica/events")
+      ).json()) as { events: Record<string, unknown>[]; cursor: number }
+      expect(events.map((event) => `${event.entity}.${event.action}`)).toEqual([
+        "block.create",
+        "block.create",
+        "view.create",
+        "link.create",
+      ])
+      expect(cursor).toBe(4)
+      expect(events[0]).toMatchObject({
+        actor: 111,
+        origin: "replica",
+        device: "dev12345.tab001",
+        client: "2026-W39.abc",
+      })
+    })
+
+    it("drops a device a writer could not plausibly have sent, rather than store it", async () => {
+      const { env } = await testEnv()
+      await replica(
+        new Request("https://example.com/api/replica/notes", {
+          method: "PUT",
+          headers: { ...clientHeaders("alice-token"), "X-Ruminate-Device": "<script>" },
+          body: JSON.stringify(aliceRows),
+        }),
+        env,
+        github,
+      )
+      const { events } = (await (await get(env, "alice-token", "/api/replica/events")).json()) as {
+        events: { device: string }[]
+      }
+      expect(events[0].device).toBe("unknown")
+    })
+
+    it("one tenant's log and past are not another's to read", async () => {
+      const { env } = await seededEnv()
+      const log = (await (await get(env, "bob-token", "/api/replica/events")).json()) as {
+        events: unknown[]
+      }
+      expect(log.events).toEqual([])
+      const past = (await (await get(env, "bob-token", "/api/replica/at?seq=99")).json()) as {
+        nodes: unknown[]
+        earliest: unknown
+      }
+      expect(past.nodes).toEqual([])
+      expect(past.earliest).toBeNull()
+      const history = await get(
+        env,
+        "bob-token",
+        "/api/replica/events?entity=block&entity_id=blk_secret0001",
+      )
+      expect(((await history.json()) as { events: unknown[] }).events).toEqual([])
+    })
+
+    it("serves a past moment, one block's history, and a clean bill of health", async () => {
+      const { env } = await seededEnv()
+      const edited = { ...aliceRows.nodes[1], text: "rewritten", updated_at: 200 }
+      await push(env, "alice-token", { nodes: [edited], links: [] })
+
+      const then = (await (await get(env, "alice-token", "/api/replica/at?seq=4")).json()) as {
+        seq: number
+        nodes: { id: string; text: string }[]
+      }
+      expect(then.seq).toBe(4)
+      expect(then.nodes.find((row) => row.id === "blk_secret0001")?.text).toBe("alice's secret")
+
+      const history = (await (
+        await get(env, "alice-token", "/api/replica/events?entity=block&entity_id=blk_secret0001")
+      ).json()) as { events: { action: string; patch: { text?: string } }[] }
+      expect(history.events.map((event) => [event.action, event.patch.text])).toEqual([
+        ["create", "alice's secret"],
+        ["update", "rewritten"],
+      ])
+
+      const verdict = await (await get(env, "alice-token", "/api/replica/verify")).json()
+      expect(verdict).toMatchObject({ ok: true, events: 5, rejected: 0 })
+    })
+
+    it("restores by appending — for the tenant, and only with a well-formed request", async () => {
+      const { env } = await seededEnv()
+      const wiped = { ...aliceRows.nodes[1], text: "", updated_at: 200 }
+      await push(env, "alice-token", { nodes: [wiped], links: [] })
+
+      const bad = await post(env, "alice-token", "/api/replica/restore", { block: "", seq: "4" })
+      expect(bad.status).toBe(400)
+      // Bob naming Alice's block restores nothing: it is not in HIS log.
+      const bob = await post(env, "bob-token", "/api/replica/restore", {
+        block: "blk_secret0001",
+        seq: 4,
+      })
+      expect(await bob.json()).toEqual({ ok: true, events: 0 })
+
+      const ok = await post(env, "alice-token", "/api/replica/restore", {
+        block: "blk_secret0001",
+        seq: 4,
+      })
+      expect(await ok.json()).toEqual({ ok: true, events: 1 })
+      const pulled = (await (
+        await get(env, "alice-token", "/api/replica/notes?since=5")
+      ).json()) as {
+        nodes: { id: string; text: string }[]
+      }
+      expect(pulled.nodes).toMatchObject([{ id: "blk_secret0001", text: "alice's secret" }])
+    })
+
+    it("refuses a moment that is neither a seq nor a time, and half an entity", async () => {
+      const { env } = await seededEnv()
+      expect((await get(env, "alice-token", "/api/replica/at")).status).toBe(400)
+      expect((await get(env, "alice-token", "/api/replica/at?seq=1&at=2")).status).toBe(400)
+      expect((await get(env, "alice-token", "/api/replica/events?entity=block")).status).toBe(400)
+      expect(
+        (await get(env, "alice-token", "/api/replica/events?entity=note&entity_id=x")).status,
+      ).toBe(400)
+    })
   })
 })
 

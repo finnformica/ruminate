@@ -28,13 +28,13 @@
 //    (not `UNION ALL`) is what makes it terminate on a graph with a loop.
 
 import {
-  planReplicaPut,
   toLinkRow,
   toNodeRow,
   type LinkRow,
   type NodeRow,
   type ReplicaPutPayload,
 } from "../handlers/replica-payload"
+import { writeRows } from "../handlers/event-log"
 import type { TenantDb } from "../tenancy-db"
 import { shareAllows, type Permission, type ShareGrant } from "./grant"
 import type { ShareView } from "./wire"
@@ -420,14 +420,20 @@ export function planSliceWrite(
   return { ok: true, nodes, links }
 }
 
-/** Land a planned write in the owner's partition — the same statements a
- * replica push runs (per-row LWW, server-assigned `seq`), minus the cursor,
- * which is the owner's own. */
+/** Land a planned write in the owner's partition — through the same door a
+ * replica push uses (`writeRows`: per-row LWW, server-assigned `seq`), minus
+ * the cursor, which is the owner's own. The events land in the OWNER's log
+ * with the grantee as their `actor`: whose corpus changed, and who changed it. */
 export async function applySliceWrite(
   owner: TenantDb,
   plan: { nodes: NodeRow[]; links: LinkRow[] },
+  actor: number,
   now: number = Date.now(),
+  writer: { device?: string; client?: string | null } = {},
 ): Promise<void> {
-  const statements = planReplicaPut({ nodes: plan.nodes, links: plan.links }, now)
-  if (statements.length > 0) await owner.batch(statements)
+  await writeRows(
+    owner,
+    { nodes: plan.nodes, links: plan.links },
+    { actor, origin: "share", now, ...writer },
+  )
 }

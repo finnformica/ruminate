@@ -32,6 +32,7 @@
 //   PUT    /api/shares/:id/notes  — write into the slice (grantee only)
 
 import { controlPlaneDriver, corpusDriver, forTenant } from "../tenancy-db"
+import { writeRows, writerOf } from "./event-log"
 import type { Env } from "../types"
 import { PERMISSIONS, normalizeEmail, type Permission, type ShareGrant } from "../shares/grant"
 import {
@@ -212,7 +213,7 @@ export async function shares(
       // share that is not the caller's.
       return rows === null ? json({ error: "not_found" }, 404) : json(rows)
     }
-    if (request.method === "PUT") return write(request, owner, received.grant)
+    if (request.method === "PUT") return write(request, owner, received.grant, session.id)
     return json({ error: "method_not_allowed" }, 405)
   }
 
@@ -266,20 +267,33 @@ async function ownsNode(tenant: ReturnType<typeof forTenant>, id: string): Promi
  * The owner's view of the node being shared, made where they have none: an
  * empty one — unpinned, unfiltered — under the root's own id, which is the
  * id the client mints too (src/data/views.ts), so the owner saving a filter
- * later lands on this very row. It carries a `seq` like any replica write,
- * so the owner's devices pull it, and it never overwrites a view the owner
- * has: the view IS the share, and what they saved is what is shared.
+ * later lands on this very row. It goes in through the log like any write
+ * (`writeRows`), so it carries a `seq` and the owner's devices pull it, and
+ * it never overwrites a view the owner has — live or tombstoned: the view IS
+ * the share, and what they saved is what is shared.
  */
 async function ensureView(
   tenant: ReturnType<typeof forTenant>,
   rootId: string,
   now: number,
 ): Promise<void> {
-  await tenant.exec(
-    "INSERT INTO views (user_id, id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at, seq) " +
-      "VALUES (:tenant, ?1, ?1, NULL, NULL, 0, NULL, ?2, NULL, (SELECT COALESCE(MAX(s), 0) + 1 FROM (SELECT MAX(seq) AS s FROM nodes WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM link WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */ UNION ALL SELECT MAX(seq) FROM views WHERE user_id = :tenant /* includes-deleted: the sequence spans tombstones */))) " +
-      "ON CONFLICT (user_id, id) DO NOTHING",
-    [rootId, now],
+  const held = await tenant.exec("SELECT id FROM views WHERE user_id = :tenant AND id = ?1", [
+    rootId,
+  ])
+  if (held.length > 0) return
+  const view = {
+    id: rootId,
+    root_id: rootId,
+    filter: null,
+    sort: null,
+    pinned: false,
+    sort_key: null,
+    updated_at: now,
+  }
+  await writeRows(
+    tenant,
+    { nodes: [], links: [], views: [view] },
+    { actor: tenant.userId, origin: "system", device: "share", cause: "share:ensure-view", now },
   )
 }
 
@@ -343,6 +357,8 @@ async function write(
   request: Request,
   owner: ReturnType<typeof forTenant>,
   grant: ShareGrant,
+  /** The verified grantee: recorded as the `actor` of every event they cause. */
+  granteeId: number,
 ): Promise<Response> {
   const contentLength = Number(request.headers.get("Content-Length") ?? "0")
   if (contentLength > MAX_BODY_BYTES) return json({ error: "payload_too_large" }, 413)
@@ -370,6 +386,6 @@ async function write(
   if (!plan.ok) {
     return json({ error: plan.refusal.error, detail: plan.refusal.detail }, plan.refusal.status)
   }
-  await applySliceWrite(owner, plan, now)
+  await applySliceWrite(owner, plan, granteeId, now, writerOf(request))
   return json({ ok: true, nodes: plan.nodes.length, links: plan.links.length })
 }

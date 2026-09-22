@@ -15,6 +15,7 @@ import migration0005 from "../../migrations/0005_row_seq.sql?raw"
 import migration0006 from "../../migrations/0006_notes_id.sql?raw"
 import migration0015 from "../../migrations/0015_views.sql?raw"
 import migration0016 from "../../migrations/0016_retire_view_props.sql?raw"
+import migration0018 from "../../migrations/0018_events.sql?raw"
 import migration0003 from "../../migrations/0003_control_plane.sql?raw"
 import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import migration0011 from "../../migrations/0011_user_email_required.sql?raw"
@@ -96,6 +97,10 @@ export async function createTenantTestDriver(): Promise<SqlDriver> {
     },
     "columns",
   )
+  // The event log (migrations/0018) is the replica's alone — the browser's
+  // store is a cache of the projections and never holds it — so it is applied
+  // here rather than through the ladder the two share.
+  await driver.execScript(migration0018)
   return driver
 }
 

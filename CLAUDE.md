@@ -47,6 +47,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 - **Store** (`src/data/note-store.ts`, `sql-note-store.ts`): eight methods — `getGraph`, `applyOps`, `getAllRows`, `applyPull`, `clear`, `getMeta`, `setMeta`, `close` — over a `SqlDriver` (sqlite-wasm with OPFS in the browser, `node:sqlite` in tests). The store never sees markdown.
 - **Ops** (`src/data/ops.ts`): every edit is a batch of ops (`create`, `setText`, `setType`, `setProps`, `link`, `unlink`, `delete`) applied to the in-memory `GraphSnapshot` and persisted verbatim. `docToOps` diffs an edited doc against the snapshot; `deleteBlockOps` / `deletePageOps` carry the delete-rescue rules.
 - **Runtime** (`src/data/database-mode.ts`): holds the live graph atom, coalesces pending ops, and pushes/pulls row diffs to the D1 replica through the Worker (`worker/handlers/replica.ts`).
+- **Event log** (docs/event-sourcing.md): on the replica every change to a block, link or view is an appended event (`migrations/0018`); `nodes`/`link`/`views` are projections of that log, written only by `worker/handlers/event-log.ts` (`writeRows` is the one door — the push, MCP and shares all land there). Never `INSERT`/`UPDATE` those tables anywhere else: the fold and the tables must agree (`GET /api/replica/verify`).
 - **Notes as metadata** (`src/data/note-meta.ts`): `Note` objects (title, dates, props) are derived from the graph for lists, search and the calendar.
 - **Shared notes** (`src/data/shared-mode.ts`, docs/sharing.md): slices of other users' corpora, fetched whole and held in memory, merged into `graphSnapshotAtom`; the write seam (`src/data/store.ts`) routes a batch of ops to the share it names.
 
@@ -69,7 +70,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 
 - **Frontend**: React 18, TypeScript, Vite, Tailwind CSS
 - **State**: Jotai
-- **Storage**: sqlite-wasm (OPFS) locally, Cloudflare D1 remotely, replicated per row with last-writer-wins
+- **Storage**: sqlite-wasm (OPFS) locally, Cloudflare D1 remotely — an append-only event log with row projections, replicated per row with last-writer-wins
 - **Routing**: TanStack Router (file-based)
 - **UI**: Base UI (headless) under the app's own primitives in `src/components/ui/` — every raised surface is `Surface` (docs/design-principles.md, Elevation)
 - **Markdown**: react-markdown with remark-gfm and remark-math/rehype-katex, inline-only, for block bodies
