@@ -93,9 +93,10 @@ keyboard that appears and disappears. The block editor
   it), `@` mention, comment, text colour and highlight, underline (no
   markdown for it), duplicate and move up / down (the block menu has them).
   Focus on is Ruminate's own: a phone has no <kbd>F</kbd> or <kbd>⌘</kbd>
-  <kbd>.</kbd> to press, and only a leaf's bullet to tap (a parent's is its
-  chevron), so the bar is how any block — a paragraph, a heading, a parent —
-  is focused on in two taps. The change of view ends the edit, so the
+  <kbd>.</kbd> to press, and no marker to tap (a leaf's bullet once focused,
+  but a finger reaching for the text landed on it too often, and a parent's
+  is its chevron), so the bar is how any block — a paragraph, a heading, a
+  parent — is focused on in two taps. The change of view ends the edit, so the
   keyboard goes and the subtree is there to read; on the block already
   focused on the button is greyed, there being nowhere further in. The
   breadcrumb and the nav bar's Back lead out again.

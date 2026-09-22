@@ -83,14 +83,10 @@ describe("a shared note (read-only, browsed)", () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it("a click highlights a row, its bullet focuses; nothing edits or removes", () => {
+  it("a click highlights a row; nothing edits or removes", () => {
     const { container, getByText, onChange } = renderShared()
     fireEvent.click(getByText("five"))
     expect(highlighted(container)).toBe("five")
-    // A leaf's bullet is the focus target it is in an editable note.
-    expect(
-      getByText("five").closest("[data-block-row]")?.querySelector('[aria-label="Focus on block"]'),
-    ).not.toBeNull()
     const root = editor(container)
     fireEvent.keyDown(root, { key: "Enter" })
     expect(container.querySelector("textarea")).toBeNull()
