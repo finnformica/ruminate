@@ -62,10 +62,11 @@ export interface BlockEditorApi {
   selectedSet: Set<string>
   /**
    * For each row in a multi-selection whose highlight surface touches a
-   * selected neighbour, which of its corners (top/bottom) should go straight
-   * so the run reads as one continuous surface. Empty for single selections.
+   * selected neighbour, how its top and bottom meet that neighbour
+   * (`JoinEdge`), so the run reads as one outlined surface. Empty for
+   * single selections.
    */
-  selectionRunEdges: Map<string, { top: boolean; bottom: boolean }>
+  selectionRunEdges: Map<string, RunEdges>
   /** Display-only: no editing, selection, or mutation (collapse still works). */
   readOnly?: boolean
   /**
@@ -216,6 +217,74 @@ const GUIDE_X = 11
  * 2px + 2px vertical padding). */
 const ROOT_GAP = 2
 
+/**
+ * How one vertical side of a selected row meets the selected row beyond it
+ * (block-editor.tsx, `selectionRunEdges`), when their surfaces touch:
+ *
+ * - `run`: the two are the same width. Both drop the ring on that side,
+ *   square its corners and reach the full 4px, so they overlap into one
+ *   surface.
+ * - `over`: this row is the wider one. Its ring stays, drawn right across;
+ *   the neighbour covers the part of it they share, leaving the ring only
+ *   where this row reaches past — the step of the outline. A corner rounds
+ *   where this row reaches past the neighbour (the outline turns outward
+ *   there) and squares where their edges line up (the outline runs on).
+ * - `under`: this row is the narrower one. Ring off, corners squared, and
+ *   it reaches exactly one pixel over the wider row's ring line (`reach`:
+ *   the gap to the neighbour less the neighbour's own 2px, plus that pixel
+ *   — 3px between nested rows, 5px to a root row with its 2px more), so
+ *   its solid wash covers the ring where they share an edge and its side
+ *   ring meets the wider row's line at the corner, with nothing over or
+ *   short. Beneath a wider row it is later in the DOM and paints over it
+ *   of its own accord; above one it is raised (`z-[1]`) to.
+ */
+export type JoinEdge =
+  | { kind: "run" }
+  | { kind: "over"; roundLeft: boolean; roundRight: boolean }
+  | { kind: "under"; reach: 3 | 5 }
+
+export interface RunEdges {
+  top?: JoinEdge
+  bottom?: JoinEdge
+}
+
+/** The classes a side takes for its `JoinEdge` — the reach (a negative
+ * margin paired with padding, so the text never moves), which corners
+ * square, and whether the ring on that side goes (`.block-run-*`). */
+function joinClasses(side: "top" | "bottom", edge: JoinEdge): string {
+  const t = side === "top"
+  if (edge.kind === "run") {
+    return t
+      ? "-mt-1 pt-1 rounded-t-none block-run-top"
+      : "-mb-1 pb-1 rounded-b-none block-run-bottom"
+  }
+  if (edge.kind === "under") {
+    const reach =
+      edge.reach === 3
+        ? t
+          ? "-mt-[3px] pt-[3px]"
+          : "-mb-[3px] pb-[3px]"
+        : t
+          ? "-mt-[5px] pt-[5px]"
+          : "-mb-[5px] pb-[5px]"
+    return cx(reach, t ? "rounded-t-none block-run-top" : "rounded-b-none block-run-bottom z-[1]")
+  }
+  return cx(
+    t ? "-mt-0.5 pt-0.5" : "-mb-0.5 pb-0.5",
+    !edge.roundLeft && (t ? "rounded-tl-none" : "rounded-bl-none"),
+    !edge.roundRight && (t ? "rounded-tr-none" : "rounded-br-none"),
+  )
+}
+
+/** How far a side reaches for its edge, in px: where the toggle beside a
+ * to-do's checkbox sits down from the surface's top. */
+function reachOf(edge: JoinEdge | undefined): number {
+  if (!edge) return 2
+  if (edge.kind === "run") return 4
+  if (edge.kind === "under") return edge.reach
+  return 2
+}
+
 /** How long a nameless key press (keyCode 229) at the start of a block is
  * given to change the text before it is taken for a Backspace. A keyboard's
  * own input arrives in the same turn as its keydown; the beat is slack for a
@@ -242,10 +311,9 @@ export function BlockItem({
   // Selection and edit focus are per row: this occurrence, not the block.
   const editing = !readOnly && api.focus?.key === occurrence.key
   const selected = api.selectedSet.has(occurrence.key) && !editing
-  // Which sides of this row sit MID-RUN in a multi-select (the adjacent
-  // visible row is also selected and the surfaces touch) — those sides keep
-  // the full 4px vertical extension so the run merges seamlessly; every other
-  // side extends only 2px (see the data-block-line classes below).
+  // How each side of this row meets a selected neighbour in a multi-select
+  // (`JoinEdge`): mid-run sides reach further so the surfaces merge; every
+  // other side extends only 2px (see the data-block-line classes below).
   const runEdges = selected ? api.selectionRunEdges.get(occurrence.key) : undefined
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const pendingCaret = useRef<number | null>(null)
@@ -1122,25 +1190,27 @@ export function BlockItem({
             // runEdges pairs below): 2px by default — the midpoint of the
             // nested 4px inter-row gap, so two adjacent surfaces painted in
             // DIFFERENT colors (a hover next to a selection) can at most
-            // abut edge-to-edge, never overlap — and the full 4px only on a
-            // side that sits mid-run in a multi-select, where the neighbour
+            // abut edge-to-edge, never overlap — and more only on a side
+            // that meets a selected neighbour in a multi-select (`JoinEdge`):
+            // the full 4px between rows of one width, where the neighbour
             // is the same solid accent and the overlap is what merges the
-            // run into one continuous surface. Either way the negative
-            // margin equals the padding, so the text never moves a pixel
-            // and the block rhythm gains nothing.
+            // run into one continuous surface; a single pixel over a wider
+            // neighbour's ring, so the outline steps. Either way the
+            // negative margin equals the padding, so the text never moves a
+            // pixel and the block rhythm gains nothing.
             "relative flex items-start gap-2 rounded",
             wide
               ? "-ml-[4.5px] -mr-[4.5px] pl-[8.5px] pr-[8.5px]"
               : "-ml-0.5 -mr-0.5 pl-1.5 pr-1.5",
-            // Per-side vertical pairs. Mid-run sides also square their
-            // corners and drop that edge of the selection ring
+            // Per-side vertical pairs (`joinClasses`). Mid-run sides also
+            // square their corners and drop that edge of the selection ring
             // (`.block-run-*`, block-editor.css) so the run reads as ONE
-            // outlined surface, rounded and closed only at its ends (the
-            // editor computes which neighbours actually touch — heading top
-            // margins break a run). Nested rows sit 4px apart: 4+4 overlaps
-            // seamlessly (same solid fill, same solid side lines); root rows
-            // sit 6px apart: 4+4 still overlaps 2px, so runs merge at every
-            // level.
+            // outlined surface, rounded and closed only at its ends and
+            // where it steps (the editor computes which neighbours actually
+            // touch, and which is the wider — heading top margins break a
+            // run). Nested rows sit 4px apart: 4+4 overlaps seamlessly (same
+            // solid fill, same solid side lines); root rows sit 6px apart:
+            // 4+4 still overlaps 2px, so runs merge at every level.
             //
             // A roomy row (`BlockKind.roomy` — a note in a list) pads for
             // real instead: 8.5px each side of its 23px line is the 40px
@@ -1148,12 +1218,12 @@ export function BlockItem({
             // same 2px between two of them. It is never mid-run: only
             // read-only lists have one, and they have no multi-select.
             runEdges?.top
-              ? "-mt-1 pt-1 rounded-t-none block-run-top"
+              ? joinClasses("top", runEdges.top)
               : roomy
                 ? "-mt-px pt-[8.5px]"
                 : "-mt-0.5 pt-0.5",
             runEdges?.bottom
-              ? "-mb-1 pb-1 rounded-b-none block-run-bottom"
+              ? joinClasses("bottom", runEdges.bottom)
               : roomy
                 ? "-mb-px pb-[8.5px]"
                 : "-mb-0.5 pb-0.5",
@@ -1196,7 +1266,9 @@ export function BlockItem({
             <span
               className={cx(
                 "block-toggle-beside absolute -left-[15px] h-[1lh] w-5",
-                runEdges?.top ? "top-1" : "top-0.5",
+                { 2: "top-0.5", 3: "top-[3px]", 4: "top-1", 5: "top-[5px]" }[
+                  reachOf(runEdges?.top)
+                ],
                 typo,
               )}
             >

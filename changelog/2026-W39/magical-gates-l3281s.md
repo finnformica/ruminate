@@ -5,4 +5,5 @@
 
 ### Fixed
 
+- The outline around a selection of a block and what is nested under it no longer breaks where the indentation changes. A heading over its blocks, a block over its indented children, or the last of those over the next block out, used to show open notches at every step; the outline now steps cleanly around the whole selection.
 - Indenting several selected blocks now moves them together. Before, blocks selected by sweeping the mouse across them indented only the first; and when the first selected block had nothing above it to nest under, the rest nested under it instead of staying put.

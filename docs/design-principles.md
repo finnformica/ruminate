@@ -281,6 +281,20 @@ where you are, and everything below the leading row reads as it does outside foc
   the squared corners), rounded only at the run's top and bottom. A heading's
   top margin (or the focus title's bottom margin) keeps a real gap, so those
   boundaries stay rounded — and those sides fall back to the 2px extension.
+  Where the run **steps** — a parent over its indented child, the last child
+  over the row its parent's run goes on with, a heading (whose surface
+  reaches further, both ways) over anything — the two surfaces are not one
+  width, and merging them as if they were left the outline open at every
+  step. So the wider row keeps its ring on that side and rounds the corner it
+  reaches past with, and the narrower row squares its corners, drops its
+  ring, and reaches exactly one pixel over the wider row's ring line (3px
+  between nested rows, 5px to a root row): its solid wash hides the ring
+  where they share an edge and leaves it where the wider row reaches past,
+  and its side ring meets that line at the corner. A narrower row beneath
+  a wider one paints over it in DOM order; one above is raised (`z-[1]`).
+  The one join no stacking can draw — a heading with nothing under it over a
+  row wider to the left, each reaching past the other on one side — stays
+  closed on both sides (`JoinEdge`, block-item.tsx).
 
 ## Radius family
 

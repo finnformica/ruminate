@@ -171,6 +171,8 @@ import {
   type BlockDebugOptions,
   type BlockEditorApi,
   type FocusRequest,
+  type JoinEdge,
+  type RunEdges,
 } from "./block-item"
 export type { BlockDebugOptions } from "./block-item"
 import { useBlockHistory } from "./use-block-history"
@@ -762,32 +764,59 @@ export function BlockEditor({
   const selectedSet = useMemo(() => new Set(selectedKeys), [selectedKeys])
 
   // Where two selected rows' highlight surfaces touch on screen, the sides
-  // between them get the FULL 4px vertical extension and straight corners so
-  // the run reads as ONE continuous surface, rounded only at its ends (every
-  // other side extends just 2px — to the midpoint of the nested 4px inter-row
-  // gap — so differently-painted neighbours, e.g. a hover beside a selection,
-  // never overlap; see the runEdges pairs in block-item.tsx). With 4px per
-  // touching side, consecutive selected rows always meet (nested 4px gaps
-  // overlap 4px, root 6px gaps overlap 2px) — except across a heading's top
-  // margin (or the focus title's bottom margin), which keeps a visible gap;
-  // those boundaries stay rounded.
+  // between them meet (`JoinEdge`, block-item.tsx) so the run reads as ONE
+  // outlined surface, rounded only at its ends and where it steps (every
+  // other side extends just 2px — to the midpoint of the nested 4px
+  // inter-row gap — so differently-painted neighbours, e.g. a hover beside a
+  // selection, never overlap). Two rows of one width — siblings, or a run of
+  // paragraphs — reach the full 4px into each other and drop the ring
+  // between them (nested 4px gaps overlap 4px, root 6px gaps overlap 2px).
+  // Rows of different widths — a parent over its indented child, a child
+  // over the row its parent's run goes on with, a heading (its surface
+  // reaches further, both ways) over anything — step: the wider keeps its
+  // ring and rounds the corner it reaches past with, the narrower squares
+  // its corners and reaches one pixel over that ring, covering it where
+  // they share an edge. Drawn as if they were one width, the outline used
+  // to break at every step — open notches at a heading's foot and at each
+  // change of depth. Across a heading's top margin (or the focus title's
+  // bottom margin) there is a visible gap and no join: those boundaries
+  // stay rounded; so does the one join no stacking can draw, a heading
+  // (wider to the right) over a row that is wider to the left.
   const selectionRunEdges = useMemo(() => {
-    const edges = new Map<string, { top: boolean; bottom: boolean }>()
+    const edges = new Map<string, RunEdges>()
     if (selectedSet.size < 2) return edges
-    const headingAt = (key: string) => isHeading(doc.blocks[idOfKey(key)]?.type ?? "text")
-    for (let i = 0; i < visibleOrder.length; i++) {
-      const key = visibleOrder[i]
-      if (!selectedSet.has(key)) continue
-      const prev = i > 0 ? visibleOrder[i - 1] : null
-      const next = i + 1 < visibleOrder.length ? visibleOrder[i + 1] : null
-      const top =
-        prev !== null && selectedSet.has(prev) && !headingAt(key) && prev !== focusTitleKey
-      const bottom =
-        next !== null && selectedSet.has(next) && !headingAt(next) && key !== focusTitleKey
-      if (top || bottom) edges.set(key, { top, bottom })
+    const headingAt = (row: Occurrence) => isHeading(doc.blocks[row.id]?.type ?? "text")
+    const set = (key: string, side: "top" | "bottom", edge: JoinEdge) =>
+      edges.set(key, { ...edges.get(key), [side]: edge })
+    for (let i = 1; i < rows.length; i++) {
+      const above = rows[i - 1]
+      const below = rows[i]
+      if (!selectedSet.has(above.key) || !selectedSet.has(below.key)) continue
+      if (headingAt(below) || above.key === focusTitleKey) continue
+      // Which of the two reaches further on each side. Depth is 24px a
+      // level, a heading's reach a few px, so depth decides the left edge;
+      // right edges line up except a heading's. `below` is never a heading.
+      const aboveLeft =
+        above.depth < below.depth || (above.depth === below.depth && headingAt(above))
+      const belowLeft = above.depth > below.depth
+      const aboveRight = headingAt(above)
+      // The narrower row's reach over the wider one's ring: one pixel past
+      // the gap between the rows less the wider one's own 2px. Nested rows
+      // sit 4px apart; a root row that is not the first sits 2px further.
+      const reach = below.depth === 0 && below.index > 0 ? 5 : 3
+      if (!aboveLeft && !belowLeft && !aboveRight) {
+        set(above.key, "bottom", { kind: "run" })
+        set(below.key, "top", { kind: "run" })
+      } else if (!belowLeft) {
+        set(above.key, "bottom", { kind: "over", roundLeft: aboveLeft, roundRight: aboveRight })
+        set(below.key, "top", { kind: "under", reach })
+      } else if (!aboveRight) {
+        set(above.key, "bottom", { kind: "under", reach })
+        set(below.key, "top", { kind: "over", roundLeft: true, roundRight: false })
+      }
     }
     return edges
-  }, [selectedSet, visibleOrder, doc, focusTitleKey])
+  }, [selectedSet, rows, doc, focusTitleKey])
 
   const select = (key: string, extend = false) => {
     setFocus(null)

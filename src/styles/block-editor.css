@@ -24,9 +24,13 @@
  * set from the runEdges pairs in block-item.tsx) and read as ONE outlined
  * surface. Ring and wash are both computed-solid (opaque inputs), so where
  * the run-edge sides' full 4px extension makes adjacent selected surfaces
- * overlap, neither the fill nor the side lines double up. Every other side
- * extends only 2px, so differently-painted neighbours (a hover beside a
- * selection) can never overlap. */
+ * overlap, neither the fill nor the side lines double up — and where the
+ * run steps (a parent over its indented child, a heading over anything),
+ * the narrower surface, reaching one pixel over the wider one's ring, hides
+ * that ring where they share an edge and leaves it where the wider one
+ * reaches past: the step of the outline (`JoinEdge`, block-item.tsx). Every
+ * other side extends only 2px, so differently-painted neighbours (a hover
+ * beside a selection) can never overlap. */
 [data-block-line] {
   transition:
     background-color 100ms ease,
