@@ -106,7 +106,9 @@ export interface BlockEditorApi {
    */
   coarsePointer?: boolean
   /** Highlight a row (leaves edit mode, collapses any multi-selection). */
-  select: (key: string) => void
+  /** Highlight a row — or, `extend`, the run from the selection to it
+   * (Shift+click). */
+  select: (key: string, extend?: boolean) => void
   /** Enter edit mode on a row — at the end of its text, its start, or at
    * an explicit caret offset (where a tap landed). */
   edit: (key: string, atStart?: boolean, caret?: number) => void
@@ -1049,7 +1051,7 @@ export function BlockItem({
             // whole row is the target, not just the text.
             {}
           : {
-              onClick: () => api.select(occurrence.key),
+              onClick: (event: React.MouseEvent) => api.select(occurrence.key, event.shiftKey),
               onDoubleClick: () => api.edit(occurrence.key),
             })}
     >

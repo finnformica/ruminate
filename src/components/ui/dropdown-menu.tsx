@@ -21,6 +21,13 @@ type ContentProps = {
    * menu is its items and nothing else.
    */
   footer?: React.ReactNode
+  /**
+   * Where the keyboard goes when the menu closes. Left out, Base UI hands
+   * it back to the trigger. A menu that acts on something else — the
+   * selection bar's, on the editor's selection — names that instead, so
+   * the keys work there again the moment an item has run.
+   */
+  finalFocus?: Menu.Popup.Props["finalFocus"]
 }
 
 function Content({
@@ -32,6 +39,7 @@ function Content({
   children,
   className,
   footer,
+  finalFocus,
 }: ContentProps) {
   return (
     <Menu.Portal>
@@ -48,6 +56,7 @@ function Content({
           }
           className={className}
           style={{ width }}
+          finalFocus={finalFocus}
         >
           <div className="grid max-h-[45svh] scroll-py-1 overflow-auto p-1">{children}</div>
           {footer ? <div className="border-t border-border-secondary p-1.5">{footer}</div> : null}
