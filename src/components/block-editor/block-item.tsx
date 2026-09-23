@@ -247,6 +247,15 @@ export function BlockItem({
   const runEdges = selected ? api.selectionRunEdges.get(occurrence.key) : undefined
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const pendingCaret = useRef<number | null>(null)
+  // Where a finger actually came down on this row: the pointerdown's point,
+  // which the browser never adjusts. The click that follows may be moved —
+  // a phone snaps a near miss onto the nearest control (a todo's checkbox
+  // above all) — so a tap is judged by where it landed, not by where the
+  // click says it did.
+  const touchDown = useRef<{ x: number; y: number } | null>(null)
+  // Set by a checkbox click that is handed to the text: React raises the
+  // box's change from the same click, after it, so the change must be told.
+  const tickHandedOff = useRef(false)
   // Set by a Cmd/Ctrl+Shift+V keydown so the paste event that follows inserts
   // plain text at the caret (newlines collapsed, no block splitting).
   const plainPaste = useRef(false)
@@ -714,11 +723,13 @@ export function BlockItem({
         // IconButton's default radius is the 8px base — on a 20px square that
         // reads as a pill. The small radius (4px) keeps it a square.
         "rounded-sm",
-        // Coarse pointers get a 32px square to tap instead of IconButton's
+        // Coarse pointers get a 32px-tall target instead of IconButton's
         // 40px-tall padded bar (which would overlap neighbouring rows and
         // squeeze the glyph); it reaches a hair past the surface into the
-        // gap on either side, where no other control lives.
-        "h-5 w-5 coarse:h-8 coarse:w-8 coarse:px-0",
+        // gap on either side, where no other control lives. It is 36px
+        // wide: the row's wider marker gap on a coarse pointer leaves the
+        // room, and it still stops short of the text.
+        "h-5 w-5 coarse:h-8 coarse:w-9 coarse:px-0",
         // Beside a todo the square is a hit area only — no hover surface, so
         // it never clashes with the checkbox or the highlight it straddles;
         // the chevron's own fade-in is the whole reveal. It stays 20px wide
@@ -737,8 +748,8 @@ export function BlockItem({
           // swap, easing out to rest with no overshoot.
           "transition-transform duration-300 ease-[var(--ease-in-out)] motion-reduce:transition-none",
           // A finger's chevron is the key itself (it never swaps in), so
-          // it is drawn a size up to be read as one.
-          "coarse:size-2.5",
+          // it is drawn a size up to be read — and aimed at — as one.
+          "coarse:size-3",
           isCollapsed || looped ? "rotate-0" : "rotate-90",
         )}
       >
@@ -823,6 +834,24 @@ export function BlockItem({
       {toggle}
     </span>
   )
+  // Whether a finger's tap on the checkbox came down to the right of the
+  // box as drawn — in the gap before the text. Only on a coarse pointer, and
+  // only for a press (a keyboard's Space clicks with `detail` 0 and no point).
+  // The point is spent either way, so a stale one never judges a later click.
+  const tapMissedBox = (event: React.MouseEvent<HTMLElement>) => {
+    const point = touchDown.current
+    touchDown.current = null
+    if (!api.coarsePointer || !point || event.detail === 0) return false
+    return point.x > event.currentTarget.getBoundingClientRect().right
+  }
+  // The caret to the very start of the text: into the open edit, or opening
+  // one. The box sits on the first line, so a tap beside it means offset 0.
+  const caretToStart = () => {
+    const textarea = textareaRef.current
+    if (editing && textarea) textarea.setSelectionRange(0, 0)
+    else api.edit(occurrence.key, true)
+  }
+
   // An image (`slot: "none"`) has no slot at all: the row's content starts at
   // its edge. A parent still needs somewhere to put its chevron, so it falls
   // through to the empty glyph slot.
@@ -848,9 +877,26 @@ export function BlockItem({
           // a box you can only reach by stopping typing is a box you stop
           // typing to reach.
           onMouseDown={keepEditing}
-          onClick={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation()
+            // A finger that came down PAST the box — in the gap before the
+            // text, where the box's own tap area or the browser's snapping
+            // caught it — meant the start of the line, not the box: the
+            // tick is cancelled and the caret goes there instead.
+            if (tapMissedBox(event)) {
+              event.preventDefault()
+              tickHandedOff.current = true
+              caretToStart()
+            }
+          }}
           // Checked is a TYPE (docs/graph-schema-v2.md): ticking is `todo` ↔ `done`.
-          onChange={() => api.onBlockChange(block.id, { type: type === "done" ? "todo" : "done" })}
+          onChange={() => {
+            if (tickHandedOff.current) {
+              tickHandedOff.current = false
+              return
+            }
+            api.onBlockChange(block.id, { type: type === "done" ? "todo" : "done" })
+          }}
           className={cx("block-checkbox", readOnly ? "cursor-default" : "cursor-pointer")}
         />
       </span>
@@ -1043,16 +1089,36 @@ export function BlockItem({
   // target is the row's whole width and height, not its few words. A tap on
   // the row already being edited is the textarea's own (a caret move), and
   // a press-and-hold never gets here: the editor withholds its click.
+  //
+  // A tap LEFT of the text — in the marker gap, or on an empty marker slot —
+  // is read at the text's own left edge, so it opens the edit at the start
+  // of the line it was level with (the first line's start is the text's),
+  // never at the end.
   const handleRowTap = (event: React.MouseEvent<HTMLDivElement>) => {
     if (editing) return
     const target = event.target instanceof Element ? event.target : null
     if (target?.closest("button, input, a, textarea, [role='menu']")) return
     const bodyEl = event.currentTarget.querySelector<HTMLElement>("[data-block-id]")
+    const point = touchDown.current ?? { x: event.clientX, y: event.clientY }
+    touchDown.current = null
+    const left = bodyEl?.getBoundingClientRect().left
+    const beforeText = left !== undefined && point.x < left
     const caret =
-      bodyEl && !kind.body ? caretOffsetAtPoint(bodyEl, body, event.clientX, event.clientY) : null
-    api.edit(occurrence.key, false, caret ?? undefined)
+      bodyEl && !kind.body
+        ? caretOffsetAtPoint(bodyEl, body, beforeText ? left + 1 : point.x, point.y)
+        : null
+    if (caret === null && beforeText) api.edit(occurrence.key, true)
+    else api.edit(occurrence.key, false, caret ?? undefined)
   }
-  const rowTap = !readOnly && api.coarsePointer ? { onClick: handleRowTap } : {}
+  const rowTap =
+    !readOnly && api.coarsePointer
+      ? {
+          onClick: handleRowTap,
+          onPointerDown: (event: React.PointerEvent) => {
+            touchDown.current = { x: event.clientX, y: event.clientY }
+          },
+        }
+      : {}
 
   return (
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
@@ -1102,7 +1168,10 @@ export function BlockItem({
             // run into one continuous surface. Either way the negative
             // margin equals the padding, so the text never moves a pixel
             // and the block rhythm gains nothing.
-            "relative flex items-start gap-2 rounded",
+            // The marker gap widens on a coarse pointer, so a finger aiming
+            // for the start of the line lands on the line, not the marker
+            // (a todo's checkbox above all).
+            "relative flex items-start gap-2 rounded coarse:gap-3",
             wide
               ? "-ml-[4.5px] -mr-[4.5px] pl-[8.5px] pr-[8.5px]"
               : "-ml-0.5 -mr-0.5 pl-1.5 pr-1.5",

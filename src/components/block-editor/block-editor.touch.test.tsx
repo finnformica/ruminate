@@ -139,6 +139,80 @@ describe("a touch screen's tap", () => {
   })
 })
 
+describe("a touch screen's tap beside a marker", () => {
+  /** Stand the element's box at this left/right edge (jsdom lays nothing out). */
+  const placeAt = (el: Element, left: number, right: number) => {
+    el.getBoundingClientRect = () =>
+      ({ left, right, top: 0, bottom: 24, width: right - left, height: 24 }) as DOMRect
+  }
+
+  it("hands a tap that landed past the checkbox to the text, at its start", () => {
+    const { container, getByTestId } = render(<Harness initial={"- [ ] Buy milk"} />)
+    const row = rows(container)[0]
+    const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+    placeAt(checkbox, 4, 21)
+    // The finger came down in the gap; the phone snapped the click onto the box.
+    fireEvent.pointerDown(row, { clientX: 26, clientY: 12 })
+    fireEvent.click(checkbox, { detail: 1 })
+    expect(lines(getByTestId)).toEqual(["[ ] Buy milk"])
+    expect(container.querySelector("textarea")!.selectionStart).toBe(0)
+  })
+
+  it("moves the caret to the start of an open edit rather than ticking", () => {
+    const { container, getByTestId } = render(<Harness initial={"- [ ] Buy milk"} />)
+    fireEvent.click(bodyOf(rows(container)[0]))
+    const textarea = container.querySelector("textarea")!
+    textarea.setSelectionRange(5, 5)
+    const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+    placeAt(checkbox, 4, 21)
+    fireEvent.pointerDown(rows(container)[0], { clientX: 26, clientY: 12 })
+    fireEvent.click(checkbox, { detail: 1 })
+    expect(lines(getByTestId)).toEqual(["[ ] Buy milk"])
+    expect(container.querySelector("textarea")).toBe(textarea)
+    expect(textarea.selectionStart).toBe(0)
+  })
+
+  it("still ticks for a finger that landed on the box", () => {
+    const { container, getByTestId } = render(<Harness initial={"- [ ] Buy milk"} />)
+    const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+    placeAt(checkbox, 4, 21)
+    fireEvent.pointerDown(checkbox, { clientX: 12, clientY: 12 })
+    fireEvent.click(checkbox, { detail: 1 })
+    expect(lines(getByTestId)).toEqual(["[x] Buy milk"])
+    expect(container.querySelector("textarea")).toBeNull()
+  })
+
+  it("reads a tap left of the text at the text's left edge: the start of that line", () => {
+    const { container } = render(<Harness initial={"Alpha beta"} />)
+    const row = rows(container)[0]
+    const body = bodyOf(row)
+    placeAt(body, 40, 300)
+    const doc = document as unknown as Record<string, unknown>
+    // The hit test answers 0 only at the text's own left edge.
+    doc.caretPositionFromPoint = (x: number) => ({
+      offsetNode: body.firstChild!,
+      offset: x === 41 ? 0 : 6,
+      getClientRect: () => null,
+    })
+    try {
+      fireEvent.pointerDown(row, { clientX: 20, clientY: 12 })
+      fireEvent.click(row, { clientX: 20, clientY: 12 })
+      expect(container.querySelector("textarea")!.selectionStart).toBe(0)
+    } finally {
+      delete doc.caretPositionFromPoint
+    }
+  })
+
+  it("opens at the start, not the end, for a tap left of text that shows formatted", () => {
+    const { container } = render(<Harness initial={"**Alpha** beta"} />)
+    const row = rows(container)[0]
+    placeAt(bodyOf(row), 40, 300)
+    fireEvent.pointerDown(row, { clientX: 20, clientY: 12 })
+    fireEvent.click(row, { clientX: 20, clientY: 12 })
+    expect(container.querySelector("textarea")!.selectionStart).toBe(0)
+  })
+})
+
 describe("a touch screen's edit", () => {
   it("ends when the keyboard goes away (focus to nothing), with nothing left highlighted", () => {
     const { container } = render(<Harness initial={"Alpha\nBeta"} />)

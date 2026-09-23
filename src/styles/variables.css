@@ -276,12 +276,13 @@
 
 @media (pointer: coarse) {
   :root {
-    /* Font sizes. Body text grows a step for reading at arm's length; the
-     * display sizes shrink instead — a 30px heading on a 390px screen is a
-     * third of the line — so more of a note fits on a phone. */
-    --font-size-sm: 13px;
-    --font-size-base: 15px;
-    --font-size-lg: 17px;
+    /* Font sizes. Body text grows two steps for reading at arm's length —
+     * 16px is also the size below which iOS zooms the page into a focused
+     * field; the display sizes shrink instead — a 30px heading on a 390px
+     * screen is a third of the line — so more of a note fits on a phone. */
+    --font-size-sm: 14px;
+    --font-size-base: 16px;
+    --font-size-lg: 18px;
     --font-size-xl: 21px;
     --font-size-2xl: 25px;
     --font-size-3xl: 28px;
