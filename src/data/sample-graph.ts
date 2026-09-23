@@ -123,15 +123,16 @@ export function sampleGraph(): GraphSnapshot {
 }
 
 /**
- * The signed-out views (`src/data/views.ts`): the welcome note is pinned, so
- * the sidebar's **Views** has something in it before anyone signs in. Edits
- * to these are as fleeting as edits to the sample graph.
+ * The signed-out views (`src/data/views.ts`): one block of the welcome note
+ * made a view of its own, so the sidebar's **Views** shows a block row
+ * beside the notes before anyone signs in. Edits to these are as fleeting
+ * as edits to the sample graph.
  */
 export function sampleViews(): ViewRow[] {
   return [
     {
-      id: "readme",
-      root_id: "readme",
+      id: "blk_welcome003",
+      root_id: "blk_welcome003",
       filter: null,
       sort: null,
       pinned: true,

@@ -25,7 +25,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
  *   any input or the block editor's edit-mode textarea, but fire from the
  *   editor's select mode (whose container leaves unbound keys un-prevented, so
  *   they bubble here).
- * - `g` chords (`g d` / `g n` / `g s` / `g c` / `g a`) navigate — same listener, same
+ * - `g` chords (`g d` / `g v` / `g s` / `g c` / `g a`) navigate — same listener, same
  *   typing guard, via {@link GChordMachine}. An *armed* chord's second key is
  *   additionally intercepted at capture phase so it wins over the block
  *   editor's own single-key select-mode bindings (w/a/s/d — a bare `d` there
@@ -52,11 +52,11 @@ export function GlobalShortcuts() {
       // nav item does (src/components/nav-items.tsx).
       d: () =>
         navigate({
-          to: "/notes/$",
+          to: "/views/$",
           params: { _splat: toDateString(new Date()) },
           search: { query: undefined },
         }),
-      n: () => navigate({ to: "/", search: { query: undefined } }),
+      v: () => navigate({ to: "/", search: { query: undefined } }),
       s: () => navigate({ to: "/settings", search: { query: undefined } }),
       c: () => navigate({ to: "/changelog", search: { release: undefined } }),
       a: () => {

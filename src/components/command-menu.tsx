@@ -5,7 +5,7 @@ import { atom, useAtom, useAtomValue } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
-import { pinnedRootsAtom } from "../global-state"
+import { viewRootsAtom } from "../global-state"
 import { useRecentRoots } from "../hooks/recent-roots"
 import { useCreateNote } from "../hooks/note"
 import { useSearchResults } from "../hooks/search-results"
@@ -61,17 +61,17 @@ export function CommandMenu() {
   const createNote = useCreateNote()
   // With nothing typed: the places most used lately — notes, and blocks
   // focused on — ranked by frecency (`useRecentRoots`), at most five; then
-  // the Views beneath, the pinned notes and blocks (docs/metadata.md), each a
-  // row that opens its note (focused on the block, for a block). A pinned
-  // place used lately is in both: Recent is what you use, Views what you
-  // chose to keep to hand.
+  // the Views beneath, the notes and the block views in the sidebar's order
+  // (docs/metadata.md), each a row that opens its note (focused on the
+  // block, for a block). A place used lately is in both: Recent is what you
+  // use, Views is everything there is.
   const recentRoots = useRecentRoots()
-  const pinnedRoots = useAtomValue(pinnedRootsAtom)
+  const viewRoots = useAtomValue(viewRootsAtom)
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
 
   // The open note, if any: it leads the `in:` suggestions, and ⌘P searches
   // its headings — or, focused on a block, the headings under that block.
-  const noteMatch = useMatch({ from: "/_appRoot/notes_/$", shouldThrow: false })
+  const noteMatch = useMatch({ from: "/_appRoot/views_/$", shouldThrow: false })
   const noteId = noteMatch?.params._splat
   const focusBlockId = noteMatch?.search?.block
   const headingsQuery = useMemo(
@@ -197,20 +197,20 @@ export function CommandMenu() {
   const results = useSearchResults(deferredQuery)
   const hasRows = deferredQuery
     ? results.rows.length > 0
-    : recentRoots.length > 0 || pinnedRoots.length > 0
+    : recentRoots.length > 0 || viewRoots.length > 0
 
   // The keyboard's way through the rows. With nothing typed there are two
   // lists, Recent and then Views, walked as one: ↓ from the query lands on
   // the first row of the first list there is; ↓ past the last recent row
-  // lands on the first pinned row (`recentToPinned`); ↑ past the first
-  // pinned row lands on the last recent row (`pinnedToRecent`); ↑ past the
+  // lands on the first view row (`recentToViews`); ↑ past the first
+  // view row lands on the last recent row (`viewsToRecent`); ↑ past the
   // first row of the first list returns to the query. Each hop is a signal
   // the editor concerned acts on.
   const [focusFirstSignal, setFocusFirstSignal] = useState(0)
   const [recentLastSignal, setRecentLastSignal] = useState(0)
-  const [pinnedFirstSignal, setPinnedFirstSignal] = useState(0)
-  const recentToPinned = useCallback(() => setPinnedFirstSignal((n) => n + 1), [])
-  const pinnedToRecent = useCallback(() => setRecentLastSignal((n) => n + 1), [])
+  const [viewsFirstSignal, setViewsFirstSignal] = useState(0)
+  const recentToViews = useCallback(() => setViewsFirstSignal((n) => n + 1), [])
+  const viewsToRecent = useCallback(() => setRecentLastSignal((n) => n + 1), [])
   /** ↓ in the query with cmdk's highlight on the last item (or no items at
    * all) hands the keyboard to the result rows: the editor takes focus
    * (cmdk's highlight stays on the last item, dimmed — command-menu.css —
@@ -240,11 +240,11 @@ export function CommandMenu() {
     const id = generateNoteId()
     createNote(id, title ? { title } : {})
     leave()
-    navigate({ to: "/notes/$", params: { _splat: id }, search: { query: undefined } })
+    navigate({ to: "/views/$", params: { _splat: id }, search: { query: undefined } })
   }, [text, createNote, leave, navigate])
 
   // Commit the typed query to the full results view — the URL-addressable
-  // `/?query=` the notes route already owns, so filter views are bookmarkable
+  // `/?query=` the Views page already owns, so filter views are bookmarkable
   // and back/forward just work. The query as typed, not as last searched:
   // ↵ can land inside the debounce.
   const openResultsView = useCallback(() => {
@@ -266,7 +266,7 @@ export function CommandMenu() {
     (noteId: string, blockId?: string) => {
       leave()
       navigate({
-        to: "/notes/$",
+        to: "/views/$",
         params: { _splat: noteId },
         search: { query: undefined, block: blockId },
       })
@@ -377,7 +377,7 @@ export function CommandMenu() {
                   description={formatDateDistance(dateString)}
                   onSelect={handleSelect(() => {
                     navigate({
-                      to: "/notes/$",
+                      to: "/views/$",
                       params: {
                         _splat: dateString,
                       },
@@ -409,29 +409,27 @@ export function CommandMenu() {
                   focusFirstSignal={focusFirstSignal}
                   focusLastSignal={recentLastSignal}
                   onExitTop={takeBackFromRows}
-                  onExitBottom={
-                    !deferredQuery && pinnedRoots.length > 0 ? recentToPinned : undefined
-                  }
+                  onExitBottom={!deferredQuery && viewRoots.length > 0 ? recentToViews : undefined}
                 />
               </Command.Group>
             ) : null}
-            {!deferredQuery && pinnedRoots.length > 0 ? (
-              // The pinned notes and blocks, beneath the recent ones: a
-              // second results block, browsed the same way, walked into
-              // from the recent rows and back out of them (or, with
-              // nothing recent, straight from the query).
+            {!deferredQuery && viewRoots.length > 0 ? (
+              // The Views list, beneath the recent places: a second results
+              // block, browsed the same way, walked into from the recent
+              // rows and back out of them (or, with nothing recent, straight
+              // from the query).
               <Command.Group heading="Views">
                 <ResultsList
                   variant="palette"
                   query=""
                   results={results}
-                  browseRoots={pinnedRoots}
+                  browseRoots={viewRoots}
                   limit={NUM_VISIBLE_RESULTS}
                   readOnly
                   initialSelection="none"
                   onOpen={openResult}
-                  focusFirstSignal={recentRoots.length > 0 ? pinnedFirstSignal : focusFirstSignal}
-                  onExitTop={recentRoots.length > 0 ? pinnedToRecent : takeBackFromRows}
+                  focusFirstSignal={recentRoots.length > 0 ? viewsFirstSignal : focusFirstSignal}
+                  onExitTop={recentRoots.length > 0 ? viewsToRecent : takeBackFromRows}
                 />
               </Command.Group>
             ) : null}

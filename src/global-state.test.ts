@@ -18,10 +18,10 @@ import {
   linkDirectionsAtom,
   notesAtom,
   ownSortedNotesAtom,
-  pinnedBlocksAtom,
-  pinnedEntriesAtom,
-  pinnedNotesAtom,
-  pinnedRootsAtom,
+  blockViewsAtom,
+  noteSortAtom,
+  viewEntriesAtom,
+  viewRootsAtom,
   recentVisitsAtom,
   sampleGraphAtom,
   searchBlocksAtom,
@@ -107,8 +107,8 @@ describe("graphSnapshotAtom", () => {
     const readme = notes.get("readme")!
     // The readme's title and props come from the note node, not markdown.
     expect(readme.title).toBe("👋 Welcome to Ruminate")
-    // The welcome note is pinned by a sample VIEW, not by a prop.
-    expect(store.get(pinnedNotesAtom).map((note) => note.id)).toEqual(["readme"])
+    // A block of the welcome note is a view, by a sample VIEW row, not a prop.
+    expect(store.get(blockViewsAtom).map((block) => block.id)).toEqual(["blk_welcome003"])
     expect(rollup("readme", snapshot)).toBe(serialize(noteDoc("readme", snapshot)!))
 
     // An edit signed out applies to the sample graph in memory, and the
@@ -140,9 +140,9 @@ describe("linkDirectionsAtom", () => {
   })
 })
 
-describe("pinnedBlocksAtom", () => {
-  /** Pin a block: a VIEW rooted at it (src/data/views.ts), never a prop. */
-  const pin = (store: ReturnType<typeof createStore>, ...ids: string[]) =>
+describe("blockViewsAtom", () => {
+  /** Make blocks views: a VIEW row rooted at each (src/data/views.ts). */
+  const view = (store: ReturnType<typeof createStore>, ...ids: string[]) =>
     store.set(
       viewsAtom,
       viewMapOf(
@@ -158,23 +158,23 @@ describe("pinnedBlocksAtom", () => {
       ),
     )
 
-  it("lists the blocks with a pinned view, each with the note it opens in, in index order", async () => {
+  it("lists the blocks with a view row, each with the note it opens in, in index order", async () => {
     const { store, unsubscribe } = await signedInStore(FILES)
     store.set(viewsAtom, new Map())
-    expect(store.get(pinnedBlocksAtom)).toEqual([])
+    expect(store.get(blockViewsAtom)).toEqual([])
 
-    pin(store, "blk_milk")
-    expect(store.get(pinnedBlocksAtom)).toMatchObject([
-      { id: "blk_milk", noteId: "tasks", text: "buy milk", note: { id: "tasks" } },
+    view(store, "blk_milk")
+    expect(store.get(blockViewsAtom)).toMatchObject([
+      { id: "blk_milk", noteId: "tasks", text: "buy milk", updatedAt: 1, note: { id: "tasks" } },
     ])
 
     // Index order: `misc` (plants) is indexed before `tasks` (milk).
-    pin(store, "blk_milk", "blk_plants")
-    expect(store.get(pinnedBlocksAtom).map((block) => block.id)).toEqual(["blk_plants", "blk_milk"])
+    view(store, "blk_milk", "blk_plants")
+    expect(store.get(blockViewsAtom).map((block) => block.id)).toEqual(["blk_plants", "blk_milk"])
 
-    // Unpinned, the block is gone from the list.
-    pin(store, "blk_milk")
-    expect(store.get(pinnedBlocksAtom).map((block) => block.id)).toEqual(["blk_milk"])
+    // Its row gone, the block is gone from the list.
+    view(store, "blk_milk")
+    expect(store.get(blockViewsAtom).map((block) => block.id)).toEqual(["blk_milk"])
     unsubscribe()
   })
 
@@ -201,29 +201,29 @@ describe("pinnedBlocksAtom", () => {
         2,
       ),
     )
-    pin(store, "blk_both")
-    expect(store.get(pinnedBlocksAtom)).toMatchObject([{ id: "blk_both", noteId: "tasks" }])
+    view(store, "blk_both")
+    expect(store.get(blockViewsAtom)).toMatchObject([{ id: "blk_both", noteId: "tasks" }])
     unsubscribe()
   })
 
   it("lists a block in a note someone shared with the user — the view is theirs, not the owner's", async () => {
     const { store, unsubscribe } = await signedInStore(FILES)
-    pin(store, "blk_milk")
+    view(store, "blk_milk")
     store.set(sharedOriginAtom, new Map([["blk_milk", "share-1"]]))
-    expect(store.get(pinnedBlocksAtom).map((block) => block.id)).toEqual(["blk_milk"])
+    expect(store.get(blockViewsAtom).map((block) => block.id)).toEqual(["blk_milk"])
     unsubscribe()
   })
 
   it("leaves out a view whose root the graph no longer holds", async () => {
     const { store, unsubscribe } = await signedInStore(FILES)
-    pin(store, "blk_gone")
-    expect(store.get(pinnedBlocksAtom)).toEqual([])
+    view(store, "blk_gone")
+    expect(store.get(blockViewsAtom)).toEqual([])
     unsubscribe()
   })
 })
 
-describe("pinnedEntriesAtom", () => {
-  const pinnedView = (id: string, sort_key: string | null) => ({
+describe("viewEntriesAtom", () => {
+  const viewRow = (id: string, sort_key: string | null) => ({
     id,
     root_id: id,
     filter: null,
@@ -233,10 +233,24 @@ describe("pinnedEntriesAtom", () => {
     updated_at: 2,
   })
 
-  it("lists the notes then the blocks until something is dragged", async () => {
+  it("is every note and every block view, by name in the default sort", async () => {
     const { store, unsubscribe } = await signedInStore(FILES)
-    store.set(viewsAtom, viewMapOf([pinnedView("blk_milk", null), pinnedView("tasks", null)]))
-    expect(store.get(pinnedEntriesAtom).map((entry) => `${entry.kind}:${entry.id}`)).toEqual([
+    store.set(viewsAtom, viewMapOf([viewRow("blk_milk", null)]))
+    // "buy milk" sorts between "misc" and "Today" by name.
+    expect(store.get(viewEntriesAtom).map((entry) => `${entry.kind}:${entry.id}`)).toEqual([
+      "block:blk_milk",
+      "note:misc",
+      "note:tasks",
+    ])
+    unsubscribe()
+  })
+
+  it("lists the notes then the blocks in the manual sort until something is dragged", async () => {
+    const { store, unsubscribe } = await signedInStore(FILES)
+    store.set(noteSortAtom, "manual")
+    store.set(viewsAtom, viewMapOf([viewRow("blk_milk", null)]))
+    expect(store.get(viewEntriesAtom).map((entry) => `${entry.kind}:${entry.id}`)).toEqual([
+      "note:misc",
       "note:tasks",
       "block:blk_milk",
     ])
@@ -245,25 +259,33 @@ describe("pinnedEntriesAtom", () => {
 
   it("puts keyed views in key order, blocks above notes if that is where they were dragged", async () => {
     const { store, unsubscribe } = await signedInStore(FILES)
+    store.set(noteSortAtom, "manual")
     store.set(
       viewsAtom,
       viewMapOf([
-        pinnedView("blk_milk", "a0"),
-        pinnedView("tasks", "a1"),
-        // Pinned after the drag: no key, so it joins the end.
-        pinnedView("misc", null),
+        viewRow("blk_milk", "a0"),
+        viewRow("tasks", "a1"),
+        // Never dragged: no key, so it joins the end.
       ]),
     )
-    expect(store.get(pinnedEntriesAtom).map((entry) => entry.id)).toEqual([
+    expect(store.get(viewEntriesAtom).map((entry) => entry.id)).toEqual([
       "blk_milk",
       "tasks",
       "misc",
     ])
-    expect(store.get(pinnedRootsAtom)).toEqual([
+    expect(store.get(viewRootsAtom)).toEqual([
       { id: "blk_milk", noteId: "tasks" },
       { id: "tasks", noteId: "tasks" },
       { id: "misc", noteId: "misc" },
     ])
+    unsubscribe()
+  })
+
+  it("leaves the keys alone in an automatic sort, and keeps shared notes out", async () => {
+    const { store, unsubscribe } = await signedInStore(FILES)
+    store.set(viewsAtom, viewMapOf([viewRow("misc", "a0")]))
+    store.set(sharedOriginAtom, new Map([["misc", "share-1"]]))
+    expect(store.get(viewEntriesAtom).map((entry) => entry.id)).toEqual(["tasks"])
     unsubscribe()
   })
 })

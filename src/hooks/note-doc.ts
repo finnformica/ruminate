@@ -36,7 +36,7 @@ const NO_CONTEXT: ReadonlySet<string> = new Set()
  * difference between the graph and `next` becomes a batch of ops
  * (`docToOps`: a new block is one `create` and one `link`, typing is one
  * `setText`) applied to the graph at once and written behind. The note's
- * `updated_at` is stamped on every change — what orders the notes list and
+ * `updated_at` is stamped on every change — what orders the Views page and
  * drives the replica's incremental pulls (docs/graph-storage.md); in focus,
  * where the doc says nothing about the note node, as its own `setProps`.
  *

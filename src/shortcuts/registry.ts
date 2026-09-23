@@ -55,7 +55,7 @@ export const APP_SHORTCUTS = {
   /** The `g` chords, which `GChordMachine` binds and the sidebar labels its
    * rows with — so a destination's key is written once, here. */
   goCalendar: "g d",
-  goNotes: "g n",
+  goViews: "g v",
   goSettings: "g s",
   goAdmin: "g a",
   goChangelog: "g c",
@@ -353,9 +353,9 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
     group: "Navigation",
   },
   {
-    combos: [APP_SHORTCUTS.goNotes],
+    combos: [APP_SHORTCUTS.goViews],
     scope: "global",
-    description: "Go to the notes list (press g, then n)",
+    description: "Go to the Views list (press g, then v)",
     group: "Navigation",
   },
   {
@@ -379,7 +379,7 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   {
     combos: [APP_SHORTCUTS.focusSearch],
     scope: "global",
-    description: "Jump to the search input (notes list)",
+    description: "Jump to the search input (Views page)",
     group: "Navigation",
   },
   {
@@ -402,7 +402,7 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   },
 ]
 
-// Search results — the rows in ⌘K, on the notes list and on the results view
+// Search results — the rows in ⌘K, on the Views page and on the results view
 // (`/?query=`) are the block editor (src/components/results-editor.tsx), so
 // their keys are the editor's. These are the hand-offs around them.
 const SEARCH_RESULT_ENTRIES: Shortcut[] = [

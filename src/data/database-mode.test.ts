@@ -29,7 +29,7 @@ import type { ReplicaSyncHandle } from "./replica-sync"
 import { createNodeSqlDriver } from "./sql-node-test-driver"
 import type { NoteStore } from "./note-store"
 import { openSqlNoteStore } from "./sql-note-store"
-import { pinnedRootIdsAtom, viewsAtom, type ViewRow } from "./views"
+import { viewRootIdsAtom, viewsAtom, type ViewRow } from "./views"
 
 /**
  * Boot-flow tests for database-authoritative mode, at the highest level the
@@ -748,7 +748,7 @@ describe("database mode views", () => {
     const store = await boot({ source, replica: stubReplica().handle })
     expect(views()).toEqual([viewRow()])
     expect(await store.getViews()).toEqual([viewRow()])
-    expect([...jotai.get(pinnedRootIdsAtom)]).toEqual(["note-a"])
+    expect([...jotai.get(viewRootIdsAtom)]).toEqual(["note-a"])
   })
 
   it("a write lands on the atom at once, then in the store and the push queue", async () => {
@@ -836,6 +836,6 @@ describe("database mode views", () => {
 
     stopDatabaseMode()
     await flushDatabaseMode()
-    expect(views().map((row) => row.id)).toEqual(["readme"])
+    expect(views().map((row) => row.id)).toEqual(["blk_welcome003"])
   })
 })

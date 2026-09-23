@@ -1,6 +1,6 @@
 /**
  * The `g` chord state machine behind the app's navigation vocabulary
- * (`g d` → today's daily note, `g n` → notes, …). Pressing `g` outside any
+ * (`g d` → today's daily note, `g v` → the Views list, …). Pressing `g` outside any
  * typing context arms a short window; the next key either fires its action or
  * disarms. Pure and timer-based only through `setTimeout`, so tests drive it
  * with fake timers.

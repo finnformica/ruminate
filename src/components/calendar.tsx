@@ -321,7 +321,7 @@ function CalendarItem({
 }: CalendarItemProps) {
   const link = (
     <Link
-      to="/notes/$"
+      to="/views/$"
       params={{ _splat: id }}
       search={{
         query: undefined,
@@ -471,7 +471,7 @@ function MonthWeekRow({
 
   const weekLink = (
     <Link
-      to="/notes/$"
+      to="/views/$"
       params={{ _splat: weekString }}
       search={{
         query: undefined,
@@ -571,7 +571,7 @@ function MonthDateCell({
 
   const link = (
     <Link
-      to="/notes/$"
+      to="/views/$"
       params={{ _splat: dateString }}
       search={{
         query: undefined,

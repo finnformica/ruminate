@@ -9,7 +9,7 @@ import type { Note, NoteId } from "../schema"
  * A place is a DESTINATION: a note, or a block focused on within one — so
  * unfolding Personal and focusing on Fashion counts Fashion, not Personal,
  * and the Recent row opens straight onto it. A destination is visited when
- * it is opened (from the notes page, the palette, a link, or by focusing on
+ * it is opened (from the Views page, the palette, a link, or by focusing on
  * it in the editor), edited, or a block in it folded or unfolded, on this
  * device; and a note is visited, too, when it is edited anywhere else (the
  * graph's `updatedAt`, which every device sees). Never by selecting,

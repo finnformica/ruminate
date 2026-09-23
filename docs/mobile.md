@@ -30,7 +30,7 @@ keyboard that appears and disappears. The block editor
   popup are one list (`menuEntries`) on two surfaces, and it carries only
   what nothing else on the row does, in sections ruled apart: Copy and Copy
   link to block; a link's or a figure's own actions, where the row has
-  them; Move up, Move down and Duplicate; Pin and Share; Unlink and Delete. Editing is
+  them; Move up, Move down and Duplicate; Add to Views and Share; Unlink and Delete. Editing is
   a tap, collapsing the chevron, and Indent, Outdent, Focus on and Turn into
   are the edit bar's (keys, on a desktop). Android's long press arrives as a
   `contextmenu` event and opens the same sheet.

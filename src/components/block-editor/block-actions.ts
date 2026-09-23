@@ -18,7 +18,7 @@ import type { BlockType } from "../../blocks/types"
  * The structural actions act on the rows' roots, so a selected subtree
  * moves as one. The actions that are one block's own affair — its link,
  * its picture, its card, sharing it — take the first of `keys`; the ones
- * that are independent per block (pin, download, refresh) take each.
+ * that are independent per block (view, download, refresh) take each.
  */
 export interface BlockActions {
   indent: (keys: string[]) => void
@@ -58,10 +58,11 @@ export interface BlockActions {
   /** A link to the block, on the clipboard. Absent when the editor has no
    * note to link into (Storybook, tests). */
   copyLink?: (keys: string[]) => void
-  /** Pin each block — or unpin it, when it is: a pinned block is listed in
-   * the sidebar under Views and opens focused on. Absent where the rows
-   * are not the user's own to pin. */
-  pin?: (keys: string[]) => void
+  /** Make each block a view of its own — or take it out of Views, when it
+   * is one: a block view is listed in the sidebar under Views and opens
+   * focused on (docs/metadata.md). Absent where the editor has no note
+   * behind it to list the block under. */
+  view?: (keys: string[]) => void
   /** Share the block — and everything beneath it — with someone
    * (docs/sharing.md). Absent where the rows are not the user's own. */
   share?: (keys: string[]) => void

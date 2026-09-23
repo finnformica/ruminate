@@ -28,7 +28,7 @@ import { NoteFavicon } from "./note-favicon"
  * under the caret, how a pick is spliced back) lives in
  * `src/utils/qualifier-suggestions.ts`; this file adds the corpus-backed set
  * and the rendering. The one box that shows it is `QueryBox`
- * (query-box.tsx), on the notes page and in the ⌘K palette alike.
+ * (query-box.tsx), on the Views page and in the ⌘K palette alike.
  */
 
 /** A row of the picker: a query value, plus (for `in:`) the note it names. */

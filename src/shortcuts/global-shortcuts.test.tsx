@@ -90,14 +90,14 @@ describe("g chords", () => {
     fireEvent.keyDown(document.body, { key: "d" })
     expect(mocks.navigate).toHaveBeenCalledTimes(1)
     const call = mocks.navigate.mock.calls[0][0]
-    expect(call.to).toBe("/notes/$")
+    expect(call.to).toBe("/views/$")
     expect(call.params._splat).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 
-  it("g then n / s navigate to notes, settings", () => {
+  it("g then v / s navigate to the Views list, settings", () => {
     renderShortcuts()
     fireEvent.keyDown(document.body, { key: "g" })
-    fireEvent.keyDown(document.body, { key: "n" })
+    fireEvent.keyDown(document.body, { key: "v" })
     expect(mocks.navigate).toHaveBeenLastCalledWith(expect.objectContaining({ to: "/" }))
     fireEvent.keyDown(document.body, { key: "g" })
     fireEvent.keyDown(document.body, { key: "s" })

@@ -19,7 +19,7 @@ import {
 import { QueryPill } from "./query-pill"
 
 /**
- * **The query box** — the one search input, on the notes page and in the
+ * **The query box** — the one search input, on the Views page and in the
  * ⌘K palette. The query is the caller's, one string (`in:n1 type:todo
  * milk`); the box shows it as the **filters**, each a pill beneath the line
  * (`QueryPill`), and the **text** in the line. A qualifier is lifted out of

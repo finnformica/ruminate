@@ -5,7 +5,7 @@ import { useDebounce } from "use-debounce"
 import { useRecentRoots } from "../hooks/recent-roots"
 import { useSearchResults } from "../hooks/search-results"
 import type { ResultRoot } from "../hooks/results-doc"
-import { ownSortedNotesAtom, pinnedRootsAtom, sharedNotesAtom } from "../global-state"
+import { sharedNotesAtom, viewRootsAtom } from "../global-state"
 import type { Note, NoteId } from "../schema"
 import { pluralize } from "../utils/pluralize"
 import { QueryBox } from "./query-box"
@@ -30,21 +30,20 @@ const PAGE_SIZE = 10
 export const QUERY_DEBOUNCE_MS = 150
 
 /**
- * The notes page: the query box over the results block (`QueryBox`,
+ * The Views page: the query box over the results block (`QueryBox`,
  * `ResultsList` — the same two the ⌘K palette is made of). A query with
  * text (or a block-scoped `type:`) resolves to BLOCKS: the results are the
  * matching blocks themselves, at any depth. A query that only names notes
  * (a date, a property, nothing at all) keeps the note listing — see
- * `resolvesToBlocks`. A filtered view edits in place; the plain notes list
- * is browsed (for now — it could edit too).
+ * `resolvesToBlocks`. A filtered view edits in place; the plain listing is
+ * browsed (for now — it could edit too).
  *
- * **With no query the page is where you go next, not an index** — Recent,
- * Views, Shared. **Recent** is the palette's (the places most used lately,
- * `useRecentRoots`); **Views** is the sidebar's, the pinned blocks as well
- * as the pinned notes (`pinnedRootsAtom`). Between them they hold what you
- * come back to, so the full list of your notes is left to the sidebar and
- * to search — and shown here only while both are empty (a new corpus), so
- * the page is never just a search box.
+ * **With no query the page is where you go next** — Recent, Views, Shared.
+ * **Recent** is the palette's (the places most used lately,
+ * `useRecentRoots`); **Views** is the sidebar's list, every note and every
+ * block view in the sidebar's order (`viewRootsAtom`); **Shared** is what
+ * other people shared. A place used lately is under Recent and under Views
+ * both: Recent is what you use, Views is everything there is.
  *
  * A query is *not* sectioned: results are ranked by score across the whole
  * corpus (docs/query-language.md), and cutting that ranking into bands would
@@ -63,9 +62,8 @@ export function NoteList({
   const readOnly = fullQuery === ""
   const browsing = fullQuery === ""
 
-  const ownNotes = useAtomValue(ownSortedNotesAtom)
   const sharedNotes = useAtomValue(sharedNotesAtom)
-  const pinnedRoots = useAtomValue(pinnedRootsAtom)
+  const viewRoots = useAtomValue(viewRootsAtom)
   const recentRoots = useRecentRoots()
 
   // The keyboard hand-off between the search box and the rows.
@@ -81,37 +79,26 @@ export function NoteList({
 
   const openNote = React.useCallback(
     (noteId: string, block?: string) =>
-      navigate({ to: "/notes/$", params: { _splat: noteId }, search: { query: undefined, block } }),
+      navigate({ to: "/views/$", params: { _splat: noteId }, search: { query: undefined, block } }),
     [navigate],
   )
 
   // The bands, each the roots its own results block draws. Recent leads —
   // the places most used lately, notes and focused blocks, by frecency
   // (`useRecentRoots`), as the palette lists them with nothing typed — so
-  // what you keep coming back to is one click away. Then Views (it leads
-  // the sidebar), both kinds of pin, a pinned place used lately among them
-  // too: Recent is what you use, Views what you chose to keep. Then what
+  // what you keep coming back to is one click away. Then Views, the
+  // sidebar's list whole, a place used lately among them too. Then what
   // other people shared with you.
   const sections = React.useMemo(() => {
     if (!browsing) return []
     const rootsOf = (notes: Note[]) => notes.map((note) => ({ id: note.id, noteId: note.id }))
     const shared = sharedNotes.map(({ note }) => note)
-    // Your notes are listed only while there is nothing recent and nothing
-    // pinned — a new corpus — so the page is never just a search box.
-    const fallback = recentRoots.length + pinnedRoots.length === 0
     return [
       { key: "recent", heading: "Recent", roots: recentRoots },
-      { key: "views", heading: "Views", roots: pinnedRoots },
-      // Named "Notes" only when it is one band among several; on its own it
-      // is the whole list and a heading over it says nothing.
-      {
-        key: "own",
-        heading: shared.length > 0 ? "Notes" : null,
-        roots: fallback ? rootsOf(ownNotes) : [],
-      },
+      { key: "views", heading: "Views", roots: viewRoots },
       { key: "shared", heading: "Shared", roots: rootsOf(shared) },
     ].filter((section) => section.roots.length > 0)
-  }, [browsing, ownNotes, sharedNotes, pinnedRoots, recentRoots])
+  }, [browsing, sharedNotes, viewRoots, recentRoots])
 
   return (
     <div className="flex flex-col gap-4">
@@ -148,10 +135,9 @@ export function NoteList({
 
 interface NoteSection {
   key: string
-  /** Null for a band that is the whole list, which needs no name. */
-  heading: string | null
-  /** What the band draws — notes, or (under Views) blocks too, each opening
-   * its note focused on it. */
+  heading: string
+  /** What the band draws — notes, or (under Recent and Views) blocks too,
+   * each opening its note focused on it. */
   roots: readonly ResultRoot[]
 }
 
@@ -194,9 +180,7 @@ function NoteSections({
         const next = sections[index + 1]
         return (
           <div key={section.key} className="flex flex-col gap-2">
-            {section.heading ? (
-              <h2 className="text-sm text-text-secondary">{section.heading}</h2>
-            ) : null}
+            <h2 className="text-sm text-text-secondary">{section.heading}</h2>
             <ResultsList
               query=""
               results={emptyResults}

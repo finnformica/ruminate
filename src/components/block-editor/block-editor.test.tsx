@@ -12,6 +12,8 @@ import { ImageUploadError, type UploadedImage } from "../../data/images"
 import type { LinkPreview } from "../../blocks/link"
 import { LinkPreviewError } from "../../data/link-previews"
 import { BlockEditor, type BlockDebugOptions } from "./block-editor"
+import { getDefaultStore } from "jotai"
+import { viewRootIdsAtom, viewsAtom } from "../../data/views"
 
 // The context menu (Base UI) measures its popup with a ResizeObserver and
 // scrolls the highlighted item into view; jsdom implements neither.
@@ -22,7 +24,18 @@ globalThis.ResizeObserver = class {
   disconnect() {}
 }
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  // A view made from a menu lands in the default store; the next test
+  // starts with none.
+  getDefaultStore().set(viewsAtom, new Map())
+})
+
+/** The rows' block ids, in document order. */
+const idsOf = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll<HTMLElement>("[data-block-row]")).map((row) =>
+    row.getAttribute("data-block-row")!,
+  )
 
 /** Mirror BlockNoteEditor: an empty parse still gets one block to edit. */
 function withStarter(doc: BlockDoc): BlockDoc {
@@ -2718,29 +2731,29 @@ describe("BlockEditor context menu", () => {
     expect(serializedLines(getByTestId)).toEqual(["A", "C"])
   })
 
-  it("pins and unpins a block from its menu, as a prop on the block, and the row says so", async () => {
+  it("adds a block to Views from its menu, as a view rooted at it, and removes it again", async () => {
     const { container } = render(<Harness initial={"A\nB"} noteId="n" />)
     let menu = await openMenuOn(container, 1)
-    expect(menu.textContent).toContain("Pin")
-    expect(menu.textContent).not.toContain("Unpin")
+    expect(menu.textContent).toContain("Add to Views")
+    expect(menu.textContent).not.toContain("Remove from Views")
+    await pick("Add to Views")
+    // The block has a view row now, and nothing in the row itself says so:
+    // the sidebar's list is where a view shows.
+    const blockId = idsOf(container)[1]
+    expect(getDefaultStore().get(viewRootIdsAtom).has(blockId)).toBe(true)
     expect(container.querySelector('[data-testid="block-pinned"]')).toBeNull()
-    await pick("Pin")
-    // The row now carries the pin glyph; the menu offers Unpin.
-    const rows = container.querySelectorAll("[data-occurrence]")
-    expect(rows[1]!.querySelector('[data-testid="block-pinned"]')).not.toBeNull()
-    expect(rows[0]!.querySelector('[data-testid="block-pinned"]')).toBeNull()
     menu = await openMenuOn(container, 1)
-    expect(menu.textContent).toContain("Unpin")
-    await pick("Unpin")
-    expect(container.querySelector('[data-testid="block-pinned"]')).toBeNull()
+    expect(menu.textContent).toContain("Remove from Views")
+    await pick("Remove from Views")
+    expect(getDefaultStore().get(viewRootIdsAtom).has(blockId)).toBe(false)
   })
 
-  it("offers Pin only where the rows are a note's own", async () => {
+  it("offers Add to Views only where the rows are a note's own", async () => {
     // No note behind the editor (a clipboard fragment, Storybook): nothing
-    // to list the block under, so no Pin.
+    // to list the block under, so no view to make.
     const { container } = render(<Harness initial={"A\nB"} />)
     const menu = await openMenuOn(container, 1)
-    expect(menu.textContent).not.toContain("Pin")
+    expect(menu.textContent).not.toContain("Views")
   })
 
   it("opens on a row with the standard actions, and selects that row", async () => {
@@ -4546,7 +4559,7 @@ describe("every surface runs the one action set", () => {
     expect(fromMenu).toHaveBeenCalledWith(["blk_b", "blk_c"])
   })
 
-  it("the per-block actions take each selected block: Pin pins them all", async () => {
+  it("the per-block actions take each selected block: Add to Views adds them all", async () => {
     const { container } = render(<Harness initial={FOUR} noteId="n" />)
     selectRows(editorRoot(container), 1, 2)
     await act(async () => {
@@ -4555,11 +4568,9 @@ describe("every surface runs the one action set", () => {
         clientY: 10,
       })
     })
-    await pick("Pin")
-    const rows = container.querySelectorAll("[data-occurrence]")
-    expect(rows[0]!.querySelector('[data-testid="block-pinned"]')).toBeNull()
-    expect(rows[1]!.querySelector('[data-testid="block-pinned"]')).not.toBeNull()
-    expect(rows[2]!.querySelector('[data-testid="block-pinned"]')).not.toBeNull()
-    expect(rows[3]!.querySelector('[data-testid="block-pinned"]')).toBeNull()
+    await pick("Add to Views")
+    const ids = idsOf(container)
+    const roots = getDefaultStore().get(viewRootIdsAtom)
+    expect(ids.map((id) => roots.has(id))).toEqual([false, true, true, false])
   })
 })

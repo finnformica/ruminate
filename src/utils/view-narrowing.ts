@@ -10,7 +10,7 @@ import { parseSort } from "./view-filter"
  * A note's header narrows the note in place (`src/data/filter-view.ts`), and
  * what it narrows BY is a query-language string. There is exactly one thing
  * in the app that knows what such a string means over blocks — `searchBlocks`,
- * the engine behind `type:todo` in the ⌘K palette and on the notes page — so
+ * the engine behind `type:todo` in the ⌘K palette and on the Views page — so
  * that is what answers here too. The filter is run as a corpus query scoped
  * to the note, and the hits it returns are the rows that matched.
  *

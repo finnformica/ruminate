@@ -44,10 +44,6 @@ const STORIES = [
   { id: "blockeditor--deep-headings-focused", waitFor: '[data-testid="focus-breadcrumb"]' },
   { id: "blockeditor--selection-sweep", waitFor: '[data-testid="block-body"]' },
   { id: "blockeditor--empty", waitFor: '[data-testid="block-body"]' },
-  // Pinned rows: the pin's trailing slot mirrors the marker slot, on a
-  // heading (whose surface reaches both ways), a paragraph, a bullet and a
-  // wrapping nested bullet.
-  { id: "blockeditor--pinned", waitFor: '[data-testid="block-pinned"]' },
   // Waits for the tokens: the grammar is fetched after the story mounts.
   { id: "blockeditor--code", waitFor: '[data-testid="code-panel"] .token' },
   { id: "notetitle--default", waitFor: "text=Meeting notes" },
