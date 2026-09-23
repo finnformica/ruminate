@@ -131,6 +131,14 @@ page load**, not from an effect — React's strict mode runs effects twice on
 purpose and a remount would do the same, and the first pass consuming the
 request left the second with nothing to show.
 
+**The card can be turned off.** Settings → Updates, **Show what's new after an
+update** (`showWhatsNewAtom`, stored on the device like the card's own notes).
+Off, the boot still takes the update request and records the build, so
+switching it back on later does not greet the reader with a release they have
+been running for weeks: not wanting to be told counts as read, exactly as
+dismissing does. The `/changelog` page is unaffected — **What's new** in the
+sidebar reaches it either way.
+
 **The card is not a dialog, and not tied to the button's click handler.** That
 button applies the waiting service worker and reloads
 (`src/hooks/app-update.ts`), so there is no moment between the click and the

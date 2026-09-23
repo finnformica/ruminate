@@ -4,6 +4,7 @@ import { useEffect } from "react"
 import { useNetworkState } from "react-use"
 import { DEFAULT_NEW_BLOCK_MARKER } from "../blocks/markers"
 import { Button } from "../components/ui/button"
+import { Checkbox } from "../components/ui/checkbox"
 import { useSignOut } from "../components/github-auth"
 import { GitHubAvatar } from "../components/github-avatar"
 import { SettingsIcon16 } from "../components/icons"
@@ -35,6 +36,7 @@ import {
   linkDirectionsAtom,
   githubUserAtom,
   newBlockMarkerAtom,
+  showWhatsNewAtom,
   themeAtom,
   type Theme,
 } from "../global-state"
@@ -58,6 +60,7 @@ function RouteComponent() {
         <div className="mx-auto flex max-w-xl flex-col gap-6">
           <AppearanceSection />
           <EditorSection />
+          <UpdatesSection />
           <StorageSection />
           {sharing ? <SharingSection /> : null}
           {mcp ? <McpTokensSection /> : null}
@@ -280,6 +283,35 @@ function EditorSection() {
             )
           })}
         </div>
+      </div>
+    </SettingsSection>
+  )
+}
+
+/** The what's-new card, and whether it greets an update at all. The card is
+ * the only surface the app puts up unasked, so it is the one that gets a
+ * switch; **What's new** in the sidebar reaches the changelog either way. */
+function UpdatesSection() {
+  const [showWhatsNew, setShowWhatsNew] = useAtom(showWhatsNewAtom)
+
+  return (
+    <SettingsSection title="Updates">
+      {/* `htmlFor` points at the checkbox, which renders a <button> — a
+          labelable element — so clicking the description toggles it. */}
+      <div className="flex items-start gap-2 leading-4">
+        <Checkbox
+          id="show-whats-new"
+          className="mt-0.5"
+          checked={showWhatsNew}
+          onCheckedChange={(checked) => setShowWhatsNew(checked)}
+        />
+        <label htmlFor="show-whats-new" className="flex cursor-pointer flex-col gap-1">
+          <span>Show what's new after an update</span>
+          <span className="text-sm leading-4 text-text-secondary">
+            A card in the corner lists what changed when Ruminate updates. The full changelog is
+            always under What's new in the sidebar.
+          </span>
+        </label>
       </div>
     </SettingsSection>
   )

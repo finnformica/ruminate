@@ -552,6 +552,15 @@ export type Theme = "system" | "light" | "dark"
 
 export const themeAtom = atomWithStorage<Theme>("theme", "system")
 
+/**
+ * Whether the what's-new card (src/components/whats-new-popover.tsx) greets a
+ * build this device has not seen. On by default; Settings → Updates turns it
+ * off for a reader who would rather find the changelog for themselves. Stored
+ * on this device, as the card's own notes are: it is about what this device
+ * has seen, not about the account.
+ */
+export const showWhatsNewAtom = atomWithStorage<boolean>("whats-new-card", true)
+
 export const sidebarAtom = atomWithStorage<"expanded" | "collapsed">("sidebar", "expanded")
 
 /**

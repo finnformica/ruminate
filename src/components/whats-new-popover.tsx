@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router"
+import { useAtomValue } from "jotai"
 import { useEffect, useState } from "react"
 import {
   countEntries,
@@ -11,6 +12,7 @@ import { IconButton } from "./ui/icon-button"
 import { Surface } from "./ui/surface"
 import { XIcon16 } from "./icons"
 import { EntryText } from "./release-notes"
+import { showWhatsNewAtom } from "../global-state"
 import { lastSeenVersion, rememberVersion, takeUpdateRequest } from "../utils/whats-new"
 
 /**
@@ -58,13 +60,23 @@ const MAX_ENTRIES = 6
  *
  * Nothing is fetched to answer that question. The stamp is a string in the app
  * bundle; only a device that is actually behind pays for the changelog.
+ *
+ * Settings → Updates can turn the card off (`showWhatsNewAtom`). The boot's
+ * notes are still taken and the build still recorded, so switching it back on
+ * later does not greet the reader with a release they have been running for
+ * weeks: off means "I did not want to be told", which counts as read, exactly
+ * as dismissing does.
  */
 export function WhatsNewPopover() {
+  const show = useAtomValue(showWhatsNewAtom)
   const [unseen, setUnseen] = useState<ChangelogRelease[] | null>(null)
   const [dismissed, setDismissed] = useState(false)
 
   useEffect(() => {
+    // Taken before the setting is consulted, so that the one-shot notes are
+    // consumed on this boot whether or not anything is shown for them.
     const { asked, seen } = bootFacts()
+    if (!show) return
 
     // Either the reader took an update a moment ago, or this device is running
     // a build it has not seen — which is how the reader whose waiting worker
@@ -86,9 +98,12 @@ export function WhatsNewPopover() {
     return () => {
       live = false
     }
-  }, [])
+  }, [show])
 
-  const nothingToSay = unseen === null || unseen.length === 0
+  // Off in Settings reads as nothing to say, so the card is put away the
+  // moment the box is unticked — and, the facts being cached for the page
+  // load, comes back if it is ticked again before the next one.
+  const nothingToSay = !show || unseen === null || unseen.length === 0
 
   // <kbd>Esc</kbd> puts it away, as it does every other transient surface in
   // the app — but only while it is there, so it never swallows the key.
