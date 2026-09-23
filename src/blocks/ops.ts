@@ -381,12 +381,6 @@ export function moveBlocks(doc: BlockDoc, keys: string[], direction: "up" | "dow
   return next
 }
 
-/** Reorder an occurrence among its siblings, carrying its subtree with it.
- * Returns the doc unchanged when it's already at the end it's moving toward. */
-export function moveBlock(doc: BlockDoc, key: string, direction: "up" | "down"): BlockDoc {
-  return moveBlocks(doc, [key], direction)
-}
-
 /** `id` plus every descendant, depth-first (just `[id]` for a leaf). */
 export function subtreeIds(doc: BlockDoc, id: string): string[] {
   // Each block once, however many paths reach it — and so a loop ends.

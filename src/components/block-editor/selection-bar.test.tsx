@@ -190,7 +190,9 @@ describe("the selection bar", () => {
     // Move up is greyed where the run has no room; here it has.
     await open()
     expect(item("Move up").getAttribute("aria-disabled")).not.toBe("true")
-    await pick("Remove")
+    // No graph behind this editor: removing the rows is the delete, so the
+    // item says so (in a note it reads Unlink, beside the block's Delete).
+    await pick("Delete")
     expect(lines(container)).toEqual(["A", "D", "B", "C"])
     expect(barOpen()).toBe(false)
   })

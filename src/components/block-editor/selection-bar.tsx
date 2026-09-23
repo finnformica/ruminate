@@ -3,39 +3,13 @@ import { useRef } from "react"
 import { createPortal } from "react-dom"
 import type React from "react"
 import { BLOCK_TYPE_DEFS } from "../../blocks/registry"
-import type { BlockType } from "../../blocks/types"
+import type { BlockActions } from "./block-actions"
 import { cx } from "../../utils/cx"
 import { ChevronDownIcon16, XIcon16 } from "../icons"
 import { Button } from "../ui/button"
 import { DropdownMenu } from "../ui/dropdown-menu"
 import { IconButton } from "../ui/icon-button"
 import { Surface } from "../ui/surface"
-
-/** What the bar can do to the selected rows: the same actions the keys run
- * on a multi-row selection (docs/keyboard-shortcuts.md, Multi-select), each
- * on every selected block at once. */
-export interface SelectionBarActions {
-  indent: () => void
-  outdent: () => void
-  moveUp: () => void
-  moveDown: () => void
-  duplicate: () => void
-  turnInto: (type: BlockType) => void
-  copy: () => void
-  cut: () => void
-  remove: () => void
-  /** Back to one highlighted block — what <kbd>Esc</kbd> does. */
-  clear: () => void
-}
-
-/** What the selection can take right now: a menu item whose action would
- * do nothing is greyed, as on the touch screen's edit bar. */
-export interface SelectionBarState {
-  canIndent: boolean
-  canOutdent: boolean
-  canMoveUp: boolean
-  canMoveDown: boolean
-}
 
 /** The types the selection can be turned into: the registry's, in its
  * order (the block menu's Turn into offers the same). */
@@ -67,19 +41,32 @@ const keepFocus = (event: React.MouseEvent) => event.preventDefault()
 export function SelectionBar({
   open,
   count,
-  state,
+  keys,
   actions,
+  onClear,
+  removal = "unlink",
   finalFocus,
 }: {
   open: boolean
   count: number
-  state: SelectionBarState
-  actions: SelectionBarActions
+  /** The rows the bar acts on: the selection's roots. */
+  keys: string[]
+  /** The editor's one set of block actions (`block-actions.ts`) — the same
+   * object the right-click menu runs; the bar runs each over `keys`. An
+   * item whose action would do nothing is greyed (`actions.moves`). */
+  actions: BlockActions
+  /** Back to one highlighted block — what <kbd>Esc</kbd> does. */
+  onClear: () => void
+  /** What removing the rows means, as the block menu words it: **Unlink**
+   * in a note's outline (the blocks stay), **Delete** where the row's
+   * removal is the delete (the basket, editors with no graph behind them). */
+  removal?: "unlink" | "delete"
   finalFocus: React.RefObject<HTMLElement | null>
 }) {
   const shown = useRef(count)
   if (open) shown.current = count
   if (typeof document === "undefined") return null
+  const state = actions.moves(keys)
   return createPortal(
     <div
       data-selection-bar
@@ -110,7 +97,7 @@ export function SelectionBar({
           shortcut={["Esc"]}
           tooltipSide="top"
           onMouseDown={keepFocus}
-          onClick={actions.clear}
+          onClick={onClear}
         >
           <XIcon16 />
         </IconButton>
@@ -135,7 +122,10 @@ export function SelectionBar({
                   >
                     <div className="grid p-1" data-testid="selection-turn-into">
                       {TYPES.map((def) => (
-                        <DropdownMenu.Item key={def.id} onClick={() => actions.turnInto(def.id)}>
+                        <DropdownMenu.Item
+                          key={def.id}
+                          onClick={() => actions.turnInto(keys, def.id)}
+                        >
                           {def.label}
                         </DropdownMenu.Item>
                       ))}
@@ -145,49 +135,58 @@ export function SelectionBar({
               </Menu.Portal>
             </Menu.SubmenuRoot>
             <DropdownMenu.Separator />
-            <DropdownMenu.Item shortcut={["⌥", "⇧", "↓"]} onClick={actions.duplicate}>
+            <DropdownMenu.Item shortcut={["⌥", "⇧", "↓"]} onClick={() => actions.duplicate(keys)}>
               Duplicate
             </DropdownMenu.Item>
             <DropdownMenu.Separator />
             <DropdownMenu.Item
               shortcut={["⇥"]}
               disabled={!state.canIndent}
-              onClick={actions.indent}
+              onClick={() => actions.indent(keys)}
             >
               Indent
             </DropdownMenu.Item>
             <DropdownMenu.Item
               shortcut={["⇧", "⇥"]}
               disabled={!state.canOutdent}
-              onClick={actions.outdent}
+              onClick={() => actions.outdent(keys)}
             >
               Outdent
             </DropdownMenu.Item>
             <DropdownMenu.Item
               shortcut={["⌥", "↑"]}
               disabled={!state.canMoveUp}
-              onClick={actions.moveUp}
+              onClick={() => actions.moveUp(keys)}
             >
               Move up
             </DropdownMenu.Item>
             <DropdownMenu.Item
               shortcut={["⌥", "↓"]}
               disabled={!state.canMoveDown}
-              onClick={actions.moveDown}
+              onClick={() => actions.moveDown(keys)}
             >
               Move down
             </DropdownMenu.Item>
             <DropdownMenu.Separator />
-            <DropdownMenu.Item shortcut={["⌘", "C"]} onClick={actions.copy}>
+            <DropdownMenu.Item shortcut={["⌘", "C"]} onClick={() => actions.copy(keys)}>
               Copy
             </DropdownMenu.Item>
-            <DropdownMenu.Item shortcut={["⌘", "X"]} onClick={actions.cut}>
+            <DropdownMenu.Item shortcut={["⌘", "X"]} onClick={() => actions.cut(keys)}>
               Cut
             </DropdownMenu.Item>
             <DropdownMenu.Separator />
-            <DropdownMenu.Item shortcut={["⌫"]} variant="danger" onClick={actions.remove}>
-              Remove
+            <DropdownMenu.Item
+              shortcut={["⌫"]}
+              variant={removal === "delete" ? "danger" : undefined}
+              onClick={() => actions.remove(keys)}
+            >
+              {removal === "unlink" ? "Unlink" : "Delete"}
             </DropdownMenu.Item>
+            {actions.deleteEverywhere ? (
+              <DropdownMenu.Item variant="danger" onClick={() => actions.deleteEverywhere?.(keys)}>
+                Delete
+              </DropdownMenu.Item>
+            ) : null}
           </DropdownMenu.Content>
         </DropdownMenu>
       </Surface>

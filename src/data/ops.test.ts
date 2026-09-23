@@ -630,6 +630,34 @@ describe("deleteBlockOps / parentCount", () => {
     expect(deleteBlockOps("a", linked)).toEqual([])
     expect(deleteBlockOps("nope", linked)).toEqual([])
   })
+
+  it("deletes several blocks as one batch — a link between two of them goes with them", () => {
+    const snapshot = graphOf({
+      a: "- shared\n  id:: blk_shared0000\n  - under shared\n    id:: blk_under00000\n- only a\n  id:: blk_onlya00000\n",
+      b: "- b\n  id:: blk_b000000000\n",
+    })
+    const linked = applyOps(
+      snapshot,
+      [{ op: "link", source: "b", destination: "blk_shared0000", sortKey: "a1" }],
+      2,
+    )
+    const ops = deleteBlockOps(["blk_shared0000", "blk_under00000", "blk_shared0000"], linked)
+    // Unlinked from outside the batch only: the edge from `shared` to
+    // `under` is between two deleted blocks and is left to the deletes.
+    expect(ops.filter((op) => op.op === "unlink")).toEqual([
+      { op: "unlink", source: "a", destination: "blk_shared0000" },
+      { op: "unlink", source: "b", destination: "blk_shared0000" },
+    ])
+    expect(ops.filter((op) => op.op === "delete").map((op) => (op as { id: string }).id)).toEqual([
+      "blk_shared0000",
+      "blk_under00000",
+    ])
+    const next = applyOps(linked, ops, 3)
+    expect(next.nodes.has("blk_shared0000")).toBe(false)
+    expect(next.nodes.has("blk_under00000")).toBe(false)
+    expect([...unassignedIds(next)]).toEqual([])
+    expect(next.childLinks.get("a")?.map((l) => l.destination_id)).toEqual(["blk_onlya00000"])
+  })
 })
 
 describe("deleteSubtreeOps", () => {
