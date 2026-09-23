@@ -2,7 +2,6 @@ import { ContextMenu } from "@base-ui/react/context-menu"
 import { Menu } from "@base-ui/react/menu"
 import React from "react"
 import { FIGURE_ALIGNS, type FigureAlign } from "../../blocks/figure"
-import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
 import { DropdownMenu } from "../ui/dropdown-menu"
@@ -28,10 +27,12 @@ import { Surface } from "../ui/surface"
  * **Pin** puts the block in the sidebar's Views list (docs/metadata.md),
  * from where it opens focused on; on a pinned block the item reads Unpin.
  *
- * The structure moves (indent, outdent, move up/down) are in the menu with
- * their keys beside them. A mouse could leave them to the keyboard, but a
- * finger cannot (no Tab on a phone's keyboard), and the popup and the sheet
- * are one list on two surfaces — so every surface carries every action.
+ * The menu carries only what nothing else on the row does. Editing is a
+ * click or a tap; collapsing is the chevron; indent, outdent, focus and the
+ * block types are keys on a desktop and the edit bar's buttons on a phone
+ * (`mobile-edit-bar.tsx`). What is left — the moves, duplicate, copy, the
+ * links and figures' own actions, pin, share, delete — is one list on two
+ * surfaces, the popup and the sheet, with keys beside it on the popup.
  */
 
 /** The row the menu was opened on. */
@@ -40,7 +41,6 @@ export interface BlockMenuTarget {
   id: string
   type: BlockType
   hasChildren: boolean
-  collapsed: boolean
   /** How many places the block appears across the corpus (1 = only here). */
   places: number
   /** Pinned (docs/metadata.md): listed in the sidebar's Views list. */
@@ -49,22 +49,16 @@ export interface BlockMenuTarget {
    * or card keeps to, and whether it has been dragged to a size of its own. */
   figure?: { align: FigureAlign; sized: boolean }
   /** The web links in the row's text (docs/links.md), for "Edit link" and
-   * "Turn into → Link"; a link block's own address. */
+   * "Turn into link block"; a link block's own address. */
   links?: { href: string; title: string }[]
 }
 
 export interface BlockMenuActions {
-  edit: (key: string) => void
-  setType: (id: string, type: BlockType) => void
   duplicate: (key: string) => void
-  /** Structure moves — offered on a touch screen only, where there are no
-   * keys for them. */
-  indent: (key: string) => void
-  outdent: (key: string) => void
+  /** Move up / down: the edit bar has no buttons for them, so on a phone
+   * the menu (or a drag) is the way. */
   moveUp: (key: string) => void
   moveDown: (key: string) => void
-  toggleCollapse: (key: string) => void
-  focusBlock: (id: string) => void
   copy: (key: string) => void
   /** Absent when the editor has no note to link into (Storybook, tests). */
   copyLink?: (id: string) => void
@@ -79,7 +73,7 @@ export interface BlockMenuActions {
    * has nothing to hover with. */
   editLink?: (key: string, href: string) => void
   /** Make a link block of the row's first link (docs/links.md): "Turn
-   * into → Link", what the hover card's "Turn into block" does. */
+   * into link block", what the hover card's "Turn into block" does. */
   turnIntoLink?: (key: string, href: string, title: string) => void
   /** Remove this row (the block stays where else it is held). */
   remove: (key: string) => void
@@ -111,9 +105,6 @@ const ALIGN_LABELS: Record<FigureAlign, string> = {
   center: "Centre",
   right: "Right",
 }
-
-/** The types a block can be turned into: the registry's, in its order. */
-const TYPES = BLOCK_TYPE_DEFS.filter((def) => def.turnInto)
 
 /** The menu and its submenus are drawn on the same surface as every other
  * menu in the app (src/components/ui/surface.tsx). */
@@ -192,11 +183,6 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
     entries.push({ kind: "item", ...e })
   const rule = () => entries.push({ kind: "separator" })
 
-  item({
-    label: image ? "Edit caption" : link ? "Edit title" : "Edit",
-    shortcut: ["↵"],
-    onSelect: () => actions.edit(key),
-  })
   // A link's card, for a screen with nothing to hover with: the one link
   // straight away, several by their display text.
   if (links.length === 1 && actions.editLink) {
@@ -243,56 +229,22 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
       onSelect: () => actions.resetFigureSize?.(id),
     })
   }
-  // A figure is its picture or its page: "turn into" would only keep the
-  // caption or the title. A link block goes back to the inline link it was
-  // made from instead.
+  // A link block goes back to the inline link it was made from; a row with
+  // a link in its text makes a link block of the first one, in place or
+  // beneath (docs/links.md). A figure is its picture or its page, so it is
+  // never turned into anything else.
   if (link && actions.linkToInline)
     item({ label: "Turn into inline", onSelect: () => actions.linkToInline?.(id) })
-  if (!figure) {
-    entries.push({
-      kind: "group",
-      label: "Turn into",
-      width: 200,
-      items: [
-        ...TYPES.map((def) => ({
-          key: def.id,
-          label: def.label,
-          // A checked todo is a to-do for the tick; every heading level is
-          // a heading.
-          selected: canonicalOf(target.type) === def.id,
-          onSelect: () => actions.setType(id, def.id),
-        })),
-        // Not a type change: the row's first link becomes a link block, in
-        // place or beneath (docs/links.md). Offered only where there is a
-        // link to make it of.
-        ...(links.length > 0 && actions.turnIntoLink
-          ? [
-              {
-                key: "link",
-                label: "Link",
-                onSelect: () => actions.turnIntoLink?.(key, links[0].href, links[0].title),
-              },
-            ]
-          : []),
-      ],
+  if (!figure && links.length > 0 && actions.turnIntoLink) {
+    item({
+      label: "Turn into link block",
+      onSelect: () => actions.turnIntoLink?.(key, links[0].href, links[0].title),
     })
   }
-  rule()
-  item({ label: "Duplicate", shortcut: ["⌥", "⇧", "↓"], onSelect: () => actions.duplicate(key) })
-  rule()
-  item({ label: "Indent", shortcut: ["⇥"], onSelect: () => actions.indent(key) })
-  item({ label: "Outdent", shortcut: ["⇧", "⇥"], onSelect: () => actions.outdent(key) })
+  if (entries.length > 0) rule()
   item({ label: "Move up", shortcut: ["⌥", "↑"], onSelect: () => actions.moveUp(key) })
   item({ label: "Move down", shortcut: ["⌥", "↓"], onSelect: () => actions.moveDown(key) })
-  rule()
-  if (target.hasChildren) {
-    item({
-      label: target.collapsed ? "Expand" : "Collapse",
-      shortcut: ["Space"],
-      onSelect: () => actions.toggleCollapse(key),
-    })
-  }
-  item({ label: "Focus on", shortcut: ["F"], onSelect: () => actions.focusBlock(id) })
+  item({ label: "Duplicate", shortcut: ["⌥", "⇧", "↓"], onSelect: () => actions.duplicate(key) })
   item({ label: "Copy", shortcut: ["⌘", "C"], onSelect: () => actions.copy(key) })
   if (actions.copyLink)
     item({ label: "Copy link to block", onSelect: () => actions.copyLink?.(id) })
@@ -378,11 +330,17 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMen
  * small heading with the current choice marked, the row's text at the top
  * so it is clear which block the sheet is for. A pick closes the sheet;
  * so does a swipe down or a tap on the page.
+ *
+ * The sheet rises while the finger that held the row is still down, so its
+ * rows take no pick until that finger has lifted (`holding`): the lift, and
+ * the click the browser owes it, land on whatever row is under the finger
+ * by then, and are not a choice.
  */
 export function BlockMenuSheet({
   target,
   title,
   actions,
+  holding = false,
   open,
   onOpenChange,
 }: {
@@ -390,11 +348,14 @@ export function BlockMenuSheet({
   /** The block's text, for the sheet's heading. */
   title: string
   actions: BlockMenuActions
+  /** The finger that opened the sheet is still down (or only just up). */
+  holding?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
   const entries = target ? menuEntries(target, actions) : []
   const pick = (run: () => void) => () => {
+    if (holding) return
     onOpenChange(false)
     run()
   }
@@ -402,6 +363,7 @@ export function BlockMenuSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <Sheet.Content
         data-testid="block-menu-sheet"
+        className="select-none [-webkit-touch-callout:none]"
         size="fit"
         handle
         titleVisible

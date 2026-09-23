@@ -27,17 +27,34 @@ keyboard that appears and disappears. The block editor
   thumb; a pick closes it, so does a swipe down. The popup anchored under the
   finger that came before was fragile — it opened as the press registered and
   shut on the lift, or on the scroll the same finger began. The sheet and the
-  popup are one list (`menuEntries`) on two surfaces, so the structure moves —
-  Indent, Outdent, Move up, Move down — are in both, with their keys shown
-  beside them on the popup. Android's long press arrives as a `contextmenu`
-  event and opens the same sheet. The hold selects no text: the editor's
-  container is `select-none` under a finger (every row, card title, caption
-  and gap), with the textarea being edited taking selection back for itself
-  (`select-text`, said outright — iOS ignores a field under a `select-none`
-  ancestor), and no touch callout. A selection the page shows anyway is
-  dropped by the next finger on the editor and as the sheet opens, since
-  with nothing selectable to tap iOS offers no way to be rid of one; a
-  field's own selection is the person's and stays.
+  popup are one list (`menuEntries`) on two surfaces, and it carries only
+  what nothing else on the row does: Move up, Move down, Duplicate, Copy, a
+  link's or a figure's own actions, Pin, Share, Unlink and Delete. Editing is
+  a tap, collapsing the chevron, and Indent, Outdent, Focus on and Turn into
+  are the edit bar's (keys, on a desktop). Android's long press arrives as a
+  `contextmenu` event and opens the same sheet.
+
+  The sheet rises while the finger is still down, so its rows take no pick
+  until that finger has lifted and a beat (250ms) has passed: the lift, and
+  the click the browser owes it, land on whatever row is under the finger by
+  then, and are not a choice. The lift is heard on the document, since the
+  sheet is portalled out of the editor. A hold in the textarea being edited
+  is the person selecting text, and opens no sheet.
+
+  The hold selects no text. From the finger's down on a row until its lift,
+  the root carries `press-hold` (`block-editor.css`), which makes nothing on
+  the page selectable and suppresses the callout — the text behind the
+  sheet, the sheet rising under the finger, and the page as a whole, which
+  iOS would otherwise select once the sheet is there. Beneath that, the
+  editor's container is `select-none` under a finger at all times (every
+  row, card title, caption and gap), with the textarea being edited taking
+  selection back for itself (`select-text`, said outright — iOS ignores a
+  field under a `select-none` ancestor), and the sheet is `select-none`
+  too. A selection the page shows anyway is dropped by the next finger on
+  the editor and as the sheet opens, since with nothing selectable to tap
+  iOS offers no way to be rid of one; a field's own selection is the
+  person's and stays.
+
 - **A highlight has no job on a touch screen.** There is no keyboard cursor
   for it to mark, so once an edit ends (the keyboard put away, a delete, a
   swap of rows) nothing stays lit; the one time a row is marked is while the
