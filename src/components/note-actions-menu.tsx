@@ -6,9 +6,10 @@ import { useFeature } from "../data/features"
 import { blockRollup, rollup } from "../data/graph"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
-import { useDeleteNote, useNoteById, useRenameNote } from "../hooks/note"
+import { useNoteById, useRenameNote } from "../hooks/note"
 import { useNoteShare } from "../hooks/share"
 import { useIsPinned, useWriteView } from "../hooks/views"
+import { deleteNoteDialogAtom } from "./delete-note-dialog"
 import { shareDialogAtom } from "./share-note-dialog"
 import type { Width } from "../schema"
 import { cx } from "../utils/cx"
@@ -80,7 +81,8 @@ export function NoteActionsMenu({
   const note = useNoteById(noteId)
   const jotaiStore = useStore()
   const renameNote = useRenameNote()
-  const deleteNote = useDeleteNote()
+  // Delete asks first (`delete-note-dialog.tsx`); the menu only opens it.
+  const requestDelete = useSetAtom(deleteNoteDialogAtom)
   // Developer mode (`src/hooks/is-developer.ts`): the debug toggles live at
   // the bottom of the open note's menu, for the developer's account only.
   const isDeveloper = useIsDeveloper()
@@ -130,16 +132,19 @@ export function NoteActionsMenu({
     renameNote({ noteId, newTitle: raw })
   }
 
-  const remove = () => {
-    deleteNote(noteId)
-    // The header menu passes onDeleted (it's always the open note); the sidebar
-    // menu falls back to the path check so deleting the note you're viewing from
-    // the list also takes you home.
-    if (editor?.onDeleted) editor.onDeleted()
-    else if (isViewing) {
-      navigate({ to: "/", search: { query: undefined }, replace: true })
-    }
-  }
+  const remove = () =>
+    requestDelete({
+      noteId,
+      // The header menu passes onDeleted (it's always the open note); the sidebar
+      // menu falls back to the path check so deleting the note you're viewing from
+      // the list also takes you home.
+      onDeleted: () => {
+        if (editor?.onDeleted) editor.onDeleted()
+        else if (isViewing) {
+          navigate({ to: "/", search: { query: undefined }, replace: true })
+        }
+      },
+    })
 
   return (
     <DropdownMenu modal={false}>

@@ -10,6 +10,7 @@ import { SettingsIcon16 } from "../components/icons"
 import { McpTokensSection } from "../components/mcp-tokens-section"
 import { PageLayout } from "../components/page-layout"
 import { SettingsSection } from "../components/settings-section"
+import { DeletedNotesSection } from "../components/deleted-notes-section"
 import { SharingSection } from "../components/sharing-section"
 import { useFeature } from "../data/features"
 import { recordedEmailAtom } from "../data/shared-mode"
@@ -52,6 +53,9 @@ function RouteComponent() {
   // account may not use is not drawn. The Worker refuses regardless.
   const sharing = useFeature("sharing")
   const mcp = useFeature("mcp")
+  // Recently deleted reads the local database, which only a signed-in user
+  // has (the sample notes have no tombstones).
+  const githubUser = useAtomValue(githubUserAtom)
   return (
     <PageLayout title="Settings" icon={<SettingsIcon16 />} disableGuard>
       <div className="p-4 pb-6">
@@ -59,6 +63,7 @@ function RouteComponent() {
           <AppearanceSection />
           <EditorSection />
           <StorageSection />
+          {githubUser ? <DeletedNotesSection /> : null}
           {sharing ? <SharingSection /> : null}
           {mcp ? <McpTokensSection /> : null}
           <GitHubSection />
