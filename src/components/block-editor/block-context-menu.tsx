@@ -4,6 +4,7 @@ import React from "react"
 import { FIGURE_ALIGNS, type FigureAlign } from "../../blocks/figure"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
+import type { BlockActions } from "./block-actions"
 import { DropdownMenu } from "../ui/dropdown-menu"
 import { Sheet } from "../ui/sheet"
 import { Surface } from "../ui/surface"
@@ -12,10 +13,11 @@ import { Surface } from "../ui/surface"
  * The block's right-click menu: the standard actions on one row, the same
  * commands the keyboard runs, so nothing here has a second meaning. Opened
  * by the editor on any row it owns (never in read-only views); the editor
- * supplies the row (`target`) and the actions, this file the menu. Opened
- * on a row of a selected range, the actions that take a range — copy, the
- * moves, duplicate, and the removals — take the whole of it, as the keys
- * would, and say how many blocks that is (`target.count`).
+ * supplies the row (`target`) and the actions, this file the menu. The
+ * actions on blocks are the editor's one set (`block-actions.ts`), the same
+ * object the selection bar runs, each over the rows the menu is for
+ * (`target.keys`): the row alone, or the selected range it is in — in which
+ * case the item says how many blocks it takes.
  *
  * Removing is graph-aware. A row is one place a block appears. In a note's
  * outline the menu offers **Unlink** (what ⌫ does: the row goes, the block
@@ -47,9 +49,9 @@ export interface BlockMenuTarget {
   id: string
   type: BlockType
   hasChildren: boolean
-  /** How many blocks the range actions act on: the selected range's roots
-   * when the row is one of them, else 1 — the row alone. */
-  count: number
+  /** The rows the block actions act on: the selected range's roots when
+   * the row is one of them, else the row alone — a list of one. */
+  keys: string[]
   /** How many places the block appears across the corpus (1 = only here). */
   places: number
   /** Pinned (docs/metadata.md): listed in the sidebar's Views list. */
@@ -62,13 +64,9 @@ export interface BlockMenuTarget {
   links?: { href: string; title: string }[]
 }
 
-export interface BlockMenuActions {
-  duplicate: (key: string) => void
-  /** Move up / down: the edit bar has no buttons for them, so on a phone
-   * the menu (or a drag) is the way. */
-  moveUp: (key: string) => void
-  moveDown: (key: string) => void
-  copy: (key: string) => void
+/** The editor's block actions, plus what only a menu on one row offers:
+ * the block's own link, picture, card, pin and share. */
+export interface BlockMenuActions extends BlockActions {
   /** Absent when the editor has no note to link into (Storybook, tests). */
   copyLink?: (id: string) => void
   /** Pin this block — or unpin it, when it is (`target.pinned`): a pinned
@@ -84,13 +82,6 @@ export interface BlockMenuActions {
   /** Make a link block of the row's first link (docs/links.md): "Turn
    * into link block", what the hover card's "Turn into block" does. */
   turnIntoLink?: (key: string, href: string, title: string) => void
-  /** Remove this row (the block stays where else it is held). */
-  remove: (key: string) => void
-  /** Delete the row's block from every place it appears. Absent standalone. */
-  deleteEverywhere?: (key: string) => void
-  /** Delete the row's block and everything beneath it that nothing else
-   * holds (the basket's). Absent where a delete never cascades. */
-  deleteSubtree?: (key: string) => void
   /** Image rows: expand the picture, and save it to the device. */
   openImage?: (id: string) => void
   downloadImage?: (id: string) => void
@@ -181,10 +172,10 @@ export type MenuEntry =
     }
 
 function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEntry[] {
-  const { key, id, count } = target
+  const { key, id, keys } = target
   // A range's actions say how many blocks they take: "Delete 3 blocks".
-  const many = count > 1 ? ` ${count} blocks` : ""
-  const shared = target.places > 1 && count === 1
+  const many = keys.length > 1 ? ` ${keys.length} blocks` : ""
+  const shared = target.places > 1 && keys.length === 1
   const image = target.type === "image"
   const link = target.type === "link"
   const figure = target.figure !== undefined
@@ -206,7 +197,7 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
     push({ kind: "item", ...e })
 
   // Copying, first: what a hold is most often for.
-  item({ label: `Copy${many}`, shortcut: ["⌘", "C"], onSelect: () => actions.copy(key) })
+  item({ label: `Copy${many}`, shortcut: ["⌘", "C"], onSelect: () => actions.copy(keys) })
   if (actions.copyLink)
     item({ label: "Copy link to block", onSelect: () => actions.copyLink?.(id) })
 
@@ -273,12 +264,12 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
 
   // Arranging: where the block sits, and a second of it.
   section()
-  item({ label: "Move up", shortcut: ["⌥", "↑"], onSelect: () => actions.moveUp(key) })
-  item({ label: "Move down", shortcut: ["⌥", "↓"], onSelect: () => actions.moveDown(key) })
+  item({ label: "Move up", shortcut: ["⌥", "↑"], onSelect: () => actions.moveUp(keys) })
+  item({ label: "Move down", shortcut: ["⌥", "↓"], onSelect: () => actions.moveDown(keys) })
   item({
     label: `Duplicate${many}`,
     shortcut: ["⌥", "⇧", "↓"],
-    onSelect: () => actions.duplicate(key),
+    onSelect: () => actions.duplicate(keys),
   })
 
   // Beyond the note: the sidebar, and other people.
@@ -290,27 +281,27 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
   // Removing, last and apart.
   section()
   if (actions.deleteEverywhere) {
-    item({ label: `Unlink${many}`, shortcut: ["⌫"], onSelect: () => actions.remove(key) })
+    item({ label: `Unlink${many}`, shortcut: ["⌫"], onSelect: () => actions.remove(keys) })
     item({
       label: `Delete${many}`,
       danger: true,
       trailing: shared ? (
         <span className="text-sm text-text-secondary">{target.places} places</span>
       ) : undefined,
-      onSelect: () => actions.deleteEverywhere?.(key),
+      onSelect: () => actions.deleteEverywhere?.(keys),
     })
   } else {
     item({
       label: `Delete${many}`,
       danger: true,
       shortcut: ["⌫"],
-      onSelect: () => actions.remove(key),
+      onSelect: () => actions.remove(keys),
     })
     if (actions.deleteSubtree && target.hasChildren) {
       item({
         label: `Delete${many} with contents`,
         danger: true,
-        onSelect: () => actions.deleteSubtree?.(key),
+        onSelect: () => actions.deleteSubtree?.(keys),
       })
     }
   }

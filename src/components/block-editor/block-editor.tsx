@@ -43,6 +43,7 @@ import { openLink } from "./link-card"
 import { ImageLightbox } from "./image-lightbox"
 import { MobileEditBar } from "./mobile-edit-bar"
 import { SelectionBar } from "./selection-bar"
+import type { BlockActions } from "./block-actions"
 import { NoteTitle } from "./note-title"
 import { useCoarsePointer } from "../../hooks/coarse-pointer"
 import { useWriteView } from "../../hooks/views"
@@ -320,9 +321,6 @@ const LIFT_GRACE = 250
 
 /** Keys that are only modifiers: pressing one alone is not "using the keyboard". */
 const MODIFIER_KEYS = new Set(["Shift", "Meta", "Control", "Alt", "CapsLock"])
-
-/** The selection bar's state with nothing selected (it is hidden then). */
-const NO_MOVES = { canIndent: false, canOutdent: false, canMoveUp: false, canMoveDown: false }
 
 /** Why an edit to a results view's root list did nothing (`fixedRoots`). */
 const FIXED_ROOTS_NOTICE = "Open the note to add or remove blocks at this level"
@@ -1013,11 +1011,6 @@ export function BlockEditor({
   // the exact block tree embedded so Ruminate→Ruminate paste round-trips.
   const copyRows = (keys: string[]) =>
     writeRichClipboard(richClipboardFormats(markdownOfRows(keys)))
-  const copySelection = () => copyRows(selectionRoots())
-  const cutSelection = () => {
-    copySelection()
-    runOnSelection("deleteBlock")
-  }
   // When the caller bumps `focusFirstSignal` (e.g. Down-arrow from the note
   // title), highlight the first block — moving between the title and the blocks
   // moves the highlight, like moving between blocks.
@@ -1372,21 +1365,27 @@ export function BlockEditor({
   // the selection acts on that row, as it selects it.
   const rootsFor = (key: string): string[] =>
     selectedKeys.length > 1 && selectedSet.has(key) ? selectionRoots() : [key]
-  // What every command runs with: the doc, the row (and the range it is
-  // the head of), and the view's context. One builder, so a key, a menu
-  // item and a bar button never see a different world.
+  // What every command runs with: the doc, the rows (and the row that leads
+  // them — the selection's head when they are the selection, else the
+  // first), and the view's context. One builder, so a key, a menu item and
+  // a bar button never see a different world.
   const commandInput = (
     mode: Mode,
-    key: string,
+    keys: string[],
     over: Pick<CommandInput, "caret" | "typed" | "blockType"> = {},
   ): CommandInput => {
-    const keys = mode === "select" ? rootsFor(key) : [key]
+    const ofSelection =
+      mode === "select" && selected !== null && keys.some((root) => isWithin(selected, root))
+    // No rows (the hidden bar asking what nothing can do): a path no doc
+    // has, which every command and `movesOf` treat as nothing to act on.
+    const key = ofSelection ? (selected as string) : (keys[0] ?? "")
     return {
       doc,
       key,
       keys,
-      // A range is select mode's: while editing, the row alone.
-      anchorKey: mode === "select" && (keys.length > 1 || key === selected) ? anchorKey : null,
+      // A range is select mode's, and only on the selection: while editing,
+      // or on rows that are not it, the rows alone.
+      anchorKey: ofSelection ? anchorKey : null,
       mode,
       visibleOrder,
       focusRootId,
@@ -1402,13 +1401,14 @@ export function BlockEditor({
   // The single entry point every keyboard handler funnels through: resolve the
   // event to a command via the keymap and run it — on the selection, when
   // the row is its head. The menu, the bar and the edit bar dispatch the
-  // same commands (`runOnRows`, `runOnSelection`, `runOnEditing`). Returns
-  // whether the gesture was consumed.
+  // same commands (`blockActions`, `runOnEditing`). Returns whether the
+  // gesture was consumed.
   const dispatchKey = (mode: Mode, key: string, event: KeyLike, caret?: CaretInput): boolean => {
     if (!navigable) return false
     // Which character the key types, for the one command that depends on it
     // (`wrapTyped`); every other command reads the resolved name alone.
-    const input = commandInput(mode, key, { caret, typed: event.key })
+    const keys = mode === "select" ? rootsFor(key) : [key]
+    const input = commandInput(mode, keys, { caret, typed: event.key })
     const name = resolveKey(mode, event, input)
     if (!name) return false
     if (readOnly) {
@@ -1425,19 +1425,37 @@ export function BlockEditor({
     applyResult(result)
     return result.handled
   }
-  // Run a command by name on a row — and on the whole selection, when the
-  // row is one of the selected rows: what the context menu does, so a menu
-  // item and its key do exactly the same thing.
-  const runOnRows = (name: CommandName, key: string, over?: Pick<CommandInput, "blockType">) => {
-    if (readOnly) return
-    // The menu's row leads the range it is in; off the selection the row
-    // is the selection.
-    const head = selectedSet.has(key) && selected ? selected : key
-    applyResult(runCommand(name, commandInput("select", head, over)))
+  // Run a command by name on some rows, in select mode: what every action
+  // below is.
+  const runOnRows = (name: CommandName, keys: string[], over?: Pick<CommandInput, "blockType">) => {
+    if (readOnly || keys.length === 0) return
+    applyResult(runCommand(name, commandInput("select", keys, over)))
   }
-  // Run a command on the current selection — what the selection bar does.
-  const runOnSelection = (name: CommandName, over?: Pick<CommandInput, "blockType">) => {
-    if (selected) runOnRows(name, selected, over)
+  // The one set of actions on blocks (`block-actions.ts`): what the
+  // right-click menu, the selection bar and the keys all run. Each takes
+  // the rows it acts on; the surface says which — the menu the row it was
+  // opened on (or the selection that row is in), the bar the selection's
+  // roots, a key the selection's roots — and a single block is a list of
+  // one. Copy and cut are here rather than commands: the clipboard is a
+  // side effect the pure command layer never touches.
+  const blockActions: BlockActions = {
+    indent: (keys) => runOnRows("indent", keys),
+    outdent: (keys) => runOnRows("outdent", keys),
+    moveUp: (keys) => runOnRows("moveBlockUp", keys),
+    moveDown: (keys) => runOnRows("moveBlockDown", keys),
+    duplicate: (keys) => runOnRows("duplicateBelow", keys),
+    turnInto: (keys, type) => runOnRows("turnInto", keys, { blockType: type }),
+    copy: (keys) => copyRows(keys),
+    cut: (keys) => {
+      copyRows(keys)
+      runOnRows("deleteBlock", keys)
+    },
+    remove: (keys) => runOnRows("deleteBlock", keys),
+    deleteEverywhere: onDeleteEverywhere
+      ? (keys) => onDeleteEverywhere(keys.map(idOfKey))
+      : undefined,
+    deleteSubtree: onDeleteSubtree ? (keys) => onDeleteSubtree(keys.map(idOfKey)) : undefined,
+    moves: (keys) => movesOf(commandInput("select", keys)),
   }
   // Run a command on the row being edited, in edit mode with its caret —
   // what the touch screen's edit bar does, so its Indent is Tab's: the
@@ -1454,7 +1472,7 @@ export function BlockEditor({
           atLastLine: false,
         }
       : undefined
-    applyResult(runCommand(name, commandInput("edit", focus.key, { caret, ...over })))
+    applyResult(runCommand(name, commandInput("edit", [focus.key], { caret, ...over })))
   }
 
   // ── The context menu ──────────────────────────────────────────────────────
@@ -1483,7 +1501,7 @@ export function BlockEditor({
       id: row.id,
       type: block.type,
       hasChildren: row.hasChildren,
-      count: rootsFor(row.key).length,
+      keys: rootsFor(row.key),
       places: parentCountOf ? Math.max(1, parentCountOf(row.id)) : 1,
       pinned: pinnedRoots.has(block.id),
       figure: isFigureType(block.type)
@@ -2041,6 +2059,7 @@ export function BlockEditor({
   }
 
   const menuActions: BlockMenuActions = {
+    ...blockActions,
     editLink: (key, href) => setLinkCard({ key, href }),
     turnIntoLink: (key, href, title) => linkToBlock(key, href, title === href ? "" : title),
     openImage: (id) => setLightbox(id),
@@ -2057,23 +2076,11 @@ export function BlockEditor({
     linkToInline,
     alignFigure: (id, align) => setFigureLayout(id, { align }),
     resetFigureSize: (id) => setFigureLayout(id, { size: null }),
-    duplicate: (key) => runOnRows("duplicateBelow", key),
-    moveUp: (key) => runOnRows("moveBlockUp", key),
-    moveDown: (key) => runOnRows("moveBlockDown", key),
-    copy: (key) => copyRows(rootsFor(key)),
     copyLink: noteId
       ? (id) => copy(`${window.location.origin}/notes/${noteId}?block=${id}`)
       : undefined,
     pin: canPin ? togglePin : undefined,
     share: canShare ? (id) => openShareDialog(id) : undefined,
-    remove: (key) => runOnRows("deleteBlock", key),
-    // The graph-level deletes take the blocks of the rows the menu is for.
-    deleteEverywhere: onDeleteEverywhere
-      ? (key) => onDeleteEverywhere(rootsFor(key).map(idOfKey))
-      : undefined,
-    deleteSubtree: onDeleteSubtree
-      ? (key) => onDeleteSubtree(rootsFor(key).map(idOfKey))
-      : undefined,
   }
 
   /**
@@ -2108,7 +2115,7 @@ export function BlockEditor({
     updateLink: readOnly ? undefined : updateLink,
     linkToInline: readOnly ? undefined : linkToInline,
     updateLinkBlock: readOnly ? undefined : updateLinkBlock,
-    removeLinkBlock: readOnly ? undefined : (key) => runOnRows("deleteBlock", key),
+    removeLinkBlock: readOnly ? undefined : (key) => blockActions.remove([key]),
     removeLink: readOnly ? undefined : removeLink,
     linkCard,
     closeLinkCard: () => setLinkCard(null),
@@ -2316,12 +2323,12 @@ export function BlockEditor({
     // Copy / cut the current selection — one block or many.
     if (mod && !event.altKey && event.key.toLowerCase() === "c") {
       event.preventDefault()
-      copySelection()
+      blockActions.copy(selectionRoots())
       return
     }
     if (mod && !event.altKey && event.key.toLowerCase() === "x") {
       event.preventDefault()
-      cutSelection()
+      blockActions.cut(selectionRoots())
       return
     }
     // Cmd/Ctrl+Shift+V pastes as plain text: flag it and let the browser's
@@ -2584,13 +2591,7 @@ export function BlockEditor({
     event.preventDefault()
 
     // The same removal the keys and the menu run, over the picked rows.
-    applyResult(
-      runCommand("deleteBlock", {
-        ...commandInput("select", roots[0]),
-        keys: roots,
-        anchorKey: null,
-      }),
-    )
+    blockActions.remove(roots)
   }
 
   const handleCopy = (event: ClipboardEvent<HTMLDivElement>) => {
@@ -2844,32 +2845,19 @@ export function BlockEditor({
         <SelectionBar
           open={selectedKeys.length > 1 && keyboardActive}
           count={selectedKeys.length}
-          state={selected ? movesOf(commandInput("select", selected)) : NO_MOVES}
+          keys={selectionRoots()}
+          actions={blockActions}
           removal={onDeleteEverywhere ? "unlink" : "delete"}
           finalFocus={containerRef}
-          actions={{
-            indent: () => runOnSelection("indent"),
-            outdent: () => runOnSelection("outdent"),
-            moveUp: () => runOnSelection("moveBlockUp"),
-            moveDown: () => runOnSelection("moveBlockDown"),
-            duplicate: () => runOnSelection("duplicateBelow"),
-            turnInto: (type) => runOnSelection("turnInto", { blockType: type }),
-            copy: copySelection,
-            cut: cutSelection,
-            remove: () => runOnSelection("deleteBlock"),
-            deleteEverywhere: onDeleteEverywhere
-              ? () => onDeleteEverywhere(selectionRoots().map(idOfKey))
-              : undefined,
-            // Back to the head row alone, as Escape does.
-            clear: () => runOnSelection("deselect"),
-          }}
+          // Back to the head row alone, as Escape does.
+          onClear={() => runOnRows("deselect", selectionRoots())}
         />
       ) : null}
       {coarse && !readOnly && focus ? (
         <MobileEditBar
           state={{
             type: doc.blocks[idOfKey(focus.key)]?.type ?? "text",
-            ...movesOf(commandInput("edit", focus.key)),
+            ...movesOf(commandInput("edit", [focus.key])),
             // The focused block leads its own view: focusing on it again
             // would go nowhere.
             canFocus: idOfKey(focus.key) !== focusRootId,
