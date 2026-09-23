@@ -2762,6 +2762,41 @@ describe("BlockEditor context menu", () => {
     }
   })
 
+  it("runs in sections, ruled apart: copying first, removing last", async () => {
+    /** The menu's items in order, "—" for each rule between sections. */
+    const outline = (menu: HTMLElement) =>
+      Array.from(menu.querySelectorAll('[role="menuitem"], [role="separator"]')).map((el) =>
+        el.getAttribute("role") === "separator" ? "—" : el.textContent!.replace(/[⌘⌥⇧↑↓⌫C]+$/, ""),
+      )
+    const { container } = render(<Harness initial={"A\nRead [the guide](https://e.com/g)"} />)
+    // A plain row: no link or figure section, and no rule left for it.
+    expect(outline(await openMenuOn(container, 0))).toEqual([
+      "Copy",
+      "—",
+      "Move up",
+      "Move down",
+      "Duplicate",
+      "—",
+      "Delete",
+    ])
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    })
+    // A row with a link: its own section, between copying and arranging.
+    expect(outline(await openMenuOn(container, 1))).toEqual([
+      "Copy",
+      "—",
+      "Edit link",
+      "Turn into link block",
+      "—",
+      "Move up",
+      "Move down",
+      "Duplicate",
+      "—",
+      "Delete",
+    ])
+  })
+
   it("Delete removes the row (an undoable edit)", async () => {
     const { container, getByTestId } = render(<Harness initial={"A\nB\nC"} />)
     await openMenuOn(container, 1)

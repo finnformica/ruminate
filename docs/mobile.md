@@ -28,8 +28,9 @@ keyboard that appears and disappears. The block editor
   finger that came before was fragile — it opened as the press registered and
   shut on the lift, or on the scroll the same finger began. The sheet and the
   popup are one list (`menuEntries`) on two surfaces, and it carries only
-  what nothing else on the row does: Move up, Move down, Duplicate, Copy, a
-  link's or a figure's own actions, Pin, Share, Unlink and Delete. Editing is
+  what nothing else on the row does, in sections ruled apart: Copy and Copy
+  link to block; a link's or a figure's own actions, where the row has
+  them; Move up, Move down and Duplicate; Pin and Share; Unlink and Delete. Editing is
   a tap, collapsing the chevron, and Indent, Outdent, Focus on and Turn into
   are the edit bar's (keys, on a desktop). Android's long press arrives as a
   `contextmenu` event and opens the same sheet.

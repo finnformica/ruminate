@@ -32,7 +32,10 @@ import { Surface } from "../ui/surface"
  * block types are keys on a desktop and the edit bar's buttons on a phone
  * (`mobile-edit-bar.tsx`). What is left — the moves, duplicate, copy, the
  * links and figures' own actions, pin, share, delete — is one list on two
- * surfaces, the popup and the sheet, with keys beside it on the popup.
+ * surfaces, the popup and the sheet, with keys beside it on the popup. It
+ * runs in sections, ruled apart: copying first, then the row's own link or
+ * figure actions, arranging (move, duplicate), pin and share, and removing
+ * last.
  */
 
 /** The row the menu was opened on. */
@@ -179,16 +182,34 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
   const figure = target.figure !== undefined
   const links = target.links ?? []
   const entries: MenuEntry[] = []
+  // The menu is sections, a rule between each two that have something in
+  // them: a section a row has nothing for (a plain paragraph has no link or
+  // figure actions, a view no Pin) leaves no doubled or dangling rule.
+  let ruleDue = false
+  const section = () => {
+    ruleDue = entries.length > 0
+  }
+  const push = (entry: MenuEntry) => {
+    if (ruleDue) entries.push({ kind: "separator" })
+    ruleDue = false
+    entries.push(entry)
+  }
   const item = (e: Omit<Extract<MenuEntry, { kind: "item" }>, "kind">) =>
-    entries.push({ kind: "item", ...e })
-  const rule = () => entries.push({ kind: "separator" })
+    push({ kind: "item", ...e })
 
+  // Copying, first: what a hold is most often for.
+  item({ label: "Copy", shortcut: ["⌘", "C"], onSelect: () => actions.copy(key) })
+  if (actions.copyLink)
+    item({ label: "Copy link to block", onSelect: () => actions.copyLink?.(id) })
+
+  // The row's own kind of thing: its links, its picture, its card.
+  section()
   // A link's card, for a screen with nothing to hover with: the one link
   // straight away, several by their display text.
   if (links.length === 1 && actions.editLink) {
     item({ label: "Edit link", onSelect: () => actions.editLink?.(key, links[0].href) })
   } else if (links.length > 1 && actions.editLink) {
-    entries.push({
+    push({
       kind: "group",
       label: "Edit link",
       testId: "edit-link-menu",
@@ -210,7 +231,7 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
   // A figure's layout: the side it keeps to (the frame's own toolbar offers
   // the same), and its natural width back after a drag.
   if (figure && actions.alignFigure) {
-    entries.push({
+    push({
       kind: "group",
       label: "Align",
       testId: "figure-align-menu",
@@ -241,17 +262,21 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
       onSelect: () => actions.turnIntoLink?.(key, links[0].href, links[0].title),
     })
   }
-  if (entries.length > 0) rule()
+
+  // Arranging: where the block sits, and a second of it.
+  section()
   item({ label: "Move up", shortcut: ["⌥", "↑"], onSelect: () => actions.moveUp(key) })
   item({ label: "Move down", shortcut: ["⌥", "↓"], onSelect: () => actions.moveDown(key) })
   item({ label: "Duplicate", shortcut: ["⌥", "⇧", "↓"], onSelect: () => actions.duplicate(key) })
-  item({ label: "Copy", shortcut: ["⌘", "C"], onSelect: () => actions.copy(key) })
-  if (actions.copyLink)
-    item({ label: "Copy link to block", onSelect: () => actions.copyLink?.(id) })
+
+  // Beyond the note: the sidebar, and other people.
+  section()
   if (actions.pin)
     item({ label: target.pinned ? "Unpin" : "Pin", onSelect: () => actions.pin?.(id) })
   if (actions.share) item({ label: "Share…", onSelect: () => actions.share?.(id) })
-  rule()
+
+  // Removing, last and apart.
+  section()
   if (actions.deleteEverywhere) {
     item({ label: "Unlink", shortcut: ["⌫"], onSelect: () => actions.remove(key) })
     item({
