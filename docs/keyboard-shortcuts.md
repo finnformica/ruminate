@@ -80,15 +80,20 @@ The tags page keeps its own Linear-style list keys (<kbd>↑</kbd> / <kbd>↓</k
 
 The palette's results — the matching **blocks** at any depth and the notes
 whose title matched, ranked together by score; or, with nothing typed, the
-**Recent** notes — the five most recently touched: edited or created (the
-graph's timestamp, the same on every device) merged with opened, edited,
-a block folded or unfolded, or a block focused on, on this device (a list of at
-most five note ids and timestamps, under one browser-storage key that
-overwrites itself); selecting, focusing or arrowing through a note never
-counts — with the
-**Views** — the pinned notes — beneath, less any already listed as recent, and the pinned
-blocks after them (docs/metadata.md), each opening its note focused on
-it; both give way
+**Recent** places — the five most used lately, notes and blocks focused on
+alike, ranked by frecency (how often, weighted by how recently: each place's
+score halves every week, and a visit adds one). A place is visited when it
+is opened — from the notes page, the palette or a link, or by focusing on a
+block in the editor — edited, or a block in it folded or unfolded, on this
+device (at most fifty places, a timestamp and a score each, under one
+browser-storage key that overwrites itself; touches within half an hour of
+the last are the same visit), and a note is visited, too, when it is edited
+on another device (the graph's timestamp); selecting, focusing or arrowing
+through a note never counts (`src/utils/recents.ts`). The notes page lists
+the same Recent above its Views. With the
+**Views** — the pinned notes, then the pinned blocks (docs/metadata.md),
+each block opening its note focused on it — beneath; a pinned place used
+lately is under both. Both give way
 to results the moment you type — are the same block editor, browsed, under
 the same count line as the notes page. The
 palette's one item of its own — a date, when the query reads as one —

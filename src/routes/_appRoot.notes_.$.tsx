@@ -225,13 +225,14 @@ function NotePage() {
   // `renameTo`), else the first block. Never while the notes are still
   // loading, or under a shared note's id (see `notesLoaded`).
   const isNewNote = !noteExists && notesLoaded && share === null
-  // The note is TOUCHED — for the palette's Recent list — exactly when it
-  // is opened, edited (an edit lands through `setEditorDoc`), a block in it
-  // folded or unfolded (`onToggleCollapse`) or focused on
-  // (`onFocusNavigate`). Never by selecting, focusing or arrowing through
+  // What is open — the focused block, or else the note — is TOUCHED, for
+  // the Recent lists, exactly when it is opened (focusing on a block opens
+  // it: `focusBlockId` changes), edited (an edit lands through
+  // `setEditorDoc`), or a block in it folded or unfolded
+  // (`onToggleCollapse`). Never by selecting, focusing or arrowing through
   // it: reading a note is not touching it. One seam (`useTouchNote`), no
   // calls inside the editor.
-  const { touch, touching } = useTouchNote(noteId)
+  const touch = useTouchNote(noteId, focusBlockId)
   const setEditorDoc = React.useCallback(
     (next: BlockDoc, hint?: ChangeHint) => {
       if (!isSignedOut) {
@@ -530,11 +531,11 @@ function NotePage() {
                   newRootSignal={newRootSignal}
                   refocusSignal={refocusSignal}
                   focusBlockId={focusBlockId ?? null}
-                  onFocusNavigate={touching((id) => {
+                  onFocusNavigate={(id) => {
                     revealOnLeaveFocus(id)
                     // A plain push, so the back button undoes focus naturally.
                     navigate({ search: (prev) => ({ ...prev, block: id ?? undefined }) })
-                  })}
+                  }}
                   noteTitle={note?.displayName ?? ""}
                   context={context}
                   // Narrowed, there is no blank row to type into: a new

@@ -3,29 +3,38 @@ import { act, renderHook } from "@testing-library/react"
 import { Provider, createStore } from "jotai"
 import type { ReactNode } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { recentTouchesAtom } from "../global-state"
+import { recentVisitsAtom } from "../global-state"
 import { useTouchNote } from "./touch-note"
 
 describe("useTouchNote", () => {
   beforeEach(() => localStorage.clear())
 
-  function mount(noteId: string | undefined) {
+  function mount(noteId: string | undefined, block?: string) {
     const store = createStore()
-    store.set(recentTouchesAtom, [])
+    store.set(recentVisitsAtom, [])
     const wrapper = ({ children }: { children: ReactNode }) => (
       <Provider store={store}>{children}</Provider>
     )
-    const hook = renderHook(({ id }) => useTouchNote(id), { wrapper, initialProps: { id: noteId } })
+    const hook = renderHook(({ id, block }) => useTouchNote(id, block), {
+      wrapper,
+      initialProps: { id: noteId, block },
+    })
     return { store, ...hook }
   }
   const touched = (store: ReturnType<typeof createStore>) =>
-    store.get(recentTouchesAtom).map((touch) => touch.id)
+    store.get(recentVisitsAtom).map(({ id, noteId }) => `${noteId}/${id}`)
 
   it("touches the note when it opens, and again when another opens in its place", () => {
     const { store, rerender } = mount("a")
-    expect(touched(store)).toEqual(["a"])
-    rerender({ id: "b" })
-    expect(touched(store)).toEqual(["b", "a"])
+    expect(touched(store)).toEqual(["a/a"])
+    rerender({ id: "b", block: undefined })
+    expect(touched(store)).toEqual(["b/b", "a/a"])
+  })
+
+  it("touches the focused block, not its note: focusing on a block opens it", () => {
+    const { store, rerender } = mount("personal")
+    rerender({ id: "personal", block: "fashion" })
+    expect(touched(store)).toEqual(["personal/fashion", "personal/personal"])
   })
 
   it("touches nothing for no note", () => {
@@ -33,20 +42,17 @@ describe("useTouchNote", () => {
     expect(touched(store)).toEqual([])
   })
 
-  it("a focus (or a fold, or an edit) touches: `touching` notes the touch and runs the callback", () => {
+  it("a fold or an edit touches what is open: `touch` notes the touch", () => {
     vi.useFakeTimers()
     try {
-      const { store, result } = mount("a")
+      const { store, result } = mount("personal", "fashion")
       // A second later (the open's touch has aged past the coalescing window).
       vi.setSystemTime(Date.now() + 2000)
-      const navigate = vi.fn()
-      const focus = result.current.touching((id: string | null) => navigate(id))
-      const before = store.get(recentTouchesAtom)
-      act(() => focus("blk_1"))
-      expect(navigate).toHaveBeenCalledWith("blk_1")
-      const after = store.get(recentTouchesAtom)
+      const before = store.get(recentVisitsAtom)
+      act(() => result.current())
+      const after = store.get(recentVisitsAtom)
       expect(after).not.toBe(before)
-      expect(after[0].id).toBe("a")
+      expect(after[0].id).toBe("fashion")
       expect(after[0].at).toBeGreaterThan(before[0].at)
     } finally {
       vi.useRealTimers()

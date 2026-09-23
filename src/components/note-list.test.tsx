@@ -12,11 +12,13 @@ const mocks = vi.hoisted(() => ({
     titleMatches: unknown[]
     rows: unknown[]
   },
+  recent: [] as { id: string; noteId: string }[],
 }))
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn() }))
 vi.mock("../hooks/search-results", () => ({ useSearchResults: () => mocks.results }))
 vi.mock("../data/store", () => ({ useApplyOps: () => () => {} }))
+vi.mock("../hooks/recent-roots", () => ({ useRecentRoots: () => mocks.recent }))
 // The rows are the block editor over the graph; this file is about which
 // bands the page draws and what they are called, so the rows are stubbed.
 vi.mock("./results-list", () => ({
@@ -57,6 +59,7 @@ const noteOf = (id: string, name: string): Note =>
 afterEach(cleanup)
 beforeEach(() => {
   mocks.results = { mode: "notes", hits: [], notes: [], titleMatches: [], rows: [] }
+  mocks.recent = []
 })
 
 function renderList({
@@ -109,6 +112,25 @@ describe("the notes page listing", () => {
     })
     expect(headings()).toEqual(["Views", "Notes"])
     expect(bands()).toEqual(["a,blk_x", "a"])
+  })
+
+  it("leads with Recent — notes and focused blocks — above Views, a place in both under each", () => {
+    mocks.recent = [
+      { id: "blk_fashion", noteId: "p" },
+      { id: "a", noteId: "a" },
+    ]
+    renderList({
+      own: [noteOf("p", "Personal"), noteOf("a", "Alpha")],
+      pinned: [{ id: "a", noteId: "a" }],
+    })
+    expect(headings()).toEqual(["Recent", "Views", "Notes"])
+    expect(bands()).toEqual(["blk_fashion,a", "a", "p,a"])
+  })
+
+  it("names the Notes band when Recent is the only other", () => {
+    mocks.recent = [{ id: "a", noteId: "a" }]
+    renderList({ own: [noteOf("a", "Alpha")] })
+    expect(headings()).toEqual(["Recent", "Notes"])
   })
 
   it("draws no heading over a list that is the whole corpus", () => {
