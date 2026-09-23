@@ -8,7 +8,7 @@ import { isDatabaseModeAtom, newBlockMarkerAtom } from "../../global-state"
 import { useFeature } from "../../data/features"
 import { sharedOriginAtom } from "../../data/shared-mode"
 import { shareDialogAtom } from "../share-note-dialog"
-import type { Block, BlockDoc, BlockType, ChangeHint } from "../../blocks/types"
+import type { Block, BlockDoc, ChangeHint } from "../../blocks/types"
 import type { BlockOp } from "../../blocks/history"
 import { blockId } from "../../blocks/id"
 import {
@@ -47,15 +47,9 @@ import { NoteTitle } from "./note-title"
 import { useCoarsePointer } from "../../hooks/coarse-pointer"
 import { useWriteView } from "../../hooks/views"
 import { pinnedRootIdsAtom } from "../../data/views"
+import { isHeading, leadingMarker, titlesFocus, typeOfMarker } from "../../blocks/markers"
 import {
-  isHeading,
-  leadingMarker,
-  titlesFocus,
-  toggleType,
-  TURN_INTO_KEYS,
-  typeOfMarker,
-} from "../../blocks/markers"
-import {
+  movesOf,
   runCommand,
   type CaretInput,
   type CommandInput,
@@ -134,14 +128,10 @@ function Subtree({
 }
 
 import {
-  duplicateBlocks,
   emptyBlock,
-  indentBlock,
   insertBlocksAsFirstChildren,
   insertAfter,
   insertFirstChild,
-  moveBlocks,
-  outdentBlock,
   remintCollidingIds,
   removeBlock,
   spliceBlocks,
@@ -331,6 +321,9 @@ const LIFT_GRACE = 250
 /** Keys that are only modifiers: pressing one alone is not "using the keyboard". */
 const MODIFIER_KEYS = new Set(["Shift", "Meta", "Control", "Alt", "CapsLock"])
 
+/** The selection bar's state with nothing selected (it is hidden then). */
+const NO_MOVES = { canIndent: false, canOutdent: false, canMoveUp: false, canMoveDown: false }
+
 /** Why an edit to a results view's root list did nothing (`fixedRoots`). */
 const FIXED_ROOTS_NOTICE = "Open the note to add or remove blocks at this level"
 
@@ -408,12 +401,13 @@ export function BlockEditor({
   /** How many places a block appears across the corpus (whether the context
    * menu offers Unlink beside Delete). Absent = only here. */
   parentCountOf?: (id: string) => number
-  /** Delete a block from every place it appears (the graph-level delete);
-   * absent standalone, where the menu offers only the row's removal. */
-  onDeleteEverywhere?: (id: string) => void
-  /** Delete a block and everything beneath it that nothing else holds
+  /** Delete blocks from every place they appear (the graph-level delete) —
+   * the selected ones, when the menu is opened on a selection; absent
+   * standalone, where the menu offers only the rows' removal. */
+  onDeleteEverywhere?: (ids: string[]) => void
+  /** Delete blocks and everything beneath them that nothing else holds
    * (`deleteSubtreeOps`); the basket's menu offers it. Absent elsewhere. */
-  onDeleteSubtree?: (id: string) => void
+  onDeleteSubtree?: (ids: string[]) => void
   /** Whether the graph already holds a block — what tells a block an edit
    * created from one it linked in, for undo (`useBlockHistory`). Absent =
    * nothing is known, so every block an edit brings in counts as created. */
@@ -976,10 +970,6 @@ export function BlockEditor({
     return selectedKeys.filter((key) => !ancestorKeys(key).some((ancestor) => set.has(ancestor)))
   }
 
-  // Selection roots for *structural* ops — the rows to move, indent, outdent
-  // or delete once each.
-  const structuralRoots = selectionRoots
-
   // The first selectable row of a given doc, honouring the current focus.
   const firstSelectable = (d: BlockDoc): string | null => {
     if (focusRootId && d.blocks[focusRootId]) {
@@ -990,137 +980,6 @@ export function BlockEditor({
       return child ? keyOf(rootKey, child) : null
     }
     return d.rootBlockIds[0] ?? null
-  }
-
-  // A structural move gives the moved rows new keys (a row's key is its
-  // path). Carry the selection across: the head and anchor follow whichever
-  // moved root they sit under.
-  const followMoved = (moved: [from: string, to: string][]) => {
-    const follow = (key: string | null) => {
-      if (key === null) return key
-      const hit = moved.find(([from]) => isWithin(key, from))
-      return hit ? hit[1] + key.slice(hit[0].length) : key
-    }
-    setSelected(follow)
-    setAnchorKey(follow)
-  }
-  // Whether the structure moves would do anything on the selection — what
-  // the selection bar greys its buttons by, and what Tab and Shift+Tab check
-  // first. Indent moves the selection as one: every root needs a sibling
-  // above it, or nothing moves (a root left behind would have the rest nest
-  // under it — under a selected row, reshaping the very selection). Outdent
-  // lifts whichever roots can be lifted. The group moves need the roots to
-  // be a run of siblings with room to move (`moveBlocks`).
-  const selectionMoves = () => {
-    const roots = structuralRoots()
-    const moves = roots.map(structureMoves)
-    const parentKey = roots.length > 0 ? parentKeyOf(roots[0]) : null
-    const siblings =
-      parentKey === null ? doc.rootBlockIds : (doc.blocks[idOfKey(parentKey)]?.children ?? [])
-    const indices = roots.map((key) => siblings.indexOf(idOfKey(key)))
-    const run =
-      roots.length > 0 &&
-      roots.every((key) => parentKeyOf(key) === parentKey) &&
-      indices.every((index, k) => index !== -1 && index === indices[0] + k)
-    return {
-      canIndent: moves.length > 0 && moves.every((move) => move.canIndent),
-      canOutdent: moves.some((move) => move.canOutdent),
-      canMoveUp: run && indices[0] > 0,
-      canMoveDown: run && indices[indices.length - 1] < siblings.length - 1,
-    }
-  }
-  const indentSelection = () => {
-    if (!selectionMoves().canIndent) return
-    let next = doc
-    const moved: [string, string][] = []
-    // In document order: each row's new previous sibling is the one the group
-    // is nesting under, so a contiguous sibling range nests together.
-    for (const key of structuralRoots()) {
-      const result = indentBlock(next, key)
-      if (result.doc !== next) moved.push([key, result.key])
-      next = result.doc
-    }
-    if (next === doc) return
-    history.commit(doc, next, { type: "structural" })
-    followMoved(moved)
-  }
-  const outdentSelection = () => {
-    let next = doc
-    const moved: [string, string][] = []
-    // Reverse order keeps siblings in place as each is lifted out. At the focus
-    // boundary, outdenting a direct child would eject it from the view — skip.
-    for (const key of [...structuralRoots()].reverse()) {
-      if (focusRootKey !== null && parentKeyOf(key) === focusRootKey) continue
-      const result = outdentBlock(next, key)
-      if (result.doc !== next) moved.push([key, result.key])
-      next = result.doc
-    }
-    if (next === doc) return
-    history.commit(doc, next, { type: "structural" })
-    followMoved(moved)
-  }
-  // The whole contiguous selection, one position among its shared parent's
-  // children (a no-op across parents).
-  const moveSelection = (direction: "up" | "down") => {
-    const next = moveBlocks(doc, structuralRoots(), direction)
-    if (next !== doc) history.commit(doc, next, { type: "structural" })
-  }
-  // The selection roots copied as one group, above or below it, and the
-  // copies selected.
-  const duplicateSelection = (direction: "above" | "below") => {
-    const result = duplicateBlocks(doc, structuralRoots(), direction)
-    if (!result) return
-    history.commit(doc, result.doc, { type: "structural" })
-    setFocus(null)
-    setAnchorKey(result.copies[0])
-    setSelected(result.copies[result.copies.length - 1])
-  }
-  // Every selected root to one type (marker swap only — content and children
-  // untouched). One structural commit = one undo step. The type is the
-  // block's, so a block selected in two rows changes once. `toggle` is the
-  // marker keys' way: a root already of the kind goes back to text.
-  const turnSelectionInto = (target: BlockType, toggle = false) => {
-    let next = doc
-    for (const rootId of new Set(selectionRoots().map(idOfKey))) {
-      const block = next.blocks[rootId]
-      if (block) next = updateType(next, rootId, toggle ? toggleType(block.type, target) : target)
-    }
-    if (next !== doc) history.commit(doc, next, { type: "structural" })
-  }
-  const removeSelection = () => {
-    let next = doc
-    for (const key of structuralRoots()) {
-      if (!hasOccurrence(next, key)) continue
-      // The focused view's own root row: removing it would take the view with
-      // it (`deleteBlock` refuses the same thing on one row, with a notice —
-      // a sweep over a range that happens to include it just passes it by).
-      if (focusRootId && idOfKey(key) === focusRootId) continue
-      next = removeBlock(next, key).doc
-    }
-    if (next === doc) return
-    // Select the row that visually takes the removed range's place: the first
-    // surviving row below the range, falling back to the first above
-    // (mirroring the single-row deleteBlock command).
-    const indices = selectedKeys
-      .map((key) => visibleOrder.indexOf(key))
-      .filter((index) => index !== -1)
-    const lo = indices.length > 0 ? Math.min(...indices) : 0
-    const hi = indices.length > 0 ? Math.max(...indices) : -1
-    let focusKey: string | null = null
-    for (let i = hi + 1; i < visibleOrder.length && !focusKey; i++) {
-      if (hasOccurrence(next, visibleOrder[i])) focusKey = visibleOrder[i]
-    }
-    for (let i = lo - 1; i >= 0 && !focusKey; i--) {
-      if (hasOccurrence(next, visibleOrder[i])) focusKey = visibleOrder[i]
-    }
-    history.commit(doc, next, { type: "structural" })
-    setAnchorKey(null)
-    setFocus(null)
-    // An emptied doc regains a blank block via the editor's trailing-blank
-    // rule; an emptied focused view hands the keyboard up to its title.
-    const target = focusKey ?? firstSelectable(next)
-    if (target === null && focusRoot) exitTop()
-    else setSelected(target)
   }
 
   // Serialize the selected subtrees to block markdown (markers + nesting +
@@ -1157,7 +1016,7 @@ export function BlockEditor({
   const copySelection = () => copyRows(selectionRoots())
   const cutSelection = () => {
     copySelection()
-    removeSelection()
+    runOnSelection("deleteBlock")
   }
   // When the caller bumps `focusFirstSignal` (e.g. Down-arrow from the note
   // title), highlight the first block — moving between the title and the blocks
@@ -1449,8 +1308,9 @@ export function BlockEditor({
     else onExitTop?.()
   }
   const applyFocus = (intent: FocusIntent) => {
-    // Any single-target command collapses a multi-row selection.
-    setAnchorKey(null)
+    // A command names the range it leaves selected (`anchor`) or, naming
+    // none, collapses the selection to the one row it lands on.
+    setAnchorKey(intent.mode === "select" ? (intent.anchor ?? null) : null)
     // In focus, a target outside the view (the focused block itself, or a root
     // the view does not show — where a delete falls back to) is the title —
     // or, where there is none, the view's own root row.
@@ -1484,9 +1344,9 @@ export function BlockEditor({
     // so it is not folded *yet* and the two demands above would both find
     // nothing to do. Recorded as the reader's own open, which is what keeps
     // the depth rule from closing it around the row just nested into it.
-    if (result.reveal) {
-      if (onReveal) onReveal(result.reveal)
-      else setCollapsedState(result.reveal, false)
+    for (const key of result.reveal ?? []) {
+      if (onReveal) onReveal(key)
+      else setCollapsedState(key, false)
     }
     if (result.focus) applyFocus(result.focus)
     // A change of focus root navigates (URL state); the focus-change effect
@@ -1506,20 +1366,29 @@ export function BlockEditor({
     }
   }
 
-  // The single entry point every keyboard handler funnels through: resolve the
-  // event to a command via the keymap and run it. Touch/menu entry points would
-  // dispatch the same commands. Returns whether the gesture was consumed.
-  const dispatchKey = (mode: Mode, key: string, event: KeyLike, caret?: CaretInput): boolean => {
-    if (!navigable) return false
-    const input: CommandInput = {
+  // The rows a command run on `key` acts on: the whole selection's roots,
+  // when the row is one of the selected (the keyboard on the highlight, the
+  // menu opened on it), else the row alone — a menu opened on a row outside
+  // the selection acts on that row, as it selects it.
+  const rootsFor = (key: string): string[] =>
+    selectedKeys.length > 1 && selectedSet.has(key) ? selectionRoots() : [key]
+  // What every command runs with: the doc, the row (and the range it is
+  // the head of), and the view's context. One builder, so a key, a menu
+  // item and a bar button never see a different world.
+  const commandInput = (
+    mode: Mode,
+    key: string,
+    over: Pick<CommandInput, "caret" | "typed" | "blockType"> = {},
+  ): CommandInput => {
+    const keys = mode === "select" ? rootsFor(key) : [key]
+    return {
       doc,
       key,
+      keys,
+      // A range is select mode's: while editing, the row alone.
+      anchorKey: mode === "select" && (keys.length > 1 || key === selected) ? anchorKey : null,
       mode,
       visibleOrder,
-      caret,
-      // Which character the key types, for the one command that depends on it
-      // (`wrapTyped`); every other command reads the resolved name alone.
-      typed: event.key,
       focusRootId,
       focusTitled,
       focusBackId,
@@ -1527,7 +1396,19 @@ export function BlockEditor({
       newBlockType: typeOfMarker(newBlockMarker),
       placesOf: parentCountOf,
       emptyable,
+      ...over,
     }
+  }
+  // The single entry point every keyboard handler funnels through: resolve the
+  // event to a command via the keymap and run it — on the selection, when
+  // the row is its head. The menu, the bar and the edit bar dispatch the
+  // same commands (`runOnRows`, `runOnSelection`, `runOnEditing`). Returns
+  // whether the gesture was consumed.
+  const dispatchKey = (mode: Mode, key: string, event: KeyLike, caret?: CaretInput): boolean => {
+    if (!navigable) return false
+    // Which character the key types, for the one command that depends on it
+    // (`wrapTyped`); every other command reads the resolved name alone.
+    const input = commandInput(mode, key, { caret, typed: event.key })
     const name = resolveKey(mode, event, input)
     if (!name) return false
     if (readOnly) {
@@ -1544,45 +1425,25 @@ export function BlockEditor({
     applyResult(result)
     return result.handled
   }
-  // Run a command by name on a row — what the context menu does, so a menu
+  // Run a command by name on a row — and on the whole selection, when the
+  // row is one of the selected rows: what the context menu does, so a menu
   // item and its key do exactly the same thing.
-  const runOnRow = (name: CommandName, key: string, mode: Mode = "select", caret?: CaretInput) => {
+  const runOnRows = (name: CommandName, key: string, over?: Pick<CommandInput, "blockType">) => {
     if (readOnly) return
-    applyResult(
-      runCommand(name, {
-        doc,
-        key,
-        mode,
-        visibleOrder,
-        caret,
-        focusRootId,
-        focusTitled,
-        focusBackId,
-        rootId: noteId ?? null,
-        newBlockType: typeOfMarker(newBlockMarker),
-        placesOf: parentCountOf,
-        emptyable,
-      }),
-    )
+    // The menu's row leads the range it is in; off the selection the row
+    // is the selection.
+    const head = selectedSet.has(key) && selected ? selected : key
+    applyResult(runCommand(name, commandInput("select", head, over)))
   }
-  // Whether the structure moves would do anything on a row — what the edit
-  // bar greys its Outdent and Indent by. Indent needs a sibling above (the
-  // row nests under it); Outdent a parent that is not the focus root (its
-  // children cannot leave the view).
-  const structureMoves = (key: string): { canIndent: boolean; canOutdent: boolean } => {
-    const parentKey = parentKeyOf(key)
-    const siblings =
-      parentKey === null ? doc.rootBlockIds : (doc.blocks[idOfKey(parentKey)]?.children ?? [])
-    const canIndent = siblings.indexOf(idOfKey(key)) > 0
-    const canOutdent =
-      parentKey !== null && (focusRootId === null || idOfKey(parentKey) !== focusRootId)
-    return { canIndent, canOutdent }
+  // Run a command on the current selection — what the selection bar does.
+  const runOnSelection = (name: CommandName, over?: Pick<CommandInput, "blockType">) => {
+    if (selected) runOnRows(name, selected, over)
   }
   // Run a command on the row being edited, in edit mode with its caret —
   // what the touch screen's edit bar does, so its Indent is Tab's: the
   // caret stays where it was on the row's new key.
-  const runOnEditing = (name: CommandName) => {
-    if (!focus) return
+  const runOnEditing = (name: CommandName, over?: Pick<CommandInput, "blockType">) => {
+    if (!focus || readOnly) return
     const el = containerRef.current?.querySelector("textarea")
     const caret: CaretInput | undefined = el
       ? {
@@ -1593,7 +1454,7 @@ export function BlockEditor({
           atLastLine: false,
         }
       : undefined
-    runOnRow(name, focus.key, "edit", caret)
+    applyResult(runCommand(name, commandInput("edit", focus.key, { caret, ...over })))
   }
 
   // ── The context menu ──────────────────────────────────────────────────────
@@ -1622,6 +1483,7 @@ export function BlockEditor({
       id: row.id,
       type: block.type,
       hasChildren: row.hasChildren,
+      count: rootsFor(row.key).length,
       places: parentCountOf ? Math.max(1, parentCountOf(row.id)) : 1,
       pinned: pinnedRoots.has(block.id),
       figure: isFigureType(block.type)
@@ -2178,10 +2040,6 @@ export function BlockEditor({
     history.commit(doc, updated, { type: "structural" })
   }
 
-  const setBlockType = (id: string, type: BlockType) => {
-    const next = updateBlock(doc, id, { type })
-    if (next !== doc) history.commit(doc, next, { type: "structural" })
-  }
   const menuActions: BlockMenuActions = {
     editLink: (key, href) => setLinkCard({ key, href }),
     turnIntoLink: (key, href, title) => linkToBlock(key, href, title === href ? "" : title),
@@ -2199,18 +2057,23 @@ export function BlockEditor({
     linkToInline,
     alignFigure: (id, align) => setFigureLayout(id, { align }),
     resetFigureSize: (id) => setFigureLayout(id, { size: null }),
-    duplicate: (key) => runOnRow("duplicateBelow", key),
-    moveUp: (key) => runOnRow("moveBlockUp", key),
-    moveDown: (key) => runOnRow("moveBlockDown", key),
-    copy: (key) => copyRows([key]),
+    duplicate: (key) => runOnRows("duplicateBelow", key),
+    moveUp: (key) => runOnRows("moveBlockUp", key),
+    moveDown: (key) => runOnRows("moveBlockDown", key),
+    copy: (key) => copyRows(rootsFor(key)),
     copyLink: noteId
       ? (id) => copy(`${window.location.origin}/notes/${noteId}?block=${id}`)
       : undefined,
     pin: canPin ? togglePin : undefined,
     share: canShare ? (id) => openShareDialog(id) : undefined,
-    remove: (key) => runOnRow("deleteBlock", key),
-    deleteEverywhere: onDeleteEverywhere,
-    deleteSubtree: onDeleteSubtree,
+    remove: (key) => runOnRows("deleteBlock", key),
+    // The graph-level deletes take the blocks of the rows the menu is for.
+    deleteEverywhere: onDeleteEverywhere
+      ? (key) => onDeleteEverywhere(rootsFor(key).map(idOfKey))
+      : undefined,
+    deleteSubtree: onDeleteSubtree
+      ? (key) => onDeleteSubtree(rootsFor(key).map(idOfKey))
+      : undefined,
   }
 
   /**
@@ -2245,7 +2108,7 @@ export function BlockEditor({
     updateLink: readOnly ? undefined : updateLink,
     linkToInline: readOnly ? undefined : linkToInline,
     updateLinkBlock: readOnly ? undefined : updateLinkBlock,
-    removeLinkBlock: readOnly ? undefined : (key) => runOnRow("deleteBlock", key),
+    removeLinkBlock: readOnly ? undefined : (key) => runOnRows("deleteBlock", key),
     removeLink: readOnly ? undefined : removeLink,
     linkCard,
     closeLinkCard: () => setLinkCard(null),
@@ -2468,55 +2331,9 @@ export function BlockEditor({
       plainPasteRef.current = true
       return
     }
-    // Actions that only make sense on a multi-row selection.
-    if (selectedKeys.length > 1) {
-      const isArrow = event.key === "ArrowUp" || event.key === "ArrowDown"
-      const direction = event.key === "ArrowUp" ? "up" : "down"
-      // Shift+Alt+Arrow duplicates the selection roots as one group and
-      // selects the copies.
-      if (isArrow && event.altKey && event.shiftKey && !mod) {
-        event.preventDefault()
-        duplicateSelection(direction === "up" ? "above" : "below")
-        return
-      }
-      // Alt+Arrow / Mod+Shift+Arrow move the whole contiguous selection one
-      // position among its shared parent's children (no-op across parents).
-      if (
-        isArrow &&
-        ((event.altKey && !event.shiftKey && !mod) || (mod && event.shiftKey && !event.altKey))
-      ) {
-        event.preventDefault()
-        moveSelection(direction)
-        return
-      }
-      if (event.key === "Tab") {
-        event.preventDefault()
-        if (event.shiftKey) outdentSelection()
-        else indentSelection()
-        return
-      }
-      if (event.key === "Backspace" || event.key === "Delete") {
-        event.preventDefault()
-        removeSelection()
-        return
-      }
-      if (event.key === "Escape") {
-        event.preventDefault()
-        select(key)
-        return
-      }
-      // Marker keys "turn into" across the whole selection: toggle each root
-      // to the kind. Shift AND Alt are fine — # and > need Shift on many
-      // layouts, and non-US Macs type symbols with Option (UK # is Alt+3).
-      // Only Mod combos stay the browser's.
-      const target = TURN_INTO_KEYS[event.key]
-      if (target && !mod) {
-        event.preventDefault()
-        turnSelectionInto(target, true)
-        return
-      }
-    }
-    // Single-select: resolve through the keymap.
+    // Everything else resolves through the keymap — on the whole selection
+    // where a range is selected (the structural commands take `keys`), on
+    // the highlighted row otherwise.
     if (dispatchKey("select", key, event)) event.preventDefault()
   }
 
@@ -2766,20 +2583,14 @@ export function BlockEditor({
     event.clipboardData.setData("text/html", formats.html)
     event.preventDefault()
 
-    let next = doc
-    let focusKey: string | null = null
-    for (const key of roots) {
-      if (!hasOccurrence(next, key)) continue
-      const result = removeBlock(next, key)
-      next = result.doc
-      focusKey = result.focusKey
-    }
-    if (next === doc) return
-    if (focusKey && !hasOccurrence(next, focusKey)) focusKey = null
-    history.commit(doc, next, { type: "structural" })
-    setAnchorKey(null)
-    setFocus(null)
-    setSelected(focusKey ?? firstSelectable(next))
+    // The same removal the keys and the menu run, over the picked rows.
+    applyResult(
+      runCommand("deleteBlock", {
+        ...commandInput("select", roots[0]),
+        keys: roots,
+        anchorKey: null,
+      }),
+    )
   }
 
   const handleCopy = (event: ClipboardEvent<HTMLDivElement>) => {
@@ -3033,22 +2844,24 @@ export function BlockEditor({
         <SelectionBar
           open={selectedKeys.length > 1 && keyboardActive}
           count={selectedKeys.length}
-          state={selectionMoves()}
+          state={selected ? movesOf(commandInput("select", selected)) : NO_MOVES}
+          removal={onDeleteEverywhere ? "unlink" : "delete"}
           finalFocus={containerRef}
           actions={{
-            indent: indentSelection,
-            outdent: outdentSelection,
-            moveUp: () => moveSelection("up"),
-            moveDown: () => moveSelection("down"),
-            duplicate: () => duplicateSelection("below"),
-            turnInto: (type) => turnSelectionInto(type),
+            indent: () => runOnSelection("indent"),
+            outdent: () => runOnSelection("outdent"),
+            moveUp: () => runOnSelection("moveBlockUp"),
+            moveDown: () => runOnSelection("moveBlockDown"),
+            duplicate: () => runOnSelection("duplicateBelow"),
+            turnInto: (type) => runOnSelection("turnInto", { blockType: type }),
             copy: copySelection,
             cut: cutSelection,
-            remove: removeSelection,
+            remove: () => runOnSelection("deleteBlock"),
+            deleteEverywhere: onDeleteEverywhere
+              ? () => onDeleteEverywhere(selectionRoots().map(idOfKey))
+              : undefined,
             // Back to the head row alone, as Escape does.
-            clear: () => {
-              if (selected) select(selected)
-            },
+            clear: () => runOnSelection("deselect"),
           }}
         />
       ) : null}
@@ -3056,7 +2869,7 @@ export function BlockEditor({
         <MobileEditBar
           state={{
             type: doc.blocks[idOfKey(focus.key)]?.type ?? "text",
-            ...structureMoves(focus.key),
+            ...movesOf(commandInput("edit", focus.key)),
             // The focused block leads its own view: focusing on it again
             // would go nowhere.
             canFocus: idOfKey(focus.key) !== focusRootId,
@@ -3064,7 +2877,7 @@ export function BlockEditor({
             canRedo: history.canRedo(),
           }}
           actions={{
-            turnInto: (type) => setBlockType(idOfKey(focus.key), type),
+            turnInto: (type) => runOnEditing("turnInto", { blockType: type }),
             bold: () => runOnEditing("wrapBold"),
             italic: () => runOnEditing("wrapItalic"),
             strike: () => runOnEditing("wrapStrike"),

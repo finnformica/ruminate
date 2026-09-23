@@ -60,7 +60,7 @@ function Harness({
   resolveBlocks?: (ids: string[]) => Record<string, string | null>
   debug?: BlockDebugOptions
   parentCountOf?: (id: string) => number
-  onDeleteEverywhere?: (id: string) => void
+  onDeleteEverywhere?: (ids: string[]) => void
   onImageUpload?: (file: File) => Promise<UploadedImage>
   onLinkPreview?: (url: string) => Promise<LinkPreview>
   /** Sees every change's hint (undefined when there is none). */
@@ -2818,7 +2818,7 @@ describe("BlockEditor context menu", () => {
     expect(menu.textContent).not.toContain("places")
     const id = getByTestId("serialized").textContent!.match(/id:: (\S+)\n?$/)![1]
     await pick("Delete")
-    expect(deleteEverywhere).toHaveBeenCalledWith(id)
+    expect(deleteEverywhere).toHaveBeenCalledWith([id])
     expect(serializedLines(getByTestId)).toEqual(["A", "B"])
   })
 
@@ -2833,7 +2833,7 @@ describe("BlockEditor context menu", () => {
     expect(menu.textContent).toContain("2 places")
     const id = getByTestId("serialized").textContent!.match(/id:: (\S+)\n?$/)![1]
     await pick("Delete")
-    expect(deleteEverywhere).toHaveBeenCalledWith(id)
+    expect(deleteEverywhere).toHaveBeenCalledWith([id])
     // The graph-level delete is the host's; the row is left for the snapshot
     // to drop, so nothing was removed by the editor itself.
     expect(serializedLines(getByTestId)).toEqual(["A", "B"])
@@ -4280,5 +4280,133 @@ describe("wrapping the selection by typing", () => {
     const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!
     textarea.setSelectionRange(5, 5)
     expect(fireEvent.keyDown(textarea, { key: "(" })).toBe(true)
+  })
+})
+
+describe("one action layer: a range of blocks takes the same commands as one", () => {
+  const FOUR = [
+    "A",
+    "  id:: blk_a",
+    "B",
+    "  id:: blk_b",
+    "C",
+    "  id:: blk_c",
+    "D",
+    "  id:: blk_d",
+  ].join("\n")
+
+  async function openMenuOn(container: HTMLElement, index: number): Promise<HTMLElement> {
+    const row = container.querySelectorAll("[data-occurrence]")[index]!
+    await act(async () => {
+      fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
+    })
+    return screen.getByTestId("block-context-menu")
+  }
+  async function pick(label: string) {
+    await act(async () => {
+      fireEvent.click(screen.getByText(label))
+    })
+  }
+  /** Highlight B, then extend the range down to C (B is the anchor, C the head). */
+  function selectBC(root: HTMLElement) {
+    selectNth(root, 1)
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true })
+  }
+
+  it("the menu opened on a selected row acts on every selected block, and says how many", async () => {
+    const deleteEverywhere = vi.fn()
+    const { container, getByTestId } = render(
+      <Harness initial={FOUR} parentCountOf={() => 1} onDeleteEverywhere={deleteEverywhere} />,
+    )
+    const root = editorRoot(container)
+    selectBC(root)
+    expect(highlightedAll(container)).toEqual(["B", "C"])
+    let menu = await openMenuOn(container, 2) // C, inside the selection
+    // The selection survives the right-click, and the menu is for all of it.
+    expect(highlightedAll(container)).toEqual(["B", "C"])
+    for (const label of [
+      "Copy 2 blocks",
+      "Duplicate 2 blocks",
+      "Unlink 2 blocks",
+      "Delete 2 blocks",
+    ]) {
+      expect(menu.textContent).toContain(label)
+    }
+    await pick("Delete 2 blocks")
+    // The graph-level delete gets every selected block, in document order.
+    expect(deleteEverywhere).toHaveBeenCalledWith(["blk_b", "blk_c"])
+
+    menu = await openMenuOn(container, 1) // B, still selected with C
+    await pick("Unlink 2 blocks")
+    // Both rows go — what ⌫ on the selection does — and the highlight lands
+    // on the row that takes their place.
+    expect(serializedLines(getByTestId)).toEqual(["A", "D"])
+    expect(highlightedAll(container)).toEqual(["D"])
+  })
+
+  it("the menu opened off the selection is for that row alone", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={FOUR} parentCountOf={() => 1} onDeleteEverywhere={() => {}} />,
+    )
+    const root = editorRoot(container)
+    selectBC(root)
+    const menu = await openMenuOn(container, 3) // D, outside the selection
+    // The row under the pointer becomes the selection, so the menu names no count.
+    expect(highlightedAll(container)).toEqual(["D"])
+    expect(menu.textContent).toContain("Unlink")
+    expect(menu.textContent).not.toContain("blocks")
+    await pick("Unlink")
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "C"])
+  })
+
+  it("the menu's Duplicate and moves take the selection too, and the range follows", async () => {
+    const { container, getByTestId } = render(<Harness initial={FOUR} />)
+    const root = editorRoot(container)
+    selectBC(root)
+    await openMenuOn(container, 1)
+    await pick("Move down")
+    expect(serializedLines(getByTestId)).toEqual(["A", "D", "B", "C"])
+    expect(highlightedAll(container)).toEqual(["B", "C"])
+    await openMenuOn(container, 2)
+    await pick("Duplicate 2 blocks")
+    expect(serializedLines(getByTestId)).toEqual(["A", "D", "B", "C", "B", "C"])
+    // The copies are the selection now.
+    expect(highlightedAll(container).length).toBe(2)
+  })
+
+  it("Escape on a range collapses it to the head, then deselects", () => {
+    const { container } = render(<Harness initial={FOUR} />)
+    const root = editorRoot(container)
+    selectBC(root)
+    fireEvent.keyDown(root, { key: "Escape" })
+    expect(highlightedAll(container)).toEqual(["C"])
+    fireEvent.keyDown(root, { key: "Escape" })
+    expect(highlightedAll(container)).toEqual([])
+  })
+
+  it("Tab on a range indents every root and keeps the range on the moved rows", () => {
+    const { container, getByTestId } = render(<Harness initial={FOUR} />)
+    const root = editorRoot(container)
+    selectBC(root)
+    fireEvent.keyDown(root, { key: "Tab" })
+    expect(serializedLines(getByTestId)).toEqual(["A", "  B", "  C", "D"])
+    expect(highlightedAll(container)).toEqual(["B", "C"])
+    // Nothing above the first root to nest under now: the range stays put.
+    fireEvent.keyDown(root, { key: "Tab" })
+    expect(serializedLines(getByTestId)).toEqual(["A", "  B", "  C", "D"])
+    fireEvent.keyDown(root, { key: "Tab", shiftKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "C", "D"])
+    expect(highlightedAll(container)).toEqual(["B", "C"])
+  })
+
+  it("x toggles every todo in the range", () => {
+    const { container, getByTestId } = render(<Harness initial={"[ ] A\n[x] B\nC"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true })
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true })
+    expect(highlightedAll(container)).toEqual(["A", "B", "C"])
+    fireEvent.keyDown(root, { key: "x" })
+    expect(serializedLines(getByTestId)).toEqual(["[x] A", "[ ] B", "C"])
+    expect(highlightedAll(container)).toEqual(["A", "B", "C"])
   })
 })

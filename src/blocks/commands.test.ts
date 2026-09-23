@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   linkSelection,
+  movesOf,
   runCommand,
   surroundSelection,
   wrapSelection,
@@ -97,7 +98,7 @@ describe("indent / outdent", () => {
       visibleOrder: ["a", "a/x", "a/y"],
     })
     expect(result.focus).toEqual({ mode: "edit", key: "a/x/y", caret: 1 })
-    expect(result.reveal).toBe("a/x")
+    expect(result.reveal).toEqual(["a/x"])
     expect(result.expand).toBeUndefined()
   })
 
@@ -105,7 +106,7 @@ describe("indent / outdent", () => {
     const doc = fixture()
     const result = runCommand("indent", input(doc, "c"))
     expect(result.focus).toEqual({ mode: "select", key: "b/c" })
-    expect(result.reveal).toBe("b")
+    expect(result.reveal).toEqual(["b"])
   })
 
   it("asks for no reveal when the indent did not happen", () => {
@@ -1332,5 +1333,161 @@ describe("parent rows (upstream occurrences)", () => {
     )
     expect(result.doc!.blocks.r.upstream).toEqual(["p"])
     expect(result.focus).toEqual({ mode: "select", key: "r/^p" })
+  })
+})
+
+describe("a range of rows (`keys`)", () => {
+  /** Rows b and c selected: b the anchor, c the head. */
+  const range = (doc: BlockDoc, over: Partial<CommandInput> = {}) =>
+    input(doc, "c", { keys: ["b", "c"], anchorKey: "b", ...over })
+
+  it("indents every root under the row above the first, and keeps the range on the moved rows", () => {
+    const result = runCommand("indent", range(fixture()))
+    expect(result.doc!.blocks.a.children).toEqual(["b", "c"])
+    expect(result.doc!.rootBlockIds).toEqual(["a"])
+    expect(result.focus).toEqual({ mode: "select", key: "a/c", anchor: "a/b" })
+    expect(result.reveal).toEqual(["a"])
+  })
+
+  it("indents nothing when a root has nothing above it (the range moves as one)", () => {
+    const doc = fixture()
+    const result = runCommand("indent", input(doc, "b", { keys: ["a", "b"], anchorKey: "a" }))
+    expect(result.handled).toBe(true)
+    expect(result.doc).toBeUndefined()
+    expect(result.focus).toEqual({ mode: "select", key: "b", anchor: "a" })
+  })
+
+  it("outdents whichever roots can be lifted, keeping the range", () => {
+    const doc = fixture()
+    const nested = runCommand("indent", range(doc)).doc!
+    const result = runCommand(
+      "outdent",
+      input(nested, "a/c", {
+        keys: ["a/b", "a/c"],
+        anchorKey: "a/b",
+        visibleOrder: ["a", "a/b", "a/b/b1", "a/c"],
+      }),
+    )
+    expect(result.doc!.rootBlockIds).toEqual(["a", "b", "c"])
+    expect(result.focus).toEqual({ mode: "select", key: "c", anchor: "b" })
+  })
+
+  it("moves the range as one group, the selection staying on it", () => {
+    const result = runCommand("moveBlockUp", range(fixture()))
+    expect(result.doc!.rootBlockIds).toEqual(["b", "c", "a"])
+    expect(result.focus).toEqual({ mode: "select", key: "c", anchor: "b" })
+    // At the top there is nowhere further to go.
+    expect(runCommand("moveBlockUp", range(result.doc!)).doc).toBeUndefined()
+  })
+
+  it("duplicates the range as one group and selects the copies", () => {
+    const result = runCommand("duplicateBelow", range(fixture()))
+    expect(result.doc!.rootBlockIds.length).toBe(5)
+    const [, , , first, last] = result.doc!.rootBlockIds
+    expect(result.focus).toEqual({ mode: "select", key: last, anchor: first })
+    expect(result.doc!.blocks[first].text).toBe("B")
+    expect(result.doc!.blocks[last].text).toBe("C")
+  })
+
+  it("removes every root and lands on the row that takes their place", () => {
+    const result = runCommand("deleteBlock", range(fixture()))
+    expect(result.doc!.rootBlockIds).toEqual(["a"])
+    expect(result.focus).toEqual({ mode: "select", key: "a" })
+    // A row above the range is the landing when nothing is below it.
+    const below = runCommand("deleteBlock", input(fixture(), "c", { keys: ["b", "c"] }))
+    expect(below.focus).toEqual({ mode: "select", key: "a" })
+  })
+
+  it("passes the focus root by in a range, and refuses it on its own", () => {
+    const doc = fixture()
+    const result = runCommand(
+      "deleteBlock",
+      input(doc, "b/b1", {
+        keys: ["b", "b/b1"],
+        anchorKey: "b",
+        focusRootId: "b",
+        focusTitled: false,
+      }),
+    )
+    expect(result.doc!.blocks.b.children).toEqual([])
+    expect(result.notice).toBeUndefined()
+    const alone = runCommand(
+      "deleteBlock",
+      input(doc, "b", { focusRootId: "b", focusTitled: false }),
+    )
+    expect(alone.doc).toBeUndefined()
+    expect(alone.notice).toMatch(/focus/)
+  })
+
+  it("turns every root into the type — toggled by a marker key, set by a menu's pick", () => {
+    const doc = fixture()
+    const toggled = runCommand("turnIntoHeading", range(doc)).doc!
+    expect([toggled.blocks.b.type, toggled.blocks.c.type, toggled.blocks.b1.type]).toEqual([
+      "h1",
+      "h1",
+      "text",
+    ])
+    // Again: back to paragraphs.
+    const back = runCommand("turnIntoHeading", range(toggled)).doc!
+    expect([back.blocks.b.type, back.blocks.c.type]).toEqual(["text", "text"])
+    // A pick sets outright: a heading picked over a heading stays one.
+    const picked = runCommand("turnInto", range(toggled, { blockType: "h1" })).doc!
+    expect([picked.blocks.b.type, picked.blocks.c.type]).toEqual(["h1", "h1"])
+    expect(runCommand("turnInto", range(doc)).handled).toBe(false)
+    // The range stays selected; a single empty row would open editing instead.
+    expect(runCommand("turnIntoHeading", range(doc)).focus).toEqual({
+      mode: "select",
+      key: "c",
+      anchor: "b",
+    })
+  })
+
+  it("flips every todo in the range", () => {
+    const doc = fixture()
+    doc.blocks.b = { ...doc.blocks.b, type: "todo" }
+    doc.blocks.c = { ...doc.blocks.c, type: "done" }
+    const result = runCommand("toggleTodo", range(doc)).doc!
+    expect([result.blocks.b.type, result.blocks.c.type, result.blocks.a.type]).toEqual([
+      "done",
+      "todo",
+      "text",
+    ])
+  })
+
+  it("Escape collapses a range to its head before deselecting", () => {
+    expect(runCommand("deselect", range(fixture())).focus).toEqual({ mode: "select", key: "c" })
+    expect(runCommand("deselect", input(fixture(), "c")).focus).toEqual({
+      mode: "select",
+      key: null,
+    })
+  })
+
+  it("says what the structure moves can do to the range", () => {
+    const doc = fixture()
+    expect(movesOf(range(doc))).toEqual({
+      canIndent: true,
+      canOutdent: false,
+      canMoveUp: true,
+      canMoveDown: false,
+    })
+    expect(movesOf(input(doc, "b", { keys: ["a", "b"], anchorKey: "a" }))).toEqual({
+      canIndent: false,
+      canOutdent: false,
+      canMoveUp: false,
+      canMoveDown: true,
+    })
+    // Roots under different parents are no run to move together.
+    expect(movesOf(input(doc, "c", { keys: ["b/b1", "c"], anchorKey: "b/b1" }))).toMatchObject({
+      canOutdent: true,
+      canMoveUp: false,
+      canMoveDown: false,
+    })
+    // One row: the same rules.
+    expect(movesOf(input(doc, "a"))).toEqual({
+      canIndent: false,
+      canOutdent: false,
+      canMoveUp: false,
+      canMoveDown: true,
+    })
   })
 })

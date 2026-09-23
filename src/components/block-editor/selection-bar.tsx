@@ -11,9 +11,9 @@ import { DropdownMenu } from "../ui/dropdown-menu"
 import { IconButton } from "../ui/icon-button"
 import { Surface } from "../ui/surface"
 
-/** What the bar can do to the selected rows: the same actions the keys run
- * on a multi-row selection (docs/keyboard-shortcuts.md, Multi-select), each
- * on every selected block at once. */
+/** What the bar can do to the selected rows: the same commands the keys
+ * and the block menu run (`src/blocks/commands.ts`), each over the whole
+ * selection at once. */
 export interface SelectionBarActions {
   indent: () => void
   outdent: () => void
@@ -23,7 +23,12 @@ export interface SelectionBarActions {
   turnInto: (type: BlockType) => void
   copy: () => void
   cut: () => void
+  /** Remove the selected rows (the blocks stay where else they are held —
+   * or go for good, where a row's removal is the delete: `removal`). */
   remove: () => void
+  /** Delete the selected blocks from every place they appear (the block
+   * menu's Delete). Absent where a row's removal is already the delete. */
+  deleteEverywhere?: () => void
   /** Back to one highlighted block — what <kbd>Esc</kbd> does. */
   clear: () => void
 }
@@ -69,12 +74,17 @@ export function SelectionBar({
   count,
   state,
   actions,
+  removal = "unlink",
   finalFocus,
 }: {
   open: boolean
   count: number
   state: SelectionBarState
   actions: SelectionBarActions
+  /** What removing the rows means, as the block menu words it: **Unlink**
+   * in a note's outline (the blocks stay), **Delete** where the row's
+   * removal is the delete (the basket, editors with no graph behind them). */
+  removal?: "unlink" | "delete"
   finalFocus: React.RefObject<HTMLElement | null>
 }) {
   const shown = useRef(count)
@@ -185,9 +195,18 @@ export function SelectionBar({
               Cut
             </DropdownMenu.Item>
             <DropdownMenu.Separator />
-            <DropdownMenu.Item shortcut={["⌫"]} variant="danger" onClick={actions.remove}>
-              Remove
+            <DropdownMenu.Item
+              shortcut={["⌫"]}
+              variant={removal === "delete" ? "danger" : undefined}
+              onClick={actions.remove}
+            >
+              {removal === "unlink" ? "Unlink" : "Delete"}
             </DropdownMenu.Item>
+            {actions.deleteEverywhere ? (
+              <DropdownMenu.Item variant="danger" onClick={actions.deleteEverywhere}>
+                Delete
+              </DropdownMenu.Item>
+            ) : null}
           </DropdownMenu.Content>
         </DropdownMenu>
       </Surface>

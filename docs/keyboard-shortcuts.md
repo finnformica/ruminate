@@ -200,9 +200,15 @@ block _is_.)
 
 With more than one block selected, <kbd>⇥</kbd> / <kbd>⇧⇥</kbd>, delete,
 copy / cut / paste, move (<kbd>⌥↑/↓</kbd> or <kbd>⌘⇧↑/↓</kbd> — only when the
-selected blocks share a parent), duplicate (<kbd>⇧⌥↑/↓</kbd>), and the
-turn-into marker keys act on the whole selection; <kbd>Esc</kbd> collapses
-back to one.
+selected blocks share a parent), duplicate (<kbd>⇧⌥↑/↓</kbd>), the
+turn-into marker keys and <kbd>x</kbd> act on the whole selection;
+<kbd>Esc</kbd> collapses back to one. These are not separate bulk actions:
+each key runs the same command it runs on one block, over every selected
+block at once (`src/blocks/commands.ts`), so a single block is simply a
+selection of one. The right-click menu is the same: opened on a row of the
+selection, its Copy, Duplicate, the moves, Unlink and Delete take the whole
+selection and say how many blocks that is (**Delete 3 blocks**); opened on
+a row outside it, that row alone.
 
 A mouse selects a run of blocks too: sweeping across rows selects every row the
 sweep touched (the anchor stays at the end the sweep began, so <kbd>⇧</kbd>
@@ -213,9 +219,10 @@ the rest nesting under it.
 
 While more than one block is selected, a bar rises at the bottom of the window
 with the count, a way out, and an **Actions** menu holding every action above
-(turn into, duplicate, indent, outdent, move, copy, cut, remove), each acting
-on the whole selection. An item greys where the action would do nothing, and
-the bar sinks away when the selection collapses.
+(turn into, duplicate, indent, outdent, move, copy, cut, unlink — and, in a
+note, the block menu's Delete), each acting on the whole selection through the
+same commands the keys run. An item greys where the action would do nothing,
+and the bar sinks away when the selection collapses.
 
 #### Selection ladder
 
@@ -239,8 +246,10 @@ ladder. Starting from a <kbd>⇧</kbd> <kbd>↑/↓</kbd> range, <kbd>⌘</kbd>
 <kbd>A</kbd> grows to the deepest subtree that contains the whole range. All
 multi-block actions (indent, delete, copy / cut, move, duplicate, paste-after)
 work on ladder selections. Like <kbd>⌘</kbd> <kbd>C</kbd> / <kbd>⌘</kbd>
-<kbd>X</kbd>, these two bindings are handled imperatively in the editor
-component rather than through the keymap table.
+<kbd>X</kbd> and <kbd>⇧</kbd> <kbd>↑/↓</kbd>, these two bindings are handled
+imperatively in the editor component rather than through the keymap table:
+they change what is selected, where the keymap's commands change what the
+selection is.
 
 Copying writes both plain markdown and a rich-text (HTML) flavor that carries
 the exact block tree, so blocks copied from Ruminate paste back into Ruminate

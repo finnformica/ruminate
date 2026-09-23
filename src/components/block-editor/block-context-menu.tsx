@@ -12,7 +12,10 @@ import { Surface } from "../ui/surface"
  * The block's right-click menu: the standard actions on one row, the same
  * commands the keyboard runs, so nothing here has a second meaning. Opened
  * by the editor on any row it owns (never in read-only views); the editor
- * supplies the row (`target`) and the actions, this file the menu.
+ * supplies the row (`target`) and the actions, this file the menu. Opened
+ * on a row of a selected range, the actions that take a range — copy, the
+ * moves, duplicate, and the removals — take the whole of it, as the keys
+ * would, and say how many blocks that is (`target.count`).
  *
  * Removing is graph-aware. A row is one place a block appears. In a note's
  * outline the menu offers **Unlink** (what ⌫ does: the row goes, the block
@@ -44,6 +47,9 @@ export interface BlockMenuTarget {
   id: string
   type: BlockType
   hasChildren: boolean
+  /** How many blocks the range actions act on: the selected range's roots
+   * when the row is one of them, else 1 — the row alone. */
+  count: number
   /** How many places the block appears across the corpus (1 = only here). */
   places: number
   /** Pinned (docs/metadata.md): listed in the sidebar's Views list. */
@@ -80,11 +86,11 @@ export interface BlockMenuActions {
   turnIntoLink?: (key: string, href: string, title: string) => void
   /** Remove this row (the block stays where else it is held). */
   remove: (key: string) => void
-  /** Delete the block from every place it appears. Absent standalone. */
-  deleteEverywhere?: (id: string) => void
-  /** Delete the block and everything beneath it that nothing else holds
-   * (the basket's). Absent where a delete never cascades. */
-  deleteSubtree?: (id: string) => void
+  /** Delete the row's block from every place it appears. Absent standalone. */
+  deleteEverywhere?: (key: string) => void
+  /** Delete the row's block and everything beneath it that nothing else
+   * holds (the basket's). Absent where a delete never cascades. */
+  deleteSubtree?: (key: string) => void
   /** Image rows: expand the picture, and save it to the device. */
   openImage?: (id: string) => void
   downloadImage?: (id: string) => void
@@ -175,8 +181,10 @@ export type MenuEntry =
     }
 
 function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEntry[] {
-  const { key, id } = target
-  const shared = target.places > 1
+  const { key, id, count } = target
+  // A range's actions say how many blocks they take: "Delete 3 blocks".
+  const many = count > 1 ? ` ${count} blocks` : ""
+  const shared = target.places > 1 && count === 1
   const image = target.type === "image"
   const link = target.type === "link"
   const figure = target.figure !== undefined
@@ -198,7 +206,7 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
     push({ kind: "item", ...e })
 
   // Copying, first: what a hold is most often for.
-  item({ label: "Copy", shortcut: ["⌘", "C"], onSelect: () => actions.copy(key) })
+  item({ label: `Copy${many}`, shortcut: ["⌘", "C"], onSelect: () => actions.copy(key) })
   if (actions.copyLink)
     item({ label: "Copy link to block", onSelect: () => actions.copyLink?.(id) })
 
@@ -267,7 +275,11 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
   section()
   item({ label: "Move up", shortcut: ["⌥", "↑"], onSelect: () => actions.moveUp(key) })
   item({ label: "Move down", shortcut: ["⌥", "↓"], onSelect: () => actions.moveDown(key) })
-  item({ label: "Duplicate", shortcut: ["⌥", "⇧", "↓"], onSelect: () => actions.duplicate(key) })
+  item({
+    label: `Duplicate${many}`,
+    shortcut: ["⌥", "⇧", "↓"],
+    onSelect: () => actions.duplicate(key),
+  })
 
   // Beyond the note: the sidebar, and other people.
   section()
@@ -278,22 +290,27 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
   // Removing, last and apart.
   section()
   if (actions.deleteEverywhere) {
-    item({ label: "Unlink", shortcut: ["⌫"], onSelect: () => actions.remove(key) })
+    item({ label: `Unlink${many}`, shortcut: ["⌫"], onSelect: () => actions.remove(key) })
     item({
-      label: "Delete",
+      label: `Delete${many}`,
       danger: true,
       trailing: shared ? (
         <span className="text-sm text-text-secondary">{target.places} places</span>
       ) : undefined,
-      onSelect: () => actions.deleteEverywhere?.(id),
+      onSelect: () => actions.deleteEverywhere?.(key),
     })
   } else {
-    item({ label: "Delete", danger: true, shortcut: ["⌫"], onSelect: () => actions.remove(key) })
+    item({
+      label: `Delete${many}`,
+      danger: true,
+      shortcut: ["⌫"],
+      onSelect: () => actions.remove(key),
+    })
     if (actions.deleteSubtree && target.hasChildren) {
       item({
-        label: "Delete with contents",
+        label: `Delete${many} with contents`,
         danger: true,
-        onSelect: () => actions.deleteSubtree?.(id),
+        onSelect: () => actions.deleteSubtree?.(key),
       })
     }
   }
