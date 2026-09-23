@@ -38,14 +38,13 @@ export const QUERY_DEBOUNCE_MS = 150
  * `resolvesToBlocks`. A filtered view edits in place; the plain notes list
  * is browsed (for now — it could edit too).
  *
- * **With no query the listing is split into sections** — Recent, Views,
- * Notes, Shared — because one undifferentiated list of everything gave no
- * way to tell your own note from one someone shared with you, or to find a
- * pinned note among the rest. **Recent** is the palette's (the places most
- * used lately, `useRecentRoots`); the rest are the sidebar's exactly, so
- * the two surfaces read the same way — **Views** included, which means the
- * pinned blocks as well as the pinned notes (`pinnedRootsAtom`). A pinned
- * note is in **Notes** below as well, in its sorted place.
+ * **With no query the page is where you go next, not an index** — Recent,
+ * Views, Shared. **Recent** is the palette's (the places most used lately,
+ * `useRecentRoots`); **Views** is the sidebar's, the pinned blocks as well
+ * as the pinned notes (`pinnedRootsAtom`). Between them they hold what you
+ * come back to, so the full list of your notes is left to the sidebar and
+ * to search — and shown here only while both are empty (a new corpus), so
+ * the page is never just a search box.
  *
  * A query is *not* sectioned: results are ranked by score across the whole
  * corpus (docs/query-language.md), and cutting that ranking into bands would
@@ -91,14 +90,15 @@ export function NoteList({
   // (`useRecentRoots`), as the palette lists them with nothing typed — so
   // what you keep coming back to is one click away. Then Views (it leads
   // the sidebar), both kinds of pin, a pinned place used lately among them
-  // too: Recent is what you use, Views what you chose to keep. Then all
-  // of your own notes in the chosen sort — the pinned ones among them, since
-  // a pin adds a place to reach a note rather than moving it; then what
+  // too: Recent is what you use, Views what you chose to keep. Then what
   // other people shared with you.
   const sections = React.useMemo(() => {
     if (!browsing) return []
     const rootsOf = (notes: Note[]) => notes.map((note) => ({ id: note.id, noteId: note.id }))
     const shared = sharedNotes.map(({ note }) => note)
+    // Your notes are listed only while there is nothing recent and nothing
+    // pinned — a new corpus — so the page is never just a search box.
+    const fallback = recentRoots.length + pinnedRoots.length === 0
     return [
       { key: "recent", heading: "Recent", roots: recentRoots },
       { key: "views", heading: "Views", roots: pinnedRoots },
@@ -106,8 +106,8 @@ export function NoteList({
       // is the whole list and a heading over it says nothing.
       {
         key: "own",
-        heading: recentRoots.length + pinnedRoots.length + shared.length > 0 ? "Notes" : null,
-        roots: rootsOf(ownNotes),
+        heading: shared.length > 0 ? "Notes" : null,
+        roots: fallback ? rootsOf(ownNotes) : [],
       },
       { key: "shared", heading: "Shared", roots: rootsOf(shared) },
     ].filter((section) => section.roots.length > 0)

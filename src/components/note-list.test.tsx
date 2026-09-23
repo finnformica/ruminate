@@ -89,15 +89,19 @@ const headings = () => screen.queryAllByRole("heading").map((h) => h.textContent
 const bands = () => screen.getAllByTestId("results").map((el) => el.textContent)
 
 describe("the notes page listing", () => {
-  it("splits browsing into the sidebar's sections, in the sidebar's order", () => {
+  it("browses Recent, then Views, then Shared — your notes are the sidebar's to list", () => {
+    mocks.recent = [
+      { id: "blk_fashion", noteId: "p" },
+      { id: "a", noteId: "a" },
+    ]
     renderList({
-      own: [noteOf("p", "Pinned"), noteOf("a", "Alpha"), noteOf("b", "Bravo")],
+      own: [noteOf("p", "Personal"), noteOf("a", "Alpha"), noteOf("b", "Bravo")],
       shared: [noteOf("s", "Shared one")],
-      pinned: [{ id: "p", noteId: "p" }],
+      pinned: [{ id: "a", noteId: "a" }],
     })
-    expect(headings()).toEqual(["Views", "Notes", "Shared"])
-    // The pinned note leads under Views AND keeps its place in Notes.
-    expect(bands()).toEqual(["p", "p,a,b", "s"])
+    // A place used lately and pinned is under both; no Notes band.
+    expect(headings()).toEqual(["Recent", "Views", "Shared"])
+    expect(bands()).toEqual(["blk_fashion,a", "a", "s"])
   })
 
   it("draws the pinned blocks under Views, not just the pinned notes", () => {
@@ -110,48 +114,25 @@ describe("the notes page listing", () => {
         { id: "blk_x", noteId: "a" },
       ],
     })
-    expect(headings()).toEqual(["Views", "Notes"])
-    expect(bands()).toEqual(["a,blk_x", "a"])
-  })
-
-  it("leads with Recent — notes and focused blocks — above Views, a place in both under each", () => {
-    mocks.recent = [
-      { id: "blk_fashion", noteId: "p" },
-      { id: "a", noteId: "a" },
-    ]
-    renderList({
-      own: [noteOf("p", "Personal"), noteOf("a", "Alpha")],
-      pinned: [{ id: "a", noteId: "a" }],
-    })
-    expect(headings()).toEqual(["Recent", "Views", "Notes"])
-    expect(bands()).toEqual(["blk_fashion,a", "a", "p,a"])
-  })
-
-  it("names the Notes band when Recent is the only other", () => {
-    mocks.recent = [{ id: "a", noteId: "a" }]
-    renderList({ own: [noteOf("a", "Alpha")] })
-    expect(headings()).toEqual(["Recent", "Notes"])
-  })
-
-  it("draws no heading over a list that is the whole corpus", () => {
-    renderList({ own: [noteOf("a", "Alpha"), noteOf("b", "Bravo")] })
-    expect(headings()).toEqual([])
-    expect(bands()).toEqual(["a,b"])
+    expect(headings()).toEqual(["Views"])
+    expect(bands()).toEqual(["a,blk_x"])
   })
 
   it("leaves out a band with nothing in it", () => {
-    renderList({ own: [noteOf("a", "Alpha")], pinned: [{ id: "a", noteId: "a" }] })
-    expect(headings()).toEqual(["Views", "Notes"])
+    mocks.recent = [{ id: "a", noteId: "a" }]
+    renderList({ own: [noteOf("a", "Alpha")] })
+    expect(headings()).toEqual(["Recent"])
   })
 
-  it("draws no Pinned band when nothing is pinned", () => {
+  it("lists your notes, unheaded, while nothing is recent or pinned", () => {
     renderList({ own: [noteOf("a", "Alpha"), noteOf("b", "Bravo")] })
     expect(headings()).toEqual([])
     expect(bands()).toEqual(["a,b"])
   })
 
-  it("keeps a shared note out of your own band", () => {
+  it("names that fallback Notes, and keeps shared notes out of it, when there are shared ones", () => {
     renderList({ own: [noteOf("a", "Alpha")], shared: [noteOf("s", "Shared one")] })
+    expect(headings()).toEqual(["Notes", "Shared"])
     expect(bands()).toEqual(["a", "s"])
   })
 
