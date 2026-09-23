@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useAtom, useAtomValue } from "jotai"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useNetworkState } from "react-use"
 import { DEFAULT_NEW_BLOCK_MARKER } from "../blocks/markers"
 import { Button } from "../components/ui/button"
@@ -12,7 +12,9 @@ import { McpTokensSection } from "../components/mcp-tokens-section"
 import { PageLayout } from "../components/page-layout"
 import { SettingsSection } from "../components/settings-section"
 import { SharingSection } from "../components/sharing-section"
+import { saveAccountPreferences, useAccountPreference } from "../data/account-preferences"
 import { useFeature } from "../data/features"
+import { usePending } from "../hooks/pending"
 import { recordedEmailAtom } from "../data/shared-mode"
 import { TextInput } from "../components/ui/text-input"
 import { IconButton } from "../components/ui/icon-button"
@@ -36,7 +38,6 @@ import {
   linkDirectionsAtom,
   githubUserAtom,
   newBlockMarkerAtom,
-  showWhatsNewAtom,
   themeAtom,
   type Theme,
 } from "../global-state"
@@ -54,13 +55,15 @@ function RouteComponent() {
   // account may not use is not drawn. The Worker refuses regardless.
   const sharing = useFeature("sharing")
   const mcp = useFeature("mcp")
+  // The preferences follow the account, so there is nothing to set signed out.
+  const githubUser = useAtomValue(githubUserAtom)
   return (
     <PageLayout title="Settings" icon={<SettingsIcon16 />} disableGuard>
       <div className="p-4 pb-6">
         <div className="mx-auto flex max-w-xl flex-col gap-6">
           <AppearanceSection />
           <EditorSection />
-          <UpdatesSection />
+          {githubUser ? <UpdatesSection /> : null}
           <StorageSection />
           {sharing ? <SharingSection /> : null}
           {mcp ? <McpTokensSection /> : null}
@@ -288,11 +291,24 @@ function EditorSection() {
   )
 }
 
-/** The what's-new card, and whether it greets an update at all. The card is
- * the only surface the app puts up unasked, so it is the one that gets a
- * switch; **What's new** in the sidebar reaches the changelog either way. */
+/** The what's-new card, and whether it greets an update at all. Off until
+ * asked for, and a preference of the account (src/data/account-preferences.ts)
+ * rather than the device, so it is answered once; **What's new** in the
+ * sidebar reaches the changelog either way. */
 function UpdatesSection() {
-  const [showWhatsNew, setShowWhatsNew] = useAtom(showWhatsNewAtom)
+  const showWhatsNew = useAccountPreference("whatsNewCard")
+  const [failed, setFailed] = useState(false)
+  // The box shows the new value at once and is held until the server has it
+  // (docs/design-principles.md, Busy controls); refused, the value goes back
+  // and the row says so.
+  const [save, saving] = usePending(async (checked: boolean) => {
+    setFailed(false)
+    try {
+      await saveAccountPreferences({ whatsNewCard: checked })
+    } catch {
+      setFailed(true)
+    }
+  })
 
   return (
     <SettingsSection title="Updates">
@@ -303,7 +319,8 @@ function UpdatesSection() {
           id="show-whats-new"
           className="mt-0.5"
           checked={showWhatsNew}
-          onCheckedChange={(checked) => setShowWhatsNew(checked)}
+          disabled={saving}
+          onCheckedChange={(checked) => save(checked)}
         />
         <label htmlFor="show-whats-new" className="flex cursor-pointer flex-col gap-1">
           <span>Show what's new after an update</span>
@@ -311,6 +328,11 @@ function UpdatesSection() {
             A card in the corner lists what changed when Ruminate updates. The full changelog is
             always under What's new in the sidebar.
           </span>
+          {failed ? (
+            <span className="text-sm leading-4 text-text-danger">
+              Couldn't save that — check your connection and try again.
+            </span>
+          ) : null}
         </label>
       </div>
     </SettingsSection>

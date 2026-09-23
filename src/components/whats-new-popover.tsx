@@ -1,5 +1,4 @@
 import { Link } from "@tanstack/react-router"
-import { useAtomValue } from "jotai"
 import { useEffect, useState } from "react"
 import {
   countEntries,
@@ -12,7 +11,7 @@ import { IconButton } from "./ui/icon-button"
 import { Surface } from "./ui/surface"
 import { XIcon16 } from "./icons"
 import { EntryText } from "./release-notes"
-import { showWhatsNewAtom } from "../global-state"
+import { useAccountPreference } from "../data/account-preferences"
 import { lastSeenVersion, rememberVersion, takeUpdateRequest } from "../utils/whats-new"
 
 /**
@@ -61,14 +60,17 @@ const MAX_ENTRIES = 6
  * Nothing is fetched to answer that question. The stamp is a string in the app
  * bundle; only a device that is actually behind pays for the changelog.
  *
- * Settings → Updates can turn the card off (`showWhatsNewAtom`). The boot's
- * notes are still taken and the build still recorded, so switching it back on
- * later does not greet the reader with a release they have been running for
- * weeks: off means "I did not want to be told", which counts as read, exactly
- * as dismissing does.
+ * The card is off until asked for: Settings → Updates turns it on, as a
+ * preference of the account rather than the device
+ * (src/data/account-preferences.ts), so it is answered once for every
+ * device the reader signs in on. The boot's notes are taken and the build
+ * recorded either way, so turning it on later does not greet the reader with
+ * a release they have been running for weeks: not being told counts as read,
+ * exactly as dismissing does. The preference arrives with the sign-in, which
+ * may be after this has mounted — hence the effect follows it.
  */
 export function WhatsNewPopover() {
-  const show = useAtomValue(showWhatsNewAtom)
+  const show = useAccountPreference("whatsNewCard")
   const [unseen, setUnseen] = useState<ChangelogRelease[] | null>(null)
   const [dismissed, setDismissed] = useState(false)
 
@@ -100,9 +102,9 @@ export function WhatsNewPopover() {
     }
   }, [show])
 
-  // Off in Settings reads as nothing to say, so the card is put away the
-  // moment the box is unticked — and, the facts being cached for the page
-  // load, comes back if it is ticked again before the next one.
+  // Off reads as nothing to say, so the card is put away the moment the box
+  // is unticked in Settings — and, the facts being cached for the page load,
+  // comes back if it is ticked again before the next one.
   const nothingToSay = !show || unseen === null || unseen.length === 0
 
   // <kbd>Esc</kbd> puts it away, as it does every other transient surface in
