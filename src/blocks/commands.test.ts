@@ -1406,9 +1406,30 @@ describe("a selection of rows (`keys`)", () => {
   })
 
   it("removes every root and lands on the row that takes their place", () => {
+    // Nothing below the range: the row above takes the highlight.
     const result = runCommand("deleteBlock", range(fixture()))
     expect(result.doc!.rootBlockIds).toEqual(["a"])
     expect(result.focus).toEqual({ mode: "select", key: "a" })
+    // A row below: it slides up into the range's place.
+    const below = runCommand("deleteBlock", input(fixture(), "b", { keys: ["a", "b"] }))
+    expect(below.doc!.rootBlockIds).toEqual(["c"])
+    expect(below.focus).toEqual({ mode: "select", key: "c" })
+  })
+
+  it("moves the selection down as one group too", () => {
+    const result = runCommand("moveBlockDown", input(fixture(), "b", { keys: ["a", "b"] }))
+    expect(result.doc!.rootBlockIds).toEqual(["c", "a", "b"])
+    expect(result.focus).toEqual({ mode: "select", key: "b", keys: ["a", "b"] })
+    expect(runCommand("moveBlockDown", range(fixture())).doc).toBeUndefined()
+  })
+
+  it("duplicates the selection above as one group, the copies selected", () => {
+    const result = runCommand("duplicateAbove", range(fixture()))
+    const [a, first, last, b, c] = result.doc!.rootBlockIds
+    expect([a, b, c]).toEqual(["a", "b", "c"])
+    expect(result.doc!.blocks[first].text).toBe("B")
+    expect(result.doc!.blocks[last].text).toBe("C")
+    expect(result.focus).toEqual({ mode: "select", key: last, keys: [first, last] })
   })
 
   it("refuses to remove the focus root, alone or as the root of the selection", () => {

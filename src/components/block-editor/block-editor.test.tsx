@@ -4410,3 +4410,156 @@ describe("one action layer: a range of blocks takes the same commands as one", (
     expect(highlightedAll(container)).toEqual(["A", "B", "C"])
   })
 })
+
+describe("every surface runs the one action set", () => {
+  const FOUR = [
+    "A",
+    "  id:: blk_a",
+    "B",
+    "  id:: blk_b",
+    "C",
+    "  id:: blk_c",
+    "D",
+    "  id:: blk_d",
+  ].join("\n")
+  const pick = async (label: string) => {
+    await act(async () => {
+      fireEvent.click(screen.getByText(label))
+    })
+  }
+  /** Highlight rows `from`..`to` by keyboard, from the first row. */
+  const selectRows = (root: HTMLElement, from: number, to: number) => {
+    selectNth(root, from)
+    for (let i = from; i < to; i++) fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true })
+  }
+  /** The three ways to run an action on the selection: its key, the block
+   * menu opened on a selected row, and the selection bar's menu. */
+  const drivers = {
+    key: async (root: HTMLElement, _container: HTMLElement, by: Driver) => {
+      fireEvent.keyDown(root, by.key)
+    },
+    menu: async (_root: HTMLElement, container: HTMLElement, by: Driver) => {
+      const row = container.querySelectorAll("[data-occurrence]")[2]! // C, in the selection
+      await act(async () => {
+        fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
+      })
+      await pick(by.menu!)
+    },
+    bar: async (_root: HTMLElement, _container: HTMLElement, by: Driver) => {
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Actions" }))
+      })
+      for (const label of Array.isArray(by.bar) ? by.bar : [by.bar]) await pick(label)
+    },
+  }
+  interface Driver {
+    key: { key: string; altKey?: boolean; shiftKey?: boolean }
+    /** The block menu's item; absent where the menu does not offer the action. */
+    menu?: string
+    bar: string | string[]
+  }
+  const cases: { action: string; initial?: string; by: Driver }[] = [
+    { action: "indent", by: { key: { key: "Tab" }, bar: "Indent" } },
+    {
+      action: "outdent",
+      initial: "A\n  B\n  C\nD",
+      by: { key: { key: "Tab", shiftKey: true }, bar: "Outdent" },
+    },
+    {
+      action: "move up",
+      by: { key: { key: "ArrowUp", altKey: true }, menu: "Move up", bar: "Move up" },
+    },
+    {
+      action: "move down",
+      by: { key: { key: "ArrowDown", altKey: true }, menu: "Move down", bar: "Move down" },
+    },
+    {
+      action: "duplicate",
+      by: {
+        key: { key: "ArrowDown", altKey: true, shiftKey: true },
+        menu: "Duplicate 2 blocks",
+        bar: "Duplicate",
+      },
+    },
+    {
+      action: "remove",
+      by: { key: { key: "Backspace" }, menu: "Delete 2 blocks", bar: "Delete" },
+    },
+    { action: "turn into", by: { key: { key: "[" }, bar: ["Turn into", "To-do"] } },
+  ]
+
+  for (const { action, initial = FOUR, by } of cases) {
+    it(`${action}: the key, the menu and the bar leave the same doc and the same rows selected`, async () => {
+      const outcomes: Record<string, { lines: string[]; highlighted: string[] }> = {}
+      for (const [name, drive] of Object.entries(drivers)) {
+        if (name === "menu" && !by.menu) continue
+        const { container, getByTestId, unmount } = render(<Harness initial={initial} />)
+        const root = editorRoot(container)
+        selectRows(root, 1, 2) // B and C
+        expect(highlightedAll(container)).toEqual(["B", "C"])
+        await drive(root, container, by)
+        outcomes[name] = {
+          lines: serializedLines(getByTestId),
+          highlighted: highlightedAll(container),
+        }
+        unmount()
+      }
+      const [first, ...rest] = Object.values(outcomes)
+      expect(rest.length).toBeGreaterThan(0)
+      for (const other of rest) expect(other).toEqual(first)
+      // And it did something: the action changed the doc.
+      expect(first.lines).not.toEqual(serializedLinesOf(initial))
+    })
+  }
+
+  /** The content lines an initial markdown would serialise to. */
+  function serializedLinesOf(markdown: string): string[] {
+    return markdown.split("\n").filter((l) => !l.includes("id::") && l.trim() !== "")
+  }
+
+  it("the bar's Delete deletes every selected block everywhere, as the menu's does", async () => {
+    const fromBar = vi.fn()
+    const fromMenu = vi.fn()
+    for (const [deleteEverywhere, open] of [
+      [fromBar, async () => fireEvent.click(screen.getByRole("button", { name: "Actions" }))],
+      [
+        fromMenu,
+        async (container: HTMLElement) =>
+          fireEvent.contextMenu(container.querySelectorAll("[data-occurrence]")[2]!, {
+            clientX: 10,
+            clientY: 10,
+          }),
+      ],
+    ] as const) {
+      const { container, unmount } = render(
+        <Harness initial={FOUR} parentCountOf={() => 1} onDeleteEverywhere={deleteEverywhere} />,
+      )
+      selectRows(editorRoot(container), 1, 2)
+      await act(async () => {
+        await open(container)
+      })
+      // The bar says Unlink beside Delete here, as the menu does.
+      await pick(deleteEverywhere === fromBar ? "Delete" : "Delete 2 blocks")
+      unmount()
+    }
+    expect(fromBar).toHaveBeenCalledWith(["blk_b", "blk_c"])
+    expect(fromMenu).toHaveBeenCalledWith(["blk_b", "blk_c"])
+  })
+
+  it("the per-block actions take each selected block: Pin pins them all", async () => {
+    const { container } = render(<Harness initial={FOUR} noteId="n" />)
+    selectRows(editorRoot(container), 1, 2)
+    await act(async () => {
+      fireEvent.contextMenu(container.querySelectorAll("[data-occurrence]")[1]!, {
+        clientX: 10,
+        clientY: 10,
+      })
+    })
+    await pick("Pin")
+    const rows = container.querySelectorAll("[data-occurrence]")
+    expect(rows[0]!.querySelector('[data-testid="block-pinned"]')).toBeNull()
+    expect(rows[1]!.querySelector('[data-testid="block-pinned"]')).not.toBeNull()
+    expect(rows[2]!.querySelector('[data-testid="block-pinned"]')).not.toBeNull()
+    expect(rows[3]!.querySelector('[data-testid="block-pinned"]')).toBeNull()
+  })
+})
