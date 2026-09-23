@@ -132,9 +132,12 @@ keyboard that appears and disappears. The block editor
   is WebKit not re-reading the attribute when focus is moved by script while
   the keyboard is already up — a known quirk with no page-side fix.)
 - **Chrome is sized for a finger.** The collapse chevron always shows (nothing
-  to hover with) at a 10px glyph on a 32px square; the focus dot's hit area is
-  26px; the todo checkbox grows its hit area through a pseudo-element; the
-  type scale steps body text up and display sizes down
+  to hover with) at a 12px glyph on a 36×32px target; the focus dot's hit area
+  is 26px; the todo checkbox is drawn at 17px and grows its hit area through a
+  pseudo-element, mostly up and down — only 4px to the right, and the marker
+  gap widens from 8px to 12px, so a tap at the start of a todo's line lands on
+  the line rather than the box; the type scale steps body text up (16px, the
+  size below which iOS zooms into a focused field) and display sizes down
   (`src/styles/variables.css`).
 
 ## Elsewhere in the app
@@ -202,7 +205,7 @@ Found while working through the editor; none is fixed here.
 6. **The help drawer is a keyboard reference.** `?` lists shortcuts that a
    phone cannot press; a touch screen would want a page on taps and holds
    instead.
-7. **Row height.** Rows keep the desktop rhythm (a 15px line with 4px between
+7. **Row height.** Rows keep the desktop rhythm (a 16px line with 4px between
    nested rows, ~30px pitch) rather than the 44px Apple and 48px Material ask
    of a control. The whole-row tap target and the widened chrome cover the
    common taps; a denser outline was chosen over a taller one.

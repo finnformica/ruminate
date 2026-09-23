@@ -714,11 +714,13 @@ export function BlockItem({
         // IconButton's default radius is the 8px base — on a 20px square that
         // reads as a pill. The small radius (4px) keeps it a square.
         "rounded-sm",
-        // Coarse pointers get a 32px square to tap instead of IconButton's
+        // Coarse pointers get a 32px-tall target instead of IconButton's
         // 40px-tall padded bar (which would overlap neighbouring rows and
         // squeeze the glyph); it reaches a hair past the surface into the
-        // gap on either side, where no other control lives.
-        "h-5 w-5 coarse:h-8 coarse:w-8 coarse:px-0",
+        // gap on either side, where no other control lives. It is 36px
+        // wide: the row's wider marker gap on a coarse pointer leaves the
+        // room, and it still stops short of the text.
+        "h-5 w-5 coarse:h-8 coarse:w-9 coarse:px-0",
         // Beside a todo the square is a hit area only — no hover surface, so
         // it never clashes with the checkbox or the highlight it straddles;
         // the chevron's own fade-in is the whole reveal. It stays 20px wide
@@ -737,8 +739,8 @@ export function BlockItem({
           // swap, easing out to rest with no overshoot.
           "transition-transform duration-300 ease-[var(--ease-in-out)] motion-reduce:transition-none",
           // A finger's chevron is the key itself (it never swaps in), so
-          // it is drawn a size up to be read as one.
-          "coarse:size-2.5",
+          // it is drawn a size up to be read — and aimed at — as one.
+          "coarse:size-3",
           isCollapsed || looped ? "rotate-0" : "rotate-90",
         )}
       >
@@ -1102,7 +1104,10 @@ export function BlockItem({
             // run into one continuous surface. Either way the negative
             // margin equals the padding, so the text never moves a pixel
             // and the block rhythm gains nothing.
-            "relative flex items-start gap-2 rounded",
+            // The marker gap widens on a coarse pointer, so a finger aiming
+            // for the start of the line lands on the line, not the marker
+            // (a todo's checkbox above all).
+            "relative flex items-start gap-2 rounded coarse:gap-3",
             wide
               ? "-ml-[4.5px] -mr-[4.5px] pl-[8.5px] pr-[8.5px]"
               : "-ml-0.5 -mr-0.5 pl-1.5 pr-1.5",

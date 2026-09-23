@@ -253,17 +253,23 @@
     border-color 150ms ease;
 }
 
-/* Coarse pointers: a 15px box is a small tap target, so its hit area grows
- * through a pseudo-element (drawn size unchanged) — less to the LEFT, where a
- * parent todo's always-showing chevron square ends 1px short of the box. */
+/* Coarse pointers: the box is drawn a size up (it overhangs the 15px slot
+ * evenly, so the guide line still hangs from its centre) and its hit area
+ * grows through a pseudo-element — mostly up and down. Only a little to the
+ * RIGHT: a tap just past the box is a tap at the start of the line (the
+ * row's own tap, which puts the caret there), and the row's wider marker gap
+ * leaves room for one; less still to the LEFT, where a parent todo's
+ * always-showing chevron square ends where the box begins. */
 @media (pointer: coarse) {
   .block-checkbox {
     position: relative;
+    width: 17px;
+    height: 17px;
   }
   .block-checkbox::before {
     content: "";
     position: absolute;
-    inset: -10px -10px -10px -2px;
+    inset: -10px -4px -10px -2px;
   }
 }
 
@@ -278,6 +284,12 @@
   background-size: 10px 10px;
   background-position: center;
   background-repeat: no-repeat;
+}
+/* The tick grows with the coarse pointer's larger box. */
+@media (pointer: coarse) {
+  .block-checkbox:checked {
+    background-size: 12px 12px;
+  }
 }
 
 .block-checkbox:focus-visible {
