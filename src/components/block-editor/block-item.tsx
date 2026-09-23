@@ -298,12 +298,11 @@ export function BlockItem({
   // A marker slot is drawn unless the type has none AND nothing needs one.
   const slotted = kind.slot !== "none" || hasToggle
   const rowContext: RowContext = { block, occurrence, api, depth, editing, slotted }
-  const roomy = kind.roomy?.(rowContext) ?? false
   // A ROOT of a results view (`api.fixedRoots`): its surface is set in by
-  // the same 8.5px at the sides a listed note's is all round, so every
-  // root's surface — a note's, a matched block's — shares one left edge, the
-  // one the page's search box sits on (the view pads by the reach). The
-  // margin still nets the text to the shared 4px column.
+  // 8.5px at the sides, so every root's surface — a note's, a matched
+  // block's — shares one left edge, the one the page's search box sits on
+  // (the view pads by the reach). The margin still nets the text to the
+  // shared 4px column.
   const wide = !!api.fixedRoots && depth === 0
   // Kept as context by a filter, not found by it (`BlockEditorApi.context`).
   const dimmed = api.context?.has(block.id) ?? false
@@ -1184,22 +1183,8 @@ export function BlockItem({
             // seamlessly (same solid fill, same solid side lines); root rows
             // sit 6px apart: 4+4 still overlaps 2px, so runs merge at every
             // level.
-            //
-            // A roomy row (`BlockKind.roomy` — a note in a list) pads for
-            // real instead: 8.5px each side of its 23px line is the 40px
-            // row the notes list always had, and the 1px reach leaves the
-            // same 2px between two of them. It is never mid-run: only
-            // read-only lists have one, and they have no multi-select.
-            runEdges?.top
-              ? "-mt-1 pt-1 rounded-t-none block-run-top"
-              : roomy
-                ? "-mt-px pt-[8.5px]"
-                : "-mt-0.5 pt-0.5",
-            runEdges?.bottom
-              ? "-mb-1 pb-1 rounded-b-none block-run-bottom"
-              : roomy
-                ? "-mb-px pb-[8.5px]"
-                : "-mb-0.5 pb-0.5",
+            runEdges?.top ? "-mt-1 pt-1 rounded-t-none block-run-top" : "-mt-0.5 pt-0.5",
+            runEdges?.bottom ? "-mb-1 pb-1 rounded-b-none block-run-bottom" : "-mb-0.5 pb-0.5",
             // bg-bg-secondary is the structural "selected" hook (tests query
             // it); .block-highlight draws the accent ring and faint wash over
             // it so selection reads as selected, not hovered.

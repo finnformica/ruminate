@@ -59,15 +59,6 @@ export interface BlockKind {
   /** A parent's collapse chevron sits beside the marker rather than
    * replacing it (the checkbox keeps its own click). */
   readonly toggleBeside?: boolean
-  /**
-   * The row stands with more room above and below its line: real padding on
-   * the highlight surface, so the hover and the keyboard highlight grow with
-   * it, rather than the margin-cancelled pair every other row uses. The text
-   * column is untouched. Given the row's context, so a type can be roomy in
-   * one view and keep the editor's rhythm in another — the only one that is
-   * is `note`, listed as a result.
-   */
-  readonly roomy?: (context: RowContext) => boolean
   /** Text size and weight, by outline depth — the same on the rendered view
    * and the textarea, so switching never shifts a character. Given the block
    * too, for a type whose text follows its props (an image's caption sits
@@ -191,13 +182,11 @@ const note: BlockKind = {
   ),
   // A note's title is a NAME, not content: it is set in the interface font
   // the sidebar and the note header use for it, not the content font the
-  // blocks inside it are set in.
-  typography: () => cx(BODY, "font-sans"),
-  // A note listed as a result (a root of a results view) is a whole note,
-  // not a line inside one: it takes the 40px row the notes list gave it
-  // before notes were drawn as blocks. Linked under a block in the editor it
-  // keeps the editor's rhythm.
-  roomy: ({ api, depth }) => !!api.fixedRoots && depth === 0,
+  // blocks inside it are set in. Listed as a result it is drawn the way a
+  // listed heading is — bold, at the body's scale, on the editor's rhythm —
+  // so a note row and a heading row read as the same row with a different
+  // key.
+  typography: (_depth, _block, listed) => cx(BODY, "font-sans", listed && "font-bold"),
 }
 
 export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
