@@ -428,3 +428,17 @@
     transform: none;
   }
 }
+
+/* ── Press-and-hold ──────────────────────────────────────────────────────────
+ * While a finger is down on a row on a touch screen (the block sheet's
+ * press-and-hold, `block-editor.tsx`), nothing on the page may be selected
+ * or called out: not the text behind the sheet, not the sheet rising under
+ * the finger, not the page itself, which iOS would otherwise select whole.
+ * The editor puts the class on the root on the finger's down and takes it
+ * off on the lift. */
+html.press-hold,
+html.press-hold * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}

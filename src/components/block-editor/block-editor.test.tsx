@@ -2746,7 +2746,7 @@ describe("BlockEditor context menu", () => {
   it("opens on a row with the standard actions, and selects that row", async () => {
     const { container } = render(<Harness initial={"A\nB\nC"} />)
     const menu = await openMenuOn(container, 1)
-    for (const label of ["Edit", "Turn into", "Duplicate", "Focus on", "Copy", "Delete"]) {
+    for (const label of ["Move up", "Move down", "Duplicate", "Copy", "Delete"]) {
       expect(menu.textContent).toContain(label)
     }
     // The row under the pointer becomes the selection (and the menu's target).
@@ -2755,10 +2755,46 @@ describe("BlockEditor context menu", () => {
     // alone, with nothing to unlink from.
     expect(menu.textContent).not.toContain("Unlink")
     expect(menu.textContent).not.toContain("places")
-    // The structure moves are in the menu on every surface, keys beside them.
-    for (const label of ["Indent", "Outdent", "Move up", "Move down"]) {
-      expect(menu.textContent).toContain(label)
+    // Nothing a click, the chevron or a key (the edit bar, on a phone)
+    // already does.
+    for (const label of ["Edit", "Indent", "Outdent", "Focus on", "Turn into", "Collapse"]) {
+      expect(menu.textContent).not.toContain(label)
     }
+  })
+
+  it("runs in sections, ruled apart: copying first, removing last", async () => {
+    /** The menu's items in order, "—" for each rule between sections. */
+    const outline = (menu: HTMLElement) =>
+      Array.from(menu.querySelectorAll('[role="menuitem"], [role="separator"]')).map((el) =>
+        el.getAttribute("role") === "separator" ? "—" : el.textContent!.replace(/[⌘⌥⇧↑↓⌫C]+$/, ""),
+      )
+    const { container } = render(<Harness initial={"A\nRead [the guide](https://e.com/g)"} />)
+    // A plain row: no link or figure section, and no rule left for it.
+    expect(outline(await openMenuOn(container, 0))).toEqual([
+      "Copy",
+      "—",
+      "Move up",
+      "Move down",
+      "Duplicate",
+      "—",
+      "Delete",
+    ])
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    })
+    // A row with a link: its own section, between copying and arranging.
+    expect(outline(await openMenuOn(container, 1))).toEqual([
+      "Copy",
+      "—",
+      "Edit link",
+      "Turn into link block",
+      "—",
+      "Move up",
+      "Move down",
+      "Duplicate",
+      "—",
+      "Delete",
+    ])
   })
 
   it("Delete removes the row (an undoable edit)", async () => {
@@ -2768,16 +2804,6 @@ describe("BlockEditor context menu", () => {
     expect(serializedLines(getByTestId)).toEqual(["A", "C"])
     fireEvent.keyDown(editorRoot(container), { key: "z", metaKey: true })
     expect(serializedLines(getByTestId)).toEqual(["A", "B", "C"])
-  })
-
-  it("Turn into changes the block's type from the submenu", async () => {
-    const { container, getByTestId } = render(<Harness initial={"A\nB"} />)
-    await openMenuOn(container, 0)
-    await act(async () => {
-      fireEvent.click(screen.getByText("Turn into"))
-    })
-    await pick("Heading")
-    expect(serializedLines(getByTestId)).toEqual(["# A", "B"])
   })
 
   it("in a note, a block held only here offers Unlink (the row) and Delete (the block)", async () => {
@@ -3122,7 +3148,6 @@ describe("BlockEditor images", () => {
       fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
     })
     const menu = screen.getByTestId("block-context-menu")
-    expect(menu.textContent).toContain("Edit caption")
     expect(menu.textContent).toContain("Open image")
     expect(menu.textContent).toContain("Download image")
     expect(menu.textContent).not.toContain("Turn into")
@@ -3750,7 +3775,7 @@ describe("BlockEditor links", () => {
     )
   })
 
-  it("Turn into → Link in the menu makes the block of the row's first link", async () => {
+  it("Turn into link block in the menu makes the block of the row's first link", async () => {
     const { container, getByTestId } = render(
       <Harness
         initial={"Read [the guide](https://e.com/g) and https://e.com/x\n[e.com](https://e.com/y)"}
@@ -3759,10 +3784,7 @@ describe("BlockEditor links", () => {
     // A sentence: the block goes in beneath, titled as the link.
     await openMenuOn(container, 0)
     await act(async () => {
-      fireEvent.click(screen.getByText("Turn into"))
-    })
-    await act(async () => {
-      fireEvent.click(await screen.findByText("Link"))
+      fireEvent.click(screen.getByText("Turn into link block"))
     })
     expect(serializedLines(getByTestId)).toEqual([
       "Read [the guide](https://e.com/g) and https://e.com/x",
@@ -3772,10 +3794,7 @@ describe("BlockEditor links", () => {
     // A row that is only the link becomes the block itself.
     await openMenuOn(container, 2)
     await act(async () => {
-      fireEvent.click(screen.getByText("Turn into"))
-    })
-    await act(async () => {
-      fireEvent.click(await screen.findByText("Link"))
+      fireEvent.click(screen.getByText("Turn into link block"))
     })
     expect(serializedLines(getByTestId)).toEqual([
       "Read [the guide](https://e.com/g) and https://e.com/x",
@@ -3788,11 +3807,8 @@ describe("BlockEditor links", () => {
     )
     // A row with no link is not offered it.
     const plain = render(<Harness initial={"No link here"} />)
-    await openMenuOn(plain.container, 0)
-    await act(async () => {
-      fireEvent.click(screen.getByText("Turn into"))
-    })
-    expect(screen.queryByText("Link")).toBeNull()
+    const menu = await openMenuOn(plain.container, 0)
+    expect(menu.textContent).not.toContain("Turn into link block")
   })
 
   it("the menu's Edit link opens a link block's card outright, for a touch screen", async () => {
@@ -4081,7 +4097,6 @@ describe("BlockEditor links", () => {
       />,
     )
     const menu = await openMenuOn(container, 0)
-    expect(menu.textContent).toContain("Edit title")
     expect(menu.textContent).toContain("Open link")
     expect(menu.textContent).toContain("Turn into inline")
     expect(menu.textContent).toContain("Align")

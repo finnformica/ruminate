@@ -472,8 +472,17 @@ describe("the edit bar", () => {
   })
 })
 
+/** The finger that opened the block sheet lifts, and a beat passes: the
+ * sheet takes taps from here on. Needs fake timers. */
+function liftFinger() {
+  act(() => {
+    document.body.dispatchEvent(new Event("touchend", { bubbles: true, cancelable: true }))
+    vi.advanceTimersByTime(300)
+  })
+}
+
 describe("the block menu on a touch screen", () => {
-  it("is a sheet, opened by a press-and-hold on the row, carrying the structure moves", async () => {
+  it("is a sheet, opened by a press-and-hold on the row, carrying what nothing else does", async () => {
     vi.useFakeTimers()
     try {
       const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta"} />)
@@ -485,18 +494,94 @@ describe("the block menu on a touch screen", () => {
       })
       const sheet = screen.getByTestId("block-menu-sheet")
       expect(sheet.textContent).toContain("Beta")
-      for (const label of ["Indent", "Outdent", "Move up", "Move down", "Turn into", "Delete"]) {
+      for (const label of ["Move up", "Move down", "Duplicate", "Copy", "Delete"]) {
         expect(sheet.textContent).toContain(label)
+      }
+      // What a tap, the chevron or the edit bar already does is not repeated.
+      for (const label of ["Edit", "Indent", "Outdent", "Collapse", "Focus on", "Turn into"]) {
+        expect(sheet.textContent).not.toContain(label)
       }
       // The row the sheet is for is marked, quietly.
       expect(container.querySelector(".bg-bg-secondary")!.textContent).toContain("Beta")
-      fireEvent.click(screen.getByText("Indent"))
-      expect(lines(getByTestId)).toEqual(["Alpha", "  Beta"])
+      liftFinger()
+      fireEvent.click(screen.getByText("Move up"))
+      expect(lines(getByTestId)).toEqual(["Beta", "Alpha"])
       // Closed on the pick, and nothing left lit.
       act(() => {
         vi.runAllTimers()
       })
       expect(container.querySelector(".bg-bg-secondary")).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("takes no pick until the finger that opened it has lifted", () => {
+    vi.useFakeTimers()
+    try {
+      const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta"} />)
+      fireEvent.pointerDown(rows(container)[1], { pointerType: "touch", clientX: 20, clientY: 20 })
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
+      // The finger is still down: whatever row it is over is not a choice.
+      fireEvent.click(screen.getByText("Move up"))
+      expect(lines(getByTestId)).toEqual(["Alpha", "Beta"])
+      // The lift, and the click the browser owes it, straight after.
+      const lift = new Event("touchend", { bubbles: true, cancelable: true })
+      document.body.dispatchEvent(lift)
+      expect(lift.defaultPrevented).toBe(true)
+      fireEvent.click(screen.getByText("Move up"))
+      expect(lines(getByTestId)).toEqual(["Alpha", "Beta"])
+      expect(screen.getByTestId("block-menu-sheet")).toBeTruthy()
+      // A beat later, a tap is a pick.
+      act(() => {
+        vi.advanceTimersByTime(300)
+      })
+      fireEvent.click(screen.getByText("Move up"))
+      expect(lines(getByTestId)).toEqual(["Beta", "Alpha"])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("lets nothing on the page be selected while the finger is down", () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(<Harness initial={"Alpha\nBeta"} />)
+      const root = document.documentElement
+      const row = rows(container)[1]
+      // A tap: locked on the down, given back on the lift.
+      fireEvent.pointerDown(row, { pointerType: "touch", clientX: 20, clientY: 20 })
+      expect(root.classList.contains("press-hold")).toBe(true)
+      fireEvent.pointerUp(row, { pointerType: "touch" })
+      expect(root.classList.contains("press-hold")).toBe(false)
+      // A hold: still locked once the sheet is up, until after the lift.
+      fireEvent.pointerDown(row, { pointerType: "touch", clientX: 20, clientY: 20 })
+      act(() => {
+        vi.advanceTimersByTime(500)
+      })
+      fireEvent.pointerUp(row, { pointerType: "touch" })
+      expect(root.classList.contains("press-hold")).toBe(true)
+      liftFinger()
+      expect(root.classList.contains("press-hold")).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("leaves a hold in the text being edited to the text: no sheet", () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(<Harness initial={"Alpha\nBeta"} />)
+      fireEvent.click(bodyOf(rows(container)[0]))
+      const textarea = container.querySelector("textarea")!
+      fireEvent.pointerDown(textarea, { pointerType: "touch", clientX: 20, clientY: 20 })
+      act(() => {
+        vi.advanceTimersByTime(600)
+      })
+      expect(screen.queryByTestId("block-menu-sheet")).toBeNull()
+      expect(document.documentElement.classList.contains("press-hold")).toBe(false)
     } finally {
       vi.useRealTimers()
     }
@@ -525,17 +610,23 @@ describe("the block menu on a touch screen", () => {
   })
 
   it("opens the sheet on a contextmenu too (Android's long press), never the popup", async () => {
-    const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta"} />)
-    await act(async () => {
-      fireEvent.contextMenu(rows(container)[1], { clientX: 10, clientY: 10 })
-    })
-    expect(screen.queryByTestId("block-context-menu")).toBeNull()
-    const sheet = screen.getByTestId("block-menu-sheet")
-    expect(sheet.textContent).toContain("Outdent")
-    await act(async () => {
-      fireEvent.click(screen.getByText("Indent"))
-    })
-    expect(lines(getByTestId)).toEqual(["Alpha", "  Beta"])
+    vi.useFakeTimers()
+    try {
+      const { container, getByTestId } = render(<Harness initial={"Alpha\nBeta"} />)
+      await act(async () => {
+        fireEvent.contextMenu(rows(container)[1], { clientX: 10, clientY: 10 })
+      })
+      expect(screen.queryByTestId("block-context-menu")).toBeNull()
+      const sheet = screen.getByTestId("block-menu-sheet")
+      expect(sheet.textContent).toContain("Move down")
+      liftFinger()
+      await act(async () => {
+        fireEvent.click(screen.getByText("Move up"))
+      })
+      expect(lines(getByTestId)).toEqual(["Beta", "Alpha"])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("selects no text under the finger: the rows are unselectable, the textarea is not", () => {
@@ -596,8 +687,8 @@ describe("the block menu on a touch screen", () => {
     })
     const menu = screen.getByTestId("block-context-menu")
     // One list on two surfaces: the moves are here too, keys beside them.
-    expect(menu.textContent).toContain("Indent")
     expect(menu.textContent).toContain("Move up")
+    expect(menu.textContent).not.toContain("Indent")
     expect(screen.queryByTestId("block-menu-sheet")).toBeNull()
   })
 })

@@ -322,6 +322,12 @@ function ownsFocus(container: HTMLElement, active: Element | null): boolean {
   )
 }
 
+/** How the finger that opened the block sheet announces its lift, and how
+ * long after it the sheet's rows start taking taps: long enough for the
+ * click the browser owes the lift to have landed and been ignored. */
+const LIFT_EVENTS = ["touchend", "touchcancel", "pointerup", "pointercancel"] as const
+const LIFT_GRACE = 250
+
 /** Keys that are only modifiers: pressing one alone is not "using the keyboard". */
 const MODIFIER_KEYS = new Set(["Shift", "Meta", "Control", "Alt", "CapsLock"])
 
@@ -1616,7 +1622,6 @@ export function BlockEditor({
       id: row.id,
       type: block.type,
       hasChildren: row.hasChildren,
-      collapsed: row.collapsed,
       places: parentCountOf ? Math.max(1, parentCountOf(row.id)) : 1,
       pinned: pinnedRoots.has(block.id),
       figure: isFigureType(block.type)
@@ -1662,6 +1667,8 @@ export function BlockEditor({
       event.preventDefault()
       event.stopPropagation()
       cancelPress()
+      lockPage(true)
+      setHolding(true)
       openMenuOn(target)
       setSheetOpen(true)
       return
@@ -1705,10 +1712,48 @@ export function BlockEditor({
   const [sheetOpen, setSheetOpen] = useState(false)
   const press = useRef<{ timer: number; x: number; y: number } | null>(null)
   const cancelPress = () => {
-    if (press.current === null) return
-    window.clearTimeout(press.current.timer)
-    press.current = null
+    if (press.current !== null) {
+      window.clearTimeout(press.current.timer)
+      press.current = null
+    }
+    if (!holdingRef.current) lockPage(false)
   }
+  // While a finger is down on a row, nothing on the page may be selected:
+  // not the text behind the sheet, not the sheet rising under the finger,
+  // not the page itself (iOS's long press, left to itself, selects whatever
+  // the finger is over once the sheet is there — at worst the whole screen).
+  // The lock is a class on the root (`block-editor.css`), taken on the
+  // finger's down and given back on its lift.
+  const lockPage = (on: boolean) => document.documentElement.classList.toggle("press-hold", on)
+  // The sheet opens while the finger that asked for it is still down, and
+  // the lift that follows is not a pick: the sheet's rows ignore it (and
+  // the click the browser owes it) until a beat after the finger is up.
+  // Listened to on the document, since the sheet is portalled out of the
+  // editor and the row the finger went down on may have re-rendered away.
+  const [holding, setHoldingState] = useState(false)
+  const holdingRef = useRef(false)
+  const setHolding = (on: boolean) => {
+    holdingRef.current = on
+    setHoldingState(on)
+    if (!on) lockPage(false)
+  }
+  useEffect(() => {
+    if (!holding) return
+    let timer: number | undefined
+    const lift = (event: Event) => {
+      if ((event as PointerEvent).pointerType === "mouse") return
+      if (event.type === "touchend" && event.cancelable) event.preventDefault()
+      if (timer === undefined) timer = window.setTimeout(() => setHolding(false), LIFT_GRACE)
+    }
+    for (const type of LIFT_EVENTS) {
+      document.addEventListener(type, lift, { capture: true, passive: false })
+    }
+    return () => {
+      for (const type of LIFT_EVENTS) document.removeEventListener(type, lift, true)
+      window.clearTimeout(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setHolding is stable in what it does
+  }, [holding])
   // A text selection the page is showing is dropped by a finger on the
   // editor: the rows are unselectable under a finger (the container's
   // `select-none`), so a selection is never one the person meant — it is
@@ -1725,16 +1770,20 @@ export function BlockEditor({
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!coarse || readOnly || event.pointerType === "mouse") return
     dropPageSelection()
+    // A hold in the text being edited is the person selecting some of it
+    // (to format it, to copy it): iOS's own selection, and no sheet.
+    if (event.target instanceof HTMLTextAreaElement) return
     const target = menuTargetAt(event.target)
     if (!target) return
     cancelPress()
+    lockPage(true)
     const { clientX: x, clientY: y } = event
     press.current = {
       x,
       y,
       timer: window.setTimeout(() => {
         press.current = null
-        heldOpen.current = true
+        setHolding(true)
         dropPageSelection()
         openMenuOn(target)
         setSheetOpen(true)
@@ -1751,7 +1800,14 @@ export function BlockEditor({
     setSheetOpen(false)
     setMenuTarget(null)
   }
-  useEffect(() => cancelPress, [])
+  useEffect(
+    () => () => {
+      cancelPress()
+      lockPage(false)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on unmount only
+    [],
+  )
   // ── Images ────────────────────────────────────────────────────────────────
   // A pasted, dropped or picked picture is uploaded first and only then
   // becomes a block (a failed upload leaves the doc as it was and says so),
@@ -2122,18 +2178,17 @@ export function BlockEditor({
     history.commit(doc, updated, { type: "structural" })
   }
 
+  const setBlockType = (id: string, type: BlockType) => {
+    const next = updateBlock(doc, id, { type })
+    if (next !== doc) history.commit(doc, next, { type: "structural" })
+  }
   const menuActions: BlockMenuActions = {
-    edit: (key) => edit(key),
     editLink: (key, href) => setLinkCard({ key, href }),
     turnIntoLink: (key, href, title) => linkToBlock(key, href, title === href ? "" : title),
     openImage: (id) => setLightbox(id),
     downloadImage: (id) => {
       const block = doc.blocks[id]
       if (block) void downloadImage(block)
-    },
-    setType: (id, type) => {
-      const next = updateBlock(doc, id, { type })
-      if (next !== doc) history.commit(doc, next, { type: "structural" })
     },
     openLink: (id) => {
       const block = doc.blocks[id]
@@ -2145,12 +2200,8 @@ export function BlockEditor({
     alignFigure: (id, align) => setFigureLayout(id, { align }),
     resetFigureSize: (id) => setFigureLayout(id, { size: null }),
     duplicate: (key) => runOnRow("duplicateBelow", key),
-    indent: (key) => runOnRow("indent", key),
-    outdent: (key) => runOnRow("outdent", key),
     moveUp: (key) => runOnRow("moveBlockUp", key),
     moveDown: (key) => runOnRow("moveBlockDown", key),
-    toggleCollapse: (key) => toggleCollapse(key),
-    focusBlock: (id) => navigateFocus(id),
     copy: (key) => copyRows([key]),
     copyLink: noteId
       ? (id) => copy(`${window.location.origin}/notes/${noteId}?block=${id}`)
@@ -2901,6 +2952,7 @@ export function BlockEditor({
             target={readOnly ? null : menuTarget}
             title={menuTarget ? (doc.blocks[menuTarget.id]?.text ?? "") : ""}
             actions={menuActions}
+            holding={holding}
             open={sheetOpen && menuTarget !== null}
             onOpenChange={(open) => {
               if (!open) closeSheet()
@@ -3012,7 +3064,7 @@ export function BlockEditor({
             canRedo: history.canRedo(),
           }}
           actions={{
-            turnInto: (type) => menuActions.setType(idOfKey(focus.key), type),
+            turnInto: (type) => setBlockType(idOfKey(focus.key), type),
             bold: () => runOnEditing("wrapBold"),
             italic: () => runOnEditing("wrapItalic"),
             strike: () => runOnEditing("wrapStrike"),
