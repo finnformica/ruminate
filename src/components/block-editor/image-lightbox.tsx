@@ -44,11 +44,11 @@ export function ImageLightbox({ block, onClose }: { block: Block | null; onClose
 }
 
 function LightboxImage({ block }: { block: Block }) {
-  const { src } = useImageSrc(block)
+  const { src, failure } = useImageSrc(block)
   const caption = block.text.trim()
   return (
     <>
-      {src && src !== "error" ? (
+      {src ? (
         <img
           src={src}
           alt={caption}
@@ -56,7 +56,11 @@ function LightboxImage({ block }: { block: Block }) {
         />
       ) : (
         <span className="text-[#ffffffaa]">
-          {src === "error" ? "Image unavailable" : "Loading…"}
+          {failure === "missing"
+            ? "Image unavailable"
+            : failure === "unreachable"
+              ? "This image isn’t on this device, and can’t be fetched right now"
+              : "Loading…"}
         </span>
       )}
       {caption ? <p className="max-w-prose text-center text-[#ffffffcc]">{caption}</p> : null}
