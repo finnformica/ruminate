@@ -1,6 +1,6 @@
 ### Added
 
-- Pictures in your notes are kept on your device, so they show when you are offline. Every picture in your own notes is saved in the background once you are signed in, not only the ones you have opened. Notes shared with you are not kept offline.
+- Pictures you have opened are kept on your device, so they still show when you are offline. Pictures are saved as you view or add them, up to 250 MB, with the earliest-saved ones making way for new ones.
 
 ### Changed
 

@@ -1,12 +1,8 @@
-import { getDefaultStore } from "jotai"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { databaseGraphAtom, EMPTY_GRAPH } from "./database-mode"
-import { buildGraphSnapshot } from "./graph"
 import {
   cacheImage,
   fetchImageBlob,
   ImageFetchError,
-  imageIdsOf,
   readCachedImage,
   startImageCache,
   stopImageCache,
@@ -18,13 +14,16 @@ const fetched = vi.mocked(sessionFetch)
 
 /** An in-memory CacheStorage: enough of the Cache API for the module. */
 class FakeCache {
-  entries = new Map<string, Blob>()
+  entries = new Map<string, { blob: Blob; headers: Headers }>()
   async match(request: Request) {
-    const blob = this.entries.get(request.url)
-    return blob ? new Response(blob) : undefined
+    const entry = this.entries.get(request.url)
+    return entry ? new Response(entry.blob, { headers: entry.headers }) : undefined
   }
   async put(request: Request, response: Response) {
-    this.entries.set(request.url, await response.blob())
+    this.entries.set(request.url, { blob: await response.blob(), headers: response.headers })
+  }
+  async delete(request: Request) {
+    return this.entries.delete(request.url)
   }
   async keys() {
     return [...this.entries.keys()].map((url) => new Request(url))
@@ -47,54 +46,23 @@ class FakeCacheStorage {
 
 let storage: FakeCacheStorage
 
-const node = (id: string, type: string, props: Record<string, unknown> | null = null) => ({
-  id,
-  type,
-  text: "",
-  props: props === null ? null : JSON.stringify(props),
-  updated_at: 1,
-})
-
-const graphOf = (...ids: string[]) =>
-  buildGraphSnapshot(
-    [node("p", "page"), ...ids.map((image, i) => node(`b${i}`, "image", { image }))],
-    [],
-  )
-
 const ORIGIN = "https://ruminate.test"
 const A = "img_aaaaaaaaaaaaaaaaaaaaaaaa"
 const B = "img_bbbbbbbbbbbbbbbbbbbbbbbb"
+const C = "img_cccccccccccccccccccccccc"
 
 beforeEach(() => {
   storage = new FakeCacheStorage()
   vi.stubGlobal("caches", storage)
   // Node, not jsdom: jsdom's Blob is not one Node's Response can read. The
-  // two browser globals the module reaches for are stood in for.
-  vi.stubGlobal("window", new EventTarget())
+  // browser global the module reaches for is stood in for.
   vi.stubGlobal("location", { origin: ORIGIN })
   fetched.mockReset()
-  getDefaultStore().set(databaseGraphAtom, EMPTY_GRAPH)
 })
 
 afterEach(() => {
   stopImageCache()
   vi.unstubAllGlobals()
-})
-
-describe("imageIdsOf", () => {
-  it("lists the uploaded pictures in a graph, and nothing else", () => {
-    const graph = buildGraphSnapshot(
-      [
-        node("a", "image", { image: A }),
-        node("b", "image", { src: "https://example.com/x.png" }),
-        node("c", "image", { image: "../../escape" }),
-        node("d", "text", { image: B }),
-        node("e", "image"),
-      ],
-      [],
-    )
-    expect(imageIdsOf(graph)).toEqual([A])
-  })
 })
 
 describe("fetchImageBlob", () => {
@@ -124,9 +92,8 @@ describe("the device's copy of the user's pictures", () => {
   })
 
   it("throws away another identity's pictures when a different account signs in", async () => {
-    await (
-      await storage.open("ruminate-images-7")
-    ).put(new Request(`${ORIGIN}/api/images/${A}`), new Response(new Blob(["theirs"])))
+    startImageCache("7")
+    await cacheImage(A, new Blob(["theirs"]))
     await storage.open("unrelated-cache")
     startImageCache("42")
     await vi.waitFor(() => expect(storage.caches.has("ruminate-images-7")).toBe(false))
@@ -134,61 +101,38 @@ describe("the device's copy of the user's pictures", () => {
     expect(await readCachedImage(A)).toBeNull()
   })
 
-  it("fetches every picture in the user's notes it lacks, in the background", async () => {
-    await (
-      await storage.open("ruminate-images-42")
-    ).put(new Request(`${ORIGIN}/api/images/${A}`), new Response(new Blob(["already"])))
-    getDefaultStore().set(databaseGraphAtom, graphOf(A, B))
-    fetched.mockImplementation(async () => new Response(new Blob(["fetched"])))
-    startImageCache("42")
-    await vi.waitFor(async () => expect(await (await readCachedImage(B))?.text()).toBe("fetched"))
-    // Only the picture it lacked was fetched.
-    expect(fetched).toHaveBeenCalledTimes(1)
-    expect(fetched.mock.calls[0][0]).toBe(`/api/images/${B}`)
+  it("keeps within its cap by letting the earliest-kept pictures go", async () => {
+    startImageCache("42", 10)
+    await cacheImage(A, new Blob(["aaaa"]))
+    await cacheImage(B, new Blob(["bbbb"]))
+    // Six more bytes would pass ten: A, the oldest, goes to make room.
+    await cacheImage(C, new Blob(["cccccc"]))
+    expect(await readCachedImage(A)).toBeNull()
+    expect(await (await readCachedImage(B))?.text()).toBe("bbbb")
+    expect(await (await readCachedImage(C))?.text()).toBe("cccccc")
+    // A picture larger than the whole cap is not kept at all.
+    await cacheImage(A, new Blob(["x".repeat(11)]))
+    expect(await readCachedImage(A)).toBeNull()
+    expect(await readCachedImage(B)).not.toBeNull()
   })
 
-  it("does not ask again for a picture the server has not got", async () => {
-    vi.useFakeTimers()
-    try {
-      getDefaultStore().set(databaseGraphAtom, graphOf(A))
-      fetched.mockImplementation(async () => new Response("", { status: 404 }))
-      startImageCache("42")
-      await vi.advanceTimersByTimeAsync(100)
-      expect(fetched).toHaveBeenCalledTimes(1)
-      // The graph changes; the sweep runs again, and leaves the missing one be.
-      getDefaultStore().set(databaseGraphAtom, graphOf(A, B))
-      await vi.advanceTimersByTimeAsync(5000)
-      expect(fetched.mock.calls.map((call) => call[0])).toEqual([
-        `/api/images/${A}`,
-        `/api/images/${B}`,
-      ])
-    } finally {
-      vi.useRealTimers()
-    }
+  it("counts what the cache already held at start towards its cap", async () => {
+    startImageCache("42", 10)
+    await cacheImage(A, new Blob(["aaaaaa"]))
+    stopImageCache()
+    // Signed in again: A's six bytes are still counted, so B pushes it out.
+    startImageCache("42", 10)
+    await cacheImage(B, new Blob(["bbbbbb"]))
+    expect(await readCachedImage(A)).toBeNull()
+    expect(await (await readCachedImage(B))?.text()).toBe("bbbbbb")
   })
 
-  it("stops sweeping when the server is out of reach, and starts again when the network returns", async () => {
-    vi.useFakeTimers()
-    try {
-      getDefaultStore().set(databaseGraphAtom, graphOf(A, B))
-      fetched.mockRejectedValue(new TypeError("Failed to fetch"))
-      startImageCache("42")
-      await vi.advanceTimersByTimeAsync(100)
-      // Both workers stop at their first failure.
-      expect(fetched.mock.calls.length).toBeLessThanOrEqual(2)
-      const before = fetched.mock.calls.length
-      // An edit within the pause does not try again.
-      getDefaultStore().set(databaseGraphAtom, graphOf(A, B, A))
-      await vi.advanceTimersByTimeAsync(5000)
-      expect(fetched.mock.calls.length).toBe(before)
-      // The network coming back does.
-      fetched.mockImplementation(async () => new Response(new Blob(["back"])))
-      window.dispatchEvent(new Event("online"))
-      await vi.advanceTimersByTimeAsync(100)
-      expect(await (await readCachedImage(A))?.text()).toBe("back")
-      expect(await (await readCachedImage(B))?.text()).toBe("back")
-    } finally {
-      vi.useRealTimers()
-    }
+  it("keeps one copy of a picture put twice at once", async () => {
+    startImageCache("42", 10)
+    await Promise.all([cacheImage(A, new Blob(["aaaa"])), cacheImage(A, new Blob(["aaaa"]))])
+    await cacheImage(B, new Blob(["bbbbbb"]))
+    // Four and six fit exactly, so nothing was double-counted and pushed out.
+    expect(await readCachedImage(A)).not.toBeNull()
+    expect(await readCachedImage(B)).not.toBeNull()
   })
 })

@@ -137,16 +137,23 @@ identity (`ruminate-images-<github id>`), bound as the SQL store is
 (docs/graph-storage.md): signing out leaves it in place, and a different
 account signing in deletes the previous one's before anything reads it.
 
-While signed in, a **sweep** fetches every picture in the user's own notes
-that the cache lacks, two at a time: at sign-in, a few seconds after the
-graph stops changing, and at once when the network comes back. Notes shared
-with the user are left out, as they are not kept offline at all
-(docs/sharing.md). The sweep stops when the origin is using 80% of its
-quota, stops at the first picture it cannot reach (and waits a minute, or
-for the network, before trying again), and never asks twice in a session for
-a picture the server says it has not got. At sign-in the app asks once for
-persistent storage (`navigator.storage.persist()`), which covers the notes'
-own store too.
+A picture is kept when it is **shown or uploaded**, and never fetched ahead —
+as Notion does, whose offline pages show the pictures that loaded while
+online and no others. The copy grows with what the user looks at rather than
+with the corpus, which matters on a phone: pictures are up to ten megabytes
+each. A picture never opened on this device (one added on another, say) is
+not there offline; it shows its likeness and a badge (below).
+
+The copy is capped at 250 MB. Each entry is stamped with its size, so the
+total is known at sign-in without reading the bytes back; a picture that
+would pass the cap lets the earliest-kept ones go first, and one larger than
+the whole cap is not kept. At sign-in the app asks once for persistent
+storage (`navigator.storage.persist()`), which covers the notes' own store
+too.
+
+Only pictures the Worker serves to this identity can be kept, so notes shared
+with the user contribute nothing: they are not kept offline at all
+(docs/sharing.md).
 
 **The likeness** (`src/data/image-thumbhash.ts`). An upload measures a
 [ThumbHash](https://evanw.github.io/thumbhash/) of the picture, from the
@@ -168,7 +175,8 @@ and is tried again when the network returns.
 On iOS, the Cache API and persistent storage both work in Safari, and best
 from the Home Screen: a web app added there is exempt from Safari's rule that
 clears a site's stored data after seven days without a visit, and has its
-own storage allowance.
+own storage allowance. There is no dependable background work on iOS, so a
+picture is only ever kept by being seen in the app.
 
 ## Reading through MCP
 

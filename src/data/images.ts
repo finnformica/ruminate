@@ -20,8 +20,7 @@ import { isImageMime, MAX_IMAGE_BYTES } from "../../worker/handlers/image-policy
  * cannot carry one — and become object URLs, cached for the page's life so
  * a picture is fetched once however many rows show it. The bytes are kept
  * on the device too (`image-cache.ts`), and read from there first, so a
- * picture seen once — or fetched ahead by the background sweep — is there
- * offline.
+ * picture seen once is there offline.
  */
 export const imagesEnabled: boolean = import.meta.env.VITE_IMAGES_ENABLED === "true"
 
