@@ -83,14 +83,14 @@ vi.mock("../global-state", async (importOriginal) => {
     isDatabaseModeAtom: atom(false),
     notesAtom: atom(new Map()),
     sortedNotesAtom: atom([]),
-    pinnedEntriesAtom: atom([]),
-    recentTouchesAtom: atom([]),
+    pinnedRootsAtom: atom([]),
+    recentVisitsAtom: atom([]),
     // The block index only serves the scope pill's label here.
     blockIndexAtom: atom({ hits: [], getBlock: () => undefined }),
   }
 })
 
-import { pinnedEntriesAtom, recentTouchesAtom, sortedNotesAtom } from "../global-state"
+import { pinnedRootsAtom, recentVisitsAtom, sortedNotesAtom } from "../global-state"
 import { CommandMenu, isCommandMenuOpenAtom } from "./command-menu"
 
 // cmdk scrolls the selected item into view and measures its list with a
@@ -118,30 +118,27 @@ function renderMenu({
 }: {
   open?: boolean
   notes?: unknown[]
-  touches?: { id: string; at: number }[]
+  touches?: { id: string; noteId?: string; at: number }[]
   pinned?: unknown[]
   pinnedBlocks?: unknown[]
 } = {}) {
   const store = createStore()
-  // The corpus's notes, the touches this device remembers (what the
-  // palette's Recent list is merged from) and the pinned notes. The atoms
-  // are the mock's plain, writable ones.
+  // The corpus's notes, the places this device visited (what the
+  // palette's Recent list is ranked from — a note unless `noteId` names the
+  // note a block was focused on in, one visit each) and the pinned notes and
+  // blocks. The atoms are the mock's plain, writable ones.
   store.set(sortedNotesAtom as never, notes as never)
-  store.set(recentTouchesAtom as never, touches as never)
   store.set(
-    pinnedEntriesAtom as never,
+    recentVisitsAtom as never,
+    touches.map(({ id, noteId = id, at }) => ({ id, noteId, at, score: 1 })) as never,
+  )
+  store.set(
+    pinnedRootsAtom as never,
     [
-      ...(pinned as { id: string }[]).map((note) => ({
-        kind: "note",
-        id: note.id,
-        noteId: note.id,
-        note,
-      })),
-      ...(pinnedBlocks as { id: string; noteId: string }[]).map((block) => ({
-        kind: "block",
-        id: block.id,
-        noteId: block.noteId,
-        block,
+      ...(pinned as { id: string }[]).map((note) => ({ id: note.id, noteId: note.id })),
+      ...(pinnedBlocks as { id: string; noteId: string }[]).map(({ id, noteId }) => ({
+        id,
+        noteId,
       })),
     ] as never,
   )
@@ -623,10 +620,10 @@ describe("note results", () => {
     expect(rowIds()).toEqual(["research"])
   })
 
-  it("lists the pinned notes beneath the recent ones — a note in both shows once, as recent", () => {
-    // `research` is recent AND pinned: it is listed under Recent only.
-    // `journal` (never edited, never touched) is pinned only: Views holds
-    // it, beneath.
+  it("lists the pinned notes beneath the recent ones — a note in both is in both", () => {
+    // `research` is recent AND pinned: Recent is what you use, Views what
+    // you chose to keep, so it is under each. `journal` (never edited,
+    // never touched) is pinned only: Views holds it, beneath.
     const research = edited("research", 5000)
     const journal = makeNote("journal")
     renderMenu({ open: true, notes: [research, journal], pinned: [research, journal] })
@@ -641,8 +638,26 @@ describe("note results", () => {
         (row) => row.dataset.blockRow,
       )
     expect(idsIn(groups[0])).toEqual(["research"])
-    expect(idsIn(groups[1])).toEqual(["journal"])
-    expect(rowIds()).toEqual(["research", "journal"])
+    expect(idsIn(groups[1])).toEqual(["research", "journal"])
+  })
+
+  it("a block focused on is recent in its own right, and its row opens focused on it", () => {
+    // `blk_ship` was focused on inside `journal` — Recent lists the block,
+    // not the note it lives in.
+    renderMenu({
+      open: true,
+      notes: [makeNote("journal")],
+      touches: [{ id: "blk_ship", noteId: "journal", at: 1000 }],
+    })
+    expect(screen.getByText("Recent")).toBeTruthy()
+    expect(rowIds()).toEqual(["blk_ship"])
+    handOffToRows()
+    fireEvent.keyDown(editor(), { key: "Enter" })
+    expect(mocks.navigate).toHaveBeenCalledWith({
+      to: "/notes/$",
+      params: { _splat: "journal" },
+      search: { query: undefined, block: "blk_ship" },
+    })
   })
 
   it("Views lists the pinned blocks after the pinned notes, each a row of its own", () => {

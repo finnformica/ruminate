@@ -467,8 +467,9 @@ are all of its call sites:
 - `walkGraph`'s upstream pass: the root would show above a note as its parent.
 
 The sort itself is a preference, not data: **Name** (the default), **Recently
-updated** and **Manual**, shared by the sidebar and the notes page so the two
-never disagree about where a note is. Manual is two bands — the notes the root
+updated** and **Manual**, used by the sidebar's notes list (and by the notes
+page, on the rare occasion it lists every note — nothing recent, nothing
+pinned) so the two never disagree about where a note is. Manual is two bands — the notes the root
 holds, then the ones it does not, in the name order beneath them.
 
 **A pin does not steer the order.** Pinned notes are listed on their own under

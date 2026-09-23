@@ -22,13 +22,13 @@ import {
   pinnedEntriesAtom,
   pinnedNotesAtom,
   pinnedRootsAtom,
-  recentTouchesAtom,
+  recentVisitsAtom,
   sampleGraphAtom,
   searchBlocksAtom,
   sharedNotesAtom,
-  touchNoteAtom,
+  touchRecentAtom,
 } from "./global-state"
-import { RECENT_STORAGE_KEY } from "./utils/recent-notes"
+import { RECENT_STORAGE_KEY } from "./utils/recents"
 
 /**
  * The unchecked-boxes flow end-to-end at the atom level: sign in,
@@ -397,31 +397,29 @@ describe("isBootingAtom", () => {
   })
 })
 
-describe("touchNoteAtom", () => {
-  it("notes a touch once, writes the one storage key, and coalesces bumps within a second", () => {
+describe("touchRecentAtom", () => {
+  it("notes a visit once, writes the one storage key, and coalesces touches within a second", () => {
     localStorage.clear()
     const store = createStore()
-    store.set(recentTouchesAtom, [])
-    store.set(touchNoteAtom, "a", 1000)
-    store.set(touchNoteAtom, "b", 2000)
-    expect(store.get(recentTouchesAtom)).toEqual([
-      { id: "b", at: 2000 },
-      { id: "a", at: 1000 },
-    ])
-    expect(JSON.parse(localStorage.getItem(RECENT_STORAGE_KEY)!)).toEqual([
-      { id: "b", at: 2000 },
-      { id: "a", at: 1000 },
-    ])
-    // A selection walking through `b` within the second: nothing changes,
+    store.set(recentVisitsAtom, [])
+    store.set(touchRecentAtom, { id: "a", noteId: "a" }, 1000)
+    store.set(touchRecentAtom, { id: "blk", noteId: "b" }, 2000)
+    const visits = [
+      { id: "blk", noteId: "b", at: 2000, score: 1 },
+      { id: "a", noteId: "a", at: 1000, score: 1 },
+    ]
+    expect(store.get(recentVisitsAtom)).toEqual(visits)
+    expect(JSON.parse(localStorage.getItem(RECENT_STORAGE_KEY)!)).toEqual(visits)
+    // A selection walking through `blk` within the second: nothing changes,
     // nothing is written.
-    const before = store.get(recentTouchesAtom)
+    const before = store.get(recentVisitsAtom)
     localStorage.setItem(RECENT_STORAGE_KEY, "sentinel")
-    store.set(touchNoteAtom, "b", 2500)
-    expect(store.get(recentTouchesAtom)).toBe(before)
+    store.set(touchRecentAtom, { id: "blk", noteId: "b" }, 2500)
+    expect(store.get(recentVisitsAtom)).toBe(before)
     expect(localStorage.getItem(RECENT_STORAGE_KEY)).toBe("sentinel")
     // A second on, it is noted again — and only one key is ever used.
-    store.set(touchNoteAtom, "b", 3000)
-    expect(store.get(recentTouchesAtom)[0]).toEqual({ id: "b", at: 3000 })
+    store.set(touchRecentAtom, { id: "blk", noteId: "b" }, 3000)
+    expect(store.get(recentVisitsAtom)[0].at).toBe(3000)
     expect(Object.keys(localStorage)).toEqual([RECENT_STORAGE_KEY])
   })
 })

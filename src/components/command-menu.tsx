@@ -5,9 +5,8 @@ import { atom, useAtom, useAtomValue } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
-import { pinnedEntriesAtom, recentTouchesAtom, sortedNotesAtom } from "../global-state"
-import type { ResultRoot } from "../hooks/results-doc"
-import { recentNotes as recentTouched } from "../utils/recent-notes"
+import { pinnedRootsAtom } from "../global-state"
+import { useRecentRoots } from "../hooks/recent-roots"
 import { useCreateNote } from "../hooks/note"
 import { useSearchResults } from "../hooks/search-results"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/registry"
@@ -60,29 +59,14 @@ const NAVIGATION_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End"])
 export function CommandMenu() {
   const navigate = useNavigate()
   const createNote = useCreateNote()
-  // With nothing typed: the notes most recently TOUCHED — edited or created
-  // (the graph's `updatedAt`) merged with what was opened, edited or folded
-  // on this device (`recentTouchesAtom`) — at most five; then the pinned
-  // notes beneath, less any already listed as recent, so nothing is there
-  // twice, and the pinned blocks after them (docs/metadata.md), each a row
-  // that opens its note focused on it.
-  const sortedNotes = useAtomValue(sortedNotesAtom)
-  const touches = useAtomValue(recentTouchesAtom)
-  const recentNotes = useMemo(() => recentTouched(touches, sortedNotes), [touches, sortedNotes])
-  const recentRoots = useMemo<ResultRoot[]>(
-    () => recentNotes.map((note) => ({ id: note.id, noteId: note.id })),
-    [recentNotes],
-  )
-  const pinnedEntries = useAtomValue(pinnedEntriesAtom)
-  const pinnedRoots = useMemo<ResultRoot[]>(
-    () =>
-      pinnedEntries
-        .filter(
-          (entry) => entry.kind !== "note" || !recentNotes.some((recent) => recent.id === entry.id),
-        )
-        .map(({ id, noteId }) => ({ id, noteId })),
-    [pinnedEntries, recentNotes],
-  )
+  // With nothing typed: the places most used lately — notes, and blocks
+  // focused on — ranked by frecency (`useRecentRoots`), at most five; then
+  // the Views beneath, the pinned notes and blocks (docs/metadata.md), each a
+  // row that opens its note (focused on the block, for a block). A pinned
+  // place used lately is in both: Recent is what you use, Views what you
+  // chose to keep to hand.
+  const recentRoots = useRecentRoots()
+  const pinnedRoots = useAtomValue(pinnedRootsAtom)
   const [isOpen, setIsOpen] = useAtom(isCommandMenuOpenAtom)
 
   // The open note, if any: it leads the `in:` suggestions, and ⌘P searches
@@ -213,7 +197,7 @@ export function CommandMenu() {
   const results = useSearchResults(deferredQuery)
   const hasRows = deferredQuery
     ? results.rows.length > 0
-    : recentNotes.length > 0 || pinnedRoots.length > 0
+    : recentRoots.length > 0 || pinnedRoots.length > 0
 
   // The keyboard's way through the rows. With nothing typed there are two
   // lists, Recent and then Views, walked as one: ↓ from the query lands on
@@ -407,7 +391,7 @@ export function CommandMenu() {
                 </CommandItem>
               </Command.Group>
             ) : null}
-            {deferredQuery || recentNotes.length > 0 ? (
+            {deferredQuery || recentRoots.length > 0 ? (
               <Command.Group heading={deferredQuery ? "Results" : "Recent"}>
                 {/* The results block — the count and the rows — as the
                     notes page draws it. ↓ past the last item hands the
@@ -446,8 +430,8 @@ export function CommandMenu() {
                   readOnly
                   initialSelection="none"
                   onOpen={openResult}
-                  focusFirstSignal={recentNotes.length > 0 ? pinnedFirstSignal : focusFirstSignal}
-                  onExitTop={recentNotes.length > 0 ? pinnedToRecent : takeBackFromRows}
+                  focusFirstSignal={recentRoots.length > 0 ? pinnedFirstSignal : focusFirstSignal}
+                  onExitTop={recentRoots.length > 0 ? pinnedToRecent : takeBackFromRows}
                 />
               </Command.Group>
             ) : null}

@@ -3,11 +3,12 @@ import { atom } from "jotai"
 import { atomWithStorage } from "jotai/utils"
 import { GitHubUser, Note, NoteId, githubUserSchema } from "./schema"
 import {
-  loadRecentTouches,
-  saveRecentTouches,
+  loadRecentVisits,
+  saveRecentVisits,
   touchRecent,
-  type RecentTouch,
-} from "./utils/recent-notes"
+  type RecentDestination,
+  type RecentVisit,
+} from "./utils/recents"
 import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
 import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
@@ -574,25 +575,28 @@ export const isHelpPanelOpenAtom = atomWithStorage<boolean>(
 )
 
 /**
- * The notes recently TOUCHED on this device — opened, a block in them
- * focused, selected, folded or edited — at most five, a timestamp each
- * (`src/utils/recent-notes.ts`), under the one storage key, overwritten
- * whole. Read once at load; written through `touchNoteAtom`, which
- * coalesces (a note already first is bumped at most once a second) and
- * writes only when the list changed. The palette merges these with the
- * graph's `updatedAt` for its **Recent** list (`recentNotes`).
+ * The places VISITED on this device — a note, or a block focused on in one
+ * — each with a timestamp and a frecency score, at most `RECENT_KEEP`
+ * (`src/utils/recents.ts`), under the one storage key, overwritten whole.
+ * Read once at load; written through `touchRecentAtom`, which coalesces (a
+ * destination is written at most once a second) and writes only when the
+ * list changed. The palette and the notes page rank these, with the graph's
+ * `updatedAt`, into their **Recent** lists (`useRecentRoots`).
  */
-export const recentTouchesAtom = atom<readonly RecentTouch[]>(
-  loadRecentTouches(typeof localStorage === "undefined" ? null : localStorage),
+export const recentVisitsAtom = atom<readonly RecentVisit[]>(
+  loadRecentVisits(typeof localStorage === "undefined" ? null : localStorage),
 )
 
-export const touchNoteAtom = atom(null, (get, set, noteId: NoteId, now: number = Date.now()) => {
-  const touches = get(recentTouchesAtom)
-  const next = touchRecent(touches, noteId, now)
-  if (next === touches) return
-  set(recentTouchesAtom, next)
-  saveRecentTouches(typeof localStorage === "undefined" ? null : localStorage, next)
-})
+export const touchRecentAtom = atom(
+  null,
+  (get, set, destination: RecentDestination, now: number = Date.now()) => {
+    const visits = get(recentVisitsAtom)
+    const next = touchRecent(visits, destination, now)
+    if (next === visits) return
+    set(recentVisitsAtom, next)
+    saveRecentVisits(typeof localStorage === "undefined" ? null : localStorage, next)
+  },
+)
 
 export const calendarLayoutAtom = atomWithStorage<"week" | "month">("calendar-layout", "week")
 
