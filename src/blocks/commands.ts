@@ -24,6 +24,7 @@ import {
   keyOf,
   parentKeyOf,
   pathIdsOf,
+  rootKeys,
   rowsBeneath,
   siblingKey,
 } from "./view"
@@ -44,14 +45,15 @@ import {
  * is read off the key rather than searched for. The block's own text and
  * type are still the node's, changed by id.
  *
- * A **range** of rows is the same commands over more rows: `keys` names the
- * selection's roots (the selected rows with no selected ancestor), and the
- * structural commands — indent, outdent, move, duplicate, delete, turn into,
- * the todo toggle — act on every one of them at once, as one undo step. A
- * single row is a range of one, so there is one delete, not a delete and a
- * bulk delete: the keyboard, the block menu, the selection bar and the
- * touch screen's edit bar all run these, and the only difference between
- * one row and many is what the caller puts in `keys`.
+ * A **selection** of rows is the same commands over more rows: `keys` is
+ * every selected row, and the structural commands — indent, outdent, move,
+ * duplicate, delete, turn into, the todo toggle — act on its roots (the
+ * rows with no selected ancestor, `rootKeys`) at once, as one undo step, so
+ * a subtree the selection covers moves as one. A single row is a selection
+ * of one, so there is one delete, not a delete and a bulk delete: the
+ * keyboard, the block menu, the selection bar and the touch screen's edit
+ * bar all run these, and the only difference between one row and many is
+ * what the caller puts in `keys`.
  *
  * Commands are **pure**: they take the current doc plus a little UI context and
  * return a `CommandResult` describing what should change (a new doc, where focus
@@ -75,20 +77,14 @@ export interface CaretInput {
 
 export interface CommandInput {
   doc: BlockDoc
-  /** The row the command acts on: an occurrence key. With a range selected
-   * this is its head — the row the highlight moves from — and `keys` says
-   * what the command acts on. */
+  /** The row the command is at: the highlight, or the caret's row — an
+   * occurrence key, one of `keys`. What a command about one row (moving
+   * the highlight, editing, splitting) acts on. */
   key: string
-  /**
-   * The rows a structural command acts on when a range is selected: the
-   * selection's roots (rows with no selected ancestor), in document order,
-   * `key` among them or beneath one. Absent or empty = `[key]`, the one row.
-   */
-  keys?: string[]
-  /** The other end of a range selection — where it was started from — so a
-   * command that gives the rows new keys can keep the range on them. Null
-   * or absent = a single row. */
-  anchorKey?: string | null
+  /** The rows the command acts on: every selected row, in document order,
+   * `key` among them. One row is `[key]`. A structural command acts on
+   * their roots (`rootKeys`), so a selected subtree moves as one. */
+  keys: string[]
   mode: Mode
   /** On-screen order of the visible rows' keys (collapsed children skipped). */
   visibleOrder: string[]
@@ -155,9 +151,10 @@ export type FocusIntent =
   | {
       mode: "select"
       key: string | null
-      /** The other end of a range to keep selected, from `key` to here.
-       * Absent or null: `key` alone is highlighted. */
-      anchor?: string | null
+      /** The rows to leave selected, `key` among them, where the command
+       * kept a selection of several (on their new keys, after a move).
+       * Absent: `key` alone is highlighted. */
+      keys?: string[]
     }
   | { mode: "edit"; key: string; atStart?: boolean; caret?: number }
 
@@ -267,16 +264,12 @@ function keepFocus(mode: Mode, key: string, caret?: CaretInput): FocusIntent {
   return mode === "edit" ? { mode: "edit", key, caret: caret?.start } : { mode: "select", key }
 }
 
-/** The rows a structural command acts on: the range's roots, or the one row. */
-const rootsOf = (input: CommandInput): string[] =>
-  input.keys && input.keys.length > 0 ? input.keys : [input.key]
+/** The rows a structural command acts on: the selection's roots. */
+const rootsOf = (input: CommandInput): string[] => rootKeys(input.keys)
 
-/** Is the selection a range — more than one root, or one root with the
- * highlight reaching beneath it (the anchor at one end, the head at the
- * other)? A range is kept as a range after a command; a single row keeps
- * its mode and caret. */
-const isRange = (input: CommandInput): boolean =>
-  rootsOf(input).length > 1 || (input.anchorKey != null && input.anchorKey !== input.key)
+/** Is the selection several rows? Several are kept selected after a
+ * command; a single row keeps its mode and caret. */
+const isRange = (input: CommandInput): boolean => input.keys.length > 1
 
 /** Carry a row's key across the rekeying a structural move did above it: a
  * row beneath a moved root has the root's new key as its prefix now. */
@@ -291,14 +284,14 @@ function rekey(moved: [from: string, to: string][]) {
 /**
  * Where the selection lands after a structural command on its rows: a
  * single row keeps its mode (and, when editing, its caret) on its new key;
- * a range keeps both its ends, each on its new key, so the same rows stay
- * selected wherever the command put them.
+ * several rows stay selected, each on its new key, wherever the command
+ * put them.
  */
 function keepSelection(input: CommandInput, moved: [from: string, to: string][] = []): FocusIntent {
   const follow = rekey(moved)
   const key = follow(input.key) ?? input.key
   if (!isRange(input)) return keepFocus(input.mode, key, input.caret)
-  return { mode: "select", key, anchor: follow(input.anchorKey ?? null) }
+  return { mode: "select", key, keys: input.keys.map((row) => follow(row) ?? row) }
 }
 
 /** What the structure moves can do to the rows right now — what the
@@ -452,7 +445,7 @@ function duplicate(direction: "above" | "below"): Command {
     if (!result) return { handled: true }
     const { copies } = result
     const focus: FocusIntent = isRange(input)
-      ? { mode: "select", key: copies[copies.length - 1], anchor: copies[0] }
+      ? { mode: "select", key: copies[copies.length - 1], keys: copies }
       : keepFocus(mode, copies[0], caret)
     return { handled: true, doc: result.doc, op: STRUCTURAL, focus }
   }
@@ -923,7 +916,7 @@ export const COMMANDS: Record<CommandName, Command> = {
     // Walk the pre-delete visible order outward from the removed rows: first
     // below the last of them (skipping their own removed subtrees via the
     // survives-in-next check), then above the first.
-    const indices = roots.map((key) => visibleOrder.indexOf(key)).filter((i) => i !== -1)
+    const indices = input.keys.map((key) => visibleOrder.indexOf(key)).filter((i) => i !== -1)
     const lo = indices.length > 0 ? Math.min(...indices) : 0
     const hi = indices.length > 0 ? Math.max(...indices) : -1
     let focusKey: string | null = null
