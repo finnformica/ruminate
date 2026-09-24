@@ -1152,7 +1152,7 @@ export const COMMANDS: Record<CommandName, Command> = {
 /** Run a named command. Unknown names are a no-op (defensive). */
 /**
  * The commands a **browse** view runs — a read-only editor the reader still
- * moves through (the notes list, a search's results): everything that moves
+ * moves through (the Views page, a search's results): everything that moves
  * the highlight, folds a row or focuses, and nothing that writes. Enter is
  * the view's own (it opens the row rather than editing it), so `enterEdit`
  * is not here.

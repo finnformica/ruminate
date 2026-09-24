@@ -16,7 +16,9 @@ import { Route as AppRootIndexImport } from './routes/_appRoot.index'
 import { Route as AppRootSettingsImport } from './routes/_appRoot.settings'
 import { Route as AppRootChangelogImport } from './routes/_appRoot.changelog'
 import { Route as AppRootAdminImport } from './routes/_appRoot.admin'
+import { Route as AppRootViewsIndexImport } from './routes/_appRoot.views.index'
 import { Route as AppRootNotesIndexImport } from './routes/_appRoot.notes.index'
+import { Route as AppRootViewsSplatImport } from './routes/_appRoot.views_.$'
 import { Route as AppRootNotesSplatImport } from './routes/_appRoot.notes_.$'
 import { Route as AppRootInviteTokenImport } from './routes/_appRoot.invite.$token'
 
@@ -51,9 +53,21 @@ const AppRootAdminRoute = AppRootAdminImport.update({
   getParentRoute: () => AppRootRoute,
 } as any)
 
+const AppRootViewsIndexRoute = AppRootViewsIndexImport.update({
+  id: '/views/',
+  path: '/views/',
+  getParentRoute: () => AppRootRoute,
+} as any)
+
 const AppRootNotesIndexRoute = AppRootNotesIndexImport.update({
   id: '/notes/',
   path: '/notes/',
+  getParentRoute: () => AppRootRoute,
+} as any)
+
+const AppRootViewsSplatRoute = AppRootViewsSplatImport.update({
+  id: '/views_/$',
+  path: '/views/$',
   getParentRoute: () => AppRootRoute,
 } as any)
 
@@ -122,11 +136,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRootNotesSplatImport
       parentRoute: typeof AppRootImport
     }
+    '/_appRoot/views_/$': {
+      id: '/_appRoot/views_/$'
+      path: '/views/$'
+      fullPath: '/views/$'
+      preLoaderRoute: typeof AppRootViewsSplatImport
+      parentRoute: typeof AppRootImport
+    }
     '/_appRoot/notes/': {
       id: '/_appRoot/notes/'
       path: '/notes'
       fullPath: '/notes'
       preLoaderRoute: typeof AppRootNotesIndexImport
+      parentRoute: typeof AppRootImport
+    }
+    '/_appRoot/views/': {
+      id: '/_appRoot/views/'
+      path: '/views'
+      fullPath: '/views'
+      preLoaderRoute: typeof AppRootViewsIndexImport
       parentRoute: typeof AppRootImport
     }
   }
@@ -141,7 +169,9 @@ interface AppRootRouteChildren {
   AppRootIndexRoute: typeof AppRootIndexRoute
   AppRootInviteTokenRoute: typeof AppRootInviteTokenRoute
   AppRootNotesSplatRoute: typeof AppRootNotesSplatRoute
+  AppRootViewsSplatRoute: typeof AppRootViewsSplatRoute
   AppRootNotesIndexRoute: typeof AppRootNotesIndexRoute
+  AppRootViewsIndexRoute: typeof AppRootViewsIndexRoute
 }
 
 const AppRootRouteChildren: AppRootRouteChildren = {
@@ -151,7 +181,9 @@ const AppRootRouteChildren: AppRootRouteChildren = {
   AppRootIndexRoute: AppRootIndexRoute,
   AppRootInviteTokenRoute: AppRootInviteTokenRoute,
   AppRootNotesSplatRoute: AppRootNotesSplatRoute,
+  AppRootViewsSplatRoute: AppRootViewsSplatRoute,
   AppRootNotesIndexRoute: AppRootNotesIndexRoute,
+  AppRootViewsIndexRoute: AppRootViewsIndexRoute,
 }
 
 const AppRootRouteWithChildren =
@@ -165,7 +197,9 @@ export interface FileRoutesByFullPath {
   '/': typeof AppRootIndexRoute
   '/invite/$token': typeof AppRootInviteTokenRoute
   '/notes/$': typeof AppRootNotesSplatRoute
+  '/views/$': typeof AppRootViewsSplatRoute
   '/notes': typeof AppRootNotesIndexRoute
+  '/views': typeof AppRootViewsIndexRoute
 }
 
 export interface FileRoutesByTo {
@@ -175,7 +209,9 @@ export interface FileRoutesByTo {
   '/': typeof AppRootIndexRoute
   '/invite/$token': typeof AppRootInviteTokenRoute
   '/notes/$': typeof AppRootNotesSplatRoute
+  '/views/$': typeof AppRootViewsSplatRoute
   '/notes': typeof AppRootNotesIndexRoute
+  '/views': typeof AppRootViewsIndexRoute
 }
 
 export interface FileRoutesById {
@@ -187,7 +223,9 @@ export interface FileRoutesById {
   '/_appRoot/': typeof AppRootIndexRoute
   '/_appRoot/invite/$token': typeof AppRootInviteTokenRoute
   '/_appRoot/notes_/$': typeof AppRootNotesSplatRoute
+  '/_appRoot/views_/$': typeof AppRootViewsSplatRoute
   '/_appRoot/notes/': typeof AppRootNotesIndexRoute
+  '/_appRoot/views/': typeof AppRootViewsIndexRoute
 }
 
 export interface FileRouteTypes {
@@ -200,7 +238,9 @@ export interface FileRouteTypes {
     | '/'
     | '/invite/$token'
     | '/notes/$'
+    | '/views/$'
     | '/notes'
+    | '/views'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/admin'
@@ -209,7 +249,9 @@ export interface FileRouteTypes {
     | '/'
     | '/invite/$token'
     | '/notes/$'
+    | '/views/$'
     | '/notes'
+    | '/views'
   id:
     | '__root__'
     | '/_appRoot'
@@ -219,7 +261,9 @@ export interface FileRouteTypes {
     | '/_appRoot/'
     | '/_appRoot/invite/$token'
     | '/_appRoot/notes_/$'
+    | '/_appRoot/views_/$'
     | '/_appRoot/notes/'
+    | '/_appRoot/views/'
   fileRoutesById: FileRoutesById
 }
 
@@ -253,7 +297,9 @@ export const routeTree = rootRoute
         "/_appRoot/",
         "/_appRoot/invite/$token",
         "/_appRoot/notes_/$",
-        "/_appRoot/notes/"
+        "/_appRoot/views_/$",
+        "/_appRoot/notes/",
+        "/_appRoot/views/"
       ]
     },
     "/_appRoot/admin": {
@@ -280,8 +326,16 @@ export const routeTree = rootRoute
       "filePath": "_appRoot.notes_.$.tsx",
       "parent": "/_appRoot"
     },
+    "/_appRoot/views_/$": {
+      "filePath": "_appRoot.views_.$.tsx",
+      "parent": "/_appRoot"
+    },
     "/_appRoot/notes/": {
       "filePath": "_appRoot.notes.index.tsx",
+      "parent": "/_appRoot"
+    },
+    "/_appRoot/views/": {
+      "filePath": "_appRoot.views.index.tsx",
       "parent": "/_appRoot"
     }
   }

@@ -8,7 +8,6 @@ import { copyAsMarkdown } from "../utils/copy-markdown"
 import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
 import { useNoteById, useRenameNote } from "../hooks/note"
 import { useNoteShare } from "../hooks/share"
-import { useIsPinned, useWriteView } from "../hooks/views"
 import { deleteNoteDialogAtom } from "./delete-note-dialog"
 import { shareDialogAtom } from "./share-note-dialog"
 import type { Width } from "../schema"
@@ -21,8 +20,6 @@ import {
   CopyIcon16,
   EditIcon16,
   MoreIcon16,
-  PinFillIcon16,
-  PinIcon16,
   PrinterIcon16,
   ShareIcon16,
   TrashIcon16,
@@ -32,7 +29,7 @@ import {
 
 /**
  * The row's place in the manual order, when the list it sits in has one
- * (`src/data/note-order.ts`). Reordering by drag alone would be reachable by
+ * (`src/data/views.ts`). Reordering by drag alone would be reachable by
  * pointer alone, so the sidebar hands the menu the same two moves — which is
  * also the only way to reorder on a touch screen.
  */
@@ -90,11 +87,8 @@ export function NoteActionsMenu({
   // A note someone shared with the user (docs/sharing.md): its rows are the
   // owner's, so the verbs the owner granted decide what the menu offers.
   // Width is a prop on the note node — the owner's — so a shared note has
-  // none; the pin is a view of this user's own (`src/data/views.ts`), so a
-  // shared note can be pinned like any other.
+  // none.
   const share = useNoteShare(noteId)
-  const pinned = useIsPinned(noteId)
-  const writeView = useWriteView()
   const canRename = !isSignedOut && (share === null || share.canWrite)
   const canDelete = !isSignedOut && (share === null || share.canDelete)
   // Sharing is the owner's: an own note, signed in (docs/sharing.md), and
@@ -105,13 +99,11 @@ export function NoteActionsMenu({
 
   // Compare the decoded path segment, not the raw pathname: a note id with a
   // space or other special character is percent-encoded in the URL, so a raw
-  // `=== /notes/${noteId}` check would miss it and skip the post-delete redirect.
-  const openNoteId = location.pathname.startsWith("/notes/")
-    ? decodeURIComponent(location.pathname.slice("/notes/".length))
+  // `=== /views/${noteId}` check would miss it and skip the post-delete redirect.
+  const openNoteId = location.pathname.startsWith("/views/")
+    ? decodeURIComponent(location.pathname.slice("/views/".length))
     : ""
   const isViewing = openNoteId === noteId
-
-  const togglePin = () => writeView(noteId, { pinned: !pinned })
 
   // Copy what the view holds, not what the note holds: focused on a block,
   // that block and everything beneath it. A focused block the graph has since
@@ -182,14 +174,6 @@ export function NoteActionsMenu({
             </DropdownMenu.Group>
             <DropdownMenu.Separator />
           </>
-        ) : null}
-        {share === null ? (
-          <DropdownMenu.Item
-            icon={pinned ? <PinFillIcon16 className="text-text-pinned" /> : <PinIcon16 />}
-            onClick={togglePin}
-          >
-            {pinned ? "Unpin" : "Pin"}
-          </DropdownMenu.Item>
         ) : null}
         {reorder ? (
           <>

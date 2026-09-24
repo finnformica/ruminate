@@ -18,7 +18,7 @@ import { useSearchNotes } from "./search-notes"
  * A query that only names NOTES — `date:2026-01-01`, a bare property
  * qualifier, or nothing at all — stays a note listing: every block in every
  * matching note is not a search result, it's the corpus. That rule is what
- * keeps the notes page browsing notes, while typing text into it narrows to
+ * keeps the Views page browsing notes, while typing text into it narrows to
  * blocks.
  */
 function resolvesToBlocks(query: string): boolean {

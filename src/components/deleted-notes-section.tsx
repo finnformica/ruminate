@@ -46,7 +46,7 @@ export function DeletedNotesSection() {
       action: {
         label: "Open",
         onClick: () =>
-          navigate({ to: "/notes/$", params: { _splat: id }, search: { query: undefined } }),
+          navigate({ to: "/views/$", params: { _splat: id }, search: { query: undefined } }),
       },
     })
     await load()

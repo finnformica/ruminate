@@ -35,11 +35,11 @@ vi.mock("../global-state", async (importOriginal) => {
     ...original,
     ownSortedNotesAtom: atom([]),
     sharedNotesAtom: atom([]),
-    pinnedRootsAtom: atom([]),
+    viewRootsAtom: atom([]),
   }
 })
 
-import { ownSortedNotesAtom, pinnedRootsAtom, sharedNotesAtom } from "../global-state"
+import { ownSortedNotesAtom, sharedNotesAtom, viewRootsAtom } from "../global-state"
 import { NoteList } from "./note-list"
 
 const noteOf = (id: string, name: string): Note =>
@@ -65,19 +65,19 @@ beforeEach(() => {
 function renderList({
   own = [],
   shared = [],
-  pinned = [],
+  views = [],
   query = "",
 }: {
   own?: Note[]
   shared?: Note[]
-  /** The Views band's roots — notes and blocks alike (`pinnedRootsAtom`). */
-  pinned?: { id: string; noteId: string }[]
+  /** The Views band's roots — notes and blocks alike (`viewRootsAtom`). */
+  views?: { id: string; noteId: string }[]
   query?: string
 }) {
   const store = createStore()
   store.set(ownSortedNotesAtom as never, own as never)
   store.set(sharedNotesAtom as never, shared.map((note) => ({ note, share: {} })) as never)
-  store.set(pinnedRootsAtom as never, pinned as never)
+  store.set(viewRootsAtom as never, views as never)
   render(
     <Provider store={store}>
       <NoteList query={query} onQueryChange={() => {}} />
@@ -88,8 +88,8 @@ function renderList({
 const headings = () => screen.queryAllByRole("heading").map((h) => h.textContent)
 const bands = () => screen.getAllByTestId("results").map((el) => el.textContent)
 
-describe("the notes page listing", () => {
-  it("browses Recent, then Views, then Shared — your notes are the sidebar's to list", () => {
+describe("the Views page listing", () => {
+  it("browses Recent, then Views, then Shared — a place used lately is under both", () => {
     mocks.recent = [
       { id: "blk_fashion", noteId: "p" },
       { id: "a", noteId: "a" },
@@ -97,19 +97,23 @@ describe("the notes page listing", () => {
     renderList({
       own: [noteOf("p", "Personal"), noteOf("a", "Alpha"), noteOf("b", "Bravo")],
       shared: [noteOf("s", "Shared one")],
-      pinned: [{ id: "a", noteId: "a" }],
+      views: [
+        { id: "p", noteId: "p" },
+        { id: "a", noteId: "a" },
+        { id: "b", noteId: "b" },
+      ],
     })
-    // A place used lately and pinned is under both; no Notes band.
+    // No Notes band: the Views band is the sidebar's whole list.
     expect(headings()).toEqual(["Recent", "Views", "Shared"])
-    expect(bands()).toEqual(["blk_fashion,a", "a", "s"])
+    expect(bands()).toEqual(["blk_fashion,a", "p,a,b", "s"])
   })
 
-  it("draws the pinned blocks under Views, not just the pinned notes", () => {
-    // The sidebar's Pinned list holds both kinds; the page's must match, or
-    // a pinned block is reachable from one surface and not the other.
+  it("draws the block views under Views, among the notes", () => {
+    // The sidebar's list holds both kinds; the page's must match, or a
+    // block view is reachable from one surface and not the other.
     renderList({
       own: [noteOf("a", "Alpha")],
-      pinned: [
+      views: [
         { id: "a", noteId: "a" },
         { id: "blk_x", noteId: "a" },
       ],
@@ -124,15 +128,13 @@ describe("the notes page listing", () => {
     expect(headings()).toEqual(["Recent"])
   })
 
-  it("lists your notes, unheaded, while nothing is recent or pinned", () => {
-    renderList({ own: [noteOf("a", "Alpha"), noteOf("b", "Bravo")] })
-    expect(headings()).toEqual([])
-    expect(bands()).toEqual(["a,b"])
-  })
-
-  it("names that fallback Notes, and keeps shared notes out of it, when there are shared ones", () => {
-    renderList({ own: [noteOf("a", "Alpha")], shared: [noteOf("s", "Shared one")] })
-    expect(headings()).toEqual(["Notes", "Shared"])
+  it("keeps shared notes out of Views — they have a band of their own", () => {
+    renderList({
+      own: [noteOf("a", "Alpha")],
+      shared: [noteOf("s", "Shared one")],
+      views: [{ id: "a", noteId: "a" }],
+    })
+    expect(headings()).toEqual(["Views", "Shared"])
     expect(bands()).toEqual(["a", "s"])
   })
 
@@ -145,8 +147,8 @@ describe("the notes page listing", () => {
       rows: [{ id: "blk_x", noteId: "a" }],
     }
     renderList({
-      own: [noteOf("p", "Pinned"), noteOf("a", "Alpha")],
-      pinned: [{ id: "p", noteId: "p" }],
+      own: [noteOf("p", "Personal"), noteOf("a", "Alpha")],
+      views: [{ id: "p", noteId: "p" }],
       query: "alpha",
     })
     expect(headings()).toEqual([])

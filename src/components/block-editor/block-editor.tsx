@@ -47,8 +47,8 @@ import type { BlockActions } from "./block-actions"
 import { rootKeys } from "../../blocks/view"
 import { NoteTitle } from "./note-title"
 import { useCoarsePointer } from "../../hooks/coarse-pointer"
-import { useWriteView } from "../../hooks/views"
-import { pinnedRootIdsAtom } from "../../data/views"
+import { REMOVE_VIEW, useWriteView } from "../../hooks/views"
+import { viewRootIdsAtom } from "../../data/views"
 import { isHeading, leadingMarker, titlesFocus, typeOfMarker } from "../../blocks/markers"
 import {
   movesOf,
@@ -453,12 +453,12 @@ export function BlockEditor({
   browse?: boolean
   /**
    * Open a row — what Enter and a click do in a read-only view that is
-   * browsed with somewhere to go: the notes list, a search's results.
+   * browsed with somewhere to go: the Views page, a search's results.
    */
   onActivate?: (id: string) => void
   /**
    * The roots are the view's own, not a parent's children — a results
-   * list's hits, the notes list's notes — so there is nowhere for a new root
+   * list's hits, the Views page's notes — so there is nowhere for a new root
    * to go and nothing a removed one leaves. An edit that would add, remove
    * or reorder them is refused with a notice; everything beneath a root
    * edits as it does in its note.
@@ -1461,7 +1461,7 @@ export function BlockEditor({
       hasChildren: row.hasChildren,
       keys: rowsFor(row.key),
       places: parentCountOf ? Math.max(1, parentCountOf(row.id)) : 1,
-      pinned: pinnedRoots.has(block.id),
+      inViews: viewRoots.has(block.id),
       figure: isFigureType(block.type)
         ? { align: figureAlignOf(block), sized: figureLayoutOf(block).size !== undefined }
         : undefined,
@@ -1885,7 +1885,7 @@ export function BlockEditor({
    * address takes the old preview with it (it was the old page's) and has
    * the new page's fetched behind; a scheme-less one is taken as https,
    * and anything not a web address is refused. The layout is kept (and the
-   * pin needs no keeping: it is a view of the block's id, which stays).
+   * view needs no keeping: it is rooted at the block's id, which stays).
    */
   const updateLinkBlock = (id: string, next: { href?: string; title?: string }) => {
     const block = doc.blocks[id]
@@ -1934,15 +1934,17 @@ export function BlockEditor({
   const sharingEnabled = useFeature("sharing")
   const canShare =
     noteId !== undefined && isDatabaseMode && sharingEnabled && !sharedOrigin.has(noteId)
-  // A block can be pinned wherever the editor has a note behind it — signed
-  // out too, where the sample notes are there to play with, and in a note
-  // someone shared: the pin is a view of this user's own
-  // (`src/data/views.ts`), not a prop on the owner's row. It is not a
-  // change to the doc, so it is not an undo step either.
-  const canPin = noteId !== undefined
-  const pinnedRoots = useAtomValue(pinnedRootIdsAtom)
+  // A block can be made a view wherever the editor has a note behind it —
+  // signed out too, where the sample notes are there to play with, and in a
+  // note someone shared: the view is this user's own row
+  // (`src/data/views.ts`), not a prop on the owner's. It is not a change to
+  // the doc, so it is not an undo step either. Removing clears the whole
+  // row — its saved filter and sort with it — so the block is no view at all.
+  const canView = noteId !== undefined
+  const viewRoots = useAtomValue(viewRootIdsAtom)
   const writeView = useWriteView()
-  const togglePin = (id: string) => writeView(id, { pinned: !pinnedRoots.has(id) })
+  const toggleView = (id: string) =>
+    writeView(id, viewRoots.has(id) ? REMOVE_VIEW : { pinned: true })
 
   // ── Links ─────────────────────────────────────────────────────────────────
   // Leaving a row's edit mode writes out any bare address in it as a link
@@ -2052,9 +2054,9 @@ export function BlockEditor({
     math: (keys) => runOnRows("wrapMath", keys),
     moves: (keys) => movesOf(commandInput("select", keys)),
     copyLink: noteId
-      ? (keys) => copy(`${window.location.origin}/notes/${noteId}?block=${firstId(keys)}`)
+      ? (keys) => copy(`${window.location.origin}/views/${noteId}?block=${firstId(keys)}`)
       : undefined,
-    pin: canPin ? (keys) => new Set(keys.map(idOfKey)).forEach(togglePin) : undefined,
+    view: canView ? (keys) => new Set(keys.map(idOfKey)).forEach(toggleView) : undefined,
     share: canShare ? (keys) => openShareDialog(firstId(keys)) : undefined,
     editLink: (keys, href) => setLinkCard({ key: keys[0], href }),
     turnIntoLink: (keys, href, title) => linkToBlock(keys[0], href, title === href ? "" : title),

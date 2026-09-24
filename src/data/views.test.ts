@@ -3,20 +3,20 @@ import { describe, expect, it } from "vitest"
 import {
   applyViewRows,
   deletedIdsOf,
-  orderPinned,
+  orderViews,
   orphanedViews,
   patchedView,
-  pinnedRootIdsAtom,
   reorderedViews,
   viewByRootAtom,
   viewMapOf,
+  viewRootIdsAtom,
   viewsAtom,
   type ViewRow,
 } from "./views"
 
 /**
- * The view model (`src/data/views.ts`): what a pin, a saved filter and a
- * delete write, as rows. Pure, so the runtime and the signed-out seam can
+ * The view model (`src/data/views.ts`): what making a block a view, a saved
+ * filter, a drag and a delete write, as rows. Pure, so the runtime and the signed-out seam can
  * share it and be about plumbing rather than about what a view is.
  */
 
@@ -54,10 +54,15 @@ describe("patchedView", () => {
     })
   })
 
-  it("tombstones a view with nothing left in it, so unpinning leaves no empty row", () => {
+  it("tombstones a view with nothing left in it, so removing a block from Views leaves no empty row", () => {
     const gone = patchedView(view(), "blk_a", { pinned: false }, 500)
     expect(gone.deleted_at).toBe(500)
     expect(gone.updated_at).toBe(500)
+    // A place in the order is something: a note's row, holding nothing but
+    // its sort key, stays.
+    const placed = patchedView(undefined, "n", { sort_key: "a0" }, 500)
+    expect(placed.deleted_at).toBeUndefined()
+    expect(placed.pinned).toBe(false)
     // ...but keeps one that still saves something.
     const kept = patchedView(view({ filter: "type:todo" }), "blk_a", { pinned: false }, 500)
     expect(kept.deleted_at).toBeUndefined()
@@ -108,30 +113,30 @@ describe("orphanedViews / deletedIdsOf", () => {
 })
 
 describe("the atoms", () => {
-  it("serve the sample view signed out: the welcome note is pinned", () => {
+  it("serve the sample view signed out: a block of the welcome note is a view", () => {
     const store = createStore()
-    expect([...store.get(pinnedRootIdsAtom)]).toEqual(["readme"])
-    expect(store.get(viewByRootAtom).get("readme")?.pinned).toBe(true)
+    expect([...store.get(viewRootIdsAtom)]).toEqual(["blk_welcome003"])
+    expect(store.get(viewByRootAtom).get("blk_welcome003")?.pinned).toBe(true)
   })
 
-  it("index the views by root, and the pinned roots as a set", () => {
+  it("index the views by root, and every root with a row as a set", () => {
     const store = createStore()
     store.set(
       viewsAtom,
       viewMapOf([view({ pinned: false, filter: "type:todo" }), view({ id: "n", root_id: "n" })]),
     )
     expect(store.get(viewByRootAtom).get("blk_a")?.filter).toBe("type:todo")
-    expect([...store.get(pinnedRootIdsAtom)]).toEqual(["n"])
+    expect([...store.get(viewRootIdsAtom)]).toEqual(["blk_a", "n"])
   })
 })
 
-describe("orderPinned", () => {
+describe("orderViews", () => {
   const entry = (id: string) => ({ id })
   const byRoot = (rows: ViewRow[]) => new Map(rows.map((row) => [row.root_id, row]))
 
   it("keeps the drawn order while nothing is keyed", () => {
     const entries = [entry("n1"), entry("n2"), entry("b1")]
-    expect(orderPinned(entries, byRoot([view({ id: "n1", root_id: "n1" })]))).toEqual(entries)
+    expect(orderViews(entries, byRoot([view({ id: "n1", root_id: "n1" })]))).toEqual(entries)
   })
 
   it("puts keyed views first by key, and the unkeyed after in their drawn order", () => {
@@ -141,7 +146,7 @@ describe("orderPinned", () => {
       view({ id: "n2", root_id: "n2" }),
     ])
     expect(
-      orderPinned([entry("n1"), entry("n2"), entry("b1"), entry("n3")], views).map((e) => e.id),
+      orderViews([entry("n1"), entry("n2"), entry("b1"), entry("n3")], views).map((e) => e.id),
     ).toEqual(["b1", "n1", "n2", "n3"])
   })
 })
@@ -163,6 +168,14 @@ describe("reorderedViews", () => {
     expect(rows.every((row) => row.updated_at === 500)).toBe(true)
   })
 
+  it("mints a row for a root that has none — a note dragged for the first time", () => {
+    const rows = reorderedViews(byRoot([pinnedAt("b", "a1")]), ["n", "b"], 500)
+    expect(rows.map((row) => row.id)).toEqual(["n"])
+    expect(rows[0]).toMatchObject({ root_id: "n", pinned: false, filter: null, sort: null })
+    expect(rows[0].sort_key! < "a1").toBe(true)
+    expect(rows[0].deleted_at).toBeUndefined()
+  })
+
   it("rewrites one row once the list is keyed, and the list then reads in the dropped order", () => {
     const views = byRoot([pinnedAt("a", "a0"), pinnedAt("b", "a1"), pinnedAt("c", "a2")])
     const rows = reorderedViews(views, ["a", "c", "b"], 500)
@@ -171,20 +184,22 @@ describe("reorderedViews", () => {
     expect(rows).toHaveLength(1)
     const next = new Map(views)
     for (const row of rows) next.set(row.root_id, row)
-    expect(orderPinned([{ id: "a" }, { id: "b" }, { id: "c" }], next).map((e) => e.id)).toEqual([
+    expect(orderViews([{ id: "a" }, { id: "b" }, { id: "c" }], next).map((e) => e.id)).toEqual([
       "a",
       "c",
       "b",
     ])
   })
 
-  it("writes nothing for a drop that changes nothing, and skips roots with no pinned view", () => {
+  it("writes nothing for a drop that changes nothing, and keys every root in one that does", () => {
     const views = byRoot([
       pinnedAt("a", "a0"),
       pinnedAt("b", "a1"),
       view({ id: "x", root_id: "x", pinned: false }),
     ])
     expect(reorderedViews(views, ["a", "b"], 500)).toEqual([])
-    expect(reorderedViews(views, ["b", "x", "a"], 500).map((row) => row.id)).toEqual(["a"])
+    // `x` has a row with no key; `a` has to move past `b`. Both are written,
+    // `b`'s key still fitting where it is.
+    expect(reorderedViews(views, ["b", "x", "a"], 500).map((row) => row.id)).toEqual(["x", "a"])
   })
 })

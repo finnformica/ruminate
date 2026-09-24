@@ -43,7 +43,7 @@ import {
  * right-click menu), and a block has no page of its own to open. The slice
  * arrives as the owner's rows; on the way into the snapshot a root that is
  * not a note is given the note type (`asNotes`), so it lists in the sidebar,
- * opens at `/notes/<id>` with its text as the title and its children as the
+ * opens at `/views/<id>` with its text as the title and its children as the
  * outline, and searches like any note. A push puts the row's own type back
  * (`Slice.rootTypes`), so the owner's block never becomes a note.
  *
@@ -55,7 +55,7 @@ import {
  *
  * **How the UI sees it.** `sharedGraphAtom` is the union of every slice, and
  * `graphSnapshotAtom` (global-state.ts) merges it with the user's own graph,
- * so the editor, search, hover cards and the notes list read shared notes
+ * so the editor, search, hover cards and the Views page read shared notes
  * exactly as they read the user's own. `sharedOriginAtom` says which share a
  * node came from, which is how the write seam (`store.ts`) routes a batch of
  * ops here rather than to the local store, and how the sidebar tells a

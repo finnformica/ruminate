@@ -195,7 +195,7 @@ function ReceivedList({ shares }: { shares: ReceivedShareSummary[] | null }) {
             <span className="flex flex-wrap gap-x-2 leading-4">
               {/* A shared block opens as a note of its own (shared-mode.ts). */}
               <Link
-                to="/notes/$"
+                to="/views/$"
                 params={{ _splat: share.view.rootId }}
                 search={{ query: undefined }}
                 className="link"

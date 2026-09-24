@@ -83,14 +83,14 @@ vi.mock("../global-state", async (importOriginal) => {
     isDatabaseModeAtom: atom(false),
     notesAtom: atom(new Map()),
     sortedNotesAtom: atom([]),
-    pinnedRootsAtom: atom([]),
+    viewRootsAtom: atom([]),
     recentVisitsAtom: atom([]),
     // The block index only serves the scope pill's label here.
     blockIndexAtom: atom({ hits: [], getBlock: () => undefined }),
   }
 })
 
-import { pinnedRootsAtom, recentVisitsAtom, sortedNotesAtom } from "../global-state"
+import { recentVisitsAtom, sortedNotesAtom, viewRootsAtom } from "../global-state"
 import { CommandMenu, isCommandMenuOpenAtom } from "./command-menu"
 
 // cmdk scrolls the selected item into view and measures its list with a
@@ -113,30 +113,32 @@ function renderMenu({
   open = false,
   notes = [],
   touches = [],
-  pinned = [],
-  pinnedBlocks = [],
+  views = [],
+  blockViews = [],
 }: {
   open?: boolean
   notes?: unknown[]
   touches?: { id: string; noteId?: string; at: number }[]
-  pinned?: unknown[]
-  pinnedBlocks?: unknown[]
+  /** The Views list's notes, and its block views — the atom is the mock's
+   * plain, writable one, so a test states the list rather than the graph. */
+  views?: unknown[]
+  blockViews?: unknown[]
 } = {}) {
   const store = createStore()
   // The corpus's notes, the places this device visited (what the
   // palette's Recent list is ranked from — a note unless `noteId` names the
-  // note a block was focused on in, one visit each) and the pinned notes and
-  // blocks. The atoms are the mock's plain, writable ones.
+  // note a block was focused on in, one visit each) and the Views list. The
+  // atoms are the mock's plain, writable ones.
   store.set(sortedNotesAtom as never, notes as never)
   store.set(
     recentVisitsAtom as never,
     touches.map(({ id, noteId = id, at }) => ({ id, noteId, at, score: 1 })) as never,
   )
   store.set(
-    pinnedRootsAtom as never,
+    viewRootsAtom as never,
     [
-      ...(pinned as { id: string }[]).map((note) => ({ id: note.id, noteId: note.id })),
-      ...(pinnedBlocks as { id: string; noteId: string }[]).map(({ id, noteId }) => ({
+      ...(views as { id: string }[]).map((note) => ({ id: note.id, noteId: note.id })),
+      ...(blockViews as { id: string; noteId: string }[]).map(({ id, noteId }) => ({
         id,
         noteId,
       })),
@@ -373,7 +375,7 @@ describe("block results", () => {
     fireEvent.keyDown(input, { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith(
       expect.objectContaining({
-        to: "/notes/$",
+        to: "/views/$",
         params: { _splat: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) },
       }),
     )
@@ -437,7 +439,7 @@ describe("block results", () => {
     expect(rowOf("blk_nvidia")?.querySelector(".block-highlight")).not.toBeNull()
     fireEvent.keyDown(editor(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/notes/$",
+      to: "/views/$",
       params: { _splat: "research" },
       search: { query: undefined, block: "blk_nvidia" },
     })
@@ -479,7 +481,7 @@ describe("block results", () => {
     expect(screen.getByTestId("palette-create").textContent).toContain('Create new note "nvidia"')
     fireEvent.keyDown(commandsInput(), { key: "Enter", metaKey: true })
     expect(mocks.navigate).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "/notes/$", search: { query: undefined } }),
+      expect.objectContaining({ to: "/views/$", search: { query: undefined } }),
     )
   })
 
@@ -490,7 +492,7 @@ describe("block results", () => {
     expect(footer.textContent).not.toContain('"')
     fireEvent.click(footer)
     expect(mocks.navigate).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "/notes/$", search: { query: undefined } }),
+      expect.objectContaining({ to: "/views/$", search: { query: undefined } }),
     )
   })
 
@@ -620,13 +622,13 @@ describe("note results", () => {
     expect(rowIds()).toEqual(["research"])
   })
 
-  it("lists the pinned notes beneath the recent ones — a note in both is in both", () => {
-    // `research` is recent AND pinned: Recent is what you use, Views what
-    // you chose to keep, so it is under each. `journal` (never edited,
-    // never touched) is pinned only: Views holds it, beneath.
+  it("lists the views beneath the recent places — a note in both is in both", () => {
+    // `research` is recent AND a view (every note is): Recent is what you
+    // use, Views is everything there is, so it is under each. `journal`
+    // (never edited, never touched) is in Views alone, beneath.
     const research = edited("research", 5000)
     const journal = makeNote("journal")
-    renderMenu({ open: true, notes: [research, journal], pinned: [research, journal] })
+    renderMenu({ open: true, notes: [research, journal], views: [research, journal] })
     const groups = Array.from(document.querySelectorAll("[cmdk-group]")).filter((group) =>
       ["Recent", "Views"].includes(group.querySelector("[cmdk-group-heading]")?.textContent ?? ""),
     )
@@ -654,19 +656,19 @@ describe("note results", () => {
     handOffToRows()
     fireEvent.keyDown(editor(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/notes/$",
+      to: "/views/$",
       params: { _splat: "journal" },
       search: { query: undefined, block: "blk_ship" },
     })
   })
 
-  it("Views lists the pinned blocks after the pinned notes, each a row of its own", () => {
-    // `journal` is pinned; so is the block `blk_ship` inside it. Nothing is
-    // recent, so Views is the only group — and the block is a row that
-    // opens its note focused on it.
+  it("Views lists the block views among the notes, each a row of its own", () => {
+    // `journal` is a note; the block `blk_ship` inside it was made a view.
+    // Nothing is recent, so Views is the only group — and the block is a
+    // row that opens its note focused on it.
     const journal = makeNote("journal")
     const ship = { id: "blk_ship", noteId: "journal", text: "ship it", note: journal }
-    renderMenu({ open: true, notes: [journal], pinned: [journal], pinnedBlocks: [ship] })
+    renderMenu({ open: true, notes: [journal], views: [journal], blockViews: [ship] })
     expect(screen.queryByText("Recent")).toBeNull()
     expect(screen.getByText("Views")).toBeTruthy()
     expect(rowIds()).toEqual(["journal", "blk_ship"])
@@ -675,18 +677,18 @@ describe("note results", () => {
     fireEvent.keyDown(editor(), { key: "ArrowDown" })
     fireEvent.keyDown(editor(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/notes/$",
+      to: "/views/$",
       params: { _splat: "journal" },
       search: { query: undefined, block: "blk_ship" },
     })
   })
 
-  it("a pinned heading block is a row like the notes beside it: body scale, no breathing room", () => {
+  it("a heading block view is a row like the notes beside it: body scale, no breathing room", () => {
     renderMenu({
       open: true,
       notes: [RESEARCH],
       touches: [{ id: "research", at: 1 }],
-      pinnedBlocks: [{ id: "blk_semis", noteId: "research" }],
+      blockViews: [{ id: "blk_semis", noteId: "research" }],
     })
     const row = rowOf("blk_semis")
     const text = row?.querySelector<HTMLElement>(".whitespace-pre-wrap")
@@ -699,9 +701,9 @@ describe("note results", () => {
     ).not.toContain("text-2xl")
   })
 
-  it("Views holds the pinned notes that are not recent, and goes with Recent when typing", async () => {
-    // Six newer notes keep `journal` out of Recent; pinned, it is listed
-    // beneath.
+  it("Views holds the notes that are not recent, and goes with Recent when typing", async () => {
+    // Six newer notes keep `journal` out of Recent; a view like every note,
+    // it is listed beneath.
     const notes = [
       ...["n1", "n2", "n3", "n4", "n5"].map((id, i) => edited(id, 9000 - i)),
       edited("research", 8000),
@@ -714,7 +716,7 @@ describe("note results", () => {
       titleMatches: [],
       rows: rowsOf([TODO_MILK]),
     }
-    renderMenu({ open: true, notes, pinned: [notes[6]] })
+    renderMenu({ open: true, notes, views: [notes[6]] })
     expect(screen.getByText("Recent")).toBeTruthy()
     expect(screen.getByText("Views")).toBeTruthy()
     expect(rowIds()).toEqual(["journal"])
@@ -728,10 +730,10 @@ describe("note results", () => {
   })
 
   it("↓ and ↑ walk Recent and then Views as one list, and ↑ from the first row returns to the query", () => {
-    // `research` recent; `journal` pinned only. Nothing typed.
+    // `research` recent; `journal` in Views only. Nothing typed.
     const research = edited("research", 5000)
     const journal = makeNote("journal")
-    renderMenu({ open: true, notes: [research, journal], pinned: [journal] })
+    renderMenu({ open: true, notes: [research, journal], views: [journal] })
     const input = commandsInput()
     input.focus()
     const editors = () => Array.from(document.querySelectorAll<HTMLElement>("[data-block-editor]"))
@@ -745,7 +747,7 @@ describe("note results", () => {
     fireEvent.keyDown(input, { key: "ArrowDown" })
     expect(document.activeElement).toBe(editors()[0])
     expect(highlighted()).toEqual(["research"])
-    // ↓ past the last recent row: the first pinned row, in the second editor.
+    // ↓ past the last recent row: the first view row, in the second editor.
     fireEvent.keyDown(editors()[0], { key: "ArrowDown" })
     expect(document.activeElement).toBe(editors()[1])
     expect(highlighted()).toEqual(["journal"])
@@ -765,14 +767,14 @@ describe("note results", () => {
     fireEvent.keyDown(editors()[0], { key: "ArrowDown" })
     fireEvent.keyDown(editors()[1], { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/notes/$",
+      to: "/views/$",
       params: { _splat: "journal" },
       search: { query: undefined, block: undefined },
     })
   })
 
   it("a results list mounting after an earlier hand-off never takes the keyboard from the query", async () => {
-    // Seen in the browser: ↓ had handed the keyboard to the pinned rows once;
+    // Seen in the browser: ↓ had handed the keyboard to the view rows once;
     // back in the query, typing swapped the lists for the results, whose
     // fresh editor mounted under the already-bumped signal and took focus
     // mid-word.
@@ -784,7 +786,7 @@ describe("note results", () => {
       titleMatches: [],
       rows: rowsOf([NVIDIA]),
     }
-    renderMenu({ open: true, notes: [journal], pinned: [journal] })
+    renderMenu({ open: true, notes: [journal], views: [journal] })
     const input = commandsInput()
     input.focus()
     fireEvent.keyDown(input, { key: "ArrowDown" })
@@ -799,11 +801,11 @@ describe("note results", () => {
     expect(rowOf("blk_nvidia")?.querySelector(".block-highlight")).toBeNull()
   })
 
-  it("with nothing recent, ↓ from the query lands in the pinned rows", () => {
+  it("with nothing recent, ↓ from the query lands in the view rows", () => {
     // A note never edited (no timestamp) and never touched is not recent —
     // pinned, it is the only listing.
     const journal = makeNote("journal")
-    renderMenu({ open: true, notes: [journal], pinned: [journal] })
+    renderMenu({ open: true, notes: [journal], views: [journal] })
     expect(screen.queryByText("Recent")).toBeNull()
     expect(screen.getByText("Views")).toBeTruthy()
     expect(rowIds()).toEqual(["journal"])
@@ -825,7 +827,7 @@ describe("note results", () => {
     handOffToRows()
     fireEvent.keyDown(editor(), { key: "Enter" })
     expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/notes/$",
+      to: "/views/$",
       params: { _splat: "research" },
       search: { query: undefined, block: undefined },
     })
@@ -836,7 +838,7 @@ describe("note results", () => {
     fireEvent.click(screen.getByLabelText("Expand"))
     fireEvent.click(screen.getByText("buy milk"))
     expect(mocks.navigate).toHaveBeenCalledWith({
-      to: "/notes/$",
+      to: "/views/$",
       params: { _splat: "research" },
       search: { query: undefined, block: "blk_milk" },
     })

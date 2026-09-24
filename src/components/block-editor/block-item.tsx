@@ -1,5 +1,5 @@
 import type React from "react"
-import { useAtomValue } from "jotai"
+
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent, ClipboardEvent, CSSProperties, KeyboardEvent } from "react"
 import { cx } from "../../utils/cx"
@@ -21,10 +21,8 @@ import {
 import { htmlToMarkdown } from "../../utils/html-to-markdown"
 import { clipboardBlocksToMarkdown, extractClipboardBlocks } from "../../utils/rich-clipboard"
 import { imageFilesOf } from "../../data/images"
-import { pinnedRootIdsAtom } from "../../data/views"
 import { blurLeavesWindow } from "../../utils/window-blur"
 import { IconButton } from "../ui/icon-button"
-import { PinFillIcon12 } from "../icons"
 import { BlockContent } from "./block-content"
 import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext } from "./block-kinds"
 import { caretCoordinates, caretLineFlags, caretOffsetAtPoint } from "./caret"
@@ -76,7 +74,7 @@ export interface BlockEditorApi {
    */
   navigable?: boolean
   /**
-   * The roots are the view's own — a results list's hits, the notes list's
+   * The roots are the view's own — a results list's hits, the Views page's
    * notes — not a parent's children (`BlockEditor.fixedRoots`). A kind may
    * draw a root differently for it (a listed note takes a roomier row).
    */
@@ -235,8 +233,6 @@ export function BlockItem({
 }) {
   const { depth, olNumber, hasChildren, collapsed: isCollapsed } = occurrence
   const readOnly = api.readOnly ?? false
-  // The pin is a view of the block (`src/data/views.ts`), not a prop of it.
-  const hasPin = useAtomValue(pinnedRootIdsAtom).has(block.id)
   // Selection and edit focus are per row: this occurrence, not the block.
   const editing = !readOnly && api.focus?.key === occurrence.key
   const selected = api.selectedSet.has(occurrence.key) && !editing
@@ -1233,26 +1229,6 @@ export function BlockItem({
           ) : null}
           {kind.before?.(rowContext)}
           {kind.wrap ? kind.wrap(content, rowContext) : content}
-          {/* A pinned block says so, with the glyph the sidebar's Views
-              list uses — in a TRAILING SLOT that mirrors the marker slot:
-              the same 15px, on the first line (`h-[1lh]` at the line's own
-              typography, as the marker's), the glyph centred in it as the
-              bullet's dot is. So the pin's centre sits as far from the
-              surface's right edge as the dot's from its left (6px of
-              padding + half the slot), and the surface reads symmetric
-              instead of the glyph hugging the edge with the padding alone
-              between them. Anything else that trails the content goes
-              through the same slot, never beside it with its own offset. */}
-          {hasPin ? (
-            <span
-              className={cx(
-                "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
-                typo,
-              )}
-            >
-              <PinFillIcon12 data-testid="block-pinned" className="shrink-0 text-text-pinned" />
-            </span>
-          ) : null}
           {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
         </div>
         {api.debug?.showMetadata ? (

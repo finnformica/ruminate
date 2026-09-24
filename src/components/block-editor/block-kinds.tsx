@@ -161,7 +161,7 @@ const heading: BlockKind = {
  * A note is a node like any other (docs/graph-schema-v2.md): its `text` is
  * the title, its `props` the metadata, and its children are its top-level
  * blocks. It draws as a row like any other too — which is what lets a note
- * search result, a note in the notes list and a note linked under a block all
+ * search result, a note in the Views page and a note linked under a block all
  * be the same row. Its key is its **favicon** (the day for a daily note, a
  * calendar for a weekly one, the note icon otherwise): the one thing about a
  * note that its title does not already say, in the shared 15px marker slot

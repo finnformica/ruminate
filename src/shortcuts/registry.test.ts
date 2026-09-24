@@ -120,7 +120,7 @@ describe("shortcut registry entries", () => {
     const combos = new Set(SHORTCUTS.flatMap((shortcut) => shortcut.combos))
     for (const expected of [
       "g d",
-      "g n",
+      "g v",
       "g s",
       "?",
       APP_SHORTCUTS.focusSearch,

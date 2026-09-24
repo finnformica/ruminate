@@ -1,12 +1,10 @@
 import { StoryObj } from "@storybook/react"
 import { expect, userEvent, waitFor, within } from "@storybook/test"
-import { getDefaultStore } from "jotai"
 import { useState } from "react"
 import { emptyBlock } from "../../blocks/ops"
 import { parse } from "../../blocks/parse"
 import { serialize } from "../../blocks/serialize"
 import type { BlockDoc } from "../../blocks/types"
-import { viewMapOf, viewsAtom } from "../../data/views"
 import { BlockEditor } from "./block-editor"
 
 /** Ensure a parsed doc always has at least one block to edit. */
@@ -26,14 +24,10 @@ function Harness({
   startEditing,
   focusRootId,
   deferCollapse,
-  pinned,
 }: {
   initial: string
   /** A doc built by hand, for what markdown cannot say (an image's layout). */
   initialDoc?: BlockDoc
-  /** The blocks with a pinned view (src/data/views.ts): the pin is a row
-   * about the block, not a prop of it, so the story states it here. */
-  pinned?: string[]
   startEditing?: boolean
   /** Start focused on this block (transient local focus — no router). */
   focusRootId?: string | null
@@ -44,22 +38,6 @@ function Harness({
   deferCollapse?: number
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarterBlock(parse(initial)))
-  useState(() => {
-    getDefaultStore().set(
-      viewsAtom,
-      viewMapOf(
-        (pinned ?? []).map((id) => ({
-          id,
-          root_id: id,
-          filter: null,
-          sort: null,
-          pinned: true,
-          sort_key: null,
-          updated_at: 1,
-        })),
-      ),
-    )
-  })
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const deferred = deferCollapse !== undefined
   return (
@@ -115,70 +93,8 @@ export default {
 
 type Story = StoryObj<typeof Harness>
 
-/** Visual reference: mixed block types render as a document, not an outline. */
-export const Mixed: Story = {
-  args: { initial: SAMPLE },
-}
-
-export const Empty: Story = {
-  args: { initial: "" },
-}
-
 /**
- * Pinned blocks (docs/metadata.md): a heading, a paragraph and two bullets
- * each carry the pin glyph at the end of their line, in a trailing slot
- * that mirrors the marker's: the glyph sits as far from the line's right
- * edge as a bullet's dot from its left, on the first line of a wrapping
- * row, whether the row is plain, hovered or selected. The heading's surface
- * reaches as far on the right as on the left.
- */
-export const Pinned: Story = {
-  args: {
-    initial: "",
-    pinned: ["blk_h1", "blk_p1", "blk_b1", "blk_b2"],
-    initialDoc: {
-      props: null,
-      rootBlockIds: ["blk_h1", "blk_p1", "blk_b1", "blk_p2"],
-      blocks: {
-        blk_h1: {
-          id: "blk_h1",
-          type: "h1",
-          text: "A pinned heading",
-          children: [],
-        },
-        blk_p1: {
-          id: "blk_p1",
-          type: "text",
-          text: "A pinned paragraph, listed in the sidebar under Pinned",
-          children: [],
-        },
-        blk_b1: {
-          id: "blk_b1",
-          type: "ul",
-          text: "A pinned bullet",
-          children: ["blk_b2"],
-        },
-        blk_b2: {
-          id: "blk_b2",
-          type: "ul",
-          text: "A nested bullet that wraps onto a second line so the pin can be seen on the first line of a tall row",
-          children: [],
-        },
-        blk_p2: {
-          id: "blk_p2",
-          type: "text",
-          text: "An ordinary paragraph after them",
-          children: [],
-        },
-      },
-    },
-  },
-}
-
-/**
- * Code: a fenced block with a language, one without, one nested under a
- * bullet, one that is empty (as `\`\`\`` then Enter leaves it), one with a row
- * under it (so its collapse chevron takes the slot), and inline code in a
+ * Code blocks (docs/block-editor-architecture.md): a fenced block after a
  * paragraph. The panel spans the row like a picture does, and the chip in
  * the paragraph must not move the line when the row is edited.
  */
@@ -213,6 +129,15 @@ const CODE_SAMPLE = [
   "A closing paragraph",
   "  id:: blk_cz",
 ].join("\n")
+
+/** Visual reference: mixed block types render as a document, not an outline. */
+export const Mixed: Story = {
+  args: { initial: SAMPLE },
+}
+
+export const Empty: Story = {
+  args: { initial: "" },
+}
 
 export const Code: Story = {
   args: { initial: CODE_SAMPLE },

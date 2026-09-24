@@ -29,17 +29,18 @@ import { Surface } from "../ui/surface"
  * **Delete with contents** on a block that holds something, since
  * its plain Delete leaves what the block held as new basket roots.
  *
- * **Pin** puts the block in the sidebar's Views list (docs/metadata.md),
- * from where it opens focused on; on a pinned block the item reads Unpin.
+ * **Add to Views** makes the block a view of its own — a row in the
+ * sidebar's Views list (docs/metadata.md), from where it opens focused on;
+ * on a block that is one the item reads Remove from Views.
  *
  * The menu carries only what nothing else on the row does. Editing is a
  * click or a tap; collapsing is the chevron; indent, outdent, focus and the
  * block types are keys on a desktop and the edit bar's buttons on a phone
  * (`mobile-edit-bar.tsx`). What is left — the moves, duplicate, copy, the
- * links and figures' own actions, pin, share, delete — is one list on two
+ * links and figures' own actions, view, share, delete — is one list on two
  * surfaces, the popup and the sheet, with keys beside it on the popup. It
  * runs in sections, ruled apart: copying first, then the row's own link or
- * figure actions, arranging (move, duplicate), pin and share, and removing
+ * figure actions, arranging (move, duplicate), view and share, and removing
  * last.
  */
 
@@ -54,8 +55,8 @@ export interface BlockMenuTarget {
   keys: string[]
   /** How many places the block appears across the corpus (1 = only here). */
   places: number
-  /** Pinned (docs/metadata.md): listed in the sidebar's Views list. */
-  pinned: boolean
+  /** A view of its own (docs/metadata.md): listed in the sidebar's Views. */
+  inViews: boolean
   /** A figure row's layout (`src/blocks/figure.ts`): the side its picture
    * or card keeps to, and whether it has been dragged to a size of its own. */
   figure?: { align: FigureAlign; sized: boolean }
@@ -148,7 +149,7 @@ function menuEntries(target: BlockMenuTarget, actions: BlockActions): MenuEntry[
   const entries: MenuEntry[] = []
   // The menu is sections, a rule between each two that have something in
   // them: a section a row has nothing for (a plain paragraph has no link or
-  // figure actions, a view no Pin) leaves no doubled or dangling rule.
+  // figure actions, a view no Add to Views) leaves no doubled or dangling rule.
   let ruleDue = false
   const section = () => {
     ruleDue = entries.length > 0
@@ -240,8 +241,11 @@ function menuEntries(target: BlockMenuTarget, actions: BlockActions): MenuEntry[
 
   // Beyond the note: the sidebar, and other people.
   section()
-  if (actions.pin)
-    item({ label: target.pinned ? "Unpin" : "Pin", onSelect: () => actions.pin?.(keys) })
+  if (actions.view)
+    item({
+      label: target.inViews ? "Remove from Views" : "Add to Views",
+      onSelect: () => actions.view?.(keys),
+    })
   if (actions.share) item({ label: "Share…", onSelect: () => actions.share?.(keys) })
 
   // Removing, last and apart.

@@ -72,7 +72,6 @@
   --color-text-success: var(--green-11);
   --color-text-danger: var(--red-11);
   --color-text-pending: var(--yellow-11);
-  --color-text-pinned: var(--orange-11);
 
   /* Background colors */
   --color-bg: var(--neutral-1);
@@ -466,7 +465,6 @@
     --color-text-success: var(--color-text);
     --color-text-danger: var(--color-text);
     --color-text-pending: var(--color-text);
-    --color-text-pinned: var(--color-text);
 
     /* Background colors */
     --color-bg: #fff;
