@@ -1,4 +1,4 @@
-import { useRouter } from "@tanstack/react-router"
+import { useLocation, useRouter } from "@tanstack/react-router"
 import { useSetAtom } from "jotai"
 import { sidebarAtom } from "../global-state"
 import { APP_SHORTCUTS, formatCombo } from "../shortcuts/registry"
@@ -8,11 +8,17 @@ import { IconButton } from "./ui/icon-button"
 import { ArrowLeftIcon16, ArrowRightIcon16, SidebarIcon16 } from "./icons"
 import { NavItems } from "./nav-items"
 import { NewNoteButton } from "./new-note-button"
+import { SettingsNavItems } from "./settings/settings-pages"
 
 export function Sidebar() {
   const router = useRouter()
   const setSidebar = useSetAtom(sidebarAtom)
   const { isScrolled, topSentinelProps } = useIsScrolled()
+  // While Settings is open the sidebar lists its pages instead of the notes
+  // (src/components/settings/settings-pages.tsx): the notes are not what
+  // anyone opened Settings for, and the pages need a home.
+  const { pathname } = useLocation()
+  const inSettings = pathname === "/settings" || pathname.startsWith("/settings/")
 
   return (
     <div className="grid grid-rows-[auto_1fr] overflow-hidden h-full border-r border-border-secondary">
@@ -55,7 +61,7 @@ export function Sidebar() {
       </div>
       <div className="relative flex scroll-py-2 flex-col gap-2 overflow-auto p-2 pt-0">
         <div {...topSentinelProps} />
-        <NavItems />
+        {inSettings ? <SettingsNavItems /> : <NavItems />}
       </div>
     </div>
   )

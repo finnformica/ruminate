@@ -4,9 +4,8 @@ import React from "react"
 import { useFeature, useIsAdmin } from "../../data/features"
 import type { FeatureKey } from "../../data/feature-flags"
 import { githubUserAtom } from "../../global-state"
-import { cx } from "../../utils/cx"
 import { DeletedNotesSection } from "../deleted-notes-section"
-import { ChevronLeftIcon16, ChevronRightIcon16 } from "../icons"
+import { ArrowLeftIcon16, ChevronLeftIcon16, ChevronRightIcon16 } from "../icons"
 import { McpTokensSection } from "../mcp-tokens-section"
 import { SharingSection } from "../sharing-section"
 import { AboutSection } from "./about-section"
@@ -27,7 +26,7 @@ import { UpdatesSection } from "./updates-section"
  * sits apart at the foot of the list.
  *
  * `/settings` itself is the list on a phone and a redirect to the first page
- * on a wider screen, where the list is a column beside the page.
+ * on a wider screen, where the sidebar lists the pages.
  */
 export type SettingsPageId =
   "account" | "preferences" | "sharing" | "mcp" | "data" | "about" | "admin"
@@ -154,16 +153,27 @@ export function useCurrentSettingsPage(): SettingsPage | undefined {
 }
 
 /**
- * The settings nav: the column beside the page on a wide screen. Rows in the
- * sidebar's own recipe (`.nav-item`), so it reads as the sidebar's
- * continuation rather than a second kind of list, with the admin's page set
- * off beneath a rule — the sidebar's own way of setting a row apart.
+ * The sidebar while Settings is open (src/components/sidebar.tsx): the pages
+ * in place of the notes, which are not what anyone is here for, with a way
+ * back above them. Rows in the sidebar's own recipe (`.nav-item`), so the
+ * sidebar reads as one thing that changed its contents rather than two;
+ * the admin's page is set off beneath a rule, the sidebar's own way of
+ * setting a row apart.
  */
-export function SettingsNav({ className }: { className?: string }) {
+export function SettingsNavItems() {
   const pages = useSettingsPages()
   return (
-    <nav aria-label="Settings" className={cx("flex flex-col gap-1", className)}>
-      <SettingsNavRows pages={pages.filter((page) => !page.admin)} />
+    <nav aria-label="Settings" className="flex flex-col gap-1">
+      <Link to="/" search={{ query: undefined }} className="nav-item text-text-secondary">
+        <ArrowLeftIcon16 className="shrink-0" />
+        <span className="truncate">Back to notes</span>
+      </Link>
+      <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
+        <span className="flex h-6 items-center px-2 text-sm text-text-secondary coarse:px-3">
+          Settings
+        </span>
+        <SettingsNavRows pages={pages.filter((page) => !page.admin)} />
+      </div>
       {pages.some((page) => page.admin) ? (
         <div className="mt-1 border-t border-border-secondary pt-2">
           <SettingsNavRows pages={pages.filter((page) => page.admin)} />
