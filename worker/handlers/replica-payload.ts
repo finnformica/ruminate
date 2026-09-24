@@ -241,6 +241,14 @@ export interface ReplicaCorpusBody {
   /** The replica cursor at pull time (meta `replica_cursor`); the client
    * stores it and sends it back as `?since=` on the next incremental pull. */
   cursor: string | null
+  /**
+   * Which database answered: `"production"`, or a preview clone's id
+   * (`Env.REPLICA_ID`). A cursor is only meaningful against the database that
+   * issued it, so a client that sees this change from what it stored discards
+   * its cache and pulls in full. Optional on the wire for the sake of older
+   * Workers; the client treats a missing id as "unknown, keep going".
+   */
+  replica_id?: string
 }
 
 /**
@@ -264,6 +272,8 @@ export interface ReplicaStatusBody {
   counts: { nodes: number; links: number; pages: number }
   schema_version: string | null
   replica_cursor: string | null
+  /** As on the pull bodies: which database answered. */
+  replica_id?: string
 }
 
 /** A planned SQL statement: the pure, D1-free representation of the write. */
