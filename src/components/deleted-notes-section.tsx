@@ -11,7 +11,7 @@ import { SettingsSection } from "./settings-section"
 /**
  * Settings' **Recently deleted**: the notes the local database still holds
  * under a tombstone (`src/data/deleted-notes.ts`), newest first, each with a
- * button that puts it back — the note, and every block that went with it.
+ * button that restores it — the note, and every block that went with it.
  * Read once when the section opens and again after each restore; a delete
  * elsewhere in the app while the page is open shows up on the next visit.
  * Own notes only: a note someone shared with the user is the owner's, and
@@ -42,7 +42,7 @@ export function DeletedNotesSection() {
   const restore = async (id: string, title: string) => {
     if (!rows) return
     apply(restoreNoteOps(id, rows))
-    toast(`Put back “${title}”.`, {
+    toast(`Restored “${title}”.`, {
       action: {
         label: "Open",
         onClick: () =>
@@ -57,7 +57,7 @@ export function DeletedNotesSection() {
       <div className="flex flex-col gap-1">
         <span className="leading-4">Deleted notes</span>
         <span className="text-sm leading-5 text-text-secondary">
-          A deleted note is kept, and can be put back with everything only it held. A block that was
+          A deleted note is kept, and can be restored with everything only it held. A block that was
           also in another note stays where it is.
         </span>
       </div>
@@ -84,7 +84,7 @@ export function DeletedNotesSection() {
                 className="shrink-0"
                 onClick={() => restore(note.id, note.title)}
               >
-                Put back
+                Restore
               </AsyncButton>
             </li>
           ))}

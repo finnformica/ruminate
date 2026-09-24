@@ -1,6 +1,6 @@
 ### Added
 
-- Put a deleted note back. Deleting a note no longer loses it: **Recently deleted** in Settings lists every note deleted on this account, newest first, and **Put back** restores it with every block that went with it, in its old place in the list. A block that was also in another note was never deleted, and simply hangs beneath both again.
+- Restore a deleted note. Deleting a note no longer loses it: **Recently deleted** in Settings lists every note deleted on this account, newest first, and **Restore** brings it back with every block that went with it, in its old place in the list. A block that was also in another note was never deleted, and simply hangs beneath both again.
 
 ### Changed
 

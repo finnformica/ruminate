@@ -15,7 +15,7 @@ import { Dialog } from "./ui/dialog"
  * is gone (the open note's page navigates away).
  *
  * The delete is the ordinary one (`deleteNoteOps`), and so recoverable: the
- * rows are only tombstoned, and Settings' Recently deleted puts them back
+ * rows are only tombstoned, and Settings' Recently deleted restores them
  * (`src/data/deleted-notes.ts`). A note someone shared with the user is the
  * owner's, though — deleting it tombstones the owner's rows — so there the
  * dialog says so instead.
@@ -61,7 +61,7 @@ export function DeleteNoteDialog() {
           <p className="leading-5 text-text-secondary">
             {share === null ? (
               <>
-                The note and everything only it holds will be deleted. You can put it back from{" "}
+                The note and everything only it holds will be deleted. You can restore it from{" "}
                 <span className="text-text">Recently deleted</span> in Settings.
               </>
             ) : (

@@ -57,7 +57,7 @@ export function deletedNotesOf(rows: CorpusRows): DeletedNote[] {
 }
 
 /**
- * The batch that puts a deleted note back: a `create` for the note and each
+ * The batch that restores a deleted note: a `create` for the note and each
  * block that went with it, and a `link` for every retained link between two
  * of them, or between one of them and a live node (the corpus root's link
  * to the note, so it keeps its place in the order; a block another note

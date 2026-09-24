@@ -67,7 +67,7 @@ describe("deletedNotesOf", () => {
 })
 
 describe("restoreNoteOps", () => {
-  it("puts a deleted note back exactly as it was", async () => {
+  it("restores a deleted note exactly as it was", async () => {
     const store = await makeStore()
     await seed(store, "a", A)
     await deleteNote(store, "a")
