@@ -26,6 +26,9 @@
       // The feature flags as the caller sees them, and the admin API behind
       // the /admin page: invite links and the flags' audiences.
       "/api/features",
+      // The account's preferences — the settings that follow the account
+      // rather than the device (src/data/preferences.ts).
+      "/api/preferences",
       "/api/admin",
       "/api/admin/*",
       // Sharing: shares given and received, and the slice a grantee reads

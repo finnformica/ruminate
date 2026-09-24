@@ -1,17 +1,21 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useAtom, useAtomValue } from "jotai"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useNetworkState } from "react-use"
 import { DEFAULT_NEW_BLOCK_MARKER } from "../blocks/markers"
 import { Button } from "../components/ui/button"
+import { Checkbox } from "../components/ui/checkbox"
 import { useSignOut } from "../components/github-auth"
 import { GitHubAvatar } from "../components/github-avatar"
 import { SettingsIcon16 } from "../components/icons"
 import { McpTokensSection } from "../components/mcp-tokens-section"
 import { PageLayout } from "../components/page-layout"
 import { SettingsSection } from "../components/settings-section"
+import { DeletedNotesSection } from "../components/deleted-notes-section"
 import { SharingSection } from "../components/sharing-section"
+import { saveAccountPreferences, useAccountPreference } from "../data/account-preferences"
 import { useFeature } from "../data/features"
+import { usePending } from "../hooks/pending"
 import { recordedEmailAtom } from "../data/shared-mode"
 import { TextInput } from "../components/ui/text-input"
 import { IconButton } from "../components/ui/icon-button"
@@ -52,13 +56,20 @@ function RouteComponent() {
   // account may not use is not drawn. The Worker refuses regardless.
   const sharing = useFeature("sharing")
   const mcp = useFeature("mcp")
+  // Two panels need a signed-in user: the preferences follow the account, so
+  // there is nothing to set signed out, and Recently deleted reads the local
+  // database, which only a signed-in user has (the sample notes have no
+  // tombstones).
+  const githubUser = useAtomValue(githubUserAtom)
   return (
     <PageLayout title="Settings" icon={<SettingsIcon16 />} disableGuard>
       <div className="p-4 pb-6">
         <div className="mx-auto flex max-w-xl flex-col gap-6">
           <AppearanceSection />
           <EditorSection />
+          {githubUser ? <UpdatesSection /> : null}
           <StorageSection />
+          {githubUser ? <DeletedNotesSection /> : null}
           {sharing ? <SharingSection /> : null}
           {mcp ? <McpTokensSection /> : null}
           <GitHubSection />
@@ -280,6 +291,54 @@ function EditorSection() {
             )
           })}
         </div>
+      </div>
+    </SettingsSection>
+  )
+}
+
+/** The what's-new card, and whether it greets an update at all. Off until
+ * asked for, and a preference of the account (src/data/account-preferences.ts)
+ * rather than the device, so it is answered once; **What's new** in the
+ * sidebar reaches the changelog either way. */
+function UpdatesSection() {
+  const showWhatsNew = useAccountPreference("whatsNewCard")
+  const [failed, setFailed] = useState(false)
+  // The box shows the new value at once and is held until the server has it
+  // (docs/design-principles.md, Busy controls); refused, the value goes back
+  // and the row says so.
+  const [save, saving] = usePending(async (checked: boolean) => {
+    setFailed(false)
+    try {
+      await saveAccountPreferences({ whatsNewCard: checked })
+    } catch {
+      setFailed(true)
+    }
+  })
+
+  return (
+    <SettingsSection title="Updates">
+      {/* `htmlFor` points at the checkbox, which renders a <button> — a
+          labelable element — so clicking the description toggles it. */}
+      <div className="flex items-start gap-2 leading-4">
+        <Checkbox
+          id="show-whats-new"
+          className="mt-0.5"
+          checked={showWhatsNew}
+          disabled={saving}
+          onCheckedChange={(checked) => save(checked)}
+        />
+        <label htmlFor="show-whats-new" className="flex cursor-pointer flex-col gap-1">
+          <span>Show what's new after an update</span>
+          <span className="text-sm leading-4 text-text-secondary">
+            A card in the corner lists what changed when Ruminate updates. The full changelog is
+            always under What's new in the sidebar.
+          </span>
+          {failed ? (
+            <span className="text-sm leading-4 text-text-danger">
+              Couldn't save that — check your connection and try again.
+            </span>
+          ) : null}
+        </label>
       </div>
     </SettingsSection>
   )

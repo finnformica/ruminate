@@ -89,6 +89,14 @@
   --color-bg-secondary-hover: var(--neutral-a4);
   --color-bg-secondary-active: var(--neutral-a5);
   --color-bg-tertiary: var(--neutral-a4);
+  /* The one solid red: the button that confirms a destructive action
+     (Button's `danger` variant), and nothing else. Solid steps 9–11 of the
+     red ramp, which flips with the scheme like every other ramp; its ink is
+     Radix's red contrast, white on either. */
+  --color-bg-danger: var(--red-9);
+  --color-bg-danger-hover: var(--red-10);
+  --color-bg-danger-active: var(--red-11);
+  --color-text-on-danger: white;
   --color-bg-code-block: var(--neutral-a3);
   --color-bg-highlight: var(--yellow-a3);
   --color-bg-selection: var(--accent-a3);
@@ -467,6 +475,10 @@
     --color-bg-overlay-backdrop: var(--color-bg);
     --color-bg-secondary: var(--color-bg);
     --color-bg-tertiary: var(--color-bg);
+    --color-bg-danger: var(--color-bg);
+    --color-bg-danger-hover: var(--color-bg);
+    --color-bg-danger-active: var(--color-bg);
+    --color-text-on-danger: var(--color-text);
     --color-bg-code-block: var(--color-bg);
     --color-bg-highlight: var(--color-text);
     --color-bg-selection: var(--color-text);

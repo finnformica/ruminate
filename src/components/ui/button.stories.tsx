@@ -25,6 +25,15 @@ export const Secondary = {
   },
 }
 
+/** The confirm of a destructive dialog — the only place this variant goes. */
+export const Danger = {
+  args: {
+    children: "Delete",
+    variant: "danger",
+    size: "medium",
+  },
+}
+
 export const WithKeyboardShortcut = {
   args: {
     children: "Save",

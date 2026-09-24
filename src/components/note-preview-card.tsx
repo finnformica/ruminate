@@ -1,13 +1,14 @@
 import { Link } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
-import { useAtomValue, useStore } from "jotai"
+import { useAtomValue, useSetAtom, useStore } from "jotai"
 import React from "react"
 import { rollup } from "../data/graph"
 import { graphSnapshotAtom, isSignedOutAtom } from "../global-state"
-import { useDeleteNote, useNoteById } from "../hooks/note"
+import { useNoteById } from "../hooks/note"
 import { NoteId } from "../schema"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { cx } from "../utils/cx"
+import { deleteNoteDialogAtom } from "./delete-note-dialog"
 import { DropdownMenu } from "./ui/dropdown-menu"
 import { IconButton } from "./ui/icon-button"
 import { CopyIcon16, MoreIcon16, TrashIcon16 } from "./icons"
@@ -22,7 +23,8 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
   const note = useNoteById(id)
   const isSignedOut = useAtomValue(isSignedOutAtom)
   const jotaiStore = useStore()
-  const deleteNote = useDeleteNote()
+  // Delete asks first (`delete-note-dialog.tsx`); the menu only opens it.
+  const requestDelete = useSetAtom(deleteNoteDialogAtom)
   const [isDropdownOpen, setIsDropdownOpen] = React.useState(false)
 
   if (!note) return null
@@ -82,7 +84,7 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
                 variant="danger"
                 icon={<TrashIcon16 />}
                 disabled={isSignedOut}
-                onClick={() => deleteNote(id)}
+                onClick={() => requestDelete({ noteId: id })}
               >
                 Delete
               </DropdownMenu.Item>
