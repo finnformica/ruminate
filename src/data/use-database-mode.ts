@@ -5,6 +5,7 @@ import { githubUserAtom, signOutAtom } from "../global-state"
 import { sessionStatusAtom } from "../utils/github-session"
 import { requestAmbientDatabasePull, startDatabaseMode, stopDatabaseMode } from "./database-mode"
 import { refreshFeatures, resetFeatures, seedFeatures } from "./features"
+import { refreshPreferences, resetPreferences } from "./account-preferences"
 import { requestAmbientSharesRefresh, startSharedMode, stopSharedMode } from "./shared-mode"
 
 /**
@@ -54,7 +55,12 @@ export function useDatabaseMode() {
     // server's is fetched once per sign-in, again when the network returns.
     seedFeatures(owner)
     void refreshFeatures()
+    // The account's preferences (src/data/account-preferences.ts): the
+    // server's, once per sign-in and again when the network returns. Nothing
+    // is kept on the device, so until it answers the defaults stand.
+    void refreshPreferences()
     return () => {
+      resetPreferences()
       resetFeatures()
       stopSharedMode()
       stopDatabaseMode()
@@ -88,6 +94,7 @@ export function useDatabaseMode() {
       requestAmbientDatabasePull()
       requestAmbientSharesRefresh()
       void refreshFeatures()
+      void refreshPreferences()
     }
   })
 }
