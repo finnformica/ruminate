@@ -18,6 +18,11 @@ const button = cva(
         // control.
         primary:
           "bg-text font-bold text-bg [&_*]:text-bg enabled:hover:bg-text-secondary enabled:active:bg-text-tertiary",
+        // The strongest action when what it does cannot be taken back: the
+        // one solid red in the app (docs/design-principles.md, Color roles).
+        // A dialog's confirm (`ConfirmDialog`), never a button among others.
+        danger:
+          "bg-bg-danger font-bold text-text-on-danger [&_*]:text-text-on-danger enabled:hover:bg-bg-danger-hover enabled:active:bg-bg-danger-active",
       },
       size: {
         small: "h-6 px-2",
