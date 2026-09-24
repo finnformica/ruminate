@@ -1,0 +1,49 @@
+name: Preview database teardown
+# When a pull request closes — merged or not — its preview clone of the
+# production database goes with it (docs/preview-databases.md). The clone's
+# name comes from the same function the preview script uses, so the two
+# cannot drift. Clones this misses (a closed PR while the token was broken,
+# a manual delete of a branch) are caught by the sweep every preview build
+# runs. Production and the shared clone are never named here.
+permissions:
+  contents: read
+on:
+  pull_request:
+    types: [closed]
+jobs:
+  teardown:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22.x
+      - name: Delete this branch's preview database, if it has one
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then
+            echo "CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set; nothing to do"
+            exit 0
+          fi
+          name="ruminate-preview-$(node scripts/preview-deploy.mjs --slug "${BRANCH}")"
+          case "${name}" in
+            ruminate|ruminate-preview) echo "refusing to delete ${name}"; exit 1 ;;
+          esac
+          if npx --yes wrangler@4 d1 list --json | node -e '
+            const name = process.argv[1]
+            let input = ""
+            process.stdin.on("data", (chunk) => (input += chunk))
+            process.stdin.on("end", () => {
+              const list = JSON.parse(input.slice(input.indexOf("[")))
+              process.exit(list.some((db) => db.name === name) ? 0 : 3)
+            })
+          ' "${name}"; then
+            echo "deleting ${name}"
+            npx --yes wrangler@4 d1 delete "${name}" -y
+          else
+            echo "${name} does not exist; nothing to do"
+          fi
