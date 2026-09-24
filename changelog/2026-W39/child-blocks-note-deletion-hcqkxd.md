@@ -4,4 +4,4 @@
 
 ### Changed
 
-- Deleting a note asks first. **Delete** in a note's menu now opens a dialog naming the note and saying what the delete takes with it, rather than deleting on the click. A slip on the item beside it used to be unrecoverable.
+- Deleting a note asks first. **Delete** in a note's menu now opens a dialog naming the note and saying what the delete takes with it, with a red **Delete** button and focus on **Cancel**, rather than deleting on the click. A slip on the item beside it used to be unrecoverable.

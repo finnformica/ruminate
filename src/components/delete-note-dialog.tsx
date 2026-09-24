@@ -3,8 +3,7 @@ import { useDeleteNote } from "../hooks/note"
 import { useNoteShare } from "../hooks/share"
 import { notesAtom } from "../global-state"
 import type { NoteId } from "../schema"
-import { Button } from "./ui/button"
-import { Dialog } from "./ui/dialog"
+import { ConfirmDialog } from "./ui/confirm-dialog"
 
 /**
  * "Delete" from a note's menu, in the header or on a sidebar row: the note
@@ -38,47 +37,33 @@ export function DeleteNoteDialog() {
   const deleteNote = useDeleteNote()
 
   const note = request === null ? undefined : notes.get(request.noteId)
-  const close = () => setRequest(null)
-
-  if (request === null || note === undefined) return <Dialog open={false} />
-
-  const text = note.displayName
+  const text = note?.displayName ?? ""
   const label = text.length > LABEL_LENGTH ? `${text.slice(0, LABEL_LENGTH - 1)}…` : text
 
-  const confirm = () => {
-    deleteNote(request.noteId)
-    close()
-    request.onDeleted?.()
-  }
-
   return (
-    <Dialog open onOpenChange={(next) => (next ? undefined : close())}>
-      <Dialog.Content title={`Delete “${label || "Untitled"}”?`}>
-        <div className="flex flex-col gap-4">
-          {/* What the delete takes, and where it goes, before the button that
-              does it. The default focus stays on the window, not on Delete, so
-              an Enter that was meant for the menu cannot land here. */}
-          <p className="leading-5 text-text-secondary">
-            {share === null ? (
-              <>
-                The note and everything only it holds will be deleted. You can restore it from{" "}
-                <span className="text-text">Recently deleted</span> in Settings.
-              </>
-            ) : (
-              <>
-                This note was shared with you: deleting it deletes it from its owner’s notes too,
-                along with everything only it holds.
-              </>
-            )}
-          </p>
-          <div className="flex gap-2">
-            <Button variant="primary" onClick={confirm}>
-              Delete
-            </Button>
-            <Button onClick={close}>Cancel</Button>
-          </div>
-        </div>
-      </Dialog.Content>
-    </Dialog>
+    <ConfirmDialog
+      open={request !== null && note !== undefined}
+      onOpenChange={(open) => (open ? undefined : setRequest(null))}
+      title={`Delete “${label || "Untitled"}”?`}
+      confirmLabel="Delete"
+      variant="danger"
+      onConfirm={() => {
+        if (!request) return
+        deleteNote(request.noteId)
+        request.onDeleted?.()
+      }}
+    >
+      {share === null ? (
+        <>
+          The note and everything only it holds will be deleted. You can restore it from{" "}
+          <span className="text-text">Recently deleted</span> in Settings.
+        </>
+      ) : (
+        <>
+          This note was shared with you: deleting it deletes it from its owner’s notes too, along
+          with everything only it holds.
+        </>
+      )}
+    </ConfirmDialog>
   )
 }
