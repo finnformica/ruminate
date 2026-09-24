@@ -8,25 +8,18 @@ import { cx } from "../../utils/cx"
 import { ChevronLeftIcon16, ChevronRightIcon16 } from "../icons"
 
 /**
- * The settings, one page each, in the order the settings nav lists them —
- * grouped by what a page is *about*: the account (it follows the sign-in,
- * wherever it is used), this device (theme, editor and storage are the
- * browser's, and set again on the next one), and the admin's (the bootstrap
- * owner's alone, as the server says).
+ * The settings, one page per subject, in the order the settings nav lists
+ * them. A page holds every card about its subject — the account's name and
+ * sign-in; how the app looks and the editor behaves; the notes shared and
+ * received; and so on — so a subject is one place, and the list stays short.
+ * The admin's page is the bootstrap owner's alone, as the server says, and
+ * sits apart at the foot of the list.
  *
  * `/settings` itself is the list on a phone and a redirect to the first page
  * on a wider screen, where the list is a column beside the page.
  */
 export type SettingsPageId =
-  | "account"
-  | "sharing"
-  | "mcp"
-  | "appearance"
-  | "editor"
-  | "data"
-  | "features"
-  | "invites"
-  | "about"
+  "account" | "preferences" | "sharing" | "mcp" | "data" | "about" | "admin"
 
 export interface SettingsPage {
   id: SettingsPageId
@@ -37,138 +30,104 @@ export interface SettingsPage {
   feature?: FeatureKey
   /** Listed only signed in. */
   signedIn?: boolean
-  /** Listed for the admin alone. */
+  /** Listed for the admin alone, apart from the rest. */
   admin?: boolean
 }
 
-export interface SettingsGroup {
-  /** No heading for the group of one at the end. */
-  heading: string | null
-  pages: SettingsPage[]
-}
-
-const SETTINGS_GROUPS: SettingsGroup[] = [
+const SETTINGS_PAGES: SettingsPage[] = [
   {
-    heading: "Account",
-    pages: [
-      {
-        id: "account",
-        label: "Account",
-        description: "Your name, your email address and how you sign in.",
-      },
-      {
-        id: "sharing",
-        label: "Sharing",
-        description: "The notes you have shared, and the ones shared with you.",
-        feature: "sharing",
-        signedIn: true,
-      },
-      {
-        id: "mcp",
-        label: "MCP access",
-        description: "Tokens that let an agent read or write your notes.",
-        feature: "mcp",
-        signedIn: true,
-      },
-    ],
+    id: "account",
+    label: "Account",
+    description: "Your name, your email address and how you sign in.",
   },
   {
-    heading: "This device",
-    pages: [
-      { id: "appearance", label: "Appearance", description: "Theme and accent colour." },
-      {
-        id: "editor",
-        label: "Editor",
-        description: "How a note opens, and what a new block starts as.",
-      },
-      {
-        id: "data",
-        label: "Data",
-        description: "The local database, cloud sync, and recently deleted notes.",
-      },
-    ],
+    id: "preferences",
+    label: "Preferences",
+    description: "Theme and accent colour, how notes open, and what's new.",
   },
   {
-    heading: "Admin",
-    pages: [
-      {
-        id: "features",
-        label: "Feature flags",
-        description: "Who may use each feature.",
-        admin: true,
-      },
-      { id: "invites", label: "Invites", description: "The links that admit people.", admin: true },
-    ],
+    id: "sharing",
+    label: "Sharing",
+    description: "The notes you have shared, and the ones shared with you.",
+    feature: "sharing",
+    signedIn: true,
   },
   {
-    heading: null,
-    pages: [{ id: "about", label: "About", description: "Version and credits." }],
+    id: "mcp",
+    label: "MCP access",
+    description: "Tokens that let an agent read or write your notes.",
+    feature: "mcp",
+    signedIn: true,
+  },
+  {
+    id: "data",
+    label: "Data",
+    description: "The local database, cloud sync, and recently deleted notes.",
+  },
+  { id: "about", label: "About", description: "Version and credits." },
+  {
+    id: "admin",
+    label: "Admin",
+    description: "Feature flags, and the invites that admit people.",
+    admin: true,
   },
 ]
 
 const settingsPagePath = (id: SettingsPageId) => `/settings/${id}` as const
 
-/** The groups this reader is shown, with the pages they may not use left out. */
-function useSettingsGroups(): SettingsGroup[] {
+/** The pages this reader is shown, with the ones they may not use left out. */
+function useSettingsPages(): SettingsPage[] {
   const githubUser = useAtomValue(githubUserAtom)
   const isAdmin = useIsAdmin()
   const sharing = useFeature("sharing")
   const mcp = useFeature("mcp")
   const features: Record<FeatureKey, boolean> = { sharing, mcp }
-  return SETTINGS_GROUPS.map((group) => ({
-    ...group,
-    pages: group.pages.filter(
-      (page) =>
-        (!page.signedIn || githubUser) &&
-        (!page.admin || isAdmin) &&
-        (!page.feature || features[page.feature]),
-    ),
-  })).filter((group) => group.pages.length > 0)
+  return SETTINGS_PAGES.filter(
+    (page) =>
+      (!page.signedIn || githubUser) &&
+      (!page.admin || isAdmin) &&
+      (!page.feature || features[page.feature]),
+  )
 }
 
 /** The page the address names, if any. */
 export function useCurrentSettingsPage(): SettingsPage | undefined {
   const { pathname } = useLocation()
   const id = pathname.split("/")[2]
-  for (const group of SETTINGS_GROUPS) {
-    const page = group.pages.find((entry) => entry.id === id)
-    if (page) return page
-  }
-  return undefined
+  return SETTINGS_PAGES.find((entry) => entry.id === id)
 }
 
 /**
  * The settings nav: the column beside the page on a wide screen. Rows in the
- * sidebar's own recipe (`.nav-item`), grouped under quiet headings, so it
- * reads as the sidebar's continuation rather than a second kind of list.
+ * sidebar's own recipe (`.nav-item`), so it reads as the sidebar's
+ * continuation rather than a second kind of list, with the admin's page set
+ * off beneath a rule — the sidebar's own way of setting a row apart.
  */
 export function SettingsNav({ className }: { className?: string }) {
-  const groups = useSettingsGroups()
+  const pages = useSettingsPages()
   return (
-    <nav aria-label="Settings" className={cx("flex flex-col gap-4", className)}>
-      {groups.map((group, index) => (
-        <div key={group.heading ?? index} className="flex flex-col gap-1">
-          {group.heading ? (
-            <span className="flex h-6 items-center px-2 text-sm text-text-secondary">
-              {group.heading}
-            </span>
-          ) : null}
-          <ul className="flex flex-col gap-1">
-            {group.pages.map((page) => (
-              <li key={page.id}>
-                <Link
-                  to={settingsPagePath(page.id)}
-                  className="nav-item"
-                  activeOptions={{ exact: true }}
-                >
-                  <span className="truncate">{page.label}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+    <nav aria-label="Settings" className={cx("flex flex-col gap-1", className)}>
+      <SettingsNavRows pages={pages.filter((page) => !page.admin)} />
+      {pages.some((page) => page.admin) ? (
+        <div className="mt-1 border-t border-border-secondary pt-2">
+          <SettingsNavRows pages={pages.filter((page) => page.admin)} />
         </div>
-      ))}
+      ) : null}
     </nav>
+  )
+}
+
+function SettingsNavRows({ pages }: { pages: SettingsPage[] }) {
+  return (
+    <ul className="flex flex-col gap-1">
+      {pages.map((page) => (
+        <li key={page.id}>
+          <Link to={settingsPagePath(page.id)} className="nav-item" activeOptions={{ exact: true }}>
+            <span className="truncate">{page.label}</span>
+          </Link>
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -178,38 +137,36 @@ export function SettingsNav({ className }: { className?: string }) {
  * its name and a chevron at its end, in the size the phone's drawer uses.
  */
 export function SettingsIndexList() {
-  const groups = useSettingsGroups()
+  const pages = useSettingsPages()
   return (
-    <div className="flex flex-col gap-5">
-      {groups.map((group, index) => (
-        <div key={group.heading ?? index} className="flex flex-col gap-1">
-          {group.heading ? (
-            <span className="flex h-6 items-center px-3 text-sm text-text-secondary">
-              {group.heading}
-            </span>
-          ) : null}
-          <ul className="flex flex-col gap-1">
-            {group.pages.map((page) => (
-              <li key={page.id}>
-                <Link
-                  to={settingsPagePath(page.id)}
-                  className="nav-item h-auto! py-2"
-                  data-size="large"
-                >
-                  <span className="flex w-0 grow flex-col gap-0.5">
-                    <span className="truncate leading-5">{page.label}</span>
-                    <span className="line-clamp-2 text-sm leading-4 text-text-secondary">
-                      {page.description}
-                    </span>
-                  </span>
-                  <ChevronRightIcon16 className="shrink-0 text-text-tertiary" />
-                </Link>
-              </li>
-            ))}
-          </ul>
+    <div className="flex flex-col gap-1">
+      <SettingsIndexRows pages={pages.filter((page) => !page.admin)} />
+      {pages.some((page) => page.admin) ? (
+        <div className="mt-2 border-t border-border-secondary pt-3">
+          <SettingsIndexRows pages={pages.filter((page) => page.admin)} />
         </div>
-      ))}
+      ) : null}
     </div>
+  )
+}
+
+function SettingsIndexRows({ pages }: { pages: SettingsPage[] }) {
+  return (
+    <ul className="flex flex-col gap-1">
+      {pages.map((page) => (
+        <li key={page.id}>
+          <Link to={settingsPagePath(page.id)} className="nav-item h-auto! py-2" data-size="large">
+            <span className="flex w-0 grow flex-col gap-0.5">
+              <span className="truncate leading-5">{page.label}</span>
+              <span className="line-clamp-2 text-sm leading-4 text-text-secondary">
+                {page.description}
+              </span>
+            </span>
+            <ChevronRightIcon16 className="shrink-0 text-text-tertiary" />
+          </Link>
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -247,9 +204,7 @@ export function SettingsPageBody({
 
 /** The page named by its id — for a route to look itself up. */
 export function settingsPage(id: SettingsPageId): SettingsPage {
-  for (const group of SETTINGS_GROUPS) {
-    const page = group.pages.find((entry) => entry.id === id)
-    if (page) return page
-  }
-  throw new Error(`No settings page ${id}`)
+  const page = SETTINGS_PAGES.find((entry) => entry.id === id)
+  if (!page) throw new Error(`No settings page ${id}`)
+  return page
 }

@@ -21,12 +21,10 @@ import { Route as AppRootSettingsIndexImport } from './routes/_appRoot.settings.
 import { Route as AppRootNotesIndexImport } from './routes/_appRoot.notes.index'
 import { Route as AppRootViewsSplatImport } from './routes/_appRoot.views_.$'
 import { Route as AppRootSettingsSharingImport } from './routes/_appRoot.settings.sharing'
+import { Route as AppRootSettingsPreferencesImport } from './routes/_appRoot.settings.preferences'
 import { Route as AppRootSettingsMcpImport } from './routes/_appRoot.settings.mcp'
-import { Route as AppRootSettingsInvitesImport } from './routes/_appRoot.settings.invites'
-import { Route as AppRootSettingsFeaturesImport } from './routes/_appRoot.settings.features'
-import { Route as AppRootSettingsEditorImport } from './routes/_appRoot.settings.editor'
 import { Route as AppRootSettingsDataImport } from './routes/_appRoot.settings.data'
-import { Route as AppRootSettingsAppearanceImport } from './routes/_appRoot.settings.appearance'
+import { Route as AppRootSettingsAdminImport } from './routes/_appRoot.settings.admin'
 import { Route as AppRootSettingsAccountImport } from './routes/_appRoot.settings.account'
 import { Route as AppRootSettingsAboutImport } from './routes/_appRoot.settings.about'
 import { Route as AppRootNotesSplatImport } from './routes/_appRoot.notes_.$'
@@ -93,27 +91,17 @@ const AppRootSettingsSharingRoute = AppRootSettingsSharingImport.update({
   getParentRoute: () => AppRootSettingsRoute,
 } as any)
 
+const AppRootSettingsPreferencesRoute = AppRootSettingsPreferencesImport.update(
+  {
+    id: '/preferences',
+    path: '/preferences',
+    getParentRoute: () => AppRootSettingsRoute,
+  } as any,
+)
+
 const AppRootSettingsMcpRoute = AppRootSettingsMcpImport.update({
   id: '/mcp',
   path: '/mcp',
-  getParentRoute: () => AppRootSettingsRoute,
-} as any)
-
-const AppRootSettingsInvitesRoute = AppRootSettingsInvitesImport.update({
-  id: '/invites',
-  path: '/invites',
-  getParentRoute: () => AppRootSettingsRoute,
-} as any)
-
-const AppRootSettingsFeaturesRoute = AppRootSettingsFeaturesImport.update({
-  id: '/features',
-  path: '/features',
-  getParentRoute: () => AppRootSettingsRoute,
-} as any)
-
-const AppRootSettingsEditorRoute = AppRootSettingsEditorImport.update({
-  id: '/editor',
-  path: '/editor',
   getParentRoute: () => AppRootSettingsRoute,
 } as any)
 
@@ -123,9 +111,9 @@ const AppRootSettingsDataRoute = AppRootSettingsDataImport.update({
   getParentRoute: () => AppRootSettingsRoute,
 } as any)
 
-const AppRootSettingsAppearanceRoute = AppRootSettingsAppearanceImport.update({
-  id: '/appearance',
-  path: '/appearance',
+const AppRootSettingsAdminRoute = AppRootSettingsAdminImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => AppRootSettingsRoute,
 } as any)
 
@@ -220,11 +208,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRootSettingsAccountImport
       parentRoute: typeof AppRootSettingsImport
     }
-    '/_appRoot/settings/appearance': {
-      id: '/_appRoot/settings/appearance'
-      path: '/appearance'
-      fullPath: '/settings/appearance'
-      preLoaderRoute: typeof AppRootSettingsAppearanceImport
+    '/_appRoot/settings/admin': {
+      id: '/_appRoot/settings/admin'
+      path: '/admin'
+      fullPath: '/settings/admin'
+      preLoaderRoute: typeof AppRootSettingsAdminImport
       parentRoute: typeof AppRootSettingsImport
     }
     '/_appRoot/settings/data': {
@@ -234,32 +222,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRootSettingsDataImport
       parentRoute: typeof AppRootSettingsImport
     }
-    '/_appRoot/settings/editor': {
-      id: '/_appRoot/settings/editor'
-      path: '/editor'
-      fullPath: '/settings/editor'
-      preLoaderRoute: typeof AppRootSettingsEditorImport
-      parentRoute: typeof AppRootSettingsImport
-    }
-    '/_appRoot/settings/features': {
-      id: '/_appRoot/settings/features'
-      path: '/features'
-      fullPath: '/settings/features'
-      preLoaderRoute: typeof AppRootSettingsFeaturesImport
-      parentRoute: typeof AppRootSettingsImport
-    }
-    '/_appRoot/settings/invites': {
-      id: '/_appRoot/settings/invites'
-      path: '/invites'
-      fullPath: '/settings/invites'
-      preLoaderRoute: typeof AppRootSettingsInvitesImport
-      parentRoute: typeof AppRootSettingsImport
-    }
     '/_appRoot/settings/mcp': {
       id: '/_appRoot/settings/mcp'
       path: '/mcp'
       fullPath: '/settings/mcp'
       preLoaderRoute: typeof AppRootSettingsMcpImport
+      parentRoute: typeof AppRootSettingsImport
+    }
+    '/_appRoot/settings/preferences': {
+      id: '/_appRoot/settings/preferences'
+      path: '/preferences'
+      fullPath: '/settings/preferences'
+      preLoaderRoute: typeof AppRootSettingsPreferencesImport
       parentRoute: typeof AppRootSettingsImport
     }
     '/_appRoot/settings/sharing': {
@@ -305,12 +279,10 @@ declare module '@tanstack/react-router' {
 interface AppRootSettingsRouteChildren {
   AppRootSettingsAboutRoute: typeof AppRootSettingsAboutRoute
   AppRootSettingsAccountRoute: typeof AppRootSettingsAccountRoute
-  AppRootSettingsAppearanceRoute: typeof AppRootSettingsAppearanceRoute
+  AppRootSettingsAdminRoute: typeof AppRootSettingsAdminRoute
   AppRootSettingsDataRoute: typeof AppRootSettingsDataRoute
-  AppRootSettingsEditorRoute: typeof AppRootSettingsEditorRoute
-  AppRootSettingsFeaturesRoute: typeof AppRootSettingsFeaturesRoute
-  AppRootSettingsInvitesRoute: typeof AppRootSettingsInvitesRoute
   AppRootSettingsMcpRoute: typeof AppRootSettingsMcpRoute
+  AppRootSettingsPreferencesRoute: typeof AppRootSettingsPreferencesRoute
   AppRootSettingsSharingRoute: typeof AppRootSettingsSharingRoute
   AppRootSettingsIndexRoute: typeof AppRootSettingsIndexRoute
 }
@@ -318,12 +290,10 @@ interface AppRootSettingsRouteChildren {
 const AppRootSettingsRouteChildren: AppRootSettingsRouteChildren = {
   AppRootSettingsAboutRoute: AppRootSettingsAboutRoute,
   AppRootSettingsAccountRoute: AppRootSettingsAccountRoute,
-  AppRootSettingsAppearanceRoute: AppRootSettingsAppearanceRoute,
+  AppRootSettingsAdminRoute: AppRootSettingsAdminRoute,
   AppRootSettingsDataRoute: AppRootSettingsDataRoute,
-  AppRootSettingsEditorRoute: AppRootSettingsEditorRoute,
-  AppRootSettingsFeaturesRoute: AppRootSettingsFeaturesRoute,
-  AppRootSettingsInvitesRoute: AppRootSettingsInvitesRoute,
   AppRootSettingsMcpRoute: AppRootSettingsMcpRoute,
+  AppRootSettingsPreferencesRoute: AppRootSettingsPreferencesRoute,
   AppRootSettingsSharingRoute: AppRootSettingsSharingRoute,
   AppRootSettingsIndexRoute: AppRootSettingsIndexRoute,
 }
@@ -369,12 +339,10 @@ export interface FileRoutesByFullPath {
   '/notes/$': typeof AppRootNotesSplatRoute
   '/settings/about': typeof AppRootSettingsAboutRoute
   '/settings/account': typeof AppRootSettingsAccountRoute
-  '/settings/appearance': typeof AppRootSettingsAppearanceRoute
+  '/settings/admin': typeof AppRootSettingsAdminRoute
   '/settings/data': typeof AppRootSettingsDataRoute
-  '/settings/editor': typeof AppRootSettingsEditorRoute
-  '/settings/features': typeof AppRootSettingsFeaturesRoute
-  '/settings/invites': typeof AppRootSettingsInvitesRoute
   '/settings/mcp': typeof AppRootSettingsMcpRoute
+  '/settings/preferences': typeof AppRootSettingsPreferencesRoute
   '/settings/sharing': typeof AppRootSettingsSharingRoute
   '/views/$': typeof AppRootViewsSplatRoute
   '/notes': typeof AppRootNotesIndexRoute
@@ -390,12 +358,10 @@ export interface FileRoutesByTo {
   '/notes/$': typeof AppRootNotesSplatRoute
   '/settings/about': typeof AppRootSettingsAboutRoute
   '/settings/account': typeof AppRootSettingsAccountRoute
-  '/settings/appearance': typeof AppRootSettingsAppearanceRoute
+  '/settings/admin': typeof AppRootSettingsAdminRoute
   '/settings/data': typeof AppRootSettingsDataRoute
-  '/settings/editor': typeof AppRootSettingsEditorRoute
-  '/settings/features': typeof AppRootSettingsFeaturesRoute
-  '/settings/invites': typeof AppRootSettingsInvitesRoute
   '/settings/mcp': typeof AppRootSettingsMcpRoute
+  '/settings/preferences': typeof AppRootSettingsPreferencesRoute
   '/settings/sharing': typeof AppRootSettingsSharingRoute
   '/views/$': typeof AppRootViewsSplatRoute
   '/notes': typeof AppRootNotesIndexRoute
@@ -414,12 +380,10 @@ export interface FileRoutesById {
   '/_appRoot/notes_/$': typeof AppRootNotesSplatRoute
   '/_appRoot/settings/about': typeof AppRootSettingsAboutRoute
   '/_appRoot/settings/account': typeof AppRootSettingsAccountRoute
-  '/_appRoot/settings/appearance': typeof AppRootSettingsAppearanceRoute
+  '/_appRoot/settings/admin': typeof AppRootSettingsAdminRoute
   '/_appRoot/settings/data': typeof AppRootSettingsDataRoute
-  '/_appRoot/settings/editor': typeof AppRootSettingsEditorRoute
-  '/_appRoot/settings/features': typeof AppRootSettingsFeaturesRoute
-  '/_appRoot/settings/invites': typeof AppRootSettingsInvitesRoute
   '/_appRoot/settings/mcp': typeof AppRootSettingsMcpRoute
+  '/_appRoot/settings/preferences': typeof AppRootSettingsPreferencesRoute
   '/_appRoot/settings/sharing': typeof AppRootSettingsSharingRoute
   '/_appRoot/views_/$': typeof AppRootViewsSplatRoute
   '/_appRoot/notes/': typeof AppRootNotesIndexRoute
@@ -439,12 +403,10 @@ export interface FileRouteTypes {
     | '/notes/$'
     | '/settings/about'
     | '/settings/account'
-    | '/settings/appearance'
+    | '/settings/admin'
     | '/settings/data'
-    | '/settings/editor'
-    | '/settings/features'
-    | '/settings/invites'
     | '/settings/mcp'
+    | '/settings/preferences'
     | '/settings/sharing'
     | '/views/$'
     | '/notes'
@@ -459,12 +421,10 @@ export interface FileRouteTypes {
     | '/notes/$'
     | '/settings/about'
     | '/settings/account'
-    | '/settings/appearance'
+    | '/settings/admin'
     | '/settings/data'
-    | '/settings/editor'
-    | '/settings/features'
-    | '/settings/invites'
     | '/settings/mcp'
+    | '/settings/preferences'
     | '/settings/sharing'
     | '/views/$'
     | '/notes'
@@ -481,12 +441,10 @@ export interface FileRouteTypes {
     | '/_appRoot/notes_/$'
     | '/_appRoot/settings/about'
     | '/_appRoot/settings/account'
-    | '/_appRoot/settings/appearance'
+    | '/_appRoot/settings/admin'
     | '/_appRoot/settings/data'
-    | '/_appRoot/settings/editor'
-    | '/_appRoot/settings/features'
-    | '/_appRoot/settings/invites'
     | '/_appRoot/settings/mcp'
+    | '/_appRoot/settings/preferences'
     | '/_appRoot/settings/sharing'
     | '/_appRoot/views_/$'
     | '/_appRoot/notes/'
@@ -544,12 +502,10 @@ export const routeTree = rootRoute
       "children": [
         "/_appRoot/settings/about",
         "/_appRoot/settings/account",
-        "/_appRoot/settings/appearance",
+        "/_appRoot/settings/admin",
         "/_appRoot/settings/data",
-        "/_appRoot/settings/editor",
-        "/_appRoot/settings/features",
-        "/_appRoot/settings/invites",
         "/_appRoot/settings/mcp",
+        "/_appRoot/settings/preferences",
         "/_appRoot/settings/sharing",
         "/_appRoot/settings/"
       ]
@@ -574,28 +530,20 @@ export const routeTree = rootRoute
       "filePath": "_appRoot.settings.account.tsx",
       "parent": "/_appRoot/settings"
     },
-    "/_appRoot/settings/appearance": {
-      "filePath": "_appRoot.settings.appearance.tsx",
+    "/_appRoot/settings/admin": {
+      "filePath": "_appRoot.settings.admin.tsx",
       "parent": "/_appRoot/settings"
     },
     "/_appRoot/settings/data": {
       "filePath": "_appRoot.settings.data.tsx",
       "parent": "/_appRoot/settings"
     },
-    "/_appRoot/settings/editor": {
-      "filePath": "_appRoot.settings.editor.tsx",
-      "parent": "/_appRoot/settings"
-    },
-    "/_appRoot/settings/features": {
-      "filePath": "_appRoot.settings.features.tsx",
-      "parent": "/_appRoot/settings"
-    },
-    "/_appRoot/settings/invites": {
-      "filePath": "_appRoot.settings.invites.tsx",
-      "parent": "/_appRoot/settings"
-    },
     "/_appRoot/settings/mcp": {
       "filePath": "_appRoot.settings.mcp.tsx",
+      "parent": "/_appRoot/settings"
+    },
+    "/_appRoot/settings/preferences": {
+      "filePath": "_appRoot.settings.preferences.tsx",
       "parent": "/_appRoot/settings"
     },
     "/_appRoot/settings/sharing": {

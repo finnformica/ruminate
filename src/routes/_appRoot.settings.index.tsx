@@ -17,7 +17,7 @@ function RouteComponent() {
   const wide = useMedia("(min-width: 640px)")
   const githubUser = useAtomValue(githubUserAtom)
   if (wide) {
-    return <Navigate to={githubUser ? "/settings/account" : "/settings/appearance"} replace />
+    return <Navigate to={githubUser ? "/settings/account" : "/settings/preferences"} replace />
   }
   return <SettingsIndexList />
 }
