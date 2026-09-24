@@ -424,7 +424,12 @@ changed here, and it is invisible from outside:
   revives the row.
 - The user-visible rule above is deliberately unchanged by this: whether
   unlink-plus-rescue is still right once deletes are recoverable is a separate
-  decision, and there is no restore UI yet — only data that supports one.
+  decision. The one restore there is puts a **note** back: Settings' Recently
+  deleted (`src/data/deleted-notes.ts`) re-creates the note and the blocks
+  stamped with it that the retained links reach from it (or from its basket's
+  roots), and re-links them along those links — the reverse of
+  `deleteNoteOps`. A block deleted on its own stays deleted, and a view the
+  delete tombstoned (a pin) is not revived.
 
 ## Ordering notes
 
