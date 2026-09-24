@@ -5,7 +5,18 @@ import { useFeature, useIsAdmin } from "../../data/features"
 import type { FeatureKey } from "../../data/feature-flags"
 import { githubUserAtom } from "../../global-state"
 import { cx } from "../../utils/cx"
+import { DeletedNotesSection } from "../deleted-notes-section"
 import { ChevronLeftIcon16, ChevronRightIcon16 } from "../icons"
+import { McpTokensSection } from "../mcp-tokens-section"
+import { SharingSection } from "../sharing-section"
+import { AboutSection } from "./about-section"
+import { AccountSection } from "./account-section"
+import { AppearanceSection } from "./appearance-section"
+import { EditorSection } from "./editor-section"
+import { FeaturesSection } from "./features-section"
+import { InvitesSection } from "./invites-section"
+import { StorageSection } from "./storage-section"
+import { UpdatesSection } from "./updates-section"
 
 /**
  * The settings, one page per subject, in the order the settings nav lists
@@ -38,7 +49,7 @@ const SETTINGS_PAGES: SettingsPage[] = [
   {
     id: "account",
     label: "Account",
-    description: "Your name, your email address and how you sign in.",
+    description: "The GitHub account you sign in with.",
   },
   {
     id: "preferences",
@@ -73,7 +84,53 @@ const SETTINGS_PAGES: SettingsPage[] = [
   },
 ]
 
-const settingsPagePath = (id: SettingsPageId) => `/settings/${id}` as const
+export const isSettingsPageId = (id: string): id is SettingsPageId =>
+  SETTINGS_PAGES.some((page) => page.id === id)
+
+/**
+ * A page's cards, in order. A card that needs a sign-in is not drawn without
+ * one (the preferences follow the account; Recently deleted reads the local
+ * database, which only a signed-in user has); the admin's page draws for
+ * the admin alone, as the server says, and says so to anyone else.
+ */
+export function SettingsPageContent({ id }: { id: SettingsPageId }) {
+  const githubUser = useAtomValue(githubUserAtom)
+  const isAdmin = useIsAdmin()
+  switch (id) {
+    case "account":
+      return <AccountSection />
+    case "preferences":
+      return (
+        <>
+          <AppearanceSection />
+          <EditorSection />
+          {githubUser ? <UpdatesSection /> : null}
+        </>
+      )
+    case "sharing":
+      return <SharingSection />
+    case "mcp":
+      return <McpTokensSection />
+    case "data":
+      return (
+        <>
+          <StorageSection />
+          {githubUser ? <DeletedNotesSection /> : null}
+        </>
+      )
+    case "about":
+      return <AboutSection />
+    case "admin":
+      return isAdmin ? (
+        <>
+          <FeaturesSection />
+          <InvitesSection />
+        </>
+      ) : (
+        <span className="text-text-secondary">Nothing here.</span>
+      )
+  }
+}
 
 /** The pages this reader is shown, with the ones they may not use left out. */
 function useSettingsPages(): SettingsPage[] {
@@ -93,8 +150,7 @@ function useSettingsPages(): SettingsPage[] {
 /** The page the address names, if any. */
 export function useCurrentSettingsPage(): SettingsPage | undefined {
   const { pathname } = useLocation()
-  const id = pathname.split("/")[2]
-  return SETTINGS_PAGES.find((entry) => entry.id === id)
+  return SETTINGS_PAGES.find((entry) => entry.id === pathname.split("/")[2])
 }
 
 /**
@@ -122,7 +178,12 @@ function SettingsNavRows({ pages }: { pages: SettingsPage[] }) {
     <ul className="flex flex-col gap-1">
       {pages.map((page) => (
         <li key={page.id}>
-          <Link to={settingsPagePath(page.id)} className="nav-item" activeOptions={{ exact: true }}>
+          <Link
+            to="/settings/$page"
+            params={{ page: page.id }}
+            className="nav-item"
+            activeOptions={{ exact: true }}
+          >
             <span className="truncate">{page.label}</span>
           </Link>
         </li>
@@ -155,7 +216,12 @@ function SettingsIndexRows({ pages }: { pages: SettingsPage[] }) {
     <ul className="flex flex-col gap-1">
       {pages.map((page) => (
         <li key={page.id}>
-          <Link to={settingsPagePath(page.id)} className="nav-item h-auto! py-2" data-size="large">
+          <Link
+            to="/settings/$page"
+            params={{ page: page.id }}
+            className="nav-item h-auto! py-2"
+            data-size="large"
+          >
             <span className="flex w-0 grow flex-col gap-0.5">
               <span className="truncate leading-5">{page.label}</span>
               <span className="line-clamp-2 text-sm leading-4 text-text-secondary">

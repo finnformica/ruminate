@@ -60,7 +60,7 @@ export function GlobalShortcuts() {
       s: () => navigate({ to: "/settings", search: { query: undefined } }),
       c: () => navigate({ to: "/changelog", search: { release: undefined } }),
       a: () => {
-        if (isAdminRef.current) navigate({ to: "/settings/admin" })
+        if (isAdminRef.current) navigate({ to: "/settings/$page", params: { page: "admin" } })
       },
     })
 
