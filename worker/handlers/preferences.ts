@@ -9,10 +9,9 @@
 // beside the tenant's `replica_cursor`, which is the other thing the server
 // knows about an account that is not a note.
 //
-// The client's cached copy is only a cache: a device that saved while
-// offline will be overwritten by the next answer here, and that is the
-// intended reading — the server holds the account's preference, the device
-// holds its last sight of it.
+// This is the only copy. The client holds the answer in memory for the
+// sign-in and keeps nothing on the device (src/data/account-preferences.ts),
+// so every device the reader signs in on reads the same preference.
 
 import {
   readPreferences,

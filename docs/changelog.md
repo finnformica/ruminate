@@ -136,10 +136,10 @@ after an update**, turns it on. That is a preference of the account rather
 than the device (`whatsNewCard`, src/data/preferences.ts): answered once, it
 holds on every device the reader signs in on, stored by the Worker under the
 tenant's `meta` row `preferences` (`/api/preferences`,
-worker/handlers/preferences.ts) and mirrored on the client the way the feature
-flags are (src/data/account-preferences.ts), so a start with no network starts
-from the last answer. Signed out there is no account, so the card stays away
-and the setting is not offered. Off, the boot still takes the update request
+worker/handlers/preferences.ts) and held in memory on the client for the
+sign-in (src/data/account-preferences.ts) — nothing is kept on the device, so
+until the server has answered the defaults stand. Signed out there is no
+account, so the card stays away and the setting is not offered. Off, the boot still takes the update request
 and records the build, so turning it on later does not greet the reader with a
 release they have been running for weeks: not wanting to be told counts as
 read, exactly as dismissing does. The `/changelog` page is unaffected —

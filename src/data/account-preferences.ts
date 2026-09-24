@@ -9,17 +9,17 @@ import {
 import { ensureFreshToken, getAccessToken, withAuthRetry } from "../utils/github-session"
 
 /**
- * The account's preferences (src/data/preferences.ts) on this device: read
- * from `GET /api/preferences` once per sign-in, saved through `PUT`, and
- * remembered per account so a start with no network starts from the last
- * answer rather than from the defaults — the same arrangement as the
- * feature flags (src/data/features.ts). Signed out there is no account, so
- * the defaults stand and nothing can be saved.
+ * The account's preferences (src/data/preferences.ts) as this sign-in knows
+ * them: read from `GET /api/preferences` once per sign-in and again when the
+ * network returns, saved through `PUT`, and held in memory only. Nothing is
+ * kept on the device — the server holds the account's preference, so every
+ * device the reader signs in on reads the same answer, and until it has
+ * answered (or signed out, where there is no account) the defaults stand.
  *
- * A save is optimistic: the device shows the new value at once and tells the
- * server; if the server refuses or cannot be reached, the value goes back to
- * what it was, since the account's preference is what the server holds and
- * a device that only thinks it changed it would drift from every other one.
+ * A save is optimistic: the new value shows at once and is sent; if the
+ * server refuses or cannot be reached, the value goes back to what it was,
+ * since a device that only thinks it changed a preference would drift from
+ * every other one.
  */
 
 /** Null = nothing known for the current sign-in. */
@@ -27,43 +27,11 @@ const preferencesAtom = atom<AccountPreferences | null>(null)
 
 const effectivePreferencesAtom = atom((get) => get(preferencesAtom) ?? DEFAULT_PREFERENCES)
 
-/** Where the last answer for an account is kept on this device. */
-const cacheKey = (owner: string) => `preferences:${owner}`
-
-function readCache(owner: string): AccountPreferences | null {
-  try {
-    const raw = localStorage.getItem(cacheKey(owner))
-    if (!raw) return null
-    return withDefaults(readPreferences(JSON.parse(raw)))
-  } catch {
-    return null
-  }
-}
-
-function writeCache(owner: string, preferences: AccountPreferences): void {
-  try {
-    localStorage.setItem(cacheKey(owner), JSON.stringify(preferences))
-  } catch {
-    // A full or unavailable localStorage: the preferences still stand in memory.
-  }
-}
-
-/** The account the preferences are for, so an answer is remembered under it. */
-let currentOwner: string | null = null
-
-/** Start from what this account was last told on this device, if anything.
- * Called on sign-in, before `refreshPreferences` asks the server. */
-export function seedPreferences(owner: string): void {
-  currentOwner = owner
-  const cached = readCache(owner)
-  if (cached) getDefaultStore().set(preferencesAtom, cached)
-}
-
 const preferenceAtoms = {
   whatsNewCard: atom((get) => get(effectivePreferencesAtom).whatsNewCard),
 } satisfies Record<keyof AccountPreferences, unknown>
 
-/** One preference of the signed-in account, or its default signed out. */
+/** One preference of the signed-in account, or its default until known. */
 export function useAccountPreference<K extends keyof AccountPreferences>(
   key: K,
 ): AccountPreferences[K] {
@@ -90,17 +58,16 @@ async function request(init: RequestInit, fetchImpl: typeof fetch): Promise<Resp
   })
 }
 
-/** Take the server's answer as the account's preferences, and remember it. */
+/** Take the server's answer as the account's preferences. */
 function accept(body: unknown): void {
   const preferences = withDefaults(
     readPreferences((body as Partial<PreferencesBody> | null)?.preferences),
   )
   getDefaultStore().set(preferencesAtom, preferences)
-  if (currentOwner !== null) writeCache(currentOwner, preferences)
 }
 
-/** Fetch the preferences for the signed-in account. Silent on failure: the
- * cached answer, or the defaults, stand. */
+/** Fetch the preferences for the signed-in account. Silent on failure: what
+ * this sign-in already knows, or the defaults, stand. */
 export async function refreshPreferences(fetchImpl: typeof fetch = fetch): Promise<void> {
   try {
     if (!getAccessToken()) return
@@ -138,9 +105,7 @@ export async function saveAccountPreferences(
 }
 
 /** Forget the preferences — on sign-out, so the next account starts from the
- * defaults. The device's memory of each account's answer is kept, under
- * that account, for its next sign-in. */
+ * defaults until the server has answered for it. */
 export function resetPreferences(): void {
-  currentOwner = null
   getDefaultStore().set(preferencesAtom, null)
 }
