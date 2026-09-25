@@ -1,7 +1,7 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router"
 import { useAtomValue } from "jotai"
 import { useMedia } from "react-use"
-import { SettingsIndexList } from "../components/settings/settings-pages"
+import { SettingsIndexList } from "../components/settings/settings-nav"
 import { githubUserAtom } from "../global-state"
 
 /**

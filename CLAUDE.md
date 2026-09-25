@@ -79,6 +79,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 
 - `src/blocks/` - Block types (`registry.ts`), parse/serialize, doc operations, keymap and commands
 - `src/components/ui/` - The primitives everything else is built from: `Surface` (every card, popup and modal), `Sheet` (the phone's drawers), the Base UI wrappers (Dialog, DropdownMenu, Tooltip, HoverCard, Checkbox), `ConfirmDialog` (every "are you sure?", with a `danger` or `primary` confirm; docs/design-principles.md, Confirmation), the atoms (Button, AsyncButton, IconButton, PillButton, TextInput, SearchField, Keys, Skeleton, Details) and the list recipes (`listRow`, `listHeading`). Variants are `cva`, and the axis is always `variant`/`size`. Nothing outside `ui/` spells out a control's own classes. A control that starts a request is busy until it settles: `loading` on Button and IconButton, `AsyncButton` for a click that is the request, `usePending` (`src/hooks/pending.ts`) to hold a flight (docs/design-principles.md, Busy controls).
+- `src/components/settings/` - The Settings pages: the registry and sidebar rows (`settings-nav.tsx`), the cards each page draws (`settings-pages.tsx`), one file per card (docs/settings.md)
 - `src/components/block-editor/` - The block/outline editor
 - `src/components/` - React components with Storybook stories
 - `src/data/` - Graph, ops, store, database runtime, note metadata
@@ -105,6 +106,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 
 - Prettier configuration: no semicolons, trailing commas, 100 character line length
 - ESLint rules enforced for TypeScript, React, and accessibility
+- A setting is a label and nothing under it. Never add or change descriptive copy on a setting without the owner's sign-off: propose the line and wait (docs/settings.md, Copy)
 
 ### Before Committing
 

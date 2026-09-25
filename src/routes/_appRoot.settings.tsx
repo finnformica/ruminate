@@ -1,7 +1,7 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router"
 import { SettingsIcon16 } from "../components/icons"
 import { PageLayout } from "../components/page-layout"
-import { useCurrentSettingsPage } from "../components/settings/settings-pages"
+import { useCurrentSettingsPage } from "../components/settings/settings-nav"
 
 /**
  * Settings: one page per subject (src/components/settings/settings-pages.tsx),
