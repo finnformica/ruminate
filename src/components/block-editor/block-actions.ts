@@ -58,10 +58,6 @@ export interface BlockActions {
   /** A link to the block, on the clipboard. Absent when the editor has no
    * note to link into (Storybook, tests). */
   copyLink?: (keys: string[]) => void
-  /** Open the row — the note, or the note focused on the block — where the
-   * rows are browsed rather than edited (the Views page, the palette).
-   * Absent in an editor, where the row is already open. */
-  open?: (keys: string[]) => void
   /** Make each block a view of its own — or take it out of Views, when it
    * is one: a block view is listed in the sidebar under Views and opens
    * focused on (docs/metadata.md). Absent where the editor has no note

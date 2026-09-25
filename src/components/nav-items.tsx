@@ -1,5 +1,4 @@
 import { Link, LinkComponentProps, useLocation } from "@tanstack/react-router"
-import copy from "copy-to-clipboard"
 import { useAtom, useAtomValue } from "jotai"
 import React, { createContext, useContext } from "react"
 import { requestDatabasePull } from "../data/database-mode"
@@ -15,7 +14,7 @@ import {
 } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
 import { usePending } from "../hooks/pending"
-import { REMOVE_VIEW, useReorderViews, useWriteView } from "../hooks/views"
+import { useReorderViews } from "../hooks/views"
 import { useDragReorder } from "../hooks/drag-reorder"
 import { shareOwnerName } from "../data/shares"
 import type { Note } from "../schema"
@@ -28,13 +27,10 @@ import { isValidDateString, isValidWeekString, toDateString } from "../utils/dat
 import { DropdownMenu } from "./ui/dropdown-menu"
 import { IconButton } from "./ui/icon-button"
 import {
-  ArrowDownIcon16,
-  ArrowUpIcon16,
   CalendarDateFillIcon16,
   CalendarDateIcon16,
   CircleQuestionMarkFillIcon16,
   CircleQuestionMarkIcon16,
-  CopyIcon16,
   GridFillIcon16,
   GridIcon16,
   HistoryFillIcon16,
@@ -46,11 +42,12 @@ import {
   SettingsIcon16,
   SortAlphabetAscIcon16,
   SortNumberDescIcon16,
-  XIcon16,
 } from "./icons"
 import { Keys } from "./ui/keys"
 import { NavListSkeleton } from "./ui/skeleton"
-import { NoteActionsMenu } from "./note-actions-menu"
+import { NoteActionsMenu, type ReorderActions } from "./note-actions-menu"
+import { useBlockViewMenuEntries } from "./block-view-menu"
+import { MenuItems } from "./block-editor/block-context-menu"
 import { NoteFavicon } from "./note-favicon"
 import { SettingsNavList } from "./settings/settings-nav"
 import { beginGitHubSignIn } from "./github-auth"
@@ -611,17 +608,11 @@ function BlockViewNavItem({
   )
 }
 
-/** A block view's row menu: move it within Views (the keyboard's and a
- * touch screen's way to reorder), take it out of Views, or copy a link to
- * it. */
-function BlockViewActionsMenu({
-  block,
-  reorder,
-}: {
-  block: BlockView
-  reorder?: { onMoveUp?: () => void; onMoveDown?: () => void }
-}) {
-  const writeView = useWriteView()
+/** A block view's row menu: the block's menu away from its note
+ * (`useBlockViewMenuEntries` — Copy, Copy link, Share, Remove from Views),
+ * the list's moves ahead of it in the manual sort, as a note row has. */
+function BlockViewActionsMenu({ block, reorder }: { block: BlockView; reorder?: ReorderActions }) {
+  const entriesFor = useBlockViewMenuEntries()
   return (
     <DropdownMenu modal={false}>
       <DropdownMenu.Trigger
@@ -632,34 +623,7 @@ function BlockViewActionsMenu({
         }
       />
       <DropdownMenu.Content align="start">
-        {reorder ? (
-          <>
-            <DropdownMenu.Item
-              icon={<ArrowUpIcon16 />}
-              disabled={!reorder.onMoveUp}
-              onClick={() => reorder.onMoveUp?.()}
-            >
-              Move up
-            </DropdownMenu.Item>
-            <DropdownMenu.Item
-              icon={<ArrowDownIcon16 />}
-              disabled={!reorder.onMoveDown}
-              onClick={() => reorder.onMoveDown?.()}
-            >
-              Move down
-            </DropdownMenu.Item>
-            <DropdownMenu.Separator />
-          </>
-        ) : null}
-        <DropdownMenu.Item icon={<XIcon16 />} onClick={() => writeView(block.id, REMOVE_VIEW)}>
-          Remove from Views
-        </DropdownMenu.Item>
-        <DropdownMenu.Item
-          icon={<CopyIcon16 />}
-          onClick={() => copy(`${window.location.origin}/views/${block.noteId}?block=${block.id}`)}
-        >
-          Copy link to block
-        </DropdownMenu.Item>
+        <MenuItems entries={entriesFor(block.id, block.noteId, { reorder })} />
       </DropdownMenu.Content>
     </DropdownMenu>
   )

@@ -12,10 +12,6 @@ import { ImageUploadError, type UploadedImage } from "../../data/images"
 import type { LinkPreview } from "../../blocks/link"
 import { LinkPreviewError } from "../../data/link-previews"
 import { BlockEditor, type BlockDebugOptions } from "./block-editor"
-
-/** What "Copy link to block" put on the clipboard. */
-const clipboard = vi.hoisted(() => ({ copy: vi.fn() }))
-vi.mock("copy-to-clipboard", () => ({ default: clipboard.copy }))
 import { getDefaultStore } from "jotai"
 import { viewRootIdsAtom, viewsAtom } from "../../data/views"
 
@@ -2752,57 +2748,42 @@ describe("BlockEditor context menu", () => {
     expect(getDefaultStore().get(viewRootIdsAtom).has(blockId)).toBe(false)
   })
 
-  it("on a browsed list, offers what reads and reaches — Open, Copy, Copy link, Add to Views — and nothing that edits", async () => {
-    // The Views page and the palette: read-only rows with somewhere to go.
-    const onActivate = vi.fn()
-    const noteIdOf = (id: string) => (id === "n" ? "n" : "m")
-    const { container } = render(
+  it("a read-only editor has no menu of its own, and draws its host's list when given one", async () => {
+    // A read-only preview: a right-click is the browser's.
+    const { container, unmount } = render(
+      <BlockEditor doc={parse("A\nB")} onChange={() => {}} readOnly />,
+    )
+    await act(async () => {
+      fireEvent.contextMenu(container.querySelectorAll("[data-occurrence]")[0]!, {
+        clientX: 10,
+        clientY: 10,
+      })
+    })
+    expect(screen.queryByTestId("block-context-menu")).toBeNull()
+    unmount()
+    // A browsed list (the Views page): the host says what a row's menu holds.
+    const onSelect = vi.fn()
+    const { container: browsed } = render(
       <BlockEditor
         doc={parse("A\n  id:: blk_a\nB\n  id:: blk_b")}
         onChange={() => {}}
         readOnly
-        onActivate={onActivate}
-        noteIdOf={noteIdOf}
-      />,
-    )
-    const menu = await openMenuOn(container, 1)
-    // Each item's text, its key beside it as the row draws it.
-    const labels = Array.from(menu.querySelectorAll('[role="menuitem"]')).map(
-      (el) => el.textContent,
-    )
-    expect(labels).toEqual(["Open↵", "Copy⌘C", "Copy link to block", "Add to Views"])
-    for (const absent of ["Delete", "Move up", "Duplicate", "Unlink", "Turn into"]) {
-      expect(menu.textContent).not.toContain(absent)
-    }
-    await pick("Open")
-    expect(onActivate).toHaveBeenCalledWith("blk_b")
-  })
-
-  it("a browsed row's link is into its own note, and a note's own row links to the note", async () => {
-    const noteIdOf = (id: string) => (id === "n" ? "n" : "m")
-    const { container } = render(
-      <BlockEditor
-        doc={parse("The note\n  id:: n\nA block\n  id:: blk_a")}
-        onChange={() => {}}
-        readOnly
         onActivate={() => {}}
-        noteIdOf={noteIdOf}
+        menuEntries={(target) => [
+          { kind: "item", label: `Host item for ${target.id}`, onSelect },
+          { kind: "separator" },
+          { kind: "item", label: "Greyed", disabled: true, onSelect },
+        ]}
       />,
     )
-    await openMenuOn(container, 1)
-    await pick("Copy link to block")
-    expect(clipboard.copy).toHaveBeenLastCalledWith(`${window.location.origin}/views/m?block=blk_a`)
-    await openMenuOn(container, 0)
-    await pick("Copy link to block")
-    expect(clipboard.copy).toHaveBeenLastCalledWith(`${window.location.origin}/views/n`)
-  })
-
-  it("a read-only preview with nowhere to go still copies, and offers no Open", async () => {
-    const { container } = render(<BlockEditor doc={parse("A\nB")} onChange={() => {}} readOnly />)
-    const menu = await openMenuOn(container, 0)
-    expect(menu.textContent).toContain("Copy")
-    expect(menu.textContent).not.toContain("Open")
-    expect(menu.textContent).not.toContain("Views")
+    const menu = await openMenuOn(browsed, 1)
+    expect(menu.textContent).toContain("Host item for blk_b")
+    expect(menu.textContent).not.toContain("Delete")
+    expect(
+      screen.getByText("Greyed").closest('[role="menuitem"]')?.getAttribute("aria-disabled"),
+    ).toBe("true")
+    await pick("Host item for blk_b")
+    expect(onSelect).toHaveBeenCalled()
   })
 
   it("offers Add to Views only where the rows are a note's own", async () => {

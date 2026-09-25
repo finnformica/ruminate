@@ -1,7 +1,10 @@
 import React from "react"
 import { useResultsDoc, type ResultRoot } from "../hooks/results-doc"
 import type { NoteId } from "../schema"
+import type { BlockMenuTarget, MenuEntry } from "./block-editor/block-context-menu"
 import { BlockEditor } from "./block-editor/block-editor"
+import { useBlockViewMenuEntries } from "./block-view-menu"
+import { useNoteMenuEntries } from "./note-actions-menu"
 
 /**
  * **The results view: the block editor over a set of roots.**
@@ -15,8 +18,10 @@ import { BlockEditor } from "./block-editor/block-editor"
  * Read-only, the reader still browses (`BlockEditor.onActivate`): the
  * highlight moves, `space` / `→` / `←` fold and unfold, `f` focuses, and Enter
  * or a click opens the row — the note, or the note focused on the block —
- * and a right-click (a press-and-hold, on a phone) offers the browsed
- * row's menu: Open, Copy, Copy link to block, Add to Views.
+ * and a right-click (a press-and-hold, on a phone) opens the row's menu: the
+ * same one its sidebar row has, a note's (`useNoteMenuEntries`) or a
+ * block's (`useBlockViewMenuEntries`), so the page and the sidebar never
+ * disagree about what can be done with a row.
  * Editable, the rows edit as they do in their notes and the change lands in
  * the graph (`useResultsDoc`); focusing opens the note instead, since a
  * results view has no focus view of its own. Either way the roots are the
@@ -56,9 +61,16 @@ export function ResultsEditor({
 }) {
   const { doc, collapsed, toggleCollapse, setDoc, noteOf } = useResultsDoc({ roots, resetKey })
 
-  // Each row's own note, for the row's menu (a link to the block, Add to
-  // Views): the rows come from many notes, so the editor asks per row.
-  const noteIdOf = React.useCallback((id: string) => noteOf.get(id), [noteOf])
+  const noteEntries = useNoteMenuEntries()
+  const blockEntries = useBlockViewMenuEntries()
+  const menuEntries = React.useCallback(
+    (target: BlockMenuTarget): MenuEntry[] => {
+      if (target.type === "note") return noteEntries(target.id)
+      const noteId = noteOf.get(target.id)
+      return noteId === undefined ? [] : blockEntries(target.id, noteId)
+    },
+    [noteEntries, blockEntries, noteOf],
+  )
 
   const open = React.useCallback(
     (id: string) => {
@@ -82,8 +94,10 @@ export function ResultsEditor({
       doc={doc}
       onChange={setDoc}
       readOnly={readOnly}
-      noteIdOf={noteIdOf}
       onActivate={readOnly ? open : undefined}
+      // Browsed, the rows carry their sidebar menus; editable, the editor's
+      // own, as in a note.
+      menuEntries={readOnly ? menuEntries : undefined}
       fixedRoots
       collapsed={collapsed}
       onToggleCollapse={toggleCollapse}

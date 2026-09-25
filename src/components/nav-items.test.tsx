@@ -292,6 +292,30 @@ describe("the sidebar's Views list", () => {
     expect(store.get(viewsAtom).has("blk_x")).toBe(false)
   })
 
+  it("a block view's ⋯ is the block's menu — the list's moves, then Copy, Copy link, Share, Remove from Views", async () => {
+    renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
+    fireEvent.click(within(viewRows()[1]).getByRole("button", { name: "Block view actions" }))
+    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
+    const items = within(screen.getByRole("menu")).getAllByRole("menuitem")
+    expect(items.map((item) => item.textContent)).toEqual([
+      "Move up",
+      "Move down",
+      "Copy",
+      "Copy link to block",
+      "Share…",
+      "Remove from Views",
+    ])
+    // Every item leads with an icon, as the note's menu does; Remove wears
+    // the delete icon, the same one the note's Delete wears.
+    expect(items.every((item) => item.querySelector("svg") !== null)).toBe(true)
+    const removeIcon = items[5].querySelector("svg")!.innerHTML
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    fireEvent.click(within(viewRows()[0]).getByRole("button", { name: "Note actions" }))
+    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy())
+    const deleteIcon = screen.getByRole("menuitem", { name: "Delete" }).querySelector("svg")!
+    expect(deleteIcon.innerHTML).toBe(removeIcon)
+  })
+
   it("a block row opens its note focused on it, at the views address", () => {
     renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
     const link = within(viewRows()[1]).getByRole("link")

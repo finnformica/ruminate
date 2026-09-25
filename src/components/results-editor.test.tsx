@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { Provider, createStore } from "jotai"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { parse } from "../blocks/parse"
@@ -7,7 +7,12 @@ import { serialize } from "../blocks/serialize"
 import { buildGraphSnapshot, docToGraph } from "../data/graph"
 import { githubUserAtom, isSignedOutAtom, sampleGraphAtom } from "../global-state"
 import { resultsDoc, resultsToOps, type ResultRoot } from "../hooks/results-doc"
+import { viewRootIdsAtom } from "../data/views"
 import { ResultsEditor } from "./results-editor"
+
+/** What "Copy link to block" put on the clipboard. */
+const clipboard = vi.hoisted(() => ({ copy: vi.fn() }))
+vi.mock("copy-to-clipboard", () => ({ default: clipboard.copy }))
 
 // The editor's context menu (Base UI) measures with a ResizeObserver and
 // scrolls the highlight into view; jsdom implements neither.
@@ -216,6 +221,82 @@ describe("ResultsEditor (browsing the notes list)", () => {
     press("Backspace")
     expect(rowIds()).toEqual(["research", "journal"])
     expect(store.get(sampleGraphAtom).nodes.has("research")).toBe(true)
+  })
+})
+
+describe("ResultsEditor (a browsed row's menu)", () => {
+  /** Right-click the row for `id` and return the open menu. */
+  async function menuOn(id: string): Promise<HTMLElement> {
+    const row = document.querySelector(`[data-block-row="${id}"]`)!
+    await act(async () => {
+      fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
+    })
+    return screen.getByTestId("block-context-menu")
+  }
+  const labels = (menu: HTMLElement) =>
+    Array.from(menu.querySelectorAll('[role="menuitem"]')).map((el) =>
+      el.textContent?.replace(/[⌘C↵]+$/, ""),
+    )
+
+  it("a note's row opens the note's menu — what its sidebar row's ⋯ holds", async () => {
+    await renderResults(NOTE_ROOTS)
+    const menu = await menuOn("journal")
+    expect(labels(menu)).toEqual([
+      "Copy markdown",
+      "Copy ID",
+      "Share…",
+      "Rename",
+      "Print",
+      "Delete",
+    ])
+    // Nothing of the note editor's block menu: a note's row is not a block.
+    expect(menu.textContent).not.toContain("Duplicate")
+    expect(menu.textContent).not.toContain("Add to Views")
+  })
+
+  it("a block's row opens the block's menu away from its note, with Add to Views for a block that is none", async () => {
+    await renderResults([{ id: "blk_semis", noteId: "research" }])
+    const menu = await menuOn("blk_semis")
+    expect(labels(menu)).toEqual(["Copy", "Copy link to block", "Share…", "Add to Views"])
+    for (const absent of ["Move up", "Duplicate", "Delete", "Unlink", "Turn into"]) {
+      expect(menu.textContent).not.toContain(absent)
+    }
+    // Each item leads with an icon, as the sidebar's menus do; the last is
+    // the Views item.
+    expect(menu.querySelectorAll('[role="menuitem"] svg').length).toBeGreaterThanOrEqual(4)
+  })
+
+  it("Add to Views makes the block a view; its menu then offers Remove from Views", async () => {
+    const { store } = await renderResults([{ id: "blk_semis", noteId: "research" }])
+    let menu = await menuOn("blk_semis")
+    await act(async () => {
+      fireEvent.click(screen.getByText("Add to Views"))
+    })
+    expect(store.get(viewRootIdsAtom).has("blk_semis")).toBe(true)
+    menu = await menuOn("blk_semis")
+    expect(menu.textContent).toContain("Remove from Views")
+    await act(async () => {
+      fireEvent.click(screen.getByText("Remove from Views"))
+    })
+    expect(store.get(viewRootIdsAtom).has("blk_semis")).toBe(false)
+  })
+
+  it("Copy link to block links into the block's own note", async () => {
+    await renderResults([{ id: "blk_elsewhere", noteId: "journal" }])
+    await menuOn("blk_elsewhere")
+    await act(async () => {
+      fireEvent.click(screen.getByText("Copy link to block"))
+    })
+    expect(clipboard.copy).toHaveBeenLastCalledWith(
+      `${window.location.origin}/views/journal?block=blk_elsewhere`,
+    )
+  })
+
+  it("an editable results view keeps the editor's own block menu", async () => {
+    await renderResults([{ id: "blk_milk", noteId: "research" }], { readOnly: false })
+    const menu = await menuOn("blk_milk")
+    expect(menu.textContent).toContain("Duplicate")
+    expect(menu.textContent).toContain("Delete")
   })
 })
 

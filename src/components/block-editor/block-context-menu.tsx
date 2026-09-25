@@ -12,8 +12,11 @@ import { Surface } from "../ui/surface"
 /**
  * The block's right-click menu: the standard actions on one row, the same
  * commands the keyboard runs, so nothing here has a second meaning. Opened
- * by the editor on any row it owns (never in read-only views); the editor
- * supplies the row (`target`) and the actions, this file the menu. The
+ * by the editor on any row it owns; the editor supplies the row (`target`)
+ * and the actions, this file the menu. A read-only editor has no menu of
+ * its own — unless its host says what a row's menu holds (`entriesFor`: the
+ * Views page's rows, whose menus are the sidebar's), in which case the
+ * popup and the sheet draw that list through the same renderers. The
  * actions are the editor's one set (`block-actions.ts`), the same object
  * the selection bar and the keys run, each over the rows the menu is for
  * (`target.keys`): the row alone, or the selection it is in — in which case
@@ -57,10 +60,6 @@ export interface BlockMenuTarget {
   places: number
   /** A view of its own (docs/metadata.md): listed in the sidebar's Views. */
   inViews: boolean
-  /** The rows are browsed, not edited (the Views page, the palette): the
-   * menu offers what reads and reaches — Open, Copy, Copy link, Add to
-   * Views, Share — and nothing that would change the note. */
-  readOnly: boolean
   /** A figure row's layout (`src/blocks/figure.ts`): the side its picture
    * or card keeps to, and whether it has been dragged to a size of its own. */
   figure?: { align: FigureAlign; sized: boolean }
@@ -85,11 +84,15 @@ const popup = (
 export function BlockContextMenu({
   target,
   actions,
+  entriesFor = menuEntries,
   onOpenChange,
   children,
 }: {
   target: BlockMenuTarget | null
   actions: BlockActions
+  /** What the menu holds for a row: the editor's own list, unless the host
+   * supplies one. */
+  entriesFor?: (target: BlockMenuTarget, actions: BlockActions) => MenuEntry[]
   /** Open or closed, and the event that did it (a `contextmenu` for a
    * right-click; the `touchstart` of a press-and-hold, Base UI's own 500ms
    * one, which never yields a `contextmenu` on a phone). The editor reads
@@ -107,7 +110,7 @@ export function BlockContextMenu({
                 rows, would otherwise hide the last items (Unlink, Delete) in a
                 scroll no one finds — it may take most of the screen instead. */}
             <div className="grid max-h-[45svh] scroll-py-1 overflow-auto p-1 coarse:max-h-[80svh]">
-              {target ? <Items target={target} actions={actions} /> : null}
+              {target ? <MenuItems entries={entriesFor(target, actions)} /> : null}
             </div>
           </ContextMenu.Popup>
         </ContextMenu.Positioner>
@@ -130,6 +133,11 @@ export type MenuEntry =
       shortcut?: string[]
       danger?: boolean
       selected?: boolean
+      /** Greyed and inert — offered, so the reader learns it exists, but not
+       * theirs to run (a shared note's Rename). */
+      disabled?: boolean
+      /** A leading icon, where the list has them (the sidebar's menus). */
+      icon?: React.ReactNode
       trailing?: React.ReactNode
     }
   | { kind: "separator" }
@@ -142,7 +150,6 @@ export type MenuEntry =
     }
 
 function menuEntries(target: BlockMenuTarget, actions: BlockActions): MenuEntry[] {
-  if (target.readOnly) return browseEntries(target, actions)
   const { keys } = target
   // A range's actions say how many blocks they take: "Delete 3 blocks".
   const many = keys.length > 1 ? ` ${keys.length} blocks` : ""
@@ -284,44 +291,11 @@ function menuEntries(target: BlockMenuTarget, actions: BlockActions): MenuEntry[
 }
 
 /**
- * The menu of a browsed row (`BlockMenuTarget.readOnly`): the same list, cut
- * to what does not edit. Open leads, since it is what a click does; then
- * copying; then the block's place beyond the note. A note's own row (the
- * Views page lists notes as rows) is not offered Add to Views — a note is a
- * view already (docs/metadata.md).
+ * A pointer's menu from its entries: Base UI menu items and submenus, inside
+ * any menu popup — the editor's right-click menu, and the sidebar's ⋯ menus,
+ * which draw the same lists (`note-actions-menu.tsx`, `block-view-menu.tsx`).
  */
-function browseEntries(target: BlockMenuTarget, actions: BlockActions): MenuEntry[] {
-  const { keys } = target
-  const entries: MenuEntry[] = []
-  let ruleDue = false
-  const section = () => {
-    ruleDue = entries.length > 0
-  }
-  const item = (entry: Omit<Extract<MenuEntry, { kind: "item" }>, "kind">) => {
-    if (ruleDue) entries.push({ kind: "separator" })
-    ruleDue = false
-    entries.push({ kind: "item", ...entry })
-  }
-  if (actions.open) item({ label: "Open", shortcut: ["↵"], onSelect: () => actions.open?.(keys) })
-
-  section()
-  item({ label: "Copy", shortcut: ["⌘", "C"], onSelect: () => actions.copy(keys) })
-  if (actions.copyLink)
-    item({ label: "Copy link to block", onSelect: () => actions.copyLink?.(keys) })
-
-  section()
-  if (actions.view && target.type !== "note")
-    item({
-      label: target.inViews ? "Remove from Views" : "Add to Views",
-      onSelect: () => actions.view?.(keys),
-    })
-  if (actions.share) item({ label: "Share…", onSelect: () => actions.share?.(keys) })
-  return entries
-}
-
-/** The pointer's popup: the entries as Base UI menu items and submenus. */
-function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockActions }) {
-  const entries = menuEntries(target, actions)
+export function MenuItems({ entries }: { entries: readonly MenuEntry[] }) {
   return (
     <>
       {entries.map((entry, index) => {
@@ -353,8 +327,10 @@ function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockAct
         return (
           <DropdownMenu.Item
             key={index}
+            icon={entry.icon}
             shortcut={entry.shortcut}
             variant={entry.danger ? "danger" : undefined}
+            disabled={entry.disabled}
             trailingVisual={entry.trailing}
             onClick={entry.onSelect}
           >
@@ -384,6 +360,7 @@ export function BlockMenuSheet({
   target,
   title,
   actions,
+  entriesFor = menuEntries,
   holding = false,
   open,
   onOpenChange,
@@ -392,12 +369,14 @@ export function BlockMenuSheet({
   /** The block's text, for the sheet's heading. */
   title: string
   actions: BlockActions
+  /** As `BlockContextMenu`'s: the host's list, or the editor's own. */
+  entriesFor?: (target: BlockMenuTarget, actions: BlockActions) => MenuEntry[]
   /** The finger that opened the sheet is still down (or only just up). */
   holding?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const entries = target ? menuEntries(target, actions) : []
+  const entries = target ? entriesFor(target, actions) : []
   const pick = (run: () => void) => () => {
     if (holding) return
     onOpenChange(false)
@@ -452,6 +431,7 @@ export function BlockMenuSheet({
               <SheetRow
                 key={index}
                 danger={entry.danger}
+                disabled={entry.disabled}
                 onSelect={pick(entry.onSelect)}
                 trailing={entry.trailing}
               >
@@ -469,19 +449,22 @@ function SheetRow({
   children,
   onSelect,
   danger,
+  disabled,
   trailing,
 }: {
   children: React.ReactNode
   onSelect: () => void
   danger?: boolean
+  disabled?: boolean
   trailing?: React.ReactNode
 }) {
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={onSelect}
       className={cx(
-        "flex h-11 w-full cursor-pointer select-none items-center gap-3 rounded px-3 text-left text-[15px] active:bg-bg-active",
+        "flex h-11 w-full cursor-pointer select-none items-center gap-3 rounded px-3 text-left text-[15px] active:bg-bg-active disabled:cursor-not-allowed disabled:opacity-50",
         danger ? "text-text-danger" : "text-text",
       )}
     >

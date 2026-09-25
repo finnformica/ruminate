@@ -60,9 +60,11 @@ here, opens the note at that block. Opening a row loads only that row's
 blocks; a child opens the next level the same way.
 
 The Views page is browsed: <kbd>↵</kbd> (or a click) opens the highlighted
-row, and nothing writes. A right-click on a row offers what a browsed row
-can do — **Open**, **Copy**, **Copy link to block**, **Add to Views** — and
-none of the editing the note's own menu carries. A filtered view **edits in place**: <kbd>↵</kbd>
+row, and nothing writes. A right-click on a row opens the menu its sidebar
+row has: a note's **⋯** menu on a note's row, and on a block's row the
+block's menu away from its note — **Copy**, **Copy link to block**,
+**Share…**, **Remove from Views** — with none of the editing the note's own
+menu carries. A filtered view **edits in place**: <kbd>↵</kbd>
 edits the row as it would in its note, the change lands in the note, and the
 only thing refused is adding a block beside a result or removing one from the
 list — open the note for that.
