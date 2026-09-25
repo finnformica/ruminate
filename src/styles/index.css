@@ -143,7 +143,9 @@ body:has([data-resizing="true"]) * {
 }
 
 /* Toggled-open panels (e.g. Help) are a state, not a place — they keep a
- * NEUTRAL surface so accent stays reserved for "current". It sits one step
+ * NEUTRAL surface so accent stays reserved for "current". The Settings row
+ * takes the same state while any settings page is open (nav-items.tsx), so
+ * the rows at the foot of the sidebar mark themselves alike. It sits one step
  * above the row hover, on the same three-step ladder a filled button uses:
  * at `--color-bg-secondary` it was the very value an ordinary row hovers to,
  * so a toggled-open Help row and a hovered Notes row were the same colour. */

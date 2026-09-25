@@ -3,11 +3,11 @@ import {
   isSettingsPageId,
   SettingsPageBody,
   settingsPage,
-  SettingsPageContent,
-} from "../components/settings/settings-pages"
+} from "../components/settings/settings-nav"
+import { SettingsPageContent } from "../components/settings/settings-pages"
 
 /** One settings page: `/settings/<id>` — Account, Preferences, Sharing…
- * (src/components/settings/settings-pages.tsx). An id that names no page is
+ * (src/components/settings/settings-nav.tsx). An id that names no page is
  * not found. */
 export const Route = createFileRoute("/_appRoot/settings/$page")({
   loader: ({ params }) => {

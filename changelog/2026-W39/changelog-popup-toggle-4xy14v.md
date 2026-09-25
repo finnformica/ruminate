@@ -1,3 +1,5 @@
 ### Changed
 
-- The what's-new card no longer appears after an update unless you ask for it. **Show what's new after an update**, under **Updates** in Settings, turns the card in the corner on, and the choice follows your account to every device you sign in on. Off, nothing is put up unasked; the full changelog stays a click away under **What's new** in the sidebar.
+- The what's-new card no longer appears after an update unless you ask for it. **Show what's new after an update**, under **Changelog** in Settings → Preferences, turns the card in the corner on, and the choice follows your account to every device you sign in on. Off, nothing is put up unasked; the full changelog stays a click away under **Changelog** in the sidebar.
+- The sidebar keeps its shape while Settings is open. The Views and Calendar links stay above and the update, sync, Settings, Changelog and Help rows stay below; only the list of views gives its place to the settings pages. It used to swap the whole sidebar for the pages and a way back.
+- Views, Settings and Changelog light up with a filled icon when you are on them, as Calendar and Help already did. Settings is marked on every one of its pages, the way Help is while its panel is open.

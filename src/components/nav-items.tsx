@@ -35,7 +35,9 @@ import {
   CircleQuestionMarkFillIcon16,
   CircleQuestionMarkIcon16,
   CopyIcon16,
+  GridFillIcon16,
   GridIcon16,
+  HistoryFillIcon16,
   HistoryIcon16,
   ListIcon16,
   LoadingIcon16,
@@ -50,6 +52,7 @@ import { Keys } from "./ui/keys"
 import { NavListSkeleton } from "./ui/skeleton"
 import { NoteActionsMenu } from "./note-actions-menu"
 import { NoteFavicon } from "./note-favicon"
+import { SettingsNavList } from "./settings/settings-nav"
 import { beginGitHubSignIn } from "./github-auth"
 import { SyncStatusIcon, useSyncStatusMeta, useSyncStatusText } from "./sync-status"
 import { Tooltip } from "./ui/tooltip"
@@ -76,6 +79,11 @@ export function NavItems({
   // Calendar link is active when viewing any daily or weekly note
   const noteId = pathname.startsWith("/views/") ? pathname.slice(7) : ""
   const isCalendarActive = isValidDateString(noteId) || isValidWeekString(noteId)
+  // While Settings is open its pages take the Views list's place, and only
+  // that: the links above and the rows below stay where they are, so the
+  // sidebar reads as one thing whose middle changed rather than a different
+  // sidebar (src/components/settings/settings-nav.tsx).
+  const inSettings = pathname === "/settings" || pathname.startsWith("/settings/")
 
   // Registered once by the app layout (src/hooks/app-update.ts).
   const { needRefresh, apply } = useAtomValue(appUpdateAtom)
@@ -92,7 +100,7 @@ export function NavItems({
               <NavLink
                 to="/"
                 search={{ query: undefined }}
-                activeIcon={<GridIcon16 />}
+                activeIcon={<GridFillIcon16 />}
                 icon={<GridIcon16 />}
                 shortcut={formatCombo(APP_SHORTCUTS.goViews)}
                 onNavigate={onNavigate}
@@ -125,7 +133,12 @@ export function NavItems({
               the sort menu says — and in the manual sort, the order it was
               dragged into, a block able to sit between two notes. A block's
               row opens its note focused on it. */}
-          {views.length > 0 ? (
+          {inSettings ? (
+            <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
+              <SectionHeading>Settings</SectionHeading>
+              <SettingsNavList size={size} />
+            </div>
+          ) : views.length > 0 ? (
             <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
               <SectionHeading action={<ViewSortMenu />}>Views</SectionHeading>
               <ViewRows entries={views} size={size} onNavigate={onNavigate} />
@@ -138,7 +151,7 @@ export function NavItems({
               tooltip and in the note page's header. They are listed apart
               from the user's own notes — they are rows in someone else's
               corpus — but open, read and edit as the verbs allow, like any note. */}
-          {sharedNotes.length > 0 ? (
+          {!inSettings && sharedNotes.length > 0 ? (
             <div className="flex flex-col gap-1 pt-2">
               <SectionHeading>Shared</SectionHeading>
               <NoteRows
@@ -224,6 +237,14 @@ export function NavItems({
             activeIcon={<SettingsFillIcon16 />}
             icon={<SettingsIcon16 />}
             className="text-text-secondary"
+            // Marked on every settings page, not only the list at
+            // `/settings`, and marked the way Help is while its panel is
+            // open — the neutral pressed state, not the accent "current"
+            // one — so the two rows at the foot of the sidebar that open
+            // something over the notes read the same. On `/settings` itself
+            // the Link adds `aria-current` as well; the pressed rules come
+            // later in index.css and win.
+            pressed={inSettings}
             shortcut={formatCombo(APP_SHORTCUTS.goSettings)}
             onNavigate={onNavigate}
           >
@@ -233,7 +254,7 @@ export function NavItems({
             <NavLink
               to="/changelog"
               search={{ release: undefined }}
-              activeIcon={<HistoryIcon16 />}
+              activeIcon={<HistoryFillIcon16 />}
               icon={<HistoryIcon16 />}
               className="text-text-secondary"
               shortcut={formatCombo(APP_SHORTCUTS.goChangelog)}
@@ -651,6 +672,7 @@ function NavLink({
   icon,
   includeSearch = false,
   forceActive = false,
+  pressed = false,
   onNavigate,
   children,
   onClick,
@@ -661,6 +683,9 @@ function NavLink({
   icon: React.ReactNode
   includeSearch?: boolean
   forceActive?: boolean
+  /** Marked as Help is while open (`aria-pressed`, the neutral surface)
+   * rather than as the current place; the filled icon shows either way. */
+  pressed?: boolean
   onNavigate?: () => void
   children: React.ReactNode
   /** The keys that reach this destination (`formatCombo`), shown beside it. */
@@ -671,12 +696,14 @@ function NavLink({
   const inner = (
     <>
       {activeIcon ? (
-        <span className="hidden shrink-0 [[aria-current=page]>&]:flex">{activeIcon}</span>
+        <span className="hidden shrink-0 [[aria-current=page]>&]:flex [[aria-pressed=true]>&]:flex">
+          {activeIcon}
+        </span>
       ) : null}
       <span
         className={cx(
           "flex shrink-0 text-text-secondary",
-          activeIcon && "[[aria-current=page]>&]:hidden",
+          activeIcon && "[[aria-current=page]>&]:hidden [[aria-pressed=true]>&]:hidden",
         )}
       >
         {icon}
@@ -692,6 +719,7 @@ function NavLink({
       data-size={size}
       className={cx("nav-item", className)}
       aria-current={forceActive ? "page" : undefined}
+      aria-pressed={pressed || undefined}
       onClick={(event) => {
         onClick?.(event)
         if (!event.defaultPrevented) {

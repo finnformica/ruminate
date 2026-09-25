@@ -6,9 +6,10 @@ import { SettingsSection } from "../settings-section"
 
 /** The what's-new card, and whether it greets an update at all. Off until
  * asked for, and a preference of the account (src/data/account-preferences.ts)
- * rather than the device, so it is answered once; **What's new** in the
- * sidebar reaches the changelog either way. */
-export function UpdatesSection() {
+ * rather than the device, so it is answered once; **Changelog** in the
+ * sidebar reaches the changelog either way. A label and nothing under it
+ * (docs/settings.md). */
+export function ChangelogSection() {
   const showWhatsNew = useAccountPreference("whatsNewCard")
   const [failed, setFailed] = useState(false)
   // The box shows the new value at once and is held until the server has it
@@ -24,23 +25,21 @@ export function UpdatesSection() {
   })
 
   return (
-    <SettingsSection title="Updates">
+    <SettingsSection title="Changelog">
       {/* `htmlFor` points at the checkbox, which renders a <button> — a
-          labelable element — so clicking the description toggles it. */}
-      <div className="flex items-start gap-2 leading-4">
+          labelable element — so clicking the label toggles it. */}
+      {/* Centred, not top-aligned with a nudge: that layout was for a label
+          with a line under it, and with the label alone it sat the box 2px
+          low. */}
+      <div className="flex items-center gap-2 leading-4">
         <Checkbox
           id="show-whats-new"
-          className="mt-0.5"
           checked={showWhatsNew}
           disabled={saving}
           onCheckedChange={(checked) => save(checked)}
         />
         <label htmlFor="show-whats-new" className="flex cursor-pointer flex-col gap-1">
           <span>Show what's new after an update</span>
-          <span className="text-sm leading-4 text-text-secondary">
-            A card in the corner lists what changed when Ruminate updates. The full changelog is
-            always under What's new in the sidebar.
-          </span>
           {failed ? (
             <span className="text-sm leading-4 text-text-danger">
               Couldn't save that — check your connection and try again.

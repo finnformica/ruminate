@@ -336,6 +336,44 @@ describe("the sidebar's Views list", () => {
   })
 })
 
+describe("the sidebar while Settings is open", () => {
+  it("keeps the links above and the rows below, and lists the pages in the Views list's place", () => {
+    mocks.pathname = "/settings/preferences"
+    renderSidebar({ notes: THREE, shared: [noteOf("shared", "Theirs")] })
+    // The chrome every page has.
+    expect(screen.getByRole("link", { name: /^Views/ })).toBeTruthy()
+    expect(screen.getByRole("link", { name: /^Calendar/ })).toBeTruthy()
+    // Settings is marked on any of its pages, exactly as Help is while
+    // open: pressed, not current.
+    expect(screen.getByRole("link", { name: /^Settings/ }).getAttribute("aria-pressed")).toBe(
+      "true",
+    )
+    expect(screen.getByRole("link", { name: /^Changelog/ })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /^Help/ })).toBeTruthy()
+    // The pages, where the views were — and no way back, since Views is
+    // right there above them.
+    const headings = screen.getAllByTestId("section-heading").map((el) => el.textContent)
+    expect(headings).toEqual(["Settings"])
+    expect(screen.queryByTestId("view-rows")).toBeNull()
+    expect(screen.queryByText("Theirs")).toBeNull()
+    expect(screen.queryByText("Back to notes")).toBeNull()
+    for (const page of ["Account", "Preferences", "Data", "About"]) {
+      expect(screen.getByRole("link", { name: page })).toBeTruthy()
+    }
+    // Not this reader's: the feature pages (no feature is on here) and Admin.
+    expect(screen.queryByRole("link", { name: "Sharing" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Admin" })).toBeNull()
+  })
+
+  it("lists the views again once Settings is left", () => {
+    mocks.pathname = "/"
+    renderSidebar({ notes: THREE })
+    expect(screen.getByTestId("view-rows")).toBeTruthy()
+    expect(screen.queryByRole("link", { name: "Account" })).toBeNull()
+    expect(screen.getByRole("link", { name: /^Settings/ }).getAttribute("aria-pressed")).toBeNull()
+  })
+})
+
 describe("the sidebar's bottom block", () => {
   it("names the changelog Changelog, and gives it a chord", () => {
     renderSidebar({ notes: THREE })
