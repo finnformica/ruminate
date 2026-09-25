@@ -33,7 +33,7 @@ Any query with text in it — or a block-scoped `type:` (below) — resolves at 
 - **Expand a result in place** with the chevron or <kbd>→</kbd> to see the blocks inside it; <kbd>←</kbd> closes it again (and, from a revealed child, jumps to the block it sits under). Only the level you open is fetched, and it's remembered.
 - <kbd>↵</kbd> **on a highlighted result** opens its note, focused on that block.
 - <kbd>↵</kbd> **on the query itself** in <kbd>⌘</kbd> <kbd>K</kbd> — straight after typing, with no item highlighted — opens the full results view. That view is just a URL — `/?query=type:todo+in:%22Reading+list%22` — so any filter is bookmarkable and back/forward behave.
-- A note whose **title** matches the text is a result row too, ranked among the blocks **purely by score** — both are fast-fuzzy matches at the one threshold, so a title that matched well sits beside the blocks that matched as well, never in a bucket of its own. Ties keep the note above the block. A query that names a block type or an `in:` scope asks for blocks, so it lists no note rows; an explicit `sort:` orders the notes and then the blocks by the sort instead. The notes page and <kbd>⌘</kbd> <kbd>K</kbd> rank the same way.
+- A note whose **title** matches the text is a result row too, ranked among the blocks **purely by score** — both are fast-fuzzy matches at the one threshold, so a title that matched well sits beside the blocks that matched as well, never in a bucket of its own. Ties keep the note above the block. A query that names a block type or an `in:` scope asks for blocks, so it lists no note rows; an explicit `sort:` orders the notes and then the blocks by the sort instead. The Views page and <kbd>⌘</kbd> <kbd>K</kbd> rank the same way.
 - The result count is the number of **matched blocks**, alongside how many notes they live in, and how many notes matched by title. Blocks revealed by expanding are context, not matches, so they never change the count.
 
 A query that names only notes — a date, a bare property qualifier, or an empty query — still lists notes: every block of every matching note isn't a search result, it's your corpus.
@@ -50,11 +50,11 @@ A query that names only notes — a date, a bare property qualifier, or an empty
 
 ## Filters as pills
 
-The query box — on the notes page and in <kbd>⌘</kbd> <kbd>K</kbd> — keeps the qualifiers out of the line. A `key:value` you finish typing (a space after it, or a pick from the suggestions) is lifted out as a **pill** beneath the box: an `in:` named as the note (or note › block), anything else as typed (`type: todo`, `-type: done`, `sort: updated`). The line holds only the words you are searching for, and the query the app runs — and the `?query=` URL <kbd>↵</kbd> opens — is the pills and the words together, pills first. Click a pill to take it out; <kbd>⌫</kbd> on an empty line takes the last pill back into the line to edit; Clear (or <kbd>Esc</kbd> in the palette) empties both.
+The query box — on the Views page and in <kbd>⌘</kbd> <kbd>K</kbd> — keeps the qualifiers out of the line. A `key:value` you finish typing (a space after it, or a pick from the suggestions) is lifted out as a **pill** beneath the box: an `in:` named as the note (or note › block), anything else as typed (`type: todo`, `-type: done`, `sort: updated`). The line holds only the words you are searching for, and the query the app runs — and the `?query=` URL <kbd>↵</kbd> opens — is the pills and the words together, pills first. Click a pill to take it out; <kbd>⌫</kbd> on an empty line takes the last pill back into the line to edit; Clear (or <kbd>Esc</kbd> in the palette) empties both.
 
 ## Suggestions as you type
 
-Typing a qualifier whose values are a known set opens a popover beside the token — on the notes page and in <kbd>⌘</kbd> <kbd>K</kbd>, the same one (`src/components/query-box.tsx`):
+Typing a qualifier whose values are a known set opens a popover beside the token — on the Views page and in <kbd>⌘</kbd> <kbd>K</kbd>, the same one (`src/components/query-box.tsx`):
 
 - `type:` — the block types below, each beside its markdown glyph, then the note types. Headings are offered as the one `heading` and lists as `bullet` and `ordered`; `h1`…`h3` and `list` still work typed.
 - `in:` — your notes, by name, most recent first (the open note leads, even before it exists).

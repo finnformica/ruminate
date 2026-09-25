@@ -1,17 +1,17 @@
 import { Link } from "@tanstack/react-router"
 import copy from "copy-to-clipboard"
-import { useAtomValue, useStore } from "jotai"
+import { useAtomValue, useSetAtom, useStore } from "jotai"
 import React from "react"
 import { rollup } from "../data/graph"
 import { graphSnapshotAtom, isSignedOutAtom } from "../global-state"
-import { useDeleteNote, useNoteById } from "../hooks/note"
-import { useIsPinned, useWriteView } from "../hooks/views"
+import { useNoteById } from "../hooks/note"
 import { NoteId } from "../schema"
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { cx } from "../utils/cx"
+import { deleteNoteDialogAtom } from "./delete-note-dialog"
 import { DropdownMenu } from "./ui/dropdown-menu"
 import { IconButton } from "./ui/icon-button"
-import { CopyIcon16, MoreIcon16, PinFillIcon16, PinIcon16, TrashIcon16 } from "./icons"
+import { CopyIcon16, MoreIcon16, TrashIcon16 } from "./icons"
 import { NotePreview } from "./note-preview"
 import { surface } from "./ui/surface"
 
@@ -22,10 +22,9 @@ type NoteCardProps = {
 export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProps) {
   const note = useNoteById(id)
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  const pinned = useIsPinned(id)
-  const writeView = useWriteView()
   const jotaiStore = useStore()
-  const deleteNote = useDeleteNote()
+  // Delete asks first (`delete-note-dialog.tsx`); the menu only opens it.
+  const requestDelete = useSetAtom(deleteNoteDialogAtom)
   const [isDropdownOpen, setIsDropdownOpen] = React.useState(false)
 
   if (!note) return null
@@ -33,7 +32,7 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
   return (
     <div className="group relative">
       <Link
-        to="/notes/$"
+        to="/views/$"
         params={{ _splat: id }}
         search={{
           query: undefined,
@@ -55,24 +54,6 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
       >
         <NotePreview note={note} className="coarse:pr-[52px]" />
       </Link>
-      <div
-        className={cx(
-          "absolute right-1.5 top-1.5 rounded bg-bg-card opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 coarse:opacity-100",
-          pinned && "opacity-100!",
-        )}
-      >
-        <IconButton
-          aria-label={pinned ? "Unpin" : "Pin"}
-          tooltipSide="left"
-          disabled={isSignedOut}
-          onClick={() => {
-            if (isSignedOut) return
-            writeView(id, { pinned: !pinned })
-          }}
-        >
-          {pinned ? <PinFillIcon16 className="text-text-pinned" /> : <PinIcon16 />}
-        </IconButton>
-      </div>
       {note ? (
         <div
           className={cx(
@@ -103,7 +84,7 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
                 variant="danger"
                 icon={<TrashIcon16 />}
                 disabled={isSignedOut}
-                onClick={() => deleteNote(id)}
+                onClick={() => requestDelete({ noteId: id })}
               >
                 Delete
               </DropdownMenu.Item>

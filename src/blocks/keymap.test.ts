@@ -19,7 +19,7 @@ function docWith(content: string): BlockDoc {
 }
 
 function input(content: string, mode: Mode, caret?: CaretInput): CommandInput {
-  return { doc: docWith(content), key: "x", mode, visibleOrder: ["x"], caret }
+  return { doc: docWith(content), key: "x", keys: ["x"], mode, visibleOrder: ["x"], caret }
 }
 
 function caret(value: string, start: number, end = start, lines = {}): CaretInput {
@@ -246,6 +246,7 @@ describe("edit mode Enter in and into a code block", () => {
         blocks: { x: { id: "x", type, text, children: [] } },
       },
       key: "x",
+      keys: ["x"],
       mode: "edit",
       visibleOrder: ["x"],
       caret: c,

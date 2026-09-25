@@ -131,6 +131,20 @@ page load**, not from an effect — React's strict mode runs effects twice on
 purpose and a remount would do the same, and the first pass consuming the
 request left the second with nothing to show.
 
+**The card is off until asked for.** Settings → Updates, **Show what's new
+after an update**, turns it on. That is a preference of the account rather
+than the device (`whatsNewCard`, src/data/preferences.ts): answered once, it
+holds on every device the reader signs in on, stored by the Worker under the
+tenant's `meta` row `preferences` (`/api/preferences`,
+worker/handlers/preferences.ts) and held in memory on the client for the
+sign-in (src/data/account-preferences.ts) — nothing is kept on the device, so
+until the server has answered the defaults stand. Signed out there is no
+account, so the card stays away and the setting is not offered. Off, the boot still takes the update request
+and records the build, so turning it on later does not greet the reader with a
+release they have been running for weeks: not wanting to be told counts as
+read, exactly as dismissing does. The `/changelog` page is unaffected —
+**What's new** in the sidebar reaches it either way.
+
 **The card is not a dialog, and not tied to the button's click handler.** That
 button applies the waiting service worker and reloads
 (`src/hooks/app-update.ts`), so there is no moment between the click and the

@@ -10,7 +10,7 @@ import { ResultsEditor } from "./results-editor"
 
 /**
  * **The results block** — what a query resolves to, drawn the one way on
- * the notes page and in the ⌘K palette: the count line ("3 matching blocks
+ * the Views page and in the ⌘K palette: the count line ("3 matching blocks
  * in 2 notes", "12 results", or that nothing matched), then the rows — the
  * block editor over the matched blocks or notes (`ResultsEditor`) — and,
  * where the surface wants it, a way to the rest.

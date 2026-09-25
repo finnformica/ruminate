@@ -81,7 +81,7 @@ asks for it.
    fades — perceptually instant.
    Outside the editor "chosen" and "current" are a **wash**: the sidebar's
    active nav row / open note (`.nav-item[aria-current]`, with
-   `-hover`/`-active` steps), the notes list keyboard highlight
+   `-hover`/`-active` steps), the Views page keyboard highlight
    (`.list-highlight`), the calendar's current day and week, and the settings
    pickers (`<Button selected>`) all use `--color-bg-selected` /
    `--color-text-selected` verbatim. Every one of
@@ -346,6 +346,7 @@ belongs to the control under the pointer wherever that control is.
 | Inactive sel | neutral ring + fill (see §3)                                    | the selection while the editor lacks focus or blank space was clicked — 22% neutral-9 ring over a 4% fill light / 14% white ring over a 4% lift dark                                                            |
 | Current      | `--color-bg-selected`                                           | sidebar active route / open note row (same tokens as Selection)                                                                                                                                                 |
 | Accent solid | `--accent-9`                                                    | checked checkbox fill                                                                                                                                                                                           |
+| Danger solid | `--color-bg-danger` (red-9), ink `--color-text-on-danger`       | the confirm of a destructive `ConfirmDialog` (Button's `danger` variant) — the app's one solid red, nowhere else; `--color-text-danger` (red-11) is its ink-only cousin for a menu item or an error line        |
 | Transclusion | `--accent-a2` tint                                              | `((ref))` embeds — quietly "live" content                                                                                                                                                                       |
 
 All roles are Radix alpha/step tokens, so both color schemes (and print, which
@@ -415,6 +416,30 @@ the thing is or does; the reader is here to act, not to read. If it needs a
 second sentence, the control is unclear or the sentence belongs in the docs.
 Labels are nouns (**Email address**), buttons are verbs (**Share**), and the
 sentence before a consequential button says exactly what it will do.
+
+### Confirmation
+
+Every "are you sure?" is one component, `ConfirmDialog`
+(`src/components/ui/confirm-dialog.tsx`): a title that asks the question and
+names its subject (**Delete “Ideas”?**), one sentence on what answering yes
+does and what it cannot undo, and two buttons — the verb (**Delete**,
+**Revoke**, never **OK**) and **Cancel**. Two variants, chosen by what the
+verb does rather than how it feels:
+
+- **`danger`** — it cannot be taken back, or not easily. The confirm is the
+  app's one solid red (`--color-bg-danger`), and the dialog opens with focus
+  on Cancel, so <kbd>Enter</kbd> pressed before reading is the safe answer.
+- **`primary`** — a step merely worth a second look (a full re-push, a sign
+  out). The confirm is the strongest ordinary button, and takes focus, since
+  going ahead is the expected answer.
+
+A confirm that is a request follows "Busy controls": the button spins from
+the click until the promise settles, Cancel and the close control wait with
+it, and a failure is shown beneath the buttons with the dialog still open —
+a confirmation never closes on a failure it has not shown. Nothing else in
+the app is drawn in the solid red: a destructive menu item is red ink
+(`--color-text-danger`), and a destructive button among other buttons is a
+sign the action wants a dialog.
 
 ## Loading
 

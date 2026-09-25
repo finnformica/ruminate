@@ -20,7 +20,7 @@ export const Default = {
     <HoverCard.Provider>
       <HoverCard.Trigger
         // eslint-disable-next-line jsx-a11y/anchor-has-content -- content is provided via children
-        render={<a href="https://example.com/notes/meeting-notes" className="link" />}
+        render={<a href="https://example.com/views/meeting-notes" className="link" />}
         payload={{ content: card }}
       >
         Meeting notes
@@ -36,7 +36,7 @@ export const Open = {
       <HoverCard.Provider open>
         <HoverCard.Trigger
           // eslint-disable-next-line jsx-a11y/anchor-has-content -- content is provided via children
-          render={<a href="https://example.com/notes/meeting-notes" className="link" />}
+          render={<a href="https://example.com/views/meeting-notes" className="link" />}
           payload={{ content: card }}
         >
           Meeting notes

@@ -3,25 +3,24 @@ import copy from "copy-to-clipboard"
 import { useAtom, useAtomValue } from "jotai"
 import React, { createContext, useContext } from "react"
 import { requestDatabasePull } from "../data/database-mode"
-import { useIsAdmin } from "../data/features"
 import {
   isBootingAtom,
   isHelpPanelOpenAtom,
   noteSortAtom,
-  ownSortedNotesAtom,
-  pinnedEntriesAtom,
   sharedNotesAtom,
+  viewEntriesAtom,
+  type BlockView,
   type NoteSort,
-  type PinnedBlock,
-  type PinnedEntry,
+  type ViewEntry,
 } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
 import { usePending } from "../hooks/pending"
-import { useMoveNote } from "../hooks/note"
-import { useIsPinned, useReorderPinned, useWriteView } from "../hooks/views"
+import { REMOVE_VIEW, useReorderViews, useWriteView } from "../hooks/views"
 import { useDragReorder } from "../hooks/drag-reorder"
 import { shareOwnerName } from "../data/shares"
-import type { Note, NoteId } from "../schema"
+import type { Note } from "../schema"
+import { typeGlyph } from "../blocks/registry"
+import type { BlockType } from "../blocks/types"
 import { APP_SHORTCUTS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { inlineText } from "../utils/inline-text"
@@ -36,20 +35,16 @@ import {
   CircleQuestionMarkFillIcon16,
   CircleQuestionMarkIcon16,
   CopyIcon16,
-  FlagFillIcon16,
-  FlagIcon16,
+  GridIcon16,
   HistoryIcon16,
   ListIcon16,
   LoadingIcon16,
   MoreIcon16,
-  NoteFillIcon16,
-  NoteIcon16,
-  PinFillIcon16,
-  PinIcon16,
   SettingsFillIcon16,
   SettingsIcon16,
   SortAlphabetAscIcon16,
   SortNumberDescIcon16,
+  XIcon16,
 } from "./icons"
 import { Keys } from "./ui/keys"
 import { NavListSkeleton } from "./ui/skeleton"
@@ -68,8 +63,7 @@ export function NavItems({
   size?: "medium" | "large"
   onNavigate?: () => void
 }) {
-  const notes = useAtomValue(ownSortedNotesAtom)
-  const pinned = useAtomValue(pinnedEntriesAtom)
+  const views = useAtomValue(viewEntriesAtom)
   const sharedNotes = useAtomValue(sharedNotesAtom)
   const booting = useAtomValue(isBootingAtom)
   const syncText = useSyncStatusText()
@@ -80,7 +74,7 @@ export function NavItems({
   const todayString = toDateString(today)
 
   // Calendar link is active when viewing any daily or weekly note
-  const noteId = pathname.startsWith("/notes/") ? pathname.slice(7) : ""
+  const noteId = pathname.startsWith("/views/") ? pathname.slice(7) : ""
   const isCalendarActive = isValidDateString(noteId) || isValidWeekString(noteId)
 
   // Registered once by the app layout (src/hooks/app-update.ts).
@@ -88,10 +82,6 @@ export function NavItems({
   // Busy from the press until the reload: the waiting-update dot becomes the
   // spinner (docs/design-principles.md, "Busy controls").
   const [applyUpdate, updating] = usePending(apply)
-
-  // The admin page (invites, feature flags) is the bootstrap owner's alone,
-  // as the server says (src/data/features.ts); nobody else sees the link.
-  const isAdmin = useIsAdmin()
 
   return (
     <SizeContext.Provider value={size}>
@@ -102,17 +92,17 @@ export function NavItems({
               <NavLink
                 to="/"
                 search={{ query: undefined }}
-                activeIcon={<NoteFillIcon16 />}
-                icon={<NoteIcon16 />}
-                shortcut={formatCombo(APP_SHORTCUTS.goNotes)}
+                activeIcon={<GridIcon16 />}
+                icon={<GridIcon16 />}
+                shortcut={formatCombo(APP_SHORTCUTS.goViews)}
                 onNavigate={onNavigate}
               >
-                Notes
+                Views
               </NavLink>
             </li>
             <li>
               <NavLink
-                to="/notes/$"
+                to="/views/$"
                 params={{ _splat: todayString }}
                 search={{
                   query: undefined,
@@ -127,32 +117,18 @@ export function NavItems({
               </NavLink>
             </li>
           </ul>
-          {/* The lists, each under its own heading — Views, Notes, Shared —
-              with one rule above them all, setting them off from the links
-              above.
+          {/* The lists, each under its own heading — Views, Shared — with one
+              rule above them, setting them off from the links above.
 
-              Views leads: it is what you keep to hand, and it holds both
-              kinds of pin (docs/metadata.md) — notes and blocks in one list,
-              in the order it was dragged into, a block opening its note
-              focused on it. A pinned note is ALSO still in Notes below, in
-              its sorted place: the pin is somewhere else to reach it, not
-              somewhere it has gone. */}
-          {pinned.length > 0 ? (
+              Views is the one list of the user's own: every note, and every
+              block made a view of its own (docs/metadata.md), in the order
+              the sort menu says — and in the manual sort, the order it was
+              dragged into, a block able to sit between two notes. A block's
+              row opens its note focused on it. */}
+          {views.length > 0 ? (
             <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
-              <SectionHeading>Views</SectionHeading>
-              <ViewRows entries={pinned} size={size} onNavigate={onNavigate} />
-            </div>
-          ) : null}
-          {notes.length > 0 ? (
-            <div
-              className={cx(
-                "flex flex-col gap-1",
-                // The rule belongs to whichever list is first.
-                pinned.length > 0 ? "pt-2" : "border-t border-border-secondary pt-3",
-              )}
-            >
-              <SectionHeading action={<NoteSortMenu />}>Notes</SectionHeading>
-              <OwnNoteRows notes={notes} size={size} onNavigate={onNavigate} />
+              <SectionHeading action={<ViewSortMenu />}>Views</SectionHeading>
+              <ViewRows entries={views} size={size} onNavigate={onNavigate} />
             </div>
           ) : booting ? (
             <NavListSkeleton />
@@ -253,19 +229,6 @@ export function NavItems({
           >
             Settings
           </NavLink>
-          {isAdmin ? (
-            <NavLink
-              to="/admin"
-              search={{ query: undefined }}
-              activeIcon={<FlagFillIcon16 />}
-              icon={<FlagIcon16 />}
-              className="text-text-secondary"
-              shortcut={formatCombo(APP_SHORTCUTS.goAdmin)}
-              onNavigate={onNavigate}
-            >
-              Admin
-            </NavLink>
-          ) : null}
           <div className="mt-1 flex flex-col gap-1 border-t border-border-secondary pt-2">
             <NavLink
               to="/changelog"
@@ -287,7 +250,7 @@ export function NavItems({
 }
 
 /** A sidebar list's heading: quiet, in the row's inset, with room at its end
- * for a control belonging to the list beneath it (the Notes sort). */
+ * for a control belonging to the list beneath it (the Views sort). */
 function SectionHeading({
   title,
   action,
@@ -317,27 +280,27 @@ const NOTE_SORTS: { value: NoteSort; label: string; icon: React.ReactNode }[] = 
 ]
 
 /**
- * The Notes list's sort, over the heading: one preference for the sidebar and
- * the notes page both (`noteSortAtom`), so the two never disagree about where
- * a note is. **Manual** is what turns dragging on — a drag in an automatic
- * sort would be undone by the next render, so the rows are only draggable
- * once the order is the user's to set.
+ * The Views list's sort, over the heading: one preference for the sidebar,
+ * the Views page and the palette (`noteSortAtom`), so no two surfaces
+ * disagree about where a view is. **Manual** is what turns dragging on — a
+ * drag in an automatic sort would be undone by the next render, so the rows
+ * are only draggable once the order is the user's to set.
  */
-function NoteSortMenu() {
+function ViewSortMenu() {
   const [sort, setSort] = useAtom(noteSortAtom)
   const current = NOTE_SORTS.find((entry) => entry.value === sort) ?? NOTE_SORTS[0]
   return (
     <DropdownMenu modal={false}>
       <DropdownMenu.Trigger
         render={
-          <IconButton aria-label={`Sort notes by ${current.label.toLowerCase()}`} size="small">
+          <IconButton aria-label={`Sort views by ${current.label.toLowerCase()}`} size="small">
             {current.icon}
           </IconButton>
         }
       />
       <DropdownMenu.Content align="end">
         <DropdownMenu.Group>
-          <DropdownMenu.GroupLabel>Sort notes</DropdownMenu.GroupLabel>
+          <DropdownMenu.GroupLabel>Sort views</DropdownMenu.GroupLabel>
           {NOTE_SORTS.map((entry) => (
             <DropdownMenu.Item
               key={entry.value}
@@ -351,84 +314,6 @@ function NoteSortMenu() {
         </DropdownMenu.Group>
       </DropdownMenu.Content>
     </DropdownMenu>
-  )
-}
-
-/**
- * The user's own notes, which are the only rows that reorder: a shared note
- * is a row in someone else's corpus, so there is no link of ours to key it by
- * (docs/sharing.md).
- *
- * Dragging is live only in the manual sort: in an automatic one the next
- * render would undo it. There is no band within the list to be stopped at —
- * a pin lists a note under **Views** above, and leaves its place here
- * untouched — so any row may be dropped anywhere.
- */
-function OwnNoteRows({
-  notes,
-  size,
-  onNavigate,
-}: {
-  notes: Note[]
-  size: "medium" | "large"
-  onNavigate?: () => void
-}) {
-  const sort = useAtomValue(noteSortAtom)
-  const moveNote = useMoveNote()
-  const manual = sort === "manual"
-
-  const ids = React.useMemo(() => notes.map((note) => note.id), [notes])
-  const onMove = React.useCallback((id: NoteId, next: NoteId[]) => moveNote(id, next), [moveNote])
-  const reorder = useDragReorder({ ids, onMove, enabled: manual })
-
-  // The keyboard's way to the same move (`NoteActionsMenu`), swapping a row
-  // with its neighbour.
-  const swap = (index: number, delta: number) => {
-    const target = index + delta
-    if (target < 0 || target >= notes.length) return undefined
-    return () => {
-      const next = [...ids]
-      const [moved] = next.splice(index, 1)
-      next.splice(target, 0, moved)
-      moveNote(ids[index], next)
-    }
-  }
-
-  return (
-    <ul
-      className="flex flex-col gap-1"
-      data-testid="note-rows"
-      {...(manual ? reorder.listProps : {})}
-    >
-      {notes.map((note, index) => {
-        const rowProps = manual ? reorder.rowProps(note.id) : null
-        return (
-          <li
-            key={note.id}
-            className={cx(
-              "note-row group/note relative",
-              manual && "data-[dragging]:opacity-40",
-              reorder.dropBefore === note.id &&
-                "before:absolute before:-top-0.5 before:inset-x-0 before:h-0.5 before:rounded-full before:bg-border-focus",
-              reorder.dropBefore === "end" &&
-                index === notes.length - 1 &&
-                "after:absolute after:-bottom-0.5 after:inset-x-0 after:h-0.5 after:rounded-full after:bg-border-focus",
-            )}
-            {...rowProps}
-          >
-            <NoteNavItem note={note} size={size} onNavigate={onNavigate} className="w-full" />
-            <RowActions size={size}>
-              <NoteActionsMenu
-                noteId={note.id}
-                reorder={
-                  manual ? { onMoveUp: swap(index, -1), onMoveDown: swap(index, 1) } : undefined
-                }
-              />
-            </RowActions>
-          </li>
-        )
-      })}
-    </ul>
   )
 }
 
@@ -474,28 +359,7 @@ function NavRowIcon({
   )
 }
 
-/**
- * **What a pinned row leads with**, a note and a block alike: the pin, in the
- * pinned tint.
- *
- * It replaces the row's own icon rather than sitting beside it. A nav row is
- * a name and one glyph; the glyph is the only thing there to carry the state,
- * and a favicon saying which kind of note this is earns the slot rather less
- * than the pin does. Two glyphs to say one row would be a crowded way to say
- * it.
- *
- * **The leading pin is the sidebar's alone.** Where the block editor draws a
- * row — the notes page, the palette, a search result — the pin trails the
- * content instead (`block-item.tsx`, docs/metadata.md): those rows are
- * blocks, drawn to one rhythm with a shared text column, and the head slot is
- * already spoken for by the marker that says what the row is, or by the fold
- * chevron the moment it has anything in it.
- */
-const pinRowIcon = (
-  <NavRowIcon icon={<PinIcon16 />} filled={<PinFillIcon16 />} tint="text-text-pinned" />
-)
-
-/** The note rows of one list: the user's own, or the shared ones. */
+/** The note rows of a list with no order of its own: the shared notes. */
 function NoteRows({
   notes,
   titleOf,
@@ -555,33 +419,37 @@ function RowActions({ size, children }: { size: "medium" | "large"; children: Re
   )
 }
 
-/** What a pinned block's row calls it: its text as one plain line (a row
+/** What a block view's row calls it: its text as one plain line (a row
  * renders no inline markdown), or a stand-in for none. */
-const pinnedBlockLabel = (block: PinnedBlock): string => inlineText(block.text) || "Untitled block"
+const blockViewLabel = (block: BlockView): string => inlineText(block.text) || "Untitled block"
 
 /**
- * **The Views list**: the pinned notes and blocks as one list of rows, in
- * the order it was dragged into (`pinnedEntriesAtom`). Dragging is always
- * live here — the list has no sort but the user's own — and the first drag
- * is what keys the list (docs/metadata.md); the row's menu moves it up and
- * down for the keyboard and for a touch screen, through the same write.
+ * **The Views list**: the notes and the block views as one list of rows
+ * (`viewEntriesAtom`). Dragging is live only in the manual sort — in an
+ * automatic one the next render would undo it — and the first drag is what
+ * keys the list (docs/metadata.md); the row's menu moves it up and down for
+ * the keyboard and for a touch screen, through the same write. There is no
+ * band within the list to be stopped at: any row may be dropped anywhere,
+ * a block above a note included.
  */
 function ViewRows({
   entries,
   size,
   onNavigate,
 }: {
-  entries: PinnedEntry[]
+  entries: ViewEntry[]
   size: "medium" | "large"
   onNavigate?: () => void
 }) {
-  const reorderPinned = useReorderPinned()
+  const sort = useAtomValue(noteSortAtom)
+  const manual = sort === "manual"
+  const reorderViews = useReorderViews()
   const ids = React.useMemo(() => entries.map((entry) => entry.id), [entries])
   const onMove = React.useCallback(
-    (_id: string, next: string[]) => reorderPinned(next),
-    [reorderPinned],
+    (_id: string, next: string[]) => reorderViews(next),
+    [reorderViews],
   )
-  const reorder = useDragReorder({ ids, onMove })
+  const reorder = useDragReorder({ ids, onMove, enabled: manual })
 
   const swap = (index: number, delta: number) => {
     const target = index + delta
@@ -590,26 +458,31 @@ function ViewRows({
       const next = [...ids]
       const [moved] = next.splice(index, 1)
       next.splice(target, 0, moved)
-      reorderPinned(next)
+      reorderViews(next)
     }
   }
 
   return (
-    <ul className="flex flex-col gap-1" data-testid="view-rows" {...reorder.listProps}>
+    <ul
+      className="flex flex-col gap-1"
+      data-testid="view-rows"
+      {...(manual ? reorder.listProps : {})}
+    >
       {entries.map((entry, index) => {
-        const moves = { onMoveUp: swap(index, -1), onMoveDown: swap(index, 1) }
+        const moves = manual ? { onMoveUp: swap(index, -1), onMoveDown: swap(index, 1) } : undefined
         return (
           <li
             key={entry.id}
             className={cx(
-              "note-row group/note relative data-[dragging]:opacity-40",
+              "note-row group/note relative",
+              manual && "data-[dragging]:opacity-40",
               reorder.dropBefore === entry.id &&
                 "before:absolute before:-top-0.5 before:inset-x-0 before:h-0.5 before:rounded-full before:bg-border-focus",
               reorder.dropBefore === "end" &&
                 index === entries.length - 1 &&
                 "after:absolute after:-bottom-0.5 after:inset-x-0 after:h-0.5 after:rounded-full after:bg-border-focus",
             )}
-            {...reorder.rowProps(entry.id)}
+            {...(manual ? reorder.rowProps(entry.id) : {})}
           >
             {entry.kind === "note" ? (
               <>
@@ -625,14 +498,14 @@ function ViewRows({
               </>
             ) : (
               <>
-                <PinnedBlockNavItem
+                <BlockViewNavItem
                   block={entry.block}
                   size={size}
                   onNavigate={onNavigate}
                   className="w-full"
                 />
                 <RowActions size={size}>
-                  <PinnedBlockActionsMenu block={entry.block} reorder={moves} />
+                  <BlockViewActionsMenu block={entry.block} reorder={moves} />
                 </RowActions>
               </>
             )}
@@ -643,27 +516,48 @@ function ViewRows({
   )
 }
 
-/** A pinned block's row: the pin, and the block's text, with the note it
- * opens in as the row's tooltip. Current while its note is open focused
- * into it — the row's own link, exactly. */
-function PinnedBlockNavItem({
+/**
+ * The glyph a block view's row leads with: the block's own markdown marker
+ * (`typeGlyph`: a bullet's `-`, a to-do's `[ ]`, a heading's `#`), in the
+ * slot a note's favicon takes, so the row says what kind of block it opens
+ * on the way the row in the note does. Mono and quiet, as the qualifier
+ * picker draws the same glyphs; centred in the icon's square, and a
+ * three-character glyph is let run a little past it rather than shrunk.
+ */
+function BlockGlyph({ type }: { type: BlockType }) {
+  const glyph = typeGlyph(type)
+  return (
+    <span
+      aria-hidden
+      data-glyph={glyph}
+      className="grid size-icon place-items-center overflow-visible whitespace-nowrap font-mono text-xs leading-none tracking-tight"
+    >
+      {glyph}
+    </span>
+  )
+}
+
+/** A block view's row: the block's marker glyph (`BlockGlyph`) and its text,
+ * with the note it opens in as the row's tooltip. Current while its note is
+ * open focused into it — the row's own link, exactly. */
+function BlockViewNavItem({
   block,
   size,
   onNavigate,
   className,
 }: {
-  block: PinnedBlock
+  block: BlockView
   size: "medium" | "large"
   onNavigate?: () => void
   className?: string
 }) {
-  const label = pinnedBlockLabel(block)
+  const label = blockViewLabel(block)
   return (
     <Link
-      to="/notes/$"
+      to="/views/$"
       params={{ _splat: block.noteId }}
       // The block's own saved view (docs/metadata.md) is applied by the note
-      // page from the block's props, so the link carries only where to go.
+      // page from the block's view row, so the link carries only where to go.
       search={{ query: undefined, block: block.id }}
       activeOptions={{ exact: true, includeSearch: true }}
       data-size={size}
@@ -673,7 +567,10 @@ function PinnedBlockNavItem({
         if (!event.defaultPrevented) onNavigate?.()
       }}
     >
-      {pinRowIcon}
+      <NavRowIcon
+        icon={<BlockGlyph type={block.type} />}
+        filled={<BlockGlyph type={block.type} />}
+      />
       {/* The same wrapper a note row's name sits in, so the two line up to
           the pixel down the list. */}
       <span className="flex min-w-0 items-center gap-1.5">
@@ -683,13 +580,14 @@ function PinnedBlockNavItem({
   )
 }
 
-/** A pinned block's row menu: move it within Views (the keyboard's and a
- * touch screen's way to reorder), unpin it, or copy a link to it. */
-function PinnedBlockActionsMenu({
+/** A block view's row menu: move it within Views (the keyboard's and a
+ * touch screen's way to reorder), take it out of Views, or copy a link to
+ * it. */
+function BlockViewActionsMenu({
   block,
   reorder,
 }: {
-  block: PinnedBlock
+  block: BlockView
   reorder?: { onMoveUp?: () => void; onMoveDown?: () => void }
 }) {
   const writeView = useWriteView()
@@ -697,7 +595,7 @@ function PinnedBlockActionsMenu({
     <DropdownMenu modal={false}>
       <DropdownMenu.Trigger
         render={
-          <IconButton aria-label="Pinned block actions" size="small" disableTooltip>
+          <IconButton aria-label="Block view actions" size="small" disableTooltip>
             <MoreIcon16 />
           </IconButton>
         }
@@ -722,15 +620,12 @@ function PinnedBlockActionsMenu({
             <DropdownMenu.Separator />
           </>
         ) : null}
-        <DropdownMenu.Item
-          icon={<PinFillIcon16 className="text-text-pinned" />}
-          onClick={() => writeView(block.id, { pinned: false })}
-        >
-          Unpin
+        <DropdownMenu.Item icon={<XIcon16 />} onClick={() => writeView(block.id, REMOVE_VIEW)}>
+          Remove from Views
         </DropdownMenu.Item>
         <DropdownMenu.Item
           icon={<CopyIcon16 />}
-          onClick={() => copy(`${window.location.origin}/notes/${block.noteId}?block=${block.id}`)}
+          onClick={() => copy(`${window.location.origin}/views/${block.noteId}?block=${block.id}`)}
         >
           Copy link to block
         </DropdownMenu.Item>
@@ -810,8 +705,7 @@ function NavLink({
   )
 }
 
-/** A note row in the sidebar list: favicon, an optional pin marker, and the
- * note's display name. Pinned notes sort to the top (see sortedNotesAtom). */
+/** A note row in the sidebar list: its favicon and its display name. */
 function NoteNavItem({
   note,
   title,
@@ -825,10 +719,9 @@ function NoteNavItem({
   onNavigate?: () => void
   className?: string
 }) {
-  const pinned = useIsPinned(note.id)
   return (
     <Link
-      to="/notes/$"
+      to="/views/$"
       params={{ _splat: note.id }}
       search={{ query: undefined }}
       // Current only at the note's ROOT. Focus is a place of its own — the
@@ -836,7 +729,7 @@ function NoteNavItem({
       // outside focus" — and focused in, you are reading that block, not the
       // note whole. Matching the search is what draws that line: with no
       // block the searches are equal and the row is current; with one they
-      // differ and it is not, so a pinned block's row is the only thing lit
+      // differ and it is not, so a block view's row is the only thing lit
       // rather than the block and its note at once.
       activeOptions={{ exact: true, includeSearch: true }}
       data-size={size}
@@ -846,17 +739,7 @@ function NoteNavItem({
         if (!event.defaultPrevented) onNavigate?.()
       }}
     >
-      {/* Pinned, the row wears the pin instead of its favicon — in every
-          list, not just under **Views**, so a note looks the same wherever
-          it is listed and one glance says which notes are pinned. */}
-      {pinned ? (
-        pinRowIcon
-      ) : (
-        <NavRowIcon
-          icon={<NoteFavicon note={note} />}
-          filled={<NoteFavicon note={note} filled />}
-        />
-      )}
+      <NavRowIcon icon={<NoteFavicon note={note} />} filled={<NoteFavicon note={note} filled />} />
       <span className="flex min-w-0 items-center gap-1.5">
         {/* Show the note's name, matching the page header. Ids are minted and
             opaque now (docs/graph-storage.md), so the name is the

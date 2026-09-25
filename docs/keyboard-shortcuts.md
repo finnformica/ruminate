@@ -29,16 +29,16 @@ the old copy.
 `g` pressed outside any text field arms a short (~1.5s) chord window; the next
 key navigates. The chords work from the block editor's select mode too.
 
-| Action                            | Shortcut                                              |
-| --------------------------------- | ----------------------------------------------------- |
-| Go to today's daily note          | <kbd>g</kbd> then <kbd>d</kbd>                        |
-| Go to the notes list              | <kbd>g</kbd> then <kbd>n</kbd>                        |
-| Go to settings                    | <kbd>g</kbd> then <kbd>s</kbd>                        |
-| Go to the changelog               | <kbd>g</kbd> then <kbd>c</kbd>                        |
-| Go to the admin page (admin only) | <kbd>g</kbd> then <kbd>a</kbd>                        |
-| Focus the search (notes list)     | <kbd>/</kbd>                                          |
-| `i`                               | Focus the editor, restoring the last selected block   |
-| Back / forward (browser history)  | <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> |
+| Action                                | Shortcut                                              |
+| ------------------------------------- | ----------------------------------------------------- |
+| Go to today's daily note              | <kbd>g</kbd> then <kbd>d</kbd>                        |
+| Go to the Views list                  | <kbd>g</kbd> then <kbd>v</kbd>                        |
+| Go to settings                        | <kbd>g</kbd> then <kbd>s</kbd>                        |
+| Go to the changelog                   | <kbd>g</kbd> then <kbd>c</kbd>                        |
+| Go to the Admin settings (admin only) | <kbd>g</kbd> then <kbd>a</kbd>                        |
+| Focus the search (Views page)         | <kbd>/</kbd>                                          |
+| `i`                                   | Focus the editor, restoring the last selected block   |
+| Back / forward (browser history)      | <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> |
 
 ### Headings
 
@@ -49,18 +49,18 @@ document order, and typing narrows them. <kbd>↵</kbd> on a highlighted
 heading opens the note focused on it. There is no separate outline mode:
 take the pills off and it is the ordinary search.
 
-## The notes list and search results
+## The Views page and search results
 
-The notes list (`/`) and the full results view (`/?query=…`) are the block
-editor over a set of roots — every note, or the matched blocks — so the keys
+The Views page (`/`) and the full results view (`/?query=…`) are the block
+editor over a set of roots — the views, or the matched blocks — so the keys
 are the editor's own (see "Block editor" above): the arrows and <kbd>w</kbd> /
 <kbd>s</kbd> / <kbd>a</kbd> / <kbd>d</kbd> move the highlight, <kbd>space</kbd>
 / <kbd>→</kbd> / <kbd>←</kbd> fold and unfold, <kbd>f</kbd> focuses — which,
 here, opens the note at that block. Opening a row loads only that row's
 blocks; a child opens the next level the same way.
 
-The notes list is browsed: <kbd>↵</kbd> (or a click) opens the highlighted
-note, and nothing writes. A filtered view **edits in place**: <kbd>↵</kbd>
+The Views page is browsed: <kbd>↵</kbd> (or a click) opens the highlighted
+row, and nothing writes. A filtered view **edits in place**: <kbd>↵</kbd>
 edits the row as it would in its note, the change lands in the note, and the
 only thing refused is adding a block beside a result or removing one from the
 list — open the note for that.
@@ -69,7 +69,7 @@ list — open the note for that.
 | --------------------------------------- | ------------ |
 | In the search box: highlight first row  | <kbd>↓</kbd> |
 | From the first row: back to the search  | <kbd>↑</kbd> |
-| Notes list: open the highlighted note   | <kbd>↵</kbd> |
+| Views page: open the highlighted row    | <kbd>↵</kbd> |
 | Filtered view: edit the highlighted row | <kbd>↵</kbd> |
 | Open the note at this block             | <kbd>f</kbd> |
 
@@ -83,19 +83,19 @@ whose title matched, ranked together by score; or, with nothing typed, the
 **Recent** places — the five most used lately, notes and blocks focused on
 alike, ranked by frecency (how often, weighted by how recently: each place's
 score halves every week, and a visit adds one). A place is visited when it
-is opened — from the notes page, the palette or a link, or by focusing on a
+is opened — from the Views page, the palette or a link, or by focusing on a
 block in the editor — edited, or a block in it folded or unfolded, on this
 device (at most fifty places, a timestamp and a score each, under one
 browser-storage key that overwrites itself; touches within half an hour of
 the last are the same visit), and a note is visited, too, when it is edited
 on another device (the graph's timestamp); selecting, focusing or arrowing
-through a note never counts (`src/utils/recents.ts`). The notes page lists
+through a note never counts (`src/utils/recents.ts`). The Views page lists
 the same Recent above its Views. With the
-**Views** — the pinned notes, then the pinned blocks (docs/metadata.md),
-each block opening its note focused on it — beneath; a pinned place used
-lately is under both. Both give way
+**Views** — the notes and the block views, in the sidebar's order
+(docs/metadata.md), each block opening its note focused on it — beneath; a
+place used lately is under both. Both give way
 to results the moment you type — are the same block editor, browsed, under
-the same count line as the notes page. The
+the same count line as the Views page. The
 palette's one item of its own — a date, when the query reads as one —
 comes first and takes cmdk's <kbd>↑</kbd> / <kbd>↓</kbd>; nothing is
 highlighted until you arrow, so <kbd>↵</kbd> straight after typing is the
@@ -105,7 +105,7 @@ are then the editor's (fold with <kbd>space</kbd> / <kbd>→</kbd> /
 <kbd>←</kbd>, walk with <kbd>w</kbd> <kbd>s</kbd> <kbd>a</kbd> <kbd>d</kbd>,
 open with <kbd>↵</kbd> or <kbd>f</kbd>). With nothing typed, Recent and
 Views are walked as one list: <kbd>↓</kbd> past the last recent row lands on
-the first pinned one, <kbd>↑</kbd> walks back the same way. <kbd>↑</kbd>
+the first view row, <kbd>↑</kbd> walks back the same way. <kbd>↑</kbd>
 from the very first row, or <kbd>Esc</kbd>, returns to the query. Typing
 never moves the keyboard: the rows change under the query, and the query
 keeps it.
@@ -200,9 +200,15 @@ block _is_.)
 
 With more than one block selected, <kbd>⇥</kbd> / <kbd>⇧⇥</kbd>, delete,
 copy / cut / paste, move (<kbd>⌥↑/↓</kbd> or <kbd>⌘⇧↑/↓</kbd> — only when the
-selected blocks share a parent), duplicate (<kbd>⇧⌥↑/↓</kbd>), and the
-turn-into marker keys act on the whole selection; <kbd>Esc</kbd> collapses
-back to one.
+selected blocks share a parent), duplicate (<kbd>⇧⌥↑/↓</kbd>), the
+turn-into marker keys and <kbd>x</kbd> act on the whole selection;
+<kbd>Esc</kbd> collapses back to one. These are not separate bulk actions:
+each key runs the same command it runs on one block, over every selected
+block at once (`src/blocks/commands.ts`), so a single block is simply a
+selection of one. The right-click menu is the same: opened on a row of the
+selection, its Copy, Duplicate, the moves, Unlink and Delete take the whole
+selection and say how many blocks that is (**Delete 3 blocks**); opened on
+a row outside it, that row alone.
 
 A mouse selects a run of blocks too: sweeping across rows selects every row the
 sweep touched (the anchor stays at the end the sweep began, so <kbd>⇧</kbd>
@@ -213,9 +219,10 @@ the rest nesting under it.
 
 While more than one block is selected, a bar rises at the bottom of the window
 with the count, a way out, and an **Actions** menu holding every action above
-(turn into, duplicate, indent, outdent, move, copy, cut, remove), each acting
-on the whole selection. An item greys where the action would do nothing, and
-the bar sinks away when the selection collapses.
+(turn into, duplicate, indent, outdent, move, copy, cut, unlink — and, in a
+note, the block menu's Delete), each acting on the whole selection through the
+same commands the keys run. An item greys where the action would do nothing,
+and the bar sinks away when the selection collapses.
 
 #### Selection ladder
 
@@ -239,8 +246,10 @@ ladder. Starting from a <kbd>⇧</kbd> <kbd>↑/↓</kbd> range, <kbd>⌘</kbd>
 <kbd>A</kbd> grows to the deepest subtree that contains the whole range. All
 multi-block actions (indent, delete, copy / cut, move, duplicate, paste-after)
 work on ladder selections. Like <kbd>⌘</kbd> <kbd>C</kbd> / <kbd>⌘</kbd>
-<kbd>X</kbd>, these two bindings are handled imperatively in the editor
-component rather than through the keymap table.
+<kbd>X</kbd> and <kbd>⇧</kbd> <kbd>↑/↓</kbd>, these two bindings are handled
+imperatively in the editor component rather than through the keymap table:
+they change what is selected, where the keymap's commands change what the
+selection is.
 
 Copying writes both plain markdown and a rich-text (HTML) flavor that carries
 the exact block tree, so blocks copied from Ruminate paste back into Ruminate

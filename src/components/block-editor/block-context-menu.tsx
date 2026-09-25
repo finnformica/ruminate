@@ -4,6 +4,7 @@ import React from "react"
 import { FIGURE_ALIGNS, type FigureAlign } from "../../blocks/figure"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
+import type { BlockActions } from "./block-actions"
 import { DropdownMenu } from "../ui/dropdown-menu"
 import { Sheet } from "../ui/sheet"
 import { Surface } from "../ui/surface"
@@ -12,7 +13,11 @@ import { Surface } from "../ui/surface"
  * The block's right-click menu: the standard actions on one row, the same
  * commands the keyboard runs, so nothing here has a second meaning. Opened
  * by the editor on any row it owns (never in read-only views); the editor
- * supplies the row (`target`) and the actions, this file the menu.
+ * supplies the row (`target`) and the actions, this file the menu. The
+ * actions are the editor's one set (`block-actions.ts`), the same object
+ * the selection bar and the keys run, each over the rows the menu is for
+ * (`target.keys`): the row alone, or the selection it is in — in which case
+ * the item says how many blocks it takes.
  *
  * Removing is graph-aware. A row is one place a block appears. In a note's
  * outline the menu offers **Unlink** (what ⌫ does: the row goes, the block
@@ -24,17 +29,18 @@ import { Surface } from "../ui/surface"
  * **Delete with contents** on a block that holds something, since
  * its plain Delete leaves what the block held as new basket roots.
  *
- * **Pin** puts the block in the sidebar's Views list (docs/metadata.md),
- * from where it opens focused on; on a pinned block the item reads Unpin.
+ * **Add to Views** makes the block a view of its own — a row in the
+ * sidebar's Views list (docs/metadata.md), from where it opens focused on;
+ * on a block that is one the item reads Remove from Views.
  *
  * The menu carries only what nothing else on the row does. Editing is a
  * click or a tap; collapsing is the chevron; indent, outdent, focus and the
  * block types are keys on a desktop and the edit bar's buttons on a phone
  * (`mobile-edit-bar.tsx`). What is left — the moves, duplicate, copy, the
- * links and figures' own actions, pin, share, delete — is one list on two
+ * links and figures' own actions, view, share, delete — is one list on two
  * surfaces, the popup and the sheet, with keys beside it on the popup. It
  * runs in sections, ruled apart: copying first, then the row's own link or
- * figure actions, arranging (move, duplicate), pin and share, and removing
+ * figure actions, arranging (move, duplicate), view and share, and removing
  * last.
  */
 
@@ -44,62 +50,19 @@ export interface BlockMenuTarget {
   id: string
   type: BlockType
   hasChildren: boolean
+  /** The rows the block actions act on: the selected range's roots when
+   * the row is one of them, else the row alone — a list of one. */
+  keys: string[]
   /** How many places the block appears across the corpus (1 = only here). */
   places: number
-  /** Pinned (docs/metadata.md): listed in the sidebar's Views list. */
-  pinned: boolean
+  /** A view of its own (docs/metadata.md): listed in the sidebar's Views. */
+  inViews: boolean
   /** A figure row's layout (`src/blocks/figure.ts`): the side its picture
    * or card keeps to, and whether it has been dragged to a size of its own. */
   figure?: { align: FigureAlign; sized: boolean }
   /** The web links in the row's text (docs/links.md), for "Edit link" and
    * "Turn into link block"; a link block's own address. */
   links?: { href: string; title: string }[]
-}
-
-export interface BlockMenuActions {
-  duplicate: (key: string) => void
-  /** Move up / down: the edit bar has no buttons for them, so on a phone
-   * the menu (or a drag) is the way. */
-  moveUp: (key: string) => void
-  moveDown: (key: string) => void
-  copy: (key: string) => void
-  /** Absent when the editor has no note to link into (Storybook, tests). */
-  copyLink?: (id: string) => void
-  /** Pin this block — or unpin it, when it is (`target.pinned`): a pinned
-   * block is listed in the sidebar under Pinned and opens focused on.
-   * Absent where the rows are not the user's own to pin. */
-  pin?: (id: string) => void
-  /** Share this block — and everything beneath it — with someone
-   * (docs/sharing.md). Absent where the rows are not the user's own. */
-  share?: (id: string) => void
-  /** Open a link's card (`link-hover-card.tsx`) outright — a touch screen
-   * has nothing to hover with. */
-  editLink?: (key: string, href: string) => void
-  /** Make a link block of the row's first link (docs/links.md): "Turn
-   * into link block", what the hover card's "Turn into block" does. */
-  turnIntoLink?: (key: string, href: string, title: string) => void
-  /** Remove this row (the block stays where else it is held). */
-  remove: (key: string) => void
-  /** Delete the block from every place it appears. Absent standalone. */
-  deleteEverywhere?: (id: string) => void
-  /** Delete the block and everything beneath it that nothing else holds
-   * (the basket's). Absent where a delete never cascades. */
-  deleteSubtree?: (id: string) => void
-  /** Image rows: expand the picture, and save it to the device. */
-  openImage?: (id: string) => void
-  downloadImage?: (id: string) => void
-  /** Link rows (docs/links.md): open the page in a new tab, and fetch its
-   * preview again (absent signed out, where there is nothing to fetch it
-   * through). */
-  openLink?: (id: string) => void
-  refreshPreview?: (id: string) => void
-  /** Link rows: back to a paragraph holding the link as text (the hover
-   * card offers the same; here for a keyboard or a touch screen). */
-  linkToInline?: (id: string) => void
-  /** Figure rows: which side of the row the picture or card keeps to. */
-  alignFigure?: (id: string, align: FigureAlign) => void
-  /** Figure rows: return a dragged figure to its natural width. */
-  resetFigureSize?: (id: string) => void
 }
 
 /** The Align submenu's items, in the order the figure's toolbar has them. */
@@ -122,7 +85,7 @@ export function BlockContextMenu({
   children,
 }: {
   target: BlockMenuTarget | null
-  actions: BlockMenuActions
+  actions: BlockActions
   /** Open or closed, and the event that did it (a `contextmenu` for a
    * right-click; the `touchstart` of a press-and-hold, Base UI's own 500ms
    * one, which never yields a `contextmenu` on a phone). The editor reads
@@ -174,9 +137,11 @@ export type MenuEntry =
       items: { label: React.ReactNode; onSelect: () => void; selected?: boolean; key: string }[]
     }
 
-function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEntry[] {
-  const { key, id } = target
-  const shared = target.places > 1
+function menuEntries(target: BlockMenuTarget, actions: BlockActions): MenuEntry[] {
+  const { keys } = target
+  // A range's actions say how many blocks they take: "Delete 3 blocks".
+  const many = keys.length > 1 ? ` ${keys.length} blocks` : ""
+  const shared = target.places > 1 && keys.length === 1
   const image = target.type === "image"
   const link = target.type === "link"
   const figure = target.figure !== undefined
@@ -184,7 +149,7 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
   const entries: MenuEntry[] = []
   // The menu is sections, a rule between each two that have something in
   // them: a section a row has nothing for (a plain paragraph has no link or
-  // figure actions, a view no Pin) leaves no doubled or dangling rule.
+  // figure actions, a view no Add to Views) leaves no doubled or dangling rule.
   let ruleDue = false
   const section = () => {
     ruleDue = entries.length > 0
@@ -198,16 +163,16 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
     push({ kind: "item", ...e })
 
   // Copying, first: what a hold is most often for.
-  item({ label: "Copy", shortcut: ["⌘", "C"], onSelect: () => actions.copy(key) })
+  item({ label: `Copy${many}`, shortcut: ["⌘", "C"], onSelect: () => actions.copy(keys) })
   if (actions.copyLink)
-    item({ label: "Copy link to block", onSelect: () => actions.copyLink?.(id) })
+    item({ label: "Copy link to block", onSelect: () => actions.copyLink?.(keys) })
 
   // The row's own kind of thing: its links, its picture, its card.
   section()
   // A link's card, for a screen with nothing to hover with: the one link
   // straight away, several by their display text.
   if (links.length === 1 && actions.editLink) {
-    item({ label: "Edit link", onSelect: () => actions.editLink?.(key, links[0].href) })
+    item({ label: "Edit link", onSelect: () => actions.editLink?.(keys, links[0].href) })
   } else if (links.length > 1 && actions.editLink) {
     push({
       kind: "group",
@@ -217,17 +182,18 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
       items: links.map((l, index) => ({
         key: `${index}:${l.href}`,
         label: <span className="truncate">{l.title}</span>,
-        onSelect: () => actions.editLink?.(key, l.href),
+        onSelect: () => actions.editLink?.(keys, l.href),
       })),
     })
   }
   if (image && actions.openImage)
-    item({ label: "Open image", onSelect: () => actions.openImage?.(id) })
+    item({ label: "Open image", onSelect: () => actions.openImage?.(keys) })
   if (image && actions.downloadImage)
-    item({ label: "Download image", onSelect: () => actions.downloadImage?.(id) })
-  if (link && actions.openLink) item({ label: "Open link", onSelect: () => actions.openLink?.(id) })
+    item({ label: "Download image", onSelect: () => actions.downloadImage?.(keys) })
+  if (link && actions.openLink)
+    item({ label: "Open link", onSelect: () => actions.openLink?.(keys) })
   if (link && actions.refreshPreview)
-    item({ label: "Refresh preview", onSelect: () => actions.refreshPreview?.(id) })
+    item({ label: "Refresh preview", onSelect: () => actions.refreshPreview?.(keys) })
   // A figure's layout: the side it keeps to (the frame's own toolbar offers
   // the same), and its natural width back after a drag.
   if (figure && actions.alignFigure) {
@@ -240,14 +206,14 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
         key: align,
         label: ALIGN_LABELS[align],
         selected: target.figure?.align === align,
-        onSelect: () => actions.alignFigure?.(id, align),
+        onSelect: () => actions.alignFigure?.(keys, align),
       })),
     })
   }
   if (figure && target.figure?.sized && actions.resetFigureSize) {
     item({
       label: image ? "Original size" : "Full width",
-      onSelect: () => actions.resetFigureSize?.(id),
+      onSelect: () => actions.resetFigureSize?.(keys),
     })
   }
   // A link block goes back to the inline link it was made from; a row with
@@ -255,45 +221,57 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
   // beneath (docs/links.md). A figure is its picture or its page, so it is
   // never turned into anything else.
   if (link && actions.linkToInline)
-    item({ label: "Turn into inline", onSelect: () => actions.linkToInline?.(id) })
+    item({ label: "Turn into inline", onSelect: () => actions.linkToInline?.(keys) })
   if (!figure && links.length > 0 && actions.turnIntoLink) {
     item({
       label: "Turn into link block",
-      onSelect: () => actions.turnIntoLink?.(key, links[0].href, links[0].title),
+      onSelect: () => actions.turnIntoLink?.(keys, links[0].href, links[0].title),
     })
   }
 
   // Arranging: where the block sits, and a second of it.
   section()
-  item({ label: "Move up", shortcut: ["⌥", "↑"], onSelect: () => actions.moveUp(key) })
-  item({ label: "Move down", shortcut: ["⌥", "↓"], onSelect: () => actions.moveDown(key) })
-  item({ label: "Duplicate", shortcut: ["⌥", "⇧", "↓"], onSelect: () => actions.duplicate(key) })
+  item({ label: "Move up", shortcut: ["⌥", "↑"], onSelect: () => actions.moveUp(keys) })
+  item({ label: "Move down", shortcut: ["⌥", "↓"], onSelect: () => actions.moveDown(keys) })
+  item({
+    label: `Duplicate${many}`,
+    shortcut: ["⌥", "⇧", "↓"],
+    onSelect: () => actions.duplicate(keys),
+  })
 
   // Beyond the note: the sidebar, and other people.
   section()
-  if (actions.pin)
-    item({ label: target.pinned ? "Unpin" : "Pin", onSelect: () => actions.pin?.(id) })
-  if (actions.share) item({ label: "Share…", onSelect: () => actions.share?.(id) })
+  if (actions.view)
+    item({
+      label: target.inViews ? "Remove from Views" : "Add to Views",
+      onSelect: () => actions.view?.(keys),
+    })
+  if (actions.share) item({ label: "Share…", onSelect: () => actions.share?.(keys) })
 
   // Removing, last and apart.
   section()
   if (actions.deleteEverywhere) {
-    item({ label: "Unlink", shortcut: ["⌫"], onSelect: () => actions.remove(key) })
+    item({ label: `Unlink${many}`, shortcut: ["⌫"], onSelect: () => actions.remove(keys) })
     item({
-      label: "Delete",
+      label: `Delete${many}`,
       danger: true,
       trailing: shared ? (
         <span className="text-sm text-text-secondary">{target.places} places</span>
       ) : undefined,
-      onSelect: () => actions.deleteEverywhere?.(id),
+      onSelect: () => actions.deleteEverywhere?.(keys),
     })
   } else {
-    item({ label: "Delete", danger: true, shortcut: ["⌫"], onSelect: () => actions.remove(key) })
+    item({
+      label: `Delete${many}`,
+      danger: true,
+      shortcut: ["⌫"],
+      onSelect: () => actions.remove(keys),
+    })
     if (actions.deleteSubtree && target.hasChildren) {
       item({
-        label: "Delete with contents",
+        label: `Delete${many} with contents`,
         danger: true,
-        onSelect: () => actions.deleteSubtree?.(id),
+        onSelect: () => actions.deleteSubtree?.(keys),
       })
     }
   }
@@ -301,7 +279,7 @@ function menuEntries(target: BlockMenuTarget, actions: BlockMenuActions): MenuEn
 }
 
 /** The pointer's popup: the entries as Base UI menu items and submenus. */
-function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockMenuActions }) {
+function Items({ target, actions }: { target: BlockMenuTarget; actions: BlockActions }) {
   const entries = menuEntries(target, actions)
   return (
     <>
@@ -372,7 +350,7 @@ export function BlockMenuSheet({
   target: BlockMenuTarget | null
   /** The block's text, for the sheet's heading. */
   title: string
-  actions: BlockMenuActions
+  actions: BlockActions
   /** The finger that opened the sheet is still down (or only just up). */
   holding?: boolean
   open: boolean

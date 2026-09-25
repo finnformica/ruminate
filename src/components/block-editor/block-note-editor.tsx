@@ -228,8 +228,9 @@ export function BlockNoteEditor({
   )
 
   // The context menu's graph-aware delete: how many places a block appears
-  // (read at open, off the live graph), and deleting it from all of them —
-  // a batch of ops applied straight to the graph, which the page then
+  // (read at open, off the live graph), and deleting blocks — the selected
+  // ones, when the menu is opened on a selection — from all of them: a
+  // batch of ops applied straight to the graph, which the page then
   // re-walks (not an editor edit, so not an undo step).
   const applyOps = useApplyOps()
   const parentCountOf = useCallback(
@@ -237,11 +238,11 @@ export function BlockNoteEditor({
     [jotaiStore],
   )
   const deleteEverywhere = useCallback(
-    (id: string) => applyOps(deleteBlockOps(id, jotaiStore.get(graphSnapshotAtom))),
+    (ids: string[]) => applyOps(deleteBlockOps(ids, jotaiStore.get(graphSnapshotAtom))),
     [applyOps, jotaiStore],
   )
   const deleteSubtree = useCallback(
-    (id: string) => applyOps(deleteSubtreeOps(id, jotaiStore.get(graphSnapshotAtom))),
+    (ids: string[]) => applyOps(deleteSubtreeOps(ids, jotaiStore.get(graphSnapshotAtom))),
     [applyOps, jotaiStore],
   )
   // Undo needs to tell a block an edit created from one it linked in: only

@@ -259,54 +259,71 @@ export function parentCount(snapshot: GraphSnapshot, id: string): number {
   return snapshot.parentLinks.get(id)?.length ?? 0
 }
 
+/** The blocks a delete names: one id or several, each once, notes and
+ * unknown ids left out (a note is deleted by `deleteNoteOps`). */
+function blockIdsOf(ids: string | string[], snapshot: GraphSnapshot): string[] {
+  const out: string[] = []
+  for (const id of typeof ids === "string" ? [ids] : ids) {
+    const node = snapshot.nodes.get(id)
+    if (node && node.type !== NOTE_TYPE && !out.includes(id)) out.push(id)
+  }
+  return out
+}
+
 /**
- * Delete a block from every place it appears: unlink it from each parent and
- * delete it — and nothing more. Its children keep their note and, no longer
- * reached, show in that note's Unassigned basket. The graph-level counterpart
- * of removing a row in the editor (which only unlinks the row's own
- * occurrence and keeps a block still held elsewhere).
+ * Delete a block — or several, as one batch — from every place it appears:
+ * unlink each from each parent and delete it — and nothing more. Its
+ * children keep their note and, no longer reached, show in that note's
+ * Unassigned basket. The graph-level counterpart of removing a row in the
+ * editor (which only unlinks the row's own occurrence and keeps a block
+ * still held elsewhere).
  */
-export function deleteBlockOps(blockId: string, snapshot: GraphSnapshot): Op[] {
-  const node = snapshot.nodes.get(blockId)
-  if (!node || node.type === NOTE_TYPE) return []
-  const unlinks: Op[] = (snapshot.parentLinks.get(blockId) ?? []).map((link) => ({
-    op: "unlink",
-    source: link.source_id,
-    destination: blockId,
-  }))
-  // What it held goes to the basket — except the blank ones, which have
-  // nothing in them to rescue (`strandedBlankOps`).
+export function deleteBlockOps(blockIds: string | string[], snapshot: GraphSnapshot): Op[] {
+  const ids = blockIdsOf(blockIds, snapshot)
+  if (ids.length === 0) return []
+  const deleted = new Set(ids)
+  // A link between two of the deleted goes with them (a delete's links are
+  // retained, as `deleteSubtreeOps` keeps them); the rest are unlinked.
+  const unlinks: Op[] = []
   const parents = parentLookup(snapshot)
-  for (const link of snapshot.parentLinks.get(blockId) ?? [])
-    parents(blockId).delete(link.source_id)
-  const deleted = new Set([blockId])
+  for (const id of ids) {
+    for (const link of snapshot.parentLinks.get(id) ?? []) {
+      parents(id).delete(link.source_id)
+      if (deleted.has(link.source_id)) continue
+      unlinks.push({ op: "unlink", source: link.source_id, destination: id })
+    }
+  }
+  // What they held goes to the basket — except the blank ones, which have
+  // nothing in them to rescue (`strandedBlankOps`).
   return [
     ...unlinks,
-    { op: "delete", id: blockId },
+    ...ids.map((id) => ({ op: "delete", id }) as Op),
     ...strandedBlankOps(snapshot, parents, deleted),
   ]
 }
 
 /**
- * Delete a block and everything beneath it that nothing else holds: the
- * block itself from every place it appears (as `deleteBlockOps`), and each
- * block reachable from it that no note, and no other block outside the
- * subtree, still reaches once it is gone. A block that also hangs from
- * another note, or from another Unassigned root, is only unlinked from the
- * subtree and survives. The basket's "Delete with contents".
+ * Delete a block — or several, as one batch — and everything beneath it
+ * that nothing else holds: the block itself from every place it appears
+ * (as `deleteBlockOps`), and each block reachable from it that no note, and
+ * no other block outside the subtrees, still reaches once they are gone. A
+ * block that also hangs from another note, or from another Unassigned
+ * root, is only unlinked from the subtree and survives. The basket's
+ * "Delete with contents".
  */
-export function deleteSubtreeOps(blockId: string, snapshot: GraphSnapshot): Op[] {
-  const node = snapshot.nodes.get(blockId)
-  if (!node || node.type === NOTE_TYPE) return []
-  const below = reachableFrom(snapshot, [blockId])
-  below.delete(blockId)
+export function deleteSubtreeOps(blockIds: string | string[], snapshot: GraphSnapshot): Op[] {
+  const ids = blockIdsOf(blockIds, snapshot)
+  if (ids.length === 0) return []
+  const named = new Set(ids)
+  const below = reachableFrom(snapshot, ids)
+  for (const id of ids) below.delete(id)
   // What the rest of the graph still reaches without going through the
-  // block: every note, and every parentless block (an Unassigned root of
-  // any note) other than this one, walked around the block.
+  // blocks: every note, and every parentless block (an Unassigned root of
+  // any note) other than these, walked around them.
   const parentsOf = parentsIndex(snapshot)
-  const roots = noteIds(snapshot).filter((id) => id !== blockId)
+  const roots = noteIds(snapshot).filter((id) => !named.has(id))
   for (const other of snapshot.nodes.values()) {
-    if (other.id === blockId || other.type === NOTE_TYPE) continue
+    if (named.has(other.id) || other.type === NOTE_TYPE) continue
     // The corpus root is parentless by construction (see ROOT_TYPE), so it
     // would walk in here as a rescue root — and since it holds every note,
     // walking from it would rescue the entire corpus and delete nothing.
@@ -319,12 +336,12 @@ export function deleteSubtreeOps(blockId: string, snapshot: GraphSnapshot): Op[]
     const id = stack.pop() as string
     for (const link of snapshot.childLinks.get(id) ?? []) {
       const child = link.destination_id
-      if (child === blockId || kept.has(child)) continue
+      if (named.has(child) || kept.has(child)) continue
       kept.add(child)
       stack.push(child)
     }
   }
-  const doomed = new Set<string>([blockId])
+  const doomed = new Set<string>(ids)
   for (const id of below) if (!kept.has(id)) doomed.add(id)
   // Links into the doomed from outside are tombstoned so the removal
   // replicates; links among the doomed are retained, as a delete's always are.

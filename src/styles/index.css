@@ -134,10 +134,9 @@ body:has([data-resizing="true"]) * {
  * handed down to them. A nav link's filled icon inherits it already.
  *
  * `.nav-item-tint` opts out. An icon that REPORTS something about the row —
- * the pin, which says the row is pinned — is a state, not a label, and it is
- * no less true on the row you are reading, so it keeps its own colour instead
- * of dissolving into the selection. Only an icon that merely names the row
- * leans with the label. */
+ * a state rather than a label — is no less true on the row you are reading,
+ * so it keeps its own colour instead of dissolving into the selection. Only
+ * an icon that merely names the row leans with the label. */
 .nav-item[aria-current]
   :is(.nav-item-icon, .nav-item-icon *):not(:is(.nav-item-tint, .nav-item-tint *)) {
   color: inherit;

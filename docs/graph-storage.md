@@ -298,16 +298,17 @@ text are plain text.)
 ### `views` (id, root_id, filter, sort, pinned, sort_key, updated_at, deleted_at)
 
 The entrypoints into the graph (docs/metadata.md, "Views"; `migrations/0015`):
-a node to start at, what of its subgraph to keep, how to lay it out, and
-whether it is pinned. Not part of the graph and not derivable from it — a
+a node to start at, what of its subgraph to keep, how to lay it out, and where
+it sits in the Views list (`sort_key`; `pinned` now only says a block's row is
+to be kept when it saves nothing else). Not part of the graph and not derivable from it — a
 view may name a node another tenant owns (a share), which no prop on that
 node could record — so a table of its own, replicated exactly as the other
 two are: per-row last-writer-wins on `updated_at`, a delete as a row carrying
 `deleted_at`, and a `seq` drawn from the same per-tenant sequence, so the one
 pull cursor covers all three tables. `root_id` has no foreign key for the
 same reason link targets have none. One view per root for now, minted under
-the root's own id, so two devices pinning the same note apart converge on one
-row. The client keeps the rows in `viewsAtom` (`src/data/views.ts`) beside
+the root's own id, so two devices making the same block a view apart converge
+on one row. The client keeps the rows in `viewsAtom` (`src/data/views.ts`) beside
 the graph atom, written through `databaseApplyViews` the way ops are written
 through `databaseApplyOps`, and a delete op tombstones the view rooted at the
 node it deletes. `migrations/0016` retired the props the three fields used to
@@ -424,7 +425,12 @@ changed here, and it is invisible from outside:
   revives the row.
 - The user-visible rule above is deliberately unchanged by this: whether
   unlink-plus-rescue is still right once deletes are recoverable is a separate
-  decision, and there is no restore UI yet — only data that supports one.
+  decision. The one restore there is puts a **note** back: Settings' Recently
+  deleted (`src/data/deleted-notes.ts`) re-creates the note and the blocks
+  stamped with it that the retained links reach from it (or from its basket's
+  roots), and re-links them along those links — the reverse of
+  `deleteNoteOps`. A block deleted on its own stays deleted, and a view the
+  delete tombstoned (a pin) is not revived.
 
 ## Ordering notes
 
@@ -467,21 +473,22 @@ are all of its call sites:
 - `walkGraph`'s upstream pass: the root would show above a note as its parent.
 
 The sort itself is a preference, not data: **Name** (the default), **Recently
-updated** and **Manual**, used by the sidebar's notes list (and by the notes
-page, on the rare occasion it lists every note — nothing recent, nothing
-pinned) so the two never disagree about where a note is. Manual is two bands — the notes the root
-holds, then the ones it does not, in the name order beneath them.
+updated** and **Manual**, one preference for the sidebar's Views list, the
+Views page and the palette, so no two surfaces disagree about where a view
+is. Manual is two bands — the notes the root holds, then the ones it does
+not, in the name order beneath them.
 
-**A pin does not steer the order.** Pinned notes are listed on their own under
-**Views**, above the notes and alongside the pinned blocks, and they keep
-their sorted place in the notes list as well — a pin is a second place to
-reach a note, never a note lifted out of the order. That is what lets the
-order be wholly the user's: no band interrupts the manual sequence, and a drag
-has no boundary to be stopped at. The Views list has an order of its own, on
-the views' `sort_key` (`orderPinned`, `reorderedViews` in
-`src/data/views.ts`): the same fractional keys, reconciled by the same
-`reconcileSortKeys`, so a drag there rewrites one view row, and the first
-drag keys the list.
+**The root's links are read, never written, now.** The Views list is one
+list of notes and block views (docs/metadata.md, "Views"), and one order
+cannot live on links from the root — a block view's place among the notes
+is not a link the graph should hold. So the order moved onto the view rows
+themselves: `sort_key` (`orderViews`, `reorderedViews` in
+`src/data/views.ts`), the same fractional keys, reconciled by the same
+`reconcileSortKeys`, so a drag rewrites one view row and the first drag keys
+the whole list — minting a row for every note that had none. The root's links
+survive as the fallback band's order: a corpus dragged into an order before
+the move still reads in it, until the first drag of the Views list keys every
+row and the root stops mattering (`orderedNoteIds`, `src/data/note-order.ts`).
 
 ## Cross-file block-id dedup
 

@@ -12,6 +12,8 @@ import { ImageUploadError, type UploadedImage } from "../../data/images"
 import type { LinkPreview } from "../../blocks/link"
 import { LinkPreviewError } from "../../data/link-previews"
 import { BlockEditor, type BlockDebugOptions } from "./block-editor"
+import { getDefaultStore } from "jotai"
+import { viewRootIdsAtom, viewsAtom } from "../../data/views"
 
 // The context menu (Base UI) measures its popup with a ResizeObserver and
 // scrolls the highlighted item into view; jsdom implements neither.
@@ -22,7 +24,18 @@ globalThis.ResizeObserver = class {
   disconnect() {}
 }
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  // A view made from a menu lands in the default store; the next test
+  // starts with none.
+  getDefaultStore().set(viewsAtom, new Map())
+})
+
+/** The rows' block ids, in document order. */
+const idsOf = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll<HTMLElement>("[data-block-row]")).map((row) =>
+    row.getAttribute("data-block-row")!,
+  )
 
 /** Mirror BlockNoteEditor: an empty parse still gets one block to edit. */
 function withStarter(doc: BlockDoc): BlockDoc {
@@ -60,7 +73,7 @@ function Harness({
   resolveBlocks?: (ids: string[]) => Record<string, string | null>
   debug?: BlockDebugOptions
   parentCountOf?: (id: string) => number
-  onDeleteEverywhere?: (id: string) => void
+  onDeleteEverywhere?: (ids: string[]) => void
   onImageUpload?: (file: File) => Promise<UploadedImage>
   onLinkPreview?: (url: string) => Promise<LinkPreview>
   /** Sees every change's hint (undefined when there is none). */
@@ -2718,29 +2731,29 @@ describe("BlockEditor context menu", () => {
     expect(serializedLines(getByTestId)).toEqual(["A", "C"])
   })
 
-  it("pins and unpins a block from its menu, as a prop on the block, and the row says so", async () => {
+  it("adds a block to Views from its menu, as a view rooted at it, and removes it again", async () => {
     const { container } = render(<Harness initial={"A\nB"} noteId="n" />)
     let menu = await openMenuOn(container, 1)
-    expect(menu.textContent).toContain("Pin")
-    expect(menu.textContent).not.toContain("Unpin")
+    expect(menu.textContent).toContain("Add to Views")
+    expect(menu.textContent).not.toContain("Remove from Views")
+    await pick("Add to Views")
+    // The block has a view row now, and nothing in the row itself says so:
+    // the sidebar's list is where a view shows.
+    const blockId = idsOf(container)[1]
+    expect(getDefaultStore().get(viewRootIdsAtom).has(blockId)).toBe(true)
     expect(container.querySelector('[data-testid="block-pinned"]')).toBeNull()
-    await pick("Pin")
-    // The row now carries the pin glyph; the menu offers Unpin.
-    const rows = container.querySelectorAll("[data-occurrence]")
-    expect(rows[1]!.querySelector('[data-testid="block-pinned"]')).not.toBeNull()
-    expect(rows[0]!.querySelector('[data-testid="block-pinned"]')).toBeNull()
     menu = await openMenuOn(container, 1)
-    expect(menu.textContent).toContain("Unpin")
-    await pick("Unpin")
-    expect(container.querySelector('[data-testid="block-pinned"]')).toBeNull()
+    expect(menu.textContent).toContain("Remove from Views")
+    await pick("Remove from Views")
+    expect(getDefaultStore().get(viewRootIdsAtom).has(blockId)).toBe(false)
   })
 
-  it("offers Pin only where the rows are a note's own", async () => {
+  it("offers Add to Views only where the rows are a note's own", async () => {
     // No note behind the editor (a clipboard fragment, Storybook): nothing
-    // to list the block under, so no Pin.
+    // to list the block under, so no view to make.
     const { container } = render(<Harness initial={"A\nB"} />)
     const menu = await openMenuOn(container, 1)
-    expect(menu.textContent).not.toContain("Pin")
+    expect(menu.textContent).not.toContain("Views")
   })
 
   it("opens on a row with the standard actions, and selects that row", async () => {
@@ -2818,7 +2831,7 @@ describe("BlockEditor context menu", () => {
     expect(menu.textContent).not.toContain("places")
     const id = getByTestId("serialized").textContent!.match(/id:: (\S+)\n?$/)![1]
     await pick("Delete")
-    expect(deleteEverywhere).toHaveBeenCalledWith(id)
+    expect(deleteEverywhere).toHaveBeenCalledWith([id])
     expect(serializedLines(getByTestId)).toEqual(["A", "B"])
   })
 
@@ -2833,7 +2846,7 @@ describe("BlockEditor context menu", () => {
     expect(menu.textContent).toContain("2 places")
     const id = getByTestId("serialized").textContent!.match(/id:: (\S+)\n?$/)![1]
     await pick("Delete")
-    expect(deleteEverywhere).toHaveBeenCalledWith(id)
+    expect(deleteEverywhere).toHaveBeenCalledWith([id])
     // The graph-level delete is the host's; the row is left for the snapshot
     // to drop, so nothing was removed by the editor itself.
     expect(serializedLines(getByTestId)).toEqual(["A", "B"])
@@ -4312,5 +4325,284 @@ describe("wrapping the selection by typing", () => {
     const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!
     textarea.setSelectionRange(5, 5)
     expect(fireEvent.keyDown(textarea, { key: "(" })).toBe(true)
+  })
+})
+
+describe("one action layer: a range of blocks takes the same commands as one", () => {
+  const FOUR = [
+    "A",
+    "  id:: blk_a",
+    "B",
+    "  id:: blk_b",
+    "C",
+    "  id:: blk_c",
+    "D",
+    "  id:: blk_d",
+  ].join("\n")
+
+  async function openMenuOn(container: HTMLElement, index: number): Promise<HTMLElement> {
+    const row = container.querySelectorAll("[data-occurrence]")[index]!
+    await act(async () => {
+      fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
+    })
+    return screen.getByTestId("block-context-menu")
+  }
+  async function pick(label: string) {
+    await act(async () => {
+      fireEvent.click(screen.getByText(label))
+    })
+  }
+  /** Highlight B, then extend the range down to C (B is the anchor, C the head). */
+  function selectBC(root: HTMLElement) {
+    selectNth(root, 1)
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true })
+  }
+
+  it("the menu opened on a selected row acts on every selected block, and says how many", async () => {
+    const deleteEverywhere = vi.fn()
+    const { container, getByTestId } = render(
+      <Harness initial={FOUR} parentCountOf={() => 1} onDeleteEverywhere={deleteEverywhere} />,
+    )
+    const root = editorRoot(container)
+    selectBC(root)
+    expect(highlightedAll(container)).toEqual(["B", "C"])
+    let menu = await openMenuOn(container, 2) // C, inside the selection
+    // The selection survives the right-click, and the menu is for all of it.
+    expect(highlightedAll(container)).toEqual(["B", "C"])
+    for (const label of [
+      "Copy 2 blocks",
+      "Duplicate 2 blocks",
+      "Unlink 2 blocks",
+      "Delete 2 blocks",
+    ]) {
+      expect(menu.textContent).toContain(label)
+    }
+    await pick("Delete 2 blocks")
+    // The graph-level delete gets every selected block, in document order.
+    expect(deleteEverywhere).toHaveBeenCalledWith(["blk_b", "blk_c"])
+
+    menu = await openMenuOn(container, 1) // B, still selected with C
+    await pick("Unlink 2 blocks")
+    // Both rows go — what ⌫ on the selection does — and the highlight lands
+    // on the row that takes their place.
+    expect(serializedLines(getByTestId)).toEqual(["A", "D"])
+    expect(highlightedAll(container)).toEqual(["D"])
+  })
+
+  it("the menu opened off the selection is for that row alone", async () => {
+    const { container, getByTestId } = render(
+      <Harness initial={FOUR} parentCountOf={() => 1} onDeleteEverywhere={() => {}} />,
+    )
+    const root = editorRoot(container)
+    selectBC(root)
+    const menu = await openMenuOn(container, 3) // D, outside the selection
+    // The row under the pointer becomes the selection, so the menu names no count.
+    expect(highlightedAll(container)).toEqual(["D"])
+    expect(menu.textContent).toContain("Unlink")
+    expect(menu.textContent).not.toContain("blocks")
+    await pick("Unlink")
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "C"])
+  })
+
+  it("the menu's Duplicate and moves take the selection too, and the range follows", async () => {
+    const { container, getByTestId } = render(<Harness initial={FOUR} />)
+    const root = editorRoot(container)
+    selectBC(root)
+    await openMenuOn(container, 1)
+    await pick("Move down")
+    expect(serializedLines(getByTestId)).toEqual(["A", "D", "B", "C"])
+    expect(highlightedAll(container)).toEqual(["B", "C"])
+    await openMenuOn(container, 2)
+    await pick("Duplicate 2 blocks")
+    expect(serializedLines(getByTestId)).toEqual(["A", "D", "B", "C", "B", "C"])
+    // The copies are the selection now.
+    expect(highlightedAll(container).length).toBe(2)
+  })
+
+  it("Escape on a range collapses it to the head, then deselects", () => {
+    const { container } = render(<Harness initial={FOUR} />)
+    const root = editorRoot(container)
+    selectBC(root)
+    fireEvent.keyDown(root, { key: "Escape" })
+    expect(highlightedAll(container)).toEqual(["C"])
+    fireEvent.keyDown(root, { key: "Escape" })
+    expect(highlightedAll(container)).toEqual([])
+  })
+
+  it("Tab on a range indents every root and keeps the range on the moved rows", () => {
+    const { container, getByTestId } = render(<Harness initial={FOUR} />)
+    const root = editorRoot(container)
+    selectBC(root)
+    fireEvent.keyDown(root, { key: "Tab" })
+    expect(serializedLines(getByTestId)).toEqual(["A", "  B", "  C", "D"])
+    expect(highlightedAll(container)).toEqual(["B", "C"])
+    // Nothing above the first root to nest under now: the range stays put.
+    fireEvent.keyDown(root, { key: "Tab" })
+    expect(serializedLines(getByTestId)).toEqual(["A", "  B", "  C", "D"])
+    fireEvent.keyDown(root, { key: "Tab", shiftKey: true })
+    expect(serializedLines(getByTestId)).toEqual(["A", "B", "C", "D"])
+    expect(highlightedAll(container)).toEqual(["B", "C"])
+  })
+
+  it("x toggles every todo in the range", () => {
+    const { container, getByTestId } = render(<Harness initial={"[ ] A\n[x] B\nC"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true })
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true })
+    expect(highlightedAll(container)).toEqual(["A", "B", "C"])
+    fireEvent.keyDown(root, { key: "x" })
+    expect(serializedLines(getByTestId)).toEqual(["[x] A", "[ ] B", "C"])
+    expect(highlightedAll(container)).toEqual(["A", "B", "C"])
+  })
+})
+
+describe("every surface runs the one action set", () => {
+  const FOUR = [
+    "A",
+    "  id:: blk_a",
+    "B",
+    "  id:: blk_b",
+    "C",
+    "  id:: blk_c",
+    "D",
+    "  id:: blk_d",
+  ].join("\n")
+  const pick = async (label: string) => {
+    await act(async () => {
+      fireEvent.click(screen.getByText(label))
+    })
+  }
+  /** Highlight rows `from`..`to` by keyboard, from the first row. */
+  const selectRows = (root: HTMLElement, from: number, to: number) => {
+    selectNth(root, from)
+    for (let i = from; i < to; i++) fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true })
+  }
+  /** The three ways to run an action on the selection: its key, the block
+   * menu opened on a selected row, and the selection bar's menu. */
+  const drivers = {
+    key: async (root: HTMLElement, _container: HTMLElement, by: Driver) => {
+      fireEvent.keyDown(root, by.key)
+    },
+    menu: async (_root: HTMLElement, container: HTMLElement, by: Driver) => {
+      const row = container.querySelectorAll("[data-occurrence]")[2]! // C, in the selection
+      await act(async () => {
+        fireEvent.contextMenu(row, { clientX: 10, clientY: 10 })
+      })
+      await pick(by.menu!)
+    },
+    bar: async (_root: HTMLElement, _container: HTMLElement, by: Driver) => {
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Actions" }))
+      })
+      for (const label of Array.isArray(by.bar) ? by.bar : [by.bar]) await pick(label)
+    },
+  }
+  interface Driver {
+    key: { key: string; altKey?: boolean; shiftKey?: boolean }
+    /** The block menu's item; absent where the menu does not offer the action. */
+    menu?: string
+    bar: string | string[]
+  }
+  const cases: { action: string; initial?: string; by: Driver }[] = [
+    { action: "indent", by: { key: { key: "Tab" }, bar: "Indent" } },
+    {
+      action: "outdent",
+      initial: "A\n  B\n  C\nD",
+      by: { key: { key: "Tab", shiftKey: true }, bar: "Outdent" },
+    },
+    {
+      action: "move up",
+      by: { key: { key: "ArrowUp", altKey: true }, menu: "Move up", bar: "Move up" },
+    },
+    {
+      action: "move down",
+      by: { key: { key: "ArrowDown", altKey: true }, menu: "Move down", bar: "Move down" },
+    },
+    {
+      action: "duplicate",
+      by: {
+        key: { key: "ArrowDown", altKey: true, shiftKey: true },
+        menu: "Duplicate 2 blocks",
+        bar: "Duplicate",
+      },
+    },
+    {
+      action: "remove",
+      by: { key: { key: "Backspace" }, menu: "Delete 2 blocks", bar: "Delete" },
+    },
+    { action: "turn into", by: { key: { key: "[" }, bar: ["Turn into", "To-do"] } },
+  ]
+
+  for (const { action, initial = FOUR, by } of cases) {
+    it(`${action}: the key, the menu and the bar leave the same doc and the same rows selected`, async () => {
+      const outcomes: Record<string, { lines: string[]; highlighted: string[] }> = {}
+      for (const [name, drive] of Object.entries(drivers)) {
+        if (name === "menu" && !by.menu) continue
+        const { container, getByTestId, unmount } = render(<Harness initial={initial} />)
+        const root = editorRoot(container)
+        selectRows(root, 1, 2) // B and C
+        expect(highlightedAll(container)).toEqual(["B", "C"])
+        await drive(root, container, by)
+        outcomes[name] = {
+          lines: serializedLines(getByTestId),
+          highlighted: highlightedAll(container),
+        }
+        unmount()
+      }
+      const [first, ...rest] = Object.values(outcomes)
+      expect(rest.length).toBeGreaterThan(0)
+      for (const other of rest) expect(other).toEqual(first)
+      // And it did something: the action changed the doc.
+      expect(first.lines).not.toEqual(serializedLinesOf(initial))
+    })
+  }
+
+  /** The content lines an initial markdown would serialise to. */
+  function serializedLinesOf(markdown: string): string[] {
+    return markdown.split("\n").filter((l) => !l.includes("id::") && l.trim() !== "")
+  }
+
+  it("the bar's Delete deletes every selected block everywhere, as the menu's does", async () => {
+    const fromBar = vi.fn()
+    const fromMenu = vi.fn()
+    for (const [deleteEverywhere, open] of [
+      [fromBar, async () => fireEvent.click(screen.getByRole("button", { name: "Actions" }))],
+      [
+        fromMenu,
+        async (container: HTMLElement) =>
+          fireEvent.contextMenu(container.querySelectorAll("[data-occurrence]")[2]!, {
+            clientX: 10,
+            clientY: 10,
+          }),
+      ],
+    ] as const) {
+      const { container, unmount } = render(
+        <Harness initial={FOUR} parentCountOf={() => 1} onDeleteEverywhere={deleteEverywhere} />,
+      )
+      selectRows(editorRoot(container), 1, 2)
+      await act(async () => {
+        await open(container)
+      })
+      // The bar says Unlink beside Delete here, as the menu does.
+      await pick(deleteEverywhere === fromBar ? "Delete" : "Delete 2 blocks")
+      unmount()
+    }
+    expect(fromBar).toHaveBeenCalledWith(["blk_b", "blk_c"])
+    expect(fromMenu).toHaveBeenCalledWith(["blk_b", "blk_c"])
+  })
+
+  it("the per-block actions take each selected block: Add to Views adds them all", async () => {
+    const { container } = render(<Harness initial={FOUR} noteId="n" />)
+    selectRows(editorRoot(container), 1, 2)
+    await act(async () => {
+      fireEvent.contextMenu(container.querySelectorAll("[data-occurrence]")[1]!, {
+        clientX: 10,
+        clientY: 10,
+      })
+    })
+    await pick("Add to Views")
+    const ids = idsOf(container)
+    const roots = getDefaultStore().get(viewRootIdsAtom)
+    expect(ids.map((id) => roots.has(id))).toEqual([false, true, true, false])
   })
 })

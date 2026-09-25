@@ -81,7 +81,7 @@ export interface BlockAncestor {
 /**
  * One block-level search result: which block, in which note, and what the
  * query is tested against. The target is the note route with the `?block=`
- * focus param (`/notes/$noteId?block=$blockId`); `note` is the containing
+ * focus param (`/views/$noteId?block=$blockId`); `note` is the containing
  * note's metadata (note-level qualifiers). Block ids are minted per note and
  * can be *pinned* by an `id::` line, so the same id can legitimately appear
  * in two notes — a hit is always note-scoped.
@@ -330,7 +330,7 @@ export function searchBlocks(query: Query, index: BlockIndex): BlockHit[] {
 
 /**
  * The notes containing a list of block hits, deduped in first-hit order —
- * what the notes list renders when a query carries a block-scoped `type:`
+ * what the Views page renders when a query carries a block-scoped `type:`
  * (per-note hits stay available by grouping on `noteId`).
  */
 export function notesFromBlockHits(hits: BlockHit[]): Note[] {
