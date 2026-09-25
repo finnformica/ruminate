@@ -3,7 +3,6 @@ import copy from "copy-to-clipboard"
 import { useAtom, useAtomValue } from "jotai"
 import React, { createContext, useContext } from "react"
 import { requestDatabasePull } from "../data/database-mode"
-import { useIsAdmin } from "../data/features"
 import {
   isBootingAtom,
   isHelpPanelOpenAtom,
@@ -36,8 +35,6 @@ import {
   CircleQuestionMarkFillIcon16,
   CircleQuestionMarkIcon16,
   CopyIcon16,
-  FlagFillIcon16,
-  FlagIcon16,
   GridIcon16,
   HistoryIcon16,
   ListIcon16,
@@ -85,10 +82,6 @@ export function NavItems({
   // Busy from the press until the reload: the waiting-update dot becomes the
   // spinner (docs/design-principles.md, "Busy controls").
   const [applyUpdate, updating] = usePending(apply)
-
-  // The admin page (invites, feature flags) is the bootstrap owner's alone,
-  // as the server says (src/data/features.ts); nobody else sees the link.
-  const isAdmin = useIsAdmin()
 
   return (
     <SizeContext.Provider value={size}>
@@ -236,19 +229,6 @@ export function NavItems({
           >
             Settings
           </NavLink>
-          {isAdmin ? (
-            <NavLink
-              to="/admin"
-              search={{ query: undefined }}
-              activeIcon={<FlagFillIcon16 />}
-              icon={<FlagIcon16 />}
-              className="text-text-secondary"
-              shortcut={formatCombo(APP_SHORTCUTS.goAdmin)}
-              onNavigate={onNavigate}
-            >
-              Admin
-            </NavLink>
-          ) : null}
           <div className="mt-1 flex flex-col gap-1 border-t border-border-secondary pt-2">
             <NavLink
               to="/changelog"
