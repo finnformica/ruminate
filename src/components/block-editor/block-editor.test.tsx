@@ -2748,6 +2748,44 @@ describe("BlockEditor context menu", () => {
     expect(getDefaultStore().get(viewRootIdsAtom).has(blockId)).toBe(false)
   })
 
+  it("a read-only editor has no menu of its own, and draws its host's list when given one", async () => {
+    // A read-only preview: a right-click is the browser's.
+    const { container, unmount } = render(
+      <BlockEditor doc={parse("A\nB")} onChange={() => {}} readOnly />,
+    )
+    await act(async () => {
+      fireEvent.contextMenu(container.querySelectorAll("[data-occurrence]")[0]!, {
+        clientX: 10,
+        clientY: 10,
+      })
+    })
+    expect(screen.queryByTestId("block-context-menu")).toBeNull()
+    unmount()
+    // A browsed list (the Views page): the host says what a row's menu holds.
+    const onSelect = vi.fn()
+    const { container: browsed } = render(
+      <BlockEditor
+        doc={parse("A\n  id:: blk_a\nB\n  id:: blk_b")}
+        onChange={() => {}}
+        readOnly
+        onActivate={() => {}}
+        menuEntries={(target) => [
+          { kind: "item", label: `Host item for ${target.id}`, onSelect },
+          { kind: "separator" },
+          { kind: "item", label: "Greyed", disabled: true, onSelect },
+        ]}
+      />,
+    )
+    const menu = await openMenuOn(browsed, 1)
+    expect(menu.textContent).toContain("Host item for blk_b")
+    expect(menu.textContent).not.toContain("Delete")
+    expect(
+      screen.getByText("Greyed").closest('[role="menuitem"]')?.getAttribute("aria-disabled"),
+    ).toBe("true")
+    await pick("Host item for blk_b")
+    expect(onSelect).toHaveBeenCalled()
+  })
+
   it("offers Add to Views only where the rows are a note's own", async () => {
     // No note behind the editor (a clipboard fragment, Storybook): nothing
     // to list the block under, so no view to make.
