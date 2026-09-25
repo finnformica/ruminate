@@ -33,7 +33,9 @@ keyboard that appears and disappears. The block editor
   them; Move up, Move down and Duplicate; Add to Views and Share; Unlink and Delete. Editing is
   a tap, collapsing the chevron, and Indent, Outdent, Focus on and Turn into
   are the edit bar's (keys, on a desktop). Android's long press arrives as a
-  `contextmenu` event and opens the same sheet.
+  `contextmenu` event and opens the same sheet. On a browsed list — the Views
+  page, the palette — the sheet carries the browsed row's shorter list: Open,
+  Copy and Copy link to block, then Add to Views and Share.
 
   The sheet rises while the finger is still down, so its rows take no pick
   until that finger has lifted and a beat (250ms) has passed: the lift, and

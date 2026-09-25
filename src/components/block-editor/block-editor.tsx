@@ -355,6 +355,7 @@ export function BlockEditor({
   newRootSignal,
   refocusSignal,
   readOnly = false,
+  noteIdOf,
   browse = false,
   focusRootId: focusRootIdProp = null,
   onFocusNavigate,
@@ -392,6 +393,11 @@ export function BlockEditor({
   onLinkPreview?: (url: string) => Promise<LinkPreview>
   /** The note this doc belongs to — what "Copy link to block" links into. */
   noteId?: string
+  /** The note behind each row, where the rows come from several notes (a
+   * results view, the Views page): what "Copy link to block" links into
+   * and what makes a row's block one that can be added to Views. A row it
+   * has no note for gets `noteId`. */
+  noteIdOf?: (id: string) => string | undefined
   /** How many places a block appears across the corpus (whether the context
    * menu offers Unlink beside Delete). Absent = only here. */
   parentCountOf?: (id: string) => number
@@ -1462,6 +1468,7 @@ export function BlockEditor({
       keys: rowsFor(row.key),
       places: parentCountOf ? Math.max(1, parentCountOf(row.id)) : 1,
       inViews: viewRoots.has(block.id),
+      readOnly,
       figure: isFigureType(block.type)
         ? { align: figureAlignOf(block), sized: figureLayoutOf(block).size !== undefined }
         : undefined,
@@ -1489,7 +1496,6 @@ export function BlockEditor({
   // block's menu still opens on the rest of the row (its marker, the
   // margin), and on the whole row once it is not being edited.
   const handleContextMenuCapture = (event: MouseEvent<HTMLDivElement>) => {
-    if (readOnly) return
     if (event.target instanceof HTMLTextAreaElement) {
       event.stopPropagation()
       return
@@ -1520,7 +1526,6 @@ export function BlockEditor({
       heldOpen.current = false
       return
     }
-    if (readOnly) return
     const pressed = event?.target ?? null
     const target = menuTargetAt(pressed)
     if (target) {
@@ -1606,7 +1611,7 @@ export function BlockEditor({
     if (selection && !selection.isCollapsed) selection.removeAllRanges()
   }
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!coarse || readOnly || event.pointerType === "mouse") return
+    if (!coarse || event.pointerType === "mouse") return
     dropPageSelection()
     // A hold in the text being edited is the person selecting some of it
     // (to format it, to copy it): iOS's own selection, and no sheet.
@@ -1936,12 +1941,14 @@ export function BlockEditor({
   const canShare =
     noteId !== undefined && isDatabaseMode && sharingEnabled && !sharedOrigin.has(noteId)
   // A block can be made a view wherever the editor has a note behind it —
-  // signed out too, where the sample notes are there to play with, and in a
-  // note someone shared: the view is this user's own row
+  // signed out too, where the sample notes are there to play with, in a
+  // note someone shared, and on the Views page, where each row has a note
+  // of its own (`noteIdOf`): the view is this user's own row
   // (`src/data/views.ts`), not a prop on the owner's. It is not a change to
   // the doc, so it is not an undo step either. Removing clears the whole
   // row — its saved filter and sort with it — so the block is no view at all.
-  const canView = noteId !== undefined
+  const hasNote = noteId !== undefined || noteIdOf !== undefined
+  const canView = hasNote
   const viewRoots = useAtomValue(viewRootIdsAtom)
   const writeView = useWriteView()
   const toggleView = (id: string) =>
@@ -2054,9 +2061,19 @@ export function BlockEditor({
     link: (keys) => runOnRows("wrapLink", keys),
     math: (keys) => runOnRows("wrapMath", keys),
     moves: (keys) => movesOf(commandInput("select", keys)),
-    copyLink: noteId
-      ? (keys) => copy(`${window.location.origin}/views/${noteId}?block=${firstId(keys)}`)
+    // The link to a row: into its own note (`noteIdOf`), else the editor's;
+    // a note's own row (the Views page lists notes as rows) links to the
+    // note, with no block to focus on.
+    copyLink: hasNote
+      ? (keys) => {
+          const id = firstId(keys)
+          const note = noteIdOf?.(id) ?? noteId
+          if (note === undefined) return
+          const base = `${window.location.origin}/views/${note}`
+          copy(id === note ? base : `${base}?block=${id}`)
+        }
       : undefined,
+    open: readOnly && onActivate ? (keys) => onActivate(firstId(keys)) : undefined,
     view: canView ? (keys) => new Set(keys.map(idOfKey)).forEach(toggleView) : undefined,
     share: canShare ? (keys) => openShareDialog(firstId(keys)) : undefined,
     editLink: (keys, href) => setLinkCard({ key: keys[0], href }),
@@ -2759,7 +2776,7 @@ export function BlockEditor({
             )}
           </div>
           <BlockMenuSheet
-            target={readOnly ? null : menuTarget}
+            target={menuTarget}
             title={menuTarget ? (doc.blocks[menuTarget.id]?.text ?? "") : ""}
             actions={blockActions}
             holding={holding}
@@ -2771,7 +2788,7 @@ export function BlockEditor({
         </>
       ) : (
         <BlockContextMenu
-          target={readOnly ? null : menuTarget}
+          target={menuTarget}
           actions={blockActions}
           onOpenChange={handleMenuOpenChange}
         >

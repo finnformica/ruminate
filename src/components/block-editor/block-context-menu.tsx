@@ -57,6 +57,10 @@ export interface BlockMenuTarget {
   places: number
   /** A view of its own (docs/metadata.md): listed in the sidebar's Views. */
   inViews: boolean
+  /** The rows are browsed, not edited (the Views page, the palette): the
+   * menu offers what reads and reaches — Open, Copy, Copy link, Add to
+   * Views, Share — and nothing that would change the note. */
+  readOnly: boolean
   /** A figure row's layout (`src/blocks/figure.ts`): the side its picture
    * or card keeps to, and whether it has been dragged to a size of its own. */
   figure?: { align: FigureAlign; sized: boolean }
@@ -138,6 +142,7 @@ export type MenuEntry =
     }
 
 function menuEntries(target: BlockMenuTarget, actions: BlockActions): MenuEntry[] {
+  if (target.readOnly) return browseEntries(target, actions)
   const { keys } = target
   // A range's actions say how many blocks they take: "Delete 3 blocks".
   const many = keys.length > 1 ? ` ${keys.length} blocks` : ""
@@ -275,6 +280,42 @@ function menuEntries(target: BlockMenuTarget, actions: BlockActions): MenuEntry[
       })
     }
   }
+  return entries
+}
+
+/**
+ * The menu of a browsed row (`BlockMenuTarget.readOnly`): the same list, cut
+ * to what does not edit. Open leads, since it is what a click does; then
+ * copying; then the block's place beyond the note. A note's own row (the
+ * Views page lists notes as rows) is not offered Add to Views — a note is a
+ * view already (docs/metadata.md).
+ */
+function browseEntries(target: BlockMenuTarget, actions: BlockActions): MenuEntry[] {
+  const { keys } = target
+  const entries: MenuEntry[] = []
+  let ruleDue = false
+  const section = () => {
+    ruleDue = entries.length > 0
+  }
+  const item = (entry: Omit<Extract<MenuEntry, { kind: "item" }>, "kind">) => {
+    if (ruleDue) entries.push({ kind: "separator" })
+    ruleDue = false
+    entries.push({ kind: "item", ...entry })
+  }
+  if (actions.open) item({ label: "Open", shortcut: ["↵"], onSelect: () => actions.open?.(keys) })
+
+  section()
+  item({ label: "Copy", shortcut: ["⌘", "C"], onSelect: () => actions.copy(keys) })
+  if (actions.copyLink)
+    item({ label: "Copy link to block", onSelect: () => actions.copyLink?.(keys) })
+
+  section()
+  if (actions.view && target.type !== "note")
+    item({
+      label: target.inViews ? "Remove from Views" : "Add to Views",
+      onSelect: () => actions.view?.(keys),
+    })
+  if (actions.share) item({ label: "Share…", onSelect: () => actions.share?.(keys) })
   return entries
 }
 

@@ -374,6 +374,21 @@ describe("the sidebar while Settings is open", () => {
   })
 })
 
+describe("a sidebar row's actions", () => {
+  it("keep their box while out of sight, so a closing menu keeps its anchor", () => {
+    // The menu fades out after its trigger has dropped `data-popup-open`.
+    // A wrapper that went `display: none` then would take the anchor with
+    // it, and the fading menu would snap to the page's corner (RowActions).
+    renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
+    for (const row of viewRows()) {
+      const wrapper = within(row).getByRole("button").parentElement!
+      expect(wrapper.className).not.toContain("hidden")
+      expect(wrapper.className).toContain("opacity-0")
+      expect(wrapper.className).toContain("has-data-[popup-open]:opacity-100")
+    }
+  })
+})
+
 describe("the sidebar's bottom block", () => {
   it("names the changelog Changelog, and gives it a chord", () => {
     renderSidebar({ notes: THREE })

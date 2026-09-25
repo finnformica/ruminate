@@ -424,12 +424,22 @@ function NoteRows({
   )
 }
 
-/** The actions button's place at the end of a sidebar row (see `NoteRows`). */
+/**
+ * The actions button's place at the end of a sidebar row (see `NoteRows`).
+ *
+ * Out of sight until the row is hovered, the button focused, or its menu
+ * open — but never out of the LAYOUT: the menu is anchored to the button,
+ * and it leaves with a short fade after its trigger has already dropped
+ * `data-popup-open`. Were the wrapper `display: none` by then, the anchor
+ * would have no box and the departing menu would snap to the page's corner
+ * for the length of the fade. Opacity keeps the box; focus-within shows the
+ * button to a keyboard, which `display: none` never could.
+ */
 function RowActions({ size, children }: { size: "medium" | "large"; children: React.ReactNode }) {
   return (
     <div
       className={cx(
-        "absolute inset-y-0 hidden items-center group-hover/note:flex has-data-[popup-open]:flex",
+        "absolute inset-y-0 flex items-center opacity-0 group-hover/note:opacity-100 focus-within:opacity-100 has-data-[popup-open]:opacity-100",
         // The 24px button in a 32px row (40px large) sits 4px
         // (8px) in from the top and bottom; the same from the end.
         size === "large" ? "right-2" : "right-1",

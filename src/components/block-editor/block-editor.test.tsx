@@ -12,6 +12,10 @@ import { ImageUploadError, type UploadedImage } from "../../data/images"
 import type { LinkPreview } from "../../blocks/link"
 import { LinkPreviewError } from "../../data/link-previews"
 import { BlockEditor, type BlockDebugOptions } from "./block-editor"
+
+/** What "Copy link to block" put on the clipboard. */
+const clipboard = vi.hoisted(() => ({ copy: vi.fn() }))
+vi.mock("copy-to-clipboard", () => ({ default: clipboard.copy }))
 import { getDefaultStore } from "jotai"
 import { viewRootIdsAtom, viewsAtom } from "../../data/views"
 
@@ -2746,6 +2750,59 @@ describe("BlockEditor context menu", () => {
     expect(menu.textContent).toContain("Remove from Views")
     await pick("Remove from Views")
     expect(getDefaultStore().get(viewRootIdsAtom).has(blockId)).toBe(false)
+  })
+
+  it("on a browsed list, offers what reads and reaches — Open, Copy, Copy link, Add to Views — and nothing that edits", async () => {
+    // The Views page and the palette: read-only rows with somewhere to go.
+    const onActivate = vi.fn()
+    const noteIdOf = (id: string) => (id === "n" ? "n" : "m")
+    const { container } = render(
+      <BlockEditor
+        doc={parse("A\n  id:: blk_a\nB\n  id:: blk_b")}
+        onChange={() => {}}
+        readOnly
+        onActivate={onActivate}
+        noteIdOf={noteIdOf}
+      />,
+    )
+    const menu = await openMenuOn(container, 1)
+    // Each item's text, its key beside it as the row draws it.
+    const labels = Array.from(menu.querySelectorAll('[role="menuitem"]')).map(
+      (el) => el.textContent,
+    )
+    expect(labels).toEqual(["Open↵", "Copy⌘C", "Copy link to block", "Add to Views"])
+    for (const absent of ["Delete", "Move up", "Duplicate", "Unlink", "Turn into"]) {
+      expect(menu.textContent).not.toContain(absent)
+    }
+    await pick("Open")
+    expect(onActivate).toHaveBeenCalledWith("blk_b")
+  })
+
+  it("a browsed row's link is into its own note, and a note's own row links to the note", async () => {
+    const noteIdOf = (id: string) => (id === "n" ? "n" : "m")
+    const { container } = render(
+      <BlockEditor
+        doc={parse("The note\n  id:: n\nA block\n  id:: blk_a")}
+        onChange={() => {}}
+        readOnly
+        onActivate={() => {}}
+        noteIdOf={noteIdOf}
+      />,
+    )
+    await openMenuOn(container, 1)
+    await pick("Copy link to block")
+    expect(clipboard.copy).toHaveBeenLastCalledWith(`${window.location.origin}/views/m?block=blk_a`)
+    await openMenuOn(container, 0)
+    await pick("Copy link to block")
+    expect(clipboard.copy).toHaveBeenLastCalledWith(`${window.location.origin}/views/n`)
+  })
+
+  it("a read-only preview with nowhere to go still copies, and offers no Open", async () => {
+    const { container } = render(<BlockEditor doc={parse("A\nB")} onChange={() => {}} readOnly />)
+    const menu = await openMenuOn(container, 0)
+    expect(menu.textContent).toContain("Copy")
+    expect(menu.textContent).not.toContain("Open")
+    expect(menu.textContent).not.toContain("Views")
   })
 
   it("offers Add to Views only where the rows are a note's own", async () => {

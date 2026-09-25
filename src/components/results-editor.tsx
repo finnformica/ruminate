@@ -14,7 +14,9 @@ import { BlockEditor } from "./block-editor/block-editor"
  *
  * Read-only, the reader still browses (`BlockEditor.onActivate`): the
  * highlight moves, `space` / `→` / `←` fold and unfold, `f` focuses, and Enter
- * or a click opens the row — the note, or the note focused on the block.
+ * or a click opens the row — the note, or the note focused on the block —
+ * and a right-click (a press-and-hold, on a phone) offers the browsed
+ * row's menu: Open, Copy, Copy link to block, Add to Views.
  * Editable, the rows edit as they do in their notes and the change lands in
  * the graph (`useResultsDoc`); focusing opens the note instead, since a
  * results view has no focus view of its own. Either way the roots are the
@@ -54,6 +56,10 @@ export function ResultsEditor({
 }) {
   const { doc, collapsed, toggleCollapse, setDoc, noteOf } = useResultsDoc({ roots, resetKey })
 
+  // Each row's own note, for the row's menu (a link to the block, Add to
+  // Views): the rows come from many notes, so the editor asks per row.
+  const noteIdOf = React.useCallback((id: string) => noteOf.get(id), [noteOf])
+
   const open = React.useCallback(
     (id: string) => {
       const noteId = noteOf.get(id)
@@ -76,6 +82,7 @@ export function ResultsEditor({
       doc={doc}
       onChange={setDoc}
       readOnly={readOnly}
+      noteIdOf={noteIdOf}
       onActivate={readOnly ? open : undefined}
       fixedRoots
       collapsed={collapsed}
