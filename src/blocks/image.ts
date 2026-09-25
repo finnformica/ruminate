@@ -7,7 +7,9 @@ import type { Block, BlockProps } from "./types"
  * from `/api/images/<id>` (the app's own uploads), or `src`, an external
  * URL (a picture pasted as a markdown reference). `width`/`height` are the
  * pixel size measured at upload, so a row can reserve the picture's space
- * before its bytes arrive.
+ * before its bytes arrive, and `thumbhash` a blurred likeness of it
+ * (`src/data/image-thumbhash.ts`), drawn in that space until they do — or
+ * instead of them, offline.
  *
  * How the picture sits in its row — `align` and `size` — is the figure
  * layout every figure block shares (`figure.ts`).
@@ -20,6 +22,7 @@ export interface ImageProps {
   src?: string
   width?: number
   height?: number
+  thumbhash?: string
 }
 
 /** The image props of a block, read leniently (a stray shape renders as a
@@ -31,6 +34,7 @@ export function imagePropsOf(block: Pick<Block, "props">): ImageProps {
   if (typeof props.src === "string") out.src = props.src
   if (typeof props.width === "number" && props.width > 0) out.width = props.width
   if (typeof props.height === "number" && props.height > 0) out.height = props.height
+  if (typeof props.thumbhash === "string" && props.thumbhash !== "") out.thumbhash = props.thumbhash
   return out
 }
 

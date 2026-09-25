@@ -1,8 +1,11 @@
-import { useEffect, useState, useSyncExternalStore } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { imagePropsOf } from "../blocks/image"
 import type { Block } from "../blocks/types"
+import { cacheImage, fetchImageBlob, ImageFetchError, readCachedImage } from "./image-cache"
+import type { ImageFetchFailure } from "./image-cache"
+import { thumbHashOf } from "./image-thumbhash"
 import { sessionFetch } from "./session-fetch"
-import { imageUrlOf, isImageMime, MAX_IMAGE_BYTES } from "../../worker/handlers/image-policy"
+import { isImageMime, MAX_IMAGE_BYTES } from "../../worker/handlers/image-policy"
 
 /**
  * The client half of image assets (docs/images.md): uploading a pasted
@@ -15,9 +18,9 @@ import { imageUrlOf, isImageMime, MAX_IMAGE_BYTES } from "../../worker/handlers/
  *
  * Reads go through `fetch` with the session's bearer token — an `<img src>`
  * cannot carry one — and become object URLs, cached for the page's life so
- * a picture is fetched once however many rows show it. The Worker marks the
- * response immutable and private, so the browser's own cache keeps the
- * bytes across reloads too.
+ * a picture is fetched once however many rows show it. The bytes are kept
+ * on the device too (`image-cache.ts`), and read from there first, so a
+ * picture seen once is there offline.
  */
 export const imagesEnabled: boolean = import.meta.env.VITE_IMAGES_ENABLED === "true"
 
@@ -39,6 +42,8 @@ export interface UploadedImage {
   id: string
   width?: number
   height?: number
+  /** A blurred likeness of the picture (`image-thumbhash.ts`). */
+  thumbhash?: string
 }
 
 /** The image files in a paste or drop, if any (a screenshot pasted from the
@@ -64,12 +69,23 @@ function rejectImage(file: File): ImageUploadError | null {
   return null
 }
 
-/** The pixel size of an image file, or nothing when the browser can't say. */
-async function measure(file: File): Promise<{ width: number; height: number } | null> {
+interface Measured {
+  width: number
+  height: number
+  thumbhash?: string
+}
+
+/** The pixel size and ThumbHash of an image file, read from the one decode;
+ * nothing when the browser can't say. */
+async function measure(file: File): Promise<Measured | null> {
+  const measured = (source: CanvasImageSource, width: number, height: number): Measured => {
+    const thumbhash = thumbHashOf(source, width, height)
+    return { width, height, ...(thumbhash ? { thumbhash } : {}) }
+  }
   if (typeof createImageBitmap === "function") {
     try {
       const bitmap = await createImageBitmap(file)
-      const size = { width: bitmap.width, height: bitmap.height }
+      const size = measured(bitmap, bitmap.width, bitmap.height)
       bitmap.close()
       return size
     } catch {
@@ -82,7 +98,7 @@ async function measure(file: File): Promise<{ width: number; height: number } | 
     const img = new Image()
     img.onload = () => {
       URL.revokeObjectURL(url)
-      resolve({ width: img.naturalWidth, height: img.naturalHeight })
+      resolve(measured(img, img.naturalWidth, img.naturalHeight))
     }
     img.onerror = () => {
       URL.revokeObjectURL(url)
@@ -179,58 +195,105 @@ const objectUrls = new Map<string, Promise<string>>()
 
 /** Seed the read cache from bytes already in hand, so a picture that has just
  * finished uploading draws from them rather than fetching itself straight
- * back down. */
+ * back down — and keep them on the device, so it is there offline. */
 export function primeImageObjectUrl(id: string, file: File): void {
+  void cacheImage(id, file)
   if (objectUrls.has(id) || typeof URL.createObjectURL !== "function") return
   objectUrls.set(id, Promise.resolve(URL.createObjectURL(file)))
 }
 
-/** The bytes of an uploaded picture as an object URL (cached). */
+/** Forget the page's object URLs (on signing out: they are one account's). */
+export function resetImageObjectUrls(): void {
+  const urls = [...objectUrls.values()]
+  objectUrls.clear()
+  for (const url of urls) url.then((href) => URL.revokeObjectURL(href)).catch(() => {})
+}
+
+/** The bytes of an uploaded picture as an object URL (cached): from the
+ * device's copy when it has one, else from the Worker, keeping a copy.
+ * Throws `ImageFetchError`. */
 function imageObjectUrl(id: string): Promise<string> {
   const cached = objectUrls.get(id)
   if (cached) return cached
   const loading = (async () => {
-    const response = await sessionFetch(imageUrlOf(id), { method: "GET" }, signedOut)
-    if (!response.ok) throw new Error(`Image ${id} unavailable (${response.status})`)
-    return URL.createObjectURL(await response.blob())
+    const kept = await readCachedImage(id)
+    if (kept) return URL.createObjectURL(kept)
+    const blob = await fetchImageBlob(id)
+    void cacheImage(id, blob)
+    return URL.createObjectURL(blob)
   })()
   objectUrls.set(id, loading)
   loading.catch(() => objectUrls.delete(id))
   return loading
 }
 
+/** Bump on the network coming back, so a picture that could not be reached
+ * tries again. */
+function useOnlineRetry(active: boolean): number {
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    if (!active || typeof window === "undefined") return
+    const retry = () => setAttempt((n) => n + 1)
+    window.addEventListener("online", retry)
+    return () => window.removeEventListener("online", retry)
+  }, [active])
+  return attempt
+}
+
 /**
- * What an `<img>` should show for a block, and whether those bytes are still
- * going up.
+ * What an `<img>` should show for a block, whether those bytes are still
+ * going up, and why there is nothing to show when there is not.
  *
  * A picture still uploading draws from its local preview, so it is on screen
  * from the moment it is pasted; an external one draws from its own address;
- * an uploaded one draws once its bytes are here. `src` is `null` while
- * loading and `"error"` when it cannot be shown at all.
+ * an uploaded one draws once its bytes are here. `src` is `null` until then.
+ * `failure` says why it may never come: `missing` when there is no picture
+ * to show (the server has none, or the block names none); `unreachable`
+ * when the picture is not on this device and the server cannot be reached
+ * — offline, most often — in which case it is tried again when the network
+ * returns.
  */
 export function useImageSrc(block: Pick<Block, "id" | "props">): {
-  src: string | null | "error"
+  src: string | null
   uploading: boolean
+  failure: ImageFetchFailure | null
 } {
   const { image, src } = imagePropsOf(block)
   const pending = usePendingImage(block.id)
-  const [state, setState] = useState<string | null | "error">(null)
+  const [state, setState] = useState<{ src: string | null; failure: ImageFetchFailure | null }>({
+    src: null,
+    failure: null,
+  })
+  const attempt = useOnlineRetry(state.failure === "unreachable")
+  const shown = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (!image) return
     let live = true
-    setState(null)
+    // A retry keeps the unreachable picture's placeholder up while it tries;
+    // a different picture starts from nothing.
+    const retrying = shown.current === image
+    shown.current = image
+    if (!retrying) setState({ src: null, failure: null })
     imageObjectUrl(image).then(
-      (url) => live && setState(url),
-      () => live && setState("error"),
+      (url) => live && setState({ src: url, failure: null }),
+      (error: unknown) =>
+        live &&
+        setState({
+          src: null,
+          failure:
+            error instanceof ImageFetchError && error.failure === "missing"
+              ? "missing"
+              : "unreachable",
+        }),
     )
     return () => {
       live = false
     }
-  }, [image])
-  if (pending) return { src: pending, uploading: true }
-  if (src) return { src, uploading: false }
-  if (!image) return { src: "error", uploading: false }
-  return { src: state, uploading: false }
+  }, [image, attempt])
+  if (pending) return { src: pending, uploading: true, failure: null }
+  if (src) return { src, uploading: false, failure: null }
+  if (!image) return { src: null, uploading: false, failure: "missing" }
+  return { ...state, uploading: false }
 }
 
 /** Save a block's picture to the reader's device, named after its caption. */

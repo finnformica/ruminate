@@ -1732,6 +1732,7 @@ export function BlockEditor({
                 ...(asset.width && asset.height
                   ? { width: asset.width, height: asset.height }
                   : {}),
+                ...(asset.thumbhash ? { thumbhash: asset.thumbhash } : {}),
               },
             },
           },

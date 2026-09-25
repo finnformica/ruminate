@@ -2905,6 +2905,7 @@ describe("BlockEditor images", () => {
   const imagePaste = (files: File[]) => ({
     clipboardData: { files, types: ["Files"], getData: () => "" },
   })
+  const THUMBHASH = "YyUKNJh2d3eAiHh3iIeGcGgHdw=="
   const uploads = (id = "img_abcdefghijklmnop") =>
     vi.fn(async (): Promise<UploadedImage> => ({ id, width: 640, height: 480 }))
 
@@ -2941,9 +2942,13 @@ describe("BlockEditor images", () => {
     expect(serializedLines(getByTestId)).toHaveLength(4)
 
     await act(async () => {
-      settle({ id: "img_abcdefghijklmnop", width: 640, height: 480 })
+      settle({ id: "img_abcdefghijklmnop", width: 640, height: 480, thumbhash: THUMBHASH })
     })
     expect(queryByTestId("block-image-uploading")).toBeNull()
+    // The picture's size and likeness land with its id.
+    expect(JSON.parse(getByTestId("image-props").textContent ?? "[]")).toEqual([
+      { image: "img_abcdefghijklmnop", width: 640, height: 480, thumbhash: THUMBHASH },
+    ])
     expect(serializedLines(getByTestId)).toEqual([
       "A",
       "B",
@@ -3266,6 +3271,33 @@ describe("BlockEditor images", () => {
     expect(plain.style.aspectRatio).toBe("")
     expect(plain.className).toContain("max-h-80")
     expect(plain.className).not.toMatch(/(^|\s)w-full(\s|$)/)
+  })
+
+  it("stands a picture's likeness in its place, and says so when it cannot be fetched", async () => {
+    // No session in the harness: the picture can be neither read from the
+    // device nor fetched — as it is offline.
+    const { container, findByTestId } = render(
+      <Harness
+        initialDoc={imageDoc({
+          // An id no other test has uploaded (and so primed the page's cache).
+          image: "img_notonthisdevice",
+          width: 1200,
+          height: 500,
+          thumbhash: "YyUKNJh2d3eAiHh3iIeGcGgHdw==",
+        })}
+      />,
+    )
+    const placeholder = container.querySelector<HTMLElement>(
+      '[data-testid="block-image-placeholder"]',
+    )!
+    // The blurred likeness, in the picture's own box, and still.
+    expect(placeholder.style.backgroundImage).toMatch(/^url\("data:image\/png;base64,/)
+    expect(placeholder.style.aspectRatio).toBe("1200 / 500")
+    expect(placeholder.className).not.toContain("animate-pulse")
+    // It stays that box, with a badge, rather than turning into "unavailable".
+    expect((await findByTestId("block-image-unreachable")).textContent).toMatch(/load|Offline/)
+    expect(container.querySelector('[data-testid="block-image-missing"]')).toBeNull()
+    expect(container.querySelector('[data-testid="block-image-placeholder"]')).toBe(placeholder)
   })
 
   it("the figure's toolbar sets the side the picture keeps to, as one undo step", () => {

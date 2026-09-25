@@ -5,6 +5,8 @@ import { githubUserAtom, signOutAtom } from "../global-state"
 import { sessionStatusAtom } from "../utils/github-session"
 import { requestAmbientDatabasePull, startDatabaseMode, stopDatabaseMode } from "./database-mode"
 import { refreshFeatures, resetFeatures, seedFeatures } from "./features"
+import { startImageCache, stopImageCache } from "./image-cache"
+import { imagesEnabled, resetImageObjectUrls } from "./images"
 import { refreshPreferences, resetPreferences } from "./account-preferences"
 import { requestAmbientSharesRefresh, startSharedMode, stopSharedMode } from "./shared-mode"
 
@@ -59,7 +61,12 @@ export function useDatabaseMode() {
     // server's, once per sign-in and again when the network returns. Nothing
     // is kept on the device, so until it answers the defaults stand.
     void refreshPreferences()
+    // The user's pictures, kept on the device for offline (image-cache.ts),
+    // bound to the same identity as the store.
+    if (imagesEnabled) startImageCache(owner)
     return () => {
+      stopImageCache()
+      resetImageObjectUrls()
       resetPreferences()
       resetFeatures()
       stopSharedMode()

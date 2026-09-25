@@ -4,9 +4,11 @@ import type { ReactNode } from "react"
 import { imagePropsOf } from "../../blocks/image"
 import type { Block } from "../../blocks/types"
 import type { Occurrence } from "../../blocks/view"
+import { useNetworkState } from "react-use"
+import { thumbHashDataUrl } from "../../data/image-thumbhash"
 import { useImageSrc } from "../../data/images"
 import { cx } from "../../utils/cx"
-import { LoadingIcon16 } from "../icons"
+import { LoadingIcon16, OfflineIcon16 } from "../icons"
 import type { BlockEditorApi } from "./block-item"
 import { FigureFrame } from "./figure-frame"
 
@@ -34,6 +36,13 @@ import { FigureFrame } from "./figure-frame"
  * already showing, then grows under the rows below. A picture whose size
  * is not known (an external URL pasted as markdown) is laid out as it
  * loads, as before.
+ *
+ * The placeholder is the picture's ThumbHash when the block has one (a
+ * blurred likeness, measured at upload: `image-thumbhash.ts`), a grey box
+ * when it has not. A picture that is not on this device and cannot be
+ * fetched — offline, most often — keeps that placeholder, still, with a
+ * small badge saying why; it loads when the network comes back. Only a
+ * picture the server says it does not have is "Image unavailable".
  */
 export function ImageFigure({
   block,
@@ -48,8 +57,12 @@ export function ImageFigure({
    * uncaptioned picture that is not being edited. */
   caption: ReactNode
 }) {
-  const { src, uploading } = useImageSrc(block)
-  const { width, height } = imagePropsOf(block)
+  const { src, uploading, failure } = useImageSrc(block)
+  const { width, height, thumbhash } = imagePropsOf(block)
+  const likeness = thumbhash ? thumbHashDataUrl(thumbhash) : null
+  const likenessStyle: React.CSSProperties | undefined = likeness
+    ? { backgroundImage: `url("${likeness}")`, backgroundSize: "cover" }
+    : undefined
   const [loaded, setLoaded] = useState(false)
   const captionText = block.text.trim()
   // The picture's shape, when its pixel size is known: the box the
@@ -86,7 +99,7 @@ export function ImageFigure({
 
   // The controls: only on a picture that is there to lay out, in an editor
   // that can write the change.
-  const controls = !api.readOnly && !!src && src !== "error"
+  const controls = !api.readOnly && !!src
 
   return (
     <FigureFrame
@@ -99,7 +112,7 @@ export function ImageFigure({
       caption={caption}
     >
       {({ boxed }) =>
-        src === "error" ? (
+        failure === "missing" ? (
           <div
             data-testid="block-image-missing"
             className="self-start rounded-lg border border-dashed border-border-secondary px-3 py-2 text-sm text-text-tertiary"
@@ -120,7 +133,11 @@ export function ImageFigure({
             )}
           >
             {src ? (
-              <span className="relative block">
+              // The likeness sits behind the picture while it fades in.
+              <span
+                className="relative block bg-no-repeat"
+                style={loaded ? undefined : likenessStyle}
+              >
                 <img
                   ref={imgRef}
                   src={src}
@@ -154,20 +171,38 @@ export function ImageFigure({
               </span>
             ) : (
               <span
-                aria-hidden
                 data-testid="block-image-placeholder"
                 // The picture's own box, when its size is known; a guess at
-                // one when it is not.
+                // one when it is not. It pulses while the bytes are on their
+                // way, unless it already looks like the picture.
                 className={cx(
-                  "block max-w-full animate-pulse bg-bg-tertiary",
+                  "relative block max-w-full bg-bg-tertiary bg-no-repeat",
                   boxed ? "w-full" : "max-h-80 w-64",
+                  !failure && !likeness && "animate-pulse",
                 )}
-                style={{ aspectRatio: ratio ?? "4 / 3" }}
-              />
+                style={{ aspectRatio: ratio ?? "4 / 3", ...likenessStyle }}
+              >
+                {failure === "unreachable" ? <UnreachableBadge /> : null}
+              </span>
             )}
           </button>
         )
       }
     </FigureFrame>
+  )
+}
+
+/** Why a picture that is surely there is not showing: this device has no
+ * copy, and the server cannot be reached to fetch one. */
+function UnreachableBadge() {
+  const { online } = useNetworkState()
+  return (
+    <span
+      data-testid="block-image-unreachable"
+      className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-bg-overlay-backdrop px-2 py-0.5 text-xs text-text-secondary backdrop-blur-lg"
+    >
+      <OfflineIcon16 aria-hidden className="size-3" />
+      {online === false ? "Offline" : "Couldn’t load image"}
+    </span>
   )
 }
