@@ -28,10 +28,12 @@ export function ChangelogSection() {
     <SettingsSection title="Changelog">
       {/* `htmlFor` points at the checkbox, which renders a <button> — a
           labelable element — so clicking the label toggles it. */}
-      <div className="flex items-start gap-2 leading-4">
+      {/* Centred, not top-aligned with a nudge: that layout was for a label
+          with a line under it, and with the label alone it sat the box 2px
+          low. */}
+      <div className="flex items-center gap-2 leading-4">
         <Checkbox
           id="show-whats-new"
-          className="mt-0.5"
           checked={showWhatsNew}
           disabled={saving}
           onCheckedChange={(checked) => save(checked)}
