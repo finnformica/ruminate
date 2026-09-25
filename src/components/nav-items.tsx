@@ -237,6 +237,11 @@ export function NavItems({
             activeIcon={<SettingsFillIcon16 />}
             icon={<SettingsIcon16 />}
             className="text-text-secondary"
+            // Current on every settings page, not only the list at
+            // `/settings`: the pages are Settings, as a daily note is the
+            // Calendar's — and the row would otherwise read as unselected
+            // on the very pages it opens, as Help does not while open.
+            forceActive={inSettings}
             shortcut={formatCombo(APP_SHORTCUTS.goSettings)}
             onNavigate={onNavigate}
           >

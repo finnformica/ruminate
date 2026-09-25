@@ -343,7 +343,10 @@ describe("the sidebar while Settings is open", () => {
     // The chrome every page has.
     expect(screen.getByRole("link", { name: /^Views/ })).toBeTruthy()
     expect(screen.getByRole("link", { name: /^Calendar/ })).toBeTruthy()
-    expect(screen.getByRole("link", { name: /^Settings/ })).toBeTruthy()
+    // Settings is current on any of its pages, as Help is while open.
+    expect(screen.getByRole("link", { name: /^Settings/ }).getAttribute("aria-current")).toBe(
+      "page",
+    )
     expect(screen.getByRole("link", { name: /^Changelog/ })).toBeTruthy()
     expect(screen.getByRole("button", { name: /^Help/ })).toBeTruthy()
     // The pages, where the views were — and no way back, since Views is
@@ -366,6 +369,7 @@ describe("the sidebar while Settings is open", () => {
     renderSidebar({ notes: THREE })
     expect(screen.getByTestId("view-rows")).toBeTruthy()
     expect(screen.queryByRole("link", { name: "Account" })).toBeNull()
+    expect(screen.getByRole("link", { name: /^Settings/ }).getAttribute("aria-current")).toBeNull()
   })
 })
 
