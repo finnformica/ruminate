@@ -237,11 +237,14 @@ export function NavItems({
             activeIcon={<SettingsFillIcon16 />}
             icon={<SettingsIcon16 />}
             className="text-text-secondary"
-            // Current on every settings page, not only the list at
-            // `/settings`: the pages are Settings, as a daily note is the
-            // Calendar's — and the row would otherwise read as unselected
-            // on the very pages it opens, as Help does not while open.
-            forceActive={inSettings}
+            // Marked on every settings page, not only the list at
+            // `/settings`, and marked the way Help is while its panel is
+            // open — the neutral pressed state, not the accent "current"
+            // one — so the two rows at the foot of the sidebar that open
+            // something over the notes read the same. On `/settings` itself
+            // the Link adds `aria-current` as well; the pressed rules come
+            // later in index.css and win.
+            pressed={inSettings}
             shortcut={formatCombo(APP_SHORTCUTS.goSettings)}
             onNavigate={onNavigate}
           >
@@ -669,6 +672,7 @@ function NavLink({
   icon,
   includeSearch = false,
   forceActive = false,
+  pressed = false,
   onNavigate,
   children,
   onClick,
@@ -679,6 +683,9 @@ function NavLink({
   icon: React.ReactNode
   includeSearch?: boolean
   forceActive?: boolean
+  /** Marked as Help is while open (`aria-pressed`, the neutral surface)
+   * rather than as the current place; the filled icon shows either way. */
+  pressed?: boolean
   onNavigate?: () => void
   children: React.ReactNode
   /** The keys that reach this destination (`formatCombo`), shown beside it. */
@@ -689,12 +696,14 @@ function NavLink({
   const inner = (
     <>
       {activeIcon ? (
-        <span className="hidden shrink-0 [[aria-current=page]>&]:flex">{activeIcon}</span>
+        <span className="hidden shrink-0 [[aria-current=page]>&]:flex [[aria-pressed=true]>&]:flex">
+          {activeIcon}
+        </span>
       ) : null}
       <span
         className={cx(
           "flex shrink-0 text-text-secondary",
-          activeIcon && "[[aria-current=page]>&]:hidden",
+          activeIcon && "[[aria-current=page]>&]:hidden [[aria-pressed=true]>&]:hidden",
         )}
       >
         {icon}
@@ -710,6 +719,7 @@ function NavLink({
       data-size={size}
       className={cx("nav-item", className)}
       aria-current={forceActive ? "page" : undefined}
+      aria-pressed={pressed || undefined}
       onClick={(event) => {
         onClick?.(event)
         if (!event.defaultPrevented) {

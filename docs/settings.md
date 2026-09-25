@@ -34,9 +34,10 @@ While Settings is open the sidebar keeps its shape. The Views and Calendar
 links above, and the update, sync, Settings, Changelog and Help rows below,
 are exactly where they are on every other page; only the Views list gives
 its place to the pages, under a **Settings** heading, in the same rows. The
-**Settings** row below is current on every settings page, not only at
-`/settings`, as Help is while its panel is open: the selected surface and
-the filled icon say where you are. It
+**Settings** row below is marked on every settings page, not only at
+`/settings`, and marked exactly as Help is while its panel is open — the
+neutral pressed surface and the filled icon, not the accent "current" one —
+so the two rows that open something over the notes read the same. It
 used to swap the whole sidebar for a list of pages with a way back on top,
 which read as a second sidebar rather than the one sidebar showing something
 else — and took the footer's rows, the update button among them, away from
