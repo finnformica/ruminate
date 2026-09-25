@@ -393,10 +393,15 @@ export function searchTypeValues(): Record<string, readonly BlockType[]> {
   return values
 }
 
-/** The markdown glyph the qualifier picker draws beside a `type:` row: the
+/** The markdown glyph that stands for a type — what the qualifier picker
+ * draws beside a `type:` row, and the sidebar beside a block view: the
  * type's marker, or what stands for it where the marker is not a prefix
  * (a numbered item's number, a code fence, an image's `![]`, a link
  * block's `[]()`, a paragraph's pilcrow). */
+export function typeGlyph(type: BlockType): string {
+  return searchGlyph(defOf(type))
+}
+
 function searchGlyph(def: BlockTypeDef): string {
   if (typeof def.marker === "function") return def.marker(1).trim()
   if (def.marker.trim() !== "") return def.marker.trim()

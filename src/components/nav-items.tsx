@@ -19,6 +19,8 @@ import { REMOVE_VIEW, useReorderViews, useWriteView } from "../hooks/views"
 import { useDragReorder } from "../hooks/drag-reorder"
 import { shareOwnerName } from "../data/shares"
 import type { Note } from "../schema"
+import { typeGlyph } from "../blocks/registry"
+import type { BlockType } from "../blocks/types"
 import { APP_SHORTCUTS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { inlineText } from "../utils/inline-text"
@@ -33,7 +35,6 @@ import {
   CircleQuestionMarkFillIcon16,
   CircleQuestionMarkIcon16,
   CopyIcon16,
-  FocusIcon16,
   GridIcon16,
   HistoryIcon16,
   ListIcon16,
@@ -515,10 +516,30 @@ function ViewRows({
   )
 }
 
-/** A block view's row: the focus glyph — the row opens its note focused on
- * the block, and this is the glyph focusing wears elsewhere — and the
- * block's text, with the note it opens in as the row's tooltip. Current
- * while its note is open focused into it — the row's own link, exactly. */
+/**
+ * The glyph a block view's row leads with: the block's own markdown marker
+ * (`typeGlyph`: a bullet's `-`, a to-do's `[ ]`, a heading's `#`), in the
+ * slot a note's favicon takes, so the row says what kind of block it opens
+ * on the way the row in the note does. Mono and quiet, as the qualifier
+ * picker draws the same glyphs; centred in the icon's square, and a
+ * three-character glyph is let run a little past it rather than shrunk.
+ */
+function BlockGlyph({ type }: { type: BlockType }) {
+  const glyph = typeGlyph(type)
+  return (
+    <span
+      aria-hidden
+      data-glyph={glyph}
+      className="grid size-icon place-items-center overflow-visible whitespace-nowrap font-mono text-xs leading-none tracking-tight"
+    >
+      {glyph}
+    </span>
+  )
+}
+
+/** A block view's row: the block's marker glyph (`BlockGlyph`) and its text,
+ * with the note it opens in as the row's tooltip. Current while its note is
+ * open focused into it — the row's own link, exactly. */
 function BlockViewNavItem({
   block,
   size,
@@ -546,7 +567,10 @@ function BlockViewNavItem({
         if (!event.defaultPrevented) onNavigate?.()
       }}
     >
-      <NavRowIcon icon={<FocusIcon16 />} filled={<FocusIcon16 />} />
+      <NavRowIcon
+        icon={<BlockGlyph type={block.type} />}
+        filled={<BlockGlyph type={block.type} />}
+      />
       {/* The same wrapper a note row's name sits in, so the two line up to
           the pixel down the list. */}
       <span className="flex min-w-0 items-center gap-1.5">

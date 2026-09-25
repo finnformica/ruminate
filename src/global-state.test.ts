@@ -165,7 +165,14 @@ describe("blockViewsAtom", () => {
 
     view(store, "blk_milk")
     expect(store.get(blockViewsAtom)).toMatchObject([
-      { id: "blk_milk", noteId: "tasks", text: "buy milk", updatedAt: 1, note: { id: "tasks" } },
+      {
+        id: "blk_milk",
+        noteId: "tasks",
+        text: "buy milk",
+        type: "todo",
+        updatedAt: 1,
+        note: { id: "tasks" },
+      },
     ])
 
     // Index order: `misc` (plants) is indexed before `tasks` (milk).

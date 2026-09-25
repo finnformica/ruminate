@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { Provider, createStore } from "jotai"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { BlockType } from "../blocks/types"
 import type { Note } from "../schema"
 
 // The sidebar sits inside the router and the whole global-state machine. Only
@@ -83,7 +84,7 @@ beforeEach(() => {
   mocks.pathname = "/"
 })
 
-type BlockViewRow = { id: string; noteId: string; text: string; note: Note }
+type BlockViewRow = { id: string; noteId: string; text: string; type: BlockType; note: Note }
 
 function renderSidebar({
   notes,
@@ -146,8 +147,10 @@ function renderSidebar({
 /** The Views list's rows — the top nav is a list of its own. */
 const viewRows = () => within(screen.getByTestId("view-rows")).getAllByRole("listitem")
 
-/** The rows' names, in the order drawn. */
-const rowNames = () => viewRows().map((li) => li.textContent?.trim() ?? "")
+/** The rows' names, in the order drawn — the label alone, without the
+ * glyph a block row leads with. */
+const rowNames = () =>
+  viewRows().map((li) => li.querySelector(".nav-item .truncate")?.textContent?.trim() ?? "")
 
 /** The section headings, in order. */
 const headings = () => screen.getAllByTestId("section-heading").map((el) => el.textContent?.trim())
@@ -167,7 +170,13 @@ const dragAbove = (from: HTMLElement, onto: HTMLElement) => {
 }
 
 const THREE = [noteOf("a", "Alpha"), noteOf("b", "Bravo"), noteOf("c", "Charlie")]
-const BLOCK: BlockViewRow = { id: "blk_x", noteId: "a", text: "A block view", note: THREE[0] }
+const BLOCK: BlockViewRow = {
+  id: "blk_x",
+  noteId: "a",
+  text: "A block view",
+  type: "ul",
+  note: THREE[0],
+}
 
 describe("the sidebar's Views list", () => {
   it("is the one list of the user's own — notes and block views under one heading, no Notes", () => {
@@ -290,18 +299,33 @@ describe("the sidebar's Views list", () => {
     expect(link.getAttribute("title")).toBe("Alpha › A block view")
   })
 
-  it("draws a note row's icon and a block row's icon through the same slot, neither tinted", () => {
+  it("draws a note row's icon and a block row's glyph through the same slot, neither tinted", () => {
     renderSidebar({ notes: [THREE[0]], blocks: [BLOCK] })
     const icons = viewRows().map((row) =>
       row.querySelector(".nav-item .nav-item-icon:not(.hidden)"),
     )
     expect(icons.every((icon) => icon !== null)).toBe(true)
-    // A favicon NAMES the row, and so does the focus glyph on a block's:
+    // A favicon NAMES the row, and so does the marker glyph on a block's:
     // both lean with the label when the row is current. Nothing reports a
     // state any more.
     for (const icon of icons) expect(icon!.className).not.toContain("nav-item-tint")
-    // Different glyphs: the note's favicon, the block's focus glyph.
-    expect(icons[0]!.innerHTML).not.toBe(icons[1]!.innerHTML)
+    // The note's favicon is an icon; the block's slot holds its marker.
+    expect(icons[0]!.querySelector("svg")).not.toBeNull()
+    expect(icons[1]!.querySelector("[data-glyph]")?.getAttribute("data-glyph")).toBe("-")
+  })
+
+  it("leads a block row with the block's own markdown marker, whatever its type", () => {
+    const rows: BlockViewRow[] = [
+      { ...BLOCK, id: "blk_todo", type: "todo" },
+      { ...BLOCK, id: "blk_h2", type: "h2" },
+      { ...BLOCK, id: "blk_ol", type: "ol" },
+      { ...BLOCK, id: "blk_text", type: "text" },
+    ]
+    renderSidebar({ notes: [], blocks: rows })
+    const glyphs = viewRows().map(
+      (row) => row.querySelector(".nav-item-icon:not(.hidden) [data-glyph]")?.textContent,
+    )
+    expect(glyphs).toEqual(["[ ]", "##", "1.", "¶"])
   })
 
   it("lights the note's row only at the note's root, and the block's only focused on it", () => {
