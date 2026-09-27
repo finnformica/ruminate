@@ -3,6 +3,7 @@ import { buildGraphSnapshot, docToGraph, type GraphSnapshot } from "../data/grap
 import type { Note } from "../schema"
 import {
   createBlockIndexer,
+  hasAncestorFilter,
   hasBlockTypeFilter,
   indexNoteBlocks,
   isBlockTypeFilter,
@@ -82,6 +83,44 @@ const MISC_NOTE = makeNote({
     "  id:: blk_plain",
   ),
 })
+
+// Two days of standups: a row per person, their actions beneath. The "Alice"
+// row is a different block each day — what `under:` spans and `in:` cannot.
+const STANDUP_MON = makeNote({
+  id: "mon",
+  updatedAt: 300,
+  content: md(
+    "# Standup",
+    "  id:: blk_standup",
+    "  - Alice Smith",
+    "    id:: blk_alice_mon",
+    "    [ ] deploy the thing",
+    "      id:: blk_deploy",
+    "      needs a review first",
+    "        id:: blk_review",
+    "    [x] write the doc",
+    "      id:: blk_doc",
+    "  - Bob",
+    "    id:: blk_bob",
+    "    [ ] fix the build",
+    "      id:: blk_build",
+  ),
+})
+
+const STANDUP_TUE = makeNote({
+  id: "tue",
+  updatedAt: 400,
+  content: md(
+    "# Standup",
+    "  id:: blk_standup_tue",
+    "  - Alice Smith",
+    "    id:: blk_alice_tue",
+    "    [ ] call the client",
+    "      id:: blk_call",
+  ),
+})
+
+const STANDUPS = [STANDUP_MON, STANDUP_TUE]
 
 function buildIndex(notes: Fixture[]) {
   return createBlockIndexer()(notes, snapshotFor(notes))
@@ -301,6 +340,58 @@ describe("searchBlocks", () => {
     // Composes with everything else, and a leaf has nothing downstream.
     expect(ids(run("type:todo in:blk_head area:work"))).toEqual(["blk_milk"])
     expect(run("in:blk_milk")).toEqual([])
+  })
+})
+
+describe("under: and parent:", () => {
+  test("under: is everything beneath every block whose text matches, across notes", () => {
+    expect(ids(run("under:alice", STANDUPS))).toEqual([
+      "blk_deploy",
+      "blk_review",
+      "blk_doc",
+      "blk_call",
+    ])
+    // The text is matched case-insensitively, as a substring; quoted when it
+    // has spaces. The matching block is the scope, never a result.
+    expect(ids(run("under:ALICE", STANDUPS))).toEqual(ids(run("under:alice", STANDUPS)))
+    expect(ids(run('under:"alice smith"', STANDUPS))).toEqual(ids(run("under:alice", STANDUPS)))
+    expect(ids(run("under:bob", STANDUPS))).toEqual(["blk_build"])
+    expect(run("under:carol", STANDUPS)).toEqual([])
+  })
+
+  test("parent: keeps to the direct children", () => {
+    expect(ids(run("parent:alice", STANDUPS))).toEqual(["blk_deploy", "blk_doc", "blk_call"])
+    expect(ids(run("parent:standup", STANDUPS))).toEqual([
+      "blk_alice_mon",
+      "blk_bob",
+      "blk_alice_tue",
+    ])
+  })
+
+  test("both take a block id too, so parent:<id> is one block's direct children", () => {
+    expect(ids(run("parent:blk_standup", STANDUPS))).toEqual(["blk_alice_mon", "blk_bob"])
+    expect(ids(run("parent:blk_alice_tue", STANDUPS))).toEqual(["blk_call"])
+    expect(ids(run("under:blk_standup", STANDUPS))).toEqual(ids(run("in:blk_standup", STANDUPS)))
+  })
+
+  test("compose with type:, text, in:, -, and comma lists", () => {
+    expect(ids(run("under:alice type:todo", STANDUPS))).toEqual(["blk_deploy", "blk_call"])
+    expect(ids(run("under:alice review", STANDUPS))).toEqual(["blk_review"])
+    expect(ids(run("under:alice in:tue", STANDUPS))).toEqual(["blk_call"])
+    expect(ids(run("under:alice,bob type:todo", STANDUPS))).toEqual([
+      "blk_deploy",
+      "blk_build",
+      "blk_call",
+    ])
+    expect(ids(run("-under:alice type:todo", STANDUPS))).toEqual(["blk_build"])
+    // The review note sits under the deploy row, not directly under Alice.
+    expect(ids(run("-parent:alice type:text", STANDUPS))).toEqual(["blk_review"])
+  })
+
+  test("are block queries: the engine reports them so a bare under: lists blocks", () => {
+    expect(hasAncestorFilter(parseQuery("under:alice").filters)).toBe(true)
+    expect(hasAncestorFilter(parseQuery("-parent:blk_x").filters)).toBe(true)
+    expect(hasAncestorFilter(parseQuery("in:tue type:todo").filters)).toBe(false)
   })
 })
 
