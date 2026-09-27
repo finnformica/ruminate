@@ -79,7 +79,9 @@ export function filteredView(
   const { doc, context } = prune(sorted, matched, keepRoots)
   // A filtered view shows what survived, open: the reader asked for the
   // matches, so making them unfold to find them would be a riddle. The
-  // page's fold rule is left alone — it comes back the moment the filter does.
+  // page's fold rule is left alone — it comes back the moment the filter
+  // does. Folds the reader makes while narrowed are the page's own,
+  // transient ones (`useNarrowedFolds`, src/data/view-state.ts), not these.
   return { doc, collapsed: new Set(), context, matches: matched.size }
 }
 

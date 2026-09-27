@@ -10,6 +10,7 @@ import {
   foldRule,
   readFolds,
   useFoldRule,
+  useNarrowedFolds,
   withFold,
   writeFolds,
 } from "./view-state"
@@ -204,5 +205,37 @@ describe("useFoldRule", () => {
     act(() => result.current.setFold("a/b", true))
     expect(result.current.expanded("a/b", 2)).toBe(true)
     expect(Object.keys(localStorage).filter((key) => key.startsWith("collapse:"))).toEqual([])
+  })
+})
+
+describe("useNarrowedFolds", () => {
+  it("starts fully open, toggles a row closed and open again, and stores nothing", () => {
+    const { result } = renderHook(({ key }) => useNarrowedFolds(key), {
+      initialProps: { key: "n1\n\ntype:todo\n" },
+    })
+    expect(result.current.collapsed.size).toBe(0)
+    act(() => result.current.toggle("a"))
+    expect(sorted(result.current.collapsed)).toEqual(["a"])
+    act(() => result.current.toggle("a/b"))
+    expect(sorted(result.current.collapsed)).toEqual(["a", "a/b"])
+    act(() => result.current.toggle("a"))
+    expect(sorted(result.current.collapsed)).toEqual(["a/b"])
+    act(() => result.current.setOpen("a/b"))
+    expect(result.current.collapsed.size).toBe(0)
+    // Never the note's folds: nothing reaches storage.
+    expect(stored("n1")).toBe(null)
+  })
+
+  it("forgets its folds when the narrowing changes", () => {
+    const { result, rerender } = renderHook(({ key }) => useNarrowedFolds(key), {
+      initialProps: { key: "n1\n\ntype:todo\n" },
+    })
+    act(() => result.current.toggle("a"))
+    expect(sorted(result.current.collapsed)).toEqual(["a"])
+    rerender({ key: "n1\n\ntype:done\n" })
+    expect(result.current.collapsed.size).toBe(0)
+    // The same narrowing again starts open too: a filter always opens fully.
+    rerender({ key: "n1\n\ntype:todo\n" })
+    expect(result.current.collapsed.size).toBe(0)
   })
 })

@@ -36,7 +36,7 @@ import { useNoteDoc } from "../hooks/note-doc"
 import { pathToBlock } from "../data/graph"
 import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
 import { FilterMenu, SortMenu } from "../components/view-controls"
-import { useFoldRule } from "../data/view-state"
+import { useFoldRule, useNarrowedFolds } from "../data/view-state"
 import { keyOf } from "../blocks/view"
 import { useNoteShare } from "../hooks/share"
 import { shareOwnerName } from "../data/shares"
@@ -183,6 +183,13 @@ function NotePage() {
   // (`useFoldRule`); every change the editor hands back becomes ops applied
   // to the graph — see useNoteDoc.
   const { expanded, setFold } = useFoldRule(noteId)
+  // Narrowed — a filter or a sort on — the view opens fully and folds on its
+  // own, transiently (`useNarrowedFolds`): the note's folds stand aside, and
+  // a chevron clicked here must not write to them.
+  const narrowed = filter !== "" || sort !== ""
+  const narrowedFolds = useNarrowedFolds(
+    [noteId ?? "", focusBlockId ?? "", filter, sort].join("\n"),
+  )
   const directions = useAtomValue(linkDirectionsAtom)
   const {
     doc: editorDoc,
@@ -512,11 +519,15 @@ function NotePage() {
                   noteId={noteId}
                   doc={editorDoc}
                   onChange={setEditorDoc}
-                  folds={{
-                    collapsed,
-                    toggle: (key) => setFold(key, collapsed.has(key)),
-                    setOpen: (key) => setFold(key, true),
-                  }}
+                  folds={
+                    narrowed
+                      ? narrowedFolds
+                      : {
+                          collapsed,
+                          toggle: (key) => setFold(key, collapsed.has(key)),
+                          setOpen: (key) => setFold(key, true),
+                        }
+                  }
                   onToggleCollapse={touch}
                   startEditing={isNewNote && !showsTitle}
                   readOnly={readOnlyShare}
@@ -542,7 +553,7 @@ function NotePage() {
                   // block is structure, and structure belongs to the note
                   // rather than to a selection of it (`useNoteDoc`). A row
                   // that swallowed typing would be a lie.
-                  trailingBlank={filter === "" && sort === ""}
+                  trailingBlank={!narrowed}
                 />
                 {noteId && noteExists && share === null ? (
                   <UnassignedBasket noteId={noteId} />
