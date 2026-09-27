@@ -218,3 +218,45 @@ export function useFoldRule(noteId: string | undefined) {
 
   return { expanded, setFold, folds: state.folds }
 }
+
+const NO_KEYS: ReadonlySet<string> = new Set()
+
+/**
+ * Folds for a NARROWED view — a note filtered or sorted in place
+ * (`src/data/filter-view.ts`). Such a view opens fully whatever the reader's
+ * folds on the note say: they asked for the matches, and a match behind a
+ * fold would be a riddle. A long filtered outline still wants folding,
+ * though, so the view keeps folds of its own: transient, never stored, and
+ * forgotten whenever `resetKey` changes (the filter, the sort, the note or
+ * the focus). The note's own folds (`useFoldRule`) are left untouched
+ * underneath and come back the moment the narrowing clears — a chevron
+ * clicked in a filtered view must never leave a row folded in the note.
+ */
+export function useNarrowedFolds(resetKey: string) {
+  const [state, setState] = React.useState<{ resetKey: string; closed: ReadonlySet<string> }>(
+    () => ({ resetKey, closed: NO_KEYS }),
+  )
+  // Re-read during render on a different narrowing, so a new filter never
+  // paints with the old one's folds. Settles in one extra render.
+  if (state.resetKey !== resetKey) setState({ resetKey, closed: NO_KEYS })
+
+  const toggle = React.useCallback((key: string) => {
+    setState((prev) => {
+      const closed = new Set(prev.closed)
+      if (closed.has(key)) closed.delete(key)
+      else closed.add(key)
+      return { ...prev, closed }
+    })
+  }, [])
+
+  const setOpen = React.useCallback((key: string) => {
+    setState((prev) => {
+      if (!prev.closed.has(key)) return prev
+      const closed = new Set(prev.closed)
+      closed.delete(key)
+      return { ...prev, closed }
+    })
+  }, [])
+
+  return { collapsed: state.closed, toggle, setOpen }
+}
