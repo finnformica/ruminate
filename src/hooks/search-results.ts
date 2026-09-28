@@ -117,12 +117,40 @@ function useTitleMatches(query: string, showBlocks: boolean): ScoredNote[] {
   }, [searcher, query, showBlocks])
 }
 
+/**
+ * `results` with only the rows `keep` keeps — the hits, the title matches
+ * and the notes they live in trimmed to match, so the count line stays
+ * true. What a picker (`src/components/palette.ts`) narrows the palette
+ * by. Pure.
+ */
+export function keepResults(results: SearchResults, keep: (row: ResultRow) => boolean) {
+  const rows = results.rows.filter(keep)
+  const ids = new Set(rows.map((row) => row.id))
+  const hits = results.hits.filter((hit) => ids.has(hit.blockId))
+  const titleMatches = results.titleMatches.filter((note) => ids.has(note.id))
+  const noteIds =
+    results.mode === "blocks"
+      ? new Set([...hits.map((hit) => hit.noteId), ...titleMatches.map((note) => note.id)])
+      : ids
+  return {
+    ...results,
+    rows,
+    hits,
+    titleMatches,
+    notes: results.notes.filter((n) => noteIds.has(n.id)),
+  }
+}
+
 /** Resolve a query to result rows — blocks when it discriminates blocks, notes
- * otherwise (see `resolvesToBlocks`). */
-export function useSearchResults(query: string): SearchResults {
+ * otherwise (see `resolvesToBlocks`), or always blocks when `blocks` says so
+ * (a picker of rows over a bare `in:`). */
+export function useSearchResults(
+  query: string,
+  { blocks = false }: { blocks?: boolean } = {},
+): SearchResults {
   const searchNotes = useSearchNotes()
   const source = useBlockSearchSource()
-  const showBlocks = resolvesToBlocks(query)
+  const showBlocks = blocks || resolvesToBlocks(query)
   const titleMatches = useTitleMatches(query, showBlocks)
 
   // Memoized so an async source is asked once per query, not once per render.

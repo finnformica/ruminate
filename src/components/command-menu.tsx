@@ -1,26 +1,25 @@
 import { useMatch, useNavigate } from "@tanstack/react-router"
 import { parseDate } from "chrono-node"
 import { Command } from "cmdk"
-import { atom, useAtom, useAtomValue } from "jotai"
+import { useAtom, useAtomValue } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useDebounce } from "use-debounce"
 import { viewRootsAtom } from "../global-state"
 import { useRecentRoots } from "../hooks/recent-roots"
 import { useCreateNote } from "../hooks/note"
-import { useSearchResults } from "../hooks/search-results"
+import { keepResults, useSearchResults } from "../hooks/search-results"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/registry"
 import { formatDate, formatDateDistance, toDateString } from "../utils/date"
 import { generateNoteId } from "../utils/note-id"
 import { composeQuery, parseQuery } from "../utils/search"
-import { CalendarDateIcon16, PlusIcon16 } from "./icons"
+import { CalendarDateIcon16, PlusIcon16, SearchIcon16 } from "./icons"
 import { Keys } from "./ui/keys"
 import { Surface } from "./ui/surface"
 import { QUERY_DEBOUNCE_MS } from "./note-list"
 import { QueryBox } from "./query-box"
 import { ResultsList } from "./results-list"
-
-export const isCommandMenuOpenAtom = atom(false)
+import { isCommandMenuOpenAtom, paletteRequestAtom, type PaletteChoice } from "./palette"
 
 /** The cmdk root the palette's input sits in. */
 function paletteRoot(input: HTMLInputElement | null): HTMLElement | null {
@@ -55,10 +54,17 @@ const NAVIGATION_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End"])
  * pill. ⌘P is the same palette with two filters set for it — the open
  * note's headings (`type:heading in:<note>`) — so "jump to a heading" is a
  * search like any other, and typing narrows the headings.
+ *
+ * Opened with a request (`palette.ts`), the same palette is a **picker**:
+ * a pick is handed back to the asker instead of opening anything, and the
+ * palette's own rows and footer stand aside.
  */
 export function CommandMenu() {
   const navigate = useNavigate()
   const createNote = useCreateNote()
+  // The request the palette is a picker for, if any (`usePalettePicker`).
+  const [request, setRequest] = useAtom(paletteRequestAtom)
+  const picking = request !== null
   // With nothing typed: the places most used lately — notes, and blocks
   // focused on — ranked by frecency (`useRecentRoots`), at most five; then
   // the Views beneath, the notes and the block views in the sidebar's order
@@ -124,20 +130,46 @@ export function CommandMenu() {
   )
 
   // Close, and put the keyboard back where it was. The query goes with the
-  // dialog: reopening starts over.
+  // dialog: reopening starts over. A picker closed this way was cancelled.
   const closeMenu = useCallback(() => {
     setIsOpen(false)
     setQuery("")
+    if (request) {
+      setRequest(null)
+      request.onCancel?.()
+    }
     setTimeout(() => {
       prevActiveElement.current?.focus()
     })
-  }, [setIsOpen])
+  }, [setIsOpen, request, setRequest])
 
   // Close on the way somewhere else: the destination takes the keyboard.
   const leave = useCallback(() => {
     setIsOpen(false)
     setQuery("")
   }, [setIsOpen])
+
+  // A picker's pick: close, and hand the choice to the asker. The keyboard
+  // goes back where it was, as after any close.
+  const pick = useCallback(
+    (choice: PaletteChoice) => {
+      if (!request) return
+      leave()
+      setRequest(null)
+      setTimeout(() => {
+        prevActiveElement.current?.focus()
+      })
+      request.onPick(choice)
+    },
+    [request, leave, setRequest],
+  )
+
+  // A request opens the palette with its query — as ⌘P opens it with the
+  // headings query.
+  const requestQuery = request?.query ?? ""
+  useEffect(() => {
+    if (picking) openMenu(requestQuery)
+  }, [picking, requestQuery, openMenu])
 
   const toggleMenu = useCallback(() => {
     if (isOpen) {
@@ -165,6 +197,8 @@ export function CommandMenu() {
   useHotkeys(
     APP_SHORTCUTS.searchHeadings,
     () => {
+      // Not a picker's to answer.
+      if (picking) return
       if (!isOpen) {
         openMenu(headingsQuery)
       } else if (query === headingsQuery) {
@@ -194,7 +228,12 @@ export function CommandMenu() {
   // Search BLOCKS — the palette's primary results. A nested heading or a todo
   // is a first-class row here, not a note it happens to live in; a note
   // whose title matched is a row among them, by score.
-  const results = useSearchResults(deferredQuery)
+  const searched = useSearchResults(deferredQuery, { blocks: request?.blocks })
+  // A picker lists only the rows its request keeps.
+  const keep = request?.keep
+  const results = useMemo(() => (keep ? keepResults(searched, keep) : searched), [searched, keep])
+  // The typed text as a row of its own, when the picker takes a value.
+  const textRow = picking && request.textRow && text.trim() ? request.textRow(text.trim()) : ""
   const hasRows = deferredQuery
     ? results.rows.length > 0
     : recentRoots.length > 0 || viewRoots.length > 0
@@ -236,12 +275,13 @@ export function CommandMenu() {
   // filename charset to sanitize against and no name collision to avoid, so
   // a fresh note is always a fresh note; with nothing typed it is untitled.
   const createFromQuery = useCallback(() => {
+    if (picking) return
     const title = text.trim()
     const id = generateNoteId()
     createNote(id, title ? { title } : {})
     leave()
     navigate({ to: "/views/$", params: { _splat: id }, search: { query: undefined } })
-  }, [text, createNote, leave, navigate])
+  }, [picking, text, createNote, leave, navigate])
 
   // Commit the typed query to the full results view — the URL-addressable
   // `/?query=` the Views page already owns, so filter views are bookmarkable
@@ -253,17 +293,27 @@ export function CommandMenu() {
   }, [leave, navigate, query])
   /** ↵ in the query: with a query typed and no item highlighted, it is a
    * search, and the results view opens. With an item highlighted, ↵ is
-   * cmdk's and picks the item. */
+   * cmdk's and picks the item. For a picker that takes a value, ↵ on the
+   * query picks the typed text; for one that does not, it does nothing. */
   const submit = useCallback(() => {
     const root = paletteRoot(inputRef.current)
     if (!query.trim() || !root || hasHighlightedItem(root)) return false
+    if (picking) {
+      if (textRow) pick({ kind: "text", text: text.trim() })
+      return true
+    }
     openResultsView()
     return true
-  }, [query, openResultsView])
+  }, [query, picking, textRow, text, pick, openResultsView])
 
-  // Open a result: the note, or the note focused on the block.
+  // Open a result: the note, or the note focused on the block — or, for a
+  // picker, hand it back as the pick.
   const openResult = useCallback(
     (noteId: string, blockId?: string) => {
+      if (picking) {
+        pick(blockId ? { kind: "block", noteId, blockId } : { kind: "note", noteId })
+        return
+      }
       leave()
       navigate({
         to: "/views/$",
@@ -271,7 +321,7 @@ export function CommandMenu() {
         search: { query: undefined, block: blockId },
       })
     },
-    [leave, navigate],
+    [picking, pick, leave, navigate],
   )
 
   // cmdk reports every change of the highlighted item here — both the user
@@ -297,7 +347,7 @@ export function CommandMenu() {
 
   return (
     <Command.Dialog
-      label="Global command menu"
+      label={request?.label ?? "Global command menu"}
       open={isOpen}
       onOpenChange={(open) => {
         if (open) {
@@ -356,7 +406,7 @@ export function CommandMenu() {
             variant="palette"
             inputRef={inputRef}
             popoverHost={bodyRef}
-            placeholder="Search notes…"
+            placeholder={request?.placeholder ?? "Search notes…"}
             value={query}
             onChange={handleQueryChange}
             currentNoteId={noteId}
@@ -369,7 +419,21 @@ export function CommandMenu() {
           />
 
           <Command.List>
-            {dateString ? (
+            {textRow ? (
+              // The typed text as a pick of its own: the first row, so ↓
+              // reaches it first and ↵ on the query is the same pick.
+              <Command.Group>
+                <CommandItem
+                  key={`text:${text.trim()}`}
+                  value={`text:${text.trim()}`}
+                  icon={<SearchIcon16 />}
+                  onSelect={() => pick({ kind: "text", text: text.trim() })}
+                >
+                  {textRow}
+                </CommandItem>
+              </Command.Group>
+            ) : null}
+            {dateString && !picking ? (
               <Command.Group heading="Date">
                 <CommandItem
                   key={dateString}
@@ -434,25 +498,28 @@ export function CommandMenu() {
               </Command.Group>
             ) : null}
           </Command.List>
-          {/* The footer: always there, whatever the query. A button, not a
+          {/* The footer: always there, whatever the query — unless the
+              palette is a picker, which makes nothing. A button, not a
               cmdk item — the items are walked with ↑/↓ above the rows, and
               this one is reached by its key instead. */}
-          <div className="border-t border-border-secondary p-2">
-            <button
-              type="button"
-              data-testid="palette-create"
-              onClick={createFromQuery}
-              className="focus-ring flex h-9 w-full items-center gap-3 rounded px-3 text-left hover:bg-bg-hover active:bg-bg-secondary-active"
-            >
-              <span className="grid h-4 w-4 place-items-center text-text-secondary">
-                <PlusIcon16 />
-              </span>
-              <span className="grow truncate">
-                {text.trim() ? `Create new note "${text.trim()}"` : "Create new note"}
-              </span>
-              <Keys keys={formatCombo("Mod+Enter")} className="coarse:hidden" />
-            </button>
-          </div>
+          {picking ? null : (
+            <div className="border-t border-border-secondary p-2">
+              <button
+                type="button"
+                data-testid="palette-create"
+                onClick={createFromQuery}
+                className="focus-ring flex h-9 w-full items-center gap-3 rounded px-3 text-left hover:bg-bg-hover active:bg-bg-secondary-active"
+              >
+                <span className="grid h-4 w-4 place-items-center text-text-secondary">
+                  <PlusIcon16 />
+                </span>
+                <span className="grow truncate">
+                  {text.trim() ? `Create new note "${text.trim()}"` : "Create new note"}
+                </span>
+                <Keys keys={formatCombo("Mod+Enter")} className="coarse:hidden" />
+              </button>
+            </div>
+          )}
         </Surface>
       </div>
     </Command.Dialog>

@@ -60,7 +60,7 @@ A query that names only notes — a date, a bare property qualifier, or an empty
 - The block matched is the scope, never a result — it is not under itself, the way `in:` is "inside".
 - They compose like any qualifier: `under:alice type:todo` is Alice's open actions, `under:alice deploy` her actions mentioning a deploy, `-under:Parked` hides everything under a "Parked" row, `under:alice,bob` is either, and `under:Decisions in:"Project X"` narrows to one note. A query with `under:` or `parent:` asks for blocks, so it lists no note rows, whatever else it says.
 
-They work wherever the query language does: the ⌘K palette, the Views page (`/?query=under:alice+type:todo` is a bookmarkable page of Alice's open actions), a note's own **Filter**, and the MCP server's `search`.
+They work wherever the query language does: the ⌘K palette, the Views page (`/?query=under:alice+type:todo` is a bookmarkable page of Alice's open actions), a note's own **Filter** (where the menu's **Parent** and **Under** pick them — see "Filtering a note in place"), and the MCP server's `search`.
 
 ## Filters as pills
 
@@ -94,7 +94,7 @@ The query language also narrows a note **where it stands**, rather than resolvin
 
 A note-level qualifier behaves honestly rather than being ignored: inside one note it holds for every row or for none, so `area:work` shows the whole note or nothing at all — which is exactly what the same query means in a search.
 
-**The menu offers `type:` and nothing else**, in a **Type** submenu — the shape a second qualifier would need, and it keeps the top of the menu a list of what can be filtered rather than of block types. The rest of the vocabulary is note-level, and inside a single note a note-level qualifier holds for every row or for none — so as a menu item it is not a filter but a switch between the whole note and a blank page. `in:` is left out for a different reason: it names the view's **root**, which is what focusing already does (<kbd>f</kbd>, the edit bar, the breadcrumb). Both still work typed into a filter by hand, and mean there exactly what they mean in a search.
+**The menu offers `type:`, `parent:` and `under:`**, each a submenu, so the top of the menu is a list of what can be filtered rather than of values. **Type** ticks block types. **Parent** and **Under** list what is chosen and offer **Choose…**, which opens the <kbd>⌘</kbd> <kbd>K</kbd> palette as a picker over this note's rows (or the focused block's) that have children: pick a row and the filter names it, so the note narrows to what sits beneath that row; or take the typed text, offered as the first row ("Contains “alice”"), and the filter names every row containing it — `parent:"alice"`, the same query as typed. The rest of the vocabulary is note-level, and inside a single note a note-level qualifier holds for every row or for none — so as a menu item it is not a filter but a switch between the whole note and a blank page. `in:` is left out for a different reason: it names the view's **root**, which is what focusing already does (<kbd>f</kbd>, the edit bar, the breadcrumb). All of it still works typed into a filter by hand, and means there exactly what it means in a search.
 
 The block types the menu lists are the query box's own picker vocabulary (`STATIC_QUALIFIER_OPTIONS`), so a block type added to the registry appears in the note header with it.
 

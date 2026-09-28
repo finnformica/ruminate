@@ -442,6 +442,7 @@ function NotePage() {
             <FilterMenu
               filter={filter}
               onFilterChange={(next) => setNarrowing({ filter: next })}
+              scope={focusBlockId ?? noteId}
               saved={savedView.writable ? { ...savedViewActions, dirty: filterDirty } : undefined}
             />
             <NoteActionsMenu

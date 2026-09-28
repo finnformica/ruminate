@@ -35,7 +35,10 @@ vi.mock("../hooks/note", () => ({
   useRenameNote: () => vi.fn(),
 }))
 
-vi.mock("../hooks/search-results", () => ({
+vi.mock("../hooks/search-results", async (importOriginal) => ({
+  // The real module (a picker narrows results with its pure `keepResults`),
+  // with the search itself pinned.
+  ...(await importOriginal<typeof import("../hooks/search-results")>()),
   useSearchResults: () => mocks.results,
 }))
 vi.mock("../data/store", () => ({ useApplyOps: () => () => {} }))
@@ -93,7 +96,8 @@ vi.mock("../global-state", async (importOriginal) => {
 })
 
 import { recentVisitsAtom, sortedNotesAtom, viewRootsAtom } from "../global-state"
-import { CommandMenu, isCommandMenuOpenAtom } from "./command-menu"
+import { CommandMenu } from "./command-menu"
+import { isCommandMenuOpenAtom, paletteRequestAtom, type PaletteRequest } from "./palette"
 
 // cmdk scrolls the selected item into view and measures its list with a
 // ResizeObserver; jsdom implements neither.
@@ -113,12 +117,15 @@ beforeEach(() => {
 
 function renderMenu({
   open = false,
+  request,
   notes = [],
   touches = [],
   views = [],
   blockViews = [],
 }: {
   open?: boolean
+  /** Open as a picker for this request (`usePalettePicker`). */
+  request?: PaletteRequest
   notes?: unknown[]
   touches?: { id: string; noteId?: string; at: number }[]
   /** The Views list's notes, and its block views — the atom is the mock's
@@ -147,6 +154,7 @@ function renderMenu({
     ] as never,
   )
   if (open) store.set(isCommandMenuOpenAtom, true)
+  if (request) store.set(paletteRequestAtom, request)
   render(
     <Provider store={store}>
       <CommandMenu />
@@ -923,5 +931,110 @@ describe("qualifier suggestions", () => {
     expect(screen.queryByTestId("qualifier-suggestions")).toBeNull()
     type("https://example.com")
     expect(screen.queryByTestId("qualifier-suggestions")).toBeNull()
+  })
+})
+
+// ── As a picker ─────────────────────────────────────────────────────────────
+// Opened with a request (`palette.ts`), the same palette hands a pick back
+// to the asker instead of opening it — the note header's Parent and Under
+// filters are the first askers.
+
+describe("as a picker", () => {
+  it("opens with the request's query as pills and its placeholder, and makes nothing", () => {
+    const onPick = vi.fn()
+    renderMenu({ request: { query: "in:note-1", placeholder: "Parent…", onPick } })
+    const input = screen.getByPlaceholderText("Parent…") as HTMLInputElement
+    expect(input.value).toBe("")
+    expect(pills()).toEqual(["note-1"])
+    // No note to create, no ⌘↵.
+    expect(screen.queryByTestId("palette-create")).toBeNull()
+    fireEvent.keyDown(input, { key: "Enter", metaKey: true })
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    expect(onPick).not.toHaveBeenCalled()
+  })
+
+  it("offers the typed text as the first row; Enter on the query picks it and closes", async () => {
+    const onPick = vi.fn()
+    mocks.results = {
+      mode: "blocks",
+      hits: [NVIDIA],
+      notes: [RESEARCH],
+      titleMatches: [],
+      rows: rowsOf([NVIDIA]),
+    }
+    renderMenu({
+      request: { placeholder: "Parent…", textRow: (text) => `Contains “${text}”`, onPick },
+    })
+    const input = screen.getByPlaceholderText("Parent…") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "alice" } })
+    await waitFor(() => {
+      expect(screen.getByText("Contains “alice”")).toBeTruthy()
+    })
+    input.setSelectionRange(input.value.length, input.value.length)
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(onPick).toHaveBeenCalledWith({ kind: "text", text: "alice" })
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    expect(screen.queryByPlaceholderText("Parent…")).toBeNull()
+  })
+
+  it("lists only the rows the request keeps, and hands a picked row back as its block", async () => {
+    const onPick = vi.fn()
+    mocks.results = {
+      mode: "blocks",
+      hits: [NVIDIA, TODO_MILK],
+      notes: [RESEARCH],
+      titleMatches: [],
+      rows: rowsOf([NVIDIA, TODO_MILK]),
+    }
+    renderMenu({
+      request: { placeholder: "Parent…", keep: (row) => row.id === "blk_nvidia", onPick },
+    })
+    const input = screen.getByPlaceholderText("Parent…") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "nvidia" } })
+    input.setSelectionRange(input.value.length, input.value.length)
+    await waitFor(() => {
+      expect(screen.getByText("Results")).toBeTruthy()
+    })
+    expect(rowIds()).toEqual(["blk_nvidia"])
+    expect(screen.getByTestId("result-count").textContent).toBe("1 matching block in 1 note")
+    for (let i = 0; i < 3 && document.activeElement !== editor(); i += 1) {
+      fireEvent.keyDown(input, { key: "ArrowDown" })
+    }
+    expect(document.activeElement).toBe(editor())
+    fireEvent.keyDown(editor(), { key: "Enter" })
+    expect(onPick).toHaveBeenCalledWith({
+      kind: "block",
+      noteId: "research",
+      blockId: "blk_nvidia",
+    })
+    expect(mocks.navigate).not.toHaveBeenCalled()
+  })
+
+  it("without a text row, Enter on the query picks nothing and opens nothing", async () => {
+    const onPick = vi.fn()
+    renderMenu({ request: { placeholder: "Parent…", onPick } })
+    const input = screen.getByPlaceholderText("Parent…") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "alice" } })
+    input.setSelectionRange(input.value.length, input.value.length)
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(onPick).not.toHaveBeenCalled()
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    expect(screen.getByPlaceholderText("Parent…")).toBeTruthy()
+  })
+
+  it("Escape cancels: the asker is told, nothing is picked, and ⌘K reopens the plain palette", () => {
+    const onPick = vi.fn()
+    const onCancel = vi.fn()
+    renderMenu({ request: { query: "in:note-1", placeholder: "Parent…", onPick, onCancel } })
+    // The first Escape clears the query, the second closes — as ever.
+    fireEvent.keyDown(screen.getByPlaceholderText("Parent…"), { key: "Escape" })
+    expect(pills()).toEqual([])
+    fireEvent.keyDown(screen.getByPlaceholderText("Parent…"), { key: "Escape" })
+    expect(screen.queryByPlaceholderText("Parent…")).toBeNull()
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onPick).not.toHaveBeenCalled()
+    fireEvent.keyDown(document.body, { key: "k", code: "KeyK", metaKey: true })
+    expect(screen.getByPlaceholderText("Search notes…")).toBeTruthy()
+    expect(screen.getByTestId("palette-create")).toBeTruthy()
   })
 })
