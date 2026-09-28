@@ -478,11 +478,14 @@ request that ends in leaving the page (signing in, taking an update) stays
 busy until the page has gone, since on this page it has no after. The
 "Saving…" trace in a note's header is the same rule on a surface rather
 than a control: it shows from the edit until its push has landed, and only
-while a push can land. Offline, or signed out, the edit is saved on this
-device the moment it is made and its push waits for the network or the
-sign-in, which the sidebar's status already says — so the trace stays quiet
-rather than spinning without end over nothing in flight (`isSaveInFlight`,
-`src/components/sync-status.tsx`).
+while a push can land. Offline, the edit lands on this device and its push
+waits for the network, so once the write is down the trace turns into
+**Saved offline** with the offline icon and no spinner — nothing is in
+flight, and it is a fact about the note rather than a wait. It is there
+because the sidebar's "Offline" row may not be on screen (collapsed, or a
+phone's closed drawer), and it clears when the push goes out on
+reconnecting. Signed out, the sidebar's "Signed out" is the news and the
+header says nothing (`saveTrace`, `src/components/sync-status.tsx`).
 
 ## Empty-block placeholder
 

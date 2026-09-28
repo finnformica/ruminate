@@ -7,7 +7,7 @@ import { Calendar } from "../components/calendar"
 import { CalendarHeader } from "../components/calendar-header"
 import { DaysOfWeek } from "../components/days-of-week"
 import { Details } from "../components/ui/details"
-import { LoadingIcon16, NoteIcon16, ShareIcon16 } from "../components/icons"
+import { LoadingIcon16, NoteIcon16, OfflineIcon16, ShareIcon16 } from "../components/icons"
 import { Notice } from "../components/notice"
 import { parse } from "../blocks/parse"
 import type { BlockDoc, ChangeHint } from "../blocks/types"
@@ -17,7 +17,7 @@ import { NoteActionsMenu } from "../components/note-actions-menu"
 import { UnassignedBasket } from "../components/unassigned-basket"
 import { NoteFavicon } from "../components/note-favicon"
 import { PageLayout } from "../components/page-layout"
-import { isSaveInFlight, useSyncStatusKind } from "../components/sync-status"
+import { saveTrace, useSaveTraceState } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { sharedModeStatusAtom } from "../data/shared-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
@@ -130,8 +130,7 @@ function NotePage() {
 
   // Global state
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  const syncStatus = useSyncStatusKind()
-  const isSyncing = syncStatus === "syncing"
+  const { kind: syncStatus, pushesPending } = useSaveTraceState()
   const databaseStatus = useAtomValue(databaseModeStatusAtom)
   const sharedStatus = useAtomValue(sharedModeStatusAtom)
   // While the local store is still opening — or the notes shared with the
@@ -293,19 +292,15 @@ function NotePage() {
   const renameNote = useRenameNote()
   const createNote = useCreateNote()
 
-  const wasSyncingRef = React.useRef(false)
+  // The dispatch moment is over once the pending pushes change: the write
+  // landed on this device and queued its push (rising), or the push landed
+  // (falling). Online the trace carries on as "Saving…" until the push has
+  // landed; offline it becomes "Saved offline" (`saveTrace`).
   useEffect(() => {
-    if (isSyncing) {
-      wasSyncingRef.current = true
-    } else if (wasSyncingRef.current) {
-      wasSyncingRef.current = false
-      setPendingSave(false)
-    }
-  }, [isSyncing])
+    setPendingSave(false)
+  }, [pushesPending])
 
-  // Offline, or signed out, nothing is in flight — the edit is on this device
-  // and the sidebar says so — and the trace stays quiet (`isSaveInFlight`).
-  const isSaving = isSaveInFlight(syncStatus, pendingSave)
+  const trace = saveTrace(syncStatus, { pendingSave, pushesPending })
 
   // Note props (width, gist) are one `setProps` op, written at once.
   const setProp = React.useCallback(
@@ -432,11 +427,17 @@ function NotePage() {
       actions={
         <div className="flex items-center gap-2">
           {/* Changes save automatically; this is the honest-but-quiet trace of
-              a save in flight. */}
-          {isSaving ? (
+              a save in flight — and, offline, of one that is on this device
+              and waiting to sync (`saveTrace`). */}
+          {trace === "saving" ? (
             <span className="flex items-center gap-1.5 text-sm text-text-secondary print:hidden">
               <LoadingIcon16 className="animate-spin" />
               Saving…
+            </span>
+          ) : trace === "saved-offline" ? (
+            <span className="flex items-center gap-1.5 text-sm text-text-secondary print:hidden">
+              <OfflineIcon16 />
+              Saved offline
             </span>
           ) : null}
 

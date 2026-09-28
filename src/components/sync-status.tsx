@@ -32,13 +32,7 @@ const isSyncErrorAtom = atom((get) => {
 })
 
 export type SyncStatusKind =
-  | "hidden"
-  | "offline"
-  | "signed-out"
-  | "syncing"
-  | "expiring"
-  | "failed"
-  | "synced"
+  "hidden" | "offline" | "signed-out" | "syncing" | "expiring" | "failed" | "synced"
 
 /** The inputs the sidebar's sync status is read from. */
 export interface SyncStatusState {
@@ -66,8 +60,8 @@ export interface SyncStatusState {
  * - `failed`: the last push or pull failed, with the network up.
  * - `synced`: nothing pending, nothing wrong.
  *
- * Pure, so the sidebar row, the nav-bar badge, the note header's "Saving…"
- * trace (`isSaveInFlight`) and their tests share it.
+ * Pure, so the sidebar row, the nav-bar badge, the note header's save trace
+ * (`saveTrace`) and their tests share it.
  */
 export function syncStatusKind(state: SyncStatusState): SyncStatusKind {
   if (!state.isDatabaseMode) return "hidden"
@@ -94,28 +88,46 @@ export function attentionTone(state: SyncStatusState): "danger" | "pending" | nu
   }
 }
 
+/** What a note's header says about its save, if anything (`saveTrace`). */
+export type SaveTrace = "saving" | "saved-offline" | null
+
+export interface SaveTraceInputs {
+  /** A save was just dispatched, ahead of the local write and the push. */
+  pendingSave: boolean
+  /** Rows are waiting to be pushed: the edit is on this device, not synced. */
+  pushesPending: boolean
+}
+
 /**
- * Whether a note's header shows its "Saving…" trace: pushes in flight, or a
- * save just dispatched (`pendingSave`, ahead of the debounced push) where a
- * push can land. Offline, or signed out, the pending pushes wait for the
- * network or the sign-in — nothing is in flight, and the sidebar's status
- * says why — so the trace would spin without end over an edit that was saved
- * on this device the moment it was made. Read through `syncStatusKind`, so
- * the trace shows exactly when the sidebar reads "Syncing…" (plus the
- * dispatch-to-push moment).
+ * The trace a note's header shows about its save, read through
+ * `syncStatusKind` so it never disagrees with the sidebar:
+ *
+ * - `saving`: a push in flight (the sidebar reads "Syncing…"), or a save
+ *   just dispatched and not yet landed — online or offline, the moment of
+ *   writing looks the same.
+ * - `saved-offline`: offline, with the edit on this device and its push
+ *   waiting for the network. Nothing is in flight, so no spinner: it is a
+ *   fact about the note, and where the sidebar (collapsed, or a phone's
+ *   closed drawer) may not be on screen to say "Offline", it is the one
+ *   thing that says the edit has not synced.
+ * - nothing: nothing pending, or nowhere for a push to land — signed out,
+ *   the sidebar's "Signed out" is the news, and the sample notes have no
+ *   sync at all.
  */
-export function isSaveInFlight(kind: SyncStatusKind, pendingSave: boolean): boolean {
+export function saveTrace(kind: SyncStatusKind, inputs: SaveTraceInputs): SaveTrace {
   switch (kind) {
     case "syncing":
-      return true
+      return "saving"
     case "synced":
     case "expiring":
     case "failed":
-      return pendingSave
-    case "hidden":
+      return inputs.pendingSave ? "saving" : null
     case "offline":
+      if (inputs.pendingSave) return "saving"
+      return inputs.pushesPending ? "saved-offline" : null
+    case "hidden":
     case "signed-out":
-      return false
+      return null
   }
 }
 
@@ -128,9 +140,11 @@ function useSyncStatusState(): SyncStatusState {
   return { isDatabaseMode, online: online !== false, session, isSyncing, isSyncError }
 }
 
-/** The sync status' one reading, live (see `syncStatusKind`). */
-export function useSyncStatusKind(): SyncStatusKind {
-  return syncStatusKind(useSyncStatusState())
+/** What the note header's save trace reads from, live: the sync status'
+ * one reading, and whether rows are waiting to be pushed (see `saveTrace`). */
+export function useSaveTraceState(): { kind: SyncStatusKind; pushesPending: boolean } {
+  const state = useSyncStatusState()
+  return { kind: syncStatusKind(state), pushesPending: state.isSyncing }
 }
 
 /** The sync status' attention tone, live (see `attentionTone`). */

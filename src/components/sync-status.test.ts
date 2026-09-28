@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { attentionTone, isSaveInFlight, syncStatusKind } from "./sync-status"
+import { attentionTone, saveTrace, syncStatusKind } from "./sync-status"
 
 const base = {
   isDatabaseMode: true,
@@ -66,28 +66,36 @@ describe("attentionTone", () => {
   })
 })
 
-describe("isSaveInFlight", () => {
-  it("shows the trace while pushes are in flight", () => {
-    expect(isSaveInFlight("syncing", false)).toBe(true)
-    expect(isSaveInFlight("syncing", true)).toBe(true)
+describe("saveTrace", () => {
+  const idle = { pendingSave: false, pushesPending: false }
+  const dispatched = { pendingSave: true, pushesPending: false }
+  const queued = { pendingSave: false, pushesPending: true }
+
+  it("reads Saving… while pushes are in flight", () => {
+    expect(saveTrace("syncing", idle)).toBe("saving")
+    expect(saveTrace("syncing", queued)).toBe("saving")
   })
 
-  it("shows the trace from the dispatch until the push starts, where a push can land", () => {
-    expect(isSaveInFlight("synced", true)).toBe(true)
-    expect(isSaveInFlight("expiring", true)).toBe(true)
-    expect(isSaveInFlight("failed", true)).toBe(true)
-    expect(isSaveInFlight("synced", false)).toBe(false)
-    expect(isSaveInFlight("failed", false)).toBe(false)
+  it("reads Saving… from the dispatch until the write lands, where a push can land", () => {
+    expect(saveTrace("synced", dispatched)).toBe("saving")
+    expect(saveTrace("expiring", dispatched)).toBe("saving")
+    expect(saveTrace("failed", dispatched)).toBe("saving")
+    expect(saveTrace("synced", idle)).toBeNull()
+    expect(saveTrace("failed", idle)).toBeNull()
   })
 
-  it("stays quiet offline: the edit is on this device, and the pushes wait", () => {
-    // Pending pushes read as "syncing" only online; offline they are not in flight.
-    expect(isSaveInFlight("offline", false)).toBe(false)
-    expect(isSaveInFlight("offline", true)).toBe(false)
+  it("offline, reads Saving… while the write is landing, then Saved offline", () => {
+    expect(saveTrace("offline", dispatched)).toBe("saving")
+    // A further edit while one is already waiting: the write comes first.
+    expect(saveTrace("offline", { pendingSave: true, pushesPending: true })).toBe("saving")
+    expect(saveTrace("offline", queued)).toBe("saved-offline")
+    // Offline with nothing waiting: nothing about the note is unusual.
+    expect(saveTrace("offline", idle)).toBeNull()
   })
 
-  it("stays quiet signed out, where no push can land", () => {
-    expect(isSaveInFlight("signed-out", true)).toBe(false)
-    expect(isSaveInFlight("hidden", true)).toBe(false)
+  it("says nothing signed out or outside database mode, where no push can land", () => {
+    expect(saveTrace("signed-out", queued)).toBeNull()
+    expect(saveTrace("signed-out", dispatched)).toBeNull()
+    expect(saveTrace("hidden", dispatched)).toBeNull()
   })
 })
