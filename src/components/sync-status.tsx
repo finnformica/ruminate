@@ -9,9 +9,11 @@ import { CheckFillIcon16, ErrorFillIcon16, LoadingFillIcon16, OfflineIcon16 } fr
 
 /**
  * "Actively syncing": a D1 pull in flight, or replica pushes queued/pending
- * (so a save shows as syncing until its push lands).
+ * (so a save shows as syncing until its push lands). Raw: offline, the
+ * pending pushes wait for the network and this stays true — read it through
+ * `syncStatusKind`, which puts "offline" first.
  */
-export const isSyncingAtom = atom((get) => {
+const isSyncingAtom = atom((get) => {
   const pull = get(databaseModeStatusAtom).pull
   const replica = get(storageDiagnosticsAtom).replica
   return (
@@ -28,6 +30,15 @@ const isSyncErrorAtom = atom((get) => {
   const replica = get(storageDiagnosticsAtom).replica
   return status.pull === "error" || (replica?.lastError ?? null) !== null
 })
+
+export type SyncStatusKind =
+  | "hidden"
+  | "offline"
+  | "signed-out"
+  | "syncing"
+  | "expiring"
+  | "failed"
+  | "synced"
 
 /** The inputs the sidebar's sync status is read from. */
 export interface SyncStatusState {
@@ -55,11 +66,10 @@ export interface SyncStatusState {
  * - `failed`: the last push or pull failed, with the network up.
  * - `synced`: nothing pending, nothing wrong.
  *
- * Pure, so the sidebar row, the nav-bar badge and their tests share it.
+ * Pure, so the sidebar row, the nav-bar badge, the note header's "Saving…"
+ * trace (`isSaveInFlight`) and their tests share it.
  */
-export function syncStatusKind(
-  state: SyncStatusState,
-): "hidden" | "offline" | "signed-out" | "syncing" | "expiring" | "failed" | "synced" {
+export function syncStatusKind(state: SyncStatusState): SyncStatusKind {
   if (!state.isDatabaseMode) return "hidden"
   if (!state.online) return "offline"
   if (state.session === "expired") return "signed-out"
@@ -84,6 +94,31 @@ export function attentionTone(state: SyncStatusState): "danger" | "pending" | nu
   }
 }
 
+/**
+ * Whether a note's header shows its "Saving…" trace: pushes in flight, or a
+ * save just dispatched (`pendingSave`, ahead of the debounced push) where a
+ * push can land. Offline, or signed out, the pending pushes wait for the
+ * network or the sign-in — nothing is in flight, and the sidebar's status
+ * says why — so the trace would spin without end over an edit that was saved
+ * on this device the moment it was made. Read through `syncStatusKind`, so
+ * the trace shows exactly when the sidebar reads "Syncing…" (plus the
+ * dispatch-to-push moment).
+ */
+export function isSaveInFlight(kind: SyncStatusKind, pendingSave: boolean): boolean {
+  switch (kind) {
+    case "syncing":
+      return true
+    case "synced":
+    case "expiring":
+    case "failed":
+      return pendingSave
+    case "hidden":
+    case "offline":
+    case "signed-out":
+      return false
+  }
+}
+
 function useSyncStatusState(): SyncStatusState {
   const isSyncing = useAtomValue(isSyncingAtom)
   const isSyncError = useAtomValue(isSyncErrorAtom)
@@ -91,6 +126,11 @@ function useSyncStatusState(): SyncStatusState {
   const session = useAtomValue(sessionStatusAtom)
   const { online } = useNetworkState()
   return { isDatabaseMode, online: online !== false, session, isSyncing, isSyncError }
+}
+
+/** The sync status' one reading, live (see `syncStatusKind`). */
+export function useSyncStatusKind(): SyncStatusKind {
+  return syncStatusKind(useSyncStatusState())
 }
 
 /** The sync status' attention tone, live (see `attentionTone`). */

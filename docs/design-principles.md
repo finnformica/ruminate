@@ -477,7 +477,12 @@ itself, with `usePending` (`src/hooks/pending.ts`) to hold a flight. A
 request that ends in leaving the page (signing in, taking an update) stays
 busy until the page has gone, since on this page it has no after. The
 "Saving…" trace in a note's header is the same rule on a surface rather
-than a control.
+than a control: it shows from the edit until its push has landed, and only
+while a push can land. Offline, or signed out, the edit is saved on this
+device the moment it is made and its push waits for the network or the
+sign-in, which the sidebar's status already says — so the trace stays quiet
+rather than spinning without end over nothing in flight (`isSaveInFlight`,
+`src/components/sync-status.tsx`).
 
 ## Empty-block placeholder
 

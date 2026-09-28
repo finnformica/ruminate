@@ -17,7 +17,7 @@ import { NoteActionsMenu } from "../components/note-actions-menu"
 import { UnassignedBasket } from "../components/unassigned-basket"
 import { NoteFavicon } from "../components/note-favicon"
 import { PageLayout } from "../components/page-layout"
-import { isSyncingAtom } from "../components/sync-status"
+import { isSaveInFlight, useSyncStatusKind } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { sharedModeStatusAtom } from "../data/shared-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
@@ -130,7 +130,8 @@ function NotePage() {
 
   // Global state
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  const isSyncing = useAtomValue(isSyncingAtom)
+  const syncStatus = useSyncStatusKind()
+  const isSyncing = syncStatus === "syncing"
   const databaseStatus = useAtomValue(databaseModeStatusAtom)
   const sharedStatus = useAtomValue(sharedModeStatusAtom)
   // While the local store is still opening — or the notes shared with the
@@ -302,7 +303,9 @@ function NotePage() {
     }
   }, [isSyncing])
 
-  const isSaving = pendingSave || isSyncing
+  // Offline, or signed out, nothing is in flight — the edit is on this device
+  // and the sidebar says so — and the trace stays quiet (`isSaveInFlight`).
+  const isSaving = isSaveInFlight(syncStatus, pendingSave)
 
   // Note props (width, gist) are one `setProps` op, written at once.
   const setProp = React.useCallback(

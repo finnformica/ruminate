@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { attentionTone, syncStatusKind } from "./sync-status"
+import { attentionTone, isSaveInFlight, syncStatusKind } from "./sync-status"
 
 const base = {
   isDatabaseMode: true,
@@ -63,5 +63,31 @@ describe("attentionTone", () => {
   it("says nothing offline or outside database mode (there is no sync to fail)", () => {
     expect(attentionTone({ ...base, online: false, isSyncError: true })).toBeNull()
     expect(attentionTone({ ...base, isDatabaseMode: false, session: "expired" })).toBeNull()
+  })
+})
+
+describe("isSaveInFlight", () => {
+  it("shows the trace while pushes are in flight", () => {
+    expect(isSaveInFlight("syncing", false)).toBe(true)
+    expect(isSaveInFlight("syncing", true)).toBe(true)
+  })
+
+  it("shows the trace from the dispatch until the push starts, where a push can land", () => {
+    expect(isSaveInFlight("synced", true)).toBe(true)
+    expect(isSaveInFlight("expiring", true)).toBe(true)
+    expect(isSaveInFlight("failed", true)).toBe(true)
+    expect(isSaveInFlight("synced", false)).toBe(false)
+    expect(isSaveInFlight("failed", false)).toBe(false)
+  })
+
+  it("stays quiet offline: the edit is on this device, and the pushes wait", () => {
+    // Pending pushes read as "syncing" only online; offline they are not in flight.
+    expect(isSaveInFlight("offline", false)).toBe(false)
+    expect(isSaveInFlight("offline", true)).toBe(false)
+  })
+
+  it("stays quiet signed out, where no push can land", () => {
+    expect(isSaveInFlight("signed-out", true)).toBe(false)
+    expect(isSaveInFlight("hidden", true)).toBe(false)
   })
 })
