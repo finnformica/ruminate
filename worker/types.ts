@@ -32,6 +32,14 @@ export interface Env {
   SIGNUP_MODE?: string
   /** Overrides the code default in replica.ts — raise to shut out old clients. */
   MIN_REPLICA_PROTOCOL?: string
+  /**
+   * Which database this Worker's replica answers from — absent in production,
+   * the preview clone's D1 id on a preview version (scripts/preview-deploy.mjs,
+   * docs/preview-databases.md). Echoed on every pull and status response so a
+   * client that last pulled from a different database discards its cache
+   * rather than carry a cursor from one database into another.
+   */
+  REPLICA_ID?: string
   GITHUB_CLIENT_SECRET: string
   /** Image bytes (docs/images.md). Absent until the bucket is bound. */
   IMAGES?: R2Bucket

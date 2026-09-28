@@ -118,6 +118,29 @@ const OWNER_KEY = "store_owner"
  * this is bumped deliberately rather than routinely.
  */
 export const CACHE_GENERATION = "6"
+/**
+ * The database the local copy was last pulled from — `"production"`, or a
+ * preview clone's id — as the replica reports it (`replica_id` on every pull,
+ * `Env.REPLICA_ID` on the Worker). A pull cursor is a row sequence issued by
+ * ONE database: a preview clone rebuilt from production starts its sequence
+ * wherever production was that day, which is behind any device that had
+ * pushed to the previous clone at the same URL, so its since-pulls would
+ * fetch nothing forever. When the id changes, the cache goes the way of a
+ * stale generation: wiped, cursor included, and pulled again in full
+ * (docs/preview-databases.md).
+ */
+const REPLICA_ID_KEY = "replica_id"
+
+/**
+ * Has the replica behind this URL been swapped for another database since
+ * the local copy last pulled? Unknown (an older Worker sends no id) and
+ * first contact (nothing stored yet) are both "no": neither is evidence of a
+ * swap, and wiping on either would cost a device its unpushed edits for
+ * nothing.
+ */
+function replicaIdentityChanged(stored: string | null, seen: string | undefined) {
+  return typeof seen === "string" && seen.length > 0 && stored !== null && stored !== seen
+}
 const CACHE_GENERATION_KEY = "cache_generation"
 const PULL_RETRY_MS = 60_000
 /** How long a run of ops coalesces before it is written: a typed word is one
@@ -701,10 +724,23 @@ function runPull(activation: DatabaseModeRuntime) {
       // in the same shape; a full pull is simply "everything changed".
       const useSince =
         cursor !== null && /^\d+$/.test(cursor) && Number(cursor) < LEGACY_TIMESTAMP_CURSOR_FLOOR
-      const body: ReplicaChangesBody = useSince
+      let body: ReplicaChangesBody = useSince
         ? await activation.source.pullSince(cursor)
         : await activation.source.pullFull()
       if (runtime !== activation) return
+
+      // A different database behind the same URL (a rebuilt preview clone):
+      // the rows AND the cursor belong to the old one. Same wipe as a stale
+      // cache generation, then the full corpus of the new one.
+      if (replicaIdentityChanged(await store.getMeta(REPLICA_ID_KEY), body.replica_id)) {
+        await store.clear()
+        await store.setMeta(PULL_CURSOR_KEY, "")
+        if (useSince) body = await activation.source.pullFull()
+        if (runtime !== activation) return
+      }
+      if (typeof body.replica_id === "string" && body.replica_id.length > 0) {
+        await store.setMeta(REPLICA_ID_KEY, body.replica_id)
+      }
 
       const local = await store.getAllRows()
       const pendingNoteIds = activation.replica?.pendingNoteIds?.() ?? new Set<string>()
