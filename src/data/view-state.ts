@@ -5,33 +5,59 @@ import { idOfKey, type ExpandedRule } from "../blocks/view"
 import { expandedLevelsAtom } from "../global-state"
 
 /**
- * Fold state for one note: per-device ephemera, not synced data
+ * Fold state for one VIEW: per-device ephemera, not synced data
  * (docs/graph-schema-v2.md dropped the view_state table). Folds key by
  * occurrence (`src/blocks/view.ts`): a block that shows up twice in a note is
  * two rows, folded independently.
  *
- * Two layers, one answer. The depth setting (`expandedByDepth`, Settings →
- * Editor) is a standing rule that decides every row the reader has not
- * touched. Over it sit the reader's own folds — the rows they closed AND the
- * rows they opened, each remembered explicitly, so a row they opened stays
- * open when the setting moves and a row they closed stays closed when the
- * note grows around it. A row with no entry follows the rule, which is what
- * lets the walk be lazy (`walkGraph`): a row reached for the first time has
- * an answer without a document to seed from.
+ * A view is a note, or a note narrowed by a filter and a sort
+ * (`src/data/filter-view.ts`), and each keeps folds of its own under its own
+ * key (`foldKeyOf`). So the note's folds and a filtered view's are two
+ * entries in one store, told apart by key rather than by a second store: a
+ * chevron clicked while narrowed lands on the narrowed view's entry, and
+ * the note's is untouched underneath; clear the filter and the note's folds
+ * are back, put the same filter on again and its folds are back too.
  *
- * Storage is bounded: entries are per note (`collapse:<noteId>`), only notes
- * the reader has folded or unfolded are stored, and the least recently
- * written fall off past `MAX_STORED_NOTES`. Settings offers a reset that
+ * Two layers, one answer. A standing rule decides every row the reader has
+ * not touched: for a note, the depth setting (`expandedByDepth`, Settings →
+ * Editor); for a narrowed view, everything open — the reader asked for the
+ * matches, and a match behind a fold would be a riddle. Over it sit the
+ * reader's own folds — the rows they closed AND the rows they opened, each
+ * remembered explicitly, so a row they opened stays open when the setting
+ * moves and a row they closed stays closed when the note grows around it. A
+ * row with no entry follows the rule, which is what lets the walk be lazy
+ * (`walkGraph`): a row reached for the first time has an answer without a
+ * document to seed from.
+ *
+ * Storage is bounded: entries are per view (`collapse:<key>`), only views
+ * the reader has folded or unfolded in are stored, and the least recently
+ * written fall off past `MAX_STORED_VIEWS`. Settings offers a reset that
  * forgets every fold on the device. Nothing is pruned against the document:
  * a lazy doc does not hold the rows beneath a fold, and a fold on a row that
  * has since gone is inert.
  */
 
 const STORAGE_PREFIX = "collapse:"
-const storageKey = (noteId: string) => `${STORAGE_PREFIX}${noteId}`
+const storageKey = (viewKey: string) => `${STORAGE_PREFIX}${viewKey}`
 
-/** How many notes' folds a device keeps; the least recently written go first. */
-export const MAX_STORED_NOTES = 500
+/** How many views' folds a device keeps; the least recently written go first. */
+export const MAX_STORED_VIEWS = 500
+
+/** What a view is narrowed by, as the page has it (empty = not at all). */
+export interface Narrowing {
+  filter?: string
+  sort?: string
+}
+
+/**
+ * The key a view's folds are kept under: the note's id for the note itself
+ * (so every fold stored to date is still where it was), and the id with the
+ * filter and sort appended for a narrowed view. Newlines separate the parts
+ * because neither an id nor a query holds one.
+ */
+export function foldKeyOf(noteId: string, { filter = "", sort = "" }: Narrowing = {}): string {
+  return filter === "" && sort === "" ? noteId : `${noteId}\n${filter}\n${sort}`
+}
 
 /** The reader's explicit folds on one note. Never mutated — every update
  * builds fresh sets. */
@@ -67,10 +93,10 @@ const asStrings = (x: unknown): string[] =>
  * along. An entry without a `/` is a block id from before folds keyed by
  * occurrence, and applies to every occurrence of that block (`foldRule`).
  */
-export function readFolds(noteId: string | undefined): Folds | null {
-  if (!noteId || typeof localStorage === "undefined") return null
+export function readFolds(viewKey: string | undefined): Folds | null {
+  if (!viewKey || typeof localStorage === "undefined") return null
   try {
-    const raw = localStorage.getItem(storageKey(noteId))
+    const raw = localStorage.getItem(storageKey(viewKey))
     if (!raw) return null
     const parsed: unknown = JSON.parse(raw)
     if (Array.isArray(parsed)) return { open: new Set(), closed: new Set(asStrings(parsed)) }
@@ -109,32 +135,32 @@ function storedTime(raw: string | null): number {
   }
 }
 
-/** Every note id with folds stored on this device. */
-function storedNoteIds(): string[] {
-  const ids: string[] = []
+/** Every view key with folds stored on this device. */
+function storedViewKeys(): string[] {
+  const keys: string[] = []
   for (let i = 0; i < localStorage.length; i += 1) {
     const key = localStorage.key(i)
-    if (key?.startsWith(STORAGE_PREFIX)) ids.push(key.slice(STORAGE_PREFIX.length))
+    if (key?.startsWith(STORAGE_PREFIX)) keys.push(key.slice(STORAGE_PREFIX.length))
   }
-  return ids
+  return keys
 }
 
 /** Drop the least recently written entries beyond the cap. */
-function pruneStoredNotes(keep: string) {
-  const ids = storedNoteIds()
-  if (ids.length <= MAX_STORED_NOTES) return
-  const byAge = ids
-    .filter((id) => id !== keep)
-    .map((id) => ({ id, t: storedTime(localStorage.getItem(storageKey(id))) }))
+function pruneStoredViews(keep: string) {
+  const keys = storedViewKeys()
+  if (keys.length <= MAX_STORED_VIEWS) return
+  const byAge = keys
+    .filter((key) => key !== keep)
+    .map((key) => ({ key, t: storedTime(localStorage.getItem(storageKey(key))) }))
     .sort((a, b) => a.t - b.t)
-  for (const { id } of byAge.slice(0, ids.length - MAX_STORED_NOTES)) {
-    localStorage.removeItem(storageKey(id))
+  for (const { key } of byAge.slice(0, keys.length - MAX_STORED_VIEWS)) {
+    localStorage.removeItem(storageKey(key))
   }
 }
 
-/** Persist a note's folds. Empty lists are still written: they record that
+/** Persist a view's folds. Empty lists are still written: they record that
  * the reader's last toggle put a row back where the rule has it. */
-export function writeFolds(noteId: string, folds: Folds) {
+export function writeFolds(viewKey: string, folds: Folds) {
   if (typeof localStorage === "undefined") return
   try {
     const entry: StoredFolds = {
@@ -143,8 +169,8 @@ export function writeFolds(noteId: string, folds: Folds) {
       closed: [...folds.closed],
       t: Date.now(),
     }
-    localStorage.setItem(storageKey(noteId), JSON.stringify(entry))
-    pruneStoredNotes(noteId)
+    localStorage.setItem(storageKey(viewKey), JSON.stringify(entry))
+    pruneStoredViews(viewKey)
   } catch {
     // Storage full/unavailable — fold state is ephemeral by design.
   }
@@ -186,77 +212,46 @@ export function withFold(folds: Folds, key: string, open: boolean): Folds {
   return next
 }
 
+/** The standing rule of a narrowed view: every row open. */
+const EVERYTHING_OPEN: ExpandedRule = () => true
+
 /**
- * Fold state for one note: the rule its view is walked by, and the way to
- * move a row. `setFold(key, open)` records the reader's decision for that
- * row (and persists it, when there is a note to persist under); the owner of
+ * Fold state for one view — a note, or the note narrowed by `narrowing`:
+ * the rule its rows are drawn by, and the way to move a row. `setFold(key,
+ * open)` records the reader's decision for that row (and persists it, under
+ * the view's own key, when there is a note to persist under); the owner of
  * the view — which knows what is folded right now — turns a toggle into
  * one. Without a note id (Storybook / standalone) nothing is stored.
+ *
+ * The standing rule beneath the reader's folds is the depth setting for a
+ * note and everything open for a narrowed view (see the top of this file):
+ * the one place that says what a view starts as.
  */
-export function useFoldRule(noteId: string | undefined) {
+export function useFoldRule(noteId: string | undefined, narrowing: Narrowing = {}) {
   const levels = useAtomValue(expandedLevelsAtom)
-  const [state, setState] = React.useState<{ noteId: string | undefined; folds: Folds }>(() => ({
-    noteId,
-    folds: readFolds(noteId) ?? NO_FOLDS,
+  const { filter = "", sort = "" } = narrowing
+  const viewKey = noteId === undefined ? undefined : foldKeyOf(noteId, { filter, sort })
+  const narrowed = filter !== "" || sort !== ""
+  const [state, setState] = React.useState<{ viewKey: string | undefined; folds: Folds }>(() => ({
+    viewKey,
+    folds: readFolds(viewKey) ?? NO_FOLDS,
   }))
-  // Re-read during render on a different note, so the new note never paints
-  // with the old note's folds. Settles in one extra render.
-  if (state.noteId !== noteId) setState({ noteId, folds: readFolds(noteId) ?? NO_FOLDS })
+  // Re-read during render on a different view, so the new view never paints
+  // with the old one's folds. Settles in one extra render.
+  if (state.viewKey !== viewKey) setState({ viewKey, folds: readFolds(viewKey) ?? NO_FOLDS })
 
   const expanded = React.useMemo(
-    () => foldRule(state.folds, expandedByDepth(levels)),
-    [state.folds, levels],
+    () => foldRule(state.folds, narrowed ? EVERYTHING_OPEN : expandedByDepth(levels)),
+    [state.folds, narrowed, levels],
   )
 
   const setFold = React.useCallback((key: string, open: boolean) => {
     setState((prev) => {
       const folds = withFold(prev.folds, key, open)
-      if (prev.noteId) writeFolds(prev.noteId, folds)
+      if (prev.viewKey) writeFolds(prev.viewKey, folds)
       return { ...prev, folds }
     })
   }, [])
 
   return { expanded, setFold, folds: state.folds }
-}
-
-const NO_KEYS: ReadonlySet<string> = new Set()
-
-/**
- * Folds for a NARROWED view — a note filtered or sorted in place
- * (`src/data/filter-view.ts`). Such a view opens fully whatever the reader's
- * folds on the note say: they asked for the matches, and a match behind a
- * fold would be a riddle. A long filtered outline still wants folding,
- * though, so the view keeps folds of its own: transient, never stored, and
- * forgotten whenever `resetKey` changes (the filter, the sort, the note or
- * the focus). The note's own folds (`useFoldRule`) are left untouched
- * underneath and come back the moment the narrowing clears — a chevron
- * clicked in a filtered view must never leave a row folded in the note.
- */
-export function useNarrowedFolds(resetKey: string) {
-  const [state, setState] = React.useState<{ resetKey: string; closed: ReadonlySet<string> }>(
-    () => ({ resetKey, closed: NO_KEYS }),
-  )
-  // Re-read during render on a different narrowing, so a new filter never
-  // paints with the old one's folds. Settles in one extra render.
-  if (state.resetKey !== resetKey) setState({ resetKey, closed: NO_KEYS })
-
-  const toggle = React.useCallback((key: string) => {
-    setState((prev) => {
-      const closed = new Set(prev.closed)
-      if (closed.has(key)) closed.delete(key)
-      else closed.add(key)
-      return { ...prev, closed }
-    })
-  }, [])
-
-  const setOpen = React.useCallback((key: string) => {
-    setState((prev) => {
-      if (!prev.closed.has(key)) return prev
-      const closed = new Set(prev.closed)
-      closed.delete(key)
-      return { ...prev, closed }
-    })
-  }, [])
-
-  return { collapsed: state.closed, toggle, setOpen }
 }

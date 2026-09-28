@@ -64,6 +64,37 @@ describe("docToOps", () => {
     expect(docToOps("a", noteDoc("a", snapshot)!, snapshot)).toEqual([])
   })
 
+  it("a doc that shows part of the note edits only what it shows", () => {
+    const snapshot = graphOf({ a: A })
+    // A view of the note with `one` filtered out: `two` and `deep` alone.
+    const whole = noteDoc("a", snapshot)!
+    const shown: BlockDoc = {
+      ...whole,
+      rootBlockIds: ["blk_two0000000"],
+      blocks: {
+        blk_two0000000: whole.blocks.blk_two0000000,
+        blk_deep000000: whole.blocks.blk_deep000000,
+      },
+    }
+    // Handed back as it was: nothing — `one` is hidden, not removed.
+    expect(docToOps("a", shown, snapshot, undefined, "a", shown)).toEqual([])
+    // Whereas without saying what was shown, the same doc removes `one`.
+    expect(kinds(docToOps("a", shown, snapshot))).toEqual(["unlink"])
+
+    // A row added after `two` follows it in the note; `one` stays first.
+    const fresh = emptyBlock("ul", "three")
+    const added = insertAfter(shown, "blk_two0000000", fresh)
+    const ops = docToOps("a", added, snapshot, undefined, "a", shown)
+    expect(kinds(ops)).toEqual(["create", "link"])
+    const after = applyOps(snapshot, ops, NOW)
+    expect(walk(after, "a")).toBe(A + "- three\n  id:: " + fresh.id + "\n")
+
+    // `two` removed from the view is unlinked, and only it: `one` stands.
+    const removed = removeBlock(shown, "blk_two0000000").doc
+    const gone = docToOps("a", removed, snapshot, undefined, "a", shown)
+    expect(gone).toEqual([{ op: "unlink", source: "a", destination: "blk_two0000000" }])
+  })
+
   it("typing is one setText; nothing else moves", () => {
     const snapshot = graphOf({ a: A })
     const doc = updateText(noteDoc("a", snapshot)!, "blk_one0000000", "one edited")

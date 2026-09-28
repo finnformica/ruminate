@@ -36,7 +36,7 @@ import { useNoteDoc } from "../hooks/note-doc"
 import { pathToBlock } from "../data/graph"
 import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
 import { FilterMenu, SortMenu } from "../components/view-controls"
-import { useFoldRule, useNarrowedFolds } from "../data/view-state"
+import { useFoldRule } from "../data/view-state"
 import { keyOf } from "../blocks/view"
 import { useNoteShare } from "../hooks/share"
 import { shareOwnerName } from "../data/shares"
@@ -181,15 +181,11 @@ function NotePage() {
   // The doc is the walk of the note — or of the focused block — over the
   // live graph, descended only where the reader's folds open a row
   // (`useFoldRule`); every change the editor hands back becomes ops applied
-  // to the graph — see useNoteDoc.
-  const { expanded, setFold } = useFoldRule(noteId)
-  // Narrowed — a filter or a sort on — the view opens fully and folds on its
-  // own, transiently (`useNarrowedFolds`): the note's folds stand aside, and
-  // a chevron clicked here must not write to them.
+  // to the graph — see useNoteDoc. The folds are the VIEW's: the note's, or
+  // — narrowed — the ones kept for this filter and sort, so a chevron
+  // clicked here never lands on the note's own.
+  const { expanded, setFold } = useFoldRule(noteId, { filter, sort })
   const narrowed = filter !== "" || sort !== ""
-  const narrowedFolds = useNarrowedFolds(
-    [noteId ?? "", focusBlockId ?? "", filter, sort].join("\n"),
-  )
   const directions = useAtomValue(linkDirectionsAtom)
   const {
     doc: editorDoc,
@@ -519,15 +515,11 @@ function NotePage() {
                   noteId={noteId}
                   doc={editorDoc}
                   onChange={setEditorDoc}
-                  folds={
-                    narrowed
-                      ? narrowedFolds
-                      : {
-                          collapsed,
-                          toggle: (key) => setFold(key, collapsed.has(key)),
-                          setOpen: (key) => setFold(key, true),
-                        }
-                  }
+                  folds={{
+                    collapsed,
+                    toggle: (key) => setFold(key, collapsed.has(key)),
+                    setOpen: (key) => setFold(key, true),
+                  }}
                   onToggleCollapse={touch}
                   startEditing={isNewNote && !showsTitle}
                   readOnly={readOnlyShare}
@@ -549,10 +541,11 @@ function NotePage() {
                   }}
                   noteTitle={note?.displayName ?? ""}
                   context={context}
-                  // Narrowed, there is no blank row to type into: a new
-                  // block is structure, and structure belongs to the note
-                  // rather than to a selection of it (`useNoteDoc`). A row
-                  // that swallowed typing would be a lie.
+                  // Narrowed, there is no blank row to type into. A new
+                  // row lands in the note as it does anywhere (Enter on a
+                  // row, `useNoteDoc`), but a blank one is a plain text row
+                  // the filter hides the moment it is typed into, and one
+                  // minted on every edit would litter the note with empties.
                   trailingBlank={!narrowed}
                 />
                 {noteId && noteExists && share === null ? (
