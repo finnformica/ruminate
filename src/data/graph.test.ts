@@ -1192,6 +1192,64 @@ describe("sort keys", () => {
     expect(moved > "a1" && moved < "a2").toBe(true)
   })
 
+  it("reconcileSortKeys places a child among the shown, in the graph's order", () => {
+    const existing = [
+      { id: "a", sortKey: "a0" },
+      { id: "hidden", sortKey: "a1" },
+      { id: "b", sortKey: "a2" },
+    ]
+    // The view showed a and b, with `hidden` between them held back. A child
+    // put after a lands after a in the graph — before `hidden`, which the
+    // edit never saw — and the shown keep their keys.
+    const keys = reconcileSortKeys(existing, ["a", "new", "b"], ["a", "b"])
+    expect(keys.get("a")).toBe("a0")
+    expect(keys.get("b")).toBe("a2")
+    expect(keys.has("hidden")).toBe(false)
+    const inserted = keys.get("new") as string
+    expect(inserted > "a0" && inserted < "a1").toBe(true)
+    // Before the first shown child: just before it in the graph.
+    const first = reconcileSortKeys(existing, ["new", "a", "b"], ["a", "b"]).get("new") as string
+    expect(first < "a0").toBe(true)
+    // After the last: after everything the graph holds under the parent.
+    const last = reconcileSortKeys(existing, ["a", "b", "new"], ["a", "b"]).get("new") as string
+    expect(last > "a2").toBe(true)
+  })
+
+  it("reconcileSortKeys keeps a sorted view's keys, and moves within it against the graph", () => {
+    const existing = [
+      { id: "a", sortKey: "a0" },
+      { id: "b", sortKey: "a1" },
+      { id: "c", sortKey: "a2" },
+    ]
+    // Shown sorted the other way round, and handed back unchanged: nothing
+    // is re-keyed, however the keys run along the list.
+    expect([...reconcileSortKeys(existing, ["c", "b", "a"], ["c", "b", "a"])]).toEqual([
+      ["c", "a2"],
+      ["b", "a1"],
+      ["a", "a0"],
+    ])
+    // Two rows swapped in that view: one of them is re-keyed to follow the
+    // other in the graph, and the third is left alone.
+    const moved = reconcileSortKeys(existing, ["c", "a", "b"], ["c", "b", "a"])
+    expect(moved.get("c")).toBe("a2")
+    const rekeyed = ["a", "b"].filter(
+      (id) => moved.get(id) !== existing.find((e) => e.id === id)?.sortKey,
+    )
+    expect(rekeyed).toHaveLength(1)
+  })
+
+  it("reconcileSortKeys starts afresh only when nothing hidden remains", () => {
+    const existing = [
+      { id: "a", sortKey: "a0" },
+      { id: "hidden", sortKey: "a1" },
+    ]
+    // The shown child replaced by another: after the hidden one.
+    const kept = reconcileSortKeys(existing, ["new"], ["a"]).get("new") as string
+    expect(kept > "a1").toBe(true)
+    // Nothing hidden: the list is the edit's to key from the start.
+    expect(reconcileSortKeys([{ id: "a", sortKey: "a0" }], ["new"]).get("new")).toBe("a0")
+  })
+
   it("reconcileSortKeys yields strictly increasing keys for any order", () => {
     const existing = [
       { id: "a", sortKey: "a0" },

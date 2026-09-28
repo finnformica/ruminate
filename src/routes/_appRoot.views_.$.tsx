@@ -549,10 +549,11 @@ function NotePage() {
                   }}
                   noteTitle={note?.displayName ?? ""}
                   context={context}
-                  // Narrowed, there is no blank row to type into: a new
-                  // block is structure, and structure belongs to the note
-                  // rather than to a selection of it (`useNoteDoc`). A row
-                  // that swallowed typing would be a lie.
+                  // Narrowed, there is no blank row to type into. A new
+                  // row lands in the note as it does anywhere (Enter on a
+                  // row, `useNoteDoc`), but a blank one is a plain text row
+                  // the filter hides the moment it is typed into, and one
+                  // minted on every edit would litter the note with empties.
                   trailingBlank={!narrowed}
                 />
                 {noteId && noteExists && share === null ? (

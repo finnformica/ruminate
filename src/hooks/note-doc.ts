@@ -33,9 +33,13 @@ const NO_CONTEXT: ReadonlySet<string> = new Set()
  * everything is walked.
  *
  * `setDoc(next)` is the editor handing back what it now shows. The
- * difference between the graph and `next` becomes a batch of ops
+ * difference between what it was shown and `next` becomes a batch of ops
  * (`docToOps`: a new block is one `create` and one `link`, typing is one
- * `setText`) applied to the graph at once and written behind. The note's
+ * `setText`) applied to the graph at once and written behind. Narrowed —
+ * a filter or a sort on (`src/data/filter-view.ts`) — the doc is the rows
+ * that survived, in the view's order, and the edit is read as exactly
+ * that: the rows the filter hid, and the note's own order, are left as they
+ * are, and everything else edits as it does in the note. The note's
  * `updated_at` is stamped on every change — what orders the Views page and
  * drives the replica's incremental pulls (docs/graph-storage.md); in focus,
  * where the doc says nothing about the note node, as its own `setProps`.
@@ -108,6 +112,9 @@ export function useNoteDoc({
   // Once the note has been seen, its absence means "deleted", not "new".
   const seenRef = useRef(exists)
   if (exists) seenRef.current = true
+  // What the editor was handed — the doc an edit starts from.
+  const shownRef = useRef(view)
+  shownRef.current = view
 
   const setDoc = useCallback(
     (next: BlockDoc, hint?: ChangeHint) => {
@@ -119,26 +126,18 @@ export function useNoteDoc({
         if (seenRef.current) return // deleted underneath: let it stay deleted
         if (isEmptyDoc(next)) return // nothing worth creating a note for
       }
-      if (narrowed) {
-        // **A narrowed view is a SELECTION of the note, not the note.** Its
-        // doc holds only the rows that survived the filter, in the order the
-        // sort put them — so reconciling it against the graph would read
-        // every hidden row as removed and every reordered one as moved, and
-        // an unlink is how a row leaves a note. Only the ops that change a
-        // row's own value are kept: ticking a to-do, retyping a line, a
-        // block's props. Structure — new rows, indents, removals, reorders —
-        // belongs to the note itself, which is one click away with the
-        // filter cleared.
-        const ops = docToOps(noteId, next, current, hint?.discard, rootId ?? undefined).filter(
-          (op) => op.op === "setText" || op.op === "setType" || op.op === "setProps",
-        )
-        if (ops.length > 0) apply([...ops, ...notePropsOps(noteId, {}, current)])
-        return
-      }
+      // The diff is read as the edit to what the view SHOWED (`docToOps`,
+      // `shown`): the whole note, or — narrowed — the rows that survived the
+      // filter in the order the sort put them. So a narrowed view edits as
+      // the note does, with the same editor and the same save: a row added
+      // beneath a match lands beside it in the note, a row removed is
+      // unlinked, and the rows the filter hid, and the note's own order,
+      // are never this edit's to change.
+      const shown = shownRef.current?.doc
       if (rootId) {
         // In focus: the block's subtree is diffed; the note itself is only
         // stamped, and only when something changed.
-        const ops = docToOps(noteId, next, current, hint?.discard, rootId)
+        const ops = docToOps(noteId, next, current, hint?.discard, rootId, shown)
         if (ops.length > 0) apply([...ops, ...notePropsOps(noteId, {}, current)])
         return
       }
@@ -146,9 +145,9 @@ export function useNoteDoc({
         ...next,
         props: { ...(next.props ?? {}), updated_at: new Date().toISOString() },
       }
-      apply(docToOps(noteId, stamped, current, hint?.discard))
+      apply(docToOps(noteId, stamped, current, hint?.discard, noteId, shown))
     },
-    [noteId, rootId, narrowed, store, apply],
+    [noteId, rootId, store, apply],
   )
 
   return {

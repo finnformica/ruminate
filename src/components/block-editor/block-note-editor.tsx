@@ -167,8 +167,8 @@ export function BlockNoteEditor({
   //
   // A view that may legitimately hold nothing gets no starter either: a
   // filter that matched nothing, and the basket, would otherwise show one
-  // empty row that cannot be typed into (a narrowed view writes no structure
-  // — `useNoteDoc`) and that reads as "this note is empty" when it is not.
+  // empty row that reads as "this note is empty" when it is not, and that
+  // the filter would hide again as soon as it was typed into.
   const seedDoc = (incoming: BlockDoc) => {
     if (!trailingBlank) return incoming
     const seeded = withStarterBlock(incoming)

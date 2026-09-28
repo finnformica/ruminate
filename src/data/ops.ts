@@ -362,6 +362,16 @@ export function deleteSubtreeOps(blockIds: string | string[], snapshot: GraphSna
   return [...unlinks, ...[...doomed].map((id) => ({ op: "delete", id }) as Op), ...blanks]
 }
 /**
+ * The child lists a doc shows, by parent — its roots under `rootId`, and
+ * each block's children — as `partsToOps` reads them (`shownOf`).
+ */
+function shownListsOf(doc: BlockDoc, rootId: string): Map<string, string[]> {
+  const lists = new Map<string, string[]>([[rootId, doc.rootBlockIds]])
+  for (const [id, block] of Object.entries(doc.blocks)) lists.set(id, block.children)
+  return lists
+}
+
+/**
  * The batch that makes the graph hold `doc` as note `noteId`'s content:
  *
  * - the note node created or retitled/re-propped;
@@ -390,6 +400,17 @@ export function deleteSubtreeOps(blockIds: string | string[], snapshot: GraphSna
  * reconciles to nothing, and the blocks beneath it, absent from `nodes`,
  * keep their parent and are never dropped. `rootId` names the doc's root
  * when it is a block rather than the note (the focused page).
+ *
+ * `shown` is the doc the edit started from — what the view SHOWED, which
+ * may be less than the note (a filtered view holds only the rows that
+ * survived) or in another order (a sorted one). Given, the diff is read as
+ * the edit it was: a child shown and gone is removed, a child not shown was
+ * never this edit's to touch and keeps its place, and a new or moved one
+ * lands beside the shown rows it was put between, in the note's own order
+ * (`reconcileSortKeys`). So a narrowed view edits exactly as the note does —
+ * the same doc maths, the same editor, the same save — and never reads the
+ * rows it hid as removed, nor writes its sort into the note. Without it,
+ * the doc is taken to show everything.
  */
 export function docToOps(
   noteId: NoteId,
@@ -397,6 +418,7 @@ export function docToOps(
   snapshot: GraphSnapshot,
   discard?: Iterable<string>,
   rootId: string = noteId,
+  shown?: BlockDoc,
 ): Op[] {
   const { nodes, childrenOf, upstreamOf } = docToParts(
     noteId,
@@ -404,6 +426,7 @@ export function docToOps(
     0,
     reservedNoteIds(snapshot, noteId),
   )
+  const shownOf = shown ? shownListsOf(shown, rootId) : undefined
   if (rootId !== noteId) {
     // A doc rooted at a block (the focused page, `blockView`): its one root is
     // the block, walked as a block, so its own text and children are diffed
@@ -421,6 +444,7 @@ export function docToOps(
       "keep",
       new Set(discard ?? []),
       upstreamOf,
+      shownOf,
     )
   }
   return partsToOps(
@@ -432,6 +456,7 @@ export function docToOps(
     "keep",
     new Set(discard ?? []),
     upstreamOf,
+    shownOf,
   )
 }
 
@@ -550,6 +575,16 @@ export function reservedNoteIds(snapshot: GraphSnapshot, noteId: string): Set<st
  * own child list is not here to speak: a parent row removed from beneath
  * a block, and gone from the doc with it, is unlinked from it; a parent
  * named that the doc does not hold is linked, after its last child.
+ *
+ * `shownOf` is each parent's child list as the view showed it before the
+ * edit (`docToOps`, `shown`). A parent with a list there is reconciled as
+ * the edit to that list: a child the graph holds that the list left out
+ * was hidden, not removed — it is neither unlinked nor keyed — and the
+ * rest are placed against what was shown (`reconcileSortKeys`). A parent
+ * without one (a block new to the doc, or a whole-list edit) is reconciled
+ * against everything the graph holds under it. A block under itself, or a
+ * link to a node the graph lacks, is never "hidden": those are the repairs
+ * the write side always makes.
  */
 export function partsToOps(
   noteId: NoteId,
@@ -560,6 +595,7 @@ export function partsToOps(
   dropped: "keep" | "delete",
   discard: ReadonlySet<string> = new Set(),
   upstreamOf: Map<string, string[]> = new Map(),
+  shownOf?: ReadonlyMap<string, readonly string[]>,
 ): Op[] {
   const creates: Op[] = []
   const sets: Op[] = []
@@ -593,13 +629,25 @@ export function partsToOps(
     // show. Every other loop is kept.
     const desired = wanted.filter((id) => id !== parentId)
     const existing = snapshot.childLinks.get(parentId) ?? []
+    const shown = shownOf?.get(parentId)
+    // What the view held back: the parent's children it did not show, which
+    // this edit never saw and leaves exactly where they are.
+    const hidden = new Set<string>()
+    if (shown) {
+      const seen = new Set(shown)
+      for (const link of existing) {
+        const id = link.destination_id
+        if (!seen.has(id) && id !== parentId && snapshot.nodes.has(id)) hidden.add(id)
+      }
+    }
     const keys = reconcileSortKeys(
       existing.map((link) => ({ id: link.destination_id, sortKey: link.sort_key })),
       desired,
+      shown,
     )
     const desiredSet = new Set(desired)
     for (const link of existing) {
-      if (desiredSet.has(link.destination_id)) continue
+      if (desiredSet.has(link.destination_id) || hidden.has(link.destination_id)) continue
       linkOps.push({ op: "unlink", source: parentId, destination: link.destination_id })
       parents(link.destination_id).delete(parentId)
     }
