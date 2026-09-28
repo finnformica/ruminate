@@ -90,19 +90,43 @@ export function clearFilterKey(filter: string, key: string): string {
   return withFilterValues(filter, key, [])
 }
 
+/** The ancestor qualifiers the Filter menu offers beside `type:` — each a
+ * block picked by id, or a text the block must contain (docs/query-language.md,
+ * "Under a block, by what it says"). */
+export const ANCESTOR_FILTER_KEYS = ["parent", "under"] as const
+export type AncestorFilterKey = (typeof ANCESTOR_FILTER_KEYS)[number]
+
+/** How an ancestor value reads: a picked block by its text (the id is
+ * opaque), a typed text in quotes. */
+export function describeAncestorValue(
+  value: string,
+  blockText?: (id: string) => string | undefined,
+): string {
+  const text = blockText?.(value)
+  return text !== undefined ? text : `“${value}”`
+}
+
 /**
- * How a filter reads in a sentence — the block types it names, then the text
- * it is searching for, then anything else it carries (a qualifier typed by
- * hand) as written, so the button never claims a filter is empty when it is
- * not.
+ * How a filter reads in a sentence — the block types it names, then the
+ * ancestors ("parent Alice", "under Standup"), then the text it is searching
+ * for, then anything else it carries (a qualifier typed by hand) as written,
+ * so the button never claims a filter is empty when it is not. `blockText`
+ * names a block picked by id (`blockIndexAtom`'s `getBlock`).
  */
-export function describeFilter(filter: string): string {
+export function describeFilter(
+  filter: string,
+  blockText?: (id: string) => string | undefined,
+): string {
   const types = filterValues(filter, "type").map(
     (value) => FILTER_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? value,
   )
+  const ancestors = ANCESTOR_FILTER_KEYS.flatMap((key) =>
+    filterValues(filter, key).map((value) => `${key} ${describeAncestorValue(value, blockText)}`),
+  )
   const { qualifiers, text } = splitQuery(filter)
-  const others = qualifiers.filter((q) => !q.startsWith("type:"))
-  return [...types, ...(text ? [`“${text}”`] : []), ...others].join(", ")
+  const described = ["type", ...ANCESTOR_FILTER_KEYS]
+  const others = qualifiers.filter((q) => !described.some((key) => q.startsWith(`${key}:`)))
+  return [...types, ...ancestors, ...(text ? [`“${text}”`] : []), ...others].join(", ")
 }
 
 /**
