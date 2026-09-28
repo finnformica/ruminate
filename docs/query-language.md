@@ -86,7 +86,7 @@ The query language also narrows a note **where it stands**, rather than resolvin
 
 - The rows that match stay. The rows above a match are kept as **context** and drawn dimmed — so you can see which heading a to-do lives under without that heading pretending to be a result. A branch holding no match is dropped.
 - Everything beneath a match is kept as context too: a to-do you filtered to is still the to-do with its notes underneath.
-- A narrowed note opens fully, whatever folds you have on the note: you asked for the matches, and a match behind a fold would be a riddle. You can still fold rows while it is narrowed — those folds are the narrowed view's own, forgotten when the filter or sort changes or clears, and the note's own folds are untouched underneath.
+- A narrowed note opens fully, whatever folds you have on the note: you asked for the matches, and a match behind a fold would be a riddle. You can still fold rows while it is narrowed — those folds are the narrowed view's own, kept on this device for that filter and sort (`src/data/view-state.ts`, `foldKeyOf`), so the same narrowing opens the way you left it, a different one opens fully, and the note's own folds are untouched underneath.
 - It is drawn by the block editor, from the note's own doc, so the markers, the typography, the folds and the keys are the note page's — a filtered note is the note, shorter, never a second kind of list.
 - The filter and the sort live in the URL (`?filter=type:todo&sort=text:desc`), so a narrowed view is a link, and the back button takes the narrowing off.
 
@@ -102,9 +102,9 @@ The block types the menu lists are the query box's own picker vocabulary (`STATI
 
 A sort reorders each parent's **children** and leaves the nesting alone: a filtered outline is still an outline, and a single order over a tree is not something a reader can follow. Document order is the default, and the absence of a sort.
 
-A filter that matches nothing shows an empty page, not a blank row to type in: a narrowed view writes no structure, so a row offered there could not be written.
+**A narrowed view edits as the note does.** Tick a to-do, retype a line, press <kbd>↵</kbd> for a new row, indent, move, remove — every edit lands in the note exactly as it would with the filter cleared, through the same editor and the same save. What makes that safe is how the save reads the edit: not as "make the note look like this doc" but as "this is what changed between what the view showed and what it shows now" (`docToOps`, `shown`, in `src/data/ops.ts`). So the rows the filter hid are never taken for removed, a row you add beneath a match follows it in the note — ahead of whatever the filter hid after it — and a sort is never written into the note: a row that keeps its place among the rows on screen keeps its place in the note, whatever order the screen had them in.
 
-**A narrowed view edits its rows, not the note's shape.** Tick a to-do, retype a line, change a block's properties — those land in the graph as they always do. Structure does not: a narrowed view holds only the rows that survived, in the order the sort put them, so reconciling it against the graph would read every hidden row as removed. New rows, indents, removals and reorders belong to the note, which is one click away with the filter cleared. For the same reason a narrowed view has no trailing blank row to type into.
+A new row is subject to the filter like any other: a to-do split off a to-do stays, since it matches; a plain line typed under a text filter is hidden as soon as its text stops matching. That is also why a narrowed view has no trailing blank row to type into, and a filter that matches nothing shows an empty page rather than a starter row: a blank line is a plain text row, which most filters would hide the moment it was typed into.
 
 Any note or block can save a filter and a sort of its own, so that it opens the way it was left — see [metadata.md](./metadata.md), "Saved views".
 
