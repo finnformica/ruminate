@@ -18,6 +18,11 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 22.x
+          cache: "npm"
+      # The slug comes from scripts/preview-deploy.mjs, which imports
+      # jsonc-parser through scripts/preview-db.mjs; and wrangler is the one
+      # the lockfile pins, not a fresh download.
+      - run: npm ci
       - name: Delete this branch's preview database, if it has one
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -33,7 +38,7 @@ jobs:
           case "${name}" in
             ruminate|ruminate-preview) echo "refusing to delete ${name}"; exit 1 ;;
           esac
-          if npx --yes wrangler@4 d1 list --json | node -e '
+          if npx wrangler d1 list --json | node -e '
             const name = process.argv[1]
             let input = ""
             process.stdin.on("data", (chunk) => (input += chunk))
@@ -43,7 +48,7 @@ jobs:
             })
           ' "${name}"; then
             echo "deleting ${name}"
-            npx --yes wrangler@4 d1 delete "${name}" -y
+            npx wrangler d1 delete "${name}" -y
           else
             echo "${name} does not exist; nothing to do"
           fi
