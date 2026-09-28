@@ -64,7 +64,8 @@ export function useNoteDoc({
    * the note. A block the graph lacks falls back to the note's view (the
    * editor then clears the focus). */
   focusBlockId?: string | null
-  /** The fold rule the walk descends by; absent = walk everything. */
+  /** The fold rule the view's rows are drawn by — the view's own
+   * (`useFoldRule`, src/data/view-state.ts); absent = nothing folded. */
   expanded?: ExpandedRule
   /** Which links the walk follows (Settings → Editor, "Show links"). */
   directions?: LinkDirections
@@ -92,8 +93,10 @@ export function useNoteDoc({
     if (noteId === undefined) return null
     // A narrowed view is walked EAGERLY: whether a branch survives depends on
     // what is beneath it, and a sort must see every sibling to order them,
-    // neither of which a lazy walk can answer. The reader's folds stand
-    // aside while it is on and come back untouched the moment it clears.
+    // neither of which a lazy walk can answer. The fold rule is then applied
+    // over what survived (`filteredView`) rather than by the walk — the
+    // same rule, the narrowed view's own (`useFoldRule`), so a filtered
+    // note folds exactly as the note does.
     const rule = narrowed ? undefined : expanded
     const focused = focusBlockId ? blockView(focusBlockId, snapshot, rule, directions) : null
     const base = focused ?? noteView(noteId, snapshot, rule, directions)
@@ -101,7 +104,11 @@ export function useNoteDoc({
     // Focused, the root block is the view's title rather than one of its
     // rows, so the filter runs over what is inside it and never takes it
     // away (`keepRoots`).
-    return filteredView(base, narrowing, { keepRoots: focused !== null })
+    return filteredView(base, narrowing, {
+      keepRoots: focused !== null,
+      expanded,
+      startLevel: focused ? 0 : 1,
+    })
   }, [noteId, focusBlockId, snapshot, expanded, directions, narrowed, narrowing])
   // Whether the doc is rooted at the focused block (the note node is then not
   // this doc's to write).

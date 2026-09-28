@@ -72,7 +72,7 @@ The query language also narrows a note **where it stands**, rather than resolvin
 
 - The rows that match stay. The rows above a match are kept as **context** and drawn dimmed — so you can see which heading a to-do lives under without that heading pretending to be a result. A branch holding no match is dropped.
 - Everything beneath a match is kept as context too: a to-do you filtered to is still the to-do with its notes underneath.
-- A narrowed note opens fully, whatever folds you have on the note: you asked for the matches, and a match behind a fold would be a riddle. You can still fold rows while it is narrowed — those folds are the narrowed view's own, forgotten when the filter or sort changes or clears, and the note's own folds are untouched underneath.
+- A narrowed note opens fully, whatever folds you have on the note: you asked for the matches, and a match behind a fold would be a riddle. You can still fold rows while it is narrowed — those folds are the narrowed view's own, kept on this device for that filter and sort (`src/data/view-state.ts`, `foldKeyOf`), so the same narrowing opens the way you left it, a different one opens fully, and the note's own folds are untouched underneath.
 - It is drawn by the block editor, from the note's own doc, so the markers, the typography, the folds and the keys are the note page's — a filtered note is the note, shorter, never a second kind of list.
 - The filter and the sort live in the URL (`?filter=type:todo&sort=text:desc`), so a narrowed view is a link, and the back button takes the narrowing off.
 
