@@ -23,9 +23,10 @@ import { compareNotes, matchesNoteScope, testNoteFilters } from "./search-notes"
  * Query semantics (all composable with the existing `parseQuery` vocabulary):
  * - `type:` filters with block-type values (the table below) match the block
  *   itself; `in:` scopes to what is downstream of a note or a block (see
- *   `testScopeFilter`); every other qualifier (`date:`, a property,
- *   `has:`/`no:`, …) filters by the containing note, exactly as note search
- *   does.
+ *   `testScopeFilter`); `under:` and `parent:` scope to what is beneath a
+ *   block named by its text or id, across notes (`testAncestorFilter`);
+ *   every other qualifier (`date:`, a property, `has:`/`no:`, …) filters by
+ *   the containing note, exactly as note search does.
  * - Fuzzy text matches the block's own text (fast-fuzzy, same threshold as
  *   note search); with fuzzy text present, results rank by fuzzy relevance,
  *   otherwise document order grouped by note (in the note order the index
@@ -248,6 +249,47 @@ function testScopeFilter(filter: Filter, hit: BlockHit): boolean {
   return filter.exclude ? !match : match
 }
 
+/** Is this `under:` or `parent:` — an ancestor filter (`testAncestorFilter`)? */
+function isAncestorFilter(filter: Filter): boolean {
+  return filter.key === "under" || filter.key === "parent"
+}
+
+/** Does this query name an ancestor (`under:` / `parent:`)? Such a query
+ * asks for blocks — the rows beneath a block are blocks, and a note is not
+ * one — so it resolves at block granularity like a block-scoped `type:`. */
+export function hasAncestorFilter(filters: Filter[]): boolean {
+  return filters.some(isAncestorFilter)
+}
+
+/** Does an `under:` / `parent:` value name this ancestor — by its id, or by
+ * its text: a case-insensitive substring, so `under:alice` finds the rows
+ * under "Alice Smith" and under "**Alice**" alike. A scope wants precision,
+ * so the text is never fuzzy-matched. */
+function matchesAncestor(value: string, ancestor: BlockAncestor): boolean {
+  if (value === ancestor.id) return true
+  const needle = value.trim().toLowerCase()
+  return needle !== "" && ancestor.text.toLowerCase().includes(needle)
+}
+
+/**
+ * `under:` and `parent:` — everything beneath a block named by what it SAYS,
+ * across every note. `in:` scopes to one block by id, and a block id is
+ * minted per note: the "Alice" row in each day's standup is a different
+ * block, so no id spans them. `under:alice` does — a row is under it when any
+ * ancestor on its path matches (`matchesAncestor`); `parent:alice` when its
+ * immediate parent does, which is the direct children and nothing deeper. A
+ * value is matched by id too, so `parent:<block id>` is one block's direct
+ * children. The ancestor itself is never a result — it is the scope, not a
+ * row in it — and `-` and comma lists work as on any qualifier.
+ */
+function testAncestorFilter(filter: Filter, hit: BlockHit): boolean {
+  const ancestors = filter.key === "parent" ? hit.ancestors.slice(-1) : hit.ancestors
+  const match = filter.values.some((value) =>
+    ancestors.some((ancestor) => matchesAncestor(value, ancestor)),
+  )
+  return filter.exclude ? !match : match
+}
+
 const collator = new Intl.Collator(undefined, {
   sensitivity: "base",
   numeric: true,
@@ -295,8 +337,9 @@ export function compareBlockHits(a: BlockHit, b: BlockHit, sorts: Sort[]): numbe
 /**
  * Run a parsed query against the block index. Qualifiers AND together:
  * block-scoped `type:` filters test the block, `in:` tests the block's
- * ancestry / note (`testScopeFilter`), everything else tests the containing
- * note. Fuzzy text ranks by relevance over block text; without it,
+ * ancestry / note (`testScopeFilter`), `under:` / `parent:` test its
+ * ancestors' text or id (`testAncestorFilter`), everything else tests the
+ * containing note. Fuzzy text ranks by relevance over block text; without it,
  * hits keep index order (document order grouped by note). `sort:` keys:
  * `text` (block text), `updated`/`updated_at` (note fallback, see above), and
  * any note-level key (`title`, a property, …) applied via the containing
@@ -305,8 +348,9 @@ export function compareBlockHits(a: BlockHit, b: BlockHit, sorts: Sort[]): numbe
 export function searchBlocks(query: Query, index: BlockIndex): BlockHit[] {
   const blockFilters = query.filters.filter(isBlockTypeFilter)
   const scopeFilters = query.filters.filter(isScopeFilter)
+  const ancestorFilters = query.filters.filter(isAncestorFilter)
   const noteFilters = query.filters.filter(
-    (filter) => !isBlockTypeFilter(filter) && !isScopeFilter(filter),
+    (filter) => !isBlockTypeFilter(filter) && !isScopeFilter(filter) && !isAncestorFilter(filter),
   )
 
   // A text search scores each hit (best first); a bare filter lists the
@@ -320,6 +364,7 @@ export function searchBlocks(query: Query, index: BlockIndex): BlockHit[] {
     (hit) =>
       blockFilters.every((filter) => testBlockTypeFilter(filter, hit)) &&
       scopeFilters.every((filter) => testScopeFilter(filter, hit)) &&
+      ancestorFilters.every((filter) => testAncestorFilter(filter, hit)) &&
       testNoteFilters(noteFilters, hit.note),
   )
 

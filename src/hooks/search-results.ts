@@ -2,7 +2,12 @@ import { useAtomValue } from "jotai"
 import React from "react"
 import { blockIndexAtom, noteTitleSearcherAtom } from "../global-state"
 import type { Note } from "../schema"
-import { hasBlockTypeFilter, notesFromBlockHits, type BlockHit } from "../utils/block-search"
+import {
+  hasAncestorFilter,
+  hasBlockTypeFilter,
+  notesFromBlockHits,
+  type BlockHit,
+} from "../utils/block-search"
 import { inMemoryBlockSearchSource, type BlockSearchSource } from "../utils/block-search-source"
 import { rankResultRows, type ResultRow, type ScoredNote } from "../utils/rank-results"
 import { parseQuery } from "../utils/search"
@@ -11,9 +16,9 @@ import { useSearchNotes } from "./search-notes"
 
 /**
  * What a query resolves to. Search results ARE the matching blocks: a query
- * with text or a block-scoped `type:` resolves at block granularity, so a
- * heading nested six levels down is a first-class result row rather than a
- * filename.
+ * with text, a block-scoped `type:` or an `under:` / `parent:` scope resolves
+ * at block granularity, so a heading nested six levels down is a first-class
+ * result row rather than a filename.
  *
  * A query that only names NOTES — `date:2026-01-01`, a bare property
  * qualifier, or nothing at all — stays a note listing: every block in every
@@ -23,7 +28,11 @@ import { useSearchNotes } from "./search-notes"
  */
 function resolvesToBlocks(query: string): boolean {
   const parsed = parseQuery(query)
-  return parsed.fuzzy.trim() !== "" || hasBlockTypeFilter(parsed.filters)
+  return (
+    parsed.fuzzy.trim() !== "" ||
+    hasBlockTypeFilter(parsed.filters) ||
+    hasAncestorFilter(parsed.filters)
+  )
 }
 
 /**
@@ -70,7 +79,8 @@ export interface SearchResults {
   notes: Note[]
   /** "blocks" mode: the notes whose TITLE matched the query's text, each a
    * row among the hits. Empty when the query asks for blocks of a type or
-   * scopes with `in:` (a note is neither), and in "notes" mode. */
+   * scopes with `in:`, `under:` or `parent:` (a note is none of those), and
+   * in "notes" mode. */
   titleMatches: Note[]
   /** The rows to draw, in order: "blocks" mode ranks the title matches and
    * the hits together by score (`rankResultRows`); "notes" mode lists the
@@ -84,8 +94,8 @@ const NO_NOTES: Note[] = []
 /**
  * The notes whose title matches the query's text, scored, and filtered by
  * whatever note-level qualifiers the query carries (a date, a property).
- * None when the query names a block type or an `in:` scope: it asks for
- * blocks, and a note row would not be one.
+ * None when the query names a block type or an `in:`, `under:` or `parent:`
+ * scope: it asks for blocks, and a note row would not be one.
  */
 function useTitleMatches(query: string, showBlocks: boolean): ScoredNote[] {
   const searcher = useAtomValue(noteTitleSearcherAtom)
@@ -94,7 +104,7 @@ function useTitleMatches(query: string, showBlocks: boolean): ScoredNote[] {
     const parsed = parseQuery(query)
     const text = parsed.fuzzy.trim()
     if (!text) return []
-    if (hasBlockTypeFilter(parsed.filters)) return []
+    if (hasBlockTypeFilter(parsed.filters) || hasAncestorFilter(parsed.filters)) return []
     if (parsed.filters.some((filter) => filter.key === "in")) return []
     const matches = searcher.search(text, { returnMatchData: true })
     const scores = new Map(matches.map((match) => [match.item.id, match.score]))

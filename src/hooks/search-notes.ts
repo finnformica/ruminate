@@ -2,7 +2,12 @@ import { useAtomValue } from "jotai"
 import React from "react"
 import type { FullOptions, Searcher as FuzzySearcher } from "fast-fuzzy"
 import { noteSearcherAtom, searchBlocksAtom, sortedNotesAtom } from "../global-state"
-import { hasBlockTypeFilter, notesFromBlockHits, type BlockHit } from "../utils/block-search"
+import {
+  hasAncestorFilter,
+  hasBlockTypeFilter,
+  notesFromBlockHits,
+  type BlockHit,
+} from "../utils/block-search"
 import { parseQuery } from "../utils/search"
 import { filterNotes, sortNotes } from "../utils/search-notes"
 import type { Note } from "../schema"
@@ -16,10 +21,11 @@ function runSearch(
 ) {
   if (!query) return sortedNotes
   const parsed = parseQuery(query)
-  // A block-scoped `type:` (e.g. `type:todo`) resolves the query at block
-  // granularity: the list shows the notes containing matching blocks, in hit
-  // order. Queries without one behave exactly as before.
-  if (hasBlockTypeFilter(parsed.filters)) {
+  // A block-scoped `type:` (e.g. `type:todo`) or an `under:` / `parent:`
+  // scope resolves the query at block granularity: the list shows the notes
+  // containing matching blocks, in hit order. Queries without one behave
+  // exactly as before.
+  if (hasBlockTypeFilter(parsed.filters) || hasAncestorFilter(parsed.filters)) {
     return notesFromBlockHits(searchBlocks(parsed))
   }
   const { fuzzy, filters, sorts } = parsed
