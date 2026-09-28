@@ -478,7 +478,9 @@ request that ends in leaving the page (signing in, taking an update) stays
 busy until the page has gone, since on this page it has no after. The
 "Saving…" trace in a note's header is the same rule on a surface rather
 than a control: it shows from the edit until its push has landed, and only
-while a push can land. Offline, the edit lands on this device and its push
+while a push can land. The sidebar's sync row uses the same word for the
+same state — "Saving…", never "Syncing…" — so one save in flight is never
+named two ways on one screen. Offline, the edit lands on this device and its push
 waits for the network, so once the write is down the trace turns into
 **Saved offline** with the offline icon and no spinner — nothing is in
 flight, and it is a fact about the note rather than a wait. It is there

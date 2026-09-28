@@ -71,7 +71,7 @@ describe("saveTrace", () => {
   const dispatched = { pendingSave: true, pushesPending: false }
   const queued = { pendingSave: false, pushesPending: true }
 
-  it("reads Saving… while pushes are in flight", () => {
+  it("reads Saving… while pushes are in flight (the sidebar's word too)", () => {
     expect(saveTrace("syncing", idle)).toBe("saving")
     expect(saveTrace("syncing", queued)).toBe("saving")
   })
