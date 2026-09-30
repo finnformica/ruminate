@@ -19,6 +19,7 @@ import {
   ArrowUpIcon16,
   CopyIcon16,
   EditIcon16,
+  GridIcon16,
   MoreIcon16,
   PinFillIcon16,
   PinIcon16,
@@ -100,6 +101,10 @@ export function NoteActionsMenu({
   const sharingEnabled = useFeature("sharing")
   const canShare = !isSignedOut && share === null && sharingEnabled
   const openShare = useSetAtom(shareDialogAtom)
+  // A board (docs/boards.md) is the note read as a wall of its pictures —
+  // any own note, where the feature is on.
+  const boardsEnabled = useFeature("boards")
+  const canOpenAsBoard = share === null && boardsEnabled
 
   // Compare the decoded path segment, not the raw pathname: a note id with a
   // space or other special character is percent-encoded in the URL, so a raw
@@ -220,6 +225,14 @@ export function NoteActionsMenu({
         <DropdownMenu.Item icon={<EditIcon16 />} disabled={!canRename} onClick={rename}>
           Rename
         </DropdownMenu.Item>
+        {canOpenAsBoard ? (
+          <DropdownMenu.Item
+            icon={<GridIcon16 />}
+            onClick={() => navigate({ to: "/boards/$", params: { _splat: noteId } })}
+          >
+            Open as board
+          </DropdownMenu.Item>
+        ) : null}
         <DropdownMenu.Separator />
         <DropdownMenu.Item icon={<PrinterIcon16 />} onClick={() => window.print()}>
           Print
