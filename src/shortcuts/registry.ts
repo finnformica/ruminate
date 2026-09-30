@@ -8,9 +8,9 @@ import { WRAP_PAIRS, type CommandName } from "../blocks/commands"
  * 1. **The block editor's keymap** (`src/blocks/keymap.ts`) — entries are
  *    *generated* from the live `KEYMAP`, so the reference can never drift from
  *    the editor's real behaviour (a test enforces the mapping both ways).
- * 2. **Imperative editor bindings** — undo/redo, the ⌘A ladder, multi-select
- *    group ops, copy/cut/paste — declared here as literals, with each list
- *    pointing at the handler that owns it.
+ * 2. **Imperative editor bindings** — undo/redo, the ⌘A ladder, extending
+ *    the selection, copy/cut/paste — declared here as literals, with each
+ *    list pointing at the handler that owns it.
  * 3. **App-level hotkeys** — the `react-hotkeys-hook` call sites read their
  *    combo strings from `APP_SHORTCUTS` below, so this file is the source of
  *    truth for those too.
@@ -55,7 +55,7 @@ export const APP_SHORTCUTS = {
   /** The `g` chords, which `GChordMachine` binds and the sidebar labels its
    * rows with — so a destination's key is written once, here. */
   goCalendar: "g d",
-  goNotes: "g n",
+  goViews: "g v",
   goSettings: "g s",
   goAdmin: "g a",
   goChangelog: "g c",
@@ -82,9 +82,9 @@ export const GLOBAL_HOTKEY_OPTIONS = {
 export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   enterEdit: "Edit the highlighted block",
   exitEdit: "Stop editing (back to highlight)",
-  deselect: "Deselect (nothing highlighted)",
-  indent: "Indent the block",
-  outdent: "Outdent the block",
+  deselect: "Deselect (a range: back to one block; then nothing highlighted)",
+  indent: "Indent the selected block(s)",
+  outdent: "Outdent the selected block(s)",
   moveSelectionUp: "Move the highlight up",
   moveSelectionDown: "Move the highlight down",
   moveEditFocusUp: "Exit edit upward (at the first line)",
@@ -97,19 +97,20 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   selectFirstChild: "Select the first child (auto-expands a collapsed block)",
   expandOrFirstChild: "Expand the block (already open: select its first child)",
   collapseOrParent: "Collapse the block (already closed, or a leaf: select the parent)",
-  turnIntoHeading: "Turn into a heading (again: back to a paragraph)",
-  turnIntoBullet: "Turn into a bullet (again: back to a paragraph)",
-  turnIntoTodo: "Turn into a todo (again: back to a paragraph)",
-  turnIntoQuote: "Turn into a quote (again: back to a paragraph)",
-  turnIntoOrdered: "Turn into a numbered item (again: back to a paragraph)",
-  turnIntoCode: "Turn into a code block (again: back to a paragraph)",
+  turnIntoHeading: "Turn the selected block(s) into a heading (again: back to a paragraph)",
+  turnIntoBullet: "Turn the selected block(s) into a bullet (again: back to a paragraph)",
+  turnIntoTodo: "Turn the selected block(s) into a todo (again: back to a paragraph)",
+  turnIntoQuote: "Turn the selected block(s) into a quote (again: back to a paragraph)",
+  turnIntoOrdered: "Turn the selected block(s) into a numbered item (again: back to a paragraph)",
+  turnIntoCode: "Turn the selected block(s) into a code block (again: back to a paragraph)",
+  turnInto: "Turn the selected block(s) into the type picked (the selection bar, the edit bar)",
   openFence: "Open a code block of the language typed after ``` (then Enter)",
   jumpLevelTop: "Jump to the top of the current level",
   jumpLevelBottom: "Jump to the bottom of the current level",
-  moveBlockUp: "Move the block up (with its subtree)",
-  moveBlockDown: "Move the block down (with its subtree)",
-  duplicateAbove: "Duplicate the block above",
-  duplicateBelow: "Duplicate the block below",
+  moveBlockUp: "Move the selected block(s) up (with their subtrees)",
+  moveBlockDown: "Move the selected block(s) down (with their subtrees)",
+  duplicateAbove: "Duplicate the selected block(s) above",
+  duplicateBelow: "Duplicate the selected block(s) below",
   wrapBold: "Bold the selection (** around it; again to take it off)",
   wrapItalic: "Italicise the selection (_ around it; again to take it off)",
   wrapStrike: "Strike the selection through (~~ around it; again to take it off)",
@@ -117,8 +118,9 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
   wrapMath: "Set the selection as maths ($$ around it; again to take it off)",
   wrapLink: "Make the selection a link ([text](url), caret in the parentheses)",
   wrapTyped: "Wrap the selection in the character typed (a bracket closes with its partner)",
-  deleteBlock: "Remove the block from here (it keeps its place elsewhere, or goes to Unassigned)",
-  toggleTodo: "Toggle the checkbox (todo blocks)",
+  deleteBlock:
+    "Remove the selected block(s) from here (they keep their place elsewhere, or go to Unassigned)",
+  toggleTodo: "Toggle the checkbox (todo blocks; every todo in a selection)",
   toggleCollapse: "Collapse / expand children",
   insertBelow: "New block below (caret at end of block)",
   insertSiblingBelow: "New block below, same type (ignores the caret)",
@@ -140,6 +142,14 @@ export const EDITOR_COMMAND_DESCRIPTIONS: Record<CommandName, string> = {
  * completeness test knows not to look for a binding.
  */
 export const COMMANDS_WITHOUT_BINDINGS = new Set<CommandName>(["wrapTyped"])
+
+/**
+ * Commands no key runs at all: they are picked from a menu, with the pick
+ * as their argument (`turnInto`, with the type). Described above so the
+ * table stays total over `CommandName`, and shown nowhere — there is no
+ * key to show.
+ */
+export const MENU_COMMANDS = new Set<CommandName>(["turnInto"])
 
 /** Focus commands render under their own group, whichever mode binds them. */
 const FOCUS_COMMANDS = new Set<CommandName>(["focusBlock", "focusBack", "leaveFocus"])
@@ -189,8 +199,11 @@ function editorEntries(): Shortcut[] {
 // ── Imperative editor bindings ──────────────────────────────────────────────
 // These are handled imperatively in `handleKeyDown` of
 // `src/components/block-editor/block-editor.tsx` (not through the keymap
-// table): undo/redo, Shift+Arrow extension, copy/cut/paste, the ⌘A ladder,
-// and the multi-select group operations.
+// table): undo/redo, Shift+Arrow extension, copy/cut/paste and the ⌘A
+// ladder — the keys that change what is selected or reach the clipboard.
+// What a selection is *done to* (indent, move, duplicate, remove, turn
+// into) is the keymap's own commands over every selected block, so those
+// keys are listed once, above, under Select mode.
 
 const CLIPBOARD_HISTORY_ENTRIES: Shortcut[] = [
   {
@@ -270,43 +283,8 @@ const MULTI_SELECT_ENTRIES: Shortcut[] = [
   {
     combos: ["Shift+ArrowUp", "Shift+ArrowDown"],
     scope: "select",
-    description: "Extend the selection to more blocks",
-    group: "Multi-select",
-  },
-  {
-    combos: ["Alt+ArrowUp", "Alt+ArrowDown"],
-    scope: "select",
-    description: "Move the selected blocks together (same parent)",
-    group: "Multi-select",
-  },
-  {
-    combos: ["Alt+Shift+ArrowUp", "Alt+Shift+ArrowDown"],
-    scope: "select",
-    description: "Duplicate the selection as a group",
-    group: "Multi-select",
-  },
-  {
-    combos: ["Tab", "Shift+Tab"],
-    scope: "select",
-    description: "Indent / outdent the whole selection",
-    group: "Multi-select",
-  },
-  {
-    combos: ["Backspace", "Delete"],
-    scope: "select",
-    description: "Remove the selected blocks from here",
-    group: "Multi-select",
-  },
-  {
-    combos: ["#", "-", "[", ">", "1"],
-    scope: "select",
-    description: "Turn the selected blocks into that type (toggle)",
-    group: "Multi-select",
-  },
-  {
-    combos: ["Escape"],
-    scope: "select",
-    description: "Collapse back to a single selection",
+    description:
+      "Extend the selection to more blocks (the Select mode keys then act on all of them)",
     group: "Multi-select",
   },
 ]
@@ -375,9 +353,9 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
     group: "Navigation",
   },
   {
-    combos: [APP_SHORTCUTS.goNotes],
+    combos: [APP_SHORTCUTS.goViews],
     scope: "global",
-    description: "Go to the notes list (press g, then n)",
+    description: "Go to the Views list (press g, then v)",
     group: "Navigation",
   },
   {
@@ -395,13 +373,13 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   {
     combos: [APP_SHORTCUTS.goAdmin],
     scope: "global",
-    description: "Go to the admin page (press g, then a; the admin only)",
+    description: "Go to the Admin settings (press g, then a; the admin only)",
     group: "Navigation",
   },
   {
     combos: [APP_SHORTCUTS.focusSearch],
     scope: "global",
-    description: "Jump to the search input (notes list)",
+    description: "Jump to the search input (Views page)",
     group: "Navigation",
   },
   {
@@ -424,7 +402,7 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   },
 ]
 
-// Search results — the rows in ⌘K, on the notes list and on the results view
+// Search results — the rows in ⌘K, on the Views page and on the results view
 // (`/?query=`) are the block editor (src/components/results-editor.tsx), so
 // their keys are the editor's. These are the hand-offs around them.
 const SEARCH_RESULT_ENTRIES: Shortcut[] = [

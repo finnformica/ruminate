@@ -93,6 +93,17 @@ describe("describeFilter", () => {
   it("says nothing about nothing", () => {
     expect(describeFilter("")).toBe("")
   })
+
+  it("reads an ancestor as the block's text when picked, or the typed text in quotes", () => {
+    const blockText = (id: string) => (id === "blk_alice" ? "Alice Smith" : undefined)
+    expect(describeFilter("parent:blk_alice", blockText)).toBe("parent Alice Smith")
+    expect(describeFilter('under:"alice smith"', blockText)).toBe("under “alice smith”")
+    expect(describeFilter("type:todo parent:alice milk", blockText)).toBe(
+      "Todo, parent “alice”, “milk”",
+    )
+    // Without a lookup an id reads as itself, quoted like any value.
+    expect(describeFilter("parent:blk_alice")).toBe("parent “blk_alice”")
+  })
 })
 
 describe("resolveNarrowing / narrowingParam", () => {

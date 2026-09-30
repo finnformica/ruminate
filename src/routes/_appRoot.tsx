@@ -3,6 +3,7 @@ import React from "react"
 import { Toaster } from "sonner"
 import { AppLayout } from "../components/app-layout"
 import { CommandMenu } from "../components/command-menu"
+import { DeleteNoteDialog } from "../components/delete-note-dialog"
 import { DevBar } from "../components/dev-bar"
 import { ShareDialog } from "../components/share-note-dialog"
 import { useDatabaseMode } from "../data/use-database-mode"
@@ -64,6 +65,7 @@ function RouteComponent() {
       </AppLayout>
       <CommandMenu />
       <ShareDialog />
+      <DeleteNoteDialog />
       <GlobalShortcuts />
       <DevBar />
       {/* Toasts (sonner) — see "Notices" in docs/design-principles.md. Bottom

@@ -4,7 +4,6 @@ import React from "react"
 import { NOTE_TYPE, propsJson } from "../data/graph"
 import { notePropsOps } from "../data/note-meta"
 import { deleteNoteOps, type Op } from "../data/ops"
-import { moveNoteOps } from "../data/note-order"
 import { emittedNoteTitle } from "../data/note-identity"
 import { useApplyOps } from "../data/store"
 import { dateMentionsAtom, graphSnapshotAtom, notesAtom } from "../global-state"
@@ -56,24 +55,6 @@ export function useSetNoteProps() {
   return React.useCallback(
     (id: NoteId, patch: Record<string, unknown>) => {
       apply(notePropsOps(id, patch, store.get(graphSnapshotAtom)))
-    },
-    [store, apply],
-  )
-}
-
-/**
- * Move a note within the manual order (`src/data/note-order.ts`): `noteId` is
- * the row that was dragged and `ids` the notes in the order they should now
- * sit — the list the sidebar drew, with that row at its new index.
- *
- * Costs one link row in the steady state; see `moveNoteOps`.
- */
-export function useMoveNote() {
-  const store = useStore()
-  const apply = useApplyOps()
-  return React.useCallback(
-    (noteId: NoteId, ids: NoteId[]) => {
-      apply(moveNoteOps(noteId, ids, store.get(graphSnapshotAtom)))
     },
     [store, apply],
   )

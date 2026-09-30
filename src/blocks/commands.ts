@@ -6,7 +6,7 @@ import {
   emptyBlock,
   indentBlock,
   insertAfter,
-  moveBlock,
+  moveBlocks,
   outdentBlock,
   removeBlock,
   siblingsOf,
@@ -20,9 +20,11 @@ import {
   directionOfKey,
   hasOccurrence,
   idOfKey,
+  isWithin,
   keyOf,
   parentKeyOf,
   pathIdsOf,
+  rootKeys,
   rowsBeneath,
   siblingKey,
 } from "./view"
@@ -42,6 +44,16 @@ import {
  * is two distinct places to indent, delete or navigate from, and its parent
  * is read off the key rather than searched for. The block's own text and
  * type are still the node's, changed by id.
+ *
+ * A **selection** of rows is the same commands over more rows: `keys` is
+ * every selected row, and the structural commands — indent, outdent, move,
+ * duplicate, delete, turn into, the todo toggle — act on its roots (the
+ * rows with no selected ancestor, `rootKeys`) at once, as one undo step, so
+ * a subtree the selection covers moves as one. A single row is a selection
+ * of one, so there is one delete, not a delete and a bulk delete: the
+ * keyboard, the block menu, the selection bar and the touch screen's edit
+ * bar all run these, and the only difference between one row and many is
+ * what the caller puts in `keys`.
  *
  * Commands are **pure**: they take the current doc plus a little UI context and
  * return a `CommandResult` describing what should change (a new doc, where focus
@@ -65,8 +77,14 @@ export interface CaretInput {
 
 export interface CommandInput {
   doc: BlockDoc
-  /** The row the command acts on: an occurrence key. */
+  /** The row the command is at: the highlight, or the caret's row — an
+   * occurrence key, one of `keys`. What a command about one row (moving
+   * the highlight, editing, splitting) acts on. */
   key: string
+  /** The rows the command acts on: every selected row, in document order,
+   * `key` among them. One row is `[key]`. A structural command acts on
+   * their roots (`rootKeys`), so a selected subtree moves as one. */
+  keys: string[]
   mode: Mode
   /** On-screen order of the visible rows' keys (collapsed children skipped). */
   visibleOrder: string[]
@@ -79,6 +97,12 @@ export interface CommandInput {
    * rather than on a binding of its own (see `WRAP_PAIRS`).
    */
   typed?: string
+  /**
+   * The type for `turnInto` — the one command whose target is chosen from a
+   * menu (the selection bar's, the edit bar's) rather than bound to a key of
+   * its own (`turnIntoHeading` and its siblings). Read only by `turnInto`.
+   */
+  blockType?: BlockType
   /** The block the editor is focused on, or null/absent. In focus, the
    * visible world is this block plus its subtree — commands must not move,
    * delete, or navigate past that boundary. */
@@ -124,7 +148,14 @@ export interface CommandInput {
 
 /** Where selection / edit focus should land after a command runs (a row). */
 export type FocusIntent =
-  | { mode: "select"; key: string | null }
+  | {
+      mode: "select"
+      key: string | null
+      /** The rows to leave selected, `key` among them, where the command
+       * kept a selection of several (on their new keys, after a move).
+       * Absent: `key` alone is highlighted. */
+      keys?: string[]
+    }
   | { mode: "edit"; key: string; atStart?: boolean; caret?: number }
 
 export interface CommandResult {
@@ -145,13 +176,13 @@ export interface CommandResult {
   /** Row that must end up collapsed — the symmetric demand to `expand`: the
    * editor folds the row only if it is currently open. */
   collapse?: string
-  /** Row that must be open *whatever the fold rule would say* — recorded as
-   * the reader's own, the way opening it by hand would be. `expand` cannot
-   * do this: it acts only on a row that is folded right now, and the row
-   * this names is one that is about to become a parent for the first time
-   * (nothing beneath it yet, so nothing folded), which the depth rule would
-   * otherwise close the instant it gains a child. */
-  reveal?: string
+  /** Rows that must be open *whatever the fold rule would say* — recorded
+   * as the reader's own, the way opening them by hand would be. `expand`
+   * cannot do this: it acts only on a row that is folded right now, and the
+   * rows this names are ones about to become parents for the first time
+   * (nothing beneath them yet, so nothing folded), which the depth rule
+   * would otherwise close the instant they gain a child. */
+  reveal?: string[]
   /** Navigation tried to move above the first block — the caller may hand focus
    * to whatever sits above the editor (e.g. the note title). */
   exitTop?: boolean
@@ -231,6 +262,78 @@ function sameType(type: BlockType): BlockType {
  */
 function keepFocus(mode: Mode, key: string, caret?: CaretInput): FocusIntent {
   return mode === "edit" ? { mode: "edit", key, caret: caret?.start } : { mode: "select", key }
+}
+
+/** The rows a structural command acts on: the selection's roots. */
+const rootsOf = (input: CommandInput): string[] => rootKeys(input.keys)
+
+/** Is the selection several rows? Several are kept selected after a
+ * command; a single row keeps its mode and caret. */
+const isRange = (input: CommandInput): boolean => input.keys.length > 1
+
+/** Carry a row's key across the rekeying a structural move did above it: a
+ * row beneath a moved root has the root's new key as its prefix now. */
+function rekey(moved: [from: string, to: string][]) {
+  return (key: string | null): string | null => {
+    if (key === null) return null
+    const hit = moved.find(([from]) => isWithin(key, from))
+    return hit ? hit[1] + key.slice(hit[0].length) : key
+  }
+}
+
+/**
+ * Where the selection lands after a structural command on its rows: a
+ * single row keeps its mode (and, when editing, its caret) on its new key;
+ * several rows stay selected, each on its new key, wherever the command
+ * put them.
+ */
+function keepSelection(input: CommandInput, moved: [from: string, to: string][] = []): FocusIntent {
+  const follow = rekey(moved)
+  const key = follow(input.key) ?? input.key
+  if (!isRange(input)) return keepFocus(input.mode, key, input.caret)
+  return { mode: "select", key, keys: input.keys.map((row) => follow(row) ?? row) }
+}
+
+/** What the structure moves can do to the rows right now — what the
+ * selection bar and the edit bar grey their items by, and what the commands
+ * themselves check first, so a greyed item and a dead key agree. */
+export interface Moves {
+  /** Every root has a sibling above it to nest under. A range moves as
+   * one: a root left behind would have the rest nest under it — under a
+   * selected row, reshaping the very selection. */
+  canIndent: boolean
+  /** Some root has a parent it can be lifted out of — one that is not the
+   * focus root, whose children cannot leave the view. */
+  canOutdent: boolean
+  /** The roots are one run of siblings with room above / below (`moveBlocks`). */
+  canMoveUp: boolean
+  canMoveDown: boolean
+}
+
+export function movesOf(input: CommandInput): Moves {
+  const { doc, focusRootId } = input
+  const places = rootsOf(input).flatMap((key) => {
+    const at = siblingsOf(doc, key)
+    return at ? [{ key, ...at }] : []
+  })
+  const first = places[0]
+  const run =
+    first !== undefined &&
+    places.every(
+      (at, k) =>
+        at.parentKey === first.parentKey && at.direction === "down" && at.index === first.index + k,
+    )
+  return {
+    canIndent: places.length > 0 && places.every((at) => at.index > 0),
+    canOutdent: places.some(
+      (at) =>
+        at.parentKey !== null &&
+        !parentIsFocusRoot(at.parentKey, focusRootId) &&
+        !(focusRootId && idOfKey(at.key) === focusRootId),
+    ),
+    canMoveUp: run && first.index > 0,
+    canMoveDown: run && places[places.length - 1].index < first.siblings.length - 1,
+  }
 }
 
 /** The nearest ancestor row of `key` present in `visibleOrder`, or null. Used
@@ -331,20 +434,31 @@ function splitAtCaret(typeFor: (type: BlockType, input: CommandInput) => BlockTy
   }
 }
 
-/** Duplicate the row's subtree; focus follows the copy (VS Code semantics:
- * duplicate-down lands on the lower copy, duplicate-up on the upper). In edit
- * mode the copy opens editing with the caret preserved ("duplicate line"). */
+/** Duplicate the rows' subtrees as one group; focus follows the copy (VS
+ * Code semantics: duplicate-down lands on the lower copy, duplicate-up on
+ * the upper). In edit mode the copy opens editing with the caret preserved
+ * ("duplicate line"). A range's copies are the new range, first to last. */
 function duplicate(direction: "above" | "below"): Command {
   return (input) => {
-    const { doc, key, mode, caret } = input
-    const result = duplicateBlocks(doc, [key], direction)
+    const { doc, mode, caret } = input
+    const result = duplicateBlocks(doc, rootsOf(input), direction)
     if (!result) return { handled: true }
-    return {
-      handled: true,
-      doc: result.doc,
-      op: STRUCTURAL,
-      focus: keepFocus(mode, result.copies[0], caret),
-    }
+    const { copies } = result
+    const focus: FocusIntent = isRange(input)
+      ? { mode: "select", key: copies[copies.length - 1], keys: copies }
+      : keepFocus(mode, copies[0], caret)
+    return { handled: true, doc: result.doc, op: STRUCTURAL, focus }
+  }
+}
+
+/** Move the rows as one group among their shared parent's children (a no-op
+ * across parents, or at the end they are moving toward). The rows keep their
+ * keys, so the selection stays where it was — and the caret with it. */
+function moveGroup(direction: "up" | "down"): Command {
+  return (input) => {
+    const next = moveBlocks(input.doc, rootsOf(input), direction)
+    if (next === input.doc) return { handled: true }
+    return { handled: true, doc: next, op: STRUCTURAL, focus: keepSelection(input) }
   }
 }
 
@@ -473,25 +587,34 @@ function wrapWith(marker: string): Command {
 }
 
 /**
- * Select-mode "turn into": toggle the block to the given type. Text and
- * children are never touched — this is a type change only, one structural
- * undo step. An *empty* block additionally opens editing (caret at the end) so
- * the marker key starts you typing that block type immediately. Allowed on the
- * focused title too (a type change never escapes the view).
+ * "Turn into": every root to the given type — toggled, for a marker key (a
+ * root already of the kind goes back to a paragraph), or set outright, for
+ * a menu's pick. Text and children are never touched — this is a type
+ * change only, one structural undo step; the type is the block's, so a
+ * block selected in two rows changes once. An *empty* block on its own
+ * additionally opens editing (caret at the end) so the marker key starts
+ * you typing that block type immediately. Allowed on the focused title too
+ * (a type change never escapes the view).
  */
-function turnInto(target: BlockType): Command {
-  return (input) => {
-    const { doc, key, mode } = input
-    const block = blockOf(input)
-    if (!block) return IGNORED
-    const result: CommandResult = {
-      handled: true,
-      doc: updateType(doc, block.id, toggleType(block.type, target)),
-      op: STRUCTURAL,
-    }
-    if (block.text.trim() === "") return { ...result, focus: { mode: "edit", key } }
-    return { ...result, focus: keepFocus(mode, key) }
+function retype(input: CommandInput, target: BlockType, toggle: boolean): CommandResult {
+  const { doc, key } = input
+  const block = blockOf(input)
+  if (!block) return IGNORED
+  let next = doc
+  for (const id of new Set(rootsOf(input).map(idOfKey))) {
+    const each = next.blocks[id]
+    if (each) next = updateType(next, id, toggle ? toggleType(each.type, target) : target)
   }
+  const result: CommandResult = { handled: true, doc: next, op: STRUCTURAL }
+  if (!isRange(input) && block.text.trim() === "") {
+    return { ...result, focus: { mode: "edit", key } }
+  }
+  return { ...result, focus: keepSelection(input) }
+}
+
+/** The marker keys' "turn into": a toggle (see `retype`). */
+function turnInto(target: BlockType): Command {
+  return (input) => retype(input, target, true)
 }
 
 export type CommandName =
@@ -533,6 +656,7 @@ export type CommandName =
   | "turnIntoQuote"
   | "turnIntoOrdered"
   | "turnIntoCode"
+  | "turnInto"
   | "openFence"
   | "toggleCollapse"
   | "insertBelow"
@@ -553,8 +677,12 @@ export const COMMANDS: Record<CommandName, Command> = {
   /** Edit → back to highlighting the row. */
   exitEdit: ({ key }) => ({ handled: true, focus: { mode: "select", key } }),
 
-  /** Select → nothing focused (Escape's last rung). Arrows re-select. */
-  deselect: () => ({ handled: true, focus: { mode: "select", key: null } }),
+  /** Select → nothing focused (Escape's last rung). Arrows re-select. A
+   * range first collapses back to its head row, the rung before. */
+  deselect: (input) => ({
+    handled: true,
+    focus: { mode: "select", key: isRange(input) ? input.key : null },
+  }),
 
   /** Nest the row under its previous sibling; keeps the current mode/focus
    * (and, when editing, the caret position) — on the row's new key. The row
@@ -564,35 +692,58 @@ export const COMMANDS: Record<CommandName, Command> = {
    * just indented, mid-edit. Nesting something under a row is asking to see
    * it, so the open is recorded as the reader's own. */
   indent: (input) => {
-    const { doc, key, mode, caret } = input
-    const next = indentBlock(doc, key)
+    const { doc } = input
     // Consume the key even when it can't indent (no previous sibling), so Tab
-    // never escapes the editor.
-    if (next.doc === doc) return { handled: true, focus: keepFocus(mode, key, caret) }
+    // never escapes the editor. A range moves as one, or not at all
+    // (`movesOf`).
+    if (!movesOf(input).canIndent) return { handled: true, focus: keepSelection(input) }
+    let next = doc
+    const moved: [string, string][] = []
+    const reveal: string[] = []
+    // In document order: each row's new previous sibling is the one the group
+    // is nesting under, so a contiguous sibling range nests together.
+    for (const key of rootsOf(input)) {
+      const result = indentBlock(next, key)
+      if (result.doc === next) continue
+      moved.push([key, result.key])
+      const parent = parentKeyOf(result.key)
+      if (parent !== null && !reveal.includes(parent)) reveal.push(parent)
+      next = result.doc
+    }
+    if (next === doc) return { handled: true, focus: keepSelection(input) }
     return {
       handled: true,
-      doc: next.doc,
+      doc: next,
       op: STRUCTURAL,
-      reveal: parentKeyOf(next.key) ?? undefined,
-      focus: keepFocus(mode, next.key, caret),
+      reveal,
+      focus: keepSelection(input, moved),
     }
   },
 
-  /** Lift the row out to become a sibling of its parent. */
+  /** Lift the rows out to become siblings of their parents — whichever of
+   * them can be lifted. */
   outdent: (input) => {
-    const { doc, key, mode, caret, focusRootId } = input
-    // Focus boundary: outdenting a direct child of the focus root (which would
+    const { doc, focusRootId } = input
+    let next = doc
+    const moved: [string, string][] = []
+    // Reverse order keeps siblings in place as each is lifted out. Focus
+    // boundary: outdenting a direct child of the focus root (which would
     // become the root's sibling and leave the view) is a no-op — as is
     // outdenting the focus root itself, where it leads the view as a row.
-    if (
-      parentIsFocusRoot(parentKeyOf(key), focusRootId) ||
-      (focusRootId && idOfKey(key) === focusRootId)
-    ) {
-      return { handled: true, focus: keepFocus(mode, key, caret) }
+    for (const key of [...rootsOf(input)].reverse()) {
+      if (
+        parentIsFocusRoot(parentKeyOf(key), focusRootId) ||
+        (focusRootId && idOfKey(key) === focusRootId)
+      ) {
+        continue
+      }
+      const result = outdentBlock(next, key)
+      if (result.doc === next) continue
+      moved.push([key, result.key])
+      next = result.doc
     }
-    const next = outdentBlock(doc, key)
-    if (next.doc === doc) return { handled: true, focus: keepFocus(mode, key, caret) }
-    return { handled: true, doc: next.doc, op: STRUCTURAL, focus: keepFocus(mode, next.key, caret) }
+    if (next === doc) return { handled: true, focus: keepSelection(input) }
+    return { handled: true, doc: next, op: STRUCTURAL, focus: keepSelection(input, moved) }
   },
 
   moveSelectionUp: moveSelection("up"),
@@ -726,53 +877,53 @@ export const COMMANDS: Record<CommandName, Command> = {
     return { handled: true, focus: keepFocus(mode, siblingKey(key, last)) }
   },
 
-  /** Reorder the row among its siblings (subtree comes along). Preserves the
-   * caret when editing so the cursor rides along with the moved block. */
-  moveBlockUp: (input) => {
-    const { doc, key, mode, caret } = input
-    const next = moveBlock(doc, key, "up")
-    if (next === doc) return { handled: true }
-    return { handled: true, doc: next, op: STRUCTURAL, focus: keepFocus(mode, key, caret) }
-  },
-  moveBlockDown: (input) => {
-    const { doc, key, mode, caret } = input
-    const next = moveBlock(doc, key, "down")
-    if (next === doc) return { handled: true }
-    return { handled: true, doc: next, op: STRUCTURAL, focus: keepFocus(mode, key, caret) }
-  },
+  /** Reorder the rows among their siblings (subtrees come along). Preserves
+   * the caret when editing so the cursor rides along with the moved block. */
+  moveBlockUp: moveGroup("up"),
+  moveBlockDown: moveGroup("down"),
 
-  /** Duplicate the row (and its subtree) above / below itself. */
+  /** Duplicate the rows (and their subtrees) above / below themselves. */
   duplicateAbove: duplicate("above"),
   duplicateBelow: duplicate("below"),
 
-  /** Delete the highlighted row and its subtree (select mode). The selection
-   * lands on the visible row that takes the deleted one's place — the one
-   * that slides up from below — falling back to the row above when the
-   * deleted row was last. */
+  /** Remove the highlighted rows and their subtrees. The selection lands on
+   * the visible row that takes the removed ones' place — the one that
+   * slides up from below — falling back to the row above when the removed
+   * rows were last. */
   deleteBlock: (input) => {
-    const { doc, key, visibleOrder, focusRootId, focusTitled } = input
-    const id = idOfKey(key)
+    const { doc, visibleOrder, focusRootId, focusTitled } = input
+    const roots = rootsOf(input)
     // The focused view's own root, where it leads the view as a row: removing
-    // it from inside would take the view with it — say so rather than doing
-    // nothing, since the row looks removable like any other.
-    if (focusRootId && id === focusRootId) {
+    // it from inside would take the view with it — a range that happens to
+    // include it passes it by; on its own, say so rather than doing nothing,
+    // since the row looks removable like any other.
+    const removable = roots.filter((key) => !(focusRootId && idOfKey(key) === focusRootId))
+    if (removable.length === 0) {
       return { handled: true, notice: "Leave focus to remove the block you're focused on" }
     }
+    // A note keeps a block to type in: its one and only leaf stays.
+    const onlyId = doc.rootBlockIds.length === 1 ? doc.rootBlockIds[0] : null
     const onlyBlock =
-      doc.rootBlockIds.length === 1 &&
-      doc.rootBlockIds[0] === id &&
-      (doc.blocks[id]?.children.length ?? 0) === 0
+      onlyId !== null &&
+      (doc.blocks[onlyId]?.children.length ?? 0) === 0 &&
+      removable.some((key) => idOfKey(key) === onlyId)
     if (onlyBlock && !input.emptyable) return { handled: true }
-    const { doc: next } = removeBlock(doc, key)
-    // Walk the pre-delete visible order outward from the deleted row: first
-    // below (skipping its own removed subtree via the survives-in-next check),
-    // then above.
-    const at = visibleOrder.indexOf(key)
+    let next = doc
+    for (const key of removable) {
+      if (hasOccurrence(next, key)) next = removeBlock(next, key).doc
+    }
+    if (next === doc) return { handled: true }
+    // Walk the pre-delete visible order outward from the removed rows: first
+    // below the last of them (skipping their own removed subtrees via the
+    // survives-in-next check), then above the first.
+    const indices = input.keys.map((key) => visibleOrder.indexOf(key)).filter((i) => i !== -1)
+    const lo = indices.length > 0 ? Math.min(...indices) : 0
+    const hi = indices.length > 0 ? Math.max(...indices) : -1
     let focusKey: string | null = null
-    for (let i = at + 1; i < visibleOrder.length && !focusKey; i++) {
+    for (let i = hi + 1; i < visibleOrder.length && !focusKey; i++) {
       if (hasOccurrence(next, visibleOrder[i])) focusKey = visibleOrder[i]
     }
-    for (let i = at - 1; i >= 0 && !focusKey; i--) {
+    for (let i = lo - 1; i >= 0 && !focusKey; i--) {
       if (hasOccurrence(next, visibleOrder[i])) focusKey = visibleOrder[i]
     }
     // The focused view emptied: the title above the rows takes the keyboard
@@ -794,17 +945,24 @@ export const COMMANDS: Record<CommandName, Command> = {
   },
 
   /** Toggle a todo's checkbox from select mode (no-op on other blocks):
-   * checked is a TYPE, so this is `todo` ↔ `done`. */
+   * checked is a TYPE, so this is `todo` ↔ `done`. Over a range, every
+   * todo in it flips; the rest are left alone. */
   toggleTodo: (input) => {
-    const { doc, key, mode } = input
-    const block = blockOf(input)
-    const type = block?.type
-    if (!block || (type !== "todo" && type !== "done")) return IGNORED
+    const { doc } = input
+    const todos = [...new Set(rootsOf(input).map(idOfKey))].filter((id) => {
+      const type = doc.blocks[id]?.type
+      return type === "todo" || type === "done"
+    })
+    if (todos.length === 0) return IGNORED
+    let next = doc
+    for (const id of todos) {
+      next = updateType(next, id, next.blocks[id].type === "todo" ? "done" : "todo")
+    }
     return {
       handled: true,
-      doc: updateType(doc, block.id, type === "todo" ? "done" : "todo"),
-      op: { type: "text", blockId: block.id },
-      focus: keepFocus(mode, key),
+      doc: next,
+      op: { type: "text", blockId: todos[0] },
+      focus: keepSelection(input),
     }
   },
 
@@ -857,6 +1015,11 @@ export const COMMANDS: Record<CommandName, Command> = {
   turnIntoQuote: turnInto("quote"),
   turnIntoOrdered: turnInto("ol"),
   turnIntoCode: turnInto("code"),
+  /** A menu's "turn into": the rows become `blockType` outright (a pick of
+   * Heading over a heading is still a heading). Unbound: the selection bar
+   * and the edit bar run it with the type they were given. */
+  turnInto: (input) =>
+    input.blockType === undefined ? IGNORED : retype(input, input.blockType, false),
 
   /**
    * The fence shortcut: Enter on a block whose whole text is three backticks
@@ -989,7 +1152,7 @@ export const COMMANDS: Record<CommandName, Command> = {
 /** Run a named command. Unknown names are a no-op (defensive). */
 /**
  * The commands a **browse** view runs — a read-only editor the reader still
- * moves through (the notes list, a search's results): everything that moves
+ * moves through (the Views page, a search's results): everything that moves
  * the highlight, folds a row or focuses, and nothing that writes. Enter is
  * the view's own (it opens the row rather than editing it), so `enterEdit`
  * is not here.

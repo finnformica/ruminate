@@ -4,8 +4,8 @@ import React from "react"
 import { BoardFilters } from "../components/boards/board-filters"
 import { BoardInspector } from "../components/boards/board-inspector"
 import { BoardPicture, type BoardImage } from "../components/boards/board-picture"
-import { Button } from "../components/button"
-import { IconButton } from "../components/icon-button"
+import { Button } from "../components/ui/button"
+import { IconButton } from "../components/ui/icon-button"
 import { GridIcon16, NoteIcon16 } from "../components/icons"
 import { Notice } from "../components/notice"
 import { PageLayout } from "../components/page-layout"
@@ -170,10 +170,18 @@ function BoardPage({ boardId }: { boardId: string }) {
           >
             Add images
           </Button>
-          <IconButton aria-label="Open as note" size="small" asChild>
-            <Link to="/notes/$" params={{ _splat: boardId }} search={{ query: undefined }}>
-              <NoteIcon16 />
-            </Link>
+          <IconButton
+            aria-label="Open as note"
+            size="small"
+            onClick={() =>
+              navigate({
+                to: "/views/$",
+                params: { _splat: boardId },
+                search: { query: undefined },
+              })
+            }
+          >
+            <NoteIcon16 />
           </IconButton>
           <input
             ref={fileInputRef}
@@ -208,7 +216,7 @@ function BoardPage({ boardId }: { boardId: string }) {
           <Notice>
             There is no note here yet.{" "}
             <Link
-              to="/notes/$"
+              to="/views/$"
               params={{ _splat: boardId }}
               search={{ query: undefined }}
               className="link"

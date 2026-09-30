@@ -64,6 +64,37 @@ describe("docToOps", () => {
     expect(docToOps("a", noteDoc("a", snapshot)!, snapshot)).toEqual([])
   })
 
+  it("a doc that shows part of the note edits only what it shows", () => {
+    const snapshot = graphOf({ a: A })
+    // A view of the note with `one` filtered out: `two` and `deep` alone.
+    const whole = noteDoc("a", snapshot)!
+    const shown: BlockDoc = {
+      ...whole,
+      rootBlockIds: ["blk_two0000000"],
+      blocks: {
+        blk_two0000000: whole.blocks.blk_two0000000,
+        blk_deep000000: whole.blocks.blk_deep000000,
+      },
+    }
+    // Handed back as it was: nothing — `one` is hidden, not removed.
+    expect(docToOps("a", shown, snapshot, undefined, "a", shown)).toEqual([])
+    // Whereas without saying what was shown, the same doc removes `one`.
+    expect(kinds(docToOps("a", shown, snapshot))).toEqual(["unlink"])
+
+    // A row added after `two` follows it in the note; `one` stays first.
+    const fresh = emptyBlock("ul", "three")
+    const added = insertAfter(shown, "blk_two0000000", fresh)
+    const ops = docToOps("a", added, snapshot, undefined, "a", shown)
+    expect(kinds(ops)).toEqual(["create", "link"])
+    const after = applyOps(snapshot, ops, NOW)
+    expect(walk(after, "a")).toBe(A + "- three\n  id:: " + fresh.id + "\n")
+
+    // `two` removed from the view is unlinked, and only it: `one` stands.
+    const removed = removeBlock(shown, "blk_two0000000").doc
+    const gone = docToOps("a", removed, snapshot, undefined, "a", shown)
+    expect(gone).toEqual([{ op: "unlink", source: "a", destination: "blk_two0000000" }])
+  })
+
   it("typing is one setText; nothing else moves", () => {
     const snapshot = graphOf({ a: A })
     const doc = updateText(noteDoc("a", snapshot)!, "blk_one0000000", "one edited")
@@ -629,6 +660,34 @@ describe("deleteBlockOps / parentCount", () => {
     // Notes are not blocks; unknown ids are nothing.
     expect(deleteBlockOps("a", linked)).toEqual([])
     expect(deleteBlockOps("nope", linked)).toEqual([])
+  })
+
+  it("deletes several blocks as one batch — a link between two of them goes with them", () => {
+    const snapshot = graphOf({
+      a: "- shared\n  id:: blk_shared0000\n  - under shared\n    id:: blk_under00000\n- only a\n  id:: blk_onlya00000\n",
+      b: "- b\n  id:: blk_b000000000\n",
+    })
+    const linked = applyOps(
+      snapshot,
+      [{ op: "link", source: "b", destination: "blk_shared0000", sortKey: "a1" }],
+      2,
+    )
+    const ops = deleteBlockOps(["blk_shared0000", "blk_under00000", "blk_shared0000"], linked)
+    // Unlinked from outside the batch only: the edge from `shared` to
+    // `under` is between two deleted blocks and is left to the deletes.
+    expect(ops.filter((op) => op.op === "unlink")).toEqual([
+      { op: "unlink", source: "a", destination: "blk_shared0000" },
+      { op: "unlink", source: "b", destination: "blk_shared0000" },
+    ])
+    expect(ops.filter((op) => op.op === "delete").map((op) => (op as { id: string }).id)).toEqual([
+      "blk_shared0000",
+      "blk_under00000",
+    ])
+    const next = applyOps(linked, ops, 3)
+    expect(next.nodes.has("blk_shared0000")).toBe(false)
+    expect(next.nodes.has("blk_under00000")).toBe(false)
+    expect([...unassignedIds(next)]).toEqual([])
+    expect(next.childLinks.get("a")?.map((l) => l.destination_id)).toEqual(["blk_onlya00000"])
   })
 })
 

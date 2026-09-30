@@ -6,9 +6,12 @@ import {
   takeEntries,
   type ChangelogRelease,
 } from "../utils/changelog"
-import { IconButton } from "./icon-button"
+import { cx } from "../utils/cx"
+import { IconButton } from "./ui/icon-button"
+import { Surface } from "./ui/surface"
 import { XIcon16 } from "./icons"
 import { EntryText } from "./release-notes"
+import { useAccountPreference } from "../data/account-preferences"
 import { lastSeenVersion, rememberVersion, takeUpdateRequest } from "../utils/whats-new"
 
 /**
@@ -47,21 +50,35 @@ const MAX_ENTRIES = 6
  * counts as read, since it does not come back.
  *
  * The **Update Ruminate** button applies the waiting service worker and
- * reloads (`src/hooks/app-update.ts`), so there is no moment between the click
- * and the new build in which anything could be shown: the page is about to be
- * torn down. This is therefore not tied to the button at all. It asks, on
+ * reloads (`src/hooks/app-update.ts`); between the click and the new build
+ * the page is on its way down, and all it shows is the button's own busy
+ * state. This is therefore not tied to the button at all. It asks, on
  * every boot, whether the build it is running is newer than the one this
  * device last saw, which also catches the reader whose waiting worker
  * activated on its own after they closed every tab.
  *
  * Nothing is fetched to answer that question. The stamp is a string in the app
  * bundle; only a device that is actually behind pays for the changelog.
+ *
+ * The card is off until asked for: Settings → Preferences → Changelog turns it on, as a
+ * preference of the account rather than the device
+ * (src/data/account-preferences.ts), so it is answered once for every
+ * device the reader signs in on. The boot's notes are taken and the build
+ * recorded either way, so turning it on later does not greet the reader with
+ * a release they have been running for weeks: not being told counts as read,
+ * exactly as dismissing does. The preference arrives with the sign-in, which
+ * may be after this has mounted — hence the effect follows it.
  */
 export function WhatsNewPopover() {
+  const show = useAccountPreference("whatsNewCard")
   const [unseen, setUnseen] = useState<ChangelogRelease[] | null>(null)
+  const [dismissed, setDismissed] = useState(false)
 
   useEffect(() => {
+    // Taken before the setting is consulted, so that the one-shot notes are
+    // consumed on this boot whether or not anything is shown for them.
     const { asked, seen } = bootFacts()
+    if (!show) return
 
     // Either the reader took an update a moment ago, or this device is running
     // a build it has not seen — which is how the reader whose waiting worker
@@ -83,24 +100,27 @@ export function WhatsNewPopover() {
     return () => {
       live = false
     }
-  }, [])
+  }, [show])
 
-  const dismissed = unseen === null || unseen.length === 0
+  // Off reads as nothing to say, so the card is put away the moment the box
+  // is unticked in Settings — and, the facts being cached for the page load,
+  // comes back if it is ticked again before the next one.
+  const nothingToSay = !show || unseen === null || unseen.length === 0
 
   // <kbd>Esc</kbd> puts it away, as it does every other transient surface in
   // the app — but only while it is there, so it never swallows the key.
   useEffect(() => {
-    if (dismissed) return
+    if (nothingToSay || dismissed) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setUnseen(null)
+      if (event.key === "Escape") setDismissed(true)
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [dismissed])
+  }, [nothingToSay, dismissed])
 
-  if (dismissed) return null
+  if (nothingToSay) return null
 
-  const close = () => setUnseen(null)
+  const close = () => setDismissed(true)
 
   const total = countEntries(unseen)
   const shown = takeEntries(unseen, MAX_ENTRIES)
@@ -117,10 +137,18 @@ export function WhatsNewPopover() {
     // what keeps it clear of the bottom chrome on every screen. `aria-live` is
     // off: this is not news worth interrupting a screen reader mid-sentence
     // for, and it is reachable in the reading order like anything else.
-    <div
+    <Surface
       role="complementary"
       aria-label="What's new"
-      className="whats-new-card card-2 absolute inset-x-3 bottom-3 z-20 flex flex-col gap-3 rounded-xl! p-4 sm:right-auto sm:w-[21rem] print:hidden"
+      // A popup that no Base UI component holds, so `open` is what puts it
+      // away: the surface plays its exit and the browser hides it after.
+      open={!dismissed}
+      className={cx(
+        "absolute inset-x-3 bottom-3 z-popup flex flex-col gap-3 p-4 sm:right-auto sm:w-[21rem] print:hidden",
+        // It grows out of the corner it sits in — what an anchor's
+        // `--transform-origin` comes to for something with no anchor.
+        "origin-bottom sm:origin-bottom-left",
+      )}
     >
       <div className="flex items-center justify-between gap-2">
         <h2 className="font-bold">What's new</h2>
@@ -162,6 +190,6 @@ export function WhatsNewPopover() {
         </Link>
         {rest > 0 ? <span className="text-sm text-text-secondary">+{rest} more</span> : null}
       </div>
-    </div>
+    </Surface>
   )
 }

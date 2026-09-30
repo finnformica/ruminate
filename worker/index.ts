@@ -14,6 +14,7 @@ import { githubRefresh } from "./handlers/github-refresh"
 import { images } from "./handlers/images"
 import { mcp, MCP_PATH } from "./handlers/mcp"
 import { mcpTokens, MCP_TOKENS_PREFIX } from "./handlers/mcp-tokens"
+import { preferences, PREFERENCES_PATH } from "./handlers/preferences"
 import { replica } from "./handlers/replica"
 import { shares, SHARES_PREFIX } from "./handlers/shares"
 import { isSocialPath, withSocialMeta } from "./handlers/social"
@@ -38,6 +39,7 @@ export default {
     }
     if (pathname === UNFURL_PATH) return unfurl(request, env)
     if (pathname === FEATURES_PATH) return features(request, env)
+    if (pathname === PREFERENCES_PATH) return preferences(request, env)
     if (pathname === ADMIN_PREFIX || pathname.startsWith(`${ADMIN_PREFIX}/`)) {
       return admin(request, env)
     }

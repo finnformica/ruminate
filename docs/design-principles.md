@@ -81,7 +81,7 @@ asks for it.
    fades — perceptually instant.
    Outside the editor "chosen" and "current" are a **wash**: the sidebar's
    active nav row / open note (`.nav-item[aria-current]`, with
-   `-hover`/`-active` steps), the notes list keyboard highlight
+   `-hover`/`-active` steps), the Views page keyboard highlight
    (`.list-highlight`), the calendar's current day and week, and the settings
    pickers (`<Button selected>`) all use `--color-bg-selected` /
    `--color-text-selected` verbatim. Every one of
@@ -178,10 +178,10 @@ asks for it.
    and the outline reads as indented beneath the title rather than the title
    as one more row. The pull is the page's to grant: it needs the 40px
    gutter, so a narrow page (16–20px) leaves the header at the text column.
-   The rows never take it — the text column does not move. Unlike the bullet
-   and number the hash is NOT a focus target — it reads as typography, and
-   focus stays on F / Cmd+. and the bullet/number clicks (on leaves; a
-   parent's key is its collapse toggle).
+   The rows never take it — the text column does not move. The hash is NOT a
+   focus target, and neither is the bullet or the number — the markers read
+   as typography, and focus stays on F / Cmd+., the block menu and the
+   phone's edit bar (a parent's key is its collapse toggle).
 
 ## Type scale
 
@@ -298,6 +298,39 @@ family with it. (There is no intermediate 6px step any more — line surfaces
 share the control radius; the old `--border-radius-md` read as too sharp on a
 full-width highlight.)
 
+## Elevation
+
+Everything raised is a `Surface` (src/components/ui/surface.tsx) and says
+which of three tiers it is. The tier decides the edge, the fill, the shadow
+and the radius, so no component picks a shadow or a radius for itself:
+
+| Tier    | What                                                                               | Fill and shadow                                      | Radius    |
+| ------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------- | --------- |
+| `card`  | part of the page: settings sections, previews                                      | `bg-card`, `--shadow-card`                           | `lg` 12px |
+| `popup` | floats over the page: menus, tooltips, hover cards, listboxes, the what's-new card | `bg-overlay-backdrop` blurred, `--shadow-popup`      | `lg` 12px |
+| `modal` | floats over everything: dialogs, the palette                                       | `bg-overlay-backdrop` blurred more, `--shadow-modal` | `xl` 16px |
+
+A modal also draws a scrim over the page (`--color-bg-scrim`: a fifth of black
+in the light, half in the dark, where a light dim reads as haze), so the page
+steps back and the window comes forward; the dialog's fades with it, the
+palette's is simply there. A dialog sits centred on the page.
+
+Every tier shares the same hairline ring for an edge (`--neutral-a3`, inset in
+the dark), which is what makes them read as one family at three heights. An
+in-page card renders `<Surface tier="card">` like the rest; the two elements
+that cannot be a `Surface` — a router `Link`, the calendar's own container —
+take the recipe, `surface({ tier: "card" })`, so there is still one definition.
+
+**Layers** are named, never numbered (`--z-raised` 10, `--z-popup` 20,
+`--z-modal` 30, `--z-tooltip` 40 in variables.css; `z-raised` … `z-tooltip` in
+Tailwind), and the layer is named by the element that is _positioned_, not by
+the surface: a Base UI `Positioner`, a fixed dialog, a drawer, the what's-new
+card's own box. A z-index on a surface inside a positioned, transformed
+wrapper orders nothing outside that wrapper — which is why Material UI puts
+`zIndex` on the popover and not the paper, and shadcn puts `z-50` on the
+positioner. Tooltips take the layer above the modals, because a tooltip
+belongs to the control under the pointer wherever that control is.
+
 ## Color roles
 
 | Role         | Light / dark token                                              | Used for                                                                                                                                                                                                        |
@@ -313,6 +346,7 @@ full-width highlight.)
 | Inactive sel | neutral ring + fill (see §3)                                    | the selection while the editor lacks focus or blank space was clicked — 22% neutral-9 ring over a 4% fill light / 14% white ring over a 4% lift dark                                                            |
 | Current      | `--color-bg-selected`                                           | sidebar active route / open note row (same tokens as Selection)                                                                                                                                                 |
 | Accent solid | `--accent-9`                                                    | checked checkbox fill                                                                                                                                                                                           |
+| Danger solid | `--color-bg-danger` (red-9), ink `--color-text-on-danger`       | the confirm of a destructive `ConfirmDialog` (Button's `danger` variant) — the app's one solid red, nowhere else; `--color-text-danger` (red-11) is its ink-only cousin for a menu item or an error line        |
 | Transclusion | `--accent-a2` tint                                              | `((ref))` embeds — quietly "live" content                                                                                                                                                                       |
 
 All roles are Radix alpha/step tokens, so both color schemes (and print, which
@@ -383,6 +417,30 @@ second sentence, the control is unclear or the sentence belongs in the docs.
 Labels are nouns (**Email address**), buttons are verbs (**Share**), and the
 sentence before a consequential button says exactly what it will do.
 
+### Confirmation
+
+Every "are you sure?" is one component, `ConfirmDialog`
+(`src/components/ui/confirm-dialog.tsx`): a title that asks the question and
+names its subject (**Delete “Ideas”?**), one sentence on what answering yes
+does and what it cannot undo, and two buttons — the verb (**Delete**,
+**Revoke**, never **OK**) and **Cancel**. Two variants, chosen by what the
+verb does rather than how it feels:
+
+- **`danger`** — it cannot be taken back, or not easily. The confirm is the
+  app's one solid red (`--color-bg-danger`), and the dialog opens with focus
+  on Cancel, so <kbd>Enter</kbd> pressed before reading is the safe answer.
+- **`primary`** — a step merely worth a second look (a full re-push, a sign
+  out). The confirm is the strongest ordinary button, and takes focus, since
+  going ahead is the expected answer.
+
+A confirm that is a request follows "Busy controls": the button spins from
+the click until the promise settles, Cancel and the close control wait with
+it, and a failure is shown beneath the buttons with the dialog still open —
+a confirmation never closes on a failure it has not shown. Nothing else in
+the app is drawn in the solid red: a destructive menu item is red ink
+(`--color-text-danger`), and a destructive button among other buttons is a
+sign the action wants a dialog.
+
 ## Loading
 
 While the notes are still on their way — the identity resolving at boot, the
@@ -396,6 +454,40 @@ says "wait" without saying for what, and the app's one spinner (the "Saving…"
 trace in a note's header) marks an action in flight, not a page. Skeletons
 never stand in for an empty corpus that is really empty — that state says
 what it is (the offline notice, an empty list).
+
+### Busy controls
+
+A spinner marks an **action in flight**, and it sits on the control that
+started the action. Every control that starts a request — signing in,
+sharing, revoking, applying an update, pushing a full copy — is busy from the
+press until the request has settled, however it settles:
+
+- **Disabled** against a second press, and said to be busy (`aria-busy`).
+- **Spinning in its icon slot**: the spinner takes the place of the control's
+  icon, or goes before the label if it has none. The label stays as it was —
+  never "Sharing…" — so the control keeps its words and its width.
+- **Not dimmed.** A disabled control is unavailable and fades to say so; a
+  busy one is working, and its spinner says so at full strength.
+
+This is `loading` on `Button` and `IconButton`. A lone control whose click
+is the request is an `AsyncButton`, busy for as long as the promise its
+click returns; a control whose flight is held elsewhere — a form's submit,
+a state the data layer reports (the replica's full push) — passes `loading`
+itself, with `usePending` (`src/hooks/pending.ts`) to hold a flight. A
+request that ends in leaving the page (signing in, taking an update) stays
+busy until the page has gone, since on this page it has no after. The
+"Saving…" trace in a note's header is the same rule on a surface rather
+than a control: it shows from the edit until its push has landed, and only
+while a push can land. The sidebar's sync row uses the same word for the
+same state — "Saving…", never "Syncing…" — so one save in flight is never
+named two ways on one screen. Offline, the edit lands on this device and its push
+waits for the network, so once the write is down the trace turns into
+**Saved offline** with the offline icon and no spinner — nothing is in
+flight, and it is a fact about the note rather than a wait. It is there
+because the sidebar's "Offline" row may not be on screen (collapsed, or a
+phone's closed drawer), and it clears when the push goes out on
+reconnecting. Signed out, the sidebar's "Signed out" is the news and the
+header says nothing (`saveTrace`, `src/components/sync-status.tsx`).
 
 ## Empty-block placeholder
 
@@ -413,21 +505,37 @@ growing the row.
 Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`,
 `--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1)`):
 
-| What                                    | How                                                                                                                                            |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hover affordances                       | opacity 150ms ease-out                                                                                                                         |
-| Hover surfaces (crumbs, focus dot)      | background/color 150ms ease                                                                                                                    |
-| Block line hover (neutral)              | background-color 100ms ease                                                                                                                    |
-| Selection highlight                     | background-color + color + box-shadow 100ms ease                                                                                               |
-| Chevron rotation                        | transform 300ms ease-in-out, in step with the fold                                                                                             |
-| Unfold (collapsed → open)               | the subtree's box's bottom edge sweeps down to reveal it, the rows below slide down, all transforms, 300ms ease-in-out, no fade: an accordion  |
-| Fold (open → collapsed)                 | the box, out of the flow, its edge sweeping up to cover it as the rows below slide up over it, 300ms ease-in-out; its rows linger inert for it |
-| Todo check → text mutes                 | color 200ms ease                                                                                                                               |
-| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms                                                                                                         |
+| What                                    | How                                                                                                                                                                                                                                       |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hover affordances                       | opacity 150ms ease-out                                                                                                                                                                                                                    |
+| Hover surfaces (crumbs, focus dot)      | background/color 150ms ease                                                                                                                                                                                                               |
+| Block line hover (neutral)              | background-color 100ms ease                                                                                                                                                                                                               |
+| Selection highlight                     | background-color + color + box-shadow 100ms ease                                                                                                                                                                                          |
+| Chevron rotation                        | transform 300ms ease-in-out, in step with the fold                                                                                                                                                                                        |
+| Unfold (collapsed → open)               | the subtree's box's bottom edge sweeps down to reveal it, the rows below slide down, all transforms, 300ms ease-in-out, no fade: an accordion                                                                                             |
+| Fold (open → collapsed)                 | the box, out of the flow, its edge sweeping up to cover it as the rows below slide up over it, 300ms ease-in-out; its rows linger inert for it                                                                                            |
+| Todo check → text mutes                 | color 200ms ease                                                                                                                                                                                                                          |
+| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms                                                                                                                                                                                                    |
+| Help panel (wide screen)                | the panel's share of the width, 300ms ease-in-out, with its contents translating in from the page's edge and back out under a fade — the one width the app animates                                                                       |
+| Selection bar                           | rises a few pixels into its place at the bottom of the window under a fade, 150ms `--ease-out-strong`, and sinks back out the same way — a rise rather than a popup's scale, since it is pinned to an edge and has no anchor to grow from |
 
 Press feedback lives on the **control**, never the content: collapsing a
 subtree gives the chevron a pressed scale and hover surface. Pressed scale is
 removed under `prefers-reduced-motion`.
+
+**Raised surfaces arrive and leave alike.** Every popup and modal is drawn
+on `Surface` (src/components/ui/surface.tsx), and the motion is the surface's:
+a fade from a slight scale about the point it is anchored to, and the same
+back — a transition rather than an animation, so one dismissed while it is
+still opening turns back smoothly instead of jumping. Written once, in both
+vocabularies: Base UI marks a popup it holds `data-starting-style` and
+`data-ending-style`; a surface nothing holds (the what's-new card) gets the
+same two moments from the browser, `@starting-style` for the arrival and a
+discrete `display` transition for the departure, with nothing to time in
+JavaScript. The fade is unconditional and the scale is `motion-safe`, so
+reduced motion keeps the one and is spared the other. Not everything raised
+moves: the palette and the slash menu are opened by keys and used constantly,
+and ask for `motion={false}`.
 
 **The fold moves, but never lays out.** Rows render as nested subtrees
 (`Subtree`, block-editor.tsx), and folding or unfolding is laid over the
@@ -468,7 +576,11 @@ row, always show. Reduced motion swaps the motion for a short fade.
   animation.
 - Layout. Only `opacity`, `transform` and colors transition — never
   height, width, margin, padding, or a clip. The fold is the test case: it
-  reads as a height change and is built without one.
+  reads as a height change and is built without one. The one exception is
+  a side panel's share of the app layout (the help panel opening and
+  closing): its edge has to travel with its contents, and nothing but the
+  width can move an edge the page is laid out against. Never while the
+  separator is dragged, never under reduced motion.
 
 `prefers-reduced-motion`: color/opacity fades stay (they aid comprehension);
 transform-based motion (chevron rotation, expand rise) is removed.

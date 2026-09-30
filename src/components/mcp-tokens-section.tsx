@@ -13,10 +13,12 @@ import {
 } from "../data/mcp-tokens"
 import { githubUserAtom, notesAtom } from "../global-state"
 import { cx } from "../utils/cx"
-import { Button } from "./button"
-import { Checkbox } from "./checkbox"
+import { AsyncButton } from "./ui/async-button"
+import { Button } from "./ui/button"
+import { Checkbox } from "./ui/checkbox"
 import { CheckIcon16, CopyIcon16, PlusIcon16, TrashIcon16 } from "./icons"
-import { TextInput } from "./text-input"
+import { TextInput } from "./ui/text-input"
+import { SettingsSection } from "./settings-section"
 
 /**
  * MCP access, on the settings page (docs/mcp-server.md).
@@ -70,14 +72,14 @@ export function McpTokensSection() {
 
   if (!githubUser) {
     return (
-      <Section>
+      <SettingsSection title="MCP access">
         <div className="text-text-secondary">Sign in to give an agent access to your notes.</div>
-      </Section>
+      </SettingsSection>
     )
   }
 
   return (
-    <Section>
+    <SettingsSection title="MCP access">
       <div className="flex flex-col gap-2">
         <p className="leading-5 text-text-secondary">
           Give an AI agent access to your notes over the{" "}
@@ -122,21 +124,11 @@ export function McpTokensSection() {
           }}
         />
       ) : (
-        <Button className="self-start" onClick={() => setComposing(true)}>
-          <PlusIcon16 />
+        <Button className="self-start" icon={<PlusIcon16 />} onClick={() => setComposing(true)}>
           New token
         </Button>
       )}
-    </Section>
-  )
-}
-
-function Section({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <h3 className="font-bold leading-4">MCP access</h3>
-      <div className="card-1 flex flex-col gap-5 p-4">{children}</div>
-    </div>
+    </SettingsSection>
   )
 }
 
@@ -273,14 +265,14 @@ function TokenList({
               </span>
             </div>
             {state === "live" ? (
-              <Button
+              <AsyncButton
                 className="shrink-0"
                 aria-label={`Revoke ${token.name}`}
-                onClick={() => void onRevoke(token.id)}
+                icon={<TrashIcon16 />}
+                onClick={() => onRevoke(token.id)}
               >
-                <TrashIcon16 />
                 Revoke
-              </Button>
+              </AsyncButton>
             ) : null}
           </li>
         )
@@ -474,8 +466,8 @@ function MintForm({
       {error ? <p className="text-text-danger">{error}</p> : null}
 
       <div className="flex gap-2">
-        <Button variant="primary" disabled={!ready || busy} onClick={() => void submit()}>
-          {busy ? "Creating…" : "Create token"}
+        <Button variant="primary" disabled={!ready} loading={busy} onClick={() => void submit()}>
+          Create token
         </Button>
         <Button onClick={onCancel}>Cancel</Button>
       </div>

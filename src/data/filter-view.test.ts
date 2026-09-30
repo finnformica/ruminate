@@ -111,9 +111,22 @@ describe("filteredView", () => {
     expect(matches).toBe(1)
   })
 
-  it("unfolds what survived, so a match is never hidden behind a fold", () => {
+  it("folds what survived by the rule it is given, and nothing without one", () => {
+    // The walk's own folds are not carried over: an eager walk has none
+    // worth keeping, and the narrowed view's rule decides afresh.
     const view: GraphView = { ...viewOf(NOTE), collapsed: new Set(["some-key"]) }
     expect(filteredView(view, matching(view.doc, ["milk"])).collapsed.size).toBe(0)
+    // A rule closing the Shopping row folds it; leaves are never folded.
+    const shopping = view.doc.rootBlockIds[0]
+    const rule = (key: string) => key !== shopping
+    const { collapsed } = filteredView(view, matching(view.doc, ["milk", "hoover"]), {
+      expanded: rule,
+    })
+    expect([...collapsed]).toEqual([shopping])
+    // Sorted only, the same: the rule runs over the sorted rows.
+    expect([...filteredView(view, byText(view.doc), { expanded: rule }).collapsed]).toEqual([
+      shopping,
+    ])
   })
 
   it("empties the view when nothing matched", () => {

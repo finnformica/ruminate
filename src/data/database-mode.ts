@@ -17,6 +17,7 @@ import { NOTE_TYPE, buildGraphSnapshot, type GraphSnapshot } from "./graph"
 import { applyOps, notesTouchedBy, type Op } from "./ops"
 import { resetReplicaAccess } from "./replica-access"
 import type { ReplicaSyncHandle } from "./replica-sync"
+import type { CorpusRows } from "./deleted-notes"
 import type { NoteStore } from "./note-store"
 import { isBrowserOffline } from "../utils/network"
 import { sampleViews } from "./sample-graph"
@@ -499,6 +500,24 @@ export function requestDatabaseFlush(): Promise<void> {
     activation.opsFlushTimer = null
   }
   return enqueue(() => flushOps(activation))
+}
+
+/**
+ * Every row the local store holds, tombstones included, once the ops still
+ * coalescing have landed — what Settings' Recently deleted reads
+ * (`src/data/deleted-notes.ts`). Null while the runtime is down or still
+ * opening its store.
+ */
+export async function databaseAllRows(): Promise<CorpusRows | null> {
+  const activation = runtime
+  if (!activation) return null
+  let rows: CorpusRows | null = null
+  await enqueue(async () => {
+    if (runtime !== activation || !activation.store) return
+    await flushOps(activation)
+    rows = await activation.store.getAllRows()
+  })
+  return rows
 }
 
 function onPageHidden() {

@@ -1,12 +1,12 @@
 import type { BoardFeatureState } from "../../data/boards"
-import { Button } from "../button"
-import { DropdownMenu } from "../dropdown-menu"
+import { Button } from "../ui/button"
+import { DropdownMenu } from "../ui/dropdown-menu"
 import { ChevronDownIcon16 } from "../icons"
 import { SearchInput } from "../search-input"
 
 /**
  * Narrowing the board: words matched against captions, and one value per
- * feature (the chosen values intersect, as `in:` scopes do in a search).
+ * feature (the chosen values intersect: a picture must carry every one).
  * Only a feature with values on the page gets a menu — there is nothing to
  * narrow by until a picture has been given one.
  */

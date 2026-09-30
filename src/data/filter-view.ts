@@ -1,4 +1,6 @@
+import { collapsedKeysOf } from "../blocks/default-collapsed"
 import type { Block, BlockDoc } from "../blocks/types"
+import type { ExpandedRule } from "../blocks/view"
 import type { ViewNarrowing } from "../utils/view-narrowing"
 import type { GraphView } from "./graph"
 
@@ -59,6 +61,8 @@ export function filteredView(
   narrowing: ViewNarrowing,
   {
     keepRoots = false,
+    expanded,
+    startLevel = 1,
   }: {
     /**
      * Keep the view's roots whatever the filter says. A focused block is its
@@ -68,19 +72,29 @@ export function filteredView(
      * any other.
      */
     keepRoots?: boolean
+    /**
+     * The fold rule the narrowed rows are drawn by — the narrowed view's own
+     * (`useFoldRule` with the narrowing, src/data/view-state.ts), which
+     * opens everything the reader has not folded themselves. Absent, nothing
+     * is folded. The walk handed in was eager, so the rule is applied here,
+     * over what survived, exactly as a lazy walk would have applied it.
+     */
+    expanded?: ExpandedRule
+    /** The level of the view's roots, as the walk counts them (1 for a
+     * note's rows, 0 for a focused block). */
+    startLevel?: number
   } = {},
 ): FilteredView {
   const { matched, compare } = narrowing
   if (matched === null && compare === null) return { ...view, context: NO_CONTEXT, matches: null }
 
   const sorted = compare ? sortSiblings(view.doc, compare) : view.doc
-  if (matched === null) return { ...view, doc: sorted, context: NO_CONTEXT, matches: null }
-
-  const { doc, context } = prune(sorted, matched, keepRoots)
-  // A filtered view shows what survived, open: the reader asked for the
-  // matches, so making them unfold to find them would be a riddle. The
-  // page's fold rule is left alone — it comes back the moment the filter does.
-  return { doc, collapsed: new Set(), context, matches: matched.size }
+  const { doc, context } =
+    matched === null
+      ? { doc: sorted, context: new Set<string>() }
+      : prune(sorted, matched, keepRoots)
+  const collapsed = new Set(expanded ? collapsedKeysOf(doc, expanded, startLevel) : [])
+  return { doc, collapsed, context, matches: matched === null ? null : matched.size }
 }
 
 /**

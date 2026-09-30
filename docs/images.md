@@ -12,11 +12,11 @@ and how to turn it off again).
 
 An image block is an ordinary node in the graph (docs/graph-schema-v2.md):
 
-| field   | holds                                                                                                                                                              |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `type`  | `image`                                                                                                                                                            |
-| `text`  | the caption (may be empty)                                                                                                                                         |
-| `props` | `{ image: "img_…" }` for an uploaded picture, `{ src: url }` for an external one; `width`/`height` in pixels when known; `align` and `size` for its layout (below) |
+| field   | holds                                                                                                                                                                                                          |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`  | `image`                                                                                                                                                                                                        |
+| `text`  | the caption (may be empty)                                                                                                                                                                                     |
+| `props` | `{ image: "img_…" }` for an uploaded picture, `{ src: url }` for an external one; `width`/`height` in pixels when known; `thumbhash` (below, Offline) when measured; `align` and `size` for its layout (below) |
 
 The picture's bytes are **not** in the graph. An uploaded picture lives in an
 R2 bucket, and the block keeps only its asset id. The graph stays small rows
@@ -118,10 +118,65 @@ so a note mid-upload syncs as an empty image block rather than a broken
 reference.
 
 On success the bytes already in hand seed the read cache
-(`primeImageObjectUrl`), so a picture just uploaded is never fetched straight
-back down. Other reads go through `fetch` with the bearer token (an
-`<img src>` cannot carry one) and become object URLs, cached for the page's
-life.
+(`primeImageObjectUrl`), and the device's copy (Offline, below), so a picture
+just uploaded is never fetched straight back down. Other reads look in the
+device's copy first, then go through `fetch` with the bearer token (an
+`<img src>` cannot carry one); either way they become object URLs, cached for
+the page's life.
+
+## Offline
+
+Two halves: a picture the device has is drawn from the device, and one it
+has not got keeps its place with a likeness of itself.
+
+**The device's copy** (`src/data/image-cache.ts`). An asset never changes
+under its id, so a kept copy is never stale. Copies live in the Cache API
+rather than the browser's HTTP cache, which the browser may empty at will and
+the app can neither list nor clear. There is one cache per signed-in
+identity (`ruminate-images-<github id>`), bound as the SQL store is
+(docs/graph-storage.md): signing out leaves it in place, and a different
+account signing in deletes the previous one's before anything reads it.
+
+A picture is kept when it is **shown or uploaded**, and never fetched ahead —
+as Notion does, whose offline pages show the pictures that loaded while
+online and no others. The copy grows with what the user looks at rather than
+with the corpus, which matters on a phone: pictures are up to ten megabytes
+each. A picture never opened on this device (one added on another, say) is
+not there offline; it shows its likeness and a badge (below).
+
+The copy is capped at 250 MB. Each entry is stamped with its size, so the
+total is known at sign-in without reading the bytes back; a picture that
+would pass the cap lets the earliest-kept ones go first, and one larger than
+the whole cap is not kept. At sign-in the app asks once for persistent
+storage (`navigator.storage.persist()`), which covers the notes' own store
+too.
+
+Only pictures the Worker serves to this identity can be kept, so notes shared
+with the user contribute nothing: they are not kept offline at all
+(docs/sharing.md).
+
+**The likeness** (`src/data/image-thumbhash.ts`). An upload measures a
+[ThumbHash](https://evanw.github.io/thumbhash/) of the picture, from the
+same decode that measures its size: about 25 bytes, kept as base64 in the
+block's `thumbhash` prop. Until the bytes arrive the placeholder is that
+blurred likeness, in the picture's own box, rather than a pulsing grey one.
+Pictures uploaded before it existed have none and keep the grey box; they are
+not backfilled, because writing a prop bumps the block's (and so its note's)
+updated time, and a device that has the bytes to measure has no need of the
+likeness.
+
+A read ends in one of two failures (`useImageSrc`'s `failure`): **missing**,
+when the server answers 404 — "Image unavailable", as before — and
+**unreachable**, for anything else (offline, signed out, a server error). An
+unreachable picture keeps its placeholder, still, with a small badge
+("Offline", or "Couldn't load image" while the browser thinks it is online),
+and is tried again when the network returns.
+
+On iOS, the Cache API and persistent storage both work in Safari, and best
+from the Home Screen: a web app added there is exempt from Safari's rule that
+clears a site's stored data after seven days without a visit, and has its
+own storage allowance. There is no dependable background work on iOS, so a
+picture is only ever kept by being seen in the app.
 
 ## Reading through MCP
 
@@ -178,6 +233,10 @@ thousand screenshots stays inside the free allowance. Check Cloudflare's
 pricing page for the current figures.
 
 ## Not yet
+
+- **Uploading offline.** An upload still needs the network: a picture pasted
+  offline fails and its row is taken back out. Queuing the bytes on the
+  device and sending them when the network returns is future work.
 
 - **Deleting bytes.** Deleting an image block (or its note) leaves the asset
   in the bucket: a block delete is undoable, and the bytes must outlive the

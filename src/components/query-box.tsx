@@ -2,12 +2,12 @@ import React from "react"
 import { createPortal } from "react-dom"
 import { useHotkeys } from "react-hotkeys-hook"
 import { APP_SHORTCUTS } from "../shortcuts/registry"
-import { cx } from "../utils/cx"
 import { composeQuery, extractQualifiers, splitQuery } from "../utils/search"
 import { caretCoordinates } from "./block-editor/caret"
-import { IconButton } from "./icon-button"
+import { IconButton } from "./ui/icon-button"
 import { ClearIcon16, SearchIcon16 } from "./icons"
-import { Keys } from "./keys"
+import { Keys } from "./ui/keys"
+import { searchField } from "./ui/search-field"
 import {
   QUALIFIER_POPOVER_MAX_WIDTH,
   QUALIFIER_POPOVER_MIN_WIDTH,
@@ -19,7 +19,7 @@ import {
 import { QueryPill } from "./query-pill"
 
 /**
- * **The query box** — the one search input, on the notes page and in the
+ * **The query box** — the one search input, on the Views page and in the
  * ⌘K palette. The query is the caller's, one string (`in:n1 type:todo
  * milk`); the box shows it as the **filters**, each a pill beneath the line
  * (`QueryPill`), and the **text** in the line. A qualifier is lifted out of
@@ -272,10 +272,7 @@ export function QueryBox({
       data-testid="query-box"
       className={
         variant === "page"
-          ? cx(
-              "focus-ring h-10 w-full rounded-lg bg-bg-secondary pl-10 [-webkit-appearance:none] [font-variant-numeric:inherit] placeholder:text-text-secondary coarse:h-12 coarse:pl-11 [&:not(:focus-visible)]:hover:ring-1 [&:not(:focus-visible)]:hover:ring-inset [&:not(:focus-visible)]:hover:ring-border-secondary",
-              value ? "pr-10 coarse:pr-12" : "pr-3 coarse:pr-4",
-            )
+          ? searchField({ trailing: Boolean(value) })
           : "w-full bg-transparent px-5 py-4 text-lg leading-none outline-hidden placeholder:text-text-tertiary"
       }
       // The page's box is a search field (the browser clears it on Esc); the

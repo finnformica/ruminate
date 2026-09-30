@@ -4,10 +4,12 @@ import type React from "react"
 import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
+import type { BlockActions } from "./block-actions"
 import {
   ArrowLeftToLineIcon16,
   ArrowRightToLineIcon16,
   ChevronsLeftIcon16,
+  FocusIcon16,
   ImageIcon16,
   KeyboardDownIcon16,
   LinkIcon16,
@@ -17,21 +19,11 @@ import {
   UndoIcon16,
 } from "../icons"
 
-/** What the bar can do to the row being edited: the same commands the keys
- * and the block menu run (`src/blocks/commands.ts`), plus `done`. */
-export interface MobileEditBarActions {
-  turnInto: (type: BlockType) => void
-  bold: () => void
-  italic: () => void
-  strike: () => void
-  code: () => void
-  link: () => void
-  math: () => void
-  indent: () => void
-  outdent: () => void
+/** What is the bar's own, beside the block actions: history, a picture,
+ * and putting the keyboard away. */
+export interface MobileEditBarExtras {
   undo: () => void
   redo: () => void
-  remove: () => void
   /** Add a picture at this row; absent where images are switched off (the
    * button stays, greyed, so the row never changes shape). */
   image?: () => void
@@ -45,6 +37,8 @@ export interface MobileEditBarState {
   type: BlockType
   canIndent: boolean
   canOutdent: boolean
+  /** False on the block already focused on: there is nowhere further in. */
+  canFocus: boolean
   canUndo: boolean
   canRedo: boolean
 }
@@ -67,7 +61,8 @@ const TYPE_GLYPHS: Record<string, string> = {
 
 /** Every button is this wide, so the Turn into row's highlight can slide to
  * the active one by index. 38px: eight of them fit a 390pt phone with the
- * bar's insets, its end padding and the keyboard button taken out. */
+ * bar's insets, its end padding and the keyboard button taken out — the main
+ * row exactly, until Redo grows in and it scrolls under its fade. */
 const BUTTON_WIDTH = 38
 /** The bar floats this far above the keyboard's top edge. */
 const LIFT = 8
@@ -189,10 +184,12 @@ type View = "main" | "format" | "turnInto"
  * row for the inline formatting (bold, italic, strikethrough, code, link,
  * maths — each drawn as the markdown renders); Turn into, which swaps it for
  * the block types as their markdown glyphs, a highlight sliding to the
- * current one; outdent and indent, greyed where they would do nothing; undo,
- * with redo beside it only while there is something to redo; a picture,
- * where images are on; and delete. Each runs the same command its key does,
- * in edit mode with the caret, so Indent by bar is Tab by key.
+ * current one; outdent and indent, greyed where they would do nothing; focus
+ * on, which makes the row's block the whole view (a phone has no F to press,
+ * and only a leaf's bullet to tap), greyed on the block already focused on;
+ * undo, with redo beside it only while there is something to redo; a
+ * picture, where images are on; and delete. Each runs the same command its
+ * key does, in edit mode with the caret, so Indent by bar is Tab by key.
  *
  * Fixed to the bottom of the visual viewport, so it sits on the keyboard
  * whether the keyboard overlays the page (iOS) or shrinks it (Android).
@@ -204,12 +201,19 @@ type View = "main" | "format" | "turnInto"
  */
 export function MobileEditBar({
   state,
+  keys,
   actions,
+  extras,
 }: {
   state: MobileEditBarState
-  actions: MobileEditBarActions
+  /** The row being edited: what every block action here acts on. */
+  keys: string[]
+  /** The editor's one set of block actions (`block-actions.ts`), the same
+   * object the right-click menu and the selection bar run. */
+  actions: BlockActions
+  extras: MobileEditBarExtras
 }) {
-  const { bottom, keyboardUp } = useKeyboard(actions.done)
+  const { bottom, keyboardUp } = useKeyboard(extras.done)
   const barRef = useRef<HTMLDivElement>(null)
   usePageInset(barRef, bottom)
   const [view, setViewState] = useState<View>("main")
@@ -221,7 +225,7 @@ export function MobileEditBar({
     setViewState(next)
   }
   const rowRef = useRef<HTMLDivElement>(null)
-  const overflows = useOverflowsRight(rowRef, [view, state.canRedo, actions.image !== undefined])
+  const overflows = useOverflowsRight(rowRef, [view, state.canRedo, extras.image !== undefined])
   if (typeof document === "undefined") return null
   const current = canonicalOf(state.type)
   const activeType = Math.max(
@@ -242,7 +246,7 @@ export function MobileEditBar({
       // 6px of padding at either end is the pill's, not a button's: the
       // first and last glyphs sit clear of the rounded ends, and the row
       // scrolls under it evenly.
-      className="fixed inset-x-3 top-0 z-20 flex h-12 items-stretch overflow-hidden rounded-full bg-bg-overlay px-1.5 shadow-2xl ring-1 ring-[var(--neutral-a3)] will-change-transform dark:ring-inset print:hidden"
+      className="fixed inset-x-3 top-0 z-popup flex h-12 items-stretch overflow-hidden rounded-full bg-bg-overlay px-1.5 shadow-2xl ring-1 ring-[var(--neutral-a3)] will-change-transform dark:ring-inset print:hidden"
       style={{
         // The bar's bottom edge a little above the visual viewport's (see
         // `useKeyboard`); with no keyboard, above the home indicator too.
@@ -281,7 +285,7 @@ export function MobileEditBar({
               label="Bold"
               enter="cascade"
               index={0}
-              onClick={actions.bold}
+              onClick={() => actions.bold(keys)}
               className="font-content text-lg font-bold"
             >
               B
@@ -290,7 +294,7 @@ export function MobileEditBar({
               label="Italic"
               enter="cascade"
               index={1}
-              onClick={actions.italic}
+              onClick={() => actions.italic(keys)}
               className="font-content text-lg italic"
             >
               I
@@ -299,24 +303,24 @@ export function MobileEditBar({
               label="Strikethrough"
               enter="cascade"
               index={2}
-              onClick={actions.strike}
+              onClick={() => actions.strike(keys)}
               className="font-content text-lg line-through"
             >
               S
             </BarButton>
-            <BarButton label="Code" enter="cascade" index={3} onClick={actions.code}>
+            <BarButton label="Code" enter="cascade" index={3} onClick={() => actions.code(keys)}>
               <code className="rounded-sm border border-border-secondary bg-[var(--color-bg-code-block)] px-1.5 py-px font-mono text-[13px]">
                 {"<>"}
               </code>
             </BarButton>
-            <BarButton label="Link" enter="cascade" index={4} onClick={actions.link}>
+            <BarButton label="Link" enter="cascade" index={4} onClick={() => actions.link(keys)}>
               <LinkIcon16 />
             </BarButton>
             <BarButton
               label="Maths"
               enter="cascade"
               index={5}
-              onClick={actions.math}
+              onClick={() => actions.math(keys)}
               className="font-serif text-lg italic"
             >
               <span aria-hidden>√x</span>
@@ -352,7 +356,7 @@ export function MobileEditBar({
                   index={index}
                   pressed={def.id === current}
                   onClick={() => {
-                    actions.turnInto(def.id)
+                    actions.turnInto(keys, def.id)
                     setView("main")
                   }}
                   className="relative font-mono text-[15px] whitespace-pre"
@@ -392,7 +396,7 @@ export function MobileEditBar({
               label="Outdent"
               enter="cascade"
               index={1}
-              onClick={actions.outdent}
+              onClick={() => actions.outdent(keys)}
               disabled={!state.canOutdent}
             >
               <ArrowLeftToLineIcon16 />
@@ -401,16 +405,25 @@ export function MobileEditBar({
               label="Indent"
               enter="cascade"
               index={2}
-              onClick={actions.indent}
+              onClick={() => actions.indent(keys)}
               disabled={!state.canIndent}
             >
               <ArrowRightToLineIcon16 />
             </BarButton>
             <BarButton
-              label="Undo"
+              label="Focus on block"
               enter="cascade"
               index={3}
-              onClick={actions.undo}
+              onClick={() => actions.focus(keys)}
+              disabled={!state.canFocus}
+            >
+              <FocusIcon16 />
+            </BarButton>
+            <BarButton
+              label="Undo"
+              enter="cascade"
+              index={4}
+              onClick={extras.undo}
               disabled={!state.canUndo}
             >
               <UndoIcon16 />
@@ -426,16 +439,16 @@ export function MobileEditBar({
               )}
               style={{ width: state.canRedo ? BUTTON_WIDTH : 0 }}
             >
-              <BarButton label="Redo" enter="cascade" index={4} onClick={actions.redo}>
+              <BarButton label="Redo" enter="cascade" index={5} onClick={extras.redo}>
                 <RedoIcon16 />
               </BarButton>
             </span>
             <BarButton
               label="Image"
               enter="cascade"
-              index={5}
-              onClick={actions.image ?? noop}
-              disabled={!actions.image}
+              index={6}
+              onClick={extras.image ?? noop}
+              disabled={!extras.image}
             >
               <ImageIcon16 />
             </BarButton>
@@ -444,8 +457,8 @@ export function MobileEditBar({
             <BarButton
               label="Delete"
               enter="cascade"
-              index={6}
-              onClick={actions.remove}
+              index={7}
+              onClick={() => actions.remove(keys)}
               className="ml-auto text-text-danger"
             >
               <TrashIcon16 />
@@ -454,7 +467,7 @@ export function MobileEditBar({
         )}
       </div>
       <Rule />
-      <BarButton label="Hide keyboard" onClick={actions.done} className="w-12 text-text">
+      <BarButton label="Hide keyboard" onClick={extras.done} className="w-12 text-text">
         <KeyboardDownIcon16 />
       </BarButton>
     </div>,

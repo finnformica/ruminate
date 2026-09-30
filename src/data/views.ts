@@ -7,21 +7,31 @@ import { sampleViews } from "./sample-graph"
 /**
  * **Views** (migrations/0015, docs/metadata.md): the entrypoints into the
  * graph. A view is a node to start at (`root_id`), what of its subgraph to
- * keep (`filter`), how to lay that out (`sort`) and whether it is **pinned**:
- * listed under **Views** in the sidebar, the notes page and the palette.
+ * keep (`filter`), how to lay that out (`sort`) and where it sits in the
+ * **Views** list (`sort_key`) — the one list the sidebar, the Views page and
+ * the palette draw.
+ *
+ * **Every note is a view**, row or no row: a page node is listed whether or
+ * not anything was saved about it, and its row, when it has one, only says
+ * how it opens and where it sits. **A block is a view exactly when it has a
+ * row**: "Add to Views" on a block writes one (`pinned`, the column's name on
+ * the wire, is what keeps a row alive that saves no filter and no sort — a
+ * note never needs it), and "Remove from Views" tombstones it. Nothing is
+ * pinned any more: a place is kept to hand by where it is dragged to, and
+ * the list has one order for notes and blocks alike.
  *
  * A view is the viewer's own row about a node that need not be theirs — a
- * note someone shared can be pinned from this side — which is why it is a
- * table beside the graph rather than props on the node, and why nothing here
- * goes through ops: the graph is untouched by a view, and a view is untouched
- * by every edit to the graph except one, the delete of its root
- * (`orphanedViews`). Moving a block keeps its id, so it keeps its view;
+ * block in a note someone shared can be a view from this side — which is
+ * why it is a table beside the graph rather than props on the node, and why
+ * nothing here goes through ops: the graph is untouched by a view, and a
+ * view is untouched by every edit to the graph except one, the delete of its
+ * root (`orphanedViews`). Moving a block keeps its id, so it keeps its view;
  * duplicating one mints ids, so the copy has none.
  *
- * **One view per root, and its id IS the root's.** Two devices pinning the
- * same note while apart then converge on one row under last-writer-wins
- * rather than on two rows for one note. The table keeps `id` a column of its
- * own so "several views of one node" needs no migration when it comes.
+ * **One view per root, and its id IS the root's.** Two devices adding the
+ * same block while apart then converge on one row under last-writer-wins
+ * rather than on two rows for one block. The table keeps `id` a column of
+ * its own so "several views of one node" needs no migration when it comes.
  */
 
 export type { ViewRow }
@@ -31,7 +41,8 @@ export type { ViewRow }
  * corpus's signed out. Never a tombstone: those are for replication. */
 export const viewsAtom = atom<ReadonlyMap<string, ViewRow>>(viewMapOf(sampleViews()))
 
-/** The view rooted at each node, for the note page's lookup. */
+/** The view rooted at each node, for the note page's lookup and the list's
+ * order. */
 export const viewByRootAtom = atom((get) => {
   const byRoot = new Map<string, ViewRow>()
   for (const view of get(viewsAtom).values()) {
@@ -42,10 +53,12 @@ export const viewByRootAtom = atom((get) => {
 
 const NO_ROOTS: ReadonlySet<string> = new Set()
 
-/** The roots of the pinned views: what wears the pin, wherever it is drawn. */
-export const pinnedRootIdsAtom = atom((get) => {
+/** The roots that have a view row. For a block that is what makes it a
+ * view of its own (see above); a note is one regardless, so this is read for
+ * blocks — the sidebar's block rows and the editor's "Add to Views". */
+export const viewRootIdsAtom = atom((get) => {
   const ids = new Set<string>()
-  for (const view of get(viewsAtom).values()) if (view.pinned) ids.add(view.root_id)
+  for (const view of get(viewsAtom).values()) ids.add(view.root_id)
   return ids.size === 0 ? NO_ROOTS : ids
 })
 
@@ -57,8 +70,11 @@ const viewIdFor = (rootId: string) => rootId
 export interface ViewPatch {
   filter?: string | null
   sort?: string | null
+  /** Kept as a view of its own with nothing saved on it — what "Add to
+   * Views" on a block writes, and what "Remove from Views" clears (with the
+   * rest, so the row goes). Never written for a note. */
   pinned?: boolean
-  /** Where the view sits in the Views list (`orderPinned`). */
+  /** Where the view sits in the Views list (`orderViews`). */
   sort_key?: string | null
 }
 
@@ -70,11 +86,11 @@ const textOrNull = (value: string | null | undefined, fallback: string | null) =
 
 /**
  * The row a patch to the view rooted at `rootId` writes: the current row
- * with the patch over it — or, when nothing is left that a view is for (not
- * pinned, no filter, no sort), its tombstone, so unpinning a note that saved
- * nothing leaves no empty row behind. `updated_at` always moves past the
- * current row's, because last-writer-wins reads `>=` and a clock that stood
- * still must not make the write a draw.
+ * with the patch over it — or, when nothing is left that a row is for (not
+ * kept, no filter, no sort, no place in the order), its tombstone, so
+ * removing a block from Views leaves no empty row behind. `updated_at`
+ * always moves past the current row's, because last-writer-wins reads `>=`
+ * and a clock that stood still must not make the write a draw.
  */
 export function patchedView(
   current: ViewRow | undefined,
@@ -91,7 +107,7 @@ export function patchedView(
     sort_key: patch.sort_key !== undefined ? patch.sort_key : (current?.sort_key ?? null),
     updated_at: Math.max(now, (current?.updated_at ?? 0) + 1),
   }
-  if (!next.pinned && next.filter === null && next.sort === null) {
+  if (!next.pinned && next.filter === null && next.sort === null && next.sort_key === null) {
     return { ...next, deleted_at: next.updated_at }
   }
   return next
@@ -146,16 +162,16 @@ export function orphanedViews(
 }
 
 /**
- * **The Views list's order.** A pinned view with a `sort_key` sits where the
+ * **The Views list's manual order.** A view with a `sort_key` sits where the
  * key puts it — the same fractional index a `child` link uses for sibling
  * order, so a drag rewrites one row — and the rest follow in the order the
  * caller drew them (the notes in their sort, then the blocks in index
  * order), which is where a view sits until it is dragged: keys are assigned
- * on the first drag, not at pin time, so a corpus nobody has reordered
- * carries none, and a view pinned later joins the end rather than jumping
- * the queue. Ties on a key break on the root id, as sibling links do.
+ * on the first drag, not when a view is made, so a corpus nobody has
+ * reordered carries none, and a view added later joins the end rather than
+ * jumping the queue. Ties on a key break on the root id, as sibling links do.
  */
-export function orderPinned<T extends { id: string }>(
+export function orderViews<T extends { id: string }>(
   entries: readonly T[],
   viewByRoot: ReadonlyMap<string, ViewRow>,
 ): T[] {
@@ -172,28 +188,28 @@ export function orderPinned<T extends { id: string }>(
 }
 
 /**
- * The rows a drag of the Views list writes: the pinned views in `nextRootIds`
+ * The rows a drag of the Views list writes: the views in `nextRootIds`
  * order, keyed the way `reconcileSortKeys` keys siblings — every key that
  * still fits the new order is kept, so an ordinary drag rewrites one row,
- * and the first drag ever (no keys yet) keys the whole list. A root with no
- * pinned view is skipped rather than invented.
+ * and the first drag ever (no keys yet) keys the whole list. A note with no
+ * row yet gets one here, holding nothing but its place: the order is the
+ * one thing a note's row is always for.
  */
 export function reorderedViews(
   viewByRoot: ReadonlyMap<string, ViewRow>,
   nextRootIds: readonly string[],
   now: number,
 ): ViewRow[] {
-  const desired = nextRootIds.filter((id) => viewByRoot.get(id)?.pinned === true)
-  const existing = desired.flatMap((id) => {
+  const existing = nextRootIds.flatMap((id) => {
     const key = viewByRoot.get(id)?.sort_key
     return typeof key === "string" ? [{ id, sortKey: key }] : []
   })
-  const keys = reconcileSortKeys(existing, desired)
+  const keys = reconcileSortKeys(existing, [...nextRootIds])
   const rows: ViewRow[] = []
-  for (const id of desired) {
-    const view = viewByRoot.get(id) as ViewRow
+  for (const id of nextRootIds) {
+    const view = viewByRoot.get(id)
     const key = keys.get(id)
-    if (key === undefined || key === view.sort_key) continue
+    if (key === undefined || key === (view?.sort_key ?? null)) continue
     rows.push(patchedView(view, id, { sort_key: key }, now))
   }
   return rows

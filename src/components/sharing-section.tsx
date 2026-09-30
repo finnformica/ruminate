@@ -15,8 +15,9 @@ import type { ShareView } from "../data/shares"
 import { describeFilter, describeSort } from "../utils/view-filter"
 import { githubUserAtom, graphSnapshotAtom, notesAtom } from "../global-state"
 import { cx } from "../utils/cx"
-import { Button } from "./button"
+import { AsyncButton } from "./ui/async-button"
 import { TrashIcon16 } from "./icons"
+import { SettingsSection } from "./settings-section"
 
 /**
  * Sharing, on the settings page (docs/sharing.md): the overview. The shares
@@ -51,14 +52,14 @@ export function SharingSection() {
 
   if (!githubUser) {
     return (
-      <Section>
+      <SettingsSection title="Sharing">
         <div className="text-text-secondary">Sign in to share notes with someone.</div>
-      </Section>
+      </SettingsSection>
     )
   }
 
   return (
-    <Section>
+    <SettingsSection title="Sharing">
       <div className="flex flex-col gap-1">
         <p className="leading-5 text-text-secondary">
           Share a note or block from its menu, by their GitHub sign-in email.
@@ -88,16 +89,7 @@ export function SharingSection() {
           <ReceivedList shares={received} />
         </>
       )}
-    </Section>
-  )
-}
-
-function Section({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <h3 className="font-bold leading-4">Sharing</h3>
-      <div className="card-1 flex flex-col gap-5 p-4">{children}</div>
-    </div>
+    </SettingsSection>
   )
 }
 
@@ -175,14 +167,14 @@ function GivenList({
               </span>
             </div>
             {live ? (
-              <Button
+              <AsyncButton
                 className="shrink-0"
                 aria-label={`Revoke the share with ${share.granteeEmail}`}
-                onClick={() => void onRevoke(share.id)}
+                icon={<TrashIcon16 />}
+                onClick={() => onRevoke(share.id)}
               >
-                <TrashIcon16 />
                 Revoke
-              </Button>
+              </AsyncButton>
             ) : null}
           </li>
         )
@@ -203,7 +195,7 @@ function ReceivedList({ shares }: { shares: ReceivedShareSummary[] | null }) {
             <span className="flex flex-wrap gap-x-2 leading-4">
               {/* A shared block opens as a note of its own (shared-mode.ts). */}
               <Link
-                to="/notes/$"
+                to="/views/$"
                 params={{ _splat: share.view.rootId }}
                 search={{ query: undefined }}
                 className="link"

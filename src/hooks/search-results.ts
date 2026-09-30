@@ -2,7 +2,12 @@ import { useAtomValue } from "jotai"
 import React from "react"
 import { blockIndexAtom, noteTitleSearcherAtom } from "../global-state"
 import type { Note } from "../schema"
-import { hasBlockTypeFilter, notesFromBlockHits, type BlockHit } from "../utils/block-search"
+import {
+  hasAncestorFilter,
+  hasBlockTypeFilter,
+  notesFromBlockHits,
+  type BlockHit,
+} from "../utils/block-search"
 import { inMemoryBlockSearchSource, type BlockSearchSource } from "../utils/block-search-source"
 import { rankResultRows, type ResultRow, type ScoredNote } from "../utils/rank-results"
 import { parseQuery } from "../utils/search"
@@ -11,19 +16,23 @@ import { useSearchNotes } from "./search-notes"
 
 /**
  * What a query resolves to. Search results ARE the matching blocks: a query
- * with text or a block-scoped `type:` resolves at block granularity, so a
- * heading nested six levels down is a first-class result row rather than a
- * filename.
+ * with text, a block-scoped `type:` or an `under:` / `parent:` scope resolves
+ * at block granularity, so a heading nested six levels down is a first-class
+ * result row rather than a filename.
  *
  * A query that only names NOTES — `date:2026-01-01`, a bare property
  * qualifier, or nothing at all — stays a note listing: every block in every
  * matching note is not a search result, it's the corpus. That rule is what
- * keeps the notes page browsing notes, while typing text into it narrows to
+ * keeps the Views page browsing notes, while typing text into it narrows to
  * blocks.
  */
 function resolvesToBlocks(query: string): boolean {
   const parsed = parseQuery(query)
-  return parsed.fuzzy.trim() !== "" || hasBlockTypeFilter(parsed.filters)
+  return (
+    parsed.fuzzy.trim() !== "" ||
+    hasBlockTypeFilter(parsed.filters) ||
+    hasAncestorFilter(parsed.filters)
+  )
 }
 
 /**
@@ -70,7 +79,8 @@ export interface SearchResults {
   notes: Note[]
   /** "blocks" mode: the notes whose TITLE matched the query's text, each a
    * row among the hits. Empty when the query asks for blocks of a type or
-   * scopes with `in:` (a note is neither), and in "notes" mode. */
+   * scopes with `in:`, `under:` or `parent:` (a note is none of those), and
+   * in "notes" mode. */
   titleMatches: Note[]
   /** The rows to draw, in order: "blocks" mode ranks the title matches and
    * the hits together by score (`rankResultRows`); "notes" mode lists the
@@ -84,8 +94,8 @@ const NO_NOTES: Note[] = []
 /**
  * The notes whose title matches the query's text, scored, and filtered by
  * whatever note-level qualifiers the query carries (a date, a property).
- * None when the query names a block type or an `in:` scope: it asks for
- * blocks, and a note row would not be one.
+ * None when the query names a block type or an `in:`, `under:` or `parent:`
+ * scope: it asks for blocks, and a note row would not be one.
  */
 function useTitleMatches(query: string, showBlocks: boolean): ScoredNote[] {
   const searcher = useAtomValue(noteTitleSearcherAtom)
@@ -94,7 +104,7 @@ function useTitleMatches(query: string, showBlocks: boolean): ScoredNote[] {
     const parsed = parseQuery(query)
     const text = parsed.fuzzy.trim()
     if (!text) return []
-    if (hasBlockTypeFilter(parsed.filters)) return []
+    if (hasBlockTypeFilter(parsed.filters) || hasAncestorFilter(parsed.filters)) return []
     if (parsed.filters.some((filter) => filter.key === "in")) return []
     const matches = searcher.search(text, { returnMatchData: true })
     const scores = new Map(matches.map((match) => [match.item.id, match.score]))
@@ -107,12 +117,40 @@ function useTitleMatches(query: string, showBlocks: boolean): ScoredNote[] {
   }, [searcher, query, showBlocks])
 }
 
+/**
+ * `results` with only the rows `keep` keeps — the hits, the title matches
+ * and the notes they live in trimmed to match, so the count line stays
+ * true. What a picker (`src/components/palette.ts`) narrows the palette
+ * by. Pure.
+ */
+export function keepResults(results: SearchResults, keep: (row: ResultRow) => boolean) {
+  const rows = results.rows.filter(keep)
+  const ids = new Set(rows.map((row) => row.id))
+  const hits = results.hits.filter((hit) => ids.has(hit.blockId))
+  const titleMatches = results.titleMatches.filter((note) => ids.has(note.id))
+  const noteIds =
+    results.mode === "blocks"
+      ? new Set([...hits.map((hit) => hit.noteId), ...titleMatches.map((note) => note.id)])
+      : ids
+  return {
+    ...results,
+    rows,
+    hits,
+    titleMatches,
+    notes: results.notes.filter((n) => noteIds.has(n.id)),
+  }
+}
+
 /** Resolve a query to result rows — blocks when it discriminates blocks, notes
- * otherwise (see `resolvesToBlocks`). */
-export function useSearchResults(query: string): SearchResults {
+ * otherwise (see `resolvesToBlocks`), or always blocks when `blocks` says so
+ * (a picker of rows over a bare `in:`). */
+export function useSearchResults(
+  query: string,
+  { blocks = false }: { blocks?: boolean } = {},
+): SearchResults {
   const searchNotes = useSearchNotes()
   const source = useBlockSearchSource()
-  const showBlocks = resolvesToBlocks(query)
+  const showBlocks = blocks || resolvesToBlocks(query)
   const titleMatches = useTitleMatches(query, showBlocks)
 
   // Memoized so an async source is asked once per query, not once per render.

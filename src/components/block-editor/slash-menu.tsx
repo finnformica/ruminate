@@ -3,6 +3,8 @@ import type { CSSProperties } from "react"
 import { slashGroupOf, type SlashItem } from "../../blocks/slash-menu"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
+import { listHeading, listRow } from "../ui/list"
+import { Surface } from "../ui/surface"
 import { CalendarDateIcon16 } from "../icons"
 
 /** Width of the popup (px); the anchor is clamped so it never overflows. */
@@ -63,7 +65,7 @@ export function SlashMenu({
   }, [activeIndex, items])
 
   return (
-    <div
+    <Surface
       ref={listRef}
       role="listbox"
       aria-label="Slash menu"
@@ -72,7 +74,9 @@ export function SlashMenu({
       // is reachable by pointer and screen readers, never by Tab.
       tabIndex={-1}
       style={{ width: SLASH_MENU_WIDTH, ...style }}
-      className="card-2 absolute z-20 max-h-[45svh] overflow-auto rounded-lg p-1 font-sans text-base font-normal leading-normal tracking-normal text-text no-underline"
+      // Opened by a key and used constantly, so it does not arrive: it is there.
+      motion={false}
+      className="absolute z-popup max-h-[45svh] overflow-auto p-1 font-sans text-base font-normal leading-normal tracking-normal text-text no-underline"
       onMouseDown={(event) => event.preventDefault()}
     >
       {items.map((item, index) => {
@@ -83,7 +87,7 @@ export function SlashMenu({
           <div key={item.id} className={cx(heading && index > 0 && "mt-1")}>
             {heading ? (
               // Group labels are chrome, not content — faint, like the ⌘K menu's.
-              <div className="flex h-7 items-center px-2 text-sm text-text-tertiary">{group}</div>
+              <div className={listHeading()}>{group}</div>
             ) : null}
             {/* Keyboard handling lives on the textarea (arrows / Enter / Esc);
                 this row only needs the pointer. */}
@@ -93,10 +97,7 @@ export function SlashMenu({
               aria-selected={active}
               tabIndex={-1}
               data-slash-item={item.id}
-              className={cx(
-                "flex h-8 cursor-pointer select-none items-center gap-3 rounded px-2",
-                active && "bg-bg-hover",
-              )}
+              className={listRow({ active })}
               onMouseEnter={() => onHover(index)}
               onClick={() => onPick(item)}
             >
@@ -115,6 +116,6 @@ export function SlashMenu({
           </div>
         )
       })}
-    </div>
+    </Surface>
   )
 }

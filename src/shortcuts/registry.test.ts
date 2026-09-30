@@ -4,6 +4,7 @@ import type { CommandName } from "../blocks/commands"
 import {
   APP_SHORTCUTS,
   COMMANDS_WITHOUT_BINDINGS,
+  MENU_COMMANDS,
   EDITOR_COMMAND_DESCRIPTIONS,
   GROUP_ORDER,
   SHORTCUTS,
@@ -65,8 +66,10 @@ describe("shortcut registry ↔ keymap completeness", () => {
   it("every described editor command exists in KEYMAP (no stale descriptions)", () => {
     for (const command of Object.keys(EDITOR_COMMAND_DESCRIPTIONS)) {
       // Except the handful the resolver reaches by the character typed
-      // rather than by a combo — they are listed in the registry by hand.
+      // rather than by a combo — they are listed in the registry by hand —
+      // and the ones a menu runs, which no key reaches.
       if (COMMANDS_WITHOUT_BINDINGS.has(command as CommandName)) continue
+      if (MENU_COMMANDS.has(command as CommandName)) continue
       expect(keymapCommands.has(command as CommandName), `"${command}" is not bound`).toBe(true)
     }
   })
@@ -117,7 +120,7 @@ describe("shortcut registry entries", () => {
     const combos = new Set(SHORTCUTS.flatMap((shortcut) => shortcut.combos))
     for (const expected of [
       "g d",
-      "g n",
+      "g v",
       "g s",
       "?",
       APP_SHORTCUTS.focusSearch,

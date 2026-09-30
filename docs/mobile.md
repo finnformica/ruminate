@@ -27,17 +27,38 @@ keyboard that appears and disappears. The block editor
   thumb; a pick closes it, so does a swipe down. The popup anchored under the
   finger that came before was fragile — it opened as the press registered and
   shut on the lift, or on the scroll the same finger began. The sheet and the
-  popup are one list (`menuEntries`) on two surfaces, so the structure moves —
-  Indent, Outdent, Move up, Move down — are in both, with their keys shown
-  beside them on the popup. Android's long press arrives as a `contextmenu`
-  event and opens the same sheet. The hold selects no text: the editor's
-  container is `select-none` under a finger (every row, card title, caption
-  and gap), with the textarea being edited taking selection back for itself
-  (`select-text`, said outright — iOS ignores a field under a `select-none`
-  ancestor), and no touch callout. A selection the page shows anyway is
-  dropped by the next finger on the editor and as the sheet opens, since
-  with nothing selectable to tap iOS offers no way to be rid of one; a
-  field's own selection is the person's and stays.
+  popup are one list (`menuEntries`) on two surfaces, and it carries only
+  what nothing else on the row does, in sections ruled apart: Copy and Copy
+  link to block; a link's or a figure's own actions, where the row has
+  them; Move up, Move down and Duplicate; Add to Views and Share; Unlink and Delete. Editing is
+  a tap, collapsing the chevron, and Indent, Outdent, Focus on and Turn into
+  are the edit bar's (keys, on a desktop). Android's long press arrives as a
+  `contextmenu` event and opens the same sheet. On a browsed list — the Views
+  page, the palette — the sheet carries the row's sidebar menu instead: a
+  note's (Copy markdown, Copy ID, Share, Rename, Print, Delete) or a block's
+  (Copy, Copy link to block, Share, then Add to or Remove from Views).
+
+  The sheet rises while the finger is still down, so its rows take no pick
+  until that finger has lifted and a beat (250ms) has passed: the lift, and
+  the click the browser owes it, land on whatever row is under the finger by
+  then, and are not a choice. The lift is heard on the document, since the
+  sheet is portalled out of the editor. A hold in the textarea being edited
+  is the person selecting text, and opens no sheet.
+
+  The hold selects no text. From the finger's down on a row until its lift,
+  the root carries `press-hold` (`block-editor.css`), which makes nothing on
+  the page selectable and suppresses the callout — the text behind the
+  sheet, the sheet rising under the finger, and the page as a whole, which
+  iOS would otherwise select once the sheet is there. Beneath that, the
+  editor's container is `select-none` under a finger at all times (every
+  row, card title, caption and gap), with the textarea being edited taking
+  selection back for itself (`select-text`, said outright — iOS ignores a
+  field under a `select-none` ancestor), and the sheet is `select-none`
+  too. A selection the page shows anyway is dropped by the next finger on
+  the editor and as the sheet opens, since with nothing selectable to tap
+  iOS offers no way to be rid of one; a field's own selection is the
+  person's and stays.
+
 - **A highlight has no job on a touch screen.** There is no keyboard cursor
   for it to mark, so once an edit ends (the keyboard put away, a delete, a
   swap of rows) nothing stays lit; the one time a row is marked is while the
@@ -71,15 +92,16 @@ keyboard that appears and disappears. The block editor
   runs the same command its key does (`src/blocks/commands.ts`), in edit mode
   with the caret, so Indent by bar is Tab by key.
 
-  | Main row        | Does                                                         | Notion's      |
-  | --------------- | ------------------------------------------------------------ | ------------- |
-  | Aa              | Swaps the row for the formatting row                         | Aa            |
-  | ⇄ Turn into     | Swaps the row for the block types                            | Turn into     |
-  | Outdent, Indent | `outdent`, `indent`; greyed where they would do nothing      | ⇤ ⇥           |
-  | Undo, Redo      | Redo shows only while there is something to redo             | Undo          |
-  | Image           | The picture picker (`requestImage`), where images are on     | Insert image  |
-  | Delete          | `deleteBlock`, in the danger colour; the next row highlights | Delete        |
-  | Keyboard down   | Ends the edit and puts the keyboard away                     | Keyboard down |
+  | Main row        | Does                                                          | Notion's      |
+  | --------------- | ------------------------------------------------------------- | ------------- |
+  | Aa              | Swaps the row for the formatting row                          | Aa            |
+  | ⇄ Turn into     | Swaps the row for the block types                             | Turn into     |
+  | Outdent, Indent | `outdent`, `indent`; greyed where they would do nothing       | ⇤ ⇥           |
+  | Focus on        | `focusBlock`: the block becomes the whole view, the edit ends | —             |
+  | Undo, Redo      | Redo shows only while there is something to redo              | Undo          |
+  | Image           | The picture picker (`requestImage`), where images are on      | Insert image  |
+  | Delete          | `deleteBlock`, in the danger colour; the next row highlights  | Delete        |
+  | Keyboard down   | Ends the edit and puts the keyboard away                      | Keyboard down |
 
   The formatting row (Back, then bold, italic, strikethrough, code, link,
   maths) draws each button as the markdown renders it — a bold B, the inline
@@ -91,6 +113,14 @@ keyboard that appears and disappears. The block editor
   having no counterpart here: `+` add block (Return and the slash menu do
   it), `@` mention, comment, text colour and highlight, underline (no
   markdown for it), duplicate and move up / down (the block menu has them).
+  Focus on is Ruminate's own: a phone has no <kbd>F</kbd> or <kbd>⌘</kbd>
+  <kbd>.</kbd> to press, and no marker to tap (a leaf's bullet once focused,
+  but a finger reaching for the text landed on it too often, and a parent's
+  is its chevron), so the bar is how any block — a paragraph, a heading, a
+  parent — is focused on in two taps. The change of view ends the edit, so the
+  keyboard goes and the subtree is there to read; on the block already
+  focused on the button is greyed, there being nowhere further in. The
+  breadcrumb and the nav bar's Back lead out again.
 
   Where the bar sits is the hard part. A `position: fixed` element lives in
   the _layout_ viewport, which an overlaying keyboard (iOS Safari) does not
@@ -123,10 +153,19 @@ keyboard that appears and disappears. The block editor
   is WebKit not re-reading the attribute when focus is moved by script while
   the keyboard is already up — a known quirk with no page-side fix.)
 - **Chrome is sized for a finger.** The collapse chevron always shows (nothing
-  to hover with) at a 10px glyph on a 32px square; the focus dot's hit area is
-  26px; the todo checkbox grows its hit area through a pseudo-element; the
-  type scale steps body text up and display sizes down
+  to hover with) at a 12px glyph on a 36×32px target; the focus dot's hit area
+  is 26px; the todo checkbox is drawn at 17px and grows its hit area through a
+  pseudo-element, up and down and a little left but never right, and the
+  marker gap widens from 8px to 12px; the type scale steps body text up (16px,
+  the size below which iOS zooms into a focused field) and display sizes down
   (`src/styles/variables.css`).
+- **A tap beside a marker means the text.** A tap in the gap between a marker
+  and its text opens the edit at the start of the line it was level with, not
+  at the end (the row reads the tap at the text's left edge). A phone also
+  snaps a near miss onto the nearest control, so a click on a todo's checkbox
+  is judged by where the finger actually came down (the row's pointerdown):
+  past the box's right edge, the tick is cancelled and the caret goes to the
+  start of the text instead (`tapMissedBox`, `block-item.tsx`).
 
 ## Elsewhere in the app
 
@@ -193,7 +232,7 @@ Found while working through the editor; none is fixed here.
 6. **The help drawer is a keyboard reference.** `?` lists shortcuts that a
    phone cannot press; a touch screen would want a page on taps and holds
    instead.
-7. **Row height.** Rows keep the desktop rhythm (a 15px line with 4px between
+7. **Row height.** Rows keep the desktop rhythm (a 16px line with 4px between
    nested rows, ~30px pitch) rather than the 44px Apple and 48px Material ask
    of a control. The whole-row tap target and the widened chrome cover the
    common taps; a denser outline was chosen over a taller one.

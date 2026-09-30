@@ -1,11 +1,12 @@
 import { PreviewCard } from "@base-ui/react/preview-card"
 import copy from "copy-to-clipboard"
 import type React from "react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useId } from "react"
 import { hostOf } from "../../blocks/link"
-import { cx } from "../../utils/cx"
-import { Button } from "../button"
-import { IconButton } from "../icon-button"
+import { Surface } from "../ui/surface"
+import { TextInput } from "../ui/text-input"
+import { Button } from "../ui/button"
+import { IconButton } from "../ui/icon-button"
 import { CopyIcon16, GlobeIcon16, TrashIcon16 } from "../icons"
 
 /** What the card can do to the link it is over. */
@@ -106,15 +107,10 @@ export function LinkHoverCard({
         {children}
       </PreviewCard.Trigger>
       <PreviewCard.Portal>
-        <PreviewCard.Positioner side="bottom" sideOffset={6} align="start">
+        <PreviewCard.Positioner className="z-popup" side="bottom" sideOffset={6} align="start">
           <PreviewCard.Popup
             data-testid="link-hover-card"
-            className={cx(
-              "card-2 z-30 rounded-lg print:hidden",
-              "origin-(--transform-origin) transition-[transform,scale,opacity]",
-              "data-ending-style:scale-95 data-ending-style:opacity-0",
-              "data-starting-style:scale-95 data-starting-style:opacity-0",
-            )}
+            render={<Surface className="print:hidden" />}
           >
             {editing ? (
               <EditPanel href={href} title={title} actions={actions} flush={flush} />
@@ -183,6 +179,8 @@ function EditPanel({
    * as it closes. */
   flush: React.MutableRefObject<(() => void) | null>
 }) {
+  const urlId = useId()
+  const titleId = useId()
   const [address, setAddress] = useState(href)
   // A link whose text is its own address (a typed one, never rewritten)
   // is offered the host it would have been given on paste.
@@ -238,28 +236,30 @@ function EditPanel({
       onClick={stop}
       onKeyDown={stop}
     >
-      <label className="flex flex-col gap-1.5">
+      <label htmlFor={urlId} className="flex flex-col gap-1.5">
         <span className="text-xs text-text-secondary">URL</span>
-        <input
+        <TextInput
+          id={urlId}
           data-testid="link-card-url"
           value={address}
           onChange={(event) => setAddress(event.target.value)}
           onBlur={() => save()}
           spellCheck={false}
           placeholder="https://"
-          className={FIELD}
+          className="text-sm"
         />
       </label>
-      <label className="flex flex-col gap-1.5">
+      <label htmlFor={titleId} className="flex flex-col gap-1.5">
         <span className="text-xs text-text-secondary">Link title</span>
-        <input
+        <TextInput
+          id={titleId}
           data-testid="link-display-text"
           value={text}
           onChange={(event) => setText(event.target.value)}
           onBlur={() => save()}
           placeholder="Display text"
           ref={titleRef}
-          className={FIELD}
+          className="text-sm"
         />
       </label>
       <div className="-mx-1 -mb-1 flex items-center justify-between border-t border-border-secondary pt-2">
@@ -281,6 +281,3 @@ function EditPanel({
     </form>
   )
 }
-
-const FIELD =
-  "focus-ring h-8 min-w-0 rounded border border-border-secondary bg-transparent px-2 text-sm text-text placeholder:text-text-tertiary"

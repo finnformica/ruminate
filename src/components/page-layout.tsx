@@ -5,11 +5,12 @@ import { storageDiagnosticsAtom } from "../data/storage-diagnostics"
 import { isBootingAtom, isDatabaseModeAtom, isSignedOutAtom } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
 import { cx } from "../utils/cx"
-import { Button } from "./button"
+import { AsyncButton } from "./ui/async-button"
+import { Button } from "./ui/button"
 import { PageHeader, PageHeaderProps } from "./page-header"
-import { HoverCard } from "./hover-card"
+import { HoverCard } from "./ui/hover-card"
 import { Notice } from "./notice"
-import { PageSkeleton, Skeleton } from "./skeleton"
+import { PageSkeleton, Skeleton } from "./ui/skeleton"
 
 type PageLayoutProps = PageHeaderProps & {
   className?: string
@@ -75,7 +76,7 @@ export function PageLayout({
             {otherTabHasDatabase && !disableGuard ? (
               <div className="p-4">
                 <Notice
-                  tone="warning"
+                  variant="warning"
                   actions={<Button onClick={() => window.location.reload()}>Reload</Button>}
                 >
                   Ruminate is open in another tab — this tab is using a temporary in-memory copy.
@@ -86,10 +87,10 @@ export function PageLayout({
             {accessDenied !== null && !isSignedOut && !disableGuard ? (
               <div className="p-4">
                 <Notice
-                  tone="warning"
+                  variant="warning"
                   actions={
                     accessDenied === "client_too_old" ? (
-                      <Button onClick={applyUpdate}>Update Ruminate</Button>
+                      <AsyncButton onClick={applyUpdate}>Update Ruminate</AsyncButton>
                     ) : undefined
                   }
                 >
@@ -103,7 +104,7 @@ export function PageLayout({
             ) : null}
             {databaseStatus.emptyOffline && !disableGuard ? (
               <div className="p-4">
-                <Notice tone="info">
+                <Notice variant="info">
                   No notes yet — this device hasn’t been able to reach the notes database. They’ll
                   load automatically once you’re back online, and anything you write now is kept
                   locally and synced later.

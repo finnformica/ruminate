@@ -14,6 +14,25 @@ module.exports = {
         bold: "var(--font-weight-bold)",
       },
       size: {},
+      // Elevation, layering and pace are tokens (src/styles/variables.css),
+      // so a surface names its tier rather than picking a shadow, a number
+      // or a number of milliseconds.
+      boxShadow: {
+        card: "var(--shadow-card)",
+        popup: "var(--shadow-popup)",
+        modal: "var(--shadow-modal)",
+      },
+      zIndex: {
+        raised: "var(--z-raised)",
+        popup: "var(--z-popup)",
+        modal: "var(--z-modal)",
+        tooltip: "var(--z-tooltip)",
+      },
+      transitionDuration: {
+        quick: "var(--duration-quick)",
+        base: "var(--duration-base)",
+        slow: "var(--duration-slow)",
+      },
     },
     fontFamily: {
       sans: "var(--font-family-sans)",
@@ -41,6 +60,7 @@ module.exports = {
         highlight: "var(--color-text-highlight)",
         success: "var(--color-text-success)",
         danger: "var(--color-text-danger)",
+        "on-danger": "var(--color-text-on-danger)",
         pending: "var(--color-text-pending)",
         pinned: "var(--color-text-pinned)",
         selected: "var(--color-text-selected)",
@@ -54,10 +74,14 @@ module.exports = {
         overlay: "var(--color-bg-overlay)",
         backdrop: "var(--color-bg-backdrop)",
         "overlay-backdrop": "var(--color-bg-overlay-backdrop)",
+        scrim: "var(--color-bg-scrim)",
         secondary: "var(--color-bg-secondary)",
         "secondary-hover": "var(--color-bg-secondary-hover)",
         "secondary-active": "var(--color-bg-secondary-active)",
         tertiary: "var(--color-bg-tertiary)",
+        danger: "var(--color-bg-danger)",
+        "danger-hover": "var(--color-bg-danger-hover)",
+        "danger-active": "var(--color-bg-danger-active)",
         "code-block": "var(--color-bg-code-block)",
         highlight: "var(--color-bg-highlight)",
         selection: "var(--color-bg-selection)",

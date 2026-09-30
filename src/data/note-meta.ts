@@ -9,7 +9,7 @@ import { emittedNoteTitle, isMintedNoteId } from "./note-identity"
 
 /**
  * Note metadata from the graph: everything
- * the notes list, the sidebar, search and the calendar know about a note is
+ * the Views page, the sidebar, search and the calendar know about a note is
  * read off the note node's `text` and `props` and the blocks it reaches. No
  * markdown is parsed on the way — a task is a `todo`/`done` block, the
  * preview of an untitled note is its first words.

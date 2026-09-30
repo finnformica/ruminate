@@ -5,7 +5,7 @@ import { sidebarAtom } from "../global-state"
 import { useCreateNewNote } from "../hooks/create-new-note"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
-import { IconButton } from "./icon-button"
+import { IconButton } from "./ui/icon-button"
 import { ArrowLeftIcon16, ArrowRightIcon16, SidebarCollapsedIcon16 } from "./icons"
 import { NewNoteButton } from "./new-note-button"
 

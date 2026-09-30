@@ -1,5 +1,5 @@
 import { useCreateNewNote } from "../hooks/create-new-note"
-import { IconButton } from "./icon-button"
+import { IconButton } from "./ui/icon-button"
 import { ComposeIcon16 } from "./icons"
 
 export function NewNoteButton() {

@@ -1,7 +1,7 @@
 import type { BoardFeatureState, BoardValue } from "../../data/boards"
 import { cx } from "../../utils/cx"
-import { Button } from "../button"
-import { DropdownMenu } from "../dropdown-menu"
+import { Button } from "../ui/button"
+import { DropdownMenu } from "../ui/dropdown-menu"
 import { ChevronDownIcon16, PlusIcon16 } from "../icons"
 
 /**

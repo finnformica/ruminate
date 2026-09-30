@@ -72,7 +72,6 @@
   --color-text-success: var(--green-11);
   --color-text-danger: var(--red-11);
   --color-text-pending: var(--yellow-11);
-  --color-text-pinned: var(--orange-11);
 
   /* Background colors */
   --color-bg: var(--neutral-1);
@@ -83,10 +82,21 @@
   --color-bg-overlay: white;
   --color-bg-backdrop: #fcfcfccc;
   --color-bg-overlay-backdrop: #ffffffcc;
+  /* What a modal draws over the page: a little darker, so the page steps back
+     and the dialog comes forward. */
+  --color-bg-scrim: rgb(0 0 0 / 0.2);
   --color-bg-secondary: var(--neutral-a3);
   --color-bg-secondary-hover: var(--neutral-a4);
   --color-bg-secondary-active: var(--neutral-a5);
   --color-bg-tertiary: var(--neutral-a4);
+  /* The one solid red: the button that confirms a destructive action
+     (Button's `danger` variant), and nothing else. Solid steps 9–11 of the
+     red ramp, which flips with the scheme like every other ramp; its ink is
+     Radix's red contrast, white on either. */
+  --color-bg-danger: var(--red-9);
+  --color-bg-danger-hover: var(--red-10);
+  --color-bg-danger-active: var(--red-11);
+  --color-text-on-danger: white;
   --color-bg-code-block: var(--neutral-a3);
   --color-bg-highlight: var(--yellow-a3);
   --color-bg-selection: var(--accent-a3);
@@ -185,6 +195,27 @@
   /* An accordion's curve: gathers pace, then settles. The fold and its
      chevron share it, so they move as one. */
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  /* Durations: quick is a colour changing under the pointer, base is a
+     surface arriving or leaving, slow is the fold (docs/design-principles.md). */
+  --duration-quick: 100ms;
+  --duration-base: 150ms;
+  --duration-slow: 300ms;
+
+  /* Elevation — the shadow of each tier of raised surface (src/components/ui/surface.tsx).
+     A card sits on the page, a popup floats over it, a modal floats over
+     everything; the shadow grows with the distance. */
+  --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-popup: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-modal: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+
+  /* Layers — the stacking order of everything that floats, from the bottom
+     up. Nothing sets a z-index by number: it names its layer. Tooltips sit
+     above modals because a tooltip belongs to the control under the pointer,
+     wherever that control is. */
+  --z-raised: 10;
+  --z-popup: 20;
+  --z-modal: 30;
+  --z-tooltip: 40;
 
   /* Icons */
   --icon-size: 16px;
@@ -204,6 +235,7 @@
   --color-bg-overlay: var(--neutral-3);
   --color-bg-backdrop: #111111cc;
   --color-bg-overlay-backdrop: #222222cc;
+  --color-bg-scrim: rgb(0 0 0 / 0.5);
   --color-bg-code-block: var(--neutral-a2);
 
   /* Selected colors: the same wash over a white-LIFTED background. The
@@ -251,12 +283,13 @@
 
 @media (pointer: coarse) {
   :root {
-    /* Font sizes. Body text grows a step for reading at arm's length; the
-     * display sizes shrink instead — a 30px heading on a 390px screen is a
-     * third of the line — so more of a note fits on a phone. */
-    --font-size-sm: 13px;
-    --font-size-base: 15px;
-    --font-size-lg: 17px;
+    /* Font sizes. Body text grows two steps for reading at arm's length —
+     * 16px is also the size below which iOS zooms the page into a focused
+     * field; the display sizes shrink instead — a 30px heading on a 390px
+     * screen is a third of the line — so more of a note fits on a phone. */
+    --font-size-sm: 14px;
+    --font-size-base: 16px;
+    --font-size-lg: 18px;
     --font-size-xl: 21px;
     --font-size-2xl: 25px;
     --font-size-3xl: 28px;
@@ -432,7 +465,6 @@
     --color-text-success: var(--color-text);
     --color-text-danger: var(--color-text);
     --color-text-pending: var(--color-text);
-    --color-text-pinned: var(--color-text);
 
     /* Background colors */
     --color-bg: #fff;
@@ -443,6 +475,10 @@
     --color-bg-overlay-backdrop: var(--color-bg);
     --color-bg-secondary: var(--color-bg);
     --color-bg-tertiary: var(--color-bg);
+    --color-bg-danger: var(--color-bg);
+    --color-bg-danger-hover: var(--color-bg);
+    --color-bg-danger-active: var(--color-bg);
+    --color-text-on-danger: var(--color-text);
     --color-bg-code-block: var(--color-bg);
     --color-bg-highlight: var(--color-text);
     --color-bg-selection: var(--color-text);

@@ -44,13 +44,53 @@ const STORIES = [
   { id: "blockeditor--deep-headings-focused", waitFor: '[data-testid="focus-breadcrumb"]' },
   { id: "blockeditor--selection-sweep", waitFor: '[data-testid="block-body"]' },
   { id: "blockeditor--empty", waitFor: '[data-testid="block-body"]' },
-  // Pinned rows: the pin's trailing slot mirrors the marker slot, on a
-  // heading (whose surface reaches both ways), a paragraph, a bullet and a
-  // wrapping nested bullet.
-  { id: "blockeditor--pinned", waitFor: '[data-testid="block-pinned"]' },
   // Waits for the tokens: the grammar is fetched after the story mounts.
   { id: "blockeditor--code", waitFor: '[data-testid="code-panel"] .token' },
   { id: "notetitle--default", waitFor: "text=Meeting notes" },
+  // Every primitive in src/components/ui/, and the molecules built straight on
+  // them: a change to an atom shows here before it shows in the app. Popups
+  // are held open by their stories; the dialog and the dropdown need a click
+  // to open and are covered by their own tests instead.
+  { id: "surface--tiers", waitFor: "text=A raised surface" },
+  { id: "button--primary", waitFor: "#storybook-root button" },
+  { id: "button--secondary", waitFor: "#storybook-root button" },
+  { id: "button--with-keyboard-shortcut", waitFor: "#storybook-root button kbd" },
+  { id: "button--disabled", waitFor: "#storybook-root button" },
+  { id: "button--small", waitFor: "#storybook-root button" },
+  { id: "button--with-icon", waitFor: "#storybook-root button svg" },
+  { id: "button--loading", waitFor: "#storybook-root button[aria-busy]" },
+  { id: "asyncbutton--default", waitFor: "#storybook-root button svg" },
+  { id: "iconbutton--default", waitFor: "#storybook-root button" },
+  { id: "iconbutton--with-keyboard-shortcut", waitFor: "#storybook-root button" },
+  { id: "iconbutton--small", waitFor: "#storybook-root button" },
+  { id: "iconbutton--loading", waitFor: "#storybook-root button[aria-busy]" },
+  { id: "pillbutton--primary", waitFor: "#storybook-root button" },
+  { id: "pillbutton--secondary", waitFor: "#storybook-root button" },
+  { id: "pillbutton--dashed", waitFor: "#storybook-root button" },
+  { id: "checkbox--default", waitFor: '#storybook-root [role="checkbox"]' },
+  { id: "checkbox--checked", waitFor: '#storybook-root [role="checkbox"]' },
+  { id: "checkbox--disabled", waitFor: '#storybook-root [role="checkbox"]' },
+  { id: "textinput--default", waitFor: "#storybook-root input" },
+  { id: "textinput--with-value", waitFor: "#storybook-root input" },
+  { id: "searchfield--default", waitFor: "#storybook-root input" },
+  { id: "searchfield--trailing", waitFor: "#storybook-root input" },
+  { id: "keys--default", waitFor: "#storybook-root kbd" },
+  { id: "keys--chord", waitFor: "#storybook-root kbd" },
+  { id: "keys--single", waitFor: "#storybook-root kbd" },
+  { id: "skeleton--page", waitFor: '#storybook-root [data-testid="page-skeleton"]' },
+  { id: "skeleton--nav-list", waitFor: '#storybook-root [data-testid="nav-skeleton"]' },
+  { id: "details--default", waitFor: "#storybook-root summary" },
+  { id: "list--rows", waitFor: '#storybook-root [role="listbox"]' },
+  { id: "tooltip--open", waitFor: "text=Search" },
+  { id: "hovercard--open", waitFor: "text=Edited yesterday" },
+  { id: "sheet--open", waitFor: "text=Turn into" },
+  { id: "notice--info", waitFor: '#storybook-root [role="status"]' },
+  { id: "notice--warning", waitFor: '#storybook-root [role="status"]' },
+  { id: "notice--with-actions", waitFor: '#storybook-root [role="status"]' },
+  { id: "searchinput--default", waitFor: "#storybook-root input" },
+  { id: "searchinput--with-shortcut", waitFor: "#storybook-root input" },
+  { id: "searchinput--with-value", waitFor: "#storybook-root input" },
+  { id: "settingssection--default", waitFor: "#storybook-root h3" },
   // Per-story override example: { id: "...", waitFor: "...", maxDiffRatio: 0.005 },
 ]
 const SCHEMES = ["light", "dark"]

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { attentionTone, syncStatusKind } from "./sync-status"
+import { attentionTone, saveTrace, syncStatusKind } from "./sync-status"
 
 const base = {
   isDatabaseMode: true,
@@ -63,5 +63,39 @@ describe("attentionTone", () => {
   it("says nothing offline or outside database mode (there is no sync to fail)", () => {
     expect(attentionTone({ ...base, online: false, isSyncError: true })).toBeNull()
     expect(attentionTone({ ...base, isDatabaseMode: false, session: "expired" })).toBeNull()
+  })
+})
+
+describe("saveTrace", () => {
+  const idle = { pendingSave: false, pushesPending: false }
+  const dispatched = { pendingSave: true, pushesPending: false }
+  const queued = { pendingSave: false, pushesPending: true }
+
+  it("reads Saving… while pushes are in flight (the sidebar's word too)", () => {
+    expect(saveTrace("syncing", idle)).toBe("saving")
+    expect(saveTrace("syncing", queued)).toBe("saving")
+  })
+
+  it("reads Saving… from the dispatch until the write lands, where a push can land", () => {
+    expect(saveTrace("synced", dispatched)).toBe("saving")
+    expect(saveTrace("expiring", dispatched)).toBe("saving")
+    expect(saveTrace("failed", dispatched)).toBe("saving")
+    expect(saveTrace("synced", idle)).toBeNull()
+    expect(saveTrace("failed", idle)).toBeNull()
+  })
+
+  it("offline, reads Saving… while the write is landing, then Saved offline", () => {
+    expect(saveTrace("offline", dispatched)).toBe("saving")
+    // A further edit while one is already waiting: the write comes first.
+    expect(saveTrace("offline", { pendingSave: true, pushesPending: true })).toBe("saving")
+    expect(saveTrace("offline", queued)).toBe("saved-offline")
+    // Offline with nothing waiting: nothing about the note is unusual.
+    expect(saveTrace("offline", idle)).toBeNull()
+  })
+
+  it("says nothing signed out or outside database mode, where no push can land", () => {
+    expect(saveTrace("signed-out", queued)).toBeNull()
+    expect(saveTrace("signed-out", dispatched)).toBeNull()
+    expect(saveTrace("hidden", dispatched)).toBeNull()
   })
 })

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
-import { NoteIcon16 } from "../components/icons"
+import { GridIcon16 } from "../components/icons"
 import { NoteList } from "../components/note-list"
 import { PageLayout } from "../components/page-layout"
 
@@ -28,7 +28,7 @@ function RouteComponent() {
   }, [query])
 
   return (
-    <PageLayout title="Notes" icon={<NoteIcon16 />}>
+    <PageLayout title="Views" icon={<GridIcon16 />}>
       <div className="p-4 pt-0">
         <NoteList
           query={text}

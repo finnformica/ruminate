@@ -2,7 +2,8 @@ import { useAtomValue } from "jotai"
 import React from "react"
 import { sortedNotesAtom } from "../global-state"
 import type { Note } from "../schema"
-import { cx } from "../utils/cx"
+import { listRow } from "./ui/list"
+import { Surface } from "./ui/surface"
 import {
   SUGGESTED_QUALIFIER_KEYS,
   STATIC_QUALIFIER_OPTIONS,
@@ -27,7 +28,7 @@ import { NoteFavicon } from "./note-favicon"
  * under the caret, how a pick is spliced back) lives in
  * `src/utils/qualifier-suggestions.ts`; this file adds the corpus-backed set
  * and the rendering. The one box that shows it is `QueryBox`
- * (query-box.tsx), on the notes page and in the ⌘K palette alike.
+ * (query-box.tsx), on the Views page and in the ⌘K palette alike.
  */
 
 /** A row of the picker: a query value, plus (for `in:`) the note it names. */
@@ -353,7 +354,7 @@ export function QualifierPopover({
   const pictured = anyQualifierPicture(items, trigger.key)
 
   return (
-    <div
+    <Surface
       ref={listRef}
       id={id}
       role="listbox"
@@ -368,7 +369,9 @@ export function QualifierPopover({
         minWidth: placement.full ? undefined : QUALIFIER_POPOVER_MIN_WIDTH,
         maxWidth: placement.maxWidth,
       }}
-      className="card-2 absolute z-30 max-h-[45svh] overflow-auto rounded-lg p-1 font-sans text-base font-normal leading-normal text-text"
+      // Opened by typing and used constantly, so it does not arrive: it is there.
+      motion={false}
+      className="absolute z-popup max-h-[45svh] overflow-auto p-1 font-sans text-base font-normal leading-normal text-text"
       onMouseDown={(event) => event.preventDefault()}
     >
       {items.map((item, index) => {
@@ -384,10 +387,7 @@ export function QualifierPopover({
             aria-selected={active}
             tabIndex={-1}
             data-suggestion={item.value}
-            className={cx(
-              "flex h-8 cursor-pointer select-none items-center gap-3 rounded px-2",
-              active && "bg-bg-hover",
-            )}
+            className={listRow({ active })}
             onMouseEnter={() => onHover(index)}
             onClick={() => onPick(item)}
           >
@@ -400,6 +400,6 @@ export function QualifierPopover({
           </div>
         )
       })}
-    </div>
+    </Surface>
   )
 }

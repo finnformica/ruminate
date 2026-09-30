@@ -45,6 +45,23 @@ body:has([data-resizing="true"]) * {
   pointer-events: none;
 }
 
+/* Panel motion: a panel's share of the app layout's width transitions when a
+ * panel opens or closes (the help panel expanding from, and collapsing to,
+ * nothing), so its edge travels with its contents. This is the one width the
+ * app animates — the exception noted under "What never animates" in
+ * docs/design-principles.md — and it is off while a separator is being
+ * dragged and under reduced motion. The group switches it on once its first
+ * layout has settled (src/components/app-layout.tsx). */
+[data-panel-motion="true"] > [data-panel] {
+  transition: flex-grow var(--duration-slow) var(--ease-in-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-panel-motion="true"] > [data-panel] {
+    transition: none;
+  }
+}
+
 /* Focus styles for buttons, inputs, etc. */
 @utility focus-ring {
   @apply focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus;
@@ -71,23 +88,7 @@ body:has([data-resizing="true"]) * {
   margin-left: 2px;
 }
 
-/* Card */
-
-@utility card {
-  @apply rounded-lg border-0 ring-1 ring-[var(--neutral-a3)] dark:ring-inset;
-}
-
-@utility card-1 {
-  @apply card bg-bg-card shadow-sm;
-}
-
-@utility card-2 {
-  @apply card bg-bg-overlay-backdrop shadow-lg backdrop-blur-lg;
-}
-
-@utility card-3 {
-  @apply card bg-bg-overlay-backdrop shadow-2xl backdrop-blur-xl;
-}
+/* Cards, popups and modals are all `Surface` (src/components/ui/surface.tsx). */
 
 /* Nav item */
 
@@ -133,17 +134,18 @@ body:has([data-resizing="true"]) * {
  * handed down to them. A nav link's filled icon inherits it already.
  *
  * `.nav-item-tint` opts out. An icon that REPORTS something about the row —
- * the pin, which says the row is pinned — is a state, not a label, and it is
- * no less true on the row you are reading, so it keeps its own colour instead
- * of dissolving into the selection. Only an icon that merely names the row
- * leans with the label. */
+ * a state rather than a label — is no less true on the row you are reading,
+ * so it keeps its own colour instead of dissolving into the selection. Only
+ * an icon that merely names the row leans with the label. */
 .nav-item[aria-current]
   :is(.nav-item-icon, .nav-item-icon *):not(:is(.nav-item-tint, .nav-item-tint *)) {
   color: inherit;
 }
 
 /* Toggled-open panels (e.g. Help) are a state, not a place — they keep a
- * NEUTRAL surface so accent stays reserved for "current". It sits one step
+ * NEUTRAL surface so accent stays reserved for "current". The Settings row
+ * takes the same state while any settings page is open (nav-items.tsx), so
+ * the rows at the foot of the sidebar mark themselves alike. It sits one step
  * above the row hover, on the same three-step ladder a filled button uses:
  * at `--color-bg-secondary` it was the very value an ordinary row hovers to,
  * so a toggled-open Help row and a hovered Notes row were the same colour. */
@@ -255,30 +257,6 @@ body,
     animation: mask-height-grow forwards;
     animation-timeline: scroll(nearest);
     animation-range: 0 32px;
-  }
-
-  /* The what's-new card (src/components/whats-new-popover.tsx), arriving in the
- * corner on the first boot of a build this device has not seen. It rises a
- * little as it fades in, so it reads as having arrived rather than as having
- * been there all along and missed. */
-  @keyframes whats-new-in {
-    from {
-      opacity: 0;
-      transform: translateY(0.5rem);
-    }
-  }
-
-  .whats-new-card {
-    animation: whats-new-in 200ms ease-out;
-  }
-
-  /* Reduced motion keeps the fade and drops the movement. */
-  @media (prefers-reduced-motion: reduce) {
-    @keyframes whats-new-in {
-      from {
-        opacity: 0;
-      }
-    }
   }
 
   @keyframes mask-height-grow {
