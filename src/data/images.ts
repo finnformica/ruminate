@@ -3,6 +3,7 @@ import { imagePropsOf } from "../blocks/image"
 import type { Block } from "../blocks/types"
 import { cacheImage, fetchImageBlob, ImageFetchError, readCachedImage } from "./image-cache"
 import type { ImageFetchFailure } from "./image-cache"
+import { fitImage } from "./image-fit"
 import { thumbHashOf } from "./image-thumbhash"
 import { sessionFetch } from "./session-fetch"
 import { isImageMime, MAX_IMAGE_BYTES } from "../../worker/handlers/image-policy"
@@ -110,8 +111,16 @@ async function measure(file: File): Promise<Measured | null> {
 
 const signedOut = () => new ImageUploadError("signed_out", "Sign in to add images")
 
-/** Upload one picture; resolves to what the block should remember. */
-export async function uploadImage(file: File): Promise<UploadedImage> {
+/**
+ * Upload one picture; resolves to what the block should remember.
+ *
+ * A picture over the limit, or in a format only this browser can read, is
+ * first fitted (`image-fit.ts`): re-encoded smaller and stripped of its
+ * metadata. Only when that cannot be done is the original refused for what
+ * it is.
+ */
+export async function uploadImage(picked: File): Promise<UploadedImage> {
+  const file = (await fitImage(picked)) ?? picked
   const rejected = rejectImage(file)
   if (rejected) throw rejected
   const [size, response] = await Promise.all([
