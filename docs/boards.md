@@ -17,9 +17,16 @@ one property is what makes it a board: the note's kind is `board`
 every list, sends its rows to the board page rather than the outline
 (`useOpenNote`, `src/hooks/open-note.ts`), lists it under `type:board` in a
 search, and is what the board page checks before it draws anything — a
-note without it is refused and opened as a note. Turning an existing note
-into a board is setting the property on its page; nothing else about the
-note changes.
+note without it is refused and opened as a note.
+
+The property is a note's **default surface**, nothing more, and the note's
+menu toggles it: **Make this a board** on any plain note sets it and opens
+the board; **Make this a note** on a board clears it. Nothing else about the
+note changes either way — the same rows, the same outline, the same id and
+URL — and no structure is required first: a note with no pictures makes an
+empty board, and the outline of a board is one click away (**Open outline**
+in its header, **Open board** in the outline's menu). A daily or weekly
+note is what its id says it is and cannot be made a board.
 
 Beneath that property, every piece of a board is a block the outline
 already understands, which is what lets the board and the outline be two
