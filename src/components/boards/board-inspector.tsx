@@ -1,6 +1,6 @@
 import { useAtomValue } from "jotai"
 import React from "react"
-import { imageValues, type BoardFeatureState } from "../../data/boards"
+import { imageValues, type BoardFeature, type BoardFeatureState } from "../../data/boards"
 import { graphSnapshotAtom } from "../../global-state"
 import type { BoardWrites } from "../../hooks/board"
 import { Button } from "../ui/button"
@@ -9,6 +9,7 @@ import { IconButton } from "../ui/icon-button"
 import { TrashIcon16, XIcon16 } from "../icons"
 import { TextInput } from "../ui/text-input"
 import { BoardPicture, type BoardImage } from "./board-picture"
+import { NewValueDialog } from "./new-value-dialog"
 import { ValuePicker } from "./value-picker"
 
 /**
@@ -44,11 +45,8 @@ export function BoardInspector({
     return () => document.removeEventListener("keydown", onKeyDown)
   }, [onClose])
 
-  const askForNew = (state: BoardFeatureState) => {
-    const text = window.prompt(`New ${state.feature.label.toLowerCase()}`)
-    if (text === null || text.trim() === "") return
-    writes.setValue(state.feature, image.id, { text })
-  }
+  // The feature a new value is being named for (`NewValueDialog`), if any.
+  const [naming, setNaming] = React.useState<BoardFeature | null>(null)
 
   return (
     <section
@@ -90,10 +88,15 @@ export function BoardInspector({
               selected={imageValues(snapshot, state, image.id)}
               onPick={(value) => writes.setValue(state.feature, image.id, { id: value.id })}
               onClear={(value) => writes.clearValue(state.feature, value, image.id)}
-              onNew={() => askForNew(state)}
+              onNew={() => setNaming(state.feature)}
             />
           </div>
         ))}
+        <NewValueDialog
+          feature={naming}
+          onAdd={(feature, text) => writes.setValue(feature, image.id, { text })}
+          onClose={() => setNaming(null)}
+        />
         <Button
           size="small"
           className="mt-auto self-start text-text-danger"
