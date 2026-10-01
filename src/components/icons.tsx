@@ -659,6 +659,14 @@ export function KeyboardDownIcon16(props: IconProps) {
 }
 
 /** A picture: a framed landscape. */
+export function CameraIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M5.5 1.5a1 1 0 0 0-.83.45L3.6 3.5H2.5A2.5 2.5 0 0 0 0 6v6a2.5 2.5 0 0 0 2.5 2.5h11A2.5 2.5 0 0 0 16 12V6a2.5 2.5 0 0 0-2.5-2.5h-1.1l-1.07-1.55a1 1 0 0 0-.83-.45h-5Zm.4 1.5h4.2l1.07 1.55a1 1 0 0 0 .83.45h1.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1H4a1 1 0 0 0 .83-.45L5.9 3ZM8 5.75a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5Zm0 1.5a1.75 1.75 0 1 1 0 3.5 1.75 1.75 0 0 1 0-3.5Z" />
+    </Icon>
+  )
+}
+
 export function ImageIcon16(props: IconProps) {
   return (
     <Icon size={16} {...props}>

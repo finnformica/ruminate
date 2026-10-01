@@ -5,8 +5,15 @@ import { BoardFilters } from "../components/boards/board-filters"
 import { BoardInspector } from "../components/boards/board-inspector"
 import { BoardPicture, type BoardImage } from "../components/boards/board-picture"
 import { Button } from "../components/ui/button"
+import { DropdownMenu } from "../components/ui/dropdown-menu"
 import { IconButton } from "../components/ui/icon-button"
-import { GridIcon16, NoteIcon16 } from "../components/icons"
+import {
+  CameraIcon16,
+  ChevronDownIcon16,
+  GridIcon16,
+  ImageIcon16,
+  NoteIcon16,
+} from "../components/icons"
 import { Notice } from "../components/notice"
 import { PageLayout } from "../components/page-layout"
 import type { BoardFeatureState } from "../data/boards"
@@ -15,6 +22,7 @@ import { parentIdsOf, parseProps } from "../data/graph"
 import { imageFilesOf } from "../data/images"
 import { graphSnapshotAtom } from "../global-state"
 import { useBoard, useBoardMatches, useBoardWrites } from "../hooks/board"
+import { useCoarsePointer } from "../hooks/coarse-pointer"
 import { useNoteById } from "../hooks/note"
 import { cx } from "../utils/cx"
 
@@ -136,6 +144,8 @@ function BoardPage({ boardId }: { boardId: string }) {
   // Adding pictures: the button's file picker, a drop anywhere on the page,
   // or a paste while nothing else is taking the keys.
   const fileInputRef = React.useRef<HTMLInputElement>(null)
+  const cameraInputRef = React.useRef<HTMLInputElement>(null)
+  const coarsePointer = useCoarsePointer()
   const addFiles = (files: File[]) => {
     if (files.length > 0) void writes.addImages(files)
   }
@@ -162,20 +172,46 @@ function BoardPage({ boardId }: { boardId: string }) {
       icon={<GridIcon16 />}
       actions={
         <div className="flex items-center gap-2">
-          <Button
-            size="small"
-            disabled={!writes.canUpload}
-            title={
-              writes.canUpload
-                ? undefined
-                : exists
-                  ? "Sign in to add images"
-                  : "Open it as a note to start it first"
-            }
-            onClick={() => fileInputRef.current?.click()}
-          >
-            Add images
-          </Button>
+          <DropdownMenu modal={false}>
+            <DropdownMenu.Trigger
+              render={
+                <Button
+                  size="small"
+                  className="gap-1.5"
+                  disabled={!writes.canUpload}
+                  title={
+                    writes.canUpload
+                      ? undefined
+                      : exists
+                        ? "Sign in to add images"
+                        : "Open it as a note to start it first"
+                  }
+                >
+                  Add images
+                  <ChevronDownIcon16 className="text-text-secondary" />
+                </Button>
+              }
+            />
+            <DropdownMenu.Content align="end" width={200}>
+              {/* The camera is a thing a phone has in hand; on a desktop the
+                  capture hint is ignored and the row would only open the
+                  picker twice over. */}
+              {coarsePointer ? (
+                <DropdownMenu.Item
+                  icon={<CameraIcon16 />}
+                  onClick={() => cameraInputRef.current?.click()}
+                >
+                  Take a photo
+                </DropdownMenu.Item>
+              ) : null}
+              <DropdownMenu.Item
+                icon={<ImageIcon16 />}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Upload photos
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu>
           <IconButton
             aria-label="Open as note"
             size="small"
@@ -196,6 +232,20 @@ function BoardPage({ boardId }: { boardId: string }) {
             multiple
             hidden
             data-testid="board-file-input"
+            onChange={(event) => {
+              addFiles(Array.from(event.currentTarget.files ?? []))
+              event.currentTarget.value = ""
+            }}
+          />
+          {/* `capture` asks a phone for its camera rather than its library;
+              one picture at a time, as a camera gives. */}
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+            data-testid="board-camera-input"
             onChange={(event) => {
               addFiles(Array.from(event.currentTarget.files ?? []))
               event.currentTarget.value = ""
