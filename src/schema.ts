@@ -2,7 +2,9 @@ import { z } from "zod"
 
 export type NoteId = string
 
-export type NoteType = "note" | "daily" | "weekly"
+/** What kind of note: a daily or weekly note by its id, a board by the
+ * `board` property on its page (docs/boards.md), a plain note otherwise. */
+export type NoteType = "note" | "daily" | "weekly" | "board"
 
 /** A heading block: its level (its outline depth, from 1) and text. */
 export type Heading = { level: number; text: string }

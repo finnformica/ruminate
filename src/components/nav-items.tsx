@@ -721,6 +721,31 @@ function NoteNavItem({
   onNavigate?: () => void
   className?: string
 }) {
+  // A board's row opens its board page (docs/boards.md), with nothing to
+  // say about focus; every other note's its outline.
+  if (note.type === "board") {
+    return (
+      <Link
+        to="/boards/$"
+        params={{ _splat: note.id }}
+        activeOptions={{ exact: true }}
+        data-size={size}
+        className={cx("nav-item", className)}
+        title={title}
+        onClick={(event) => {
+          if (!event.defaultPrevented) onNavigate?.()
+        }}
+      >
+        <NavRowIcon
+          icon={<NoteFavicon note={note} />}
+          filled={<NoteFavicon note={note} filled />}
+        />
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate">{note.displayName}</span>
+        </span>
+      </Link>
+    )
+  }
   return (
     <Link
       to="/views/$"

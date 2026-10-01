@@ -1,25 +1,36 @@
 # Boards
 
-A **board** is a note read as a wall of its pictures: a place to keep
+A **board** is a wall of pictures with a page of its own: a place to keep
 inspiration — for a future home, say — where each picture can be captioned
 and given a **location**, a **fixture** and a **material** from a form, and
-the wall narrowed by any of them. **Open as board** in a note's **⋯** menu
-opens it at `/boards/<note id>`; **Open as note** in the board's header goes
-back. Behind a feature flag (`boards`, `src/data/feature-flags.ts`), admin
-only by default.
+the wall narrowed by any of them. **New board** in the header makes one and
+opens it at `/boards/<note id>`; **Open outline** in the board's header
+opens the note beneath it. Behind a feature flag (`boards`,
+`src/data/feature-flags.ts`), admin only by default.
 
-## Nothing new in the data
+## One property, and nothing else new in the data
 
-A board is not a kind of note, and there is no such thing as a board in the
-graph. Every piece of it is a block the outline already understands, which is
-what lets the board and the note page be two surfaces on one graph with no
-special-casing between them: a picture pasted into the note is on the board,
-a picture added from the board is in the note, and a board can be written by
-hand in the outline and the form picks it up.
+A board is a note whose page carries `board: true` among its metadata
+(`BOARD_PROP`, `src/utils/board-prop.ts`), beside its font and width. That
+one property is what makes it a board: the note's kind is `board`
+(`NoteType`, derived in `src/data/note-meta.ts`), which gives it its icon in
+every list, sends its rows to the board page rather than the outline
+(`useOpenNote`, `src/hooks/open-note.ts`), lists it under `type:board` in a
+search, and is what the board page checks before it draws anything — a
+note without it is refused and opened as a note. Turning an existing note
+into a board is setting the property on its page; nothing else about the
+note changes.
+
+Beneath that property, every piece of a board is a block the outline
+already understands, which is what lets the board and the outline be two
+surfaces on one graph with no special-casing between them: a picture pasted
+into the outline is on the board, a picture added from the board is in the
+note, and a board's features and values can be written by hand in the
+outline and the form picks them up.
 
 | on the board       | in the graph                                                                                                                  |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| the board          | any note                                                                                                                      |
+| the board          | a note whose page props hold `board: true`                                                                                    |
 | its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket    |
 | a feature          | a direct child of the page whose text is the feature's label — `Location`, `Fixture`, `Material` — trimmed, whatever its case |
 | a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                               |

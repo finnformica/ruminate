@@ -22,7 +22,6 @@ import {
   ArrowUpIcon16,
   CopyIcon16,
   EditIcon16,
-  GridIcon16,
   MoreIcon16,
   PrinterIcon16,
   ShareIcon16,
@@ -106,21 +105,8 @@ export function useNoteMenuEntries() {
   const requestDelete = useSetAtom(deleteNoteDialogAtom)
   const sharingEnabled = useFeature("sharing")
   const openShare = useSetAtom(shareDialogAtom)
-  // A board (docs/boards.md) is the note read as a wall of its pictures —
-  // an own note, where the feature is on. Opening one is a navigation, so
-  // the surface that has a router hands it in (`openBoard`).
-  const boardsEnabled = useFeature("boards")
-
   return React.useCallback(
-    (
-      noteId: string,
-      options: {
-        focusBlockId?: string | null
-        onDeleted?: () => void
-        /** Open the note as a board; absent, the entry is not offered. */
-        openBoard?: () => void
-      } = {},
-    ) => {
+    (noteId: string, options: { focusBlockId?: string | null; onDeleted?: () => void } = {}) => {
       const shareId = jotaiStore.get(sharedOriginAtom).get(noteId)
       const share =
         shareId === undefined
@@ -170,16 +156,6 @@ export function useNoteMenuEntries() {
           disabled: !canRename,
           onSelect: rename,
         },
-        ...(options.openBoard && verbs === null && boardsEnabled
-          ? [
-              {
-                kind: "item" as const,
-                label: "Open as board",
-                icon: <GridIcon16 />,
-                onSelect: options.openBoard,
-              },
-            ]
-          : []),
         { kind: "separator" },
         { kind: "item", label: "Print", icon: <PrinterIcon16 />, onSelect: () => window.print() },
         { kind: "separator" },
@@ -193,7 +169,7 @@ export function useNoteMenuEntries() {
         },
       ] satisfies MenuEntry[]
     },
-    [jotaiStore, isSignedOut, sharingEnabled, boardsEnabled, renameNote, requestDelete, openShare],
+    [jotaiStore, isSignedOut, sharingEnabled, renameNote, requestDelete, openShare],
   )
 }
 
@@ -281,11 +257,7 @@ export function NoteActionsMenu({
         <MenuItems
           entries={[
             ...(reorder ? reorderEntries(reorder) : []),
-            ...entriesFor(noteId, {
-              focusBlockId: editor?.focusBlockId,
-              onDeleted,
-              openBoard: () => navigate({ to: "/boards/$", params: { _splat: noteId } }),
-            }),
+            ...entriesFor(noteId, { focusBlockId: editor?.focusBlockId, onDeleted }),
           ]}
         />
         {editor && isDeveloper ? (

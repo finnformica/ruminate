@@ -1,4 +1,5 @@
 import { useMatch, useNavigate } from "@tanstack/react-router"
+import { useOpenNote } from "../hooks/open-note"
 import { parseDate } from "chrono-node"
 import { Command } from "cmdk"
 import { useAtom, useAtomValue } from "jotai"
@@ -61,6 +62,7 @@ const NAVIGATION_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End"])
  */
 export function CommandMenu() {
   const navigate = useNavigate()
+  const openNote = useOpenNote()
   const createNote = useCreateNote()
   // The request the palette is a picker for, if any (`usePalettePicker`).
   const [request, setRequest] = useAtom(paletteRequestAtom)
@@ -315,13 +317,9 @@ export function CommandMenu() {
         return
       }
       leave()
-      navigate({
-        to: "/views/$",
-        params: { _splat: noteId },
-        search: { query: undefined, block: blockId },
-      })
+      void openNote(noteId, blockId)
     },
-    [picking, pick, leave, navigate],
+    [picking, pick, leave, openNote],
   )
 
   // cmdk reports every change of the highlighted item here — both the user

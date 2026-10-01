@@ -7,6 +7,7 @@ import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/
 import { cx } from "../utils/cx"
 import { IconButton } from "./ui/icon-button"
 import { ArrowLeftIcon16, ArrowRightIcon16, SidebarCollapsedIcon16 } from "./icons"
+import { NewBoardButton } from "./new-board-button"
 import { NewNoteButton } from "./new-note-button"
 
 export type PageHeaderProps = {
@@ -67,6 +68,7 @@ export function PageHeader({ title, icon, className, actions }: PageHeaderProps)
               <ArrowRightIcon16 className="transition-transform group-active:translate-x-0.5" />
             </IconButton>
             <NewNoteButton />
+            <NewBoardButton />
           </div>
         ) : null}
         {/* The rule between the nav buttons and the title, whether or not

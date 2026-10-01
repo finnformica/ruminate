@@ -1,8 +1,9 @@
-import type { Heading, Note, NoteId, Task } from "../schema"
+import type { Heading, Note, NoteId, NoteType, Task } from "../schema"
 import { isHeading } from "../blocks/markers"
 import type { Block, BlockDoc } from "../blocks/types"
 import { formatDate, formatWeek, toDateStringUtc } from "../utils/date"
 import { noteTypeOf } from "../utils/note-type"
+import { BOARD_PROP } from "../utils/board-prop"
 import { NOTE_TYPE, noteDoc, parseProps, propsJson, type GraphSnapshot } from "./graph"
 import type { Op } from "./ops"
 import { emittedNoteTitle, isMintedNoteId } from "./note-identity"
@@ -121,7 +122,10 @@ export function noteFromNode(id: NoteId, snapshot: GraphSnapshot): Note | null {
     const date = dateOf(value)
     if (date) dates.add(date)
   }
-  const type = noteTypeOf(id)
+  // A board is a plain note whose page carries the `board` property
+  // (docs/boards.md); a daily or weekly note is what its id says it is.
+  const type: NoteType =
+    noteTypeOf(id) === "note" && props[BOARD_PROP] === true ? "board" : noteTypeOf(id)
   if (type === "daily") dates.add(id)
 
   const text = texts.join("\n")
@@ -134,12 +138,18 @@ export function noteFromNode(id: NoteId, snapshot: GraphSnapshot): Note | null {
       displayName = title || formatWeek(id)
       break
     case "note":
+    case "board":
       if (title) displayName = title
       // An id a human wrote is a name; a minted one is opaque and never is.
       else if (id && !/^\d+$/.test(id) && !isMintedNoteId(id)) displayName = id
       else {
         const words = text.trim().split(/\s+/).filter(Boolean)
-        displayName = words.length > 0 ? words.slice(0, PREVIEW_WORDS).join(" ") : "Empty note"
+        displayName =
+          words.length > 0
+            ? words.slice(0, PREVIEW_WORDS).join(" ")
+            : type === "board"
+              ? "Empty board"
+              : "Empty note"
         if (words.length > PREVIEW_WORDS) displayName += "…"
       }
       break

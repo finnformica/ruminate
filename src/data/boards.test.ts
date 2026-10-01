@@ -37,7 +37,8 @@ function graphOf(notes: Record<string, string>): GraphSnapshot {
   const nodes = []
   const links = []
   for (const [id, markdown] of Object.entries(notes)) {
-    const g = docToGraph(id, serialize(parse(markdown)), 1)
+    // Every note in a fixture is a board: the page carries the property.
+    const g = docToGraph(id, serialize(parse(markdown)), 1, { board: true })
     nodes.push(...g.nodes)
     links.push(...g.links)
   }
@@ -272,6 +273,14 @@ describe("setValueOps", () => {
       setValueOps(snapshot, "b", LOCATION, "blk_pic1000000", { id: "blk_nope000000" }),
     ).toEqual([])
     expect(setValueOps(snapshot, "nope", LOCATION, "blk_pic1000000", { text: "x" })).toEqual([])
+    // A note without the property is not a board, whatever it holds.
+    const plain = applyOps(
+      snapshot,
+      [{ op: "create", id: "p", type: "note", text: "p", props: null }],
+      NOW,
+    )
+    expect(setValueOps(plain, "p", LOCATION, "blk_pic1000000", { text: "x" })).toEqual([])
+    expect(addImageOps(plain, "p", "blk_new0000009")).toEqual([])
     expect(setValueOps(snapshot, "b", LOCATION, "blk_nope000000", { text: "x" })).toEqual([])
   })
 

@@ -10,7 +10,7 @@ import { IconButton } from "../components/ui/icon-button"
 import {
   CameraIcon16,
   ChevronDownIcon16,
-  GridIcon16,
+  BoardIcon16,
   ImageIcon16,
   NoteIcon16,
 } from "../components/icons"
@@ -27,10 +27,12 @@ import { useNoteById } from "../hooks/note"
 import { cx } from "../utils/cx"
 
 /**
- * A note as a board (docs/boards.md): its pictures as a wall of tiles, a
- * form to caption and tag the one you pick, and menus to narrow the wall by
- * what has been set. Everything on screen is the note's own graph — the
- * same rows the outline shows — read and written through the same seams.
+ * A board (docs/boards.md): a note whose page carries the `board` property,
+ * shown as a wall of its pictures, with a form to caption and tag the one
+ * you pick and menus to narrow the wall by what has been set. Everything on
+ * screen is the note's own graph — the same rows its outline shows — read
+ * and written through the same seams. A note without the property is
+ * refused: it is opened as a note.
  */
 
 type RouteSearch = {
@@ -53,7 +55,7 @@ function RouteComponent() {
   const enabled = useFeature("boards")
   if (!enabled) {
     return (
-      <PageLayout title="Board" icon={<GridIcon16 />}>
+      <PageLayout title="Board" icon={<BoardIcon16 />}>
         <div className="p-4">
           <Notice>Boards aren’t switched on for this account.</Notice>
         </div>
@@ -169,7 +171,7 @@ function BoardPage({ boardId }: { boardId: string }) {
   return (
     <PageLayout
       title={<span className="truncate">{note?.displayName || "Untitled"}</span>}
-      icon={<GridIcon16 />}
+      icon={<BoardIcon16 />}
       actions={
         <div className="flex items-center gap-2">
           <DropdownMenu modal={false}>
@@ -213,7 +215,7 @@ function BoardPage({ boardId }: { boardId: string }) {
             </DropdownMenu.Content>
           </DropdownMenu>
           <IconButton
-            aria-label="Open as note"
+            aria-label="Open outline"
             size="small"
             onClick={() =>
               navigate({
@@ -270,16 +272,22 @@ function BoardPage({ boardId }: { boardId: string }) {
       >
         {!exists ? (
           <Notice>
-            There is no note here yet.{" "}
-            <Link
-              to="/views/$"
-              params={{ _splat: boardId }}
-              search={{ query: undefined }}
-              className="link"
-            >
-              Open it as a note
-            </Link>{" "}
-            to start it.
+            {note ? (
+              <>
+                This note is not a board.{" "}
+                <Link
+                  to="/views/$"
+                  params={{ _splat: boardId }}
+                  search={{ query: undefined }}
+                  className="link"
+                >
+                  Open it as a note
+                </Link>
+                , or make a new board from the header.
+              </>
+            ) : (
+              <>There is no board here. Make one with New board in the header.</>
+            )}
           </Notice>
         ) : null}
         <BoardFilters

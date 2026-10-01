@@ -15,7 +15,7 @@ import {
   type QualifierOption,
   type QualifierTrigger,
 } from "../utils/qualifier-suggestions"
-import { CalendarIcon16, ImageIcon16, LinkIcon16, NoteIcon16 } from "./icons"
+import { BoardIcon16, CalendarIcon16, ImageIcon16, LinkIcon16, NoteIcon16 } from "./icons"
 import { NoteFavicon } from "./note-favicon"
 
 /**
@@ -204,6 +204,7 @@ export function useQualifierSuggestions({
 const TYPE_VALUE_ICONS: Record<string, React.ReactNode> = {
   note: <NoteIcon16 />,
   template: <NoteIcon16 />,
+  board: <BoardIcon16 />,
   daily: <CalendarIcon16 />,
   weekly: <CalendarIcon16 />,
   image: <ImageIcon16 />,

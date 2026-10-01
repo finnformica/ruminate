@@ -32,11 +32,9 @@ export const NotePreviewCard = React.memo(function NoteCard({ id }: NoteCardProp
   return (
     <div className="group relative">
       <Link
-        to="/views/$"
-        params={{ _splat: id }}
-        search={{
-          query: undefined,
-        }}
+        {...(note.type === "board"
+          ? { to: "/boards/$" as const, params: { _splat: id } }
+          : { to: "/views/$" as const, params: { _splat: id }, search: { query: undefined } })}
         className={cx(
           surface({ tier: "card" }),
           "rounded-[calc(var(--border-radius-base)+6px)]! relative block w-full cursor-pointer overflow-hidden -outline-offset-1",

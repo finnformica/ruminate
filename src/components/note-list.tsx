@@ -1,6 +1,6 @@
-import { useNavigate } from "@tanstack/react-router"
 import { useAtomValue } from "jotai"
 import React, { useState } from "react"
+import { useOpenNote } from "../hooks/open-note"
 import { useDebounce } from "use-debounce"
 import { useRecentRoots } from "../hooks/recent-roots"
 import { useSearchResults } from "../hooks/search-results"
@@ -55,7 +55,6 @@ export function NoteList({
   onQueryChange,
   enableKeyboardNav = false,
 }: NoteListProps) {
-  const navigate = useNavigate()
   const [deferredQuery] = useDebounce(query, QUERY_DEBOUNCE_MS)
   const fullQuery = `${baseQuery} ${deferredQuery}`.trim()
   const results = useSearchResults(fullQuery)
@@ -77,11 +76,7 @@ export function NoteList({
     return true
   }
 
-  const openNote = React.useCallback(
-    (noteId: string, block?: string) =>
-      navigate({ to: "/views/$", params: { _splat: noteId }, search: { query: undefined, block } }),
-    [navigate],
-  )
+  const openNote = useOpenNote()
 
   // The bands, each the roots its own results block draws. Recent leads —
   // the places most used lately, notes and focused blocks, by frecency

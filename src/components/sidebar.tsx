@@ -7,6 +7,7 @@ import { cx } from "../utils/cx"
 import { IconButton } from "./ui/icon-button"
 import { ArrowLeftIcon16, ArrowRightIcon16, SidebarIcon16 } from "./icons"
 import { NavItems } from "./nav-items"
+import { NewBoardButton } from "./new-board-button"
 import { NewNoteButton } from "./new-note-button"
 
 export function Sidebar() {
@@ -51,6 +52,7 @@ export function Sidebar() {
             <ArrowRightIcon16 className="transition-transform group-active:translate-x-0.5" />
           </IconButton>
           <NewNoteButton />
+          <NewBoardButton />
         </div>
       </div>
       <div className="relative flex scroll-py-2 flex-col gap-2 overflow-auto p-2 pt-0">

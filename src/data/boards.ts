@@ -1,10 +1,12 @@
 import { blockId } from "../blocks/id"
 import type { NoteId } from "../schema"
+import { BOARD_PROP } from "../utils/board-prop"
 import {
   NOTE_TYPE,
   childIdsOf,
   noteDoc,
   parentIdsOf,
+  parseProps,
   propsJson,
   sortKeyBetween,
   type GraphSnapshot,
@@ -17,7 +19,9 @@ import type { Op } from "./ops"
  * few features — a location, a fixture, a material — you can set on each
  * one from a form instead of the outline.
  *
- * Nothing here is a new kind of thing. A board is any note. Its pictures
+ * A board is a note whose page carries `board: true` (`BOARD_PROP`):
+ * made by **New board**, drawn with its own icon, opened on its own page.
+ * Beneath that one property nothing here is a new kind of thing. Its pictures
  * are the image blocks written in the note: the ones its outline reaches,
  * and the ones nothing reaches yet, which sit in the note's Unassigned
  * basket (`basket.ts`) as any such block does. A picture added from the
@@ -64,9 +68,13 @@ const normalise = (text: string) => text.trim().toLocaleLowerCase()
 const isFeatureText = (text: string, feature: BoardFeature) =>
   normalise(text) === normalise(feature.label)
 
-/** Whether a note exists in the snapshot to be a board. */
+/** Whether the note is a board: a note whose page carries `board: true`
+ * (`BOARD_PROP`). The board page refuses any other note, and the writes
+ * here write to nothing else. */
 export function isBoard(snapshot: GraphSnapshot, boardId: NoteId): boolean {
-  return snapshot.nodes.get(boardId)?.type === NOTE_TYPE
+  const node = snapshot.nodes.get(boardId)
+  if (!node || node.type !== NOTE_TYPE) return false
+  return parseProps(node.props)?.[BOARD_PROP] === true
 }
 
 /**
