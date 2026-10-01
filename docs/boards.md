@@ -4,9 +4,9 @@ A **board** is a wall of pictures with a page of its own: a place to keep
 inspiration — for a future home, say — where each picture can be captioned
 and given a **location**, a **fixture** and a **material** from a form, and
 the wall narrowed by any of them. **New board** in the header makes one and
-opens it at `/boards/<note id>`; **Open outline** in the board's header
-opens the note beneath it. Behind a feature flag (`boards`,
-`src/data/feature-flags.ts`), admin only by default.
+opens it at `/boards/<note id>`; its header is the note's own — Sort, Filter
+and the ⋯ menu, where **Open outline** opens the note beneath it. Behind a
+feature flag (`boards`, `src/data/feature-flags.ts`), admin only by default.
 
 ## One property, and nothing else new in the data
 
@@ -25,7 +25,7 @@ the board; **Make this a note** on a board clears it. Nothing else about the
 note changes either way — the same rows, the same outline, the same id and
 URL — and no structure is required first: a note with no pictures makes an
 empty board, and the outline of a board is one click away (**Open outline**
-in its header, **Open board** in the outline's menu). A daily or weekly
+in the board's ⋯ menu, **Open board** in the outline's). A daily or weekly
 note is what its id says it is and cannot be made a board.
 
 Beneath that property, every piece of a board is a block the outline
@@ -92,25 +92,43 @@ paste would leave it.
 
 ## Reading
 
-The board's pictures are the note's own rows, read off the live graph
-(`boardImageIds`): the basket's first, most recently changed first as the
-basket lists them, then everything the outline reaches, in document order.
-A narrowing keeps the pictures carrying every chosen value — a value is
-carried when its block is one of the picture's parents (`carryingAll`) —
-and, when words are typed, those whose caption the search engine's own
-matcher and threshold accept (`useBoardMatches`, `src/hooks/board.ts`).
+The board's pictures are the note's own rows, read off the live graph: the
+ones the outline reaches, in document order (`outlineImageIds`), and the
+basket's beneath them, most recently changed first (`unassignedImageIds`),
+under an **Unassigned** heading — as the note page draws its basket beneath
+the outline.
 
-Two things are done on the board's own rows rather than through a search,
-on purpose. The values, because a search tests each `in:` against one
-occurrence's ancestry, and a picture under two values is on two paths,
-neither of which passes both — so `type:image in:Mauritius in:Lamp` finds
-nothing where the board finds the brass lamp. The words, because the corpus
-index holds what a note reaches, and an untagged picture in the basket is on
-the board too. `type:image in:<board>` in the search box still lists the
-board's tagged pictures.
+**Narrowing the wall is narrowing the note.** The header's Sort and Filter
+are the note page's own (`src/components/view-controls.tsx`), reading and
+writing the same view: the URL's `filter` and `sort` where they speak, else
+the view the note saved as its default (`useSavedView`, `src/hooks/views.ts`
+— one row, so a filter saved on the board is what the outline opens with,
+and the other way round), and **Update to default** / **Reset to default**
+settle it from either page. The filter is a query-language string and the
+sort a comparator, resolved through the search engine exactly as the note
+page resolves them (`viewNarrowing`, `src/utils/view-narrowing.ts`; the
+board applies them in `useBoardNarrowing`, `src/hooks/board.ts`): nothing is
+added to the language, and whatever a note's filter can say, a board's can.
 
-The narrowing lives in the URL (`?values=<value ids>&q=<words>`), so a
-narrowed board is a link and the back button widens it.
+The Filter menu leads with the board's features (`FilterBranch`): under
+**Location**, the values on the page, each with how many pictures carry it,
+and each a tick writing `parent:<value id>` — the qualifier the menu's own
+Parent branch writes, so the branches are a shortcut into the one filter
+rather than a filter of their own. Two ticks are a comma list, which the
+language reads as _either_: `parent:Mauritius,Lamp` keeps a picture under
+Mauritius or under Lamp, as it would in the search box, and as a note's
+filter would. Narrowing to pictures that carry both is not something the
+language says today (each `parent:` is tested against one occurrence's
+parent, and a picture under two values is two occurrences), so the board
+does not say it either; it would be a change to the engine, for every
+surface at once.
+
+The basket's pictures are not narrowed: the index holds what a note
+reaches, and the note page draws its basket whole beneath a narrowed
+outline, so the board draws its Unassigned wall whole too. The words typed
+in the box above the wall are matched against captions of both walls with
+the engine's own matcher and threshold (`useBoardMatches`), run over the
+board's pictures directly for the same reason.
 
 ## Writing
 
@@ -149,18 +167,37 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
 `src/routes/_appRoot.boards.$.tsx`, with its parts under
 `src/components/boards/`:
 
-- **The wall**: square tiles, the caption over the foot of each. Click one to
-  pick it.
-- **The inspector** (`board-inspector.tsx`): the picked picture, large, with
-  its caption and a picker per feature. Drawn on the page above the wall
-  rather than in a dialog, so the pickers' menus have nothing to fight and
-  the wall stays in view for the next one. Escape closes it.
+- **The header**: the note's name, then Sort, Filter and the ⋯ menu — the
+  note page's own controls, with the board's features leading the Filter
+  (above). The menu is the note's (`NoteActionsMenu`, `surface="board"`),
+  with **Open outline** where the outline's has **Open board**; **Make this
+  a note** from here lands on the outline, since the board page refuses a
+  note.
+- **The toolbar** (`board-toolbar.tsx`): the box for caption words and, at
+  the end of the same line, **Add images** — the camera on a phone, the
+  library everywhere. A drop anywhere on the page, or a paste, adds too.
+- **The wall** (`board-wall.tsx`): a masonry laid out from the pictures'
+  own shapes (`masonry.ts`): as many columns as the width allows, no
+  narrower than 160px and never fewer than two — a phone's width gives two,
+  a desktop's five or six — each picture dropped onto the shortest column
+  so far, its height counted in widths, so the columns end close to level
+  and the order is kept near enough. A picture's shape is the size written
+  on its block when it went up (docs/images.md); one written without a size
+  is laid out square until its bytes arrive and say otherwise. The caption
+  over the foot of each tile; click one to pick it.
+- **The inspector** (`board-inspector.tsx`): the picked picture in a window
+  of its own — the app's dialog, as wide as the screen allows — the picture
+  large with its caption and a picker per feature beside it, stacked on a
+  phone. Focus stays in the window but the page is not made inert
+  (`modal="trap-focus"`), so the toast that answers a change, with its
+  Undo, stays in reach while the window is open; a press on the scrim,
+  Escape or the close control put it away. A menu opened from inside a
+  dialog floats in the dialog's layer (`InModalContext`,
+  `src/components/ui/layer.ts`), or it would open behind the window.
 - **A picker** (`value-picker.tsx`): a menu of the feature's values —
   single-select closes on a pick, multi-select stays open with each row a
-  toggle — and **New…**, which asks for a name.
-- **The filters** (`board-filters.tsx`): a box for caption words and, for
-  each feature with values on the page, a menu of them with how many
-  pictures carry each.
+  toggle — and **New…**, which asks for a name in a dialog of its own
+  (`new-value-dialog.tsx`).
 
 ## Not yet
 

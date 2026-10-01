@@ -1,6 +1,6 @@
 ### Added
 
-- Boards: a wall of pictures with its own page. **New board** in the header makes one; add pictures from your camera or library, pick one to caption it and give it a location, a fixture and a material, then narrow the wall by any of them. A board is a note with a board icon and its outline one click away: a feature is a block, its values the blocks beneath it, and an untagged picture waits in Unassigned. **Make this a board** in a note's menu turns a note into one, and **Make this a note** turns it back.
+- Boards: a wall of pictures with its own page. **New board** in the header makes one; add pictures from your camera or library, pick one to caption and tag it in its own window, and narrow the wall from the header's Filter, where the board's features lead. A board is a note with a board icon and its outline a click away: a feature is a block, its values the blocks beneath it, an untagged picture waits in Unassigned. **Make this a board** in a note's menu makes one, **Make this a note** turns it back.
 
 ### Changed
 

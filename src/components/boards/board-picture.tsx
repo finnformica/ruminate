@@ -21,11 +21,15 @@ export function BoardPicture({
   image,
   fit,
   className,
+  onSize,
 }: {
   image: BoardImage
   /** `cover` fills its box (a tile); `contain` shows the whole picture. */
   fit: "cover" | "contain"
   className?: string
+  /** Told the picture's own pixels once its bytes have arrived, for a
+   * block that recorded no size. */
+  onSize?: (width: number, height: number) => void
 }) {
   const { src, uploading } = useImageSrc(image)
   const caption = image.text.trim()
@@ -59,6 +63,10 @@ export function BoardPicture({
         draggable={false}
         data-testid="board-image"
         className={cx("block h-full w-full", fit === "cover" ? "object-cover" : "object-contain")}
+        onLoad={(event) => {
+          const { naturalWidth, naturalHeight } = event.currentTarget
+          if (naturalWidth > 0 && naturalHeight > 0) onSize?.(naturalWidth, naturalHeight)
+        }}
       />
       {uploading ? (
         <span

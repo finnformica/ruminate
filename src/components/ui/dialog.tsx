@@ -3,6 +3,7 @@ import React from "react"
 import { cx } from "../../utils/cx"
 import { XIcon16 } from "../icons"
 import { IconButton } from "./icon-button"
+import { InModalContext } from "./layer"
 import { Surface } from "./surface"
 
 type ContentProps = Omit<BaseDialog.Popup.Props, "title"> & {
@@ -18,7 +19,9 @@ type ContentProps = Omit<BaseDialog.Popup.Props, "title"> & {
  * arrives and leaves with the app's own motion. A scrim dims the page a
  * little behind it, so the page steps back and the window comes forward; it
  * fades with the window. The close control is inside the popup, which Base
- * UI asks for so that a touch screen reader can escape the dialog.
+ * UI asks for so that a touch screen reader can escape the dialog. What
+ * the body holds is told it is in the modal layer (`InModalContext`), so a
+ * menu opened from it floats above the window rather than behind it.
  */
 function Content({ title, className, children, ...props }: ContentProps) {
   return (
@@ -46,7 +49,9 @@ function Content({ title, className, children, ...props }: ContentProps) {
             <XIcon16 />
           </BaseDialog.Close>
         </div>
-        <div className="overflow-auto p-4">{children}</div>
+        <div className="overflow-auto p-4">
+          <InModalContext.Provider value={true}>{children}</InModalContext.Provider>
+        </div>
       </BaseDialog.Popup>
     </BaseDialog.Portal>
   )

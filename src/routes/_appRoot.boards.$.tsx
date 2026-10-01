@@ -1,50 +1,49 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useAtomValue } from "jotai"
 import React from "react"
-import { BoardFilters } from "../components/boards/board-filters"
 import { BoardInspector } from "../components/boards/board-inspector"
-import { BoardPicture, type BoardImage } from "../components/boards/board-picture"
-import { Button } from "../components/ui/button"
-import { DropdownMenu } from "../components/ui/dropdown-menu"
-import { IconButton } from "../components/ui/icon-button"
-import {
-  CameraIcon16,
-  ChevronDownIcon16,
-  BoardIcon16,
-  ImageIcon16,
-  NoteIcon16,
-} from "../components/icons"
+import { type BoardImage } from "../components/boards/board-picture"
+import { BoardToolbar } from "../components/boards/board-toolbar"
+import { BoardWall } from "../components/boards/board-wall"
+import { BoardIcon16 } from "../components/icons"
+import { NoteActionsMenu } from "../components/note-actions-menu"
 import { Notice } from "../components/notice"
 import { PageLayout } from "../components/page-layout"
-import type { BoardFeatureState } from "../data/boards"
+import { listHeading } from "../components/ui/list"
+import { FilterMenu, SortMenu, type FilterBranch } from "../components/view-controls"
 import { useFeature } from "../data/features"
 import { parentIdsOf, parseProps } from "../data/graph"
 import { imageFilesOf } from "../data/images"
 import { graphSnapshotAtom } from "../global-state"
-import { useBoard, useBoardMatches, useBoardWrites } from "../hooks/board"
-import { useCoarsePointer } from "../hooks/coarse-pointer"
+import { useBoard, useBoardMatches, useBoardNarrowing, useBoardWrites } from "../hooks/board"
 import { useNoteById } from "../hooks/note"
-import { cx } from "../utils/cx"
+import { useSavedView, useWriteView } from "../hooks/views"
+import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
 
 /**
  * A board (docs/boards.md): a note whose page carries the `board` property,
- * shown as a wall of its pictures, with a form to caption and tag the one
- * you pick and menus to narrow the wall by what has been set. Everything on
- * screen is the note's own graph — the same rows its outline shows — read
- * and written through the same seams. A note without the property is
- * refused: it is opened as a note.
+ * shown as a wall of its pictures, with a window to caption and tag the one
+ * you pick. Its header is the note's own — Sort, Filter and the ⋯ menu —
+ * and the Filter leads with the board's features, so narrowing the wall is
+ * narrowing the note, by the same filter string, resolved the same way.
+ * Everything on screen is the note's own graph — the same rows its outline
+ * shows — read and written through the same seams. A note without the
+ * property is refused: it is opened as a note.
  */
 
 type RouteSearch = {
-  /** The chosen values narrowing the wall: value block ids, comma-joined. */
-  values?: string
+  /** The view's filter and sort, as on the note page: absent means the
+   * saved default, empty means explicitly none (`resolveNarrowing`). */
+  filter?: string
+  sort?: string
   /** Words matched against captions. */
   q?: string
 }
 
 export const Route = createFileRoute("/_appRoot/boards/$")({
   validateSearch: (search: Record<string, unknown>): RouteSearch => ({
-    values: typeof search.values === "string" && search.values !== "" ? search.values : undefined,
+    filter: typeof search.filter === "string" ? search.filter : undefined,
+    sort: typeof search.sort === "string" ? search.sort : undefined,
     q: typeof search.q === "string" && search.q !== "" ? search.q : undefined,
   }),
   component: RouteComponent,
@@ -65,89 +64,113 @@ function RouteComponent() {
   return <BoardPage key={boardId} boardId={boardId} />
 }
 
-const NO_IDS: string[] = []
-
 function BoardPage({ boardId }: { boardId: string }) {
-  const { values: valuesParam, q } = Route.useSearch()
+  const { filter: filterParam, sort: sortParam, q } = Route.useSearch()
   const navigate = Route.useNavigate()
   const note = useNoteById(boardId)
   const snapshot = useAtomValue(graphSnapshotAtom)
-  const { exists, features, imageIds } = useBoard(boardId)
+  const { exists, features, outlineIds, basketIds, imageIds } = useBoard(boardId)
   const writes = useBoardWrites(boardId, exists)
 
-  // The narrowing lives in the URL, so a narrowed board is a link and the
-  // back button widens it again.
-  const valueIds = React.useMemo(
-    () => (valuesParam ? valuesParam.split(",").filter(Boolean) : NO_IDS),
-    [valuesParam],
-  )
+  // The view's narrowing, exactly as the note page resolves it: the URL
+  // where it speaks, else what the note saved as its default view — the
+  // same row the outline opens with. Every narrowing is a link.
+  const savedView = useSavedView(null, boardId)
+  const filter = resolveNarrowing(filterParam, savedView.filter)
+  const sort = resolveNarrowing(sortParam, savedView.sort)
   const text = q ?? ""
   const setNarrowing = React.useCallback(
-    (patch: { values?: string[]; q?: string }) => {
+    (patch: { filter?: string; sort?: string; q?: string }) => {
       void navigate({
         search: (prev) => ({
-          values:
-            patch.values !== undefined
-              ? patch.values.length
-                ? patch.values.join(",")
-                : undefined
-              : prev.values,
-          q: patch.q !== undefined ? patch.q || undefined : prev.q,
+          ...prev,
+          ...("filter" in patch
+            ? { filter: narrowingParam(patch.filter ?? "", savedView.filter) }
+            : {}),
+          ...("sort" in patch ? { sort: narrowingParam(patch.sort ?? "", savedView.sort) } : {}),
+          ...("q" in patch ? { q: patch.q || undefined } : {}),
         }),
         replace: true,
       })
     },
-    [navigate],
+    [navigate, savedView],
   )
-  // The chosen value of each feature: the id in the URL that is one of its
-  // values. A value that has since gone narrows nothing.
-  const active = React.useMemo(() => {
-    const map = new Map<string, string>()
-    for (const state of features) {
-      const chosen = state.values.find((value) => valueIds.includes(value.id))
-      if (chosen) map.set(state.feature.label, chosen.id)
-    }
-    return map
-  }, [features, valueIds])
-  const pick = (state: BoardFeatureState, valueId: string | null) => {
-    const others = valueIds.filter((id) => !state.values.some((value) => value.id === id))
-    setNarrowing({ values: valueId ? [...others, valueId] : others })
-  }
+  // Saving the view is the note's own: one row on the note, both halves.
+  const writeView = useWriteView()
+  const saveDefaultView = React.useCallback(() => {
+    writeView(boardId, { filter, sort })
+    navigate({ search: (prev) => ({ ...prev, filter: undefined, sort: undefined }), replace: true })
+  }, [boardId, filter, sort, writeView, navigate])
+  const resetToDefaultView = React.useCallback(() => {
+    navigate({ search: (prev) => ({ ...prev, filter: undefined, sort: undefined }), replace: true })
+  }, [navigate])
+  const savedViewActions = React.useMemo(
+    () => ({ onUpdateDefault: saveDefaultView, onResetDefault: resetToDefaultView }),
+    [saveDefaultView, resetToDefaultView],
+  )
+  const filterDirty = savedView.writable && savedView.filter !== filter
+  const sortDirty = savedView.writable && savedView.sort !== sort
 
-  const matches = useBoardMatches(imageIds, valueIds, text)
-  const shown = matches ?? imageIds
-  const images = React.useMemo<BoardImage[]>(
-    () =>
-      shown.flatMap((id) => {
+  // The board's features as the Filter menu's first branches: each value a
+  // parent to tick, with how many of the board's pictures carry it.
+  const branches = React.useMemo<FilterBranch[]>(() => {
+    const counts = new Map<string, number>()
+    for (const id of imageIds) {
+      for (const parent of parentIdsOf(snapshot, id))
+        counts.set(parent, (counts.get(parent) ?? 0) + 1)
+    }
+    return features
+      .filter((state) => state.values.length > 0)
+      .map((state) => ({
+        label: state.feature.label,
+        values: state.values.map((value) => ({
+          id: value.id,
+          label: value.text.trim() || "Untitled",
+          count: counts.get(value.id) ?? 0,
+        })),
+      }))
+  }, [features, imageIds, snapshot])
+
+  // The outline's pictures, narrowed and ordered as the note's view would
+  // be; the basket's whole beneath them, as the note page draws the basket;
+  // the typed words over both.
+  const narrowedOutline = useBoardNarrowing(boardId, filter, sort, outlineIds)
+  const outlineMatches = useBoardMatches(narrowedOutline, text)
+  const basketMatches = useBoardMatches(basketIds, text)
+  const toImages = React.useCallback(
+    (ids: readonly string[]): BoardImage[] =>
+      ids.flatMap((id) => {
         const node = snapshot.nodes.get(id)
         return node ? [{ id, text: node.text, props: parseProps(node.props) }] : []
       }),
-    [shown, snapshot],
+    [snapshot],
   )
-  // How many of the board's pictures carry each value.
-  const counts = React.useMemo(() => {
-    const map = new Map<string, number>()
-    for (const id of imageIds) {
-      for (const parent of parentIdsOf(snapshot, id)) map.set(parent, (map.get(parent) ?? 0) + 1)
-    }
-    return map
-  }, [imageIds, snapshot])
+  const outlineImages = React.useMemo(
+    () => toImages(outlineMatches ?? narrowedOutline),
+    [toImages, outlineMatches, narrowedOutline],
+  )
+  const basketImages = React.useMemo(
+    () => toImages(basketMatches ?? basketIds),
+    [toImages, basketMatches, basketIds],
+  )
+  const narrowed = filter !== "" || text.trim() !== ""
 
   // The picked picture, while it is still on the board.
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
   const selected = React.useMemo(
-    () => (selectedId ? images.find((image) => image.id === selectedId) : undefined),
-    [images, selectedId],
+    () =>
+      selectedId
+        ? [...outlineImages, ...basketImages].find((image) => image.id === selectedId)
+        : undefined,
+    [outlineImages, basketImages, selectedId],
   )
   React.useEffect(() => {
     if (selectedId && !imageIds.includes(selectedId)) setSelectedId(null)
   }, [selectedId, imageIds])
+  const close = React.useCallback(() => setSelectedId(null), [])
 
-  // Adding pictures: the button's file picker, a drop anywhere on the page,
-  // or a paste while nothing else is taking the keys.
-  const fileInputRef = React.useRef<HTMLInputElement>(null)
-  const cameraInputRef = React.useRef<HTMLInputElement>(null)
-  const coarsePointer = useCoarsePointer()
+  // Adding pictures: the toolbar's picker, a drop anywhere on the page, or
+  // a paste while nothing else is taking the keys.
   const addFiles = (files: File[]) => {
     if (files.length > 0) void writes.addImages(files)
   }
@@ -166,93 +189,25 @@ function BoardPage({ boardId }: { boardId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- addFiles reads the latest writes
   }, [writes])
 
-  const narrowed = matches !== null
-
   return (
     <PageLayout
       title={<span className="truncate">{note?.displayName || "Untitled"}</span>}
       icon={<BoardIcon16 />}
       actions={
-        <div className="flex items-center gap-2">
-          <DropdownMenu modal={false}>
-            <DropdownMenu.Trigger
-              render={
-                <Button
-                  size="small"
-                  className="gap-1.5"
-                  disabled={!writes.canUpload}
-                  title={
-                    writes.canUpload
-                      ? undefined
-                      : exists
-                        ? "Sign in to add images"
-                        : "Open it as a note to start it first"
-                  }
-                >
-                  Add images
-                  <ChevronDownIcon16 className="text-text-secondary" />
-                </Button>
-              }
-            />
-            <DropdownMenu.Content align="end" width={200}>
-              {/* The camera is a thing a phone has in hand; on a desktop the
-                  capture hint is ignored and the row would only open the
-                  picker twice over. */}
-              {coarsePointer ? (
-                <DropdownMenu.Item
-                  icon={<CameraIcon16 />}
-                  onClick={() => cameraInputRef.current?.click()}
-                >
-                  Take a photo
-                </DropdownMenu.Item>
-              ) : null}
-              <DropdownMenu.Item
-                icon={<ImageIcon16 />}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                Upload photos
-              </DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu>
-          <IconButton
-            aria-label="Open outline"
-            size="small"
-            onClick={() =>
-              navigate({
-                to: "/views/$",
-                params: { _splat: boardId },
-                search: { query: undefined },
-              })
-            }
-          >
-            <NoteIcon16 />
-          </IconButton>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            hidden
-            data-testid="board-file-input"
-            onChange={(event) => {
-              addFiles(Array.from(event.currentTarget.files ?? []))
-              event.currentTarget.value = ""
-            }}
+        <div className="flex items-center">
+          <SortMenu
+            sort={sort}
+            onSortChange={(next) => setNarrowing({ sort: next })}
+            saved={savedView.writable ? { ...savedViewActions, dirty: sortDirty } : undefined}
           />
-          {/* `capture` asks a phone for its camera rather than its library;
-              one picture at a time, as a camera gives. */}
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            hidden
-            data-testid="board-camera-input"
-            onChange={(event) => {
-              addFiles(Array.from(event.currentTarget.files ?? []))
-              event.currentTarget.value = ""
-            }}
+          <FilterMenu
+            filter={filter}
+            onFilterChange={(next) => setNarrowing({ filter: next })}
+            scope={boardId}
+            branches={branches}
+            saved={savedView.writable ? { ...savedViewActions, dirty: filterDirty } : undefined}
           />
+          <NoteActionsMenu noteId={boardId} align="end" surface="board" />
         </div>
       }
     >
@@ -290,14 +245,12 @@ function BoardPage({ boardId }: { boardId: string }) {
             )}
           </Notice>
         ) : null}
-        <BoardFilters
-          features={features}
-          active={active}
-          counts={counts}
+        <BoardToolbar
           text={text}
           onText={(value) => setNarrowing({ q: value })}
-          onPick={pick}
-          onClear={() => setNarrowing({ values: [], q: "" })}
+          canUpload={writes.canUpload}
+          exists={exists}
+          onFiles={addFiles}
         />
         {selected ? (
           <BoardInspector
@@ -305,45 +258,44 @@ function BoardPage({ boardId }: { boardId: string }) {
             image={selected}
             features={features}
             writes={writes}
-            onClose={() => setSelectedId(null)}
+            onClose={close}
           />
         ) : null}
-        {images.length === 0 ? (
+        {outlineImages.length === 0 && basketImages.length === 0 ? (
           <p className="py-12 text-center text-text-secondary">
             {narrowed
               ? "Nothing on the board matches."
               : "No pictures yet. Add images, or paste one into the note."}
           </p>
         ) : (
-          <ul
-            data-testid="board-grid"
-            className="grid list-none grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-3 p-0"
-          >
-            {images.map((image) => {
-              const caption = image.text.trim()
-              return (
-                <li key={image.id} className="min-w-0">
-                  <button
-                    type="button"
-                    aria-label={caption || "Picture"}
-                    aria-pressed={image.id === selectedId}
-                    onClick={() => setSelectedId(image.id === selectedId ? null : image.id)}
-                    className={cx(
-                      "focus-ring group relative block aspect-square w-full overflow-hidden rounded-lg bg-bg-secondary",
-                      image.id === selectedId && "ring-2 ring-border-selected",
-                    )}
-                  >
-                    <BoardPicture image={image} fit="cover" className="h-full w-full" />
-                    {caption ? (
-                      <span className="absolute inset-x-0 bottom-0 truncate bg-bg-overlay-backdrop px-2 py-1 text-left text-sm text-text">
-                        {caption}
-                      </span>
-                    ) : null}
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
+          <>
+            {outlineImages.length > 0 ? (
+              <BoardWall
+                images={outlineImages}
+                selectedId={selectedId}
+                onPick={setSelectedId}
+                label="Pictures"
+              />
+            ) : narrowed ? (
+              <p className="py-6 text-center text-text-secondary">Nothing on the board matches.</p>
+            ) : null}
+            {basketImages.length > 0 ? (
+              <>
+                {/* The basket's pictures beneath the outline's, as the note
+                    page draws its basket: a filter narrows the outline, not
+                    the basket, whose rows the index does not hold. */}
+                <h2 className={listHeading({ className: "-mx-3 mt-2" })}>
+                  Unassigned ({basketImages.length})
+                </h2>
+                <BoardWall
+                  images={basketImages}
+                  selectedId={selectedId}
+                  onPick={setSelectedId}
+                  label="Unassigned"
+                />
+              </>
+            ) : null}
+          </>
         )}
       </div>
     </PageLayout>

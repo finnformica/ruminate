@@ -100,11 +100,25 @@ function DefaultFooter({ onUpdateDefault, onResetDefault }: SavedViewActions) {
 /** The ancestor branches as the menu names them. */
 const ANCESTOR_LABELS: Record<AncestorFilterKey, string> = { parent: "Parent", under: "Under" }
 
+/**
+ * A branch a surface adds to the top of the Filter menu: a label and the
+ * blocks it offers as parents, each row a tick writing `parent:<id>` — the
+ * same qualifier the Parent branch's picker writes, so the surface's rows
+ * are a shortcut into the one filter, not a filter of their own. A board
+ * hands its features this way (docs/boards.md): Location, and under it the
+ * values on the page, with how many pictures carry each.
+ */
+export interface FilterBranch {
+  label: string
+  values: { id: string; label: string; count?: number }[]
+}
+
 export function FilterMenu({
   filter,
   onFilterChange,
   saved,
   scope,
+  branches,
 }: {
   /** The view's filter, as the query language writes it. */
   filter: string
@@ -114,6 +128,9 @@ export function FilterMenu({
   /** What the view is rooted at — the note, or the focused block — and so
    * what the Parent and Under pickers search within (`in:`). */
   scope?: string
+  /** What the surface offers as parents ahead of the language's own
+   * branches, if anything. */
+  branches?: readonly FilterBranch[]
 }) {
   const index = useAtomValue(blockIndexAtom)
   const graph = useAtomValue(graphSnapshotAtom)
@@ -165,6 +182,54 @@ export function FilterMenu({
         width={saved?.dirty ? 320 : undefined}
         footer={saved?.dirty ? <DefaultFooter {...saved} /> : undefined}
       >
+        {/* The surface's own branches first: each row ticks a block into
+            `parent:`, several at once a comma list — any of them, as the
+            language reads a list. Any takes this branch's rows out and
+            leaves the others. */}
+        {branches?.map((branch) => {
+          const parents = filterValues(filter, "parent")
+          const mine = branch.values.filter((value) => parents.includes(value.id))
+          const clearMine = () =>
+            onFilterChange(
+              mine.reduce((next, value) => toggleFilterValue(next, "parent", value.id), filter),
+            )
+          return (
+            <DropdownMenu.Submenu key={branch.label}>
+              <DropdownMenu.SubmenuTrigger
+                value={mine.map((value) => value.label).join(", ") || "Any"}
+              >
+                {branch.label}
+              </DropdownMenu.SubmenuTrigger>
+              <DropdownMenu.Content align="start" side="left" width={224}>
+                <DropdownMenu.Item
+                  selected={mine.length === 0}
+                  closeOnClick={false}
+                  onClick={clearMine}
+                >
+                  Any
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator />
+                {branch.values.map((value) => (
+                  <DropdownMenu.Item
+                    key={value.id}
+                    selected={parents.includes(value.id)}
+                    closeOnClick={false}
+                    trailingVisual={
+                      value.count !== undefined ? (
+                        <span className="text-sm text-text-secondary">{value.count}</span>
+                      ) : undefined
+                    }
+                    onClick={() => onFilterChange(toggleFilterValue(filter, "parent", value.id))}
+                  >
+                    {value.label}
+                  </DropdownMenu.Item>
+                ))}
+              </DropdownMenu.Content>
+            </DropdownMenu.Submenu>
+          )
+        })}
+        {branches && branches.length > 0 ? <DropdownMenu.Separator /> : null}
+
         {/* One branch per qualifier the menu offers. The block types come
             straight from the query box's picker; several at once is a comma
             list, exactly as it is typed. */}

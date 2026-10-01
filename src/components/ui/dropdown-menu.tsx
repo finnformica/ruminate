@@ -1,6 +1,7 @@
 import { Menu } from "@base-ui/react/menu"
 import React from "react"
 import { cx } from "../../utils/cx"
+import { InModalContext } from "./layer"
 import { listHeading, listRow } from "./list"
 import { Surface } from "./surface"
 import { CheckIcon16, ChevronRightIcon12 } from "../icons"
@@ -41,10 +42,13 @@ function Content({
   footer,
   finalFocus,
 }: ContentProps) {
+  // A menu opened from inside a dialog floats in the dialog's layer, or it
+  // would open behind the window its trigger is in.
+  const inModal = React.useContext(InModalContext)
   return (
     <Menu.Portal>
       <Menu.Positioner
-        className="z-popup"
+        className={inModal ? "z-modal" : "z-popup"}
         side={side}
         sideOffset={sideOffset}
         align={align}
