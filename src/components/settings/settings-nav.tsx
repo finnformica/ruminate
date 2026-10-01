@@ -85,7 +85,8 @@ function useSettingsPages(): SettingsPage[] {
   const isAdmin = useIsAdmin()
   const sharing = useFeature("sharing")
   const mcp = useFeature("mcp")
-  const features: Record<FeatureKey, boolean> = { sharing, mcp }
+  const boards = useFeature("boards")
+  const features: Record<FeatureKey, boolean> = { sharing, mcp, boards }
   return SETTINGS_PAGES.filter(
     (page) =>
       (!page.signedIn || githubUser) &&

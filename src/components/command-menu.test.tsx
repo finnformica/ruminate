@@ -31,8 +31,10 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("../hooks/note", () => ({
   useNoteById: () => undefined,
   useCreateNote: () => vi.fn(),
-  // The rows' menus (`useNoteMenuEntries`) rename through this.
+  // The rows' menus (`useNoteMenuEntries`) rename and toggle the board
+  // property through these.
   useRenameNote: () => vi.fn(),
+  useSetNoteProps: () => vi.fn(),
 }))
 
 vi.mock("../hooks/search-results", async (importOriginal) => ({

@@ -106,6 +106,22 @@ checks them before uploading): PNG, JPEG, GIF, WebP and AVIF; ten megabytes a
 picture. SVG is refused on purpose — served from the app's own origin it can
 run script when opened directly.
 
+**A picture over the limit is fitted, not refused** (`src/data/image-fit.ts`).
+A phone's photo is over ten megabytes because of its pixels — a 48-megapixel
+JPEG is 10–15 MB whatever it carries beside the image; the HDR gain map and
+the EXIF block are a megabyte or two of that at most, so stripping them alone
+would not reliably bring it under. The client re-encodes it instead, through
+a canvas: no larger than 3200 pixels on its longest side, written back as a
+JPEG at quality 0.85, which lands a phone photo at one to three megabytes. A
+canvas keeps only the pixels, so the gain map, the EXIF, the colour profile
+and every other segment go with the resolution; the orientation EXIF
+described is applied while decoding, so a portrait photo stays upright. The
+same route takes a HEIC that the Worker refuses but Safari can decode, and
+sends a JPEG. A picture that fits goes up as it is, bytes and metadata alike;
+an animated GIF is never re-encoded (a canvas keeps one frame), so it fits or
+it is refused. Where the browser cannot decode or re-encode a file, the
+original is refused for what it is, as before.
+
 The client (`src/data/images.ts`) puts the row in FIRST and uploads behind
 it. The block starts with no image props at all and draws the pasted file
 from a local object URL held in memory (`beginPendingImage`), under a

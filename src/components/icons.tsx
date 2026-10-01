@@ -659,6 +659,30 @@ export function KeyboardDownIcon16(props: IconProps) {
 }
 
 /** A picture: a framed landscape. */
+export function BoardIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M2.5 1A2.5 2.5 0 0 0 0 3.5v9A2.5 2.5 0 0 0 2.5 15h11a2.5 2.5 0 0 0 2.5-2.5v-9A2.5 2.5 0 0 0 13.5 1h-11Zm0 1.5h11a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1ZM3.5 4a.5.5 0 0 0-.5.5v4a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-4a.5.5 0 0 0-.5-.5h-3Zm6 0a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5h-3Zm0 4a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-3Zm-6 2a.5.5 0 0 0-.5.5v1a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-1a.5.5 0 0 0-.5-.5h-3Z" />
+    </Icon>
+  )
+}
+
+export function BoardFillIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M2.5 1A2.5 2.5 0 0 0 0 3.5v9A2.5 2.5 0 0 0 2.5 15h11a2.5 2.5 0 0 0 2.5-2.5v-9A2.5 2.5 0 0 0 13.5 1h-11ZM3 4.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-4Zm6 0a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-2Zm0 4a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v3a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-3Zm-6 2a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1Z" />
+    </Icon>
+  )
+}
+
+export function CameraIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M5.5 1.5a1 1 0 0 0-.83.45L3.6 3.5H2.5A2.5 2.5 0 0 0 0 6v6a2.5 2.5 0 0 0 2.5 2.5h11A2.5 2.5 0 0 0 16 12V6a2.5 2.5 0 0 0-2.5-2.5h-1.1l-1.07-1.55a1 1 0 0 0-.83-.45h-5Zm.4 1.5h4.2l1.07 1.55a1 1 0 0 0 .83.45h1.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1H4a1 1 0 0 0 .83-.45L5.9 3ZM8 5.75a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5Zm0 1.5a1.75 1.75 0 1 1 0 3.5 1.75 1.75 0 0 1 0-3.5Z" />
+    </Icon>
+  )
+}
+
 export function ImageIcon16(props: IconProps) {
   return (
     <Icon size={16} {...props}>

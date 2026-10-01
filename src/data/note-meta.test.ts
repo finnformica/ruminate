@@ -56,6 +56,16 @@ describe("noteFromNode", () => {
     expect(n.type).toBe("note")
   })
 
+  it("is a board when the page says so, and only then", () => {
+    const board = note("blk_b", "- x\n", { board: true })
+    expect(board.type).toBe("board")
+    expect(board.displayName).toBe("x")
+    expect(note("blk_c", "", { board: true }).displayName).toBe("Empty board")
+    expect(note("blk_d", "- x\n", { board: "yes" }).type).toBe("note")
+    // A daily note is a daily note whatever its props say.
+    expect(note("2026-03-04", "- x\n", { board: true }).type).toBe("daily")
+  })
+
   it("falls back to the first heading for the title", () => {
     const n = note("blk_p", "# Google\n- x\n")
     expect(n.title).toBe("Google")

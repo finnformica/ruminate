@@ -9,10 +9,11 @@ import { receivedSharesAtom, sharePermissions, sharedOriginAtom } from "../data/
 import { copyAsMarkdown } from "../utils/copy-markdown"
 import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-developer"
 import { useNoteShare } from "../hooks/share"
-import { useRenameNote } from "../hooks/note"
+import { useRenameNote, useSetNoteProps } from "../hooks/note"
 import { deleteNoteDialogAtom } from "./delete-note-dialog"
 import { shareDialogAtom } from "./share-note-dialog"
 import type { Width } from "../schema"
+import { BOARD_PROP } from "../utils/board-prop"
 import { cx } from "../utils/cx"
 import { MenuItems, type MenuEntry } from "./block-editor/block-context-menu"
 import { DropdownMenu } from "./ui/dropdown-menu"
@@ -20,9 +21,11 @@ import { IconButton } from "./ui/icon-button"
 import {
   ArrowDownIcon16,
   ArrowUpIcon16,
+  BoardIcon16,
   CopyIcon16,
   EditIcon16,
   MoreIcon16,
+  NoteIcon16,
   PrinterIcon16,
   ShareIcon16,
   TrashIcon16,
@@ -79,8 +82,8 @@ interface EditorActions {
 
 /**
  * **The note's menu, as entries** (`MenuEntry`, one list for every surface):
- * Copy markdown, Copy ID, Share…, Rename, then Print, then Delete. The
- * sidebar's ⋯ on a note row draws it (`NoteActionsMenu`), the open note's
+ * Copy markdown, Copy ID, Share…, Rename, the board entries, then Print,
+ * then Delete. The sidebar's ⋯ on a note row draws it (`NoteActionsMenu`), the open note's
  * header draws it with its own extras around it, and the Views page draws
  * it on a right-click of a note's row (`results-editor.tsx`) — so a note has
  * one menu wherever it is met.
@@ -96,6 +99,14 @@ interface EditorActions {
  * owner's, so the verbs the owner granted decide what the menu offers.
  * Sharing is the owner's alone: an own note, signed in, the feature on for
  * this account (src/data/feature-flags.ts).
+ *
+ * A note's default surface is one property on its page (docs/boards.md):
+ * **Make this a board** sets it and opens the board, **Make this a note**
+ * clears it, and a board's outline offers **Open board** to get back. Own
+ * notes only (signed out, the sample graph in memory, as **New board**
+ * does), with boards on for the account, and only where the caller can
+ * open the board (`openBoard`); a daily or weekly note is what its id says
+ * it is, so neither is offered one.
  */
 export function useNoteMenuEntries() {
   const isSignedOut = useAtomValue(isSignedOutAtom)
@@ -105,9 +116,18 @@ export function useNoteMenuEntries() {
   const requestDelete = useSetAtom(deleteNoteDialogAtom)
   const sharingEnabled = useFeature("sharing")
   const openShare = useSetAtom(shareDialogAtom)
-
+  const boardsEnabled = useFeature("boards")
+  const setNoteProps = useSetNoteProps()
   return React.useCallback(
-    (noteId: string, options: { focusBlockId?: string | null; onDeleted?: () => void } = {}) => {
+    (
+      noteId: string,
+      options: {
+        focusBlockId?: string | null
+        onDeleted?: () => void
+        /** Opens the note's board page, where the surface can do so. */
+        openBoard?: () => void
+      } = {},
+    ) => {
       const shareId = jotaiStore.get(sharedOriginAtom).get(noteId)
       const share =
         shareId === undefined
@@ -140,6 +160,41 @@ export function useNoteMenuEntries() {
 
       const remove = () => requestDelete({ noteId, onDeleted: options.onDeleted })
 
+      // The board entries: which of them a note gets is its kind, read as
+      // the menu opens, like the rest.
+      const kind = jotaiStore.get(notesAtom).get(noteId)?.type
+      const canBoard = verbs === null && boardsEnabled && !!options.openBoard
+      const boardEntries: MenuEntry[] = !canBoard
+        ? []
+        : kind === "board"
+          ? [
+              {
+                kind: "item",
+                label: "Open board",
+                icon: <BoardIcon16 />,
+                onSelect: () => options.openBoard?.(),
+              },
+              {
+                kind: "item",
+                label: "Make this a note",
+                icon: <NoteIcon16 />,
+                onSelect: () => setNoteProps(noteId, { [BOARD_PROP]: null }),
+              },
+            ]
+          : kind === "note"
+            ? [
+                {
+                  kind: "item",
+                  label: "Make this a board",
+                  icon: <BoardIcon16 />,
+                  onSelect: () => {
+                    setNoteProps(noteId, { [BOARD_PROP]: true })
+                    options.openBoard?.()
+                  },
+                },
+              ]
+            : []
+
       return [
         { kind: "item", label: "Copy markdown", icon: <CopyIcon16 />, onSelect: copyMarkdown },
         { kind: "item", label: "Copy ID", icon: <CopyIcon16 />, onSelect: () => copy(noteId) },
@@ -157,6 +212,7 @@ export function useNoteMenuEntries() {
           disabled: !canRename,
           onSelect: rename,
         },
+        ...boardEntries,
         { kind: "separator" },
         { kind: "item", label: "Print", icon: <PrinterIcon16 />, onSelect: () => window.print() },
         { kind: "separator" },
@@ -170,7 +226,16 @@ export function useNoteMenuEntries() {
         },
       ] satisfies MenuEntry[]
     },
-    [jotaiStore, isSignedOut, sharingEnabled, renameNote, requestDelete, openShare],
+    [
+      jotaiStore,
+      isSignedOut,
+      sharingEnabled,
+      boardsEnabled,
+      renameNote,
+      requestDelete,
+      openShare,
+      setNoteProps,
+    ],
   )
 }
 
@@ -258,7 +323,11 @@ export function NoteActionsMenu({
         <MenuItems
           entries={[
             ...(reorder ? reorderEntries(reorder) : []),
-            ...entriesFor(noteId, { focusBlockId: editor?.focusBlockId, onDeleted }),
+            ...entriesFor(noteId, {
+              focusBlockId: editor?.focusBlockId,
+              onDeleted,
+              openBoard: () => navigate({ to: "/boards/$", params: { _splat: noteId } }),
+            }),
           ]}
         />
         {editor && isDeveloper ? (

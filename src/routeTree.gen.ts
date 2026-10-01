@@ -14,6 +14,7 @@ import { Route as AppRootIndexRouteImport } from './routes/_appRoot.index'
 import { Route as AppRootAdminRouteImport } from './routes/_appRoot.admin'
 import { Route as AppRootChangelogRouteImport } from './routes/_appRoot.changelog'
 import { Route as AppRootSettingsRouteImport } from './routes/_appRoot.settings'
+import { Route as AppRootBoardsSplatRouteImport } from './routes/_appRoot.boards.$'
 import { Route as AppRootInviteTokenRouteImport } from './routes/_appRoot.invite.$token'
 import { Route as AppRootNotesIndexRouteImport } from './routes/_appRoot.notes.index'
 import { Route as AppRootNotesSplatRouteImport } from './routes/_appRoot.notes_.$'
@@ -44,6 +45,11 @@ const AppRootChangelogRoute = AppRootChangelogRouteImport.update({
 const AppRootSettingsRoute = AppRootSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => AppRootRoute,
+} as any)
+const AppRootBoardsSplatRoute = AppRootBoardsSplatRouteImport.update({
+  id: '/boards/$',
+  path: '/boards/$',
   getParentRoute: () => AppRootRoute,
 } as any)
 const AppRootInviteTokenRoute = AppRootInviteTokenRouteImport.update({
@@ -87,6 +93,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AppRootAdminRoute
   '/changelog': typeof AppRootChangelogRoute
   '/settings': typeof AppRootSettingsRouteWithChildren
+  '/boards/$': typeof AppRootBoardsSplatRoute
   '/invite/$token': typeof AppRootInviteTokenRoute
   '/notes/$': typeof AppRootNotesSplatRoute
   '/settings/$page': typeof AppRootSettingsPageRoute
@@ -99,6 +106,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AppRootAdminRoute
   '/changelog': typeof AppRootChangelogRoute
   '/': typeof AppRootIndexRoute
+  '/boards/$': typeof AppRootBoardsSplatRoute
   '/invite/$token': typeof AppRootInviteTokenRoute
   '/notes/$': typeof AppRootNotesSplatRoute
   '/settings/$page': typeof AppRootSettingsPageRoute
@@ -114,6 +122,7 @@ export interface FileRoutesById {
   '/_appRoot/changelog': typeof AppRootChangelogRoute
   '/_appRoot/settings': typeof AppRootSettingsRouteWithChildren
   '/_appRoot/': typeof AppRootIndexRoute
+  '/_appRoot/boards/$': typeof AppRootBoardsSplatRoute
   '/_appRoot/invite/$token': typeof AppRootInviteTokenRoute
   '/_appRoot/notes_/$': typeof AppRootNotesSplatRoute
   '/_appRoot/settings/$page': typeof AppRootSettingsPageRoute
@@ -129,6 +138,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/changelog'
     | '/settings'
+    | '/boards/$'
     | '/invite/$token'
     | '/notes/$'
     | '/settings/$page'
@@ -141,6 +151,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/changelog'
     | '/'
+    | '/boards/$'
     | '/invite/$token'
     | '/notes/$'
     | '/settings/$page'
@@ -155,6 +166,7 @@ export interface FileRouteTypes {
     | '/_appRoot/changelog'
     | '/_appRoot/settings'
     | '/_appRoot/'
+    | '/_appRoot/boards/$'
     | '/_appRoot/invite/$token'
     | '/_appRoot/notes_/$'
     | '/_appRoot/settings/$page'
@@ -203,6 +215,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof AppRootSettingsRouteImport
+      parentRoute: typeof AppRootRoute
+    }
+    '/_appRoot/boards/$': {
+      id: '/_appRoot/boards/$'
+      path: '/boards/$'
+      fullPath: '/boards/$'
+      preLoaderRoute: typeof AppRootBoardsSplatRouteImport
       parentRoute: typeof AppRootRoute
     }
     '/_appRoot/invite/$token': {
@@ -276,6 +295,7 @@ interface AppRootRouteChildren {
   AppRootChangelogRoute: typeof AppRootChangelogRoute
   AppRootSettingsRoute: typeof AppRootSettingsRouteWithChildren
   AppRootIndexRoute: typeof AppRootIndexRoute
+  AppRootBoardsSplatRoute: typeof AppRootBoardsSplatRoute
   AppRootInviteTokenRoute: typeof AppRootInviteTokenRoute
   AppRootNotesSplatRoute: typeof AppRootNotesSplatRoute
   AppRootViewsSplatRoute: typeof AppRootViewsSplatRoute
@@ -288,6 +308,7 @@ const AppRootRouteChildren: AppRootRouteChildren = {
   AppRootChangelogRoute: AppRootChangelogRoute,
   AppRootSettingsRoute: AppRootSettingsRouteWithChildren,
   AppRootIndexRoute: AppRootIndexRoute,
+  AppRootBoardsSplatRoute: AppRootBoardsSplatRoute,
   AppRootInviteTokenRoute: AppRootInviteTokenRoute,
   AppRootNotesSplatRoute: AppRootNotesSplatRoute,
   AppRootViewsSplatRoute: AppRootViewsSplatRoute,
