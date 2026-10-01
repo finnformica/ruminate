@@ -14,6 +14,7 @@ import {
   inverseOps,
   setCaptionOps,
   setValueOps,
+  unassignedImageIds,
 } from "./boards"
 import {
   buildGraphSnapshot,
@@ -24,6 +25,7 @@ import {
   type GraphSnapshot,
 } from "./graph"
 import { applyOps, type Op } from "./ops"
+import { unassignedIds } from "./basket"
 
 const NOW = 1000
 
@@ -125,16 +127,16 @@ describe("boardFeatures", () => {
 })
 
 describe("boardImageIds", () => {
-  it("lists the page's own pictures first, then the rest once each", () => {
+  it("lists the reached pictures in document order, once each", () => {
     const snapshot = boardOf(
       ["# Heading", "  id:: blk_heading000", `  ${img(3)}`, "    id:: blk_pic3000000", ""].join(
         "\n",
       ),
     )
     expect(boardImageIds(snapshot, "b")).toEqual([
+      "blk_pic3000000",
       "blk_pic1000000",
       "blk_pic2000000",
-      "blk_pic3000000",
     ])
   })
 
@@ -155,16 +157,19 @@ describe("imageValues", () => {
 })
 
 describe("addImageOps / imageUploadedOps", () => {
-  it("writes an empty image block in the note, last under the page, then its asset", () => {
+  it("writes an empty image block in the note with no parent — the basket's — then its asset", () => {
     const snapshot = boardOf()
     const ops = addImageOps(snapshot, "b", "blk_new0000000")
     expect(ops).toEqual([
       { op: "create", id: "blk_new0000000", type: "image", text: "", props: null, notesId: "b" },
-      expect.objectContaining({ op: "link", source: "b", destination: "blk_new0000000" }),
     ])
     const next = applyOps(snapshot, ops, NOW)
-    expect(childIdsOf(next, "b").at(-1)).toBe("blk_new0000000")
+    expect(childIdsOf(next, "b")).not.toContain("blk_new0000000")
+    expect(unassignedIds(next).has("blk_new0000000")).toBe(true)
     expect(next.nodes.get("blk_new0000000")?.notes_id).toBe("b")
+    // First on the board, ahead of the pictures the outline reaches.
+    expect(boardImageIds(next, "b")).toEqual(["blk_new0000000", "blk_pic1000000", "blk_pic2000000"])
+    expect(addImageOps(snapshot, "nope", "blk_new0000001")).toEqual([])
 
     const landed = applyOps(
       next,
@@ -308,6 +313,41 @@ describe("carryingAll", () => {
     expect(carryingAll(snapshot, all, ["blk_mauritius0"])).toEqual(["blk_pic1000000"])
     expect(carryingAll(snapshot, all, ["blk_mauritius0", lamp])).toEqual(["blk_pic1000000"])
     expect(carryingAll(snapshot, all, ["blk_lisbon0000", lamp])).toEqual([])
+  })
+})
+
+describe("a picture's home is the basket until a value takes it", () => {
+  it("leaves the basket on its first value and returns on its last clear", () => {
+    let snapshot = applyOps(boardOf(), addImageOps(boardOf(), "b", "blk_new0000000"), NOW)
+    expect(unassignedIds(snapshot).has("blk_new0000000")).toBe(true)
+    snapshot = applyOps(
+      snapshot,
+      setValueOps(snapshot, "b", LOCATION, "blk_new0000000", { id: "blk_lisbon0000" }),
+      NOW + 1,
+    )
+    expect(unassignedIds(snapshot).has("blk_new0000000")).toBe(false)
+    expect(parentIdsOf(snapshot, "blk_new0000000")).toEqual(["blk_lisbon0000"])
+    // Still on the board, now among the reached pictures, in document order
+    // (Mauritius and its picture come before Lisbon).
+    expect(boardImageIds(snapshot, "b")).toEqual([
+      "blk_pic1000000",
+      "blk_new0000000",
+      "blk_pic2000000",
+    ])
+    snapshot = applyOps(
+      snapshot,
+      clearValueOps(snapshot, "blk_lisbon0000", "blk_new0000000"),
+      NOW + 2,
+    )
+    expect(unassignedIds(snapshot).has("blk_new0000000")).toBe(true)
+    expect(boardImageIds(snapshot, "b")).toContain("blk_new0000000")
+  })
+
+  it("lists the basket's pictures most recently changed first", () => {
+    let snapshot = boardOf()
+    snapshot = applyOps(snapshot, addImageOps(snapshot, "b", "blk_older00000"), NOW)
+    snapshot = applyOps(snapshot, addImageOps(snapshot, "b", "blk_newer00000"), NOW + 5)
+    expect(unassignedImageIds(snapshot, "b")).toEqual(["blk_newer00000", "blk_older00000"])
   })
 })
 

@@ -63,7 +63,7 @@ function BoardPage({ boardId }: { boardId: string }) {
   const note = useNoteById(boardId)
   const snapshot = useAtomValue(graphSnapshotAtom)
   const { exists, features, imageIds } = useBoard(boardId)
-  const writes = useBoardWrites(boardId)
+  const writes = useBoardWrites(boardId, exists)
 
   // The narrowing lives in the URL, so a narrowed board is a link and the
   // back button widens it again.
@@ -104,7 +104,7 @@ function BoardPage({ boardId }: { boardId: string }) {
     setNarrowing({ values: valueId ? [...others, valueId] : others })
   }
 
-  const matches = useBoardMatches(boardId, imageIds, valueIds, text)
+  const matches = useBoardMatches(imageIds, valueIds, text)
   const shown = matches ?? imageIds
   const images = React.useMemo<BoardImage[]>(
     () =>
@@ -165,7 +165,13 @@ function BoardPage({ boardId }: { boardId: string }) {
           <Button
             size="small"
             disabled={!writes.canUpload}
-            title={writes.canUpload ? undefined : "Sign in to add images"}
+            title={
+              writes.canUpload
+                ? undefined
+                : exists
+                  ? "Sign in to add images"
+                  : "Open it as a note to start it first"
+            }
             onClick={() => fileInputRef.current?.click()}
           >
             Add images
@@ -248,9 +254,7 @@ function BoardPage({ boardId }: { boardId: string }) {
           <p className="py-12 text-center text-text-secondary">
             {narrowed
               ? "Nothing on the board matches."
-              : imageIds.length === 0
-                ? "No pictures yet. Add images, or paste one into the note."
-                : "Loading…"}
+              : "No pictures yet. Add images, or paste one into the note."}
           </p>
         ) : (
           <ul

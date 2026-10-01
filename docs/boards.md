@@ -20,7 +20,7 @@ hand in the outline and the form picks it up.
 | on the board       | in the graph                                                                                                                  |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
 | the board          | any note                                                                                                                      |
-| its pictures       | the image blocks the note reaches (docs/images.md). Added from the board, a picture is a direct child of the page, last       |
+| its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket    |
 | a feature          | a direct child of the page whose text is the feature's label — `Location`, `Fixture`, `Material` — trimmed, whatever its case |
 | a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                               |
 | a picture's value  | a `child` link from the value block to the picture: the value is a second parent, exactly as copy and select-mode paste make  |
@@ -36,8 +36,9 @@ Home inspiration
   Fixture
     - Lamp
       [picture]
-  [picture]
-  [picture]
+
+  Unassigned
+    [picture]      ← added from the board, no value yet
 ```
 
 The features are the preset in `src/data/boards.ts` (`BOARD_FEATURES`): a
@@ -57,30 +58,38 @@ the pictures keep their place — the value beneath it, and the picture linked
 under the value. A feature nobody has used is not on the page, and adding one
 to the preset changes nothing on disk until someone uses it.
 
-**Membership is reachability.** A picture is on the board if and only if the
-note reaches it — which is what the editor means by "in this note", what
-`in:` means in a search, and what the delete-rescue rules mean. Deleting a
-value therefore leaves its pictures on the board, untagged, since the page
-still reaches them directly. The Unassigned basket is not a home: a block
-nothing reaches is not in the search index, so a board's pictures always
-hang from the page itself.
+**A picture's home is the basket until a value takes it.** A picture added
+from the board is written in the note with no parent, so it sits in the
+note's Unassigned basket — where any block nothing reaches sits
+(docs/graph-schema-v2.md, "Delete"), beneath the outline on the note page.
+Its first value links it under the value block, and the basket no longer
+has it; clearing its last value unlinks it, and the basket has it again.
+Deleting a value in the outline does the same to the pictures only it held.
+None of this is a rule of the board's: it is the editor's own basket,
+written the editor's way, and the board simply lists the basket's pictures
+along with the ones the outline reaches. A picture pasted straight into the
+outline is on the board too, wherever it was pasted, and a value set on it
+is a second parent — it stays where it was pasted as well, as select-mode
+paste would leave it.
 
 ## Reading
 
 The board's pictures are the note's own rows, read off the live graph
-(`boardImageIds`): the page's direct children first, in the order they were
-added, then anything reached deeper, in document order. A narrowing keeps
-the pictures carrying every chosen value — a value is carried when its block
-is one of the picture's parents (`carryingAll`) — and, when words are typed,
-those the search engine matches for `type:image in:<board> <words>`, which
-is captions fuzzy-matched as any text query is (`useBoardMatches`,
-`src/hooks/board.ts`).
+(`boardImageIds`): the basket's first, most recently changed first as the
+basket lists them, then everything the outline reaches, in document order.
+A narrowing keeps the pictures carrying every chosen value — a value is
+carried when its block is one of the picture's parents (`carryingAll`) —
+and, when words are typed, those whose caption the search engine's own
+matcher and threshold accept (`useBoardMatches`, `src/hooks/board.ts`).
 
-The values are tested on parents rather than handed to the engine as `in:`
-scopes on purpose: a search tests each `in:` against one occurrence's
-ancestry, and a picture under two values is on two paths, neither of which
-passes both — so `type:image in:Mauritius in:Lamp` finds nothing where the
-board finds the brass lamp. One value at a time, the two agree.
+Two things are done on the board's own rows rather than through a search,
+on purpose. The values, because a search tests each `in:` against one
+occurrence's ancestry, and a picture under two values is on two paths,
+neither of which passes both — so `type:image in:Mauritius in:Lamp` finds
+nothing where the board finds the brass lamp. The words, because the corpus
+index holds what a note reaches, and an untagged picture in the basket is on
+the board too. `type:image in:<board>` in the search box still lists the
+board's tagged pictures.
 
 The narrowing lives in the URL (`?values=<value ids>&q=<words>`), so a
 narrowed board is a link and the back button widens it.
@@ -93,17 +102,17 @@ Every write is a batch of ops through the one storage seam
 each):
 
 - **Adding a picture** (`addImageOps`) is the editor's own flow: an image
-  block with no picture yet, written in the note and linked last under the
-  page, drawing the file already in hand while the upload happens behind it;
-  the asset id is written when it lands (`imageUploadedOps`), and a failed
-  upload takes the row back out. The button, a drop anywhere on the page, or
-  a paste.
+  block with no picture yet, written in the note with no parent — the
+  basket's — drawing the file already in hand while the upload happens
+  behind it; the asset id is written when it lands (`imageUploadedOps`), and
+  a failed upload takes the row back out. The button, a drop anywhere on the
+  page, or a paste.
 - **Setting a value** (`setValueOps`) makes the feature block and the value
   block if they are missing and links the picture under the value. A
   single-select feature first unlinks any other value of its own the picture
   carried. Picking an existing value reuses it, by text, whatever its case.
 - **Clearing a value** (`clearValueOps`) unlinks. The value stays for the
-  others.
+  others; a picture left with no parent is back in the basket.
 - **The caption** is the image block's text (`setCaptionOps`) — what search
   matches, as in the editor.
 - **Delete image** is the context menu's Delete (`deleteBlockOps`): the row

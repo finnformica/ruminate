@@ -9,6 +9,7 @@ import {
   sortKeyBetween,
   type GraphSnapshot,
 } from "./graph"
+import { unassignedIds } from "./basket"
 import type { Op } from "./ops"
 
 /**
@@ -17,16 +18,20 @@ import type { Op } from "./ops"
  * one from a form instead of the outline.
  *
  * Nothing here is a new kind of thing. A board is any note. Its pictures
- * are the image blocks the note reaches; the ones added from the board are
- * direct children of the page, in the order they were added. A FEATURE is a
- * direct child of the page whose text is one of the labels below, created
- * the first time a picture is given one; a VALUE is a child of that block
- * ("Mauritius" under "Location"), created the first time it is picked; and
- * setting a value on a picture is a `link` from the value block to the
- * picture — the same second parent that copy and select-mode paste give a
- * block in the editor. So the outline shows exactly what the board shows,
- * a board can be written by hand in the outline and the form picks it up,
- * and deleting a value leaves its pictures on the board, untagged.
+ * are the image blocks written in the note: the ones its outline reaches,
+ * and the ones nothing reaches yet, which sit in the note's Unassigned
+ * basket (`basket.ts`) as any such block does. A picture added from the
+ * board is written in the note with no parent, so it starts in the basket.
+ * A FEATURE is a direct child of the page whose text is one of the labels
+ * below, created the first time a picture is given one; a VALUE is a child
+ * of that block ("Mauritius" under "Location"), created the first time it
+ * is picked; and setting a value on a picture is a `link` from the value
+ * block to the picture — the same parent that select-mode paste gives a
+ * block in the editor, and what takes the picture out of the basket.
+ * Clearing its last value unlinks it, and the basket has it again. So the
+ * outline shows exactly what the board shows, a board can be written by
+ * hand in the outline and the form picks it up, and nothing here is a rule
+ * of its own: it is the editor's basket, read and written the editor's way.
  *
  * Every function is pure: a snapshot in, a batch of ops out, applied
  * through the one storage seam (`src/data/store.ts`) like the editor's.
@@ -114,10 +119,10 @@ export function boardFeatures(snapshot: GraphSnapshot, boardId: NoteId): BoardFe
 }
 
 /**
- * The board's pictures: every image block the note reaches, each once. The
- * page's own direct children lead, in their order — the order pictures were
- * added from the board — and then any picture reached only through a value
- * or deeper, in document order (one pasted under a heading, say).
+ * The board's pictures, each once: first the ones in the note's Unassigned
+ * basket — written in the note, reached by nothing, so not yet given a
+ * value — most recently changed first, as the basket lists them; then
+ * every image block the outline reaches, in document order.
  */
 export function boardImageIds(snapshot: GraphSnapshot, boardId: NoteId): string[] {
   const out: string[] = []
@@ -128,7 +133,7 @@ export function boardImageIds(snapshot: GraphSnapshot, boardId: NoteId): string[
     seen.add(id)
     out.push(id)
   }
-  for (const id of childIdsOf(snapshot, boardId)) add(id)
+  for (const id of unassignedImageIds(snapshot, boardId)) add(id)
   const doc = noteDoc(boardId, snapshot)
   if (!doc) return out
   const path = new Set<string>()
@@ -144,6 +149,18 @@ export function boardImageIds(snapshot: GraphSnapshot, boardId: NoteId): string[
   }
   walk(doc.rootBlockIds)
   return out
+}
+
+/** The pictures in the note's Unassigned basket, most recently changed
+ * first: image blocks written in the note that no note reaches. */
+export function unassignedImageIds(snapshot: GraphSnapshot, boardId: NoteId): string[] {
+  const ids: string[] = []
+  for (const id of unassignedIds(snapshot)) {
+    const node = snapshot.nodes.get(id)
+    if (node && node.type === IMAGE_TYPE && node.notes_id === boardId) ids.push(id)
+  }
+  const stamp = (id: string) => snapshot.nodes.get(id)?.updated_at ?? 0
+  return ids.sort((a, b) => stamp(b) - stamp(a) || (a < b ? -1 : 1))
 }
 
 /** The value blocks a picture carries, among a feature's values. */
@@ -184,13 +201,13 @@ function keyAtEnd(snapshot: GraphSnapshot, parentId: string): string {
 /**
  * A picture added from the board: an image block written in the note, with
  * no picture yet (`imageUploadedOps` fills it in when the bytes land, as
- * the editor does), linked last under the page.
+ * the editor does) and no parent, so it sits in the note's Unassigned
+ * basket until a value takes it. Nothing when there is no such note to
+ * write it in.
  */
 export function addImageOps(snapshot: GraphSnapshot, boardId: NoteId, imageId: string): Op[] {
-  return [
-    { op: "create", id: imageId, type: IMAGE_TYPE, text: "", props: null, notesId: boardId },
-    { op: "link", source: boardId, destination: imageId, sortKey: keyAtEnd(snapshot, boardId) },
-  ]
+  if (!isBoard(snapshot, boardId)) return []
+  return [{ op: "create", id: imageId, type: IMAGE_TYPE, text: "", props: null, notesId: boardId }]
 }
 
 /** The upload landed: the asset the block now shows. */
@@ -322,7 +339,8 @@ export function setValueOps(
   return ops
 }
 
-/** Take a value back off a picture. The value stays for the others. */
+/** Take a value back off a picture. The value stays for the others; a
+ * picture left with no parent is back in the basket. */
 export function clearValueOps(snapshot: GraphSnapshot, valueId: string, imageId: string): Op[] {
   if (!parentIdsOf(snapshot, imageId).includes(valueId)) return []
   return [{ op: "unlink", source: valueId, destination: imageId }]

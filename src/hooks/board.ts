@@ -1,3 +1,4 @@
+import { Searcher } from "fast-fuzzy"
 import { useAtomValue, useStore } from "jotai"
 import React from "react"
 import { toast } from "sonner"
@@ -29,9 +30,8 @@ import {
 } from "../data/images"
 import { deleteBlockOps, type Op } from "../data/ops"
 import { useApplyOps } from "../data/store"
-import { graphSnapshotAtom, isDatabaseModeAtom, searchBlocksAtom } from "../global-state"
+import { graphSnapshotAtom, isDatabaseModeAtom } from "../global-state"
 import type { NoteId } from "../schema"
-import type { Query } from "../utils/search"
 
 /**
  * A board (docs/boards.md) as the page draws it: whether the note is there,
@@ -57,43 +57,37 @@ export function useBoard(boardId: NoteId): {
 
 /**
  * The pictures a narrowing keeps, in the board's order. The chosen values
- * are tested on each picture's parents (`carryingAll`); the typed words go
- * to the search engine itself, `type:image in:<board> <words>`, matched
- * against captions as any text query is. Null when nothing narrows, so the
- * caller shows the board whole without a query.
+ * are tested on each picture's parents (`carryingAll`); the typed words are
+ * fuzzy-matched against captions with the search engine's own matcher and
+ * threshold — run over the board's pictures directly, because the corpus
+ * index holds only what a note reaches, and an untagged picture in the
+ * basket is on the board too. Null when nothing narrows, so the caller
+ * shows the board whole.
  */
 export function useBoardMatches(
-  boardId: NoteId,
   imageIds: readonly string[],
   valueIds: readonly string[],
   text: string,
 ): string[] | null {
   const snapshot = useAtomValue(graphSnapshotAtom)
-  const search = useAtomValue(searchBlocksAtom)
   return React.useMemo(() => {
     const fuzzy = text.trim()
     if (valueIds.length === 0 && fuzzy === "") return null
     let kept = carryingAll(snapshot, imageIds, valueIds)
     if (fuzzy !== "") {
-      const query: Query = {
-        fuzzy,
-        sorts: [],
-        filters: [
-          { key: "type", values: ["image"], exclude: false },
-          { key: "in", values: [boardId], exclude: false },
-        ],
-      }
-      const matched = new Set(search(query).map((hit) => hit.blockId))
+      const captions = kept.map((id) => ({ id, text: snapshot.nodes.get(id)?.text ?? "" }))
+      const searcher = new Searcher(captions, { keySelector: (item) => item.text, threshold: 0.8 })
+      const matched = new Set(searcher.search(fuzzy).map((item) => item.id))
       kept = kept.filter((id) => matched.has(id))
     }
     return kept
-  }, [snapshot, search, boardId, imageIds, valueIds, text])
+  }, [snapshot, imageIds, valueIds, text])
 }
 
 /** What the board page may write, and how. */
 export interface BoardWrites {
-  /** Whether pictures can be added here: uploads are on, and there is a
-   * store to keep them (signed in). */
+  /** Whether pictures can be added here: uploads are on, there is a store
+   * to keep them (signed in), and a note to write them in. */
   canUpload: boolean
   addImages: (files: File[]) => Promise<void>
   setValue: (feature: BoardFeature, imageId: string, ref: ValueRef) => void
@@ -108,11 +102,11 @@ export interface BoardWrites {
  * it, so a change to a picture's features is answered with a toast that can
  * undo it — the inverse batch, worked out against the graph as it stood.
  */
-export function useBoardWrites(boardId: NoteId): BoardWrites {
+export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   const store = useStore()
   const apply = useApplyOps()
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
-  const canUpload = imagesEnabled && isDatabaseMode
+  const canUpload = imagesEnabled && isDatabaseMode && exists
 
   const undoable = React.useCallback(
     (ops: Op[], message: string) => {
