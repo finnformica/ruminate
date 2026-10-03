@@ -1,4 +1,5 @@
 import { useAtomValue } from "jotai"
+import React from "react"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { replicaAccessDeniedAtom } from "../data/replica-access"
 import { storageDiagnosticsAtom } from "../data/storage-diagnostics"
@@ -9,6 +10,7 @@ import { AsyncButton } from "./ui/async-button"
 import { Button } from "./ui/button"
 import { PageHeader, PageHeaderProps } from "./page-header"
 import { HoverCard } from "./ui/hover-card"
+import { FloatingHostContext } from "./ui/layer"
 import { Notice } from "./notice"
 import { PageSkeleton, Skeleton } from "./ui/skeleton"
 
@@ -55,6 +57,10 @@ export function PageLayout({
   // empty corpus that is about to fill. Guard-free pages (Settings) are their
   // own content and never wait.
   const booting = useAtomValue(isBootingAtom) && !disableGuard
+  // The page's box, for the bars that float at its foot (`FloatingBar`):
+  // in the page rather than over the window, so they clear the phone's nav
+  // bar and the sign-in banner the way the floating actions do.
+  const [host, setHost] = React.useState<HTMLElement | null>(null)
 
   return (
     <HoverCard.Provider>
@@ -65,7 +71,7 @@ export function PageLayout({
           actions={showContent && !booting ? actions : undefined}
           className="print:hidden"
         />
-        <div className="relative grid overflow-hidden">
+        <div ref={setHost} className="relative grid overflow-hidden">
           {/* `--edit-bar-inset`: what a phone's keyboard and the edit bar
               above it cover while a block is edited (mobile-edit-bar.tsx).
               The scroller pads by it, so the end of the page can still be
@@ -111,7 +117,9 @@ export function PageLayout({
                 </Notice>
               </div>
             ) : null}
-            {booting ? <PageSkeleton /> : showContent ? children : null}
+            <FloatingHostContext.Provider value={host}>
+              {booting ? <PageSkeleton /> : showContent ? children : null}
+            </FloatingHostContext.Provider>
           </main>
 
           <div className="absolute bottom-3 right-3 flex items-center gap-2 coarse:gap-3">

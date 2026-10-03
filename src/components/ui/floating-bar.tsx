@@ -1,15 +1,20 @@
 import React from "react"
 import { createPortal } from "react-dom"
 import { cx } from "../../utils/cx"
+import { FloatingHostContext } from "./layer"
 import { Surface } from "./surface"
 
 /**
- * **A bar that floats at the bottom of the window** — the selection bar
- * over a run of selected rows, a board's add buttons once the ones on the
- * page have scrolled away — centred, clear of the phone's nav bar, and
- * with one arrival and one departure for every such bar: it rises a few
- * pixels into its place under a fade, and sinks back out the same way
- * (docs/design-principles.md, "Motion").
+ * **A bar that floats at the foot of the page** — the selection bar over
+ * a run of selected rows, a board's add buttons once the ones on the page
+ * have scrolled away — centred, and with one arrival and one departure for
+ * every such bar: it rises a few pixels into its place under a fade, and
+ * sinks back out the same way (docs/design-principles.md, "Motion").
+ *
+ * It is placed in the page's own box (`FloatingHostContext`, which
+ * `PageLayout` provides), so it clears whatever the app draws beneath the
+ * page — the phone's nav bar, the sign-in banner — without knowing the
+ * height of either; outside a page it floats over the window instead.
  *
  * Kept mounted and hidden rather than unmounted, so the departure has
  * something to play on: the browser's discrete `display` transition holds
@@ -32,6 +37,7 @@ export function FloatingBar({
   /** Classes for the surface itself, around the children. */
   className?: string
 }) {
+  const host = React.useContext(FloatingHostContext)
   if (typeof document === "undefined") return null
   return createPortal(
     <div
@@ -40,11 +46,8 @@ export function FloatingBar({
       aria-hidden={!open || undefined}
       {...props}
       className={cx(
-        // Above the phone's nav bar (and its safe area) where there is one;
-        // a plain inset from the window's edge on a wide screen, where the
-        // nav bar is not drawn.
-        "pointer-events-none fixed inset-x-0 z-raised flex justify-center px-4 print:hidden",
-        "bottom-[calc(var(--height-nav-bar)+env(safe-area-inset-bottom)+1rem)] sm:bottom-4",
+        "pointer-events-none inset-x-0 bottom-4 z-raised flex justify-center px-4 print:hidden",
+        host ? "absolute" : "fixed",
         // The arrival and the departure: a fade, and (where motion is
         // welcome) a short rise from below. The `display` flip is discrete,
         // so the bar stays on screen until the exit has played.
@@ -61,6 +64,6 @@ export function FloatingBar({
         {children}
       </Surface>
     </div>,
-    document.body,
+    host ?? document.body,
   )
 }
