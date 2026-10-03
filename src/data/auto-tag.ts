@@ -41,7 +41,9 @@ export const CLOUDFLARE_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it"
 export const AUTO_TAG_DAILY_LIMIT = 300
 
 /** The most the picture's bytes may weigh: the API takes five megabytes of
- * base64, which is three and three-quarter of raw bytes. */
+ * base64, which is three and three-quarter of raw bytes. A sanity limit —
+ * the client sends a copy fitted for the model (`visionCopy`,
+ * src/data/image-fit.ts), which is far below it. */
 export const AUTO_TAG_MAX_IMAGE_BYTES = Math.floor((5 * 1024 * 1024 * 3) / 4)
 
 /** The picture formats the API reads. AVIF, which the editor accepts, is
@@ -61,10 +63,9 @@ export interface TagFeature {
   values: string[]
 }
 
-/** `POST /api/boards/tag` takes this. */
+/** What `POST /api/boards/tag` takes beside the picture: the board's
+ * features, as the `features` field of the form, a JSON string of this. */
 export interface TagRequest {
-  /** The asset's id (`img_…`), the key the bytes are under in R2. */
-  imageId: string
   features: TagFeature[]
 }
 
@@ -95,14 +96,14 @@ const MAX_SUGGESTED_VALUES = 5
 const normalise = (text: string) => text.trim().toLocaleLowerCase()
 
 /**
- * The request a body states, or null when it is not one: an asset id and
- * up to a dozen features, each a label, a `multi` flag and a list of
- * values, every string trimmed and cut to length.
+ * The request a value states, or null when it is not one: up to a dozen
+ * features, each a label, a `multi` flag and a list of values, every
+ * string trimmed and cut to length.
  */
 export function readTagRequest(raw: unknown): TagRequest | null {
   if (typeof raw !== "object" || raw === null) return null
   const record = raw as Record<string, unknown>
-  if (typeof record.imageId !== "string" || !Array.isArray(record.features)) return null
+  if (!Array.isArray(record.features)) return null
   if (record.features.length > MAX_FEATURES) return null
   const features: TagFeature[] = []
   for (const entry of record.features) {
@@ -122,7 +123,7 @@ export function readTagRequest(raw: unknown): TagRequest | null {
     }
     features.push({ label, multi: feature.multi, values })
   }
-  return { imageId: record.imageId, features }
+  return { features }
 }
 
 /** What the model is, and how it is to answer. Fixed text, so it caches. */

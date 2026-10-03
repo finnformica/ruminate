@@ -21,37 +21,27 @@ describe("readTagRequest", () => {
   it("reads a request, trimming and dropping empty values", () => {
     expect(
       readTagRequest({
-        imageId: "img_abcdefghijkl",
         features: [{ label: " Location ", multi: false, values: [" Mauritius", "", "Lisbon "] }],
       }),
     ).toEqual({
-      imageId: "img_abcdefghijkl",
       features: [{ label: "Location", multi: false, values: ["Mauritius", "Lisbon"] }],
     })
   })
 
   it("takes a board with no features", () => {
-    expect(readTagRequest({ imageId: "img_abcdefghijkl", features: [] })).toEqual({
-      imageId: "img_abcdefghijkl",
-      features: [],
-    })
+    expect(readTagRequest({ features: [] })).toEqual({ features: [] })
   })
 
   it("reads anything else as no request", () => {
     expect(readTagRequest(null)).toBeNull()
     expect(readTagRequest("x")).toBeNull()
-    expect(readTagRequest({ imageId: 1, features: [] })).toBeNull()
-    expect(readTagRequest({ imageId: "img_x", features: "Location" })).toBeNull()
-    expect(readTagRequest({ imageId: "img_x", features: [{ label: "Location" }] })).toBeNull()
-    expect(
-      readTagRequest({ imageId: "img_x", features: [{ label: "", multi: true, values: [] }] }),
-    ).toBeNull()
-    expect(
-      readTagRequest({ imageId: "img_x", features: [{ label: "L", multi: true, values: [1] }] }),
-    ).toBeNull()
+    expect(readTagRequest({})).toBeNull()
+    expect(readTagRequest({ features: "Location" })).toBeNull()
+    expect(readTagRequest({ features: [{ label: "Location" }] })).toBeNull()
+    expect(readTagRequest({ features: [{ label: "", multi: true, values: [] }] })).toBeNull()
+    expect(readTagRequest({ features: [{ label: "L", multi: true, values: [1] }] })).toBeNull()
     expect(
       readTagRequest({
-        imageId: "img_x",
         features: Array.from({ length: 13 }, () => ({ label: "L", multi: true, values: [] })),
       }),
     ).toBeNull()

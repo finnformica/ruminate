@@ -23,9 +23,11 @@ import {
   type ValueRef,
 } from "../data/boards"
 import { requestDatabaseFlush } from "../data/database-mode"
+import { visionCopy } from "../data/image-fit"
 import {
   ImageUploadError,
   beginPendingImage,
+  imageBlob,
   imagesEnabled,
   primeImageObjectUrl,
   releasePendingImage,
@@ -214,11 +216,16 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   )
 
   /**
-   * Claude's caption and tags for a picture: the board's features as they
-   * stand go with the asset's id; the answer is read into the writes it
-   * amounts to (`suggestionOps` — filling in, never overriding) and applied
-   * as one batch with one Undo. A picture without an uploaded asset (an
-   * external one, or one still on its way up) cannot be sent.
+   * A caption and tags for a picture: its bytes, as the page already has
+   * them (`imageBlob`), fitted on the device for the model (`visionCopy` —
+   * a JPEG no larger than 1,568 px on its longest side, so a phone photo of
+   * any size goes, and goes small), go with the board's features as they
+   * stand; the answer is read into the writes it amounts to
+   * (`suggestionOps` — filling in, never overriding) and applied as one
+   * batch with one Undo. A picture without an uploaded asset (an external
+   * one, or one still on its way up) cannot be sent. Where the browser
+   * cannot make the copy, the original goes and the Worker's size limit
+   * answers for it.
    */
   const suggestTags = React.useCallback(
     async (imageId: string) => {
@@ -229,8 +236,16 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
         toast.error("Only uploaded pictures can be tagged.")
         return
       }
+      let picture: Blob
       try {
-        const suggestion = await requestTagSuggestion(asset, tagFeaturesOf(snapshot, boardId))
+        const original = await imageBlob(asset)
+        picture = (await visionCopy(original)) ?? original
+      } catch {
+        toast.error("Couldn’t read that picture.")
+        return
+      }
+      try {
+        const suggestion = await requestTagSuggestion(picture, tagFeaturesOf(snapshot, boardId))
         const { ops, summary } = suggestionOps(
           store.get(graphSnapshotAtom),
           boardId,
