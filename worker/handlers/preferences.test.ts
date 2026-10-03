@@ -12,7 +12,7 @@ const USER = 7
 const OTHER_USER = 8
 
 /** Every preference at its default: what a fresh account reads. */
-const DEFAULTS = { whatsNewCard: false }
+const DEFAULTS = { whatsNewCard: false, useCloudflareAi: false }
 
 let harness: McpTestEnv
 

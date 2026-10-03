@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai"
-import { useIsAdmin } from "../../data/features"
+import { useFeature, useIsAdmin } from "../../data/features"
 import { githubUserAtom } from "../../global-state"
 import { DeletedNotesSection } from "../deleted-notes-section"
 import { McpTokensSection } from "../mcp-tokens-section"
@@ -7,7 +7,8 @@ import { SharingSection } from "../sharing-section"
 import { AboutSection } from "./about-section"
 import { AccountSection } from "./account-section"
 import { AppearanceSection } from "./appearance-section"
-import { ApiKeySection } from "./api-key-section"
+import { CloudflareAiSection } from "./ai-cloudflare-section"
+import { AnthropicKeySection } from "./ai-key-section"
 import { ChangelogSection } from "./changelog-section"
 import { EditorSection } from "./editor-section"
 import { FeaturesSection } from "./features-section"
@@ -25,6 +26,7 @@ import { StorageSection } from "./storage-section"
 export function SettingsPageContent({ id }: { id: SettingsPageId }) {
   const githubUser = useAtomValue(githubUserAtom)
   const isAdmin = useIsAdmin()
+  const cloudflareAi = useFeature("cloudflareAi")
   switch (id) {
     case "account":
       return <AccountSection />
@@ -40,8 +42,13 @@ export function SettingsPageContent({ id }: { id: SettingsPageId }) {
       return <SharingSection />
     case "mcp":
       return <McpTokensSection />
-    case "api":
-      return <ApiKeySection />
+    case "ai":
+      return (
+        <>
+          <AnthropicKeySection />
+          {cloudflareAi ? <CloudflareAiSection /> : null}
+        </>
+      )
     case "data":
       return (
         <>

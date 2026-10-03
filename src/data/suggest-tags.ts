@@ -20,8 +20,11 @@ export class SuggestTagsError extends Error {
 
 /** The words for each refusal — what the person can do about it. */
 const MESSAGES: Record<string, string> = {
-  no_api_key: "Add your Anthropic API key under Settings → API to suggest tags.",
-  invalid_api_key: "Anthropic refused your API key — check it under Settings → API.",
+  no_provider: "Set up AI under Settings → AI to suggest tags.",
+  invalid_api_key: "Anthropic refused your API key — check it under Settings → AI.",
+  ai_disabled: "Cloudflare AI isn’t set up on this Ruminate.",
+  ai_error: "Cloudflare AI couldn’t answer — try again in a moment.",
+  bad_answer: "The model’s answer made no sense — try again.",
   daily_limit: "Tagging has made its calls for today.",
   rate_limited: "Anthropic asked to slow down — try again in a minute.",
   image_too_large: "That picture is too large to tag.",

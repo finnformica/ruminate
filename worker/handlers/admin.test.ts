@@ -179,7 +179,7 @@ describe("feature flags", () => {
     const body = (await bodyOf(
       await sendAdmin(apiRequest("GET", "/api/admin/features")),
     )) as FeatureAudiencesBody
-    expect(body.audiences).toEqual({ mcp: "everyone" })
+    expect(body.audiences).toEqual({ mcp: "everyone", cloudflareAi: "admin" })
   })
 
   it("sets an audience and answers with the whole set", async () => {
@@ -189,10 +189,11 @@ describe("feature flags", () => {
     expect(response.status).toBe(200)
     expect(((await bodyOf(response)) as FeatureAudiencesBody).audiences).toEqual({
       mcp: "admin",
+      cloudflareAi: "admin",
     })
     // Set again: an update, not a second row.
     await sendAdmin(apiRequest("PUT", "/api/admin/features/mcp", { audience: "off" }))
-    expect(await featureAudiences(harness.control)).toEqual({ mcp: "off" })
+    expect(await featureAudiences(harness.control)).toEqual({ mcp: "off", cloudflareAi: "admin" })
     expect(await harness.control.exec("SELECT key, updated_by FROM feature_flags")).toEqual([
       { key: "mcp", updated_by: ADMIN },
     ])
@@ -225,7 +226,10 @@ describe("feature flags", () => {
 
   it("reads as the defaults when the table is missing (migration 0013 not applied), and cannot be set", async () => {
     await harness.control.execScript("DROP TABLE feature_flags")
-    expect(await featureAudiences(harness.control)).toEqual({ mcp: "everyone" })
+    expect(await featureAudiences(harness.control)).toEqual({
+      mcp: "everyone",
+      cloudflareAi: "admin",
+    })
     expect((await sendAdmin(apiRequest("GET", "/api/admin/features"))).status).toBe(200)
     expect(
       (await sendAdmin(apiRequest("PUT", "/api/admin/features/mcp", { audience: "off" }))).status,
@@ -242,11 +246,11 @@ describe("GET /api/features", () => {
     await sendAdmin(apiRequest("PUT", "/api/admin/features/mcp", { audience: "admin" }))
     expect(await bodyOf(await sendFeatures(apiRequest("GET", "/api/features")))).toEqual({
       admin: true,
-      features: { mcp: true },
+      features: { mcp: true, cloudflareAi: true },
     })
     expect(
       await bodyOf(await sendFeatures(apiRequest("GET", "/api/features", undefined, "user"))),
-    ).toEqual({ admin: false, features: { mcp: false } })
+    ).toEqual({ admin: false, features: { mcp: false, cloudflareAi: false } })
   })
 
   it("is session-guarded and GET only", async () => {

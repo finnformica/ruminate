@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
+  cloudflareTagPrompt,
+  extractJson,
   isAnthropicKeyShaped,
   keyLast4,
   readTagRequest,
@@ -165,5 +167,45 @@ describe("the key's shape", () => {
 
   it("shows the last four characters", () => {
     expect(keyLast4("sk-ant-api03-abcdWXYZ")).toBe("WXYZ")
+  })
+})
+
+describe("cloudflareTagPrompt", () => {
+  it("lists the features and asks for the JSON shape in so many words", () => {
+    const prompt = cloudflareTagPrompt(FEATURES)
+    expect(prompt).toContain(tagPrompt(FEATURES))
+    expect(prompt).toContain("JSON only")
+    expect(prompt).toContain('"caption"')
+    expect(prompt).toContain('"features"')
+  })
+})
+
+describe("extractJson", () => {
+  const object = { caption: "A lamp", features: [] }
+  const text = JSON.stringify(object)
+
+  it("reads bare JSON", () => {
+    expect(extractJson(text)).toEqual(object)
+  })
+
+  it("strips a code fence, with or without a language", () => {
+    expect(extractJson("```json\n" + text + "\n```")).toEqual(object)
+    expect(extractJson("```\n" + text + "\n```")).toEqual(object)
+  })
+
+  it("takes the object out of the words around it", () => {
+    expect(extractJson("Sure! Here is the answer:\n" + text + "\nLet me know.")).toEqual(object)
+  })
+
+  it("keeps nested braces", () => {
+    const nested = { caption: "x", features: [{ label: "L", values: ["{a}"] }] }
+    expect(extractJson("Answer: " + JSON.stringify(nested) + " done")).toEqual(nested)
+  })
+
+  it("is null when there is no object, or it does not parse", () => {
+    expect(extractJson("I cannot see the picture.")).toBeNull()
+    expect(extractJson("{not json}")).toBeNull()
+    expect(extractJson("}{")).toBeNull()
+    expect(extractJson("")).toBeNull()
   })
 })

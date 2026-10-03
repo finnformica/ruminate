@@ -17,10 +17,15 @@ export interface AccountPreferences {
   /** Whether the what's-new card greets an update
    * (src/components/whats-new-popover.tsx). Off until asked for. */
   whatsNewCard: boolean
+  /** Whether a board's pictures are tagged on Workers AI rather than with
+   * the account's Anthropic key (docs/boards.md, "Tagging with Claude").
+   * Off until asked for; nothing unless the `cloudflareAi` flag allows. */
+  useCloudflareAi: boolean
 }
 
 export const DEFAULT_PREFERENCES: AccountPreferences = {
   whatsNewCard: false,
+  useCloudflareAi: false,
 }
 
 /** The body both directions carry: `GET` returns it, `PUT` takes a partial
@@ -40,6 +45,7 @@ export function readPreferences(raw: unknown): Partial<AccountPreferences> {
   const record = raw as Record<string, unknown>
   const read: Partial<AccountPreferences> = {}
   if (typeof record.whatsNewCard === "boolean") read.whatsNewCard = record.whatsNewCard
+  if (typeof record.useCloudflareAi === "boolean") read.useCloudflareAi = record.useCloudflareAi
   return read
 }
 

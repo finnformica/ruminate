@@ -21,7 +21,7 @@ import { ChevronLeftIcon16, ChevronRightIcon16 } from "../icons"
  * the always-mounted sidebar carries the list without the cards.
  */
 export type SettingsPageId =
-  "account" | "preferences" | "sharing" | "mcp" | "api" | "data" | "about" | "admin"
+  "account" | "preferences" | "sharing" | "mcp" | "ai" | "data" | "about" | "admin"
 
 export interface SettingsPage {
   id: SettingsPageId
@@ -62,8 +62,8 @@ const SETTINGS_PAGES: SettingsPage[] = [
     signedIn: true,
   },
   {
-    id: "api",
-    label: "API",
+    id: "ai",
+    label: "AI",
     description: "Enable AI-powered features.",
     signedIn: true,
   },
@@ -89,7 +89,8 @@ function useSettingsPages(): SettingsPage[] {
   const githubUser = useAtomValue(githubUserAtom)
   const isAdmin = useIsAdmin()
   const mcp = useFeature("mcp")
-  const features: Record<FeatureKey, boolean> = { mcp }
+  const cloudflareAi = useFeature("cloudflareAi")
+  const features: Record<FeatureKey, boolean> = { mcp, cloudflareAi }
   return SETTINGS_PAGES.filter(
     (page) =>
       (!page.signedIn || githubUser) &&

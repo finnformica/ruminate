@@ -22,7 +22,6 @@ import {
   type BoardValue,
   type ValueRef,
 } from "../data/boards"
-import { refreshAnthropicKey, useAnthropicKey } from "../data/anthropic-key"
 import { requestDatabaseFlush } from "../data/database-mode"
 import {
   ImageUploadError,
@@ -39,6 +38,7 @@ import { requestTagSuggestion, SuggestTagsError } from "../data/suggest-tags"
 import { blockIndexAtom, graphSnapshotAtom, isDatabaseModeAtom } from "../global-state"
 import type { NoteId } from "../schema"
 import { viewNarrowing } from "../utils/view-narrowing"
+import { useAiAvailable } from "./ai"
 
 /**
  * A board (docs/boards.md) as the page draws it: whether the note is there,
@@ -149,13 +149,10 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const canUpload = imagesEnabled && isDatabaseMode && exists
 
-  // Tagging with Claude: signed in, with a key kept. Whether one is kept is
-  // asked for the first time a board needs to know.
-  const anthropicKey = useAnthropicKey()
-  React.useEffect(() => {
-    if (isDatabaseMode && anthropicKey === null) void refreshAnthropicKey()
-  }, [isDatabaseMode, anthropicKey])
-  const canSuggest = isDatabaseMode && exists && anthropicKey?.set === true
+  // Tagging: whether a provider answers for this account is the one hook's
+  // answer (src/hooks/ai.ts); which one, the Worker decides for itself by
+  // the same router.
+  const canSuggest = useAiAvailable().available && exists
 
   const undoable = React.useCallback(
     (ops: Op[], message: string) => {

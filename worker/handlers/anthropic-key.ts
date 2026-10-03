@@ -12,14 +12,8 @@
 // Anthropic API. It is NEVER in a response body, and nothing here logs it.
 // The browser holds only the answer to "is one set".
 
-import {
-  AUTO_TAG_DAILY_LIMIT,
-  isAnthropicKeyShaped,
-  keyLast4,
-  type AnthropicKeyBody,
-} from "../../src/data/auto-tag"
+import { isAnthropicKeyShaped, keyLast4, type AnthropicKeyBody } from "../../src/data/auto-tag"
 import type { SqlDriver } from "../../src/data/sql-driver"
-import { dayOf } from "../mcp/rate-limit"
 import { controlPlaneDriver } from "../tenancy-db"
 import type { Env } from "../types"
 import { requireSession } from "./replica"
@@ -52,37 +46,16 @@ async function forgetKey(driver: SqlDriver, userId: number) {
   await driver.exec("DELETE FROM anthropic_keys WHERE user_id = ?1", [userId])
 }
 
-export type KeySpend =
-  { ok: true; apiKey: string; callsToday: number } | { ok: false; reason: "no_key" | "daily_limit" }
-
 /**
- * The kept key, and one call counted against the account's day — the one
- * read the tagging route makes. One statement does both, the way an MCP
- * token's day is spent (worker/mcp/rate-limit.ts): a row whose day is
- * today and whose count has reached the cap matches nothing, so the key
- * is not read and nothing is written. An empty answer is then one of two
- * things, told apart by a second, cheap read.
+ * The kept key, or null — the one read the tagging route makes, and the
+ * only place the key leaves this table. The day's calls are counted apart
+ * (worker/ai-usage.ts), the same way for every provider; the `calls_*`
+ * columns 0018 gave this table are no longer written.
  */
-export async function spendKey(
-  driver: SqlDriver,
-  userId: number,
-  now: number,
-  limit: number = AUTO_TAG_DAILY_LIMIT,
-): Promise<KeySpend> {
-  const today = dayOf(now)
-  const rows = await driver.exec(
-    "UPDATE anthropic_keys SET calls_day = ?2, " +
-      "calls_today = CASE WHEN calls_day = ?2 THEN calls_today + 1 ELSE 1 END " +
-      "WHERE user_id = ?1 AND (calls_day <> ?2 OR calls_today < ?3) " +
-      "RETURNING api_key, calls_today",
-    [userId, today, limit],
-  )
-  const row = rows[0]
-  if (row && typeof row.api_key === "string") {
-    return { ok: true, apiKey: row.api_key, callsToday: Number(row.calls_today) }
-  }
-  const status = await keyStatus(driver, userId)
-  return { ok: false, reason: status.set ? "daily_limit" : "no_key" }
+export async function readKey(driver: SqlDriver, userId: number): Promise<string | null> {
+  const rows = await driver.exec("SELECT api_key FROM anthropic_keys WHERE user_id = ?1", [userId])
+  const key = rows[0]?.api_key
+  return typeof key === "string" ? key : null
 }
 
 export async function anthropicKey(

@@ -223,15 +223,51 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
 
 ## Tagging with Claude
 
-**A proof of concept**, open to every signed-in user with a key kept. A
-picked picture's window carries **Suggest** in its title bar — a sparkles
-icon and the word, beside the close control, busy until the answer is in —
-and that is the one way to tag: Claude is shown the picture and the board's
-features with the values in use, and answers with a caption and, per
-feature, the values that fit — an existing value spelled as given, or a
-short new one. Nothing is tagged unasked.
+**A proof of concept**, open to every signed-in user with a provider set
+up (below). A picked picture's window carries **Suggest** in its title bar
+— a sparkles icon and the word, beside the close control, busy until the
+answer is in — and that is the one way to tag: a vision model is shown the
+picture and the board's features with the values in use, and answers with
+a caption and, per feature, the values that fit — an existing value
+spelled as given, or a short new one. Nothing is tagged unasked.
 
-**The key is the user's own, and lives on the server.** Settings → API
+**Two providers, one path.** The request (`TagRequest`) says nothing about
+who is asked; the Worker's handler resolves that itself and the providers
+differ only in how the picture and the features go out and how the raw
+answer comes back (`TagProvider`, worker/handlers/board-tag.ts: a picture
+and the features in, the model's text out). Everything else is shared —
+the day's count, the refusal codes, one step that reads the text leniently
+(`extractJson`: a code fence or words around the object are stripped) into
+a `TagSuggestion` through the same `readTagSuggestion` (trimmed,
+de-duplicated, capped, one value for a single-value feature; an answer
+that is not a suggestion is a 422) — and on the client one `suggestionOps`
+batch through `suggestTags`.
+
+- **Anthropic** — the Messages API with the user's own key, open to every
+  signed-in user who keeps one under Settings → AI, with a JSON schema the
+  answer is held to.
+- **Cloudflare** — Workers AI (`env.AI`, wrangler.jsonc), free within
+  Cloudflare's allowance of 10,000 neurons a day for the whole Worker,
+  behind the `cloudflareAi` feature flag (admin only by default). While the
+  flag allows it, Settings → AI offers **Use Cloudflare AI**, a preference
+  of the account. The model is `@cf/google/gemma-4-26b-a4b-it`
+  (`CLOUDFLARE_AI_MODEL`), asked with the same picture (as a data URL in a
+  chat-completion message) and the same features. Workers AI's JSON mode is
+  not something every model there honours, so the prompt asks for the JSON
+  shape in so many words, `response_format` with the schema is tried first
+  and the call made again without it if refused, and the answer is parsed
+  out of whatever came back.
+
+**One router, Anthropic first.** `resolveAiProvider` (src/data/ai-router.ts)
+is the one place the order lives: Anthropic if the account has a key kept →
+Cloudflare if the `cloudflareAi` flag allows the account and **Use
+Cloudflare AI** is ticked → none. The Worker reads it from its own truth on
+every request — the key row, the flag's audience, the stored preference —
+so the client never chooses; `useAiAvailable` (src/hooks/ai.ts) reads the
+same router over what the sign-in knows, only to show and enable the same
+answer, and anything the client says about a provider is ignored.
+
+**The key is the user's own, and lives on the server.** Settings → AI
 takes an Anthropic API key and keeps it in the control plane's
 `anthropic_keys` table (migrations/0018), one row per account, reached
 through `/api/anthropic-key` (worker/handlers/anthropic-key.ts). The route
@@ -252,10 +288,13 @@ reading them from D1, on purpose: the browser's graph is the one that
 knows the board now (a value picked a moment ago may not have reached the
 replica yet), and the Worker trusts the body as prompt text only and
 writes nothing to the graph. Refusals are codes the client
-puts into words (src/data/suggest-tags.ts): no key kept (412), a key
-Anthropic refuses (422), the day's calls spent (429 — a
-fuse of 300 a day on the user's own bill, counted on the key's row), a
-picture too large or in a format the API does not read (413, 415).
+puts into words (src/data/suggest-tags.ts): nothing set up (412), a key
+Anthropic refuses (422), the day's calls spent (429 — a fuse of 300 a day
+per account whoever answers, counted in `ai_usage`, migrations/0019; the
+`calls_*` columns 0018 gave the key's row are no longer written), a picture
+too large or in a format the API does not read (413, 415), Cloudflare
+chosen with no binding (501), the provider failing (502), and an answer
+that is not a suggestion (422).
 
 **Applying the answer** is the board's ordinary writes. `suggestionOps`
 (src/data/boards.ts) reads the suggestion into one batch — a caption only

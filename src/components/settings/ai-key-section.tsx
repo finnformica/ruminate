@@ -18,7 +18,7 @@ import { SettingsSection } from "../settings-section"
  * offers to remove it; without, a box to paste one into and Save. A label
  * and nothing under it (docs/settings.md).
  */
-export function ApiKeySection() {
+export function AnthropicKeySection() {
   const key = useAnthropicKey()
   const [draft, setDraft] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
