@@ -158,9 +158,9 @@ function BoardPage({ boardId }: { boardId: string }) {
   // way they came, the first new picture opens in the window straight
   // away, under its spinner, so it can be captioned and tagged while its
   // bytes are still going up.
-  const addFiles = (files: File[]) => {
+  const addFiles = (files: File[], source?: "camera" | "photos") => {
     if (files.length === 0) return
-    const [first] = writes.addImages(files)
+    const [first] = writes.addImages(files, source)
     if (first) setSelectedId(first)
   }
   React.useEffect(() => {

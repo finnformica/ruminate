@@ -8,6 +8,8 @@ import {
   boardImageIds,
   clearValueOps,
   featureBlockId,
+  imageLocationOf,
+  imageLocationOps,
   imageUploadedOps,
   imageValues,
   inverseOps,
@@ -525,5 +527,73 @@ describe("resetImageOps", () => {
     const snapshot = boardOf()
     expect(resetImageOps(snapshot, "b", "blk_pic2000000")).toEqual([])
     expect(resetImageOps(snapshot, "nope", "blk_pic1000000")).toEqual([])
+  })
+})
+
+describe("where a picture was taken", () => {
+  const AT = { lat: 46.05127, lon: 14.50556 }
+
+  it("goes on the block with the asset when known by then, and not otherwise", () => {
+    const snapshot = applyOps(boardOf(), addImageOps(boardOf(), "b", "blk_new0000000"), NOW)
+    const placed = applyOps(
+      snapshot,
+      imageUploadedOps("blk_new0000000", { id: "img_abcdefabcdef", width: 40, height: 30 }, AT),
+      NOW,
+    )
+    expect(JSON.parse(placed.nodes.get("blk_new0000000")?.props ?? "null")).toEqual({
+      image: "img_abcdefabcdef",
+      width: 40,
+      height: 30,
+      lat: 46.05127,
+      lon: 14.50556,
+    })
+    expect(imageLocationOf(placed, "blk_new0000000")).toEqual(AT)
+    const unplaced = applyOps(
+      snapshot,
+      imageUploadedOps("blk_new0000000", { id: "img_abcdefabcdef" }, null),
+      NOW,
+    )
+    expect(JSON.parse(unplaced.nodes.get("blk_new0000000")?.props ?? "null")).toEqual({
+      image: "img_abcdefabcdef",
+    })
+    expect(imageLocationOf(unplaced, "blk_new0000000")).toBeNull()
+  })
+
+  it("is added afterwards to the props the block has, and not to a block that is gone", () => {
+    let snapshot = applyOps(boardOf(), addImageOps(boardOf(), "b", "blk_new0000000"), NOW)
+    snapshot = applyOps(
+      snapshot,
+      imageUploadedOps("blk_new0000000", { id: "img_abcdefabcdef", width: 40, height: 30 }),
+      NOW,
+    )
+    const ops = imageLocationOps(snapshot, "blk_new0000000", AT)
+    expect(kinds(ops)).toEqual(["setProps"])
+    const placed = applyOps(snapshot, ops, NOW)
+    expect(JSON.parse(placed.nodes.get("blk_new0000000")?.props ?? "null")).toEqual({
+      image: "img_abcdefabcdef",
+      width: 40,
+      height: 30,
+      lat: 46.05127,
+      lon: 14.50556,
+    })
+    expect(imageLocationOps(snapshot, "blk_missing000", AT)).toEqual([])
+    const gone = applyOps(snapshot, [{ op: "delete", id: "blk_new0000000" }], NOW)
+    expect(imageLocationOps(gone, "blk_new0000000", AT)).toEqual([])
+  })
+
+  it("reads nothing off a block whose coordinates are not numbers", () => {
+    const snapshot = applyOps(
+      boardOf(),
+      [
+        {
+          op: "setProps",
+          id: "blk_pic1000000",
+          props: JSON.stringify({ image: "img_x", lat: "46", lon: 14 }),
+        },
+      ],
+      NOW,
+    )
+    expect(imageLocationOf(snapshot, "blk_pic1000000")).toBeNull()
+    expect(imageLocationOf(snapshot, "blk_pic2000000")).toBeNull()
   })
 })

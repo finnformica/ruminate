@@ -1,4 +1,4 @@
-import type { TagFeature, TagResponse, TagSuggestion } from "./auto-tag"
+import type { TagFeature, TagLocation, TagResponse, TagSuggestion } from "./auto-tag"
 import { sessionFetch } from "./session-fetch"
 
 /**
@@ -94,10 +94,13 @@ export function suggestTagsDetail(parts: {
 export async function requestTagSuggestion(
   image: Blob,
   features: TagFeature[],
+  location?: TagLocation | null,
 ): Promise<TagSuggestion> {
   const form = new FormData()
   form.set("image", image, "picture")
-  form.set("features", JSON.stringify(features))
+  // The one field beside the picture: the request's JSON (`TagRequest`),
+  // the features and, when the picture's block carries one, its location.
+  form.set("features", JSON.stringify(location ? { features, location } : { features }))
   // No Content-Type: the browser writes the form's own, boundary and all.
   const response = await sessionFetch(
     "/api/boards/tag",

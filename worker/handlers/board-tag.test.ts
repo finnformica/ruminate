@@ -74,8 +74,15 @@ function messageWith(output: unknown, stopReason = "end_turn"): Response {
   )
 }
 
+/** What the stub answers Nominatim with, and what it was asked. */
+let nominatim: { reply: () => Response; calls: string[] }
+
 const fetchStub = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input)
+  if (url.startsWith("https://nominatim.openstreetmap.org/reverse")) {
+    nominatim.calls.push(url)
+    return nominatim.reply()
+  }
   if (url === "https://api.github.com/user") {
     const auth = (init?.headers as Record<string, string> | undefined)?.Authorization ?? ""
     const token = /^Bearer (.+)$/.exec(auth)?.[1] ?? ""
@@ -180,6 +187,14 @@ beforeEach(async () => {
   harness = await createMcpTestEnv()
   await harness.addUser(USER)
   anthropic = { calls: [], reply: () => messageWith(GOOD) }
+  nominatim = {
+    calls: [],
+    reply: () =>
+      new Response(JSON.stringify({ display_name: "Ljubljana, Slovenia" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+  }
 })
 
 describe("before the call", () => {
@@ -646,5 +661,78 @@ describe("the Cloudflare call, as it goes out and comes back", () => {
     expect(typeof body.message).toBe("string")
     expect(body.message).toContain("Overloaded")
     expect(JSON.stringify(body)).not.toContain(KEY)
+  })
+})
+
+// -----------------------------------------------------------------------------
+// Where the picture was taken: a place name for the prompt, when the
+// block carries coordinates. Nominatim stubbed: it is not called from here.
+// -----------------------------------------------------------------------------
+
+describe("a location with the request", () => {
+  const AT = { lat: 46.05127, lon: 14.50556 }
+  const promptText = () => anthropic.calls[0].body.messages[0].content[1].text as string
+
+  it("names the place for the model, asked of Nominatim once", async () => {
+    await keepKey()
+    const response = await send(tagRequest({ features: { features: FEATURES, location: AT } }))
+    expect(response.status).toBe(200)
+    expect(nominatim.calls).toEqual([
+      "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat=46.05127&lon=14.50556",
+    ])
+    expect(promptText()).toContain("- Location (one value): Values in use: Mauritius, Lisbon")
+    expect(promptText()).toContain(
+      "The picture was taken at: Ljubljana; Slovenia (most specific first). For Location, use a value in use that covers the place; otherwise name it as a person would in conversation — the country by default, or the everyday short name of a notable specific place such as an airport, a landmark or a city.",
+    )
+  })
+
+  it("gives the coordinates when no place can be found, and still tags", async () => {
+    await keepKey()
+    nominatim.reply = () => new Response("", { status: 503 })
+    const response = await send(tagRequest({ features: { features: FEATURES, location: AT } }))
+    expect(response.status).toBe(200)
+    expect(promptText()).toContain(
+      "The picture was taken at latitude 46.05127, longitude 14.50556: name the town or area for Location.",
+    )
+  })
+
+  it("says nothing of a location when there is none, and drops one off the globe", async () => {
+    await keepKey()
+    expect((await send(tagRequest())).status).toBe(200)
+    expect(nominatim.calls).toEqual([])
+    expect(promptText()).not.toContain("The picture was taken")
+
+    anthropic.calls = []
+    const response = await send(
+      tagRequest({ features: { features: FEATURES, location: { lat: 95, lon: 14 } } }),
+    )
+    expect(response.status).toBe(200)
+    expect(nominatim.calls).toEqual([])
+    expect(promptText()).not.toContain("The picture was taken")
+  })
+
+  it("asks Nominatim nothing for a call the day refuses", async () => {
+    await keepKey()
+    expect(
+      (await send(tagRequest({ features: { features: [], location: AT } }), { dailyLimit: 1 }))
+        .status,
+    ).toBe(200)
+    const response = await send(tagRequest({ features: { features: [], location: AT } }), {
+      dailyLimit: 1,
+    })
+    expect(response.status).toBe(429)
+    expect(nominatim.calls).toHaveLength(1)
+  })
+
+  it("reaches the Cloudflare provider's prompt too", async () => {
+    await allowCloudflare()
+    await optIntoCloudflare()
+    const ai = fakeAi(() => completion(JSON.stringify(GOOD)))
+    Object.assign(harness.env, { AI: ai.binding })
+    expect(
+      (await send(tagRequest({ features: { features: FEATURES, location: AT } }))).status,
+    ).toBe(200)
+    const text = ai.calls[0].input.messages[1].content[1].text as string
+    expect(text).toContain("The picture was taken at: Ljubljana; Slovenia")
   })
 })

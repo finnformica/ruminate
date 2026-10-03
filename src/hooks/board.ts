@@ -8,7 +8,10 @@ import {
   boardFeatures,
   boardImageIds,
   clearValueOps,
+  imageLocationOf,
+  imageLocationOps,
   imageUploadedOps,
+  type ImageLocation,
   inverseOps,
   isBoard,
   outlineImageIds,
@@ -24,6 +27,8 @@ import {
   type ValueRef,
 } from "../data/boards"
 import { requestDatabaseFlush } from "../data/database-mode"
+import { devicePosition } from "../data/device-position"
+import { readExifLocation } from "../data/exif-location"
 import { visionCopy } from "../data/image-fit"
 import {
   ImageUploadError,
@@ -149,7 +154,10 @@ export interface BoardWrites {
   /** Writes a row for each picture and hands back their ids at once, in
    * the order given; the uploads go on behind. Empty when nothing could
    * be added. */
-  addImages: (files: File[]) => string[]
+  /** Add pictures; `source` says where they came from, which is where
+   * their location comes from: the camera's from the device, a library's
+   * from the picture's own metadata. Neither is required. */
+  addImages: (files: File[], source?: "camera" | "photos") => string[]
   setValue: (feature: BoardFeature, imageId: string, ref: ValueRef) => void
   clearValue: (feature: BoardFeature, value: BoardValue, imageId: string) => void
   /** Take every value off a picture, all features at once, as one undoable
@@ -280,7 +288,11 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
         return
       }
       try {
-        const suggestion = await requestTagSuggestion(picture, tagFeaturesOf(snapshot, boardId))
+        const suggestion = await requestTagSuggestion(
+          picture,
+          tagFeaturesOf(snapshot, boardId),
+          imageLocationOf(snapshot, imageId),
+        )
         const ops = suggestionOps(
           store.get(graphSnapshotAtom),
           boardId,
@@ -309,9 +321,19 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
    * while its bytes are still going up — the caption and the features are
    * the row's own and take at once, and the asset id joins them when it
    * lands. A failed upload takes its row back out and says why.
+   *
+   * Where a picture was taken goes on its block as `lat`/`lon`, when it can
+   * be known (docs/boards.md, "Tagging with Claude"): a picture from the
+   * CAMERA is placed by the device, asked once for all of them as the
+   * uploads start, with the browser's own permission prompt, and never
+   * waited for — a position that answers after the asset has landed is
+   * added to the block by a follow-up op, and one that answers after the
+   * upload failed is dropped with the row; a picture from the PHOTOS
+   * library is placed by its own EXIF, read from the original before the
+   * fitter strips it. A picture with no coordinates gets no such props.
    */
   const addImages = React.useCallback(
-    (files: File[]): string[] => {
+    (files: File[], source?: "camera" | "photos"): string[] => {
       if (!canUpload) return []
       const queued: { id: string; file: File }[] = []
       for (const file of files) {
@@ -324,12 +346,32 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
         queued.push({ id, file })
       }
       if (queued.length === 0) return []
+      // The device's position, for the camera's pictures: one ask, beside
+      // the uploads, never holding them. What it answers is written where
+      // the row stands by then.
+      const landed = new Set<string>()
+      let position: ImageLocation | null = null
+      const positioned =
+        source === "camera"
+          ? devicePosition().then((found) => {
+              position = found
+              if (!found) return
+              for (const { id } of queued) {
+                if (!landed.has(id)) continue
+                apply(imageLocationOps(store.get(graphSnapshotAtom), id, found))
+              }
+              void requestDatabaseFlush()
+            })
+          : null
+      void positioned
       void (async () => {
         for (const { id, file } of queued) {
           try {
+            const exif = source === "photos" ? await readExifLocation(file) : null
             const asset = await uploadImage(file)
             primeImageObjectUrl(asset.id, file)
-            apply(imageUploadedOps(id, asset))
+            apply(imageUploadedOps(id, asset, exif ?? position))
+            landed.add(id)
           } catch (error) {
             apply(deleteBlockOps(id, store.get(graphSnapshotAtom)))
             toast.error(error instanceof ImageUploadError ? error.message : "Image upload failed")

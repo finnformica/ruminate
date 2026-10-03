@@ -334,6 +334,34 @@ answer as it came, or the error's words), and the toast that shows it has
 a **Copy** action that puts those lines on the clipboard, so a failure can
 be reported as it was rather than described.
 
+**Where the picture was taken** gives the model a place for Location. A
+picture added from the board may carry `lat` and `lon` on its block (WGS84,
+five decimal places), set at upload: one taken with the **Camera** button
+is placed by the device's position (`devicePosition`,
+src/data/device-position.ts — asked once as the uploads start, with the
+browser's own permission prompt and no copy of ours, never waited for,
+written to the block by a follow-up op when it answers late and dropped
+with the row when the upload failed); one picked with **Photos** is placed
+by the picture's own EXIF GPS block, read by hand from the original before
+the fitter strips it (`readExifLocation`, src/data/exif-location.ts — a
+JPEG's first quarter megabyte, no dependency; iOS usually strips it from
+what it hands a web page, so a library picture is often unplaced). A
+picture with no coordinates gets no such props and no Location hint. With
+them, the request carries `location` (validated by `readTagRequest`:
+finite, on the globe, else dropped) and the Worker asks OpenStreetMap's
+Nominatim once (`reverseGeocode`, worker/geocode.ts: `zoom=18`, named per
+its usage policy, in English, held to three seconds, after the day's call
+is counted and never failing the tag) for the place's whole chain of names,
+most specific first — `display_name` with postcodes and house numbers
+dropped, each name once, "; "-joined, cut to 160 characters: "Ljubljana
+Jože Pučnik Airport; Zgornji Brnik; Cerklje na Gorenjskem; Upper Carniola;
+Slovenia". The prompt gives the model the chain and asks it to name the
+place as a person would in conversation: a value in use that covers it,
+else the country by default, or the everyday short name of a notable
+specific place — an airport, a landmark, a city — rather than the precise
+village the chain begins with. With coordinates but no chain it gives them
+and asks for the town or area.
+
 **Reading the answer** is the same for both providers (`readTagSuggestion`,
 src/data/auto-tag.ts). The caption's first letter is upper-cased. A value
 that matches one in use — trimmed, whatever its case — comes back spelled
