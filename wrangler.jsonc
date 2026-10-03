@@ -29,6 +29,10 @@
       // The account's preferences — the settings that follow the account
       // rather than the device (src/data/preferences.ts).
       "/api/preferences",
+      // Tagging a board's pictures with Claude (docs/boards.md): the user's
+      // own Anthropic API key, and the route that asks the model.
+      "/api/anthropic-key",
+      "/api/boards/tag",
       "/api/admin",
       "/api/admin/*",
       // Sharing: shares given and received, and the slice a grantee reads

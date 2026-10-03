@@ -691,6 +691,19 @@ export function ImageIcon16(props: IconProps) {
   )
 }
 
+/** A four-point sparkle with a smaller one beside it: what asks Claude for
+ * a picture's tags (src/components/boards/board-inspector.tsx). */
+export function SparklesIcon16(props: IconProps) {
+  return (
+    <Icon size={16} fill="none" stroke="currentColor" strokeWidth={1.5} {...props}>
+      <path
+        strokeLinejoin="round"
+        d="M6.25 3.75C6.25 7.5 8.5 9.75 12.25 9.75C8.5 9.75 6.25 12 6.25 15.75C6.25 12 4 9.75 0.25 9.75C4 9.75 6.25 7.5 6.25 3.75ZM12.5 0.75C12.5 2.5 13.5 3.5 15.25 3.5C13.5 3.5 12.5 4.5 12.5 6.25C12.5 4.5 11.5 3.5 9.75 3.5C11.5 3.5 12.5 2.5 12.5 0.75Z"
+      />
+    </Icon>
+  )
+}
+
 export function HistoryIcon16(props: IconProps) {
   return (
     <Icon size={16} {...props}>

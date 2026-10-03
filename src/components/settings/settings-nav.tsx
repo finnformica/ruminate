@@ -21,7 +21,7 @@ import { ChevronLeftIcon16, ChevronRightIcon16 } from "../icons"
  * the always-mounted sidebar carries the list without the cards.
  */
 export type SettingsPageId =
-  "account" | "preferences" | "sharing" | "mcp" | "data" | "about" | "admin"
+  "account" | "preferences" | "sharing" | "mcp" | "api" | "data" | "about" | "admin"
 
 export interface SettingsPage {
   id: SettingsPageId
@@ -59,6 +59,12 @@ const SETTINGS_PAGES: SettingsPage[] = [
     label: "MCP access",
     description: "Tokens that let an agent read or write your notes.",
     feature: "mcp",
+    signedIn: true,
+  },
+  {
+    id: "api",
+    label: "API",
+    description: "Enable AI-powered features.",
     signedIn: true,
   },
   {

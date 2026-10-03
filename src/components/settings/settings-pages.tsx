@@ -7,6 +7,7 @@ import { SharingSection } from "../sharing-section"
 import { AboutSection } from "./about-section"
 import { AccountSection } from "./account-section"
 import { AppearanceSection } from "./appearance-section"
+import { ApiKeySection } from "./api-key-section"
 import { ChangelogSection } from "./changelog-section"
 import { EditorSection } from "./editor-section"
 import { FeaturesSection } from "./features-section"
@@ -39,6 +40,8 @@ export function SettingsPageContent({ id }: { id: SettingsPageId }) {
       return <SharingSection />
     case "mcp":
       return <McpTokensSection />
+    case "api":
+      return <ApiKeySection />
     case "data":
       return (
         <>

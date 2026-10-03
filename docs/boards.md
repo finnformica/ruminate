@@ -221,6 +221,59 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
   toggle — and **New…**, which asks for a name in a dialog of its own
   (`new-value-dialog.tsx`).
 
+## Tagging with Claude
+
+**A proof of concept**, open to every signed-in user with a key kept. A
+picked picture's window carries **Suggest** in its title bar — a sparkles
+icon and the word, beside the close control, busy until the answer is in —
+and that is the one way to tag: Claude is shown the picture and the board's
+features with the values in use, and answers with a caption and, per
+feature, the values that fit — an existing value spelled as given, or a
+short new one. Nothing is tagged unasked.
+
+**The key is the user's own, and lives on the server.** Settings → API
+takes an Anthropic API key and keeps it in the control plane's
+`anthropic_keys` table (migrations/0018), one row per account, reached
+through `/api/anthropic-key` (worker/handlers/anthropic-key.ts). The route
+never answers with the key: `GET` says whether one is kept and its last
+four characters, and that is all the browser ever holds
+(src/data/anthropic-key.ts). It is stored as pasted, not encrypted at
+rest — D1 is reached only through the Worker — which is one of the things
+that would have to change before this left the proof-of-concept stage.
+
+**The call** is `POST /api/boards/tag` (worker/handlers/board-tag.ts):
+the asset's id and the board's features (`TagRequest`,
+src/data/auto-tag.ts). The Worker reads the bytes from the caller's own
+prefix in R2 — the key minted from the session, as images.ts mints it —
+and sends them with a fixed system prompt and a JSON schema the answer is
+held to (structured output) to the Messages API, as `claude-haiku-4-5`
+with the caller's key. The client sends the features rather than the Worker
+reading them from D1, on purpose: the browser's graph is the one that
+knows the board now (a value picked a moment ago may not have reached the
+replica yet), and the Worker trusts the body as prompt text only and
+writes nothing to the graph. Refusals are codes the client
+puts into words (src/data/suggest-tags.ts): no key kept (412), a key
+Anthropic refuses (422), the day's calls spent (429 — a
+fuse of 300 a day on the user's own bill, counted on the key's row), a
+picture too large or in a format the API does not read (413, 415).
+
+**Applying the answer** is the board's ordinary writes. `suggestionOps`
+(src/data/boards.ts) reads the suggestion into one batch — a caption only
+where the picture has none, a single-value feature only where the picture
+carries none of its values, a multi-value feature's values added to those
+carried — each value through `setValueOps` by text, so an existing value
+is reused and a new one made, and the batch built up against the snapshot
+as each write would leave it, so two new values under one new feature make
+one feature block. It fills in and never overrides what a person set, and
+it is one toast with one **Undo**. Nothing to add is a toast that says so.
+
+Deliberately not done: encrypting the key at rest; a cheaper picture for
+the call (the full bytes go, under the API's five-megabyte base64 cap —
+a picture larger than that is refused rather than resized); tagging in
+bulk, or on upload (only the inspector's button asks); any caching of
+answers; and prompt tuning beyond the one system prompt. Signed out there
+is no key, so nothing of this shows.
+
 ## Not yet
 
 - **Thumbnails.** A tile draws the picture's full bytes, as the editor does.

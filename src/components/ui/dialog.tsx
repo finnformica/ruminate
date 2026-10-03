@@ -8,11 +8,15 @@ import { Surface } from "./surface"
 
 type ContentProps = Omit<BaseDialog.Popup.Props, "title"> & {
   title: React.ReactNode
+  /** Controls that act on what the dialog shows, in the header beside the
+   * close control (`IconButton`s, as the close control is). */
+  actions?: React.ReactNode
 }
 
 /**
  * A dialog's window: the modal surface, a titled header with the close
- * control, and the body scrolling beneath it.
+ * control — and, before it, any `actions` that act on what the dialog
+ * shows — and the body scrolling beneath it.
  *
  * Base UI holds the dialog — focus is trapped, the page behind is locked and
  * inert, <kbd>Esc</kbd> and the close control put it away — and the surface
@@ -23,7 +27,7 @@ type ContentProps = Omit<BaseDialog.Popup.Props, "title"> & {
  * the body holds is told it is in the modal layer (`InModalContext`), so a
  * menu opened from it floats above the window rather than behind it.
  */
-function Content({ title, className, children, ...props }: ContentProps) {
+function Content({ title, actions, className, children, ...props }: ContentProps) {
   return (
     <BaseDialog.Portal>
       <BaseDialog.Backdrop className="fixed inset-0 z-modal bg-bg-scrim transition-opacity duration-base data-ending-style:opacity-0 data-starting-style:opacity-0" />
@@ -37,17 +41,18 @@ function Content({ title, className, children, ...props }: ContentProps) {
       >
         <div className="flex h-12 items-center justify-between border-b border-border-secondary px-4">
           <BaseDialog.Title className="font-bold">{title}</BaseDialog.Title>
-          <BaseDialog.Close
-            render={
-              <IconButton
-                aria-label="Close"
-                className="-m-2 coarse:-m-3 coarse:rounded-lg"
-                disableTooltip
-              />
-            }
-          >
-            <XIcon16 />
-          </BaseDialog.Close>
+          {/* The controls pull into the header's padding as the close
+              control does, so the actions sit level with it. */}
+          <div className="-m-2 flex items-center gap-1 coarse:-m-3 coarse:gap-2">
+            {actions}
+            <BaseDialog.Close
+              render={
+                <IconButton aria-label="Close" className="coarse:rounded-lg" disableTooltip />
+              }
+            >
+              <XIcon16 />
+            </BaseDialog.Close>
+          </div>
         </div>
         <div className="overflow-auto p-4">
           <InModalContext.Provider value={true}>{children}</InModalContext.Provider>
