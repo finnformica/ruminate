@@ -65,7 +65,7 @@ const SETTINGS_PAGES: SettingsPage[] = [
   {
     id: "api",
     label: "API",
-    description: "Claude tagging the pictures on your boards, and the key it uses.",
+    description: "Enable AI-powered features.",
     signedIn: true,
   },
   {

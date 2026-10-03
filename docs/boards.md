@@ -211,9 +211,9 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
 ## Tagging with Claude
 
 **A proof of concept**, open to every signed-in user with a key kept. A
-picked picture's window carries **Suggest tags** in its title bar — the
-sparkles, beside the close control, busy until the answer is in — and that
-is the one way to tag: Claude is shown the picture and the board's
+picked picture's window carries **Suggest** in its title bar — a sparkles
+icon and the word, beside the close control, busy until the answer is in —
+and that is the one way to tag: Claude is shown the picture and the board's
 features with the values in use, and answers with a caption and, per
 feature, the values that fit — an existing value spelled as given, or a
 short new one. Nothing is tagged unasked.

@@ -6,7 +6,6 @@ import type { BoardWrites } from "../../hooks/board"
 import { usePending } from "../../hooks/pending"
 import { Button } from "../ui/button"
 import { Dialog } from "../ui/dialog"
-import { IconButton } from "../ui/icon-button"
 import { FormControl } from "../form-control"
 import { SparklesIcon16, TrashIcon16 } from "../icons"
 import { TextInput } from "../ui/text-input"
@@ -43,8 +42,8 @@ export function BoardInspector({
   const [naming, setNaming] = React.useState<BoardFeature | null>(null)
 
   // Claude's caption and tags for this picture (docs/boards.md, "Tagging
-  // with Claude"): the sparkles in the title bar, busy from the press until
-  // the toast (docs/design-principles.md, Busy controls).
+  // with Claude"): **Suggest**, the sparkles in the title bar, busy from the
+  // press until the toast (docs/design-principles.md, Busy controls).
   const [suggest, suggesting] = usePending(() => writes.suggestTags(image.id))
 
   return (
@@ -56,15 +55,16 @@ export function BoardInspector({
         title={image.text.trim() || "Picture"}
         actions={
           writes.canSuggest ? (
-            <IconButton
-              aria-label="Suggest tags"
-              tooltipSide="bottom"
-              className="coarse:rounded-lg"
+            // The word is the control's name; the icon's slot is where the
+            // spinner goes.
+            <Button
+              size="small"
+              icon={<SparklesIcon16 />}
               loading={suggesting}
               onClick={() => suggest()}
             >
-              <SparklesIcon16 />
-            </IconButton>
+              Suggest
+            </Button>
           ) : null
         }
         className="max-h-[90vh] w-[calc(100vw-24px)] max-w-5xl"
