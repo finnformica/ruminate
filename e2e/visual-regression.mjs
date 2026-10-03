@@ -84,6 +84,8 @@ const STORIES = [
   { id: "tooltip--open", waitFor: "text=Search" },
   { id: "hovercard--open", waitFor: "text=Edited yesterday" },
   { id: "sheet--open", waitFor: "text=Turn into" },
+  // Every kind at once, fanned out: the last to mount is the one to wait for.
+  { id: "toaster--kinds", waitFor: '[data-sonner-toast][data-type="warning"]' },
   { id: "notice--info", waitFor: '#storybook-root [role="status"]' },
   { id: "notice--warning", waitFor: '#storybook-root [role="status"]' },
   { id: "notice--with-actions", waitFor: '#storybook-root [role="status"]' },
