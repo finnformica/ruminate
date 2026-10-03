@@ -6,7 +6,6 @@ import {
   addImageOps,
   boardFeatures,
   boardImageIds,
-  carryingAll,
   clearValueOps,
   featureBlockId,
   imageUploadedOps,
@@ -168,8 +167,8 @@ describe("addImageOps / imageUploadedOps", () => {
     expect(childIdsOf(next, "b")).not.toContain("blk_new0000000")
     expect(unassignedIds(next).has("blk_new0000000")).toBe(true)
     expect(next.nodes.get("blk_new0000000")?.notes_id).toBe("b")
-    // First on the board, ahead of the pictures the outline reaches.
-    expect(boardImageIds(next, "b")).toEqual(["blk_new0000000", "blk_pic1000000", "blk_pic2000000"])
+    // On the board, after the pictures the outline reaches.
+    expect(boardImageIds(next, "b")).toEqual(["blk_pic1000000", "blk_pic2000000", "blk_new0000000"])
     expect(addImageOps(snapshot, "nope", "blk_new0000001")).toEqual([])
 
     const landed = applyOps(
@@ -304,24 +303,6 @@ describe("setValueOps", () => {
         destination: "blk_pic5000000",
       }),
     ])
-  })
-})
-
-describe("carryingAll", () => {
-  it("keeps the pictures whose parents include every value", () => {
-    let snapshot = boardOf()
-    snapshot = applyOps(
-      snapshot,
-      setValueOps(snapshot, "b", FIXTURE, "blk_pic1000000", { text: "Lamp" }),
-      NOW,
-    )
-    const [, fixture] = boardFeatures(snapshot, "b")
-    const lamp = fixture.values[0].id
-    const all = boardImageIds(snapshot, "b")
-    expect(carryingAll(snapshot, all, [])).toEqual(all)
-    expect(carryingAll(snapshot, all, ["blk_mauritius0"])).toEqual(["blk_pic1000000"])
-    expect(carryingAll(snapshot, all, ["blk_mauritius0", lamp])).toEqual(["blk_pic1000000"])
-    expect(carryingAll(snapshot, all, ["blk_lisbon0000", lamp])).toEqual([])
   })
 })
 

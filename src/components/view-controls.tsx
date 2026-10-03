@@ -11,10 +11,12 @@ import {
   describeFilter,
   describeSort,
   FILTER_TYPE_OPTIONS,
+  filterText,
   filterValues,
   sortBranches,
   sortDirections,
   toggleFilterValue,
+  withFilterText,
   type AncestorFilterKey,
 } from "../utils/view-filter"
 import { Button } from "./ui/button"
@@ -36,8 +38,10 @@ import { QualifierPicture } from "./qualifier-suggestions"
  * (`src/utils/view-filter.ts`), so the menu and the box can never offer
  * different things.
  *
- * **Filter offers `type:`, `parent:` and `under:`**, though a filter typed
- * by hand understands the whole language. The rest of the vocabulary is
+ * **Filter offers `type:`, `parent:`, `under:` and the text** — the words
+ * the engine fuzzy-matches over each row's own text, which on a board are
+ * the captions — though a filter typed by hand understands the whole
+ * language. The rest of the vocabulary is
  * note-level: inside a single note it holds for every row or for none, so as
  * a menu item it is not a filter but a switch between the whole note and a
  * blank page. `in:` is left out too — it names the view's root, which is
@@ -100,11 +104,25 @@ function DefaultFooter({ onUpdateDefault, onResetDefault }: SavedViewActions) {
 /** The ancestor branches as the menu names them. */
 const ANCESTOR_LABELS: Record<AncestorFilterKey, string> = { parent: "Parent", under: "Under" }
 
+/**
+ * A branch a surface adds to the top of the Filter menu: a label and the
+ * blocks it offers as parents, each row a tick writing `parent:<id>` — the
+ * same qualifier the Parent branch's picker writes, so the surface's rows
+ * are a shortcut into the one filter, not a filter of their own. A board
+ * hands its features this way (docs/boards.md): Location, and under it the
+ * values on the page, with how many pictures carry each.
+ */
+export interface FilterBranch {
+  label: string
+  values: { id: string; label: string; count?: number }[]
+}
+
 export function FilterMenu({
   filter,
   onFilterChange,
   saved,
   scope,
+  branches,
 }: {
   /** The view's filter, as the query language writes it. */
   filter: string
@@ -114,6 +132,9 @@ export function FilterMenu({
   /** What the view is rooted at — the note, or the focused block — and so
    * what the Parent and Under pickers search within (`in:`). */
   scope?: string
+  /** What the surface offers as parents ahead of the language's own
+   * branches, if anything. */
+  branches?: readonly FilterBranch[]
 }) {
   const index = useAtomValue(blockIndexAtom)
   const graph = useAtomValue(graphSnapshotAtom)
@@ -145,6 +166,20 @@ export function FilterMenu({
     })
   }
 
+  // The words: the palette with nothing but the typed text to pick.
+  const text = filterText(filter)
+  const pickText = () => {
+    openPicker({
+      label: "Words to match",
+      placeholder: "Words…",
+      keep: () => false,
+      textRow: (typed) => `Contains “${typed}”`,
+      onPick: (choice) => {
+        if (choice.kind === "text") onFilterChange(withFilterText(filter, choice.text))
+      },
+    })
+  }
+
   return (
     <DropdownMenu modal={false}>
       <DropdownMenu.Trigger
@@ -165,6 +200,54 @@ export function FilterMenu({
         width={saved?.dirty ? 320 : undefined}
         footer={saved?.dirty ? <DefaultFooter {...saved} /> : undefined}
       >
+        {/* The surface's own branches first: each row ticks a block into
+            `parent:`, several at once a comma list — any of them, as the
+            language reads a list. Any takes this branch's rows out and
+            leaves the others. */}
+        {branches?.map((branch) => {
+          const parents = filterValues(filter, "parent")
+          const mine = branch.values.filter((value) => parents.includes(value.id))
+          const clearMine = () =>
+            onFilterChange(
+              mine.reduce((next, value) => toggleFilterValue(next, "parent", value.id), filter),
+            )
+          return (
+            <DropdownMenu.Submenu key={branch.label}>
+              <DropdownMenu.SubmenuTrigger
+                value={mine.map((value) => value.label).join(", ") || "Any"}
+              >
+                {branch.label}
+              </DropdownMenu.SubmenuTrigger>
+              <DropdownMenu.Content align="start" side="left" width={224}>
+                <DropdownMenu.Item
+                  selected={mine.length === 0}
+                  closeOnClick={false}
+                  onClick={clearMine}
+                >
+                  Any
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator />
+                {branch.values.map((value) => (
+                  <DropdownMenu.Item
+                    key={value.id}
+                    selected={parents.includes(value.id)}
+                    closeOnClick={false}
+                    trailingVisual={
+                      value.count !== undefined ? (
+                        <span className="text-sm text-text-secondary">{value.count}</span>
+                      ) : undefined
+                    }
+                    onClick={() => onFilterChange(toggleFilterValue(filter, "parent", value.id))}
+                  >
+                    {value.label}
+                  </DropdownMenu.Item>
+                ))}
+              </DropdownMenu.Content>
+            </DropdownMenu.Submenu>
+          )
+        })}
+        {branches && branches.length > 0 ? <DropdownMenu.Separator /> : null}
+
         {/* One branch per qualifier the menu offers. The block types come
             straight from the query box's picker; several at once is a comma
             list, exactly as it is typed. */}
@@ -238,6 +321,40 @@ export function FilterMenu({
             </DropdownMenu.Submenu>
           )
         })}
+
+        {/* The words: what is typed, as a tick that takes it out, and the
+            palette to type more — the typed text is its one row. */}
+        <DropdownMenu.Submenu>
+          <DropdownMenu.SubmenuTrigger value={text ? `“${text}”` : "Any"}>
+            Text
+          </DropdownMenu.SubmenuTrigger>
+          <DropdownMenu.Content align="start" side="left">
+            <DropdownMenu.Item
+              selected={text === ""}
+              closeOnClick={false}
+              onClick={() => onFilterChange(withFilterText(filter, ""))}
+            >
+              Any
+            </DropdownMenu.Item>
+            {text ? (
+              <DropdownMenu.Item
+                selected
+                closeOnClick={false}
+                onClick={() => onFilterChange(withFilterText(filter, ""))}
+              >
+                {`“${text}”`}
+              </DropdownMenu.Item>
+            ) : null}
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item
+              data-testid="filter-text-type"
+              icon={<SearchIcon16 />}
+              onClick={pickText}
+            >
+              Type…
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Submenu>
 
         <DropdownMenu.Separator />
         <DropdownMenu.Item disabled={filter === ""} onClick={() => onFilterChange("")}>

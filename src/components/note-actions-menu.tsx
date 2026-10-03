@@ -126,6 +126,9 @@ export function useNoteMenuEntries() {
         onDeleted?: () => void
         /** Opens the note's board page, where the surface can do so. */
         openBoard?: () => void
+        /** Opens the note's outline: what the board page passes instead,
+         * being the board already. */
+        openOutline?: () => void
       } = {},
     ) => {
       const shareId = jotaiStore.get(sharedOriginAtom).get(noteId)
@@ -163,25 +166,38 @@ export function useNoteMenuEntries() {
       // The board entries: which of them a note gets is its kind, read as
       // the menu opens, like the rest.
       const kind = jotaiStore.get(notesAtom).get(noteId)?.type
-      const canBoard = verbs === null && boardsEnabled && !!options.openBoard
+      const canBoard =
+        verbs === null && boardsEnabled && !!(options.openBoard || options.openOutline)
+      // On the board itself the way across is to the outline, and a board
+      // made a note is opened there, since the board page refuses a note.
       const boardEntries: MenuEntry[] = !canBoard
         ? []
         : kind === "board"
           ? [
-              {
-                kind: "item",
-                label: "Open board",
-                icon: <BoardIcon16 />,
-                onSelect: () => options.openBoard?.(),
-              },
+              options.openOutline
+                ? {
+                    kind: "item",
+                    label: "Open outline",
+                    icon: <NoteIcon16 />,
+                    onSelect: () => options.openOutline?.(),
+                  }
+                : {
+                    kind: "item",
+                    label: "Open board",
+                    icon: <BoardIcon16 />,
+                    onSelect: () => options.openBoard?.(),
+                  },
               {
                 kind: "item",
                 label: "Make this a note",
                 icon: <NoteIcon16 />,
-                onSelect: () => setNoteProps(noteId, { [BOARD_PROP]: null }),
+                onSelect: () => {
+                  setNoteProps(noteId, { [BOARD_PROP]: null })
+                  options.openOutline?.()
+                },
               },
             ]
-          : kind === "note"
+          : kind === "note" && options.openBoard
             ? [
                 {
                   kind: "item",
@@ -251,12 +267,16 @@ export function NoteActionsMenu({
   align = "start",
   editor,
   reorder,
+  surface = "outline",
 }: {
   noteId: string
   className?: string
   align?: "start" | "end"
   editor?: EditorActions
   reorder?: ReorderActions
+  /** Where the menu is drawn: the board page says so, and gets the way to
+   * the outline where every other surface gets the way to the board. */
+  surface?: "outline" | "board"
 }) {
   const entriesFor = useNoteMenuEntries()
   const navigate = useNavigate()
@@ -266,10 +286,9 @@ export function NoteActionsMenu({
   // viewing from the list also takes you home. Compare the decoded path
   // segment, not the raw pathname: a note id with a space or other special
   // character is percent-encoded in the URL, so a raw `=== /views/${noteId}`
-  // check would miss it and skip the redirect.
-  const openNoteId = location.pathname.startsWith("/views/")
-    ? decodeURIComponent(location.pathname.slice("/views/".length))
-    : ""
+  // check would miss it and skip the redirect. A board's page counts too.
+  const openMatch = location.pathname.match(/^\/(?:views|boards)\/(.+)$/)
+  const openNoteId = openMatch ? decodeURIComponent(openMatch[1]) : ""
   const onDeleted =
     editor?.onDeleted ??
     (openNoteId === noteId
@@ -326,7 +345,16 @@ export function NoteActionsMenu({
             ...entriesFor(noteId, {
               focusBlockId: editor?.focusBlockId,
               onDeleted,
-              openBoard: () => navigate({ to: "/boards/$", params: { _splat: noteId } }),
+              ...(surface === "board"
+                ? {
+                    openOutline: () =>
+                      navigate({
+                        to: "/views/$",
+                        params: { _splat: noteId },
+                        search: { query: undefined },
+                      }),
+                  }
+                : { openBoard: () => navigate({ to: "/boards/$", params: { _splat: noteId } }) }),
             }),
           ]}
         />

@@ -127,21 +127,22 @@ export function boardFeatures(snapshot: GraphSnapshot, boardId: NoteId): BoardFe
 }
 
 /**
- * The board's pictures, each once: first the ones in the note's Unassigned
- * basket — written in the note, reached by nothing, so not yet given a
- * value — most recently changed first, as the basket lists them; then
- * every image block the outline reaches, in document order.
+ * The board's pictures, each once: every image block the outline reaches,
+ * in document order, then the ones in the note's Unassigned basket —
+ * written in the note, reached by nothing, so not yet given a value — most
+ * recently changed first, as the basket lists them beneath the outline.
  */
 export function boardImageIds(snapshot: GraphSnapshot, boardId: NoteId): string[] {
+  const outline = outlineImageIds(snapshot, boardId)
+  const seen = new Set(outline)
+  return [...outline, ...unassignedImageIds(snapshot, boardId).filter((id) => !seen.has(id))]
+}
+
+/** The image blocks the note's outline reaches, in document order, once
+ * each — the rows a filter and a sort on the note can narrow. */
+export function outlineImageIds(snapshot: GraphSnapshot, boardId: NoteId): string[] {
   const out: string[] = []
   const seen = new Set<string>()
-  const add = (id: string) => {
-    if (seen.has(id)) return
-    if (snapshot.nodes.get(id)?.type !== IMAGE_TYPE) return
-    seen.add(id)
-    out.push(id)
-  }
-  for (const id of unassignedImageIds(snapshot, boardId)) add(id)
   const doc = noteDoc(boardId, snapshot)
   if (!doc) return out
   const path = new Set<string>()
@@ -149,7 +150,10 @@ export function boardImageIds(snapshot: GraphSnapshot, boardId: NoteId): string[
     for (const id of ids) {
       const block = doc.blocks[id]
       if (!block || path.has(id)) continue
-      add(id)
+      if (!seen.has(id) && snapshot.nodes.get(id)?.type === IMAGE_TYPE) {
+        seen.add(id)
+        out.push(id)
+      }
       path.add(id)
       walk(block.children)
       path.delete(id)
@@ -179,25 +183,6 @@ export function imageValues(
 ): BoardValue[] {
   const parents = new Set(parentIdsOf(snapshot, imageId))
   return state.values.filter((value) => parents.has(value.id))
-}
-
-/**
- * The pictures carrying every one of `valueIds`: a value is carried when
- * the value block is one of the picture's parents. Tested here rather than
- * as `in:` scopes in a search, because a search tests each `in:` against
- * one occurrence's ancestry, and a picture under two values is on two
- * paths, neither of which passes both.
- */
-export function carryingAll(
-  snapshot: GraphSnapshot,
-  imageIds: readonly string[],
-  valueIds: readonly string[],
-): string[] {
-  if (valueIds.length === 0) return [...imageIds]
-  return imageIds.filter((imageId) => {
-    const parents = new Set(parentIdsOf(snapshot, imageId))
-    return valueIds.every((valueId) => parents.has(valueId))
-  })
 }
 
 /** The sort key that puts a new child last under `parentId`. */

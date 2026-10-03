@@ -28,9 +28,7 @@ import {
   linkDirectionsAtom,
 } from "../global-state"
 import { useCreateNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
-import { useWriteView } from "../hooks/views"
-import { viewByRootAtom } from "../data/views"
-import { sharedViewByRootAtom } from "../data/shared-mode"
+import { useSavedView, useWriteView } from "../hooks/views"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
 import { pathToBlock } from "../data/graph"
@@ -47,36 +45,6 @@ import { isValidDateString, isValidWeekString, toDateString } from "../utils/dat
 
 /** What a note or block saved as its default view (docs/metadata.md), and
  * whether this session may write one. */
-interface SavedView {
-  filter: string
-  sort: string
-  /** Whether the header may offer to save: there is something to root a
-   * view at. A note shared with the user included — the view is the user's
-   * own row (`src/data/views.ts`), whoever owns the note. */
-  writable: boolean
-}
-
-const NO_SAVED_VIEW: SavedView = { filter: "", sort: "", writable: false }
-
-/**
- * The saved view of whatever the page is rooted at — the focused block, else
- * the note: the view row rooted there (docs/metadata.md, "Views"). A note
- * needs no row to be a view, and a block needs no row to save one. On a note
- * someone shared, the reader's own row wins, and the share's view — the
- * owner's filter and sort, which is what a share IS (docs/sharing.md) — fills
- * in behind it, so the note opens the way the owner meant it to.
- */
-function useSavedView(focusBlockId: string | null, noteId: string | undefined) {
-  const byRoot = useAtomValue(viewByRootAtom)
-  const sharedByRoot = useAtomValue(sharedViewByRootAtom)
-  return React.useMemo<SavedView>(() => {
-    const rootId = focusBlockId ?? noteId
-    if (!rootId) return NO_SAVED_VIEW
-    const view = byRoot.get(rootId) ?? sharedByRoot.get(rootId)
-    return { filter: view?.filter ?? "", sort: view?.sort ?? "", writable: true }
-  }, [focusBlockId, noteId, byRoot, sharedByRoot])
-}
-
 type RouteSearch = {
   query: string | undefined
   /** Block id the editor is focused on; absent = outside focus. */

@@ -7,12 +7,13 @@ import {
   addImageOps,
   boardFeatures,
   boardImageIds,
-  carryingAll,
   clearValueOps,
   imageUploadedOps,
   inverseOps,
   isBoard,
+  outlineImageIds,
   setCaptionOps,
+  unassignedImageIds,
   setValueOps,
   type BoardFeature,
   type BoardFeatureState,
@@ -30,18 +31,26 @@ import {
 } from "../data/images"
 import { deleteBlockOps, type Op } from "../data/ops"
 import { useApplyOps } from "../data/store"
-import { graphSnapshotAtom, isDatabaseModeAtom } from "../global-state"
+import { blockIndexAtom, graphSnapshotAtom, isDatabaseModeAtom } from "../global-state"
 import type { NoteId } from "../schema"
+import { viewNarrowing } from "../utils/view-narrowing"
 
 /**
  * A board (docs/boards.md) as the page draws it: whether the note is there,
- * its features as they stand, and its pictures in order. Derived from the
- * live graph, so an edit in the outline — or on another device — is on the
- * board at once.
+ * its features as they stand, and its pictures — the ones the outline
+ * reaches, in document order, and the ones in the note's Unassigned basket,
+ * apart, as the note page draws the basket beneath the outline. Derived
+ * from the live graph, so an edit in the outline — or on another device —
+ * is on the board at once.
  */
 export function useBoard(boardId: NoteId): {
   exists: boolean
   features: BoardFeatureState[]
+  /** The pictures the outline reaches, in document order. */
+  outlineIds: string[]
+  /** The basket's pictures, most recently changed first. */
+  basketIds: string[]
+  /** Both, once each: the outline's, then the basket's. */
   imageIds: string[]
 } {
   const snapshot = useAtomValue(graphSnapshotAtom)
@@ -49,6 +58,8 @@ export function useBoard(boardId: NoteId): {
     () => ({
       exists: isBoard(snapshot, boardId),
       features: boardFeatures(snapshot, boardId),
+      outlineIds: outlineImageIds(snapshot, boardId),
+      basketIds: unassignedImageIds(snapshot, boardId),
       imageIds: boardImageIds(snapshot, boardId),
     }),
     [snapshot, boardId],
@@ -56,32 +67,47 @@ export function useBoard(boardId: NoteId): {
 }
 
 /**
- * The pictures a narrowing keeps, in the board's order. The chosen values
- * are tested on each picture's parents (`carryingAll`); the typed words are
- * fuzzy-matched against captions with the search engine's own matcher and
- * threshold — run over the board's pictures directly, because the corpus
- * index holds only what a note reaches, and an untagged picture in the
- * basket is on the board too. Null when nothing narrows, so the caller
- * shows the board whole.
+ * The outline's pictures as the note's Filter and Sort leave them: the
+ * filter is a query-language string and the sort a comparator, both
+ * resolved through the search engine exactly as the note page resolves
+ * them (`viewNarrowing`, src/utils/view-narrowing.ts), so `parent:<value>`
+ * narrows the wall as it narrows the outline and `text:desc` orders it as
+ * it orders the rows. The basket's pictures are not here: the index holds
+ * what a note reaches, and the note page draws its basket whole beneath a
+ * narrowed outline, so the board does the same.
  */
-export function useBoardMatches(
-  imageIds: readonly string[],
-  valueIds: readonly string[],
-  text: string,
-): string[] | null {
+export function useBoardNarrowing(
+  boardId: NoteId,
+  filter: string,
+  sort: string,
+  outlineIds: readonly string[],
+): string[] {
+  const index = useAtomValue(blockIndexAtom)
+  return React.useMemo(() => {
+    const { matched, compare } = viewNarrowing({ filter, sort, noteId: boardId, index })
+    const kept = matched ? outlineIds.filter((id) => matched.has(id)) : [...outlineIds]
+    // `sort` is stable, so rows the comparator ties keep the note's order.
+    return compare ? kept.sort(compare) : kept
+  }, [index, boardId, filter, sort, outlineIds])
+}
+
+/**
+ * The pictures whose caption the typed words match, in the order given —
+ * fuzzy-matched with the search engine's own matcher and threshold, run
+ * over the board's pictures directly, because the corpus index holds only
+ * what a note reaches and an untagged picture in the basket is on the
+ * board too. Null when nothing is typed, so the caller shows them all.
+ */
+export function useBoardMatches(imageIds: readonly string[], text: string): string[] | null {
   const snapshot = useAtomValue(graphSnapshotAtom)
   return React.useMemo(() => {
     const fuzzy = text.trim()
-    if (valueIds.length === 0 && fuzzy === "") return null
-    let kept = carryingAll(snapshot, imageIds, valueIds)
-    if (fuzzy !== "") {
-      const captions = kept.map((id) => ({ id, text: snapshot.nodes.get(id)?.text ?? "" }))
-      const searcher = new Searcher(captions, { keySelector: (item) => item.text, threshold: 0.8 })
-      const matched = new Set(searcher.search(fuzzy).map((item) => item.id))
-      kept = kept.filter((id) => matched.has(id))
-    }
-    return kept
-  }, [snapshot, imageIds, valueIds, text])
+    if (fuzzy === "") return null
+    const captions = imageIds.map((id) => ({ id, text: snapshot.nodes.get(id)?.text ?? "" }))
+    const searcher = new Searcher(captions, { keySelector: (item) => item.text, threshold: 0.8 })
+    const matched = new Set(searcher.search(fuzzy).map((item) => item.id))
+    return imageIds.filter((id) => matched.has(id))
+  }, [snapshot, imageIds, text])
 }
 
 /** What the board page may write, and how. */
