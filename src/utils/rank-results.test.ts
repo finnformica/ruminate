@@ -25,6 +25,8 @@ const hit = (blockId: string, score?: number): BlockHit =>
     text: blockId,
     type: "text",
     ancestors: [],
+    parents: [],
+    lineage: [],
     note: note("n"),
     score,
   }) as BlockHit
