@@ -397,16 +397,31 @@ Placement conventions:
   the content they concern, sharing the page column's width.
 - Notices never float, overlay, or animate in — they are part of the page,
   and they leave by re-render (dismiss), not by transition.
-- **Toasts** ([sonner](https://sonner.emilkowal.ski), its `Toaster` mounted
-  once in `src/routes/_appRoot.tsx`; raise one with `toast.error(message)`)
-  are the one exception, for one job: telling the reader that something they
-  have _just done_ has failed, or did nothing — a picture that would not
-  upload, a paste of a block already under the target. A toast
-  floats in the bottom corner (above the phone nav bar), follows the system
-  theme, and leaves on its own after a few seconds or on its close button.
+- **Toasts** ([sonner](https://sonner.emilkowal.ski), drawn in the app's
+  colours by `Toaster` in `src/components/ui/toaster.tsx` and mounted once in
+  `src/routes/_appRoot.tsx`) are the one exception, for one job: answering
+  something the reader has _just done_, when the page cannot. A toast floats
+  in the bottom corner (above the phone nav bar), follows the app's colour
+  scheme, and leaves on its own after a few seconds or on its close button.
   It never carries state the reader must come back to — anything that
-  persists is a notice in the page, not a toast — and never a success
-  message: the picture landing is its own confirmation.
+  persists is a notice in the page, not a toast. A toast says one of three
+  things, and its colour says which before its words do:
+  - **It failed** — `toast.error(message)`, in the danger red: a picture
+    that would not upload, a preview that could not be fetched, a change a
+    share's owner refused. Every failure of something the reader did is
+    told, in a toast or in the control it came from.
+  - **It happened, and you cannot see it from here** — `toast.success(message)`,
+    in the success green: a note restored from Settings (it reappears in the
+    sidebar, not on the page), a note shared (the dialog has closed). Where
+    the page itself shows the result — a picture landing in the note, a
+    board's field taking its value — there is no toast: the result is its
+    own confirmation, and a green one on top of it is noise. A toast that
+    exists to carry an **Undo** for a change the reader can see is a plain
+    one, not a success: its job is the way back, not the news.
+  - **Nothing happened, and here is why** — `toast(message)`, on the plain
+    popup surface: a paste of a block already under the target, an edit to
+    a note shared read-only. Neither a failure nor a success, and painted as
+    neither.
 
 ### Copy
 
