@@ -150,24 +150,29 @@ function BoardPage({ boardId }: { boardId: string }) {
   )
   const narrowed = filter !== ""
 
-  // The picked picture, while it is still on the board.
+  // The picked picture, while it is still on the board. Read off the whole
+  // board rather than the narrowed wall: a picture just added opens in the
+  // window at once, and a filter that does not match its empty caption
+  // yet must not keep it out.
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
   const selected = React.useMemo(
-    () =>
-      selectedId
-        ? [...outlineImages, ...basketImages].find((image) => image.id === selectedId)
-        : undefined,
-    [outlineImages, basketImages, selectedId],
+    () => (selectedId && imageIds.includes(selectedId) ? toImages([selectedId])[0] : undefined),
+    [toImages, imageIds, selectedId],
   )
   React.useEffect(() => {
     if (selectedId && !imageIds.includes(selectedId)) setSelectedId(null)
   }, [selectedId, imageIds])
   const close = React.useCallback(() => setSelectedId(null), [])
 
-  // Adding pictures: the buttons' pickers, a drop anywhere on the page, or
-  // a paste while nothing else is taking the keys.
+  // Adding pictures: the buttons' pickers, the camera, a drop anywhere on
+  // the page, or a paste while nothing else is taking the keys. Whichever
+  // way they came, the first new picture opens in the window straight
+  // away, under its spinner, so it can be captioned and tagged while its
+  // bytes are still going up.
   const addFiles = (files: File[]) => {
-    if (files.length > 0) void writes.addImages(files)
+    if (files.length === 0) return
+    const [first] = writes.addImages(files)
+    if (first) setSelectedId(first)
   }
   React.useEffect(() => {
     if (!writes.canUpload) return
