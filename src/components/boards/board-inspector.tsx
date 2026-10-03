@@ -62,15 +62,17 @@ export function BoardInspector({
         title={image.text.trim() || "Picture"}
         actions={
           writes.canSuggest ? (
-            // The word is the control's name; the icon's slot is where the
-            // spinner goes.
+            // The icon's slot is where the spinner goes. On a phone the
+            // title bar has no room for the word, so the sparkles stand
+            // alone there and the name is the label.
             <Button
               size="small"
+              aria-label="Suggest tags"
               icon={<SparklesIcon16 />}
               loading={suggesting}
               onClick={() => suggest()}
             >
-              Suggest
+              <span className="hidden sm:inline">Suggest</span>
             </Button>
           ) : null
         }

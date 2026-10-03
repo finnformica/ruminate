@@ -34,16 +34,21 @@ function Content({ title, actions, className, children, ...props }: ContentProps
       <BaseDialog.Popup
         render={<Surface tier="modal" />}
         className={cx(
-          "fixed left-1/2 top-1/2 z-modal grid max-h-[75vh] w-[calc(100vw-24px)] max-w-md -translate-x-1/2 -translate-y-1/2 grid-rows-[auto_1fr] overflow-hidden focus:outline-hidden",
+          // The one column is `minmax(0,1fr)`, not `auto`: an auto column grows to
+          // its content, and a title kept to one line would widen the window
+          // past the screen rather than be cut.
+          "fixed left-1/2 top-1/2 z-modal grid max-h-[75vh] w-[calc(100vw-24px)] max-w-md -translate-x-1/2 -translate-y-1/2 grid-cols-[minmax(0,1fr)] grid-rows-[auto_1fr] overflow-hidden focus:outline-hidden",
           className,
         )}
         {...props}
       >
-        <div className="flex h-12 items-center justify-between border-b border-border-secondary px-4">
-          <BaseDialog.Title className="font-bold">{title}</BaseDialog.Title>
+        <div className="flex h-12 items-center justify-between gap-3 border-b border-border-secondary px-4">
+          {/* One line, however long the title: the controls keep their
+              room and the title is cut with an ellipsis. */}
+          <BaseDialog.Title className="min-w-0 flex-1 truncate font-bold">{title}</BaseDialog.Title>
           {/* The controls pull into the header's padding as the close
               control does, so the actions sit level with it. */}
-          <div className="-m-2 flex items-center gap-1 coarse:-m-3 coarse:gap-2">
+          <div className="-m-2 flex shrink-0 items-center gap-1 coarse:-m-3 coarse:gap-2">
             {actions}
             <BaseDialog.Close
               render={

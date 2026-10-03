@@ -550,7 +550,7 @@ async function flush(activation: SharedRuntime, shareId: string, keepalive = fal
       // The server will say the same thing again: drop the rows and put the
       // screen back to what the owner's partition holds.
       const message = error instanceof Error ? error.message : String(error)
-      toast(`A change to a shared note was refused: ${message}`)
+      toast.error(`A change to a shared note was refused: ${message}`)
       pending.diff = emptyGraphDiff()
       activation.pending.delete(shareId)
       patchStatus({ lastError: message })
