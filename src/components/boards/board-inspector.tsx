@@ -46,6 +46,13 @@ export function BoardInspector({
   // press until the toast (docs/design-principles.md, Busy controls).
   const [suggest, suggesting] = usePending(() => writes.suggestTags(image.id))
 
+  // How many values the picture carries, over every feature: what Reset
+  // would take off.
+  const carried = features.reduce(
+    (count, state) => count + imageValues(snapshot, state, image.id).length,
+    0,
+  )
+
   return (
     // Focus is kept in the window, but the page is not made inert: the
     // toast that answers a change — with its Undo — must stay in reach
@@ -114,17 +121,28 @@ export function BoardInspector({
               onAdd={(feature, text) => writes.setValue(feature, image.id, { text })}
               onClose={() => setNaming(null)}
             />
-            <Button
-              size="small"
-              className="mt-auto self-start text-text-danger"
-              onClick={() => {
-                onClose()
-                writes.deleteImage(image.id)
-              }}
-            >
-              <TrashIcon16 />
-              Delete image
-            </Button>
+            <div className="mt-auto flex flex-wrap items-center gap-2">
+              {/* Every value off the picture at once, as one Undo; the
+                  caption stays. Nothing to take off, nothing to press. */}
+              <Button
+                size="small"
+                disabled={carried === 0}
+                onClick={() => writes.resetValues(image.id)}
+              >
+                Reset
+              </Button>
+              <Button
+                size="small"
+                className="text-text-danger"
+                onClick={() => {
+                  onClose()
+                  writes.deleteImage(image.id)
+                }}
+              >
+                <TrashIcon16 />
+                Delete image
+              </Button>
+            </div>
           </div>
         </div>
       </Dialog.Content>

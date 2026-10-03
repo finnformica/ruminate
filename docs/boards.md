@@ -165,6 +165,10 @@ each):
   others; a picture left with no parent is back in the basket.
 - **The caption** is the image block's text (`setCaptionOps`) — what search
   matches, as in the editor.
+- **Reset** (`resetValuesOps`) takes every value off the picture, all
+  features at once, as one batch with one Undo; the caption stays. Beside
+  **Delete image** at the foot of the form, and nothing to press while the
+  picture carries no value.
 - **Delete image** is the context menu's Delete (`deleteBlockOps`): the row
   is tombstoned; the bytes stay in the bucket (docs/images.md, "Not yet").
 
@@ -325,6 +329,20 @@ answer as it came, or the error's words), and the toast that shows it has
 a **Copy** action that puts those lines on the clipboard, so a failure can
 be reported as it was rather than described.
 
+**Reading the answer** is the same for both providers (`readTagSuggestion`,
+src/data/auto-tag.ts). The caption's first letter is upper-cased. A value
+that matches one in use — trimmed, whatever its case — comes back spelled
+exactly as the value in use, so `setValueOps` links the board's own value
+rather than making a near-duplicate. A new value is cut to 30 characters
+(`MAX_SUGGESTED_VALUE_LENGTH`: it becomes a menu option; a value in use is
+never shortened) and takes the style of the feature's values in use: when
+every one starts upper-case its first letter is upper-cased, when every one
+starts lower-case it is lower-cased, and mixed or none in use means
+upper-cased. The prompt asks the model for the same style — the same case,
+singular or plural as the values in use are — and for a value for every
+feature the picture clearly shows something for, with none only when it
+shows nothing for that feature.
+
 **Applying the answer** is the board's ordinary writes. `suggestionOps`
 (src/data/boards.ts) reads the suggestion into one batch — a caption only
 where the picture has none, a single-value feature only where the picture
@@ -333,7 +351,8 @@ carried — each value through `setValueOps` by text, so an existing value
 is reused and a new one made, and the batch built up against the snapshot
 as each write would leave it, so two new values under one new feature make
 one feature block. It fills in and never overrides what a person set, and
-it is one toast with one **Undo**. Nothing to add is a toast that says so.
+it is one toast — **Picture updated** — with one **Undo**. Nothing to add
+is a toast that says so.
 
 Deliberately not done: encrypting the key at rest; tagging a picture that
 is not an upload (an external picture's bytes are at its own address);
