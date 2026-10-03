@@ -130,14 +130,14 @@ export function useBoardMatches(imageIds: readonly string[], text: string): stri
  * stays up long enough to be read and pressed.
  */
 function failedToast(message: string, detail: string): void {
-  toast.error(message, {
-    duration: 10000,
-    action: {
-      label: "Copy",
-      onClick: () => void navigator.clipboard?.writeText(detail).catch(() => {}),
-    },
-  })
+  toast.error(message, { duration: 10000, action: copyControl(detail) })
 }
+
+/** A toast control that puts `detail` on the clipboard. */
+const copyControl = (detail: string) => ({
+  label: "Copy",
+  onClick: () => void navigator.clipboard?.writeText(detail).catch(() => {}),
+})
 
 /** An error that is not the route's — the network, a decode — as lines:
  * what it says, and the first lines of where it came from. */
@@ -191,8 +191,11 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   // the same router.
   const canSuggest = useAiAvailable().available && exists
 
+  // A change's toast: Undo as its action and, when there is something to
+  // copy about it (what a suggestion read and said), Copy in the second
+  // slot, so Undo stays the one the eye lands on.
   const undoable = React.useCallback(
-    (ops: Op[], message: string) => {
+    (ops: Op[], message: string, copy?: string) => {
       if (ops.length === 0) return
       const before = store.get(graphSnapshotAtom)
       const inverse = inverseOps(ops, before)
@@ -208,6 +211,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
               },
             }
           : undefined,
+        ...(copy ? { cancel: copyControl(copy), duration: 10000 } : {}),
       })
     },
     [store, apply],
@@ -287,7 +291,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
         return
       }
       try {
-        const suggestion = await requestTagSuggestion(
+        const { suggestion, detail } = await requestTagSuggestion(
           picture,
           tagFeaturesOf(snapshot, boardId),
           imageLocationOf(snapshot, imageId),
@@ -300,10 +304,11 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
           Date.now(),
         )
         if (ops.length === 0) {
-          toast("Nothing to add.")
+          // An empty answer is worth a look too.
+          toast("Nothing to add.", { action: copyControl(detail), duration: 10000 })
           return
         }
-        undoable(ops, "Picture updated")
+        undoable(ops, "Picture updated", detail)
       } catch (error) {
         if (error instanceof SuggestTagsError) failedToast(error.message, error.detail)
         else failedToast("Couldn’t suggest tags.", describeError(error))

@@ -60,3 +60,26 @@ describe("suggestTagsDetail", () => {
     expect(new SuggestTagsError("x", "Nope", "Nope\ncode: x").detail).toBe("Nope\ncode: x")
   })
 })
+
+describe("the detail of a success", () => {
+  it("carries what was read and what the model said", () => {
+    const suggestion = { caption: "A lamp", features: [{ label: "Object", values: ["Lamp"] }] }
+    const detail = suggestTagsDetail({
+      message: "Suggested",
+      code: "ok",
+      status: 200,
+      body: { provider: "cloudflare", model: "m", log: "01LOG" },
+      cfRay: "ray",
+      suggestion,
+      answer: '{"caption":"a lamp","features":[{"label":"Objects","values":["lamp"]}]}',
+    })
+    expect(detail).toContain("provider: cloudflare")
+    expect(detail).toContain("log: 01LOG")
+    expect(detail).toContain("suggestion: " + JSON.stringify(suggestion, null, 2))
+    expect(
+      detail.endsWith(
+        'answer: {"caption":"a lamp","features":[{"label":"Objects","values":["lamp"]}]}',
+      ),
+    ).toBe(true)
+  })
+})

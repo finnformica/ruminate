@@ -32,14 +32,14 @@ const PICTURE_BASE64 = "/9j/4AECAw=="
 
 const FEATURES: TagFeature[] = [
   { label: "Location", multi: false, values: ["Mauritius", "Lisbon"] },
-  { label: "Fixture", multi: true, values: [] },
+  { label: "Object", multi: true, values: [] },
 ]
 
 const GOOD = {
   caption: "A rattan lamp",
   features: [
     { label: "Location", values: ["Mauritius"] },
-    { label: "Fixture", values: ["Lamp", "lamp"] },
+    { label: "Object", values: ["Lamp", "lamp"] },
   ],
 }
 
@@ -48,7 +48,7 @@ const READ = {
   caption: "A rattan lamp",
   features: [
     { label: "Location", values: ["Mauritius"] },
-    { label: "Fixture", values: ["Lamp"] },
+    { label: "Object", values: ["Lamp"] },
   ],
 }
 
@@ -190,7 +190,7 @@ beforeEach(async () => {
   nominatim = {
     calls: [],
     reply: () =>
-      new Response(JSON.stringify({ address: { city: "Ljubljana", country: "Slovenia" } }), {
+      new Response(JSON.stringify({ display_name: "Ljubljana, Slovenia" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
@@ -335,6 +335,7 @@ describe("the Anthropic provider", () => {
       suggestion: READ,
       provider: "anthropic",
       model: AUTO_TAG_MODEL,
+      answer: JSON.stringify(GOOD),
     })
 
     expect(anthropic.calls).toHaveLength(1)
@@ -348,8 +349,8 @@ describe("the Anthropic provider", () => {
       type: "image",
       source: { type: "base64", media_type: "image/jpeg", data: PICTURE_BASE64 },
     })
-    expect(text.text).toContain("- Location (one value): Mauritius, Lisbon")
-    expect(text.text).toContain("- Fixture (several values): none yet")
+    expect(text.text).toContain("- Location (one value): Values in use: Mauritius, Lisbon")
+    expect(text.text).toContain("- Object (several values): Values in use: none yet")
   })
 
   it("tells the caller the key was refused, without the key", async () => {
@@ -444,6 +445,7 @@ describe("the Cloudflare provider", () => {
       suggestion: READ,
       provider: "cloudflare",
       model: CLOUDFLARE_AI_MODEL,
+      answer: JSON.stringify(GOOD),
     })
     expect(ai.calls).toHaveLength(1)
     const { model, input } = ai.calls[0]
@@ -458,7 +460,7 @@ describe("the Cloudflare provider", () => {
       type: "image_url",
       image_url: { url: `data:image/jpeg;base64,${PICTURE_BASE64}` },
     })
-    expect(text.text).toContain("- Location (one value): Mauritius, Lisbon")
+    expect(text.text).toContain("- Location (one value): Values in use: Mauritius, Lisbon")
     expect(text.text).toContain("JSON only")
     expect(await aiCalls()).toEqual([{ calls_today: 1 }])
   })
@@ -616,6 +618,7 @@ describe("the Cloudflare call, as it goes out and comes back", () => {
       provider: "cloudflare",
       model: CLOUDFLARE_AI_MODEL,
       log: "01LOG",
+      answer: JSON.stringify(GOOD),
     })
 
     const bad = fakeAi(() => completion("I cannot see the picture."))
@@ -678,11 +681,11 @@ describe("a location with the request", () => {
     const response = await send(tagRequest({ features: { features: FEATURES, location: AT } }))
     expect(response.status).toBe(200)
     expect(nominatim.calls).toEqual([
-      "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&lat=46.05127&lon=14.50556",
+      "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat=46.05127&lon=14.50556",
     ])
-    expect(promptText()).toContain("- Location (one value): Mauritius, Lisbon")
+    expect(promptText()).toContain("- Location (one value): Values in use: Mauritius, Lisbon")
     expect(promptText()).toContain(
-      "The picture was taken in Ljubljana, Slovenia: use it for Location, as a value in use if one matches, else as a new value.",
+      "The picture was taken at: Ljubljana; Slovenia (most specific first). For Location, use a value in use that covers the place; otherwise name it as a person would in conversation — the country by default, or the everyday short name of a notable specific place such as an airport, a landmark or a city.",
     )
   })
 
@@ -733,6 +736,6 @@ describe("a location with the request", () => {
       (await send(tagRequest({ features: { features: FEATURES, location: AT } }))).status,
     ).toBe(200)
     const text = ai.calls[0].input.messages[1].content[1].text as string
-    expect(text).toContain("The picture was taken in Ljubljana, Slovenia")
+    expect(text).toContain("The picture was taken at: Ljubljana; Slovenia")
   })
 })

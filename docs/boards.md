@@ -34,13 +34,13 @@ into the outline is on the board, a picture added from the board is in the
 note, and a board's features and values can be written by hand in the
 outline and the form picks them up.
 
-| on the board       | in the graph                                                                                                                  |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| the board          | a note whose page props hold `board: true`                                                                                    |
-| its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket    |
-| a feature          | a direct child of the page whose text is the feature's label — `Location`, `Fixture`, `Material` — trimmed, whatever its case |
-| a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                               |
-| a picture's value  | a `child` link from the value block to the picture: the value is a second parent, exactly as copy and select-mode paste make  |
+| on the board       | in the graph                                                                                                                 |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| the board          | a note whose page props hold `board: true`                                                                                   |
+| its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket   |
+| a feature          | a direct child of the page whose text is the feature's label — `Location`, `Object`, `Material` — trimmed, whatever its case |
+| a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                              |
+| a picture's value  | a `child` link from the value block to the picture: the value is a second parent, exactly as copy and select-mode paste make |
 
 So a board's outline reads:
 
@@ -50,7 +50,7 @@ Home inspiration
     - Mauritius
       [picture]
     - Lisbon
-  Fixture
+  Object
     - Lamp
       [picture]
 
@@ -60,7 +60,12 @@ Home inspiration
 
 The features are the preset in `src/data/boards.ts` (`BOARD_FEATURES`): a
 label and whether a picture may carry several of its values (**Location** is
-one at a time; **Fixture** and **Material** are as many as apply). The label
+one at a time; **Object** and **Material** are as many as apply), and what
+each means, as the model is told it: **Location** is where the picture was
+taken, named as a person would say it; **Object** is the thing the picture
+is of — furniture, lighting, cutlery, plants, decoration; **Material** is
+what that thing is made of. (Object was **Fixture** until 2026-W40; there
+is no alias, so a board with a `Fixture` block retitles it.) The label
 is the identity, so renaming a feature block in the outline detaches it: the
 form makes a fresh one on next use and the old block stays as ordinary
 content, values and pictures still linked. Two direct children with the same
@@ -116,7 +121,7 @@ Parent branch writes, so the branches are a shortcut into the one filter
 rather than a filter of their own. Each feature keeps a `parent:` qualifier
 of its own, and the language reads the two shapes two ways: a comma list
 within one qualifier is _either_, the key repeated is _both_. So Mauritius
-and Lisbon ticked under Location, and Lamp under Fixture, is
+and Lisbon ticked under Location, and Lamp under Object, is
 `parent:<mauritius>,<lisbon> parent:<lamp>` — a picture in Mauritius or
 Lisbon that is a lamp — as it would be in the search box, and as a note's
 filter would read it. A branch tells its qualifier from the others by the
@@ -344,12 +349,18 @@ what it hands a web page, so a library picture is often unplaced). A
 picture with no coordinates gets no such props and no Location hint. With
 them, the request carries `location` (validated by `readTagRequest`:
 finite, on the globe, else dropped) and the Worker asks OpenStreetMap's
-Nominatim once for a place name (`reverseGeocode`, worker/geocode.ts:
-`zoom=10`, named per its usage policy, in English, held to three seconds,
-after the day's call is counted and never failing the tag) — "Ljubljana,
-Slovenia" — and the prompt says the picture was taken there, to use for
-Location as a value in use if one matches, else as a new one; with
-coordinates but no name it gives them and asks for the town or area.
+Nominatim once (`reverseGeocode`, worker/geocode.ts: `zoom=18`, named per
+its usage policy, in English, held to three seconds, after the day's call
+is counted and never failing the tag) for the place's whole chain of names,
+most specific first — `display_name` with postcodes and house numbers
+dropped, each name once, "; "-joined, cut to 160 characters: "Ljubljana
+Jože Pučnik Airport; Zgornji Brnik; Cerklje na Gorenjskem; Upper Carniola;
+Slovenia". The prompt gives the model the chain and asks it to name the
+place as a person would in conversation: a value in use that covers it,
+else the country by default, or the everyday short name of a notable
+specific place — an airport, a landmark, a city — rather than the precise
+village the chain begins with. With coordinates but no chain it gives them
+and asks for the town or area.
 
 **Reading the answer** is the same for both providers (`readTagSuggestion`,
 src/data/auto-tag.ts). The caption's first letter is upper-cased. A value
@@ -373,8 +384,17 @@ carried — each value through `setValueOps` by text, so an existing value
 is reused and a new one made, and the batch built up against the snapshot
 as each write would leave it, so two new values under one new feature make
 one feature block. It fills in and never overrides what a person set, and
-it is one toast — **Picture updated** — with one **Undo**. Nothing to add
-is a toast that says so.
+it is one toast — **Picture updated** — with one **Undo**, and a **Copy**
+beside it that puts what the model answered and what was read from it on
+the clipboard, so a thin answer can be inspected. Nothing to add is a
+toast that says so, with the same Copy.
+
+The prompt tells the model what each feature means (`meaning` on
+`BoardFeature`, sent with the request as `TagFeature.meaning` and rendered
+as "- Object (several values): the thing the picture is of, such as …
+Values in use: cutlery, potted plant"), and an answer that names the
+features under other labels — "Objects", "Materials" — is still read, by
+position, when it has one entry per feature in order.
 
 Deliberately not done: encrypting the key at rest; tagging a picture that
 is not an upload (an external picture's bytes are at its own address);

@@ -47,15 +47,27 @@ export interface BoardFeature {
   label: string
   /** Whether a picture may carry several of its values at once. */
   multi: boolean
+  /** What the feature is, as the model is told it (docs/boards.md,
+   * "Tagging with Claude"). */
+  meaning: string
 }
 
 /** The features a board offers, in the order the form shows them. The
  * label is the identity: a block on the page with this text (trimmed,
  * case-insensitively) is the feature's block. */
 export const BOARD_FEATURES: readonly BoardFeature[] = [
-  { label: "Location", multi: false },
-  { label: "Fixture", multi: true },
-  { label: "Material", multi: true },
+  {
+    label: "Location",
+    multi: false,
+    meaning: "where the picture was taken, named as a person would say it",
+  },
+  {
+    label: "Object",
+    multi: true,
+    meaning:
+      "the thing the picture is of, such as furniture, lighting, cutlery, plants or decoration",
+  },
+  { label: "Material", multi: true, meaning: "what that thing is made of" },
 ]
 
 /** The type a feature block is created as, and the type a value is. */
@@ -375,6 +387,7 @@ export function tagFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): TagFeat
   return boardFeatures(snapshot, boardId).map((state) => ({
     label: state.feature.label,
     multi: state.feature.multi,
+    meaning: state.feature.meaning,
     values: state.values.map((value) => value.text.trim()).filter((text) => text !== ""),
   }))
 }

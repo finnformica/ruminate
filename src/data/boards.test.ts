@@ -291,7 +291,7 @@ describe("setValueOps", () => {
   it("picks up a board written by hand in the outline", () => {
     const snapshot = graphOf({
       b: [
-        "fixture",
+        "object",
         "  id:: blk_fixture000",
         "  - Lamp",
         "    id:: blk_lamp000000",
@@ -395,11 +395,18 @@ describe("inverseOps", () => {
 
 describe("tagFeaturesOf", () => {
   it("names every preset feature, with the values in use", () => {
+    const [location, object, material] = BOARD_FEATURES
     expect(tagFeaturesOf(boardOf(), "b")).toEqual([
-      { label: "Location", multi: false, values: ["Mauritius", "Lisbon"] },
-      { label: "Fixture", multi: true, values: [] },
-      { label: "Material", multi: true, values: [] },
+      {
+        label: "Location",
+        multi: false,
+        meaning: location.meaning,
+        values: ["Mauritius", "Lisbon"],
+      },
+      { label: "Object", multi: true, meaning: object.meaning, values: [] },
+      { label: "Material", multi: true, meaning: material.meaning, values: [] },
     ])
+    expect(object.meaning).toContain("the thing the picture is of")
   })
 })
 
@@ -408,7 +415,7 @@ describe("suggestionOps", () => {
     caption: "A rattan lamp",
     features: [
       { label: "Location", values: ["lisbon"] },
-      { label: "Fixture", values: ["Lamp", "Pendant"] },
+      { label: "Object", values: ["Lamp", "Pendant"] },
       { label: "Material", values: [] },
     ],
   }
@@ -428,9 +435,9 @@ describe("suggestionOps", () => {
       "Lamp",
       "Pendant",
     ])
-    // One Fixture block, not one per value.
+    // One Object block, not one per value.
     expect(
-      childIdsOf(next, "b").filter((id) => next.nodes.get(id)?.text === "Fixture"),
+      childIdsOf(next, "b").filter((id) => next.nodes.get(id)?.text === "Object"),
     ).toHaveLength(1)
     // And undone as one.
     const undone = applyOps(next, inverseOps(ops, snapshot) as Op[], NOW)

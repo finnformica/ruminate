@@ -17,7 +17,7 @@ import {
 
 const FEATURES: TagFeature[] = [
   { label: "Location", multi: false, values: ["Mauritius", "Lisbon"] },
-  { label: "Fixture", multi: true, values: ["Lamp"] },
+  { label: "Object", multi: true, values: ["Lamp"] },
   { label: "Material", multi: true, values: [] },
 ]
 
@@ -76,9 +76,9 @@ describe("tagPrompt", () => {
     expect(tagPrompt(FEATURES)).toBe(
       [
         "Features:",
-        "- Location (one value): Mauritius, Lisbon",
-        "- Fixture (several values): Lamp",
-        "- Material (several values): none yet",
+        "- Location (one value): Values in use: Mauritius, Lisbon",
+        "- Object (several values): Values in use: Lamp",
+        "- Material (several values): Values in use: none yet",
       ].join("\n"),
     )
   })
@@ -104,7 +104,7 @@ describe("readTagSuggestion", () => {
         {
           caption: "  A rattan lamp ",
           features: [
-            { label: "fixture", values: ["Lamp", "Pendant"] },
+            { label: "object", values: ["Lamp", "Pendant"] },
             { label: "Location", values: ["Mauritius"] },
           ],
         },
@@ -114,7 +114,7 @@ describe("readTagSuggestion", () => {
       caption: "A rattan lamp",
       features: [
         { label: "Location", values: ["Mauritius"] },
-        { label: "Fixture", values: ["Lamp", "Pendant"] },
+        { label: "Object", values: ["Lamp", "Pendant"] },
         { label: "Material", values: [] },
       ],
     })
@@ -126,7 +126,7 @@ describe("readTagSuggestion", () => {
         caption: "x",
         features: [
           { label: "Location", values: ["Lisbon", "Mauritius"] },
-          { label: "Fixture", values: ["Lamp", " lamp ", "", 3, "Pendant"] },
+          { label: "Object", values: ["Lamp", " lamp ", "", 3, "Pendant"] },
         ],
       },
       FEATURES,
@@ -139,7 +139,7 @@ describe("readTagSuggestion", () => {
     const read = readTagSuggestion(
       {
         caption: "c".repeat(300),
-        features: [{ label: "Fixture", values: ["a", "b", "c", "d", "e", "f", "g"] }],
+        features: [{ label: "Object", values: ["a", "b", "c", "d", "e", "f", "g"] }],
       },
       FEATURES,
     )
@@ -161,7 +161,7 @@ describe("readTagSuggestion", () => {
         caption: "x",
         features: [
           { label: "Location", values: ["  LISBON "] },
-          { label: "Fixture", values: ["lamp", "Lamp"] },
+          { label: "Object", values: ["lamp", "Lamp"] },
         ],
       },
       FEATURES,
@@ -305,9 +305,9 @@ describe("tagPrompt with a location", () => {
   it("names the place when one was found", () => {
     const prompt = tagPrompt(FEATURES, { location, place: "Ljubljana, Slovenia" })
     expect(prompt.split("\n").at(-1)).toBe(
-      "The picture was taken in Ljubljana, Slovenia: use it for Location, as a value in use if one matches, else as a new value.",
+      "The picture was taken at: Ljubljana, Slovenia (most specific first). For Location, use a value in use that covers the place; otherwise name it as a person would in conversation — the country by default, or the everyday short name of a notable specific place such as an airport, a landmark or a city.",
     )
-    expect(prompt).toContain("- Location (one value): Mauritius, Lisbon")
+    expect(prompt).toContain("- Location (one value): Values in use: Mauritius, Lisbon")
   })
 
   it("gives the coordinates when none was", () => {
@@ -320,7 +320,91 @@ describe("tagPrompt with a location", () => {
   it("says nothing of a location without one", () => {
     expect(tagPrompt(FEATURES)).not.toContain("The picture was taken")
     expect(cloudflareTagPrompt(FEATURES, { location, place: "Bled, Slovenia" })).toContain(
-      "The picture was taken in Bled, Slovenia",
+      "The picture was taken at: Bled, Slovenia (most specific first)",
     )
+  })
+})
+
+describe("a feature's meaning", () => {
+  it("travels with the request, trimmed and cut, and is dropped when it is not a string", () => {
+    const read = readTagRequest({
+      features: [
+        { label: "Object", multi: true, values: [], meaning: "  the thing the picture is of " },
+        { label: "Material", multi: true, values: [], meaning: 7 },
+        { label: "Location", multi: false, values: [], meaning: "m".repeat(300) },
+      ],
+    })
+    expect(read?.features[0]).toEqual({
+      label: "Object",
+      multi: true,
+      values: [],
+      meaning: "the thing the picture is of",
+    })
+    expect(read?.features[1]).toEqual({ label: "Material", multi: true, values: [] })
+    expect(read?.features[2].meaning).toHaveLength(200)
+  })
+
+  it("is said in the prompt before the values in use", () => {
+    const prompt = tagPrompt([
+      {
+        label: "Object",
+        multi: true,
+        values: ["cutlery", "potted plant", "lamp"],
+        meaning:
+          "the thing the picture is of, such as furniture, lighting, cutlery, plants or decoration",
+      },
+      { label: "Material", multi: true, values: [], meaning: "what that thing is made of" },
+    ])
+    expect(prompt.split("\n")).toEqual([
+      "Features:",
+      "- Object (several values): the thing the picture is of, such as furniture, lighting, cutlery, plants or decoration. Values in use: cutlery, potted plant, lamp",
+      "- Material (several values): what that thing is made of. Values in use: none yet",
+    ])
+  })
+})
+
+describe("an answer under other labels", () => {
+  it("is read by position when it has one entry per feature in order", () => {
+    const read = readTagSuggestion(
+      {
+        caption: "x",
+        features: [
+          { label: "Locations", values: ["Mauritius"] },
+          { label: "Objects", values: ["potted plant"] },
+          { label: "Materials", values: ["Oak"] },
+        ],
+      },
+      FEATURES,
+    )
+    expect(read?.features.map((f) => f.values)).toEqual([["Mauritius"], ["Potted plant"], ["Oak"]])
+  })
+
+  it("lets a label that matches win over its position", () => {
+    const read = readTagSuggestion(
+      {
+        caption: "x",
+        features: [
+          { label: "Material", values: ["Oak"] },
+          { label: "Things", values: ["lamp"] },
+          { label: "Location", values: ["Lisbon"] },
+        ],
+      },
+      FEATURES,
+    )
+    expect(read?.features.map((f) => f.values)).toEqual([["Lisbon"], ["Lamp"], ["Oak"]])
+  })
+
+  it("ignores unknown labels when the count does not match", () => {
+    const read = readTagSuggestion(
+      {
+        caption: "x",
+        features: [
+          { label: "Objects", values: ["lamp"] },
+          { label: "Materials", values: ["Oak"] },
+        ],
+      },
+      FEATURES,
+    )
+    expect(read?.features.map((f) => f.values)).toEqual([[], [], []])
   })
 })
