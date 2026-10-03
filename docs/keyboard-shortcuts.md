@@ -156,7 +156,7 @@ declaratively in `src/blocks/keymap.ts` and dispatched through the command layer
 | Extend selection to more blocks          | <kbd>⇧</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                   |
 | Grow selection by structure (ladder)     | <kbd>⌘</kbd> <kbd>A</kbd>                                                  |
 | Shrink it back one rung                  | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>A</kbd>                                     |
-| Remove block(s) from here                | <kbd>⌫</kbd> / <kbd>⌦</kbd>                                                |
+| Remove block(s) from here                | <kbd>⌫</kbd> / <kbd>⌦</kbd> (one row: edit the row that takes its place)   |
 | Copy / cut selection                     | <kbd>⌘</kbd> <kbd>C</kbd> / <kbd>⌘</kbd> <kbd>X</kbd>                      |
 | Paste after the selection                | <kbd>⌘</kbd> <kbd>V</kbd>                                                  |
 | Paste as one plain block                 | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>                                     |

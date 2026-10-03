@@ -5,7 +5,7 @@ inspiration — for a future home, say — where each picture can be captioned
 and given a **location**, a **fixture** and a **material** from a form, and
 the wall narrowed by any of them. **New board** in the header makes one and
 opens it at `/boards/<note id>`; its header is the note's own — Sort, Filter
-and the ⋯ menu, where **Open outline** opens the note beneath it.
+and the ⋯ menu, where **Open note** opens the note beneath it.
 
 ## One property, and nothing else new in the data
 
@@ -23,7 +23,7 @@ menu toggles it: **Make this a board** on any plain note sets it and opens
 the board; **Make this a note** on a board clears it. Nothing else about the
 note changes either way — the same rows, the same outline, the same id and
 URL — and no structure is required first: a note with no pictures makes an
-empty board, and the outline of a board is one click away (**Open outline**
+empty board, and the outline of a board is one click away (**Open note**
 in the board's ⋯ menu, **Open board** in the outline's). A daily or weekly
 note is what its id says it is and cannot be made a board.
 
@@ -193,7 +193,7 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
 - **The header**: the note's name, then Sort, Filter and the ⋯ menu — the
   note page's own controls, with the board's features leading the Filter
   (above). The menu is the note's (`NoteActionsMenu`, `surface="board"`),
-  with **Open outline** where the outline's has **Open board**; **Make this
+  with **Open note** where the outline's has **Open board**; **Make this
   a note** from here lands on the outline, since the board page refuses a
   note.
 - **Adding pictures** (`add-images.tsx`): two buttons at the top of the

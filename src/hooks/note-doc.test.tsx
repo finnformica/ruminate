@@ -73,10 +73,12 @@ function rows(doc: BlockDoc, context: ReadonlySet<string>): string[] {
 
 type Wrapper = ({ children }: { children: ReactNode }) => ReactNode
 
-function renderNote(wrapper: Wrapper, filter = "", sort = "") {
-  return renderHook(() => useNoteDoc({ noteId: NOTE_ID, defaultDoc: EMPTY_DOC, filter, sort }), {
-    wrapper,
-  })
+function renderNote(wrapper: Wrapper, filter = "", sort = "", keep?: ReadonlySet<string>) {
+  return renderHook(
+    ({ keep }: { keep?: ReadonlySet<string> }) =>
+      useNoteDoc({ noteId: NOTE_ID, defaultDoc: EMPTY_DOC, filter, sort, keep }),
+    { wrapper, initialProps: { keep } },
+  )
 }
 
 describe("useNoteDoc, filtered", () => {
@@ -185,6 +187,28 @@ describe("useNoteDoc, filtered", () => {
       "  milk",
       "  eggs",
     ])
+    unsubscribe()
+  })
+
+  it("keeps the row being edited whatever the filter says, until the editing leaves it", async () => {
+    const { wrapper, unsubscribe } = await signedOutStore(NOTE)
+    const { result, rerender } = renderNote(wrapper, "type:todo", "", new Set(["blk_milk000000"]))
+    expect(rows(result.current.doc, result.current.context)).toEqual(["~Shopping", "  milk"])
+
+    // Ticked off mid-edit, `milk` no longer matches `type:todo` — and stays,
+    // as the row under the caret, undimmed.
+    act(() => {
+      const doc = result.current.doc
+      result.current.setDoc({
+        ...doc,
+        blocks: { ...doc.blocks, blk_milk000000: { ...doc.blocks.blk_milk000000, type: "done" } },
+      })
+    })
+    expect(rows(result.current.doc, result.current.context)).toEqual(["~Shopping", "  milk"])
+
+    // The editing leaves it: the filter has its say.
+    rerender({ keep: undefined })
+    expect(rows(result.current.doc, result.current.context)).toEqual([])
     unsubscribe()
   })
 

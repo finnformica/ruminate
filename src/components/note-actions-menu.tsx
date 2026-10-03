@@ -172,7 +172,7 @@ export function useNoteMenuEntries() {
               options.openOutline
                 ? {
                     kind: "item",
-                    label: "Open outline",
+                    label: "Open note",
                     icon: <NoteIcon16 />,
                     onSelect: () => options.openOutline?.(),
                   }

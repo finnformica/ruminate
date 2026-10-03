@@ -1,4 +1,5 @@
 import { atom, useAtomValue } from "jotai"
+import { useEffect, useState } from "react"
 import { useNetworkState } from "react-use"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { storageDiagnosticsAtom } from "../data/storage-diagnostics"
@@ -130,6 +131,33 @@ export function saveTrace(kind: SyncStatusKind, inputs: SaveTraceInputs): SaveTr
     case "signed-out":
       return null
   }
+}
+
+/** How long the header keeps a save's trace after the save has settled —
+ * the pause between two words, so a trace that settled and was stirred
+ * again by the next keystroke never flickers (`useSteadySaveTrace`). */
+export const SAVE_TRACE_HOLD_MS = 2000
+
+/**
+ * `trace`, as the header shows it: a save in flight shows the instant it
+ * starts, and what follows it — "Saved offline", or nothing — only once the
+ * trace has read that way for `SAVE_TRACE_HOLD_MS`. Typing is a save per
+ * keystroke, and each one lands on the device within a moment, so the raw
+ * trace flaps between "Saving…" and what comes after at typing speed;
+ * held, it reads "Saving…" for the whole burst and settles once the typing
+ * has.
+ */
+export function useSteadySaveTrace(trace: SaveTrace): SaveTrace {
+  const [shown, setShown] = useState(trace)
+  useEffect(() => {
+    if (trace === "saving") {
+      setShown("saving")
+      return
+    }
+    const timer = window.setTimeout(() => setShown(trace), SAVE_TRACE_HOLD_MS)
+    return () => window.clearTimeout(timer)
+  }, [trace])
+  return shown
 }
 
 function useSyncStatusState(): SyncStatusState {

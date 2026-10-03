@@ -63,6 +63,7 @@ export function filteredView(
     keepRoots = false,
     expanded,
     startLevel = 1,
+    keep,
   }: {
     /**
      * Keep the view's roots whatever the filter says. A focused block is its
@@ -83,6 +84,17 @@ export function filteredView(
     /** The level of the view's roots, as the walk counts them (1 for a
      * note's rows, 0 for a focused block). */
     startLevel?: number
+    /**
+     * Rows kept whatever the filter says — the row being edited. A row is
+     * judged by the filter when the editing leaves it, not on every
+     * keystroke: a line retyped, a bullet made a to-do or a row outdented
+     * would otherwise vanish from under the caret the moment it stopped
+     * matching, and a row could never be made that did not match from its
+     * first character. Kept the way a match is — its ancestors as context,
+     * what hangs beneath it with it — and drawn as one, but not counted as
+     * one (`matches` is the filter's own count).
+     */
+    keep?: ReadonlySet<string>
   } = {},
 ): FilteredView {
   const { matched, compare } = narrowing
@@ -92,7 +104,7 @@ export function filteredView(
   const { doc, context } =
     matched === null
       ? { doc: sorted, context: new Set<string>() }
-      : prune(sorted, matched, keepRoots)
+      : prune(sorted, matched, keepRoots, keep)
   const collapsed = new Set(expanded ? collapsedKeysOf(doc, expanded, startLevel) : [])
   return { doc, collapsed, context, matches: matched === null ? null : matched.size }
 }
@@ -105,15 +117,20 @@ export function filteredView(
  * A match's own children are kept whether or not they matched — a to-do you
  * filtered to is still the to-do with its notes underneath — but they are
  * context, not matches, so the dimming says which row the filter found.
+ *
+ * A row in `kept` (the one being edited) stands as a match does, whatever
+ * the filter made of it.
  */
 function prune(
   doc: BlockDoc,
   matched: ReadonlySet<string>,
   keepRoots: boolean,
+  kept?: ReadonlySet<string>,
 ): { doc: BlockDoc; context: Set<string> } {
   const blocks: Record<string, Block> = {}
   const context = new Set<string>()
   const path = new Set<string>()
+  const held = (id: string): boolean => matched.has(id) || (kept?.has(id) ?? false)
 
   // Whether `id` survives — it matched, or something beneath it did — and,
   // on the way, the pruned block itself. Loops end the descent, as they do
@@ -122,7 +139,7 @@ function prune(
     if (blocks[id]) return true
     const block = doc.blocks[id]
     if (!block || path.has(id)) return false
-    const isMatch = matched.has(id)
+    const isMatch = held(id)
     path.add(id)
     // Beneath a match every row is kept; elsewhere only the branches that
     // lead to one.
@@ -144,7 +161,7 @@ function prune(
     path.add(id)
     const children = block.children.filter((childId) => keepAll(childId))
     path.delete(id)
-    if (!matched.has(id)) context.add(id)
+    if (!held(id)) context.add(id)
     blocks[id] = { ...block, children }
     return true
   }
@@ -157,7 +174,7 @@ function prune(
     const block = doc.blocks[id]
     if (!block) return false
     blocks[id] = { ...block, children: [] }
-    if (!matched.has(id)) context.add(id)
+    if (!held(id)) context.add(id)
     return true
   }
 

@@ -56,6 +56,7 @@ export function useNoteDoc({
   directions = "downstream",
   filter = "",
   sort = "",
+  keep,
 }: {
   noteId: NoteId | undefined
   /** What a note not in the graph starts as (`?content=`, or empty). */
@@ -75,6 +76,9 @@ export function useNoteDoc({
   /** Order each parent's children by this key (`text`, `text:desc`, …), the
    * nesting untouched. Empty = document order. */
   sort?: string
+  /** Rows the filter keeps whatever it says of them — the row being edited
+   * (`filteredView`, `keep`). Nothing without a filter. */
+  keep?: ReadonlySet<string>
 }) {
   const snapshot = useAtomValue(graphSnapshotAtom)
   const store = useStore()
@@ -108,8 +112,9 @@ export function useNoteDoc({
       keepRoots: focused !== null,
       expanded,
       startLevel: focused ? 0 : 1,
+      keep,
     })
-  }, [noteId, focusBlockId, snapshot, expanded, directions, narrowed, narrowing])
+  }, [noteId, focusBlockId, snapshot, expanded, directions, narrowed, narrowing, keep])
   // Whether the doc is rooted at the focused block (the note node is then not
   // this doc's to write).
   const rootId = focusBlockId && view?.doc.rootBlockIds[0] === focusBlockId ? focusBlockId : null
