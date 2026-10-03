@@ -12,6 +12,7 @@ import {
   inverseOps,
   isBoard,
   outlineImageIds,
+  resetImageOps,
   setCaptionOps,
   suggestionOps,
   tagFeaturesOf,
@@ -23,9 +24,11 @@ import {
   type ValueRef,
 } from "../data/boards"
 import { requestDatabaseFlush } from "../data/database-mode"
+import { visionCopy } from "../data/image-fit"
 import {
   ImageUploadError,
   beginPendingImage,
+  imageBlob,
   imagesEnabled,
   primeImageObjectUrl,
   releasePendingImage,
@@ -115,6 +118,29 @@ export function useBoardMatches(imageIds: readonly string[], text: string): stri
   }, [snapshot, imageIds, text])
 }
 
+/**
+ * A failure's toast, with its detail a press away: **Copy** puts the lines
+ * the person would otherwise have to describe — the code, the provider,
+ * the log the call is under, what the model said — on the clipboard. It
+ * stays up long enough to be read and pressed.
+ */
+function failedToast(message: string, detail: string): void {
+  toast.error(message, { duration: 10000, action: copyControl(detail) })
+}
+
+/** A toast control that puts `detail` on the clipboard. */
+const copyControl = (detail: string) => ({
+  label: "Copy",
+  onClick: () => void navigator.clipboard?.writeText(detail).catch(() => {}),
+})
+
+/** An error that is not the route's — the network, a decode — as lines:
+ * what it says, and the first lines of where it came from. */
+function describeError(error: unknown): string {
+  const stack = error instanceof Error && error.stack ? error.stack.split("\n").slice(0, 4) : []
+  return [String(error), ...stack.slice(1)].join("\n")
+}
+
 /** What the board page may write, and how. */
 export interface BoardWrites {
   /** Whether pictures can be added here: uploads are on, there is a store
@@ -126,6 +152,9 @@ export interface BoardWrites {
   addImages: (files: File[]) => string[]
   setValue: (feature: BoardFeature, imageId: string, ref: ValueRef) => void
   clearValue: (feature: BoardFeature, value: BoardValue, imageId: string) => void
+  /** Take every value off a picture, all features at once, as one undoable
+   * batch. The caption stays. */
+  resetImage: (imageId: string) => void
   setCaption: (imageId: string, caption: string) => void
   deleteImage: (imageId: string) => void
   /** Whether Claude can be asked to tag a picture here: there is a store
@@ -154,6 +183,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   // the same router.
   const canSuggest = useAiAvailable().available && exists
 
+  // A change's toast, with Undo as its action.
   const undoable = React.useCallback(
     (ops: Op[], message: string) => {
       if (ops.length === 0) return
@@ -194,6 +224,13 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
     [store, undoable],
   )
 
+  const resetImage = React.useCallback(
+    (imageId: string) => {
+      undoable(resetImageOps(store.get(graphSnapshotAtom), boardId, imageId), "Picture reset")
+    },
+    [store, boardId, undoable],
+  )
+
   const setCaption = React.useCallback(
     (imageId: string, caption: string) => {
       const ops = setCaptionOps(store.get(graphSnapshotAtom), imageId, caption)
@@ -214,11 +251,16 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   )
 
   /**
-   * Claude's caption and tags for a picture: the board's features as they
-   * stand go with the asset's id; the answer is read into the writes it
-   * amounts to (`suggestionOps` — filling in, never overriding) and applied
-   * as one batch with one Undo. A picture without an uploaded asset (an
-   * external one, or one still on its way up) cannot be sent.
+   * A caption and tags for a picture: its bytes, as the page already has
+   * them (`imageBlob`), fitted on the device for the model (`visionCopy` —
+   * a JPEG no larger than 1,568 px on its longest side, so a phone photo of
+   * any size goes, and goes small), go with the board's features as they
+   * stand; the answer is read into the writes it amounts to
+   * (`suggestionOps` — filling in, never overriding) and applied as one
+   * batch with one Undo. A picture without an uploaded asset (an external
+   * one, or one still on its way up) cannot be sent. Where the browser
+   * cannot make the copy, the original goes and the Worker's size limit
+   * answers for it.
    */
   const suggestTags = React.useCallback(
     async (imageId: string) => {
@@ -229,9 +271,17 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
         toast.error("Only uploaded pictures can be tagged.")
         return
       }
+      let picture: Blob
       try {
-        const suggestion = await requestTagSuggestion(asset, tagFeaturesOf(snapshot, boardId))
-        const { ops, summary } = suggestionOps(
+        const original = await imageBlob(asset)
+        picture = (await visionCopy(original)) ?? original
+      } catch (error) {
+        failedToast("Couldn’t read that picture.", describeError(error))
+        return
+      }
+      try {
+        const suggestion = await requestTagSuggestion(picture, tagFeaturesOf(snapshot, boardId))
+        const ops = suggestionOps(
           store.get(graphSnapshotAtom),
           boardId,
           imageId,
@@ -242,9 +292,10 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
           toast("Nothing to add.")
           return
         }
-        undoable(ops, summary.join(" · "))
+        undoable(ops, "Picture updated")
       } catch (error) {
-        toast.error(error instanceof SuggestTagsError ? error.message : "Couldn’t suggest tags.")
+        if (error instanceof SuggestTagsError) failedToast(error.message, error.detail)
+        else failedToast("Couldn’t suggest tags.", describeError(error))
       }
     },
     [canSuggest, store, boardId, undoable],
@@ -299,11 +350,22 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       addImages,
       setValue,
       clearValue,
+      resetImage,
       setCaption,
       deleteImage,
       canSuggest,
       suggestTags,
     }),
-    [canUpload, addImages, setValue, clearValue, setCaption, deleteImage, canSuggest, suggestTags],
+    [
+      canUpload,
+      addImages,
+      setValue,
+      clearValue,
+      resetImage,
+      setCaption,
+      deleteImage,
+      canSuggest,
+      suggestTags,
+    ],
   )
 }

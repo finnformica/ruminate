@@ -236,6 +236,17 @@ function imageObjectUrl(id: string): Promise<string> {
   return loading
 }
 
+/** The bytes of an uploaded picture: from the device's copy when it has
+ * one (a picture just uploaded is kept there as it goes up), else from
+ * the Worker, keeping a copy. Throws `ImageFetchError`. */
+export async function imageBlob(id: string): Promise<Blob> {
+  const kept = await readCachedImage(id)
+  if (kept) return kept
+  const blob = await fetchImageBlob(id)
+  void cacheImage(id, blob)
+  return blob
+}
+
 /** Bump on the network coming back, so a picture that could not be reached
  * tries again. */
 function useOnlineRetry(active: boolean): number {

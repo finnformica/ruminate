@@ -208,7 +208,7 @@ export function FilterMenu({
             the branch's own `parent:` qualifier — several at once a comma
             list, any of them, as the language reads a list — and each
             branch writes a qualifier of its own, so a tick under Location
-            and a tick under Fixture AND, as the language reads two
+            and a tick under Object AND, as the language reads two
             qualifiers (`src/utils/view-filter.ts`). Any takes this branch's
             qualifier out and leaves the others. */}
         {branches?.map((branch) => {

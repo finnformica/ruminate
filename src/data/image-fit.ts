@@ -29,6 +29,23 @@ export const FIT_MAX_EDGE = 3200
 const FIT_QUALITY = 0.85
 const FIT_TYPE = "image/jpeg"
 
+/**
+ * The longest edge of the copy a vision model is shown (`visionCopy`):
+ * the models resize anything past about 1,568 px on the long edge before
+ * they look at it, so sending more is upload for nothing — a phone photo
+ * lands at a few hundred kilobytes rather than its megabytes.
+ */
+export const VISION_MAX_EDGE = 1568
+const VISION_QUALITY = 0.8
+
+/** How a picture is re-encoded: no larger than `maxEdge` on its longest
+ * side, written as `type` at `quality`. */
+export interface FitOptions {
+  maxEdge: number
+  quality: number
+  type: string
+}
+
 /** Formats the Worker does not take but a browser may decode. */
 const DECODABLE_ONLY: readonly string[] = ["image/heic", "image/heif"]
 
@@ -77,7 +94,7 @@ type Decoded = { source: CanvasImageSource; width: number; height: number; close
 
 /** The picture's pixels, oriented as its EXIF says, or null when this
  * browser cannot decode the file. */
-async function decode(file: File): Promise<Decoded | null> {
+async function decode(file: Blob): Promise<Decoded | null> {
   if (typeof createImageBitmap === "function") {
     try {
       const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" })
@@ -117,13 +134,14 @@ async function encode(
   source: CanvasImageSource,
   width: number,
   height: number,
+  { type, quality }: Pick<FitOptions, "type" | "quality">,
 ): Promise<Blob | null> {
   if (typeof OffscreenCanvas === "function") {
     const canvas = new OffscreenCanvas(width, height)
     const context = canvas.getContext("2d")
     if (!context) return null
     context.drawImage(source, 0, 0, width, height)
-    return canvas.convertToBlob({ type: FIT_TYPE, quality: FIT_QUALITY })
+    return canvas.convertToBlob({ type, quality })
   }
   if (typeof document === "undefined") return null
   const canvas = document.createElement("canvas")
@@ -132,7 +150,7 @@ async function encode(
   const context = canvas.getContext("2d")
   if (!context) return null
   context.drawImage(source, 0, 0, width, height)
-  return new Promise((resolve) => canvas.toBlob(resolve, FIT_TYPE, FIT_QUALITY))
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality))
 }
 
 /** Whether this browser has a canvas to re-encode with at all. */
@@ -155,15 +173,39 @@ function canEncode(): boolean {
  */
 export async function fitImage(file: File): Promise<File | null> {
   if (!needsFitting(file)) return file
+  const blob = await fitImageFor(file, {
+    maxEdge: FIT_MAX_EDGE,
+    quality: FIT_QUALITY,
+    type: FIT_TYPE,
+  })
+  if (!blob) return null
+  return new File([blob], fittedName(file.name), { type: FIT_TYPE, lastModified: Date.now() })
+}
+
+/**
+ * A copy of `blob` re-encoded as `options` say — drawn no larger than
+ * `maxEdge` on its longest side, the shape kept, written as `type` at
+ * `quality`, with no metadata — whatever its size was. Null when the
+ * browser cannot decode or re-encode it.
+ */
+export async function fitImageFor(blob: Blob, options: FitOptions): Promise<Blob | null> {
   if (!canEncode()) return null
-  const decoded = await decode(file)
+  const decoded = await decode(blob)
   if (!decoded) return null
   try {
-    const { width, height } = fittedSize(decoded.width, decoded.height)
-    const blob = await encode(decoded.source, width, height)
-    if (!blob) return null
-    return new File([blob], fittedName(file.name), { type: FIT_TYPE, lastModified: Date.now() })
+    const { width, height } = fittedSize(decoded.width, decoded.height, options.maxEdge)
+    return await encode(decoded.source, width, height, options)
   } finally {
     decoded.close()
   }
+}
+
+/**
+ * The copy of a picture a vision model is shown (docs/boards.md, "Tagging
+ * with Claude"): a JPEG no larger than `VISION_MAX_EDGE` on its longest
+ * side. Null when this browser cannot make one — the caller then sends the
+ * original and the Worker's size limit answers for it.
+ */
+export function visionCopy(blob: Blob): Promise<Blob | null> {
+  return fitImageFor(blob, { maxEdge: VISION_MAX_EDGE, quality: VISION_QUALITY, type: FIT_TYPE })
 }

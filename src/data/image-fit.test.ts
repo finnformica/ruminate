@@ -1,7 +1,16 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest"
 import { MAX_IMAGE_BYTES } from "../../worker/handlers/image-policy"
-import { FIT_MAX_EDGE, fitImage, fittedName, fittedSize, needsFitting } from "./image-fit"
+import {
+  FIT_MAX_EDGE,
+  VISION_MAX_EDGE,
+  fitImage,
+  fitImageFor,
+  fittedName,
+  fittedSize,
+  needsFitting,
+  visionCopy,
+} from "./image-fit"
 
 describe("needsFitting", () => {
   it("is a supported picture over the limit, or a format only the browser reads", () => {
@@ -30,6 +39,16 @@ describe("fittedSize", () => {
     expect(fittedSize(6048, 8064)).toEqual({ width: 2400, height: 3200 })
     expect(fittedSize(10000, 1, 100)).toEqual({ width: 100, height: 1 })
   })
+
+  it("fits a phone photo to the vision edge: a few megapixels become a couple", () => {
+    expect(VISION_MAX_EDGE).toBe(1568)
+    expect(fittedSize(4032, 3024, VISION_MAX_EDGE)).toEqual({ width: 1568, height: 1176 })
+    expect(fittedSize(3024, 4032, VISION_MAX_EDGE)).toEqual({ width: 1176, height: 1568 })
+    expect(fittedSize(4000, 3000, VISION_MAX_EDGE)).toEqual({ width: 1568, height: 1176 })
+    // Already within it: left as it is.
+    expect(fittedSize(1200, 800, VISION_MAX_EDGE)).toEqual({ width: 1200, height: 800 })
+    expect(fittedSize(1568, 1568, VISION_MAX_EDGE)).toEqual({ width: 1568, height: 1568 })
+  })
 })
 
 describe("fittedName", () => {
@@ -50,5 +69,16 @@ describe("fitImage", () => {
   it("is nothing where there is no canvas to re-encode with", async () => {
     const file = new File([new Uint8Array(10)], "a.heic", { type: "image/heic" })
     expect(await fitImage(file)).toBeNull()
+  })
+})
+
+describe("fitImageFor and visionCopy", () => {
+  // jsdom has no canvas that draws, so the re-encode cannot happen here;
+  // the sizing it would use is pinned above, and the browser check in the
+  // pull request measures the copy itself.
+  it("are nothing where there is no canvas to re-encode with", async () => {
+    const blob = new Blob([new Uint8Array(10)], { type: "image/jpeg" })
+    expect(await fitImageFor(blob, { maxEdge: 100, quality: 0.8, type: "image/jpeg" })).toBeNull()
+    expect(await visionCopy(blob)).toBeNull()
   })
 })
