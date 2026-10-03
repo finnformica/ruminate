@@ -3,7 +3,6 @@ import copy from "copy-to-clipboard"
 import { useAtom, useAtomValue, useSetAtom, useStore } from "jotai"
 import React from "react"
 import { graphSnapshotAtom, isSignedOutAtom, notesAtom } from "../global-state"
-import { useFeature } from "../data/features"
 import { blockRollup, rollup } from "../data/graph"
 import { receivedSharesAtom, sharePermissions, sharedOriginAtom } from "../data/shared-mode"
 import { copyAsMarkdown } from "../utils/copy-markdown"
@@ -97,16 +96,15 @@ interface EditorActions {
  *
  * A note someone shared with the user (docs/sharing.md): its rows are the
  * owner's, so the verbs the owner granted decide what the menu offers.
- * Sharing is the owner's alone: an own note, signed in, the feature on for
- * this account (src/data/feature-flags.ts).
+ * Sharing is the owner's alone: an own note, signed in.
  *
  * A note's default surface is one property on its page (docs/boards.md):
  * **Make this a board** sets it and opens the board, **Make this a note**
  * clears it, and a board's outline offers **Open board** to get back. Own
  * notes only (signed out, the sample graph in memory, as **New board**
- * does), with boards on for the account, and only where the caller can
- * open the board (`openBoard`); a daily or weekly note is what its id says
- * it is, so neither is offered one.
+ * does), and only where the caller can open the board (`openBoard`); a
+ * daily or weekly note is what its id says it is, so neither is offered
+ * one.
  */
 export function useNoteMenuEntries() {
   const isSignedOut = useAtomValue(isSignedOutAtom)
@@ -114,9 +112,7 @@ export function useNoteMenuEntries() {
   const renameNote = useRenameNote()
   // Delete asks first (`delete-note-dialog.tsx`); the menu only opens it.
   const requestDelete = useSetAtom(deleteNoteDialogAtom)
-  const sharingEnabled = useFeature("sharing")
   const openShare = useSetAtom(shareDialogAtom)
-  const boardsEnabled = useFeature("boards")
   const setNoteProps = useSetNoteProps()
   return React.useCallback(
     (
@@ -139,7 +135,7 @@ export function useNoteMenuEntries() {
       const verbs = share ? sharePermissions(share) : null
       const canRename = !isSignedOut && (verbs === null || verbs.write)
       const canDelete = !isSignedOut && (verbs === null || verbs.delete)
-      const canShare = !isSignedOut && verbs === null && sharingEnabled
+      const canShare = !isSignedOut && verbs === null
 
       // Copy what the view holds, not what the note holds: focused on a
       // block, that block and everything beneath it. A focused block the
@@ -166,8 +162,7 @@ export function useNoteMenuEntries() {
       // The board entries: which of them a note gets is its kind, read as
       // the menu opens, like the rest.
       const kind = jotaiStore.get(notesAtom).get(noteId)?.type
-      const canBoard =
-        verbs === null && boardsEnabled && !!(options.openBoard || options.openOutline)
+      const canBoard = verbs === null && !!(options.openBoard || options.openOutline)
       // On the board itself the way across is to the outline, and a board
       // made a note is opened there, since the board page refuses a note.
       const boardEntries: MenuEntry[] = !canBoard
@@ -242,16 +237,7 @@ export function useNoteMenuEntries() {
         },
       ] satisfies MenuEntry[]
     },
-    [
-      jotaiStore,
-      isSignedOut,
-      sharingEnabled,
-      boardsEnabled,
-      renameNote,
-      requestDelete,
-      openShare,
-      setNoteProps,
-    ],
+    [jotaiStore, isSignedOut, renameNote, requestDelete, openShare, setNoteProps],
   )
 }
 

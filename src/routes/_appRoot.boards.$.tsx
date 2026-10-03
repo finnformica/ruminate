@@ -11,7 +11,6 @@ import { Notice } from "../components/notice"
 import { PageLayout } from "../components/page-layout"
 import { listHeading } from "../components/ui/list"
 import { FilterMenu, SortMenu, type FilterBranch } from "../components/view-controls"
-import { useFeature } from "../data/features"
 import { parentIdsOf, parseProps } from "../data/graph"
 import { imageFilesOf } from "../data/images"
 import { graphSnapshotAtom } from "../global-state"
@@ -49,16 +48,6 @@ export const Route = createFileRoute("/_appRoot/boards/$")({
 
 function RouteComponent() {
   const { _splat: boardId = "" } = Route.useParams()
-  const enabled = useFeature("boards")
-  if (!enabled) {
-    return (
-      <PageLayout title="Board" icon={<BoardIcon16 />}>
-        <div className="p-4">
-          <Notice>Boards aren’t switched on for this account.</Notice>
-        </div>
-      </PageLayout>
-    )
-  }
   return <BoardPage key={boardId} boardId={boardId} />
 }
 

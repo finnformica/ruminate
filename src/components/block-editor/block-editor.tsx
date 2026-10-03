@@ -5,7 +5,6 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import type React from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent, TouchEvent } from "react"
 import { isDatabaseModeAtom, newBlockMarkerAtom } from "../../global-state"
-import { useFeature } from "../../data/features"
 import { sharedOriginAtom } from "../../data/shared-mode"
 import { shareDialogAtom } from "../share-note-dialog"
 import type { Block, BlockDoc, ChangeHint } from "../../blocks/types"
@@ -1954,9 +1953,7 @@ export function BlockEditor({
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const sharedOrigin = useAtomValue(sharedOriginAtom)
   const openShareDialog = useSetAtom(shareDialogAtom)
-  const sharingEnabled = useFeature("sharing")
-  const canShare =
-    noteId !== undefined && isDatabaseMode && sharingEnabled && !sharedOrigin.has(noteId)
+  const canShare = noteId !== undefined && isDatabaseMode && !sharedOrigin.has(noteId)
   // A block can be made a view wherever the editor has a note behind it —
   // signed out too, where the sample notes are there to play with, and in a
   // note someone shared: the view is this user's own row

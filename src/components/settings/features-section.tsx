@@ -50,7 +50,7 @@ export function FeaturesSection() {
       ) : (
         FEATURES.map((feature) => (
           <div key={feature.key} className="flex items-center justify-between gap-4">
-            <span className="w-0 grow truncate leading-4">{feature.label}</span>
+            <span className="w-0 grow truncate leading-5">{feature.label}</span>
             <AudienceMenu
               label={feature.label}
               value={audiences[feature.key]}

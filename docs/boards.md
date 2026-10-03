@@ -5,8 +5,7 @@ inspiration — for a future home, say — where each picture can be captioned
 and given a **location**, a **fixture** and a **material** from a form, and
 the wall narrowed by any of them. **New board** in the header makes one and
 opens it at `/boards/<note id>`; its header is the note's own — Sort, Filter
-and the ⋯ menu, where **Open outline** opens the note beneath it. Behind a
-feature flag (`boards`, `src/data/feature-flags.ts`), admin only by default.
+and the ⋯ menu, where **Open outline** opens the note beneath it.
 
 ## One property, and nothing else new in the data
 
