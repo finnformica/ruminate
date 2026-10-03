@@ -32,14 +32,14 @@ const PICTURE_BASE64 = "/9j/4AECAw=="
 
 const FEATURES: TagFeature[] = [
   { label: "Location", multi: false, values: ["Mauritius", "Lisbon"] },
-  { label: "Fixture", multi: true, values: [] },
+  { label: "Object", multi: true, values: [] },
 ]
 
 const GOOD = {
   caption: "A rattan lamp",
   features: [
     { label: "Location", values: ["Mauritius"] },
-    { label: "Fixture", values: ["Lamp", "lamp"] },
+    { label: "Object", values: ["Lamp", "lamp"] },
   ],
 }
 
@@ -48,7 +48,7 @@ const READ = {
   caption: "A rattan lamp",
   features: [
     { label: "Location", values: ["Mauritius"] },
-    { label: "Fixture", values: ["Lamp"] },
+    { label: "Object", values: ["Lamp"] },
   ],
 }
 
@@ -333,8 +333,8 @@ describe("the Anthropic provider", () => {
       type: "image",
       source: { type: "base64", media_type: "image/jpeg", data: PICTURE_BASE64 },
     })
-    expect(text.text).toContain("- Location (one value): Mauritius, Lisbon")
-    expect(text.text).toContain("- Fixture (several values): none yet")
+    expect(text.text).toContain("- Location (one value): Values in use: Mauritius, Lisbon")
+    expect(text.text).toContain("- Object (several values): Values in use: none yet")
   })
 
   it("tells the caller the key was refused, without the key", async () => {
@@ -443,7 +443,7 @@ describe("the Cloudflare provider", () => {
       type: "image_url",
       image_url: { url: `data:image/jpeg;base64,${PICTURE_BASE64}` },
     })
-    expect(text.text).toContain("- Location (one value): Mauritius, Lisbon")
+    expect(text.text).toContain("- Location (one value): Values in use: Mauritius, Lisbon")
     expect(text.text).toContain("JSON only")
     expect(await aiCalls()).toEqual([{ calls_today: 1 }])
   })

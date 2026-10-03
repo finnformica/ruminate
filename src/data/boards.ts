@@ -47,15 +47,27 @@ export interface BoardFeature {
   label: string
   /** Whether a picture may carry several of its values at once. */
   multi: boolean
+  /** What the feature is, as the model is told it (docs/boards.md,
+   * "Tagging with Claude"). */
+  meaning: string
 }
 
 /** The features a board offers, in the order the form shows them. The
  * label is the identity: a block on the page with this text (trimmed,
  * case-insensitively) is the feature's block. */
 export const BOARD_FEATURES: readonly BoardFeature[] = [
-  { label: "Location", multi: false },
-  { label: "Fixture", multi: true },
-  { label: "Material", multi: true },
+  {
+    label: "Location",
+    multi: false,
+    meaning: "where the picture was taken, named as a person would say it",
+  },
+  {
+    label: "Object",
+    multi: true,
+    meaning:
+      "the thing the picture is of, such as furniture, lighting, cutlery, plants or decoration",
+  },
+  { label: "Material", multi: true, meaning: "what that thing is made of" },
 ]
 
 /** The type a feature block is created as, and the type a value is. */
@@ -340,6 +352,7 @@ export function tagFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): TagFeat
   return boardFeatures(snapshot, boardId).map((state) => ({
     label: state.feature.label,
     multi: state.feature.multi,
+    meaning: state.feature.meaning,
     values: state.values.map((value) => value.text.trim()).filter((text) => text !== ""),
   }))
 }
@@ -392,14 +405,15 @@ export function suggestionOps(
 }
 
 /**
- * Take every value back off a picture, all features at once — the
- * inspector's **Reset**, one batch with one Undo. The values stay for the
- * other pictures; the caption is left as it is; a picture left with no
- * parent is back in the basket. Nothing when it carries no value.
+ * A picture back to how it was uploaded — the inspector's **Reset**: its
+ * caption cleared and every value taken off, all features at once, one
+ * batch with one Undo. The values stay for the other pictures; a picture
+ * left with no parent is back in the basket. Nothing when it has no
+ * caption and carries no value.
  */
-export function resetValuesOps(snapshot: GraphSnapshot, boardId: NoteId, imageId: string): Op[] {
+export function resetImageOps(snapshot: GraphSnapshot, boardId: NoteId, imageId: string): Op[] {
   if (!isBoard(snapshot, boardId)) return []
-  const ops: Op[] = []
+  const ops: Op[] = [...setCaptionOps(snapshot, imageId, "")]
   for (const state of boardFeatures(snapshot, boardId)) {
     for (const value of imageValues(snapshot, state, imageId)) {
       ops.push(...clearValueOps(snapshot, value.id, imageId))

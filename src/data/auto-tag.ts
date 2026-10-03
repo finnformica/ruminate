@@ -56,11 +56,14 @@ export const AUTO_TAG_IMAGE_TYPES: readonly string[] = [
 ]
 
 /** A feature as the client describes it to the Worker: its label, whether
- * a picture may carry several of its values, and the values in use. */
+ * a picture may carry several of its values, what it means, and the
+ * values in use. */
 export interface TagFeature {
   label: string
   multi: boolean
   values: string[]
+  /** What the feature is, for the prompt — "what that thing is made of". */
+  meaning?: string
 }
 
 /** What `POST /api/boards/tag` takes beside the picture: the board's
@@ -91,6 +94,7 @@ export interface TagResponse {
 const MAX_FEATURES = 12
 const MAX_VALUES_PER_FEATURE = 200
 const MAX_LABEL_LENGTH = 60
+const MAX_MEANING_LENGTH = 200
 const MAX_VALUE_LENGTH = 60
 const MAX_CAPTION_LENGTH = 120
 /** How many values the model may give one feature at once. */
@@ -118,13 +122,15 @@ export function readTagRequest(raw: unknown): TagRequest | null {
     }
     const label = feature.label.trim().slice(0, MAX_LABEL_LENGTH)
     if (label === "") return null
+    const meaning =
+      typeof feature.meaning === "string" ? feature.meaning.trim().slice(0, MAX_MEANING_LENGTH) : ""
     const values: string[] = []
     for (const value of feature.values) {
       if (typeof value !== "string") return null
       const text = value.trim().slice(0, MAX_VALUE_LENGTH)
       if (text !== "") values.push(text)
     }
-    features.push({ label, multi: feature.multi, values })
+    features.push({ label, multi: feature.multi, values, ...(meaning ? { meaning } : {}) })
   }
   return { features }
 }
@@ -147,7 +153,8 @@ export function tagPrompt(features: readonly TagFeature[]): string {
   const lines = features.map((feature) => {
     const kind = feature.multi ? "several values" : "one value"
     const values = feature.values.length ? feature.values.join(", ") : "none yet"
-    return `- ${feature.label} (${kind}): ${values}`
+    const meaning = feature.meaning ? `${feature.meaning}. ` : ""
+    return `- ${feature.label} (${kind}): ${meaning}Values in use: ${values}`
   })
   return ["Features:", ...lines].join("\n")
 }
@@ -263,7 +270,10 @@ export function styledValue(text: string, inUse: readonly string[]): string {
  * case) is returned spelled exactly as the value in use, so the board's
  * own value is linked rather than a near-duplicate made; a new value is
  * trimmed, cut to `MAX_SUGGESTED_VALUE_LENGTH` and given the style of the
- * values in use (`styledValue`). Null when the answer is not shaped as
+ * values in use (`styledValue`). An entry whose label names no feature
+ * asked about is read for the feature at its own position, when the
+ * answer has one entry per feature in order ("Objects" for Object) — a
+ * label that matches always wins. Null when the answer is not shaped as
  * asked.
  */
 export function readTagSuggestion(
@@ -274,26 +284,41 @@ export function readTagSuggestion(
   const record = raw as Record<string, unknown>
   if (typeof record.caption !== "string" || !Array.isArray(record.features)) return null
   const caption = capitalised(record.caption.trim().slice(0, MAX_CAPTION_LENGTH))
+  const asked = new Set(features.map((feature) => normalise(feature.label)))
   const answered = new Map<string, string[]>()
+  // Each entry as it came, in order, for the positional reading.
+  const entries: ({ label: string; values: string[] } | null)[] = []
   for (const entry of record.features) {
-    if (typeof entry !== "object" || entry === null) continue
+    if (typeof entry !== "object" || entry === null) {
+      entries.push(null)
+      continue
+    }
     const item = entry as Record<string, unknown>
-    if (typeof item.label !== "string" || !Array.isArray(item.values)) continue
-    const key = normalise(item.label)
-    if (answered.has(key)) continue
+    if (typeof item.label !== "string" || !Array.isArray(item.values)) {
+      entries.push(null)
+      continue
+    }
     const values: string[] = []
     for (const value of item.values) {
       if (typeof value === "string" && value.trim() !== "") values.push(value.trim())
     }
-    answered.set(key, values)
+    const label = normalise(item.label)
+    entries.push({ label, values })
+    if (!answered.has(label)) answered.set(label, values)
   }
+  // Only when the answer is the features, in order, under other names.
+  const byPosition = entries.length === features.length
   return {
     caption,
-    features: features.map((feature) => {
+    features: features.map((feature, index) => {
       const inUse = new Map(feature.values.map((value) => [normalise(value), value.trim()]))
       const seen = new Set<string>()
       const values: string[] = []
-      for (const given of answered.get(normalise(feature.label)) ?? []) {
+      const named = answered.get(normalise(feature.label))
+      const atIndex = entries[index]
+      const givens =
+        named ?? (byPosition && atIndex && !asked.has(atIndex.label) ? atIndex.values : [])
+      for (const given of givens) {
         const existing = inUse.get(normalise(given))
         const text =
           existing ?? styledValue(given.slice(0, MAX_SUGGESTED_VALUE_LENGTH).trim(), feature.values)

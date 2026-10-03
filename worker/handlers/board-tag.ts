@@ -412,6 +412,8 @@ export async function boardTag(
       422,
     )
   }
+  // The answer as it came goes back with what was read from it, so the
+  // success toast's Copy shows both.
   const response: TagResponse = { suggestion, ...found() }
   return json(response)
 }

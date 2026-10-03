@@ -12,7 +12,7 @@ import {
   inverseOps,
   isBoard,
   outlineImageIds,
-  resetValuesOps,
+  resetImageOps,
   setCaptionOps,
   suggestionOps,
   tagFeaturesOf,
@@ -125,14 +125,14 @@ export function useBoardMatches(imageIds: readonly string[], text: string): stri
  * stays up long enough to be read and pressed.
  */
 function failedToast(message: string, detail: string): void {
-  toast.error(message, {
-    duration: 10000,
-    action: {
-      label: "Copy",
-      onClick: () => void navigator.clipboard?.writeText(detail).catch(() => {}),
-    },
-  })
+  toast.error(message, { duration: 10000, action: copyControl(detail) })
 }
+
+/** A toast control that puts `detail` on the clipboard. */
+const copyControl = (detail: string) => ({
+  label: "Copy",
+  onClick: () => void navigator.clipboard?.writeText(detail).catch(() => {}),
+})
 
 /** An error that is not the route's — the network, a decode — as lines:
  * what it says, and the first lines of where it came from. */
@@ -154,7 +154,7 @@ export interface BoardWrites {
   clearValue: (feature: BoardFeature, value: BoardValue, imageId: string) => void
   /** Take every value off a picture, all features at once, as one undoable
    * batch. The caption stays. */
-  resetValues: (imageId: string) => void
+  resetImage: (imageId: string) => void
   setCaption: (imageId: string, caption: string) => void
   deleteImage: (imageId: string) => void
   /** Whether Claude can be asked to tag a picture here: there is a store
@@ -183,6 +183,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   // the same router.
   const canSuggest = useAiAvailable().available && exists
 
+  // A change's toast, with Undo as its action.
   const undoable = React.useCallback(
     (ops: Op[], message: string) => {
       if (ops.length === 0) return
@@ -223,9 +224,9 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
     [store, undoable],
   )
 
-  const resetValues = React.useCallback(
+  const resetImage = React.useCallback(
     (imageId: string) => {
-      undoable(resetValuesOps(store.get(graphSnapshotAtom), boardId, imageId), "Tags reset")
+      undoable(resetImageOps(store.get(graphSnapshotAtom), boardId, imageId), "Picture reset")
     },
     [store, boardId, undoable],
   )
@@ -349,7 +350,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       addImages,
       setValue,
       clearValue,
-      resetValues,
+      resetImage,
       setCaption,
       deleteImage,
       canSuggest,
@@ -360,7 +361,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       addImages,
       setValue,
       clearValue,
-      resetValues,
+      resetImage,
       setCaption,
       deleteImage,
       canSuggest,

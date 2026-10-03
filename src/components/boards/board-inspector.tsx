@@ -7,7 +7,7 @@ import { usePending } from "../../hooks/pending"
 import { Button } from "../ui/button"
 import { Dialog } from "../ui/dialog"
 import { FormControl } from "../form-control"
-import { SparklesIcon16, TrashIcon16 } from "../icons"
+import { ResetIcon16, SparklesIcon16, TrashIcon16 } from "../icons"
 import { TextInput } from "../ui/text-input"
 import { BoardPicture, type BoardImage } from "./board-picture"
 import { NewValueDialog } from "./new-value-dialog"
@@ -46,12 +46,13 @@ export function BoardInspector({
   // press until the toast (docs/design-principles.md, Busy controls).
   const [suggest, suggesting] = usePending(() => writes.suggestTags(image.id))
 
-  // How many values the picture carries, over every feature: what Reset
-  // would take off.
+  // What Reset would take off: the caption, and the picture's values over
+  // every feature. Nothing to take off, nothing to press.
   const carried = features.reduce(
     (count, state) => count + imageValues(snapshot, state, image.id).length,
     0,
   )
+  const resettable = carried > 0 || image.text.trim() !== ""
 
   return (
     // Focus is kept in the window, but the page is not made inert: the
@@ -122,13 +123,14 @@ export function BoardInspector({
               onClose={() => setNaming(null)}
             />
             <div className="mt-auto flex flex-wrap items-center gap-2">
-              {/* Every value off the picture at once, as one Undo; the
-                  caption stays. Nothing to take off, nothing to press. */}
+              {/* The caption and every value off the picture at once, as
+                  one Undo. */}
               <Button
                 size="small"
-                disabled={carried === 0}
-                onClick={() => writes.resetValues(image.id)}
+                disabled={!resettable}
+                onClick={() => writes.resetImage(image.id)}
               >
+                <ResetIcon16 />
                 Reset
               </Button>
               <Button

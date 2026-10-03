@@ -34,13 +34,13 @@ into the outline is on the board, a picture added from the board is in the
 note, and a board's features and values can be written by hand in the
 outline and the form picks them up.
 
-| on the board       | in the graph                                                                                                                  |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| the board          | a note whose page props hold `board: true`                                                                                    |
-| its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket    |
-| a feature          | a direct child of the page whose text is the feature's label — `Location`, `Fixture`, `Material` — trimmed, whatever its case |
-| a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                               |
-| a picture's value  | a `child` link from the value block to the picture: the value is a second parent, exactly as copy and select-mode paste make  |
+| on the board       | in the graph                                                                                                                 |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| the board          | a note whose page props hold `board: true`                                                                                   |
+| its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket   |
+| a feature          | a direct child of the page whose text is the feature's label — `Location`, `Object`, `Material` — trimmed, whatever its case |
+| a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                              |
+| a picture's value  | a `child` link from the value block to the picture: the value is a second parent, exactly as copy and select-mode paste make |
 
 So a board's outline reads:
 
@@ -50,7 +50,7 @@ Home inspiration
     - Mauritius
       [picture]
     - Lisbon
-  Fixture
+  Object
     - Lamp
       [picture]
 
@@ -60,7 +60,12 @@ Home inspiration
 
 The features are the preset in `src/data/boards.ts` (`BOARD_FEATURES`): a
 label and whether a picture may carry several of its values (**Location** is
-one at a time; **Fixture** and **Material** are as many as apply). The label
+one at a time; **Object** and **Material** are as many as apply), and what
+each means, as the model is told it: **Location** is where the picture was
+taken, named as a person would say it; **Object** is the thing the picture
+is of — furniture, lighting, cutlery, plants, decoration; **Material** is
+what that thing is made of. (Object was **Fixture** until 2026-W40; there
+is no alias, so a board with a `Fixture` block retitles it.) The label
 is the identity, so renaming a feature block in the outline detaches it: the
 form makes a fresh one on next use and the old block stays as ordinary
 content, values and pictures still linked. Two direct children with the same
@@ -116,7 +121,7 @@ Parent branch writes, so the branches are a shortcut into the one filter
 rather than a filter of their own. Each feature keeps a `parent:` qualifier
 of its own, and the language reads the two shapes two ways: a comma list
 within one qualifier is _either_, the key repeated is _both_. So Mauritius
-and Lisbon ticked under Location, and Lamp under Fixture, is
+and Lisbon ticked under Location, and Lamp under Object, is
 `parent:<mauritius>,<lisbon> parent:<lamp>` — a picture in Mauritius or
 Lisbon that is a lamp — as it would be in the search box, and as a note's
 filter would read it. A branch tells its qualifier from the others by the
@@ -165,10 +170,10 @@ each):
   others; a picture left with no parent is back in the basket.
 - **The caption** is the image block's text (`setCaptionOps`) — what search
   matches, as in the editor.
-- **Reset** (`resetValuesOps`) takes every value off the picture, all
-  features at once, as one batch with one Undo; the caption stays. Beside
+- **Reset** (`resetImageOps`) clears the caption and takes every value off
+  the picture, all features at once, as one batch with one Undo. Beside
   **Delete image** at the foot of the form, and nothing to press while the
-  picture carries no value.
+  picture has no caption and carries no value.
 - **Delete image** is the context menu's Delete (`deleteBlockOps`): the row
   is tombstoned; the bytes stay in the bucket (docs/images.md, "Not yet").
 
@@ -352,7 +357,15 @@ is reused and a new one made, and the batch built up against the snapshot
 as each write would leave it, so two new values under one new feature make
 one feature block. It fills in and never overrides what a person set, and
 it is one toast — **Picture updated** — with one **Undo**. Nothing to add
-is a toast that says so.
+is a toast that says so. Only a failure's toast offers **Copy**: a call that
+went through can be read in the gateway log.
+
+The prompt tells the model what each feature means (`meaning` on
+`BoardFeature`, sent with the request as `TagFeature.meaning` and rendered
+as "- Object (several values): the thing the picture is of, such as …
+Values in use: cutlery, potted plant"), and an answer that names the
+features under other labels — "Objects", "Materials" — is still read, by
+position, when it has one entry per feature in order.
 
 Deliberately not done: encrypting the key at rest; tagging a picture that
 is not an upload (an external picture's bytes are at its own address);
