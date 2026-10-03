@@ -4,6 +4,7 @@ import type React from "react"
 import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
+import { FloatingBarButton as BarButton, floatingBar } from "../ui/floating-bar"
 import type { BlockActions } from "./block-actions"
 import {
   ArrowLeftToLineIcon16,
@@ -240,13 +241,12 @@ export function MobileEditBar({
       data-testid="mobile-edit-bar"
       data-view={view}
       data-keyboard={keyboardUp ? "up" : "down"}
-      // The card's ring and shadow on an opaque surface: the bar sits over
-      // the note as much as over the keyboard, and a blurred note showing
-      // through would muddle the glyphs.
-      // 6px of padding at either end is the pill's, not a button's: the
-      // first and last glyphs sit clear of the rounded ends, and the row
-      // scrolls under it evenly.
-      className="fixed inset-x-3 top-0 z-popup flex h-12 items-stretch overflow-hidden rounded-full bg-bg-overlay px-1.5 shadow-2xl ring-1 ring-[var(--neutral-a3)] will-change-transform dark:ring-inset print:hidden"
+      // The floating pill (src/components/ui/floating-bar.tsx), pinned to
+      // the keyboard's top edge by the transform below.
+      className={cx(
+        floatingBar(),
+        "fixed inset-x-3 top-0 z-popup will-change-transform print:hidden",
+      )}
       style={{
         // The bar's bottom edge a little above the visual viewport's (see
         // `useKeyboard`); with no keyboard, above the home indicator too.
@@ -482,9 +482,6 @@ function Rule() {
   return <span aria-hidden className="h-4 w-px shrink-0 self-center bg-[var(--neutral-a4)]" />
 }
 
-/** Keeps focus where it is: the pointer down is cancelled, so the textarea
- * never blurs and the keyboard stays up for the tap that follows. */
-const keepFocus = (event: React.SyntheticEvent) => event.preventDefault()
 const noop = () => {}
 
 /**
@@ -509,60 +506,4 @@ function useOverflowsRight(ref: React.RefObject<HTMLDivElement | null>, deps: un
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref, ...deps])
   return overflows
-}
-
-function BarButton({
-  label,
-  onClick,
-  pressed,
-  disabled,
-  enter,
-  index = 0,
-  className,
-  children,
-}: {
-  label: string
-  onClick: () => void
-  /** The row's current choice (the Turn into row's current type). */
-  pressed?: boolean
-  /** Would do nothing right now: greyed, and inert, as its key would be. */
-  disabled?: boolean
-  /**
-   * How the button arrives when its row does (block-editor.css). `morph`:
-   * in place, growing from the glyph that was there — Aa becomes Back and
-   * Back becomes Aa, the one button the tap was on. `cascade`: sliding in
-   * from the side the row came from, each a beat after the last. `rise`:
-   * up from beneath, the same beat apart, for the Turn into row.
-   */
-  enter?: "morph" | "cascade" | "rise"
-  /** The button's place in its cascade: its delay. */
-  index?: number
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      aria-pressed={pressed}
-      aria-disabled={disabled || undefined}
-      tabIndex={-1}
-      onPointerDown={keepFocus}
-      onMouseDown={keepFocus}
-      onClick={disabled ? undefined : onClick}
-      data-enter={enter}
-      style={enter ? ({ "--edit-bar-i": index } as React.CSSProperties) : undefined}
-      className={cx(
-        "edit-bar-button flex h-12 w-[38px] shrink-0 cursor-pointer select-none items-center justify-center text-text-secondary",
-        // Greying in and out eases rather than snaps; the press itself is
-        // on the glyph (block-editor.css).
-        "transition-[color,opacity] duration-200 ease-out motion-reduce:transition-none",
-        disabled ? "cursor-default text-text-tertiary opacity-50" : "active:text-text",
-        pressed && "text-text",
-        className,
-      )}
-    >
-      {children}
-    </button>
-  )
 }
