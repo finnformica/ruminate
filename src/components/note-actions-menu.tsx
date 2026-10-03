@@ -3,7 +3,6 @@ import copy from "copy-to-clipboard"
 import { useAtom, useAtomValue, useSetAtom, useStore } from "jotai"
 import React from "react"
 import { graphSnapshotAtom, isSignedOutAtom, notesAtom } from "../global-state"
-import { useFeature } from "../data/features"
 import { blockRollup, rollup } from "../data/graph"
 import { receivedSharesAtom, sharePermissions, sharedOriginAtom } from "../data/shared-mode"
 import { copyAsMarkdown } from "../utils/copy-markdown"
@@ -97,8 +96,7 @@ interface EditorActions {
  *
  * A note someone shared with the user (docs/sharing.md): its rows are the
  * owner's, so the verbs the owner granted decide what the menu offers.
- * Sharing is the owner's alone: an own note, signed in, the feature on for
- * this account (src/data/feature-flags.ts).
+ * Sharing is the owner's alone: an own note, signed in.
  *
  * A note's default surface is one property on its page (docs/boards.md):
  * **Make this a board** sets it and opens the board, **Make this a note**
@@ -114,7 +112,6 @@ export function useNoteMenuEntries() {
   const renameNote = useRenameNote()
   // Delete asks first (`delete-note-dialog.tsx`); the menu only opens it.
   const requestDelete = useSetAtom(deleteNoteDialogAtom)
-  const sharingEnabled = useFeature("sharing")
   const openShare = useSetAtom(shareDialogAtom)
   const setNoteProps = useSetNoteProps()
   return React.useCallback(
@@ -138,7 +135,7 @@ export function useNoteMenuEntries() {
       const verbs = share ? sharePermissions(share) : null
       const canRename = !isSignedOut && (verbs === null || verbs.write)
       const canDelete = !isSignedOut && (verbs === null || verbs.delete)
-      const canShare = !isSignedOut && verbs === null && sharingEnabled
+      const canShare = !isSignedOut && verbs === null
 
       // Copy what the view holds, not what the note holds: focused on a
       // block, that block and everything beneath it. A focused block the
@@ -240,7 +237,7 @@ export function useNoteMenuEntries() {
         },
       ] satisfies MenuEntry[]
     },
-    [jotaiStore, isSignedOut, sharingEnabled, renameNote, requestDelete, openShare, setNoteProps],
+    [jotaiStore, isSignedOut, renameNote, requestDelete, openShare, setNoteProps],
   )
 }
 

@@ -1,7 +1,6 @@
 import copy from "copy-to-clipboard"
 import { useAtomValue, useSetAtom, useStore } from "jotai"
 import React from "react"
-import { useFeature } from "../data/features"
 import { blockRollup } from "../data/graph"
 import { sharedOriginAtom } from "../data/shared-mode"
 import { viewRootIdsAtom } from "../data/views"
@@ -33,17 +32,15 @@ export function useBlockViewMenuEntries() {
   const jotaiStore = useStore()
   const writeView = useWriteView()
   const viewRoots = useAtomValue(viewRootIdsAtom)
-  // Sharing is the owner's: signed in, the feature on, and not a note
-  // someone shared with them (docs/sharing.md).
+  // Sharing is the owner's: signed in, and not a note someone shared with
+  // them (docs/sharing.md).
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
-  const sharingEnabled = useFeature("sharing")
   const openShare = useSetAtom(shareDialogAtom)
 
   return React.useCallback(
     (blockId: string, noteId: string, options: { reorder?: ReorderActions } = {}): MenuEntry[] => {
       const inViews = viewRoots.has(blockId)
-      const canShare =
-        isDatabaseMode && sharingEnabled && !jotaiStore.get(sharedOriginAtom).has(noteId)
+      const canShare = isDatabaseMode && !jotaiStore.get(sharedOriginAtom).has(noteId)
       const copyBlock = () =>
         copyAsMarkdown(blockRollup(blockId, jotaiStore.get(graphSnapshotAtom)) ?? "")
       const copyLink = () => copy(`${window.location.origin}/views/${noteId}?block=${blockId}`)
@@ -74,6 +71,6 @@ export function useBlockViewMenuEntries() {
             },
       ]
     },
-    [jotaiStore, writeView, viewRoots, isDatabaseMode, sharingEnabled, openShare],
+    [jotaiStore, writeView, viewRoots, isDatabaseMode, openShare],
   )
 }
