@@ -104,9 +104,9 @@ interface EditorActions {
  * **Make this a board** sets it and opens the board, **Make this a note**
  * clears it, and a board's outline offers **Open board** to get back. Own
  * notes only (signed out, the sample graph in memory, as **New board**
- * does), with boards on for the account, and only where the caller can
- * open the board (`openBoard`); a daily or weekly note is what its id says
- * it is, so neither is offered one.
+ * does), and only where the caller can open the board (`openBoard`); a
+ * daily or weekly note is what its id says it is, so neither is offered
+ * one.
  */
 export function useNoteMenuEntries() {
   const isSignedOut = useAtomValue(isSignedOutAtom)
@@ -116,7 +116,6 @@ export function useNoteMenuEntries() {
   const requestDelete = useSetAtom(deleteNoteDialogAtom)
   const sharingEnabled = useFeature("sharing")
   const openShare = useSetAtom(shareDialogAtom)
-  const boardsEnabled = useFeature("boards")
   const setNoteProps = useSetNoteProps()
   return React.useCallback(
     (
@@ -166,8 +165,7 @@ export function useNoteMenuEntries() {
       // The board entries: which of them a note gets is its kind, read as
       // the menu opens, like the rest.
       const kind = jotaiStore.get(notesAtom).get(noteId)?.type
-      const canBoard =
-        verbs === null && boardsEnabled && !!(options.openBoard || options.openOutline)
+      const canBoard = verbs === null && !!(options.openBoard || options.openOutline)
       // On the board itself the way across is to the outline, and a board
       // made a note is opened there, since the board page refuses a note.
       const boardEntries: MenuEntry[] = !canBoard
@@ -242,16 +240,7 @@ export function useNoteMenuEntries() {
         },
       ] satisfies MenuEntry[]
     },
-    [
-      jotaiStore,
-      isSignedOut,
-      sharingEnabled,
-      boardsEnabled,
-      renameNote,
-      requestDelete,
-      openShare,
-      setNoteProps,
-    ],
+    [jotaiStore, isSignedOut, sharingEnabled, renameNote, requestDelete, openShare, setNoteProps],
   )
 }
 
