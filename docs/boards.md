@@ -5,8 +5,7 @@ inspiration — for a future home, say — where each picture can be captioned
 and given a **location**, a **fixture** and a **material** from a form, and
 the wall narrowed by any of them. **New board** in the header makes one and
 opens it at `/boards/<note id>`; its header is the note's own — Sort, Filter
-and the ⋯ menu, where **Open outline** opens the note beneath it. Behind a
-feature flag (`boards`, `src/data/feature-flags.ts`), admin only by default.
+and the ⋯ menu, where **Open outline** opens the note beneath it.
 
 ## One property, and nothing else new in the data
 
@@ -114,14 +113,23 @@ The Filter menu leads with the board's features (`FilterBranch`): under
 **Location**, the values on the page, each with how many pictures carry it,
 and each a tick writing `parent:<value id>` — the qualifier the menu's own
 Parent branch writes, so the branches are a shortcut into the one filter
-rather than a filter of their own. Two ticks are a comma list, which the
-language reads as _either_: `parent:Mauritius,Lamp` keeps a picture under
-Mauritius or under Lamp, as it would in the search box, and as a note's
-filter would. Narrowing to pictures that carry both is not something the
-language says today (each `parent:` is tested against one occurrence's
-parent, and a picture under two values is two occurrences), so the board
-does not say it either; it would be a change to the engine, for every
-surface at once.
+rather than a filter of their own. Each feature keeps a `parent:` qualifier
+of its own, and the language reads the two shapes two ways: a comma list
+within one qualifier is _either_, the key repeated is _both_. So Mauritius
+and Lisbon ticked under Location, and Lamp under Fixture, is
+`parent:<mauritius>,<lisbon> parent:<lamp>` — a picture in Mauritius or
+Lisbon that is a lamp — as it would be in the search box, and as a note's
+filter would read it. A branch tells its qualifier from the others by the
+values it offers (`src/utils/view-filter.ts`): the qualifier whose values
+are all its own is its, and one typed by hand belongs to no branch and is
+left as written. **Any** takes the one feature's qualifier out and leaves
+the rest. The engine makes the conjunction hold for a picture under two
+values: such a picture is reached by two paths, and is two occurrences in
+the index, each showing its own path — but `parent:` is tested against
+every parent the picture has, and `under:` against every ancestor on any of
+its paths, so the one picture under Mauritius and under Lamp answers to
+both (`testAncestorFilter`, `src/utils/block-search.ts`; docs/query-language.md,
+"Repeat the key for both").
 
 The filter's **words** — its text outside the qualifiers, set from the
 Filter menu's **Text** branch — are what searches captions: the engine
@@ -143,8 +151,12 @@ each):
   block with no picture yet, written in the note with no parent — the
   basket's — drawing the file already in hand while the upload happens
   behind it; the asset id is written when it lands (`imageUploadedOps`), and
-  a failed upload takes the row back out. The button, a drop anywhere on the
-  page, or a paste.
+  a failed upload takes the row back out. The button, the camera, a drop
+  anywhere on the page, or a paste. Whichever way it came, the first new
+  picture opens in the inspector at once, under its spinner: the caption
+  and the features are the row's own, so they can be set while the bytes
+  are still going up, and the asset id joins them when it lands. A failed
+  upload closes the window with its row.
 - **Setting a value** (`setValueOps`) makes the feature block and the value
   block if they are missing and links the picture under the value. A
   single-select feature first unlinks any other value of its own the picture
@@ -184,7 +196,8 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
   bar a phone gets above its keyboard, as wide as its two glyphs rather
   than the page — sliding up from beneath the page's edge and back down
   again when the row is back. A drop anywhere on the
-  page, or a paste, adds too.
+  page, or a paste, adds too. However a picture arrives, the first one
+  opens in the inspector straight away, still uploading.
 - **The wall** (`board-wall.tsx`): a masonry laid out from the pictures'
   own shapes (`masonry.ts`): as many columns as the width allows, no
   narrower than 160px and never fewer than two — a phone's width gives two,

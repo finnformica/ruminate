@@ -384,7 +384,8 @@ describe("the sidebar while Settings is open", () => {
     for (const page of ["Account", "Preferences", "Data", "About"]) {
       expect(screen.getByRole("link", { name: page })).toBeTruthy()
     }
-    // Not this reader's: the feature pages (no feature is on here) and Admin.
+    // Not this reader's: Sharing (signed out), MCP access (no feature is on
+    // here) and Admin.
     expect(screen.queryByRole("link", { name: "Sharing" })).toBeNull()
     expect(screen.queryByRole("link", { name: "Admin" })).toBeNull()
   })

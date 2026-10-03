@@ -104,6 +104,80 @@ describe("describeFilter", () => {
     // Without a lookup an id reads as itself, quoted like any value.
     expect(describeFilter("parent:blk_alice")).toBe("parent “blk_alice”")
   })
+
+  it("reads every qualifier of a key, so a board's two features both read", () => {
+    const blockText = (id: string) =>
+      ({ blk_mauritius: "Mauritius", blk_lisbon: "Lisbon", blk_lamp: "Lamp" })[id]
+    expect(describeFilter("parent:blk_mauritius,blk_lisbon parent:blk_lamp", blockText)).toBe(
+      "parent Mauritius, parent Lisbon, parent Lamp",
+    )
+  })
+})
+
+/**
+ * A board's Filter gives each feature a `parent:` qualifier of its own, so
+ * that ticks under one feature OR (a comma list) and two features AND (a
+ * key repeated) — the two shapes the engine reads two ways. A branch finds
+ * its qualifier by the values it offers.
+ */
+describe("a branch's own qualifier", () => {
+  const LOCATIONS = ["blk_mauritius", "blk_lisbon"]
+  const FIXTURES = ["blk_lamp", "blk_chair"]
+
+  it("writes a qualifier per branch: either within one, both across two", () => {
+    const one = toggleFilterValue("", "parent", "blk_mauritius", LOCATIONS)
+    expect(one).toBe("parent:blk_mauritius")
+    const two = toggleFilterValue(one, "parent", "blk_lamp", FIXTURES)
+    expect(two).toBe("parent:blk_mauritius parent:blk_lamp")
+    const three = toggleFilterValue(two, "parent", "blk_lisbon", LOCATIONS)
+    expect(three).toBe("parent:blk_mauritius,blk_lisbon parent:blk_lamp")
+  })
+
+  it("reads only its own qualifier, while a read without a branch sees them all", () => {
+    const filter = "parent:blk_mauritius,blk_lisbon parent:blk_lamp"
+    expect(filterValues(filter, "parent", LOCATIONS)).toEqual(["blk_mauritius", "blk_lisbon"])
+    expect(filterValues(filter, "parent", FIXTURES)).toEqual(["blk_lamp"])
+    expect(filterValues(filter, "parent")).toEqual(["blk_mauritius", "blk_lisbon", "blk_lamp"])
+  })
+
+  it("takes a value out of its own qualifier only, dropping it once empty", () => {
+    const filter = "parent:blk_mauritius,blk_lisbon parent:blk_lamp"
+    expect(toggleFilterValue(filter, "parent", "blk_lisbon", LOCATIONS)).toBe(
+      "parent:blk_mauritius parent:blk_lamp",
+    )
+    expect(toggleFilterValue(filter, "parent", "blk_lamp", FIXTURES)).toBe(
+      "parent:blk_mauritius,blk_lisbon",
+    )
+  })
+
+  it("clears its own qualifier and leaves the others, the text and the rest as written", () => {
+    const filter = "parent:blk_mauritius parent:blk_lamp type:text brass"
+    expect(clearFilterKey(filter, "parent", LOCATIONS)).toBe("parent:blk_lamp type:text brass")
+    expect(clearFilterKey(filter, "parent", FIXTURES)).toBe("parent:blk_mauritius type:text brass")
+    expect(clearFilterKey(filter, "parent")).toBe("type:text brass")
+  })
+
+  it("leaves a qualifier typed by hand to no branch, meaning what it meant", () => {
+    // A text value, or a list mixing two branches' values, is nobody's: it
+    // is read by none, written by none, and a branch's tick goes beside it.
+    expect(filterValues("parent:mauritius", "parent", LOCATIONS)).toEqual([])
+    expect(filterValues("parent:blk_mauritius,blk_lamp", "parent", LOCATIONS)).toEqual([])
+    expect(toggleFilterValue("parent:mauritius", "parent", "blk_lamp", FIXTURES)).toBe(
+      "parent:mauritius parent:blk_lamp",
+    )
+    expect(clearFilterKey("parent:mauritius", "parent", LOCATIONS)).toBe("parent:mauritius")
+  })
+
+  it("without a branch, takes a value out of whichever qualifier holds it, and adds to the last", () => {
+    const filter = "parent:blk_mauritius,blk_lisbon parent:blk_lamp"
+    expect(toggleFilterValue(filter, "parent", "blk_lisbon")).toBe(
+      "parent:blk_mauritius parent:blk_lamp",
+    )
+    expect(toggleFilterValue(filter, "parent", "blk_lamp")).toBe("parent:blk_mauritius,blk_lisbon")
+    expect(toggleFilterValue(filter, "parent", "blk_chair")).toBe(
+      "parent:blk_mauritius,blk_lisbon parent:blk_lamp,blk_chair",
+    )
+  })
 })
 
 describe("resolveNarrowing / narrowingParam", () => {

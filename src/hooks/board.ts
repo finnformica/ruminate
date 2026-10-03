@@ -120,7 +120,10 @@ export interface BoardWrites {
   /** Whether pictures can be added here: uploads are on, there is a store
    * to keep them (signed in), and a note to write them in. */
   canUpload: boolean
-  addImages: (files: File[]) => Promise<void>
+  /** Writes a row for each picture and hands back their ids at once, in
+   * the order given; the uploads go on behind. Empty when nothing could
+   * be added. */
+  addImages: (files: File[]) => string[]
   setValue: (feature: BoardFeature, imageId: string, ref: ValueRef) => void
   clearValue: (feature: BoardFeature, value: BoardValue, imageId: string) => void
   setCaption: (imageId: string, caption: string) => void
@@ -253,33 +256,42 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   /**
    * Pictures added from the board, the editor's way: every row is on the
    * page at once, drawing the file already in hand, and the uploads happen
-   * behind it one at a time. The asset id is written when it lands; a
-   * failed upload takes its row back out and says why.
+   * behind it one at a time. The ids are handed back as soon as the rows
+   * are written, so the page can open the first picture in its window
+   * while its bytes are still going up — the caption and the features are
+   * the row's own and take at once, and the asset id joins them when it
+   * lands. A failed upload takes its row back out and says why.
    */
   const addImages = React.useCallback(
-    async (files: File[]) => {
-      if (!canUpload) return
+    (files: File[]): string[] => {
+      if (!canUpload) return []
       const queued: { id: string; file: File }[] = []
       for (const file of files) {
         if (!file.type.startsWith("image/")) continue
         const id = blockId()
-        apply(addImageOps(store.get(graphSnapshotAtom), boardId, id))
+        // The preview is registered before the row is written, so the
+        // first paint of the row already has the file to draw.
         beginPendingImage(id, file)
+        apply(addImageOps(store.get(graphSnapshotAtom), boardId, id))
         queued.push({ id, file })
       }
-      for (const { id, file } of queued) {
-        try {
-          const asset = await uploadImage(file)
-          primeImageObjectUrl(asset.id, file)
-          apply(imageUploadedOps(id, asset))
-        } catch (error) {
-          apply(deleteBlockOps(id, store.get(graphSnapshotAtom)))
-          toast.error(error instanceof ImageUploadError ? error.message : "Image upload failed")
-        } finally {
-          releasePendingImage(id)
+      if (queued.length === 0) return []
+      void (async () => {
+        for (const { id, file } of queued) {
+          try {
+            const asset = await uploadImage(file)
+            primeImageObjectUrl(asset.id, file)
+            apply(imageUploadedOps(id, asset))
+          } catch (error) {
+            apply(deleteBlockOps(id, store.get(graphSnapshotAtom)))
+            toast.error(error instanceof ImageUploadError ? error.message : "Image upload failed")
+          } finally {
+            releasePendingImage(id)
+          }
         }
-      }
-      if (queued.length > 0) void requestDatabaseFlush()
+        void requestDatabaseFlush()
+      })()
+      return queued.map(({ id }) => id)
     },
     [canUpload, store, apply, boardId],
   )

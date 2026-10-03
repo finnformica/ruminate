@@ -11,7 +11,6 @@ import { Notice } from "../components/notice"
 import { PageLayout } from "../components/page-layout"
 import { listHeading } from "../components/ui/list"
 import { FilterMenu, SortMenu, type FilterBranch } from "../components/view-controls"
-import { useFeature } from "../data/features"
 import { parentIdsOf, parseProps } from "../data/graph"
 import { imageFilesOf } from "../data/images"
 import { graphSnapshotAtom } from "../global-state"
@@ -49,16 +48,6 @@ export const Route = createFileRoute("/_appRoot/boards/$")({
 
 function RouteComponent() {
   const { _splat: boardId = "" } = Route.useParams()
-  const enabled = useFeature("boards")
-  if (!enabled) {
-    return (
-      <PageLayout title="Board" icon={<BoardIcon16 />}>
-        <div className="p-4">
-          <Notice>Boards aren’t switched on for this account.</Notice>
-        </div>
-      </PageLayout>
-    )
-  }
   return <BoardPage key={boardId} boardId={boardId} />
 }
 
@@ -150,24 +139,29 @@ function BoardPage({ boardId }: { boardId: string }) {
   )
   const narrowed = filter !== ""
 
-  // The picked picture, while it is still on the board.
+  // The picked picture, while it is still on the board. Read off the whole
+  // board rather than the narrowed wall: a picture just added opens in the
+  // window at once, and a filter that does not match its empty caption
+  // yet must not keep it out.
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
   const selected = React.useMemo(
-    () =>
-      selectedId
-        ? [...outlineImages, ...basketImages].find((image) => image.id === selectedId)
-        : undefined,
-    [outlineImages, basketImages, selectedId],
+    () => (selectedId && imageIds.includes(selectedId) ? toImages([selectedId])[0] : undefined),
+    [toImages, imageIds, selectedId],
   )
   React.useEffect(() => {
     if (selectedId && !imageIds.includes(selectedId)) setSelectedId(null)
   }, [selectedId, imageIds])
   const close = React.useCallback(() => setSelectedId(null), [])
 
-  // Adding pictures: the buttons' pickers, a drop anywhere on the page, or
-  // a paste while nothing else is taking the keys.
+  // Adding pictures: the buttons' pickers, the camera, a drop anywhere on
+  // the page, or a paste while nothing else is taking the keys. Whichever
+  // way they came, the first new picture opens in the window straight
+  // away, under its spinner, so it can be captioned and tagged while its
+  // bytes are still going up.
   const addFiles = (files: File[]) => {
-    if (files.length > 0) void writes.addImages(files)
+    if (files.length === 0) return
+    const [first] = writes.addImages(files)
+    if (first) setSelectedId(first)
   }
   React.useEffect(() => {
     if (!writes.canUpload) return

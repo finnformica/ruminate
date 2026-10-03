@@ -52,7 +52,6 @@ const SETTINGS_PAGES: SettingsPage[] = [
     id: "sharing",
     label: "Sharing",
     description: "The notes you have shared, and the ones shared with you.",
-    feature: "sharing",
     signedIn: true,
   },
   {
@@ -89,10 +88,8 @@ export const isSettingsPageId = (id: string): id is SettingsPageId =>
 function useSettingsPages(): SettingsPage[] {
   const githubUser = useAtomValue(githubUserAtom)
   const isAdmin = useIsAdmin()
-  const sharing = useFeature("sharing")
   const mcp = useFeature("mcp")
-  const boards = useFeature("boards")
-  const features: Record<FeatureKey, boolean> = { sharing, mcp, boards }
+  const features: Record<FeatureKey, boolean> = { mcp }
   return SETTINGS_PAGES.filter(
     (page) =>
       (!page.signedIn || githubUser) &&
