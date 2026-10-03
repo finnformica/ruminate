@@ -207,7 +207,9 @@ function BoardPage({ boardId }: { boardId: string }) {
       }
     >
       <div
-        className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4"
+        // One gap throughout: the buttons, the wall's tiles and the space
+        // between them share it (`GAP` in board-wall.tsx).
+        className="mx-auto flex w-full max-w-6xl flex-col gap-2 p-4"
         onDragOver={(event) => {
           if (writes.canUpload && event.dataTransfer.types.includes("Files")) {
             event.preventDefault()

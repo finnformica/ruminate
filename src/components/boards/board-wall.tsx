@@ -8,7 +8,9 @@ import { columnCount, masonryColumns } from "./masonry"
 /** A column is never narrower than this, and the wall never has fewer than
  * two — a phone's width gives two, a desktop's five or six. */
 const MIN_COLUMN = 160
-const GAP = 12
+/** The one gap on the page: between tiles, between the buttons above the
+ * wall, and between the buttons and the wall (`gap-2`). */
+const GAP = 8
 
 /**
  * The wall: the pictures as a masonry, each tile the shape of its picture
