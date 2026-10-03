@@ -32,11 +32,16 @@
 //   415 unsupported_image    a format the API does not read (AVIF)
 //   422 invalid_api_key      Anthropic refused the key
 //   422 refused              the model declined
-//   422 bad_answer           the answer is not a suggestion
-//   502 provider_error       the provider failed
+//   422 bad_answer           the answer is not a suggestion (the answer is in `detail`)
+//   502 provider_error       the provider failed (its words are in `message`)
 //
-// The key is in one place in this file — the Anthropic client's
-// constructor — and in no log line, no error detail and no response.
+// A refusal carries what the call can be found by — the provider, its
+// model, and on the Cloudflare path the AI Gateway log id — and, for the
+// two above, what the provider actually said, so the person can copy it
+// from the toast. The key is in one place in this file — the Anthropic
+// client's constructor — and in no log line, no error detail and no
+// response: the SDK's error messages are the API's answers, which never
+// carry it.
 
 import Anthropic from "@anthropic-ai/sdk"
 import { resolveAiProvider } from "../../src/data/ai-router"
@@ -173,20 +178,64 @@ function anthropicProvider(apiKey: string, fetchImpl: typeof fetch): TagProvider
 }
 
 /** Just enough of the binding's shape to call it: the model names and
- * input types in workers-types are a moving target, and this is one call. */
+ * input types in workers-types are a moving target, and this is one call.
+ * `aiGatewayLogId` is what the binding sets after a call made through AI
+ * Gateway — the id the call is logged under. */
 interface AiBinding {
-  run(model: string, input: Record<string, unknown>): Promise<unknown>
+  run(
+    model: string,
+    input: Record<string, unknown>,
+    options?: { gateway?: { id: string } },
+  ): Promise<unknown>
+  aiGatewayLogId?: string
 }
 
-/** The text of a chat-completion answer, wherever the model put it. */
+/** The AI Gateway the Cloudflare calls go through: `default` is made on
+ * first use, and from then on every call — prompt, answer, latency, tokens
+ * — is logged under AI → AI Gateway in the dashboard. */
+const AI_GATEWAY_ID = "default"
+
+/** The log id the binding holds after a call, if any. */
+const gatewayLogOf = (ai: unknown): string | undefined => {
+  const id = (ai as AiBinding | undefined)?.aiGatewayLogId
+  return typeof id === "string" ? id : undefined
+}
+
+/**
+ * The text of a Workers AI answer, wherever the model put it. The shapes
+ * seen: `response` as a string; `response` as an OBJECT — JSON mode
+ * (`response_format`) hands the answer back already parsed, so it is
+ * written out again for the one reading step; `choices[0].message.content`
+ * as a string, or as parts, whose `text` parts are joined; and
+ * `choices[0].message.parsed`, an object. Anything else is nothing.
+ */
 function completionText(result: unknown): string {
   if (typeof result !== "object" || result === null) return ""
   const record = result as { choices?: unknown; response?: unknown }
   if (typeof record.response === "string") return record.response
+  if (typeof record.response === "object" && record.response !== null) {
+    return JSON.stringify(record.response)
+  }
   if (!Array.isArray(record.choices)) return ""
-  const content = (record.choices[0] as { message?: { content?: unknown } } | undefined)?.message
-    ?.content
-  return typeof content === "string" ? content : ""
+  const message = (record.choices[0] as { message?: { content?: unknown; parsed?: unknown } })
+    ?.message
+  if (typeof message?.content === "string") return message.content
+  if (Array.isArray(message?.content)) {
+    return message.content
+      .filter(
+        (part): part is { type: "text"; text: string } =>
+          typeof part === "object" &&
+          part !== null &&
+          (part as { type?: unknown }).type === "text" &&
+          typeof (part as { text?: unknown }).text === "string",
+      )
+      .map((part) => part.text)
+      .join("")
+  }
+  if (typeof message?.parsed === "object" && message.parsed !== null) {
+    return JSON.stringify(message.parsed)
+  }
+  return ""
 }
 
 /**
@@ -194,7 +243,10 @@ function completionText(result: unknown): string {
  * JSON asked for in the prompt. `response_format` is tried first — the
  * model's input schema lists it — and the call made again without it if
  * that is refused, since JSON mode is honoured by some models there and
- * not others.
+ * not others. Reasoning is switched off (`chat_template_kwargs`): on by
+ * default for this model, it makes the answer slow and can spend the
+ * output on thought before any JSON. The output cap is given under both
+ * names the docs use. Every call goes through AI Gateway, for its logs.
  */
 function cloudflareProvider(ai: AiBinding): TagProvider {
   return {
@@ -213,19 +265,27 @@ function cloudflareProvider(ai: AiBinding): TagProvider {
             ],
           },
         ],
-        max_tokens: 1024,
+        chat_template_kwargs: { enable_thinking: false },
+        max_completion_tokens: 400,
+        max_tokens: 400,
+        temperature: 0.2,
       }
+      const options = { gateway: { id: AI_GATEWAY_ID } }
       let result: unknown
       try {
-        result = await ai.run(CLOUDFLARE_AI_MODEL, {
-          ...input,
-          response_format: {
-            type: "json_schema",
-            json_schema: { name: "tag_suggestion", schema: tagOutputSchema() },
+        result = await ai.run(
+          CLOUDFLARE_AI_MODEL,
+          {
+            ...input,
+            response_format: {
+              type: "json_schema",
+              json_schema: { name: "tag_suggestion", schema: tagOutputSchema() },
+            },
           },
-        })
+          options,
+        )
       } catch {
-        result = await ai.run(CLOUDFLARE_AI_MODEL, input)
+        result = await ai.run(CLOUDFLARE_AI_MODEL, input, options)
       }
       return completionText(result)
     },
@@ -315,6 +375,12 @@ export async function boardTag(
     chosen === "anthropic"
       ? anthropicProvider((await readKey(controlPlaneDriver(env), session.id)) ?? "", fetchImpl)
       : cloudflareProvider(env.AI as unknown as AiBinding)
+  // What a failing call can be found by: the provider, its model, and —
+  // on the Cloudflare path — the AI Gateway log the call was written to.
+  const model = chosen === "anthropic" ? AUTO_TAG_MODEL : CLOUDFLARE_AI_MODEL
+  const logOf = () => (chosen === "cloudflare" ? gatewayLogOf(env.AI) : undefined)
+  const found = () => ({ provider: chosen, model, ...(logOf() ? { log: logOf() } : {}) })
+
   let text: string
   try {
     text = await provider.suggest({
@@ -324,17 +390,28 @@ export async function boardTag(
   } catch (error) {
     if (error instanceof ProviderRefusal) {
       return json(
-        { error: error.code, ...(error.detail ? { detail: error.detail } : {}) },
+        { error: error.code, ...(error.detail ? { detail: error.detail } : {}), ...found() },
         error.status,
         error.headers,
       )
     }
+    // The provider's own words, for the person debugging: an SDK error's
+    // message is the API's answer and never carries the key, which is in
+    // the Anthropic client's constructor alone; the binding's errors are
+    // Cloudflare's. Cut to a size a toast can hold.
     const status = error instanceof Anthropic.APIError ? (error.status ?? null) : null
-    return json({ error: "provider_error", provider: chosen, status }, 502)
+    const message = String((error as { message?: unknown })?.message ?? error).slice(0, 2000)
+    return json({ error: "provider_error", status, message, ...found() }, 502)
   }
 
   const suggestion = readTagSuggestion(extractJson(text), form.features)
-  if (suggestion === null) return json({ error: "bad_answer", provider: chosen }, 422)
-  const response: TagResponse = { suggestion, provider: chosen }
+  if (suggestion === null) {
+    // The answer as it came, so the person can see what the model said.
+    return json(
+      { error: "bad_answer", detail: { ...found(), answer: text.slice(0, 2000) }, ...found() },
+      422,
+    )
+  }
+  const response: TagResponse = { suggestion, ...found() }
   return json(response)
 }

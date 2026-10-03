@@ -94,10 +94,13 @@ const fetchStub = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
 /** A Workers AI binding that records what it was asked and answers as told. */
 function fakeAi(reply: (model: string, input: any) => unknown) {
-  const calls: { model: string; input: any }[] = []
-  const binding = {
-    async run(model: string, input: any) {
-      calls.push({ model, input })
+  const calls: { model: string; input: any; options: unknown }[] = []
+  const binding: {
+    run: (model: string, input: any, options?: unknown) => Promise<unknown>
+    aiGatewayLogId?: string
+  } = {
+    async run(model: string, input: any, options?: unknown) {
+      calls.push({ model, input, options })
       return reply(model, input)
     },
   }
@@ -313,7 +316,11 @@ describe("the Anthropic provider", () => {
     await keepKey()
     const response = await send(tagRequest())
     expect(response.status).toBe(200)
-    expect(await bodyOf(response)).toEqual({ suggestion: READ, provider: "anthropic" })
+    expect(await bodyOf(response)).toEqual({
+      suggestion: READ,
+      provider: "anthropic",
+      model: AUTO_TAG_MODEL,
+    })
 
     expect(anthropic.calls).toHaveLength(1)
     const { headers, body } = anthropic.calls[0]
@@ -368,9 +375,10 @@ describe("the Anthropic provider", () => {
       )
     let response = await send(tagRequest())
     expect(response.status).toBe(502)
-    expect(await bodyOf(response)).toEqual({
+    expect(await bodyOf(response)).toMatchObject({
       error: "provider_error",
       provider: "anthropic",
+      model: AUTO_TAG_MODEL,
       status: 529,
     })
 
@@ -417,7 +425,11 @@ describe("the Cloudflare provider", () => {
     Object.assign(harness.env, { AI: ai.binding })
     const response = await send(tagRequest())
     expect(response.status).toBe(200)
-    expect(await bodyOf(response)).toEqual({ suggestion: READ, provider: "cloudflare" })
+    expect(await bodyOf(response)).toEqual({
+      suggestion: READ,
+      provider: "cloudflare",
+      model: CLOUDFLARE_AI_MODEL,
+    })
     expect(ai.calls).toHaveLength(1)
     const { model, input } = ai.calls[0]
     expect(model).toBe(CLOUDFLARE_AI_MODEL)
@@ -478,7 +490,9 @@ describe("the Cloudflare provider", () => {
     expect(await bodyOf(response)).toEqual({
       error: "provider_error",
       provider: "cloudflare",
+      model: CLOUDFLARE_AI_MODEL,
       status: null,
+      message: "InferenceUpstreamError",
     })
     expect(ai.calls).toHaveLength(2)
   })
@@ -517,5 +531,120 @@ describe("spendAiCall", () => {
       ok: true,
       callsToday: 1,
     })
+  })
+})
+
+// -----------------------------------------------------------------------------
+// What Workers AI is asked, and the shapes it answers in. Stubbed: it
+// cannot be reached from here.
+// -----------------------------------------------------------------------------
+
+describe("the Cloudflare call, as it goes out and comes back", () => {
+  beforeEach(async () => {
+    await allowCloudflare()
+    await optIntoCloudflare()
+  })
+
+  it("asks with reasoning off, a capped output under both names, and through the gateway", async () => {
+    const ai = fakeAi(() => completion(JSON.stringify(GOOD)))
+    Object.assign(harness.env, { AI: ai.binding })
+    expect((await send(tagRequest())).status).toBe(200)
+    const { input, options } = ai.calls[0]
+    expect(input.chat_template_kwargs).toEqual({ enable_thinking: false })
+    expect(input.max_completion_tokens).toBe(400)
+    expect(input.max_tokens).toBe(400)
+    expect(input.temperature).toBe(0.2)
+    expect(options).toEqual({ gateway: { id: "default" } })
+  })
+
+  it("reads JSON mode's answer, which comes back already parsed in `response`", async () => {
+    const ai = fakeAi(() => ({ response: GOOD }))
+    Object.assign(harness.env, { AI: ai.binding })
+    const response = await send(tagRequest())
+    expect(response.status).toBe(200)
+    expect((await bodyOf(response)).suggestion).toEqual(READ)
+  })
+
+  it("reads an answer given as parts, and one given parsed on the message", async () => {
+    const parts = fakeAi(() => ({
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: [
+              { type: "text", text: "```json\n" + JSON.stringify(GOOD).slice(0, 20) },
+              { type: "image_url", image_url: { url: "x" } },
+              { type: "text", text: JSON.stringify(GOOD).slice(20) + "\n```" },
+            ],
+          },
+          finish_reason: "stop",
+        },
+      ],
+    }))
+    Object.assign(harness.env, { AI: parts.binding })
+    expect((await bodyOf(await send(tagRequest()))).suggestion).toEqual(READ)
+
+    const parsed = fakeAi(() => ({
+      choices: [{ index: 0, message: { role: "assistant", parsed: GOOD }, finish_reason: "stop" }],
+    }))
+    Object.assign(harness.env, { AI: parsed.binding })
+    expect((await bodyOf(await send(tagRequest()))).suggestion).toEqual(READ)
+  })
+
+  it("carries the gateway log id on an answer and on a refusal", async () => {
+    const ai = fakeAi(() => completion(JSON.stringify(GOOD)))
+    ai.binding.aiGatewayLogId = "01LOG"
+    Object.assign(harness.env, { AI: ai.binding })
+    expect(await bodyOf(await send(tagRequest()))).toEqual({
+      suggestion: READ,
+      provider: "cloudflare",
+      model: CLOUDFLARE_AI_MODEL,
+      log: "01LOG",
+    })
+
+    const bad = fakeAi(() => completion("I cannot see the picture."))
+    bad.binding.aiGatewayLogId = "01BAD"
+    Object.assign(harness.env, { AI: bad.binding })
+    const response = await send(tagRequest())
+    expect(response.status).toBe(422)
+    expect(await bodyOf(response)).toEqual({
+      error: "bad_answer",
+      provider: "cloudflare",
+      model: CLOUDFLARE_AI_MODEL,
+      log: "01BAD",
+      detail: {
+        provider: "cloudflare",
+        model: CLOUDFLARE_AI_MODEL,
+        log: "01BAD",
+        answer: "I cannot see the picture.",
+      },
+    })
+  })
+
+  it("says what the binding said when it fails, and never the key", async () => {
+    await keepKey()
+    // A key kept routes to Anthropic; make that fail instead, so the
+    // body's words are an SDK error's, and check the key is not in them.
+    anthropic.reply = () =>
+      new Response(
+        JSON.stringify({
+          type: "error",
+          error: { type: "overloaded_error", message: "Overloaded" },
+        }),
+        { status: 529, headers: { "Content-Type": "application/json" } },
+      )
+    const response = await send(tagRequest())
+    expect(response.status).toBe(502)
+    const body = await bodyOf(response)
+    expect(body).toMatchObject({
+      error: "provider_error",
+      provider: "anthropic",
+      model: AUTO_TAG_MODEL,
+      status: 529,
+    })
+    expect(typeof body.message).toBe("string")
+    expect(body.message).toContain("Overloaded")
+    expect(JSON.stringify(body)).not.toContain(KEY)
   })
 })

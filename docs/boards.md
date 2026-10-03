@@ -256,7 +256,15 @@ batch through `suggestTags`.
   not something every model there honours, so the prompt asks for the JSON
   shape in so many words, `response_format` with the schema is tried first
   and the call made again without it if refused, and the answer is parsed
-  out of whatever came back.
+  out of whatever came back — JSON mode hands it back already parsed, in
+  `response`, and a plain answer comes as text in `choices`. The model's
+  reasoning is switched off (`chat_template_kwargs: { enable_thinking:
+false }`): on by default, it made the answer slow and could spend the
+  output on thought before any JSON came. Every call goes through AI
+  Gateway (`gateway: { id: "default" }`, made on first use), so a call —
+  its prompt, its answer, its latency and tokens — can be read afterwards
+  under **AI → AI Gateway** in the Cloudflare dashboard, by the log id the
+  Worker returns with the answer or the refusal.
 
 **One router, Anthropic first.** `resolveAiProvider` (src/data/ai-router.ts)
 is the one place the order lives: Anthropic if the account has a key kept →
@@ -311,7 +319,11 @@ whoever answers, counted in `ai_usage`, migrations/0019; the `calls_*`
 columns 0018 gave the key's row are no longer written), a picture too
 large or in a format the API does not read (413, 415), Cloudflare chosen
 with no binding (501), the provider failing (502), and an answer that is
-not a suggestion (422).
+not a suggestion (422). A refusal carries what the call can be found by —
+the provider, its model, the gateway log — and what the provider said (the
+answer as it came, or the error's words), and the toast that shows it has
+a **Copy** action that puts those lines on the clipboard, so a failure can
+be reported as it was rather than described.
 
 **Applying the answer** is the board's ordinary writes. `suggestionOps`
 (src/data/boards.ts) reads the suggestion into one batch — a caption only
