@@ -63,10 +63,29 @@ export interface TagFeature {
   values: string[]
 }
 
+/** Where a picture was taken: WGS84, as its block's `lat`/`lon` props. */
+export interface TagLocation {
+  lat: number
+  lon: number
+}
+
 /** What `POST /api/boards/tag` takes beside the picture: the board's
- * features, as the `features` field of the form, a JSON string of this. */
+ * features and, when the picture's block carries one, where it was taken
+ * — as the `features` field of the form, a JSON string of this. */
 export interface TagRequest {
   features: TagFeature[]
+  location?: TagLocation
+}
+
+/** A location a value states, or undefined: two finite numbers on the
+ * globe. Anything else is no location, never a refusal. */
+export function readTagLocation(raw: unknown): TagLocation | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined
+  const { lat, lon } = raw as { lat?: unknown; lon?: unknown }
+  if (typeof lat !== "number" || typeof lon !== "number") return undefined
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return undefined
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return undefined
+  return { lat, lon }
 }
 
 /** What the model answers, read back into shape: a caption and, per
@@ -126,7 +145,23 @@ export function readTagRequest(raw: unknown): TagRequest | null {
     }
     features.push({ label, multi: feature.multi, values })
   }
-  return { features }
+  const location = readTagLocation(record.location)
+  return location ? { features, location } : { features }
+}
+
+/** What the prompt says of where the picture was taken: a place name,
+ * found for the coordinates, or the coordinates themselves. */
+export interface LocationHint {
+  location: TagLocation
+  place: string | null
+}
+
+/** The line the prompt carries for a location. */
+function locationLine(hint: LocationHint): string {
+  if (hint.place) {
+    return `The picture was taken in ${hint.place}: use it for Location, as a value in use if one matches, else as a new value.`
+  }
+  return `The picture was taken at latitude ${hint.location.lat}, longitude ${hint.location.lon}: name the town or area for Location.`
 }
 
 /** What the model is, and how it is to answer. Fixed text, so it caches. */
@@ -141,15 +176,19 @@ export const AUTO_TAG_SYSTEM_PROMPT = [
   "that takes one value takes at most one.",
 ].join(" ")
 
-/** The text beside the picture: the features and their values, one a line. */
-export function tagPrompt(features: readonly TagFeature[]): string {
-  if (features.length === 0) return "There are no features on this board: answer with a caption."
+/** The text beside the picture: the features and their values, one a
+ * line, and where the picture was taken, when that is known. */
+export function tagPrompt(features: readonly TagFeature[], hint?: LocationHint): string {
+  const where = hint ? [locationLine(hint)] : []
+  if (features.length === 0) {
+    return ["There are no features on this board: answer with a caption.", ...where].join("\n")
+  }
   const lines = features.map((feature) => {
     const kind = feature.multi ? "several values" : "one value"
     const values = feature.values.length ? feature.values.join(", ") : "none yet"
     return `- ${feature.label} (${kind}): ${values}`
   })
-  return ["Features:", ...lines].join("\n")
+  return ["Features:", ...lines, ...where].join("\n")
 }
 
 /**
@@ -157,9 +196,9 @@ export function tagPrompt(features: readonly TagFeature[]): string {
  * JSON asked for in so many words — JSON mode is not something every model
  * there honours, so the prompt asks and `extractJson` reads leniently.
  */
-export function cloudflareTagPrompt(features: readonly TagFeature[]): string {
+export function cloudflareTagPrompt(features: readonly TagFeature[], hint?: LocationHint): string {
   return [
-    tagPrompt(features),
+    tagPrompt(features, hint),
     "",
     "Answer with JSON only, no prose and no code fence, of exactly this shape:",
     '{"caption": "a few words", "features": [{"label": "the feature\'s label as given", "values": ["a value"]}]}',

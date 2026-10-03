@@ -58,11 +58,14 @@ import {
   tagOutputSchema,
   tagPrompt,
   type AiProvider,
+  type LocationHint,
   type TagFeature,
+  type TagLocation,
   type TagResponse,
 } from "../../src/data/auto-tag"
 import { spendAiCall } from "../ai-usage"
 import { featureAllows } from "../features"
+import { reverseGeocode } from "../geocode"
 import { controlPlaneDriver, corpusDriver, forTenant } from "../tenancy-db"
 import type { Env } from "../types"
 import { readKey } from "./anthropic-key"
@@ -94,6 +97,9 @@ type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp"
 interface TagInput {
   image: { bytes: ArrayBuffer; mimeType: ImageMediaType }
   features: TagFeature[]
+  /** Where the picture was taken, when its block says, with the place name
+   * found for it (worker/geocode.ts) or without one. */
+  hint?: LocationHint
 }
 
 /**
@@ -122,7 +128,7 @@ class ProviderRefusal extends Error {
 function anthropicProvider(apiKey: string, fetchImpl: typeof fetch): TagProvider {
   const client = new Anthropic({ apiKey, fetch: fetchImpl, maxRetries: 0 })
   return {
-    async suggest({ image, features }) {
+    async suggest({ image, features, hint }) {
       let answer: Anthropic.Message
       try {
         answer = await client.messages.create({
@@ -141,7 +147,7 @@ function anthropicProvider(apiKey: string, fetchImpl: typeof fetch): TagProvider
                     data: toBase64(image.bytes),
                   },
                 },
-                { type: "text", text: tagPrompt(features) },
+                { type: "text", text: tagPrompt(features, hint) },
               ],
             },
           ],
@@ -250,7 +256,7 @@ function completionText(result: unknown): string {
  */
 function cloudflareProvider(ai: AiBinding): TagProvider {
   return {
-    async suggest({ image, features }) {
+    async suggest({ image, features, hint }) {
       const input = {
         messages: [
           { role: "system", content: AUTO_TAG_SYSTEM_PROMPT },
@@ -261,7 +267,7 @@ function cloudflareProvider(ai: AiBinding): TagProvider {
                 type: "image_url",
                 image_url: { url: `data:${image.mimeType};base64,${toBase64(image.bytes)}` },
               },
-              { type: "text", text: cloudflareTagPrompt(features) },
+              { type: "text", text: cloudflareTagPrompt(features, hint) },
             ],
           },
         ],
@@ -312,9 +318,13 @@ async function chooseProvider(
   })
 }
 
-/** The picture and the features out of the form, or null when the request
- * is not one. A file part has bytes and a type; a string part has neither. */
-async function readForm(request: Request): Promise<{ image: Blob; features: TagFeature[] } | null> {
+/** The picture and the request out of the form, or null when it is not
+ * one. A file part has bytes and a type; a string part has neither. The
+ * `features` field is the request's JSON — an object with `features` and
+ * perhaps `location`, or, as it first was, the features array alone. */
+async function readForm(
+  request: Request,
+): Promise<{ image: Blob; features: TagFeature[]; location?: TagLocation } | null> {
   const form = await request.formData().catch(() => null)
   if (!form) return null
   const image = form.get("image")
@@ -326,9 +336,9 @@ async function readForm(request: Request): Promise<{ image: Blob; features: TagF
   } catch {
     return null
   }
-  const body = readTagRequest({ features: parsed })
+  const body = readTagRequest(Array.isArray(parsed) ? { features: parsed } : parsed)
   if (body === null) return null
-  return { image, features: body.features }
+  return { image, ...body }
 }
 
 export async function boardTag(
@@ -383,9 +393,17 @@ export async function boardTag(
 
   let text: string
   try {
+    // Where the picture was taken, as a place name when Nominatim has one
+    // for it — asked once, after the day's call is counted (a refused call
+    // asks nothing), and inside this try: a failed lookup is a hint
+    // without a name, never a failed tag.
+    const hint: LocationHint | undefined = form.location
+      ? { location: form.location, place: await reverseGeocode(fetchImpl, form.location) }
+      : undefined
     text = await provider.suggest({
       image: { bytes, mimeType: mediaType as ImageMediaType },
       features: form.features,
+      hint,
     })
   } catch (error) {
     if (error instanceof ProviderRefusal) {
