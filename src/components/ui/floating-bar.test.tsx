@@ -7,7 +7,7 @@ import { FloatingHostContext } from "./layer"
 afterEach(cleanup)
 
 describe("FloatingBar", () => {
-  it("is a named toolbar over the window where no page hosts it, with its children on the surface", () => {
+  it("is a named toolbar over the window where no page hosts it, with its children on the pill", () => {
     render(
       <FloatingBar open label="Add images" data-testid="bar">
         <button>Photos</button>
@@ -16,8 +16,20 @@ describe("FloatingBar", () => {
     const bar = screen.getByRole("toolbar", { name: "Add images" })
     expect(bar.parentElement).toBe(document.body)
     expect(bar.classList.contains("fixed")).toBe(true)
-    expect(bar.classList.contains("hidden")).toBe(false)
+    expect(bar.hasAttribute("data-open")).toBe(true)
     expect(screen.getByRole("button", { name: "Photos" })).toBeTruthy()
+  })
+
+  it("stays mounted but out of sight and reach when closed, so the exit has something to play on", () => {
+    render(
+      <FloatingBar open={false} label="Add images" data-testid="bar">
+        <button>Photos</button>
+      </FloatingBar>,
+    )
+    const bar = screen.getByTestId("bar")
+    expect(bar.hasAttribute("data-open")).toBe(false)
+    expect(bar.getAttribute("aria-hidden")).toBe("true")
+    expect(bar.firstElementChild?.classList.contains("invisible")).toBe(true)
   })
 
   it("sits in the page's box when one is provided, so it clears what is drawn beneath the page", () => {
@@ -34,16 +46,5 @@ describe("FloatingBar", () => {
     expect(bar.parentElement).toBe(host)
     expect(bar.classList.contains("absolute")).toBe(true)
     host.remove()
-  })
-
-  it("stays mounted but hidden when closed, so the exit has something to play on", () => {
-    render(
-      <FloatingBar open={false} label="Add images" data-testid="bar">
-        <button>Photos</button>
-      </FloatingBar>,
-    )
-    const bar = screen.getByTestId("bar")
-    expect(bar.classList.contains("hidden")).toBe(true)
-    expect(bar.getAttribute("aria-hidden")).toBe("true")
   })
 })

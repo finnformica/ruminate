@@ -1,13 +1,14 @@
 import { Menu } from "@base-ui/react/menu"
 import { useRef } from "react"
+import { createPortal } from "react-dom"
 import type React from "react"
 import { BLOCK_TYPE_DEFS } from "../../blocks/registry"
 import type { BlockActions } from "./block-actions"
+import { cx } from "../../utils/cx"
 import { ChevronDownIcon16, XIcon16 } from "../icons"
 import { Button } from "../ui/button"
 import { DropdownMenu } from "../ui/dropdown-menu"
 import { IconButton } from "../ui/icon-button"
-import { FloatingBar } from "../ui/floating-bar"
 import { Surface } from "../ui/surface"
 
 /** The types the selection can be turned into: the registry's, in its
@@ -22,12 +23,16 @@ const keepFocus = (event: React.MouseEvent) => event.preventDefault()
 /**
  * The floating bar over a multi-row selection: how many rows are selected,
  * a way out, and every bulk action in one menu — for a pointer that
- * selected a run of blocks and has no key to hand for what comes next. A
- * `FloatingBar` (src/components/ui/floating-bar.tsx): at the bottom of the
- * window, centred, clear of the rows it is about, rising into place under
- * a fade and sinking back out when the selection collapses — the way a
- * toolbar for a selection does in Linear. The count shown while it leaves
- * is the last one it had, not zero.
+ * selected a run of blocks and has no key to hand for what comes next. It sits at the bottom of the window, centred, clear of the
+ * rows it is about, and rises into place from just below its resting spot
+ * under a fade — and sinks back out the same way when the selection
+ * collapses — the way a toolbar for a selection does in Linear.
+ *
+ * Kept mounted and hidden rather than unmounted, so the departure has
+ * something to play on: the browser's discrete `display` transition holds
+ * it on screen for the fade, and `@starting-style` gives it the arrival
+ * (the same two moments `Surface` uses for a popup nothing holds). The
+ * count shown while it leaves is the last one it had, not zero.
  *
  * `finalFocus` is where the menu hands the keyboard back on closing: the
  * editor's container, not the menu's own trigger, so the arrows work again
@@ -60,111 +65,133 @@ export function SelectionBar({
 }) {
   const shown = useRef(count)
   if (open) shown.current = count
+  if (typeof document === "undefined") return null
   const state = actions.moves(keys)
-  return (
-    <FloatingBar open={open} label="Selected blocks" data-selection-bar>
-      <span className="px-2 tabular-nums text-text-secondary" data-testid="selection-count">
-        {shown.current} selected
-      </span>
-      <IconButton
-        size="small"
-        aria-label="Clear selection"
-        shortcut={["Esc"]}
-        tooltipSide="top"
-        onMouseDown={keepFocus}
-        onClick={onClear}
+  return createPortal(
+    <div
+      data-selection-bar
+      role="toolbar"
+      aria-label="Selected blocks"
+      aria-hidden={!open || undefined}
+      className={cx(
+        "pointer-events-none fixed inset-x-0 bottom-4 z-raised flex justify-center px-4 print:hidden",
+        // The arrival and the departure: a fade, and (where motion is
+        // welcome) a short rise from below. The `display` flip is discrete,
+        // so the bar stays on screen until the exit has played.
+        "transition-[opacity,translate,display] transition-discrete duration-base ease-(--ease-out-strong)",
+        "starting:opacity-0 motion-safe:starting:translate-y-3",
+        !open && "hidden opacity-0 motion-safe:translate-y-3",
+      )}
+    >
+      <Surface
+        tier="popup"
+        motion={false}
+        className="pointer-events-auto flex items-center gap-0.5 p-1 text-sm"
       >
-        <XIcon16 />
-      </IconButton>
-      <Rule />
-      <DropdownMenu>
-        <DropdownMenu.Trigger
-          render={
-            <Button size="small" className="gap-1 pr-1.5">
-              Actions
-              <ChevronDownIcon16 />
-            </Button>
-          }
-        />
-        <DropdownMenu.Content side="top" align="end" sideOffset={8} finalFocus={finalFocus}>
-          <Menu.SubmenuRoot>
-            <DropdownMenu.SubmenuTrigger>Turn into</DropdownMenu.SubmenuTrigger>
-            <Menu.Portal>
-              <Menu.Positioner className="z-popup" side="right" align="start" sideOffset={4}>
-                <Menu.Popup
-                  render={<Surface className="grid overflow-hidden outline-hidden" />}
-                  style={{ width: 200 }}
-                >
-                  <div className="grid p-1" data-testid="selection-turn-into">
-                    {TYPES.map((def) => (
-                      <DropdownMenu.Item
-                        key={def.id}
-                        onClick={() => actions.turnInto(keys, def.id)}
-                      >
-                        {def.label}
-                      </DropdownMenu.Item>
-                    ))}
-                  </div>
-                </Menu.Popup>
-              </Menu.Positioner>
-            </Menu.Portal>
-          </Menu.SubmenuRoot>
-          <DropdownMenu.Separator />
-          <DropdownMenu.Item shortcut={["⌥", "⇧", "↓"]} onClick={() => actions.duplicate(keys)}>
-            Duplicate
-          </DropdownMenu.Item>
-          <DropdownMenu.Separator />
-          <DropdownMenu.Item
-            shortcut={["⇥"]}
-            disabled={!state.canIndent}
-            onClick={() => actions.indent(keys)}
-          >
-            Indent
-          </DropdownMenu.Item>
-          <DropdownMenu.Item
-            shortcut={["⇧", "⇥"]}
-            disabled={!state.canOutdent}
-            onClick={() => actions.outdent(keys)}
-          >
-            Outdent
-          </DropdownMenu.Item>
-          <DropdownMenu.Item
-            shortcut={["⌥", "↑"]}
-            disabled={!state.canMoveUp}
-            onClick={() => actions.moveUp(keys)}
-          >
-            Move up
-          </DropdownMenu.Item>
-          <DropdownMenu.Item
-            shortcut={["⌥", "↓"]}
-            disabled={!state.canMoveDown}
-            onClick={() => actions.moveDown(keys)}
-          >
-            Move down
-          </DropdownMenu.Item>
-          <DropdownMenu.Separator />
-          <DropdownMenu.Item shortcut={["⌘", "C"]} onClick={() => actions.copy(keys)}>
-            Copy
-          </DropdownMenu.Item>
-          <DropdownMenu.Item shortcut={["⌘", "X"]} onClick={() => actions.cut(keys)}>
-            Cut
-          </DropdownMenu.Item>
-          <DropdownMenu.Separator />
-          <DropdownMenu.Item
-            shortcut={["⌫"]}
-            variant={removal === "delete" ? "danger" : undefined}
-            onClick={() => actions.remove(keys)}
-          >
-            {removal === "unlink" ? "Unlink" : "Delete"}
-          </DropdownMenu.Item>
-          {actions.deleteEverywhere ? (
-            <DropdownMenu.Item variant="danger" onClick={() => actions.deleteEverywhere?.(keys)}>
-              Delete
+        <span className="px-2 tabular-nums text-text-secondary" data-testid="selection-count">
+          {shown.current} selected
+        </span>
+        <IconButton
+          size="small"
+          aria-label="Clear selection"
+          shortcut={["Esc"]}
+          tooltipSide="top"
+          onMouseDown={keepFocus}
+          onClick={onClear}
+        >
+          <XIcon16 />
+        </IconButton>
+        <Rule />
+        <DropdownMenu>
+          <DropdownMenu.Trigger
+            render={
+              <Button size="small" className="gap-1 pr-1.5">
+                Actions
+                <ChevronDownIcon16 />
+              </Button>
+            }
+          />
+          <DropdownMenu.Content side="top" align="end" sideOffset={8} finalFocus={finalFocus}>
+            <Menu.SubmenuRoot>
+              <DropdownMenu.SubmenuTrigger>Turn into</DropdownMenu.SubmenuTrigger>
+              <Menu.Portal>
+                <Menu.Positioner className="z-popup" side="right" align="start" sideOffset={4}>
+                  <Menu.Popup
+                    render={<Surface className="grid overflow-hidden outline-hidden" />}
+                    style={{ width: 200 }}
+                  >
+                    <div className="grid p-1" data-testid="selection-turn-into">
+                      {TYPES.map((def) => (
+                        <DropdownMenu.Item
+                          key={def.id}
+                          onClick={() => actions.turnInto(keys, def.id)}
+                        >
+                          {def.label}
+                        </DropdownMenu.Item>
+                      ))}
+                    </div>
+                  </Menu.Popup>
+                </Menu.Positioner>
+              </Menu.Portal>
+            </Menu.SubmenuRoot>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item shortcut={["⌥", "⇧", "↓"]} onClick={() => actions.duplicate(keys)}>
+              Duplicate
             </DropdownMenu.Item>
-          ) : null}
-        </DropdownMenu.Content>
-      </DropdownMenu>
-    </FloatingBar>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item
+              shortcut={["⇥"]}
+              disabled={!state.canIndent}
+              onClick={() => actions.indent(keys)}
+            >
+              Indent
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              shortcut={["⇧", "⇥"]}
+              disabled={!state.canOutdent}
+              onClick={() => actions.outdent(keys)}
+            >
+              Outdent
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              shortcut={["⌥", "↑"]}
+              disabled={!state.canMoveUp}
+              onClick={() => actions.moveUp(keys)}
+            >
+              Move up
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              shortcut={["⌥", "↓"]}
+              disabled={!state.canMoveDown}
+              onClick={() => actions.moveDown(keys)}
+            >
+              Move down
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item shortcut={["⌘", "C"]} onClick={() => actions.copy(keys)}>
+              Copy
+            </DropdownMenu.Item>
+            <DropdownMenu.Item shortcut={["⌘", "X"]} onClick={() => actions.cut(keys)}>
+              Cut
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item
+              shortcut={["⌫"]}
+              variant={removal === "delete" ? "danger" : undefined}
+              onClick={() => actions.remove(keys)}
+            >
+              {removal === "unlink" ? "Unlink" : "Delete"}
+            </DropdownMenu.Item>
+            {actions.deleteEverywhere ? (
+              <DropdownMenu.Item variant="danger" onClick={() => actions.deleteEverywhere?.(keys)}>
+                Delete
+              </DropdownMenu.Item>
+            ) : null}
+          </DropdownMenu.Content>
+        </DropdownMenu>
+      </Surface>
+    </div>,
+    document.body,
   )
 }
 

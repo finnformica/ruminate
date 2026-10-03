@@ -2,17 +2,16 @@ import React from "react"
 import { useCoarsePointer } from "../../hooks/coarse-pointer"
 import { useInView } from "../../hooks/in-view"
 import { Button } from "../ui/button"
-import { FloatingBar } from "../ui/floating-bar"
-import { IconButton } from "../ui/icon-button"
+import { FloatingBar, FloatingBarButton } from "../ui/floating-bar"
 import { CameraIcon16, ImageIcon16 } from "../icons"
 
 /**
  * The two ways to add pictures, as buttons at the top of the wall: the
  * camera, on a phone, and the photo library. Down a long wall the row
- * scrolls away, so once it is out of view the same two follow as icons on
- * a bar floating at the bottom of the window (`FloatingBar`), and leave
- * again when the row is back. A drop anywhere on the page, or a paste,
- * adds too.
+ * scrolls away, so once it is out of view the same two follow as glyphs
+ * on the floating pill (`FloatingBar`, the edit bar's shape) at the foot
+ * of the page, and leave again when the row is back. A drop anywhere on
+ * the page, or a paste, adds too.
  */
 export function AddImages({
   canUpload,
@@ -63,27 +62,20 @@ export function AddImages({
       </div>
       {/* The same two, as icons, while the row is scrolled out of view —
           greyed as the row's are, where nothing can be added yet. */}
-      <FloatingBar open={exists && !inView} label="Add images" data-testid="add-images-bar">
+      <FloatingBar
+        open={exists && !inView}
+        label="Add images"
+        data-testid="add-images-bar"
+        className="justify-center"
+      >
         {coarsePointer ? (
-          <IconButton
-            aria-label="Camera"
-            tooltipSide="top"
-            disabled={!canUpload}
-            title={excuse}
-            onClick={camera}
-          >
+          <FloatingBarButton label="Camera" disabled={!canUpload} onClick={camera}>
             <CameraIcon16 />
-          </IconButton>
+          </FloatingBarButton>
         ) : null}
-        <IconButton
-          aria-label="Photos"
-          tooltipSide="top"
-          disabled={!canUpload}
-          title={excuse}
-          onClick={photos}
-        >
+        <FloatingBarButton label="Photos" disabled={!canUpload} onClick={photos}>
           <ImageIcon16 />
-        </IconButton>
+        </FloatingBarButton>
       </FloatingBar>
       <input
         ref={fileInputRef}
