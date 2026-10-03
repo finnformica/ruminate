@@ -79,8 +79,11 @@ export interface TagSuggestion {
 /** `POST /api/boards/tag` answers this. */
 export interface TagResponse {
   suggestion: TagSuggestion
-  /** Who answered, as the router chose. */
+  /** Who answered, as the router chose, and with which model. */
   provider: AiProvider
+  model: string
+  /** The AI Gateway log the call was written to, on the Cloudflare path. */
+  log?: string
 }
 
 // Limits on what is sent and what is read back, so a board cannot stuff

@@ -117,6 +117,29 @@ export function useBoardMatches(imageIds: readonly string[], text: string): stri
   }, [snapshot, imageIds, text])
 }
 
+/**
+ * A failure's toast, with its detail a press away: **Copy** puts the lines
+ * the person would otherwise have to describe — the code, the provider,
+ * the log the call is under, what the model said — on the clipboard. It
+ * stays up long enough to be read and pressed.
+ */
+function failedToast(message: string, detail: string): void {
+  toast.error(message, {
+    duration: 10000,
+    action: {
+      label: "Copy",
+      onClick: () => void navigator.clipboard?.writeText(detail).catch(() => {}),
+    },
+  })
+}
+
+/** An error that is not the route's — the network, a decode — as lines:
+ * what it says, and the first lines of where it came from. */
+function describeError(error: unknown): string {
+  const stack = error instanceof Error && error.stack ? error.stack.split("\n").slice(0, 4) : []
+  return [String(error), ...stack.slice(1)].join("\n")
+}
+
 /** What the board page may write, and how. */
 export interface BoardWrites {
   /** Whether pictures can be added here: uploads are on, there is a store
@@ -240,8 +263,8 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       try {
         const original = await imageBlob(asset)
         picture = (await visionCopy(original)) ?? original
-      } catch {
-        toast.error("Couldn’t read that picture.")
+      } catch (error) {
+        failedToast("Couldn’t read that picture.", describeError(error))
         return
       }
       try {
@@ -259,7 +282,8 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
         }
         undoable(ops, summary.join(" · "))
       } catch (error) {
-        toast.error(error instanceof SuggestTagsError ? error.message : "Couldn’t suggest tags.")
+        if (error instanceof SuggestTagsError) failedToast(error.message, error.detail)
+        else failedToast("Couldn’t suggest tags.", describeError(error))
       }
     },
     [canSuggest, store, boardId, undoable],

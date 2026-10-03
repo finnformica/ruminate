@@ -5,3 +5,4 @@
 ### Fixed
 
 - A phone photo can be tagged whatever its size. Suggest used to refuse a picture over a few megabytes — a photo just taken, most often — as too large; now a smaller copy is made on the device for the model, which looks at pictures no larger than that anyway, so any upload tags and a tag costs a few hundred kilobytes of upload.
+- Tagging on Cloudflare AI answers, and a failure can be copied. The free model used to think at length and its answer came back in a shape that read as nonsense; now it is asked without reasoning and read as it answers. An error toast has a **Copy** action with what went wrong, to send along.
