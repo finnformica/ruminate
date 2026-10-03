@@ -34,13 +34,13 @@ into the outline is on the board, a picture added from the board is in the
 note, and a board's features and values can be written by hand in the
 outline and the form picks them up.
 
-| on the board       | in the graph                                                                                                                  |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| the board          | a note whose page props hold `board: true`                                                                                    |
-| its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket    |
-| a feature          | a direct child of the page whose text is the feature's label — `Location`, `Fixture`, `Material` — trimmed, whatever its case |
-| a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                               |
-| a picture's value  | a `child` link from the value block to the picture: the value is a second parent, exactly as copy and select-mode paste make  |
+| on the board       | in the graph                                                                                                                 |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| the board          | a note whose page props hold `board: true`                                                                                   |
+| its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket   |
+| a feature          | a direct child of the page whose text is the feature's label — `Location`, `Object`, `Material` — trimmed, whatever its case |
+| a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                              |
+| a picture's value  | a `child` link from the value block to the picture: the value is a second parent, exactly as copy and select-mode paste make |
 
 So a board's outline reads:
 
@@ -50,7 +50,7 @@ Home inspiration
     - Mauritius
       [picture]
     - Lisbon
-  Fixture
+  Object
     - Lamp
       [picture]
 
@@ -60,7 +60,12 @@ Home inspiration
 
 The features are the preset in `src/data/boards.ts` (`BOARD_FEATURES`): a
 label and whether a picture may carry several of its values (**Location** is
-one at a time; **Fixture** and **Material** are as many as apply). The label
+one at a time; **Object** and **Material** are as many as apply), and what
+each means, as the model is told it: **Location** is where the picture was
+taken, named as a person would say it; **Object** is the thing the picture
+is of — furniture, lighting, cutlery, plants, decoration; **Material** is
+what that thing is made of. (Object was **Fixture** until 2026-W40; there
+is no alias, so a board with a `Fixture` block retitles it.) The label
 is the identity, so renaming a feature block in the outline detaches it: the
 form makes a fresh one on next use and the old block stays as ordinary
 content, values and pictures still linked. Two direct children with the same
@@ -116,7 +121,7 @@ Parent branch writes, so the branches are a shortcut into the one filter
 rather than a filter of their own. Each feature keeps a `parent:` qualifier
 of its own, and the language reads the two shapes two ways: a comma list
 within one qualifier is _either_, the key repeated is _both_. So Mauritius
-and Lisbon ticked under Location, and Lamp under Fixture, is
+and Lisbon ticked under Location, and Lamp under Object, is
 `parent:<mauritius>,<lisbon> parent:<lamp>` — a picture in Mauritius or
 Lisbon that is a lamp — as it would be in the search box, and as a note's
 filter would read it. A branch tells its qualifier from the others by the
@@ -165,6 +170,10 @@ each):
   others; a picture left with no parent is back in the basket.
 - **The caption** is the image block's text (`setCaptionOps`) — what search
   matches, as in the editor.
+- **Reset** (`resetImageOps`) clears the caption and takes every value off
+  the picture, all features at once, as one batch with one Undo. Beside
+  **Delete image** at the foot of the form, and nothing to press while the
+  picture has no caption and carries no value.
 - **Delete image** is the context menu's Delete (`deleteBlockOps`): the row
   is tombstoned; the bytes stay in the bucket (docs/images.md, "Not yet").
 
@@ -256,7 +265,15 @@ batch through `suggestTags`.
   not something every model there honours, so the prompt asks for the JSON
   shape in so many words, `response_format` with the schema is tried first
   and the call made again without it if refused, and the answer is parsed
-  out of whatever came back.
+  out of whatever came back — JSON mode hands it back already parsed, in
+  `response`, and a plain answer comes as text in `choices`. The model's
+  reasoning is switched off (`chat_template_kwargs: { enable_thinking:
+false }`): on by default, it made the answer slow and could spend the
+  output on thought before any JSON came. Every call goes through AI
+  Gateway (`gateway: { id: "default" }`, made on first use), so a call —
+  its prompt, its answer, its latency and tokens — can be read afterwards
+  under **AI → AI Gateway** in the Cloudflare dashboard, by the log id the
+  Worker returns with the answer or the refusal.
 
 **One router, Anthropic first.** `resolveAiProvider` (src/data/ai-router.ts)
 is the one place the order lives: Anthropic if the account has a key kept →
@@ -277,24 +294,87 @@ four characters, and that is all the browser ever holds
 rest — D1 is reached only through the Worker — which is one of the things
 that would have to change before this left the proof-of-concept stage.
 
-**The call** is `POST /api/boards/tag` (worker/handlers/board-tag.ts):
-the asset's id and the board's features (`TagRequest`,
-src/data/auto-tag.ts). The Worker reads the bytes from the caller's own
-prefix in R2 — the key minted from the session, as images.ts mints it —
-and sends them with a fixed system prompt and a JSON schema the answer is
-held to (structured output) to the Messages API, as `claude-haiku-4-5`
-with the caller's key. The client sends the features rather than the Worker
-reading them from D1, on purpose: the browser's graph is the one that
-knows the board now (a value picked a moment ago may not have reached the
-replica yet), and the Worker trusts the body as prompt text only and
-writes nothing to the graph. Refusals are codes the client
-puts into words (src/data/suggest-tags.ts): nothing set up (412), a key
-Anthropic refuses (422), the day's calls spent (429 — a fuse of 300 a day
-per account whoever answers, counted in `ai_usage`, migrations/0019; the
-`calls_*` columns 0018 gave the key's row are no longer written), a picture
-too large or in a format the API does not read (413, 415), Cloudflare
-chosen with no binding (501), the provider failing (502), and an answer
-that is not a suggestion (422).
+**The picture is fitted on the device before it goes.** The models resize
+anything past about 1,568 px on the long edge before they look at it, so
+the stored original is upload for nothing — and a phone photo is four to
+nine megabytes, past the API's limit, while an upload only re-encodes
+past the ten-megabyte upload limit (docs/images.md). So `suggestTags`
+takes the picture's bytes as the page already has them (`imageBlob`,
+src/data/images.ts: the device's copy, else the Worker's) and makes a
+copy for the model (`visionCopy`, src/data/image-fit.ts: a JPEG no larger
+than 1,568 px on its longest side, quality 0.8, no metadata — a few
+hundred kilobytes for a phone photo), through the same decode and encode
+the upload's own fitting uses (`fitImageFor`). A phone photo of any size
+tags, and a tag costs that much upload. Where the browser cannot make the
+copy, the original goes and the Worker's limit answers as before.
+
+**The call** is `POST /api/boards/tag` (worker/handlers/board-tag.ts), a
+form: `image`, the fitted copy, and `features`, the board's features as a
+JSON string (`TagRequest`, src/data/auto-tag.ts). The Worker reads the
+form — a format the models read, under the API's five-megabyte limit as a
+sanity check — and hands the bytes to the provider; it reads nothing of
+the caller's but the session, and R2 is not touched for tagging. The
+Anthropic provider sends them with a fixed system prompt and a JSON schema
+the answer is held to (structured output) to the Messages API, as
+`claude-haiku-4-5` with the caller's key. The client sends the features
+rather than the Worker reading them from D1, on purpose: the browser's
+graph is the one that knows the board now (a value picked a moment ago may
+not have reached the replica yet), and the Worker trusts the form as
+prompt text only and writes nothing to the graph. Refusals are codes the
+client puts into words (src/data/suggest-tags.ts): not a form with a
+picture and features (400), nothing set up (412), a key Anthropic refuses
+(422), the day's calls spent (429 — a fuse of 300 a day per account
+whoever answers, counted in `ai_usage`, migrations/0019; the `calls_*`
+columns 0018 gave the key's row are no longer written), a picture too
+large or in a format the API does not read (413, 415), Cloudflare chosen
+with no binding (501), the provider failing (502), and an answer that is
+not a suggestion (422). A refusal carries what the call can be found by —
+the provider, its model, the gateway log — and what the provider said (the
+answer as it came, or the error's words), and the toast that shows it has
+a **Copy** action that puts those lines on the clipboard, so a failure can
+be reported as it was rather than described.
+
+**Where the picture was taken** gives the model a place for Location. A
+picture added from the board may carry `lat` and `lon` on its block (WGS84,
+five decimal places), set at upload: one taken with the **Camera** button
+is placed by the device's position (`devicePosition`,
+src/data/device-position.ts — asked once as the uploads start, with the
+browser's own permission prompt and no copy of ours, never waited for,
+written to the block by a follow-up op when it answers late and dropped
+with the row when the upload failed); one picked with **Photos** is placed
+by the picture's own EXIF GPS block, read by hand from the original before
+the fitter strips it (`readExifLocation`, src/data/exif-location.ts — a
+JPEG's first quarter megabyte, no dependency; iOS usually strips it from
+what it hands a web page, so a library picture is often unplaced). A
+picture with no coordinates gets no such props and no Location hint. With
+them, the request carries `location` (validated by `readTagRequest`:
+finite, on the globe, else dropped) and the Worker asks OpenStreetMap's
+Nominatim once (`reverseGeocode`, worker/geocode.ts: `zoom=18`, named per
+its usage policy, in English, held to three seconds, after the day's call
+is counted and never failing the tag) for the place's whole chain of names,
+most specific first — `display_name` with postcodes and house numbers
+dropped, each name once, "; "-joined, cut to 160 characters: "Ljubljana
+Jože Pučnik Airport; Zgornji Brnik; Cerklje na Gorenjskem; Upper Carniola;
+Slovenia". The prompt gives the model the chain and asks it to name the
+place as a person would in conversation: a value in use that covers it,
+else the country by default, or the everyday short name of a notable
+specific place — an airport, a landmark, a city — rather than the precise
+village the chain begins with. With coordinates but no chain it gives them
+and asks for the town or area.
+
+**Reading the answer** is the same for both providers (`readTagSuggestion`,
+src/data/auto-tag.ts). The caption's first letter is upper-cased. A value
+that matches one in use — trimmed, whatever its case — comes back spelled
+exactly as the value in use, so `setValueOps` links the board's own value
+rather than making a near-duplicate. A new value is cut to 30 characters
+(`MAX_SUGGESTED_VALUE_LENGTH`: it becomes a menu option; a value in use is
+never shortened) and takes the style of the feature's values in use: when
+every one starts upper-case its first letter is upper-cased, when every one
+starts lower-case it is lower-cased, and mixed or none in use means
+upper-cased. The prompt asks the model for the same style — the same case,
+singular or plural as the values in use are — and for a value for every
+feature the picture clearly shows something for, with none only when it
+shows nothing for that feature.
 
 **Applying the answer** is the board's ordinary writes. `suggestionOps`
 (src/data/boards.ts) reads the suggestion into one batch — a caption only
@@ -304,14 +384,23 @@ carried — each value through `setValueOps` by text, so an existing value
 is reused and a new one made, and the batch built up against the snapshot
 as each write would leave it, so two new values under one new feature make
 one feature block. It fills in and never overrides what a person set, and
-it is one toast with one **Undo**. Nothing to add is a toast that says so.
+it is one toast — **Picture updated** — with one **Undo**, and a **Copy**
+beside it that puts what the model answered and what was read from it on
+the clipboard, so a thin answer can be inspected. Nothing to add is a
+toast that says so, with the same Copy.
 
-Deliberately not done: encrypting the key at rest; a cheaper picture for
-the call (the full bytes go, under the API's five-megabyte base64 cap —
-a picture larger than that is refused rather than resized); tagging in
-bulk, or on upload (only the inspector's button asks); any caching of
-answers; and prompt tuning beyond the one system prompt. Signed out there
-is no key, so nothing of this shows.
+The prompt tells the model what each feature means (`meaning` on
+`BoardFeature`, sent with the request as `TagFeature.meaning` and rendered
+as "- Object (several values): the thing the picture is of, such as …
+Values in use: cutlery, potted plant"), and an answer that names the
+features under other labels — "Objects", "Materials" — is still read, by
+position, when it has one entry per feature in order.
+
+Deliberately not done: encrypting the key at rest; tagging a picture that
+is not an upload (an external picture's bytes are at its own address);
+tagging in bulk, or on upload (only the inspector's button asks); any
+caching of answers; and prompt tuning beyond the one system prompt. Signed
+out there is no key, so nothing of this shows.
 
 ## Not yet
 

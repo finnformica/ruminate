@@ -47,15 +47,27 @@ export interface BoardFeature {
   label: string
   /** Whether a picture may carry several of its values at once. */
   multi: boolean
+  /** What the feature is, as the model is told it (docs/boards.md,
+   * "Tagging with Claude"). */
+  meaning: string
 }
 
 /** The features a board offers, in the order the form shows them. The
  * label is the identity: a block on the page with this text (trimmed,
  * case-insensitively) is the feature's block. */
 export const BOARD_FEATURES: readonly BoardFeature[] = [
-  { label: "Location", multi: false },
-  { label: "Fixture", multi: true },
-  { label: "Material", multi: true },
+  {
+    label: "Location",
+    multi: false,
+    meaning: "where the picture was taken, named as a person would say it",
+  },
+  {
+    label: "Object",
+    multi: true,
+    meaning:
+      "the thing the picture is of, such as furniture, lighting, cutlery, plants or decoration",
+  },
+  { label: "Material", multi: true, meaning: "what that thing is made of" },
 ]
 
 /** The type a feature block is created as, and the type a value is. */
@@ -204,16 +216,51 @@ export function addImageOps(snapshot: GraphSnapshot, boardId: NoteId, imageId: s
   return [{ op: "create", id: imageId, type: IMAGE_TYPE, text: "", props: null, notesId: boardId }]
 }
 
-/** The upload landed: the asset the block now shows. */
+/** Where a picture was taken, as its block carries it: `lat`/`lon`. */
+export interface ImageLocation {
+  lat: number
+  lon: number
+}
+
+/** The upload landed: the asset the block now shows, and where it was
+ * taken when that was known by then. */
 export function imageUploadedOps(
   imageId: string,
   asset: { id: string; width?: number; height?: number },
+  location?: ImageLocation | null,
 ): Op[] {
   const props = {
     image: asset.id,
     ...(asset.width && asset.height ? { width: asset.width, height: asset.height } : {}),
+    ...(location ? { lat: location.lat, lon: location.lon } : {}),
   }
   return [{ op: "setProps", id: imageId, props: propsJson(props) }]
+}
+
+/**
+ * Where a picture was taken, learnt after its row was written (the
+ * device's position answering behind the upload): added to the props the
+ * block has, the rest kept. Nothing for a block that is gone.
+ */
+export function imageLocationOps(
+  snapshot: GraphSnapshot,
+  imageId: string,
+  location: ImageLocation,
+): Op[] {
+  const node = snapshot.nodes.get(imageId)
+  if (!node || node.deleted_at) return []
+  const props = { ...(parseProps(node.props) ?? {}), lat: location.lat, lon: location.lon }
+  return [{ op: "setProps", id: imageId, props: propsJson(props) }]
+}
+
+/** Where a picture was taken, off its block, or null. */
+export function imageLocationOf(snapshot: GraphSnapshot, imageId: string): ImageLocation | null {
+  const props = parseProps(snapshot.nodes.get(imageId)?.props ?? null)
+  const lat = props?.lat
+  const lon = props?.lon
+  if (typeof lat !== "number" || typeof lon !== "number") return null
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
+  return { lat, lon }
 }
 
 /** A picture's caption — the image block's text, what search matches. */
@@ -340,6 +387,7 @@ export function tagFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): TagFeat
   return boardFeatures(snapshot, boardId).map((state) => ({
     label: state.feature.label,
     multi: state.feature.multi,
+    meaning: state.feature.meaning,
     values: state.values.map((value) => value.text.trim()).filter((text) => text !== ""),
   }))
 }
@@ -352,8 +400,8 @@ export function tagFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): TagFeat
  * and a multi-value feature's values are added to those carried. Each
  * value goes through `setValueOps` with the text, so an existing value is
  * reused and a new one created, the batch built up against the snapshot as
- * each write would leave it. `summary` names what was written, for the
- * toast; an empty batch is a suggestion with nothing to add.
+ * each write would leave it. An empty batch is a suggestion with nothing
+ * to add.
  */
 export function suggestionOps(
   snapshot: GraphSnapshot,
@@ -361,10 +409,9 @@ export function suggestionOps(
   imageId: string,
   suggestion: TagSuggestion,
   now: number,
-): { ops: Op[]; summary: string[] } {
+): Op[] {
   const ops: Op[] = []
-  const summary: string[] = []
-  if (!isBoard(snapshot, boardId)) return { ops, summary }
+  if (!isBoard(snapshot, boardId)) return ops
   let current = snapshot
   const take = (batch: Op[]) => {
     if (batch.length === 0) return
@@ -373,12 +420,9 @@ export function suggestionOps(
   }
 
   const node = current.nodes.get(imageId)
-  if (!node) return { ops, summary }
+  if (!node) return ops
   const caption = suggestion.caption.trim()
-  if (caption !== "" && node.text.trim() === "") {
-    take(setCaptionOps(current, imageId, caption))
-    summary.push(`“${caption}”`)
-  }
+  if (caption !== "" && node.text.trim() === "") take(setCaptionOps(current, imageId, caption))
 
   for (const feature of BOARD_FEATURES) {
     const answer = suggestion.features.find((entry) => isFeatureText(entry.label, feature))
@@ -389,13 +433,28 @@ export function suggestionOps(
     const carriedTexts = new Set(carried.map((value) => normalise(value.text)))
     for (const text of feature.multi ? answer.values : answer.values.slice(0, 1)) {
       if (carriedTexts.has(normalise(text))) continue
-      const batch = setValueOps(current, boardId, feature, imageId, { text })
-      if (batch.length === 0) continue
-      take(batch)
-      summary.push(`${feature.label}: ${text.trim()}`)
+      take(setValueOps(current, boardId, feature, imageId, { text }))
     }
   }
-  return { ops, summary }
+  return ops
+}
+
+/**
+ * A picture back to how it was uploaded — the inspector's **Reset**: its
+ * caption cleared and every value taken off, all features at once, one
+ * batch with one Undo. The values stay for the other pictures; a picture
+ * left with no parent is back in the basket. Nothing when it has no
+ * caption and carries no value.
+ */
+export function resetImageOps(snapshot: GraphSnapshot, boardId: NoteId, imageId: string): Op[] {
+  if (!isBoard(snapshot, boardId)) return []
+  const ops: Op[] = [...setCaptionOps(snapshot, imageId, "")]
+  for (const state of boardFeatures(snapshot, boardId)) {
+    for (const value of imageValues(snapshot, state, imageId)) {
+      ops.push(...clearValueOps(snapshot, value.id, imageId))
+    }
+  }
+  return ops
 }
 
 /** Take a value back off a picture. The value stays for the others; a

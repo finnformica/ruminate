@@ -22,7 +22,9 @@ export function AddImages({
   canUpload: boolean
   /** Whether there is a board at all, for the buttons' excuse when not. */
   exists: boolean
-  onFiles: (files: File[]) => void
+  /** The files picked, and from where: the camera's picture is placed by
+   * the device, a library's by its own metadata (`useBoardWrites.addImages`). */
+  onFiles: (files: File[], source: "camera" | "photos") => void
 }) {
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const cameraInputRef = React.useRef<HTMLInputElement>(null)
@@ -30,8 +32,8 @@ export function AddImages({
   // hint is ignored and the button would only open the picker twice over.
   const coarsePointer = useCoarsePointer()
   const { ref: rowRef, inView } = useInView<HTMLDivElement>()
-  const pick = (event: React.ChangeEvent<HTMLInputElement>) => {
-    onFiles(Array.from(event.currentTarget.files ?? []))
+  const pick = (source: "camera" | "photos") => (event: React.ChangeEvent<HTMLInputElement>) => {
+    onFiles(Array.from(event.currentTarget.files ?? []), source)
     event.currentTarget.value = ""
   }
   const camera = () => cameraInputRef.current?.click()
@@ -79,7 +81,7 @@ export function AddImages({
         multiple
         hidden
         data-testid="board-file-input"
-        onChange={pick}
+        onChange={pick("photos")}
       />
       {/* `capture` asks a phone for its camera rather than its library;
           one picture at a time, as a camera gives. */}
@@ -90,7 +92,7 @@ export function AddImages({
         capture="environment"
         hidden
         data-testid="board-camera-input"
-        onChange={pick}
+        onChange={pick("camera")}
       />
     </>
   )

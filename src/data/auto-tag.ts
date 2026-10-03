@@ -41,7 +41,9 @@ export const CLOUDFLARE_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it"
 export const AUTO_TAG_DAILY_LIMIT = 300
 
 /** The most the picture's bytes may weigh: the API takes five megabytes of
- * base64, which is three and three-quarter of raw bytes. */
+ * base64, which is three and three-quarter of raw bytes. A sanity limit —
+ * the client sends a copy fitted for the model (`visionCopy`,
+ * src/data/image-fit.ts), which is far below it. */
 export const AUTO_TAG_MAX_IMAGE_BYTES = Math.floor((5 * 1024 * 1024 * 3) / 4)
 
 /** The picture formats the API reads. AVIF, which the editor accepts, is
@@ -54,18 +56,39 @@ export const AUTO_TAG_IMAGE_TYPES: readonly string[] = [
 ]
 
 /** A feature as the client describes it to the Worker: its label, whether
- * a picture may carry several of its values, and the values in use. */
+ * a picture may carry several of its values, what it means, and the
+ * values in use. */
 export interface TagFeature {
   label: string
   multi: boolean
   values: string[]
+  /** What the feature is, for the prompt — "what that thing is made of". */
+  meaning?: string
 }
 
-/** `POST /api/boards/tag` takes this. */
+/** Where a picture was taken: WGS84, as its block's `lat`/`lon` props. */
+export interface TagLocation {
+  lat: number
+  lon: number
+}
+
+/** What `POST /api/boards/tag` takes beside the picture: the board's
+ * features and, when the picture's block carries one, where it was taken
+ * — as the `features` field of the form, a JSON string of this. */
 export interface TagRequest {
-  /** The asset's id (`img_…`), the key the bytes are under in R2. */
-  imageId: string
   features: TagFeature[]
+  location?: TagLocation
+}
+
+/** A location a value states, or undefined: two finite numbers on the
+ * globe. Anything else is no location, never a refusal. */
+export function readTagLocation(raw: unknown): TagLocation | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined
+  const { lat, lon } = raw as { lat?: unknown; lon?: unknown }
+  if (typeof lat !== "number" || typeof lon !== "number") return undefined
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return undefined
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return undefined
+  return { lat, lon }
 }
 
 /** What the model answers, read back into shape: a caption and, per
@@ -78,8 +101,14 @@ export interface TagSuggestion {
 /** `POST /api/boards/tag` answers this. */
 export interface TagResponse {
   suggestion: TagSuggestion
-  /** Who answered, as the router chose. */
+  /** Who answered, as the router chose, and with which model. */
   provider: AiProvider
+  model: string
+  /** The AI Gateway log the call was written to, on the Cloudflare path. */
+  log?: string
+  /** The model's answer as it came, cut to a toast's worth, so what was
+   * read can be seen beside what was written. */
+  answer?: string
 }
 
 // Limits on what is sent and what is read back, so a board cannot stuff
@@ -87,6 +116,7 @@ export interface TagResponse {
 const MAX_FEATURES = 12
 const MAX_VALUES_PER_FEATURE = 200
 const MAX_LABEL_LENGTH = 60
+const MAX_MEANING_LENGTH = 200
 const MAX_VALUE_LENGTH = 60
 const MAX_CAPTION_LENGTH = 120
 /** How many values the model may give one feature at once. */
@@ -95,14 +125,14 @@ const MAX_SUGGESTED_VALUES = 5
 const normalise = (text: string) => text.trim().toLocaleLowerCase()
 
 /**
- * The request a body states, or null when it is not one: an asset id and
- * up to a dozen features, each a label, a `multi` flag and a list of
- * values, every string trimmed and cut to length.
+ * The request a value states, or null when it is not one: up to a dozen
+ * features, each a label, a `multi` flag and a list of values, every
+ * string trimmed and cut to length.
  */
 export function readTagRequest(raw: unknown): TagRequest | null {
   if (typeof raw !== "object" || raw === null) return null
   const record = raw as Record<string, unknown>
-  if (typeof record.imageId !== "string" || !Array.isArray(record.features)) return null
+  if (!Array.isArray(record.features)) return null
   if (record.features.length > MAX_FEATURES) return null
   const features: TagFeature[] = []
   for (const entry of record.features) {
@@ -114,15 +144,33 @@ export function readTagRequest(raw: unknown): TagRequest | null {
     }
     const label = feature.label.trim().slice(0, MAX_LABEL_LENGTH)
     if (label === "") return null
+    const meaning =
+      typeof feature.meaning === "string" ? feature.meaning.trim().slice(0, MAX_MEANING_LENGTH) : ""
     const values: string[] = []
     for (const value of feature.values) {
       if (typeof value !== "string") return null
       const text = value.trim().slice(0, MAX_VALUE_LENGTH)
       if (text !== "") values.push(text)
     }
-    features.push({ label, multi: feature.multi, values })
+    features.push({ label, multi: feature.multi, values, ...(meaning ? { meaning } : {}) })
   }
-  return { imageId: record.imageId, features }
+  const location = readTagLocation(record.location)
+  return location ? { features, location } : { features }
+}
+
+/** What the prompt says of where the picture was taken: a place name,
+ * found for the coordinates, or the coordinates themselves. */
+export interface LocationHint {
+  location: TagLocation
+  place: string | null
+}
+
+/** The line the prompt carries for a location. */
+function locationLine(hint: LocationHint): string {
+  if (hint.place) {
+    return `The picture was taken at: ${hint.place} (most specific first). For Location, use a value in use that covers the place; otherwise name it as a person would in conversation — the country by default, or the everyday short name of a notable specific place such as an airport, a landmark or a city.`
+  }
+  return `The picture was taken at latitude ${hint.location.lat}, longitude ${hint.location.lon}: name the town or area for Location.`
 }
 
 /** What the model is, and how it is to answer. Fixed text, so it caches. */
@@ -130,21 +178,27 @@ export const AUTO_TAG_SYSTEM_PROMPT = [
   "You tag pictures on a mood board — inspiration kept for a home, a garden, a project.",
   "For each picture you are told the board's features and the values already in use.",
   "Answer with a caption of a few words (no full stop) saying what the picture shows,",
-  "and, for each feature, the values that fit it. Prefer a value already in use, spelled",
-  "exactly as given. Add a new value only when none in use fits, and keep it to a word",
-  "or two. Give a feature no values when it does not apply. A feature that takes one",
-  "value takes at most one.",
+  "and, for every feature the picture clearly shows something for, a value: one already",
+  "in use when it fits, spelled exactly as given; otherwise a new one of one to three",
+  "words, in the style of the values in use (the same case, singular or plural as they",
+  "are). Give a feature no value only when the picture shows nothing for it. A feature",
+  "that takes one value takes at most one.",
 ].join(" ")
 
-/** The text beside the picture: the features and their values, one a line. */
-export function tagPrompt(features: readonly TagFeature[]): string {
-  if (features.length === 0) return "There are no features on this board: answer with a caption."
+/** The text beside the picture: the features and their values, one a
+ * line, and where the picture was taken, when that is known. */
+export function tagPrompt(features: readonly TagFeature[], hint?: LocationHint): string {
+  const where = hint ? [locationLine(hint)] : []
+  if (features.length === 0) {
+    return ["There are no features on this board: answer with a caption.", ...where].join("\n")
+  }
   const lines = features.map((feature) => {
     const kind = feature.multi ? "several values" : "one value"
     const values = feature.values.length ? feature.values.join(", ") : "none yet"
-    return `- ${feature.label} (${kind}): ${values}`
+    const meaning = feature.meaning ? `${feature.meaning}. ` : ""
+    return `- ${feature.label} (${kind}): ${meaning}Values in use: ${values}`
   })
-  return ["Features:", ...lines].join("\n")
+  return ["Features:", ...lines, ...where].join("\n")
 }
 
 /**
@@ -152,9 +206,9 @@ export function tagPrompt(features: readonly TagFeature[]): string {
  * JSON asked for in so many words — JSON mode is not something every model
  * there honours, so the prompt asks and `extractJson` reads leniently.
  */
-export function cloudflareTagPrompt(features: readonly TagFeature[]): string {
+export function cloudflareTagPrompt(features: readonly TagFeature[], hint?: LocationHint): string {
   return [
-    tagPrompt(features),
+    tagPrompt(features, hint),
     "",
     "Answer with JSON only, no prose and no code fence, of exactly this shape:",
     '{"caption": "a few words", "features": [{"label": "the feature\'s label as given", "values": ["a value"]}]}',
@@ -185,7 +239,10 @@ export function tagOutputSchema(): Record<string, unknown> {
   return {
     type: "object",
     properties: {
-      caption: { type: "string", description: "A few words saying what the picture shows." },
+      caption: {
+        type: "string",
+        description: "A few words saying what the picture shows, with no full stop.",
+      },
       features: {
         type: "array",
         description: "One entry per feature, in the order given.",
@@ -197,7 +254,7 @@ export function tagOutputSchema(): Record<string, unknown> {
               type: "array",
               items: { type: "string" },
               description:
-                "The values that fit the picture: existing ones spelled as given, or a new short one. Empty when none applies.",
+                "The values the picture clearly shows for this feature: one already in use, spelled exactly as given, or a new one of one to three words and at most 30 characters, in the style of the values in use (the same case, singular or plural as they are). Empty only when the picture shows nothing for the feature.",
             },
           },
           required: ["label", "values"],
@@ -210,12 +267,56 @@ export function tagOutputSchema(): Record<string, unknown> {
   }
 }
 
+/** The most a NEW value may be: it becomes a menu option. A value in use
+ * is never shortened (`MAX_VALUE_LENGTH` is for the request). */
+export const MAX_SUGGESTED_VALUE_LENGTH = 30
+
+/** The first code point upper-cased, the rest as it was. */
+const capitalised = (text: string): string => {
+  const [first = "", ...rest] = Array.from(text)
+  return first.toLocaleUpperCase() + rest.join("")
+}
+
+/** The first code point lower-cased, the rest as it was. */
+const lowered = (text: string): string => {
+  const [first = "", ...rest] = Array.from(text)
+  return first.toLocaleLowerCase() + rest.join("")
+}
+
+const startsUpper = (text: string): boolean => {
+  const first = Array.from(text)[0] ?? ""
+  return first !== first.toLocaleLowerCase()
+}
+const startsLower = (text: string): boolean => {
+  const first = Array.from(text)[0] ?? ""
+  return first !== first.toLocaleUpperCase()
+}
+
+/**
+ * A new value in the style of the values in use: when every one starts
+ * with an upper-case letter, its first letter upper-cased; when every one
+ * starts lower-case, lower-cased; mixed, or none in use, upper-cased.
+ */
+export function styledValue(text: string, inUse: readonly string[]): string {
+  const letters = inUse.filter((value) => startsUpper(value) || startsLower(value))
+  if (letters.length > 0 && letters.every(startsLower)) return lowered(text)
+  return capitalised(text)
+}
+
 /**
  * The model's answer read into a suggestion against the features that were
  * asked about: a feature it did not mention gets no values, one it named
- * twice is read once, a value is trimmed, cut to length and given once
- * whatever its case, and a single-value feature keeps only the first.
- * Null when the answer is not shaped as asked.
+ * twice is read once, a value is given once whatever its case, and a
+ * single-value feature keeps only the first. The caption's first letter is
+ * upper-cased. A value that matches one in use (trimmed, whatever its
+ * case) is returned spelled exactly as the value in use, so the board's
+ * own value is linked rather than a near-duplicate made; a new value is
+ * trimmed, cut to `MAX_SUGGESTED_VALUE_LENGTH` and given the style of the
+ * values in use (`styledValue`). An entry whose label names no feature
+ * asked about is read for the feature at its own position, when the
+ * answer has one entry per feature in order ("Objects" for Object) — a
+ * label that matches always wins. Null when the answer is not shaped as
+ * asked.
  */
 export function readTagSuggestion(
   raw: unknown,
@@ -224,30 +325,50 @@ export function readTagSuggestion(
   if (typeof raw !== "object" || raw === null) return null
   const record = raw as Record<string, unknown>
   if (typeof record.caption !== "string" || !Array.isArray(record.features)) return null
-  const caption = record.caption.trim().slice(0, MAX_CAPTION_LENGTH)
+  const caption = capitalised(record.caption.trim().slice(0, MAX_CAPTION_LENGTH))
+  const asked = new Set(features.map((feature) => normalise(feature.label)))
   const answered = new Map<string, string[]>()
+  // Each entry as it came, in order, for the positional reading.
+  const entries: ({ label: string; values: string[] } | null)[] = []
   for (const entry of record.features) {
-    if (typeof entry !== "object" || entry === null) continue
+    if (typeof entry !== "object" || entry === null) {
+      entries.push(null)
+      continue
+    }
     const item = entry as Record<string, unknown>
-    if (typeof item.label !== "string" || !Array.isArray(item.values)) continue
-    const key = normalise(item.label)
-    if (answered.has(key)) continue
-    const seen = new Set<string>()
+    if (typeof item.label !== "string" || !Array.isArray(item.values)) {
+      entries.push(null)
+      continue
+    }
     const values: string[] = []
     for (const value of item.values) {
-      if (typeof value !== "string") continue
-      const text = value.trim().slice(0, MAX_VALUE_LENGTH)
-      if (text === "" || seen.has(normalise(text))) continue
-      seen.add(normalise(text))
-      values.push(text)
-      if (values.length === MAX_SUGGESTED_VALUES) break
+      if (typeof value === "string" && value.trim() !== "") values.push(value.trim())
     }
-    answered.set(key, values)
+    const label = normalise(item.label)
+    entries.push({ label, values })
+    if (!answered.has(label)) answered.set(label, values)
   }
+  // Only when the answer is the features, in order, under other names.
+  const byPosition = entries.length === features.length
   return {
     caption,
-    features: features.map((feature) => {
-      const values = answered.get(normalise(feature.label)) ?? []
+    features: features.map((feature, index) => {
+      const inUse = new Map(feature.values.map((value) => [normalise(value), value.trim()]))
+      const seen = new Set<string>()
+      const values: string[] = []
+      const named = answered.get(normalise(feature.label))
+      const atIndex = entries[index]
+      const givens =
+        named ?? (byPosition && atIndex && !asked.has(atIndex.label) ? atIndex.values : [])
+      for (const given of givens) {
+        const existing = inUse.get(normalise(given))
+        const text =
+          existing ?? styledValue(given.slice(0, MAX_SUGGESTED_VALUE_LENGTH).trim(), feature.values)
+        if (text === "" || seen.has(normalise(text))) continue
+        seen.add(normalise(text))
+        values.push(text)
+        if (values.length === MAX_SUGGESTED_VALUES) break
+      }
       return { label: feature.label, values: feature.multi ? values : values.slice(0, 1) }
     }),
   }

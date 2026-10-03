@@ -7,7 +7,7 @@ import { usePending } from "../../hooks/pending"
 import { Button } from "../ui/button"
 import { Dialog } from "../ui/dialog"
 import { FormControl } from "../form-control"
-import { SparklesIcon16, TrashIcon16 } from "../icons"
+import { ClearIcon16, SparklesIcon16, TrashIcon16 } from "../icons"
 import { TextInput } from "../ui/text-input"
 import { BoardPicture, type BoardImage } from "./board-picture"
 import { NewValueDialog } from "./new-value-dialog"
@@ -45,6 +45,14 @@ export function BoardInspector({
   // with Claude"): **Suggest**, the sparkles in the title bar, busy from the
   // press until the toast (docs/design-principles.md, Busy controls).
   const [suggest, suggesting] = usePending(() => writes.suggestTags(image.id))
+
+  // What Reset would take off: the caption, and the picture's values over
+  // every feature. Nothing to take off, nothing to press.
+  const carried = features.reduce(
+    (count, state) => count + imageValues(snapshot, state, image.id).length,
+    0,
+  )
+  const resettable = carried > 0 || image.text.trim() !== ""
 
   return (
     // Focus is kept in the window, but the page is not made inert: the
@@ -114,17 +122,29 @@ export function BoardInspector({
               onAdd={(feature, text) => writes.setValue(feature, image.id, { text })}
               onClose={() => setNaming(null)}
             />
-            <Button
-              size="small"
-              className="mt-auto self-start text-text-danger"
-              onClick={() => {
-                onClose()
-                writes.deleteImage(image.id)
-              }}
-            >
-              <TrashIcon16 />
-              Delete image
-            </Button>
+            <div className="mt-auto flex flex-wrap items-center gap-2">
+              {/* The caption and every value off the picture at once, as
+                  one Undo. */}
+              <Button
+                size="small"
+                disabled={!resettable}
+                onClick={() => writes.resetImage(image.id)}
+              >
+                <ClearIcon16 />
+                Reset
+              </Button>
+              <Button
+                size="small"
+                className="text-text-danger"
+                onClick={() => {
+                  onClose()
+                  writes.deleteImage(image.id)
+                }}
+              >
+                <TrashIcon16 />
+                Delete image
+              </Button>
+            </div>
           </div>
         </div>
       </Dialog.Content>
