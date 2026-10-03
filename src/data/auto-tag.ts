@@ -134,10 +134,11 @@ export const AUTO_TAG_SYSTEM_PROMPT = [
   "You tag pictures on a mood board — inspiration kept for a home, a garden, a project.",
   "For each picture you are told the board's features and the values already in use.",
   "Answer with a caption of a few words (no full stop) saying what the picture shows,",
-  "and, for each feature, the values that fit it. Prefer a value already in use, spelled",
-  "exactly as given. Add a new value only when none in use fits, and keep it to a word",
-  "or two. Give a feature no values when it does not apply. A feature that takes one",
-  "value takes at most one.",
+  "and, for every feature the picture clearly shows something for, a value: one already",
+  "in use when it fits, spelled exactly as given; otherwise a new one of one to three",
+  "words, in the style of the values in use (the same case, singular or plural as they",
+  "are). Give a feature no value only when the picture shows nothing for it. A feature",
+  "that takes one value takes at most one.",
 ].join(" ")
 
 /** The text beside the picture: the features and their values, one a line. */
@@ -189,7 +190,10 @@ export function tagOutputSchema(): Record<string, unknown> {
   return {
     type: "object",
     properties: {
-      caption: { type: "string", description: "A few words saying what the picture shows." },
+      caption: {
+        type: "string",
+        description: "A few words saying what the picture shows, with no full stop.",
+      },
       features: {
         type: "array",
         description: "One entry per feature, in the order given.",
@@ -201,7 +205,7 @@ export function tagOutputSchema(): Record<string, unknown> {
               type: "array",
               items: { type: "string" },
               description:
-                "The values that fit the picture: existing ones spelled as given, or a new short one. Empty when none applies.",
+                "The values the picture clearly shows for this feature: one already in use, spelled exactly as given, or a new one of one to three words and at most 30 characters, in the style of the values in use (the same case, singular or plural as they are). Empty only when the picture shows nothing for the feature.",
             },
           },
           required: ["label", "values"],
@@ -214,12 +218,53 @@ export function tagOutputSchema(): Record<string, unknown> {
   }
 }
 
+/** The most a NEW value may be: it becomes a menu option. A value in use
+ * is never shortened (`MAX_VALUE_LENGTH` is for the request). */
+export const MAX_SUGGESTED_VALUE_LENGTH = 30
+
+/** The first code point upper-cased, the rest as it was. */
+const capitalised = (text: string): string => {
+  const [first = "", ...rest] = Array.from(text)
+  return first.toLocaleUpperCase() + rest.join("")
+}
+
+/** The first code point lower-cased, the rest as it was. */
+const lowered = (text: string): string => {
+  const [first = "", ...rest] = Array.from(text)
+  return first.toLocaleLowerCase() + rest.join("")
+}
+
+const startsUpper = (text: string): boolean => {
+  const first = Array.from(text)[0] ?? ""
+  return first !== first.toLocaleLowerCase()
+}
+const startsLower = (text: string): boolean => {
+  const first = Array.from(text)[0] ?? ""
+  return first !== first.toLocaleUpperCase()
+}
+
+/**
+ * A new value in the style of the values in use: when every one starts
+ * with an upper-case letter, its first letter upper-cased; when every one
+ * starts lower-case, lower-cased; mixed, or none in use, upper-cased.
+ */
+export function styledValue(text: string, inUse: readonly string[]): string {
+  const letters = inUse.filter((value) => startsUpper(value) || startsLower(value))
+  if (letters.length > 0 && letters.every(startsLower)) return lowered(text)
+  return capitalised(text)
+}
+
 /**
  * The model's answer read into a suggestion against the features that were
  * asked about: a feature it did not mention gets no values, one it named
- * twice is read once, a value is trimmed, cut to length and given once
- * whatever its case, and a single-value feature keeps only the first.
- * Null when the answer is not shaped as asked.
+ * twice is read once, a value is given once whatever its case, and a
+ * single-value feature keeps only the first. The caption's first letter is
+ * upper-cased. A value that matches one in use (trimmed, whatever its
+ * case) is returned spelled exactly as the value in use, so the board's
+ * own value is linked rather than a near-duplicate made; a new value is
+ * trimmed, cut to `MAX_SUGGESTED_VALUE_LENGTH` and given the style of the
+ * values in use (`styledValue`). Null when the answer is not shaped as
+ * asked.
  */
 export function readTagSuggestion(
   raw: unknown,
@@ -228,7 +273,7 @@ export function readTagSuggestion(
   if (typeof raw !== "object" || raw === null) return null
   const record = raw as Record<string, unknown>
   if (typeof record.caption !== "string" || !Array.isArray(record.features)) return null
-  const caption = record.caption.trim().slice(0, MAX_CAPTION_LENGTH)
+  const caption = capitalised(record.caption.trim().slice(0, MAX_CAPTION_LENGTH))
   const answered = new Map<string, string[]>()
   for (const entry of record.features) {
     if (typeof entry !== "object" || entry === null) continue
@@ -236,22 +281,27 @@ export function readTagSuggestion(
     if (typeof item.label !== "string" || !Array.isArray(item.values)) continue
     const key = normalise(item.label)
     if (answered.has(key)) continue
-    const seen = new Set<string>()
     const values: string[] = []
     for (const value of item.values) {
-      if (typeof value !== "string") continue
-      const text = value.trim().slice(0, MAX_VALUE_LENGTH)
-      if (text === "" || seen.has(normalise(text))) continue
-      seen.add(normalise(text))
-      values.push(text)
-      if (values.length === MAX_SUGGESTED_VALUES) break
+      if (typeof value === "string" && value.trim() !== "") values.push(value.trim())
     }
     answered.set(key, values)
   }
   return {
     caption,
     features: features.map((feature) => {
-      const values = answered.get(normalise(feature.label)) ?? []
+      const inUse = new Map(feature.values.map((value) => [normalise(value), value.trim()]))
+      const seen = new Set<string>()
+      const values: string[] = []
+      for (const given of answered.get(normalise(feature.label)) ?? []) {
+        const existing = inUse.get(normalise(given))
+        const text =
+          existing ?? styledValue(given.slice(0, MAX_SUGGESTED_VALUE_LENGTH).trim(), feature.values)
+        if (text === "" || seen.has(normalise(text))) continue
+        seen.add(normalise(text))
+        values.push(text)
+        if (values.length === MAX_SUGGESTED_VALUES) break
+      }
       return { label: feature.label, values: feature.multi ? values : values.slice(0, 1) }
     }),
   }

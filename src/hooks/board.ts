@@ -12,6 +12,7 @@ import {
   inverseOps,
   isBoard,
   outlineImageIds,
+  resetValuesOps,
   setCaptionOps,
   suggestionOps,
   tagFeaturesOf,
@@ -151,6 +152,9 @@ export interface BoardWrites {
   addImages: (files: File[]) => string[]
   setValue: (feature: BoardFeature, imageId: string, ref: ValueRef) => void
   clearValue: (feature: BoardFeature, value: BoardValue, imageId: string) => void
+  /** Take every value off a picture, all features at once, as one undoable
+   * batch. The caption stays. */
+  resetValues: (imageId: string) => void
   setCaption: (imageId: string, caption: string) => void
   deleteImage: (imageId: string) => void
   /** Whether Claude can be asked to tag a picture here: there is a store
@@ -219,6 +223,13 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
     [store, undoable],
   )
 
+  const resetValues = React.useCallback(
+    (imageId: string) => {
+      undoable(resetValuesOps(store.get(graphSnapshotAtom), boardId, imageId), "Tags reset")
+    },
+    [store, boardId, undoable],
+  )
+
   const setCaption = React.useCallback(
     (imageId: string, caption: string) => {
       const ops = setCaptionOps(store.get(graphSnapshotAtom), imageId, caption)
@@ -269,7 +280,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       }
       try {
         const suggestion = await requestTagSuggestion(picture, tagFeaturesOf(snapshot, boardId))
-        const { ops, summary } = suggestionOps(
+        const ops = suggestionOps(
           store.get(graphSnapshotAtom),
           boardId,
           imageId,
@@ -280,7 +291,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
           toast("Nothing to add.")
           return
         }
-        undoable(ops, summary.join(" · "))
+        undoable(ops, "Picture updated")
       } catch (error) {
         if (error instanceof SuggestTagsError) failedToast(error.message, error.detail)
         else failedToast("Couldn’t suggest tags.", describeError(error))
@@ -338,11 +349,22 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       addImages,
       setValue,
       clearValue,
+      resetValues,
       setCaption,
       deleteImage,
       canSuggest,
       suggestTags,
     }),
-    [canUpload, addImages, setValue, clearValue, setCaption, deleteImage, canSuggest, suggestTags],
+    [
+      canUpload,
+      addImages,
+      setValue,
+      clearValue,
+      resetValues,
+      setCaption,
+      deleteImage,
+      canSuggest,
+      suggestTags,
+    ],
   )
 }

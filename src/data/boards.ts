@@ -352,8 +352,8 @@ export function tagFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): TagFeat
  * and a multi-value feature's values are added to those carried. Each
  * value goes through `setValueOps` with the text, so an existing value is
  * reused and a new one created, the batch built up against the snapshot as
- * each write would leave it. `summary` names what was written, for the
- * toast; an empty batch is a suggestion with nothing to add.
+ * each write would leave it. An empty batch is a suggestion with nothing
+ * to add.
  */
 export function suggestionOps(
   snapshot: GraphSnapshot,
@@ -361,10 +361,9 @@ export function suggestionOps(
   imageId: string,
   suggestion: TagSuggestion,
   now: number,
-): { ops: Op[]; summary: string[] } {
+): Op[] {
   const ops: Op[] = []
-  const summary: string[] = []
-  if (!isBoard(snapshot, boardId)) return { ops, summary }
+  if (!isBoard(snapshot, boardId)) return ops
   let current = snapshot
   const take = (batch: Op[]) => {
     if (batch.length === 0) return
@@ -373,12 +372,9 @@ export function suggestionOps(
   }
 
   const node = current.nodes.get(imageId)
-  if (!node) return { ops, summary }
+  if (!node) return ops
   const caption = suggestion.caption.trim()
-  if (caption !== "" && node.text.trim() === "") {
-    take(setCaptionOps(current, imageId, caption))
-    summary.push(`“${caption}”`)
-  }
+  if (caption !== "" && node.text.trim() === "") take(setCaptionOps(current, imageId, caption))
 
   for (const feature of BOARD_FEATURES) {
     const answer = suggestion.features.find((entry) => isFeatureText(entry.label, feature))
@@ -389,13 +385,27 @@ export function suggestionOps(
     const carriedTexts = new Set(carried.map((value) => normalise(value.text)))
     for (const text of feature.multi ? answer.values : answer.values.slice(0, 1)) {
       if (carriedTexts.has(normalise(text))) continue
-      const batch = setValueOps(current, boardId, feature, imageId, { text })
-      if (batch.length === 0) continue
-      take(batch)
-      summary.push(`${feature.label}: ${text.trim()}`)
+      take(setValueOps(current, boardId, feature, imageId, { text }))
     }
   }
-  return { ops, summary }
+  return ops
+}
+
+/**
+ * Take every value back off a picture, all features at once — the
+ * inspector's **Reset**, one batch with one Undo. The values stay for the
+ * other pictures; the caption is left as it is; a picture left with no
+ * parent is back in the basket. Nothing when it carries no value.
+ */
+export function resetValuesOps(snapshot: GraphSnapshot, boardId: NoteId, imageId: string): Op[] {
+  if (!isBoard(snapshot, boardId)) return []
+  const ops: Op[] = []
+  for (const state of boardFeatures(snapshot, boardId)) {
+    for (const value of imageValues(snapshot, state, imageId)) {
+      ops.push(...clearValueOps(snapshot, value.id, imageId))
+    }
+  }
+  return ops
 }
 
 /** Take a value back off a picture. The value stays for the others; a

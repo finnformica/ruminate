@@ -11,6 +11,7 @@ import {
   imageUploadedOps,
   imageValues,
   inverseOps,
+  resetValuesOps,
   setCaptionOps,
   setValueOps,
   suggestionOps,
@@ -412,13 +413,7 @@ describe("suggestionOps", () => {
 
   it("captions and tags an untagged picture in one batch, creating what is missing", () => {
     const snapshot = boardOf()
-    const { ops, summary } = suggestionOps(snapshot, "b", "blk_pic2000000", suggestion, NOW)
-    expect(summary).toEqual([
-      "“A rattan lamp”",
-      "Location: lisbon",
-      "Fixture: Lamp",
-      "Fixture: Pendant",
-    ])
+    const ops = suggestionOps(snapshot, "b", "blk_pic2000000", suggestion, NOW)
     const next = applyOps(snapshot, ops, NOW)
     expect(next.nodes.get("blk_pic2000000")?.text).toBe("A rattan lamp")
     const [location, fixture] = boardFeatures(next, "b")
@@ -449,8 +444,9 @@ describe("suggestionOps", () => {
       NOW,
     )
     // The picture has a caption, is in Mauritius, and carries Lamp.
-    const { ops, summary } = suggestionOps(snapshot, "b", "blk_pic1000000", suggestion, NOW)
-    expect(summary).toEqual(["Fixture: Pendant"])
+    const ops = suggestionOps(snapshot, "b", "blk_pic1000000", suggestion, NOW)
+    // Only the one value it did not have.
+    expect(kinds(ops)).toEqual(["create", "link", "link"])
     const next = applyOps(snapshot, ops, NOW)
     expect(next.nodes.get("blk_pic1000000")?.text).toBe("Mine")
     const [location, fixture] = boardFeatures(next, "b")
@@ -464,11 +460,62 @@ describe("suggestionOps", () => {
   it("is nothing for a suggestion with nothing to add, a missing picture, or no board", () => {
     const snapshot = boardOf()
     const empty = { caption: "", features: [{ label: "Location", values: [] }] }
-    expect(suggestionOps(snapshot, "b", "blk_pic2000000", empty, NOW)).toEqual({
-      ops: [],
-      summary: [],
-    })
-    expect(suggestionOps(snapshot, "b", "blk_missing000", suggestion, NOW).ops).toEqual([])
-    expect(suggestionOps(snapshot, "nope", "blk_pic2000000", suggestion, NOW).ops).toEqual([])
+    expect(suggestionOps(snapshot, "b", "blk_pic2000000", empty, NOW)).toEqual([])
+    expect(suggestionOps(snapshot, "b", "blk_missing000", suggestion, NOW)).toEqual([])
+    expect(suggestionOps(snapshot, "nope", "blk_pic2000000", suggestion, NOW)).toEqual([])
+  })
+
+  it("links the board's own value when the text matches one in use, whatever its case", () => {
+    const snapshot = boardOf()
+    const ops = suggestionOps(
+      snapshot,
+      "b",
+      "blk_pic2000000",
+      { caption: "", features: [{ label: "Location", values: ["LISBON"] }] },
+      NOW,
+    )
+    expect(ops).toEqual([
+      expect.objectContaining({
+        op: "link",
+        source: "blk_lisbon0000",
+        destination: "blk_pic2000000",
+      }),
+    ])
+    const [location] = boardFeatures(applyOps(snapshot, ops, NOW), "b")
+    expect(location.values.map((v) => v.text)).toEqual(["Mauritius", "Lisbon"])
+  })
+})
+
+describe("resetValuesOps", () => {
+  it("takes every value off the picture, all features at once, and leaves the caption", () => {
+    let snapshot = boardOf()
+    snapshot = applyOps(snapshot, setCaptionOps(snapshot, "blk_pic1000000", "Mine"), NOW)
+    snapshot = applyOps(
+      snapshot,
+      setValueOps(snapshot, "b", FIXTURE, "blk_pic1000000", { text: "Lamp" }),
+      NOW,
+    )
+    // In Mauritius, with a lamp.
+    const ops = resetValuesOps(snapshot, "b", "blk_pic1000000")
+    expect(kinds(ops)).toEqual(["unlink", "unlink"])
+    const next = applyOps(snapshot, ops, NOW)
+    const [location, fixture] = boardFeatures(next, "b")
+    expect(imageValues(next, location, "blk_pic1000000")).toEqual([])
+    expect(imageValues(next, fixture, "blk_pic1000000")).toEqual([])
+    expect(next.nodes.get("blk_pic1000000")?.text).toBe("Mine")
+    // The values stay for the others; the picture is still on the board.
+    expect(fixture.values.map((v) => v.text)).toEqual(["Lamp"])
+    expect(boardImageIds(next, "b")).toContain("blk_pic1000000")
+    // And undone as one.
+    const undone = applyOps(next, inverseOps(ops, snapshot) as Op[], NOW)
+    expect(imageValues(undone, boardFeatures(undone, "b")[1], "blk_pic1000000")).toEqual(
+      fixture.values,
+    )
+  })
+
+  it("is nothing for a picture that carries no value, or no board", () => {
+    const snapshot = boardOf()
+    expect(resetValuesOps(snapshot, "b", "blk_pic2000000")).toEqual([])
+    expect(resetValuesOps(snapshot, "nope", "blk_pic1000000")).toEqual([])
   })
 })

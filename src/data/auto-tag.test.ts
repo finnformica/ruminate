@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest"
 import {
+  AUTO_TAG_SYSTEM_PROMPT,
+  MAX_SUGGESTED_VALUE_LENGTH,
   cloudflareTagPrompt,
   extractJson,
   isAnthropicKeyShaped,
   keyLast4,
+  styledValue,
   readTagRequest,
   readTagSuggestion,
   tagOutputSchema,
@@ -45,6 +48,25 @@ describe("readTagRequest", () => {
         features: Array.from({ length: 13 }, () => ({ label: "L", multi: true, values: [] })),
       }),
     ).toBeNull()
+  })
+})
+
+describe("AUTO_TAG_SYSTEM_PROMPT", () => {
+  it("asks for a value wherever the picture shows one, in the style of the values in use", () => {
+    expect(AUTO_TAG_SYSTEM_PROMPT).toContain(
+      "every feature the picture clearly shows something for, a value",
+    )
+    expect(AUTO_TAG_SYSTEM_PROMPT).toContain("one already in use when it fits, spelled exactly")
+    expect(AUTO_TAG_SYSTEM_PROMPT).toContain("a new one of one to three words")
+    expect(AUTO_TAG_SYSTEM_PROMPT).toContain("the same case, singular or plural as they are")
+    expect(AUTO_TAG_SYSTEM_PROMPT).toContain("no value only when the picture shows nothing for it")
+    expect(AUTO_TAG_SYSTEM_PROMPT).toContain("takes one value takes at most one")
+    expect(AUTO_TAG_SYSTEM_PROMPT).toContain("caption of a few words (no full stop)")
+    expect(AUTO_TAG_SYSTEM_PROMPT).not.toContain("only when none in use fits")
+    const schema = JSON.stringify(tagOutputSchema())
+    expect(schema).toContain("at most 30 characters")
+    expect(schema).toContain("same case, singular or plural")
+    expect(schema).not.toContain("maxLength")
   })
 })
 
@@ -112,16 +134,69 @@ describe("readTagSuggestion", () => {
     expect(read?.features[1].values).toEqual(["Lamp", "Pendant"])
   })
 
-  it("caps how many values one feature gets, and how long a value or caption is", () => {
+  it("caps how many values one feature gets, and how long a caption is", () => {
     const read = readTagSuggestion(
       {
         caption: "c".repeat(300),
-        features: [{ label: "Fixture", values: ["a", "b", "c", "d", "e", "f", "g".repeat(99)] }],
+        features: [{ label: "Fixture", values: ["a", "b", "c", "d", "e", "f", "g"] }],
       },
       FEATURES,
     )
     expect(read?.caption).toHaveLength(120)
-    expect(read?.features[1].values).toEqual(["a", "b", "c", "d", "e"])
+    expect(read?.features[1].values).toEqual(["A", "B", "C", "D", "E"])
+  })
+
+  it("upper-cases the caption's first letter and leaves the rest", () => {
+    const read = (caption: string) => readTagSuggestion({ caption, features: [] }, FEATURES)
+    expect(read("a rattan lamp")?.caption).toBe("A rattan lamp")
+    expect(read("étagère in oak")?.caption).toBe("Étagère in oak")
+    expect(read("iPhone on a desk")?.caption).toBe("IPhone on a desk")
+    expect(read("")?.caption).toBe("")
+  })
+
+  it("spells a value that matches one in use exactly as the value in use", () => {
+    const read = readTagSuggestion(
+      {
+        caption: "x",
+        features: [
+          { label: "Location", values: ["  LISBON "] },
+          { label: "Fixture", values: ["lamp", "Lamp"] },
+        ],
+      },
+      FEATURES,
+    )
+    expect(read?.features[0].values).toEqual(["Lisbon"])
+    expect(read?.features[1].values).toEqual(["Lamp"])
+  })
+
+  it("gives a new value the case style of the values in use", () => {
+    const style = (inUse: string[], given: string) =>
+      readTagSuggestion({ caption: "x", features: [{ label: "F", values: [given] }] }, [
+        { label: "F", multi: true, values: inUse },
+      ])?.features[0].values[0]
+    expect(style(["Lamp", "Pendant"], "potted plant")).toBe("Potted plant")
+    expect(style(["lamp", "pendant"], "Potted plant")).toBe("potted plant")
+    expect(style(["Lamp", "pendant"], "potted plant")).toBe("Potted plant")
+    expect(style([], "potted plant")).toBe("Potted plant")
+    // A value in use that starts with no letter says nothing about the style.
+    expect(style(["2 lamps", "pendant"], "Potted plant")).toBe("potted plant")
+    expect(styledValue("ébène", ["Oak"])).toBe("Ébène")
+  })
+
+  it("cuts a new value to thirty characters, and never a value in use", () => {
+    expect(MAX_SUGGESTED_VALUE_LENGTH).toBe(30)
+    const long = "a very long description of a fixture indeed"
+    const read = readTagSuggestion(
+      { caption: "x", features: [{ label: "F", values: [long, "Lamp"] }] },
+      [{ label: "F", multi: true, values: ["Lamp", "x".repeat(50)] }],
+    )
+    expect(read?.features[0].values[0]).toBe("A very long description of a f")
+    expect(read?.features[0].values[1]).toBe("Lamp")
+    const inUse = readTagSuggestion(
+      { caption: "x", features: [{ label: "F", values: ["x".repeat(50)] }] },
+      [{ label: "F", multi: true, values: ["x".repeat(50)] }],
+    )
+    expect(inUse?.features[0].values).toEqual(["x".repeat(50)])
   })
 
   it("reads the first of a feature named twice, and skips entries not shaped as one", () => {
