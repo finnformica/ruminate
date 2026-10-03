@@ -191,11 +191,9 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   // the same router.
   const canSuggest = useAiAvailable().available && exists
 
-  // A change's toast: Undo as its action and, when there is something to
-  // copy about it (what a suggestion read and said), Copy in the second
-  // slot, so Undo stays the one the eye lands on.
+  // A change's toast, with Undo as its action.
   const undoable = React.useCallback(
-    (ops: Op[], message: string, copy?: string) => {
+    (ops: Op[], message: string) => {
       if (ops.length === 0) return
       const before = store.get(graphSnapshotAtom)
       const inverse = inverseOps(ops, before)
@@ -211,7 +209,6 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
               },
             }
           : undefined,
-        ...(copy ? { cancel: copyControl(copy), duration: 10000 } : {}),
       })
     },
     [store, apply],
@@ -291,7 +288,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
         return
       }
       try {
-        const { suggestion, detail } = await requestTagSuggestion(
+        const suggestion = await requestTagSuggestion(
           picture,
           tagFeaturesOf(snapshot, boardId),
           imageLocationOf(snapshot, imageId),
@@ -304,11 +301,10 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
           Date.now(),
         )
         if (ops.length === 0) {
-          // An empty answer is worth a look too.
-          toast("Nothing to add.", { action: copyControl(detail), duration: 10000 })
+          toast("Nothing to add.")
           return
         }
-        undoable(ops, "Picture updated", detail)
+        undoable(ops, "Picture updated")
       } catch (error) {
         if (error instanceof SuggestTagsError) failedToast(error.message, error.detail)
         else failedToast("Couldn’t suggest tags.", describeError(error))

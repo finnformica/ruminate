@@ -335,7 +335,6 @@ describe("the Anthropic provider", () => {
       suggestion: READ,
       provider: "anthropic",
       model: AUTO_TAG_MODEL,
-      answer: JSON.stringify(GOOD),
     })
 
     expect(anthropic.calls).toHaveLength(1)
@@ -445,7 +444,6 @@ describe("the Cloudflare provider", () => {
       suggestion: READ,
       provider: "cloudflare",
       model: CLOUDFLARE_AI_MODEL,
-      answer: JSON.stringify(GOOD),
     })
     expect(ai.calls).toHaveLength(1)
     const { model, input } = ai.calls[0]
@@ -618,7 +616,6 @@ describe("the Cloudflare call, as it goes out and comes back", () => {
       provider: "cloudflare",
       model: CLOUDFLARE_AI_MODEL,
       log: "01LOG",
-      answer: JSON.stringify(GOOD),
     })
 
     const bad = fakeAi(() => completion("I cannot see the picture."))

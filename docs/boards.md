@@ -384,10 +384,9 @@ carried — each value through `setValueOps` by text, so an existing value
 is reused and a new one made, and the batch built up against the snapshot
 as each write would leave it, so two new values under one new feature make
 one feature block. It fills in and never overrides what a person set, and
-it is one toast — **Picture updated** — with one **Undo**, and a **Copy**
-beside it that puts what the model answered and what was read from it on
-the clipboard, so a thin answer can be inspected. Nothing to add is a
-toast that says so, with the same Copy.
+it is one toast — **Picture updated** — with one **Undo**. Nothing to add
+is a toast that says so. Only a failure's toast offers **Copy**: a call that
+went through can be read in the gateway log.
 
 The prompt tells the model what each feature means (`meaning` on
 `BoardFeature`, sent with the request as `TagFeature.meaning` and rendered

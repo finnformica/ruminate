@@ -106,9 +106,6 @@ export interface TagResponse {
   model: string
   /** The AI Gateway log the call was written to, on the Cloudflare path. */
   log?: string
-  /** The model's answer as it came, cut to a toast's worth, so what was
-   * read can be seen beside what was written. */
-  answer?: string
 }
 
 // Limits on what is sent and what is read back, so a board cannot stuff

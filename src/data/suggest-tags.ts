@@ -66,10 +66,6 @@ export function suggestTagsDetail(parts: {
   body: RefusalBody | null
   rawBody?: string
   cfRay?: string | null
-  /** What was read from the answer, on a success. */
-  suggestion?: TagSuggestion
-  /** The answer as it came, on a success. */
-  answer?: string
 }): string {
   const lines = [parts.message, `code: ${parts.code}`, `status: ${parts.status}`]
   const body = parts.body
@@ -92,23 +88,14 @@ export function suggestTagsDetail(parts: {
     lines.push(`${name}: ${typeof value === "string" ? value : JSON.stringify(value, null, 2)}`)
   }
   if (body === null && parts.rawBody) lines.push(`body: ${parts.rawBody.slice(0, 2000)}`)
-  if (parts.suggestion) lines.push(`suggestion: ${JSON.stringify(parts.suggestion, null, 2)}`)
-  if (parts.answer) lines.push(`answer: ${parts.answer}`)
   return lines.join("\n")
-}
-
-/** What a request answers with: the suggestion, and the detail the
- * success toast's Copy puts on the clipboard. */
-export interface TagResult {
-  suggestion: TagSuggestion
-  detail: string
 }
 
 export async function requestTagSuggestion(
   image: Blob,
   features: TagFeature[],
   location?: TagLocation | null,
-): Promise<TagResult> {
+): Promise<TagSuggestion> {
   const form = new FormData()
   form.set("image", image, "picture")
   // The one field beside the picture: the request's JSON (`TagRequest`),
@@ -146,16 +133,5 @@ export async function requestTagSuggestion(
       suggestTagsDetail({ message, code: "failed", status: response.status, body, rawBody, cfRay }),
     )
   }
-  return {
-    suggestion: body.suggestion,
-    detail: suggestTagsDetail({
-      message: "Suggested",
-      code: "ok",
-      status: response.status,
-      body,
-      cfRay,
-      suggestion: body.suggestion,
-      answer: typeof body.answer === "string" ? body.answer : undefined,
-    }),
-  }
+  return body.suggestion
 }

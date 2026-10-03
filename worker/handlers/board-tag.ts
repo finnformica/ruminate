@@ -432,6 +432,6 @@ export async function boardTag(
   }
   // The answer as it came goes back with what was read from it, so the
   // success toast's Copy shows both.
-  const response: TagResponse = { suggestion, ...found(), answer: text.slice(0, 2000) }
+  const response: TagResponse = { suggestion, ...found() }
   return json(response)
 }
