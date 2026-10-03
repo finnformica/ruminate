@@ -152,8 +152,12 @@ each):
   block with no picture yet, written in the note with no parent — the
   basket's — drawing the file already in hand while the upload happens
   behind it; the asset id is written when it lands (`imageUploadedOps`), and
-  a failed upload takes the row back out. The button, a drop anywhere on the
-  page, or a paste.
+  a failed upload takes the row back out. The button, the camera, a drop
+  anywhere on the page, or a paste. Whichever way it came, the first new
+  picture opens in the inspector at once, under its spinner: the caption
+  and the features are the row's own, so they can be set while the bytes
+  are still going up, and the asset id joins them when it lands. A failed
+  upload closes the window with its row.
 - **Setting a value** (`setValueOps`) makes the feature block and the value
   block if they are missing and links the picture under the value. A
   single-select feature first unlinks any other value of its own the picture
@@ -193,7 +197,8 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
   bar a phone gets above its keyboard, as wide as its two glyphs rather
   than the page — sliding up from beneath the page's edge and back down
   again when the row is back. A drop anywhere on the
-  page, or a paste, adds too.
+  page, or a paste, adds too. However a picture arrives, the first one
+  opens in the inspector straight away, still uploading.
 - **The wall** (`board-wall.tsx`): a masonry laid out from the pictures'
   own shapes (`masonry.ts`): as many columns as the width allows, no
   narrower than 160px and never fewer than two — a phone's width gives two,
