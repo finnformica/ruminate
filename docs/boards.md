@@ -177,7 +177,12 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
   note.
 - **Adding pictures** (`add-images.tsx`): two buttons at the top of the
   wall, **Camera** (on a phone, where there is one in hand) and **Photos**.
-  A drop anywhere on the page, or a paste, adds too.
+  Down a long wall the row scrolls away, so once it is out of view
+  (`useInView`, src/hooks/in-view.ts) the same two follow as icons on a
+  bar floating at the bottom of the window — `FloatingBar`
+  (src/components/ui/floating-bar.tsx), the selection bar's own chrome and
+  motion — and leave again when the row is back. A drop anywhere on the
+  page, or a paste, adds too.
 - **The wall** (`board-wall.tsx`): a masonry laid out from the pictures'
   own shapes (`masonry.ts`): as many columns as the width allows, no
   narrower than 160px and never fewer than two — a phone's width gives two,
