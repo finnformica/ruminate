@@ -22,7 +22,6 @@ import {
   type BoardValue,
   type ValueRef,
 } from "../data/boards"
-import { useAccountPreference } from "../data/account-preferences"
 import { refreshAnthropicKey, useAnthropicKey } from "../data/anthropic-key"
 import { requestDatabaseFlush } from "../data/database-mode"
 import {
@@ -150,7 +149,6 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   // Tagging with Claude: signed in, with a key kept. Whether one is kept is
   // asked for the first time a board needs to know.
   const anthropicKey = useAnthropicKey()
-  const autoTagPictures = useAccountPreference("autoTagPictures")
   React.useEffect(() => {
     if (isDatabaseMode && anthropicKey === null) void refreshAnthropicKey()
   }, [isDatabaseMode, anthropicKey])
@@ -256,9 +254,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
    * Pictures added from the board, the editor's way: every row is on the
    * page at once, drawing the file already in hand, and the uploads happen
    * behind it one at a time. The asset id is written when it lands; a
-   * failed upload takes its row back out and says why. With **Tag new
-   * pictures automatically** on, and a key kept, each is tagged as soon as
-   * it has landed — one at a time, in the same queue.
+   * failed upload takes its row back out and says why.
    */
   const addImages = React.useCallback(
     async (files: File[]) => {
@@ -276,7 +272,6 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
           const asset = await uploadImage(file)
           primeImageObjectUrl(asset.id, file)
           apply(imageUploadedOps(id, asset))
-          if (autoTagPictures && canSuggest) await suggestTags(id)
         } catch (error) {
           apply(deleteBlockOps(id, store.get(graphSnapshotAtom)))
           toast.error(error instanceof ImageUploadError ? error.message : "Image upload failed")
@@ -286,7 +281,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       }
       if (queued.length > 0) void requestDatabaseFlush()
     },
-    [canUpload, store, apply, boardId, autoTagPictures, canSuggest, suggestTags],
+    [canUpload, store, apply, boardId],
   )
 
   return React.useMemo(

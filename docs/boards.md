@@ -211,12 +211,11 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
 ## Tagging with Claude
 
 **A proof of concept**, open to every signed-in user with a key kept. A
-picked picture's window offers **Suggest tags**: Claude is
-shown the picture and the board's features with the values in use, and
-answers with a caption and, per feature, the values that fit — an existing
-value spelled as given, or a short new one. Under Settings → API, **Tag
-new pictures automatically** has each picture added from the board tagged
-as soon as its upload lands, one at a time in the upload's own queue.
+picked picture's window offers **Suggest tags**, the one way to tag:
+Claude is shown the picture and the board's features with the values in
+use, and answers with a caption and, per feature, the values that fit — an
+existing value spelled as given, or a short new one. Nothing is tagged
+unasked.
 
 **The key is the user's own, and lives on the server.** Settings → API
 takes an Anthropic API key and keeps it in the control plane's
@@ -235,10 +234,10 @@ prefix in R2 — the key minted from the session, as images.ts mints it —
 and sends them with a fixed system prompt and a JSON schema the answer is
 held to (structured output) to the Messages API, as `claude-haiku-4-5`
 with the caller's key. The client sends the features rather than the Worker
-reading them from D1, on purpose: a picture is tagged right after its
-upload lands, before the replica has the row, so the browser's graph is
-the one that knows the board now; the Worker trusts the body as prompt
-text only and writes nothing to the graph. Refusals are codes the client
+reading them from D1, on purpose: the browser's graph is the one that
+knows the board now (a value picked a moment ago may not have reached the
+replica yet), and the Worker trusts the body as prompt text only and
+writes nothing to the graph. Refusals are codes the client
 puts into words (src/data/suggest-tags.ts): no key kept (412), a key
 Anthropic refuses (422), the day's calls spent (429 — a
 fuse of 300 a day on the user's own bill, counted on the key's row), a
@@ -257,9 +256,9 @@ it is one toast with one **Undo**. Nothing to add is a toast that says so.
 Deliberately not done: encrypting the key at rest; a cheaper picture for
 the call (the full bytes go, under the API's five-megabyte base64 cap —
 a picture larger than that is refused rather than resized); tagging in
-bulk, or pictures pasted into the outline (only the board's queue and the
-inspector ask); any caching of answers; and prompt tuning beyond the one
-system prompt. Signed out there is no key, so nothing of this shows.
+bulk, or on upload (only the inspector's button asks); any caching of
+answers; and prompt tuning beyond the one system prompt. Signed out there
+is no key, so nothing of this shows.
 
 ## Not yet
 

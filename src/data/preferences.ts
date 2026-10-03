@@ -17,15 +17,10 @@ export interface AccountPreferences {
   /** Whether the what's-new card greets an update
    * (src/components/whats-new-popover.tsx). Off until asked for. */
   whatsNewCard: boolean
-  /** Whether a picture added from a board is tagged by Claude as soon as
-   * its upload lands (docs/boards.md, "Tagging with Claude"). Off until
-   * asked for, and nothing without an API key kept. */
-  autoTagPictures: boolean
 }
 
 export const DEFAULT_PREFERENCES: AccountPreferences = {
   whatsNewCard: false,
-  autoTagPictures: false,
 }
 
 /** The body both directions carry: `GET` returns it, `PUT` takes a partial
@@ -45,7 +40,6 @@ export function readPreferences(raw: unknown): Partial<AccountPreferences> {
   const record = raw as Record<string, unknown>
   const read: Partial<AccountPreferences> = {}
   if (typeof record.whatsNewCard === "boolean") read.whatsNewCard = record.whatsNewCard
-  if (typeof record.autoTagPictures === "boolean") read.autoTagPictures = record.autoTagPictures
   return read
 }
 

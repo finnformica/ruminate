@@ -11,9 +11,9 @@
  * run the same code.
  *
  * The client sends the board's features and their values rather than the
- * Worker reading them from D1: a picture is tagged right after its upload
- * lands, before the replica has the row, so the graph in the browser is the
- * one that knows what the board looks like now. The Worker trusts nothing
+ * Worker reading them from D1: the graph in the browser is the one that
+ * knows what the board looks like now (a value picked a moment ago may not
+ * have reached the replica yet), and the Worker trusts nothing
  * in the body beyond the prompt's text — the image is read from the
  * caller's own prefix in R2, and the answer is applied by the client
  * through the board's ordinary writes.
