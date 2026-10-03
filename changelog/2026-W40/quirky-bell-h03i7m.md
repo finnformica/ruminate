@@ -5,4 +5,5 @@
 
 ### Changed
 
+- A picked picture's window keeps its title to one line. A long caption is cut with an ellipsis rather than pushing the controls down, and on a phone **Suggest** is the sparkles alone.
 - A picture over ten megabytes is shrunk to fit rather than refused. A phone photo that used to be turned away is re-encoded before it goes up — smaller, and without the camera data and HDR information it carried — and a HEIC photo is sent as a JPEG where the browser can read it. Pictures that already fit go up exactly as they are.
