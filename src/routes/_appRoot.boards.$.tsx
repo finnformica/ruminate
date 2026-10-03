@@ -1,9 +1,9 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useAtomValue } from "jotai"
 import React from "react"
+import { AddImages } from "../components/boards/add-images"
 import { BoardInspector } from "../components/boards/board-inspector"
 import { type BoardImage } from "../components/boards/board-picture"
-import { BoardToolbar } from "../components/boards/board-toolbar"
 import { BoardWall } from "../components/boards/board-wall"
 import { BoardIcon16 } from "../components/icons"
 import { NoteActionsMenu } from "../components/note-actions-menu"
@@ -18,14 +18,15 @@ import { graphSnapshotAtom } from "../global-state"
 import { useBoard, useBoardMatches, useBoardNarrowing, useBoardWrites } from "../hooks/board"
 import { useNoteById } from "../hooks/note"
 import { useSavedView, useWriteView } from "../hooks/views"
-import { narrowingParam, resolveNarrowing } from "../utils/view-filter"
+import { filterText, narrowingParam, resolveNarrowing } from "../utils/view-filter"
 
 /**
  * A board (docs/boards.md): a note whose page carries the `board` property,
  * shown as a wall of its pictures, with a window to caption and tag the one
  * you pick. Its header is the note's own — Sort, Filter and the ⋯ menu —
- * and the Filter leads with the board's features, so narrowing the wall is
- * narrowing the note, by the same filter string, resolved the same way.
+ * and the Filter leads with the board's features and takes the words to
+ * match captions by, so narrowing the wall is narrowing the note, by the
+ * same filter string, resolved the same way.
  * Everything on screen is the note's own graph — the same rows its outline
  * shows — read and written through the same seams. A note without the
  * property is refused: it is opened as a note.
@@ -36,15 +37,12 @@ type RouteSearch = {
    * saved default, empty means explicitly none (`resolveNarrowing`). */
   filter?: string
   sort?: string
-  /** Words matched against captions. */
-  q?: string
 }
 
 export const Route = createFileRoute("/_appRoot/boards/$")({
   validateSearch: (search: Record<string, unknown>): RouteSearch => ({
     filter: typeof search.filter === "string" ? search.filter : undefined,
     sort: typeof search.sort === "string" ? search.sort : undefined,
-    q: typeof search.q === "string" && search.q !== "" ? search.q : undefined,
   }),
   component: RouteComponent,
 })
@@ -65,7 +63,7 @@ function RouteComponent() {
 }
 
 function BoardPage({ boardId }: { boardId: string }) {
-  const { filter: filterParam, sort: sortParam, q } = Route.useSearch()
+  const { filter: filterParam, sort: sortParam } = Route.useSearch()
   const navigate = Route.useNavigate()
   const note = useNoteById(boardId)
   const snapshot = useAtomValue(graphSnapshotAtom)
@@ -78,9 +76,8 @@ function BoardPage({ boardId }: { boardId: string }) {
   const savedView = useSavedView(null, boardId)
   const filter = resolveNarrowing(filterParam, savedView.filter)
   const sort = resolveNarrowing(sortParam, savedView.sort)
-  const text = q ?? ""
   const setNarrowing = React.useCallback(
-    (patch: { filter?: string; sort?: string; q?: string }) => {
+    (patch: { filter?: string; sort?: string }) => {
       void navigate({
         search: (prev) => ({
           ...prev,
@@ -88,7 +85,6 @@ function BoardPage({ boardId }: { boardId: string }) {
             ? { filter: narrowingParam(patch.filter ?? "", savedView.filter) }
             : {}),
           ...("sort" in patch ? { sort: narrowingParam(patch.sort ?? "", savedView.sort) } : {}),
-          ...("q" in patch ? { q: patch.q || undefined } : {}),
         }),
         replace: true,
       })
@@ -132,11 +128,13 @@ function BoardPage({ boardId }: { boardId: string }) {
   }, [features, imageIds, snapshot])
 
   // The outline's pictures, narrowed and ordered as the note's view would
-  // be; the basket's whole beneath them, as the note page draws the basket;
-  // the typed words over both.
+  // be — the filter's words included, matched by the engine over the
+  // captions. The basket's beneath them, as the note page draws the basket:
+  // its rows are in no index, so only the filter's words reach them, with
+  // the same matcher, and an untagged picture is still found by what it
+  // says.
   const narrowedOutline = useBoardNarrowing(boardId, filter, sort, outlineIds)
-  const outlineMatches = useBoardMatches(narrowedOutline, text)
-  const basketMatches = useBoardMatches(basketIds, text)
+  const basketMatches = useBoardMatches(basketIds, filterText(filter))
   const toImages = React.useCallback(
     (ids: readonly string[]): BoardImage[] =>
       ids.flatMap((id) => {
@@ -145,15 +143,12 @@ function BoardPage({ boardId }: { boardId: string }) {
       }),
     [snapshot],
   )
-  const outlineImages = React.useMemo(
-    () => toImages(outlineMatches ?? narrowedOutline),
-    [toImages, outlineMatches, narrowedOutline],
-  )
+  const outlineImages = React.useMemo(() => toImages(narrowedOutline), [toImages, narrowedOutline])
   const basketImages = React.useMemo(
     () => toImages(basketMatches ?? basketIds),
     [toImages, basketMatches, basketIds],
   )
-  const narrowed = filter !== "" || text.trim() !== ""
+  const narrowed = filter !== ""
 
   // The picked picture, while it is still on the board.
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
@@ -169,7 +164,7 @@ function BoardPage({ boardId }: { boardId: string }) {
   }, [selectedId, imageIds])
   const close = React.useCallback(() => setSelectedId(null), [])
 
-  // Adding pictures: the toolbar's picker, a drop anywhere on the page, or
+  // Adding pictures: the buttons' pickers, a drop anywhere on the page, or
   // a paste while nothing else is taking the keys.
   const addFiles = (files: File[]) => {
     if (files.length > 0) void writes.addImages(files)
@@ -245,13 +240,7 @@ function BoardPage({ boardId }: { boardId: string }) {
             )}
           </Notice>
         ) : null}
-        <BoardToolbar
-          text={text}
-          onText={(value) => setNarrowing({ q: value })}
-          canUpload={writes.canUpload}
-          exists={exists}
-          onFiles={addFiles}
-        />
+        <AddImages canUpload={writes.canUpload} exists={exists} onFiles={addFiles} />
         {selected ? (
           <BoardInspector
             key={selected.id}
@@ -265,7 +254,7 @@ function BoardPage({ boardId }: { boardId: string }) {
           <p className="py-12 text-center text-text-secondary">
             {narrowed
               ? "Nothing on the board matches."
-              : "No pictures yet. Add images, or paste one into the note."}
+              : "No pictures yet. Add some, or paste one into the note."}
           </p>
         ) : (
           <>

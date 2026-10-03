@@ -11,10 +11,12 @@ import {
   describeFilter,
   describeSort,
   FILTER_TYPE_OPTIONS,
+  filterText,
   filterValues,
   sortBranches,
   sortDirections,
   toggleFilterValue,
+  withFilterText,
   type AncestorFilterKey,
 } from "../utils/view-filter"
 import { Button } from "./ui/button"
@@ -36,8 +38,10 @@ import { QualifierPicture } from "./qualifier-suggestions"
  * (`src/utils/view-filter.ts`), so the menu and the box can never offer
  * different things.
  *
- * **Filter offers `type:`, `parent:` and `under:`**, though a filter typed
- * by hand understands the whole language. The rest of the vocabulary is
+ * **Filter offers `type:`, `parent:`, `under:` and the text** — the words
+ * the engine fuzzy-matches over each row's own text, which on a board are
+ * the captions — though a filter typed by hand understands the whole
+ * language. The rest of the vocabulary is
  * note-level: inside a single note it holds for every row or for none, so as
  * a menu item it is not a filter but a switch between the whole note and a
  * blank page. `in:` is left out too — it names the view's root, which is
@@ -158,6 +162,20 @@ export function FilterMenu({
         if (choice.kind === "note") return
         const value = choice.kind === "block" ? choice.blockId : choice.text
         onFilterChange(toggleFilterValue(filter, key, value))
+      },
+    })
+  }
+
+  // The words: the palette with nothing but the typed text to pick.
+  const text = filterText(filter)
+  const pickText = () => {
+    openPicker({
+      label: "Words to match",
+      placeholder: "Words…",
+      keep: () => false,
+      textRow: (typed) => `Contains “${typed}”`,
+      onPick: (choice) => {
+        if (choice.kind === "text") onFilterChange(withFilterText(filter, choice.text))
       },
     })
   }
@@ -303,6 +321,40 @@ export function FilterMenu({
             </DropdownMenu.Submenu>
           )
         })}
+
+        {/* The words: what is typed, as a tick that takes it out, and the
+            palette to type more — the typed text is its one row. */}
+        <DropdownMenu.Submenu>
+          <DropdownMenu.SubmenuTrigger value={text ? `“${text}”` : "Any"}>
+            Text
+          </DropdownMenu.SubmenuTrigger>
+          <DropdownMenu.Content align="start" side="left">
+            <DropdownMenu.Item
+              selected={text === ""}
+              closeOnClick={false}
+              onClick={() => onFilterChange(withFilterText(filter, ""))}
+            >
+              Any
+            </DropdownMenu.Item>
+            {text ? (
+              <DropdownMenu.Item
+                selected
+                closeOnClick={false}
+                onClick={() => onFilterChange(withFilterText(filter, ""))}
+              >
+                {`“${text}”`}
+              </DropdownMenu.Item>
+            ) : null}
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item
+              data-testid="filter-text-type"
+              icon={<SearchIcon16 />}
+              onClick={pickText}
+            >
+              Type…
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Submenu>
 
         <DropdownMenu.Separator />
         <DropdownMenu.Item disabled={filter === ""} onClick={() => onFilterChange("")}>

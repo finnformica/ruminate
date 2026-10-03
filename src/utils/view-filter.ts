@@ -14,8 +14,8 @@ import { composeQuery, parseQuery, splitQuery, type Sort } from "./search"
  * read, and typed, by hand, and is answered by the same engine
  * (`src/utils/view-narrowing.ts`).
  *
- * **The menu offers `type:` and nothing else**, though the filter understands
- * everything the language does. The rest of the vocabulary is note-level
+ * **The menu offers `type:`, the ancestors and the text**, though the filter
+ * understands everything the language does. The rest of the vocabulary is note-level
  * (`has:`, `no:`, `date:`, a property): inside a single note it holds for
  * every row or for none, so as a menu item it is not a filter but a switch
  * between the whole note and a blank page. Typed by hand it still works,
@@ -88,6 +88,18 @@ export function toggleFilterValue(filter: string, key: string, value: string): s
 /** `filter` with `key` taken out entirely. */
 export function clearFilterKey(filter: string, key: string): string {
   return withFilterValues(filter, key, [])
+}
+
+/** The words a filter searches for — its text outside the qualifiers,
+ * fuzzy-matched over each row's own text by the engine. */
+export function filterText(filter: string): string {
+  return splitQuery(filter).text
+}
+
+/** `filter` with its words set to `text` (none, when empty); the qualifiers
+ * are kept exactly as written. */
+export function withFilterText(filter: string, text: string): string {
+  return composeQuery(splitQuery(filter).qualifiers, text)
 }
 
 /** The ancestor qualifiers the Filter menu offers beside `type:` — each a

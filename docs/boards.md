@@ -123,12 +123,14 @@ parent, and a picture under two values is two occurrences), so the board
 does not say it either; it would be a change to the engine, for every
 surface at once.
 
-The basket's pictures are not narrowed: the index holds what a note
-reaches, and the note page draws its basket whole beneath a narrowed
-outline, so the board draws its Unassigned wall whole too. The words typed
-in the box above the wall are matched against captions of both walls with
-the engine's own matcher and threshold (`useBoardMatches`), run over the
-board's pictures directly for the same reason.
+The filter's **words** — its text outside the qualifiers, set from the
+Filter menu's **Text** branch — are what searches captions: the engine
+fuzzy-matches them over each row's own text, which for a picture is its
+caption. The basket's pictures are in no index, so only the words reach
+them, matched with the engine's own matcher and threshold over the
+basket's captions directly (`useBoardMatches`); its qualifiers do not,
+as the note page draws its basket whole beneath a narrowed outline. An
+untagged picture is still found by what it says.
 
 ## Writing
 
@@ -173,9 +175,9 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
   with **Open outline** where the outline's has **Open board**; **Make this
   a note** from here lands on the outline, since the board page refuses a
   note.
-- **The toolbar** (`board-toolbar.tsx`): the box for caption words and, at
-  the end of the same line, **Add images** — the camera on a phone, the
-  library everywhere. A drop anywhere on the page, or a paste, adds too.
+- **Adding pictures** (`add-images.tsx`): two buttons at the top of the
+  wall, **Camera** (on a phone, where there is one in hand) and **Photos**.
+  A drop anywhere on the page, or a paste, adds too.
 - **The wall** (`board-wall.tsx`): a masonry laid out from the pictures'
   own shapes (`masonry.ts`): as many columns as the width allows, no
   narrower than 160px and never fewer than two — a phone's width gives two,
