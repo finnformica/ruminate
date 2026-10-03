@@ -136,8 +136,10 @@ export function FloatingBar({
           width === "full" ? "w-full" : "w-auto",
           // The arrival and the departure: a slide from below the page's
           // edge under a fade, and the same back. Visibility flips at once
-          // on the way in and after the slide on the way out.
-          "transition-[transform,opacity,visibility] duration-slow ease-(--ease-out-strong) motion-reduce:transition-none",
+          // on the way in and after the slide on the way out. The slide is
+          // the `translate` property (what `translate-y-*` sets), not
+          // `transform`.
+          "transition-[translate,opacity,visibility] duration-slow ease-(--ease-out-strong) motion-reduce:transition-none",
           open
             ? "visible translate-y-0 opacity-100"
             : "invisible translate-y-[calc(100%+12px)] opacity-0 [transition-delay:0s,0s,var(--duration-slow)]",
