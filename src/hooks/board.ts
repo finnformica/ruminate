@@ -15,7 +15,7 @@ import {
   inverseOps,
   isBoard,
   outlineImageIds,
-  resetValuesOps,
+  resetImageOps,
   setCaptionOps,
   suggestionOps,
   tagFeaturesOf,
@@ -162,7 +162,7 @@ export interface BoardWrites {
   clearValue: (feature: BoardFeature, value: BoardValue, imageId: string) => void
   /** Take every value off a picture, all features at once, as one undoable
    * batch. The caption stays. */
-  resetValues: (imageId: string) => void
+  resetImage: (imageId: string) => void
   setCaption: (imageId: string, caption: string) => void
   deleteImage: (imageId: string) => void
   /** Whether Claude can be asked to tag a picture here: there is a store
@@ -235,9 +235,9 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
     [store, undoable],
   )
 
-  const resetValues = React.useCallback(
+  const resetImage = React.useCallback(
     (imageId: string) => {
-      undoable(resetValuesOps(store.get(graphSnapshotAtom), boardId, imageId), "Tags reset")
+      undoable(resetImageOps(store.get(graphSnapshotAtom), boardId, imageId), "Picture reset")
     },
     [store, boardId, undoable],
   )
@@ -396,7 +396,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       addImages,
       setValue,
       clearValue,
-      resetValues,
+      resetImage,
       setCaption,
       deleteImage,
       canSuggest,
@@ -407,7 +407,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       addImages,
       setValue,
       clearValue,
-      resetValues,
+      resetImage,
       setCaption,
       deleteImage,
       canSuggest,

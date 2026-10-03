@@ -170,10 +170,10 @@ each):
   others; a picture left with no parent is back in the basket.
 - **The caption** is the image block's text (`setCaptionOps`) — what search
   matches, as in the editor.
-- **Reset** (`resetValuesOps`) takes every value off the picture, all
-  features at once, as one batch with one Undo; the caption stays. Beside
+- **Reset** (`resetImageOps`) clears the caption and takes every value off
+  the picture, all features at once, as one batch with one Undo. Beside
   **Delete image** at the foot of the form, and nothing to press while the
-  picture carries no value.
+  picture has no caption and carries no value.
 - **Delete image** is the context menu's Delete (`deleteBlockOps`): the row
   is tombstoned; the bytes stay in the bucket (docs/images.md, "Not yet").
 

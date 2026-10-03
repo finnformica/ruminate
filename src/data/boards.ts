@@ -440,14 +440,15 @@ export function suggestionOps(
 }
 
 /**
- * Take every value back off a picture, all features at once — the
- * inspector's **Reset**, one batch with one Undo. The values stay for the
- * other pictures; the caption is left as it is; a picture left with no
- * parent is back in the basket. Nothing when it carries no value.
+ * A picture back to how it was uploaded — the inspector's **Reset**: its
+ * caption cleared and every value taken off, all features at once, one
+ * batch with one Undo. The values stay for the other pictures; a picture
+ * left with no parent is back in the basket. Nothing when it has no
+ * caption and carries no value.
  */
-export function resetValuesOps(snapshot: GraphSnapshot, boardId: NoteId, imageId: string): Op[] {
+export function resetImageOps(snapshot: GraphSnapshot, boardId: NoteId, imageId: string): Op[] {
   if (!isBoard(snapshot, boardId)) return []
-  const ops: Op[] = []
+  const ops: Op[] = [...setCaptionOps(snapshot, imageId, "")]
   for (const state of boardFeatures(snapshot, boardId)) {
     for (const value of imageValues(snapshot, state, imageId)) {
       ops.push(...clearValueOps(snapshot, value.id, imageId))

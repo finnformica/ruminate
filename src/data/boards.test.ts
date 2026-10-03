@@ -13,7 +13,7 @@ import {
   imageUploadedOps,
   imageValues,
   inverseOps,
-  resetValuesOps,
+  resetImageOps,
   setCaptionOps,
   setValueOps,
   suggestionOps,
@@ -495,8 +495,8 @@ describe("suggestionOps", () => {
   })
 })
 
-describe("resetValuesOps", () => {
-  it("takes every value off the picture, all features at once, and leaves the caption", () => {
+describe("resetImageOps", () => {
+  it("clears the caption and takes every value off the picture, all features at once", () => {
     let snapshot = boardOf()
     snapshot = applyOps(snapshot, setCaptionOps(snapshot, "blk_pic1000000", "Mine"), NOW)
     snapshot = applyOps(
@@ -505,13 +505,13 @@ describe("resetValuesOps", () => {
       NOW,
     )
     // In Mauritius, with a lamp.
-    const ops = resetValuesOps(snapshot, "b", "blk_pic1000000")
-    expect(kinds(ops)).toEqual(["unlink", "unlink"])
+    const ops = resetImageOps(snapshot, "b", "blk_pic1000000")
+    expect(kinds(ops)).toEqual(["setText", "unlink", "unlink"])
     const next = applyOps(snapshot, ops, NOW)
     const [location, fixture] = boardFeatures(next, "b")
     expect(imageValues(next, location, "blk_pic1000000")).toEqual([])
     expect(imageValues(next, fixture, "blk_pic1000000")).toEqual([])
-    expect(next.nodes.get("blk_pic1000000")?.text).toBe("Mine")
+    expect(next.nodes.get("blk_pic1000000")?.text).toBe("")
     // The values stay for the others; the picture is still on the board.
     expect(fixture.values.map((v) => v.text)).toEqual(["Lamp"])
     expect(boardImageIds(next, "b")).toContain("blk_pic1000000")
@@ -520,12 +520,13 @@ describe("resetValuesOps", () => {
     expect(imageValues(undone, boardFeatures(undone, "b")[1], "blk_pic1000000")).toEqual(
       fixture.values,
     )
+    expect(undone.nodes.get("blk_pic1000000")?.text).toBe("Mine")
   })
 
-  it("is nothing for a picture that carries no value, or no board", () => {
+  it("is nothing for a picture with no caption that carries no value, or no board", () => {
     const snapshot = boardOf()
-    expect(resetValuesOps(snapshot, "b", "blk_pic2000000")).toEqual([])
-    expect(resetValuesOps(snapshot, "nope", "blk_pic1000000")).toEqual([])
+    expect(resetImageOps(snapshot, "b", "blk_pic2000000")).toEqual([])
+    expect(resetImageOps(snapshot, "nope", "blk_pic1000000")).toEqual([])
   })
 })
 
