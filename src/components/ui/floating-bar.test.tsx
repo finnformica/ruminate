@@ -18,6 +18,17 @@ describe("FloatingBar", () => {
     expect(bar.classList.contains("fixed")).toBe(true)
     expect(bar.hasAttribute("data-open")).toBe(true)
     expect(screen.getByRole("button", { name: "Photos" })).toBeTruthy()
+    // As wide as its contents unless asked for the page's width.
+    expect(bar.firstElementChild?.classList.contains("w-auto")).toBe(true)
+  })
+
+  it("spans the page when asked to", () => {
+    render(
+      <FloatingBar open width="full" label="Editing" data-testid="bar">
+        <button>Bold</button>
+      </FloatingBar>,
+    )
+    expect(screen.getByTestId("bar").firstElementChild?.classList.contains("w-full")).toBe(true)
   })
 
   it("stays mounted but out of sight and reach when closed, so the exit has something to play on", () => {

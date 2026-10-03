@@ -62,12 +62,7 @@ export function AddImages({
       </div>
       {/* The same two, as icons, while the row is scrolled out of view —
           greyed as the row's are, where nothing can be added yet. */}
-      <FloatingBar
-        open={exists && !inView}
-        label="Add images"
-        data-testid="add-images-bar"
-        className="justify-center"
-      >
+      <FloatingBar open={exists && !inView} label="Add images" data-testid="add-images-bar">
         {coarsePointer ? (
           <FloatingBarButton label="Camera" disabled={!canUpload} onClick={camera}>
             <CameraIcon16 />

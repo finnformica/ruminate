@@ -93,12 +93,16 @@ export function FloatingBarButton({
  * Placed in the page's own box (`FloatingHostContext`, which `PageLayout`
  * provides), so it clears whatever the app draws beneath the page — the
  * phone's nav bar, the sign-in banner — without knowing the height of
- * either; outside a page it floats over the window instead. Full width on a
- * phone, as the edit bar is; its own width, centred, on a wide screen.
+ * either; outside a page it floats over the window instead.
+ *
+ * `width` is the pill's: `full` spans the page as the edit bar does, for a
+ * row of many glyphs that scrolls; `content` is as wide as what it holds,
+ * centred, for a few — two glyphs in a page-wide capsule would look lost.
  */
 export function FloatingBar({
   open,
   label,
+  width = "content",
   className,
   children,
   ...props
@@ -106,6 +110,8 @@ export function FloatingBar({
   open: boolean
   /** The toolbar's accessible name. */
   label: string
+  /** The pill's width: as wide as its contents, centred, or the page's. */
+  width?: "content" | "full"
   /** Classes for the pill itself, around the children. */
   className?: string
 }) {
@@ -126,7 +132,8 @@ export function FloatingBar({
       <div
         className={cx(
           floatingBar(),
-          "pointer-events-auto w-full will-change-transform sm:w-auto",
+          "pointer-events-auto will-change-transform",
+          width === "full" ? "w-full" : "w-auto",
           // The arrival and the departure: a slide from below the page's
           // edge under a fade, and the same back. Visibility flips at once
           // on the way in and after the slide on the way out.
