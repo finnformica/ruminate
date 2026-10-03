@@ -32,6 +32,7 @@
     "check:changelog": "vite-node scripts/check-changelog.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "@base-ui/react": "^1.8.0",
     "@fontsource-variable/literata": "^5.3.0",
     "@fontsource-variable/shantell-sans": "^5.3.0",

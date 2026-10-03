@@ -13,6 +13,8 @@ import {
   inverseOps,
   setCaptionOps,
   setValueOps,
+  suggestionOps,
+  tagFeaturesOf,
   unassignedImageIds,
 } from "./boards"
 import {
@@ -385,5 +387,88 @@ describe("inverseOps", () => {
   it("refuses a batch with a delete in it", () => {
     const snapshot = boardOf()
     expect(inverseOps([{ op: "delete", id: "blk_pic2000000" }], snapshot)).toBeNull()
+  })
+})
+
+describe("tagFeaturesOf", () => {
+  it("names every preset feature, with the values in use", () => {
+    expect(tagFeaturesOf(boardOf(), "b")).toEqual([
+      { label: "Location", multi: false, values: ["Mauritius", "Lisbon"] },
+      { label: "Fixture", multi: true, values: [] },
+      { label: "Material", multi: true, values: [] },
+    ])
+  })
+})
+
+describe("suggestionOps", () => {
+  const suggestion = {
+    caption: "A rattan lamp",
+    features: [
+      { label: "Location", values: ["lisbon"] },
+      { label: "Fixture", values: ["Lamp", "Pendant"] },
+      { label: "Material", values: [] },
+    ],
+  }
+
+  it("captions and tags an untagged picture in one batch, creating what is missing", () => {
+    const snapshot = boardOf()
+    const { ops, summary } = suggestionOps(snapshot, "b", "blk_pic2000000", suggestion, NOW)
+    expect(summary).toEqual([
+      "“A rattan lamp”",
+      "Location: lisbon",
+      "Fixture: Lamp",
+      "Fixture: Pendant",
+    ])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(next.nodes.get("blk_pic2000000")?.text).toBe("A rattan lamp")
+    const [location, fixture] = boardFeatures(next, "b")
+    // The existing value by text, whatever its case; the new ones made once.
+    expect(imageValues(next, location, "blk_pic2000000")).toEqual([
+      { id: "blk_lisbon0000", text: "Lisbon" },
+    ])
+    expect(fixture.values.map((v) => v.text)).toEqual(["Lamp", "Pendant"])
+    expect(imageValues(next, fixture, "blk_pic2000000").map((v) => v.text)).toEqual([
+      "Lamp",
+      "Pendant",
+    ])
+    // One Fixture block, not one per value.
+    expect(
+      childIdsOf(next, "b").filter((id) => next.nodes.get(id)?.text === "Fixture"),
+    ).toHaveLength(1)
+    // And undone as one.
+    const undone = applyOps(next, inverseOps(ops, snapshot) as Op[], NOW)
+    expect(walk(undone, "b")).toBe(walk(snapshot, "b"))
+  })
+
+  it("fills in, and never overrides what the picture already has", () => {
+    let snapshot = boardOf()
+    snapshot = applyOps(snapshot, setCaptionOps(snapshot, "blk_pic1000000", "Mine"), NOW)
+    snapshot = applyOps(
+      snapshot,
+      setValueOps(snapshot, "b", FIXTURE, "blk_pic1000000", { text: "Lamp" }),
+      NOW,
+    )
+    // The picture has a caption, is in Mauritius, and carries Lamp.
+    const { ops, summary } = suggestionOps(snapshot, "b", "blk_pic1000000", suggestion, NOW)
+    expect(summary).toEqual(["Fixture: Pendant"])
+    const next = applyOps(snapshot, ops, NOW)
+    expect(next.nodes.get("blk_pic1000000")?.text).toBe("Mine")
+    const [location, fixture] = boardFeatures(next, "b")
+    expect(imageValues(next, location, "blk_pic1000000").map((v) => v.text)).toEqual(["Mauritius"])
+    expect(imageValues(next, fixture, "blk_pic1000000").map((v) => v.text)).toEqual([
+      "Lamp",
+      "Pendant",
+    ])
+  })
+
+  it("is nothing for a suggestion with nothing to add, a missing picture, or no board", () => {
+    const snapshot = boardOf()
+    const empty = { caption: "", features: [{ label: "Location", values: [] }] }
+    expect(suggestionOps(snapshot, "b", "blk_pic2000000", empty, NOW)).toEqual({
+      ops: [],
+      summary: [],
+    })
+    expect(suggestionOps(snapshot, "b", "blk_missing000", suggestion, NOW).ops).toEqual([])
+    expect(suggestionOps(snapshot, "nope", "blk_pic2000000", suggestion, NOW).ops).toEqual([])
   })
 })

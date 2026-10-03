@@ -20,6 +20,7 @@ import migration0010 from "../../migrations/0010_user_email.sql?raw"
 import migration0011 from "../../migrations/0011_user_email_required.sql?raw"
 import migration0013 from "../../migrations/0013_feature_flags.sql?raw"
 import migration0014 from "../../migrations/0014_invites.sql?raw"
+import migration0018 from "../../migrations/0018_anthropic_keys.sql?raw"
 import { ensureCorpusSchema } from "../../src/data/corpus-schema"
 import type { SqlDriver, SqlValue } from "../../src/data/sql-driver"
 
@@ -111,6 +112,7 @@ export async function applyControlPlane(driver: SqlDriver): Promise<void> {
   await driver.execScript(migration0011)
   await driver.execScript(migration0013)
   await driver.execScript(migration0014)
+  await driver.execScript(migration0018)
 }
 
 /**

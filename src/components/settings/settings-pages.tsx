@@ -6,7 +6,9 @@ import { McpTokensSection } from "../mcp-tokens-section"
 import { SharingSection } from "../sharing-section"
 import { AboutSection } from "./about-section"
 import { AccountSection } from "./account-section"
+import { AnthropicKeySection } from "./anthropic-key-section"
 import { AppearanceSection } from "./appearance-section"
+import { AutoTagSection } from "./auto-tag-section"
 import { ChangelogSection } from "./changelog-section"
 import { EditorSection } from "./editor-section"
 import { FeaturesSection } from "./features-section"
@@ -39,6 +41,13 @@ export function SettingsPageContent({ id }: { id: SettingsPageId }) {
       return <SharingSection />
     case "mcp":
       return <McpTokensSection />
+    case "boards":
+      return (
+        <>
+          <AnthropicKeySection />
+          <AutoTagSection />
+        </>
+      )
     case "data":
       return (
         <>

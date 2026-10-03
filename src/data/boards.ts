@@ -12,7 +12,8 @@ import {
   type GraphSnapshot,
 } from "./graph"
 import { unassignedIds } from "./basket"
-import type { Op } from "./ops"
+import type { TagFeature, TagSuggestion } from "./auto-tag"
+import { applyOps, type Op } from "./ops"
 
 /**
  * **Boards** (docs/boards.md): a note read as a wall of pictures, with a
@@ -330,6 +331,71 @@ export function setValueOps(
     })
   }
   return ops
+}
+
+/** The board's features as the tagging route is told them (docs/boards.md,
+ * "Tagging with Claude"): each label, whether it takes several values, and
+ * the values in use. */
+export function tagFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): TagFeature[] {
+  return boardFeatures(snapshot, boardId).map((state) => ({
+    label: state.feature.label,
+    multi: state.feature.multi,
+    values: state.values.map((value) => value.text.trim()).filter((text) => text !== ""),
+  }))
+}
+
+/**
+ * A suggestion from Claude (`TagSuggestion`, src/data/auto-tag.ts) as the
+ * writes it amounts to: one batch, undoable as one. It FILLS IN, never
+ * overrides — a caption is written only where the picture has none, a
+ * single-value feature only where the picture carries none of its values,
+ * and a multi-value feature's values are added to those carried. Each
+ * value goes through `setValueOps` with the text, so an existing value is
+ * reused and a new one created, the batch built up against the snapshot as
+ * each write would leave it. `summary` names what was written, for the
+ * toast; an empty batch is a suggestion with nothing to add.
+ */
+export function suggestionOps(
+  snapshot: GraphSnapshot,
+  boardId: NoteId,
+  imageId: string,
+  suggestion: TagSuggestion,
+  now: number,
+): { ops: Op[]; summary: string[] } {
+  const ops: Op[] = []
+  const summary: string[] = []
+  if (!isBoard(snapshot, boardId)) return { ops, summary }
+  let current = snapshot
+  const take = (batch: Op[]) => {
+    if (batch.length === 0) return
+    ops.push(...batch)
+    current = applyOps(current, batch, now)
+  }
+
+  const node = current.nodes.get(imageId)
+  if (!node) return { ops, summary }
+  const caption = suggestion.caption.trim()
+  if (caption !== "" && node.text.trim() === "") {
+    take(setCaptionOps(current, imageId, caption))
+    summary.push(`“${caption}”`)
+  }
+
+  for (const feature of BOARD_FEATURES) {
+    const answer = suggestion.features.find((entry) => isFeatureText(entry.label, feature))
+    if (!answer) continue
+    const state = boardFeatures(current, boardId).find((entry) => entry.feature === feature)
+    const carried = state ? imageValues(current, state, imageId) : []
+    if (!feature.multi && carried.length > 0) continue
+    const carriedTexts = new Set(carried.map((value) => normalise(value.text)))
+    for (const text of feature.multi ? answer.values : answer.values.slice(0, 1)) {
+      if (carriedTexts.has(normalise(text))) continue
+      const batch = setValueOps(current, boardId, feature, imageId, { text })
+      if (batch.length === 0) continue
+      take(batch)
+      summary.push(`${feature.label}: ${text.trim()}`)
+    }
+  }
+  return { ops, summary }
 }
 
 /** Take a value back off a picture. The value stays for the others; a

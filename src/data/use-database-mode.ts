@@ -8,6 +8,7 @@ import { refreshFeatures, resetFeatures, seedFeatures } from "./features"
 import { startImageCache, stopImageCache } from "./image-cache"
 import { imagesEnabled, resetImageObjectUrls } from "./images"
 import { refreshPreferences, resetPreferences } from "./account-preferences"
+import { resetAnthropicKey } from "./anthropic-key"
 import { requestAmbientSharesRefresh, startSharedMode, stopSharedMode } from "./shared-mode"
 
 /**
@@ -68,6 +69,9 @@ export function useDatabaseMode() {
       stopImageCache()
       resetImageObjectUrls()
       resetPreferences()
+      // What is known of the account's Anthropic key (src/data/anthropic-key.ts)
+      // is asked for when a board needs it, and forgotten with the rest.
+      resetAnthropicKey()
       resetFeatures()
       stopSharedMode()
       stopDatabaseMode()

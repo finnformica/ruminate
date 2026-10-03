@@ -13,6 +13,8 @@ import {
   isBoard,
   outlineImageIds,
   setCaptionOps,
+  suggestionOps,
+  tagFeaturesOf,
   unassignedImageIds,
   setValueOps,
   type BoardFeature,
@@ -20,7 +22,10 @@ import {
   type BoardValue,
   type ValueRef,
 } from "../data/boards"
+import { useAccountPreference } from "../data/account-preferences"
+import { refreshAnthropicKey, useAnthropicKey } from "../data/anthropic-key"
 import { requestDatabaseFlush } from "../data/database-mode"
+import { useFeature } from "../data/features"
 import {
   ImageUploadError,
   beginPendingImage,
@@ -29,8 +34,10 @@ import {
   releasePendingImage,
   uploadImage,
 } from "../data/images"
+import { parseProps } from "../data/graph"
 import { deleteBlockOps, type Op } from "../data/ops"
 import { useApplyOps } from "../data/store"
+import { requestTagSuggestion, SuggestTagsError } from "../data/suggest-tags"
 import { blockIndexAtom, graphSnapshotAtom, isDatabaseModeAtom } from "../global-state"
 import type { NoteId } from "../schema"
 import { viewNarrowing } from "../utils/view-narrowing"
@@ -120,6 +127,13 @@ export interface BoardWrites {
   clearValue: (feature: BoardFeature, value: BoardValue, imageId: string) => void
   setCaption: (imageId: string, caption: string) => void
   deleteImage: (imageId: string) => void
+  /** Whether Claude can be asked to tag a picture here: the flag is on,
+   * there is a store, and the account has an API key kept
+   * (docs/boards.md, "Tagging with Claude"). */
+  canSuggest: boolean
+  /** Ask Claude for a caption and tags for a picture, and apply what it
+   * says as one undoable batch. Settles when the toast has been shown. */
+  suggestTags: (imageId: string) => Promise<void>
 }
 
 /**
@@ -133,6 +147,16 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   const apply = useApplyOps()
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const canUpload = imagesEnabled && isDatabaseMode && exists
+
+  // Tagging with Claude: on for this account, with a key kept. Whether one
+  // is kept is asked for the first time a board needs to know.
+  const autoTagFeature = useFeature("autoTag")
+  const anthropicKey = useAnthropicKey()
+  const autoTagPictures = useAccountPreference("autoTagPictures")
+  React.useEffect(() => {
+    if (autoTagFeature && isDatabaseMode && anthropicKey === null) void refreshAnthropicKey()
+  }, [autoTagFeature, isDatabaseMode, anthropicKey])
+  const canSuggest = autoTagFeature && isDatabaseMode && exists && anthropicKey?.set === true
 
   const undoable = React.useCallback(
     (ops: Op[], message: string) => {
@@ -194,10 +218,49 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   )
 
   /**
+   * Claude's caption and tags for a picture: the board's features as they
+   * stand go with the asset's id; the answer is read into the writes it
+   * amounts to (`suggestionOps` — filling in, never overriding) and applied
+   * as one batch with one Undo. A picture without an uploaded asset (an
+   * external one, or one still on its way up) cannot be sent.
+   */
+  const suggestTags = React.useCallback(
+    async (imageId: string) => {
+      if (!canSuggest) return
+      const snapshot = store.get(graphSnapshotAtom)
+      const asset = parseProps(snapshot.nodes.get(imageId)?.props ?? null)?.image
+      if (typeof asset !== "string") {
+        toast.error("Only uploaded pictures can be tagged.")
+        return
+      }
+      try {
+        const suggestion = await requestTagSuggestion(asset, tagFeaturesOf(snapshot, boardId))
+        const { ops, summary } = suggestionOps(
+          store.get(graphSnapshotAtom),
+          boardId,
+          imageId,
+          suggestion,
+          Date.now(),
+        )
+        if (ops.length === 0) {
+          toast("Nothing to add.")
+          return
+        }
+        undoable(ops, summary.join(" · "))
+      } catch (error) {
+        toast.error(error instanceof SuggestTagsError ? error.message : "Couldn’t suggest tags.")
+      }
+    },
+    [canSuggest, store, boardId, undoable],
+  )
+
+  /**
    * Pictures added from the board, the editor's way: every row is on the
    * page at once, drawing the file already in hand, and the uploads happen
    * behind it one at a time. The asset id is written when it lands; a
-   * failed upload takes its row back out and says why.
+   * failed upload takes its row back out and says why. With **Tag new
+   * pictures automatically** on, and a key kept, each is tagged as soon as
+   * it has landed — one at a time, in the same queue.
    */
   const addImages = React.useCallback(
     async (files: File[]) => {
@@ -215,6 +278,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
           const asset = await uploadImage(file)
           primeImageObjectUrl(asset.id, file)
           apply(imageUploadedOps(id, asset))
+          if (autoTagPictures && canSuggest) await suggestTags(id)
         } catch (error) {
           apply(deleteBlockOps(id, store.get(graphSnapshotAtom)))
           toast.error(error instanceof ImageUploadError ? error.message : "Image upload failed")
@@ -224,11 +288,20 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       }
       if (queued.length > 0) void requestDatabaseFlush()
     },
-    [canUpload, store, apply, boardId],
+    [canUpload, store, apply, boardId, autoTagPictures, canSuggest, suggestTags],
   )
 
   return React.useMemo(
-    () => ({ canUpload, addImages, setValue, clearValue, setCaption, deleteImage }),
-    [canUpload, addImages, setValue, clearValue, setCaption, deleteImage],
+    () => ({
+      canUpload,
+      addImages,
+      setValue,
+      clearValue,
+      setCaption,
+      deleteImage,
+      canSuggest,
+      suggestTags,
+    }),
+    [canUpload, addImages, setValue, clearValue, setCaption, deleteImage, canSuggest, suggestTags],
   )
 }

@@ -3,6 +3,7 @@ import React from "react"
 import { imageValues, type BoardFeature, type BoardFeatureState } from "../../data/boards"
 import { graphSnapshotAtom } from "../../global-state"
 import type { BoardWrites } from "../../hooks/board"
+import { AsyncButton } from "../ui/async-button"
 import { Button } from "../ui/button"
 import { Dialog } from "../ui/dialog"
 import { FormControl } from "../form-control"
@@ -92,6 +93,17 @@ export function BoardInspector({
               onAdd={(feature, text) => writes.setValue(feature, image.id, { text })}
               onClose={() => setNaming(null)}
             />
+            {writes.canSuggest ? (
+              // Claude's caption and tags for this picture (docs/boards.md,
+              // "Tagging with Claude"): busy from the press until the toast.
+              <AsyncButton
+                size="small"
+                className="self-start"
+                onClick={() => writes.suggestTags(image.id)}
+              >
+                Suggest tags
+              </AsyncButton>
+            ) : null}
             <Button
               size="small"
               className="mt-auto self-start text-text-danger"

@@ -179,7 +179,12 @@ describe("feature flags", () => {
     const body = (await bodyOf(
       await sendAdmin(apiRequest("GET", "/api/admin/features")),
     )) as FeatureAudiencesBody
-    expect(body.audiences).toEqual({ mcp: "everyone", sharing: "everyone", boards: "admin" })
+    expect(body.audiences).toEqual({
+      mcp: "everyone",
+      sharing: "everyone",
+      boards: "admin",
+      autoTag: "admin",
+    })
   })
 
   it("sets an audience and answers with the whole set", async () => {
@@ -191,6 +196,7 @@ describe("feature flags", () => {
       mcp: "admin",
       sharing: "everyone",
       boards: "admin",
+      autoTag: "admin",
     })
     // Set again: an update, not a second row.
     await sendAdmin(apiRequest("PUT", "/api/admin/features/mcp", { audience: "off" }))
@@ -198,6 +204,7 @@ describe("feature flags", () => {
       mcp: "off",
       sharing: "everyone",
       boards: "admin",
+      autoTag: "admin",
     })
     expect(await harness.control.exec("SELECT key, updated_by FROM feature_flags")).toEqual([
       { key: "mcp", updated_by: ADMIN },
@@ -235,6 +242,7 @@ describe("feature flags", () => {
       mcp: "everyone",
       sharing: "everyone",
       boards: "admin",
+      autoTag: "admin",
     })
     expect((await sendAdmin(apiRequest("GET", "/api/admin/features"))).status).toBe(200)
     expect(
@@ -253,11 +261,14 @@ describe("GET /api/features", () => {
     await sendAdmin(apiRequest("PUT", "/api/admin/features/sharing", { audience: "off" }))
     expect(await bodyOf(await sendFeatures(apiRequest("GET", "/api/features")))).toEqual({
       admin: true,
-      features: { mcp: true, sharing: false, boards: true },
+      features: { mcp: true, sharing: false, boards: true, autoTag: true },
     })
     expect(
       await bodyOf(await sendFeatures(apiRequest("GET", "/api/features", undefined, "user"))),
-    ).toEqual({ admin: false, features: { mcp: false, sharing: false, boards: false } })
+    ).toEqual({
+      admin: false,
+      features: { mcp: false, sharing: false, boards: false, autoTag: false },
+    })
   })
 
   it("is session-guarded and GET only", async () => {
