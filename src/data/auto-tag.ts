@@ -19,9 +19,22 @@
  * through the board's ordinary writes.
  */
 
-/** The model the Worker asks. A Haiku-class model: fast, cheap, and enough
- * for a caption and a few labels. */
+/**
+ * Who answers: `anthropic` — the Messages API with the user's own key — or
+ * `cloudflare` — Workers AI, free within Cloudflare's daily allowance,
+ * behind the `cloudflareAi` flag. One router picks, in one fixed order
+ * (src/data/ai-router.ts); the Worker resolves it from its own truth, and
+ * the client only shows the same answer.
+ */
+export type AiProvider = "anthropic" | "cloudflare"
+
+/** The model the Worker asks of Anthropic. A Haiku-class model: fast,
+ * cheap, and enough for a caption and a few labels. */
 export const AUTO_TAG_MODEL = "claude-haiku-4-5"
+
+/** The model the Worker asks of Workers AI: an open vision model that reads
+ * a picture and chat-completion messages. */
+export const CLOUDFLARE_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it"
 
 /** Calls one account may make in a UTC day — a fuse on the user's own bill
  * (the key is theirs), not a quota. */
@@ -65,6 +78,8 @@ export interface TagSuggestion {
 /** `POST /api/boards/tag` answers this. */
 export interface TagResponse {
   suggestion: TagSuggestion
+  /** Who answered, as the router chose. */
+  provider: AiProvider
 }
 
 // Limits on what is sent and what is read back, so a board cannot stuff
@@ -130,6 +145,39 @@ export function tagPrompt(features: readonly TagFeature[]): string {
     return `- ${feature.label} (${kind}): ${values}`
   })
   return ["Features:", ...lines].join("\n")
+}
+
+/**
+ * The text beside the picture for Workers AI: the same features, then the
+ * JSON asked for in so many words — JSON mode is not something every model
+ * there honours, so the prompt asks and `extractJson` reads leniently.
+ */
+export function cloudflareTagPrompt(features: readonly TagFeature[]): string {
+  return [
+    tagPrompt(features),
+    "",
+    "Answer with JSON only, no prose and no code fence, of exactly this shape:",
+    '{"caption": "a few words", "features": [{"label": "the feature\'s label as given", "values": ["a value"]}]}',
+    "One entry per feature, in the order given; an empty values list when none applies.",
+  ].join("\n")
+}
+
+/**
+ * The first JSON object in a model's answer, read leniently: a code fence
+ * around it, or words before or after it, are stripped; what is between
+ * the first `{` and the last `}` is parsed. Null when there is none, or it
+ * does not parse.
+ */
+export function extractJson(text: string): unknown {
+  const unfenced = text.replace(/```[a-zA-Z]*\n?/g, "").replace(/```/g, "")
+  const start = unfenced.indexOf("{")
+  const end = unfenced.lastIndexOf("}")
+  if (start === -1 || end <= start) return null
+  try {
+    return JSON.parse(unfenced.slice(start, end + 1))
+  } catch {
+    return null
+  }
 }
 
 /** The JSON schema the model's answer is held to (structured output). */

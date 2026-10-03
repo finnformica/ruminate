@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { createMcpTestEnv, type McpTestEnv } from "../mcp/test-support"
-import { anthropicKey, spendKey } from "./anthropic-key"
+import { anthropicKey, readKey } from "./anthropic-key"
 
 /**
  * The Anthropic API key route: a kept key is never answered back, and one
@@ -118,26 +118,13 @@ describe("keeping a key", () => {
   })
 })
 
-describe("spendKey", () => {
-  const DAY = 24 * 60 * 60 * 1000
-
-  it("reads the key and counts the call, and tells no key from a spent day", async () => {
-    expect(await spendKey(harness.control, USER, 10 * DAY, 2)).toEqual({
-      ok: false,
-      reason: "no_key",
-    })
+describe("readKey", () => {
+  it("reads the kept key, or null, for this account alone", async () => {
+    expect(await readKey(harness.control, USER)).toBeNull()
     await send(apiRequest("PUT", { key: KEY }))
-    expect(await spendKey(harness.control, USER, 10 * DAY, 2)).toEqual({
-      ok: true,
-      apiKey: KEY,
-      callsToday: 1,
-    })
-    expect(await spendKey(harness.control, USER, 10 * DAY + 1, 2)).toMatchObject({ callsToday: 2 })
-    expect(await spendKey(harness.control, USER, 10 * DAY + 2, 2)).toEqual({
-      ok: false,
-      reason: "daily_limit",
-    })
-    // A new day starts the count over.
-    expect(await spendKey(harness.control, USER, 11 * DAY, 2)).toMatchObject({ callsToday: 1 })
+    expect(await readKey(harness.control, USER)).toBe(KEY)
+    expect(await readKey(harness.control, OTHER_USER)).toBeNull()
+    await send(apiRequest("DELETE"))
+    expect(await readKey(harness.control, USER)).toBeNull()
   })
 })

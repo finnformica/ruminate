@@ -99,6 +99,10 @@
   // fails on a binding that names nothing: `npx wrangler r2 bucket create
   // ruminate-images`.
   "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "ruminate-images" }],
+  // Workers AI, for tagging a board's pictures without a key of one's own
+  // (docs/boards.md, "Tagging with Claude"; behind the `cloudflareAi` flag).
+  // The free allowance is 10,000 neurons a day per account.
+  "ai": { "binding": "AI" },
   // The burst half of the MCP rate limit (docs/mcp-rate-limiting.md), keyed by
   // token id. Here rather than in D1 because this is the check a runaway agent
   // trips over and over, and refusing has to be cheaper than answering — this
@@ -147,6 +151,7 @@
       },
     ],
     "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "ruminate-images" }],
+    "ai": { "binding": "AI" },
     "ratelimits": [
       {
         "name": "MCP_BURST",

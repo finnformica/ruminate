@@ -29,6 +29,7 @@ const effectivePreferencesAtom = atom((get) => get(preferencesAtom) ?? DEFAULT_P
 
 const preferenceAtoms = {
   whatsNewCard: atom((get) => get(effectivePreferencesAtom).whatsNewCard),
+  useCloudflareAi: atom((get) => get(effectivePreferencesAtom).useCloudflareAi),
 } satisfies Record<keyof AccountPreferences, unknown>
 
 /** One preference of the signed-in account, or its default until known. */

@@ -34,6 +34,12 @@ const json = (body: unknown, status = 200): Response =>
     headers: { "Content-Type": "application/json" },
   })
 
+/** The preferences as stored for a tenant, over the defaults — for another
+ * handler that acts on one (the tag route reads `useCloudflareAi`). */
+export async function storedPreferences(tenant: TenantDb): Promise<AccountPreferences> {
+  return withDefaults(await readStored(tenant))
+}
+
 async function readStored(tenant: TenantDb): Promise<Partial<AccountPreferences>> {
   const rows = await tenant.exec("SELECT value FROM meta WHERE user_id = :tenant AND key = ?1", [
     META_KEY,
