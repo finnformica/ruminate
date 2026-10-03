@@ -4,7 +4,7 @@
  * (worker/handlers/board-tag.ts), and the client, which sends the board's
  * features and applies the answer (src/hooks/board.ts).
  *
- * A PROOF OF CONCEPT, behind the `autoTag` flag. The shapes here are the
+ * A PROOF OF CONCEPT, open to every signed-in user. The shapes here are the
  * request the client sends, the prompt the Worker builds from it, the JSON
  * schema the model is held to, and the reading of its answer back into a
  * suggestion — pure, with no platform types, so both sides and the tests

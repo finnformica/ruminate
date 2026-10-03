@@ -1,6 +1,6 @@
 // `/api/anthropic-key` — the signed-in caller's own Anthropic API key, for
 // tagging a board's pictures with Claude (docs/boards.md, "Tagging with
-// Claude"; a proof of concept behind the `autoTag` flag).
+// Claude"; a proof of concept). Any signed-in user may keep one.
 //
 //   GET    → { set, last4 }   whether a key is kept, and its last characters
 //   PUT    { key }            keep this key; answers as GET
@@ -19,7 +19,6 @@ import {
   type AnthropicKeyBody,
 } from "../../src/data/auto-tag"
 import type { SqlDriver } from "../../src/data/sql-driver"
-import { featureAllows, featureRefusal } from "../features"
 import { dayOf } from "../mcp/rate-limit"
 import { controlPlaneDriver } from "../tenancy-db"
 import type { Env } from "../types"
@@ -95,9 +94,6 @@ export async function anthropicKey(
   const session = await requireSession(request, env, fetchImpl)
   if (session instanceof Response) return session
   const driver = controlPlaneDriver(env)
-  if (!(await featureAllows(driver, env, "autoTag", session.id))) {
-    return json(featureRefusal("autoTag"), 403)
-  }
 
   if (request.method === "GET") return json(await keyStatus(driver, session.id))
 

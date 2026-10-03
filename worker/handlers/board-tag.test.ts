@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { AUTO_TAG_MODEL, type TagFeature } from "../../src/data/auto-tag"
-import { setFeatureAudience } from "../features"
 import { createMcpTestEnv, type McpTestEnv } from "../mcp/test-support"
 import { anthropicKey } from "./anthropic-key"
 import { boardTag } from "./board-tag"
@@ -12,7 +11,6 @@ import { boardTag } from "./board-tag"
  * sends, and how it reads the answer back.
  */
 
-const ADMIN = 42536816
 const USER = 7
 const KEY = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCD"
 const IMAGE = "img_abcdefghijkl"
@@ -96,7 +94,6 @@ async function keepKey() {
 beforeEach(async () => {
   harness = await createMcpTestEnv()
   await harness.addUser(USER)
-  await setFeatureAudience(harness.control, "autoTag", "everyone", ADMIN)
   await harness.putImage(
     USER,
     IMAGE,
@@ -119,15 +116,6 @@ beforeEach(async () => {
 describe("before the call", () => {
   it("refuses an unauthenticated caller", async () => {
     expect((await send(tagRequest({ imageId: IMAGE, features: [] }, null))).status).toBe(401)
-    expect(anthropic.calls).toEqual([])
-  })
-
-  it("refuses the caller while the flag is off", async () => {
-    await keepKey()
-    await setFeatureAudience(harness.control, "autoTag", "admin", ADMIN)
-    const response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
-    expect(response.status).toBe(403)
-    expect((await bodyOf(response)).error).toBe("feature_off")
     expect(anthropic.calls).toEqual([])
   })
 

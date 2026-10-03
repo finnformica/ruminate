@@ -1,8 +1,7 @@
 -- Migration number: 0018    2026-10-03
 --
 -- A user's own Anthropic API key, for tagging a board's pictures with
--- Claude (docs/boards.md, "Tagging with Claude") — a proof of concept
--- behind the `autoTag` feature flag.
+-- Claude (docs/boards.md, "Tagging with Claude") — a proof of concept.
 --
 -- The key is pasted on the settings page, kept here on the server, and sent
 -- by the Worker with each request to the Anthropic API. It is NEVER sent

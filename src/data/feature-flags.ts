@@ -17,7 +17,7 @@ export type Audience = (typeof AUDIENCES)[number]
 export const isAudience = (value: unknown): value is Audience =>
   typeof value === "string" && (AUDIENCES as readonly string[]).includes(value)
 
-export const FEATURE_KEYS = ["mcp", "sharing", "boards", "autoTag"] as const
+export const FEATURE_KEYS = ["mcp", "sharing", "boards"] as const
 export type FeatureKey = (typeof FEATURE_KEYS)[number]
 
 export const isFeatureKey = (value: unknown): value is FeatureKey =>
@@ -46,11 +46,6 @@ export const FEATURES: readonly FeatureDefinition[] = [
   {
     key: "boards",
     label: "Boards (a note as a wall of pictures)",
-    defaultAudience: "admin",
-  },
-  {
-    key: "autoTag",
-    label: "Tagging board pictures with Claude (proof of concept)",
     defaultAudience: "admin",
   },
 ]

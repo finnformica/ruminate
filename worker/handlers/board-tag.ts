@@ -1,6 +1,6 @@
 // `POST /api/boards/tag` — a caption and tags for one of the caller's
 // pictures, from Claude (docs/boards.md, "Tagging with Claude"). A PROOF OF
-// CONCEPT behind the `autoTag` flag.
+// CONCEPT, open to every signed-in user with a key kept.
 //
 // The body is a `TagRequest` (src/data/auto-tag.ts): the asset's id and
 // the board's features with their values in use. The picture's bytes come
@@ -12,8 +12,7 @@
 // board's ordinary writes, so this route writes nothing to the graph.
 //
 // Refusals, each a code the client puts into words:
-//   403 feature_off          the flag is not on for this account
-//   412 no_api_key           no key kept — Settings → Boards
+//   412 no_api_key           no key kept — Settings → API
 //   429 daily_limit          the account's calls for today are spent
 //   429 rate_limited         the API said to slow down (its Retry-After passed on)
 //   413 image_too_large      the API takes five megabytes of base64
@@ -36,7 +35,6 @@ import {
   tagPrompt,
   type TagResponse,
 } from "../../src/data/auto-tag"
-import { featureAllows, featureRefusal } from "../features"
 import { controlPlaneDriver } from "../tenancy-db"
 import type { Env } from "../types"
 import { spendKey } from "./anthropic-key"
@@ -74,9 +72,6 @@ export async function boardTag(
   const session = await requireSession(request, env, fetchImpl)
   if (session instanceof Response) return session
   const driver = controlPlaneDriver(env)
-  if (!(await featureAllows(driver, env, "autoTag", session.id))) {
-    return json(featureRefusal("autoTag"), 403)
-  }
 
   const body = readTagRequest(await request.json().catch(() => null))
   if (body === null || !isImageId(body.imageId)) return json({ error: "invalid_body" }, 400)
@@ -101,7 +96,7 @@ export async function boardTag(
   if (!spend.ok) {
     if (spend.reason === "no_key") {
       return json(
-        { error: "no_api_key", detail: "Add your Anthropic API key under Settings → Boards." },
+        { error: "no_api_key", detail: "Add your Anthropic API key under Settings → API." },
         412,
       )
     }

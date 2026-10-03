@@ -21,7 +21,7 @@ import { ChevronLeftIcon16, ChevronRightIcon16 } from "../icons"
  * the always-mounted sidebar carries the list without the cards.
  */
 export type SettingsPageId =
-  "account" | "preferences" | "sharing" | "mcp" | "boards" | "data" | "about" | "admin"
+  "account" | "preferences" | "sharing" | "mcp" | "api" | "data" | "about" | "admin"
 
 export interface SettingsPage {
   id: SettingsPageId
@@ -63,10 +63,9 @@ const SETTINGS_PAGES: SettingsPage[] = [
     signedIn: true,
   },
   {
-    id: "boards",
-    label: "Boards",
+    id: "api",
+    label: "API",
     description: "Claude tagging the pictures on your boards, and the key it uses.",
-    feature: "autoTag",
     signedIn: true,
   },
   {
@@ -93,8 +92,7 @@ function useSettingsPages(): SettingsPage[] {
   const sharing = useFeature("sharing")
   const mcp = useFeature("mcp")
   const boards = useFeature("boards")
-  const autoTag = useFeature("autoTag")
-  const features: Record<FeatureKey, boolean> = { sharing, mcp, boards, autoTag }
+  const features: Record<FeatureKey, boolean> = { sharing, mcp, boards }
   return SETTINGS_PAGES.filter(
     (page) =>
       (!page.signedIn || githubUser) &&

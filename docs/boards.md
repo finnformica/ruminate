@@ -210,15 +210,15 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
 
 ## Tagging with Claude
 
-**A proof of concept**, behind its own flag (`autoTag`, admin only by
-default). A picked picture's window offers **Suggest tags**: Claude is
+**A proof of concept**, open to every signed-in user with a key kept. A
+picked picture's window offers **Suggest tags**: Claude is
 shown the picture and the board's features with the values in use, and
 answers with a caption and, per feature, the values that fit — an existing
-value spelled as given, or a short new one. Under Settings → Boards, **Tag
+value spelled as given, or a short new one. Under Settings → API, **Tag
 new pictures automatically** has each picture added from the board tagged
 as soon as its upload lands, one at a time in the upload's own queue.
 
-**The key is the user's own, and lives on the server.** Settings → Boards
+**The key is the user's own, and lives on the server.** Settings → API
 takes an Anthropic API key and keeps it in the control plane's
 `anthropic_keys` table (migrations/0018), one row per account, reached
 through `/api/anthropic-key` (worker/handlers/anthropic-key.ts). The route
@@ -239,8 +239,8 @@ reading them from D1, on purpose: a picture is tagged right after its
 upload lands, before the replica has the row, so the browser's graph is
 the one that knows the board now; the Worker trusts the body as prompt
 text only and writes nothing to the graph. Refusals are codes the client
-puts into words (src/data/suggest-tags.ts): no key kept (412), the flag
-off (403), a key Anthropic refuses (422), the day's calls spent (429 — a
+puts into words (src/data/suggest-tags.ts): no key kept (412), a key
+Anthropic refuses (422), the day's calls spent (429 — a
 fuse of 300 a day on the user's own bill, counted on the key's row), a
 picture too large or in a format the API does not read (413, 415).
 

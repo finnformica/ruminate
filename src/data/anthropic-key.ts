@@ -7,8 +7,8 @@ import { sessionFetch } from "./session-fetch"
  * "Tagging with Claude"): whether one is kept on the server, and its last
  * characters — never the key, which the server does not answer with. Read
  * from `GET /api/anthropic-key` when the board or the settings card first
- * needs it (the flag is admin-only, so it is not asked for at every
- * sign-in), kept in memory for the sign-in, and forgotten on sign-out.
+ * needs it (few accounts keep one, so it is not asked for at every sign-in),
+ * kept in memory for the sign-in, and forgotten on sign-out.
  */
 
 /** Null = not asked yet, or the request failed. */

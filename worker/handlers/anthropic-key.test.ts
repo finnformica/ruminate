@@ -1,14 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { setFeatureAudience } from "../features"
 import { createMcpTestEnv, type McpTestEnv } from "../mcp/test-support"
 import { anthropicKey, spendKey } from "./anthropic-key"
 
 /**
- * The Anthropic API key route: a kept key is never answered back, one
- * account cannot see another's, and the flag gates it.
+ * The Anthropic API key route: a kept key is never answered back, and one
+ * account cannot see another's.
  */
 
-const ADMIN = 42536816
 const USER = 7
 const OTHER_USER = 8
 const KEY = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCD"
@@ -46,22 +44,11 @@ beforeEach(async () => {
   harness = await createMcpTestEnv()
   await harness.addUser(USER)
   await harness.addUser(OTHER_USER)
-  await setFeatureAudience(harness.control, "autoTag", "everyone", ADMIN)
 })
 
 describe("the line", () => {
   it("refuses an unauthenticated caller", async () => {
     expect((await send(apiRequest("GET", undefined, null))).status).toBe(401)
-  })
-
-  it("refuses every method while the flag is off for the caller", async () => {
-    await setFeatureAudience(harness.control, "autoTag", "admin", ADMIN)
-    for (const [method, body] of [["GET"], ["PUT", { key: KEY }], ["DELETE"]] as const) {
-      const response = await send(apiRequest(method, body))
-      expect(response.status).toBe(403)
-      expect((await bodyOf(response)).error).toBe("feature_off")
-    }
-    expect(await harness.control.exec("SELECT user_id FROM anthropic_keys")).toEqual([])
   })
 
   it("refuses an unknown method", async () => {

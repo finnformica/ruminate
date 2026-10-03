@@ -25,7 +25,6 @@ import {
 import { useAccountPreference } from "../data/account-preferences"
 import { refreshAnthropicKey, useAnthropicKey } from "../data/anthropic-key"
 import { requestDatabaseFlush } from "../data/database-mode"
-import { useFeature } from "../data/features"
 import {
   ImageUploadError,
   beginPendingImage,
@@ -127,9 +126,9 @@ export interface BoardWrites {
   clearValue: (feature: BoardFeature, value: BoardValue, imageId: string) => void
   setCaption: (imageId: string, caption: string) => void
   deleteImage: (imageId: string) => void
-  /** Whether Claude can be asked to tag a picture here: the flag is on,
-   * there is a store, and the account has an API key kept
-   * (docs/boards.md, "Tagging with Claude"). */
+  /** Whether Claude can be asked to tag a picture here: there is a store
+   * (signed in), and the account has an API key kept (docs/boards.md,
+   * "Tagging with Claude"). */
   canSuggest: boolean
   /** Ask Claude for a caption and tags for a picture, and apply what it
    * says as one undoable batch. Settles when the toast has been shown. */
@@ -148,15 +147,14 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const canUpload = imagesEnabled && isDatabaseMode && exists
 
-  // Tagging with Claude: on for this account, with a key kept. Whether one
-  // is kept is asked for the first time a board needs to know.
-  const autoTagFeature = useFeature("autoTag")
+  // Tagging with Claude: signed in, with a key kept. Whether one is kept is
+  // asked for the first time a board needs to know.
   const anthropicKey = useAnthropicKey()
   const autoTagPictures = useAccountPreference("autoTagPictures")
   React.useEffect(() => {
-    if (autoTagFeature && isDatabaseMode && anthropicKey === null) void refreshAnthropicKey()
-  }, [autoTagFeature, isDatabaseMode, anthropicKey])
-  const canSuggest = autoTagFeature && isDatabaseMode && exists && anthropicKey?.set === true
+    if (isDatabaseMode && anthropicKey === null) void refreshAnthropicKey()
+  }, [isDatabaseMode, anthropicKey])
+  const canSuggest = isDatabaseMode && exists && anthropicKey?.set === true
 
   const undoable = React.useCallback(
     (ops: Op[], message: string) => {

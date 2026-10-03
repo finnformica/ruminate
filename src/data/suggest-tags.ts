@@ -20,9 +20,8 @@ export class SuggestTagsError extends Error {
 
 /** The words for each refusal — what the person can do about it. */
 const MESSAGES: Record<string, string> = {
-  no_api_key: "Add your Anthropic API key under Settings → Boards to suggest tags.",
-  feature_off: "Tagging isn’t switched on for this account.",
-  invalid_api_key: "Anthropic refused your API key — check it under Settings → Boards.",
+  no_api_key: "Add your Anthropic API key under Settings → API to suggest tags.",
+  invalid_api_key: "Anthropic refused your API key — check it under Settings → API.",
   daily_limit: "Tagging has made its calls for today.",
   rate_limited: "Anthropic asked to slow down — try again in a minute.",
   image_too_large: "That picture is too large to tag.",
