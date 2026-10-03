@@ -89,17 +89,28 @@ export interface SavedViewActions {
 }
 
 function DefaultFooter({ onUpdateDefault, onResetDefault }: SavedViewActions) {
+  // Stacked on a phone, where the menu is narrow (see `MENU_WIDTH`).
   return (
-    <div className="flex items-center gap-1.5">
-      <Button size="small" className="w-0 grow whitespace-nowrap" onClick={onUpdateDefault}>
+    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
+      <Button size="small" className="whitespace-nowrap sm:w-0 sm:grow" onClick={onUpdateDefault}>
         Update to default
       </Button>
-      <Button size="small" className="w-0 grow whitespace-nowrap" onClick={onResetDefault}>
+      <Button size="small" className="whitespace-nowrap sm:w-0 sm:grow" onClick={onResetDefault}>
         Reset to default
       </Button>
     </div>
   )
 }
+
+/**
+ * How wide the Filter and Sort menus are. Their branches open beside them
+ * (`DropdownMenu.Content`, nested), and on a phone the two have the
+ * screen's width to share: the menu keeps to a narrow column at the right
+ * edge, where its button is, so its branch has the room to the left. With
+ * a footer (the saved-view buttons) it widens where there is room.
+ */
+const MENU_WIDTH = "max-sm:w-44"
+const MENU_WIDTH_WITH_FOOTER = "max-sm:w-44 sm:w-80"
 
 /** The ancestor branches as the menu names them. */
 const ANCESTOR_LABELS: Record<AncestorFilterKey, string> = { parent: "Parent", under: "Under" }
@@ -201,7 +212,7 @@ export function FilterMenu({
       />
       <DropdownMenu.Content
         align="end"
-        width={saved?.dirty ? 320 : undefined}
+        className={saved?.dirty ? MENU_WIDTH_WITH_FOOTER : MENU_WIDTH}
         footer={saved?.dirty ? <DefaultFooter {...saved} /> : undefined}
       >
         {/* The surface's own branches first: each row ticks a block into
@@ -222,7 +233,7 @@ export function FilterMenu({
               >
                 {branch.label}
               </DropdownMenu.SubmenuTrigger>
-              <DropdownMenu.Content align="start" side="left" width={224}>
+              <DropdownMenu.Content width={224}>
                 <DropdownMenu.Item
                   selected={mine.length === 0}
                   closeOnClick={false}
@@ -261,7 +272,7 @@ export function FilterMenu({
           <DropdownMenu.SubmenuTrigger value={typeSummary || "Any"}>
             Type
           </DropdownMenu.SubmenuTrigger>
-          <DropdownMenu.Content align="start" side="left">
+          <DropdownMenu.Content>
             <DropdownMenu.Item
               selected={chosen.length === 0}
               closeOnClick={false}
@@ -297,7 +308,7 @@ export function FilterMenu({
               <DropdownMenu.SubmenuTrigger value={summary || "Any"}>
                 {ANCESTOR_LABELS[key]}
               </DropdownMenu.SubmenuTrigger>
-              <DropdownMenu.Content align="start" side="left">
+              <DropdownMenu.Content>
                 <DropdownMenu.Item
                   selected={values.length === 0}
                   closeOnClick={false}
@@ -334,7 +345,7 @@ export function FilterMenu({
           <DropdownMenu.SubmenuTrigger value={text ? `“${text}”` : "Any"}>
             Text
           </DropdownMenu.SubmenuTrigger>
-          <DropdownMenu.Content align="start" side="left">
+          <DropdownMenu.Content>
             <DropdownMenu.Item
               selected={text === ""}
               closeOnClick={false}
@@ -406,7 +417,7 @@ export function SortMenu({
       />
       <DropdownMenu.Content
         align="end"
-        width={saved?.dirty ? 320 : undefined}
+        className={saved?.dirty ? MENU_WIDTH_WITH_FOOTER : MENU_WIDTH}
         footer={saved?.dirty ? <DefaultFooter {...saved} /> : undefined}
       >
         {/* Document order is the note's own order, and the absence of a sort. */}
@@ -429,7 +440,7 @@ export function SortMenu({
             >
               {option.label ?? option.value}
             </DropdownMenu.SubmenuTrigger>
-            <DropdownMenu.Content align="start" side="left" width={200}>
+            <DropdownMenu.Content width={200}>
               {sortDirections(option.value).map((step) => (
                 <DropdownMenu.Item
                   key={step.value}
