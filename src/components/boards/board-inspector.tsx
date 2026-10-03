@@ -3,11 +3,12 @@ import React from "react"
 import { imageValues, type BoardFeature, type BoardFeatureState } from "../../data/boards"
 import { graphSnapshotAtom } from "../../global-state"
 import type { BoardWrites } from "../../hooks/board"
-import { AsyncButton } from "../ui/async-button"
+import { usePending } from "../../hooks/pending"
 import { Button } from "../ui/button"
 import { Dialog } from "../ui/dialog"
+import { IconButton } from "../ui/icon-button"
 import { FormControl } from "../form-control"
-import { TrashIcon16 } from "../icons"
+import { SparklesIcon16, TrashIcon16 } from "../icons"
 import { TextInput } from "../ui/text-input"
 import { BoardPicture, type BoardImage } from "./board-picture"
 import { NewValueDialog } from "./new-value-dialog"
@@ -41,6 +42,11 @@ export function BoardInspector({
   // The feature a new value is being named for (`NewValueDialog`), if any.
   const [naming, setNaming] = React.useState<BoardFeature | null>(null)
 
+  // Claude's caption and tags for this picture (docs/boards.md, "Tagging
+  // with Claude"): the sparkles in the title bar, busy from the press until
+  // the toast (docs/design-principles.md, Busy controls).
+  const [suggest, suggesting] = usePending(() => writes.suggestTags(image.id))
+
   return (
     // Focus is kept in the window, but the page is not made inert: the
     // toast that answers a change — with its Undo — must stay in reach
@@ -48,6 +54,19 @@ export function BoardInspector({
     <Dialog open modal="trap-focus" onOpenChange={(next) => (next ? undefined : onClose())}>
       <Dialog.Content
         title={image.text.trim() || "Picture"}
+        actions={
+          writes.canSuggest ? (
+            <IconButton
+              aria-label="Suggest tags"
+              tooltipSide="bottom"
+              className="coarse:rounded-lg"
+              loading={suggesting}
+              onClick={() => suggest()}
+            >
+              <SparklesIcon16 />
+            </IconButton>
+          ) : null
+        }
         className="max-h-[90vh] w-[calc(100vw-24px)] max-w-5xl"
       >
         <div
@@ -93,17 +112,6 @@ export function BoardInspector({
               onAdd={(feature, text) => writes.setValue(feature, image.id, { text })}
               onClose={() => setNaming(null)}
             />
-            {writes.canSuggest ? (
-              // Claude's caption and tags for this picture (docs/boards.md,
-              // "Tagging with Claude"): busy from the press until the toast.
-              <AsyncButton
-                size="small"
-                className="self-start"
-                onClick={() => writes.suggestTags(image.id)}
-              >
-                Suggest tags
-              </AsyncButton>
-            ) : null}
             <Button
               size="small"
               className="mt-auto self-start text-text-danger"
