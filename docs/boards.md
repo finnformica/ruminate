@@ -277,24 +277,41 @@ four characters, and that is all the browser ever holds
 rest — D1 is reached only through the Worker — which is one of the things
 that would have to change before this left the proof-of-concept stage.
 
-**The call** is `POST /api/boards/tag` (worker/handlers/board-tag.ts):
-the asset's id and the board's features (`TagRequest`,
-src/data/auto-tag.ts). The Worker reads the bytes from the caller's own
-prefix in R2 — the key minted from the session, as images.ts mints it —
-and sends them with a fixed system prompt and a JSON schema the answer is
-held to (structured output) to the Messages API, as `claude-haiku-4-5`
-with the caller's key. The client sends the features rather than the Worker
-reading them from D1, on purpose: the browser's graph is the one that
-knows the board now (a value picked a moment ago may not have reached the
-replica yet), and the Worker trusts the body as prompt text only and
-writes nothing to the graph. Refusals are codes the client
-puts into words (src/data/suggest-tags.ts): nothing set up (412), a key
-Anthropic refuses (422), the day's calls spent (429 — a fuse of 300 a day
-per account whoever answers, counted in `ai_usage`, migrations/0019; the
-`calls_*` columns 0018 gave the key's row are no longer written), a picture
-too large or in a format the API does not read (413, 415), Cloudflare
-chosen with no binding (501), the provider failing (502), and an answer
-that is not a suggestion (422).
+**The picture is fitted on the device before it goes.** The models resize
+anything past about 1,568 px on the long edge before they look at it, so
+the stored original is upload for nothing — and a phone photo is four to
+nine megabytes, past the API's limit, while an upload only re-encodes
+past the ten-megabyte upload limit (docs/images.md). So `suggestTags`
+takes the picture's bytes as the page already has them (`imageBlob`,
+src/data/images.ts: the device's copy, else the Worker's) and makes a
+copy for the model (`visionCopy`, src/data/image-fit.ts: a JPEG no larger
+than 1,568 px on its longest side, quality 0.8, no metadata — a few
+hundred kilobytes for a phone photo), through the same decode and encode
+the upload's own fitting uses (`fitImageFor`). A phone photo of any size
+tags, and a tag costs that much upload. Where the browser cannot make the
+copy, the original goes and the Worker's limit answers as before.
+
+**The call** is `POST /api/boards/tag` (worker/handlers/board-tag.ts), a
+form: `image`, the fitted copy, and `features`, the board's features as a
+JSON string (`TagRequest`, src/data/auto-tag.ts). The Worker reads the
+form — a format the models read, under the API's five-megabyte limit as a
+sanity check — and hands the bytes to the provider; it reads nothing of
+the caller's but the session, and R2 is not touched for tagging. The
+Anthropic provider sends them with a fixed system prompt and a JSON schema
+the answer is held to (structured output) to the Messages API, as
+`claude-haiku-4-5` with the caller's key. The client sends the features
+rather than the Worker reading them from D1, on purpose: the browser's
+graph is the one that knows the board now (a value picked a moment ago may
+not have reached the replica yet), and the Worker trusts the form as
+prompt text only and writes nothing to the graph. Refusals are codes the
+client puts into words (src/data/suggest-tags.ts): not a form with a
+picture and features (400), nothing set up (412), a key Anthropic refuses
+(422), the day's calls spent (429 — a fuse of 300 a day per account
+whoever answers, counted in `ai_usage`, migrations/0019; the `calls_*`
+columns 0018 gave the key's row are no longer written), a picture too
+large or in a format the API does not read (413, 415), Cloudflare chosen
+with no binding (501), the provider failing (502), and an answer that is
+not a suggestion (422).
 
 **Applying the answer** is the board's ordinary writes. `suggestionOps`
 (src/data/boards.ts) reads the suggestion into one batch — a caption only
@@ -306,12 +323,11 @@ as each write would leave it, so two new values under one new feature make
 one feature block. It fills in and never overrides what a person set, and
 it is one toast with one **Undo**. Nothing to add is a toast that says so.
 
-Deliberately not done: encrypting the key at rest; a cheaper picture for
-the call (the full bytes go, under the API's five-megabyte base64 cap —
-a picture larger than that is refused rather than resized); tagging in
-bulk, or on upload (only the inspector's button asks); any caching of
-answers; and prompt tuning beyond the one system prompt. Signed out there
-is no key, so nothing of this shows.
+Deliberately not done: encrypting the key at rest; tagging a picture that
+is not an upload (an external picture's bytes are at its own address);
+tagging in bulk, or on upload (only the inspector's button asks); any
+caching of answers; and prompt tuning beyond the one system prompt. Signed
+out there is no key, so nothing of this shows.
 
 ## Not yet
 

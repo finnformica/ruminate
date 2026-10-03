@@ -1,30 +1,34 @@
-// `POST /api/boards/tag` — a caption and tags for one of the caller's
-// pictures, from a vision model (docs/boards.md, "Tagging with Claude"). A
-// PROOF OF CONCEPT, open to every signed-in user with a provider set up.
+// `POST /api/boards/tag` — a caption and tags for a picture, from a vision
+// model (docs/boards.md, "Tagging with Claude"). A PROOF OF CONCEPT, open to
+// every signed-in user with a provider set up.
 //
-// ONE path, whoever answers. The body is a `TagRequest`
-// (src/data/auto-tag.ts): the asset's id and the board's features with
-// their values in use — nothing about who is asked. The handler resolves
-// the provider itself, by the one router (src/data/ai-router.ts) over its
-// own truth: the key row, the flag's audience, the stored preference —
-// Anthropic if a key is kept, else Cloudflare if the `cloudflareAi` flag
-// allows the caller and they opted in, else nothing. Then the picture is
-// read from the caller's own prefix in R2 (the key minted from the session,
-// never from the body, as images.ts mints it), the day's call counted
-// (worker/ai-usage.ts, the same count for both), and the provider asked
-// through one interface, `TagProvider`: a picture and the features in,
-// the model's answer out as text. The providers differ in nothing else;
-// one step after reads the text leniently (`extractJson`) into a
-// `TagSuggestion` (`readTagSuggestion`: trimmed, de-duplicated, capped,
-// one value for a single-value feature) and returns it. The client applies
-// it through the board's ordinary writes; this route writes nothing.
+// ONE path, whoever answers. The request is a form: `image`, the picture's
+// bytes — a copy the client fitted for the model (`visionCopy`,
+// src/data/image-fit.ts), a few hundred kilobytes, never the stored
+// original — and `features`, the board's features with their values in use
+// as a JSON string (`TagRequest`, src/data/auto-tag.ts). Nothing about who
+// is asked: the handler resolves the provider itself, by the one router
+// (src/data/ai-router.ts) over its own truth — the key row, the flag's
+// audience, the stored preference — Anthropic if a key is kept, else
+// Cloudflare if the `cloudflareAi` flag allows the caller and they opted
+// in, else nothing. Then the picture is checked (a format the models read,
+// under the API's size limit — a sanity limit, the fitted copy being far
+// below it), the day's call counted (worker/ai-usage.ts, the same count for
+// both), and the provider asked through one interface, `TagProvider`: a
+// picture and the features in, the model's answer out as text. The
+// providers differ in nothing else; one step after reads the text leniently
+// (`extractJson`) into a `TagSuggestion` (`readTagSuggestion`: trimmed,
+// de-duplicated, capped, one value for a single-value feature) and returns
+// it. The client applies it through the board's ordinary writes; this
+// route writes nothing, and reads nothing of the caller's but the session.
 //
 // Refusals, each a code the client puts into words:
+//   400 invalid_body         not a form with a picture and features
 //   412 no_provider          nothing set up — Settings → AI
 //   501 ai_disabled          Cloudflare chosen, but no binding
 //   429 daily_limit          the account's calls for today are spent
 //   429 rate_limited         the API said to slow down (its Retry-After passed on)
-//   413 image_too_large      the API takes five megabytes of base64
+//   413 image_too_large      past the API's five megabytes of base64
 //   415 unsupported_image    a format the API does not read (AVIF)
 //   422 invalid_api_key      Anthropic refused the key
 //   422 refused              the model declined
@@ -57,7 +61,6 @@ import { featureAllows } from "../features"
 import { controlPlaneDriver, corpusDriver, forTenant } from "../tenancy-db"
 import type { Env } from "../types"
 import { readKey } from "./anthropic-key"
-import { isImageId } from "./image-policy"
 import { storedPreferences } from "./preferences"
 import { requireSession } from "./replica"
 
@@ -249,6 +252,25 @@ async function chooseProvider(
   })
 }
 
+/** The picture and the features out of the form, or null when the request
+ * is not one. A file part has bytes and a type; a string part has neither. */
+async function readForm(request: Request): Promise<{ image: Blob; features: TagFeature[] } | null> {
+  const form = await request.formData().catch(() => null)
+  if (!form) return null
+  const image = form.get("image")
+  const features = form.get("features")
+  if (typeof image !== "object" || image === null || typeof features !== "string") return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(features)
+  } catch {
+    return null
+  }
+  const body = readTagRequest({ features: parsed })
+  if (body === null) return null
+  return { image, features: body.features }
+}
+
 export async function boardTag(
   request: Request,
   env: Env,
@@ -259,11 +281,8 @@ export async function boardTag(
   const session = await requireSession(request, env, fetchImpl)
   if (session instanceof Response) return session
 
-  const body = readTagRequest(await request.json().catch(() => null))
-  if (body === null || !isImageId(body.imageId)) return json({ error: "invalid_body" }, 400)
-  if (env.VITE_IMAGES_ENABLED !== "true" || !env.IMAGES) {
-    return json({ error: "images_disabled" }, 501)
-  }
+  const form = await readForm(request)
+  if (form === null) return json({ error: "invalid_body" }, 400)
 
   // Who answers, before a byte is read or a call counted.
   const chosen = await chooseProvider(env, session)
@@ -275,16 +294,13 @@ export async function boardTag(
   }
   if (chosen === "cloudflare" && !env.AI) return json({ error: "ai_disabled" }, 501)
 
-  // The picture, before the call is counted: a missing or unreadable one
+  // The picture, before the call is counted: one the models cannot read
   // costs the day nothing.
-  const object = await env.IMAGES.get(`${session.id}/${body.imageId}`)
-  if (!object) return json({ error: "not_found" }, 404)
-  const mediaType = (object.httpMetadata?.contentType ?? "").split(";")[0].trim().toLowerCase()
+  const mediaType = (form.image.type ?? "").split(";")[0].trim().toLowerCase()
   if (!AUTO_TAG_IMAGE_TYPES.includes(mediaType)) return json({ error: "unsupported_image" }, 415)
-  if (object.size > AUTO_TAG_MAX_IMAGE_BYTES) return json({ error: "image_too_large" }, 413)
-  // R2 hands back a body stream; the test's bucket hands back the buffer.
-  // A Response reads either.
-  const bytes = await new Response(object.body as BodyInit).arrayBuffer()
+  if (form.image.size > AUTO_TAG_MAX_IMAGE_BYTES) return json({ error: "image_too_large" }, 413)
+  const bytes = await form.image.arrayBuffer()
+  if (bytes.byteLength === 0) return json({ error: "invalid_body" }, 400)
   if (bytes.byteLength > AUTO_TAG_MAX_IMAGE_BYTES) return json({ error: "image_too_large" }, 413)
 
   const now = options.clock?.() ?? Date.now()
@@ -303,7 +319,7 @@ export async function boardTag(
   try {
     text = await provider.suggest({
       image: { bytes, mimeType: mediaType as ImageMediaType },
-      features: body.features,
+      features: form.features,
     })
   } catch (error) {
     if (error instanceof ProviderRefusal) {
@@ -317,7 +333,7 @@ export async function boardTag(
     return json({ error: "provider_error", provider: chosen, status }, 502)
   }
 
-  const suggestion = readTagSuggestion(extractJson(text), body.features)
+  const suggestion = readTagSuggestion(extractJson(text), form.features)
   if (suggestion === null) return json({ error: "bad_answer", provider: chosen }, 422)
   const response: TagResponse = { suggestion, provider: chosen }
   return json(response)

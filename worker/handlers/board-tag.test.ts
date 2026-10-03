@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest"
-import { AUTO_TAG_MODEL, CLOUDFLARE_AI_MODEL, type TagFeature } from "../../src/data/auto-tag"
+import {
+  AUTO_TAG_MAX_IMAGE_BYTES,
+  AUTO_TAG_MODEL,
+  CLOUDFLARE_AI_MODEL,
+  type TagFeature,
+} from "../../src/data/auto-tag"
 import { spendAiCall } from "../ai-usage"
 import { setFeatureAudience } from "../features"
 import { createMcpTestEnv, type McpTestEnv } from "../mcp/test-support"
@@ -12,15 +17,18 @@ import { preferences } from "./preferences"
  * the Anthropic API with from a test, and Workers AI cannot be reached from
  * here at all. The point is what the route does around the call — who may
  * call, which provider the router picks from the Worker's own truth, what
- * is refused before a call is spent, what goes out, and how the one shared
- * step reads the answer back.
+ * is refused before a call is spent, what goes out (the bytes the client
+ * sent, as they came), and how the one shared step reads the answer back.
  */
 
 const ADMIN = 42536816
 const USER = 7
 const KEY = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCD"
-const IMAGE = "img_abcdefghijkl"
 const ANTHROPIC = "https://api.anthropic.com/v1/messages"
+
+/** A few bytes that stand for a fitted JPEG. */
+const PICTURE = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3])
+const PICTURE_BASE64 = "/9j/4AECAw=="
 
 const FEATURES: TagFeature[] = [
   { label: "Location", multi: false, values: ["Mauritius", "Lisbon"] },
@@ -111,16 +119,30 @@ const sessionHeaders = {
   Authorization: "Bearer good",
 }
 
-function tagRequest(body: unknown, session: string | null = "good"): Request {
+/** The form the client sends: the picture as `image`, the features as
+ * `features`. Either may be left out, or the picture given another type. */
+function tagRequest(
+  parts: { image?: Blob | string | null; features?: unknown } = {},
+  session: string | null = "good",
+): Request {
+  const form = new FormData()
+  const image =
+    parts.image === undefined ? new Blob([PICTURE], { type: "image/jpeg" }) : parts.image
+  if (typeof image === "string") form.set("image", image)
+  else if (image !== null) form.set("image", image, "picture")
+  if (parts.features !== null) {
+    form.set(
+      "features",
+      typeof parts.features === "string"
+        ? parts.features
+        : JSON.stringify(parts.features === undefined ? FEATURES : parts.features),
+    )
+  }
   return new Request("https://ruminate.test/api/boards/tag", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(session === null
-        ? {}
-        : { Cookie: "gh_refresh=session", Authorization: `Bearer ${session}` }),
-    },
-    body: JSON.stringify(body),
+    headers:
+      session === null ? {} : { Cookie: "gh_refresh=session", Authorization: `Bearer ${session}` },
+    body: form,
   })
 }
 
@@ -154,66 +176,75 @@ const aiCalls = () => harness.control.exec("SELECT calls_today FROM ai_usage")
 beforeEach(async () => {
   harness = await createMcpTestEnv()
   await harness.addUser(USER)
-  await harness.putImage(
-    USER,
-    IMAGE,
-    new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]),
-    "image/png",
-  )
   anthropic = { calls: [], reply: () => messageWith(GOOD) }
 })
 
 describe("before the call", () => {
   it("refuses an unauthenticated caller", async () => {
-    expect((await send(tagRequest({ imageId: IMAGE, features: [] }, null))).status).toBe(401)
+    expect((await send(tagRequest({}, null))).status).toBe(401)
     expect(anthropic.calls).toEqual([])
   })
 
-  it("refuses a body that is not a request", async () => {
+  it("refuses a request that is not a form with a picture and features", async () => {
     await keepKey()
-    for (const body of [
-      {},
-      { imageId: "../1/img_abcdefghijkl", features: [] },
-      { imageId: IMAGE, features: [{ label: "Location" }] },
-      { imageId: IMAGE },
-      "nonsense",
+    for (const parts of [
+      { image: null },
+      { image: "not a file" },
+      { features: null },
+      { features: "{not json" },
+      { features: [{ label: "Location" }] },
+      { features: "nonsense" },
     ]) {
-      expect((await send(tagRequest(body))).status).toBe(400)
+      expect((await send(tagRequest(parts))).status).toBe(400)
     }
+    const notAForm = new Request("https://ruminate.test/api/boards/tag", {
+      method: "POST",
+      headers: sessionHeaders,
+      body: JSON.stringify({ features: FEATURES }),
+    })
+    expect((await send(notAForm)).status).toBe(400)
     expect(anthropic.calls).toEqual([])
+    expect(await aiCalls()).toEqual([])
   })
 
   it("says clearly when nothing is set up, and spends nothing", async () => {
-    const response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    const response = await send(tagRequest())
     expect(response.status).toBe(412)
     expect((await bodyOf(response)).error).toBe("no_provider")
     expect(anthropic.calls).toEqual([])
     expect(await aiCalls()).toEqual([])
   })
 
-  it("answers 404 for a picture that is not the caller's", async () => {
+  it("refuses a format the models do not read, before spending", async () => {
     await keepKey()
-    await harness.putImage(8, "img_someoneelses0", new Uint8Array([1]), "image/png")
-    const response = await send(tagRequest({ imageId: "img_someoneelses0", features: [] }))
-    expect(response.status).toBe(404)
-    expect(anthropic.calls).toEqual([])
-  })
-
-  it("refuses a format the API does not read, before spending", async () => {
-    await keepKey()
-    await harness.putImage(USER, "img_avifavifavif", new Uint8Array([1]), "image/avif")
-    const response = await send(tagRequest({ imageId: "img_avifavifavif", features: [] }))
+    const response = await send(tagRequest({ image: new Blob([PICTURE], { type: "image/avif" }) }))
     expect(response.status).toBe(415)
+    expect((await bodyOf(response)).error).toBe("unsupported_image")
     expect(anthropic.calls).toEqual([])
     expect(await aiCalls()).toEqual([])
   })
 
+  it("refuses a picture past the API's limit, before spending", async () => {
+    await keepKey()
+    const huge = new Blob([new Uint8Array(AUTO_TAG_MAX_IMAGE_BYTES + 1)], { type: "image/jpeg" })
+    const response = await send(tagRequest({ image: huge }))
+    expect(response.status).toBe(413)
+    expect((await bodyOf(response)).error).toBe("image_too_large")
+    expect(anthropic.calls).toEqual([])
+    expect(await aiCalls()).toEqual([])
+  })
+
+  it("refuses an empty picture", async () => {
+    await keepKey()
+    expect((await send(tagRequest({ image: new Blob([], { type: "image/jpeg" }) }))).status).toBe(
+      400,
+    )
+  })
+
   it("stops at the daily limit, one count whoever answers", async () => {
     await keepKey()
-    expect(
-      (await send(tagRequest({ imageId: IMAGE, features: [] }), { dailyLimit: 1 })).status,
-    ).toBe(200)
-    const response = await send(tagRequest({ imageId: IMAGE, features: [] }), { dailyLimit: 1 })
+    expect((await send(tagRequest(), { dailyLimit: 1 })).status).toBe(200)
+    const response = await send(tagRequest(), { dailyLimit: 1 })
     expect(response.status).toBe(429)
     expect((await bodyOf(response)).error).toBe("daily_limit")
     expect(response.headers.get("Retry-After")).toBe("3600")
@@ -229,7 +260,7 @@ describe("the router, from the Worker's own truth", () => {
     await optIntoCloudflare()
     const ai = fakeAi(() => completion(JSON.stringify(GOOD)))
     Object.assign(harness.env, { AI: ai.binding })
-    const response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    const response = await send(tagRequest())
     expect(response.status).toBe(200)
     expect((await bodyOf(response)).provider).toBe("anthropic")
     expect(anthropic.calls).toHaveLength(1)
@@ -241,7 +272,7 @@ describe("the router, from the Worker's own truth", () => {
     await optIntoCloudflare()
     const ai = fakeAi(() => completion(JSON.stringify(GOOD)))
     Object.assign(harness.env, { AI: ai.binding })
-    const response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    const response = await send(tagRequest())
     expect(response.status).toBe(200)
     expect((await bodyOf(response)).provider).toBe("cloudflare")
     expect(ai.calls).toHaveLength(1)
@@ -252,7 +283,7 @@ describe("the router, from the Worker's own truth", () => {
     await optIntoCloudflare()
     const ai = fakeAi(() => completion(JSON.stringify(GOOD)))
     Object.assign(harness.env, { AI: ai.binding })
-    const response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    const response = await send(tagRequest())
     expect(response.status).toBe(412)
     expect((await bodyOf(response)).error).toBe("no_provider")
     expect(ai.calls).toEqual([])
@@ -263,23 +294,14 @@ describe("the router, from the Worker's own truth", () => {
     await allowCloudflare()
     const ai = fakeAi(() => completion(JSON.stringify(GOOD)))
     Object.assign(harness.env, { AI: ai.binding })
-    expect((await send(tagRequest({ imageId: IMAGE, features: FEATURES }))).status).toBe(412)
+    expect((await send(tagRequest())).status).toBe(412)
     expect(ai.calls).toEqual([])
-  })
-
-  it("ignores a provider the client names", async () => {
-    await keepKey()
-    const response = await send(
-      tagRequest({ imageId: IMAGE, features: FEATURES, provider: "cloudflare" }),
-    )
-    expect(response.status).toBe(200)
-    expect((await bodyOf(response)).provider).toBe("anthropic")
   })
 
   it("answers 501 when Cloudflare is chosen but there is no binding", async () => {
     await allowCloudflare()
     await optIntoCloudflare()
-    const response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    const response = await send(tagRequest())
     expect(response.status).toBe(501)
     expect((await bodyOf(response)).error).toBe("ai_disabled")
     expect(await aiCalls()).toEqual([])
@@ -287,9 +309,9 @@ describe("the router, from the Worker's own truth", () => {
 })
 
 describe("the Anthropic provider", () => {
-  it("sends the picture and the features with the kept key, and the shared step reads the answer", async () => {
+  it("sends the bytes it was given and the features with the kept key, and the shared step reads the answer", async () => {
     await keepKey()
-    const response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    const response = await send(tagRequest())
     expect(response.status).toBe(200)
     expect(await bodyOf(response)).toEqual({ suggestion: READ, provider: "anthropic" })
 
@@ -302,7 +324,7 @@ describe("the Anthropic provider", () => {
     const [image, text] = body.messages[0].content
     expect(image).toEqual({
       type: "image",
-      source: { type: "base64", media_type: "image/png", data: "iVBORwECAw==" },
+      source: { type: "base64", media_type: "image/jpeg", data: PICTURE_BASE64 },
     })
     expect(text.text).toContain("- Location (one value): Mauritius, Lisbon")
     expect(text.text).toContain("- Fixture (several values): none yet")
@@ -315,7 +337,7 @@ describe("the Anthropic provider", () => {
         JSON.stringify({ type: "error", error: { type: "authentication_error", message: "x" } }),
         { status: 401, headers: { "Content-Type": "application/json" } },
       )
-    const response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    const response = await send(tagRequest())
     expect(response.status).toBe(422)
     const body = await bodyOf(response)
     expect(body.error).toBe("invalid_api_key")
@@ -329,7 +351,7 @@ describe("the Anthropic provider", () => {
         JSON.stringify({ type: "error", error: { type: "rate_limit_error", message: "x" } }),
         { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "17" } },
       )
-    const response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    const response = await send(tagRequest())
     expect(response.status).toBe(429)
     expect((await bodyOf(response)).error).toBe("rate_limited")
     expect(response.headers.get("Retry-After")).toBe("17")
@@ -344,7 +366,7 @@ describe("the Anthropic provider", () => {
         JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "x" } }),
         { status: 529, headers: { "Content-Type": "application/json" } },
       )
-    let response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    let response = await send(tagRequest())
     expect(response.status).toBe(502)
     expect(await bodyOf(response)).toEqual({
       error: "provider_error",
@@ -366,19 +388,19 @@ describe("the Anthropic provider", () => {
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       )
-    response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    response = await send(tagRequest())
     expect(response.status).toBe(422)
     expect((await bodyOf(response)).error).toBe("bad_answer")
 
     anthropic.reply = () => messageWith({ caption: 3 })
-    response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    response = await send(tagRequest())
     expect(response.status).toBe(422)
   })
 
   it("answers 422 when the model declines", async () => {
     await keepKey()
     anthropic.reply = () => messageWith({ caption: "", features: [] }, "refusal")
-    const response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    const response = await send(tagRequest())
     expect(response.status).toBe(422)
     expect((await bodyOf(response)).error).toBe("refused")
   })
@@ -390,10 +412,10 @@ describe("the Cloudflare provider", () => {
     await optIntoCloudflare()
   })
 
-  it("asks the model with the picture as a data URL, the features, and the schema, and the shared step reads the answer", async () => {
+  it("asks the model with the same bytes as a data URL, the features, and the schema, and the shared step reads the answer", async () => {
     const ai = fakeAi(() => completion(JSON.stringify(GOOD)))
     Object.assign(harness.env, { AI: ai.binding })
-    const response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    const response = await send(tagRequest())
     expect(response.status).toBe(200)
     expect(await bodyOf(response)).toEqual({ suggestion: READ, provider: "cloudflare" })
     expect(ai.calls).toHaveLength(1)
@@ -407,7 +429,7 @@ describe("the Cloudflare provider", () => {
     const [image, text] = input.messages[1].content
     expect(image).toEqual({
       type: "image_url",
-      image_url: { url: "data:image/png;base64,iVBORwECAw==" },
+      image_url: { url: `data:image/jpeg;base64,${PICTURE_BASE64}` },
     })
     expect(text.text).toContain("- Location (one value): Mauritius, Lisbon")
     expect(text.text).toContain("JSON only")
@@ -422,7 +444,7 @@ describe("the Cloudflare provider", () => {
       )
     })
     Object.assign(harness.env, { AI: ai.binding })
-    const response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    const response = await send(tagRequest())
     expect(response.status).toBe(200)
     expect((await bodyOf(response)).suggestion).toEqual(READ)
     expect(ai.calls).toHaveLength(2)
@@ -433,14 +455,14 @@ describe("the Cloudflare provider", () => {
   it("reads the older `response` shape too", async () => {
     const ai = fakeAi(() => ({ response: JSON.stringify(GOOD) }))
     Object.assign(harness.env, { AI: ai.binding })
-    expect((await send(tagRequest({ imageId: IMAGE, features: FEATURES }))).status).toBe(200)
+    expect((await send(tagRequest())).status).toBe(200)
   })
 
   it("answers 422 bad_answer when the model's answer is not a suggestion", async () => {
     for (const content of ["I cannot see the picture.", '{"caption": 7}', "{not json"]) {
       const ai = fakeAi(() => completion(content))
       Object.assign(harness.env, { AI: ai.binding })
-      const response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+      const response = await send(tagRequest())
       expect(response.status).toBe(422)
       expect((await bodyOf(response)).error).toBe("bad_answer")
     }
@@ -451,7 +473,7 @@ describe("the Cloudflare provider", () => {
       throw new Error("InferenceUpstreamError")
     })
     Object.assign(harness.env, { AI: ai.binding })
-    const response = await send(tagRequest({ imageId: IMAGE, features: FEATURES }))
+    const response = await send(tagRequest())
     expect(response.status).toBe(502)
     expect(await bodyOf(response)).toEqual({
       error: "provider_error",
@@ -464,10 +486,8 @@ describe("the Cloudflare provider", () => {
   it("shares the daily limit with the Anthropic path", async () => {
     const ai = fakeAi(() => completion(JSON.stringify(GOOD)))
     Object.assign(harness.env, { AI: ai.binding })
-    expect(
-      (await send(tagRequest({ imageId: IMAGE, features: [] }), { dailyLimit: 1 })).status,
-    ).toBe(200)
-    const response = await send(tagRequest({ imageId: IMAGE, features: [] }), { dailyLimit: 1 })
+    expect((await send(tagRequest(), { dailyLimit: 1 })).status).toBe(200)
+    const response = await send(tagRequest(), { dailyLimit: 1 })
     expect(response.status).toBe(429)
     expect(ai.calls).toHaveLength(1)
   })
