@@ -6,6 +6,7 @@ import {
   extractJson,
   isAnthropicKeyShaped,
   keyLast4,
+  readTagLocation,
   styledValue,
   readTagRequest,
   readTagSuggestion,
@@ -272,6 +273,55 @@ describe("extractJson", () => {
     expect(extractJson("{not json}")).toBeNull()
     expect(extractJson("}{")).toBeNull()
     expect(extractJson("")).toBeNull()
+  })
+})
+
+describe("a location in the request", () => {
+  it("reads two finite numbers on the globe, and drops anything else without refusing", () => {
+    const features = [{ label: "Location", multi: false, values: [] }]
+    expect(readTagRequest({ features, location: { lat: 46.05127, lon: 14.50556 } })).toEqual({
+      features,
+      location: { lat: 46.05127, lon: 14.50556 },
+    })
+    for (const location of [
+      { lat: 91, lon: 0 },
+      { lat: 0, lon: -181 },
+      { lat: "46", lon: 14 },
+      { lat: Number.NaN, lon: 14 },
+      { lat: 46 },
+      "Ljubljana",
+      null,
+    ]) {
+      expect(readTagRequest({ features, location })).toEqual({ features })
+    }
+    expect(readTagLocation({ lat: -90, lon: 180 })).toEqual({ lat: -90, lon: 180 })
+    expect(readTagLocation(undefined)).toBeUndefined()
+  })
+})
+
+describe("tagPrompt with a location", () => {
+  const location = { lat: 46.05127, lon: 14.50556 }
+
+  it("names the place when one was found", () => {
+    const prompt = tagPrompt(FEATURES, { location, place: "Ljubljana, Slovenia" })
+    expect(prompt.split("\n").at(-1)).toBe(
+      "The picture was taken at: Ljubljana, Slovenia (most specific first). For Location, use a value in use that covers the place; otherwise name it as a person would in conversation — the country by default, or the everyday short name of a notable specific place such as an airport, a landmark or a city.",
+    )
+    expect(prompt).toContain("- Location (one value): Values in use: Mauritius, Lisbon")
+  })
+
+  it("gives the coordinates when none was", () => {
+    expect(tagPrompt(FEATURES, { location, place: null }).split("\n").at(-1)).toBe(
+      "The picture was taken at latitude 46.05127, longitude 14.50556: name the town or area for Location.",
+    )
+    expect(tagPrompt([], { location, place: null })).toContain("latitude 46.05127")
+  })
+
+  it("says nothing of a location without one", () => {
+    expect(tagPrompt(FEATURES)).not.toContain("The picture was taken")
+    expect(cloudflareTagPrompt(FEATURES, { location, place: "Bled, Slovenia" })).toContain(
+      "The picture was taken at: Bled, Slovenia (most specific first)",
+    )
   })
 })
 

@@ -216,16 +216,51 @@ export function addImageOps(snapshot: GraphSnapshot, boardId: NoteId, imageId: s
   return [{ op: "create", id: imageId, type: IMAGE_TYPE, text: "", props: null, notesId: boardId }]
 }
 
-/** The upload landed: the asset the block now shows. */
+/** Where a picture was taken, as its block carries it: `lat`/`lon`. */
+export interface ImageLocation {
+  lat: number
+  lon: number
+}
+
+/** The upload landed: the asset the block now shows, and where it was
+ * taken when that was known by then. */
 export function imageUploadedOps(
   imageId: string,
   asset: { id: string; width?: number; height?: number },
+  location?: ImageLocation | null,
 ): Op[] {
   const props = {
     image: asset.id,
     ...(asset.width && asset.height ? { width: asset.width, height: asset.height } : {}),
+    ...(location ? { lat: location.lat, lon: location.lon } : {}),
   }
   return [{ op: "setProps", id: imageId, props: propsJson(props) }]
+}
+
+/**
+ * Where a picture was taken, learnt after its row was written (the
+ * device's position answering behind the upload): added to the props the
+ * block has, the rest kept. Nothing for a block that is gone.
+ */
+export function imageLocationOps(
+  snapshot: GraphSnapshot,
+  imageId: string,
+  location: ImageLocation,
+): Op[] {
+  const node = snapshot.nodes.get(imageId)
+  if (!node || node.deleted_at) return []
+  const props = { ...(parseProps(node.props) ?? {}), lat: location.lat, lon: location.lon }
+  return [{ op: "setProps", id: imageId, props: propsJson(props) }]
+}
+
+/** Where a picture was taken, off its block, or null. */
+export function imageLocationOf(snapshot: GraphSnapshot, imageId: string): ImageLocation | null {
+  const props = parseProps(snapshot.nodes.get(imageId)?.props ?? null)
+  const lat = props?.lat
+  const lon = props?.lon
+  if (typeof lat !== "number" || typeof lon !== "number") return null
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
+  return { lat, lon }
 }
 
 /** A picture's caption — the image block's text, what search matches. */
