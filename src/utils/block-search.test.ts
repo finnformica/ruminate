@@ -395,6 +395,115 @@ describe("under: and parent:", () => {
   })
 })
 
+// A board (docs/boards.md): two features on the page, their values beneath,
+// and the pictures under the values. The brass lamp carries a Location AND
+// a Fixture — one block, two parents, reached by two paths — which the
+// markdown cannot say, so the second link is added to the graph by hand.
+const BOARD = makeNote({
+  id: "board",
+  updatedAt: 500,
+  content: md(
+    "- Location",
+    "  id:: blk_location",
+    "  - Mauritius",
+    "    id:: blk_mauritius",
+    "    brass lamp",
+    "      id:: blk_lamp_pic",
+    "    teak decking",
+    "      id:: blk_teak",
+    "  - Lisbon",
+    "    id:: blk_lisbon",
+    "    tram",
+    "      id:: blk_tram",
+    "- Fixture",
+    "  id:: blk_fixture",
+    "  - Lamp",
+    "    id:: blk_lamp",
+  ),
+})
+
+function boardIndex() {
+  const { nodes, links } = docToGraph(BOARD.id, BOARD.content, 1)
+  links.push({
+    source_id: "blk_lamp",
+    destination_id: "blk_lamp_pic",
+    kind: "child",
+    sort_key: "a0",
+    updated_at: 1,
+  })
+  return createBlockIndexer()([BOARD], buildGraphSnapshot(nodes, links))
+}
+
+const board = (query: string) => searchBlocks(parseQuery(query), boardIndex())
+const unique = (hits: BlockHit[]) => [...new Set(ids(hits))]
+
+describe("a block under two parents", () => {
+  test("is one hit per path, each showing its own path and both sharing the block's parents", () => {
+    const hits = boardIndex().hits.filter((hit) => hit.blockId === "blk_lamp_pic")
+    expect(hits.map((hit) => hit.ancestors.map((a) => a.id))).toEqual([
+      ["blk_location", "blk_mauritius"],
+      ["blk_fixture", "blk_lamp"],
+    ])
+    // Parents come in the graph's order (by source id), not the walk's.
+    const parents = ["blk_lamp", "blk_mauritius"]
+    for (const hit of hits) {
+      expect(hit.parents.map((p) => p.id)).toEqual(parents)
+      expect(hit.lineage.map((a) => a.id)).toEqual([
+        "blk_location",
+        "blk_mauritius",
+        "blk_fixture",
+        "blk_lamp",
+      ])
+    }
+    // A block with one parent and one path: its parents are the last of
+    // its ancestors and its lineage is its ancestors, as before.
+    const [teak] = boardIndex().hits.filter((hit) => hit.blockId === "blk_teak")
+    expect(teak.parents).toEqual(teak.ancestors.slice(-1))
+    expect(teak.lineage).toEqual(teak.ancestors)
+    // A root block's parent is the note, which is not a parent block.
+    const [location] = boardIndex().hits.filter((hit) => hit.blockId === "blk_location")
+    expect(location.parents).toEqual([])
+  })
+
+  test("matches parent:a parent:b — a key repeated is both", () => {
+    const hits = board("parent:blk_mauritius parent:blk_lamp")
+    expect(unique(hits)).toEqual(["blk_lamp_pic"])
+    // Found by either path, and each row still says which.
+    expect(hits.map((hit) => hit.ancestors.at(-1)?.id)).toEqual(["blk_mauritius", "blk_lamp"])
+    // By text as by id, and the pair is nothing when one side is not there.
+    expect(unique(board("parent:mauritius parent:lamp"))).toEqual(["blk_lamp_pic"])
+    expect(board("parent:blk_lisbon parent:blk_lamp")).toEqual([])
+  })
+
+  test("matches parent:a,b — a comma list is still either", () => {
+    expect(unique(board("parent:blk_mauritius,blk_lamp"))).toEqual(["blk_lamp_pic", "blk_teak"])
+    expect(unique(board("parent:blk_mauritius,blk_lisbon"))).toEqual([
+      "blk_lamp_pic",
+      "blk_teak",
+      "blk_tram",
+    ])
+    // Either within one qualifier, both across two: Mauritius or Lisbon,
+    // and a lamp — the board's Filter with a value ticked under each feature.
+    expect(unique(board("parent:blk_mauritius,blk_lisbon parent:blk_lamp"))).toEqual([
+      "blk_lamp_pic",
+    ])
+  })
+
+  test("is under every ancestor on any of its paths, so under:a under:b holds too", () => {
+    expect(unique(board("under:blk_location under:blk_fixture"))).toEqual(["blk_lamp_pic"])
+    expect(unique(board("under:location under:lamp"))).toEqual(["blk_lamp_pic"])
+    // In index order: the lamp's first occurrence is under Location, ahead
+    // of the Fixture branch, and its lineage already carries Fixture.
+    expect(unique(board("under:blk_fixture"))).toEqual(["blk_lamp_pic", "blk_lamp"])
+    // Excluding one parent excludes the block, whichever path it is seen by.
+    expect(unique(board("-parent:blk_lamp parent:blk_mauritius"))).toEqual(["blk_teak"])
+  })
+
+  test("in: stays bound to the path, as a scope is a place", () => {
+    expect(board("in:blk_lamp").map((hit) => hit.ancestors.at(-1)?.id)).toEqual(["blk_lamp"])
+  })
+})
+
 describe("getBlock", () => {
   test("looks a block up by id alone, in the first note carrying it", () => {
     const index = buildIndex([TASKS_NOTE, MISC_NOTE])

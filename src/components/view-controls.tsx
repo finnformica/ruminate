@@ -108,9 +108,13 @@ const ANCESTOR_LABELS: Record<AncestorFilterKey, string> = { parent: "Parent", u
  * A branch a surface adds to the top of the Filter menu: a label and the
  * blocks it offers as parents, each row a tick writing `parent:<id>` — the
  * same qualifier the Parent branch's picker writes, so the surface's rows
- * are a shortcut into the one filter, not a filter of their own. A board
- * hands its features this way (docs/boards.md): Location, and under it the
- * values on the page, with how many pictures carry each.
+ * are a shortcut into the one filter, not a filter of their own. Each
+ * branch keeps a `parent:` qualifier of its own, told from the others by
+ * the values it offers, so two branches narrow together (both) while the
+ * ticks within one widen (either): `parent:<mauritius>,<lisbon>
+ * parent:<lamp>`. A board hands its features this way (docs/boards.md):
+ * Location, and under it the values on the page, with how many pictures
+ * carry each.
  */
 export interface FilterBranch {
   label: string
@@ -201,16 +205,16 @@ export function FilterMenu({
         footer={saved?.dirty ? <DefaultFooter {...saved} /> : undefined}
       >
         {/* The surface's own branches first: each row ticks a block into
-            `parent:`, several at once a comma list — any of them, as the
-            language reads a list. Any takes this branch's rows out and
-            leaves the others. */}
+            the branch's own `parent:` qualifier — several at once a comma
+            list, any of them, as the language reads a list — and each
+            branch writes a qualifier of its own, so a tick under Location
+            and a tick under Fixture AND, as the language reads two
+            qualifiers (`src/utils/view-filter.ts`). Any takes this branch's
+            qualifier out and leaves the others. */}
         {branches?.map((branch) => {
-          const parents = filterValues(filter, "parent")
-          const mine = branch.values.filter((value) => parents.includes(value.id))
-          const clearMine = () =>
-            onFilterChange(
-              mine.reduce((next, value) => toggleFilterValue(next, "parent", value.id), filter),
-            )
+          const among = branch.values.map((value) => value.id)
+          const chosen = filterValues(filter, "parent", among)
+          const mine = branch.values.filter((value) => chosen.includes(value.id))
           return (
             <DropdownMenu.Submenu key={branch.label}>
               <DropdownMenu.SubmenuTrigger
@@ -222,7 +226,7 @@ export function FilterMenu({
                 <DropdownMenu.Item
                   selected={mine.length === 0}
                   closeOnClick={false}
-                  onClick={clearMine}
+                  onClick={() => onFilterChange(clearFilterKey(filter, "parent", among))}
                 >
                   Any
                 </DropdownMenu.Item>
@@ -230,14 +234,16 @@ export function FilterMenu({
                 {branch.values.map((value) => (
                   <DropdownMenu.Item
                     key={value.id}
-                    selected={parents.includes(value.id)}
+                    selected={chosen.includes(value.id)}
                     closeOnClick={false}
                     trailingVisual={
                       value.count !== undefined ? (
                         <span className="text-sm text-text-secondary">{value.count}</span>
                       ) : undefined
                     }
-                    onClick={() => onFilterChange(toggleFilterValue(filter, "parent", value.id))}
+                    onClick={() =>
+                      onFilterChange(toggleFilterValue(filter, "parent", value.id, among))
+                    }
                   >
                     {value.label}
                   </DropdownMenu.Item>

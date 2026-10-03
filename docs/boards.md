@@ -114,14 +114,23 @@ The Filter menu leads with the board's features (`FilterBranch`): under
 **Location**, the values on the page, each with how many pictures carry it,
 and each a tick writing `parent:<value id>` — the qualifier the menu's own
 Parent branch writes, so the branches are a shortcut into the one filter
-rather than a filter of their own. Two ticks are a comma list, which the
-language reads as _either_: `parent:Mauritius,Lamp` keeps a picture under
-Mauritius or under Lamp, as it would in the search box, and as a note's
-filter would. Narrowing to pictures that carry both is not something the
-language says today (each `parent:` is tested against one occurrence's
-parent, and a picture under two values is two occurrences), so the board
-does not say it either; it would be a change to the engine, for every
-surface at once.
+rather than a filter of their own. Each feature keeps a `parent:` qualifier
+of its own, and the language reads the two shapes two ways: a comma list
+within one qualifier is _either_, the key repeated is _both_. So Mauritius
+and Lisbon ticked under Location, and Lamp under Fixture, is
+`parent:<mauritius>,<lisbon> parent:<lamp>` — a picture in Mauritius or
+Lisbon that is a lamp — as it would be in the search box, and as a note's
+filter would read it. A branch tells its qualifier from the others by the
+values it offers (`src/utils/view-filter.ts`): the qualifier whose values
+are all its own is its, and one typed by hand belongs to no branch and is
+left as written. **Any** takes the one feature's qualifier out and leaves
+the rest. The engine makes the conjunction hold for a picture under two
+values: such a picture is reached by two paths, and is two occurrences in
+the index, each showing its own path — but `parent:` is tested against
+every parent the picture has, and `under:` against every ancestor on any of
+its paths, so the one picture under Mauritius and under Lamp answers to
+both (`testAncestorFilter`, `src/utils/block-search.ts`; docs/query-language.md,
+"Repeat the key for both").
 
 The filter's **words** — its text outside the qualifiers, set from the
 Filter menu's **Text** branch — are what searches captions: the engine
