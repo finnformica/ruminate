@@ -62,6 +62,7 @@ function Harness({
   onHint,
   knownBlock,
   noteId,
+  onEditingChange,
 }: {
   initial?: string
   /** A doc built by hand — for shapes markdown cannot express (a shared block). */
@@ -81,6 +82,7 @@ function Harness({
   knownBlock?: (id: string) => boolean
   /** The note behind the doc (what Pin and Copy link need). */
   noteId?: string
+  onEditingChange?: (id: string | null) => void
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarter(parse(initial)))
   return (
@@ -103,6 +105,7 @@ function Harness({
         onDeleteEverywhere={onDeleteEverywhere}
         onImageUpload={onImageUpload}
         onLinkPreview={onLinkPreview}
+        onEditingChange={onEditingChange}
       />
       <pre data-testid="serialized">{serialize(doc)}</pre>
       {/* Markdown carries no layout, so image props are shown as themselves. */}
@@ -334,26 +337,45 @@ describe("BlockEditor focus + keyboard", () => {
     expect(lines).toBeGreaterThan(2)
   })
 
-  it("re-highlights a deleted block after undo", () => {
+  it("brings a deleted block back under the caret after undo", () => {
     const { container } = render(<Harness initial={"A\nB\nC"} />)
     const root = editorRoot(container)
     fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
     expect(highlightedText(container)).toBe("B")
-    fireEvent.keyDown(root, { key: "Backspace" }) // delete B
-    expect(highlightedText(container)).not.toBe("B")
+    fireEvent.keyDown(root, { key: "Backspace" }) // delete B: C is edited in its place
+    expect(container.querySelector("textarea")!.value).toBe("C")
     fireEvent.keyDown(root, { key: "z", metaKey: true }) // undo
-    expect(highlightedText(container)).toBe("B")
+    // Undone mid-edit, the editing carries on — in the row that came back.
+    expect(container.querySelector("textarea")!.value).toBe("B")
   })
 
-  it("deleting a block selects the one below (above only when it was last)", () => {
+  it("deleting a block by the key edits the one below at its end (above only when it was last)", () => {
     const { container } = render(<Harness initial={"A\nB\nC"} />)
     const root = editorRoot(container)
     fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
     fireEvent.keyDown(root, { key: "Backspace" }) // delete B
-    // C slid into B's place and takes the highlight.
+    // C slid into B's place and is edited, the caret at its end, so the
+    // writing carries on there.
+    let textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("C")
+    expect(textarea.selectionStart).toBe(1)
+    expect(highlightedText(container)).toBeNull()
+    fireEvent.keyDown(textarea, { key: "Escape" }) // back to the highlight
     expect(highlightedText(container)).toBe("C")
     fireEvent.keyDown(root, { key: "Backspace" }) // delete C — now the last block
-    expect(highlightedText(container)).toBe("A")
+    textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("A")
+    expect(textarea.selectionStart).toBe(1)
+  })
+
+  it("deleting a range by the key leaves the highlight", () => {
+    const { container } = render(<Harness initial={"A\nB\nC\nD"} />)
+    const root = editorRoot(container)
+    fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
+    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true }) // extend to C
+    fireEvent.keyDown(root, { key: "Backspace" })
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(highlightedText(container)).toBe("D")
   })
 
   it("deleting a multi-selection selects the block below the removed range", () => {
@@ -1450,11 +1472,12 @@ describe("focus mode", () => {
       await screen.findByText("Leave focus to remove the block you're focused on"),
     ).not.toBeNull()
     toast.dismiss()
-    // Its children go as they would anywhere.
+    // Its children go as they would anywhere — the key leaves the row that
+    // takes the deleted one's place edited, here the one the view leads with.
     fireEvent.keyDown(root, { key: "ArrowDown" }) // C → D
     fireEvent.keyDown(root, { key: "Backspace" })
     expect(serializedLines(getByTestId)).toEqual(["A", "B", "  C", "  E", "F"])
-    expect(highlightedText(container)).toBe("C")
+    expect(container.querySelector("textarea")!.value).toBe("C")
   })
 
   it("exits gracefully when the focus root vanishes via undo", () => {
@@ -2010,8 +2033,8 @@ describe("rows of a shared block (selection by occurrence)", () => {
     fireEvent.click(bodyOf(rowByKey(container, "blk_q/blk_s")))
     fireEvent.keyDown(editorRoot(container), { key: "Backspace" })
     expect(serializedLines(getByTestId)).toEqual(["- p", "  - shared", "    - t", "- q", "  - r"])
-    // The selection lands on the row that slid into the deleted one's place.
-    expect(highlightedText(container)).toBe("r")
+    // The row that slid into the deleted one's place is edited, by the key.
+    expect(container.querySelector("textarea")!.value).toBe("r")
   })
 
   it("indents the row under q beside its own siblings; p's row is untouched", () => {
@@ -4642,5 +4665,39 @@ describe("every surface runs the one action set", () => {
     const ids = idsOf(container)
     const roots = getDefaultStore().get(viewRootIdsAtom)
     expect(ids.map((id) => roots.has(id))).toEqual([false, true, true, false])
+  })
+})
+
+describe("onEditingChange", () => {
+  it("names the block being edited as it changes, and nothing once none is", () => {
+    const seen: (string | null)[] = []
+    const { container } = render(
+      <Harness initial={"A\nB"} onEditingChange={(id) => seen.push(id)} />,
+    )
+    const root = editorRoot(container)
+    const idOf = (text: string) =>
+      Array.from(container.querySelectorAll<HTMLElement>("[data-block-id]")).find((el) =>
+        el.textContent?.includes(text),
+      )!.dataset.blockId!
+    expect(seen).toEqual([null])
+    const a = idOf("A")
+    const b = idOf("B")
+    fireEvent.keyDown(root, { key: "Enter" }) // edit A
+    expect(seen.at(-1)).toBe(a)
+    // Enter at the end of A makes a row beneath it, edited: the new row is
+    // named by the render that shows it, before anything paints.
+    const textarea = container.querySelector("textarea")!
+    textarea.setSelectionRange(1, 1)
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    const fresh = seen.at(-1)
+    expect(fresh).not.toBeNull()
+    expect([a, b]).not.toContain(fresh)
+    fireEvent.keyDown(container.querySelector("textarea")!, { key: "Escape" })
+    expect(seen.at(-1)).toBeNull()
+    // The row named was the one made: it is on the page, after A.
+    const ids = Array.from(container.querySelectorAll<HTMLElement>("[data-block-id]")).map(
+      (el) => el.dataset.blockId,
+    )
+    expect(ids).toEqual([a, fresh, b])
   })
 })

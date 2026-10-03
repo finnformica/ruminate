@@ -94,6 +94,7 @@ export function BlockNoteEditor({
   trailingBlank = true,
   rowRemoval = "unlink",
   context,
+  onEditingChange,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc, hint?: ChangeHint) => void
@@ -159,6 +160,8 @@ export function BlockNoteEditor({
   /** Rows the view keeps only as context — a filter's unmatched ancestors
    * (`src/data/filter-view.ts`), drawn dimmed. */
   context?: ReadonlySet<string>
+  /** Told which block is being edited as it changes (`BlockEditor`). */
+  onEditingChange?: (id: string | null) => void
 }) {
   // Read-only history views are shown verbatim; only editable notes get the
   // always-present trailing blank — and not while focused, where the doc's
@@ -322,6 +325,7 @@ export function BlockNoteEditor({
       // basket) the last row may go, and the basket goes with it.
       emptyable={!trailingBlank}
       context={context}
+      onEditingChange={onEditingChange}
     />
   )
 }

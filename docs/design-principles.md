@@ -501,8 +501,14 @@ waits for the network, so once the write is down the trace turns into
 flight, and it is a fact about the note rather than a wait. It is there
 because the sidebar's "Offline" row may not be on screen (collapsed, or a
 phone's closed drawer), and it clears when the push goes out on
-reconnecting. Signed out, the sidebar's "Signed out" is the news and the
-header says nothing (`saveTrace`, `src/components/sync-status.tsx`).
+reconnecting; on a phone it reads **Saved**, the icon saying the rest.
+Signed out, the sidebar's "Signed out" is the news and the header says
+nothing (`saveTrace`, `src/components/sync-status.tsx`). The trace is
+held a moment past the save it reports (`useSteadySaveTrace`): typing is
+a save per keystroke, each landing within a moment, and a header that
+flipped between "Saving…" and what follows it at typing speed would
+flicker. So "Saving…" shows the instant a save starts and stays for the
+whole burst, and what comes after it waits until the typing has paused.
 
 ## Empty-block placeholder
 

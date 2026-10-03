@@ -377,6 +377,7 @@ export function BlockEditor({
   fixedRoots = false,
   emptyable = false,
   context,
+  onEditingChange,
 }: {
   doc: BlockDoc
   /** The next doc, and what the change means beyond it (`ChangeHint`). */
@@ -484,6 +485,13 @@ export function BlockEditor({
    * navigates exactly as the note does.
    */
   context?: ReadonlySet<string>
+  /**
+   * Told which block is being edited — its id, or null once none is — as
+   * it changes, before the change paints. A filtered view keeps the row
+   * being edited whatever the filter says of it (`useNoteDoc`, `keep`), so
+   * the owner must know it by the render that shows the edit.
+   */
+  onEditingChange?: (id: string | null) => void
   /**
    * Whether the doc may be left with no blocks at all. Off, the only root
    * cannot be removed (⌫ on it does nothing): a note always keeps a block to
@@ -1972,6 +1980,14 @@ export function BlockEditor({
   // and a paste does — so an address typed and left by Escape, a click
   // elsewhere or Enter reads as a name too. Its own undo step, so the bare
   // address is one ⌘Z away. Never in a code block.
+  // Which block is being edited, for the owner — in a layout effect, so the
+  // owner's reply lands in the same paint as the edit it is about: a row
+  // made beneath a filter would otherwise paint pruned, then held.
+  const editingId = focus ? idOfKey(focus.key) : null
+  useLayoutEffect(() => {
+    onEditingChange?.(editingId)
+  }, [editingId, onEditingChange])
+
   const lastEdited = useRef<string | null>(null)
   useEffect(() => {
     const previous = lastEdited.current

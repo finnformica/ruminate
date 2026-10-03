@@ -889,7 +889,10 @@ export const COMMANDS: Record<CommandName, Command> = {
   /** Remove the highlighted rows and their subtrees. The selection lands on
    * the visible row that takes the removed ones' place — the one that
    * slides up from below — falling back to the row above when the removed
-   * rows were last. */
+   * rows were last. One row removed by the key (⌫, ⌦) is a step in the
+   * typing: the row that takes its place is edited, the caret at its end,
+   * so the writing carries on there. A range, a menu or a bar leave the
+   * highlight. */
   deleteBlock: (input) => {
     const { doc, visibleOrder, focusRootId, focusTitled } = input
     const roots = rootsOf(input)
@@ -936,9 +939,13 @@ export const COMMANDS: Record<CommandName, Command> = {
     const landing = focusKey ?? next.rootBlockIds[0] ?? null
     // Run while editing (the touch screen's edit bar), the edit carries on
     // in the row that takes the deleted one's place — the keyboard stays up
-    // for the next delete — rather than dropping to a highlight.
+    // for the next delete — rather than dropping to a highlight. So does a
+    // single row removed by the key: ⌫ on a highlighted row reads as the
+    // next thing typed, and the caret lands at the end of the row that
+    // takes its place.
+    const byKey = (input.typed === "Backspace" || input.typed === "Delete") && !isRange(input)
     const focus: FocusIntent =
-      landing !== null && input.mode === "edit"
+      landing !== null && (input.mode === "edit" || byKey)
         ? { mode: "edit", key: landing }
         : { mode: "select", key: landing }
     return { handled: true, doc: next, op: STRUCTURAL, focus }

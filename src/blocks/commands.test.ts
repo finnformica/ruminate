@@ -527,6 +527,27 @@ describe("deleteBlock", () => {
     expect(result.focus).toEqual({ mode: "select", key: "b/b1" })
   })
 
+  it("by the key, edits the row that takes the deleted one's place, at its end", () => {
+    const doc = fixture()
+    for (const typed of ["Backspace", "Delete"]) {
+      const result = runCommand("deleteBlock", input(doc, "a", { typed }))
+      expect(result.doc!.rootBlockIds).toEqual(["b", "c"])
+      // No `atStart`: the caret lands at the end, where the typing carries on.
+      expect(result.focus).toEqual({ mode: "edit", key: "b" })
+    }
+    // The last row gone, the row above is edited the same way.
+    expect(runCommand("deleteBlock", input(doc, "c", { typed: "Backspace" })).focus).toEqual({
+      mode: "edit",
+      key: "b/b1",
+    })
+    // A range removed by the key leaves the highlight, as the menu does.
+    const range = runCommand(
+      "deleteBlock",
+      input(doc, "a", { keys: ["a", "b"], typed: "Backspace" }),
+    )
+    expect(range.focus).toEqual({ mode: "select", key: "c" })
+  })
+
   it("refuses to delete the only block", () => {
     const doc: BlockDoc = {
       props: null,

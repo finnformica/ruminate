@@ -111,6 +111,23 @@ describe("filteredView", () => {
     expect(matches).toBe(1)
   })
 
+  it("keeps a row it is told to, as a match but not counted as one", () => {
+    const view = viewOf(NOTE)
+    const bread = Object.values(view.doc.blocks).find((b) => b.text === "bread")!
+    const { doc, context, matches } = filteredView(view, matching(view.doc, ["milk"]), {
+      keep: new Set([bread.id]),
+    })
+    // The row being edited stands whatever the filter says, its ancestors
+    // with it as context, and is drawn as a match rather than dimmed.
+    expect(outline(doc, context)).toEqual(["~Shopping", "  milk", "  bread"])
+    expect(matches).toBe(1)
+    // Let go of, it is the filter's to judge again.
+    expect(outline(filteredView(view, matching(view.doc, ["milk"])).doc, new Set())).toEqual([
+      "Shopping",
+      "  milk",
+    ])
+  })
+
   it("folds what survived by the rule it is given, and nothing without one", () => {
     // The walk's own folds are not carried over: an eager walk has none
     // worth keeping, and the narrowed view's rule decides afresh.

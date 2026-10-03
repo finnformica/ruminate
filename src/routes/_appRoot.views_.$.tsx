@@ -17,7 +17,7 @@ import { NoteActionsMenu } from "../components/note-actions-menu"
 import { UnassignedBasket } from "../components/unassigned-basket"
 import { NoteFavicon } from "../components/note-favicon"
 import { PageLayout } from "../components/page-layout"
-import { saveTrace, useSaveTraceState } from "../components/sync-status"
+import { saveTrace, useSaveTraceState, useSteadySaveTrace } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { sharedModeStatusAtom } from "../data/shared-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
@@ -155,6 +155,14 @@ function NotePage() {
   const { expanded, setFold } = useFoldRule(noteId, { filter, sort })
   const narrowed = filter !== "" || sort !== ""
   const directions = useAtomValue(linkDirectionsAtom)
+  // The block being edited, which a filter keeps whatever it says of it:
+  // a row is judged when the editing leaves it, not on every keystroke
+  // (`filteredView`, `keep`).
+  const [editingBlockId, setEditingBlockId] = useState<string | null>(null)
+  const keep = React.useMemo(
+    () => (editingBlockId === null ? undefined : new Set([editingBlockId])),
+    [editingBlockId],
+  )
   const {
     doc: editorDoc,
     collapsed,
@@ -169,6 +177,7 @@ function NotePage() {
     directions,
     filter,
     sort,
+    keep,
   })
   const jotaiStore = useStore()
   // Leaving a focus for a wider view — the note, or a block above — must
@@ -264,7 +273,9 @@ function NotePage() {
     setPendingSave(false)
   }, [pushesPending])
 
-  const trace = saveTrace(syncStatus, { pendingSave, pushesPending })
+  // Held through a burst of typing, so the header does not flicker between
+  // "Saving…" and what follows it on every keystroke (`useSteadySaveTrace`).
+  const trace = useSteadySaveTrace(saveTrace(syncStatus, { pendingSave, pushesPending }))
 
   // Note props (width, gist) are one `setProps` op, written at once.
   const setProp = React.useCallback(
@@ -401,7 +412,10 @@ function NotePage() {
           ) : trace === "saved-offline" ? (
             <span className="flex items-center gap-1.5 text-sm text-text-secondary print:hidden">
               <OfflineIcon16 />
-              Saved offline
+              {/* A phone's header has no room for the second word; the icon
+                  says offline there. */}
+              <span className="sm:hidden">Saved</span>
+              <span className="hidden sm:inline">Saved offline</span>
             </span>
           ) : null}
 
@@ -514,6 +528,7 @@ function NotePage() {
                   }}
                   noteTitle={note?.displayName ?? ""}
                   context={context}
+                  onEditingChange={setEditingBlockId}
                   // Narrowed, there is no blank row to type into. A new
                   // row lands in the note as it does anywhere (Enter on a
                   // row, `useNoteDoc`), but a blank one is a plain text row
