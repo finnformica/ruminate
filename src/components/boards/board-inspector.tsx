@@ -7,7 +7,7 @@ import { usePending } from "../../hooks/pending"
 import { Button } from "../ui/button"
 import { Dialog } from "../ui/dialog"
 import { FormControl } from "../form-control"
-import { ClearIcon16, SparklesIcon16, TrashIcon16 } from "../icons"
+import { ResetIcon16, SparklesIcon16, TrashIcon16 } from "../icons"
 import { TextInput } from "../ui/text-input"
 import { BoardPicture, type BoardImage } from "./board-picture"
 import { NewValueDialog } from "./new-value-dialog"
@@ -130,7 +130,7 @@ export function BoardInspector({
                 disabled={!resettable}
                 onClick={() => writes.resetImage(image.id)}
               >
-                <ClearIcon16 />
+                <ResetIcon16 />
                 Reset
               </Button>
               <Button
