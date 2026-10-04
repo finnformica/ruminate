@@ -231,8 +231,16 @@ function usePendingImage(blockId: string): string | null {
 
 /** Object URLs by asset id (and `<id>/thumb` for a thumbnail), for the
  * page's lifetime. A failed fetch is dropped from the cache so the next
- * mount retries. */
+ * mount retries. The bytes behind each — which the URL keeps alive in
+ * any case — are kept beside it, for a thumbnail to be made of. */
 const objectUrls = new Map<string, Promise<string>>()
+const objectBlobs = new Map<string, Blob>()
+
+/** An object URL for `blob`, remembered under `ref`. */
+function objectUrlOf(ref: string, blob: Blob): string {
+  objectBlobs.set(ref, blob)
+  return URL.createObjectURL(blob)
+}
 
 const refOf = (id: string, variant: ImageVariant) => (variant === "thumb" ? `${id}/thumb` : id)
 
@@ -247,13 +255,14 @@ function primeVariant(id: string, blob: Blob, variant: ImageVariant): void {
   void cacheImage(id, blob, variant)
   const ref = refOf(id, variant)
   if (objectUrls.has(ref) || typeof URL.createObjectURL !== "function") return
-  objectUrls.set(ref, Promise.resolve(URL.createObjectURL(blob)))
+  objectUrls.set(ref, Promise.resolve(objectUrlOf(ref, blob)))
 }
 
 /** Forget the page's object URLs (on signing out: they are one account's). */
 export function resetImageObjectUrls(): void {
   const urls = [...objectUrls.values()]
   objectUrls.clear()
+  objectBlobs.clear()
   for (const url of urls) url.then((href) => URL.revokeObjectURL(href)).catch(() => {})
 }
 
@@ -272,19 +281,21 @@ function imageObjectUrl(id: string, variant: ImageVariant = "full"): Promise<str
   if (cached) return cached
   const loading = (async () => {
     const kept = await readCachedImage(id, variant)
-    if (kept) return URL.createObjectURL(kept)
+    if (kept) return objectUrlOf(ref, kept)
     try {
       const blob = await fetchImageBlob(id, variant)
       void cacheImage(id, blob, variant)
-      return URL.createObjectURL(blob)
+      return objectUrlOf(ref, blob)
     } catch (error) {
       const missing = error instanceof ImageFetchError && error.failure === "missing"
       if (variant !== "thumb" || !missing) throw error
     }
-    const full = await imageBlob(id)
-    primeVariant(id, full, "full")
-    void backfillThumbnail(id, full)
-    return objectUrls.get(id) ?? Promise.resolve(URL.createObjectURL(full))
+    // Through the page's own cache, so a figure asking for the picture
+    // itself at the same time shares the one fetch.
+    const url = await imageObjectUrl(id, "full")
+    const full = objectBlobs.get(id)
+    if (full) void backfillThumbnail(id, full)
+    return url
   })()
   objectUrls.set(ref, loading)
   loading.catch(() => objectUrls.delete(ref))
@@ -327,6 +338,13 @@ function useOnlineRetry(active: boolean): number {
   return attempt
 }
 
+/** What an `<img>` has to show, and why it may have nothing. */
+export interface ImageSource {
+  src: string | null
+  uploading: boolean
+  failure: ImageFetchFailure | null
+}
+
 /**
  * What an `<img>` should show for a block, whether those bytes are still
  * going up, and why there is nothing to show when there is not.
@@ -334,21 +352,20 @@ function useOnlineRetry(active: boolean): number {
  * A picture still uploading draws from its local preview, so it is on screen
  * from the moment it is pasted; an external one draws from its own address;
  * an uploaded one draws once its bytes are here — the picture's own, or
- * its thumbnail's where `variant` asks for the small copy (a board's tile).
- * `src` is `null` until then. `failure` says why it may never come:
- * `missing` when there is no picture to show (the server has none, or the
- * block names none); `unreachable` when the picture is not on this device
- * and the server cannot be reached — offline, most often — in which case
- * it is tried again when the network returns.
+ * its thumbnail's where `variant` asks for the small copy. `src` is `null`
+ * until then, and for as long as `hold` is set: nothing is fetched for a
+ * picture that is not wanted yet (one far down the page), bar the preview
+ * of one still uploading, which is already in hand. `failure` says why
+ * the picture may never come: `missing` when there is no picture to show
+ * (the server has none, or the block names none); `unreachable` when the
+ * picture is not on this device and the server cannot be reached —
+ * offline, most often — in which case it is tried again when the network
+ * returns.
  */
 export function useImageSrc(
   block: Pick<Block, "id" | "props">,
-  variant: ImageVariant = "full",
-): {
-  src: string | null
-  uploading: boolean
-  failure: ImageFetchFailure | null
-} {
+  { variant = "full", hold = false }: { variant?: ImageVariant; hold?: boolean } = {},
+): ImageSource {
   const { image, src } = imagePropsOf(block)
   const pending = usePendingImage(block.id)
   const [state, setState] = useState<{ src: string | null; failure: ImageFetchFailure | null }>({
@@ -358,7 +375,7 @@ export function useImageSrc(
   const attempt = useOnlineRetry(state.failure === "unreachable")
   const shown = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (!image) return
+    if (!image || hold) return
     let live = true
     // A retry keeps the unreachable picture's placeholder up while it tries;
     // a different picture starts from nothing.
@@ -381,11 +398,67 @@ export function useImageSrc(
     return () => {
       live = false
     }
-  }, [image, variant, attempt])
+  }, [image, variant, hold, attempt])
   if (pending) return { src: pending, uploading: true, failure: null }
+  if (hold) return { src: null, uploading: false, failure: null }
   if (src) return { src, uploading: false, failure: null }
   if (!image) return { src: null, uploading: false, failure: "missing" }
   return { ...state, uploading: false }
+}
+
+/**
+ * The best bytes a block has to draw, the same way everywhere a picture is
+ * drawn (the editor's figure, the lightbox, a board's tile and inspector):
+ * nothing while `hold` is set; then the thumbnail (docs/images.md,
+ * Thumbnails) as soon as it is here; then, where `full` asks for the
+ * picture itself — a box too large for the thumbnail's pixels — the
+ * picture, swapped in only once the browser has decoded it, so the
+ * thumbnail never gives way to a half-painted picture. A picture still
+ * uploading, or an external one, is one address for both, and shows at
+ * once.
+ */
+export function usePicture(
+  block: Pick<Block, "id" | "props">,
+  { full, hold = false }: { full: boolean; hold?: boolean },
+): ImageSource {
+  const thumb = useImageSrc(block, { variant: "thumb", hold })
+  const picture = useImageSrc(block, { variant: "full", hold: hold || !full })
+  const decoded = useDecoded(picture.src !== thumb.src ? picture.src : null)
+  const src =
+    picture.src && (!thumb.src || decoded === picture.src || picture.src === thumb.src)
+      ? picture.src
+      : thumb.src
+  return {
+    src,
+    uploading: thumb.uploading || picture.uploading,
+    failure: src ? null : (thumb.failure ?? picture.failure),
+  }
+}
+
+/** `url`, once the browser has decoded the picture at it (an `<img>`
+ * given it afterwards paints whole on its first frame), or at once where
+ * it cannot say (no `Image`, no `decode`); null until then. */
+function useDecoded(url: string | null): string | null {
+  const [ready, setReady] = useState<string | null>(null)
+  useEffect(() => {
+    if (!url) return
+    if (typeof Image === "undefined") {
+      setReady(url)
+      return
+    }
+    let live = true
+    const probe = new Image()
+    const done = () => {
+      if (live) setReady(url)
+    }
+    probe.src = url
+    if (typeof probe.decode === "function") probe.decode().then(done, done)
+    else done()
+    return () => {
+      live = false
+    }
+  }, [url])
+  return ready === url ? ready : null
 }
 
 /** Save a block's picture to the reader's device, named after its caption. */

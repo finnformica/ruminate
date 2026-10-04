@@ -214,20 +214,16 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
   so far, its height counted in widths, so the columns end close to level
   and the order is kept near enough. A picture's shape is the size written
   on its block when it went up (docs/images.md); one written without a size
-  is laid out square until its bytes arrive and say otherwise. A tile
-  draws the picture's thumbnail (docs/images.md, Thumbnails) — tens of
-  kilobytes, not the picture's megabytes; a picture from before there
-  were thumbnails is drawn itself the first time and has one after — and
-  fetches it only once it is within a screenful of view
-  (`useNearView`, src/hooks/in-view.ts, watching from the page's own
-  scroll container), and keeps it once fetched: a wall of hundreds opens
+  is laid out square until its bytes arrive and say otherwise. A tile is
+  the one picture component (`Picture`, docs/images.md, Thumbnails) as a
+  lazy tile of the thumbnail alone: nothing fetched until it is within a
+  screenful of view, its likeness until then — the ThumbHash on its
+  block, which a picture added from the board carries as one pasted into
+  the outline does — and the thumbnail fading in over it, tens of
+  kilobytes rather than the picture's megabytes. A wall of hundreds opens
   by fetching the first screenful, and the rest as they are scrolled to.
-  Until the bytes are there a tile shows the picture's likeness — the
-  ThumbHash on its block (docs/images.md, Offline), which a picture added
-  from the board carries as one pasted into the outline does — or a quiet
-  box where it has none. A picture still uploading is never held back:
-  its preview is already in hand. The caption over the foot of each tile;
-  click one to pick it.
+  The inspector draws the same component after the picture itself. The
+  caption over the foot of each tile; click one to pick it.
 - **The inspector** (`board-inspector.tsx`): the picked picture in a window
   of its own — the app's dialog, as wide as the screen allows — the picture
   large with its caption and a picker per feature beside it, stacked on a

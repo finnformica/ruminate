@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { act, renderHook, waitFor } from "@testing-library/react"
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { cacheImage, fetchImageBlob, ImageFetchError, readCachedImage } from "./image-cache"
 import { thumbnailCopy } from "./image-fit"
-import { useImageSrc } from "./images"
+import { useImageSrc, usePicture } from "./images"
 import { sessionFetch } from "./session-fetch"
 
 vi.mock("./image-cache", async (importOriginal) => {
@@ -34,6 +34,10 @@ beforeAll(() => {
   url.createObjectURL = vi.fn(() => "blob:picture")
   url.revokeObjectURL = vi.fn()
 })
+
+// A hook left mounted would answer the next test's "online" event and
+// race it for the mock's answers.
+afterEach(cleanup)
 
 beforeEach(() => {
   fetched.mockReset()
@@ -98,7 +102,9 @@ describe("useImageSrc", () => {
 describe("useImageSrc, for a thumbnail", () => {
   it("draws the thumbnail from its own address", async () => {
     fetched.mockResolvedValueOnce(new Blob(["small"]))
-    const { result } = renderHook(() => useImageSrc(block("img_thumb0000000"), "thumb"))
+    const { result } = renderHook(() =>
+      useImageSrc(block("img_thumb0000000"), { variant: "thumb" }),
+    )
     await waitFor(() => expect(result.current.src).toBe("blob:picture"))
     expect(fetched).toHaveBeenCalledWith("img_thumb0000000", "thumb")
     expect(cached).toHaveBeenCalledWith("img_thumb0000000", expect.any(Blob), "thumb")
@@ -113,10 +119,12 @@ describe("useImageSrc, for a thumbnail", () => {
     const made = new Blob(["made"], { type: "image/png" })
     thumbnailed.mockResolvedValueOnce(made)
     put.mockResolvedValueOnce(new Response(null, { status: 201 }))
-    const { result } = renderHook(() => useImageSrc(block("img_old000000000"), "thumb"))
+    const { result } = renderHook(() =>
+      useImageSrc(block("img_old000000000"), { variant: "thumb" }),
+    )
     await waitFor(() => expect(result.current.src).toBe("blob:picture"))
     expect(result.current.failure).toBeNull()
-    expect(fetched).toHaveBeenCalledWith("img_old000000000")
+    expect(fetched).toHaveBeenCalledWith("img_old000000000", "full")
     // The copy goes up beside the picture, and is kept here too.
     await waitFor(() => expect(put).toHaveBeenCalled())
     expect(put.mock.calls[0][0]).toBe("/api/images/img_old000000000/thumb")
@@ -126,8 +134,48 @@ describe("useImageSrc, for a thumbnail", () => {
 
   it("is still missing when there is no picture at all", async () => {
     fetched.mockRejectedValue(new ImageFetchError("missing"))
-    const { result } = renderHook(() => useImageSrc(block("img_gone00000000"), "thumb"))
+    const { result } = renderHook(() =>
+      useImageSrc(block("img_gone00000000"), { variant: "thumb" }),
+    )
     await waitFor(() => expect(result.current.failure).toBe("missing"))
     expect(thumbnailed).not.toHaveBeenCalled()
+  })
+})
+
+describe("usePicture", () => {
+  const picture = (id: string) => ({ id: `blk_${id}`, props: { image: id } })
+
+  it("draws the thumbnail alone where the picture itself is not asked for", async () => {
+    fetched.mockResolvedValueOnce(new Blob(["small"]))
+    const { result } = renderHook(() => usePicture(picture("img_tile00000000"), { full: false }))
+    await waitFor(() => expect(result.current.src).toBe("blob:picture"))
+    expect(fetched).toHaveBeenCalledTimes(1)
+    expect(fetched).toHaveBeenCalledWith("img_tile00000000", "thumb")
+  })
+
+  it("fetches nothing while held, then both copies where the picture is asked for", async () => {
+    fetched.mockResolvedValue(new Blob(["bytes"]))
+    const { result, rerender } = renderHook(
+      ({ hold }: { hold: boolean }) =>
+        usePicture(picture("img_held00000000"), { full: true, hold }),
+      { initialProps: { hold: true } },
+    )
+    expect(result.current).toEqual({ src: null, uploading: false, failure: null })
+    expect(fetched).not.toHaveBeenCalled()
+    rerender({ hold: false })
+    await waitFor(() => expect(result.current.src).toBe("blob:picture"))
+    expect(fetched).toHaveBeenCalledWith("img_held00000000", "thumb")
+    expect(fetched).toHaveBeenCalledWith("img_held00000000", "full")
+  })
+
+  it("is missing only when neither copy can be had, and unreachable until the network returns", async () => {
+    fetched.mockRejectedValue(new ImageFetchError("missing"))
+    const gone = renderHook(() => usePicture(picture("img_pgone0000000"), { full: true }))
+    await waitFor(() => expect(gone.result.current.failure).toBe("missing"))
+
+    fetched.mockRejectedValue(new ImageFetchError("unreachable"))
+    const away = renderHook(() => usePicture(picture("img_paway0000000"), { full: true }))
+    await waitFor(() => expect(away.result.current.failure).toBe("unreachable"))
+    expect(away.result.current.src).toBeNull()
   })
 })

@@ -144,10 +144,26 @@ the page's life.
 
 ## Thumbnails
 
-A picture has a small copy beside it, for the places that draw it small:
-a board's tile (docs/boards.md, "The wall") draws the copy, and the
-inspector, the editor's figure, the download and the vision model draw or
-take the picture itself.
+A picture has a small copy beside it, and everywhere a picture is drawn
+draws the copy first.
+
+**One component draws every picture** (`Picture`, src/components/
+picture.tsx — the editor's figure, the lightbox, a board's wall and its
+inspector all draw it and keep only their own chrome around it) over one
+reader (`usePicture`, src/data/images.ts). Nothing is fetched for a
+`lazy` picture until it is within a screenful of the screen
+(`useNearView`, src/hooks/in-view.ts, watching from the page's own scroll
+container); until its bytes are here it is its likeness (the ThumbHash,
+Offline below) in the box its caller gives it, or a pulsing box when the
+block has none. The thumbnail fades in over the likeness once decoded.
+Then, by `detail`: a tile (`thumb`) stops there; the lightbox and a
+board's inspector (`full`) go on to the picture itself; the editor's
+figure (`auto`) goes on to it only where its box, measured on screen in
+device pixels, wants more than the thumbnail's 640 — a figure at the
+row's width on a retina screen does, a small one does not. The picture
+itself is swapped in only once the browser has decoded it (`useDecoded`),
+so the thumbnail never gives way to a half-painted picture. The download
+and the vision model take the picture itself.
 
 **Made on the device, written beside the picture.** As a picture goes up,
 the client makes its thumbnail (`thumbnailCopy`, `src/data/image-fit.ts`)
@@ -166,7 +182,7 @@ megabyte (`MAX_THUMB_BYTES`), and serves it from `GET
 not go up costs nothing: the upload is as good without it.
 
 **Nothing on the block says whether there is one.** A reader asks for the
-thumbnail (`useImageSrc(block, "thumb")`), and the server either has it or
+thumbnail (`useImageSrc(block, { variant: "thumb" })`), and the server either has it or
 answers 404. On a 404 the picture itself stands in — this once, at its
 full size — and a thumbnail is made from those bytes and written beside
 the picture for every view after, on any device (`backfillThumbnail`,

@@ -3286,8 +3286,10 @@ describe("BlockEditor images", () => {
     )
     const figure = natural.container.querySelector<HTMLElement>('[data-testid="image-figure"]')!
     expect(figure.style.width).toBe("min(1200px, 100%, 48rem)")
+    // The ratio is the box's, and the picture fills it.
     const img = natural.container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!
-    expect(img.style.aspectRatio).toBe("1200 / 500")
+    expect(img.parentElement!.style.aspectRatio).toBe("1200 / 500")
+    expect(img.parentElement!.className).toContain("w-full")
     expect(img.className).toContain("w-full")
     natural.unmount()
 
@@ -3299,8 +3301,8 @@ describe("BlockEditor images", () => {
       sized.container.querySelector<HTMLElement>('[data-testid="image-figure"]')!.style.width,
     ).toBe("40%")
     expect(
-      sized.container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!.style
-        .aspectRatio,
+      sized.container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!.parentElement!
+        .style.aspectRatio,
     ).toBe("1200 / 500")
     sized.unmount()
 
@@ -3329,8 +3331,8 @@ describe("BlockEditor images", () => {
       bare.container.querySelector<HTMLElement>('[data-testid="image-figure"]')!.style.width,
     ).toBe("")
     const plain = bare.container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!
-    expect(plain.style.aspectRatio).toBe("")
-    expect(plain.className).toContain("max-h-80")
+    expect(plain.parentElement!.style.aspectRatio).toBe("")
+    expect(plain.parentElement!.className).toContain("max-h-80")
     expect(plain.className).not.toMatch(/(^|\s)w-full(\s|$)/)
   })
 
