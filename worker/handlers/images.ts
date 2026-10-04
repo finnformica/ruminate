@@ -6,8 +6,14 @@
 // rows; the bytes live where bytes belong.
 //
 // Routes (wired in worker/index.ts under /api/images/*):
-//   POST /api/images        — the request body is the image; returns { id }
-//   GET  /api/images/<id>   — the bytes, immutable-cacheable
+//   POST /api/images              — the request body is the image; returns { id }
+//   GET  /api/images/<id>         — the bytes, immutable-cacheable
+//   PUT  /api/images/<id>/thumb   — a small copy of a picture already stored,
+//                                   the body again the image (docs/images.md,
+//                                   Thumbnails); the client writes it after
+//                                   the upload, or on first view of an older
+//                                   picture that has none
+//   GET  /api/images/<id>/thumb   — that copy, or 404 while there is none
 //
 // SWITCHED OFF BY DEFAULT. Both halves must be present for the routes to do
 // anything: the `IMAGES` R2 binding (wrangler.jsonc) and the
@@ -31,8 +37,17 @@ import { controlPlaneDriver } from "../tenancy-db"
 import { grantById, tenantIsActive } from "../mcp/tokens"
 import type { Env } from "../types"
 import { imageLinkParams, verifyImageLink } from "./image-links"
-import { isImageId, isImageMime, MAX_IMAGE_BYTES, newImageId } from "./image-policy"
+import {
+  isImageId,
+  isImageMime,
+  MAX_IMAGE_BYTES,
+  MAX_THUMB_BYTES,
+  newImageId,
+} from "./image-policy"
 import { requireSession } from "./replica"
+
+/** Where a picture's small copy is kept: beside its bytes, under its key. */
+const thumbKey = (prefix: string, id: string) => `${prefix}${id}/thumb`
 
 function imagesEnabled(env: Env): boolean {
   return env.VITE_IMAGES_ENABLED === "true" && env.IMAGES !== undefined
@@ -51,7 +66,12 @@ export async function images(
   const upload = pathname === "/api/images" && method === "POST"
   const idMatch = /^\/api\/images\/([^/]+)$/.exec(pathname)
   const read = idMatch !== null && method === "GET"
-  if (!upload && !read) return jsonResponse({ error: "not_found" }, 404)
+  const thumbMatch = /^\/api\/images\/([^/]+)\/thumb$/.exec(pathname)
+  const thumbWrite = thumbMatch !== null && method === "PUT"
+  const thumbRead = thumbMatch !== null && method === "GET"
+  if (!upload && !read && !thumbWrite && !thumbRead) {
+    return jsonResponse({ error: "not_found" }, 404)
+  }
 
   const link = read ? imageLinkParams(url) : null
   if (link !== null) return signedRead(env, idMatch![1], link, clock())
@@ -64,24 +84,55 @@ export async function images(
   const prefix = `${session.id}/`
 
   if (upload) {
-    const contentType = (request.headers.get("Content-Type") ?? "").split(";")[0].trim()
-    if (!isImageMime(contentType)) return jsonResponse({ error: "unsupported_type" }, 415)
-    const declared = Number(request.headers.get("Content-Length") ?? "0")
-    if (declared > MAX_IMAGE_BYTES) return jsonResponse({ error: "payload_too_large" }, 413)
-    const bytes = await request.arrayBuffer()
-    if (bytes.byteLength === 0) return jsonResponse({ error: "empty" }, 400)
-    if (bytes.byteLength > MAX_IMAGE_BYTES) {
-      return jsonResponse({ error: "payload_too_large" }, 413)
-    }
+    const body = await imageBody(request, MAX_IMAGE_BYTES)
+    if (body instanceof Response) return body
     const id = newImageId(() => crypto.randomUUID())
-    await bucket.put(prefix + id, bytes, {
-      httpMetadata: { contentType },
+    await bucket.put(prefix + id, body.bytes, {
+      httpMetadata: { contentType: body.contentType },
       customMetadata: { uploadedAt: String(Date.now()) },
     })
-    return jsonResponse({ id, size: bytes.byteLength, type: contentType }, 201)
+    return jsonResponse({ id, size: body.bytes.byteLength, type: body.contentType }, 201)
+  }
+
+  if (thumbWrite) {
+    // A copy is only ever of a picture the tenant has: the key is checked
+    // before the body is read, so nothing is stored under a name with
+    // nothing behind it.
+    const id = thumbMatch![1]
+    if (!isImageId(id)) return jsonResponse({ error: "not_found" }, 404)
+    if ((await bucket.head(prefix + id)) === null) return jsonResponse({ error: "not_found" }, 404)
+    const body = await imageBody(request, MAX_THUMB_BYTES)
+    if (body instanceof Response) return body
+    await bucket.put(thumbKey(prefix, id), body.bytes, {
+      httpMetadata: { contentType: body.contentType },
+      customMetadata: { uploadedAt: String(Date.now()) },
+    })
+    return jsonResponse({ id, size: body.bytes.byteLength, type: body.contentType }, 201)
+  }
+
+  if (thumbRead) {
+    const id = thumbMatch![1]
+    if (!isImageId(id)) return jsonResponse({ error: "not_found" }, 404)
+    return serveKey(bucket, thumbKey(prefix, id))
   }
 
   return serveObject(bucket, prefix, idMatch![1])
+}
+
+/** The picture in a request's body, checked as an upload is: an image
+ * type, not empty, no larger than `maxBytes`. Else the refusal. */
+async function imageBody(
+  request: Request,
+  maxBytes: number,
+): Promise<{ bytes: ArrayBuffer; contentType: string } | Response> {
+  const contentType = (request.headers.get("Content-Type") ?? "").split(";")[0].trim()
+  if (!isImageMime(contentType)) return jsonResponse({ error: "unsupported_type" }, 415)
+  const declared = Number(request.headers.get("Content-Length") ?? "0")
+  if (declared > maxBytes) return jsonResponse({ error: "payload_too_large" }, 413)
+  const bytes = await request.arrayBuffer()
+  if (bytes.byteLength === 0) return jsonResponse({ error: "empty" }, 400)
+  if (bytes.byteLength > maxBytes) return jsonResponse({ error: "payload_too_large" }, 413)
+  return { bytes, contentType }
 }
 
 /**
@@ -126,7 +177,13 @@ async function signedRead(
  * by the caller from a verified identity; the id is validated here. */
 async function serveObject(bucket: R2Bucket, prefix: string, id: string): Promise<Response> {
   if (!isImageId(id)) return jsonResponse({ error: "not_found" }, 404)
-  const object = await bucket.get(prefix + id)
+  return serveKey(bucket, prefix + id)
+}
+
+/** The bytes under `key`, or 404. The key is the caller's to have minted
+ * from a verified tenant and a validated id. */
+async function serveKey(bucket: R2Bucket, key: string): Promise<Response> {
+  const object = await bucket.get(key)
   if (!object) return jsonResponse({ error: "not_found" }, 404)
   return new Response(object.body, {
     status: 200,

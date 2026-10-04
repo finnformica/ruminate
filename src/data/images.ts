@@ -3,10 +3,15 @@ import { imagePropsOf } from "../blocks/image"
 import type { Block } from "../blocks/types"
 import { cacheImage, fetchImageBlob, ImageFetchError, readCachedImage } from "./image-cache"
 import type { ImageFetchFailure } from "./image-cache"
-import { fitImage } from "./image-fit"
+import { fitImage, thumbnailCopy } from "./image-fit"
 import { thumbHashOf } from "./image-thumbhash"
 import { sessionFetch } from "./session-fetch"
-import { isImageMime, MAX_IMAGE_BYTES } from "../../worker/handlers/image-policy"
+import {
+  imageVariantUrlOf,
+  isImageMime,
+  MAX_IMAGE_BYTES,
+  type ImageVariant,
+} from "../../worker/handlers/image-policy"
 
 /**
  * The client half of image assets (docs/images.md): uploading a pasted
@@ -22,6 +27,10 @@ import { isImageMime, MAX_IMAGE_BYTES } from "../../worker/handlers/image-policy
  * a picture is fetched once however many rows show it. The bytes are kept
  * on the device too (`image-cache.ts`), and read from there first, so a
  * picture seen once is there offline.
+ *
+ * A picture has a thumbnail beside it (docs/images.md, Thumbnails): a small
+ * copy a board's tile draws instead of the picture, written after the
+ * upload, and made on first view for a picture that has none.
  */
 export const imagesEnabled: boolean = import.meta.env.VITE_IMAGES_ENABLED === "true"
 
@@ -118,18 +127,25 @@ const signedOut = () => new ImageUploadError("signed_out", "Sign in to add image
  * first fitted (`image-fit.ts`): re-encoded smaller and stripped of its
  * metadata. Only when that cannot be done is the original refused for what
  * it is.
+ *
+ * Its thumbnail goes up behind it, once the asset has its id, and is in
+ * hand before this resolves — so the block's row, which the asset id
+ * makes a reader of the thumbnail, never asks for one that is not there
+ * yet. A thumbnail that cannot be made or will not go up costs nothing:
+ * the tile draws the picture itself and makes one on first view.
  */
 export async function uploadImage(picked: File): Promise<UploadedImage> {
   const file = (await fitImage(picked)) ?? picked
   const rejected = rejectImage(file)
   if (rejected) throw rejected
-  const [size, response] = await Promise.all([
+  const [size, response, thumb] = await Promise.all([
     measure(file),
     sessionFetch(
       "/api/images",
       { method: "POST", headers: { "Content-Type": file.type }, body: file },
       signedOut,
     ),
+    thumbnailCopy(file).catch(() => null),
   ])
   if (response.status === 501) {
     throw new ImageUploadError("disabled", "Images are not switched on for this Ruminate")
@@ -141,7 +157,22 @@ export async function uploadImage(picked: File): Promise<UploadedImage> {
   if (!response.ok) throw new ImageUploadError("failed", `Upload failed (${response.status})`)
   const body = (await response.json()) as { id?: unknown }
   if (typeof body.id !== "string") throw new ImageUploadError("failed", "Upload failed")
+  if (thumb && (await putThumbnail(body.id, thumb))) primeVariant(body.id, thumb, "thumb")
   return { id: body.id, ...(size ?? {}) }
+}
+
+/** Write a picture's thumbnail beside it. False when it would not go. */
+async function putThumbnail(id: string, thumb: Blob): Promise<boolean> {
+  try {
+    const response = await sessionFetch(
+      imageVariantUrlOf(id, "thumb"),
+      { method: "PUT", headers: { "Content-Type": thumb.type }, body: thumb },
+      signedOut,
+    )
+    return response.ok
+  } catch {
+    return false
+  }
 }
 
 // ── Pictures still on their way up ───────────────────────────────────────────
@@ -198,17 +229,25 @@ function usePendingImage(blockId: string): string | null {
 
 // ── Reading ─────────────────────────────────────────────────────────────────
 
-/** Object URLs by asset id, for the page's lifetime. A failed fetch is
- * dropped from the cache so the next mount retries. */
+/** Object URLs by asset id (and `<id>/thumb` for a thumbnail), for the
+ * page's lifetime. A failed fetch is dropped from the cache so the next
+ * mount retries. */
 const objectUrls = new Map<string, Promise<string>>()
+
+const refOf = (id: string, variant: ImageVariant) => (variant === "thumb" ? `${id}/thumb` : id)
 
 /** Seed the read cache from bytes already in hand, so a picture that has just
  * finished uploading draws from them rather than fetching itself straight
  * back down — and keep them on the device, so it is there offline. */
 export function primeImageObjectUrl(id: string, file: File): void {
-  void cacheImage(id, file)
-  if (objectUrls.has(id) || typeof URL.createObjectURL !== "function") return
-  objectUrls.set(id, Promise.resolve(URL.createObjectURL(file)))
+  primeVariant(id, file, "full")
+}
+
+function primeVariant(id: string, blob: Blob, variant: ImageVariant): void {
+  void cacheImage(id, blob, variant)
+  const ref = refOf(id, variant)
+  if (objectUrls.has(ref) || typeof URL.createObjectURL !== "function") return
+  objectUrls.set(ref, Promise.resolve(URL.createObjectURL(blob)))
 }
 
 /** Forget the page's object URLs (on signing out: they are one account's). */
@@ -218,22 +257,50 @@ export function resetImageObjectUrls(): void {
   for (const url of urls) url.then((href) => URL.revokeObjectURL(href)).catch(() => {})
 }
 
-/** The bytes of an uploaded picture as an object URL (cached): from the
- * device's copy when it has one, else from the Worker, keeping a copy.
- * Throws `ImageFetchError`. */
-function imageObjectUrl(id: string): Promise<string> {
-  const cached = objectUrls.get(id)
+/**
+ * The bytes of an uploaded picture, or of its thumbnail, as an object URL
+ * (cached): from the device's copy when it has one, else from the Worker,
+ * keeping a copy. Throws `ImageFetchError`.
+ *
+ * A thumbnail the server has not got — the picture went up before there
+ * were thumbnails — is stood in for by the picture itself, this once, and
+ * one is made from those bytes and written beside it for every view after.
+ */
+function imageObjectUrl(id: string, variant: ImageVariant = "full"): Promise<string> {
+  const ref = refOf(id, variant)
+  const cached = objectUrls.get(ref)
   if (cached) return cached
   const loading = (async () => {
-    const kept = await readCachedImage(id)
+    const kept = await readCachedImage(id, variant)
     if (kept) return URL.createObjectURL(kept)
-    const blob = await fetchImageBlob(id)
-    void cacheImage(id, blob)
-    return URL.createObjectURL(blob)
+    try {
+      const blob = await fetchImageBlob(id, variant)
+      void cacheImage(id, blob, variant)
+      return URL.createObjectURL(blob)
+    } catch (error) {
+      const missing = error instanceof ImageFetchError && error.failure === "missing"
+      if (variant !== "thumb" || !missing) throw error
+    }
+    const full = await imageBlob(id)
+    primeVariant(id, full, "full")
+    void backfillThumbnail(id, full)
+    return objectUrls.get(id) ?? Promise.resolve(URL.createObjectURL(full))
   })()
-  objectUrls.set(id, loading)
-  loading.catch(() => objectUrls.delete(id))
+  objectUrls.set(ref, loading)
+  loading.catch(() => objectUrls.delete(ref))
   return loading
+}
+
+/** Make an older picture's thumbnail from its bytes and write it beside
+ * it, keeping the device's copy too. Nothing to do where the browser cannot
+ * make one, or it will not go: the next view tries again. */
+async function backfillThumbnail(id: string, full: Blob): Promise<void> {
+  try {
+    const thumb = await thumbnailCopy(full)
+    if (thumb && (await putThumbnail(id, thumb))) void cacheImage(id, thumb, "thumb")
+  } catch {
+    // Left for the next view.
+  }
 }
 
 /** The bytes of an uploaded picture: from the device's copy when it has
@@ -266,14 +333,18 @@ function useOnlineRetry(active: boolean): number {
  *
  * A picture still uploading draws from its local preview, so it is on screen
  * from the moment it is pasted; an external one draws from its own address;
- * an uploaded one draws once its bytes are here. `src` is `null` until then.
- * `failure` says why it may never come: `missing` when there is no picture
- * to show (the server has none, or the block names none); `unreachable`
- * when the picture is not on this device and the server cannot be reached
- * — offline, most often — in which case it is tried again when the network
- * returns.
+ * an uploaded one draws once its bytes are here — the picture's own, or
+ * its thumbnail's where `variant` asks for the small copy (a board's tile).
+ * `src` is `null` until then. `failure` says why it may never come:
+ * `missing` when there is no picture to show (the server has none, or the
+ * block names none); `unreachable` when the picture is not on this device
+ * and the server cannot be reached — offline, most often — in which case
+ * it is tried again when the network returns.
  */
-export function useImageSrc(block: Pick<Block, "id" | "props">): {
+export function useImageSrc(
+  block: Pick<Block, "id" | "props">,
+  variant: ImageVariant = "full",
+): {
   src: string | null
   uploading: boolean
   failure: ImageFetchFailure | null
@@ -291,10 +362,11 @@ export function useImageSrc(block: Pick<Block, "id" | "props">): {
     let live = true
     // A retry keeps the unreachable picture's placeholder up while it tries;
     // a different picture starts from nothing.
-    const retrying = shown.current === image
-    shown.current = image
+    const ref = refOf(image, variant)
+    const retrying = shown.current === ref
+    shown.current = ref
     if (!retrying) setState({ src: null, failure: null })
-    imageObjectUrl(image).then(
+    imageObjectUrl(image, variant).then(
       (url) => live && setState({ src: url, failure: null }),
       (error: unknown) =>
         live &&
@@ -309,7 +381,7 @@ export function useImageSrc(block: Pick<Block, "id" | "props">): {
     return () => {
       live = false
     }
-  }, [image, attempt])
+  }, [image, variant, attempt])
   if (pending) return { src: pending, uploading: true, failure: null }
   if (src) return { src, uploading: false, failure: null }
   if (!image) return { src: null, uploading: false, failure: "missing" }

@@ -38,6 +38,16 @@ const FIT_TYPE = "image/jpeg"
 export const VISION_MAX_EDGE = 1568
 const VISION_QUALITY = 0.8
 
+/**
+ * The longest edge of a picture's thumbnail (`thumbnailCopy`; docs/images.md,
+ * Thumbnails): a board's tile is at most a couple of hundred CSS pixels
+ * wide, so this covers a phone's three-times screen for a landscape
+ * picture and is a little soft for a tall portrait on one, at tens of
+ * kilobytes against the megabytes of the picture itself.
+ */
+export const THUMB_MAX_EDGE = 640
+const THUMB_QUALITY = 0.8
+
 /** How a picture is re-encoded: no larger than `maxEdge` on its longest
  * side, written as `type` at `quality`. */
 export interface FitOptions {
@@ -208,4 +218,24 @@ export async function fitImageFor(blob: Blob, options: FitOptions): Promise<Blob
  */
 export function visionCopy(blob: Blob): Promise<Blob | null> {
   return fitImageFor(blob, { maxEdge: VISION_MAX_EDGE, quality: VISION_QUALITY, type: FIT_TYPE })
+}
+
+/** The format a thumbnail is written in: a PNG stays a PNG, so a
+ * screenshot's transparent corners stay clear; everything else is a JPEG
+ * (a GIF's first frame, a photo however it came). */
+export function thumbnailType(type: string): string {
+  return mimeOf(type) === "image/png" ? "image/png" : FIT_TYPE
+}
+
+/**
+ * A picture's thumbnail (docs/images.md, Thumbnails): a copy no larger than
+ * `THUMB_MAX_EDGE` on its longest side, for the board's tiles. Null when
+ * this browser cannot make one — the tile then draws the picture itself.
+ */
+export function thumbnailCopy(blob: Blob): Promise<Blob | null> {
+  return fitImageFor(blob, {
+    maxEdge: THUMB_MAX_EDGE,
+    quality: THUMB_QUALITY,
+    type: thumbnailType(blob.type),
+  })
 }

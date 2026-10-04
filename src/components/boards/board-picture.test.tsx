@@ -68,13 +68,13 @@ const picture = (id: string, props: Record<string, unknown> = {}) => ({
 
 describe("BoardPicture", () => {
   it("fetches a lazy tile's bytes only once it is near the screen", async () => {
-    render(<BoardPicture image={picture("lazy00000000")} fit="cover" lazy />)
+    render(<BoardPicture image={picture("lazy00000000")} fit="cover" lazy variant="thumb" />)
     expect(screen.getByTestId("board-image-placeholder")).toBeTruthy()
     expect(fetched).not.toHaveBeenCalled()
 
     act(() => FakeObserver.instances[0].intersect())
     await waitFor(() => expect(screen.getByTestId("board-image")).toBeTruthy())
-    expect(fetched).toHaveBeenCalledWith("img_lazy00000000")
+    expect(fetched).toHaveBeenCalledWith("img_lazy00000000", "thumb")
   })
 
   it("fetches straight away when it is not lazy", async () => {

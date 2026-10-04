@@ -1,3 +1,4 @@
+import type { ImageVariant } from "../../../worker/handlers/image-policy"
 import { imagePropsOf } from "../../blocks/image"
 import type { BlockProps } from "../../blocks/types"
 import { thumbHashDataUrl } from "../../data/image-thumbhash"
@@ -30,7 +31,9 @@ const NEAR_MARGIN = "100% 0px"
  * A `lazy` picture — a tile on the wall — fetches nothing until it is
  * near the screen: a wall of hundreds opens by fetching the first
  * screenful, and the rest as they are scrolled to. A picture still
- * uploading is never held back: its preview is already in hand.
+ * uploading is never held back: its preview is already in hand. A tile
+ * asks for the `thumb` variant (docs/images.md, Thumbnails): the small
+ * copy, tens of kilobytes against the picture's megabytes.
  */
 export function BoardPicture({
   image,
@@ -38,6 +41,7 @@ export function BoardPicture({
   className,
   onSize,
   lazy = false,
+  variant = "full",
 }: {
   image: BoardImage
   /** `cover` fills its box (a tile); `contain` shows the whole picture. */
@@ -48,6 +52,8 @@ export function BoardPicture({
   onSize?: (width: number, height: number) => void
   /** Fetch the bytes only once the picture is near the screen. */
   lazy?: boolean
+  /** The picture itself, or its thumbnail. */
+  variant?: ImageVariant
 }) {
   const { image: asset, src: external, thumbhash } = imagePropsOf(image)
   const likeness = thumbhash ? thumbHashDataUrl(thumbhash) : null
@@ -65,6 +71,7 @@ export function BoardPicture({
       className={className}
       onSize={onSize}
       likeness={likeness}
+      variant={variant}
     />
   )
 }
@@ -75,14 +82,16 @@ function LoadedPicture({
   className,
   onSize,
   likeness,
+  variant,
 }: {
   image: BoardImage
   fit: "cover" | "contain"
   className?: string
   onSize?: (width: number, height: number) => void
   likeness: string | null
+  variant: ImageVariant
 }) {
-  const { src, uploading } = useImageSrc(image)
+  const { src, uploading } = useImageSrc(image, variant)
   const caption = image.text.trim()
   if (src === "error") {
     return (

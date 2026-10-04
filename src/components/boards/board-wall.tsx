@@ -19,8 +19,10 @@ const GAP = 8
  * when it went up (docs/images.md); one written without a size — pasted as
  * a link, say — is laid out square until its bytes arrive and say
  * otherwise. A tile fetches its picture only once it is near the screen
- * (`BoardPicture`, `lazy`), so a long wall opens by fetching a screenful,
- * not the lot. Click a tile to pick it.
+ * (`BoardPicture`, `lazy`), and fetches its thumbnail rather than the
+ * picture (`variant="thumb"`; docs/images.md, Thumbnails), so a long wall
+ * opens by fetching a screenful of small copies, not the lot of the
+ * pictures. Click a tile to pick it.
  */
 export function BoardWall({
   images,
@@ -84,6 +86,7 @@ export function BoardWall({
                     image={image}
                     fit="cover"
                     lazy
+                    variant="thumb"
                     className="h-full w-full"
                     onSize={(w, h) => learn(image.id, w / h)}
                   />
