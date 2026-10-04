@@ -1,15 +1,17 @@
 import React from "react"
-import type { BoardFeature } from "../../data/boards"
+import { boardLinkUrl, type BoardFeature, type ValueRef } from "../../data/boards"
 import { Button } from "../ui/button"
 import { Dialog } from "../ui/dialog"
 import { TextInput } from "../ui/text-input"
 
 /**
  * Naming a new value for a feature — "New location", with a box for the
- * name — in the app's own dialog, so a phone shows the same window as a
- * desktop rather than its native prompt. Enter or **Add** makes the value
- * and gives it to the picture; the name is trimmed, and an empty one adds
- * nothing. The window closes on its own once the value is added.
+ * name; "New link", with a box for the address — in the app's own dialog,
+ * so a phone shows the same window as a desktop rather than its native
+ * prompt. Enter or **Add** makes the value and gives it to the picture; the
+ * name is trimmed, and an empty one adds nothing. An address is taken
+ * with or without its scheme, and one that is not a web address cannot be
+ * added. The window closes on its own once the value is added.
  */
 export function NewValueDialog({
   feature,
@@ -18,7 +20,7 @@ export function NewValueDialog({
 }: {
   /** The feature a value is being named for, or null while nothing is. */
   feature: BoardFeature | null
-  onAdd: (feature: BoardFeature, text: string) => void
+  onAdd: (feature: BoardFeature, ref: ValueRef) => void
   onClose: () => void
 }) {
   const [text, setText] = React.useState("")
@@ -26,10 +28,18 @@ export function NewValueDialog({
   React.useEffect(() => {
     if (feature) setText("")
   }, [feature])
-  const name = text.trim()
+  const link = feature?.kind === "link"
+  // What would be added: the name, or the address — nothing when neither.
+  const ref: ValueRef | null = link
+    ? boardLinkUrl(text) !== null
+      ? { url: text }
+      : null
+    : text.trim() !== ""
+      ? { text: text.trim() }
+      : null
   const submit = () => {
-    if (!feature || name === "") return
-    onAdd(feature, name)
+    if (!feature || !ref) return
+    onAdd(feature, ref)
     onClose()
   }
   const label = feature?.label.toLowerCase() ?? "value"
@@ -51,7 +61,9 @@ export function NewValueDialog({
               <TextInput
                 id="new-value"
                 value={text}
-                placeholder={`A ${label}…`}
+                placeholder={link ? "https://" : `A ${label}…`}
+                inputMode={link ? "url" : undefined}
+                autoCapitalize={link ? "off" : undefined}
                 autoComplete="off"
                 spellCheck={false}
                 // eslint-disable-next-line jsx-a11y/no-autofocus
@@ -60,7 +72,7 @@ export function NewValueDialog({
               />
             </div>
             <div className="flex gap-2">
-              <Button type="submit" variant="primary" disabled={name === ""}>
+              <Button type="submit" variant="primary" disabled={ref === null}>
                 Add
               </Button>
               <Button type="button" onClick={onClose}>
