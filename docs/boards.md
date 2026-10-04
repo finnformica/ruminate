@@ -38,7 +38,7 @@ outline and the form picks them up.
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | the board          | a note whose page props hold `board: true`                                                                                                                                                                                      |
 | its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket                                                                                                      |
-| a feature          | a direct child of the page whose text is the feature's label — `Location`, `Object`, `Material` — trimmed, whatever its case                                                                                                    |
+| a feature          | a direct child of the page whose text is the feature's label — `Location`, `Object`, `Material` — trimmed, whatever its case and whatever its type (the form makes it a bullet)                                                 |
 | a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                                                                                                                                 |
 | a picture's value  | a `child` link from the value block to the picture: the value is a second parent, exactly as copy and select-mode paste make                                                                                                    |
 | a picture's link   | a value of the `Link` feature, whose block is a link block (docs/links.md): the page's card, address and preview in its props, with the same `child` link from it to the picture — so the pictures from one page share one card |
@@ -47,14 +47,14 @@ So a board's outline reads:
 
 ```
 Home inspiration
-  Location
+  - Location
     - Mauritius
       [picture]
     - Lisbon
-  Object
+  - Object
     - Lamp
       [picture]
-  Link
+  - Link
     [card: Oak pendant lamp — made.com]
       [picture]
 

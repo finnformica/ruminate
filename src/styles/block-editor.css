@@ -191,10 +191,12 @@
  * surfacing. The slot (`.block-toggle-slot`) is that area: the chevron's
  * square covers the slot, so hovering the slot IS hovering the chevron; the
  * key (`.block-key`) fades out as the chevron fades in, in the same slot, so
- * nothing moves. Two things pin the chevron visible: a
+ * nothing moves. Three things pin the chevron visible: a
  * collapsed block (hidden content is never a secret — the key hides for the
- * duration), and a device with nothing to hover with, where the chevron stands
- * in for the key outright, exactly as the old always-on gutter toggle did. The
+ * duration), a parent paragraph (its slot holds no key, so there is nothing
+ * for the chevron to stand in for and nothing to mark the fold without it),
+ * and a device with nothing to hover with, where the chevron stands in for
+ * the key outright, exactly as the old always-on gutter toggle did. The
  * fades ride the elements' own opacity transitions (block-item.tsx). */
 .block-toggle {
   opacity: 0;
