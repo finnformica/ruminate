@@ -178,11 +178,21 @@ describe("addImageOps / imageUploadedOps", () => {
 
     const landed = applyOps(
       next,
-      imageUploadedOps("blk_new0000000", { id: "img_abcdefabcdef", width: 40, height: 30 }),
+      imageUploadedOps("blk_new0000000", {
+        id: "img_abcdefabcdef",
+        width: 40,
+        height: 30,
+        thumbhash: "YyUKNJh2d3eAiHh3iIeGcGgHdw==",
+      }),
       NOW,
     )
     expect(landed.nodes.get("blk_new0000000")?.props).toBe(
-      JSON.stringify({ image: "img_abcdefabcdef", width: 40, height: 30 }),
+      JSON.stringify({
+        image: "img_abcdefabcdef",
+        width: 40,
+        height: 30,
+        thumbhash: "YyUKNJh2d3eAiHh3iIeGcGgHdw==",
+      }),
     )
   })
 })

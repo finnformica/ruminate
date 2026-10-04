@@ -222,16 +222,18 @@ export interface ImageLocation {
   lon: number
 }
 
-/** The upload landed: the asset the block now shows, and where it was
- * taken when that was known by then. */
+/** The upload landed: the asset the block now shows — with its size and
+ * its likeness, as the editor writes them — and where it was taken when
+ * that was known by then. */
 export function imageUploadedOps(
   imageId: string,
-  asset: { id: string; width?: number; height?: number },
+  asset: { id: string; width?: number; height?: number; thumbhash?: string },
   location?: ImageLocation | null,
 ): Op[] {
   const props = {
     image: asset.id,
     ...(asset.width && asset.height ? { width: asset.width, height: asset.height } : {}),
+    ...(asset.thumbhash ? { thumbhash: asset.thumbhash } : {}),
     ...(location ? { lat: location.lat, lon: location.lon } : {}),
   }
   return [{ op: "setProps", id: imageId, props: propsJson(props) }]

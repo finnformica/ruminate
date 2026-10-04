@@ -214,8 +214,17 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
   so far, its height counted in widths, so the columns end close to level
   and the order is kept near enough. A picture's shape is the size written
   on its block when it went up (docs/images.md); one written without a size
-  is laid out square until its bytes arrive and say otherwise. The caption
-  over the foot of each tile; click one to pick it.
+  is laid out square until its bytes arrive and say otherwise. A tile
+  fetches its picture only once it is within a screenful of view
+  (`useNearView`, src/hooks/in-view.ts, watching from the page's own
+  scroll container), and keeps it once fetched: a wall of hundreds opens
+  by fetching the first screenful, and the rest as they are scrolled to.
+  Until the bytes are there a tile shows the picture's likeness — the
+  ThumbHash on its block (docs/images.md, Offline), which a picture added
+  from the board carries as one pasted into the outline does — or a quiet
+  box where it has none. A picture still uploading is never held back:
+  its preview is already in hand. The caption over the foot of each tile;
+  click one to pick it.
 - **The inspector** (`board-inspector.tsx`): the picked picture in a window
   of its own — the app's dialog, as wide as the screen allows — the picture
   large with its caption and a picker per feature beside it, stacked on a
@@ -403,9 +412,10 @@ out there is no key, so nothing of this shows.
 
 ## Not yet
 
-- **Thumbnails.** A tile draws the picture's full bytes, as the editor does.
-  A wall of a few hundred phone photos wants a smaller variant written at
-  upload; until then boards are for tens of pictures, not hundreds.
+- **Thumbnails.** A tile draws the picture's full bytes, as the editor does,
+  though only once it is scrolled near. A wall of a few hundred phone
+  photos wants a smaller variant written at upload; until then scrolling
+  the whole of such a wall still fetches the whole of it.
 - **A canvas.** A freer arrangement of the wall — the groupings drawn as
   clusters, pan and zoom — would be another read of the same graph, with
   nothing stored; the wall is the first such read.
