@@ -101,7 +101,7 @@ export const BOARD_FEATURES: readonly BoardFeature[] = [
 
 /** The type a feature block is created as, and the types a value is: a
  * bullet for a name, a link block for an address. */
-const FEATURE_BLOCK_TYPE = "text"
+const FEATURE_BLOCK_TYPE = "ul"
 const VALUE_BLOCK_TYPE = "ul"
 const LINK_BLOCK_TYPE = "link"
 const IMAGE_TYPE = "image"

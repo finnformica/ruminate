@@ -659,7 +659,12 @@ export function BlockItem({
     api.onPaste(occurrence.key, before, pasted, after)
   }
 
-  const pinned = isCollapsed || looped
+  // A paragraph's slot holds no key, so a parent paragraph has nothing for
+  // the chevron to swap with: left to the hover reveal, an open paragraph
+  // parent showed an empty slot and no sign of its fold. Its chevron is
+  // pinned visible instead, open or closed, as the key would be.
+  const keyless = kind.slot === "glyph" && !kind.glyph && !kind.glyphNode
+  const pinned = isCollapsed || looped || (hasToggle && keyless)
   // Every block type but an image owns the 15px marker slot. Most carry a KEY there — a
   // bullet dot, heading `#`, number, quote `>` — and the key is pure chrome,
   // so on a parent it SWAPS for the chevron: hover the slot and the key fades
