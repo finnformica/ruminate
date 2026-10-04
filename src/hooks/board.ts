@@ -43,7 +43,7 @@ import {
   uploadImage,
 } from "../data/images"
 import { parseProps } from "../data/graph"
-import { fetchLinkPreview, LinkPreviewError } from "../data/link-previews"
+import { fetchLinkPreview } from "../data/link-previews"
 import { deleteBlockOps, type Op } from "../data/ops"
 import { useApplyOps } from "../data/store"
 import { requestTagSuggestion, SuggestTagsError } from "../data/suggest-tags"
@@ -220,9 +220,10 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
 
   /**
    * A link value's preview, fetched behind the write as the editor fetches
-   * a new link block's (docs/links.md) and written on without a toast: the
-   * card is there to open either way. Only a signed-in reader can ask; a
-   * page that will not answer says so, naming its host.
+   * a new link block's (docs/links.md) and written on quietly. A page that
+   * will not answer is not an error here: the card is there to open either
+   * way, and says "No preview available" where the description would be.
+   * Only a signed-in reader can ask.
    */
   const previewInto = React.useCallback(
     (valueId: string, url: string) => {
@@ -234,12 +235,7 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
           apply(ops)
           void requestDatabaseFlush()
         })
-        .catch((error: unknown) => {
-          const why = error instanceof LinkPreviewError ? error.message : "Preview failed"
-          toast.error(
-            `No preview for ${hostOf(url)}: ${why.charAt(0).toLowerCase()}${why.slice(1)}`,
-          )
-        })
+        .catch(() => {})
     },
     [isDatabaseMode, store, apply],
   )

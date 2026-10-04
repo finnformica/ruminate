@@ -192,8 +192,8 @@ each):
   new link block's (`fetchLinkPreview`, src/data/link-previews.ts) and
   written on by `linkPreviewOps` — what the page says, and its title where
   the card has only the host's — with no history step and no toast; a page
-  that will not answer says so in a toast, naming its host, and the card
-  stays, an address to open. Signed out there is no session to fetch
+  that will not answer is no error here — the card stays, an address to
+  open, and says **No preview available** where the description would be. Signed out there is no session to fetch
   through, and the card keeps its address alone.
 - **Clearing a value** (`clearValueOps`) unlinks. The value stays for the
   others; a picture left with no parent is back in the basket.
