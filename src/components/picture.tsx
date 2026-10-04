@@ -15,6 +15,16 @@ import { LoadingIcon16, OfflineIcon16 } from "./icons"
  * viewport (`useNearView`). */
 const NEAR_MARGIN = "100% 0px"
 
+/** How long a picture takes to fade in (`duration-300`): after that the
+ * layer it faded in over can go. */
+const FADE_MS = 300
+
+/** How a picture fills a shaped box. */
+const IMG_FIT = {
+  cover: "block h-full w-full object-cover",
+  contain: "block h-full w-full object-contain",
+}
+
 /** How a picture meets the box it is given. */
 export type PictureFit =
   /** Fills the box, cropped to it: a tile. */
@@ -112,15 +122,33 @@ export function Picture({
   const missing = failure === "missing"
 
   // Loaded means decoded and ready to paint whole: until then the picture
-  // is transparent over its likeness. A picture the browser already holds
-  // (a row remounted — a nest unfolded, say) is there on the first frame
-  // and needs no fade; a new src starts over.
-  const [loaded, setLoaded] = React.useState(false)
+  // is transparent over what is beneath it. Beneath the first picture is
+  // the likeness; beneath a picture that takes another's place — the
+  // picture itself after its thumbnail — is that other, kept as a layer
+  // (`under`) for the new one to cross-fade over, and let go once it
+  // has. A picture the browser already holds (a row remounted — a nest
+  // unfolded, say) is there on the first frame and needs no fade.
+  const [loadedSrc, setLoadedSrc] = React.useState<string | null>(null)
+  const loaded = src !== null && loadedSrc === src
+  const [under, setUnder] = React.useState<string | null>(null)
   const imgRef = React.useRef<HTMLImageElement>(null)
+  const shown = React.useRef<string | null>(null)
   React.useLayoutEffect(() => {
+    const previous = shown.current
+    shown.current = src
+    if (previous !== null && src !== null && previous !== src && loadedSrc === previous) {
+      setUnder(previous)
+      return
+    }
     const img = imgRef.current
-    setLoaded(!!img && img.complete && img.naturalWidth > 0)
+    if (img && img.complete && img.naturalWidth > 0) setLoadedSrc(src)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs on a change of src alone
   }, [src])
+  React.useEffect(() => {
+    if (under === null || !loaded) return
+    const timer = setTimeout(() => setUnder(null), FADE_MS)
+    return () => clearTimeout(timer)
+  }, [under, loaded])
 
   const ready = src !== null
   React.useEffect(() => {
@@ -183,6 +211,17 @@ export function Picture({
       // The likeness sits behind the picture while it fades in.
       style={{ ...shape, maxHeight, ...style, ...(loaded ? {} : likenessStyle) }}
     >
+      {under !== null ? (
+        // The picture being replaced, beneath the one replacing it.
+        <img
+          src={under}
+          alt=""
+          aria-hidden
+          draggable={false}
+          data-testid={`${name}-under`}
+          className={cx("absolute inset-0", IMG_FIT[fit === "cover" ? "cover" : "contain"])}
+        />
+      ) : null}
       {src !== null ? (
         <img
           ref={imgRef}
@@ -192,18 +231,18 @@ export function Picture({
           decoding="async"
           data-testid={name}
           className={cx(
-            "transition-opacity duration-300 ease-out",
+            "relative transition-opacity duration-300 ease-out",
             // A shaped box the picture fills; an unshaped one takes the
             // picture's own size, no larger than the box allows.
             fit === "cover"
-              ? "block h-full w-full object-cover"
+              ? IMG_FIT.cover
               : shaped
-                ? "block h-full w-full object-contain"
+                ? IMG_FIT.contain
                 : "mx-auto block h-auto max-h-[inherit] w-auto max-w-full",
             loaded ? "opacity-100" : "opacity-0",
           )}
           onLoad={(event) => {
-            setLoaded(true)
+            setLoadedSrc(src)
             const { naturalWidth, naturalHeight } = event.currentTarget
             if (naturalWidth > 0 && naturalHeight > 0) onSize?.(naturalWidth, naturalHeight)
           }}

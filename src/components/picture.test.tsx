@@ -175,6 +175,35 @@ describe("Picture", () => {
     expect(fetched).toHaveBeenCalledWith("img_full00000000", "full")
   })
 
+  it("cross-fades the picture in over its thumbnail, then lets the thumbnail go", async () => {
+    // The thumbnail is here first; the picture follows once asked for.
+    let givePicture: (blob: Blob) => void = () => {}
+    fetched.mockImplementation((_id, variant = "full") =>
+      variant === "thumb"
+        ? Promise.resolve(new Blob(["thumb"]))
+        : new Promise<Blob>((resolve) => {
+            givePicture = resolve
+          }),
+    )
+    render(
+      <Picture block={picture("cross0000000")} name="board-image" fit="natural" detail="full" />,
+    )
+    await waitFor(() => expect(img().src).toBe("blob:5"))
+    fireEvent.load(img())
+    expect(img().className).toContain("opacity-100")
+
+    await act(async () => givePicture(new Blob(["full"])))
+    // The thumbnail stays beneath, opaque; the picture above starts clear.
+    await waitFor(() => expect(img().src).toBe("blob:4"))
+    const under = screen.getByTestId("board-image-under") as HTMLImageElement
+    expect(under.src).toBe("blob:5")
+    expect(img().className).toContain("opacity-0")
+    fireEvent.load(img())
+    expect(img().className).toContain("opacity-100")
+    // Faded in, the thumbnail beneath is let go.
+    await waitFor(() => expect(screen.queryByTestId("board-image-under")).toBeNull())
+  })
+
   it("asks for the picture itself only where its box wants more than the thumbnail has", async () => {
     // A 4000×3000 picture's thumbnail is 640 wide: a box narrower than that
     // in device pixels is content with it.
