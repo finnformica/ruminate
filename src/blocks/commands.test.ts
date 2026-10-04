@@ -527,20 +527,23 @@ describe("deleteBlock", () => {
     expect(result.focus).toEqual({ mode: "select", key: "b/b1" })
   })
 
-  it("by the key, edits the row that takes the deleted one's place, at its end", () => {
+  it("keeps the mode it ran in, whatever key or surface ran it", () => {
     const doc = fixture()
+    // A highlight stays a highlight: ⌫ and ⌦ on a highlighted row leave the
+    // row that takes its place highlighted, as the menu and the bar do.
     for (const typed of ["Backspace", "Delete"]) {
       const result = runCommand("deleteBlock", input(doc, "a", { typed }))
       expect(result.doc!.rootBlockIds).toEqual(["b", "c"])
-      // No `atStart`: the caret lands at the end, where the typing carries on.
-      expect(result.focus).toEqual({ mode: "edit", key: "b" })
+      expect(result.focus).toEqual({ mode: "select", key: "b" })
     }
-    // The last row gone, the row above is edited the same way.
-    expect(runCommand("deleteBlock", input(doc, "c", { typed: "Backspace" })).focus).toEqual({
-      mode: "edit",
-      key: "b/b1",
-    })
-    // A range removed by the key leaves the highlight, as the menu does.
+    // Editing (the touch screen's edit bar), the edit carries on in the row
+    // that takes the deleted one's place. No `atStart`: the caret lands at
+    // its end, where the typing carries on.
+    const editing = (key: string) => input(doc, key, { mode: "edit", caret: caret("", 0) })
+    expect(runCommand("deleteBlock", editing("a")).focus).toEqual({ mode: "edit", key: "b" })
+    // The last row gone, the row above takes it the same way.
+    expect(runCommand("deleteBlock", editing("c")).focus).toEqual({ mode: "edit", key: "b/b1" })
+    // A range leaves the highlight on the row that takes its place.
     const range = runCommand(
       "deleteBlock",
       input(doc, "a", { keys: ["a", "b"], typed: "Backspace" }),
@@ -664,16 +667,23 @@ describe("turn into (select-mode marker keys)", () => {
     expect(result.op).toEqual({ type: "structural" })
   })
 
-  it("an empty block applies the marker AND opens editing", () => {
+  it("an empty block applies the marker and stays highlighted, like any other", () => {
     const result = turn("turnIntoBullet", "")
     expect(result.doc!.blocks.x.type).toBe("ul")
     expect(result.doc!.blocks.x.text).toBe("")
-    expect(result.focus).toEqual({ mode: "edit", key: "x" })
-    // Swapping one empty marker for another stays in edit too.
+    expect(result.focus).toEqual({ mode: "select", key: "x" })
+    // Swapping one empty marker for another, the same.
     const swapped = turn("turnIntoTodo", "- ")
     expect(swapped.doc!.blocks.x.type).toBe("todo")
     expect(swapped.doc!.blocks.x.text).toBe("")
-    expect(swapped.focus).toEqual({ mode: "edit", key: "x" })
+    expect(swapped.focus).toEqual({ mode: "select", key: "x" })
+    // Editing it (the touch screen's edit bar), the edit carries on, caret kept.
+    const editing = runCommand(
+      "turnIntoBullet",
+      input(docOf(""), "x", { visibleOrder: ["x"], mode: "edit", caret: caret("", 0) }),
+    )
+    expect(editing.doc!.blocks.x.type).toBe("ul")
+    expect(editing.focus).toEqual({ mode: "edit", key: "x", caret: 0 })
   })
 
   it("never touches children (marker swap only)", () => {
@@ -971,6 +981,18 @@ describe("marker editing", () => {
     expect(result.doc!.blocks.c).toBeUndefined()
     // removeBlock hands focus to the previous *sibling* (b), not b1.
     expect(result.focus).toEqual({ mode: "edit", key: "b" })
+  })
+
+  it("backspaceEmpty off the first row edits the row that takes its place, at its start", () => {
+    const doc = fixture()
+    doc.blocks.a.text = ""
+    const result = runCommand(
+      "backspaceEmpty",
+      input(doc, "a", { mode: "edit", caret: caret("", 0) }),
+    )
+    expect(result.doc!.rootBlockIds).toEqual(["b", "c"])
+    // Nothing above to merge into: the editing carries on where the caret was.
+    expect(result.focus).toEqual({ mode: "edit", key: "b", atStart: true })
   })
 })
 

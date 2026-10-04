@@ -337,45 +337,29 @@ describe("BlockEditor focus + keyboard", () => {
     expect(lines).toBeGreaterThan(2)
   })
 
-  it("brings a deleted block back under the caret after undo", () => {
+  it("re-highlights a deleted block after undo", () => {
     const { container } = render(<Harness initial={"A\nB\nC"} />)
     const root = editorRoot(container)
     fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
     expect(highlightedText(container)).toBe("B")
-    fireEvent.keyDown(root, { key: "Backspace" }) // delete B: C is edited in its place
-    expect(container.querySelector("textarea")!.value).toBe("C")
+    fireEvent.keyDown(root, { key: "Backspace" }) // delete B
+    expect(highlightedText(container)).not.toBe("B")
     fireEvent.keyDown(root, { key: "z", metaKey: true }) // undo
-    // Undone mid-edit, the editing carries on — in the row that came back.
-    expect(container.querySelector("textarea")!.value).toBe("B")
+    expect(highlightedText(container)).toBe("B")
   })
 
-  it("deleting a block by the key edits the one below at its end (above only when it was last)", () => {
+  it("deleting a block highlights the one below (above only when it was last)", () => {
     const { container } = render(<Harness initial={"A\nB\nC"} />)
     const root = editorRoot(container)
     fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
     fireEvent.keyDown(root, { key: "Backspace" }) // delete B
-    // C slid into B's place and is edited, the caret at its end, so the
-    // writing carries on there.
-    let textarea = container.querySelector("textarea")!
-    expect(textarea.value).toBe("C")
-    expect(textarea.selectionStart).toBe(1)
-    expect(highlightedText(container)).toBeNull()
-    fireEvent.keyDown(textarea, { key: "Escape" }) // back to the highlight
+    // C slid into B's place and takes the highlight: a delete from a
+    // highlight never opens an edit.
+    expect(container.querySelector("textarea")).toBeNull()
     expect(highlightedText(container)).toBe("C")
     fireEvent.keyDown(root, { key: "Backspace" }) // delete C — now the last block
-    textarea = container.querySelector("textarea")!
-    expect(textarea.value).toBe("A")
-    expect(textarea.selectionStart).toBe(1)
-  })
-
-  it("deleting a range by the key leaves the highlight", () => {
-    const { container } = render(<Harness initial={"A\nB\nC\nD"} />)
-    const root = editorRoot(container)
-    fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
-    fireEvent.keyDown(root, { key: "ArrowDown", shiftKey: true }) // extend to C
-    fireEvent.keyDown(root, { key: "Backspace" })
     expect(container.querySelector("textarea")).toBeNull()
-    expect(highlightedText(container)).toBe("D")
+    expect(highlightedText(container)).toBe("A")
   })
 
   it("deleting a multi-selection selects the block below the removed range", () => {
@@ -1472,12 +1456,12 @@ describe("focus mode", () => {
       await screen.findByText("Leave focus to remove the block you're focused on"),
     ).not.toBeNull()
     toast.dismiss()
-    // Its children go as they would anywhere — the key leaves the row that
-    // takes the deleted one's place edited, here the one the view leads with.
+    // Its children go as they would anywhere: the row that takes the
+    // deleted one's place is highlighted, here the one the view leads with.
     fireEvent.keyDown(root, { key: "ArrowDown" }) // C → D
     fireEvent.keyDown(root, { key: "Backspace" })
     expect(serializedLines(getByTestId)).toEqual(["A", "B", "  C", "  E", "F"])
-    expect(container.querySelector("textarea")!.value).toBe("C")
+    expect(highlightedText(container)).toBe("C")
   })
 
   it("exits gracefully when the focus root vanishes via undo", () => {
@@ -2039,8 +2023,8 @@ describe("rows of a shared block (selection by occurrence)", () => {
     fireEvent.click(bodyOf(rowByKey(container, "blk_q/blk_s")))
     fireEvent.keyDown(editorRoot(container), { key: "Backspace" })
     expect(serializedLines(getByTestId)).toEqual(["- p", "  - shared", "    - t", "- q", "  - r"])
-    // The row that slid into the deleted one's place is edited, by the key.
-    expect(container.querySelector("textarea")!.value).toBe("r")
+    // The selection lands on the row that slid into the deleted one's place.
+    expect(highlightedText(container)).toBe("r")
   })
 
   it("indents the row under q beside its own siblings; p's row is untouched", () => {
@@ -2381,11 +2365,15 @@ describe("turn into (select-mode marker keys)", () => {
     expect(serializedLines(getByTestId)).toEqual(["task"])
   })
 
-  it("on an empty block the marker applies AND editing opens", () => {
+  it("on an empty block the marker applies and the highlight stays, as on any other", () => {
     const { container, getByTestId } = render(<Harness initial={""} />)
     const root = editorRoot(container)
     fireEvent.keyDown(root, { key: "-" })
     expect(getByTestId("serialized").textContent).toContain("- ")
+    // No edit opened by the side: ↵ is what opens the block.
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(highlightedText(container)).toBe("")
+    fireEvent.keyDown(root, { key: "Enter" })
     const textarea = container.querySelector("textarea")
     expect(textarea).not.toBeNull()
     expect(textarea!.value).toBe("") // the marker is styling, not body text
