@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { fetchImageBlob } from "../../data/image-cache"
 import { beginPendingImage, releasePendingImage } from "../../data/images"
@@ -75,6 +75,17 @@ describe("BoardPicture", () => {
     act(() => FakeObserver.instances[0].intersect())
     await waitFor(() => expect(screen.getByTestId("board-image")).toBeTruthy())
     expect(fetched).toHaveBeenCalledWith("img_lazy00000000")
+  })
+
+  it("fades the picture in over its likeness once it has loaded", async () => {
+    render(<BoardPicture image={picture("fade00000000", { thumbhash: THUMBHASH })} fit="cover" />)
+    const img = (await screen.findByTestId("board-image")) as HTMLImageElement
+    // Transparent until the bytes have decoded, the likeness behind it.
+    expect(img.className).toContain("opacity-0")
+    expect(img.parentElement?.style.backgroundImage).toMatch(/^url\("data:image\/png;base64,/)
+    fireEvent.load(img)
+    expect(img.className).toContain("opacity-100")
+    expect(img.parentElement?.style.backgroundImage).toBe("")
   })
 
   it("fetches straight away when it is not lazy", async () => {

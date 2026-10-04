@@ -1,3 +1,4 @@
+import React from "react"
 import { imagePropsOf } from "../../blocks/image"
 import type { BlockProps } from "../../blocks/types"
 import { thumbHashDataUrl } from "../../data/image-thumbhash"
@@ -25,7 +26,9 @@ const NEAR_MARGIN = "100% 0px"
  * (`useImageSrc`): the local preview while it uploads, under a spinner;
  * the asset once it has landed; its likeness while the bytes are on their
  * way (the block's ThumbHash, docs/images.md, Offline — a quiet box when
- * it has none), and a dashed one when they cannot be had.
+ * it has none), and a dashed one when they cannot be had. The picture
+ * fades in over its likeness once it has loaded, as the editor's figure
+ * does, rather than painting across the box as its bytes decode.
  *
  * A `lazy` picture — a tile on the wall — fetches nothing until it is
  * near the screen: a wall of hundreds opens by fetching the first
@@ -84,6 +87,16 @@ function LoadedPicture({
 }) {
   const { src, uploading } = useImageSrc(image)
   const caption = image.text.trim()
+  // Loaded means decoded and ready to paint whole: until then the picture
+  // is transparent over its likeness. A picture the browser already holds
+  // (a tile remounted from the cache) is there on the first frame and
+  // needs no fade; a new src starts over.
+  const [loaded, setLoaded] = React.useState(false)
+  const imgRef = React.useRef<HTMLImageElement>(null)
+  React.useLayoutEffect(() => {
+    const img = imgRef.current
+    setLoaded(!!img && img.complete && img.naturalWidth > 0)
+  }, [src])
   if (src === "error") {
     return (
       <div
@@ -101,14 +114,32 @@ function LoadedPicture({
     return <Placeholder likeness={likeness} fit={fit} className={className} />
   }
   return (
-    <span className={cx("relative block overflow-hidden rounded-lg", className)}>
+    <span
+      className={cx(
+        "relative block overflow-hidden rounded-lg bg-bg-tertiary bg-center bg-no-repeat",
+        className,
+      )}
+      // The likeness sits behind the picture while it fades in.
+      style={
+        likeness && !loaded
+          ? { backgroundImage: `url("${likeness}")`, backgroundSize: fit }
+          : undefined
+      }
+    >
       <img
+        ref={imgRef}
         src={src}
         alt={caption}
         draggable={false}
+        decoding="async"
         data-testid="board-image"
-        className={cx("block h-full w-full", fit === "cover" ? "object-cover" : "object-contain")}
+        className={cx(
+          "block h-full w-full transition-opacity duration-300 ease-out",
+          fit === "cover" ? "object-cover" : "object-contain",
+          loaded ? "opacity-100" : "opacity-0",
+        )}
         onLoad={(event) => {
+          setLoaded(true)
           const { naturalWidth, naturalHeight } = event.currentTarget
           if (naturalWidth > 0 && naturalHeight > 0) onSize?.(naturalWidth, naturalHeight)
         }}
