@@ -3,10 +3,12 @@ import { useAtomValue, useStore } from "jotai"
 import React from "react"
 import { toast } from "sonner"
 import { blockId } from "../blocks/id"
+import { hostOf } from "../blocks/link"
 import {
   addImageOps,
   boardFeatures,
   boardImageIds,
+  boardLinkUrl,
   clearValueOps,
   imageLocationOf,
   imageLocationOps,
@@ -14,6 +16,7 @@ import {
   type ImageLocation,
   inverseOps,
   isBoard,
+  linkPreviewOps,
   outlineImageIds,
   resetImageOps,
   setCaptionOps,
@@ -40,6 +43,7 @@ import {
   uploadImage,
 } from "../data/images"
 import { parseProps } from "../data/graph"
+import { fetchLinkPreview, LinkPreviewError } from "../data/link-previews"
 import { deleteBlockOps, type Op } from "../data/ops"
 import { useApplyOps } from "../data/store"
 import { requestTagSuggestion, SuggestTagsError } from "../data/suggest-tags"
@@ -214,14 +218,51 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
     [store, apply],
   )
 
+  /**
+   * A link value's preview, fetched behind the write as the editor fetches
+   * a new link block's (docs/links.md) and written on without a toast: the
+   * card is there to open either way. Only a signed-in reader can ask; a
+   * page that will not answer says so, naming its host.
+   */
+  const previewInto = React.useCallback(
+    (valueId: string, url: string) => {
+      if (!isDatabaseMode) return
+      void fetchLinkPreview(url)
+        .then((preview) => {
+          const ops = linkPreviewOps(store.get(graphSnapshotAtom), valueId, url, preview)
+          if (ops.length === 0) return
+          apply(ops)
+          void requestDatabaseFlush()
+        })
+        .catch((error: unknown) => {
+          const why = error instanceof LinkPreviewError ? error.message : "Preview failed"
+          toast.error(
+            `No preview for ${hostOf(url)}: ${why.charAt(0).toLowerCase()}${why.slice(1)}`,
+          )
+        })
+    },
+    [isDatabaseMode, store, apply],
+  )
+
   const setValue = React.useCallback(
     (feature: BoardFeature, imageId: string, ref: ValueRef) => {
       const snapshot = store.get(graphSnapshotAtom)
       const ops = setValueOps(snapshot, boardId, feature, imageId, ref)
-      const text = "text" in ref ? ref.text.trim() : (snapshot.nodes.get(ref.id)?.text ?? "")
+      const url = "url" in ref ? boardLinkUrl(ref.url) : null
+      const text =
+        "text" in ref
+          ? ref.text.trim()
+          : "id" in ref
+            ? (snapshot.nodes.get(ref.id)?.text ?? "")
+            : hostOf(url ?? ref.url)
       undoable(ops, `${feature.label}: ${text}`)
+      // A card made for a new address is asked for its preview.
+      const made = ops.find(
+        (op): op is Extract<Op, { op: "create" }> => op.op === "create" && op.type === "link",
+      )
+      if (made && url !== null) previewInto(made.id, url)
     },
-    [store, boardId, undoable],
+    [store, boardId, undoable, previewInto],
   )
 
   const clearValue = React.useCallback(
