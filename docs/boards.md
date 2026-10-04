@@ -206,10 +206,18 @@ each):
 - **Delete image** is the context menu's Delete (`deleteBlockOps`): the row
   is tombstoned; the bytes stay in the bucket (docs/images.md, "Not yet").
 
-A form has no editor history behind it, so each change to a picture's
-features is answered with a toast that can **Undo** it: the inverse batch
-(`inverseOps`), worked out against the graph as it stood — a create is
-deleted, a link unlinked or put back at the key it had, a text set back.
+**A change is its own confirmation.** Giving a picture a value, taking one
+off, captioning it, deleting it: the batch is applied at once and the page
+shows the result — the picker, the tile, the wall — and nothing else is
+said, as the editor says nothing of an edit (docs/design-principles.md,
+Notices). A form has no editor history behind it, so the two changes that
+would be costly to make by mistake are answered with a plain toast whose
+job is the way back: **Reset**, which takes several things off in one
+press, and **Suggest**, which a model made. **Undo** on it applies the
+inverse batch (`inverseOps`), worked out against the graph as it stood — a
+create is deleted, a link unlinked or put back at the key it had, a text
+set back. Deleting a picture tombstones its row, which nothing restores,
+so it offers no Undo and raises no toast.
 
 Signed out, the board reads and writes the sample graph in memory like the
 rest of the app; uploads need a store, so **Add images** waits for sign-in.
@@ -253,8 +261,8 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
   page's picture, each with **Open link** and **Remove link**) and **Add
   link** beneath them, which asks for an address in the same dialog a new
   value is named in. Focus stays in the window but the page is not made inert
-  (`modal="trap-focus"`), so the toast that answers a change, with its
-  Undo, stays in reach while the window is open; a press on the scrim,
+  (`modal="trap-focus"`), so the toast that answers a Reset or a Suggest,
+  with its Undo, stays in reach while the window is open; a press on the scrim,
   Escape or the close control put it away. A menu opened from inside a
   dialog floats in the dialog's layer (`InModalContext`,
   `src/components/ui/layer.ts`), or it would open behind the window.
