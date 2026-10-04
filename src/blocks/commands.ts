@@ -591,13 +591,13 @@ function wrapWith(marker: string): Command {
  * root already of the kind goes back to a paragraph), or set outright, for
  * a menu's pick. Text and children are never touched — this is a type
  * change only, one structural undo step; the type is the block's, so a
- * block selected in two rows changes once. An *empty* block on its own
- * additionally opens editing (caret at the end) so the marker key starts
- * you typing that block type immediately. Allowed on the focused title too
- * (a type change never escapes the view).
+ * block selected in two rows changes once. The rows stay as they were, in
+ * the mode they were in — an empty block included: it takes the type and
+ * keeps its highlight, and ↵ opens it as it does any other block. Allowed
+ * on the focused title too (a type change never escapes the view).
  */
 function retype(input: CommandInput, target: BlockType, toggle: boolean): CommandResult {
-  const { doc, key } = input
+  const { doc } = input
   const block = blockOf(input)
   if (!block) return IGNORED
   let next = doc
@@ -605,11 +605,7 @@ function retype(input: CommandInput, target: BlockType, toggle: boolean): Comman
     const each = next.blocks[id]
     if (each) next = updateType(next, id, toggle ? toggleType(each.type, target) : target)
   }
-  const result: CommandResult = { handled: true, doc: next, op: STRUCTURAL }
-  if (!isRange(input) && block.text.trim() === "") {
-    return { ...result, focus: { mode: "edit", key } }
-  }
-  return { ...result, focus: keepSelection(input) }
+  return { handled: true, doc: next, op: STRUCTURAL, focus: keepSelection(input) }
 }
 
 /** The marker keys' "turn into": a toggle (see `retype`). */
@@ -889,7 +885,10 @@ export const COMMANDS: Record<CommandName, Command> = {
   /** Remove the highlighted rows and their subtrees. The selection lands on
    * the visible row that takes the removed ones' place — the one that
    * slides up from below — falling back to the row above when the removed
-   * rows were last. */
+   * rows were last. In the mode the command ran in: from a highlight the
+   * row is highlighted, whatever key or surface did the removing; while
+   * editing (the touch screen's edit bar) the edit carries on in it, the
+   * caret at its end, so the keyboard stays up for the next delete. */
   deleteBlock: (input) => {
     const { doc, visibleOrder, focusRootId, focusTitled } = input
     const roots = rootsOf(input)
@@ -934,9 +933,6 @@ export const COMMANDS: Record<CommandName, Command> = {
       return { handled: true, doc: next, op: STRUCTURAL, exitTop: true }
     }
     const landing = focusKey ?? next.rootBlockIds[0] ?? null
-    // Run while editing (the touch screen's edit bar), the edit carries on
-    // in the row that takes the deleted one's place — the keyboard stays up
-    // for the next delete — rather than dropping to a highlight.
     const focus: FocusIntent =
       landing !== null && input.mode === "edit"
         ? { mode: "edit", key: landing }
@@ -1106,7 +1102,10 @@ export const COMMANDS: Record<CommandName, Command> = {
     }
   },
 
-  /** Backspace at the start of an empty block removes it, merging upward. */
+  /** Backspace at the start of an empty block removes it, merging upward:
+   * the edit carries on at the end of the row above. Off the first row
+   * there is nothing above, so it carries on at the start of the row that
+   * takes the removed one's place — where the caret was. */
   backspaceEmpty: (input) => {
     const { doc, key, focusRootId, focusTitled } = input
     const id = idOfKey(key)
@@ -1119,14 +1118,14 @@ export const COMMANDS: Record<CommandName, Command> = {
     if (focusTitled !== false && focusRootId && (!focusKey || idOfKey(focusKey) === focusRootId)) {
       return { handled: true, doc: next, op: STRUCTURAL, exitTop: true }
     }
-    return {
-      handled: true,
-      doc: next,
-      op: STRUCTURAL,
-      focus: focusKey
-        ? { mode: "edit", key: focusKey }
-        : { mode: "select", key: next.rootBlockIds[0] ?? null },
-    }
+    // Only an emptied view (the basket) has no row left to edit.
+    const landing = next.rootBlockIds[0] ?? null
+    const focus: FocusIntent = focusKey
+      ? { mode: "edit", key: focusKey }
+      : landing !== null
+        ? { mode: "edit", key: landing, atStart: true }
+        : { mode: "select", key: null }
+    return { handled: true, doc: next, op: STRUCTURAL, focus }
   },
 
   // ── Focus mode ───────────────────────────────────────────────────────────

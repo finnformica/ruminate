@@ -373,7 +373,7 @@ const NAVIGATION_ENTRIES: Shortcut[] = [
   {
     combos: [APP_SHORTCUTS.goAdmin],
     scope: "global",
-    description: "Go to the admin page (press g, then a; the admin only)",
+    description: "Go to the Admin settings (press g, then a; the admin only)",
     group: "Navigation",
   },
   {

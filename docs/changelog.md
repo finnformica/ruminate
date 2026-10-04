@@ -131,8 +131,8 @@ page load**, not from an effect — React's strict mode runs effects twice on
 purpose and a remount would do the same, and the first pass consuming the
 request left the second with nothing to show.
 
-**The card is off until asked for.** Settings → Updates, **Show what's new
-after an update**, turns it on. That is a preference of the account rather
+**The card is off until asked for.** Settings → Preferences, under
+**Changelog**, **Show what's new after an update** turns it on. That is a preference of the account rather
 than the device (`whatsNewCard`, src/data/preferences.ts): answered once, it
 holds on every device the reader signs in on, stored by the Worker under the
 tenant's `meta` row `preferences` (`/api/preferences`,

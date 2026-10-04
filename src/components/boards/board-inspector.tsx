@@ -1,0 +1,173 @@
+import { useAtomValue } from "jotai"
+import React from "react"
+import { imageValues, type BoardFeature, type BoardFeatureState } from "../../data/boards"
+import { graphSnapshotAtom } from "../../global-state"
+import type { BoardWrites } from "../../hooks/board"
+import { usePending } from "../../hooks/pending"
+import { Button } from "../ui/button"
+import { Dialog } from "../ui/dialog"
+import { FormControl } from "../form-control"
+import { ResetIcon16, SparklesIcon16, TrashIcon16 } from "../icons"
+import { TextInput } from "../ui/text-input"
+import { Picture } from "../picture"
+import type { BoardImage } from "./board-wall"
+import { LinkValues } from "./link-values"
+import { NewValueDialog } from "./new-value-dialog"
+import { ValuePicker } from "./value-picker"
+
+/**
+ * The picture that was picked, in a window of its own: the picture large,
+ * with its caption and its features beside it — the form a board is for
+ * (docs/boards.md): a picker per feature, and for a link feature the
+ * picture's cards with **Add link** beneath them. The app's dialog, as
+ * wide as the screen allows, so the picture has the room the wall could
+ * not give it; the pickers' menus and the window for a new value's name
+ * open over it. Escape, the close control or the scrim put it away.
+ */
+export function BoardInspector({
+  image,
+  features,
+  writes,
+  onClose,
+}: {
+  image: BoardImage
+  features: BoardFeatureState[]
+  writes: BoardWrites
+  onClose: () => void
+}) {
+  const snapshot = useAtomValue(graphSnapshotAtom)
+  const [caption, setCaption] = React.useState(image.text)
+  // Another device, or the outline, may retitle it while it is open.
+  React.useEffect(() => setCaption(image.text), [image.id, image.text])
+  const commitCaption = () => writes.setCaption(image.id, caption.trim())
+
+  // The feature a new value is being named for (`NewValueDialog`), if any.
+  const [naming, setNaming] = React.useState<BoardFeature | null>(null)
+
+  // Claude's caption and tags for this picture (docs/boards.md, "Tagging
+  // with Claude"): **Suggest**, the sparkles in the title bar, busy from the
+  // press until the toast (docs/design-principles.md, Busy controls).
+  const [suggest, suggesting] = usePending(() => writes.suggestTags(image.id))
+
+  // What Reset would take off: the caption, and the picture's values over
+  // every feature. Nothing to take off, nothing to press.
+  const carried = features.reduce(
+    (count, state) => count + imageValues(snapshot, state, image.id).length,
+    0,
+  )
+  const resettable = carried > 0 || image.text.trim() !== ""
+
+  return (
+    // Focus is kept in the window, but the page is not made inert: the
+    // toast that answers a change — with its Undo — must stay in reach
+    // while the window is open. A press on the scrim still puts it away.
+    <Dialog open modal="trap-focus" onOpenChange={(next) => (next ? undefined : onClose())}>
+      <Dialog.Content
+        title={image.text.trim() || "Picture"}
+        actions={
+          writes.canSuggest ? (
+            // The icon's slot is where the spinner goes. On a phone the
+            // title bar has no room for the word, so the sparkles stand
+            // alone there and the name is the label.
+            <Button
+              size="small"
+              aria-label="Suggest tags"
+              icon={<SparklesIcon16 />}
+              loading={suggesting}
+              onClick={() => suggest()}
+            >
+              <span className="hidden sm:inline">Suggest</span>
+            </Button>
+          ) : null
+        }
+        className="max-h-[90vh] w-[calc(100vw-24px)] max-w-5xl"
+      >
+        <div
+          data-testid="board-inspector"
+          // The phone's one column is `minmax(0,1fr)`, as the window's own
+          // is: an auto column grows to its content, and a picker's one-line
+          // summary of several values would widen the whole body past the
+          // screen rather than be cut (the desktop's picker column is fixed).
+          className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-[minmax(0,1fr)_16rem]"
+        >
+          {/* The thumbnail the wall already holds, then the picture itself
+              once decoded (`detail="full"`). */}
+          <Picture
+            block={image}
+            name="board-image"
+            fit="natural"
+            detail="full"
+            maxHeight="70vh"
+            className="min-h-40 bg-bg-secondary sm:min-h-80"
+          />
+          <div className="flex flex-col gap-4">
+            <FormControl htmlFor="board-caption" label="Caption">
+              <TextInput
+                id="board-caption"
+                value={caption}
+                placeholder="What is this?"
+                onChange={(event) => setCaption(event.target.value)}
+                onBlur={commitCaption}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    commitCaption()
+                    event.currentTarget.blur()
+                  }
+                }}
+              />
+            </FormControl>
+            {features.map((state) => (
+              <div key={state.feature.label} className="flex flex-col gap-2">
+                <span className="text-sm/4 text-text-secondary">{state.feature.label}</span>
+                {state.feature.kind === "link" ? (
+                  <LinkValues
+                    values={imageValues(snapshot, state, image.id)}
+                    onRemove={(value) => writes.clearValue(value, image.id)}
+                    onAdd={() => setNaming(state.feature)}
+                  />
+                ) : (
+                  <ValuePicker
+                    state={state}
+                    selected={imageValues(snapshot, state, image.id)}
+                    onPick={(value) => writes.setValue(state.feature, image.id, { id: value.id })}
+                    onClear={(value) => writes.clearValue(value, image.id)}
+                    onNew={() => setNaming(state.feature)}
+                  />
+                )}
+              </div>
+            ))}
+            <NewValueDialog
+              feature={naming}
+              onAdd={(feature, ref) => writes.setValue(feature, image.id, ref)}
+              onClose={() => setNaming(null)}
+            />
+            <div className="mt-auto flex flex-wrap items-center gap-2">
+              {/* The caption and every value off the picture at once, as
+                  one Undo. */}
+              <Button
+                size="small"
+                disabled={!resettable}
+                onClick={() => writes.resetImage(image.id)}
+              >
+                <ResetIcon16 />
+                Reset
+              </Button>
+              <Button
+                size="small"
+                className="text-text-danger"
+                onClick={() => {
+                  onClose()
+                  writes.deleteImage(image.id)
+                }}
+              >
+                <TrashIcon16 />
+                Delete image
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Dialog.Content>
+    </Dialog>
+  )
+}

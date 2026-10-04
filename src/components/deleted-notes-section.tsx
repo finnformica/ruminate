@@ -42,7 +42,9 @@ export function DeletedNotesSection() {
   const restore = async (id: string, title: string) => {
     if (!rows) return
     apply(restoreNoteOps(id, rows))
-    toast(`Restored “${title}”.`, {
+    // The note comes back in the sidebar, not here: the toast says so, and
+    // opens it.
+    toast.success(`Restored “${title}”.`, {
       action: {
         label: "Open",
         onClick: () =>

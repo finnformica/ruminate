@@ -533,6 +533,14 @@ export function GridIcon16(props: IconProps) {
   )
 }
 
+export function GridFillIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M5 9C6.10457 9 7 9.89543 7 11V14C7 15.1046 6.10457 16 5 16H2C0.895431 16 0 15.1046 0 14V11C0 9.89543 0.895431 9 2 9H5ZM14 9C15.1046 9 16 9.89543 16 11V14C16 15.1046 15.1046 16 14 16H11C9.89543 16 9 15.1046 9 14V11C9 9.89543 9.89543 9 11 9H14ZM5 0C6.10457 0 7 0.895431 7 2V5C7 6.10457 6.10457 7 5 7H2C0.895431 7 0 6.10457 0 5V2C0 0.895431 0.895431 0 2 0H5ZM14 0C15.1046 0 16 0.895431 16 2V5C16 6.10457 15.1046 7 14 7H11C9.89543 7 9 6.10457 9 5V2C9 0.895431 9.89543 0 11 0H14Z" />
+    </Icon>
+  )
+}
+
 export function OfflineIcon16(props: IconProps) {
   return (
     <Icon size={16} {...props}>
@@ -651,6 +659,30 @@ export function KeyboardDownIcon16(props: IconProps) {
 }
 
 /** A picture: a framed landscape. */
+export function BoardIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M2.5 1A2.5 2.5 0 0 0 0 3.5v9A2.5 2.5 0 0 0 2.5 15h11a2.5 2.5 0 0 0 2.5-2.5v-9A2.5 2.5 0 0 0 13.5 1h-11Zm0 1.5h11a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1ZM3.5 4a.5.5 0 0 0-.5.5v4a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-4a.5.5 0 0 0-.5-.5h-3Zm6 0a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5h-3Zm0 4a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-3Zm-6 2a.5.5 0 0 0-.5.5v1a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-1a.5.5 0 0 0-.5-.5h-3Z" />
+    </Icon>
+  )
+}
+
+export function BoardFillIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M2.5 1A2.5 2.5 0 0 0 0 3.5v9A2.5 2.5 0 0 0 2.5 15h11a2.5 2.5 0 0 0 2.5-2.5v-9A2.5 2.5 0 0 0 13.5 1h-11ZM3 4.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-4Zm6 0a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-2Zm0 4a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v3a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-3Zm-6 2a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1Z" />
+    </Icon>
+  )
+}
+
+export function CameraIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M5.5 1.5a1 1 0 0 0-.83.45L3.6 3.5H2.5A2.5 2.5 0 0 0 0 6v6a2.5 2.5 0 0 0 2.5 2.5h11A2.5 2.5 0 0 0 16 12V6a2.5 2.5 0 0 0-2.5-2.5h-1.1l-1.07-1.55a1 1 0 0 0-.83-.45h-5Zm.4 1.5h4.2l1.07 1.55a1 1 0 0 0 .83.45h1.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1H4a1 1 0 0 0 .83-.45L5.9 3ZM8 5.75a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5Zm0 1.5a1.75 1.75 0 1 1 0 3.5 1.75 1.75 0 0 1 0-3.5Z" />
+    </Icon>
+  )
+}
+
 export function ImageIcon16(props: IconProps) {
   return (
     <Icon size={16} {...props}>
@@ -659,10 +691,44 @@ export function ImageIcon16(props: IconProps) {
   )
 }
 
+/** A four-point sparkle with a smaller one beside it: what asks Claude for
+ * a picture's tags (src/components/boards/board-inspector.tsx). */
+export function SparklesIcon16(props: IconProps) {
+  return (
+    <Icon size={16} fill="none" stroke="currentColor" strokeWidth={1.5} {...props}>
+      <path
+        strokeLinejoin="round"
+        d="M6.25 3.75C6.25 7.5 8.5 9.75 12.25 9.75C8.5 9.75 6.25 12 6.25 15.75C6.25 12 4 9.75 0.25 9.75C4 9.75 6.25 7.5 6.25 3.75ZM12.5 0.75C12.5 2.5 13.5 3.5 15.25 3.5C13.5 3.5 12.5 4.5 12.5 6.25C12.5 4.5 11.5 3.5 9.75 3.5C11.5 3.5 12.5 2.5 12.5 0.75Z"
+      />
+    </Icon>
+  )
+}
+
+/** Two arrows chasing round a circle — Reset, a thing put back to how it
+ * started. Primer's `sync` glyph (MIT), the one 16px set drawn as fills. */
+export function ResetIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path d="M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z" />
+    </Icon>
+  )
+}
+
 export function HistoryIcon16(props: IconProps) {
   return (
     <Icon size={16} {...props}>
       <path d="M8 1C11.866 1 15 4.13401 15 8C15 11.866 11.866 15 8 15C4.13401 15 1 11.866 1 8C1 4.13401 4.13401 1 8 1ZM8 2.5C4.96243 2.5 2.5 4.96243 2.5 8C2.5 11.0376 4.96243 13.5 8 13.5C11.0376 13.5 13.5 11.0376 13.5 8C13.5 4.96243 11.0376 2.5 8 2.5ZM8 4C8.41421 4 8.75 4.33579 8.75 4.75V7.68934L10.7803 9.71967C11.0732 10.0126 11.0732 10.4874 10.7803 10.7803C10.4874 11.0732 10.0126 11.0732 9.71967 10.7803L7.46967 8.53033C7.32902 8.38968 7.25 8.19891 7.25 8V4.75C7.25 4.33579 7.58579 4 8 4Z" />
+    </Icon>
+  )
+}
+
+export function HistoryFillIcon16(props: IconProps) {
+  return (
+    <Icon size={16} {...props}>
+      <path
+        fillRule="evenodd"
+        d="M8 1C11.866 1 15 4.13401 15 8C15 11.866 11.866 15 8 15C4.13401 15 1 11.866 1 8C1 4.13401 4.13401 1 8 1ZM8 4C7.58579 4 7.25 4.33579 7.25 4.75V8C7.25 8.19891 7.32902 8.38968 7.46967 8.53033L9.71967 10.7803C10.0126 11.0732 10.4874 11.0732 10.7803 10.7803C11.0732 10.4874 11.0732 10.0126 10.7803 9.71967L8.75 7.68934V4.75C8.75 4.33579 8.41421 4 8 4Z"
+      />
     </Icon>
   )
 }

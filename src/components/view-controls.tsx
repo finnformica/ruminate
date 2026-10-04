@@ -1,19 +1,29 @@
+import { useAtomValue } from "jotai"
 import React from "react"
+import { childIdsOf } from "../data/graph"
+import { blockIndexAtom, graphSnapshotAtom } from "../global-state"
 import { cx } from "../utils/cx"
+import { composeQuery } from "../utils/search"
 import {
+  ANCESTOR_FILTER_KEYS,
   clearFilterKey,
+  describeAncestorValue,
   describeFilter,
   describeSort,
   FILTER_TYPE_OPTIONS,
+  filterText,
   filterValues,
   sortBranches,
   sortDirections,
   toggleFilterValue,
+  withFilterText,
+  type AncestorFilterKey,
 } from "../utils/view-filter"
 import { Button } from "./ui/button"
 import { DropdownMenu } from "./ui/dropdown-menu"
 import { IconButton } from "./ui/icon-button"
-import { FilterIcon16, SortAlphabetAscIcon16 } from "./icons"
+import { FilterIcon16, SearchIcon16, SortAlphabetAscIcon16 } from "./icons"
+import { usePalettePicker } from "./palette"
 import { QualifierPicture } from "./qualifier-suggestions"
 
 /**
@@ -28,14 +38,24 @@ import { QualifierPicture } from "./qualifier-suggestions"
  * (`src/utils/view-filter.ts`), so the menu and the box can never offer
  * different things.
  *
- * **Filter offers `type:` and nothing else**, though a filter typed by hand
- * understands the whole language. The rest of the vocabulary is note-level:
- * inside a single note it holds for every row or for none, so as a menu item
- * it is not a filter but a switch between the whole note and a blank page.
- * `in:` is left out too — it names the view's root, which is what focusing
- * already does (a bullet, `f`, the breadcrumb). The one branch still sits in
- * a submenu: it keeps the shape a second qualifier would need, and keeps the
- * top of the menu a list of what can be filtered rather than of block types.
+ * **Filter offers `type:`, `parent:`, `under:` and the text** — the words
+ * the engine fuzzy-matches over each row's own text, which on a board are
+ * the captions — though a filter typed by hand understands the whole
+ * language. The rest of the vocabulary is
+ * note-level: inside a single note it holds for every row or for none, so as
+ * a menu item it is not a filter but a switch between the whole note and a
+ * blank page. `in:` is left out too — it names the view's root, which is
+ * what focusing already does (a bullet, `f`, the breadcrumb). Each branch is
+ * a submenu, so the top of the menu is a list of what can be filtered
+ * rather than of values.
+ *
+ * **Parent** and **Under** name a row by what it is or what it says
+ * (docs/query-language.md, "Under a block, by what it says"). Their
+ * submenus list what is chosen, and **Choose…** opens the ⌘K palette as a
+ * picker (`src/components/palette.ts`) over the rows of this note — or of
+ * the focused block — that have children: pick a row and the filter names
+ * it by id; take the typed text, offered as the first row ("Contains
+ * “alice”"), and the filter names every row containing it.
  *
  * A button carries a **dot** when what is on screen differs from the view
  * this note or block saved (docs/metadata.md), and the menu behind it grows
@@ -69,32 +89,111 @@ export interface SavedViewActions {
 }
 
 function DefaultFooter({ onUpdateDefault, onResetDefault }: SavedViewActions) {
+  // Stacked on a phone, where the menu is narrow (see `MENU_WIDTH`).
   return (
-    <div className="flex items-center gap-1.5">
-      <Button size="small" className="w-0 grow whitespace-nowrap" onClick={onUpdateDefault}>
+    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
+      <Button size="small" className="whitespace-nowrap sm:w-0 sm:grow" onClick={onUpdateDefault}>
         Update to default
       </Button>
-      <Button size="small" className="w-0 grow whitespace-nowrap" onClick={onResetDefault}>
+      <Button size="small" className="whitespace-nowrap sm:w-0 sm:grow" onClick={onResetDefault}>
         Reset to default
       </Button>
     </div>
   )
 }
 
+/**
+ * How wide the Filter and Sort menus are. Their branches open beside them
+ * (`DropdownMenu.Content`, nested), and on a phone the two have the
+ * screen's width to share: the menu keeps to a narrow column at the right
+ * edge, where its button is, so its branch has the room to the left. With
+ * a footer (the saved-view buttons) it widens where there is room.
+ */
+const MENU_WIDTH = "max-sm:w-44"
+const MENU_WIDTH_WITH_FOOTER = "max-sm:w-44 sm:w-80"
+
+/** The ancestor branches as the menu names them. */
+const ANCESTOR_LABELS: Record<AncestorFilterKey, string> = { parent: "Parent", under: "Under" }
+
+/**
+ * A branch a surface adds to the top of the Filter menu: a label and the
+ * blocks it offers as parents, each row a tick writing `parent:<id>` — the
+ * same qualifier the Parent branch's picker writes, so the surface's rows
+ * are a shortcut into the one filter, not a filter of their own. Each
+ * branch keeps a `parent:` qualifier of its own, told from the others by
+ * the values it offers, so two branches narrow together (both) while the
+ * ticks within one widen (either): `parent:<mauritius>,<lisbon>
+ * parent:<lamp>`. A board hands its features this way (docs/boards.md):
+ * Location, and under it the values on the page, with how many pictures
+ * carry each.
+ */
+export interface FilterBranch {
+  label: string
+  values: { id: string; label: string; count?: number }[]
+}
+
 export function FilterMenu({
   filter,
   onFilterChange,
   saved,
+  scope,
+  branches,
 }: {
   /** The view's filter, as the query language writes it. */
   filter: string
   onFilterChange: (filter: string) => void
   /** The note or block's saved view, when this session may write one. */
   saved?: SavedViewActions
+  /** What the view is rooted at — the note, or the focused block — and so
+   * what the Parent and Under pickers search within (`in:`). */
+  scope?: string
+  /** What the surface offers as parents ahead of the language's own
+   * branches, if anything. */
+  branches?: readonly FilterBranch[]
 }) {
-  const summary = describeFilter(filter)
+  const index = useAtomValue(blockIndexAtom)
+  const graph = useAtomValue(graphSnapshotAtom)
+  const openPicker = usePalettePicker()
+  // A block picked by id reads as its text.
+  const blockText = React.useCallback((id: string) => index.getBlock(id)?.text, [index])
+  const summary = describeFilter(filter, blockText)
   const active = summary !== ""
   const chosen = filterValues(filter, "type")
+  const typeSummary = chosen
+    .map((value) => FILTER_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? value)
+    .join(", ")
+
+  // The picker for an ancestor: the palette over this view's rows that have
+  // children, the typed text offered as "contains".
+  const pickAncestor = (key: AncestorFilterKey) => {
+    openPicker({
+      label: `Choose ${ANCESTOR_LABELS[key].toLowerCase()}`,
+      query: scope ? composeQuery([`in:${scope}`], "") : "",
+      placeholder: `${ANCESTOR_LABELS[key]}…`,
+      blocks: true,
+      keep: (row) => row.kind === "block" && childIdsOf(graph, row.id).length > 0,
+      textRow: (text) => `Contains “${text}”`,
+      onPick: (choice) => {
+        if (choice.kind === "note") return
+        const value = choice.kind === "block" ? choice.blockId : choice.text
+        onFilterChange(toggleFilterValue(filter, key, value))
+      },
+    })
+  }
+
+  // The words: the palette with nothing but the typed text to pick.
+  const text = filterText(filter)
+  const pickText = () => {
+    openPicker({
+      label: "Words to match",
+      placeholder: "Words…",
+      keep: () => false,
+      textRow: (typed) => `Contains “${typed}”`,
+      onPick: (choice) => {
+        if (choice.kind === "text") onFilterChange(withFilterText(filter, choice.text))
+      },
+    })
+  }
 
   return (
     <DropdownMenu modal={false}>
@@ -113,17 +212,67 @@ export function FilterMenu({
       />
       <DropdownMenu.Content
         align="end"
-        width={saved?.dirty ? 320 : undefined}
+        className={saved?.dirty ? MENU_WIDTH_WITH_FOOTER : MENU_WIDTH}
         footer={saved?.dirty ? <DefaultFooter {...saved} /> : undefined}
       >
+        {/* The surface's own branches first: each row ticks a block into
+            the branch's own `parent:` qualifier — several at once a comma
+            list, any of them, as the language reads a list — and each
+            branch writes a qualifier of its own, so a tick under Location
+            and a tick under Object AND, as the language reads two
+            qualifiers (`src/utils/view-filter.ts`). Any takes this branch's
+            qualifier out and leaves the others. */}
+        {branches?.map((branch) => {
+          const among = branch.values.map((value) => value.id)
+          const chosen = filterValues(filter, "parent", among)
+          const mine = branch.values.filter((value) => chosen.includes(value.id))
+          return (
+            <DropdownMenu.Submenu key={branch.label}>
+              <DropdownMenu.SubmenuTrigger
+                value={mine.map((value) => value.label).join(", ") || "Any"}
+              >
+                {branch.label}
+              </DropdownMenu.SubmenuTrigger>
+              <DropdownMenu.Content width={224}>
+                <DropdownMenu.Item
+                  selected={mine.length === 0}
+                  closeOnClick={false}
+                  onClick={() => onFilterChange(clearFilterKey(filter, "parent", among))}
+                >
+                  Any
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator />
+                {branch.values.map((value) => (
+                  <DropdownMenu.Item
+                    key={value.id}
+                    selected={chosen.includes(value.id)}
+                    closeOnClick={false}
+                    trailingVisual={
+                      value.count !== undefined ? (
+                        <span className="text-sm text-text-secondary">{value.count}</span>
+                      ) : undefined
+                    }
+                    onClick={() =>
+                      onFilterChange(toggleFilterValue(filter, "parent", value.id, among))
+                    }
+                  >
+                    {value.label}
+                  </DropdownMenu.Item>
+                ))}
+              </DropdownMenu.Content>
+            </DropdownMenu.Submenu>
+          )
+        })}
+        {branches && branches.length > 0 ? <DropdownMenu.Separator /> : null}
+
         {/* One branch per qualifier the menu offers. The block types come
             straight from the query box's picker; several at once is a comma
             list, exactly as it is typed. */}
         <DropdownMenu.Submenu>
-          <DropdownMenu.SubmenuTrigger value={describeFilter(filter) || "Any"}>
+          <DropdownMenu.SubmenuTrigger value={typeSummary || "Any"}>
             Type
           </DropdownMenu.SubmenuTrigger>
-          <DropdownMenu.Content align="start" side="left">
+          <DropdownMenu.Content>
             <DropdownMenu.Item
               selected={chosen.length === 0}
               closeOnClick={false}
@@ -146,6 +295,81 @@ export function FilterMenu({
                 {option.label ?? option.value}
               </DropdownMenu.Item>
             ))}
+          </DropdownMenu.Content>
+        </DropdownMenu.Submenu>
+
+        {/* The ancestors: what is chosen, each a tick that takes it out, and
+            the picker for another. */}
+        {ANCESTOR_FILTER_KEYS.map((key) => {
+          const values = filterValues(filter, key)
+          const summary = values.map((value) => describeAncestorValue(value, blockText)).join(", ")
+          return (
+            <DropdownMenu.Submenu key={key}>
+              <DropdownMenu.SubmenuTrigger value={summary || "Any"}>
+                {ANCESTOR_LABELS[key]}
+              </DropdownMenu.SubmenuTrigger>
+              <DropdownMenu.Content>
+                <DropdownMenu.Item
+                  selected={values.length === 0}
+                  closeOnClick={false}
+                  onClick={() => onFilterChange(clearFilterKey(filter, key))}
+                >
+                  Any
+                </DropdownMenu.Item>
+                {values.map((value) => (
+                  <DropdownMenu.Item
+                    key={value}
+                    selected
+                    closeOnClick={false}
+                    onClick={() => onFilterChange(toggleFilterValue(filter, key, value))}
+                  >
+                    {describeAncestorValue(value, blockText)}
+                  </DropdownMenu.Item>
+                ))}
+                <DropdownMenu.Separator />
+                <DropdownMenu.Item
+                  data-testid={`filter-${key}-choose`}
+                  icon={<SearchIcon16 />}
+                  onClick={() => pickAncestor(key)}
+                >
+                  Choose…
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Submenu>
+          )
+        })}
+
+        {/* The words: what is typed, as a tick that takes it out, and the
+            palette to type more — the typed text is its one row. */}
+        <DropdownMenu.Submenu>
+          <DropdownMenu.SubmenuTrigger value={text ? `“${text}”` : "Any"}>
+            Text
+          </DropdownMenu.SubmenuTrigger>
+          <DropdownMenu.Content>
+            <DropdownMenu.Item
+              selected={text === ""}
+              closeOnClick={false}
+              onClick={() => onFilterChange(withFilterText(filter, ""))}
+            >
+              Any
+            </DropdownMenu.Item>
+            {text ? (
+              <DropdownMenu.Item
+                selected
+                closeOnClick={false}
+                onClick={() => onFilterChange(withFilterText(filter, ""))}
+              >
+                {`“${text}”`}
+              </DropdownMenu.Item>
+            ) : null}
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item
+              data-testid="filter-text-type"
+              icon={<SearchIcon16 />}
+              onClick={pickText}
+            >
+              Type…
+            </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Submenu>
 
@@ -193,7 +417,7 @@ export function SortMenu({
       />
       <DropdownMenu.Content
         align="end"
-        width={saved?.dirty ? 320 : undefined}
+        className={saved?.dirty ? MENU_WIDTH_WITH_FOOTER : MENU_WIDTH}
         footer={saved?.dirty ? <DefaultFooter {...saved} /> : undefined}
       >
         {/* Document order is the note's own order, and the absence of a sort. */}
@@ -216,7 +440,7 @@ export function SortMenu({
             >
               {option.label ?? option.value}
             </DropdownMenu.SubmenuTrigger>
-            <DropdownMenu.Content align="start" side="left" width={200}>
+            <DropdownMenu.Content width={200}>
               {sortDirections(option.value).map((step) => (
                 <DropdownMenu.Item
                   key={step.value}

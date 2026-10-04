@@ -59,6 +59,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 ### Editor
 
 - **Block editor** (`src/components/block-editor/`, `src/blocks/`): each note is a `BlockDoc` walked out of the graph (`pageDoc`). Block types are declared once in `src/blocks/registry.ts` (markers, markdown lines, slash-menu and search entries) with their presentation in `block-editor/block-kinds.tsx`. Block bodies render through `block-content.tsx`: inline markdown only (bold, italic, links, code spans, `$$…$$` maths), with the stored text otherwise shown as is. Images and link blocks are **figures** (`src/blocks/figure.ts`, `figure-frame.tsx`): one shared layout (`align`/`size`) and frame, with the picture (`image-figure.tsx`) or the card (`link-card.tsx`) inside it.
+- **Boards** (`src/data/boards.ts`, `src/routes/_appRoot.boards.$.tsx`, docs/boards.md): a note whose page carries `board: true` (`src/utils/board-prop.ts`), opened on its own page as a wall of its pictures, with a form to caption and tag each one; the note's kind is `board` (`NoteType`). Beneath that one property nothing is new in the data: a feature is a block on the page named by its text, its values are that block's children, a picture's value is a parent link, and an untagged picture sits in the note's Unassigned basket.
 - **Search** (`src/utils/search.ts`, `block-search.ts`, `search-notes.ts`): the query language in docs/query-language.md, over notes and blocks, with the one query box (input, qualifier popover, scope pills) in `components/query-box.tsx` and the results block in `components/results-list.tsx`, shared by the Views page and the ⌘K palette.
 
 ### Routing and Worker
@@ -79,7 +80,8 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 ### File Structure
 
 - `src/blocks/` - Block types (`registry.ts`), parse/serialize, doc operations, keymap and commands
-- `src/components/ui/` - The primitives everything else is built from: `Surface` (every card, popup and modal), `Sheet` (the phone's drawers), the Base UI wrappers (Dialog, DropdownMenu, Tooltip, HoverCard, Checkbox), `ConfirmDialog` (every "are you sure?", with a `danger` or `primary` confirm; docs/design-principles.md, Confirmation), the atoms (Button, AsyncButton, IconButton, PillButton, TextInput, SearchField, Keys, Skeleton, Details) and the list recipes (`listRow`, `listHeading`). Variants are `cva`, and the axis is always `variant`/`size`. Nothing outside `ui/` spells out a control's own classes. A control that starts a request is busy until it settles: `loading` on Button and IconButton, `AsyncButton` for a click that is the request, `usePending` (`src/hooks/pending.ts`) to hold a flight (docs/design-principles.md, Busy controls).
+- `src/components/ui/` - The primitives everything else is built from: `Surface` (every card, popup and modal), `Sheet` (the phone's drawers), the Base UI wrappers (Dialog, DropdownMenu, Tooltip, HoverCard, Checkbox), `ConfirmDialog` (every "are you sure?", with a `danger` or `primary` confirm; docs/design-principles.md, Confirmation), the atoms (Button, AsyncButton, IconButton, PillButton, TextInput, SearchField, Keys, Skeleton, Details), `Toaster` (sonner in the app's colours: red for a failure, green for a confirmation the page cannot show, plain for a notice; docs/design-principles.md, Notices) and the list recipes (`listRow`, `listHeading`). Variants are `cva`, and the axis is always `variant`/`size`. Nothing outside `ui/` spells out a control's own classes. A control that starts a request is busy until it settles: `loading` on Button and IconButton, `AsyncButton` for a click that is the request, `usePending` (`src/hooks/pending.ts`) to hold a flight (docs/design-principles.md, Busy controls).
+- `src/components/settings/` - The Settings pages: the registry and sidebar rows (`settings-nav.tsx`), the cards each page draws (`settings-pages.tsx`), one file per card (docs/settings.md)
 - `src/components/block-editor/` - The block/outline editor
 - `src/components/` - React components with Storybook stories
 - `src/data/` - Graph, ops, store, database runtime, note metadata
@@ -106,6 +108,7 @@ Ruminate is a note-taking web application built with React and TypeScript. Notes
 
 - Prettier configuration: no semicolons, trailing commas, 100 character line length
 - ESLint rules enforced for TypeScript, React, and accessibility
+- A setting is a label and nothing under it. Never add or change descriptive copy on a setting without the owner's sign-off: propose the line and wait (docs/settings.md, Copy)
 
 ### Before Committing
 

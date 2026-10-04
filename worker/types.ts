@@ -61,4 +61,11 @@ export interface Env {
    * been rolled out yet.
    */
   MCP_BURST?: RateLimiter
+  /**
+   * Workers AI (wrangler.jsonc `ai`): the free provider for tagging a
+   * board's pictures (worker/handlers/board-tag.ts), behind the
+   * `cloudflareAi` flag. Optional: without the binding the Cloudflare
+   * path answers 501 and the Anthropic path is unaffected.
+   */
+  AI?: Ai
 }

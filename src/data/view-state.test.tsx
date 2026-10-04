@@ -6,7 +6,8 @@ import type { ReactNode } from "react"
 import { expandedByDepth } from "../blocks/default-collapsed"
 import { expandedLevelsAtom } from "../global-state"
 import {
-  MAX_STORED_NOTES,
+  MAX_STORED_VIEWS,
+  foldKeyOf,
   foldRule,
   readFolds,
   useFoldRule,
@@ -23,14 +24,18 @@ const stored = (noteId: string): unknown => {
 const sorted = (set: ReadonlySet<string>) => [...set].sort()
 
 /** Render the hook against a store with the given depth setting. */
-function renderWithLevels(levels: number, noteId: string | undefined) {
+function renderWithLevels(
+  levels: number,
+  noteId: string | undefined,
+  narrowing: { filter?: string; sort?: string } = {},
+) {
   const store = createStore()
   store.set(expandedLevelsAtom, levels)
   const wrapper = ({ children }: { children: ReactNode }) => (
     <Provider store={store}>{children}</Provider>
   )
-  const rendered = renderHook(({ id }) => useFoldRule(id), {
-    initialProps: { id: noteId },
+  const rendered = renderHook(({ id, narrowing }) => useFoldRule(id, narrowing), {
+    initialProps: { id: noteId, narrowing },
     wrapper,
   })
   return { ...rendered, store }
@@ -122,8 +127,8 @@ describe("writeFolds", () => {
     expect(stored("n1")).toMatchObject({ v: 3, open: [], closed: [] })
   })
 
-  it("keeps at most MAX_STORED_NOTES notes, dropping the least recently written", () => {
-    for (let i = 0; i < MAX_STORED_NOTES; i += 1) {
+  it("keeps at most MAX_STORED_VIEWS notes, dropping the least recently written", () => {
+    for (let i = 0; i < MAX_STORED_VIEWS; i += 1) {
       localStorage.setItem(
         `collapse:old-${i}`,
         JSON.stringify({ v: 3, open: [], closed: ["a"], t: i + 1 }),
@@ -180,9 +185,9 @@ describe("useFoldRule", () => {
   it("re-reads on a different note, so one note's folds never paint on another", () => {
     const { result, rerender } = renderWithLevels(2, "n1")
     act(() => result.current.setFold("a", false))
-    rerender({ id: "n2" })
+    rerender({ id: "n2", narrowing: {} })
     expect(result.current.expanded("a", 1)).toBe(true)
-    rerender({ id: "n1" })
+    rerender({ id: "n1", narrowing: {} })
     expect(result.current.expanded("a", 1)).toBe(false)
   })
 
@@ -204,5 +209,44 @@ describe("useFoldRule", () => {
     act(() => result.current.setFold("a/b", true))
     expect(result.current.expanded("a/b", 2)).toBe(true)
     expect(Object.keys(localStorage).filter((key) => key.startsWith("collapse:"))).toEqual([])
+  })
+})
+
+describe("useFoldRule, narrowed", () => {
+  it("keys the note's folds by its id alone, and a narrowed view's by the narrowing", () => {
+    expect(foldKeyOf("n1")).toBe("n1")
+    expect(foldKeyOf("n1", { filter: "", sort: "" })).toBe("n1")
+    expect(foldKeyOf("n1", { filter: "type:todo" })).not.toBe("n1")
+    expect(foldKeyOf("n1", { filter: "type:todo" })).not.toBe(foldKeyOf("n1", { sort: "text" }))
+    expect(foldKeyOf("n1", { filter: "type:todo" })).not.toBe(
+      foldKeyOf("n2", { filter: "type:todo" }),
+    )
+  })
+
+  it("starts fully open whatever the depth setting says, and folds without touching the note's", () => {
+    const { result } = renderWithLevels(1, "n1", { filter: "type:todo" })
+    // Level 1 would be closed under the note's depth setting; narrowed, it is open.
+    expect(result.current.expanded("a", 1)).toBe(true)
+    expect(result.current.expanded("a/b/c", 3)).toBe(true)
+    act(() => result.current.setFold("a", false))
+    expect(result.current.expanded("a", 1)).toBe(false)
+    // The narrowed view's entry, not the note's.
+    expect(stored("n1")).toBe(null)
+    expect(readFolds(foldKeyOf("n1", { filter: "type:todo" }))?.closed.has("a")).toBe(true)
+  })
+
+  it("keeps each narrowing's folds apart, and remembers them", () => {
+    const { result, rerender } = renderWithLevels(2, "n1", { filter: "type:todo" })
+    act(() => result.current.setFold("a", false))
+    // Another filter: its own folds, open.
+    rerender({ id: "n1", narrowing: { filter: "type:done" } })
+    expect(result.current.expanded("a", 1)).toBe(true)
+    // The note itself: the depth setting, untouched by the fold above.
+    rerender({ id: "n1", narrowing: {} })
+    expect(result.current.expanded("a", 1)).toBe(true)
+    expect(result.current.expanded("a/b", 2)).toBe(false)
+    // The first filter again: the fold made in it is back.
+    rerender({ id: "n1", narrowing: { filter: "type:todo" } })
+    expect(result.current.expanded("a", 1)).toBe(false)
   })
 })

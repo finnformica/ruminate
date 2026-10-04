@@ -5,7 +5,6 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import type React from "react"
 import type { ClipboardEvent, FocusEvent, KeyboardEvent, MouseEvent, TouchEvent } from "react"
 import { isDatabaseModeAtom, newBlockMarkerAtom } from "../../global-state"
-import { useFeature } from "../../data/features"
 import { sharedOriginAtom } from "../../data/shared-mode"
 import { shareDialogAtom } from "../share-note-dialog"
 import type { Block, BlockDoc, ChangeHint } from "../../blocks/types"
@@ -152,7 +151,12 @@ import {
   writeRichClipboard,
   type ClipboardBlock,
 } from "../../utils/rich-clipboard"
-import { BlockContextMenu, BlockMenuSheet, type BlockMenuTarget } from "./block-context-menu"
+import {
+  BlockContextMenu,
+  BlockMenuSheet,
+  type BlockMenuTarget,
+  type MenuEntry,
+} from "./block-context-menu"
 import {
   BlockItem,
   type BlockDebugOptions,
@@ -355,6 +359,7 @@ export function BlockEditor({
   newRootSignal,
   refocusSignal,
   readOnly = false,
+  menuEntries,
   browse = false,
   focusRootId: focusRootIdProp = null,
   onFocusNavigate,
@@ -372,6 +377,7 @@ export function BlockEditor({
   fixedRoots = false,
   emptyable = false,
   context,
+  onEditingChange,
 }: {
   doc: BlockDoc
   /** The next doc, and what the change means beyond it (`ChangeHint`). */
@@ -392,6 +398,14 @@ export function BlockEditor({
   onLinkPreview?: (url: string) => Promise<LinkPreview>
   /** The note this doc belongs to — what "Copy link to block" links into. */
   noteId?: string
+  /**
+   * What a row's menu holds, where the host decides rather than the editor:
+   * a browsed list (the Views page, the palette) whose rows are notes and
+   * blocks from many notes, each with the menu its sidebar row has. Given,
+   * a read-only editor opens the menu on a right-click or a press-and-hold
+   * as an editable one does; without it a read-only editor has no menu.
+   */
+  menuEntries?: (target: BlockMenuTarget) => MenuEntry[]
   /** How many places a block appears across the corpus (whether the context
    * menu offers Unlink beside Delete). Absent = only here. */
   parentCountOf?: (id: string) => number
@@ -471,6 +485,13 @@ export function BlockEditor({
    * navigates exactly as the note does.
    */
   context?: ReadonlySet<string>
+  /**
+   * Told which block is being edited — its id, or null once none is — as
+   * it changes, before the change paints. A filtered view keeps the row
+   * being edited whatever the filter says of it (`useNoteDoc`, `keep`), so
+   * the owner must know it by the render that shows the edit.
+   */
+  onEditingChange?: (id: string | null) => void
   /**
    * Whether the doc may be left with no blocks at all. Off, the only root
    * cannot be removed (⌫ on it does nothing): a note always keeps a block to
@@ -1488,8 +1509,16 @@ export function BlockEditor({
   // suggestions for a marked word and a text field's cut/copy/paste. The
   // block's menu still opens on the rest of the row (its marker, the
   // margin), and on the whole row once it is not being edited.
+  // A read-only editor has a menu only where its host says what it holds.
+  const menuEnabled = !readOnly || menuEntries !== undefined
+  const entriesFor = menuEntries ? (target: BlockMenuTarget) => menuEntries(target) : undefined
   const handleContextMenuCapture = (event: MouseEvent<HTMLDivElement>) => {
-    if (readOnly) return
+    // No menu here at all: keep the event from the trigger too, so the
+    // browser's menu shows rather than an empty popup.
+    if (!menuEnabled) {
+      event.stopPropagation()
+      return
+    }
     if (event.target instanceof HTMLTextAreaElement) {
       event.stopPropagation()
       return
@@ -1520,7 +1549,7 @@ export function BlockEditor({
       heldOpen.current = false
       return
     }
-    if (readOnly) return
+    if (!menuEnabled) return
     const pressed = event?.target ?? null
     const target = menuTargetAt(pressed)
     if (target) {
@@ -1606,7 +1635,7 @@ export function BlockEditor({
     if (selection && !selection.isCollapsed) selection.removeAllRanges()
   }
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!coarse || readOnly || event.pointerType === "mouse") return
+    if (!coarse || !menuEnabled || event.pointerType === "mouse") return
     dropPageSelection()
     // A hold in the text being edited is the person selecting some of it
     // (to format it, to copy it): iOS's own selection, and no sheet.
@@ -1732,6 +1761,7 @@ export function BlockEditor({
                 ...(asset.width && asset.height
                   ? { width: asset.width, height: asset.height }
                   : {}),
+                ...(asset.thumbhash ? { thumbhash: asset.thumbhash } : {}),
               },
             },
           },
@@ -1931,9 +1961,7 @@ export function BlockEditor({
   const isDatabaseMode = useAtomValue(isDatabaseModeAtom)
   const sharedOrigin = useAtomValue(sharedOriginAtom)
   const openShareDialog = useSetAtom(shareDialogAtom)
-  const sharingEnabled = useFeature("sharing")
-  const canShare =
-    noteId !== undefined && isDatabaseMode && sharingEnabled && !sharedOrigin.has(noteId)
+  const canShare = noteId !== undefined && isDatabaseMode && !sharedOrigin.has(noteId)
   // A block can be made a view wherever the editor has a note behind it —
   // signed out too, where the sample notes are there to play with, and in a
   // note someone shared: the view is this user's own row
@@ -1952,6 +1980,14 @@ export function BlockEditor({
   // and a paste does — so an address typed and left by Escape, a click
   // elsewhere or Enter reads as a name too. Its own undo step, so the bare
   // address is one ⌘Z away. Never in a code block.
+  // Which block is being edited, for the owner — in a layout effect, so the
+  // owner's reply lands in the same paint as the edit it is about: a row
+  // made beneath a filter would otherwise paint pruned, then held.
+  const editingId = focus ? idOfKey(focus.key) : null
+  useLayoutEffect(() => {
+    onEditingChange?.(editingId)
+  }, [editingId, onEditingChange])
+
   const lastEdited = useRef<string | null>(null)
   useEffect(() => {
     const previous = lastEdited.current
@@ -2758,9 +2794,10 @@ export function BlockEditor({
             )}
           </div>
           <BlockMenuSheet
-            target={readOnly ? null : menuTarget}
+            target={menuEnabled ? menuTarget : null}
             title={menuTarget ? (doc.blocks[menuTarget.id]?.text ?? "") : ""}
             actions={blockActions}
+            entriesFor={entriesFor}
             holding={holding}
             open={sheetOpen && menuTarget !== null}
             onOpenChange={(open) => {
@@ -2770,8 +2807,9 @@ export function BlockEditor({
         </>
       ) : (
         <BlockContextMenu
-          target={readOnly ? null : menuTarget}
+          target={menuEnabled ? menuTarget : null}
           actions={blockActions}
+          entriesFor={entriesFor}
           onOpenChange={handleMenuOpenChange}
         >
           {/* The container holds keyboard focus for select mode (tabIndex -1 =

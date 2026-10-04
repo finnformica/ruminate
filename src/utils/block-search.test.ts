@@ -3,6 +3,7 @@ import { buildGraphSnapshot, docToGraph, type GraphSnapshot } from "../data/grap
 import type { Note } from "../schema"
 import {
   createBlockIndexer,
+  hasAncestorFilter,
   hasBlockTypeFilter,
   indexNoteBlocks,
   isBlockTypeFilter,
@@ -82,6 +83,44 @@ const MISC_NOTE = makeNote({
     "  id:: blk_plain",
   ),
 })
+
+// Two days of standups: a row per person, their actions beneath. The "Alice"
+// row is a different block each day — what `under:` spans and `in:` cannot.
+const STANDUP_MON = makeNote({
+  id: "mon",
+  updatedAt: 300,
+  content: md(
+    "# Standup",
+    "  id:: blk_standup",
+    "  - Alice Smith",
+    "    id:: blk_alice_mon",
+    "    [ ] deploy the thing",
+    "      id:: blk_deploy",
+    "      needs a review first",
+    "        id:: blk_review",
+    "    [x] write the doc",
+    "      id:: blk_doc",
+    "  - Bob",
+    "    id:: blk_bob",
+    "    [ ] fix the build",
+    "      id:: blk_build",
+  ),
+})
+
+const STANDUP_TUE = makeNote({
+  id: "tue",
+  updatedAt: 400,
+  content: md(
+    "# Standup",
+    "  id:: blk_standup_tue",
+    "  - Alice Smith",
+    "    id:: blk_alice_tue",
+    "    [ ] call the client",
+    "      id:: blk_call",
+  ),
+})
+
+const STANDUPS = [STANDUP_MON, STANDUP_TUE]
 
 function buildIndex(notes: Fixture[]) {
   return createBlockIndexer()(notes, snapshotFor(notes))
@@ -301,6 +340,167 @@ describe("searchBlocks", () => {
     // Composes with everything else, and a leaf has nothing downstream.
     expect(ids(run("type:todo in:blk_head area:work"))).toEqual(["blk_milk"])
     expect(run("in:blk_milk")).toEqual([])
+  })
+})
+
+describe("under: and parent:", () => {
+  test("under: is everything beneath every block whose text matches, across notes", () => {
+    expect(ids(run("under:alice", STANDUPS))).toEqual([
+      "blk_deploy",
+      "blk_review",
+      "blk_doc",
+      "blk_call",
+    ])
+    // The text is matched case-insensitively, as a substring; quoted when it
+    // has spaces. The matching block is the scope, never a result.
+    expect(ids(run("under:ALICE", STANDUPS))).toEqual(ids(run("under:alice", STANDUPS)))
+    expect(ids(run('under:"alice smith"', STANDUPS))).toEqual(ids(run("under:alice", STANDUPS)))
+    expect(ids(run("under:bob", STANDUPS))).toEqual(["blk_build"])
+    expect(run("under:carol", STANDUPS)).toEqual([])
+  })
+
+  test("parent: keeps to the direct children", () => {
+    expect(ids(run("parent:alice", STANDUPS))).toEqual(["blk_deploy", "blk_doc", "blk_call"])
+    expect(ids(run("parent:standup", STANDUPS))).toEqual([
+      "blk_alice_mon",
+      "blk_bob",
+      "blk_alice_tue",
+    ])
+  })
+
+  test("both take a block id too, so parent:<id> is one block's direct children", () => {
+    expect(ids(run("parent:blk_standup", STANDUPS))).toEqual(["blk_alice_mon", "blk_bob"])
+    expect(ids(run("parent:blk_alice_tue", STANDUPS))).toEqual(["blk_call"])
+    expect(ids(run("under:blk_standup", STANDUPS))).toEqual(ids(run("in:blk_standup", STANDUPS)))
+  })
+
+  test("compose with type:, text, in:, -, and comma lists", () => {
+    expect(ids(run("under:alice type:todo", STANDUPS))).toEqual(["blk_deploy", "blk_call"])
+    expect(ids(run("under:alice review", STANDUPS))).toEqual(["blk_review"])
+    expect(ids(run("under:alice in:tue", STANDUPS))).toEqual(["blk_call"])
+    expect(ids(run("under:alice,bob type:todo", STANDUPS))).toEqual([
+      "blk_deploy",
+      "blk_build",
+      "blk_call",
+    ])
+    expect(ids(run("-under:alice type:todo", STANDUPS))).toEqual(["blk_build"])
+    // The review note sits under the deploy row, not directly under Alice.
+    expect(ids(run("-parent:alice type:text", STANDUPS))).toEqual(["blk_review"])
+  })
+
+  test("are block queries: the engine reports them so a bare under: lists blocks", () => {
+    expect(hasAncestorFilter(parseQuery("under:alice").filters)).toBe(true)
+    expect(hasAncestorFilter(parseQuery("-parent:blk_x").filters)).toBe(true)
+    expect(hasAncestorFilter(parseQuery("in:tue type:todo").filters)).toBe(false)
+  })
+})
+
+// A board (docs/boards.md): two features on the page, their values beneath,
+// and the pictures under the values. The brass lamp carries a Location AND
+// a Fixture — one block, two parents, reached by two paths — which the
+// markdown cannot say, so the second link is added to the graph by hand.
+const BOARD = makeNote({
+  id: "board",
+  updatedAt: 500,
+  content: md(
+    "- Location",
+    "  id:: blk_location",
+    "  - Mauritius",
+    "    id:: blk_mauritius",
+    "    brass lamp",
+    "      id:: blk_lamp_pic",
+    "    teak decking",
+    "      id:: blk_teak",
+    "  - Lisbon",
+    "    id:: blk_lisbon",
+    "    tram",
+    "      id:: blk_tram",
+    "- Fixture",
+    "  id:: blk_fixture",
+    "  - Lamp",
+    "    id:: blk_lamp",
+  ),
+})
+
+function boardIndex() {
+  const { nodes, links } = docToGraph(BOARD.id, BOARD.content, 1)
+  links.push({
+    source_id: "blk_lamp",
+    destination_id: "blk_lamp_pic",
+    kind: "child",
+    sort_key: "a0",
+    updated_at: 1,
+  })
+  return createBlockIndexer()([BOARD], buildGraphSnapshot(nodes, links))
+}
+
+const board = (query: string) => searchBlocks(parseQuery(query), boardIndex())
+const unique = (hits: BlockHit[]) => [...new Set(ids(hits))]
+
+describe("a block under two parents", () => {
+  test("is one hit per path, each showing its own path and both sharing the block's parents", () => {
+    const hits = boardIndex().hits.filter((hit) => hit.blockId === "blk_lamp_pic")
+    expect(hits.map((hit) => hit.ancestors.map((a) => a.id))).toEqual([
+      ["blk_location", "blk_mauritius"],
+      ["blk_fixture", "blk_lamp"],
+    ])
+    // Parents come in the graph's order (by source id), not the walk's.
+    const parents = ["blk_lamp", "blk_mauritius"]
+    for (const hit of hits) {
+      expect(hit.parents.map((p) => p.id)).toEqual(parents)
+      expect(hit.lineage.map((a) => a.id)).toEqual([
+        "blk_location",
+        "blk_mauritius",
+        "blk_fixture",
+        "blk_lamp",
+      ])
+    }
+    // A block with one parent and one path: its parents are the last of
+    // its ancestors and its lineage is its ancestors, as before.
+    const [teak] = boardIndex().hits.filter((hit) => hit.blockId === "blk_teak")
+    expect(teak.parents).toEqual(teak.ancestors.slice(-1))
+    expect(teak.lineage).toEqual(teak.ancestors)
+    // A root block's parent is the note, which is not a parent block.
+    const [location] = boardIndex().hits.filter((hit) => hit.blockId === "blk_location")
+    expect(location.parents).toEqual([])
+  })
+
+  test("matches parent:a parent:b — a key repeated is both", () => {
+    const hits = board("parent:blk_mauritius parent:blk_lamp")
+    expect(unique(hits)).toEqual(["blk_lamp_pic"])
+    // Found by either path, and each row still says which.
+    expect(hits.map((hit) => hit.ancestors.at(-1)?.id)).toEqual(["blk_mauritius", "blk_lamp"])
+    // By text as by id, and the pair is nothing when one side is not there.
+    expect(unique(board("parent:mauritius parent:lamp"))).toEqual(["blk_lamp_pic"])
+    expect(board("parent:blk_lisbon parent:blk_lamp")).toEqual([])
+  })
+
+  test("matches parent:a,b — a comma list is still either", () => {
+    expect(unique(board("parent:blk_mauritius,blk_lamp"))).toEqual(["blk_lamp_pic", "blk_teak"])
+    expect(unique(board("parent:blk_mauritius,blk_lisbon"))).toEqual([
+      "blk_lamp_pic",
+      "blk_teak",
+      "blk_tram",
+    ])
+    // Either within one qualifier, both across two: Mauritius or Lisbon,
+    // and a lamp — the board's Filter with a value ticked under each feature.
+    expect(unique(board("parent:blk_mauritius,blk_lisbon parent:blk_lamp"))).toEqual([
+      "blk_lamp_pic",
+    ])
+  })
+
+  test("is under every ancestor on any of its paths, so under:a under:b holds too", () => {
+    expect(unique(board("under:blk_location under:blk_fixture"))).toEqual(["blk_lamp_pic"])
+    expect(unique(board("under:location under:lamp"))).toEqual(["blk_lamp_pic"])
+    // In index order: the lamp's first occurrence is under Location, ahead
+    // of the Fixture branch, and its lineage already carries Fixture.
+    expect(unique(board("under:blk_fixture"))).toEqual(["blk_lamp_pic", "blk_lamp"])
+    // Excluding one parent excludes the block, whichever path it is seen by.
+    expect(unique(board("-parent:blk_lamp parent:blk_mauritius"))).toEqual(["blk_teak"])
+  })
+
+  test("in: stays bound to the path, as a scope is a place", () => {
+    expect(board("in:blk_lamp").map((hit) => hit.ancestors.at(-1)?.id)).toEqual(["blk_lamp"])
   })
 })
 

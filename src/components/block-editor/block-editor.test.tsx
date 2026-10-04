@@ -62,6 +62,7 @@ function Harness({
   onHint,
   knownBlock,
   noteId,
+  onEditingChange,
 }: {
   initial?: string
   /** A doc built by hand — for shapes markdown cannot express (a shared block). */
@@ -81,6 +82,7 @@ function Harness({
   knownBlock?: (id: string) => boolean
   /** The note behind the doc (what Pin and Copy link need). */
   noteId?: string
+  onEditingChange?: (id: string | null) => void
 }) {
   const [doc, setDoc] = useState<BlockDoc>(() => initialDoc ?? withStarter(parse(initial)))
   return (
@@ -103,6 +105,7 @@ function Harness({
         onDeleteEverywhere={onDeleteEverywhere}
         onImageUpload={onImageUpload}
         onLinkPreview={onLinkPreview}
+        onEditingChange={onEditingChange}
       />
       <pre data-testid="serialized">{serialize(doc)}</pre>
       {/* Markdown carries no layout, so image props are shown as themselves. */}
@@ -345,14 +348,17 @@ describe("BlockEditor focus + keyboard", () => {
     expect(highlightedText(container)).toBe("B")
   })
 
-  it("deleting a block selects the one below (above only when it was last)", () => {
+  it("deleting a block highlights the one below (above only when it was last)", () => {
     const { container } = render(<Harness initial={"A\nB\nC"} />)
     const root = editorRoot(container)
     fireEvent.keyDown(root, { key: "ArrowDown" }) // highlight B
     fireEvent.keyDown(root, { key: "Backspace" }) // delete B
-    // C slid into B's place and takes the highlight.
+    // C slid into B's place and takes the highlight: a delete from a
+    // highlight never opens an edit.
+    expect(container.querySelector("textarea")).toBeNull()
     expect(highlightedText(container)).toBe("C")
     fireEvent.keyDown(root, { key: "Backspace" }) // delete C — now the last block
+    expect(container.querySelector("textarea")).toBeNull()
     expect(highlightedText(container)).toBe("A")
   })
 
@@ -1450,7 +1456,8 @@ describe("focus mode", () => {
       await screen.findByText("Leave focus to remove the block you're focused on"),
     ).not.toBeNull()
     toast.dismiss()
-    // Its children go as they would anywhere.
+    // Its children go as they would anywhere: the row that takes the
+    // deleted one's place is highlighted, here the one the view leads with.
     fireEvent.keyDown(root, { key: "ArrowDown" }) // C → D
     fireEvent.keyDown(root, { key: "Backspace" })
     expect(serializedLines(getByTestId)).toEqual(["A", "B", "  C", "  E", "F"])
@@ -1647,6 +1654,12 @@ describe("collapse toggle", () => {
     expect(slot.getAttribute("data-testid")).toBe("paragraph-slot")
     expect(slot.className).toContain("w-[15px]")
     expect(slot.querySelector(".block-key")).toBeNull()
+    // No key to swap with, so the chevron is pinned visible while open too,
+    // and stays so after a fold and an unfold.
+    expect(toggleOf(container, "blk_pp")!.className).toContain("block-toggle-pinned")
+    fireEvent.click(toggleOf(container, "blk_pp")!)
+    fireEvent.click(toggleOf(container, "blk_pp")!)
+    expect(toggleOf(container, "blk_pp")!.className).toContain("block-toggle-pinned")
     // A quote keys on `>`; a leaf paragraph keeps the empty slot, no toggle.
     const { container: c2 } = render(
       <Harness initial={"A paragraph\n  id:: blk_p\n> A quote\n  id:: blk_q\n"} />,
@@ -2352,11 +2365,15 @@ describe("turn into (select-mode marker keys)", () => {
     expect(serializedLines(getByTestId)).toEqual(["task"])
   })
 
-  it("on an empty block the marker applies AND editing opens", () => {
+  it("on an empty block the marker applies and the highlight stays, as on any other", () => {
     const { container, getByTestId } = render(<Harness initial={""} />)
     const root = editorRoot(container)
     fireEvent.keyDown(root, { key: "-" })
     expect(getByTestId("serialized").textContent).toContain("- ")
+    // No edit opened by the side: ↵ is what opens the block.
+    expect(container.querySelector("textarea")).toBeNull()
+    expect(highlightedText(container)).toBe("")
+    fireEvent.keyDown(root, { key: "Enter" })
     const textarea = container.querySelector("textarea")
     expect(textarea).not.toBeNull()
     expect(textarea!.value).toBe("") // the marker is styling, not body text
@@ -2748,6 +2765,44 @@ describe("BlockEditor context menu", () => {
     expect(getDefaultStore().get(viewRootIdsAtom).has(blockId)).toBe(false)
   })
 
+  it("a read-only editor has no menu of its own, and draws its host's list when given one", async () => {
+    // A read-only preview: a right-click is the browser's.
+    const { container, unmount } = render(
+      <BlockEditor doc={parse("A\nB")} onChange={() => {}} readOnly />,
+    )
+    await act(async () => {
+      fireEvent.contextMenu(container.querySelectorAll("[data-occurrence]")[0]!, {
+        clientX: 10,
+        clientY: 10,
+      })
+    })
+    expect(screen.queryByTestId("block-context-menu")).toBeNull()
+    unmount()
+    // A browsed list (the Views page): the host says what a row's menu holds.
+    const onSelect = vi.fn()
+    const { container: browsed } = render(
+      <BlockEditor
+        doc={parse("A\n  id:: blk_a\nB\n  id:: blk_b")}
+        onChange={() => {}}
+        readOnly
+        onActivate={() => {}}
+        menuEntries={(target) => [
+          { kind: "item", label: `Host item for ${target.id}`, onSelect },
+          { kind: "separator" },
+          { kind: "item", label: "Greyed", disabled: true, onSelect },
+        ]}
+      />,
+    )
+    const menu = await openMenuOn(browsed, 1)
+    expect(menu.textContent).toContain("Host item for blk_b")
+    expect(menu.textContent).not.toContain("Delete")
+    expect(
+      screen.getByText("Greyed").closest('[role="menuitem"]')?.getAttribute("aria-disabled"),
+    ).toBe("true")
+    await pick("Host item for blk_b")
+    expect(onSelect).toHaveBeenCalled()
+  })
+
   it("offers Add to Views only where the rows are a note's own", async () => {
     // No note behind the editor (a clipboard fragment, Storybook): nothing
     // to list the block under, so no view to make.
@@ -2905,6 +2960,7 @@ describe("BlockEditor images", () => {
   const imagePaste = (files: File[]) => ({
     clipboardData: { files, types: ["Files"], getData: () => "" },
   })
+  const THUMBHASH = "YyUKNJh2d3eAiHh3iIeGcGgHdw=="
   const uploads = (id = "img_abcdefghijklmnop") =>
     vi.fn(async (): Promise<UploadedImage> => ({ id, width: 640, height: 480 }))
 
@@ -2941,9 +2997,13 @@ describe("BlockEditor images", () => {
     expect(serializedLines(getByTestId)).toHaveLength(4)
 
     await act(async () => {
-      settle({ id: "img_abcdefghijklmnop", width: 640, height: 480 })
+      settle({ id: "img_abcdefghijklmnop", width: 640, height: 480, thumbhash: THUMBHASH })
     })
     expect(queryByTestId("block-image-uploading")).toBeNull()
+    // The picture's size and likeness land with its id.
+    expect(JSON.parse(getByTestId("image-props").textContent ?? "[]")).toEqual([
+      { image: "img_abcdefghijklmnop", width: 640, height: 480, thumbhash: THUMBHASH },
+    ])
     expect(serializedLines(getByTestId)).toEqual([
       "A",
       "B",
@@ -3219,9 +3279,12 @@ describe("BlockEditor images", () => {
       <Harness initialDoc={imageDoc({ src: SRC, width: 1200, height: 500 })} />,
     )
     const figure = natural.container.querySelector<HTMLElement>('[data-testid="image-figure"]')!
+    // jsdom folds `calc(20rem * 2.4)` as it stores it.
     expect(figure.style.width).toBe("min(1200px, 100%, 48rem)")
+    // The ratio is the box's, and the picture fills it.
     const img = natural.container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!
-    expect(img.style.aspectRatio).toBe("1200 / 500")
+    expect(img.parentElement!.style.aspectRatio).toBe("1200 / 500")
+    expect(img.parentElement!.className).toContain("w-full")
     expect(img.className).toContain("w-full")
     natural.unmount()
 
@@ -3233,8 +3296,8 @@ describe("BlockEditor images", () => {
       sized.container.querySelector<HTMLElement>('[data-testid="image-figure"]')!.style.width,
     ).toBe("40%")
     expect(
-      sized.container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!.style
-        .aspectRatio,
+      sized.container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!.parentElement!
+        .style.aspectRatio,
     ).toBe("1200 / 500")
     sized.unmount()
 
@@ -3263,9 +3326,36 @@ describe("BlockEditor images", () => {
       bare.container.querySelector<HTMLElement>('[data-testid="image-figure"]')!.style.width,
     ).toBe("")
     const plain = bare.container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!
-    expect(plain.style.aspectRatio).toBe("")
-    expect(plain.className).toContain("max-h-80")
+    expect(plain.parentElement!.style.aspectRatio).toBe("")
+    expect(plain.parentElement!.style.maxHeight).toBe("20rem")
     expect(plain.className).not.toMatch(/(^|\s)w-full(\s|$)/)
+  })
+
+  it("stands a picture's likeness in its place, and says so when it cannot be fetched", async () => {
+    // No session in the harness: the picture can be neither read from the
+    // device nor fetched — as it is offline.
+    const { container, findByTestId } = render(
+      <Harness
+        initialDoc={imageDoc({
+          // An id no other test has uploaded (and so primed the page's cache).
+          image: "img_notonthisdevice",
+          width: 1200,
+          height: 500,
+          thumbhash: "YyUKNJh2d3eAiHh3iIeGcGgHdw==",
+        })}
+      />,
+    )
+    const placeholder = container.querySelector<HTMLElement>(
+      '[data-testid="block-image-placeholder"]',
+    )!
+    // The blurred likeness, in the picture's own box, and still.
+    expect(placeholder.style.backgroundImage).toMatch(/^url\("data:image\/png;base64,/)
+    expect(placeholder.style.aspectRatio).toBe("1200 / 500")
+    expect(placeholder.className).not.toContain("animate-pulse")
+    // It stays that box, with a badge, rather than turning into "unavailable".
+    expect((await findByTestId("block-image-unreachable")).textContent).toMatch(/load|Offline/)
+    expect(container.querySelector('[data-testid="block-image-missing"]')).toBeNull()
+    expect(container.querySelector('[data-testid="block-image-placeholder"]')).toBe(placeholder)
   })
 
   it("the figure's toolbar sets the side the picture keeps to, as one undo step", () => {
@@ -4572,5 +4662,39 @@ describe("every surface runs the one action set", () => {
     const ids = idsOf(container)
     const roots = getDefaultStore().get(viewRootIdsAtom)
     expect(ids.map((id) => roots.has(id))).toEqual([false, true, true, false])
+  })
+})
+
+describe("onEditingChange", () => {
+  it("names the block being edited as it changes, and nothing once none is", () => {
+    const seen: (string | null)[] = []
+    const { container } = render(
+      <Harness initial={"A\nB"} onEditingChange={(id) => seen.push(id)} />,
+    )
+    const root = editorRoot(container)
+    const idOf = (text: string) =>
+      Array.from(container.querySelectorAll<HTMLElement>("[data-block-id]")).find((el) =>
+        el.textContent?.includes(text),
+      )!.dataset.blockId!
+    expect(seen).toEqual([null])
+    const a = idOf("A")
+    const b = idOf("B")
+    fireEvent.keyDown(root, { key: "Enter" }) // edit A
+    expect(seen.at(-1)).toBe(a)
+    // Enter at the end of A makes a row beneath it, edited: the new row is
+    // named by the render that shows it, before anything paints.
+    const textarea = container.querySelector("textarea")!
+    textarea.setSelectionRange(1, 1)
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    const fresh = seen.at(-1)
+    expect(fresh).not.toBeNull()
+    expect([a, b]).not.toContain(fresh)
+    fireEvent.keyDown(container.querySelector("textarea")!, { key: "Escape" })
+    expect(seen.at(-1)).toBeNull()
+    // The row named was the one made: it is on the page, after A.
+    const ids = Array.from(container.querySelectorAll<HTMLElement>("[data-block-id]")).map(
+      (el) => el.dataset.blockId,
+    )
+    expect(ids).toEqual([a, fresh, b])
   })
 })

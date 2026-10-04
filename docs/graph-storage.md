@@ -113,7 +113,7 @@ atom signed out.
   attempted: pushes queue, pulls wait, nothing is recorded as an error, and
   the `online` event runs both at once (a timer re-checks the flag as a
   backstop). The sidebar's sync status reads **Offline** in place of Synced /
-  Syncing… / Sync failed, with a tooltip saying notes are saved on this
+  Saving… / Sync failed, with a tooltip saying notes are saved on this
   device and will sync once the network is back; it is not a button, since
   a click could do nothing. A first-ever boot while offline shows an
   explanatory empty state; anything written then is kept locally and synced

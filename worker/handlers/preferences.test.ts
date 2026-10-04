@@ -11,6 +11,9 @@ import { preferences } from "./preferences"
 const USER = 7
 const OTHER_USER = 8
 
+/** Every preference at its default: what a fresh account reads. */
+const DEFAULTS = { whatsNewCard: false, useCloudflareAi: false }
+
 let harness: McpTestEnv
 
 /** A GitHub stub: "good" is USER's token, "other" is OTHER_USER's. */
@@ -66,22 +69,24 @@ describe("reading and saving", () => {
   it("starts at the defaults, with the what's-new card off", async () => {
     const response = await send(apiRequest("GET"))
     expect(response.status).toBe(200)
-    expect(await bodyOf(response)).toEqual({ preferences: { whatsNewCard: false } })
+    expect(await bodyOf(response)).toEqual({ preferences: DEFAULTS })
   })
 
   it("stores a saved preference and reads it back", async () => {
-    const saved = await send(apiRequest("PUT", { preferences: { whatsNewCard: true } }))
+    const saved = await send(
+      apiRequest("PUT", { preferences: { ...DEFAULTS, whatsNewCard: true } }),
+    )
     expect(saved.status).toBe(200)
-    expect(await bodyOf(saved)).toEqual({ preferences: { whatsNewCard: true } })
+    expect(await bodyOf(saved)).toEqual({ preferences: { ...DEFAULTS, whatsNewCard: true } })
     expect(await bodyOf(await send(apiRequest("GET")))).toEqual({
-      preferences: { whatsNewCard: true },
+      preferences: { ...DEFAULTS, whatsNewCard: true },
     })
   })
 
   it("merges a partial save over what is stored", async () => {
-    await send(apiRequest("PUT", { preferences: { whatsNewCard: true } }))
+    await send(apiRequest("PUT", { preferences: { ...DEFAULTS, whatsNewCard: true } }))
     const saved = await send(apiRequest("PUT", { preferences: {} }))
-    expect(await bodyOf(saved)).toEqual({ preferences: { whatsNewCard: true } })
+    expect(await bodyOf(saved)).toEqual({ preferences: { ...DEFAULTS, whatsNewCard: true } })
   })
 
   it("drops keys it does not know and values of the wrong type", async () => {
@@ -89,11 +94,11 @@ describe("reading and saving", () => {
       apiRequest("PUT", { preferences: { whatsNewCard: "yes", admin: true } }),
     )
     expect(saved.status).toBe(200)
-    expect(await bodyOf(saved)).toEqual({ preferences: { whatsNewCard: false } })
+    expect(await bodyOf(saved)).toEqual({ preferences: DEFAULTS })
     const rows = await harness
       .tenant(USER)
       .exec("SELECT value FROM meta WHERE user_id = :tenant AND key = 'preferences'")
-    expect(JSON.parse(String(rows[0]?.value))).toEqual({ whatsNewCard: false })
+    expect(JSON.parse(String(rows[0]?.value))).toEqual(DEFAULTS)
   })
 
   it("refuses a body that is not shaped as preferences", async () => {
@@ -103,12 +108,12 @@ describe("reading and saving", () => {
   })
 
   it("keeps each account's preferences to itself", async () => {
-    await send(apiRequest("PUT", { preferences: { whatsNewCard: true } }))
+    await send(apiRequest("PUT", { preferences: { ...DEFAULTS, whatsNewCard: true } }))
     expect(await bodyOf(await send(apiRequest("GET", undefined, "other")))).toEqual({
-      preferences: { whatsNewCard: false },
+      preferences: DEFAULTS,
     })
     expect(await bodyOf(await send(apiRequest("GET")))).toEqual({
-      preferences: { whatsNewCard: true },
+      preferences: { ...DEFAULTS, whatsNewCard: true },
     })
   })
 
@@ -117,7 +122,7 @@ describe("reading and saving", () => {
       .tenant(USER)
       .exec("INSERT INTO meta (user_id, key, value) VALUES (:tenant, 'preferences', '{oops')")
     expect(await bodyOf(await send(apiRequest("GET")))).toEqual({
-      preferences: { whatsNewCard: false },
+      preferences: DEFAULTS,
     })
   })
 })

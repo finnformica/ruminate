@@ -8,165 +8,294 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-// Import Routes
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as AppRootRouteImport } from './routes/_appRoot'
+import { Route as AppRootIndexRouteImport } from './routes/_appRoot.index'
+import { Route as AppRootAdminRouteImport } from './routes/_appRoot.admin'
+import { Route as AppRootChangelogRouteImport } from './routes/_appRoot.changelog'
+import { Route as AppRootSettingsRouteImport } from './routes/_appRoot.settings'
+import { Route as AppRootBoardsSplatRouteImport } from './routes/_appRoot.boards.$'
+import { Route as AppRootInviteTokenRouteImport } from './routes/_appRoot.invite.$token'
+import { Route as AppRootNotesIndexRouteImport } from './routes/_appRoot.notes.index'
+import { Route as AppRootNotesSplatRouteImport } from './routes/_appRoot.notes_.$'
+import { Route as AppRootSettingsIndexRouteImport } from './routes/_appRoot.settings.index'
+import { Route as AppRootSettingsPageRouteImport } from './routes/_appRoot.settings.$page'
+import { Route as AppRootViewsIndexRouteImport } from './routes/_appRoot.views.index'
+import { Route as AppRootViewsSplatRouteImport } from './routes/_appRoot.views_.$'
 
-import { Route as rootRoute } from './routes/__root'
-import { Route as AppRootImport } from './routes/_appRoot'
-import { Route as AppRootIndexImport } from './routes/_appRoot.index'
-import { Route as AppRootSettingsImport } from './routes/_appRoot.settings'
-import { Route as AppRootChangelogImport } from './routes/_appRoot.changelog'
-import { Route as AppRootAdminImport } from './routes/_appRoot.admin'
-import { Route as AppRootViewsIndexImport } from './routes/_appRoot.views.index'
-import { Route as AppRootNotesIndexImport } from './routes/_appRoot.notes.index'
-import { Route as AppRootViewsSplatImport } from './routes/_appRoot.views_.$'
-import { Route as AppRootNotesSplatImport } from './routes/_appRoot.notes_.$'
-import { Route as AppRootInviteTokenImport } from './routes/_appRoot.invite.$token'
-
-// Create/Update Routes
-
-const AppRootRoute = AppRootImport.update({
+const AppRootRoute = AppRootRouteImport.update({
   id: '/_appRoot',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
-
-const AppRootIndexRoute = AppRootIndexImport.update({
+const AppRootIndexRoute = AppRootIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppRootRoute,
 } as any)
-
-const AppRootSettingsRoute = AppRootSettingsImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => AppRootRoute,
-} as any)
-
-const AppRootChangelogRoute = AppRootChangelogImport.update({
-  id: '/changelog',
-  path: '/changelog',
-  getParentRoute: () => AppRootRoute,
-} as any)
-
-const AppRootAdminRoute = AppRootAdminImport.update({
+const AppRootAdminRoute = AppRootAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
   getParentRoute: () => AppRootRoute,
 } as any)
-
-const AppRootViewsIndexRoute = AppRootViewsIndexImport.update({
-  id: '/views/',
-  path: '/views/',
+const AppRootChangelogRoute = AppRootChangelogRouteImport.update({
+  id: '/changelog',
+  path: '/changelog',
   getParentRoute: () => AppRootRoute,
 } as any)
-
-const AppRootNotesIndexRoute = AppRootNotesIndexImport.update({
+const AppRootSettingsRoute = AppRootSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRootRoute,
+} as any)
+const AppRootBoardsSplatRoute = AppRootBoardsSplatRouteImport.update({
+  id: '/boards/$',
+  path: '/boards/$',
+  getParentRoute: () => AppRootRoute,
+} as any)
+const AppRootInviteTokenRoute = AppRootInviteTokenRouteImport.update({
+  id: '/invite/$token',
+  path: '/invite/$token',
+  getParentRoute: () => AppRootRoute,
+} as any)
+const AppRootNotesIndexRoute = AppRootNotesIndexRouteImport.update({
   id: '/notes/',
   path: '/notes/',
   getParentRoute: () => AppRootRoute,
 } as any)
-
-const AppRootViewsSplatRoute = AppRootViewsSplatImport.update({
+const AppRootNotesSplatRoute = AppRootNotesSplatRouteImport.update({
+  id: '/notes_/$',
+  path: '/notes/$',
+  getParentRoute: () => AppRootRoute,
+} as any)
+const AppRootSettingsIndexRoute = AppRootSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppRootSettingsRoute,
+} as any)
+const AppRootSettingsPageRoute = AppRootSettingsPageRouteImport.update({
+  id: '/$page',
+  path: '/$page',
+  getParentRoute: () => AppRootSettingsRoute,
+} as any)
+const AppRootViewsIndexRoute = AppRootViewsIndexRouteImport.update({
+  id: '/views/',
+  path: '/views/',
+  getParentRoute: () => AppRootRoute,
+} as any)
+const AppRootViewsSplatRoute = AppRootViewsSplatRouteImport.update({
   id: '/views_/$',
   path: '/views/$',
   getParentRoute: () => AppRootRoute,
 } as any)
 
-const AppRootNotesSplatRoute = AppRootNotesSplatImport.update({
-  id: '/notes_/$',
-  path: '/notes/$',
-  getParentRoute: () => AppRootRoute,
-} as any)
-
-const AppRootInviteTokenRoute = AppRootInviteTokenImport.update({
-  id: '/invite/$token',
-  path: '/invite/$token',
-  getParentRoute: () => AppRootRoute,
-} as any)
-
-// Populate the FileRoutesByPath interface
+export interface FileRoutesByFullPath {
+  '/': typeof AppRootIndexRoute
+  '/admin': typeof AppRootAdminRoute
+  '/changelog': typeof AppRootChangelogRoute
+  '/settings': typeof AppRootSettingsRouteWithChildren
+  '/boards/$': typeof AppRootBoardsSplatRoute
+  '/invite/$token': typeof AppRootInviteTokenRoute
+  '/notes/$': typeof AppRootNotesSplatRoute
+  '/settings/$page': typeof AppRootSettingsPageRoute
+  '/views/$': typeof AppRootViewsSplatRoute
+  '/notes/': typeof AppRootNotesIndexRoute
+  '/settings/': typeof AppRootSettingsIndexRoute
+  '/views/': typeof AppRootViewsIndexRoute
+}
+export interface FileRoutesByTo {
+  '/admin': typeof AppRootAdminRoute
+  '/changelog': typeof AppRootChangelogRoute
+  '/': typeof AppRootIndexRoute
+  '/boards/$': typeof AppRootBoardsSplatRoute
+  '/invite/$token': typeof AppRootInviteTokenRoute
+  '/notes/$': typeof AppRootNotesSplatRoute
+  '/settings/$page': typeof AppRootSettingsPageRoute
+  '/views/$': typeof AppRootViewsSplatRoute
+  '/notes': typeof AppRootNotesIndexRoute
+  '/settings': typeof AppRootSettingsIndexRoute
+  '/views': typeof AppRootViewsIndexRoute
+}
+export interface FileRoutesById {
+  __root__: typeof rootRouteImport
+  '/_appRoot': typeof AppRootRouteWithChildren
+  '/_appRoot/admin': typeof AppRootAdminRoute
+  '/_appRoot/changelog': typeof AppRootChangelogRoute
+  '/_appRoot/settings': typeof AppRootSettingsRouteWithChildren
+  '/_appRoot/': typeof AppRootIndexRoute
+  '/_appRoot/boards/$': typeof AppRootBoardsSplatRoute
+  '/_appRoot/invite/$token': typeof AppRootInviteTokenRoute
+  '/_appRoot/notes_/$': typeof AppRootNotesSplatRoute
+  '/_appRoot/settings/$page': typeof AppRootSettingsPageRoute
+  '/_appRoot/views_/$': typeof AppRootViewsSplatRoute
+  '/_appRoot/notes/': typeof AppRootNotesIndexRoute
+  '/_appRoot/settings/': typeof AppRootSettingsIndexRoute
+  '/_appRoot/views/': typeof AppRootViewsIndexRoute
+}
+export interface FileRouteTypes {
+  fileRoutesByFullPath: FileRoutesByFullPath
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/changelog'
+    | '/settings'
+    | '/boards/$'
+    | '/invite/$token'
+    | '/notes/$'
+    | '/settings/$page'
+    | '/views/$'
+    | '/notes/'
+    | '/settings/'
+    | '/views/'
+  fileRoutesByTo: FileRoutesByTo
+  to:
+    | '/admin'
+    | '/changelog'
+    | '/'
+    | '/boards/$'
+    | '/invite/$token'
+    | '/notes/$'
+    | '/settings/$page'
+    | '/views/$'
+    | '/notes'
+    | '/settings'
+    | '/views'
+  id:
+    | '__root__'
+    | '/_appRoot'
+    | '/_appRoot/admin'
+    | '/_appRoot/changelog'
+    | '/_appRoot/settings'
+    | '/_appRoot/'
+    | '/_appRoot/boards/$'
+    | '/_appRoot/invite/$token'
+    | '/_appRoot/notes_/$'
+    | '/_appRoot/settings/$page'
+    | '/_appRoot/views_/$'
+    | '/_appRoot/notes/'
+    | '/_appRoot/settings/'
+    | '/_appRoot/views/'
+  fileRoutesById: FileRoutesById
+}
+export interface RootRouteChildren {
+  AppRootRoute: typeof AppRootRouteWithChildren
+}
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
     '/_appRoot': {
       id: '/_appRoot'
       path: ''
-      fullPath: ''
-      preLoaderRoute: typeof AppRootImport
-      parentRoute: typeof rootRoute
-    }
-    '/_appRoot/admin': {
-      id: '/_appRoot/admin'
-      path: '/admin'
-      fullPath: '/admin'
-      preLoaderRoute: typeof AppRootAdminImport
-      parentRoute: typeof AppRootImport
-    }
-    '/_appRoot/changelog': {
-      id: '/_appRoot/changelog'
-      path: '/changelog'
-      fullPath: '/changelog'
-      preLoaderRoute: typeof AppRootChangelogImport
-      parentRoute: typeof AppRootImport
-    }
-    '/_appRoot/settings': {
-      id: '/_appRoot/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof AppRootSettingsImport
-      parentRoute: typeof AppRootImport
+      fullPath: '/'
+      preLoaderRoute: typeof AppRootRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_appRoot/': {
       id: '/_appRoot/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof AppRootIndexImport
-      parentRoute: typeof AppRootImport
+      preLoaderRoute: typeof AppRootIndexRouteImport
+      parentRoute: typeof AppRootRoute
+    }
+    '/_appRoot/admin': {
+      id: '/_appRoot/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AppRootAdminRouteImport
+      parentRoute: typeof AppRootRoute
+    }
+    '/_appRoot/changelog': {
+      id: '/_appRoot/changelog'
+      path: '/changelog'
+      fullPath: '/changelog'
+      preLoaderRoute: typeof AppRootChangelogRouteImport
+      parentRoute: typeof AppRootRoute
+    }
+    '/_appRoot/settings': {
+      id: '/_appRoot/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppRootSettingsRouteImport
+      parentRoute: typeof AppRootRoute
+    }
+    '/_appRoot/boards/$': {
+      id: '/_appRoot/boards/$'
+      path: '/boards/$'
+      fullPath: '/boards/$'
+      preLoaderRoute: typeof AppRootBoardsSplatRouteImport
+      parentRoute: typeof AppRootRoute
     }
     '/_appRoot/invite/$token': {
       id: '/_appRoot/invite/$token'
       path: '/invite/$token'
       fullPath: '/invite/$token'
-      preLoaderRoute: typeof AppRootInviteTokenImport
-      parentRoute: typeof AppRootImport
+      preLoaderRoute: typeof AppRootInviteTokenRouteImport
+      parentRoute: typeof AppRootRoute
+    }
+    '/_appRoot/notes/': {
+      id: '/_appRoot/notes/'
+      path: '/notes'
+      fullPath: '/notes/'
+      preLoaderRoute: typeof AppRootNotesIndexRouteImport
+      parentRoute: typeof AppRootRoute
     }
     '/_appRoot/notes_/$': {
       id: '/_appRoot/notes_/$'
       path: '/notes/$'
       fullPath: '/notes/$'
-      preLoaderRoute: typeof AppRootNotesSplatImport
-      parentRoute: typeof AppRootImport
+      preLoaderRoute: typeof AppRootNotesSplatRouteImport
+      parentRoute: typeof AppRootRoute
+    }
+    '/_appRoot/settings/': {
+      id: '/_appRoot/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof AppRootSettingsIndexRouteImport
+      parentRoute: typeof AppRootSettingsRoute
+    }
+    '/_appRoot/settings/$page': {
+      id: '/_appRoot/settings/$page'
+      path: '/$page'
+      fullPath: '/settings/$page'
+      preLoaderRoute: typeof AppRootSettingsPageRouteImport
+      parentRoute: typeof AppRootSettingsRoute
+    }
+    '/_appRoot/views/': {
+      id: '/_appRoot/views/'
+      path: '/views'
+      fullPath: '/views/'
+      preLoaderRoute: typeof AppRootViewsIndexRouteImport
+      parentRoute: typeof AppRootRoute
     }
     '/_appRoot/views_/$': {
       id: '/_appRoot/views_/$'
       path: '/views/$'
       fullPath: '/views/$'
-      preLoaderRoute: typeof AppRootViewsSplatImport
-      parentRoute: typeof AppRootImport
-    }
-    '/_appRoot/notes/': {
-      id: '/_appRoot/notes/'
-      path: '/notes'
-      fullPath: '/notes'
-      preLoaderRoute: typeof AppRootNotesIndexImport
-      parentRoute: typeof AppRootImport
-    }
-    '/_appRoot/views/': {
-      id: '/_appRoot/views/'
-      path: '/views'
-      fullPath: '/views'
-      preLoaderRoute: typeof AppRootViewsIndexImport
-      parentRoute: typeof AppRootImport
+      preLoaderRoute: typeof AppRootViewsSplatRouteImport
+      parentRoute: typeof AppRootRoute
     }
   }
 }
 
-// Create and export the route tree
+interface AppRootSettingsRouteChildren {
+  AppRootSettingsPageRoute: typeof AppRootSettingsPageRoute
+  AppRootSettingsIndexRoute: typeof AppRootSettingsIndexRoute
+}
+
+const AppRootSettingsRouteChildren: AppRootSettingsRouteChildren = {
+  AppRootSettingsPageRoute: AppRootSettingsPageRoute,
+  AppRootSettingsIndexRoute: AppRootSettingsIndexRoute,
+}
+
+const AppRootSettingsRouteWithChildren = AppRootSettingsRoute._addFileChildren(
+  AppRootSettingsRouteChildren,
+)
 
 interface AppRootRouteChildren {
   AppRootAdminRoute: typeof AppRootAdminRoute
   AppRootChangelogRoute: typeof AppRootChangelogRoute
-  AppRootSettingsRoute: typeof AppRootSettingsRoute
+  AppRootSettingsRoute: typeof AppRootSettingsRouteWithChildren
   AppRootIndexRoute: typeof AppRootIndexRoute
+  AppRootBoardsSplatRoute: typeof AppRootBoardsSplatRoute
   AppRootInviteTokenRoute: typeof AppRootInviteTokenRoute
   AppRootNotesSplatRoute: typeof AppRootNotesSplatRoute
   AppRootViewsSplatRoute: typeof AppRootViewsSplatRoute
@@ -177,8 +306,9 @@ interface AppRootRouteChildren {
 const AppRootRouteChildren: AppRootRouteChildren = {
   AppRootAdminRoute: AppRootAdminRoute,
   AppRootChangelogRoute: AppRootChangelogRoute,
-  AppRootSettingsRoute: AppRootSettingsRoute,
+  AppRootSettingsRoute: AppRootSettingsRouteWithChildren,
   AppRootIndexRoute: AppRootIndexRoute,
+  AppRootBoardsSplatRoute: AppRootBoardsSplatRoute,
   AppRootInviteTokenRoute: AppRootInviteTokenRoute,
   AppRootNotesSplatRoute: AppRootNotesSplatRoute,
   AppRootViewsSplatRoute: AppRootViewsSplatRoute,
@@ -189,155 +319,9 @@ const AppRootRouteChildren: AppRootRouteChildren = {
 const AppRootRouteWithChildren =
   AppRootRoute._addFileChildren(AppRootRouteChildren)
 
-export interface FileRoutesByFullPath {
-  '': typeof AppRootRouteWithChildren
-  '/admin': typeof AppRootAdminRoute
-  '/changelog': typeof AppRootChangelogRoute
-  '/settings': typeof AppRootSettingsRoute
-  '/': typeof AppRootIndexRoute
-  '/invite/$token': typeof AppRootInviteTokenRoute
-  '/notes/$': typeof AppRootNotesSplatRoute
-  '/views/$': typeof AppRootViewsSplatRoute
-  '/notes': typeof AppRootNotesIndexRoute
-  '/views': typeof AppRootViewsIndexRoute
-}
-
-export interface FileRoutesByTo {
-  '/admin': typeof AppRootAdminRoute
-  '/changelog': typeof AppRootChangelogRoute
-  '/settings': typeof AppRootSettingsRoute
-  '/': typeof AppRootIndexRoute
-  '/invite/$token': typeof AppRootInviteTokenRoute
-  '/notes/$': typeof AppRootNotesSplatRoute
-  '/views/$': typeof AppRootViewsSplatRoute
-  '/notes': typeof AppRootNotesIndexRoute
-  '/views': typeof AppRootViewsIndexRoute
-}
-
-export interface FileRoutesById {
-  __root__: typeof rootRoute
-  '/_appRoot': typeof AppRootRouteWithChildren
-  '/_appRoot/admin': typeof AppRootAdminRoute
-  '/_appRoot/changelog': typeof AppRootChangelogRoute
-  '/_appRoot/settings': typeof AppRootSettingsRoute
-  '/_appRoot/': typeof AppRootIndexRoute
-  '/_appRoot/invite/$token': typeof AppRootInviteTokenRoute
-  '/_appRoot/notes_/$': typeof AppRootNotesSplatRoute
-  '/_appRoot/views_/$': typeof AppRootViewsSplatRoute
-  '/_appRoot/notes/': typeof AppRootNotesIndexRoute
-  '/_appRoot/views/': typeof AppRootViewsIndexRoute
-}
-
-export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | ''
-    | '/admin'
-    | '/changelog'
-    | '/settings'
-    | '/'
-    | '/invite/$token'
-    | '/notes/$'
-    | '/views/$'
-    | '/notes'
-    | '/views'
-  fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/admin'
-    | '/changelog'
-    | '/settings'
-    | '/'
-    | '/invite/$token'
-    | '/notes/$'
-    | '/views/$'
-    | '/notes'
-    | '/views'
-  id:
-    | '__root__'
-    | '/_appRoot'
-    | '/_appRoot/admin'
-    | '/_appRoot/changelog'
-    | '/_appRoot/settings'
-    | '/_appRoot/'
-    | '/_appRoot/invite/$token'
-    | '/_appRoot/notes_/$'
-    | '/_appRoot/views_/$'
-    | '/_appRoot/notes/'
-    | '/_appRoot/views/'
-  fileRoutesById: FileRoutesById
-}
-
-export interface RootRouteChildren {
-  AppRootRoute: typeof AppRootRouteWithChildren
-}
-
 const rootRouteChildren: RootRouteChildren = {
   AppRootRoute: AppRootRouteWithChildren,
 }
-
-export const routeTree = rootRoute
+export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-/* ROUTE_MANIFEST_START
-{
-  "routes": {
-    "__root__": {
-      "filePath": "__root.tsx",
-      "children": [
-        "/_appRoot"
-      ]
-    },
-    "/_appRoot": {
-      "filePath": "_appRoot.tsx",
-      "children": [
-        "/_appRoot/admin",
-        "/_appRoot/changelog",
-        "/_appRoot/settings",
-        "/_appRoot/",
-        "/_appRoot/invite/$token",
-        "/_appRoot/notes_/$",
-        "/_appRoot/views_/$",
-        "/_appRoot/notes/",
-        "/_appRoot/views/"
-      ]
-    },
-    "/_appRoot/admin": {
-      "filePath": "_appRoot.admin.tsx",
-      "parent": "/_appRoot"
-    },
-    "/_appRoot/changelog": {
-      "filePath": "_appRoot.changelog.tsx",
-      "parent": "/_appRoot"
-    },
-    "/_appRoot/settings": {
-      "filePath": "_appRoot.settings.tsx",
-      "parent": "/_appRoot"
-    },
-    "/_appRoot/": {
-      "filePath": "_appRoot.index.tsx",
-      "parent": "/_appRoot"
-    },
-    "/_appRoot/invite/$token": {
-      "filePath": "_appRoot.invite.$token.tsx",
-      "parent": "/_appRoot"
-    },
-    "/_appRoot/notes_/$": {
-      "filePath": "_appRoot.notes_.$.tsx",
-      "parent": "/_appRoot"
-    },
-    "/_appRoot/views_/$": {
-      "filePath": "_appRoot.views_.$.tsx",
-      "parent": "/_appRoot"
-    },
-    "/_appRoot/notes/": {
-      "filePath": "_appRoot.notes.index.tsx",
-      "parent": "/_appRoot"
-    },
-    "/_appRoot/views/": {
-      "filePath": "_appRoot.views.index.tsx",
-      "parent": "/_appRoot"
-    }
-  }
-}
-ROUTE_MANIFEST_END */

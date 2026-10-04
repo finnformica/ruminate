@@ -13,6 +13,7 @@ import { DEFAULT_NEW_BLOCK_MARKER } from "./blocks/markers"
 import { DEFAULT_EXPANDED_LEVELS, clampExpandedLevels } from "./blocks/default-collapsed"
 import { databaseGraphAtom, databaseModeStatusAtom } from "./data/database-mode"
 import { NOTE_TYPE, type GraphSnapshot, type LinkDirections } from "./data/graph"
+import { asBlockType, type BlockType } from "./blocks/types"
 import { orderedNoteIds } from "./data/note-order"
 import {
   mergeSnapshots,
@@ -498,6 +499,8 @@ export interface BlockView {
   noteId: NoteId
   /** The block's own text, marker-free. */
   text: string
+  /** The block's type — what the sidebar's row draws the glyph of. */
+  type: BlockType
   /** When the block was last edited (ms epoch), for the Recently updated
    * sort; null when the row carries no stamp. */
   updatedAt: number | null
@@ -538,7 +541,14 @@ export const blockViewsAtom = atom((get) => {
   }
   const blocks: BlockView[] = []
   for (const [id, hit] of homes) {
-    blocks.push({ id, noteId: hit.noteId, text: hit.text, updatedAt: stampOf(id), note: hit.note })
+    blocks.push({
+      id,
+      noteId: hit.noteId,
+      text: hit.text,
+      type: hit.type,
+      updatedAt: stampOf(id),
+      note: hit.note,
+    })
   }
   const notes = get(notesAtom)
   for (const id of viewIds) {
@@ -546,7 +556,14 @@ export const blockViewsAtom = atom((get) => {
     const node = graph.nodes.get(id)
     const note = node?.notes_id ? notes.get(node.notes_id) : undefined
     if (!node || !note) continue
-    blocks.push({ id, noteId: note.id, text: node.text, updatedAt: stampOf(id), note })
+    blocks.push({
+      id,
+      noteId: note.id,
+      text: node.text,
+      type: asBlockType(node.type),
+      updatedAt: stampOf(id),
+      note,
+    })
   }
   return blocks
 })

@@ -1,9 +1,7 @@
 import { Link, LinkComponentProps, useLocation } from "@tanstack/react-router"
-import copy from "copy-to-clipboard"
 import { useAtom, useAtomValue } from "jotai"
 import React, { createContext, useContext } from "react"
 import { requestDatabasePull } from "../data/database-mode"
-import { useIsAdmin } from "../data/features"
 import {
   isBootingAtom,
   isHelpPanelOpenAtom,
@@ -16,10 +14,12 @@ import {
 } from "../global-state"
 import { appUpdateAtom } from "../hooks/app-update"
 import { usePending } from "../hooks/pending"
-import { REMOVE_VIEW, useReorderViews, useWriteView } from "../hooks/views"
+import { useReorderViews } from "../hooks/views"
 import { useDragReorder } from "../hooks/drag-reorder"
 import { shareOwnerName } from "../data/shares"
 import type { Note } from "../schema"
+import { typeGlyph } from "../blocks/registry"
+import type { BlockType } from "../blocks/types"
 import { APP_SHORTCUTS, formatCombo } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
 import { inlineText } from "../utils/inline-text"
@@ -27,17 +27,13 @@ import { isValidDateString, isValidWeekString, toDateString } from "../utils/dat
 import { DropdownMenu } from "./ui/dropdown-menu"
 import { IconButton } from "./ui/icon-button"
 import {
-  ArrowDownIcon16,
-  ArrowUpIcon16,
   CalendarDateFillIcon16,
   CalendarDateIcon16,
   CircleQuestionMarkFillIcon16,
   CircleQuestionMarkIcon16,
-  CopyIcon16,
-  FlagFillIcon16,
-  FlagIcon16,
-  FocusIcon16,
+  GridFillIcon16,
   GridIcon16,
+  HistoryFillIcon16,
   HistoryIcon16,
   ListIcon16,
   LoadingIcon16,
@@ -46,12 +42,14 @@ import {
   SettingsIcon16,
   SortAlphabetAscIcon16,
   SortNumberDescIcon16,
-  XIcon16,
 } from "./icons"
 import { Keys } from "./ui/keys"
 import { NavListSkeleton } from "./ui/skeleton"
-import { NoteActionsMenu } from "./note-actions-menu"
+import { NoteActionsMenu, type ReorderActions } from "./note-actions-menu"
+import { useBlockViewMenuEntries } from "./block-view-menu"
+import { MenuItems } from "./block-editor/block-context-menu"
 import { NoteFavicon } from "./note-favicon"
+import { SettingsNavList } from "./settings/settings-nav"
 import { beginGitHubSignIn } from "./github-auth"
 import { SyncStatusIcon, useSyncStatusMeta, useSyncStatusText } from "./sync-status"
 import { Tooltip } from "./ui/tooltip"
@@ -78,16 +76,17 @@ export function NavItems({
   // Calendar link is active when viewing any daily or weekly note
   const noteId = pathname.startsWith("/views/") ? pathname.slice(7) : ""
   const isCalendarActive = isValidDateString(noteId) || isValidWeekString(noteId)
+  // While Settings is open its pages take the Views list's place, and only
+  // that: the links above and the rows below stay where they are, so the
+  // sidebar reads as one thing whose middle changed rather than a different
+  // sidebar (src/components/settings/settings-nav.tsx).
+  const inSettings = pathname === "/settings" || pathname.startsWith("/settings/")
 
   // Registered once by the app layout (src/hooks/app-update.ts).
   const { needRefresh, apply } = useAtomValue(appUpdateAtom)
   // Busy from the press until the reload: the waiting-update dot becomes the
   // spinner (docs/design-principles.md, "Busy controls").
   const [applyUpdate, updating] = usePending(apply)
-
-  // The admin page (invites, feature flags) is the bootstrap owner's alone,
-  // as the server says (src/data/features.ts); nobody else sees the link.
-  const isAdmin = useIsAdmin()
 
   return (
     <SizeContext.Provider value={size}>
@@ -98,7 +97,7 @@ export function NavItems({
               <NavLink
                 to="/"
                 search={{ query: undefined }}
-                activeIcon={<GridIcon16 />}
+                activeIcon={<GridFillIcon16 />}
                 icon={<GridIcon16 />}
                 shortcut={formatCombo(APP_SHORTCUTS.goViews)}
                 onNavigate={onNavigate}
@@ -131,7 +130,12 @@ export function NavItems({
               the sort menu says — and in the manual sort, the order it was
               dragged into, a block able to sit between two notes. A block's
               row opens its note focused on it. */}
-          {views.length > 0 ? (
+          {inSettings ? (
+            <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
+              <SectionHeading>Settings</SectionHeading>
+              <SettingsNavList size={size} />
+            </div>
+          ) : views.length > 0 ? (
             <div className="flex flex-col gap-1 border-t border-border-secondary pt-3">
               <SectionHeading action={<ViewSortMenu />}>Views</SectionHeading>
               <ViewRows entries={views} size={size} onNavigate={onNavigate} />
@@ -144,7 +148,7 @@ export function NavItems({
               tooltip and in the note page's header. They are listed apart
               from the user's own notes — they are rows in someone else's
               corpus — but open, read and edit as the verbs allow, like any note. */}
-          {sharedNotes.length > 0 ? (
+          {!inSettings && sharedNotes.length > 0 ? (
             <div className="flex flex-col gap-1 pt-2">
               <SectionHeading>Shared</SectionHeading>
               <NoteRows
@@ -230,29 +234,24 @@ export function NavItems({
             activeIcon={<SettingsFillIcon16 />}
             icon={<SettingsIcon16 />}
             className="text-text-secondary"
+            // Marked on every settings page, not only the list at
+            // `/settings`, and marked the way Help is while its panel is
+            // open — the neutral pressed state, not the accent "current"
+            // one — so the two rows at the foot of the sidebar that open
+            // something over the notes read the same. On `/settings` itself
+            // the Link adds `aria-current` as well; the pressed rules come
+            // later in index.css and win.
+            pressed={inSettings}
             shortcut={formatCombo(APP_SHORTCUTS.goSettings)}
             onNavigate={onNavigate}
           >
             Settings
           </NavLink>
-          {isAdmin ? (
-            <NavLink
-              to="/admin"
-              search={{ query: undefined }}
-              activeIcon={<FlagFillIcon16 />}
-              icon={<FlagIcon16 />}
-              className="text-text-secondary"
-              shortcut={formatCombo(APP_SHORTCUTS.goAdmin)}
-              onNavigate={onNavigate}
-            >
-              Admin
-            </NavLink>
-          ) : null}
           <div className="mt-1 flex flex-col gap-1 border-t border-border-secondary pt-2">
             <NavLink
               to="/changelog"
               search={{ release: undefined }}
-              activeIcon={<HistoryIcon16 />}
+              activeIcon={<HistoryFillIcon16 />}
               icon={<HistoryIcon16 />}
               className="text-text-secondary"
               shortcut={formatCombo(APP_SHORTCUTS.goChangelog)}
@@ -422,12 +421,22 @@ function NoteRows({
   )
 }
 
-/** The actions button's place at the end of a sidebar row (see `NoteRows`). */
+/**
+ * The actions button's place at the end of a sidebar row (see `NoteRows`).
+ *
+ * Out of sight until the row is hovered, the button focused, or its menu
+ * open — but never out of the LAYOUT: the menu is anchored to the button,
+ * and it leaves with a short fade after its trigger has already dropped
+ * `data-popup-open`. Were the wrapper `display: none` by then, the anchor
+ * would have no box and the departing menu would snap to the page's corner
+ * for the length of the fade. Opacity keeps the box; focus-within shows the
+ * button to a keyboard, which `display: none` never could.
+ */
 function RowActions({ size, children }: { size: "medium" | "large"; children: React.ReactNode }) {
   return (
     <div
       className={cx(
-        "absolute inset-y-0 hidden items-center group-hover/note:flex has-data-[popup-open]:flex",
+        "absolute inset-y-0 flex items-center opacity-0 group-hover/note:opacity-100 focus-within:opacity-100 has-data-[popup-open]:opacity-100",
         // The 24px button in a 32px row (40px large) sits 4px
         // (8px) in from the top and bottom; the same from the end.
         size === "large" ? "right-2" : "right-1",
@@ -535,10 +544,30 @@ function ViewRows({
   )
 }
 
-/** A block view's row: the focus glyph — the row opens its note focused on
- * the block, and this is the glyph focusing wears elsewhere — and the
- * block's text, with the note it opens in as the row's tooltip. Current
- * while its note is open focused into it — the row's own link, exactly. */
+/**
+ * The glyph a block view's row leads with: the block's own markdown marker
+ * (`typeGlyph`: a bullet's `-`, a to-do's `[ ]`, a heading's `#`), in the
+ * slot a note's favicon takes, so the row says what kind of block it opens
+ * on the way the row in the note does. Mono and quiet, as the qualifier
+ * picker draws the same glyphs; centred in the icon's square, and a
+ * three-character glyph is let run a little past it rather than shrunk.
+ */
+function BlockGlyph({ type }: { type: BlockType }) {
+  const glyph = typeGlyph(type)
+  return (
+    <span
+      aria-hidden
+      data-glyph={glyph}
+      className="grid size-icon place-items-center overflow-visible whitespace-nowrap font-mono text-xs leading-none tracking-tight"
+    >
+      {glyph}
+    </span>
+  )
+}
+
+/** A block view's row: the block's marker glyph (`BlockGlyph`) and its text,
+ * with the note it opens in as the row's tooltip. Current while its note is
+ * open focused into it — the row's own link, exactly. */
 function BlockViewNavItem({
   block,
   size,
@@ -566,7 +595,10 @@ function BlockViewNavItem({
         if (!event.defaultPrevented) onNavigate?.()
       }}
     >
-      <NavRowIcon icon={<FocusIcon16 />} filled={<FocusIcon16 />} />
+      <NavRowIcon
+        icon={<BlockGlyph type={block.type} />}
+        filled={<BlockGlyph type={block.type} />}
+      />
       {/* The same wrapper a note row's name sits in, so the two line up to
           the pixel down the list. */}
       <span className="flex min-w-0 items-center gap-1.5">
@@ -576,17 +608,11 @@ function BlockViewNavItem({
   )
 }
 
-/** A block view's row menu: move it within Views (the keyboard's and a
- * touch screen's way to reorder), take it out of Views, or copy a link to
- * it. */
-function BlockViewActionsMenu({
-  block,
-  reorder,
-}: {
-  block: BlockView
-  reorder?: { onMoveUp?: () => void; onMoveDown?: () => void }
-}) {
-  const writeView = useWriteView()
+/** A block view's row menu: the block's menu away from its note
+ * (`useBlockViewMenuEntries` — Copy, Copy link, Share, Remove from Views),
+ * the list's moves ahead of it in the manual sort, as a note row has. */
+function BlockViewActionsMenu({ block, reorder }: { block: BlockView; reorder?: ReorderActions }) {
+  const entriesFor = useBlockViewMenuEntries()
   return (
     <DropdownMenu modal={false}>
       <DropdownMenu.Trigger
@@ -597,34 +623,7 @@ function BlockViewActionsMenu({
         }
       />
       <DropdownMenu.Content align="start">
-        {reorder ? (
-          <>
-            <DropdownMenu.Item
-              icon={<ArrowUpIcon16 />}
-              disabled={!reorder.onMoveUp}
-              onClick={() => reorder.onMoveUp?.()}
-            >
-              Move up
-            </DropdownMenu.Item>
-            <DropdownMenu.Item
-              icon={<ArrowDownIcon16 />}
-              disabled={!reorder.onMoveDown}
-              onClick={() => reorder.onMoveDown?.()}
-            >
-              Move down
-            </DropdownMenu.Item>
-            <DropdownMenu.Separator />
-          </>
-        ) : null}
-        <DropdownMenu.Item icon={<XIcon16 />} onClick={() => writeView(block.id, REMOVE_VIEW)}>
-          Remove from Views
-        </DropdownMenu.Item>
-        <DropdownMenu.Item
-          icon={<CopyIcon16 />}
-          onClick={() => copy(`${window.location.origin}/views/${block.noteId}?block=${block.id}`)}
-        >
-          Copy link to block
-        </DropdownMenu.Item>
+        <MenuItems entries={entriesFor(block.id, block.noteId, { reorder })} />
       </DropdownMenu.Content>
     </DropdownMenu>
   )
@@ -647,6 +646,7 @@ function NavLink({
   icon,
   includeSearch = false,
   forceActive = false,
+  pressed = false,
   onNavigate,
   children,
   onClick,
@@ -657,6 +657,9 @@ function NavLink({
   icon: React.ReactNode
   includeSearch?: boolean
   forceActive?: boolean
+  /** Marked as Help is while open (`aria-pressed`, the neutral surface)
+   * rather than as the current place; the filled icon shows either way. */
+  pressed?: boolean
   onNavigate?: () => void
   children: React.ReactNode
   /** The keys that reach this destination (`formatCombo`), shown beside it. */
@@ -667,12 +670,14 @@ function NavLink({
   const inner = (
     <>
       {activeIcon ? (
-        <span className="hidden shrink-0 [[aria-current=page]>&]:flex">{activeIcon}</span>
+        <span className="hidden shrink-0 [[aria-current=page]>&]:flex [[aria-pressed=true]>&]:flex">
+          {activeIcon}
+        </span>
       ) : null}
       <span
         className={cx(
           "flex shrink-0 text-text-secondary",
-          activeIcon && "[[aria-current=page]>&]:hidden",
+          activeIcon && "[[aria-current=page]>&]:hidden [[aria-pressed=true]>&]:hidden",
         )}
       >
         {icon}
@@ -688,6 +693,7 @@ function NavLink({
       data-size={size}
       className={cx("nav-item", className)}
       aria-current={forceActive ? "page" : undefined}
+      aria-pressed={pressed || undefined}
       onClick={(event) => {
         onClick?.(event)
         if (!event.defaultPrevented) {
@@ -715,6 +721,31 @@ function NoteNavItem({
   onNavigate?: () => void
   className?: string
 }) {
+  // A board's row opens its board page (docs/boards.md), with nothing to
+  // say about focus; every other note's its outline.
+  if (note.type === "board") {
+    return (
+      <Link
+        to="/boards/$"
+        params={{ _splat: note.id }}
+        activeOptions={{ exact: true }}
+        data-size={size}
+        className={cx("nav-item", className)}
+        title={title}
+        onClick={(event) => {
+          if (!event.defaultPrevented) onNavigate?.()
+        }}
+      >
+        <NavRowIcon
+          icon={<NoteFavicon note={note} />}
+          filled={<NoteFavicon note={note} filled />}
+        />
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate">{note.displayName}</span>
+        </span>
+      </Link>
+    )
+  }
   return (
     <Link
       to="/views/$"

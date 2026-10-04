@@ -1,7 +1,15 @@
 import { useAtom, useAtomValue } from "jotai"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels"
+import {
+  Group,
+  Panel,
+  Separator,
+  useDefaultLayout,
+  usePanelRef,
+  type Layout,
+  type LayoutChangedMeta,
+} from "react-resizable-panels"
 import { useMedia } from "react-use"
 import { isHelpPanelOpenAtom, sidebarAtom } from "../global-state"
 import { useApplyUpdateShortcut, useRegisterAppUpdate } from "../hooks/app-update"
@@ -53,8 +61,8 @@ export function AppLayout({ className, children }: AppLayoutProps) {
     [isWideViewport, isHelpPanelOpen, defaultLayout],
   )
   const rememberLayout = useCallback(
-    (layout: Record<string, number>) => {
-      if (layout.help !== 0) onLayoutChanged(layout)
+    (layout: Layout, meta: LayoutChangedMeta) => {
+      if (layout.help !== 0) onLayoutChanged(layout, meta)
     },
     [onLayoutChanged],
   )

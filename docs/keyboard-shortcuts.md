@@ -29,16 +29,16 @@ the old copy.
 `g` pressed outside any text field arms a short (~1.5s) chord window; the next
 key navigates. The chords work from the block editor's select mode too.
 
-| Action                            | Shortcut                                              |
-| --------------------------------- | ----------------------------------------------------- |
-| Go to today's daily note          | <kbd>g</kbd> then <kbd>d</kbd>                        |
-| Go to the Views list              | <kbd>g</kbd> then <kbd>v</kbd>                        |
-| Go to settings                    | <kbd>g</kbd> then <kbd>s</kbd>                        |
-| Go to the changelog               | <kbd>g</kbd> then <kbd>c</kbd>                        |
-| Go to the admin page (admin only) | <kbd>g</kbd> then <kbd>a</kbd>                        |
-| Focus the search (Views page)     | <kbd>/</kbd>                                          |
-| `i`                               | Focus the editor, restoring the last selected block   |
-| Back / forward (browser history)  | <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> |
+| Action                                | Shortcut                                              |
+| ------------------------------------- | ----------------------------------------------------- |
+| Go to today's daily note              | <kbd>g</kbd> then <kbd>d</kbd>                        |
+| Go to the Views list                  | <kbd>g</kbd> then <kbd>v</kbd>                        |
+| Go to settings                        | <kbd>g</kbd> then <kbd>s</kbd>                        |
+| Go to the changelog                   | <kbd>g</kbd> then <kbd>c</kbd>                        |
+| Go to the Admin settings (admin only) | <kbd>g</kbd> then <kbd>a</kbd>                        |
+| Focus the search (Views page)         | <kbd>/</kbd>                                          |
+| `i`                                   | Focus the editor, restoring the last selected block   |
+| Back / forward (browser history)      | <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> |
 
 ### Headings
 
@@ -60,7 +60,11 @@ here, opens the note at that block. Opening a row loads only that row's
 blocks; a child opens the next level the same way.
 
 The Views page is browsed: <kbd>↵</kbd> (or a click) opens the highlighted
-row, and nothing writes. A filtered view **edits in place**: <kbd>↵</kbd>
+row, and nothing writes. A right-click on a row opens the menu its sidebar
+row has: a note's **⋯** menu on a note's row, and on a block's row the
+block's menu away from its note — **Copy**, **Copy link to block**,
+**Share…**, **Remove from Views** — with none of the editing the note's own
+menu carries. A filtered view **edits in place**: <kbd>↵</kbd>
 edits the row as it would in its note, the change lands in the note, and the
 only thing refused is adding a block beside a result or removing one from the
 list — open the note for that.
@@ -132,6 +136,15 @@ The editor has two modes, like Notion: **select** (a block is highlighted) and
 declaratively in `src/blocks/keymap.ts` and dispatched through the command layer
 (`src/blocks/commands.ts`) — see `docs/block-editor-architecture.md`.
 
+**A command never changes the mode as a side effect.** Only the keys whose job
+is the mode cross between them: <kbd>↵</kbd> and <kbd>Esc</kbd>, <kbd>↑</kbd> /
+<kbd>↓</kbd> off the first or last line of the block being edited, and the
+keys that make a new block, which opens for typing. Everything else leaves you
+in the mode it found you in, on the row it leaves you on: a block removed
+from a highlight leaves the row that takes its place highlighted, one removed
+while typing (the touch screen's edit bar) leaves you typing in it, and a
+marker key on a highlighted block — empty or not — leaves it highlighted.
+
 ### Select mode (a block is highlighted)
 
 | Action                                   | Shortcut                                                                   |
@@ -193,8 +206,8 @@ structural — each _toggles_ the highlighted block's type: <kbd>#</kbd>
 heading, <kbd>-</kbd> bullet, <kbd>[</kbd> todo, <kbd>></kbd> quote,
 <kbd>1</kbd> numbered item, <kbd>`</kbd> code block. A block already of that type strips back to a
 paragraph; anything else swaps just the leading marker — content and children
-are never touched, and each press is one undo step. On an _empty_ block the
-marker applies and editing opens, so you start typing that type immediately.
+are never touched, and each press is one undo step. An _empty_ block takes
+the type like any other and stays highlighted; <kbd>↵</kbd> opens it.
 (<kbd>x</kbd> still toggles a todo's checkbox; <kbd>[</kbd> changes what the
 block _is_.)
 

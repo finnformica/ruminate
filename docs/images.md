@@ -12,11 +12,11 @@ and how to turn it off again).
 
 An image block is an ordinary node in the graph (docs/graph-schema-v2.md):
 
-| field   | holds                                                                                                                                                              |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `type`  | `image`                                                                                                                                                            |
-| `text`  | the caption (may be empty)                                                                                                                                         |
-| `props` | `{ image: "img_…" }` for an uploaded picture, `{ src: url }` for an external one; `width`/`height` in pixels when known; `align` and `size` for its layout (below) |
+| field   | holds                                                                                                                                                                                                          |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`  | `image`                                                                                                                                                                                                        |
+| `text`  | the caption (may be empty)                                                                                                                                                                                     |
+| `props` | `{ image: "img_…" }` for an uploaded picture, `{ src: url }` for an external one; `width`/`height` in pixels when known; `thumbhash` (below, Offline) when measured; `align` and `size` for its layout (below) |
 
 The picture's bytes are **not** in the graph. An uploaded picture lives in an
 R2 bucket, and the block keeps only its asset id. The graph stays small rows
@@ -96,7 +96,9 @@ results) lay the picture out the same way, with no controls.
 
 `POST /api/images` takes the raw bytes (the request's `Content-Type` is the
 image type) and answers `{ id, size, type }`. `GET /api/images/<id>` serves
-them back, marked `private, immutable` so the browser keeps them for good.
+them back, marked `private, immutable` so the browser keeps them for good;
+`PUT` and `GET /api/images/<id>/thumb` do the same for the picture's small
+copy (Thumbnails, below).
 Both are session-guarded exactly like the replica routes; the R2 key is
 `<verified GitHub id>/<asset id>`, minted from the session and a validated
 id, so one tenant can neither read nor overwrite another's picture.
@@ -105,6 +107,22 @@ Limits (`worker/handlers/image-policy.ts`, shared with the client, which
 checks them before uploading): PNG, JPEG, GIF, WebP and AVIF; ten megabytes a
 picture. SVG is refused on purpose — served from the app's own origin it can
 run script when opened directly.
+
+**A picture over the limit is fitted, not refused** (`src/data/image-fit.ts`).
+A phone's photo is over ten megabytes because of its pixels — a 48-megapixel
+JPEG is 10–15 MB whatever it carries beside the image; the HDR gain map and
+the EXIF block are a megabyte or two of that at most, so stripping them alone
+would not reliably bring it under. The client re-encodes it instead, through
+a canvas: no larger than 3200 pixels on its longest side, written back as a
+JPEG at quality 0.85, which lands a phone photo at one to three megabytes. A
+canvas keeps only the pixels, so the gain map, the EXIF, the colour profile
+and every other segment go with the resolution; the orientation EXIF
+described is applied while decoding, so a portrait photo stays upright. The
+same route takes a HEIC that the Worker refuses but Safari can decode, and
+sends a JPEG. A picture that fits goes up as it is, bytes and metadata alike;
+an animated GIF is never re-encoded (a canvas keeps one frame), so it fits or
+it is refused. Where the browser cannot decode or re-encode a file, the
+original is refused for what it is, as before.
 
 The client (`src/data/images.ts`) puts the row in FIRST and uploads behind
 it. The block starts with no image props at all and draws the pasted file
@@ -118,10 +136,120 @@ so a note mid-upload syncs as an empty image block rather than a broken
 reference.
 
 On success the bytes already in hand seed the read cache
-(`primeImageObjectUrl`), so a picture just uploaded is never fetched straight
-back down. Other reads go through `fetch` with the bearer token (an
-`<img src>` cannot carry one) and become object URLs, cached for the page's
-life.
+(`primeImageObjectUrl`), and the device's copy (Offline, below), so a picture
+just uploaded is never fetched straight back down. Other reads look in the
+device's copy first, then go through `fetch` with the bearer token (an
+`<img src>` cannot carry one); either way they become object URLs, cached for
+the page's life.
+
+## Thumbnails
+
+A picture has a small copy beside it, and everywhere a picture is drawn
+draws the copy first.
+
+**One component draws every picture** (`Picture`, src/components/
+picture.tsx — the editor's figure, the lightbox, a board's wall and its
+inspector all draw it and keep only their own chrome around it) over one
+reader (`usePicture`, src/data/images.ts). Nothing is fetched for a
+`lazy` picture until it is within a screenful of the screen
+(`useNearView`, src/hooks/in-view.ts, watching from the page's own scroll
+container); until its bytes are here it is its likeness (the ThumbHash,
+Offline below) in the box its caller gives it, or a pulsing box when the
+block has none. The thumbnail fades in over the likeness once decoded.
+Then, by `detail`: a tile (`thumb`) stops there; the lightbox and a
+board's inspector (`full`) go on to the picture itself; the editor's
+figure (`auto`) goes on to it only where its box, measured on screen in
+device pixels, wants more than the thumbnail's 640 — a figure at the
+row's width on a retina screen does, a small one does not. The picture
+itself is swapped in only once the browser has decoded it (`useDecoded`),
+so the thumbnail never gives way to a half-painted picture. The download
+and the vision model take the picture itself.
+
+**Made on the device, written beside the picture.** As a picture goes up,
+the client makes its thumbnail (`thumbnailCopy`, `src/data/image-fit.ts`)
+through the same canvas the fitter uses: no larger than 640 pixels on its
+longest side, a PNG kept a PNG (a screenshot's transparent corners stay
+clear) and anything else written as a JPEG at quality 0.8 — tens of
+kilobytes against the picture's megabytes. Once the upload has its id the
+copy is written to `PUT /api/images/<id>/thumb` and the upload resolves
+only then, so the block's row, which the asset id makes a reader of the
+thumbnail, never asks for one that is not there yet. The Worker keeps it in
+R2 under `<tenant>/<asset id>/thumb`, beside the picture; it takes a copy
+only for a picture the tenant already has, of an image type, under a
+megabyte (`MAX_THUMB_BYTES`), and serves it from `GET
+/api/images/<id>/thumb` as it serves the picture — session-guarded,
+`private, immutable`. A thumbnail that cannot be made (no canvas) or will
+not go up costs nothing: the upload is as good without it.
+
+**Nothing on the block says whether there is one.** A reader asks for the
+thumbnail (`useImageSrc(block, { variant: "thumb" })`), and the server either has it or
+answers 404. On a 404 the picture itself stands in — this once, at its
+full size — and a thumbnail is made from those bytes and written beside
+the picture for every view after, on any device (`backfillThumbnail`,
+`src/data/images.ts`). So the pictures uploaded before there were
+thumbnails get theirs the first time a tile shows them, with no sweep,
+no migration and no write to the graph (a prop would bump the block's
+updated time, as the ThumbHash section below says).
+
+**Kept on the device as the picture is.** The copy is cached under its
+own address (`image-cache.ts`, keyed `<id>/thumb`), counting towards the
+same cap, so a wall seen once is a wall seen offline — and a picture just
+uploaded has both its copies on the device before its row shows the
+asset.
+
+## Offline
+
+Two halves: a picture the device has is drawn from the device, and one it
+has not got keeps its place with a likeness of itself.
+
+**The device's copy** (`src/data/image-cache.ts`). An asset never changes
+under its id — nor does its thumbnail (above) — so a kept copy is never stale. Copies live in the Cache API
+rather than the browser's HTTP cache, which the browser may empty at will and
+the app can neither list nor clear. There is one cache per signed-in
+identity (`ruminate-images-<github id>`), bound as the SQL store is
+(docs/graph-storage.md): signing out leaves it in place, and a different
+account signing in deletes the previous one's before anything reads it.
+
+A picture is kept when it is **shown or uploaded**, and never fetched ahead —
+as Notion does, whose offline pages show the pictures that loaded while
+online and no others. The copy grows with what the user looks at rather than
+with the corpus, which matters on a phone: pictures are up to ten megabytes
+each. A picture never opened on this device (one added on another, say) is
+not there offline; it shows its likeness and a badge (below).
+
+The copy is capped at 250 MB. Each entry is stamped with its size, so the
+total is known at sign-in without reading the bytes back; a picture that
+would pass the cap lets the earliest-kept ones go first, and one larger than
+the whole cap is not kept. At sign-in the app asks once for persistent
+storage (`navigator.storage.persist()`), which covers the notes' own store
+too.
+
+Only pictures the Worker serves to this identity can be kept, so notes shared
+with the user contribute nothing: they are not kept offline at all
+(docs/sharing.md).
+
+**The likeness** (`src/data/image-thumbhash.ts`). An upload measures a
+[ThumbHash](https://evanw.github.io/thumbhash/) of the picture, from the
+same decode that measures its size: about 25 bytes, kept as base64 in the
+block's `thumbhash` prop. Until the bytes arrive the placeholder is that
+blurred likeness, in the picture's own box, rather than a pulsing grey one.
+Pictures uploaded before it existed have none and keep the grey box; they are
+not backfilled, because writing a prop bumps the block's (and so its note's)
+updated time, and a device that has the bytes to measure has no need of the
+likeness.
+
+A read ends in one of two failures (`useImageSrc`'s `failure`): **missing**,
+when the server answers 404 — "Image unavailable", as before — and
+**unreachable**, for anything else (offline, signed out, a server error). An
+unreachable picture keeps its placeholder, still, with a small badge
+("Offline", or "Couldn't load image" while the browser thinks it is online),
+and is tried again when the network returns.
+
+On iOS, the Cache API and persistent storage both work in Safari, and best
+from the Home Screen: a web app added there is exempt from Safari's rule that
+clears a site's stored data after seven days without a visit, and has its
+own storage allowance. There is no dependable background work on iOS, so a
+picture is only ever kept by being seen in the app.
 
 ## Reading through MCP
 
@@ -178,6 +306,10 @@ thousand screenshots stays inside the free allowance. Check Cloudflare's
 pricing page for the current figures.
 
 ## Not yet
+
+- **Uploading offline.** An upload still needs the network: a picture pasted
+  offline fails and its row is taken back out. Queuing the bytes on the
+  device and sending them when the network returns is future work.
 
 - **Deleting bytes.** Deleting an image block (or its note) leaves the asset
   in the bucket: a block delete is undoable, and the bytes must outlive the

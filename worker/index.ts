@@ -8,6 +8,8 @@
  */
 import type { Env } from "./types"
 import { admin, ADMIN_PREFIX } from "./handlers/admin"
+import { anthropicKey, ANTHROPIC_KEY_PATH } from "./handlers/anthropic-key"
+import { boardTag, BOARD_TAG_PATH } from "./handlers/board-tag"
 import { features, FEATURES_PATH } from "./handlers/features"
 import { githubAuth } from "./handlers/github-auth"
 import { githubRefresh } from "./handlers/github-refresh"
@@ -40,6 +42,8 @@ export default {
     if (pathname === UNFURL_PATH) return unfurl(request, env)
     if (pathname === FEATURES_PATH) return features(request, env)
     if (pathname === PREFERENCES_PATH) return preferences(request, env)
+    if (pathname === ANTHROPIC_KEY_PATH) return anthropicKey(request, env)
+    if (pathname === BOARD_TAG_PATH) return boardTag(request, env)
     if (pathname === ADMIN_PREFIX || pathname.startsWith(`${ADMIN_PREFIX}/`)) {
       return admin(request, env)
     }

@@ -60,7 +60,7 @@ const MAX_ENTRIES = 6
  * Nothing is fetched to answer that question. The stamp is a string in the app
  * bundle; only a device that is actually behind pays for the changelog.
  *
- * The card is off until asked for: Settings → Updates turns it on, as a
+ * The card is off until asked for: Settings → Preferences → Changelog turns it on, as a
  * preference of the account rather than the device
  * (src/data/account-preferences.ts), so it is answered once for every
  * device the reader signs in on. The boot's notes are taken and the build

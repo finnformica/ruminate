@@ -1,11 +1,12 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router"
 import React from "react"
-import { Toaster } from "sonner"
 import { AppLayout } from "../components/app-layout"
 import { CommandMenu } from "../components/command-menu"
 import { DeleteNoteDialog } from "../components/delete-note-dialog"
 import { DevBar } from "../components/dev-bar"
+import { NewBoardDialog } from "../components/new-board-dialog"
 import { ShareDialog } from "../components/share-note-dialog"
+import { Toaster } from "../components/ui/toaster"
 import { useDatabaseMode } from "../data/use-database-mode"
 import { GlobalShortcuts } from "../shortcuts/global-shortcuts"
 
@@ -65,25 +66,21 @@ function RouteComponent() {
       </AppLayout>
       <CommandMenu />
       <ShareDialog />
+      <NewBoardDialog />
       <DeleteNoteDialog />
       <GlobalShortcuts />
       <DevBar />
-      {/* Toasts (sonner) — see "Notices" in docs/design-principles.md. Bottom
-       * corner, above the phone nav bar (sonner's phone breakpoint is 600px,
-       * a shade under the `sm` one that shows the bar), following the
-       * system theme like the rest of the app. */}
+      {/* Toasts — see "Notices" in docs/design-principles.md. Bottom corner,
+       * above the phone nav bar (sonner's phone breakpoint is 600px, a shade
+       * under the `sm` one that shows the bar). */}
       <Toaster
-        theme="system"
         position="bottom-right"
-        duration={6000}
-        closeButton
         offset={16}
         mobileOffset={{
           bottom: "calc(var(--height-nav-bar) + env(safe-area-inset-bottom) + 16px)",
           left: 16,
           right: 16,
         }}
-        style={{ fontFamily: "inherit" }}
       />
     </div>
   )

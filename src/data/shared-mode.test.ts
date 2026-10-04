@@ -25,7 +25,11 @@ import {
 } from "./shared-mode"
 
 const toasts: string[] = []
-vi.mock("sonner", () => ({ toast: (message: string) => toasts.push(message) }))
+vi.mock("sonner", () => {
+  const toast = (message: string) => toasts.push(message)
+  toast.error = toast
+  return { toast }
+})
 
 const node = (id: string, text: string, type = "ul", notesId?: string): NodeRow => ({
   id,

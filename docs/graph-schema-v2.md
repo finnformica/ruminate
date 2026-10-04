@@ -299,7 +299,10 @@ folds — the rows they closed _and_ the rows they opened, each remembered
 explicitly per occurrence key in localStorage (`src/data/view-state.ts`), so
 a row they opened stays open when the setting moves and a row they closed
 stays closed as the note grows. A device that loses its localStorage is back
-on the rule.
+on the rule. The entry is the **view's**: a note's folds are stored under
+its id, and a note narrowed by a filter or a sort (docs/query-language.md)
+keeps folds of its own under the id with the narrowing appended, over a
+standing rule of everything open rather than the depth setting.
 
 Nesting a row under another is one of those explicit opens (`indent`, the
 command's `reveal`). A leaf becomes a parent the instant something goes under

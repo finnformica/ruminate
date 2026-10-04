@@ -3,6 +3,7 @@ import { act, renderHook } from "@testing-library/react"
 import { Provider, createStore } from "jotai"
 import type { ReactNode } from "react"
 import { describe, expect, it, vi } from "vitest"
+import { emptyBlock, indentBlock, insertAfter, removeBlock } from "../blocks/ops"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
@@ -16,11 +17,13 @@ import {
 import { useNoteDoc } from "./note-doc"
 
 /**
- * **A filtered view is a selection of the note, and must never be mistaken
- * for the note.** Its doc holds only the rows that survived, so reconciling
- * it against the graph would read every hidden row as removed — and a
- * removal is an unlink. These tests hold that line: what a narrowed view
- * writes is the value of the row you touched, and nothing else.
+ * **A narrowed view edits as the note does, and never touches what it
+ * hid.** Its doc holds only the rows that survived the filter, in the
+ * order the sort put them, and an edit to it is read as exactly that
+ * (`docToOps`, `shown`): a row added lands beside the rows it was put
+ * between, in the note's own order; a row removed is unlinked; the rows the
+ * filter hid, and the note's order under a sort, are never written. These
+ * tests hold both halves of that line.
  */
 
 const NOTE_ID = "blk_note00000"
@@ -70,10 +73,12 @@ function rows(doc: BlockDoc, context: ReadonlySet<string>): string[] {
 
 type Wrapper = ({ children }: { children: ReactNode }) => ReactNode
 
-function renderNote(wrapper: Wrapper, filter = "", sort = "") {
-  return renderHook(() => useNoteDoc({ noteId: NOTE_ID, defaultDoc: EMPTY_DOC, filter, sort }), {
-    wrapper,
-  })
+function renderNote(wrapper: Wrapper, filter = "", sort = "", keep?: ReadonlySet<string>) {
+  return renderHook(
+    ({ keep }: { keep?: ReadonlySet<string> }) =>
+      useNoteDoc({ noteId: NOTE_ID, defaultDoc: EMPTY_DOC, filter, sort, keep }),
+    { wrapper, initialProps: { keep } },
+  )
 }
 
 describe("useNoteDoc, filtered", () => {
@@ -151,19 +156,98 @@ describe("useNoteDoc, filtered", () => {
     unsubscribe()
   })
 
-  it("refuses a structural change while narrowed, and strands nothing", async () => {
+  it("a row added beneath a match lands beside it in the note, ahead of the rows the filter hid", async () => {
     const { store, wrapper, unsubscribe } = await signedOutStore(NOTE)
     const { result } = renderNote(wrapper, "type:todo")
 
-    // The worst case: the view hands back a doc with a root removed.
+    // Enter at the end of `milk`: a new to-do after it. The view shows
+    // nothing after `milk`; the note has `bread` there.
+    const fresh = emptyBlock("todo", "eggs")
     act(() => {
-      const doc = result.current.doc
-      result.current.setDoc({ ...doc, rootBlockIds: [] })
+      result.current.setDoc(insertAfter(result.current.doc, "blk_shop000000/blk_milk000000", fresh))
     })
 
     const graph = store.get(graphSnapshotAtom)
+    expect(childIdsOf(graph, "blk_shop000000")).toEqual([
+      "blk_milk000000",
+      fresh.id,
+      "blk_bread00000",
+    ])
+    expect(graph.nodes.get(fresh.id)).toMatchObject({
+      text: "eggs",
+      type: "todo",
+      notes_id: NOTE_ID,
+    })
+    // The rest of the note is exactly as it was.
     expect(childIdsOf(graph, NOTE_ID)).toEqual(["blk_shop000000", "blk_read000000"])
+    expect(childIdsOf(graph, "blk_read000000")).toEqual(["blk_book000000"])
+    // And the view shows the new row where it was made, still narrowed.
+    expect(rows(result.current.doc, result.current.context)).toEqual([
+      "~Shopping",
+      "  milk",
+      "  eggs",
+    ])
+    unsubscribe()
+  })
+
+  it("keeps the row being edited whatever the filter says, until the editing leaves it", async () => {
+    const { wrapper, unsubscribe } = await signedOutStore(NOTE)
+    const { result, rerender } = renderNote(wrapper, "type:todo", "", new Set(["blk_milk000000"]))
+    expect(rows(result.current.doc, result.current.context)).toEqual(["~Shopping", "  milk"])
+
+    // Ticked off mid-edit, `milk` no longer matches `type:todo` — and stays,
+    // as the row under the caret, undimmed.
+    act(() => {
+      const doc = result.current.doc
+      result.current.setDoc({
+        ...doc,
+        blocks: { ...doc.blocks, blk_milk000000: { ...doc.blocks.blk_milk000000, type: "done" } },
+      })
+    })
+    expect(rows(result.current.doc, result.current.context)).toEqual(["~Shopping", "  milk"])
+
+    // The editing leaves it: the filter has its say.
+    rerender({ keep: undefined })
+    expect(rows(result.current.doc, result.current.context)).toEqual([])
+    unsubscribe()
+  })
+
+  it("removing a shown row unlinks that row and nothing the filter hid", async () => {
+    const { store, wrapper, unsubscribe } = await signedOutStore(NOTE)
+    const { result } = renderNote(wrapper, "type:todo")
+
+    // The view's one root goes: `Shopping`, with `bread` hidden beneath it.
+    act(() => {
+      result.current.setDoc(removeBlock(result.current.doc, "blk_shop000000").doc)
+    })
+
+    const graph = store.get(graphSnapshotAtom)
+    // `Shopping` left the note (an unlink — it is in the Unassigned basket,
+    // still holding both its rows); `Reading`, which the filter hid, stands.
+    expect(childIdsOf(graph, NOTE_ID)).toEqual(["blk_read000000"])
     expect(childIdsOf(graph, "blk_shop000000")).toEqual(["blk_milk000000", "blk_bread00000"])
+    expect(graph.nodes.get("blk_shop000000")?.text).toBe("Shopping")
+    expect(childIdsOf(graph, "blk_read000000")).toEqual(["blk_book000000"])
+    unsubscribe()
+  })
+
+  it("indenting a shown row moves it in the note as it does in the note", async () => {
+    const { store, wrapper, unsubscribe } = await signedOutStore(NOTE)
+    const { result } = renderNote(wrapper, "type:task")
+    expect(rows(result.current.doc, result.current.context)).toEqual([
+      "~Shopping",
+      "  milk",
+      "  bread",
+    ])
+
+    act(() => {
+      result.current.setDoc(indentBlock(result.current.doc, "blk_shop000000/blk_bread00000").doc)
+    })
+
+    const graph = store.get(graphSnapshotAtom)
+    expect(childIdsOf(graph, "blk_shop000000")).toEqual(["blk_milk000000"])
+    expect(childIdsOf(graph, "blk_milk000000")).toEqual(["blk_bread00000"])
+    expect(childIdsOf(graph, NOTE_ID)).toEqual(["blk_shop000000", "blk_read000000"])
     unsubscribe()
   })
 
@@ -185,6 +269,28 @@ describe("useNoteDoc, filtered", () => {
     const graph = store.get(graphSnapshotAtom)
     expect(childIdsOf(graph, NOTE_ID)).toEqual(["blk_shop000000", "blk_read000000"])
     expect(childIdsOf(graph, "blk_shop000000")).toEqual(["blk_milk000000", "blk_bread00000"])
+    unsubscribe()
+  })
+
+  it("a row added under a sort lands after the row it was made beneath, in the note's order", async () => {
+    const { store, wrapper, unsubscribe } = await signedOutStore(NOTE)
+    const { result } = renderNote(wrapper, "", "text")
+
+    // Sorted, `milk` is the last row under Shopping; in the note it is the
+    // first. A row made beneath it follows it in the note — before `bread`
+    // — and the sort then puts it where its text falls.
+    const fresh = emptyBlock("ul", "cheese")
+    act(() => {
+      result.current.setDoc(insertAfter(result.current.doc, "blk_shop000000/blk_milk000000", fresh))
+    })
+
+    const graph = store.get(graphSnapshotAtom)
+    expect(childIdsOf(graph, "blk_shop000000")).toEqual([
+      "blk_milk000000",
+      fresh.id,
+      "blk_bread00000",
+    ])
+    expect(childIdsOf(graph, NOTE_ID)).toEqual(["blk_shop000000", "blk_read000000"])
     unsubscribe()
   })
 

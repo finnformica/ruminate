@@ -397,16 +397,31 @@ Placement conventions:
   the content they concern, sharing the page column's width.
 - Notices never float, overlay, or animate in — they are part of the page,
   and they leave by re-render (dismiss), not by transition.
-- **Toasts** ([sonner](https://sonner.emilkowal.ski), its `Toaster` mounted
-  once in `src/routes/_appRoot.tsx`; raise one with `toast.error(message)`)
-  are the one exception, for one job: telling the reader that something they
-  have _just done_ has failed, or did nothing — a picture that would not
-  upload, a paste of a block already under the target. A toast
-  floats in the bottom corner (above the phone nav bar), follows the system
-  theme, and leaves on its own after a few seconds or on its close button.
+- **Toasts** ([sonner](https://sonner.emilkowal.ski), drawn in the app's
+  colours by `Toaster` in `src/components/ui/toaster.tsx` and mounted once in
+  `src/routes/_appRoot.tsx`) are the one exception, for one job: answering
+  something the reader has _just done_, when the page cannot. A toast floats
+  in the bottom corner (above the phone nav bar), follows the app's colour
+  scheme, and leaves on its own after a few seconds or on its close button.
   It never carries state the reader must come back to — anything that
-  persists is a notice in the page, not a toast — and never a success
-  message: the picture landing is its own confirmation.
+  persists is a notice in the page, not a toast. A toast says one of three
+  things, and its colour says which before its words do:
+  - **It failed** — `toast.error(message)`, in the danger red: a picture
+    that would not upload, a preview that could not be fetched, a change a
+    share's owner refused. Every failure of something the reader did is
+    told, in a toast or in the control it came from.
+  - **It happened, and you cannot see it from here** — `toast.success(message)`,
+    in the success green: a note restored from Settings (it reappears in the
+    sidebar, not on the page), a note shared (the dialog has closed). Where
+    the page itself shows the result — a picture landing in the note, a
+    board's field taking its value — there is no toast: the result is its
+    own confirmation, and a green one on top of it is noise. A toast that
+    exists to carry an **Undo** for a change the reader can see is a plain
+    one, not a success: its job is the way back, not the news.
+  - **Nothing happened, and here is why** — `toast(message)`, on the plain
+    popup surface: a paste of a block already under the target, an edit to
+    a note shared read-only. Neither a failure nor a success, and painted as
+    neither.
 
 ### Copy
 
@@ -477,7 +492,23 @@ itself, with `usePending` (`src/hooks/pending.ts`) to hold a flight. A
 request that ends in leaving the page (signing in, taking an update) stays
 busy until the page has gone, since on this page it has no after. The
 "Saving…" trace in a note's header is the same rule on a surface rather
-than a control.
+than a control: it shows from the edit until its push has landed, and only
+while a push can land. The sidebar's sync row uses the same word for the
+same state — "Saving…", never "Syncing…" — so one save in flight is never
+named two ways on one screen. Offline, the edit lands on this device and its push
+waits for the network, so once the write is down the trace turns into
+**Saved offline** with the offline icon and no spinner — nothing is in
+flight, and it is a fact about the note rather than a wait. It is there
+because the sidebar's "Offline" row may not be on screen (collapsed, or a
+phone's closed drawer), and it clears when the push goes out on
+reconnecting; on a phone it reads **Saved**, the icon saying the rest.
+Signed out, the sidebar's "Signed out" is the news and the header says
+nothing (`saveTrace`, `src/components/sync-status.tsx`). The trace is
+held a moment past the save it reports (`useSteadySaveTrace`): typing is
+a save per keystroke, each landing within a moment, and a header that
+flipped between "Saving…" and what follows it at typing speed would
+flicker. So "Saving…" shows the instant a save starts and stays for the
+whole burst, and what comes after it waits until the typing has paused.
 
 ## Empty-block placeholder
 
@@ -495,19 +526,20 @@ growing the row.
 Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`,
 `--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1)`):
 
-| What                                    | How                                                                                                                                                                                                                                       |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hover affordances                       | opacity 150ms ease-out                                                                                                                                                                                                                    |
-| Hover surfaces (crumbs, focus dot)      | background/color 150ms ease                                                                                                                                                                                                               |
-| Block line hover (neutral)              | background-color 100ms ease                                                                                                                                                                                                               |
-| Selection highlight                     | background-color + color + box-shadow 100ms ease                                                                                                                                                                                          |
-| Chevron rotation                        | transform 300ms ease-in-out, in step with the fold                                                                                                                                                                                        |
-| Unfold (collapsed → open)               | the subtree's box's bottom edge sweeps down to reveal it, the rows below slide down, all transforms, 300ms ease-in-out, no fade: an accordion                                                                                             |
-| Fold (open → collapsed)                 | the box, out of the flow, its edge sweeping up to cover it as the rows below slide up over it, 300ms ease-in-out; its rows linger inert for it                                                                                            |
-| Todo check → text mutes                 | color 200ms ease                                                                                                                                                                                                                          |
-| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms                                                                                                                                                                                                    |
-| Help panel (wide screen)                | the panel's share of the width, 300ms ease-in-out, with its contents translating in from the page's edge and back out under a fade — the one width the app animates                                                                       |
-| Selection bar                           | rises a few pixels into its place at the bottom of the window under a fade, 150ms `--ease-out-strong`, and sinks back out the same way — a rise rather than a popup's scale, since it is pinned to an edge and has no anchor to grow from |
+| What                                                                                               | How                                                                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hover affordances                                                                                  | opacity 150ms ease-out                                                                                                                                                                                                                    |
+| Hover surfaces (crumbs, focus dot)                                                                 | background/color 150ms ease                                                                                                                                                                                                               |
+| Block line hover (neutral)                                                                         | background-color 100ms ease                                                                                                                                                                                                               |
+| Selection highlight                                                                                | background-color + color + box-shadow 100ms ease                                                                                                                                                                                          |
+| Chevron rotation                                                                                   | transform 300ms ease-in-out, in step with the fold                                                                                                                                                                                        |
+| Unfold (collapsed → open)                                                                          | the subtree's box's bottom edge sweeps down to reveal it, the rows below slide down, all transforms, 300ms ease-in-out, no fade: an accordion                                                                                             |
+| Fold (open → collapsed)                                                                            | the box, out of the flow, its edge sweeping up to cover it as the rows below slide up over it, 300ms ease-in-out; its rows linger inert for it                                                                                            |
+| Todo check → text mutes                                                                            | color 200ms ease                                                                                                                                                                                                                          |
+| Control press (chevron, bullet, number)                                                            | scale 0.90–0.95 while `:active`, 150ms                                                                                                                                                                                                    |
+| Help panel (wide screen)                                                                           | the panel's share of the width, 300ms ease-in-out, with its contents translating in from the page's edge and back out under a fade — the one width the app animates                                                                       |
+| Selection bar                                                                                      | rises a few pixels into its place at the bottom of the window under a fade, 150ms `--ease-out-strong`, and sinks back out the same way — a rise rather than a popup's scale, since it is pinned to an edge and has no anchor to grow from |
+| Floating pill (`FloatingBar`: a board's add buttons, once the ones on the page have scrolled away) | slides up from beneath the page's edge under a fade, 300ms `--ease-out-strong` — the pace of a hand, as the edit bar's own motion — and slides back down the same way; kept mounted while closed so the exit can play                     |
 
 Press feedback lives on the **control**, never the content: collapsing a
 subtree gives the chevron a pressed scale and hover surface. Pressed scale is

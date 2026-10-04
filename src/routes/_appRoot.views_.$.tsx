@@ -7,7 +7,7 @@ import { Calendar } from "../components/calendar"
 import { CalendarHeader } from "../components/calendar-header"
 import { DaysOfWeek } from "../components/days-of-week"
 import { Details } from "../components/ui/details"
-import { LoadingIcon16, NoteIcon16, ShareIcon16 } from "../components/icons"
+import { LoadingIcon16, NoteIcon16, OfflineIcon16, ShareIcon16 } from "../components/icons"
 import { Notice } from "../components/notice"
 import { parse } from "../blocks/parse"
 import type { BlockDoc, ChangeHint } from "../blocks/types"
@@ -17,7 +17,7 @@ import { NoteActionsMenu } from "../components/note-actions-menu"
 import { UnassignedBasket } from "../components/unassigned-basket"
 import { NoteFavicon } from "../components/note-favicon"
 import { PageLayout } from "../components/page-layout"
-import { isSyncingAtom } from "../components/sync-status"
+import { saveTrace, useSaveTraceState, useSteadySaveTrace } from "../components/sync-status"
 import { databaseModeStatusAtom } from "../data/database-mode"
 import { sharedModeStatusAtom } from "../data/shared-mode"
 import { requestDatabaseFlush } from "../data/database-mode"
@@ -28,9 +28,7 @@ import {
   linkDirectionsAtom,
 } from "../global-state"
 import { useCreateNote, useNoteById, useRenameNote, useSetNoteProps } from "../hooks/note"
-import { useWriteView } from "../hooks/views"
-import { viewByRootAtom } from "../data/views"
-import { sharedViewByRootAtom } from "../data/shared-mode"
+import { useSavedView, useWriteView } from "../hooks/views"
 import { useTouchNote } from "../hooks/touch-note"
 import { useNoteDoc } from "../hooks/note-doc"
 import { pathToBlock } from "../data/graph"
@@ -47,36 +45,6 @@ import { isValidDateString, isValidWeekString, toDateString } from "../utils/dat
 
 /** What a note or block saved as its default view (docs/metadata.md), and
  * whether this session may write one. */
-interface SavedView {
-  filter: string
-  sort: string
-  /** Whether the header may offer to save: there is something to root a
-   * view at. A note shared with the user included — the view is the user's
-   * own row (`src/data/views.ts`), whoever owns the note. */
-  writable: boolean
-}
-
-const NO_SAVED_VIEW: SavedView = { filter: "", sort: "", writable: false }
-
-/**
- * The saved view of whatever the page is rooted at — the focused block, else
- * the note: the view row rooted there (docs/metadata.md, "Views"). A note
- * needs no row to be a view, and a block needs no row to save one. On a note
- * someone shared, the reader's own row wins, and the share's view — the
- * owner's filter and sort, which is what a share IS (docs/sharing.md) — fills
- * in behind it, so the note opens the way the owner meant it to.
- */
-function useSavedView(focusBlockId: string | null, noteId: string | undefined) {
-  const byRoot = useAtomValue(viewByRootAtom)
-  const sharedByRoot = useAtomValue(sharedViewByRootAtom)
-  return React.useMemo<SavedView>(() => {
-    const rootId = focusBlockId ?? noteId
-    if (!rootId) return NO_SAVED_VIEW
-    const view = byRoot.get(rootId) ?? sharedByRoot.get(rootId)
-    return { filter: view?.filter ?? "", sort: view?.sort ?? "", writable: true }
-  }, [focusBlockId, noteId, byRoot, sharedByRoot])
-}
-
 type RouteSearch = {
   query: string | undefined
   /** Block id the editor is focused on; absent = outside focus. */
@@ -130,7 +98,7 @@ function NotePage() {
 
   // Global state
   const isSignedOut = useAtomValue(isSignedOutAtom)
-  const isSyncing = useAtomValue(isSyncingAtom)
+  const { kind: syncStatus, pushesPending } = useSaveTraceState()
   const databaseStatus = useAtomValue(databaseModeStatusAtom)
   const sharedStatus = useAtomValue(sharedModeStatusAtom)
   // While the local store is still opening — or the notes shared with the
@@ -181,9 +149,20 @@ function NotePage() {
   // The doc is the walk of the note — or of the focused block — over the
   // live graph, descended only where the reader's folds open a row
   // (`useFoldRule`); every change the editor hands back becomes ops applied
-  // to the graph — see useNoteDoc.
-  const { expanded, setFold } = useFoldRule(noteId)
+  // to the graph — see useNoteDoc. The folds are the VIEW's: the note's, or
+  // — narrowed — the ones kept for this filter and sort, so a chevron
+  // clicked here never lands on the note's own.
+  const { expanded, setFold } = useFoldRule(noteId, { filter, sort })
+  const narrowed = filter !== "" || sort !== ""
   const directions = useAtomValue(linkDirectionsAtom)
+  // The block being edited, which a filter keeps whatever it says of it:
+  // a row is judged when the editing leaves it, not on every keystroke
+  // (`filteredView`, `keep`).
+  const [editingBlockId, setEditingBlockId] = useState<string | null>(null)
+  const keep = React.useMemo(
+    () => (editingBlockId === null ? undefined : new Set([editingBlockId])),
+    [editingBlockId],
+  )
   const {
     doc: editorDoc,
     collapsed,
@@ -198,6 +177,7 @@ function NotePage() {
     directions,
     filter,
     sort,
+    keep,
   })
   const jotaiStore = useStore()
   // Leaving a focus for a wider view — the note, or a block above — must
@@ -285,17 +265,17 @@ function NotePage() {
   const renameNote = useRenameNote()
   const createNote = useCreateNote()
 
-  const wasSyncingRef = React.useRef(false)
+  // The dispatch moment is over once the pending pushes change: the write
+  // landed on this device and queued its push (rising), or the push landed
+  // (falling). Online the trace carries on as "Saving…" until the push has
+  // landed; offline it becomes "Saved offline" (`saveTrace`).
   useEffect(() => {
-    if (isSyncing) {
-      wasSyncingRef.current = true
-    } else if (wasSyncingRef.current) {
-      wasSyncingRef.current = false
-      setPendingSave(false)
-    }
-  }, [isSyncing])
+    setPendingSave(false)
+  }, [pushesPending])
 
-  const isSaving = pendingSave || isSyncing
+  // Held through a burst of typing, so the header does not flicker between
+  // "Saving…" and what follows it on every keystroke (`useSteadySaveTrace`).
+  const trace = useSteadySaveTrace(saveTrace(syncStatus, { pendingSave, pushesPending }))
 
   // Note props (width, gist) are one `setProps` op, written at once.
   const setProp = React.useCallback(
@@ -422,11 +402,20 @@ function NotePage() {
       actions={
         <div className="flex items-center gap-2">
           {/* Changes save automatically; this is the honest-but-quiet trace of
-              a save in flight. */}
-          {isSaving ? (
+              a save in flight — and, offline, of one that is on this device
+              and waiting to sync (`saveTrace`). */}
+          {trace === "saving" ? (
             <span className="flex items-center gap-1.5 text-sm text-text-secondary print:hidden">
               <LoadingIcon16 className="animate-spin" />
               Saving…
+            </span>
+          ) : trace === "saved-offline" ? (
+            <span className="flex items-center gap-1.5 text-sm text-text-secondary print:hidden">
+              <OfflineIcon16 />
+              {/* A phone's header has no room for the second word; the icon
+                  says offline there. */}
+              <span className="sm:hidden">Saved</span>
+              <span className="hidden sm:inline">Saved offline</span>
             </span>
           ) : null}
 
@@ -439,6 +428,7 @@ function NotePage() {
             <FilterMenu
               filter={filter}
               onFilterChange={(next) => setNarrowing({ filter: next })}
+              scope={focusBlockId ?? noteId}
               saved={savedView.writable ? { ...savedViewActions, dirty: filterDirty } : undefined}
             />
             <NoteActionsMenu
@@ -538,11 +528,13 @@ function NotePage() {
                   }}
                   noteTitle={note?.displayName ?? ""}
                   context={context}
-                  // Narrowed, there is no blank row to type into: a new
-                  // block is structure, and structure belongs to the note
-                  // rather than to a selection of it (`useNoteDoc`). A row
-                  // that swallowed typing would be a lie.
-                  trailingBlank={filter === "" && sort === ""}
+                  onEditingChange={setEditingBlockId}
+                  // Narrowed, there is no blank row to type into. A new
+                  // row lands in the note as it does anywhere (Enter on a
+                  // row, `useNoteDoc`), but a blank one is a plain text row
+                  // the filter hides the moment it is typed into, and one
+                  // minted on every edit would litter the note with empties.
+                  trailingBlank={!narrowed}
                 />
                 {noteId && noteExists && share === null ? (
                   <UnassignedBasket noteId={noteId} />

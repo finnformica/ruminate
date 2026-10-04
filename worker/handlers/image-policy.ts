@@ -52,6 +52,34 @@ export function imageUrlOf(id: string): string {
   return IMAGE_API_PATH + id
 }
 
+/**
+ * The two copies of an uploaded picture (docs/images.md, Thumbnails): the
+ * bytes as they went up, and a small copy for a tile, written beside them
+ * once the upload has landed and read from `/api/images/<id>/thumb`.
+ */
+export type ImageVariant = "full" | "thumb"
+
+/** The largest thumbnail accepted. A few hundred pixels on a side as a
+ * JPEG is tens of kilobytes; a megabyte is a sanity check, not a budget. */
+export const MAX_THUMB_BYTES = 1024 * 1024
+
+const THUMB_SUFFIX = "/thumb"
+
+/** The URL a variant of an asset is read from and written to. */
+export function imageVariantUrlOf(id: string, variant: ImageVariant): string {
+  return variant === "thumb" ? imageUrlOf(id) + THUMB_SUFFIX : imageUrlOf(id)
+}
+
+/** The asset id and variant an app-served image URL path names, or null
+ * for any other path. */
+export function imageVariantOfUrl(url: string): { id: string; variant: ImageVariant } | null {
+  if (!url.startsWith(IMAGE_API_PATH)) return null
+  const rest = url.slice(IMAGE_API_PATH.length)
+  const variant: ImageVariant = rest.endsWith(THUMB_SUFFIX) ? "thumb" : "full"
+  const id = variant === "thumb" ? rest.slice(0, -THUMB_SUFFIX.length) : rest
+  return isImageId(id) ? { id, variant } : null
+}
+
 /** The asset id an app-served image URL names, or null for any other URL. */
 export function imageIdOfUrl(url: string): string | null {
   if (!url.startsWith(IMAGE_API_PATH)) return null
