@@ -116,7 +116,7 @@ export function BoardInspector({
                   state={state}
                   selected={imageValues(snapshot, state, image.id)}
                   onPick={(value) => writes.setValue(state.feature, image.id, { id: value.id })}
-                  onClear={(value) => writes.clearValue(state.feature, value, image.id)}
+                  onClear={(value) => writes.clearValue(value, image.id)}
                   onNew={() => setNaming(state.feature)}
                 />
               </div>
