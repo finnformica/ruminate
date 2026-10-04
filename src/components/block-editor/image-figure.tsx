@@ -49,23 +49,24 @@ export function ImageFigure({
 }) {
   const { width, height } = imagePropsOf(block)
   const captionText = block.text.trim()
+  const FIGURE_MAX_HEIGHT = "20rem"
   // What the picture is up to, for the chrome around it.
   const [state, setState] = useState<PictureState>({
     uploading: false,
     ready: false,
     missing: false,
   })
-  // The picture's shape, when its pixel size is known: the box the
-  // placeholder and the `<img>` keep before and after the bytes arrive.
-  const pixels = width && height ? { width, height } : null
-  const ratio = pixels ? `${pixels.width} / ${pixels.height}` : undefined
   // The frame's width, when it can be known before the picture loads: the
   // width its natural size gives — its own pixels, no wider than the row,
-  // and no wider than a screenful of height allows (the 20rem `max-h-80`
-  // cap below, carried over to the width through the ratio). Without it
-  // the frame shrinks to the picture as it loads.
+  // and no wider than a screenful of height allows (`FIGURE_MAX_HEIGHT`,
+  // carried over to the width through the ratio). Without it the frame
+  // shrinks to the picture as it loads. The picture's box keeps the same
+  // shape (`Picture` shapes it from the same pixels), so neither the
+  // placeholder nor the `<img>` waiting for its bytes is any smaller than
+  // the picture will be.
+  const pixels = width && height ? { width, height } : null
   const naturalWidth = pixels
-    ? `min(${pixels.width}px, 100%, ${(20 * pixels.width) / pixels.height}rem)`
+    ? `min(${pixels.width}px, 100%, calc(${FIGURE_MAX_HEIGHT} * ${pixels.width / pixels.height}))`
     : undefined
 
   const open = (event: React.MouseEvent) => {
@@ -121,11 +122,8 @@ export function ImageFigure({
             fit={boxed ? "cover" : "natural"}
             detail="auto"
             lazy
-            className={boxed ? "w-full" : "max-h-80"}
-            // The picture's ratio, set outright rather than left to the
-            // bytes: the box is then the same shape before they arrive as
-            // after.
-            style={ratio ? { aspectRatio: ratio } : undefined}
+            className={boxed ? "w-full" : undefined}
+            maxHeight={boxed ? undefined : FIGURE_MAX_HEIGHT}
             onState={setState}
           />
         </button>

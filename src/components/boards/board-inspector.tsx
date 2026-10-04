@@ -97,7 +97,8 @@ export function BoardInspector({
             name="board-image"
             fit="natural"
             detail="full"
-            className="max-h-[70vh] min-h-40 w-full bg-bg-secondary sm:min-h-80"
+            maxHeight="70vh"
+            className="min-h-40 bg-bg-secondary sm:min-h-80"
           />
           <div className="flex flex-col gap-4">
             <FormControl htmlFor="board-caption" label="Caption">

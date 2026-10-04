@@ -60,10 +60,15 @@ export interface PictureState {
  * and loads when the network comes back; only one the server has not got
  * is "Image unavailable".
  *
- * The caller sizes the box: `className` and `style` go on it (a tile's
- * `h-full w-full`, a figure's `aspectRatio`). Test ids are `<name>` on
- * the `<img>`, and `<name>-placeholder`, `-uploading`, `-unreachable` and
- * `-missing` on the rest.
+ * The box is the picture's shape whenever its pixel size is known (an
+ * upload's is measured as it goes up), so the thumbnail and the picture
+ * itself fill the same box and nothing changes size as one gives way to
+ * the other: in `natural` fit it is as wide as the caller allows and no
+ * taller than `maxHeight`, the shape kept; in `cover` fit the caller's
+ * `className` sizes it (a tile's `h-full w-full`). A picture of unknown
+ * size (an external URL) is laid out as it loads. Test ids are `<name>`
+ * on the `<img>`, and `<name>-placeholder`, `-uploading`, `-unreachable`
+ * and `-missing` on the rest.
  */
 export function Picture({
   block,
@@ -73,6 +78,7 @@ export function Picture({
   lazy = false,
   className,
   style,
+  maxHeight,
   onSize,
   onState,
 }: {
@@ -85,6 +91,9 @@ export function Picture({
   lazy?: boolean
   className?: string
   style?: React.CSSProperties
+  /** In `natural` fit, the most height the box may take (a CSS length):
+   * the box is narrowed to keep the picture's shape under it. */
+  maxHeight?: string
   /** Told the picture's own pixels once its bytes have arrived, for a
    * block that recorded no size. */
   onSize?: (width: number, height: number) => void
@@ -143,7 +152,18 @@ export function Picture({
   const likenessStyle = likeness
     ? { backgroundImage: `url("${likeness}")`, backgroundSize: "cover" }
     : undefined
-  const shaped = style?.aspectRatio !== undefined
+  // The picture's shape, when known: the box keeps it before the bytes
+  // arrive and whichever copy of them is drawn.
+  const pixels = width && height ? { width, height } : null
+  const shaped = pixels !== null
+  const shape: React.CSSProperties = pixels
+    ? {
+        aspectRatio: `${pixels.width} / ${pixels.height}`,
+        ...(fit === "natural" && maxHeight
+          ? { width: `min(100%, calc(${maxHeight} * ${pixels.width / pixels.height}))` }
+          : {}),
+      }
+    : {}
   return (
     <span
       ref={box}
@@ -151,7 +171,7 @@ export function Picture({
       aria-hidden={src === null || undefined}
       className={cx(
         "relative block overflow-hidden rounded-lg bg-bg-tertiary bg-center bg-no-repeat",
-        fit === "natural" && "max-w-full",
+        fit === "natural" && "mx-auto max-w-full",
         // A box no one has shaped — a picture of unknown size, not here
         // yet — is a guess at one, so the row is not short by a picture.
         src === null && !shaped && fit === "natural" && "aspect-4/3 w-64",
@@ -161,7 +181,7 @@ export function Picture({
         className,
       )}
       // The likeness sits behind the picture while it fades in.
-      style={loaded ? style : { ...style, ...likenessStyle }}
+      style={{ ...shape, maxHeight, ...style, ...(loaded ? {} : likenessStyle) }}
     >
       {src !== null ? (
         <img
@@ -173,9 +193,13 @@ export function Picture({
           data-testid={name}
           className={cx(
             "transition-opacity duration-300 ease-out",
+            // A shaped box the picture fills; an unshaped one takes the
+            // picture's own size, no larger than the box allows.
             fit === "cover"
               ? "block h-full w-full object-cover"
-              : "mx-auto block h-auto max-h-[inherit] w-auto max-w-full",
+              : shaped
+                ? "block h-full w-full object-contain"
+                : "mx-auto block h-auto max-h-[inherit] w-auto max-w-full",
             loaded ? "opacity-100" : "opacity-0",
           )}
           onLoad={(event) => {

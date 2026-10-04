@@ -232,3 +232,42 @@ describe("Picture", () => {
     )
   })
 })
+
+describe("Picture, its box", () => {
+  it("keeps the picture's shape whichever copy is drawn, under the height it is allowed", async () => {
+    render(
+      <Picture
+        block={picture("shape0000000", { width: 1200, height: 500 })}
+        name="board-image"
+        fit="natural"
+        detail="full"
+        maxHeight="70vh"
+      />,
+    )
+    // The thumbnail, then the picture, in one box of the picture's shape.
+    await waitFor(() => expect(img().src).toBe("blob:4"))
+    const box = img().parentElement!
+    expect(box.style.aspectRatio).toBe("1200 / 500")
+    // jsdom folds `calc(70vh * 2.4)` as it stores it.
+    expect(box.style.width).toBe("min(100%, 168vh)")
+    expect(box.style.maxHeight).toBe("70vh")
+    expect(img().className).toContain("h-full w-full object-contain")
+  })
+
+  it("lets a picture of unknown size be its own size, no taller than allowed", async () => {
+    render(
+      <Picture
+        block={picture("loose0000000")}
+        name="board-image"
+        fit="natural"
+        detail="thumb"
+        maxHeight="20rem"
+      />,
+    )
+    await waitFor(() => expect(img().src).toBe("blob:5"))
+    const box = img().parentElement!
+    expect(box.style.aspectRatio).toBe("")
+    expect(box.style.maxHeight).toBe("20rem")
+    expect(img().className).toContain("max-h-[inherit] w-auto")
+  })
+})

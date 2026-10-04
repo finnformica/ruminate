@@ -45,7 +45,8 @@ export function ImageLightbox({ block, onClose }: { block: Block | null; onClose
                 name="lightbox-image"
                 fit="natural"
                 detail="full"
-                className="max-h-[85vh] shadow-2xl"
+                maxHeight="85vh"
+                className="shadow-2xl"
               />
               {block.text.trim() ? (
                 <p className="max-w-prose text-center text-[#ffffffcc]">{block.text.trim()}</p>

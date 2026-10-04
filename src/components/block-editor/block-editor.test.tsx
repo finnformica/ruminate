@@ -3291,6 +3291,7 @@ describe("BlockEditor images", () => {
       <Harness initialDoc={imageDoc({ src: SRC, width: 1200, height: 500 })} />,
     )
     const figure = natural.container.querySelector<HTMLElement>('[data-testid="image-figure"]')!
+    // jsdom folds `calc(20rem * 2.4)` as it stores it.
     expect(figure.style.width).toBe("min(1200px, 100%, 48rem)")
     // The ratio is the box's, and the picture fills it.
     const img = natural.container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!
@@ -3338,7 +3339,7 @@ describe("BlockEditor images", () => {
     ).toBe("")
     const plain = bare.container.querySelector<HTMLImageElement>('[data-testid="block-image"]')!
     expect(plain.parentElement!.style.aspectRatio).toBe("")
-    expect(plain.parentElement!.className).toContain("max-h-80")
+    expect(plain.parentElement!.style.maxHeight).toBe("20rem")
     expect(plain.className).not.toMatch(/(^|\s)w-full(\s|$)/)
   })
 
