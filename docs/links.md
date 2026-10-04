@@ -157,6 +157,9 @@ whole.
 Search: `type:link` finds link blocks; the title is what text queries
 match.
 
+A board's **Link** feature keeps its values as link blocks under a `Link`
+block, the pictures from a page beneath its card (docs/boards.md).
+
 ### Layout
 
 Link blocks and pictures are both **figures** (`src/blocks/figure.ts`):

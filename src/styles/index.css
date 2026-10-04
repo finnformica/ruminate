@@ -16,6 +16,17 @@ body {
   @apply bg-bg font-sans text-base font-normal text-text print:bg-[white];
 }
 
+/* A phone's photo carries a gain map: a plain picture plus how far to push
+ * each pixel past white. A browser on an HDR display applies it, and the
+ * photo blooms against the interface around it — a note's text, a board's
+ * grid, the lightbox's scrim — and looks nothing like it does on any other
+ * screen. Every picture is held to the plain one, everywhere, so a photo
+ * looks the same wherever it is opened. Browsers without the property, and
+ * displays without the headroom, already draw that. */
+img {
+  dynamic-range-limit: standard;
+}
+
 ::selection {
   color: var(--color-text-selection);
   background: var(--color-bg-selection);

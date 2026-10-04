@@ -1670,6 +1670,12 @@ describe("collapse toggle", () => {
     expect(slot.getAttribute("data-testid")).toBe("paragraph-slot")
     expect(slot.className).toContain("w-[15px]")
     expect(slot.querySelector(".block-key")).toBeNull()
+    // No key to swap with, so the chevron is pinned visible while open too,
+    // and stays so after a fold and an unfold.
+    expect(toggleOf(container, "blk_pp")!.className).toContain("block-toggle-pinned")
+    fireEvent.click(toggleOf(container, "blk_pp")!)
+    fireEvent.click(toggleOf(container, "blk_pp")!)
+    expect(toggleOf(container, "blk_pp")!.className).toContain("block-toggle-pinned")
     // A quote keys on `>`; a leaf paragraph keeps the empty slot, no toggle.
     const { container: c2 } = render(
       <Harness initial={"A paragraph\n  id:: blk_p\n> A quote\n  id:: blk_q\n"} />,

@@ -7,6 +7,7 @@ import {
   addImageOps,
   boardFeatures,
   boardImageIds,
+  boardLinkUrl,
   clearValueOps,
   imageLocationOf,
   imageLocationOps,
@@ -14,6 +15,7 @@ import {
   type ImageLocation,
   inverseOps,
   isBoard,
+  linkPreviewOps,
   outlineImageIds,
   resetImageOps,
   setCaptionOps,
@@ -40,6 +42,7 @@ import {
   uploadImage,
 } from "../data/images"
 import { parseProps } from "../data/graph"
+import { fetchLinkPreview } from "../data/link-previews"
 import { deleteBlockOps, type Op } from "../data/ops"
 import { useApplyOps } from "../data/store"
 import { requestTagSuggestion, SuggestTagsError } from "../data/suggest-tags"
@@ -158,10 +161,12 @@ export interface BoardWrites {
    * their location comes from: the camera's from the device, a library's
    * from the picture's own metadata. Neither is required. */
   addImages: (files: File[], source?: "camera" | "photos") => string[]
+  /** Give a picture a value, or take one off: the picker shows the result,
+   * and nothing else is said. */
   setValue: (feature: BoardFeature, imageId: string, ref: ValueRef) => void
-  clearValue: (feature: BoardFeature, value: BoardValue, imageId: string) => void
-  /** Take every value off a picture, all features at once, as one undoable
-   * batch. The caption stays. */
+  clearValue: (value: BoardValue, imageId: string) => void
+  /** Take the caption and every value off a picture, all features at once,
+   * as one batch with a toast that can undo it. */
   resetImage: (imageId: string) => void
   setCaption: (imageId: string, caption: string) => void
   deleteImage: (imageId: string) => void
@@ -191,7 +196,21 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   // the same router.
   const canSuggest = useAiAvailable().available && exists
 
-  // A change's toast, with Undo as its action.
+  // A batch applied at once, the page showing the result — the editor's
+  // own optimism, and no toast (docs/design-principles.md, Notices).
+  const write = React.useCallback(
+    (ops: Op[]) => {
+      if (ops.length === 0) return
+      apply(ops)
+      void requestDatabaseFlush()
+    },
+    [apply],
+  )
+
+  // A change that takes several things off at once, or that a model made:
+  // applied the same way, and answered with a plain toast whose job is the
+  // way back — **Undo**, the inverse batch. A single pick or clear is not
+  // one of these: the picker shows the result, and clearing is one click.
   const undoable = React.useCallback(
     (ops: Op[], message: string) => {
       if (ops.length === 0) return
@@ -214,22 +233,48 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
     [store, apply],
   )
 
+  /**
+   * A link value's preview, fetched behind the write as the editor fetches
+   * a new link block's (docs/links.md) and written on quietly. A page that
+   * will not answer is not an error here: the card is there to open either
+   * way, and says "No preview available" where the description would be.
+   * Only a signed-in reader can ask.
+   */
+  const previewInto = React.useCallback(
+    (valueId: string, url: string) => {
+      if (!isDatabaseMode) return
+      void fetchLinkPreview(url)
+        .then((preview) => {
+          const ops = linkPreviewOps(store.get(graphSnapshotAtom), valueId, url, preview)
+          if (ops.length === 0) return
+          apply(ops)
+          void requestDatabaseFlush()
+        })
+        .catch(() => {})
+    },
+    [isDatabaseMode, store, apply],
+  )
+
   const setValue = React.useCallback(
     (feature: BoardFeature, imageId: string, ref: ValueRef) => {
       const snapshot = store.get(graphSnapshotAtom)
       const ops = setValueOps(snapshot, boardId, feature, imageId, ref)
-      const text = "text" in ref ? ref.text.trim() : (snapshot.nodes.get(ref.id)?.text ?? "")
-      undoable(ops, `${feature.label}: ${text}`)
+      write(ops)
+      // A card made for a new address is asked for its preview.
+      const url = "url" in ref ? boardLinkUrl(ref.url) : null
+      const made = ops.find(
+        (op): op is Extract<Op, { op: "create" }> => op.op === "create" && op.type === "link",
+      )
+      if (made && url !== null) previewInto(made.id, url)
     },
-    [store, boardId, undoable],
+    [store, boardId, write, previewInto],
   )
 
   const clearValue = React.useCallback(
-    (feature: BoardFeature, value: BoardValue, imageId: string) => {
-      const ops = clearValueOps(store.get(graphSnapshotAtom), value.id, imageId)
-      undoable(ops, `${feature.label}: ${value.text} removed`)
+    (value: BoardValue, imageId: string) => {
+      write(clearValueOps(store.get(graphSnapshotAtom), value.id, imageId))
     },
-    [store, undoable],
+    [store, write],
   )
 
   const resetImage = React.useCallback(
@@ -241,21 +286,17 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
 
   const setCaption = React.useCallback(
     (imageId: string, caption: string) => {
-      const ops = setCaptionOps(store.get(graphSnapshotAtom), imageId, caption)
-      if (ops.length === 0) return
-      apply(ops)
-      void requestDatabaseFlush()
+      write(setCaptionOps(store.get(graphSnapshotAtom), imageId, caption))
     },
-    [store, apply],
+    [store, write],
   )
 
+  // The tile leaves the wall, which says it; a tombstone has no way back.
   const deleteImage = React.useCallback(
     (imageId: string) => {
-      apply(deleteBlockOps(imageId, store.get(graphSnapshotAtom)))
-      void requestDatabaseFlush()
-      toast("Image deleted")
+      write(deleteBlockOps(imageId, store.get(graphSnapshotAtom)))
     },
-    [store, apply],
+    [store, write],
   )
 
   /**

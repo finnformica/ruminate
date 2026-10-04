@@ -6,6 +6,7 @@ import {
   addImageOps,
   boardFeatures,
   boardImageIds,
+  boardLinkUrl,
   clearValueOps,
   featureBlockId,
   imageLocationOf,
@@ -13,6 +14,7 @@ import {
   imageUploadedOps,
   imageValues,
   inverseOps,
+  linkPreviewOps,
   resetImageOps,
   setCaptionOps,
   setValueOps,
@@ -404,19 +406,22 @@ describe("inverseOps", () => {
 })
 
 describe("tagFeaturesOf", () => {
-  it("names every preset feature, with the values in use", () => {
-    const [location, object, material] = BOARD_FEATURES
+  it("names every name feature, with the values in use", () => {
+    const meaningOf = (label: string) => {
+      const feature = BOARD_FEATURES.find((each) => each.label === label)
+      return feature?.kind === "text" ? feature.meaning : undefined
+    }
     expect(tagFeaturesOf(boardOf(), "b")).toEqual([
       {
         label: "Location",
         multi: false,
-        meaning: location.meaning,
+        meaning: meaningOf("Location"),
         values: ["Mauritius", "Lisbon"],
       },
-      { label: "Object", multi: true, meaning: object.meaning, values: [] },
-      { label: "Material", multi: true, meaning: material.meaning, values: [] },
+      { label: "Object", multi: true, meaning: meaningOf("Object"), values: [] },
+      { label: "Material", multi: true, meaning: meaningOf("Material"), values: [] },
     ])
-    expect(object.meaning).toContain("the thing the picture is of")
+    expect(meaningOf("Object")).toContain("the thing the picture is of")
   })
 })
 
@@ -605,5 +610,170 @@ describe("where a picture was taken", () => {
     )
     expect(imageLocationOf(snapshot, "blk_pic1000000")).toBeNull()
     expect(imageLocationOf(snapshot, "blk_pic2000000")).toBeNull()
+  })
+})
+
+describe("a link feature", () => {
+  const LINK = BOARD_FEATURES[3]
+  const url = "https://www.made.com/lamp"
+  /** A board whose first picture has been given the address: the card made,
+   * and its id. */
+  const withCard = () => {
+    const snapshot = boardOf()
+    const next = applyOps(
+      snapshot,
+      setValueOps(snapshot, "b", LINK, "blk_pic1000000", { url }),
+      NOW,
+    )
+    return { snapshot: next, card: boardFeatures(next, "b")[3].values[0].id }
+  }
+
+  it("is the last of the preset, takes several values, and its values are addresses", () => {
+    expect(LINK).toEqual({ label: "Link", multi: true, kind: "link" })
+  })
+
+  it("takes an address with or without its scheme, and nothing that is not one", () => {
+    expect(boardLinkUrl(" made.com/lamp ")).toBe("https://made.com/lamp")
+    expect(boardLinkUrl("http://made.com")).toBe("http://made.com")
+    expect(boardLinkUrl("a lamp")).toBeNull()
+    expect(boardLinkUrl("")).toBeNull()
+  })
+
+  it("makes the Link block and a card titled by the host, and links the picture under it", () => {
+    const snapshot = boardOf()
+    const ops = setValueOps(snapshot, "b", LINK, "blk_pic2000000", { url: "www.made.com/lamp" })
+    expect(kinds(ops)).toEqual(["create", "link", "create", "link", "link"])
+    const next = applyOps(snapshot, ops, NOW)
+    const link = boardFeatures(next, "b")[3]
+    expect(link.values).toEqual([{ id: expect.any(String), text: "made.com", link: { url } }])
+    const card = link.values[0].id
+    expect(next.nodes.get(card)?.type).toBe("link")
+    expect(imageValues(next, link, "blk_pic2000000")).toEqual(link.values)
+    expect(parentIdsOf(next, "blk_pic2000000")).toContain(card)
+    // In the outline: the card beneath the Link block, the picture beneath
+    // the card, as markdown writes a link block.
+    expect(walk(next, "b")).toContain("[made.com](https://www.made.com/lamp)")
+    expect(childIdsOf(next, card)).toEqual(["blk_pic2000000"])
+  })
+
+  it("reuses the board's card for the same address, a trailing slash aside", () => {
+    const { snapshot, card } = withCard()
+    const ops = setValueOps(snapshot, "b", LINK, "blk_pic2000000", { url: `${url}/` })
+    expect(ops).toEqual([
+      expect.objectContaining({ op: "link", source: card, destination: "blk_pic2000000" }),
+    ])
+  })
+
+  it("makes nothing of a name, of an address that is not one, or of an address to a name feature", () => {
+    const snapshot = boardOf()
+    expect(setValueOps(snapshot, "b", LINK, "blk_pic2000000", { text: "made.com" })).toEqual([])
+    expect(setValueOps(snapshot, "b", LINK, "blk_pic2000000", { url: "a lamp" })).toEqual([])
+    expect(setValueOps(snapshot, "b", LOCATION, "blk_pic2000000", { url })).toEqual([])
+  })
+
+  it("reads only the link blocks under a Link block written by hand as values", () => {
+    const snapshot = applyOps(
+      graphOf({
+        b: [
+          "Link",
+          "  id:: blk_link000000",
+          "  - made.com",
+          "    id:: blk_typed00000",
+          img(1),
+          "  id:: blk_pic1000000",
+          "",
+        ].join("\n"),
+      }),
+      [
+        {
+          op: "create",
+          id: "blk_card000000",
+          type: "link",
+          text: "",
+          props: JSON.stringify({ url }),
+          notesId: "b",
+        },
+        { op: "link", source: "blk_link000000", destination: "blk_card000000", sortKey: "z" },
+      ],
+      1,
+    )
+    const link = boardFeatures(snapshot, "b")[3]
+    expect(link.blockId).toBe("blk_link000000")
+    expect(link.values).toEqual([{ id: "blk_card000000", text: "", link: { url } }])
+    // A picture given that address goes under the card that is there.
+    expect(setValueOps(snapshot, "b", LINK, "blk_pic1000000", { url })).toEqual([
+      expect.objectContaining({
+        op: "link",
+        source: "blk_card000000",
+        destination: "blk_pic1000000",
+      }),
+    ])
+  })
+
+  it("comes off with the rest on Reset, and a first set is undone whole", () => {
+    const { snapshot, card } = withCard()
+    // In Mauritius, from made.com.
+    const reset = resetImageOps(snapshot, "b", "blk_pic1000000")
+    expect(reset).toEqual([
+      { op: "unlink", source: "blk_mauritius0", destination: "blk_pic1000000" },
+      { op: "unlink", source: card, destination: "blk_pic1000000" },
+    ])
+    const before = boardOf()
+    const ops = setValueOps(before, "b", LINK, "blk_pic2000000", { url })
+    const after = applyOps(before, ops, NOW)
+    const back = applyOps(after, inverseOps(ops, before) as Op[], NOW + 1)
+    expect(walk(back, "b")).toBe(walk(before, "b"))
+  })
+
+  describe("linkPreviewOps", () => {
+    const preview = {
+      url,
+      title: "Oak pendant lamp",
+      description: "A lamp.",
+      site: "MADE",
+      favicon: "https://made.com/f.ico",
+      image: "https://made.com/p.jpg",
+    }
+
+    it("writes the preview on the card and names it by the page's title", () => {
+      const { snapshot, card } = withCard()
+      const ops = linkPreviewOps(snapshot, card, url, preview)
+      expect(kinds(ops)).toEqual(["setProps", "setText"])
+      const next = applyOps(snapshot, ops, NOW)
+      expect(boardFeatures(next, "b")[3].values).toEqual([
+        {
+          id: card,
+          text: "Oak pendant lamp",
+          link: {
+            url,
+            description: "A lamp.",
+            site: "MADE",
+            favicon: "https://made.com/f.ico",
+            image: "https://made.com/p.jpg",
+          },
+        },
+      ])
+    })
+
+    it("keeps a name given since, and writes nothing for a card gone or pointing elsewhere", () => {
+      const { snapshot, card } = withCard()
+      const named = applyOps(snapshot, [{ op: "setText", id: card, text: "The lamp" }], NOW)
+      expect(kinds(linkPreviewOps(named, card, url, preview))).toEqual(["setProps"])
+      expect(linkPreviewOps(snapshot, card, "https://other.com/", preview)).toEqual([])
+      expect(linkPreviewOps(snapshot, "blk_nope000000", url, preview)).toEqual([])
+      const gone = applyOps(snapshot, [{ op: "delete", id: card }], NOW)
+      expect(linkPreviewOps(gone, card, url, preview)).toEqual([])
+    })
+  })
+
+  it("is not told to the model, and nothing the model says of one is applied", () => {
+    const snapshot = boardOf()
+    expect(tagFeaturesOf(snapshot, "b").map((feature) => feature.label)).toEqual([
+      "Location",
+      "Object",
+      "Material",
+    ])
+    const suggestion = { caption: "", features: [{ label: "Link", values: ["https://made.com"] }] }
+    expect(suggestionOps(snapshot, "b", "blk_pic2000000", suggestion, NOW)).toEqual([])
   })
 })
