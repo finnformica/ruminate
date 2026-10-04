@@ -18,7 +18,9 @@ const GAP = 8
  * again as it changes. A picture's shape is the size written on its block
  * when it went up (docs/images.md); one written without a size — pasted as
  * a link, say — is laid out square until its bytes arrive and say
- * otherwise. Click a tile to pick it.
+ * otherwise. A tile fetches its picture only once it is near the screen
+ * (`BoardPicture`, `lazy`), so a long wall opens by fetching a screenful,
+ * not the lot. Click a tile to pick it.
  */
 export function BoardWall({
   images,
@@ -81,6 +83,7 @@ export function BoardWall({
                   <BoardPicture
                     image={image}
                     fit="cover"
+                    lazy
                     className="h-full w-full"
                     onSize={(w, h) => learn(image.id, w / h)}
                   />

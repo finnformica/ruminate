@@ -1,5 +1,9 @@
+import React from "react"
+import { imagePropsOf } from "../../blocks/image"
 import type { BlockProps } from "../../blocks/types"
+import { thumbHashDataUrl } from "../../data/image-thumbhash"
 import { useImageSrc } from "../../data/images"
+import { useNearView } from "../../hooks/in-view"
 import { cx } from "../../utils/cx"
 import { LoadingIcon16 } from "../icons"
 
@@ -11,17 +15,32 @@ export interface BoardImage {
   props: BlockProps | null
 }
 
+/** How close to the screen a lazy tile is before it fetches its bytes: a
+ * screenful above and below, so a scroll finds the next tiles already
+ * on their way. A percentage of the wall's scroll container, not the
+ * viewport (`useNearView`). */
+const NEAR_MARGIN = "100% 0px"
+
 /**
  * A board's picture, drawn from the same bytes the editor draws
  * (`useImageSrc`): the local preview while it uploads, under a spinner;
- * the asset once it has landed; a quiet box while the bytes are on their
- * way, and a dashed one when they cannot be had.
+ * the asset once it has landed; its likeness while the bytes are on their
+ * way (the block's ThumbHash, docs/images.md, Offline — a quiet box when
+ * it has none), and a dashed one when they cannot be had. The picture
+ * fades in over its likeness once it has loaded, as the editor's figure
+ * does, rather than painting across the box as its bytes decode.
+ *
+ * A `lazy` picture — a tile on the wall — fetches nothing until it is
+ * near the screen: a wall of hundreds opens by fetching the first
+ * screenful, and the rest as they are scrolled to. A picture still
+ * uploading is never held back: its preview is already in hand.
  */
 export function BoardPicture({
   image,
   fit,
   className,
   onSize,
+  lazy = false,
 }: {
   image: BoardImage
   /** `cover` fills its box (a tile); `contain` shows the whole picture. */
@@ -30,9 +49,54 @@ export function BoardPicture({
   /** Told the picture's own pixels once its bytes have arrived, for a
    * block that recorded no size. */
   onSize?: (width: number, height: number) => void
+  /** Fetch the bytes only once the picture is near the screen. */
+  lazy?: boolean
+}) {
+  const { image: asset, src: external, thumbhash } = imagePropsOf(image)
+  const likeness = thumbhash ? thumbHashDataUrl(thumbhash) : null
+  const { ref, near } = useNearView<HTMLDivElement>(NEAR_MARGIN)
+  // Only a picture with bytes to fetch waits: one still uploading draws
+  // its local preview, which costs nothing.
+  const waiting = lazy && !near && (asset !== undefined || external !== undefined)
+  if (waiting) {
+    return <Placeholder observe={ref} likeness={likeness} fit={fit} className={className} />
+  }
+  return (
+    <LoadedPicture
+      image={image}
+      fit={fit}
+      className={className}
+      onSize={onSize}
+      likeness={likeness}
+    />
+  )
+}
+
+function LoadedPicture({
+  image,
+  fit,
+  className,
+  onSize,
+  likeness,
+}: {
+  image: BoardImage
+  fit: "cover" | "contain"
+  className?: string
+  onSize?: (width: number, height: number) => void
+  likeness: string | null
 }) {
   const { src, uploading } = useImageSrc(image)
   const caption = image.text.trim()
+  // Loaded means decoded and ready to paint whole: until then the picture
+  // is transparent over its likeness. A picture the browser already holds
+  // (a tile remounted from the cache) is there on the first frame and
+  // needs no fade; a new src starts over.
+  const [loaded, setLoaded] = React.useState(false)
+  const imgRef = React.useRef<HTMLImageElement>(null)
+  React.useLayoutEffect(() => {
+    const img = imgRef.current
+    setLoaded(!!img && img.complete && img.naturalWidth > 0)
+  }, [src])
   if (src === "error") {
     return (
       <div
@@ -47,23 +111,35 @@ export function BoardPicture({
     )
   }
   if (src === null) {
-    return (
-      <div
-        aria-hidden
-        data-testid="board-image-placeholder"
-        className={cx("animate-pulse rounded-lg bg-bg-tertiary", className)}
-      />
-    )
+    return <Placeholder likeness={likeness} fit={fit} className={className} />
   }
   return (
-    <span className={cx("relative block overflow-hidden rounded-lg", className)}>
+    <span
+      className={cx(
+        "relative block overflow-hidden rounded-lg bg-bg-tertiary bg-center bg-no-repeat",
+        className,
+      )}
+      // The likeness sits behind the picture while it fades in.
+      style={
+        likeness && !loaded
+          ? { backgroundImage: `url("${likeness}")`, backgroundSize: fit }
+          : undefined
+      }
+    >
       <img
+        ref={imgRef}
         src={src}
         alt={caption}
         draggable={false}
+        decoding="async"
         data-testid="board-image"
-        className={cx("block h-full w-full", fit === "cover" ? "object-cover" : "object-contain")}
+        className={cx(
+          "block h-full w-full transition-opacity duration-300 ease-out",
+          fit === "cover" ? "object-cover" : "object-contain",
+          loaded ? "opacity-100" : "opacity-0",
+        )}
         onLoad={(event) => {
+          setLoaded(true)
           const { naturalWidth, naturalHeight } = event.currentTarget
           if (naturalWidth > 0 && naturalHeight > 0) onSize?.(naturalWidth, naturalHeight)
         }}
@@ -78,5 +154,34 @@ export function BoardPicture({
         </span>
       ) : null}
     </span>
+  )
+}
+
+/** The picture's place before its bytes are here: its likeness, fitted
+ * as the picture will be, or a pulsing box when the block has none. */
+function Placeholder({
+  observe,
+  likeness,
+  fit,
+  className,
+}: {
+  /** Where a waiting tile is watched from (`useNearView`). */
+  observe?: (element: HTMLDivElement | null) => void
+  likeness: string | null
+  fit: "cover" | "contain"
+  className?: string
+}) {
+  return (
+    <div
+      ref={observe}
+      aria-hidden
+      data-testid="board-image-placeholder"
+      className={cx(
+        "rounded-lg bg-bg-tertiary bg-center bg-no-repeat",
+        !likeness && "animate-pulse",
+        className,
+      )}
+      style={likeness ? { backgroundImage: `url("${likeness}")`, backgroundSize: fit } : undefined}
+    />
   )
 }
