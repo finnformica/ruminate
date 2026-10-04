@@ -7,6 +7,7 @@ import {
   addImageOps,
   boardFeatures,
   boardImageIds,
+  boardLinkUrl,
   clearValueOps,
   imageLocationOf,
   imageLocationOps,
@@ -14,6 +15,7 @@ import {
   type ImageLocation,
   inverseOps,
   isBoard,
+  linkPreviewOps,
   outlineImageIds,
   resetImageOps,
   setCaptionOps,
@@ -40,6 +42,7 @@ import {
   uploadImage,
 } from "../data/images"
 import { parseProps } from "../data/graph"
+import { fetchLinkPreview } from "../data/link-previews"
 import { deleteBlockOps, type Op } from "../data/ops"
 import { useApplyOps } from "../data/store"
 import { requestTagSuggestion, SuggestTagsError } from "../data/suggest-tags"
@@ -230,13 +233,41 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
     [store, apply],
   )
 
+  /**
+   * A link value's preview, fetched behind the write as the editor fetches
+   * a new link block's (docs/links.md) and written on quietly. A page that
+   * will not answer is not an error here: the card is there to open either
+   * way, and says "No preview available" where the description would be.
+   * Only a signed-in reader can ask.
+   */
+  const previewInto = React.useCallback(
+    (valueId: string, url: string) => {
+      if (!isDatabaseMode) return
+      void fetchLinkPreview(url)
+        .then((preview) => {
+          const ops = linkPreviewOps(store.get(graphSnapshotAtom), valueId, url, preview)
+          if (ops.length === 0) return
+          apply(ops)
+          void requestDatabaseFlush()
+        })
+        .catch(() => {})
+    },
+    [isDatabaseMode, store, apply],
+  )
+
   const setValue = React.useCallback(
     (feature: BoardFeature, imageId: string, ref: ValueRef) => {
       const snapshot = store.get(graphSnapshotAtom)
       const ops = setValueOps(snapshot, boardId, feature, imageId, ref)
       write(ops)
+      // A card made for a new address is asked for its preview.
+      const url = "url" in ref ? boardLinkUrl(ref.url) : null
+      const made = ops.find(
+        (op): op is Extract<Op, { op: "create" }> => op.op === "create" && op.type === "link",
+      )
+      if (made && url !== null) previewInto(made.id, url)
     },
-    [store, boardId, write],
+    [store, boardId, write, previewInto],
   )
 
   const clearValue = React.useCallback(

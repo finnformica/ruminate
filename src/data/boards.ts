@@ -1,4 +1,13 @@
 import { blockId } from "../blocks/id"
+import {
+  hostOf,
+  hrefOf,
+  isWebUrl,
+  linkPropsOf,
+  withLinkPreview,
+  type LinkPreview,
+  type LinkProps,
+} from "../blocks/link"
 import type { NoteId } from "../schema"
 import { BOARD_PROP } from "../utils/board-prop"
 import {
@@ -17,8 +26,8 @@ import { applyOps, type Op } from "./ops"
 
 /**
  * **Boards** (docs/boards.md): a note read as a wall of pictures, with a
- * few features — a location, a fixture, a material — you can set on each
- * one from a form instead of the outline.
+ * few features — a location, an object, a material, a link to where it
+ * came from — you can set on each one from a form instead of the outline.
  *
  * A board is a note whose page carries `board: true` (`BOARD_PROP`):
  * made by **New board**, drawn with its own icon, opened on its own page.
@@ -33,7 +42,10 @@ import { applyOps, type Op } from "./ops"
  * is picked; and setting a value on a picture is a `link` from the value
  * block to the picture — the same parent that select-mode paste gives a
  * block in the editor, and what takes the picture out of the basket.
- * Clearing its last value unlinks it, and the basket has it again. So the
+ * Clearing its last value unlinks it, and the basket has it again. A LINK
+ * feature's values are link blocks rather than bullets (docs/links.md):
+ * the page a picture came from, as its card, with the pictures from that
+ * page beneath it; nothing else about it differs. So the
  * outline shows exactly what the board shows, a board can be written by
  * hand in the outline and the form picks it up, and nothing here is a rule
  * of its own: it is the editor's basket, read and written the editor's way.
@@ -42,15 +54,29 @@ import { applyOps, type Op } from "./ops"
  * through the one storage seam (`src/data/store.ts`) like the editor's.
  */
 
-export interface BoardFeature {
+interface FeatureBase {
   /** The block's text on the page, and what the form calls it. */
   label: string
   /** Whether a picture may carry several of its values at once. */
   multi: boolean
-  /** What the feature is, as the model is told it (docs/boards.md,
-   * "Tagging with Claude"). */
-  meaning: string
 }
+
+/** A feature, by what its values are: a NAME typed in, or a web ADDRESS. */
+export type BoardFeature =
+  | (FeatureBase & {
+      /** A value is a name: a bullet under the feature block. */
+      kind: "text"
+      /** What the feature is, as the model is told it (docs/boards.md,
+       * "Tagging with Claude"). */
+      meaning: string
+    })
+  | (FeatureBase & {
+      /** A value is a web address: a link block under the feature block,
+       * drawn as its card (docs/links.md), which every picture from that
+       * page shares. The model is not asked about it — where a picture
+       * came from cannot be read off the picture. */
+      kind: "link"
+    })
 
 /** The features a board offers, in the order the form shows them. The
  * label is the identity: a block on the page with this text (trimmed,
@@ -59,20 +85,25 @@ export const BOARD_FEATURES: readonly BoardFeature[] = [
   {
     label: "Location",
     multi: false,
+    kind: "text",
     meaning: "where the picture was taken, named as a person would say it",
   },
   {
     label: "Object",
     multi: true,
+    kind: "text",
     meaning:
       "the thing the picture is of, such as furniture, lighting, cutlery, plants or decoration",
   },
-  { label: "Material", multi: true, meaning: "what that thing is made of" },
+  { label: "Material", multi: true, kind: "text", meaning: "what that thing is made of" },
+  { label: "Link", multi: true, kind: "link" },
 ]
 
-/** The type a feature block is created as, and the type a value is. */
+/** The type a feature block is created as, and the types a value is: a
+ * bullet for a name, a link block for an address. */
 const FEATURE_BLOCK_TYPE = "text"
 const VALUE_BLOCK_TYPE = "ul"
+const LINK_BLOCK_TYPE = "link"
 const IMAGE_TYPE = "image"
 
 const normalise = (text: string) => text.trim().toLocaleLowerCase()
@@ -110,7 +141,10 @@ export function featureBlockId(
 
 export interface BoardValue {
   id: string
+  /** The name, or a link's title. */
   text: string
+  /** The address and the page's preview, for a link feature's value. */
+  link?: LinkProps
 }
 
 /** A feature as it stands on one board: its block, if any, and its values. */
@@ -120,13 +154,33 @@ export interface BoardFeatureState {
   values: BoardValue[]
 }
 
+/** The address and preview a link block carries, or null for any other
+ * block, or a link block with no address. */
+function linkOf(node: { type: string; props: string | null }): LinkProps | null {
+  if (node.type !== LINK_BLOCK_TYPE) return null
+  const link = linkPropsOf({ props: parseProps(node.props) })
+  return link.url === "" ? null : link
+}
+
 /** The values under a feature block: its direct children, in order. A
- * picture pasted straight under the feature is a picture, not a value. */
-function valuesOf(snapshot: GraphSnapshot, featureBlock: string): BoardValue[] {
+ * picture pasted straight under the feature is a picture, not a value; and
+ * under a link feature only a link block is a value — a line typed there
+ * by hand is content. */
+function valuesOf(
+  snapshot: GraphSnapshot,
+  featureBlock: string,
+  feature: BoardFeature,
+): BoardValue[] {
   const values: BoardValue[] = []
   for (const id of childIdsOf(snapshot, featureBlock)) {
     const node = snapshot.nodes.get(id)
-    if (node && node.type !== IMAGE_TYPE) values.push({ id, text: node.text })
+    if (!node || node.type === IMAGE_TYPE) continue
+    if (feature.kind === "link") {
+      const link = linkOf(node)
+      if (link !== null) values.push({ id, text: node.text, link })
+    } else {
+      values.push({ id, text: node.text })
+    }
   }
   return values
 }
@@ -135,7 +189,7 @@ function valuesOf(snapshot: GraphSnapshot, featureBlock: string): BoardValue[] {
 export function boardFeatures(snapshot: GraphSnapshot, boardId: NoteId): BoardFeatureState[] {
   return BOARD_FEATURES.map((feature) => {
     const block = featureBlockId(snapshot, boardId, feature)
-    return { feature, blockId: block, values: block ? valuesOf(snapshot, block) : [] }
+    return { feature, blockId: block, values: block ? valuesOf(snapshot, block, feature) : [] }
   })
 }
 
@@ -288,9 +342,24 @@ function featureKey(snapshot: GraphSnapshot, boardId: NoteId): string {
   return sortKeyBetween(before, after)
 }
 
-/** What a value is named as: an existing value's id, or the text of one to
- * find or create. */
-export type ValueRef = { id: string } | { text: string }
+/** What a value is named as: an existing value's id, the text of one to
+ * find or create, or — for a link feature — the address of one. */
+export type ValueRef = { id: string } | { text: string } | { url: string }
+
+/**
+ * The address a link value is made with, from what was typed: trimmed, a
+ * scheme-less one taken as https (as a typed address is in a note), and
+ * null for anything that is not a web address — nothing is made of it.
+ */
+export function boardLinkUrl(address: string): string | null {
+  const trimmed = address.trim()
+  if (trimmed === "") return null
+  const url = hrefOf(trimmed)
+  return isWebUrl(url) ? url : null
+}
+
+/** Whether two addresses name one page, a trailing slash aside. */
+const sameUrl = (a: string, b: string) => a.replace(/\/$/, "") === b.replace(/\/$/, "")
 
 /**
  * Give a picture a value of a feature. Whatever is missing is created on
@@ -298,6 +367,12 @@ export type ValueRef = { id: string } | { text: string }
  * linked beneath the value. A single-select feature first takes back any
  * other value of its own the picture carried. Nothing to do (the picture
  * already carries exactly this) is an empty batch.
+ *
+ * A link feature's value is made from an address (`{ url }`): a link block
+ * titled by the address's host, as a pasted address is named, with its
+ * preview to follow (`linkPreviewOps`); an address already on the board,
+ * a trailing slash aside, is reused. A name given to a link feature, or an
+ * address to any other, makes nothing.
  */
 export function setValueOps(
   snapshot: GraphSnapshot,
@@ -330,7 +405,7 @@ export function setValueOps(
       },
     )
   } else {
-    values = valuesOf(snapshot, featureBlock)
+    values = valuesOf(snapshot, featureBlock, feature)
   }
 
   let valueId: string
@@ -338,15 +413,28 @@ export function setValueOps(
     if (!values.some((value) => value.id === ref.id)) return []
     valueId = ref.id
   } else {
-    const text = ref.text.trim()
-    if (text === "") return []
-    const existing = values.find((value) => normalise(value.text) === normalise(text))
+    // The value to find, or what to make when it is not there.
+    let existing: BoardValue | undefined
+    let made: { type: string; text: string; props: string | null }
+    if ("url" in ref) {
+      if (feature.kind !== "link") return []
+      const url = boardLinkUrl(ref.url)
+      if (url === null) return []
+      existing = values.find((value) => value.link !== undefined && sameUrl(value.link.url, url))
+      made = { type: LINK_BLOCK_TYPE, text: hostOf(url), props: propsJson({ url }) }
+    } else {
+      if (feature.kind !== "text") return []
+      const text = ref.text.trim()
+      if (text === "") return []
+      existing = values.find((value) => normalise(value.text) === normalise(text))
+      made = { type: VALUE_BLOCK_TYPE, text, props: null }
+    }
     if (existing) {
       valueId = existing.id
     } else {
       valueId = blockId()
       ops.push(
-        { op: "create", id: valueId, type: VALUE_BLOCK_TYPE, text, props: null, notesId: boardId },
+        { op: "create", id: valueId, ...made, notesId: boardId },
         {
           op: "link",
           source: featureBlock,
@@ -380,16 +468,50 @@ export function setValueOps(
   return ops
 }
 
+/**
+ * The page's preview, landed for a link value — asked for as the editor
+ * asks when a link block is made (`fetchLinkPreview`), and written as the
+ * editor writes it (`withLinkPreview`). The page's title is taken where the
+ * value has no name of its own but the host it was made with, so the
+ * picker and the Filter menu can call the page what it calls itself; a
+ * name given since is kept. Nothing for a block that is gone, or that no
+ * longer points where the preview was asked for.
+ */
+export function linkPreviewOps(
+  snapshot: GraphSnapshot,
+  valueId: string,
+  url: string,
+  preview: LinkPreview,
+): Op[] {
+  const node = snapshot.nodes.get(valueId)
+  if (!node || node.deleted_at || linkOf(node)?.url !== url) return []
+  const props = parseProps(node.props)
+  const ops: Op[] = [
+    { op: "setProps", id: valueId, props: propsJson(withLinkPreview({ props }, preview)) },
+  ]
+  const title = preview.title?.trim() ?? ""
+  const named = node.text.trim() !== "" && node.text.trim() !== hostOf(url)
+  if (title !== "" && !named) ops.push({ op: "setText", id: valueId, text: title })
+  return ops
+}
+
 /** The board's features as the tagging route is told them (docs/boards.md,
  * "Tagging with Claude"): each label, whether it takes several values, and
- * the values in use. */
+ * the values in use. A link feature is not among them: the model is not
+ * asked where a picture came from. */
 export function tagFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): TagFeature[] {
-  return boardFeatures(snapshot, boardId).map((state) => ({
-    label: state.feature.label,
-    multi: state.feature.multi,
-    meaning: state.feature.meaning,
-    values: state.values.map((value) => value.text.trim()).filter((text) => text !== ""),
-  }))
+  return boardFeatures(snapshot, boardId).flatMap((state) => {
+    const { feature } = state
+    if (feature.kind !== "text") return []
+    return [
+      {
+        label: feature.label,
+        multi: feature.multi,
+        meaning: feature.meaning,
+        values: state.values.map((value) => value.text.trim()).filter((text) => text !== ""),
+      },
+    ]
+  })
 }
 
 /**
@@ -425,6 +547,8 @@ export function suggestionOps(
   if (caption !== "" && node.text.trim() === "") take(setCaptionOps(current, imageId, caption))
 
   for (const feature of BOARD_FEATURES) {
+    // A link is not the model's to suggest, whatever the answer names.
+    if (feature.kind !== "text") continue
     const answer = suggestion.features.find((entry) => isFeatureText(entry.label, feature))
     if (!answer) continue
     const state = boardFeatures(current, boardId).find((entry) => entry.feature === feature)
