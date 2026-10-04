@@ -81,7 +81,11 @@ export function BoardInspector({
       >
         <div
           data-testid="board-inspector"
-          className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_16rem]"
+          // The phone's one column is `minmax(0,1fr)`, as the window's own
+          // is: an auto column grows to its content, and a picker's one-line
+          // summary of several values would widen the whole body past the
+          // screen rather than be cut (the desktop's picker column is fixed).
+          className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-[minmax(0,1fr)_16rem]"
         >
           <BoardPicture
             image={image}
