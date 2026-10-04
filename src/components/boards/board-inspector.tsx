@@ -9,7 +9,8 @@ import { Dialog } from "../ui/dialog"
 import { FormControl } from "../form-control"
 import { ResetIcon16, SparklesIcon16, TrashIcon16 } from "../icons"
 import { TextInput } from "../ui/text-input"
-import { BoardPicture, type BoardImage } from "./board-picture"
+import { Picture } from "../picture"
+import type { BoardImage } from "./board-wall"
 import { LinkValues } from "./link-values"
 import { NewValueDialog } from "./new-value-dialog"
 import { ValuePicker } from "./value-picker"
@@ -89,10 +90,15 @@ export function BoardInspector({
           // screen rather than be cut (the desktop's picker column is fixed).
           className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-[minmax(0,1fr)_16rem]"
         >
-          <BoardPicture
-            image={image}
-            fit="contain"
-            className="max-h-[70vh] min-h-40 bg-bg-secondary sm:min-h-80"
+          {/* The thumbnail the wall already holds, then the picture itself
+              once decoded (`detail="full"`). */}
+          <Picture
+            block={image}
+            name="board-image"
+            fit="natural"
+            detail="full"
+            maxHeight="70vh"
+            className="min-h-40 bg-bg-secondary sm:min-h-80"
           />
           <div className="flex flex-col gap-4">
             <FormControl htmlFor="board-caption" label="Caption">

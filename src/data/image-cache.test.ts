@@ -127,6 +127,34 @@ describe("the device's copy of the user's pictures", () => {
     expect(await (await readCachedImage(B))?.text()).toBe("bbbbbb")
   })
 
+  it("keeps a picture's thumbnail apart from the picture, under the same cap", async () => {
+    startImageCache("42", 10)
+    await cacheImage(A, new Blob(["aaaa"]))
+    await cacheImage(A, new Blob(["tt"]), "thumb")
+    expect(await (await readCachedImage(A))?.text()).toBe("aaaa")
+    expect(await (await readCachedImage(A, "thumb"))?.text()).toBe("tt")
+    expect(await readCachedImage(B, "thumb")).toBeNull()
+    // Two thumbnails are two entries, not one: six more bytes push the
+    // picture out, and both thumbnails stay.
+    await cacheImage(B, new Blob(["bbbbbb"]), "thumb")
+    expect(await readCachedImage(A)).toBeNull()
+    expect(await (await readCachedImage(A, "thumb"))?.text()).toBe("tt")
+    expect(await (await readCachedImage(B, "thumb"))?.text()).toBe("bbbbbb")
+    // Signed in again, the thumbnails are still counted as themselves.
+    stopImageCache()
+    startImageCache("42", 10)
+    await cacheImage(C, new Blob(["cccc"]))
+    expect(await readCachedImage(A, "thumb")).toBeNull()
+    expect(await (await readCachedImage(B, "thumb"))?.text()).toBe("bbbbbb")
+    expect(await (await readCachedImage(C))?.text()).toBe("cccc")
+  })
+
+  it("fetches a thumbnail from its own address", async () => {
+    fetched.mockResolvedValueOnce(new Response("tiny", { status: 200 }))
+    expect(await (await fetchImageBlob(A, "thumb")).text()).toBe("tiny")
+    expect(fetched.mock.calls[0][0]).toBe(`/api/images/${A}/thumb`)
+  })
+
   it("keeps one copy of a picture put twice at once", async () => {
     startImageCache("42", 10)
     await Promise.all([cacheImage(A, new Blob(["aaaa"])), cacheImage(A, new Blob(["aaaa"]))])

@@ -1,4 +1,8 @@
-import { imageUrlOf } from "../../worker/handlers/image-policy"
+import {
+  imageVariantOfUrl,
+  imageVariantUrlOf,
+  type ImageVariant,
+} from "../../worker/handlers/image-policy"
 import { sessionFetch } from "./session-fetch"
 
 /**
@@ -18,7 +22,9 @@ import { sessionFetch } from "./session-fetch"
  * copy grows with what the user looks at, not with the size of the corpus.
  * It is held under `MAX_CACHE_BYTES`, the earliest-kept pictures going
  * first to make room, and the browser is asked once to keep the app's
- * storage rather than evict it under pressure.
+ * storage rather than evict it under pressure. A picture's thumbnail
+ * (docs/images.md, Thumbnails) is kept apart from the picture, under its
+ * own address, and counts towards the same cap.
  *
  * Everything here is a no-op where the Cache API is missing (tests, very
  * old browsers): pictures are then fetched as they are shown, as before.
@@ -65,11 +71,18 @@ let session: CacheSession | null = null
 
 const cacheStorage = (): CacheStorage | null => (typeof caches === "undefined" ? null : caches)
 
-/** The cache key for an asset: its own address, so the entry reads as what
- * it is in the browser's devtools. */
-const keyOf = (id: string) => new Request(new URL(imageUrlOf(id), location.origin).href)
+/** The cache key for a variant of an asset: its own address, so the entry
+ * reads as what it is in the browser's devtools. */
+const keyOf = (id: string, variant: ImageVariant) =>
+  new Request(new URL(imageVariantUrlOf(id, variant), location.origin).href)
 
-const idOfKey = (request: Request) => new URL(request.url).pathname.split("/").pop() ?? ""
+/** What an entry holds, as `sizes` is keyed: the asset id, with the
+ * thumbnail's suffix for a thumbnail. */
+const refOfKey = (request: Request) => {
+  const named = imageVariantOfUrl(new URL(request.url).pathname)
+  return named ? refOf(named.id, named.variant) : ""
+}
+const refOf = (id: string, variant: ImageVariant) => (variant === "thumb" ? `${id}/thumb` : id)
 
 async function openCache(current: CacheSession): Promise<Cache | null> {
   const storage = cacheStorage()
@@ -111,7 +124,7 @@ export function startImageCache(owner: string, maxBytes = MAX_CACHE_BYTES): void
       for (const request of await cache.keys()) {
         const response = await cache.match(request)
         const size = Number(response?.headers.get(SIZE_HEADER) ?? 0) || 0
-        current.sizes.set(idOfKey(request), size)
+        current.sizes.set(refOfKey(request), size)
         current.total += size
       }
     } catch {
@@ -129,30 +142,40 @@ export function stopImageCache(): void {
   session = null
 }
 
-/** The cached bytes of a picture, or null when the device has none. */
-export async function readCachedImage(id: string): Promise<Blob | null> {
+/** The cached bytes of a picture (or of its thumbnail), or null when the
+ * device has none. */
+export async function readCachedImage(
+  id: string,
+  variant: ImageVariant = "full",
+): Promise<Blob | null> {
   const current = session
   if (!current) return null
   const cache = await openCache(current)
   if (!cache) return null
   try {
-    const response = await cache.match(keyOf(id))
+    const response = await cache.match(keyOf(id, variant))
     return response ? await response.blob() : null
   } catch {
     return null
   }
 }
 
-/** Keep a picture's bytes on the device (bytes just uploaded, or fetched),
- * making room under the cap by letting the earliest-kept pictures go. */
-export async function cacheImage(id: string, blob: Blob): Promise<void> {
+/** Keep a picture's bytes (or its thumbnail's) on the device — bytes just
+ * uploaded, or fetched — making room under the cap by letting the
+ * earliest-kept pictures go. */
+export async function cacheImage(
+  id: string,
+  blob: Blob,
+  variant: ImageVariant = "full",
+): Promise<void> {
   const current = session
   if (!current || blob.size > current.maxBytes) return
   await current.ready
   const cache = await openCache(current)
-  if (!cache || session !== current || current.sizes.has(id)) return
+  const ref = refOf(id, variant)
+  if (!cache || session !== current || current.sizes.has(ref)) return
   // Counted before any await, so two puts of one picture keep one copy.
-  current.sizes.set(id, blob.size)
+  current.sizes.set(ref, blob.size)
   current.total += blob.size
   try {
     // The newest entry is this one, so the oldest is never it.
@@ -160,10 +183,10 @@ export async function cacheImage(id: string, blob: Blob): Promise<void> {
       const [oldest, size] = current.sizes.entries().next().value as [string, number]
       current.sizes.delete(oldest)
       current.total -= size
-      await cache.delete(keyOf(oldest))
+      await cache.delete(keyOfRef(oldest))
     }
     await cache.put(
-      keyOf(id),
+      keyOf(id, variant),
       new Response(blob, {
         headers: {
           "Content-Type": blob.type || "application/octet-stream",
@@ -173,16 +196,22 @@ export async function cacheImage(id: string, blob: Blob): Promise<void> {
     )
   } catch {
     // Out of space, most likely: the picture is still drawn from memory.
-    if (current.sizes.delete(id)) current.total -= blob.size
+    if (current.sizes.delete(ref)) current.total -= blob.size
   }
 }
 
-/** Fetch a picture's bytes from the Worker. Throws `ImageFetchError`. */
-export async function fetchImageBlob(id: string): Promise<Blob> {
+/** The cache key an entry in `sizes` was put under. */
+const keyOfRef = (ref: string) =>
+  ref.endsWith("/thumb") ? keyOf(ref.slice(0, -"/thumb".length), "thumb") : keyOf(ref, "full")
+
+/** Fetch a picture's bytes (or its thumbnail's) from the Worker. Throws
+ * `ImageFetchError`: `missing` for a thumbnail the server has not got yet
+ * as for a picture it has not got at all. */
+export async function fetchImageBlob(id: string, variant: ImageVariant = "full"): Promise<Blob> {
   let response: Response
   try {
     response = await sessionFetch(
-      imageUrlOf(id),
+      imageVariantUrlOf(id, variant),
       { method: "GET" },
       () => new ImageFetchError("unreachable"),
     )

@@ -2,8 +2,17 @@ import React from "react"
 import useResizeObserver from "use-resize-observer"
 import { imagePropsOf } from "../../blocks/image"
 import { cx } from "../../utils/cx"
-import { BoardPicture, type BoardImage } from "./board-picture"
+import type { BlockProps } from "../../blocks/types"
+import { Picture } from "../picture"
 import { columnCount, masonryColumns } from "./masonry"
+
+/** What the board knows of a picture: the image block's row. */
+export interface BoardImage {
+  id: string
+  /** The caption. */
+  text: string
+  props: BlockProps | null
+}
 
 /** A column is never narrower than this, and the wall never has fewer than
  * two — a phone's width gives two, a desktop's five or six. */
@@ -19,8 +28,10 @@ const GAP = 8
  * when it went up (docs/images.md); one written without a size — pasted as
  * a link, say — is laid out square until its bytes arrive and say
  * otherwise. A tile fetches its picture only once it is near the screen
- * (`BoardPicture`, `lazy`), so a long wall opens by fetching a screenful,
- * not the lot. Click a tile to pick it.
+ * (`Picture`, `lazy`), and fetches its thumbnail rather than the
+ * picture (`detail="thumb"`; docs/images.md, Thumbnails), so a long wall
+ * opens by fetching a screenful of small copies, not the lot of the
+ * pictures. Click a tile to pick it.
  */
 export function BoardWall({
   images,
@@ -80,9 +91,11 @@ export function BoardWall({
                     image.id === selectedId && "ring-2 ring-border-selected",
                   )}
                 >
-                  <BoardPicture
-                    image={image}
+                  <Picture
+                    block={image}
+                    name="board-image"
                     fit="cover"
+                    detail="thumb"
                     lazy
                     className="h-full w-full"
                     onSize={(w, h) => learn(image.id, w / h)}

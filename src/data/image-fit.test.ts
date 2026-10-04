@@ -3,12 +3,15 @@ import { describe, expect, it } from "vitest"
 import { MAX_IMAGE_BYTES } from "../../worker/handlers/image-policy"
 import {
   FIT_MAX_EDGE,
+  THUMB_MAX_EDGE,
   VISION_MAX_EDGE,
   fitImage,
   fitImageFor,
   fittedName,
   fittedSize,
   needsFitting,
+  thumbnailCopy,
+  thumbnailType,
   visionCopy,
 } from "./image-fit"
 
@@ -80,5 +83,25 @@ describe("fitImageFor and visionCopy", () => {
     const blob = new Blob([new Uint8Array(10)], { type: "image/jpeg" })
     expect(await fitImageFor(blob, { maxEdge: 100, quality: 0.8, type: "image/jpeg" })).toBeNull()
     expect(await visionCopy(blob)).toBeNull()
+  })
+})
+
+describe("thumbnailType and thumbnailCopy", () => {
+  it("fits a phone photo to the thumbnail edge: twelve megapixels become a third of one", () => {
+    expect(fittedSize(4032, 3024, THUMB_MAX_EDGE)).toEqual({ width: 640, height: 480 })
+    expect(fittedSize(3024, 4032, THUMB_MAX_EDGE)).toEqual({ width: 480, height: 640 })
+    expect(fittedSize(400, 300, THUMB_MAX_EDGE)).toEqual({ width: 400, height: 300 })
+  })
+
+  it("keeps a PNG a PNG, for its transparency, and makes everything else a JPEG", () => {
+    expect(thumbnailType("image/png")).toBe("image/png")
+    expect(thumbnailType("image/PNG; charset=binary")).toBe("image/png")
+    expect(thumbnailType("image/jpeg")).toBe("image/jpeg")
+    expect(thumbnailType("image/gif")).toBe("image/jpeg")
+    expect(thumbnailType("image/webp")).toBe("image/jpeg")
+  })
+
+  it("is nothing where there is no canvas to re-encode with", async () => {
+    expect(await thumbnailCopy(new Blob([new Uint8Array(10)], { type: "image/png" }))).toBeNull()
   })
 })

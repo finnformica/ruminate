@@ -96,7 +96,9 @@ results) lay the picture out the same way, with no controls.
 
 `POST /api/images` takes the raw bytes (the request's `Content-Type` is the
 image type) and answers `{ id, size, type }`. `GET /api/images/<id>` serves
-them back, marked `private, immutable` so the browser keeps them for good.
+them back, marked `private, immutable` so the browser keeps them for good;
+`PUT` and `GET /api/images/<id>/thumb` do the same for the picture's small
+copy (Thumbnails, below).
 Both are session-guarded exactly like the replica routes; the R2 key is
 `<verified GitHub id>/<asset id>`, minted from the session and a validated
 id, so one tenant can neither read nor overwrite another's picture.
@@ -140,13 +142,68 @@ device's copy first, then go through `fetch` with the bearer token (an
 `<img src>` cannot carry one); either way they become object URLs, cached for
 the page's life.
 
+## Thumbnails
+
+A picture has a small copy beside it, and everywhere a picture is drawn
+draws the copy first.
+
+**One component draws every picture** (`Picture`, src/components/
+picture.tsx — the editor's figure, the lightbox, a board's wall and its
+inspector all draw it and keep only their own chrome around it) over one
+reader (`usePicture`, src/data/images.ts). Nothing is fetched for a
+`lazy` picture until it is within a screenful of the screen
+(`useNearView`, src/hooks/in-view.ts, watching from the page's own scroll
+container); until its bytes are here it is its likeness (the ThumbHash,
+Offline below) in the box its caller gives it, or a pulsing box when the
+block has none. The thumbnail fades in over the likeness once decoded.
+Then, by `detail`: a tile (`thumb`) stops there; the lightbox and a
+board's inspector (`full`) go on to the picture itself; the editor's
+figure (`auto`) goes on to it only where its box, measured on screen in
+device pixels, wants more than the thumbnail's 640 — a figure at the
+row's width on a retina screen does, a small one does not. The picture
+itself is swapped in only once the browser has decoded it (`useDecoded`),
+so the thumbnail never gives way to a half-painted picture. The download
+and the vision model take the picture itself.
+
+**Made on the device, written beside the picture.** As a picture goes up,
+the client makes its thumbnail (`thumbnailCopy`, `src/data/image-fit.ts`)
+through the same canvas the fitter uses: no larger than 640 pixels on its
+longest side, a PNG kept a PNG (a screenshot's transparent corners stay
+clear) and anything else written as a JPEG at quality 0.8 — tens of
+kilobytes against the picture's megabytes. Once the upload has its id the
+copy is written to `PUT /api/images/<id>/thumb` and the upload resolves
+only then, so the block's row, which the asset id makes a reader of the
+thumbnail, never asks for one that is not there yet. The Worker keeps it in
+R2 under `<tenant>/<asset id>/thumb`, beside the picture; it takes a copy
+only for a picture the tenant already has, of an image type, under a
+megabyte (`MAX_THUMB_BYTES`), and serves it from `GET
+/api/images/<id>/thumb` as it serves the picture — session-guarded,
+`private, immutable`. A thumbnail that cannot be made (no canvas) or will
+not go up costs nothing: the upload is as good without it.
+
+**Nothing on the block says whether there is one.** A reader asks for the
+thumbnail (`useImageSrc(block, { variant: "thumb" })`), and the server either has it or
+answers 404. On a 404 the picture itself stands in — this once, at its
+full size — and a thumbnail is made from those bytes and written beside
+the picture for every view after, on any device (`backfillThumbnail`,
+`src/data/images.ts`). So the pictures uploaded before there were
+thumbnails get theirs the first time a tile shows them, with no sweep,
+no migration and no write to the graph (a prop would bump the block's
+updated time, as the ThumbHash section below says).
+
+**Kept on the device as the picture is.** The copy is cached under its
+own address (`image-cache.ts`, keyed `<id>/thumb`), counting towards the
+same cap, so a wall seen once is a wall seen offline — and a picture just
+uploaded has both its copies on the device before its row shows the
+asset.
+
 ## Offline
 
 Two halves: a picture the device has is drawn from the device, and one it
 has not got keeps its place with a likeness of itself.
 
 **The device's copy** (`src/data/image-cache.ts`). An asset never changes
-under its id, so a kept copy is never stale. Copies live in the Cache API
+under its id — nor does its thumbnail (above) — so a kept copy is never stale. Copies live in the Cache API
 rather than the browser's HTTP cache, which the browser may empty at will and
 the app can neither list nor clear. There is one cache per signed-in
 identity (`ruminate-images-<github id>`), bound as the SQL store is

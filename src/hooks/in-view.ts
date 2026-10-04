@@ -38,6 +38,9 @@ export function useInView<T extends Element>(): {
  */
 export function useNearView<T extends Element>(
   margin: string,
+  /** False for an element that is wanted at once: near from the start,
+   * and nothing watches it. */
+  enabled = true,
 ): {
   /** A callback ref: the element may mount after the first render (a
    * tile that was drawing its upload, then had an asset to fetch). */
@@ -45,7 +48,10 @@ export function useNearView<T extends Element>(
   near: boolean
 } {
   const [element, setElement] = useState<T | null>(null)
-  const [near, setNear] = useState(() => typeof IntersectionObserver === "undefined")
+  const [near, setNear] = useState(() => !enabled || typeof IntersectionObserver === "undefined")
+  useEffect(() => {
+    if (!enabled) setNear(true)
+  }, [enabled])
   useEffect(() => {
     if (near || !element) return
     const observer = new IntersectionObserver(
