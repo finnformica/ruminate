@@ -136,6 +136,15 @@ The editor has two modes, like Notion: **select** (a block is highlighted) and
 declaratively in `src/blocks/keymap.ts` and dispatched through the command layer
 (`src/blocks/commands.ts`) — see `docs/block-editor-architecture.md`.
 
+**A command never changes the mode as a side effect.** Only the keys whose job
+is the mode cross between them: <kbd>↵</kbd> and <kbd>Esc</kbd>, <kbd>↑</kbd> /
+<kbd>↓</kbd> off the first or last line of the block being edited, and the
+keys that make a new block, which opens for typing. Everything else leaves you
+in the mode it found you in, on the row it leaves you on: a block removed
+from a highlight leaves the row that takes its place highlighted, one removed
+while typing (the touch screen's edit bar) leaves you typing in it, and a
+marker key on a highlighted block — empty or not — leaves it highlighted.
+
 ### Select mode (a block is highlighted)
 
 | Action                                   | Shortcut                                                                   |
@@ -156,7 +165,7 @@ declaratively in `src/blocks/keymap.ts` and dispatched through the command layer
 | Extend selection to more blocks          | <kbd>⇧</kbd> <kbd>↑</kbd> / <kbd>↓</kbd>                                   |
 | Grow selection by structure (ladder)     | <kbd>⌘</kbd> <kbd>A</kbd>                                                  |
 | Shrink it back one rung                  | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>A</kbd>                                     |
-| Remove block(s) from here                | <kbd>⌫</kbd> / <kbd>⌦</kbd> (one row: edit the row that takes its place)   |
+| Remove block(s) from here                | <kbd>⌫</kbd> / <kbd>⌦</kbd>                                                |
 | Copy / cut selection                     | <kbd>⌘</kbd> <kbd>C</kbd> / <kbd>⌘</kbd> <kbd>X</kbd>                      |
 | Paste after the selection                | <kbd>⌘</kbd> <kbd>V</kbd>                                                  |
 | Paste as one plain block                 | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd>                                     |
@@ -197,8 +206,8 @@ structural — each _toggles_ the highlighted block's type: <kbd>#</kbd>
 heading, <kbd>-</kbd> bullet, <kbd>[</kbd> todo, <kbd>></kbd> quote,
 <kbd>1</kbd> numbered item, <kbd>`</kbd> code block. A block already of that type strips back to a
 paragraph; anything else swaps just the leading marker — content and children
-are never touched, and each press is one undo step. On an _empty_ block the
-marker applies and editing opens, so you start typing that type immediately.
+are never touched, and each press is one undo step. An _empty_ block takes
+the type like any other and stays highlighted; <kbd>↵</kbd> opens it.
 (<kbd>x</kbd> still toggles a todo's checkbox; <kbd>[</kbd> changes what the
 block _is_.)
 
