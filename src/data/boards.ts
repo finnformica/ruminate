@@ -50,7 +50,7 @@ import { applyOps, deleteBlockOps, type Op } from "./ops"
  * the page a picture came from, as its card, with the pictures from that
  * page beneath it; nothing else about it differs. A board made before
  * features were blocks has its features by name alone — Location, Object,
- * Material, Link — and those are read as the defaults they were until the
+ * Material, Link — and those are read as the defaults they are until the
  * Features editor first touches them. So the outline shows exactly what
  * the board shows, a board can be written by hand in the outline and the
  * form picks it up, and nothing here is a rule of its own: it is the
@@ -92,8 +92,7 @@ export interface BoardFeature extends FeatureSpec {
  * The features a new board starts with, in the order the form shows them
  * — written onto the page as blocks by **New board** and **Make this a
  * board** (`defaultFeatureOps`), and the names a board from before
- * features were blocks is read by (`LEGACY_FEATURES`). The one place the
- * defaults live.
+ * features were blocks is read by. The one place the defaults live.
  */
 export const DEFAULT_FEATURES: readonly { label: string; spec: FeatureSpec }[] = [
   {
@@ -114,16 +113,14 @@ export const DEFAULT_FEATURES: readonly { label: string; spec: FeatureSpec }[] =
     },
   },
   { label: "Material", spec: { type: "text", multi: true, meaning: "what that thing is made of" } },
+  { label: "Link", spec: { type: "link", multi: true } },
 ]
 
 /** The names a board made before features were blocks has its features
- * by: the defaults, and the Link feature those boards offered. A direct
- * child of the page so named, with no `feature` prop, is read as that
- * feature until the Features editor stamps the prop on it. */
-const LEGACY_FEATURES: readonly { label: string; spec: FeatureSpec }[] = [
-  ...DEFAULT_FEATURES,
-  { label: "Link", spec: { type: "link", multi: true } },
-]
+ * by: the defaults. A direct child of the page so named, with no `feature`
+ * prop, is read as that feature until the Features editor stamps the prop
+ * on it. */
+const LEGACY_FEATURES = DEFAULT_FEATURES
 
 /** What a feature added from the editor is called until it is renamed. */
 const NEW_FEATURE_LABEL = "New feature"

@@ -1,6 +1,11 @@
 import { useAtomValue } from "jotai"
 import React from "react"
-import { imageValues, type BoardFeature, type BoardFeatureState } from "../../data/boards"
+import {
+  imageValues,
+  isLinkType,
+  type BoardFeature,
+  type BoardFeatureState,
+} from "../../data/boards"
 import { graphSnapshotAtom } from "../../global-state"
 import type { BoardWrites } from "../../hooks/board"
 import { usePending } from "../../hooks/pending"
@@ -11,14 +16,15 @@ import { ResetIcon16, SparklesIcon16, TrashIcon16 } from "../icons"
 import { TextInput } from "../ui/text-input"
 import { Picture } from "../picture"
 import type { BoardImage } from "./board-wall"
+import { LinkValues } from "./link-values"
 import { NewValueDialog } from "./new-value-dialog"
 import { ValuePicker } from "./value-picker"
 
 /**
  * The picture that was picked, in a window of its own: the picture large,
  * with its caption and its features beside it — the form a board is for
- * (docs/boards.md): a picker per feature, a link feature's values listed
- * by their titles. The app's dialog, as
+ * (docs/boards.md): a picker per feature, and for a link feature the
+ * picture's cards with **Add link** beneath them. The app's dialog, as
  * wide as the screen allows, so the picture has the room the wall could
  * not give it; the pickers' menus and the window for a new value's name
  * open over it. Escape, the close control or the scrim put it away.
@@ -121,13 +127,23 @@ export function BoardInspector({
                 <span className="text-sm/4 text-text-secondary">
                   {state.feature.label.trim() || "Untitled"}
                 </span>
-                <ValuePicker
-                  state={state}
-                  selected={imageValues(snapshot, state, image.id)}
-                  onPick={(value) => writes.setValue(state.feature.id, image.id, { id: value.id })}
-                  onClear={(value) => writes.clearValue(value, image.id)}
-                  onNew={() => setNaming(state.feature)}
-                />
+                {isLinkType(state.feature.type) ? (
+                  <LinkValues
+                    values={imageValues(snapshot, state, image.id)}
+                    onRemove={(value) => writes.clearValue(value, image.id)}
+                    onAdd={() => setNaming(state.feature)}
+                  />
+                ) : (
+                  <ValuePicker
+                    state={state}
+                    selected={imageValues(snapshot, state, image.id)}
+                    onPick={(value) =>
+                      writes.setValue(state.feature.id, image.id, { id: value.id })
+                    }
+                    onClear={(value) => writes.clearValue(value, image.id)}
+                    onNew={() => setNaming(state.feature)}
+                  />
+                )}
               </div>
             ))}
             <NewValueDialog

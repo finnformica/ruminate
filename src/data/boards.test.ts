@@ -216,6 +216,7 @@ describe("boardFeatures", () => {
       ["blk_first00000", "place", false],
       ["blk_link000000", "link", true],
     ])
+    expect(state[1].feature.meaning).toBe("")
   })
 
   it("follows the blocks' order on the page, and a rename keeps the feature", () => {
@@ -961,16 +962,26 @@ describe("the defaults", () => {
   it("are written onto a new board as blocks with the prop, in order, after any feature there", () => {
     const empty = graphOf({ b: `${img(1)}\n  id:: blk_pic1000000\n` })
     const ops = defaultFeatureOps(empty, "b")
-    expect(kinds(ops)).toEqual(["create", "link", "create", "link", "create", "link"])
+    expect(kinds(ops)).toEqual([
+      "create",
+      "link",
+      "create",
+      "link",
+      "create",
+      "link",
+      "create",
+      "link",
+    ])
     const next = applyOps(empty, ops, NOW)
     const features = boardFeatures(next, "b")
     expect(features.map((s) => [s.feature.label, s.feature.type, s.feature.multi])).toEqual([
       ["Location", "place", false],
       ["Object", "text", true],
       ["Material", "text", true],
+      ["Link", "link", true],
     ])
     expect(features.map((s) => s.feature.meaning)).toEqual(
-      DEFAULT_FEATURES.map((entry) => entry.spec.meaning),
+      DEFAULT_FEATURES.map((entry) => entry.spec.meaning ?? ""),
     )
     // Each a bullet carrying the prop, before the picture.
     for (const { feature } of features) {
@@ -985,6 +996,7 @@ describe("the defaults", () => {
       "Location",
       "Object",
       "Material",
+      "Link",
       "",
     ])
     expect(childIdsOf(next, "b").at(-1)).toBe("blk_pic1000000")
@@ -993,12 +1005,13 @@ describe("the defaults", () => {
   it("leave a default the board already has by label, and are nothing for a plain note", () => {
     const snapshot = boardOf()
     const ops = defaultFeatureOps(snapshot, "b")
-    expect(kinds(ops)).toEqual(["create", "link"])
+    expect(kinds(ops)).toEqual(["create", "link", "create", "link"])
     const next = applyOps(snapshot, ops, NOW)
     expect(boardFeatures(next, "b").map((s) => s.feature.label)).toEqual([
       "Location",
       "Object",
       "Material",
+      "Link",
     ])
     // Together at the top, the pictures where they were.
     expect(childIdsOf(next, "b").slice(-2)).toEqual(["blk_pic1000000", "blk_pic2000000"])

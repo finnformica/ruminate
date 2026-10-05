@@ -95,27 +95,29 @@ model is told it):
   no location.
 - `link` — a value is a web address: a link block (docs/links.md) under the
   feature block — the page's card, its address and preview in its props —
-  made from an address typed into **New…** (`{ url, title }` as the
-  `ValueRef`; a scheme-less address is taken as https, `boardLinkUrl`, and
-  anything that is not a web address makes nothing). The card is titled as
-  given, else by the address's host, as a pasted address is named, until
-  the page's preview lands and gives it the page's own title; a title given
-  is kept. The picker and the Filter menu list link values by that title.
+  made from an address typed into **Add link** in the picture's window
+  (`{ url, title }` as the `ValueRef`; a scheme-less address is taken as
+  https, `boardLinkUrl`, and anything that is not a web address makes
+  nothing). The card is titled as given, else by the address's host, as a
+  pasted address is named, until the page's preview lands and gives it the
+  page's own title; a title given is kept. The window shows the picture's
+  link values as cards, and the Filter menu lists them by that title.
   A picture given an address already on the board (a trailing slash aside)
   goes under the card that is there, so the pictures from one page share
   it. Only a link block under a link feature is a value: a line typed there
   by hand is content. The model is never asked about a link feature.
 
 **Defaults, no templates.** Making a board — **New board**, or **Make this a
-board** on a note — writes three feature blocks onto the page, with their
+board** on a note — writes four feature blocks onto the page, with their
 props, before whatever the note holds (`defaultFeatureOps`, from
 `DEFAULT_FEATURES` in `src/data/boards.ts`, the one place they live):
 **Location** (`place`, one value: "where the picture was taken, named as a
 person would say it"), **Object** (`text`, several: "the thing the picture
-is of, such as furniture, lighting, cutlery, plants or decoration") and
-**Material** (`text`, several: "what that thing is made of"). A default the
-note already has by label is left as it is. From there the board's features
-are its own to change.
+is of, such as furniture, lighting, cutlery, plants or decoration"),
+**Material** (`text`, several: "what that thing is made of") and **Link**
+(`link`, several, no meaning — the model is not asked about it). A default
+the note already has by label is left as it is. From there the board's
+features are its own to change.
 
 **A board from before features were blocks keeps working.** Such a board has
 its features by name alone — a direct child of the page named `Location`,
@@ -313,8 +315,12 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
 - **The inspector** (`board-inspector.tsx`): the picked picture in a window
   of its own — the app's dialog, as wide as the screen allows — the picture
   large with its caption and a picker per feature beside it, stacked on a
-  phone, a link feature's values listed by their titles like any other's.
-  Focus stays in the window but the page is not made inert
+  phone — and, for a link feature, the picture's cards (`link-values.tsx`:
+  the editor's own card body, `LinkCardBody` in `link-card.tsx`, less the
+  page's picture, each with **Open link** and **Remove link**) and **Add
+  link** beneath them, which asks for an address and an optional title in
+  the same dialog a new value is named in. Focus stays in the window but
+  the page is not made inert
   (`modal="trap-focus"`), so the toast that answers a Reset or a Suggest,
   with its Undo, stays in reach while the window is open; a press on the scrim,
   Escape or the close control put it away. A menu opened from inside a
@@ -323,8 +329,8 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
 - **A picker** (`value-picker.tsx`): a menu of the feature's values —
   single-select closes on a pick, multi-select stays open with each row a
   toggle — and **New…**, which asks for a name in a dialog of its own
-  (`new-value-dialog.tsx`), or, for a link feature, an address (required,
-  a web address) and a title (optional).
+  (`new-value-dialog.tsx`); the same dialog asks a link feature's **Add
+  link** for an address (required, a web address) and a title (optional).
 
 ## Tagging with Claude
 

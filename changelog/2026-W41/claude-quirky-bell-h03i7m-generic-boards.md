@@ -1,7 +1,7 @@
 ### Added
 
-- A board's features are its own to define. **Features…** in a board's ⋯ menu lists them — each with its label, its type, whether a picture may carry several of its values, and what the model is told it means — with a move up and down, a remove, and **Add feature** for a new one. A new board starts with Location, Object and Material; a board made before this keeps the features it has.
-- A feature can hold links. Give a feature the **Link** type and its values are web addresses: **New…** in the picker asks for the address and an optional title, the value shows as the page's title or its host, and the pictures from one page share the card in the note.
+- A board's features are its own to define. **Features…** in a board's ⋯ menu lists them — each with its label, its type, whether a picture may carry several of its values, and what the model is told it means — with a move up and down, a remove, and **Add feature** for a new one. A new board starts with Location, Object, Material and Link; a board made before this keeps the features it has.
+- Any feature can hold links. Give a feature the **Link** type and its values are web addresses, shown as cards in a picture's window as the Link feature's are: **Add link** asks for the address and now an optional title, the card is named by that title or the page's, and the pictures from one page share it in the note.
 
 ### Changed
 

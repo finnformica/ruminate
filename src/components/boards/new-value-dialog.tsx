@@ -6,9 +6,10 @@ import { TextInput } from "../ui/text-input"
 
 /**
  * Naming a new value for a feature — "New location", with a box for the
- * name; "New link", with a box for the address and one for a title — in
- * the app's own dialog, so a phone shows the same window as a desktop
- * rather than its native prompt. Enter or **Add** makes the value and
+ * name, from the picker; "New link", with a box for the address and one
+ * for a title, from **Add link** — in the app's own dialog, so a phone
+ * shows the same window as a desktop rather than its native prompt. Enter
+ * or **Add** makes the value and
  * gives it to the picture; the name is trimmed, and an empty one adds
  * nothing. An address is taken with or without its scheme, and one that
  * is not a web address cannot be added; the title is the card's name, and
