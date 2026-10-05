@@ -219,3 +219,41 @@ describe("focused", () => {
     expect(occurrences(leafView.container)).toEqual(["r"])
   })
 })
+
+describe("BlockNoteEditor focus breadcrumb", () => {
+  /** The page in focus hands the editor the focused block's own view
+   * (`useNoteDoc`): a hop deeper is a doc that no longer holds the block
+   * focused on before it. The trail has to name that block all the same. */
+  const B: BlockDoc = {
+    props: null,
+    rootBlockIds: ["b"],
+    blocks: {
+      b: { id: "b", type: "text", text: "Bee", children: ["c"] },
+      c: { id: "c", type: "text", text: "Cee", children: ["d"] },
+      d: { id: "d", type: "text", text: "Dee", children: [] },
+    },
+  }
+  const C: BlockDoc = { props: null, rootBlockIds: ["c"], blocks: { c: B.blocks.c, d: B.blocks.d } }
+  const focused = (doc: BlockDoc, id: string) => (
+    <BlockNoteEditor
+      doc={doc}
+      onChange={() => {}}
+      noteId="n"
+      noteTitle="Note"
+      focusBlockId={id}
+      onFocusNavigate={() => {}}
+    />
+  )
+
+  it("names every hop of the path taken, not only the blocks the current view holds", () => {
+    const { container, rerender } = render(focused(B, "b"))
+    const crumb = () => container.querySelector('[data-testid="focus-breadcrumb"]')?.textContent
+    expect(crumb()).toBe("Note›Bee")
+    // Deeper: Bee is gone from the doc, and stays on the trail.
+    rerender(focused(C, "c"))
+    expect(crumb()).toBe("Note›Bee›Cee")
+    // Back up to it (a crumb click, the browser's back): the trail truncates.
+    rerender(focused(B, "b"))
+    expect(crumb()).toBe("Note›Bee")
+  })
+})

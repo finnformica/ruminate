@@ -7,7 +7,15 @@ import { mintToken, revokeToken } from "../mcp/tokens"
 import { controlPlaneDriver } from "../tenancy-db"
 import type { Env } from "../types"
 import { IMAGE_LINK_TTL_SECONDS, signImageLink } from "./image-links"
-import { imageIdOfUrl, imageUrlOf, isImageId, isImageMime, newImageId } from "./image-policy"
+import {
+  imageIdOfUrl,
+  imageUrlOf,
+  imageVariantOfUrl,
+  imageVariantUrlOf,
+  isImageId,
+  isImageMime,
+  newImageId,
+} from "./image-policy"
 import { images } from "./images"
 import {
   applyControlPlane,
@@ -37,6 +45,10 @@ function fakeBucket() {
         httpEtag: `"etag-${key}"`,
         httpMetadata: { contentType: found.contentType },
       }
+    },
+    async head(key: string) {
+      const found = objects.get(key)
+      return found ? { size: found.bytes.byteLength } : null
     },
   }
   return { bucket: bucket as unknown as R2Bucket, objects }
@@ -94,6 +106,16 @@ function upload(token: string, body: BodyInit, type = "image/png") {
 }
 const read = (token: string, id: string) =>
   new Request(`https://example.com/api/images/${id}`, { headers: headers(token) })
+const readThumb = (token: string, id: string) =>
+  new Request(`https://example.com/api/images/${id}/thumb`, { headers: headers(token) })
+function putThumb(token: string, id: string, body: BodyInit, type = "image/jpeg") {
+  return new Request(`https://example.com/api/images/${id}/thumb`, {
+    method: "PUT",
+    headers: headers(token, { "Content-Type": type }),
+    body,
+  })
+}
+const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 5, 6])
 
 describe("image policy", () => {
   it("mints ids the reader accepts and the URL round-trips", () => {
@@ -115,6 +137,16 @@ describe("image policy", () => {
     expect(isImageMime("image/jpeg; charset=binary")).toBe(true)
     expect(isImageMime("image/svg+xml")).toBe(false)
     expect(isImageMime("text/html")).toBe(false)
+  })
+
+  it("spells a thumbnail's address beside the picture's, and reads both back", () => {
+    const id = "img_abcdefghijklmn"
+    expect(imageVariantUrlOf(id, "full")).toBe("/api/images/img_abcdefghijklmn")
+    expect(imageVariantUrlOf(id, "thumb")).toBe("/api/images/img_abcdefghijklmn/thumb")
+    expect(imageVariantOfUrl(imageVariantUrlOf(id, "full"))).toEqual({ id, variant: "full" })
+    expect(imageVariantOfUrl(imageVariantUrlOf(id, "thumb"))).toEqual({ id, variant: "thumb" })
+    expect(imageVariantOfUrl("/api/images/nope/thumb")).toBeNull()
+    expect(imageVariantOfUrl("/elsewhere/img_abcdefghijklmn")).toBeNull()
   })
 })
 
@@ -174,6 +206,55 @@ describe("/api/images", () => {
     expect((await images(huge, env, github)).status).toBe(413)
     expect((await images(read("alice", "img_ABC"), env, github)).status).toBe(404)
     expect((await images(read("alice", "img_abcdefghijklmnop"), env, github)).status).toBe(404)
+  })
+
+  it("keeps a picture's thumbnail beside it, for its tenant, once the picture is there", async () => {
+    const { env, objects } = await testEnv()
+    const created = await images(upload("alice", png), env, github)
+    const { id } = (await created.json()) as { id: string }
+    // No thumbnail yet: the client draws the picture and makes one.
+    expect((await images(readThumb("alice", id), env, github)).status).toBe(404)
+
+    const written = await images(putThumb("alice", id, jpeg), env, github)
+    expect(written.status).toBe(201)
+    expect([...objects.keys()].sort()).toEqual([`1001/${id}`, `1001/${id}/thumb`])
+
+    const served = await images(readThumb("alice", id), env, github)
+    expect(served.status).toBe(200)
+    expect(served.headers.get("Content-Type")).toBe("image/jpeg")
+    expect(served.headers.get("Cache-Control")).toContain("immutable")
+    expect(new Uint8Array(await served.arrayBuffer())).toEqual(jpeg)
+    // The picture itself is as it was.
+    expect(
+      new Uint8Array(await (await images(read("alice", id), env, github)).arrayBuffer()),
+    ).toEqual(png)
+    // Another tenant can neither read it nor write over it.
+    expect((await images(readThumb("bob", id), env, github)).status).toBe(404)
+    expect((await images(putThumb("bob", id, jpeg), env, github)).status).toBe(404)
+    expect(objects.size).toBe(2)
+  })
+
+  it("refuses a thumbnail with no picture behind it, or that it would not store", async () => {
+    const { env, objects } = await testEnv()
+    expect(
+      (await images(putThumb("alice", "img_abcdefghijklmnop", jpeg), env, github)).status,
+    ).toBe(404)
+    expect(
+      (await images(putThumb("alice", "../1002/img_abcdefghijkl", jpeg), env, github)).status,
+    ).toBe(404)
+    const created = await images(upload("alice", png), env, github)
+    const { id } = (await created.json()) as { id: string }
+    expect((await images(putThumb("alice", id, jpeg, "image/svg+xml"), env, github)).status).toBe(
+      415,
+    )
+    expect((await images(putThumb("alice", id, new Uint8Array(0)), env, github)).status).toBe(400)
+    const huge = new Request(`https://example.com/api/images/${id}/thumb`, {
+      method: "PUT",
+      headers: headers("alice", { "Content-Type": "image/jpeg", "Content-Length": "9999999" }),
+      body: jpeg,
+    })
+    expect((await images(huge, env, github)).status).toBe(413)
+    expect([...objects.keys()]).toEqual([`1001/${id}`])
   })
 
   it("knows no other routes", async () => {

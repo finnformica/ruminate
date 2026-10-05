@@ -118,6 +118,19 @@ jobs:
       # The fold's motion frame by frame in a real browser, over its own
       # Storybook build (e2e/fold-motion.e2e.mjs).
       - run: npm run test:fold
+  multi-select:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 22.x
+          cache: "npm"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # A mouse sweep, Shift+click and every multi-select key in a real
+      # browser, over its own Storybook build (e2e/multi-select.e2e.mjs).
+      - run: npm run test:select
   build:
     runs-on: ubuntu-latest
     steps:

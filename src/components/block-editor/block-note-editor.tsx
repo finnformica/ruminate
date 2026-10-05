@@ -94,6 +94,7 @@ export function BlockNoteEditor({
   trailingBlank = true,
   rowRemoval = "unlink",
   context,
+  onEditingChange,
 }: {
   doc: BlockDoc
   onChange: (doc: BlockDoc, hint?: ChangeHint) => void
@@ -159,6 +160,8 @@ export function BlockNoteEditor({
   /** Rows the view keeps only as context — a filter's unmatched ancestors
    * (`src/data/filter-view.ts`), drawn dimmed. */
   context?: ReadonlySet<string>
+  /** Told which block is being edited as it changes (`BlockEditor`). */
+  onEditingChange?: (id: string | null) => void
 }) {
   // Read-only history views are shown verbatim; only editable notes get the
   // always-present trailing blank — and not while focused, where the doc's
@@ -167,8 +170,8 @@ export function BlockNoteEditor({
   //
   // A view that may legitimately hold nothing gets no starter either: a
   // filter that matched nothing, and the basket, would otherwise show one
-  // empty row that cannot be typed into (a narrowed view writes no structure
-  // — `useNoteDoc`) and that reads as "this note is empty" when it is not.
+  // empty row that reads as "this note is empty" when it is not, and that
+  // the filter would hide again as soon as it was typed into.
   const seedDoc = (incoming: BlockDoc) => {
     if (!trailingBlank) return incoming
     const seeded = withStarterBlock(incoming)
@@ -228,8 +231,9 @@ export function BlockNoteEditor({
   )
 
   // The context menu's graph-aware delete: how many places a block appears
-  // (read at open, off the live graph), and deleting it from all of them —
-  // a batch of ops applied straight to the graph, which the page then
+  // (read at open, off the live graph), and deleting blocks — the selected
+  // ones, when the menu is opened on a selection — from all of them: a
+  // batch of ops applied straight to the graph, which the page then
   // re-walks (not an editor edit, so not an undo step).
   const applyOps = useApplyOps()
   const parentCountOf = useCallback(
@@ -237,11 +241,11 @@ export function BlockNoteEditor({
     [jotaiStore],
   )
   const deleteEverywhere = useCallback(
-    (id: string) => applyOps(deleteBlockOps(id, jotaiStore.get(graphSnapshotAtom))),
+    (ids: string[]) => applyOps(deleteBlockOps(ids, jotaiStore.get(graphSnapshotAtom))),
     [applyOps, jotaiStore],
   )
   const deleteSubtree = useCallback(
-    (id: string) => applyOps(deleteSubtreeOps(id, jotaiStore.get(graphSnapshotAtom))),
+    (ids: string[]) => applyOps(deleteSubtreeOps(ids, jotaiStore.get(graphSnapshotAtom))),
     [applyOps, jotaiStore],
   )
   // Undo needs to tell a block an edit created from one it linked in: only
@@ -321,6 +325,7 @@ export function BlockNoteEditor({
       // basket) the last row may go, and the basket goes with it.
       emptyable={!trailingBlank}
       context={context}
+      onEditingChange={onEditingChange}
     />
   )
 }

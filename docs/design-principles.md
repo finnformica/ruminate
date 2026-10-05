@@ -81,7 +81,7 @@ asks for it.
    fades — perceptually instant.
    Outside the editor "chosen" and "current" are a **wash**: the sidebar's
    active nav row / open note (`.nav-item[aria-current]`, with
-   `-hover`/`-active` steps), the notes list keyboard highlight
+   `-hover`/`-active` steps), the Views page keyboard highlight
    (`.list-highlight`), the calendar's current day and week, and the settings
    pickers (`<Button selected>`) all use `--color-bg-selected` /
    `--color-text-selected` verbatim. Every one of
@@ -178,10 +178,10 @@ asks for it.
    and the outline reads as indented beneath the title rather than the title
    as one more row. The pull is the page's to grant: it needs the 40px
    gutter, so a narrow page (16–20px) leaves the header at the text column.
-   The rows never take it — the text column does not move. Unlike the bullet
-   and number the hash is NOT a focus target — it reads as typography, and
-   focus stays on F / Cmd+. and the bullet/number clicks (on leaves; a
-   parent's key is its collapse toggle).
+   The rows never take it — the text column does not move. The hash is NOT a
+   focus target, and neither is the bullet or the number — the markers read
+   as typography, and focus stays on F / Cmd+., the block menu and the
+   phone's edit bar (a parent's key is its collapse toggle).
 
 ## Type scale
 
@@ -346,6 +346,7 @@ belongs to the control under the pointer wherever that control is.
 | Inactive sel | neutral ring + fill (see §3)                                    | the selection while the editor lacks focus or blank space was clicked — 22% neutral-9 ring over a 4% fill light / 14% white ring over a 4% lift dark                                                            |
 | Current      | `--color-bg-selected`                                           | sidebar active route / open note row (same tokens as Selection)                                                                                                                                                 |
 | Accent solid | `--accent-9`                                                    | checked checkbox fill                                                                                                                                                                                           |
+| Danger solid | `--color-bg-danger` (red-9), ink `--color-text-on-danger`       | the confirm of a destructive `ConfirmDialog` (Button's `danger` variant) — the app's one solid red, nowhere else; `--color-text-danger` (red-11) is its ink-only cousin for a menu item or an error line        |
 | Transclusion | `--accent-a2` tint                                              | `((ref))` embeds — quietly "live" content                                                                                                                                                                       |
 
 All roles are Radix alpha/step tokens, so both color schemes (and print, which
@@ -396,16 +397,31 @@ Placement conventions:
   the content they concern, sharing the page column's width.
 - Notices never float, overlay, or animate in — they are part of the page,
   and they leave by re-render (dismiss), not by transition.
-- **Toasts** ([sonner](https://sonner.emilkowal.ski), its `Toaster` mounted
-  once in `src/routes/_appRoot.tsx`; raise one with `toast.error(message)`)
-  are the one exception, for one job: telling the reader that something they
-  have _just done_ has failed, or did nothing — a picture that would not
-  upload, a paste of a block already under the target. A toast
-  floats in the bottom corner (above the phone nav bar), follows the system
-  theme, and leaves on its own after a few seconds or on its close button.
+- **Toasts** ([sonner](https://sonner.emilkowal.ski), drawn in the app's
+  colours by `Toaster` in `src/components/ui/toaster.tsx` and mounted once in
+  `src/routes/_appRoot.tsx`) are the one exception, for one job: answering
+  something the reader has _just done_, when the page cannot. A toast floats
+  in the bottom corner (above the phone nav bar), follows the app's colour
+  scheme, and leaves on its own after a few seconds or on its close button.
   It never carries state the reader must come back to — anything that
-  persists is a notice in the page, not a toast — and never a success
-  message: the picture landing is its own confirmation.
+  persists is a notice in the page, not a toast. A toast says one of three
+  things, and its colour says which before its words do:
+  - **It failed** — `toast.error(message)`, in the danger red: a picture
+    that would not upload, a preview that could not be fetched, a change a
+    share's owner refused. Every failure of something the reader did is
+    told, in a toast or in the control it came from.
+  - **It happened, and you cannot see it from here** — `toast.success(message)`,
+    in the success green: a note restored from Settings (it reappears in the
+    sidebar, not on the page), a note shared (the dialog has closed). Where
+    the page itself shows the result — a picture landing in the note, a
+    board's field taking its value — there is no toast: the result is its
+    own confirmation, and a green one on top of it is noise. A toast that
+    exists to carry an **Undo** for a change the reader can see is a plain
+    one, not a success: its job is the way back, not the news.
+  - **Nothing happened, and here is why** — `toast(message)`, on the plain
+    popup surface: a paste of a block already under the target, an edit to
+    a note shared read-only. Neither a failure nor a success, and painted as
+    neither.
 
 ### Copy
 
@@ -415,6 +431,30 @@ the thing is or does; the reader is here to act, not to read. If it needs a
 second sentence, the control is unclear or the sentence belongs in the docs.
 Labels are nouns (**Email address**), buttons are verbs (**Share**), and the
 sentence before a consequential button says exactly what it will do.
+
+### Confirmation
+
+Every "are you sure?" is one component, `ConfirmDialog`
+(`src/components/ui/confirm-dialog.tsx`): a title that asks the question and
+names its subject (**Delete “Ideas”?**), one sentence on what answering yes
+does and what it cannot undo, and two buttons — the verb (**Delete**,
+**Revoke**, never **OK**) and **Cancel**. Two variants, chosen by what the
+verb does rather than how it feels:
+
+- **`danger`** — it cannot be taken back, or not easily. The confirm is the
+  app's one solid red (`--color-bg-danger`), and the dialog opens with focus
+  on Cancel, so <kbd>Enter</kbd> pressed before reading is the safe answer.
+- **`primary`** — a step merely worth a second look (a full re-push, a sign
+  out). The confirm is the strongest ordinary button, and takes focus, since
+  going ahead is the expected answer.
+
+A confirm that is a request follows "Busy controls": the button spins from
+the click until the promise settles, Cancel and the close control wait with
+it, and a failure is shown beneath the buttons with the dialog still open —
+a confirmation never closes on a failure it has not shown. Nothing else in
+the app is drawn in the solid red: a destructive menu item is red ink
+(`--color-text-danger`), and a destructive button among other buttons is a
+sign the action wants a dialog.
 
 ## Loading
 
@@ -452,7 +492,23 @@ itself, with `usePending` (`src/hooks/pending.ts`) to hold a flight. A
 request that ends in leaving the page (signing in, taking an update) stays
 busy until the page has gone, since on this page it has no after. The
 "Saving…" trace in a note's header is the same rule on a surface rather
-than a control.
+than a control: it shows from the edit until its push has landed, and only
+while a push can land. The sidebar's sync row uses the same word for the
+same state — "Saving…", never "Syncing…" — so one save in flight is never
+named two ways on one screen. Offline, the edit lands on this device and its push
+waits for the network, so once the write is down the trace turns into
+**Saved offline** with the offline icon and no spinner — nothing is in
+flight, and it is a fact about the note rather than a wait. It is there
+because the sidebar's "Offline" row may not be on screen (collapsed, or a
+phone's closed drawer), and it clears when the push goes out on
+reconnecting; on a phone it reads **Saved**, the icon saying the rest.
+Signed out, the sidebar's "Signed out" is the news and the header says
+nothing (`saveTrace`, `src/components/sync-status.tsx`). The trace is
+held a moment past the save it reports (`useSteadySaveTrace`): typing is
+a save per keystroke, each landing within a moment, and a header that
+flipped between "Saving…" and what follows it at typing speed would
+flicker. So "Saving…" shows the instant a save starts and stays for the
+whole burst, and what comes after it waits until the typing has paused.
 
 ## Empty-block placeholder
 
@@ -470,18 +526,20 @@ growing the row.
 Durations and easings (`--ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1)`,
 `--ease-in-out: cubic-bezier(0.65, 0, 0.35, 1)`):
 
-| What                                    | How                                                                                                                                                                 |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hover affordances                       | opacity 150ms ease-out                                                                                                                                              |
-| Hover surfaces (crumbs, focus dot)      | background/color 150ms ease                                                                                                                                         |
-| Block line hover (neutral)              | background-color 100ms ease                                                                                                                                         |
-| Selection highlight                     | background-color + color + box-shadow 100ms ease                                                                                                                    |
-| Chevron rotation                        | transform 300ms ease-in-out, in step with the fold                                                                                                                  |
-| Unfold (collapsed → open)               | the subtree's box's bottom edge sweeps down to reveal it, the rows below slide down, all transforms, 300ms ease-in-out, no fade: an accordion                       |
-| Fold (open → collapsed)                 | the box, out of the flow, its edge sweeping up to cover it as the rows below slide up over it, 300ms ease-in-out; its rows linger inert for it                      |
-| Todo check → text mutes                 | color 200ms ease                                                                                                                                                    |
-| Control press (chevron, bullet, number) | scale 0.90–0.95 while `:active`, 150ms                                                                                                                              |
-| Help panel (wide screen)                | the panel's share of the width, 300ms ease-in-out, with its contents translating in from the page's edge and back out under a fade — the one width the app animates |
+| What                                                                                               | How                                                                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hover affordances                                                                                  | opacity 150ms ease-out                                                                                                                                                                                                                    |
+| Hover surfaces (crumbs, focus dot)                                                                 | background/color 150ms ease                                                                                                                                                                                                               |
+| Block line hover (neutral)                                                                         | background-color 100ms ease                                                                                                                                                                                                               |
+| Selection highlight                                                                                | background-color + color + box-shadow 100ms ease                                                                                                                                                                                          |
+| Chevron rotation                                                                                   | transform 300ms ease-in-out, in step with the fold                                                                                                                                                                                        |
+| Unfold (collapsed → open)                                                                          | the subtree's box's bottom edge sweeps down to reveal it, the rows below slide down, all transforms, 300ms ease-in-out, no fade: an accordion                                                                                             |
+| Fold (open → collapsed)                                                                            | the box, out of the flow, its edge sweeping up to cover it as the rows below slide up over it, 300ms ease-in-out; its rows linger inert for it                                                                                            |
+| Todo check → text mutes                                                                            | color 200ms ease                                                                                                                                                                                                                          |
+| Control press (chevron, bullet, number)                                                            | scale 0.90–0.95 while `:active`, 150ms                                                                                                                                                                                                    |
+| Help panel (wide screen)                                                                           | the panel's share of the width, 300ms ease-in-out, with its contents translating in from the page's edge and back out under a fade — the one width the app animates                                                                       |
+| Selection bar                                                                                      | rises a few pixels into its place at the bottom of the window under a fade, 150ms `--ease-out-strong`, and sinks back out the same way — a rise rather than a popup's scale, since it is pinned to an edge and has no anchor to grow from |
+| Floating pill (`FloatingBar`: a board's add buttons, once the ones on the page have scrolled away) | slides up from beneath the page's edge under a fade, 300ms `--ease-out-strong` — the pace of a hand, as the edit bar's own motion — and slides back down the same way; kept mounted while closed so the exit can play                     |
 
 Press feedback lives on the **control**, never the content: collapsing a
 subtree gives the chevron a pressed scale and hover surface. Pressed scale is

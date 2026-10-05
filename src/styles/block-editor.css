@@ -191,10 +191,12 @@
  * surfacing. The slot (`.block-toggle-slot`) is that area: the chevron's
  * square covers the slot, so hovering the slot IS hovering the chevron; the
  * key (`.block-key`) fades out as the chevron fades in, in the same slot, so
- * nothing moves. Two things pin the chevron visible: a
+ * nothing moves. Three things pin the chevron visible: a
  * collapsed block (hidden content is never a secret — the key hides for the
- * duration), and a device with nothing to hover with, where the chevron stands
- * in for the key outright, exactly as the old always-on gutter toggle did. The
+ * duration), a parent paragraph (its slot holds no key, so there is nothing
+ * for the chevron to stand in for and nothing to mark the fold without it),
+ * and a device with nothing to hover with, where the chevron stands in for
+ * the key outright, exactly as the old always-on gutter toggle did. The
  * fades ride the elements' own opacity transitions (block-item.tsx). */
 .block-toggle {
   opacity: 0;
@@ -253,17 +255,23 @@
     border-color 150ms ease;
 }
 
-/* Coarse pointers: a 15px box is a small tap target, so its hit area grows
- * through a pseudo-element (drawn size unchanged) — less to the LEFT, where a
- * parent todo's always-showing chevron square ends 1px short of the box. */
+/* Coarse pointers: the box is drawn a size up (it overhangs the 15px slot
+ * evenly, so the guide line still hangs from its centre) and its hit area
+ * grows through a pseudo-element — up and down only, and a little to the
+ * LEFT, where a parent todo's always-showing chevron square ends where the
+ * box begins. Never to the RIGHT: a tap past the box is a tap at the start
+ * of the line, and one the phone snaps onto the box anyway is handed back
+ * to the text (`tapMissedBox`, block-item.tsx). */
 @media (pointer: coarse) {
   .block-checkbox {
     position: relative;
+    width: 17px;
+    height: 17px;
   }
   .block-checkbox::before {
     content: "";
     position: absolute;
-    inset: -10px -10px -10px -2px;
+    inset: -10px 0 -10px -2px;
   }
 }
 
@@ -278,6 +286,12 @@
   background-size: 10px 10px;
   background-position: center;
   background-repeat: no-repeat;
+}
+/* The tick grows with the coarse pointer's larger box. */
+@media (pointer: coarse) {
+  .block-checkbox:checked {
+    background-size: 12px 12px;
+  }
 }
 
 .block-checkbox:focus-visible {
@@ -427,4 +441,18 @@
     transition: none;
     transform: none;
   }
+}
+
+/* ── Press-and-hold ──────────────────────────────────────────────────────────
+ * While a finger is down on a row on a touch screen (the block sheet's
+ * press-and-hold, `block-editor.tsx`), nothing on the page may be selected
+ * or called out: not the text behind the sheet, not the sheet rising under
+ * the finger, not the page itself, which iOS would otherwise select whole.
+ * The editor puts the class on the root on the finger's down and takes it
+ * off on the lift. */
+html.press-hold,
+html.press-hold * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }

@@ -28,7 +28,7 @@ function Day({ date }: { date: string }) {
     // Placeholder
     return (
       <Link
-        to="/notes/$"
+        to="/views/$"
         params={{ _splat: date }}
         search={{
           query: undefined,

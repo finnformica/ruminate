@@ -256,7 +256,7 @@ one `UPDATE … RETURNING`, so two sign-ins racing for a link cannot both win.
 admin's switchboard for beta features: each registered feature has an
 audience — `off`, `admin` (the bootstrap owner alone) or `everyone` — set on
 the admin page and enforced by the Worker on the feature's own routes
-(minting MCP tokens and the `/mcp` endpoint; giving a share). The client
+(minting MCP tokens and the `/mcp` endpoint). The client
 reads `GET /api/features` once per sign-in to know what to draw; a feature
 with no row is at its registry default. The **admin** is exactly the
 bootstrap owner: `ALLOWED_GITHUB_ID` names the one account that may reach

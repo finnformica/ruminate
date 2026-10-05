@@ -4,7 +4,7 @@ import { forwardRef, useState } from "react"
 import { appUpdateAtom } from "../hooks/app-update"
 import { cx } from "../utils/cx"
 import { generateNoteId } from "../utils/note-id"
-import { isCommandMenuOpenAtom } from "./command-menu"
+import { isCommandMenuOpenAtom } from "./palette"
 import { IconButton, IconButtonProps } from "./ui/icon-button"
 import { Sheet } from "./ui/sheet"
 import { ArrowLeftIcon16, ArrowRightIcon16, MenuIcon16, ComposeIcon16, SearchIcon16 } from "./icons"
@@ -83,7 +83,7 @@ export function NavBar() {
           shortcut={["⌘", "⇧", "O"]}
           onClick={() =>
             navigate({
-              to: "/notes/$",
+              to: "/views/$",
               params: { _splat: generateNoteId() },
               search: {
                 query: undefined,

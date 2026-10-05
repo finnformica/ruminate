@@ -36,8 +36,8 @@ grant, and that choice decides everything else:
 - **The share names a view, and the view names the root.** `shares.view_id`
   is the id of the owner's row in `views` (migrations/0017): the root is what
   is shared, the filter and sort are how the grantee opens it. The create
-  endpoint makes the owner an empty view where they have none — unpinned,
-  unfiltered, under the root's own id, which is the id the client mints
+  endpoint makes the owner an empty view where they have none — unfiltered,
+  unsorted, under the root's own id, which is the id the client mints
   (src/data/views.ts), so a filter the owner saves later lands on that very
   row and changes the share without a write to it. A view is only ever
   tombstoned, never removed, and a tombstone still names its root; so the
@@ -132,10 +132,10 @@ The write/delete line follows the app's own (docs/graph-storage.md, "Remove =
 unlink, delete is explicit"): removing a row from the outline is an unlink and
 the block survives in the owner's Unassigned basket, so it is a `write`;
 retiring the row itself is a `delete`. Width is a prop on the note node — the
-owner's node — so a shared note has none. A pin is not: it is a view
-(docs/metadata.md), the grantee's own row about the owner's node, so a shared
-note or block can be pinned, filtered and sorted from the grantee's side, and
-none of it reaches the owner.
+owner's node — so a shared note has none. A view is not: it is the grantee's
+own row about the owner's node (docs/metadata.md), so a shared note or block
+can be filtered and sorted from the grantee's side, a shared block made a
+view of the grantee's own, and none of it reaches the owner.
 
 ### The write boundary
 
@@ -202,18 +202,18 @@ someone else's rows does not belong in it. So shared notes live in memory
   online) re-pull every slice, coalesced to one per 30 s; a slice with a push
   in flight keeps its local copy until it lands.
 - **How the UI sees it**: `graphSnapshotAtom` merges the own graph with the
-  union of every slice, so the editor, search, hover cards and the notes list
+  union of every slice, so the editor, search, hover cards and the Views page
   read a shared note exactly as they read an own one. `sharedOriginAtom`
   (node id → share id) is what tells them apart: the sidebar lists own notes
-  under Notes and the notes shared with them under **Shared** (who shared each
-  is the row's tooltip, and the page header's first crumb), and the note page
-  shows a notice with the owner and the verbs, renders read-only without
-  `write`, and hides Rename, Delete and the basket as the verbs dictate (Pin
-  stays: the pin is the grantee's own view, docs/metadata.md).
+  under **Views** and the notes shared with them under **Shared** (who shared
+  each is the row's tooltip, and the page header's first crumb), and the note
+  page shows a notice with the owner and the verbs, renders read-only without
+  `write`, and hides Rename, Delete and the basket as the verbs dictate (Add
+  to Views on a block stays: the view is the grantee's own, docs/metadata.md).
 - **A shared block is a note here.** A root may be a block, and a block has
   no page of its own to open; so on the way into the snapshot a root that is
   not a note is given the note type. It lists in the sidebar, opens at
-  `/notes/<id>` with its text as the title and its children as the outline,
+  `/views/<id>` with its text as the title and its children as the outline,
   and searches like any note. A push puts the row's own type back, so the
   owner's block never becomes a note.
 - **Reading a share without write**: the same block editor as the reader's

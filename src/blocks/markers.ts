@@ -89,16 +89,6 @@ export function typeOfMarker(marker: string): BlockType {
 export const DEFAULT_NEW_BLOCK_TYPE: BlockType = "ul"
 export const DEFAULT_NEW_BLOCK_MARKER = markerFor(DEFAULT_NEW_BLOCK_TYPE)
 
-/**
- * Select-mode "turn into" keys: the marker character → the type it toggles.
- * In select mode marker keys are *structural*, never typed text — the keymap
- * binds them to the `turnInto*` commands, and the multi-select handler applies
- * the same toggle across a selection.
- */
-export const TURN_INTO_KEYS: Readonly<Record<string, BlockType>> = Object.fromEntries(
-  BLOCK_TYPE_DEFS.filter((def) => def.turnIntoKey).map((def) => [def.turnIntoKey!, def.id]),
-)
-
 export const isHeading = (type: BlockType): boolean => defOf(type).family === "heading"
 
 /**

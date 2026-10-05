@@ -44,10 +44,6 @@ const STORIES = [
   { id: "blockeditor--deep-headings-focused", waitFor: '[data-testid="focus-breadcrumb"]' },
   { id: "blockeditor--selection-sweep", waitFor: '[data-testid="block-body"]' },
   { id: "blockeditor--empty", waitFor: '[data-testid="block-body"]' },
-  // Pinned rows: the pin's trailing slot mirrors the marker slot, on a
-  // heading (whose surface reaches both ways), a paragraph, a bullet and a
-  // wrapping nested bullet.
-  { id: "blockeditor--pinned", waitFor: '[data-testid="block-pinned"]' },
   // Waits for the tokens: the grammar is fetched after the story mounts.
   { id: "blockeditor--code", waitFor: '[data-testid="code-panel"] .token' },
   { id: "notetitle--default", waitFor: "text=Meeting notes" },
@@ -88,6 +84,8 @@ const STORIES = [
   { id: "tooltip--open", waitFor: "text=Search" },
   { id: "hovercard--open", waitFor: "text=Edited yesterday" },
   { id: "sheet--open", waitFor: "text=Turn into" },
+  // Every kind at once, fanned out: the last to mount is the one to wait for.
+  { id: "toaster--kinds", waitFor: '[data-sonner-toast][data-type="warning"]' },
   { id: "notice--info", waitFor: '#storybook-root [role="status"]' },
   { id: "notice--warning", waitFor: '#storybook-root [role="status"]' },
   { id: "notice--with-actions", waitFor: '#storybook-root [role="status"]' },

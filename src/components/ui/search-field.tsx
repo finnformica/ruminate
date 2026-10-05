@@ -6,7 +6,7 @@ import { cx } from "../../utils/cx"
  * The dress of a search field: the tall, filled, rounded box with room on the
  * left for its glass and, when something has been typed, room on the right
  * for the control that clears it. Worn by the plain filter box (SearchInput)
- * and by the notes page's query box, which are one control to the eye and
+ * and by the Views page's query box, which are one control to the eye and
  * were two copies of this in the code.
  *
  * The recipe is exported for the query box, whose one input is dressed

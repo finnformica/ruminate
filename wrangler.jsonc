@@ -26,6 +26,13 @@
       // The feature flags as the caller sees them, and the admin API behind
       // the /admin page: invite links and the flags' audiences.
       "/api/features",
+      // The account's preferences — the settings that follow the account
+      // rather than the device (src/data/preferences.ts).
+      "/api/preferences",
+      // Tagging a board's pictures with Claude (docs/boards.md): the user's
+      // own Anthropic API key, and the route that asks the model.
+      "/api/anthropic-key",
+      "/api/boards/tag",
       "/api/admin",
       "/api/admin/*",
       // Sharing: shares given and received, and the slice a grantee reads
@@ -92,6 +99,10 @@
   // fails on a binding that names nothing: `npx wrangler r2 bucket create
   // ruminate-images`.
   "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "ruminate-images" }],
+  // Workers AI, for tagging a board's pictures without a key of one's own
+  // (docs/boards.md, "Tagging with Claude"; behind the `cloudflareAi` flag).
+  // The free allowance is 10,000 neurons a day per account.
+  "ai": { "binding": "AI" },
   // The burst half of the MCP rate limit (docs/mcp-rate-limiting.md), keyed by
   // token id. Here rather than in D1 because this is the check a runaway agent
   // trips over and over, and refusing has to be cheaper than answering — this
@@ -111,6 +122,50 @@
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": true },
+  // Worker Previews (Workers Builds runs `npx wrangler preview` on every
+  // branch that is not main, and posts the URL to the pull request). A
+  // Preview inherits NOTHING from the top level: the block is required, and
+  // a binding or var left out of it is missing from the Preview, so every
+  // binding the Worker reads from `env` is repeated here. `assets`,
+  // `compatibility_date` and the Durable Object `migrations` stay at the
+  // top level, where Previews read them.
+  //
+  // The Previews point at the production database and bucket, as the
+  // previous preview model did — a Preview is this one instance on another
+  // branch, not a second instance — so a branch that adds a migration must
+  // apply it (`npm run migrate:remote`) before its Preview can read the new
+  // column, as production must. To isolate a branch instead, point both
+  // bindings here at a staging database and bucket of their own.
+  //
+  // Secrets are not in this file. The Previews need the same two production
+  // has, set once on the Preview base config so every new Preview gets them:
+  //   npx wrangler preview base-config secret put GITHUB_CLIENT_SECRET
+  //   npx wrangler preview base-config secret put IMAGE_LINK_SECRET
+  "previews": {
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_name": "ruminate",
+        "database_id": "7bf20efd-53cd-4605-b0b6-8805a9faab9e",
+        "migrations_dir": "./migrations",
+      },
+    ],
+    "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "ruminate-images" }],
+    "ai": { "binding": "AI" },
+    "ratelimits": [
+      {
+        "name": "MCP_BURST",
+        "namespace_id": "1",
+        "simple": { "limit": 120, "period": 60 },
+      },
+    ],
+    "vars": {
+      "VITE_GITHUB_CLIENT_ID": "Ov23lidqIncQ8ul67fUo",
+      "ALLOWED_GITHUB_ID": "42536816",
+      "SIGNUP_MODE": "invite",
+      "VITE_IMAGES_ENABLED": "true",
+    },
+  },
   // The GitHub OAuth client id is public (it's already baked into the frontend
   // bundle). The client secret is NOT here — set it once with
   //   npx wrangler secret put GITHUB_CLIENT_SECRET

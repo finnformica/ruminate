@@ -1,7 +1,7 @@
 import type React from "react"
 import { useState } from "react"
 import type { ReactNode } from "react"
-import { hostOf, linkPropsOf } from "../../blocks/link"
+import { hostOf, linkPropsOf, type LinkProps } from "../../blocks/link"
 import type { Block } from "../../blocks/types"
 import type { Occurrence } from "../../blocks/view"
 import { cx } from "../../utils/cx"
@@ -59,18 +59,9 @@ export function LinkCard({
   /** The row's click and double-click, for the card's plain surface. */
   pointer: Pick<React.HTMLAttributes<HTMLElement>, "onClick" | "onDoubleClick">
 }) {
-  const { url, description, image, favicon, site } = linkPropsOf(block)
-  const host = hostOf(url)
-  const [imageBroken, setImageBroken] = useState(false)
-  const [faviconBroken, setFaviconBroken] = useState(false)
+  const props = linkPropsOf(block)
+  const { url } = props
   const editable = !api.readOnly
-  const picture = image && !imageBroken ? image : null
-  // What the page said about itself, beyond a name for it.
-  const previewed = description !== undefined || picture !== null
-  // A title worth a line of its own: not empty, and not just the host the
-  // byline already says.
-  const named = block.text.trim() !== "" && block.text.trim() !== host
-  const showTitle = title !== null && (editing || named)
 
   // The card's own surface takes the row's click; its links, tools and the
   // title being edited keep theirs.
@@ -93,7 +84,82 @@ export function LinkCard({
       {...surface}
     />
   )
-  const inner = (
+  const inner = <LinkCardBody props={props} text={block.text} title={title} editing={editing} />
+
+  return (
+    <FigureFrame
+      block={block}
+      occurrence={occurrence}
+      api={api}
+      noun="link"
+      naturalWidth="100%"
+      controls={editable && url !== ""}
+      tools={
+        url ? (
+          <FigureTool label="Open link" onClick={() => openLink(url)}>
+            <ExternalLinkIcon16 />
+          </FigureTool>
+        ) : null
+      }
+    >
+      {() =>
+        editable && url && api.linkToInline ? (
+          <LinkHoverCard
+            href={url}
+            title={block.text}
+            actions={{
+              update: (next) => api.updateLinkBlock?.(block.id, next),
+              remove: () => api.removeLinkBlock?.(occurrence.key),
+              toggle: { label: "Turn into inline", onClick: () => api.linkToInline?.(block.id) },
+            }}
+            open={api.linkCard?.key === occurrence.key}
+            onClose={api.closeLinkCard}
+            render={card}
+          >
+            {inner}
+          </LinkHoverCard>
+        ) : (
+          <div {...card.props}>{inner}</div>
+        )
+      }
+    </FigureFrame>
+  )
+}
+
+/**
+ * What a link's card holds — the page's picture on the left when it has
+ * one, the title line, the description (or the want of one) and the byline
+ * of favicon and site — apart from the frame around it, so a board can
+ * draw a link value with the editor's own card
+ * (src/components/boards/link-values.tsx). `title` is the title line to
+ * show, or null for an untitled link that is not being edited; `text` is
+ * the link's title as text, which decides whether that line is worth
+ * showing.
+ */
+export function LinkCardBody({
+  props,
+  text,
+  title,
+  editing,
+}: {
+  props: LinkProps
+  text: string
+  title: ReactNode
+  editing: boolean
+}) {
+  const { url, description, image, favicon, site } = props
+  const host = hostOf(url)
+  const [imageBroken, setImageBroken] = useState(false)
+  const [faviconBroken, setFaviconBroken] = useState(false)
+  const picture = image && !imageBroken ? image : null
+  // What the page said about itself, beyond a name for it.
+  const previewed = description !== undefined || picture !== null
+  // A title worth a line of its own: not empty, and not just the host the
+  // byline already says.
+  const named = text.trim() !== "" && text.trim() !== host
+  const showTitle = title !== null && (editing || named)
+
+  return (
     <>
       {picture ? (
         <a
@@ -174,44 +240,5 @@ export function LinkCard({
         ) : null}
       </div>
     </>
-  )
-
-  return (
-    <FigureFrame
-      block={block}
-      occurrence={occurrence}
-      api={api}
-      noun="link"
-      naturalWidth="100%"
-      controls={editable && url !== ""}
-      tools={
-        url ? (
-          <FigureTool label="Open link" onClick={() => openLink(url)}>
-            <ExternalLinkIcon16 />
-          </FigureTool>
-        ) : null
-      }
-    >
-      {() =>
-        editable && url && api.linkToInline ? (
-          <LinkHoverCard
-            href={url}
-            title={block.text}
-            actions={{
-              update: (next) => api.updateLinkBlock?.(block.id, next),
-              remove: () => api.removeLinkBlock?.(occurrence.key),
-              toggle: { label: "Turn into inline", onClick: () => api.linkToInline?.(block.id) },
-            }}
-            open={api.linkCard?.key === occurrence.key}
-            onClose={api.closeLinkCard}
-            render={card}
-          >
-            {inner}
-          </LinkHoverCard>
-        ) : (
-          <div {...card.props}>{inner}</div>
-        )
-      }
-    </FigureFrame>
   )
 }

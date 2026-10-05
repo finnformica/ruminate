@@ -1,12 +1,14 @@
 import { Dialog } from "@base-ui/react/dialog"
 import type { Block } from "../../blocks/types"
-import { useImageSrc } from "../../data/images"
 import { XIcon16 } from "../icons"
+import { Picture } from "../picture"
 import { IconButton } from "../ui/icon-button"
 
 /**
  * The expanded view of an image block: the picture at its full size over a
  * dark scrim, its caption beneath. Click anywhere (or Escape) to close.
+ * The picture is drawn as everywhere (`Picture`): the thumbnail the figure
+ * already holds at once, the picture itself swapped in once decoded.
  */
 export function ImageLightbox({ block, onClose }: { block: Block | null; onClose: () => void }) {
   return (
@@ -36,30 +38,23 @@ export function ImageLightbox({ block, onClose }: { block: Block | null; onClose
           >
             <XIcon16 />
           </Dialog.Close>
-          {block ? <LightboxImage block={block} /> : null}
+          {block ? (
+            <>
+              <Picture
+                block={block}
+                name="lightbox-image"
+                fit="natural"
+                detail="full"
+                maxHeight="85vh"
+                className="shadow-2xl"
+              />
+              {block.text.trim() ? (
+                <p className="max-w-prose text-center text-[#ffffffcc]">{block.text.trim()}</p>
+              ) : null}
+            </>
+          ) : null}
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
-  )
-}
-
-function LightboxImage({ block }: { block: Block }) {
-  const { src } = useImageSrc(block)
-  const caption = block.text.trim()
-  return (
-    <>
-      {src && src !== "error" ? (
-        <img
-          src={src}
-          alt={caption}
-          className="max-h-[85vh] max-w-full rounded-lg object-contain shadow-2xl"
-        />
-      ) : (
-        <span className="text-[#ffffffaa]">
-          {src === "error" ? "Image unavailable" : "Loading…"}
-        </span>
-      )}
-      {caption ? <p className="max-w-prose text-center text-[#ffffffcc]">{caption}</p> : null}
-    </>
   )
 }

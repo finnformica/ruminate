@@ -15,7 +15,7 @@ import {
   type QualifierOption,
   type QualifierTrigger,
 } from "../utils/qualifier-suggestions"
-import { CalendarIcon16, ImageIcon16, LinkIcon16, NoteIcon16 } from "./icons"
+import { BoardIcon16, CalendarIcon16, ImageIcon16, LinkIcon16, NoteIcon16 } from "./icons"
 import { NoteFavicon } from "./note-favicon"
 
 /**
@@ -28,7 +28,7 @@ import { NoteFavicon } from "./note-favicon"
  * under the caret, how a pick is spliced back) lives in
  * `src/utils/qualifier-suggestions.ts`; this file adds the corpus-backed set
  * and the rendering. The one box that shows it is `QueryBox`
- * (query-box.tsx), on the notes page and in the ⌘K palette alike.
+ * (query-box.tsx), on the Views page and in the ⌘K palette alike.
  */
 
 /** A row of the picker: a query value, plus (for `in:`) the note it names. */
@@ -204,6 +204,7 @@ export function useQualifierSuggestions({
 const TYPE_VALUE_ICONS: Record<string, React.ReactNode> = {
   note: <NoteIcon16 />,
   template: <NoteIcon16 />,
+  board: <BoardIcon16 />,
   daily: <CalendarIcon16 />,
   weekly: <CalendarIcon16 />,
   image: <ImageIcon16 />,
@@ -223,7 +224,11 @@ function qualifierPicture(item: SuggestionItem, qualifierKey: string): React.Rea
   if (qualifierKey === "type" && TYPE_VALUE_ICONS[item.value]) return TYPE_VALUE_ICONS[item.value]
   if (item.glyph)
     return (
-      <span aria-hidden data-glyph={item.glyph} className="font-mono text-text-tertiary">
+      <span
+        aria-hidden
+        data-glyph={item.glyph}
+        className="whitespace-nowrap font-mono leading-none text-text-tertiary"
+      >
         {item.glyph}
       </span>
     )
@@ -240,7 +245,11 @@ function anyQualifierPicture(items: readonly SuggestionItem[], qualifierKey: str
 /**
  * The leading slot itself: one fixed box with its content CENTRED, so a
  * three-character glyph (`[x]`), a one-character one (`#`) and a 16px icon
- * all sit on the same axis down the list.
+ * all sit on the same axis down the list. The box is as wide as three mono
+ * characters at the list's size, or the icon's 24px, whichever is more —
+ * the small step is larger on a phone than on a desktop, and a box of a
+ * fixed 24px wrapped `[ ]` onto two lines there and spilt `[x]` past it.
+ * It is sized in the mono font, so `ch` measures the glyph's own font.
  */
 export function QualifierPicture({
   item,
@@ -250,7 +259,7 @@ export function QualifierPicture({
   qualifierKey: string
 }) {
   return (
-    <span className="grid h-4 w-6 shrink-0 place-items-center text-sm text-text-secondary">
+    <span className="grid h-4 w-[max(3ch,1.5rem)] shrink-0 place-items-center font-mono text-sm text-text-secondary">
       {qualifierPicture(item, qualifierKey)}
     </span>
   )

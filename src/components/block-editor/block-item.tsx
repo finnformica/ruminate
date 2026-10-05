@@ -1,5 +1,5 @@
 import type React from "react"
-import { useAtomValue } from "jotai"
+
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent, ClipboardEvent, CSSProperties, KeyboardEvent } from "react"
 import { cx } from "../../utils/cx"
@@ -21,10 +21,8 @@ import {
 import { htmlToMarkdown } from "../../utils/html-to-markdown"
 import { clipboardBlocksToMarkdown, extractClipboardBlocks } from "../../utils/rich-clipboard"
 import { imageFilesOf } from "../../data/images"
-import { pinnedRootIdsAtom } from "../../data/views"
 import { blurLeavesWindow } from "../../utils/window-blur"
 import { IconButton } from "../ui/icon-button"
-import { PinFillIcon12 } from "../icons"
 import { BlockContent } from "./block-content"
 import { LISTED_HEADING_DEPTH, headingScale, kindOf, type RowContext } from "./block-kinds"
 import { caretCoordinates, caretLineFlags, caretOffsetAtPoint } from "./caret"
@@ -71,12 +69,12 @@ export interface BlockEditorApi {
   /**
    * Whether the editor moves through its rows at all (`BlockEditor`): every
    * editable one does, and a read-only one that is browsed. A read-only row
-   * of a browsed editor highlights on click and focuses from its bullet, as
-   * an editable one does; one of an inert editor does nothing.
+   * of a browsed editor highlights on click, as an editable one does; one of
+   * an inert editor does nothing.
    */
   navigable?: boolean
   /**
-   * The roots are the view's own — a results list's hits, the notes list's
+   * The roots are the view's own — a results list's hits, the Views page's
    * notes — not a parent's children (`BlockEditor.fixedRoots`). A kind may
    * draw a root differently for it (a listed note takes a roomier row).
    */
@@ -106,7 +104,9 @@ export interface BlockEditorApi {
    */
   coarsePointer?: boolean
   /** Highlight a row (leaves edit mode, collapses any multi-selection). */
-  select: (key: string) => void
+  /** Highlight a row — or, `extend`, the run from the selection to it
+   * (Shift+click). */
+  select: (key: string, extend?: boolean) => void
   /** Enter edit mode on a row — at the end of its text, its start, or at
    * an explicit caret offset (where a tap landed). */
   edit: (key: string, atStart?: boolean, caret?: number) => void
@@ -127,8 +127,6 @@ export interface BlockEditorApi {
    * was consumed (so the caller can `preventDefault`).
    */
   dispatchKey: (mode: Mode, key: string, event: KeyLike, caret?: CaretInput) => boolean
-  /** Focus on a block: its subtree becomes the whole editor view. */
-  focusBlock: (id: string) => void
   /** Image files pasted or dropped on a row: upload them and add image blocks
    * there. Absent where images are switched off (the paste is left alone). */
   onImageFiles?: (key: string, files: File[]) => void
@@ -235,8 +233,6 @@ export function BlockItem({
 }) {
   const { depth, olNumber, hasChildren, collapsed: isCollapsed } = occurrence
   const readOnly = api.readOnly ?? false
-  // The pin is a view of the block (`src/data/views.ts`), not a prop of it.
-  const hasPin = useAtomValue(pinnedRootIdsAtom).has(block.id)
   // Selection and edit focus are per row: this occurrence, not the block.
   const editing = !readOnly && api.focus?.key === occurrence.key
   const selected = api.selectedSet.has(occurrence.key) && !editing
@@ -247,6 +243,15 @@ export function BlockItem({
   const runEdges = selected ? api.selectionRunEdges.get(occurrence.key) : undefined
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const pendingCaret = useRef<number | null>(null)
+  // Where a finger actually came down on this row: the pointerdown's point,
+  // which the browser never adjusts. The click that follows may be moved —
+  // a phone snaps a near miss onto the nearest control (a todo's checkbox
+  // above all) — so a tap is judged by where it landed, not by where the
+  // click says it did.
+  const touchDown = useRef<{ x: number; y: number } | null>(null)
+  // Set by a checkbox click that is handed to the text: React raises the
+  // box's change from the same click, after it, so the change must be told.
+  const tickHandedOff = useRef(false)
   // Set by a Cmd/Ctrl+Shift+V keydown so the paste event that follows inserts
   // plain text at the caret (newlines collapsed, no block splitting).
   const plainPaste = useRef(false)
@@ -289,12 +294,11 @@ export function BlockItem({
   // A marker slot is drawn unless the type has none AND nothing needs one.
   const slotted = kind.slot !== "none" || hasToggle
   const rowContext: RowContext = { block, occurrence, api, depth, editing, slotted }
-  const roomy = kind.roomy?.(rowContext) ?? false
   // A ROOT of a results view (`api.fixedRoots`): its surface is set in by
-  // the same 8.5px at the sides a listed note's is all round, so every
-  // root's surface — a note's, a matched block's — shares one left edge, the
-  // one the page's search box sits on (the view pads by the reach). The
-  // margin still nets the text to the shared 4px column.
+  // 8.5px at the sides, so every root's surface — a note's, a matched
+  // block's — shares one left edge, the one the page's search box sits on
+  // (the view pads by the reach). The margin still nets the text to the
+  // shared 4px column.
   const wide = !!api.fixedRoots && depth === 0
   // Kept as context by a filter, not found by it (`BlockEditorApi.context`).
   const dimmed = api.context?.has(block.id) ?? false
@@ -655,7 +659,12 @@ export function BlockItem({
     api.onPaste(occurrence.key, before, pasted, after)
   }
 
-  const pinned = isCollapsed || looped
+  // A paragraph's slot holds no key, so a parent paragraph has nothing for
+  // the chevron to swap with: left to the hover reveal, an open paragraph
+  // parent showed an empty slot and no sign of its fold. Its chevron is
+  // pinned visible instead, open or closed, as the key would be.
+  const keyless = kind.slot === "glyph" && !kind.glyph && !kind.glyphNode
+  const pinned = isCollapsed || looped || (hasToggle && keyless)
   // Every block type but an image owns the 15px marker slot. Most carry a KEY there — a
   // bullet dot, heading `#`, number, quote `>` — and the key is pure chrome,
   // so on a parent it SWAPS for the chevron: hover the slot and the key fades
@@ -714,11 +723,13 @@ export function BlockItem({
         // IconButton's default radius is the 8px base — on a 20px square that
         // reads as a pill. The small radius (4px) keeps it a square.
         "rounded-sm",
-        // Coarse pointers get a 32px square to tap instead of IconButton's
+        // Coarse pointers get a 32px-tall target instead of IconButton's
         // 40px-tall padded bar (which would overlap neighbouring rows and
         // squeeze the glyph); it reaches a hair past the surface into the
-        // gap on either side, where no other control lives.
-        "h-5 w-5 coarse:h-8 coarse:w-8 coarse:px-0",
+        // gap on either side, where no other control lives. It is 36px
+        // wide: the row's wider marker gap on a coarse pointer leaves the
+        // room, and it still stops short of the text.
+        "h-5 w-5 coarse:h-8 coarse:w-9 coarse:px-0",
         // Beside a todo the square is a hit area only — no hover surface, so
         // it never clashes with the checkbox or the highlight it straddles;
         // the chevron's own fade-in is the whole reveal. It stays 20px wide
@@ -737,8 +748,8 @@ export function BlockItem({
           // swap, easing out to rest with no overshoot.
           "transition-transform duration-300 ease-[var(--ease-in-out)] motion-reduce:transition-none",
           // A finger's chevron is the key itself (it never swaps in), so
-          // it is drawn a size up to be read as one.
-          "coarse:size-2.5",
+          // it is drawn a size up to be read — and aimed at — as one.
+          "coarse:size-3",
           isCollapsed || looped ? "rotate-0" : "rotate-90",
         )}
       >
@@ -762,11 +773,13 @@ export function BlockItem({
   // beside, and hovering the checkbox must mean the checkbox.
   const slotClass = hasToggle && !toggleBeside ? "block-toggle-slot" : undefined
 
-  // List markers double as focus targets (Logseq-style: click the bullet to
-  // make this block the note) — on leaves. A parent's key is its collapse
-  // toggle, so focus stays on F / Cmd+. there. The negative-margin padding
-  // enlarges the hit area without shifting the marker's layout size.
-  const canFocus = (!readOnly || api.navigable) && !hasToggle
+  // No marker is a focus target. A bullet once was (Logseq-style: click the
+  // dot to make the block the note), but a finger reaching for a row's text
+  // landed on the dot often enough that the note kept swapping for one
+  // block, and on a desktop nobody meant the click either. Focus stays on
+  // F / Cmd+., the block menu and the phone's edit bar (docs/mobile.md);
+  // a parent's key is its collapse toggle.
+  //
   // Every marker occupies the same 15px slot, so body text starts at one
   // column across every block type and the markers read as one chrome
   // family: dots centre in it; text glyphs (`#`, number, `>`) right-align
@@ -774,8 +787,8 @@ export function BlockItem({
   // so a swapped-in chevron centres on it, and carries `slotClass` so
   // hovering it reveals the chevron.
   //
-  // The bullet's dot: on a leaf it focuses; on a parent it is the key that
-  // swaps for the chevron.
+  // The bullet's dot: faint, like the chevron — pure chrome; content leads.
+  // On a parent it is the key that swaps for the chevron.
   const dotSlot = (
     <span
       className={cx(
@@ -783,24 +796,10 @@ export function BlockItem({
         slotClass,
       )}
     >
-      {canFocus ? (
-        <button
-          type="button"
-          aria-label="Focus on block"
-          tabIndex={-1}
-          onClick={() => api.focusBlock(block.id)}
-          // An 18px hit area around the 6px dot; a finger gets 26px.
-          className="-m-1.5 flex cursor-pointer items-center justify-center rounded-full p-1.5 transition-[background-color,transform] duration-150 hover:bg-bg-hover active:scale-90 motion-reduce:active:scale-100 coarse:-m-2.5 coarse:p-2.5"
-        >
-          {/* Faint, like the chevron — pure chrome; content leads. */}
-          <span aria-hidden className="block-glyph-fill size-1.5 rounded-full bg-text-tertiary" />
-        </button>
-      ) : (
-        <span
-          aria-hidden
-          className={cx("block-glyph-fill size-1.5 rounded-full bg-text-tertiary", keyClass)}
-        />
-      )}
+      <span
+        aria-hidden
+        className={cx("block-glyph-fill size-1.5 rounded-full bg-text-tertiary", keyClass)}
+      />
       {toggle}
     </span>
   )
@@ -809,8 +808,8 @@ export function BlockItem({
   // slot, like the dot and the checkbox, not right-aligned like `#` and the
   // numbers: `>` is a narrow glyph, and right-aligned its ink sat 3px right
   // of the dot's centre (and of the guide line that hangs from it). Never a
-  // focus button (focus stays on F / Cmd+. and bullet/number clicks); on a
-  // parent it swaps for the collapse chevron. The empty paragraph slot keeps
+  // focus button (no marker is; focus stays on F / Cmd+. and the edit bar);
+  // on a parent it swaps for the collapse chevron. The empty paragraph slot keeps
   // its width so the text stays in the shared column, and still hosts a
   // parent's chevron.
   const glyphSlot = (glyph: string | null, testId: string) => (
@@ -835,6 +834,24 @@ export function BlockItem({
       {toggle}
     </span>
   )
+  // Whether a finger's tap on the checkbox came down to the right of the
+  // box as drawn — in the gap before the text. Only on a coarse pointer, and
+  // only for a press (a keyboard's Space clicks with `detail` 0 and no point).
+  // The point is spent either way, so a stale one never judges a later click.
+  const tapMissedBox = (event: React.MouseEvent<HTMLElement>) => {
+    const point = touchDown.current
+    touchDown.current = null
+    if (!api.coarsePointer || !point || event.detail === 0) return false
+    return point.x > event.currentTarget.getBoundingClientRect().right
+  }
+  // The caret to the very start of the text: into the open edit, or opening
+  // one. The box sits on the first line, so a tap beside it means offset 0.
+  const caretToStart = () => {
+    const textarea = textareaRef.current
+    if (editing && textarea) textarea.setSelectionRange(0, 0)
+    else api.edit(occurrence.key, true)
+  }
+
   // An image (`slot: "none"`) has no slot at all: the row's content starts at
   // its edge. A parent still needs somewhere to put its chevron, so it falls
   // through to the empty glyph slot.
@@ -860,9 +877,26 @@ export function BlockItem({
           // a box you can only reach by stopping typing is a box you stop
           // typing to reach.
           onMouseDown={keepEditing}
-          onClick={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation()
+            // A finger that came down PAST the box — in the gap before the
+            // text, where the box's own tap area or the browser's snapping
+            // caught it — meant the start of the line, not the box: the
+            // tick is cancelled and the caret goes there instead.
+            if (tapMissedBox(event)) {
+              event.preventDefault()
+              tickHandedOff.current = true
+              caretToStart()
+            }
+          }}
           // Checked is a TYPE (docs/graph-schema-v2.md): ticking is `todo` ↔ `done`.
-          onChange={() => api.onBlockChange(block.id, { type: type === "done" ? "todo" : "done" })}
+          onChange={() => {
+            if (tickHandedOff.current) {
+              tickHandedOff.current = false
+              return
+            }
+            api.onBlockChange(block.id, { type: type === "done" ? "todo" : "done" })
+          }}
           className={cx("block-checkbox", readOnly ? "cursor-default" : "cursor-pointer")}
         />
       </span>
@@ -879,8 +913,8 @@ export function BlockItem({
       // overflows LEFT, past the surface's edge — the text column never
       // moves. The slot's `h-[1lh]` (resolved at the heading's scale) centres
       // the glyph on the heading's first line. A static glyph, like the note
-      // title's — never a focus button (focus stays on F / Cmd+. and
-      // bullet/number clicks); on a parent it swaps for the collapse chevron.
+      // title's — never a focus button (no marker is; focus stays on F /
+      // Cmd+. and the edit bar); on a parent it swaps for the collapse chevron.
       <span
         data-testid="heading-hash"
         className={cx(
@@ -901,21 +935,9 @@ export function BlockItem({
           slotClass,
         )}
       >
-        {canFocus ? (
-          <button
-            type="button"
-            aria-label="Focus on block"
-            tabIndex={-1}
-            onClick={() => api.focusBlock(block.id)}
-            className="-mx-0.5 cursor-pointer rounded-sm px-0.5 transition-[background-color,transform] duration-150 hover:bg-bg-hover active:scale-95 motion-reduce:active:scale-100"
-          >
-            {olNumber}.
-          </button>
-        ) : (
-          <span aria-hidden className={keyClass}>
-            {olNumber}.
-          </span>
-        )}
+        <span aria-hidden className={keyClass}>
+          {olNumber}.
+        </span>
         {toggle}
       </span>
     ) : (
@@ -1049,7 +1071,7 @@ export function BlockItem({
             // whole row is the target, not just the text.
             {}
           : {
-              onClick: () => api.select(occurrence.key),
+              onClick: (event: React.MouseEvent) => api.select(occurrence.key, event.shiftKey),
               onDoubleClick: () => api.edit(occurrence.key),
             })}
     >
@@ -1067,16 +1089,36 @@ export function BlockItem({
   // target is the row's whole width and height, not its few words. A tap on
   // the row already being edited is the textarea's own (a caret move), and
   // a press-and-hold never gets here: the editor withholds its click.
+  //
+  // A tap LEFT of the text — in the marker gap, or on an empty marker slot —
+  // is read at the text's own left edge, so it opens the edit at the start
+  // of the line it was level with (the first line's start is the text's),
+  // never at the end.
   const handleRowTap = (event: React.MouseEvent<HTMLDivElement>) => {
     if (editing) return
     const target = event.target instanceof Element ? event.target : null
     if (target?.closest("button, input, a, textarea, [role='menu']")) return
     const bodyEl = event.currentTarget.querySelector<HTMLElement>("[data-block-id]")
+    const point = touchDown.current ?? { x: event.clientX, y: event.clientY }
+    touchDown.current = null
+    const left = bodyEl?.getBoundingClientRect().left
+    const beforeText = left !== undefined && point.x < left
     const caret =
-      bodyEl && !kind.body ? caretOffsetAtPoint(bodyEl, body, event.clientX, event.clientY) : null
-    api.edit(occurrence.key, false, caret ?? undefined)
+      bodyEl && !kind.body
+        ? caretOffsetAtPoint(bodyEl, body, beforeText ? left + 1 : point.x, point.y)
+        : null
+    if (caret === null && beforeText) api.edit(occurrence.key, true)
+    else api.edit(occurrence.key, false, caret ?? undefined)
   }
-  const rowTap = !readOnly && api.coarsePointer ? { onClick: handleRowTap } : {}
+  const rowTap =
+    !readOnly && api.coarsePointer
+      ? {
+          onClick: handleRowTap,
+          onPointerDown: (event: React.PointerEvent) => {
+            touchDown.current = { x: event.clientX, y: event.clientY }
+          },
+        }
+      : {}
 
   return (
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
@@ -1126,7 +1168,10 @@ export function BlockItem({
             // run into one continuous surface. Either way the negative
             // margin equals the padding, so the text never moves a pixel
             // and the block rhythm gains nothing.
-            "relative flex items-start gap-2 rounded",
+            // The marker gap widens on a coarse pointer, so a finger aiming
+            // for the start of the line lands on the line, not the marker
+            // (a todo's checkbox above all).
+            "relative flex items-start gap-2 rounded coarse:gap-3",
             wide
               ? "-ml-[4.5px] -mr-[4.5px] pl-[8.5px] pr-[8.5px]"
               : "-ml-0.5 -mr-0.5 pl-1.5 pr-1.5",
@@ -1139,22 +1184,8 @@ export function BlockItem({
             // seamlessly (same solid fill, same solid side lines); root rows
             // sit 6px apart: 4+4 still overlaps 2px, so runs merge at every
             // level.
-            //
-            // A roomy row (`BlockKind.roomy` — a note in a list) pads for
-            // real instead: 8.5px each side of its 23px line is the 40px
-            // row the notes list always had, and the 1px reach leaves the
-            // same 2px between two of them. It is never mid-run: only
-            // read-only lists have one, and they have no multi-select.
-            runEdges?.top
-              ? "-mt-1 pt-1 rounded-t-none block-run-top"
-              : roomy
-                ? "-mt-px pt-[8.5px]"
-                : "-mt-0.5 pt-0.5",
-            runEdges?.bottom
-              ? "-mb-1 pb-1 rounded-b-none block-run-bottom"
-              : roomy
-                ? "-mb-px pb-[8.5px]"
-                : "-mb-0.5 pb-0.5",
+            runEdges?.top ? "-mt-1 pt-1 rounded-t-none block-run-top" : "-mt-0.5 pt-0.5",
+            runEdges?.bottom ? "-mb-1 pb-1 rounded-b-none block-run-bottom" : "-mb-0.5 pb-0.5",
             // bg-bg-secondary is the structural "selected" hook (tests query
             // it); .block-highlight draws the accent ring and faint wash over
             // it so selection reads as selected, not hovered.
@@ -1203,26 +1234,6 @@ export function BlockItem({
           ) : null}
           {kind.before?.(rowContext)}
           {kind.wrap ? kind.wrap(content, rowContext) : content}
-          {/* A pinned block says so, with the glyph the sidebar's Views
-              list uses — in a TRAILING SLOT that mirrors the marker slot:
-              the same 15px, on the first line (`h-[1lh]` at the line's own
-              typography, as the marker's), the glyph centred in it as the
-              bullet's dot is. So the pin's centre sits as far from the
-              surface's right edge as the dot's from its left (6px of
-              padding + half the slot), and the surface reads symmetric
-              instead of the glyph hugging the edge with the padding alone
-              between them. Anything else that trails the content goes
-              through the same slot, never beside it with its own offset. */}
-          {hasPin ? (
-            <span
-              className={cx(
-                "relative flex h-[1lh] w-[15px] shrink-0 items-center justify-center",
-                typo,
-              )}
-            >
-              <PinFillIcon12 data-testid="block-pinned" className="shrink-0 text-text-pinned" />
-            </span>
-          ) : null}
           {api.debug?.showIds ? <BlockIdBadge id={block.id} /> : null}
         </div>
         {api.debug?.showMetadata ? (

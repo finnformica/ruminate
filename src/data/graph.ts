@@ -223,31 +223,72 @@ export function docToGraph(
 /**
  * Assign sort keys for a parent's desired child order, reusing existing keys
  * wherever the relative order allows so an unchanged sibling produces no row
- * change. Greedy increasing-subsequence over the old keys; gaps get fresh keys
- * generated between their kept neighbours.
+ * change. Greedy increasing-subsequence over the old order; gaps get fresh
+ * keys generated beside their kept neighbours.
+ *
+ * `shown` is the order the children were SHOWN in before the edit — what
+ * the editor's list held. A view may show a parent's children partially
+ * (a filtered note) or in another order (a sorted one), so an unchanged
+ * sibling is one whose place among the shown is what it was, not one whose
+ * key happens to still be in sequence: under a sort the kept keys are not
+ * increasing along `desired`, and that is right, since the note's order is
+ * not the view's. A child the graph holds that was not shown is not in
+ * `desired`, and this never keys it. Left out, every existing child counts
+ * as shown, in the graph's order — a whole-list edit.
+ *
+ * A child that needs a key is put where the edit put it in what is on
+ * screen, read in the graph's terms: after the kept sibling before it (and
+ * before whatever follows THAT in the graph, which may be a child the view
+ * hid), else before the first kept sibling after it, else after the last of
+ * the parent's children. So a row added beneath a match in a filtered view
+ * lands right after the match in the note, ahead of the rows the filter hid.
  */
 export function reconcileSortKeys(
   existing: { id: string; sortKey: string }[],
   desired: string[],
+  shown?: readonly string[],
 ): Map<string, string> {
-  const oldKey = new Map(existing.map((e) => [e.id, e.sortKey]))
+  // The graph's order, whatever order the caller listed the children in.
+  const ordered = [...existing].sort((a, b) =>
+    a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+  )
+  const oldKey = new Map(ordered.map((e) => [e.id, e.sortKey]))
+  const rank = new Map((shown ?? ordered.map((e) => e.id)).map((id, i) => [id, i]))
   const keys = new Map<string, string>()
 
-  // Which desired children keep their old key: old keys must remain strictly
-  // increasing in the new order.
+  // Which desired children keep their old key: the ones the graph holds
+  // and the view showed, whose order among the shown is unchanged.
   const kept: (string | null)[] = []
-  let lastKept: string | null = null
+  let lastRank = -1
   for (const id of desired) {
     const key = oldKey.get(id)
-    if (key !== undefined && (lastKept === null || key > lastKept)) {
+    const at = rank.get(id)
+    if (key !== undefined && at !== undefined && at > lastRank) {
       kept.push(key)
-      lastKept = key
+      lastRank = at
     } else {
       kept.push(null)
     }
   }
 
-  // Fill each run of non-kept children with keys between its kept neighbours.
+  // The keys either side of an existing child, in the graph's order.
+  const keyAfter = (id: string): string | null => {
+    const at = ordered.findIndex((e) => e.id === id)
+    return at === -1 || at === ordered.length - 1 ? null : ordered[at + 1].sortKey
+  }
+  const keyBefore = (id: string): string | null => {
+    const at = ordered.findIndex((e) => e.id === id)
+    return at <= 0 ? null : ordered[at - 1].sortKey
+  }
+  // With nothing kept to place against, new children go after the children
+  // the view did not show — which stay — and, where there are none, start
+  // afresh: the shown ones are all removed or re-keyed here.
+  const lastHidden = ordered.filter((e) => !rank.has(e.id)).at(-1)
+  const lastKey = lastHidden ? lastHidden.sortKey : null
+
+  // Each run of non-kept children, and the gap it goes in. Runs that share
+  // a gap draw their keys from one sequence, so two of them never collide.
+  const runs: { ids: string[]; before: string | null; after: string | null }[] = []
   let i = 0
   while (i < desired.length) {
     if (kept[i] !== null) {
@@ -257,11 +298,27 @@ export function reconcileSortKeys(
     }
     let end = i
     while (end < desired.length && kept[end] === null) end += 1
-    const before = i > 0 ? (kept[i - 1] as string) : null
-    const after = end < desired.length ? (kept[end] as string) : null
-    const fresh = generateNKeysBetween(before, after, end - i)
-    for (let j = i; j < end; j += 1) keys.set(desired[j], fresh[j - i])
+    const anchorBefore = i > 0 ? desired[i - 1] : null
+    const anchorAfter = end < desired.length ? desired[end] : null
+    const gap =
+      anchorBefore !== null
+        ? { before: kept[i - 1] as string, after: keyAfter(anchorBefore) }
+        : anchorAfter !== null
+          ? { before: keyBefore(anchorAfter), after: kept[end] as string }
+          : { before: lastKey, after: null }
+    runs.push({ ids: desired.slice(i, end), ...gap })
     i = end
+  }
+  const byGap = new Map<string, { ids: string[]; before: string | null; after: string | null }>()
+  for (const run of runs) {
+    const at = `${run.before ?? ""}\u0000${run.after ?? ""}`
+    const known = byGap.get(at)
+    if (known) known.ids.push(...run.ids)
+    else byGap.set(at, { ids: [...run.ids], before: run.before, after: run.after })
+  }
+  for (const { ids, before, after } of byGap.values()) {
+    const fresh = generateNKeysBetween(before, after, ids.length)
+    ids.forEach((id, j) => keys.set(id, fresh[j]))
   }
 
   return keys

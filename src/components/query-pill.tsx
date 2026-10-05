@@ -10,7 +10,7 @@ import { PillButton } from "./ui/pill-button"
 /**
  * One qualifier of the query as a removable pill beneath the query box —
  * the box lifts every finished `key:value` out of its line and shows it
- * this way (query-box.tsx), on the notes page and in the ⌘K palette alike.
+ * this way (query-box.tsx), on the Views page and in the ⌘K palette alike.
  * An `in:` scope is named for a human (the note, or note › block) even
  * though the token carries an id; any other qualifier reads as typed.
  * Clicking a pill takes the whole token out of the query.

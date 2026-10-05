@@ -3,8 +3,9 @@
 **Status: the shared query language is built; the semantic half is not.**
 `search` (worker/mcp/tools.ts) now runs the app's own engine — `parseQuery` and
 `searchBlocks` — over the grant's scoped graph (worker/search/engine.ts), so
-`in:<note or block id>`, `type:todo,done`, `-type:done`, `sort:updated` and
-free text mean over MCP exactly what they mean in the search box. The
+`in:<note or block id>`, `under:alice`, `type:todo,done`, `-type:done`,
+`sort:updated` and free text mean over MCP exactly what they mean in the
+search box. The
 embedding-based half sketched below was built and measured (section chunks
 retrieved paraphrases 85% of the time against the fuzzy matcher's 0%) and set
 aside for cost and complexity; the engine is shaped so it can slot back in as a

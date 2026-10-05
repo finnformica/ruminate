@@ -195,6 +195,14 @@ export function isWithin(key: string, ancestor: string): boolean {
   return key === ancestor || key.startsWith(`${ancestor}/`)
 }
 
+/** The roots among a set of rows: those with no ancestor in the set, in
+ * the set's order — the rows to act on once each, so a subtree a selection
+ * covers is moved, copied or removed as one and never once per row. */
+export function rootKeys(keys: readonly string[]): string[] {
+  const set = new Set(keys)
+  return keys.filter((key) => !ancestorKeys(key).some((ancestor) => set.has(ancestor)))
+}
+
 /** Does the document have this occurrence — is the key a real path? */
 export function hasOccurrence(doc: BlockDoc, key: string): boolean {
   const segments = key.split("/")

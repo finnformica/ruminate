@@ -4,6 +4,8 @@ import type React from "react"
 import { BLOCK_TYPE_DEFS, canonicalOf } from "../../blocks/registry"
 import type { BlockType } from "../../blocks/types"
 import { cx } from "../../utils/cx"
+import { FloatingBarButton as BarButton, floatingBar } from "../ui/floating-bar"
+import type { BlockActions } from "./block-actions"
 import {
   ArrowLeftToLineIcon16,
   ArrowRightToLineIcon16,
@@ -18,24 +20,11 @@ import {
   UndoIcon16,
 } from "../icons"
 
-/** What the bar can do to the row being edited: the same commands the keys
- * and the block menu run (`src/blocks/commands.ts`), plus `done`. */
-export interface MobileEditBarActions {
-  turnInto: (type: BlockType) => void
-  bold: () => void
-  italic: () => void
-  strike: () => void
-  code: () => void
-  link: () => void
-  math: () => void
-  indent: () => void
-  outdent: () => void
-  /** Focus on the row's block: it becomes the whole view, and the edit ends
-   * with it (docs/keyboard-shortcuts.md, Focus). */
-  focus: () => void
+/** What is the bar's own, beside the block actions: history, a picture,
+ * and putting the keyboard away. */
+export interface MobileEditBarExtras {
   undo: () => void
   redo: () => void
-  remove: () => void
   /** Add a picture at this row; absent where images are switched off (the
    * button stays, greyed, so the row never changes shape). */
   image?: () => void
@@ -213,12 +202,19 @@ type View = "main" | "format" | "turnInto"
  */
 export function MobileEditBar({
   state,
+  keys,
   actions,
+  extras,
 }: {
   state: MobileEditBarState
-  actions: MobileEditBarActions
+  /** The row being edited: what every block action here acts on. */
+  keys: string[]
+  /** The editor's one set of block actions (`block-actions.ts`), the same
+   * object the right-click menu and the selection bar run. */
+  actions: BlockActions
+  extras: MobileEditBarExtras
 }) {
-  const { bottom, keyboardUp } = useKeyboard(actions.done)
+  const { bottom, keyboardUp } = useKeyboard(extras.done)
   const barRef = useRef<HTMLDivElement>(null)
   usePageInset(barRef, bottom)
   const [view, setViewState] = useState<View>("main")
@@ -230,7 +226,7 @@ export function MobileEditBar({
     setViewState(next)
   }
   const rowRef = useRef<HTMLDivElement>(null)
-  const overflows = useOverflowsRight(rowRef, [view, state.canRedo, actions.image !== undefined])
+  const overflows = useOverflowsRight(rowRef, [view, state.canRedo, extras.image !== undefined])
   if (typeof document === "undefined") return null
   const current = canonicalOf(state.type)
   const activeType = Math.max(
@@ -245,13 +241,12 @@ export function MobileEditBar({
       data-testid="mobile-edit-bar"
       data-view={view}
       data-keyboard={keyboardUp ? "up" : "down"}
-      // The card's ring and shadow on an opaque surface: the bar sits over
-      // the note as much as over the keyboard, and a blurred note showing
-      // through would muddle the glyphs.
-      // 6px of padding at either end is the pill's, not a button's: the
-      // first and last glyphs sit clear of the rounded ends, and the row
-      // scrolls under it evenly.
-      className="fixed inset-x-3 top-0 z-popup flex h-12 items-stretch overflow-hidden rounded-full bg-bg-overlay px-1.5 shadow-2xl ring-1 ring-[var(--neutral-a3)] will-change-transform dark:ring-inset print:hidden"
+      // The floating pill (src/components/ui/floating-bar.tsx), pinned to
+      // the keyboard's top edge by the transform below.
+      className={cx(
+        floatingBar(),
+        "fixed inset-x-3 top-0 z-popup will-change-transform print:hidden",
+      )}
       style={{
         // The bar's bottom edge a little above the visual viewport's (see
         // `useKeyboard`); with no keyboard, above the home indicator too.
@@ -290,7 +285,7 @@ export function MobileEditBar({
               label="Bold"
               enter="cascade"
               index={0}
-              onClick={actions.bold}
+              onClick={() => actions.bold(keys)}
               className="font-content text-lg font-bold"
             >
               B
@@ -299,7 +294,7 @@ export function MobileEditBar({
               label="Italic"
               enter="cascade"
               index={1}
-              onClick={actions.italic}
+              onClick={() => actions.italic(keys)}
               className="font-content text-lg italic"
             >
               I
@@ -308,24 +303,24 @@ export function MobileEditBar({
               label="Strikethrough"
               enter="cascade"
               index={2}
-              onClick={actions.strike}
+              onClick={() => actions.strike(keys)}
               className="font-content text-lg line-through"
             >
               S
             </BarButton>
-            <BarButton label="Code" enter="cascade" index={3} onClick={actions.code}>
+            <BarButton label="Code" enter="cascade" index={3} onClick={() => actions.code(keys)}>
               <code className="rounded-sm border border-border-secondary bg-[var(--color-bg-code-block)] px-1.5 py-px font-mono text-[13px]">
                 {"<>"}
               </code>
             </BarButton>
-            <BarButton label="Link" enter="cascade" index={4} onClick={actions.link}>
+            <BarButton label="Link" enter="cascade" index={4} onClick={() => actions.link(keys)}>
               <LinkIcon16 />
             </BarButton>
             <BarButton
               label="Maths"
               enter="cascade"
               index={5}
-              onClick={actions.math}
+              onClick={() => actions.math(keys)}
               className="font-serif text-lg italic"
             >
               <span aria-hidden>√x</span>
@@ -361,7 +356,7 @@ export function MobileEditBar({
                   index={index}
                   pressed={def.id === current}
                   onClick={() => {
-                    actions.turnInto(def.id)
+                    actions.turnInto(keys, def.id)
                     setView("main")
                   }}
                   className="relative font-mono text-[15px] whitespace-pre"
@@ -401,7 +396,7 @@ export function MobileEditBar({
               label="Outdent"
               enter="cascade"
               index={1}
-              onClick={actions.outdent}
+              onClick={() => actions.outdent(keys)}
               disabled={!state.canOutdent}
             >
               <ArrowLeftToLineIcon16 />
@@ -410,7 +405,7 @@ export function MobileEditBar({
               label="Indent"
               enter="cascade"
               index={2}
-              onClick={actions.indent}
+              onClick={() => actions.indent(keys)}
               disabled={!state.canIndent}
             >
               <ArrowRightToLineIcon16 />
@@ -419,7 +414,7 @@ export function MobileEditBar({
               label="Focus on block"
               enter="cascade"
               index={3}
-              onClick={actions.focus}
+              onClick={() => actions.focus(keys)}
               disabled={!state.canFocus}
             >
               <FocusIcon16 />
@@ -428,7 +423,7 @@ export function MobileEditBar({
               label="Undo"
               enter="cascade"
               index={4}
-              onClick={actions.undo}
+              onClick={extras.undo}
               disabled={!state.canUndo}
             >
               <UndoIcon16 />
@@ -444,7 +439,7 @@ export function MobileEditBar({
               )}
               style={{ width: state.canRedo ? BUTTON_WIDTH : 0 }}
             >
-              <BarButton label="Redo" enter="cascade" index={5} onClick={actions.redo}>
+              <BarButton label="Redo" enter="cascade" index={5} onClick={extras.redo}>
                 <RedoIcon16 />
               </BarButton>
             </span>
@@ -452,8 +447,8 @@ export function MobileEditBar({
               label="Image"
               enter="cascade"
               index={6}
-              onClick={actions.image ?? noop}
-              disabled={!actions.image}
+              onClick={extras.image ?? noop}
+              disabled={!extras.image}
             >
               <ImageIcon16 />
             </BarButton>
@@ -463,7 +458,7 @@ export function MobileEditBar({
               label="Delete"
               enter="cascade"
               index={7}
-              onClick={actions.remove}
+              onClick={() => actions.remove(keys)}
               className="ml-auto text-text-danger"
             >
               <TrashIcon16 />
@@ -472,7 +467,7 @@ export function MobileEditBar({
         )}
       </div>
       <Rule />
-      <BarButton label="Hide keyboard" onClick={actions.done} className="w-12 text-text">
+      <BarButton label="Hide keyboard" onClick={extras.done} className="w-12 text-text">
         <KeyboardDownIcon16 />
       </BarButton>
     </div>,
@@ -487,9 +482,6 @@ function Rule() {
   return <span aria-hidden className="h-4 w-px shrink-0 self-center bg-[var(--neutral-a4)]" />
 }
 
-/** Keeps focus where it is: the pointer down is cancelled, so the textarea
- * never blurs and the keyboard stays up for the tap that follows. */
-const keepFocus = (event: React.SyntheticEvent) => event.preventDefault()
 const noop = () => {}
 
 /**
@@ -514,60 +506,4 @@ function useOverflowsRight(ref: React.RefObject<HTMLDivElement | null>, deps: un
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref, ...deps])
   return overflows
-}
-
-function BarButton({
-  label,
-  onClick,
-  pressed,
-  disabled,
-  enter,
-  index = 0,
-  className,
-  children,
-}: {
-  label: string
-  onClick: () => void
-  /** The row's current choice (the Turn into row's current type). */
-  pressed?: boolean
-  /** Would do nothing right now: greyed, and inert, as its key would be. */
-  disabled?: boolean
-  /**
-   * How the button arrives when its row does (block-editor.css). `morph`:
-   * in place, growing from the glyph that was there — Aa becomes Back and
-   * Back becomes Aa, the one button the tap was on. `cascade`: sliding in
-   * from the side the row came from, each a beat after the last. `rise`:
-   * up from beneath, the same beat apart, for the Turn into row.
-   */
-  enter?: "morph" | "cascade" | "rise"
-  /** The button's place in its cascade: its delay. */
-  index?: number
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      aria-pressed={pressed}
-      aria-disabled={disabled || undefined}
-      tabIndex={-1}
-      onPointerDown={keepFocus}
-      onMouseDown={keepFocus}
-      onClick={disabled ? undefined : onClick}
-      data-enter={enter}
-      style={enter ? ({ "--edit-bar-i": index } as React.CSSProperties) : undefined}
-      className={cx(
-        "edit-bar-button flex h-12 w-[38px] shrink-0 cursor-pointer select-none items-center justify-center text-text-secondary",
-        // Greying in and out eases rather than snaps; the press itself is
-        // on the glyph (block-editor.css).
-        "transition-[color,opacity] duration-200 ease-out motion-reduce:transition-none",
-        disabled ? "cursor-default text-text-tertiary opacity-50" : "active:text-text",
-        pressed && "text-text",
-        className,
-      )}
-    >
-      {children}
-    </button>
-  )
 }

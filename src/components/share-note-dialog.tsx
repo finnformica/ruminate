@@ -105,7 +105,8 @@ function ShareForm({
       // The share is a view of the node, made for the owner where they had
       // none (docs/sharing.md): pull, so this device holds the row too.
       requestDatabasePull()
-      toast(`Shared “${label}” with ${email.trim().toLowerCase()}.`)
+      // The dialog closes on the share, so the toast is the only word of it.
+      toast.success(`Shared “${label}” with ${email.trim().toLowerCase()}.`)
       onDone()
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not share this.")
