@@ -130,13 +130,13 @@ export function BoardFeaturesDialog({
           <table data-testid="board-features" className="w-full border-collapse">
             <thead>
               <tr className={heading}>
-                <th className="w-8 py-1.5">
+                <th className="w-8 py-1.5 pr-2">
                   <span className="sr-only">Type</span>
                 </th>
-                <th className="py-1.5 text-left font-normal">Name</th>
-                <th className="w-16 py-1.5 text-center font-normal">Multiple</th>
-                {notes ? <th className="w-44 py-1.5 text-left font-normal">Notes</th> : null}
-                <th className="w-8 py-1.5" />
+                <th className="px-2 py-1.5 text-left font-normal">Name</th>
+                <th className="w-20 px-2 py-1.5 text-center font-normal">Multiple</th>
+                {notes ? <th className="w-48 px-2 py-1.5 text-left font-normal">Notes</th> : null}
+                <th className="w-8 py-1.5 pl-2" />
               </tr>
             </thead>
             <tbody>
@@ -288,11 +288,11 @@ function TableRow(props: RowProps) {
   const cells = useFeatureCells(props)
   return (
     <tr data-testid="board-feature" className="group border-t border-border-secondary align-top">
-      <td className="py-[3px]">{cells.typeMenu("small", "mx-auto")}</td>
-      <td className="py-[3px]">{cells.nameField()}</td>
-      <td className="py-[3px] text-center">{cells.multiBox("mx-auto mt-2")}</td>
-      {props.notes ? <td className="py-[3px]">{cells.notesField()}</td> : null}
-      <td className="py-[3px]">
+      <td className="py-[3px] pr-2">{cells.typeMenu("small", "mx-auto")}</td>
+      <td className="px-2 py-[3px]">{cells.nameField()}</td>
+      <td className="px-2 py-[3px] text-center">{cells.multiBox("mx-auto mt-2")}</td>
+      {props.notes ? <td className="px-2 py-[3px]">{cells.notesField()}</td> : null}
+      <td className="py-[3px] pl-2">
         {cells.remove(
           "small",
           "mt-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 coarse:opacity-100",
