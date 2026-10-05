@@ -95,7 +95,12 @@ export function BoardFeaturesDialog({
                 heading,
               )}
             >
-              <span className="sr-only">Type</span>
+              {/* The hidden word sits inside a cell of its own: `sr-only`
+                  takes a span out of the grid's flow, which would slide
+                  every header one column left of the cells beneath. */}
+              <span>
+                <span className="sr-only">Type</span>
+              </span>
               <span>Name</span>
               <span className="text-center">Multiple</span>
               <span />
