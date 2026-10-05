@@ -1,6 +1,6 @@
 ### Added
 
-- A board's features are its own to define. **Features** in a board's ⋯ menu lists them, and each opens in a window of its own — its name, its type, whether a picture may carry several of its values, what the model is told it means, and **Delete feature** — with **Add feature** at the foot of the list. A new board starts with Location, Object, Material and Link; a board made before this keeps the features it has, and they stand in the order their blocks have in the note.
+- A board's features are its own to define. **Features** in a board's ⋯ menu lists them, each edited in place — its type, its name, whether a picture may carry several of its values, what the model is told it means, and a delete — with **Add feature** at the foot. A new board starts with Location, Object, Material and Link; a board made before this keeps the features it has, and they stand in the order their blocks have in the note.
 - Any feature can hold links. Give a feature the **Link** type and its values are web addresses, shown as cards in a picture's window as the Link feature's are: **Add link** asks for the address and now an optional title, the card is named by that title or the page's, and the pictures from one page share it in the note.
 
 ### Changed

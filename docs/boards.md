@@ -131,29 +131,26 @@ its block. Nothing is rewritten until then. This name-matching is the one
 place a label is read as anything but a label.
 
 **The Features editor** is **Features** in the board's ⋯ menu
-(`board-features-dialog.tsx`): the app's dialog holding a list and nothing
-else — a row per feature in the page's order, the type's glyph, the label
-and a chevron — and **Add feature** at the foot, which makes a text
-feature named "New feature" and opens it straight away with its name
-selected. A row opens the feature in a window of its own over the list, as
-a picture on the wall opens in the inspector: **Name**, **Type** (**Text**,
-**Place**, **Link**), **Several values**, and **Meaning** — what the model
-is told, left out for a link feature, which the model is never told about
-— with **Delete feature** at the foot as the inspector has **Delete
-image**. Every change is written as it is made, through the board's own
-writes (`addFeatureOps`, `updateFeatureOps`, `removeFeatureOps`), and the
-page shows it: the window's title, the list, the inspector's pickers and
-the Filter menu follow a rename at once. A type cannot change between a
-name and a link while the feature has values, since the value blocks it
-has are of the one kind: those entries are greyed. The list has no moves:
-the features' order is the page's, so a feature is reordered by moving its
-block in the outline. Deleting a feature deletes its block and its value
-blocks — the links from the values to the pictures go with them, the
-pictures stay on the board, and one left with no parent is back in the
-basket — so it asks first (`ConfirmDialog`, danger); on confirm the window
-closes and the list is one row shorter, and a plain toast says so, since a
-delete has no inverse (`inverseOps`) for an Undo to apply. A picture
-pasted straight under a feature block is a picture, never a value.
+(`board-features-dialog.tsx`): one window, the board's features one
+beneath the other in the page's order, every one edited in place. A
+feature is a line — the type's glyph, which is the type menu (**Text**,
+**Place**, **Link**); its name; **Several values**; and a delete — and,
+beneath, what the model is told it means, left out for a link feature,
+which the model is never told about. **Add feature** at the foot makes a
+text feature named "New feature" with its name selected, ready to be
+typed over. Every change is written as it is made, through the board's
+own writes (`addFeatureOps`, `updateFeatureOps`, `removeFeatureOps`), and
+the page shows it: the inspector's pickers and the Filter menu follow a
+rename at once. A type cannot change between a name and a link while the
+feature has values, since the value blocks it has are of the one kind:
+those entries are greyed. There are no moves: the features' order is the
+page's, so a feature is reordered by moving its block in the outline.
+Deleting a feature deletes its block and its value blocks — the links from
+the values to the pictures go with them, the pictures stay on the board,
+and one left with no parent is back in the basket — so it asks first
+(`ConfirmDialog`, danger), and a plain toast says so, since a delete has
+no inverse (`inverseOps`) for an Undo to apply. A picture pasted straight
+under a feature block is a picture, never a value.
 
 **A picture's home is the basket until a value takes it.** A picture added
 from the board is written in the note with no parent, so it sits in the
