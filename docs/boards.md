@@ -3,7 +3,7 @@
 A **board** is a wall of pictures with a page of its own: a place to keep
 inspiration — for a future home, say — where each picture can be captioned
 and given a **location**, an **object**, a **material** and a **link** to
-where it came from, all from a form, and the wall narrowed by any of them. **New board** in the header makes one and
+where it came from, all from a form, and the wall narrowed by any of them. **New board**, under the header's **New** menu (or <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>B</kbd>), makes one and
 opens it at `/boards/<note id>`; its header is the note's own — Sort, Filter
 and the ⋯ menu, where **Open note** opens the note beneath it.
 

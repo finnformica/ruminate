@@ -8,8 +8,8 @@ import { Button } from "./ui/button"
 import { Dialog } from "./ui/dialog"
 import { TextInput } from "./ui/text-input"
 
-/** Whether the New board dialog is open. Set from the header's button and
- * the palette; the dialog itself is mounted once, in the app root. */
+/** Whether the New board dialog is open. Set from the header's **New** menu
+ * and its shortcut; the dialog itself is mounted once, in the app root. */
 export const newBoardDialogAtom = atom(false)
 
 /**
