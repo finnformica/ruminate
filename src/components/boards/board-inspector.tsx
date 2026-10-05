@@ -11,15 +11,14 @@ import { ResetIcon16, SparklesIcon16, TrashIcon16 } from "../icons"
 import { TextInput } from "../ui/text-input"
 import { Picture } from "../picture"
 import type { BoardImage } from "./board-wall"
-import { LinkValues } from "./link-values"
 import { NewValueDialog } from "./new-value-dialog"
 import { ValuePicker } from "./value-picker"
 
 /**
  * The picture that was picked, in a window of its own: the picture large,
  * with its caption and its features beside it — the form a board is for
- * (docs/boards.md): a picker per feature, and for a link feature the
- * picture's cards with **Add link** beneath them. The app's dialog, as
+ * (docs/boards.md): a picker per feature, a link feature's values listed
+ * by their titles. The app's dialog, as
  * wide as the screen allows, so the picture has the room the wall could
  * not give it; the pickers' menus and the window for a new value's name
  * open over it. Escape, the close control or the scrim put it away.
@@ -118,28 +117,22 @@ export function BoardInspector({
               />
             </FormControl>
             {features.map((state) => (
-              <div key={state.feature.label} className="flex flex-col gap-2">
-                <span className="text-sm/4 text-text-secondary">{state.feature.label}</span>
-                {state.feature.kind === "link" ? (
-                  <LinkValues
-                    values={imageValues(snapshot, state, image.id)}
-                    onRemove={(value) => writes.clearValue(value, image.id)}
-                    onAdd={() => setNaming(state.feature)}
-                  />
-                ) : (
-                  <ValuePicker
-                    state={state}
-                    selected={imageValues(snapshot, state, image.id)}
-                    onPick={(value) => writes.setValue(state.feature, image.id, { id: value.id })}
-                    onClear={(value) => writes.clearValue(value, image.id)}
-                    onNew={() => setNaming(state.feature)}
-                  />
-                )}
+              <div key={state.feature.id} className="flex flex-col gap-2">
+                <span className="text-sm/4 text-text-secondary">
+                  {state.feature.label.trim() || "Untitled"}
+                </span>
+                <ValuePicker
+                  state={state}
+                  selected={imageValues(snapshot, state, image.id)}
+                  onPick={(value) => writes.setValue(state.feature.id, image.id, { id: value.id })}
+                  onClear={(value) => writes.clearValue(value, image.id)}
+                  onNew={() => setNaming(state.feature)}
+                />
               </div>
             ))}
             <NewValueDialog
               feature={naming}
-              onAdd={(feature, ref) => writes.setValue(feature, image.id, ref)}
+              onAdd={(feature, ref) => writes.setValue(feature.id, image.id, ref)}
               onClose={() => setNaming(null)}
             />
             <div className="mt-auto flex flex-wrap items-center gap-2">

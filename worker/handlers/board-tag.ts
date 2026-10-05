@@ -53,6 +53,7 @@ import {
   CLOUDFLARE_AI_MODEL,
   cloudflareTagPrompt,
   extractJson,
+  placeLabels,
   readTagRequest,
   readTagSuggestion,
   tagOutputSchema,
@@ -395,11 +396,13 @@ export async function boardTag(
   try {
     // Where the picture was taken, as a place name when Nominatim has one
     // for it — asked once, after the day's call is counted (a refused call
-    // asks nothing), and inside this try: a failed lookup is a hint
-    // without a name, never a failed tag.
-    const hint: LocationHint | undefined = form.location
-      ? { location: form.location, place: await reverseGeocode(fetchImpl, form.location) }
-      : undefined
+    // asks nothing), only when the board has a place feature to offer it
+    // to, and inside this try: a failed lookup is a hint without a name,
+    // never a failed tag.
+    const hint: LocationHint | undefined =
+      form.location && placeLabels(form.features).length > 0
+        ? { location: form.location, place: await reverseGeocode(fetchImpl, form.location) }
+        : undefined
     text = await provider.suggest({
       image: { bytes, mimeType: mediaType as ImageMediaType },
       features: form.features,

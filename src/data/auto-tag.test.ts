@@ -16,7 +16,7 @@ import {
 } from "./auto-tag"
 
 const FEATURES: TagFeature[] = [
-  { label: "Location", multi: false, values: ["Mauritius", "Lisbon"] },
+  { label: "Location", multi: false, values: ["Mauritius", "Lisbon"], place: true },
   { label: "Object", multi: true, values: ["Lamp"] },
   { label: "Material", multi: true, values: [] },
 ]
@@ -34,6 +34,19 @@ describe("readTagRequest", () => {
 
   it("takes a board with no features", () => {
     expect(readTagRequest({ features: [] })).toEqual({ features: [] })
+  })
+
+  it("keeps a place flag that is true, and drops anything else", () => {
+    const read = readTagRequest({
+      features: [
+        { label: "Where", multi: false, values: [], place: true },
+        { label: "What", multi: true, values: [], place: "yes" },
+      ],
+    })
+    expect(read?.features).toEqual([
+      { label: "Where", multi: false, values: [], place: true },
+      { label: "What", multi: true, values: [] },
+    ])
   })
 
   it("reads anything else as no request", () => {
@@ -314,11 +327,28 @@ describe("tagPrompt with a location", () => {
     expect(tagPrompt(FEATURES, { location, place: null }).split("\n").at(-1)).toBe(
       "The picture was taken at latitude 46.05127, longitude 14.50556: name the town or area for Location.",
     )
-    expect(tagPrompt([], { location, place: null })).toContain("latitude 46.05127")
   })
 
-  it("says nothing of a location without one", () => {
+  it("names the place features the board has, whatever they are called", () => {
+    const named: TagFeature[] = [
+      { label: "Where", multi: false, values: [], place: true },
+      { label: "Object", multi: true, values: [] },
+      { label: "Country", multi: false, values: [], place: true },
+    ]
+    const prompt = tagPrompt(named, { location, place: "Bled; Slovenia" })
+    expect(prompt).toContain("For Where and Country, use a value in use that covers the place")
+    expect(tagPrompt(named, { location, place: null })).toContain(
+      "name the town or area for Where and Country.",
+    )
+  })
+
+  it("says nothing of a location without one, or without a place feature to offer it to", () => {
     expect(tagPrompt(FEATURES)).not.toContain("The picture was taken")
+    expect(tagPrompt([], { location, place: null })).not.toContain("The picture was taken")
+    const unplaced = FEATURES.map(({ place: _place, ...feature }) => feature)
+    expect(tagPrompt(unplaced, { location, place: "Bled; Slovenia" })).not.toContain(
+      "The picture was taken",
+    )
     expect(cloudflareTagPrompt(FEATURES, { location, place: "Bled, Slovenia" })).toContain(
       "The picture was taken at: Bled, Slovenia (most specific first)",
     )

@@ -2,8 +2,10 @@
 
 A **board** is a wall of pictures with a page of its own: a place to keep
 inspiration — for a future home, say — where each picture can be captioned
-and given a **location**, an **object**, a **material** and a **link** to
-where it came from, all from a form, and the wall narrowed by any of them. **New board**, under the header's **New** menu (or <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>B</kbd>), makes one and
+and given the board's **features** — a location, an object, a material to
+begin with, and whatever else the board is given under **Features…** —
+all from a form, and the wall narrowed by any of them. **New board**, under
+the header's **New** menu (or <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>B</kbd>), makes one and
 opens it at `/boards/<note id>`; its header is the note's own — Sort, Filter
 and the ⋯ menu, where **Open note** opens the note beneath it.
 
@@ -34,27 +36,28 @@ into the outline is on the board, a picture added from the board is in the
 note, and a board's features and values can be written by hand in the
 outline and the form picks them up.
 
-| on the board       | in the graph                                                                                                                                                                                                                    |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the board          | a note whose page props hold `board: true`                                                                                                                                                                                      |
-| its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket                                                                                                      |
-| a feature          | a direct child of the page whose text is the feature's label — `Location`, `Object`, `Material` — trimmed, whatever its case and whatever its type (the form makes it a bullet)                                                 |
-| a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                                                                                                                                 |
-| a picture's value  | a `child` link from the value block to the picture: the value is a second parent, exactly as copy and select-mode paste make                                                                                                    |
-| a picture's link   | a value of the `Link` feature, whose block is a link block (docs/links.md): the page's card, address and preview in its props, with the same `child` link from it to the picture — so the pictures from one page share one card |
+| on the board       | in the graph                                                                                                                                                                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the board          | a note whose page props hold `board: true`                                                                                                                                                                                                        |
+| its pictures       | the image blocks written in the note (docs/images.md): the ones the outline reaches, and the ones in its Unassigned basket                                                                                                                        |
+| a feature          | a direct child of the page whose props carry `feature` (`FEATURE_PROP`, `src/utils/board-prop.ts`): its type, whether a picture may carry several of its values, and what it means to the model. Its text is its label; the block is its identity |
+| a feature's values | the feature block's children, in order (`Mauritius`, `Lisbon` under `Location`)                                                                                                                                                                   |
+| a picture's value  | a `child` link from the value block to the picture: the value is a second parent, exactly as copy and select-mode paste make                                                                                                                      |
+| a link value       | a value of a feature of type `link`, whose block is a link block (docs/links.md): the page's card, address and preview in its props, with the same `child` link from it to the picture — so the pictures from one page share one card             |
 
 So a board's outline reads:
 
 ```
 Home inspiration
-  - Location
+  - Location              feature:: { type: place, multi: false, meaning: "where …" }
     - Mauritius
       [picture]
     - Lisbon
-  - Object
+  - Object                feature:: { type: text, multi: true, meaning: "the thing …" }
     - Lamp
       [picture]
-  - Link
+  - Material              feature:: { type: text, multi: true, meaning: "what …" }
+  - Source                feature:: { type: link, multi: true }
     [card: Oak pendant lamp — made.com]
       [picture]
 
@@ -62,44 +65,87 @@ Home inspiration
     [picture]      ← added from the board, no value yet
 ```
 
-The features are the preset in `src/data/boards.ts` (`BOARD_FEATURES`): a
-label and whether a picture may carry several of its values (**Location** is
-one at a time; **Object**, **Material** and **Link** are as many as apply),
-and what
-each means, as the model is told it: **Location** is where the picture was
-taken, named as a person would say it; **Object** is the thing the picture
-is of — furniture, lighting, cutlery, plants, decoration; **Material** is
-what that thing is made of; **Link** is where the picture came from — the
-product, the article. (Object was **Fixture** until 2026-W40; there is no
-alias, so a board with a `Fixture` block retitles it.) The label
-is the identity, so renaming a feature block in the outline detaches it: the
-form makes a fresh one on next use and the old block stays as ordinary
-content, values and pictures still linked. Two direct children with the same
-label are the first and some content. A picture pasted straight under a
-feature block is a picture, never a value.
+(The `feature::` lines stand for the block's props; the outline shows a
+feature as a bullet with its label, the prop out of sight.)
 
-**Link is the one feature whose values are not names** (`kind: "link"` on
-`BoardFeature`; the others are `"text"`). A value of it is a link block
-(docs/links.md) under the `Link` block — the page's card, its address and
-preview in its props — made from an address typed into **Add link** in the
-picture's window (`{ url }` as the `ValueRef`; a scheme-less address is
-taken as https, `boardLinkUrl`, and anything that is not a web address makes
-nothing). The card is titled by the address's host, as a pasted address is
-named, until the page's preview lands and gives it the page's own title; a
-name given since is kept. A picture given an address already on the board
-(a trailing slash aside) goes under the card that is there, so the pictures
-from one page share it, and the Filter menu's **Link** branch lists the
-cards as it lists any feature's values. Only a link block under the `Link`
-block is a value: a line typed there by hand is content. The model is never
-asked about it (below).
+## Features
 
-**Nothing is made until it is used.** A fresh board is a note with pictures
-in it and nothing else. The first time a picture is given a location, the
-`Location` block is made at the top of the page — after any feature block
-already there, before everything else, so the features stay together and
-the pictures keep their place — the value beneath it, and the picture linked
-under the value. A feature nobody has used is not on the page, and adding one
-to the preset changes nothing on disk until someone uses it.
+**A feature is a block, as a board is a property.** The `feature` prop on a
+direct child of the page is what makes it one (`featureSpecOf`,
+`src/data/boards.ts`, reads it leniently: a `feature` that is an object is
+a feature, a type it does not name is `text`, `multi` holds only when it
+says `true`, a meaning only when it says something). Its label is the
+block's text and its values are the block's children, so the outline is
+the same thing seen the other way: rename the block in the outline and the
+form calls the feature by its new name, with its values and their pictures
+still its own, because the identity is the block — its id — and never the
+label. The features' order is the blocks' order on the page. Everything
+reads them through one function, `boardFeatures` (the form, the Filter
+menu's branches, Suggest, Reset), and there is no preset anywhere else.
+
+**Three types** (`type` on `BoardFeature`), and whether a picture may carry
+several values (`multi`), and what the feature means (`meaning`, as the
+model is told it):
+
+- `text` — a value is a name: a bullet under the feature block, typed into
+  **New…** in the picker or chosen from the values there.
+- `place` — a name too, in every way but one: when a picture carries where
+  it was taken (below, "Tagging with Claude"), the hint is offered to the
+  board's place feature, by its label. A board with no place feature sends
+  no location.
+- `link` — a value is a web address: a link block (docs/links.md) under the
+  feature block — the page's card, its address and preview in its props —
+  made from an address typed into **New…** (`{ url, title }` as the
+  `ValueRef`; a scheme-less address is taken as https, `boardLinkUrl`, and
+  anything that is not a web address makes nothing). The card is titled as
+  given, else by the address's host, as a pasted address is named, until
+  the page's preview lands and gives it the page's own title; a title given
+  is kept. The picker and the Filter menu list link values by that title.
+  A picture given an address already on the board (a trailing slash aside)
+  goes under the card that is there, so the pictures from one page share
+  it. Only a link block under a link feature is a value: a line typed there
+  by hand is content. The model is never asked about a link feature.
+
+**Defaults, no templates.** Making a board — **New board**, or **Make this a
+board** on a note — writes three feature blocks onto the page, with their
+props, before whatever the note holds (`defaultFeatureOps`, from
+`DEFAULT_FEATURES` in `src/data/boards.ts`, the one place they live):
+**Location** (`place`, one value: "where the picture was taken, named as a
+person would say it"), **Object** (`text`, several: "the thing the picture
+is of, such as furniture, lighting, cutlery, plants or decoration") and
+**Material** (`text`, several: "what that thing is made of"). A default the
+note already has by label is left as it is. From there the board's features
+are its own to change.
+
+**A board from before features were blocks keeps working.** Such a board has
+its features by name alone — a direct child of the page named `Location`,
+`Object`, `Material` or `Link` (trimmed, whatever its case, whatever its
+type) with no `feature` prop — and is read as having that default (`Link`
+as a link feature taking several values), the first child of each name
+only. The first change to such a feature in the Features editor writes the
+prop onto its block, and from then on it is a feature like any other, by
+its block. Nothing is rewritten until then. This name-matching is the one
+place a label is read as anything but a label.
+
+**The Features editor** is **Features…** in the board's ⋯ menu: the app's
+dialog, with a row per feature — its label, its type (**Text**, **Place**,
+**Link**), **Several values**, and what the model is told it means — a step
+up and down among the others, and a remove, with **Add feature** at the
+foot, which adds a text feature named "New feature" with its label ready
+to be typed over. Every change is written as it is made, through the
+board's own writes (`addFeatureOps`, `updateFeatureOps`, `moveFeatureOps`,
+`removeFeatureOps`), and the page shows it: the inspector's pickers and
+the Filter menu follow a rename at once. A move relinks the block before
+the feature above it or after the one below, whatever other content stands
+between. A type cannot change between a name and a link while the feature
+has values, since the value blocks it has are of the one kind: those
+entries are greyed. Removing a feature deletes its block and its value
+blocks — the links from the values to the pictures go with them, the
+pictures stay on the board, and one left with no parent is back in the
+basket — so it asks first (`ConfirmDialog`, danger), and is answered with a
+plain toast, since a delete has no inverse (`inverseOps`) for an Undo to
+apply. A picture pasted straight under a feature block is a picture, never
+a value.
 
 **A picture's home is the basket until a value takes it.** A picture added
 from the board is written in the note with no parent, so it sits in the
@@ -183,13 +229,15 @@ each):
   and the features are the row's own, so they can be set while the bytes
   are still going up, and the asset id joins them when it lands. A failed
   upload closes the window with its row.
-- **Setting a value** (`setValueOps`) makes the feature block and the value
-  block if they are missing and links the picture under the value. A
-  single-select feature first unlinks any other value of its own the picture
-  carried. Picking an existing value reuses it, by text, whatever its case.
-  A link feature's value is made from an address: the card, titled by the
-  host, with its preview fetched behind the write as the editor fetches a
-  new link block's (`fetchLinkPreview`, src/data/link-previews.ts) and
+- **Setting a value** (`setValueOps`, by the feature's block) makes the
+  value block if it is missing and links the picture under the value; the
+  feature's block is already there, made with the board or in the Features
+  editor. A single-select feature first unlinks any other value of its own
+  the picture carried. Picking an existing value reuses it, by text,
+  whatever its case. A link feature's value is made from an address: the
+  card, titled as given or by the host, with its preview fetched behind the
+  write as the editor fetches a new link block's (`fetchLinkPreview`,
+  src/data/link-previews.ts) and
   written on by `linkPreviewOps` — what the page says, and its title where
   the card has only the host's — with no history step and no toast; a page
   that will not answer is no error here — the card stays, an address to
@@ -200,7 +248,7 @@ each):
 - **The caption** is the image block's text (`setCaptionOps`) — what search
   matches, as in the editor.
 - **Reset** (`resetImageOps`) clears the caption and takes every value off
-  the picture, all features at once, as one batch with one Undo. Beside
+  the picture, all the board's features at once, as one batch with one Undo. Beside
   **Delete image** at the foot of the form, and nothing to press while the
   picture has no caption and carries no value.
 - **Delete image** is the context menu's Delete (`deleteBlockOps`): the row
@@ -230,9 +278,10 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
 - **The header**: the note's name, then Sort, Filter and the ⋯ menu — the
   note page's own controls, with the board's features leading the Filter
   (above). The menu is the note's (`NoteActionsMenu`, `surface="board"`),
-  with **Open note** where the outline's has **Open board**; **Make this
-  a note** from here lands on the outline, since the board page refuses a
-  note.
+  with **Features…** first (the Features editor, above,
+  `board-features-dialog.tsx`), **Open note** where the outline's has
+  **Open board**, and **Make this a note**, which from here lands on the
+  outline, since the board page refuses a note.
 - **Adding pictures** (`add-images.tsx`): two buttons at the top of the
   wall, **Camera** (on a phone, where there is one in hand) and **Photos**.
   Down a long wall the row scrolls away, so once it is out of view
@@ -264,11 +313,8 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
 - **The inspector** (`board-inspector.tsx`): the picked picture in a window
   of its own — the app's dialog, as wide as the screen allows — the picture
   large with its caption and a picker per feature beside it, stacked on a
-  phone — and, for **Link**, the picture's cards (`link-values.tsx`: the
-  editor's own card body, `LinkCardBody` in `link-card.tsx`, less the
-  page's picture, each with **Open link** and **Remove link**) and **Add
-  link** beneath them, which asks for an address in the same dialog a new
-  value is named in. Focus stays in the window but the page is not made inert
+  phone, a link feature's values listed by their titles like any other's.
+  Focus stays in the window but the page is not made inert
   (`modal="trap-focus"`), so the toast that answers a Reset or a Suggest,
   with its Undo, stays in reach while the window is open; a press on the scrim,
   Escape or the close control put it away. A menu opened from inside a
@@ -277,7 +323,8 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
 - **A picker** (`value-picker.tsx`): a menu of the feature's values —
   single-select closes on a pick, multi-select stays open with each row a
   toggle — and **New…**, which asks for a name in a dialog of its own
-  (`new-value-dialog.tsx`).
+  (`new-value-dialog.tsx`), or, for a link feature, an address (required,
+  a web address) and a title (optional).
 
 ## Tagging with Claude
 
@@ -285,9 +332,10 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
 up (below). A picked picture's window carries **Suggest** in its title bar
 — a sparkles icon and, on a wide screen, the word, beside the close control, busy until the
 answer is in — and that is the one way to tag: a vision model is shown the
-picture and the board's name features with the values in use (**Link** is
-not sent, and nothing an answer says of it is applied — where a picture came
-from cannot be read off the picture), and answers with
+picture and the board's text and place features with their meanings and
+the values in use (`tagFeaturesOf`; a link feature is not sent, and nothing
+an answer says of it is applied — where a picture came from cannot be read
+off the picture), and answers with
 a caption and, per feature, the values that fit — an existing value
 spelled as given, or a short new one. Nothing is tagged unasked.
 
@@ -385,7 +433,10 @@ answer as it came, or the error's words), and the toast that shows it has
 a **Copy** action that puts those lines on the clipboard, so a failure can
 be reported as it was rather than described.
 
-**Where the picture was taken** gives the model a place for Location. A
+**Where the picture was taken** gives the model a place for the board's
+place feature — **Location** on a fresh board, or whatever a place feature
+is called; a board with none is sent no location and told nothing of it,
+and asks nothing of Nominatim. A
 picture added from the board may carry `lat` and `lon` on its block (WGS84,
 five decimal places), set at upload: one taken with the **Camera** button
 is placed by the device's position (`devicePosition`,
@@ -407,11 +458,14 @@ most specific first — `display_name` with postcodes and house numbers
 dropped, each name once, "; "-joined, cut to 160 characters: "Ljubljana
 Jože Pučnik Airport; Zgornji Brnik; Cerklje na Gorenjskem; Upper Carniola;
 Slovenia". The prompt gives the model the chain and asks it to name the
-place as a person would in conversation: a value in use that covers it,
-else the country by default, or the everyday short name of a notable
-specific place — an airport, a landmark, a city — rather than the precise
-village the chain begins with. With coordinates but no chain it gives them
-and asks for the town or area.
+place, for the place feature by its label ("For Location, …"; two place
+features are both named), as a person would in conversation: a value in use
+that covers it, else the country by default, or the everyday short name of
+a notable specific place — an airport, a landmark, a city — rather than the
+precise village the chain begins with. With coordinates but no chain it
+gives them and asks for the town or area. Which features are places goes
+with the request (`place` on `TagFeature`), so the Worker needs nothing of
+the board.
 
 **Reading the answer** is the same for both providers (`readTagSuggestion`,
 src/data/auto-tag.ts). The caption's first letter is upper-cased. A value
@@ -431,18 +485,20 @@ shows nothing for that feature.
 (src/data/boards.ts) reads the suggestion into one batch — a caption only
 where the picture has none, a single-value feature only where the picture
 carries none of its values, a multi-value feature's values added to those
-carried — each value through `setValueOps` by text, so an existing value
-is reused and a new one made, and the batch built up against the snapshot
-as each write would leave it, so two new values under one new feature make
-one feature block. It fills in and never overrides what a person set, and
+carried — each answer matched to a feature by the label the model was
+given, and each value through `setValueOps` by text, so an existing value
+is reused and a new one made, the batch built up against the snapshot as
+each write would leave it. It fills in and never overrides what a person set, and
 it is one toast — **Picture updated** — with one **Undo**. Nothing to add
 is a toast that says so. Only a failure's toast offers **Copy**: a call that
 went through can be read in the gateway log.
 
 The prompt tells the model what each feature means (`meaning` on
-`BoardFeature`, sent with the request as `TagFeature.meaning` and rendered
-as "- Object (several values): the thing the picture is of, such as …
-Values in use: cutlery, potted plant"), and an answer that names the
+`BoardFeature`, from the block's prop — what the Features editor's "What
+the model is told" box holds — sent with the request as
+`TagFeature.meaning` and rendered as "- Object (several values): the thing
+the picture is of, such as … Values in use: cutlery, potted plant"; a
+feature with no meaning is sent without one), and an answer that names the
 features under other labels — "Objects", "Materials" — is still read, by
 position, when it has one entry per feature in order.
 

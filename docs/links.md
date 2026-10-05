@@ -157,8 +157,9 @@ whole.
 Search: `type:link` finds link blocks; the title is what text queries
 match.
 
-A board's **Link** feature keeps its values as link blocks under a `Link`
-block, the pictures from a page beneath its card (docs/boards.md).
+A board's link features keep their values as link blocks under the
+feature's block, the pictures from a page beneath its card (docs/boards.md,
+"Features").
 
 ### Layout
 

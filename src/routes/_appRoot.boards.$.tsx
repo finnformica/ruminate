@@ -2,6 +2,7 @@ import { Link, createFileRoute } from "@tanstack/react-router"
 import { useAtomValue } from "jotai"
 import React from "react"
 import { AddImages } from "../components/boards/add-images"
+import { BoardFeaturesDialog } from "../components/boards/board-features-dialog"
 import { BoardInspector } from "../components/boards/board-inspector"
 import { BoardWall, type BoardImage } from "../components/boards/board-wall"
 import { BoardIcon16 } from "../components/icons"
@@ -152,6 +153,9 @@ function BoardPage({ boardId }: { boardId: string }) {
   }, [selectedId, imageIds])
   const close = React.useCallback(() => setSelectedId(null), [])
 
+  // The Features editor, from the ⋯ menu (docs/boards.md, "Features").
+  const [featuresOpen, setFeaturesOpen] = React.useState(false)
+
   // Adding pictures: the buttons' pickers, the camera, a drop anywhere on
   // the page, or a paste while nothing else is taking the keys. Whichever
   // way they came, the first new picture opens in the window straight
@@ -195,7 +199,12 @@ function BoardPage({ boardId }: { boardId: string }) {
             branches={branches}
             saved={savedView.writable ? { ...savedViewActions, dirty: filterDirty } : undefined}
           />
-          <NoteActionsMenu noteId={boardId} align="end" surface="board" />
+          <NoteActionsMenu
+            noteId={boardId}
+            align="end"
+            surface="board"
+            onFeatures={exists ? () => setFeaturesOpen(true) : undefined}
+          />
         </div>
       }
     >
@@ -236,6 +245,12 @@ function BoardPage({ boardId }: { boardId: string }) {
           </Notice>
         ) : null}
         <AddImages canUpload={writes.canUpload} exists={exists} onFiles={addFiles} />
+        <BoardFeaturesDialog
+          open={featuresOpen && exists}
+          features={features}
+          writes={writes}
+          onClose={() => setFeaturesOpen(false)}
+        />
         {selected ? (
           <BoardInspector
             key={selected.id}

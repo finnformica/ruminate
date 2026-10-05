@@ -129,14 +129,12 @@ export function LinkCard({
 /**
  * What a link's card holds — the page's picture on the left when it has
  * one, the title line, the description (or the want of one) and the byline
- * of favicon and site — apart from the frame around it, so a board can
- * draw a link value with the editor's own card
- * (src/components/boards/link-values.tsx). `title` is the title line to
- * show, or null for an untitled link that is not being edited; `text` is
- * the link's title as text, which decides whether that line is worth
- * showing.
+ * of favicon and site — apart from the frame around it. `title` is the
+ * title line to show, or null for an untitled link that is not being
+ * edited; `text` is the link's title as text, which decides whether that
+ * line is worth showing.
  */
-export function LinkCardBody({
+function LinkCardBody({
   props,
   text,
   title,
