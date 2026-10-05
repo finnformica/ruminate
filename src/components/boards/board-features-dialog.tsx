@@ -210,11 +210,11 @@ function useFeatureCells({ state, focus, writes }: RowProps) {
     values.length === 0 || isLinkType(type) === isLinkType(feature.type)
   const shown = feature.label.trim() || "Untitled"
 
-  const typeMenu = (size: "small" | "medium") => (
+  const typeMenu = (size: "small" | "medium", className?: string) => (
     <DropdownMenu modal={false}>
       <DropdownMenu.Trigger
         render={
-          <IconButton aria-label={`Type: ${TYPE_LABELS[feature.type]}`} size={size}>
+          <IconButton aria-label={TYPE_LABELS[feature.type]} size={size} className={className}>
             {TYPE_ICONS[feature.type]}
           </IconButton>
         }
@@ -288,7 +288,7 @@ function TableRow(props: RowProps) {
   const cells = useFeatureCells(props)
   return (
     <tr data-testid="board-feature" className="group border-t border-border-secondary align-top">
-      <td className="py-[3px]">{cells.typeMenu("small")}</td>
+      <td className="py-[3px]">{cells.typeMenu("small", "mx-auto")}</td>
       <td className="py-[3px]">{cells.nameField()}</td>
       <td className="py-[3px] text-center">{cells.multiBox("mx-auto mt-2")}</td>
       {props.notes ? <td className="py-[3px]">{cells.notesField()}</td> : null}
@@ -311,7 +311,7 @@ function SheetRow(props: RowProps) {
       data-testid="board-feature"
       className="grid grid-cols-[40px_minmax(0,1fr)_56px_40px] items-center border-b border-border-secondary"
     >
-      {cells.typeMenu("medium")}
+      {cells.typeMenu("medium", "justify-self-center")}
       {/* 16px text, so the phone does not zoom in on the box. */}
       {cells.nameField("text-[16px]")}
       {cells.multiBox("justify-self-center")}

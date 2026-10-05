@@ -42,7 +42,7 @@ describe("BoardFeaturesDialog", () => {
     expect(screen.queryByRole("columnheader", { name: "Notes" })).toBeNull()
     expect(screen.queryByLabelText(/^Notes on/)).toBeNull()
     expect(screen.getAllByTestId("board-feature")).toHaveLength(2)
-    expect(screen.getByRole("button", { name: "Type: Place" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Place" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Remove Location" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Add feature" })).toBeTruthy()
     cleanup()
