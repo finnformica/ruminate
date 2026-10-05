@@ -3,12 +3,26 @@ import { cleanup, fireEvent, render } from "@testing-library/react"
 import { getDefaultStore } from "jotai"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-// The hook only needs the atom and the flush seam; the service worker
-// registration (`virtual:pwa-register/react`) never runs here.
+// The hooks need the atom and the flush seam, and the service worker
+// registration (`virtual:pwa-register/react`) is stood in for: it hands back
+// the options it was given, so a test can play the registration.
 const flush = vi.fn(() => Promise.resolve())
 vi.mock("../data/database-mode", () => ({ requestDatabaseFlush: () => flush() }))
 
-import { appUpdateAtom, useApplyUpdateShortcut } from "./app-update"
+type RegisterOptions = { onRegistered?: (registration: unknown) => void }
+let registerOptions: RegisterOptions | undefined
+vi.mock("virtual:pwa-register/react", () => ({
+  useRegisterSW: (options: RegisterOptions) => {
+    registerOptions = options
+    return {
+      needRefresh: [false, () => {}],
+      offlineReady: [false, () => {}],
+      updateServiceWorker: () => Promise.resolve(),
+    }
+  },
+}))
+
+import { appUpdateAtom, useApplyUpdateShortcut, useRegisterAppUpdate } from "./app-update"
 
 function Harness() {
   useApplyUpdateShortcut()
@@ -52,5 +66,39 @@ describe("the Update Ruminate shortcut (⌘⇧U)", () => {
     pressShortcut()
     await vi.waitFor(() => expect(apply).toHaveBeenCalledTimes(1))
     expect(order).toEqual(["flush", "apply"])
+  })
+})
+
+function RegisterHarness() {
+  useRegisterAppUpdate()
+  return null
+}
+
+function setVisibility(state: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", { value: state, configurable: true })
+  document.dispatchEvent(new Event("visibilitychange"))
+}
+
+describe("checking for an update", () => {
+  it("asks the service worker again when the app comes back to the foreground", () => {
+    const update = vi.fn(() => Promise.resolve())
+    render(<RegisterHarness />)
+    registerOptions?.onRegistered?.({ update })
+    expect(update).not.toHaveBeenCalled()
+
+    setVisibility("hidden")
+    expect(update).not.toHaveBeenCalled()
+
+    setVisibility("visible")
+    expect(update).toHaveBeenCalledTimes(1)
+  })
+
+  it("a check that fails, offline, is not an error", async () => {
+    const update = vi.fn(() => Promise.reject(new Error("offline")))
+    render(<RegisterHarness />)
+    registerOptions?.onRegistered?.({ update })
+    expect(() => setVisibility("visible")).not.toThrow()
+    await Promise.resolve()
+    expect(update).toHaveBeenCalledTimes(1)
   })
 })

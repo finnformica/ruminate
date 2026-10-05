@@ -11,9 +11,10 @@ import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
  *
  * The service worker is registered exactly once, by the always-mounted app
  * layout (`useRegisterAppUpdate`), and the answer lives in an atom so any
- * surface can show it — the sidebar's "Update Ruminate" item on wide screens
- * and the badge on the phone nav bar's menu button, which is on screen when
- * the drawer holding the sidebar items is not.
+ * surface can show it — the sidebar's "Update Ruminate" item on wide screens,
+ * and on a phone the notice above the page (`AppUpdateNotice`) and the badge
+ * on the nav bar's menu button, which is on screen when the drawer holding
+ * the sidebar items is not.
  */
 export const appUpdateAtom = atom<{ needRefresh: boolean; apply: () => Promise<void> }>({
   needRefresh: false,
@@ -49,6 +50,16 @@ export function useRegisterAppUpdate() {
           },
           60 * 60 * 1000,
         )
+        // And whenever the app comes back to the foreground. A phone puts
+        // it away far more often than it keeps it open for an hour, so the
+        // hourly check mostly never comes round there, and a new build was
+        // found only by the next cold launch. Offline, the check fails
+        // quietly; the next return tries again.
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") {
+            registration.update().catch(() => {})
+          }
+        })
       }
     },
     onRegisterError(error) {

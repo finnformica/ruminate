@@ -16,6 +16,7 @@ import { useApplyUpdateShortcut, useRegisterAppUpdate } from "../hooks/app-updat
 import { usePresence } from "../hooks/presence"
 import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS } from "../shortcuts/registry"
 import { cx } from "../utils/cx"
+import { AppUpdateNotice } from "./app-update-notice"
 import { HelpDrawer, HelpSidebar } from "./help-panel"
 import { NavBar } from "./nav-bar"
 import { Sidebar } from "./sidebar"
@@ -113,6 +114,10 @@ export function AppLayout({ className, children }: AppLayoutProps) {
 
   return (
     <div className={cx("flex grow flex-col overflow-hidden print:overflow-visible", className)}>
+      {/* A waiting update, said above the page on a phone, where the
+          sidebar's row is in a drawer (src/components/app-update-notice.tsx).
+          From `sm` the sidebar and its row are on screen. */}
+      <AppUpdateNotice className="sm:hidden" />
       <div className="flex grow overflow-hidden">
         {sidebar === "expanded" ? (
           <div className="hidden w-56 shrink-0 sm:grid print:hidden">

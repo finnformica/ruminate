@@ -9,6 +9,7 @@ vi.mock("./sidebar", () => ({ Sidebar: () => <div data-testid="sidebar" /> }))
 vi.mock("./nav-bar", () => ({ NavBar: () => null }))
 vi.mock("./sign-in-banner", () => ({ SignInBanner: () => null }))
 vi.mock("./whats-new-popover", () => ({ WhatsNewPopover: () => null }))
+vi.mock("./app-update-notice", () => ({ AppUpdateNotice: () => null }))
 vi.mock("./help-panel", () => ({
   HelpSidebar: ({ open }: { open: boolean }) => <div data-testid="help-sidebar" data-open={open} />,
   HelpDrawer: () => <div data-testid="help-drawer" />,
