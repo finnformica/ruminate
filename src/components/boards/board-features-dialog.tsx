@@ -288,7 +288,7 @@ function TableRow(props: RowProps) {
   const cells = useFeatureCells(props)
   return (
     <tr data-testid="board-feature" className="group border-t border-border-secondary align-top">
-      <td className="py-[3px] pr-2">{cells.typeMenu("small", "mx-auto")}</td>
+      <td className="py-[3px] pr-2">{cells.typeMenu("small", "mx-auto mt-1")}</td>
       <td className="px-2 py-[3px]">{cells.nameField()}</td>
       <td className="px-2 py-[3px] text-center">{cells.multiBox("mx-auto mt-2")}</td>
       {props.notes ? <td className="px-2 py-[3px]">{cells.notesField()}</td> : null}
