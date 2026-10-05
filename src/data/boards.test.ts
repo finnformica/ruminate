@@ -20,7 +20,6 @@ import {
   imageValues,
   inverseOps,
   linkPreviewOps,
-  moveFeatureOps,
   removeFeatureOps,
   resetImageOps,
   setCaptionOps,
@@ -1127,55 +1126,6 @@ describe("the Features editor", () => {
       NOW,
     )
     expect(updateFeatureOps(withCard, "b", OBJECT, { type: "text" })).toEqual([])
-  })
-
-  it("moves a feature past the one above or below, over whatever stands between", () => {
-    // A heading between the two features, and the pictures after them.
-    const moved = applyOps(
-      graphOf({
-        b: [
-          "Location",
-          "  id:: blk_location00",
-          "# Notes",
-          "  id:: blk_heading000",
-          "- Object",
-          "  id:: blk_object0000",
-          img(1),
-          "  id:: blk_pic1000000",
-          img(2),
-          "  id:: blk_pic2000000",
-          "",
-        ].join("\n"),
-      }),
-      [{ op: "setProps", id: OBJECT, props: featureProps(OBJECT_SPEC) }],
-      NOW,
-    )
-    expect(childIdsOf(moved, "b")).toEqual([
-      LOCATION,
-      "blk_heading000",
-      OBJECT,
-      "blk_pic1000000",
-      "blk_pic2000000",
-    ])
-    const up = applyOps(moved, moveFeatureOps(moved, "b", OBJECT, "up"), NOW)
-    expect(childIdsOf(up, "b")).toEqual([
-      OBJECT,
-      LOCATION,
-      "blk_heading000",
-      "blk_pic1000000",
-      "blk_pic2000000",
-    ])
-    const down = applyOps(up, moveFeatureOps(up, "b", OBJECT, "down"), NOW)
-    expect(childIdsOf(down, "b")).toEqual([
-      LOCATION,
-      OBJECT,
-      "blk_heading000",
-      "blk_pic1000000",
-      "blk_pic2000000",
-    ])
-    expect(moveFeatureOps(down, "b", LOCATION, "up")).toEqual([])
-    expect(moveFeatureOps(down, "b", OBJECT, "down")).toEqual([])
-    expect(moveFeatureOps(down, "b", "blk_heading000", "up")).toEqual([])
   })
 
   it("removes a feature with its values, and the pictures stay — in the basket when nothing else holds them", () => {

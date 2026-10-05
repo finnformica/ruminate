@@ -507,46 +507,6 @@ export function updateFeatureOps(
 }
 
 /**
- * A feature moved one place among the board's features: its block relinked
- * under the page before the feature above it, or after the one below —
- * whatever other content stands between them is passed over. Nothing at
- * the top going up, or at the foot going down.
- */
-export function moveFeatureOps(
-  snapshot: GraphSnapshot,
-  boardId: NoteId,
-  featureId: string,
-  direction: "up" | "down",
-): Op[] {
-  const links = snapshot.childLinks.get(boardId) ?? []
-  const features = new Set(boardFeatures(snapshot, boardId).map((state) => state.feature.id))
-  if (!features.has(featureId)) return []
-  const at = links.findIndex((link) => link.destination_id === featureId)
-  let other = -1
-  if (direction === "up") {
-    for (let i = at - 1; i >= 0; i -= 1) {
-      if (features.has(links[i].destination_id)) {
-        other = i
-        break
-      }
-    }
-  } else {
-    for (let i = at + 1; i < links.length; i += 1) {
-      if (features.has(links[i].destination_id)) {
-        other = i
-        break
-      }
-    }
-  }
-  if (other === -1) return []
-  const sortKey =
-    direction === "up"
-      ? sortKeyBetween(links[other - 1]?.sort_key ?? null, links[other].sort_key)
-      : sortKeyBetween(links[other].sort_key, links[other + 1]?.sort_key ?? null)
-  return [{ op: "link", source: boardId, destination: featureId, sortKey }]
-}
-
-/**
  * A feature removed from the Features editor: its block and its value
  * blocks deleted, with the links from the values to the pictures. The
  * pictures stay on the board — one left with no parent is back in the

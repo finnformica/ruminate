@@ -1,40 +1,43 @@
 import React from "react"
-import {
-  isLinkType,
-  type BoardFeature,
-  type BoardFeatureState,
-  type FeatureType,
-} from "../../data/boards"
+import { isLinkType, type BoardFeatureState, type FeatureType } from "../../data/boards"
 import type { BoardWrites } from "../../hooks/board"
 import { Button } from "../ui/button"
 import { Checkbox } from "../ui/checkbox"
 import { ConfirmDialog } from "../ui/confirm-dialog"
 import { Dialog } from "../ui/dialog"
 import { DropdownMenu } from "../ui/dropdown-menu"
-import { IconButton } from "../ui/icon-button"
+import { listRow } from "../ui/list"
 import { TextInput } from "../ui/text-input"
+import { FormControl } from "../form-control"
 import {
-  ArrowDownIcon16,
-  ArrowUpIcon16,
+  AlignLeftIcon16,
   ChevronDownIcon16,
+  ChevronRightIcon12,
+  GlobeIcon16,
+  LinkIcon16,
   PlusIcon16,
   TrashIcon16,
 } from "../icons"
 
-/** The types a feature can be, as the menu names them. */
+/** The types a feature can be, as the menu names them, and the glyph each
+ * row wears: lines of text for a name, a globe for a place, a link. */
 const TYPE_LABELS: Record<FeatureType, string> = { text: "Text", link: "Link", place: "Place" }
 const TYPES: readonly FeatureType[] = ["text", "place", "link"]
+const TYPE_ICONS: Record<FeatureType, React.ReactNode> = {
+  text: <AlignLeftIcon16 />,
+  place: <GlobeIcon16 />,
+  link: <LinkIcon16 />,
+}
 
 /**
- * **Features…** in a board's ⋯ menu (docs/boards.md, "Features"): the
- * board's features as rows, each its label, its type, whether a picture
- * may carry several of its values, and what the model is told it means,
- * with a step up or down among the others and a remove. Every change is
- * written as it is made, through the board's own writes, and the page
- * shows it — the inspector's pickers and the Filter menu follow a rename
- * at once, since the feature is its block. Removing a feature deletes its
- * values, which nothing restores, so it asks first. **Add feature** puts
- * a new text feature at the foot, its label ready to be typed over.
+ * **Features** in a board's ⋯ menu (docs/boards.md, "Features"): the
+ * board's features as a list, one row each in the page's order — the
+ * type's glyph, the label, a chevron — and each row opening the feature
+ * in a window of its own (`FeatureDialog`), as a picture on the wall opens
+ * in the inspector. **Add feature** at the foot makes a text feature named
+ * "New feature" and opens it straight away with the name selected. The
+ * order is the page's: a feature is reordered by moving its block in the
+ * outline.
  */
 export function BoardFeaturesDialog({
   open,
@@ -47,13 +50,13 @@ export function BoardFeaturesDialog({
   writes: BoardWrites
   onClose: () => void
 }) {
-  // The feature whose removal is being confirmed, if any.
-  const [removing, setRemoving] = React.useState<BoardFeature | null>(null)
-  // The feature just added, whose label takes the focus.
-  const [focusId, setFocusId] = React.useState<string | null>(null)
+  // The feature open in its own window, and whether it was just added —
+  // its name is then selected, ready to be typed over.
+  const [opened, setOpened] = React.useState<{ id: string; added: boolean } | null>(null)
+  const openedState = opened ? features.find((s) => s.feature.id === opened.id) : undefined
   const add = () => {
     const id = writes.addFeature()
-    if (id) setFocusId(id)
+    if (id) setOpened({ id, added: true })
   }
   return (
     // Focus is kept in the window but the page is not made inert, as the
@@ -62,40 +65,36 @@ export function BoardFeaturesDialog({
       {open ? (
         <Dialog.Content title="Features">
           <div data-testid="board-features" className="flex flex-col gap-4">
-            {features.length === 0 ? (
-              <p className="leading-5 text-text-secondary">No features yet.</p>
-            ) : (
-              <div className="flex flex-col divide-y divide-border-secondary">
-                {features.map((state, index) => (
-                  <FeatureRow
-                    key={state.feature.id}
-                    state={state}
-                    first={index === 0}
-                    last={index === features.length - 1}
-                    focus={state.feature.id === focusId}
-                    writes={writes}
-                    onRemove={() => setRemoving(state.feature)}
-                  />
+            {features.length > 0 ? (
+              <div className="-mx-3 flex flex-col">
+                {features.map(({ feature }) => (
+                  <button
+                    key={feature.id}
+                    type="button"
+                    data-testid="board-feature"
+                    className={listRow({ className: "w-full text-left" })}
+                    onClick={() => setOpened({ id: feature.id, added: false })}
+                  >
+                    <span className="flex shrink-0 text-text-secondary">
+                      {TYPE_ICONS[feature.type]}
+                    </span>
+                    <span className="grow truncate">{feature.label.trim() || "Untitled"}</span>
+                    <ChevronRightIcon12 className="shrink-0 text-text-secondary" />
+                  </button>
                 ))}
               </div>
-            )}
+            ) : null}
             <Button className="self-start" onClick={add}>
               <PlusIcon16 />
               Add feature
             </Button>
           </div>
-          <ConfirmDialog
-            open={removing !== null}
-            onOpenChange={(next) => (next ? undefined : setRemoving(null))}
-            title={`Remove “${removing?.label.trim() || "Untitled"}”?`}
-            confirmLabel="Remove"
-            variant="danger"
-            onConfirm={() => {
-              if (removing) writes.removeFeature(removing.id)
-            }}
-          >
-            Its values are deleted and come off every picture; the pictures stay on the board.
-          </ConfirmDialog>
+          <FeatureDialog
+            state={openedState ?? null}
+            selectName={opened?.added ?? false}
+            writes={writes}
+            onClose={() => setOpened(null)}
+          />
         </Dialog.Content>
       ) : null}
     </Dialog>
@@ -103,41 +102,90 @@ export function BoardFeaturesDialog({
 }
 
 /**
- * One feature's row. The label and the meaning are committed when the
- * box is left or Enter is pressed, as the inspector's caption is, so a
- * rename is one write rather than one a keystroke; the type and the
- * checkbox write as they change. A type cannot change between a name and
- * a link while the feature has values, since its value blocks are of the
- * one kind: those entries are greyed.
+ * One feature in a window of its own, over the list, as a new value's
+ * window sits over the inspector: its name, its type, whether a picture
+ * may carry several of its values, and what the model is told it means —
+ * each written as it changes, the name and the meaning when the box is
+ * left or Enter is pressed, as the inspector's caption is. The title is
+ * the feature's label, live. A type cannot change between a name and a
+ * link while the feature has values, since its value blocks are of the
+ * one kind: those entries are greyed. **Delete feature** at the foot, as
+ * the inspector has **Delete image**, asks first: the feature's values go
+ * with it, and nothing restores them.
  */
-function FeatureRow({
+function FeatureDialog({
   state,
-  first,
-  last,
-  focus,
+  selectName,
   writes,
-  onRemove,
+  onClose,
+}: {
+  /** The feature shown, or null while none is. */
+  state: BoardFeatureState | null
+  /** Whether to open on the name selected: a feature just added. */
+  selectName: boolean
+  writes: BoardWrites
+  onClose: () => void
+}) {
+  const [deleting, setDeleting] = React.useState(false)
+  return (
+    <Dialog open={state !== null} onOpenChange={(next) => (next ? undefined : onClose())}>
+      {state ? (
+        <FeatureForm
+          key={state.feature.id}
+          state={state}
+          selectName={selectName}
+          writes={writes}
+          onDelete={() => setDeleting(true)}
+        />
+      ) : null}
+      <ConfirmDialog
+        open={deleting}
+        onOpenChange={(next) => (next ? undefined : setDeleting(false))}
+        title={`Delete “${state?.feature.label.trim() || "Untitled"}”?`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => {
+          if (!state) return
+          writes.removeFeature(state.feature.id)
+          onClose()
+        }}
+      >
+        Its values are deleted and come off every picture; the pictures stay on the board.
+      </ConfirmDialog>
+    </Dialog>
+  )
+}
+
+function FeatureForm({
+  state,
+  selectName,
+  writes,
+  onDelete,
 }: {
   state: BoardFeatureState
-  first: boolean
-  last: boolean
-  focus: boolean
+  selectName: boolean
   writes: BoardWrites
-  onRemove: () => void
+  onDelete: () => void
 }) {
   const { feature, values } = state
-  const [label, setLabel] = React.useState(feature.label)
+  const [name, setName] = React.useState(feature.label)
   const [meaning, setMeaning] = React.useState(feature.meaning)
-  // The outline, or another device, may change it while the row is open.
-  React.useEffect(() => setLabel(feature.label), [feature.label])
+  // The outline, or another device, may change it while the window is open.
+  React.useEffect(() => setName(feature.label), [feature.label])
   React.useEffect(() => setMeaning(feature.meaning), [feature.meaning])
-  const labelRef = React.useRef<HTMLInputElement>(null)
-  React.useEffect(() => {
-    if (focus) labelRef.current?.select()
-  }, [focus])
-  const commitLabel = () => {
-    if (label.trim() === "") setLabel(feature.label)
-    else writes.updateFeature(feature.id, { label })
+  const nameRef = React.useRef<HTMLInputElement>(null)
+  // A feature just added opens on its name (`initialFocus`), selected to be
+  // typed over: the selection is made as the focus lands, since the window
+  // gives it only once it has opened, after any effect here has run.
+  const selectOnce = React.useRef(selectName)
+  const onNameFocus = (event: React.FocusEvent<HTMLInputElement>) => {
+    if (!selectOnce.current) return
+    selectOnce.current = false
+    event.currentTarget.select()
+  }
+  const commitName = () => {
+    if (name.trim() === "") setName(feature.label)
+    else writes.updateFeature(feature.id, { label: name })
   }
   const commitMeaning = () => writes.updateFeature(feature.id, { meaning })
   // Enter commits and leaves the box, as it does in the inspector.
@@ -150,84 +198,79 @@ function FeatureRow({
   }
   const canBecome = (type: FeatureType) =>
     values.length === 0 || isLinkType(type) === isLinkType(feature.type)
-  const name = feature.label.trim() || "Untitled"
   return (
-    <div data-testid="board-feature" className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
-      <div className="flex items-center gap-2">
-        <TextInput
-          ref={labelRef}
-          aria-label="Label"
-          value={label}
-          autoComplete="off"
-          onChange={(event) => setLabel(event.target.value)}
-          onBlur={commitLabel}
-          onKeyDown={onEnter(commitLabel)}
-        />
-        <DropdownMenu modal={false}>
-          <DropdownMenu.Trigger
-            render={
-              <Button aria-label={`Type of ${name}`} className="shrink-0 gap-1.5">
-                {TYPE_LABELS[feature.type]}
-                <ChevronDownIcon16 className="text-text-secondary" />
-              </Button>
-            }
+    <Dialog.Content
+      title={feature.label.trim() || "Untitled"}
+      initialFocus={selectName ? nameRef : undefined}
+    >
+      <div data-testid="board-feature-window" className="flex flex-col gap-4">
+        <FormControl htmlFor="feature-name" label="Name">
+          <TextInput
+            ref={nameRef}
+            id="feature-name"
+            value={name}
+            autoComplete="off"
+            onFocus={onNameFocus}
+            onChange={(event) => setName(event.target.value)}
+            onBlur={commitName}
+            onKeyDown={onEnter(commitName)}
           />
-          <DropdownMenu.Content align="end" width={160}>
-            {TYPES.map((type) => (
-              <DropdownMenu.Item
-                key={type}
-                selected={feature.type === type}
-                disabled={!canBecome(type)}
-                onClick={() => writes.updateFeature(feature.id, { type })}
-              >
-                {TYPE_LABELS[type]}
-              </DropdownMenu.Item>
-            ))}
-          </DropdownMenu.Content>
-        </DropdownMenu>
+        </FormControl>
+        <FormControl htmlFor="feature-type" label="Type">
+          <DropdownMenu modal={false}>
+            <DropdownMenu.Trigger
+              render={
+                <Button id="feature-type" className="self-start gap-1.5">
+                  {TYPE_LABELS[feature.type]}
+                  <ChevronDownIcon16 className="text-text-secondary" />
+                </Button>
+              }
+            />
+            <DropdownMenu.Content align="start" width={160}>
+              {TYPES.map((type) => (
+                <DropdownMenu.Item
+                  key={type}
+                  icon={TYPE_ICONS[type]}
+                  selected={feature.type === type}
+                  disabled={!canBecome(type)}
+                  onClick={() => writes.updateFeature(feature.id, { type })}
+                >
+                  {TYPE_LABELS[type]}
+                </DropdownMenu.Item>
+              ))}
+            </DropdownMenu.Content>
+          </DropdownMenu>
+        </FormControl>
+        <div className="flex items-center gap-2 leading-4">
+          <Checkbox
+            id="feature-multi"
+            checked={feature.multi}
+            onCheckedChange={(checked) => writes.updateFeature(feature.id, { multi: checked })}
+          />
+          <label htmlFor="feature-multi">Several values</label>
+        </div>
+        {/* The model is never asked about a link, so a link feature has
+            nothing to tell it. */}
+        {isLinkType(feature.type) ? null : (
+          <FormControl htmlFor="feature-meaning" label="Meaning">
+            <TextInput
+              id="feature-meaning"
+              value={meaning}
+              placeholder="What the model is told"
+              autoComplete="off"
+              onChange={(event) => setMeaning(event.target.value)}
+              onBlur={commitMeaning}
+              onKeyDown={onEnter(commitMeaning)}
+            />
+          </FormControl>
+        )}
+        <div className="flex">
+          <Button size="small" className="text-text-danger" onClick={onDelete}>
+            <TrashIcon16 />
+            Delete feature
+          </Button>
+        </div>
       </div>
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id={`feature-multi-${feature.id}`}
-          checked={feature.multi}
-          onCheckedChange={(checked) => writes.updateFeature(feature.id, { multi: checked })}
-        />
-        <label htmlFor={`feature-multi-${feature.id}`} className="flex-1 leading-4">
-          Several values
-        </label>
-        <IconButton
-          aria-label={`Move ${name} up`}
-          size="small"
-          disabled={first}
-          onClick={() => writes.moveFeature(feature.id, "up")}
-        >
-          <ArrowUpIcon16 />
-        </IconButton>
-        <IconButton
-          aria-label={`Move ${name} down`}
-          size="small"
-          disabled={last}
-          onClick={() => writes.moveFeature(feature.id, "down")}
-        >
-          <ArrowDownIcon16 />
-        </IconButton>
-        <IconButton aria-label={`Remove ${name}`} size="small" onClick={onRemove}>
-          <TrashIcon16 />
-        </IconButton>
-      </div>
-      {/* The model is never asked about a link, so a link feature has
-          nothing to tell it. */}
-      {isLinkType(feature.type) ? null : (
-        <TextInput
-          aria-label={`Meaning of ${name}`}
-          value={meaning}
-          placeholder="What the model is told"
-          autoComplete="off"
-          onChange={(event) => setMeaning(event.target.value)}
-          onBlur={commitMeaning}
-          onKeyDown={onEnter(commitMeaning)}
-        />
-      )}
-    </div>
+    </Dialog.Content>
   )
 }

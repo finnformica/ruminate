@@ -2,8 +2,9 @@
 
 A **board** is a wall of pictures with a page of its own: a place to keep
 inspiration — for a future home, say — where each picture can be captioned
-and given the board's **features** — a location, an object, a material to
-begin with, and whatever else the board is given under **Features…** —
+and given the board's **features** — a location, an object, a material and
+a link to begin with, and whatever else the board is given under
+**Features** —
 all from a form, and the wall narrowed by any of them. **New board**, under
 the header's **New** menu (or <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>B</kbd>), makes one and
 opens it at `/boards/<note id>`; its header is the note's own — Sort, Filter
@@ -129,25 +130,30 @@ prop onto its block, and from then on it is a feature like any other, by
 its block. Nothing is rewritten until then. This name-matching is the one
 place a label is read as anything but a label.
 
-**The Features editor** is **Features…** in the board's ⋯ menu: the app's
-dialog, with a row per feature — its label, its type (**Text**, **Place**,
-**Link**), **Several values**, and what the model is told it means — a step
-up and down among the others, and a remove, with **Add feature** at the
-foot, which adds a text feature named "New feature" with its label ready
-to be typed over. Every change is written as it is made, through the
-board's own writes (`addFeatureOps`, `updateFeatureOps`, `moveFeatureOps`,
-`removeFeatureOps`), and the page shows it: the inspector's pickers and
-the Filter menu follow a rename at once. A move relinks the block before
-the feature above it or after the one below, whatever other content stands
-between. A type cannot change between a name and a link while the feature
-has values, since the value blocks it has are of the one kind: those
-entries are greyed. Removing a feature deletes its block and its value
+**The Features editor** is **Features** in the board's ⋯ menu
+(`board-features-dialog.tsx`): the app's dialog holding a list and nothing
+else — a row per feature in the page's order, the type's glyph, the label
+and a chevron — and **Add feature** at the foot, which makes a text
+feature named "New feature" and opens it straight away with its name
+selected. A row opens the feature in a window of its own over the list, as
+a picture on the wall opens in the inspector: **Name**, **Type** (**Text**,
+**Place**, **Link**), **Several values**, and **Meaning** — what the model
+is told, left out for a link feature, which the model is never told about
+— with **Delete feature** at the foot as the inspector has **Delete
+image**. Every change is written as it is made, through the board's own
+writes (`addFeatureOps`, `updateFeatureOps`, `removeFeatureOps`), and the
+page shows it: the window's title, the list, the inspector's pickers and
+the Filter menu follow a rename at once. A type cannot change between a
+name and a link while the feature has values, since the value blocks it
+has are of the one kind: those entries are greyed. The list has no moves:
+the features' order is the page's, so a feature is reordered by moving its
+block in the outline. Deleting a feature deletes its block and its value
 blocks — the links from the values to the pictures go with them, the
 pictures stay on the board, and one left with no parent is back in the
-basket — so it asks first (`ConfirmDialog`, danger), and is answered with a
-plain toast, since a delete has no inverse (`inverseOps`) for an Undo to
-apply. A picture pasted straight under a feature block is a picture, never
-a value.
+basket — so it asks first (`ConfirmDialog`, danger); on confirm the window
+closes and the list is one row shorter, and a plain toast says so, since a
+delete has no inverse (`inverseOps`) for an Undo to apply. A picture
+pasted straight under a feature block is a picture, never a value.
 
 **A picture's home is the basket until a value takes it.** A picture added
 from the board is written in the note with no parent, so it sits in the
@@ -280,7 +286,7 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
 - **The header**: the note's name, then Sort, Filter and the ⋯ menu — the
   note page's own controls, with the board's features leading the Filter
   (above). The menu is the note's (`NoteActionsMenu`, `surface="board"`),
-  with **Features…** first (the Features editor, above,
+  with **Features** first (the Features editor, above,
   `board-features-dialog.tsx`), **Open note** where the outline's has
   **Open board**, and **Make this a note**, which from here lands on the
   outline, since the board page refuses a note.

@@ -18,7 +18,6 @@ import {
   inverseOps,
   isBoard,
   linkPreviewOps,
-  moveFeatureOps,
   outlineImageIds,
   removeFeatureOps,
   resetImageOps,
@@ -207,12 +206,11 @@ export interface BoardWrites {
   setValue: (featureId: string, imageId: string, ref: ValueRef) => void
   clearValue: (value: BoardValue, imageId: string) => void
   /** The Features editor's writes (docs/boards.md, "Features"): a new text
-   * feature, handed back by its block's id so the editor can focus it;
-   * a feature's label, type, several-values and meaning; a step up or
-   * down among the features; and a feature removed with its values. */
+   * feature, handed back by its block's id so the editor can open it; a
+   * feature's label, type, several-values and meaning; and a feature
+   * removed with its values. */
   addFeature: () => string | null
   updateFeature: (featureId: string, patch: FeaturePatch) => void
-  moveFeature: (featureId: string, direction: "up" | "down") => void
   removeFeature: (featureId: string) => void
   /** Take the caption and every value off a picture, all features at once,
    * as one batch with a toast that can undo it. */
@@ -340,13 +338,6 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   const updateFeature = React.useCallback(
     (featureId: string, patch: FeaturePatch) => {
       write(updateFeatureOps(store.get(graphSnapshotAtom), boardId, featureId, patch))
-    },
-    [store, boardId, write],
-  )
-
-  const moveFeature = React.useCallback(
-    (featureId: string, direction: "up" | "down") => {
-      write(moveFeatureOps(store.get(graphSnapshotAtom), boardId, featureId, direction))
     },
     [store, boardId, write],
   )
@@ -523,7 +514,6 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       clearValue,
       addFeature,
       updateFeature,
-      moveFeature,
       removeFeature,
       resetImage,
       setCaption,
@@ -538,7 +528,6 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
       clearValue,
       addFeature,
       updateFeature,
-      moveFeature,
       removeFeature,
       resetImage,
       setCaption,

@@ -153,7 +153,7 @@ function BoardPage({ boardId }: { boardId: string }) {
   }, [selectedId, imageIds])
   const close = React.useCallback(() => setSelectedId(null), [])
 
-  // The Features editor, from the ⋯ menu (docs/boards.md, "Features").
+  // The Features list, from the ⋯ menu (docs/boards.md, "Features").
   const [featuresOpen, setFeaturesOpen] = React.useState(false)
 
   // Adding pictures: the buttons' pickers, the camera, a drop anywhere on

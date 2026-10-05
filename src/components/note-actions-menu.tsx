@@ -107,7 +107,7 @@ interface EditorActions {
  * board** to get back. Own notes only (signed out, the sample graph in
  * memory, as **New board** does), and only where the caller can open the
  * board (`openBoard`); a daily or weekly note is what its id says it is,
- * so neither is offered one. The board page itself adds **Features…**,
+ * so neither is offered one. The board page itself adds **Features**,
  * which opens its Features editor (`openFeatures`).
  */
 export function useNoteMenuEntries() {
@@ -180,7 +180,7 @@ export function useNoteMenuEntries() {
                 ? [
                     {
                       kind: "item" as const,
-                      label: "Features…",
+                      label: "Features",
                       icon: <ListIcon16 />,
                       onSelect: () => options.openFeatures?.(),
                     },
