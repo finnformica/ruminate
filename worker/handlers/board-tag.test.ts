@@ -31,7 +31,7 @@ const PICTURE = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3])
 const PICTURE_BASE64 = "/9j/4AECAw=="
 
 const FEATURES: TagFeature[] = [
-  { label: "Location", multi: false, values: ["Mauritius", "Lisbon"] },
+  { label: "Location", multi: false, values: ["Mauritius", "Lisbon"], place: true },
   { label: "Object", multi: true, values: [] },
 ]
 
@@ -714,14 +714,37 @@ describe("a location with the request", () => {
   it("asks Nominatim nothing for a call the day refuses", async () => {
     await keepKey()
     expect(
-      (await send(tagRequest({ features: { features: [], location: AT } }), { dailyLimit: 1 }))
-        .status,
+      (
+        await send(tagRequest({ features: { features: FEATURES, location: AT } }), {
+          dailyLimit: 1,
+        })
+      ).status,
     ).toBe(200)
-    const response = await send(tagRequest({ features: { features: [], location: AT } }), {
+    const response = await send(tagRequest({ features: { features: FEATURES, location: AT } }), {
       dailyLimit: 1,
     })
     expect(response.status).toBe(429)
     expect(nominatim.calls).toHaveLength(1)
+  })
+
+  it("asks Nominatim nothing, and says nothing, for a board with no place feature", async () => {
+    await keepKey()
+    const unplaced = FEATURES.map(({ place: _place, ...feature }) => feature)
+    const response = await send(tagRequest({ features: { features: unplaced, location: AT } }))
+    expect(response.status).toBe(200)
+    expect(nominatim.calls).toEqual([])
+    expect(promptText()).not.toContain("The picture was taken")
+  })
+
+  it("names the place feature as the board calls it", async () => {
+    await keepKey()
+    const renamed: TagFeature[] = [
+      { label: "Where", multi: false, values: [], place: true },
+      { label: "Object", multi: true, values: [] },
+    ]
+    const response = await send(tagRequest({ features: { features: renamed, location: AT } }))
+    expect(response.status).toBe(200)
+    expect(promptText()).toContain("For Where, use a value in use that covers the place")
   })
 
   it("reaches the Cloudflare provider's prompt too", async () => {

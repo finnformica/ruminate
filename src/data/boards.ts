@@ -8,8 +8,9 @@ import {
   type LinkPreview,
   type LinkProps,
 } from "../blocks/link"
+import type { BlockProps } from "../blocks/types"
 import type { NoteId } from "../schema"
-import { BOARD_PROP } from "../utils/board-prop"
+import { BOARD_PROP, FEATURE_PROP } from "../utils/board-prop"
 import {
   NOTE_TYPE,
   childIdsOf,
@@ -36,68 +37,93 @@ import { applyOps, type Op } from "./ops"
  * and the ones nothing reaches yet, which sit in the note's Unassigned
  * basket (`basket.ts`) as any such block does. A picture added from the
  * board is written in the note with no parent, so it starts in the basket.
- * A FEATURE is a direct child of the page whose text is one of the labels
- * below, created the first time a picture is given one; a VALUE is a child
- * of that block ("Mauritius" under "Location"), created the first time it
- * is picked; and setting a value on a picture is a `link` from the value
+ * A FEATURE is a direct child of the page whose props carry `feature`
+ * (`FEATURE_PROP`: its type, whether it takes several values, and notes
+ * for the model) and whose text is its label — the block is the
+ * feature's identity, so renaming it keeps it; a VALUE is a child of that
+ * block ("Mauritius" under "Location"), created the first time it is
+ * picked; and setting a value on a picture is a `link` from the value
  * block to the picture — the same parent that select-mode paste gives a
  * block in the editor, and what takes the picture out of the basket.
  * Clearing its last value unlinks it, and the basket has it again. A LINK
  * feature's values are link blocks rather than bullets (docs/links.md):
  * the page a picture came from, as its card, with the pictures from that
- * page beneath it; nothing else about it differs. So the
- * outline shows exactly what the board shows, a board can be written by
- * hand in the outline and the form picks it up, and nothing here is a rule
- * of its own: it is the editor's basket, read and written the editor's way.
+ * page beneath it; nothing else about it differs. A board made before
+ * features were blocks has its features by name alone — Location, Object,
+ * Material, Link — and those are read as the defaults they are until the
+ * Features editor first touches them. So the outline shows exactly what
+ * the board shows, a board can be written by hand in the outline and the
+ * form picks it up, and nothing here is a rule of its own: it is the
+ * editor's basket, read and written the editor's way.
  *
  * Every function is pure: a snapshot in, a batch of ops out, applied
  * through the one storage seam (`src/data/store.ts`) like the editor's.
  */
 
-interface FeatureBase {
-  /** The block's text on the page, and what the form calls it. */
-  label: string
+/**
+ * What a feature's values are: a NAME typed in (`text`), a PLACE — a name
+ * too, but the one the location hint is for when a picture carries where
+ * it was taken (docs/boards.md, "Tagging with Claude") — or a web ADDRESS
+ * (`link`), kept as a link block and drawn as its card, which the model is
+ * never asked about.
+ */
+export type FeatureType = "text" | "link" | "place"
+
+/** What the `feature` prop on a block carries. */
+export interface FeatureSpec {
+  type: FeatureType
   /** Whether a picture may carry several of its values at once. */
   multi: boolean
+  /** Notes on what the feature is, as the model is told them; left out
+   * when nothing has been said. */
+  notes?: string
 }
 
-/** A feature, by what its values are: a NAME typed in, or a web ADDRESS. */
-export type BoardFeature =
-  | (FeatureBase & {
-      /** A value is a name: a bullet under the feature block. */
-      kind: "text"
-      /** What the feature is, as the model is told it (docs/boards.md,
-       * "Tagging with Claude"). */
-      meaning: string
-    })
-  | (FeatureBase & {
-      /** A value is a web address: a link block under the feature block,
-       * drawn as its card (docs/links.md), which every picture from that
-       * page shares. The model is not asked about it — where a picture
-       * came from cannot be read off the picture. */
-      kind: "link"
-    })
+/** A feature as the board reads it off its block. */
+export interface BoardFeature extends FeatureSpec {
+  /** The feature's block: its identity, so a rename keeps it. */
+  id: string
+  /** The block's text, and what the form calls it. */
+  label: string
+  notes: string
+}
 
-/** The features a board offers, in the order the form shows them. The
- * label is the identity: a block on the page with this text (trimmed,
- * case-insensitively) is the feature's block. */
-export const BOARD_FEATURES: readonly BoardFeature[] = [
+/**
+ * The features a new board starts with, in the order the form shows them
+ * — written onto the page as blocks by **New board** and **Make this a
+ * board** (`defaultFeatureOps`), and the names a board from before
+ * features were blocks is read by. The one place the defaults live.
+ */
+export const DEFAULT_FEATURES: readonly { label: string; spec: FeatureSpec }[] = [
   {
     label: "Location",
-    multi: false,
-    kind: "text",
-    meaning: "where the picture was taken, named as a person would say it",
+    spec: {
+      type: "place",
+      multi: false,
+      notes: "where the picture was taken, named as a person would say it",
+    },
   },
   {
     label: "Object",
-    multi: true,
-    kind: "text",
-    meaning:
-      "the thing the picture is of, such as furniture, lighting, cutlery, plants or decoration",
+    spec: {
+      type: "text",
+      multi: true,
+      notes:
+        "the thing the picture is of, such as furniture, lighting, cutlery, plants or decoration",
+    },
   },
-  { label: "Material", multi: true, kind: "text", meaning: "what that thing is made of" },
-  { label: "Link", multi: true, kind: "link" },
+  { label: "Material", spec: { type: "text", multi: true, notes: "what that thing is made of" } },
+  { label: "Link", spec: { type: "link", multi: true } },
 ]
+
+/** The names a board made before features were blocks has its features
+ * by: the defaults. A direct child of the page so named, with no `feature`
+ * prop, is read as that feature until the Features editor stamps the prop
+ * on it. */
+const LEGACY_FEATURES = DEFAULT_FEATURES
+
+/** What a feature added from the editor is called until it is renamed. */
+const NEW_FEATURE_LABEL = "New feature"
 
 /** The type a feature block is created as, and the types a value is: a
  * bullet for a name, a link block for an address. */
@@ -108,9 +134,13 @@ const IMAGE_TYPE = "image"
 
 const normalise = (text: string) => text.trim().toLocaleLowerCase()
 
-/** Whether a block's text names this feature. */
-const isFeatureText = (text: string, feature: BoardFeature) =>
-  normalise(text) === normalise(feature.label)
+/** Whether two labels name one feature, trimmed and whatever their case:
+ * how a board from before features were blocks is read, and how the
+ * model's answer is matched to the features it was asked about. */
+const sameLabel = (a: string, b: string) => normalise(a) === normalise(b)
+
+/** Whether a feature's values are link blocks. */
+export const isLinkType = (type: FeatureType): boolean => type === "link"
 
 /** Whether the note is a board: a note whose page carries `board: true`
  * (`BOARD_PROP`). The board page refuses any other note, and the writes
@@ -122,35 +152,54 @@ export function isBoard(snapshot: GraphSnapshot, boardId: NoteId): boolean {
 }
 
 /**
- * The feature's block on the page: the first direct child whose text is the
- * label, or null when no picture has been given this feature yet. Only the
- * first: a second child with the same text is ordinary content, never a
- * second feature.
+ * The feature a block's props declare, or null when they declare none.
+ * Read leniently: a `feature` that is an object is a feature, with a type
+ * it does not name read as `text`, `multi` true only when it says so, and
+ * notes only when they are a non-empty string (`notes`, or `meaning`, the
+ * key they were first written under) — a hand-written prop in the outline
+ * is still a feature rather than content. A `feature` that is anything
+ * else — `false`, as a removed feature leaves — is none.
  */
-export function featureBlockId(
-  snapshot: GraphSnapshot,
-  boardId: NoteId,
-  feature: BoardFeature,
-): string | null {
-  for (const id of childIdsOf(snapshot, boardId)) {
-    const node = snapshot.nodes.get(id)
-    if (node && node.type !== IMAGE_TYPE && isFeatureText(node.text, feature)) return id
-  }
-  return null
+export function featureSpecOf(props: BlockProps | null): FeatureSpec | null {
+  const raw = props?.[FEATURE_PROP]
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null
+  const { type, multi, notes, meaning } = raw as Record<string, unknown>
+  const kind: FeatureType = type === "link" || type === "place" ? type : "text"
+  const written = typeof notes === "string" ? notes : typeof meaning === "string" ? meaning : ""
+  const said = written.trim()
+  return { type: kind, multi: multi === true, ...(said !== "" ? { notes: said } : {}) }
 }
+
+/** The block's props with the feature prop written: the spec as it is,
+ * the notes left out when empty, the rest of the props kept. */
+function withFeatureSpec(props: BlockProps | null, spec: FeatureSpec): BlockProps {
+  const notes = spec.notes?.trim() ?? ""
+  return {
+    ...(props ?? {}),
+    [FEATURE_PROP]: {
+      type: spec.type,
+      multi: spec.multi,
+      ...(notes !== "" ? { notes } : {}),
+    },
+  }
+}
+
+/** Whether a block's name is one a board from before features were blocks
+ * reads as a feature (`LEGACY_FEATURES`). */
+const hasLegacyName = (text: string): boolean =>
+  LEGACY_FEATURES.some((entry) => sameLabel(entry.label, text))
 
 export interface BoardValue {
   id: string
-  /** The name, or a link's title. */
+  /** The name — or, for a link, its title, else its host. */
   text: string
   /** The address and the page's preview, for a link feature's value. */
   link?: LinkProps
 }
 
-/** A feature as it stands on one board: its block, if any, and its values. */
+/** A feature as it stands on one board: its block, and its values. */
 export interface BoardFeatureState {
   feature: BoardFeature
-  blockId: string | null
   values: BoardValue[]
 }
 
@@ -165,19 +214,15 @@ function linkOf(node: { type: string; props: string | null }): LinkProps | null 
 /** The values under a feature block: its direct children, in order. A
  * picture pasted straight under the feature is a picture, not a value; and
  * under a link feature only a link block is a value — a line typed there
- * by hand is content. */
-function valuesOf(
-  snapshot: GraphSnapshot,
-  featureBlock: string,
-  feature: BoardFeature,
-): BoardValue[] {
+ * by hand is content — shown by its title, else by its host. */
+function valuesOf(snapshot: GraphSnapshot, feature: BoardFeature): BoardValue[] {
   const values: BoardValue[] = []
-  for (const id of childIdsOf(snapshot, featureBlock)) {
+  for (const id of childIdsOf(snapshot, feature.id)) {
     const node = snapshot.nodes.get(id)
     if (!node || node.type === IMAGE_TYPE) continue
-    if (feature.kind === "link") {
+    if (isLinkType(feature.type)) {
       const link = linkOf(node)
-      if (link !== null) values.push({ id, text: node.text, link })
+      if (link !== null) values.push({ id, text: node.text.trim() || hostOf(link.url), link })
     } else {
       values.push({ id, text: node.text })
     }
@@ -185,12 +230,46 @@ function valuesOf(
   return values
 }
 
-/** Every feature, in preset order, as it stands on the board. */
+/**
+ * The board's features, in the order their blocks stand on the page: every
+ * direct child of the page whose props carry `feature`, and — for a board
+ * from before features were blocks — the first direct child named as one
+ * of the features those boards had (trimmed, whatever its case, whatever
+ * its type) whose props say nothing of `feature` at all, read as that
+ * feature with no prop written. A second child so named, a picture, a
+ * block whose `feature` is `false` (a feature removed), and any other
+ * child are content.
+ */
 export function boardFeatures(snapshot: GraphSnapshot, boardId: NoteId): BoardFeatureState[] {
-  return BOARD_FEATURES.map((feature) => {
-    const block = featureBlockId(snapshot, boardId, feature)
-    return { feature, blockId: block, values: block ? valuesOf(snapshot, block, feature) : [] }
-  })
+  const states: BoardFeatureState[] = []
+  const legacySeen = new Set<string>()
+  for (const id of childIdsOf(snapshot, boardId)) {
+    const node = snapshot.nodes.get(id)
+    if (!node || node.type === IMAGE_TYPE) continue
+    const props = parseProps(node.props)
+    const spec = featureSpecOf(props)
+    let feature: BoardFeature | null = null
+    if (spec) {
+      feature = { id, label: node.text, ...spec, notes: spec.notes ?? "" }
+    } else if (!props || !(FEATURE_PROP in props)) {
+      const legacy = LEGACY_FEATURES.find((entry) => sameLabel(entry.label, node.text))
+      if (legacy && !legacySeen.has(normalise(legacy.label))) {
+        legacySeen.add(normalise(legacy.label))
+        feature = { id, label: node.text, ...legacy.spec, notes: legacy.spec.notes ?? "" }
+      }
+    }
+    if (feature) states.push({ feature, values: valuesOf(snapshot, feature) })
+  }
+  return states
+}
+
+/** One feature of the board, by its block, or null when it is not one. */
+export function boardFeature(
+  snapshot: GraphSnapshot,
+  boardId: NoteId,
+  featureId: string,
+): BoardFeatureState | null {
+  return boardFeatures(snapshot, boardId).find((state) => state.feature.id === featureId) ?? null
 }
 
 /**
@@ -327,26 +406,146 @@ export function setCaptionOps(snapshot: GraphSnapshot, imageId: string, caption:
 }
 
 /**
- * The key that puts a new feature block among the others at the top of the
- * page: after the last feature block, before whatever follows it, so the
- * features stay together and the pictures keep their place beneath.
+ * Keys that put `count` new feature blocks among the others at the top of
+ * the page: after the last feature block, before whatever follows it, so
+ * the features stay together and the pictures keep their place beneath.
  */
-function featureKey(snapshot: GraphSnapshot, boardId: NoteId): string {
+function featureKeys(snapshot: GraphSnapshot, boardId: NoteId, count: number): string[] {
   const links = snapshot.childLinks.get(boardId) ?? []
+  const features = new Set(boardFeatures(snapshot, boardId).map((state) => state.feature.id))
   let lastFeature = -1
   links.forEach((link, index) => {
-    const node = snapshot.nodes.get(link.destination_id)
-    if (!node || node.type === IMAGE_TYPE) return
-    if (BOARD_FEATURES.some((feature) => isFeatureText(node.text, feature))) lastFeature = index
+    if (features.has(link.destination_id)) lastFeature = index
   })
-  const before = lastFeature >= 0 ? links[lastFeature].sort_key : null
+  let before = lastFeature >= 0 ? links[lastFeature].sort_key : null
   const after = links[lastFeature + 1]?.sort_key ?? null
-  return sortKeyBetween(before, after)
+  const keys: string[] = []
+  for (let i = 0; i < count; i += 1) {
+    before = sortKeyBetween(before, after)
+    keys.push(before)
+  }
+  return keys
+}
+
+/** The block a feature is made as: a bullet carrying the prop, named by
+ * its label, written in the note. */
+function featureBlockOp(boardId: NoteId, id: string, label: string, spec: FeatureSpec): Op {
+  return {
+    op: "create",
+    id,
+    type: FEATURE_BLOCK_TYPE,
+    text: label,
+    props: propsJson(withFeatureSpec(null, spec)),
+    notesId: boardId,
+  }
+}
+
+/**
+ * The default features written onto a board as it is made — **New board**,
+ * **Make this a board** — each a block with its prop at the top of the
+ * page, in the defaults' order. A default the board already has by label
+ * (a note made a board with a `Location` block written by hand, or made
+ * one before) is left as it is. Nothing for a note that is not a board.
+ */
+export function defaultFeatureOps(snapshot: GraphSnapshot, boardId: NoteId): Op[] {
+  if (!isBoard(snapshot, boardId)) return []
+  const had = boardFeatures(snapshot, boardId).map((state) => state.feature.label)
+  const missing = DEFAULT_FEATURES.filter(
+    (entry) => !had.some((label) => sameLabel(label, entry.label)),
+  )
+  const keys = featureKeys(snapshot, boardId, missing.length)
+  return missing.flatMap((entry, index) => {
+    const id = blockId()
+    return [
+      featureBlockOp(boardId, id, entry.label, entry.spec),
+      { op: "link", source: boardId, destination: id, sortKey: keys[index] },
+    ]
+  })
+}
+
+/**
+ * A feature added from the Features editor: a text feature taking several
+ * values, named "New feature" until it is renamed, after the board's
+ * other features. `featureId` is the caller's, so the editor can put the
+ * focus on the new row.
+ */
+export function addFeatureOps(snapshot: GraphSnapshot, boardId: NoteId, featureId: string): Op[] {
+  if (!isBoard(snapshot, boardId) || snapshot.nodes.has(featureId)) return []
+  const [key] = featureKeys(snapshot, boardId, 1)
+  return [
+    featureBlockOp(boardId, featureId, NEW_FEATURE_LABEL, { type: "text", multi: true }),
+    { op: "link", source: boardId, destination: featureId, sortKey: key },
+  ]
+}
+
+/** What the Features editor may change on a feature. */
+export type FeaturePatch = Partial<Pick<BoardFeature, "label" | "type" | "multi" | "notes">>
+
+/**
+ * A feature changed from the Features editor: its label is the block's
+ * text, the rest its prop — written whole, so the first change to a
+ * feature read by its name alone stamps the prop on it. A change of type
+ * between a name and a link is refused while the feature has values, since
+ * the value blocks it has are of the other kind: the type stays, and the
+ * rest of the patch goes through. Nothing when nothing would change.
+ */
+export function updateFeatureOps(
+  snapshot: GraphSnapshot,
+  boardId: NoteId,
+  featureId: string,
+  patch: FeaturePatch,
+): Op[] {
+  const state = boardFeature(snapshot, boardId, featureId)
+  const node = snapshot.nodes.get(featureId)
+  if (!state || !node) return []
+  const { feature } = state
+  const ops: Op[] = []
+  const label = patch.label?.trim()
+  if (label !== undefined && label !== "" && label !== node.text) {
+    ops.push({ op: "setText", id: featureId, text: label })
+  }
+  let type = patch.type ?? feature.type
+  if (isLinkType(type) !== isLinkType(feature.type) && state.values.length > 0) type = feature.type
+  const spec: FeatureSpec = {
+    type,
+    multi: patch.multi ?? feature.multi,
+    notes: (patch.notes ?? feature.notes).trim(),
+  }
+  const props = parseProps(node.props)
+  const next = propsJson(withFeatureSpec(props, spec))
+  if (next !== node.props) ops.push({ op: "setProps", id: featureId, props: next })
+  return ops
+}
+
+/**
+ * A feature removed from the Features editor: nothing is deleted. The one
+ * write is to the feature block's props, taking the `feature` key out and
+ * keeping the rest, so the board stops reading it as a feature while the
+ * block, its values and the links from them to the pictures stay in the
+ * outline as ordinary content, to be kept or deleted there. A block whose
+ * name is one a board of old reads as a feature by itself — Location,
+ * Object, Material, Link — would be read as one again, so it is given
+ * `feature: false` instead. A props write has an inverse (`inverseOps`),
+ * so the toast that answers it can undo it.
+ */
+export function removeFeatureOps(
+  snapshot: GraphSnapshot,
+  boardId: NoteId,
+  featureId: string,
+): Op[] {
+  const state = boardFeature(snapshot, boardId, featureId)
+  const node = snapshot.nodes.get(featureId)
+  if (!state || !node) return []
+  const props: BlockProps = { ...(parseProps(node.props) ?? {}) }
+  delete props[FEATURE_PROP]
+  if (hasLegacyName(node.text)) props[FEATURE_PROP] = false
+  return [{ op: "setProps", id: featureId, props: propsJson(props) }]
 }
 
 /** What a value is named as: an existing value's id, the text of one to
- * find or create, or — for a link feature — the address of one. */
-export type ValueRef = { id: string } | { text: string } | { url: string }
+ * find or create, or — for a link feature — the address of one, with the
+ * title to give it, if any. */
+export type ValueRef = { id: string } | { text: string } | { url: string; title?: string }
 
 /**
  * The address a link value is made with, from what was typed: trimmed, a
@@ -364,51 +563,30 @@ export function boardLinkUrl(address: string): string | null {
 const sameUrl = (a: string, b: string) => a.replace(/\/$/, "") === b.replace(/\/$/, "")
 
 /**
- * Give a picture a value of a feature. Whatever is missing is created on
- * the way — the feature's block, then the value's — and the picture is
- * linked beneath the value. A single-select feature first takes back any
- * other value of its own the picture carried. Nothing to do (the picture
- * already carries exactly this) is an empty batch.
+ * Give a picture a value of a feature, named by its block. A value that
+ * is missing is created under the feature and the picture is linked
+ * beneath it. A single-select feature first takes back any other value of
+ * its own the picture carried. Nothing to do (the picture already carries
+ * exactly this, or there is no such feature) is an empty batch.
  *
  * A link feature's value is made from an address (`{ url }`): a link block
- * titled by the address's host, as a pasted address is named, with its
- * preview to follow (`linkPreviewOps`); an address already on the board,
- * a trailing slash aside, is reused. A name given to a link feature, or an
- * address to any other, makes nothing.
+ * titled as given, else by the address's host, as a pasted address is
+ * named, with its preview to follow (`linkPreviewOps`); an address already
+ * on the board, a trailing slash aside, is reused. A name given to a link
+ * feature, or an address to any other, makes nothing.
  */
 export function setValueOps(
   snapshot: GraphSnapshot,
   boardId: NoteId,
-  feature: BoardFeature,
+  featureId: string,
   imageId: string,
   ref: ValueRef,
 ): Op[] {
   if (!isBoard(snapshot, boardId) || !snapshot.nodes.has(imageId)) return []
+  const state = boardFeature(snapshot, boardId, featureId)
+  if (!state) return []
+  const { feature, values } = state
   const ops: Op[] = []
-
-  let featureBlock = featureBlockId(snapshot, boardId, feature)
-  let values: BoardValue[] = []
-  if (featureBlock === null) {
-    featureBlock = blockId()
-    ops.push(
-      {
-        op: "create",
-        id: featureBlock,
-        type: FEATURE_BLOCK_TYPE,
-        text: feature.label,
-        props: null,
-        notesId: boardId,
-      },
-      {
-        op: "link",
-        source: boardId,
-        destination: featureBlock,
-        sortKey: featureKey(snapshot, boardId),
-      },
-    )
-  } else {
-    values = valuesOf(snapshot, featureBlock, feature)
-  }
 
   let valueId: string
   if ("id" in ref) {
@@ -419,16 +597,17 @@ export function setValueOps(
     let existing: BoardValue | undefined
     let made: { type: string; text: string; props: string | null }
     if ("url" in ref) {
-      if (feature.kind !== "link") return []
+      if (!isLinkType(feature.type)) return []
       const url = boardLinkUrl(ref.url)
       if (url === null) return []
       existing = values.find((value) => value.link !== undefined && sameUrl(value.link.url, url))
-      made = { type: LINK_BLOCK_TYPE, text: hostOf(url), props: propsJson({ url }) }
+      const title = ref.title?.trim() ?? ""
+      made = { type: LINK_BLOCK_TYPE, text: title || hostOf(url), props: propsJson({ url }) }
     } else {
-      if (feature.kind !== "text") return []
+      if (isLinkType(feature.type)) return []
       const text = ref.text.trim()
       if (text === "") return []
-      existing = values.find((value) => normalise(value.text) === normalise(text))
+      existing = values.find((value) => sameLabel(value.text, text))
       made = { type: VALUE_BLOCK_TYPE, text, props: null }
     }
     if (existing) {
@@ -439,10 +618,9 @@ export function setValueOps(
         { op: "create", id: valueId, ...made, notesId: boardId },
         {
           op: "link",
-          source: featureBlock,
+          source: featureId,
           destination: valueId,
-          // A feature block made in this batch has no children yet.
-          sortKey: values.length ? keyAtEnd(snapshot, featureBlock) : sortKeyBetween(null, null),
+          sortKey: keyAtEnd(snapshot, featureId),
         },
       )
     }
@@ -498,19 +676,21 @@ export function linkPreviewOps(
 }
 
 /** The board's features as the tagging route is told them (docs/boards.md,
- * "Tagging with Claude"): each label, whether it takes several values, and
- * the values in use. A link feature is not among them: the model is not
- * asked where a picture came from. */
+ * "Tagging with Claude"): each label, whether it takes several values,
+ * its notes, the values in use, and — for a place feature — that the
+ * location hint is its. A link feature is not among them: the model is
+ * not asked where a picture came from. */
 export function tagFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): TagFeature[] {
   return boardFeatures(snapshot, boardId).flatMap((state) => {
     const { feature } = state
-    if (feature.kind !== "text") return []
+    if (isLinkType(feature.type)) return []
     return [
       {
         label: feature.label,
         multi: feature.multi,
-        meaning: feature.meaning,
+        ...(feature.notes !== "" ? { notes: feature.notes } : {}),
         values: state.values.map((value) => value.text.trim()).filter((text) => text !== ""),
+        ...(feature.type === "place" ? { place: true } : {}),
       },
     ]
   })
@@ -524,8 +704,8 @@ export function tagFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): TagFeat
  * and a multi-value feature's values are added to those carried. Each
  * value goes through `setValueOps` with the text, so an existing value is
  * reused and a new one created, the batch built up against the snapshot as
- * each write would leave it. An empty batch is a suggestion with nothing
- * to add.
+ * each write would leave it. The answer names features by their labels, as
+ * it was told them. An empty batch is a suggestion with nothing to add.
  */
 export function suggestionOps(
   snapshot: GraphSnapshot,
@@ -548,18 +728,18 @@ export function suggestionOps(
   const caption = suggestion.caption.trim()
   if (caption !== "" && node.text.trim() === "") take(setCaptionOps(current, imageId, caption))
 
-  for (const feature of BOARD_FEATURES) {
+  for (const { feature } of boardFeatures(snapshot, boardId)) {
     // A link is not the model's to suggest, whatever the answer names.
-    if (feature.kind !== "text") continue
-    const answer = suggestion.features.find((entry) => isFeatureText(entry.label, feature))
+    if (isLinkType(feature.type)) continue
+    const answer = suggestion.features.find((entry) => sameLabel(entry.label, feature.label))
     if (!answer) continue
-    const state = boardFeatures(current, boardId).find((entry) => entry.feature === feature)
+    const state = boardFeature(current, boardId, feature.id)
     const carried = state ? imageValues(current, state, imageId) : []
     if (!feature.multi && carried.length > 0) continue
     const carriedTexts = new Set(carried.map((value) => normalise(value.text)))
     for (const text of feature.multi ? answer.values : answer.values.slice(0, 1)) {
       if (carriedTexts.has(normalise(text))) continue
-      take(setValueOps(current, boardId, feature, imageId, { text }))
+      take(setValueOps(current, boardId, feature.id, imageId, { text }))
     }
   }
   return ops
