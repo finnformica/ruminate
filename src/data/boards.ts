@@ -23,7 +23,7 @@ import {
 } from "./graph"
 import { unassignedIds } from "./basket"
 import type { TagFeature, TagSuggestion } from "./auto-tag"
-import { applyOps, deleteBlockOps, type Op } from "./ops"
+import { applyOps, type Op } from "./ops"
 
 /**
  * **Boards** (docs/boards.md): a note read as a wall of pictures, with a
@@ -38,8 +38,8 @@ import { applyOps, deleteBlockOps, type Op } from "./ops"
  * basket (`basket.ts`) as any such block does. A picture added from the
  * board is written in the note with no parent, so it starts in the basket.
  * A FEATURE is a direct child of the page whose props carry `feature`
- * (`FEATURE_PROP`: its type, whether it takes several values, and what it
- * means to the model) and whose text is its label — the block is the
+ * (`FEATURE_PROP`: its type, whether it takes several values, and notes
+ * for the model) and whose text is its label — the block is the
  * feature's identity, so renaming it keeps it; a VALUE is a child of that
  * block ("Mauritius" under "Location"), created the first time it is
  * picked; and setting a value on a picture is a `link` from the value
@@ -74,9 +74,9 @@ export interface FeatureSpec {
   type: FeatureType
   /** Whether a picture may carry several of its values at once. */
   multi: boolean
-  /** What the feature is, as the model is told it; left out when nothing
-   * has been said. */
-  meaning?: string
+  /** Notes on what the feature is, as the model is told them; left out
+   * when nothing has been said. */
+  notes?: string
 }
 
 /** A feature as the board reads it off its block. */
@@ -85,7 +85,7 @@ export interface BoardFeature extends FeatureSpec {
   id: string
   /** The block's text, and what the form calls it. */
   label: string
-  meaning: string
+  notes: string
 }
 
 /**
@@ -100,7 +100,7 @@ export const DEFAULT_FEATURES: readonly { label: string; spec: FeatureSpec }[] =
     spec: {
       type: "place",
       multi: false,
-      meaning: "where the picture was taken, named as a person would say it",
+      notes: "where the picture was taken, named as a person would say it",
     },
   },
   {
@@ -108,11 +108,11 @@ export const DEFAULT_FEATURES: readonly { label: string; spec: FeatureSpec }[] =
     spec: {
       type: "text",
       multi: true,
-      meaning:
+      notes:
         "the thing the picture is of, such as furniture, lighting, cutlery, plants or decoration",
     },
   },
-  { label: "Material", spec: { type: "text", multi: true, meaning: "what that thing is made of" } },
+  { label: "Material", spec: { type: "text", multi: true, notes: "what that thing is made of" } },
   { label: "Link", spec: { type: "link", multi: true } },
 ]
 
@@ -155,31 +155,39 @@ export function isBoard(snapshot: GraphSnapshot, boardId: NoteId): boolean {
  * The feature a block's props declare, or null when they declare none.
  * Read leniently: a `feature` that is an object is a feature, with a type
  * it does not name read as `text`, `multi` true only when it says so, and
- * a meaning only when it is a non-empty string — a hand-written prop in
- * the outline is still a feature rather than content.
+ * notes only when they are a non-empty string (`notes`, or `meaning`, the
+ * key they were first written under) — a hand-written prop in the outline
+ * is still a feature rather than content. A `feature` that is anything
+ * else — `false`, as a removed feature leaves — is none.
  */
 export function featureSpecOf(props: BlockProps | null): FeatureSpec | null {
   const raw = props?.[FEATURE_PROP]
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null
-  const { type, multi, meaning } = raw as Record<string, unknown>
+  const { type, multi, notes, meaning } = raw as Record<string, unknown>
   const kind: FeatureType = type === "link" || type === "place" ? type : "text"
-  const said = typeof meaning === "string" ? meaning.trim() : ""
-  return { type: kind, multi: multi === true, ...(said !== "" ? { meaning: said } : {}) }
+  const written = typeof notes === "string" ? notes : typeof meaning === "string" ? meaning : ""
+  const said = written.trim()
+  return { type: kind, multi: multi === true, ...(said !== "" ? { notes: said } : {}) }
 }
 
 /** The block's props with the feature prop written: the spec as it is,
- * the meaning left out when empty, the rest of the props kept. */
+ * the notes left out when empty, the rest of the props kept. */
 function withFeatureSpec(props: BlockProps | null, spec: FeatureSpec): BlockProps {
-  const meaning = spec.meaning?.trim() ?? ""
+  const notes = spec.notes?.trim() ?? ""
   return {
     ...(props ?? {}),
     [FEATURE_PROP]: {
       type: spec.type,
       multi: spec.multi,
-      ...(meaning !== "" ? { meaning } : {}),
+      ...(notes !== "" ? { notes } : {}),
     },
   }
 }
+
+/** Whether a block's name is one a board from before features were blocks
+ * reads as a feature (`LEGACY_FEATURES`). */
+const hasLegacyName = (text: string): boolean =>
+  LEGACY_FEATURES.some((entry) => sameLabel(entry.label, text))
 
 export interface BoardValue {
   id: string
@@ -227,8 +235,10 @@ function valuesOf(snapshot: GraphSnapshot, feature: BoardFeature): BoardValue[] 
  * direct child of the page whose props carry `feature`, and — for a board
  * from before features were blocks — the first direct child named as one
  * of the features those boards had (trimmed, whatever its case, whatever
- * its type), read as that feature with no prop written. A second child so
- * named, a picture, and any other child are content.
+ * its type) whose props say nothing of `feature` at all, read as that
+ * feature with no prop written. A second child so named, a picture, a
+ * block whose `feature` is `false` (a feature removed), and any other
+ * child are content.
  */
 export function boardFeatures(snapshot: GraphSnapshot, boardId: NoteId): BoardFeatureState[] {
   const states: BoardFeatureState[] = []
@@ -236,15 +246,16 @@ export function boardFeatures(snapshot: GraphSnapshot, boardId: NoteId): BoardFe
   for (const id of childIdsOf(snapshot, boardId)) {
     const node = snapshot.nodes.get(id)
     if (!node || node.type === IMAGE_TYPE) continue
-    const spec = featureSpecOf(parseProps(node.props))
+    const props = parseProps(node.props)
+    const spec = featureSpecOf(props)
     let feature: BoardFeature | null = null
     if (spec) {
-      feature = { id, label: node.text, ...spec, meaning: spec.meaning ?? "" }
-    } else {
+      feature = { id, label: node.text, ...spec, notes: spec.notes ?? "" }
+    } else if (!props || !(FEATURE_PROP in props)) {
       const legacy = LEGACY_FEATURES.find((entry) => sameLabel(entry.label, node.text))
       if (legacy && !legacySeen.has(normalise(legacy.label))) {
         legacySeen.add(normalise(legacy.label))
-        feature = { id, label: node.text, ...legacy.spec, meaning: legacy.spec.meaning ?? "" }
+        feature = { id, label: node.text, ...legacy.spec, notes: legacy.spec.notes ?? "" }
       }
     }
     if (feature) states.push({ feature, values: valuesOf(snapshot, feature) })
@@ -453,8 +464,8 @@ export function defaultFeatureOps(snapshot: GraphSnapshot, boardId: NoteId): Op[
 }
 
 /**
- * A feature added from the Features editor: a text feature, one value at
- * a time, named "New feature" until it is renamed, after the board's
+ * A feature added from the Features editor: a text feature taking several
+ * values, named "New feature" until it is renamed, after the board's
  * other features. `featureId` is the caller's, so the editor can put the
  * focus on the new row.
  */
@@ -462,13 +473,13 @@ export function addFeatureOps(snapshot: GraphSnapshot, boardId: NoteId, featureI
   if (!isBoard(snapshot, boardId) || snapshot.nodes.has(featureId)) return []
   const [key] = featureKeys(snapshot, boardId, 1)
   return [
-    featureBlockOp(boardId, featureId, NEW_FEATURE_LABEL, { type: "text", multi: false }),
+    featureBlockOp(boardId, featureId, NEW_FEATURE_LABEL, { type: "text", multi: true }),
     { op: "link", source: boardId, destination: featureId, sortKey: key },
   ]
 }
 
 /** What the Features editor may change on a feature. */
-export type FeaturePatch = Partial<Pick<BoardFeature, "label" | "type" | "multi" | "meaning">>
+export type FeaturePatch = Partial<Pick<BoardFeature, "label" | "type" | "multi" | "notes">>
 
 /**
  * A feature changed from the Features editor: its label is the block's
@@ -498,7 +509,7 @@ export function updateFeatureOps(
   const spec: FeatureSpec = {
     type,
     multi: patch.multi ?? feature.multi,
-    meaning: (patch.meaning ?? feature.meaning).trim(),
+    notes: (patch.notes ?? feature.notes).trim(),
   }
   const props = parseProps(node.props)
   const next = propsJson(withFeatureSpec(props, spec))
@@ -507,13 +518,15 @@ export function updateFeatureOps(
 }
 
 /**
- * A feature removed from the Features editor: its block and its value
- * blocks deleted, with the links from the values to the pictures. The
- * pictures stay on the board — one left with no parent is back in the
- * basket, as the editor's own delete leaves what a block held — and so
- * does any other content the feature block held. A delete has no inverse
- * (`inverseOps`), so this is the one write the board's Undo cannot take
- * back.
+ * A feature removed from the Features editor: nothing is deleted. The one
+ * write is to the feature block's props, taking the `feature` key out and
+ * keeping the rest, so the board stops reading it as a feature while the
+ * block, its values and the links from them to the pictures stay in the
+ * outline as ordinary content, to be kept or deleted there. A block whose
+ * name is one a board of old reads as a feature by itself — Location,
+ * Object, Material, Link — would be read as one again, so it is given
+ * `feature: false` instead. A props write has an inverse (`inverseOps`),
+ * so the toast that answers it can undo it.
  */
 export function removeFeatureOps(
   snapshot: GraphSnapshot,
@@ -521,8 +534,12 @@ export function removeFeatureOps(
   featureId: string,
 ): Op[] {
   const state = boardFeature(snapshot, boardId, featureId)
-  if (!state) return []
-  return deleteBlockOps([featureId, ...state.values.map((value) => value.id)], snapshot)
+  const node = snapshot.nodes.get(featureId)
+  if (!state || !node) return []
+  const props: BlockProps = { ...(parseProps(node.props) ?? {}) }
+  delete props[FEATURE_PROP]
+  if (hasLegacyName(node.text)) props[FEATURE_PROP] = false
+  return [{ op: "setProps", id: featureId, props: propsJson(props) }]
 }
 
 /** What a value is named as: an existing value's id, the text of one to
@@ -660,7 +677,7 @@ export function linkPreviewOps(
 
 /** The board's features as the tagging route is told them (docs/boards.md,
  * "Tagging with Claude"): each label, whether it takes several values,
- * what it means, the values in use, and — for a place feature — that the
+ * its notes, the values in use, and — for a place feature — that the
  * location hint is its. A link feature is not among them: the model is
  * not asked where a picture came from. */
 export function tagFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): TagFeature[] {
@@ -671,7 +688,7 @@ export function tagFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): TagFeat
       {
         label: feature.label,
         multi: feature.multi,
-        ...(feature.meaning !== "" ? { meaning: feature.meaning } : {}),
+        ...(feature.notes !== "" ? { notes: feature.notes } : {}),
         values: state.values.map((value) => value.text.trim()).filter((text) => text !== ""),
         ...(feature.type === "place" ? { place: true } : {}),
       },

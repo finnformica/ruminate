@@ -10,7 +10,7 @@ export const BOARD_PROP = "board"
 
 /**
  * The property on a block that makes it one of a board's features
- * (docs/boards.md, "Features"): `{ feature: { type, multi, meaning } }` in
+ * (docs/boards.md, "Features"): `{ feature: { type, multi, notes } }` in
  * the props of a direct child of the board's page, whose text is the
  * feature's label and whose children are its values. Read and written in
  * `src/data/boards.ts`; named here beside `BOARD_PROP`, the other property

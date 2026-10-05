@@ -56,15 +56,16 @@ export const AUTO_TAG_IMAGE_TYPES: readonly string[] = [
 ]
 
 /** A feature as the client describes it to the Worker: its label, whether
- * a picture may carry several of its values, what it means, the values in
+ * a picture may carry several of its values, its notes, the values in
  * use, and whether it is a place — the feature the location hint is for,
  * when the picture carries where it was taken. */
 export interface TagFeature {
   label: string
   multi: boolean
   values: string[]
-  /** What the feature is, for the prompt — "what that thing is made of". */
-  meaning?: string
+  /** Notes on what the feature is, for the prompt — "what that thing is
+   * made of". */
+  notes?: string
   /** A place feature: where the picture was taken is offered to it. */
   place?: boolean
 }
@@ -116,7 +117,7 @@ export interface TagResponse {
 const MAX_FEATURES = 12
 const MAX_VALUES_PER_FEATURE = 200
 const MAX_LABEL_LENGTH = 60
-const MAX_MEANING_LENGTH = 200
+const MAX_NOTES_LENGTH = 500
 const MAX_VALUE_LENGTH = 60
 const MAX_CAPTION_LENGTH = 120
 /** How many values the model may give one feature at once. */
@@ -144,8 +145,8 @@ export function readTagRequest(raw: unknown): TagRequest | null {
     }
     const label = feature.label.trim().slice(0, MAX_LABEL_LENGTH)
     if (label === "") return null
-    const meaning =
-      typeof feature.meaning === "string" ? feature.meaning.trim().slice(0, MAX_MEANING_LENGTH) : ""
+    const notes =
+      typeof feature.notes === "string" ? feature.notes.trim().slice(0, MAX_NOTES_LENGTH) : ""
     const values: string[] = []
     for (const value of feature.values) {
       if (typeof value !== "string") return null
@@ -156,7 +157,7 @@ export function readTagRequest(raw: unknown): TagRequest | null {
       label,
       multi: feature.multi,
       values,
-      ...(meaning ? { meaning } : {}),
+      ...(notes ? { notes } : {}),
       ...(feature.place === true ? { place: true } : {}),
     })
   }
@@ -211,8 +212,8 @@ export function tagPrompt(features: readonly TagFeature[], hint?: LocationHint):
   const lines = features.map((feature) => {
     const kind = feature.multi ? "several values" : "one value"
     const values = feature.values.length ? feature.values.join(", ") : "none yet"
-    const meaning = feature.meaning ? `${feature.meaning}. ` : ""
-    return `- ${feature.label} (${kind}): ${meaning}Values in use: ${values}`
+    const notes = feature.notes ? `${feature.notes}. ` : ""
+    return `- ${feature.label} (${kind}): ${notes}Values in use: ${values}`
   })
   return ["Features:", ...lines, ...where].join("\n")
 }

@@ -355,23 +355,23 @@ describe("tagPrompt with a location", () => {
   })
 })
 
-describe("a feature's meaning", () => {
+describe("a feature's notes", () => {
   it("travels with the request, trimmed and cut, and is dropped when it is not a string", () => {
     const read = readTagRequest({
       features: [
-        { label: "Object", multi: true, values: [], meaning: "  the thing the picture is of " },
-        { label: "Material", multi: true, values: [], meaning: 7 },
-        { label: "Location", multi: false, values: [], meaning: "m".repeat(300) },
+        { label: "Object", multi: true, values: [], notes: "  the thing the picture is of " },
+        { label: "Material", multi: true, values: [], notes: 7 },
+        { label: "Location", multi: false, values: [], notes: "m".repeat(600) },
       ],
     })
     expect(read?.features[0]).toEqual({
       label: "Object",
       multi: true,
       values: [],
-      meaning: "the thing the picture is of",
+      notes: "the thing the picture is of",
     })
     expect(read?.features[1]).toEqual({ label: "Material", multi: true, values: [] })
-    expect(read?.features[2].meaning).toHaveLength(200)
+    expect(read?.features[2].notes).toHaveLength(500)
   })
 
   it("is said in the prompt before the values in use", () => {
@@ -380,10 +380,10 @@ describe("a feature's meaning", () => {
         label: "Object",
         multi: true,
         values: ["cutlery", "potted plant", "lamp"],
-        meaning:
+        notes:
           "the thing the picture is of, such as furniture, lighting, cutlery, plants or decoration",
       },
-      { label: "Material", multi: true, values: [], meaning: "what that thing is made of" },
+      { label: "Material", multi: true, values: [], notes: "what that thing is made of" },
     ])
     expect(prompt.split("\n")).toEqual([
       "Features:",

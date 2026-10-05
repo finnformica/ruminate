@@ -50,14 +50,14 @@ So a board's outline reads:
 
 ```
 Home inspiration
-  - Location              feature:: { type: place, multi: false, meaning: "where …" }
+  - Location              feature:: { type: place, multi: false, notes: "where …" }
     - Mauritius
       [picture]
     - Lisbon
-  - Object                feature:: { type: text, multi: true, meaning: "the thing …" }
+  - Object                feature:: { type: text, multi: true, notes: "the thing …" }
     - Lamp
       [picture]
-  - Material              feature:: { type: text, multi: true, meaning: "what …" }
+  - Material              feature:: { type: text, multi: true, notes: "what …" }
   - Source                feature:: { type: link, multi: true }
     [card: Oak pendant lamp — made.com]
       [picture]
@@ -75,7 +75,8 @@ feature as a bullet with its label, the prop out of sight.)
 direct child of the page is what makes it one (`featureSpecOf`,
 `src/data/boards.ts`, reads it leniently: a `feature` that is an object is
 a feature, a type it does not name is `text`, `multi` holds only when it
-says `true`, a meaning only when it says something). Its label is the
+says `true`, notes only when they say something — under `notes`, or under
+`meaning`, the key they were first written by). Its label is the
 block's text and its values are the block's children, so the outline is
 the same thing seen the other way: rename the block in the outline and the
 form calls the feature by its new name, with its values and their pictures
@@ -85,8 +86,8 @@ reads them through one function, `boardFeatures` (the form, the Filter
 menu's branches, Suggest, Reset), and there is no preset anywhere else.
 
 **Three types** (`type` on `BoardFeature`), and whether a picture may carry
-several values (`multi`), and what the feature means (`meaning`, as the
-model is told it):
+several values (`multi`), and notes on what the feature is (`notes`, as
+the model is told them):
 
 - `text` — a value is a name: a bullet under the feature block, typed into
   **New…** in the picker or chosen from the values there.
@@ -116,7 +117,7 @@ props, before whatever the note holds (`defaultFeatureOps`, from
 person would say it"), **Object** (`text`, several: "the thing the picture
 is of, such as furniture, lighting, cutlery, plants or decoration"),
 **Material** (`text`, several: "what that thing is made of") and **Link**
-(`link`, several, no meaning — the model is not asked about it). A default
+(`link`, several, no notes — the model is not asked about it). A default
 the note already has by label is left as it is. From there the board's
 features are its own to change.
 
@@ -131,40 +132,38 @@ its block. Nothing is rewritten until then. This name-matching is the one
 place a label is read as anything but a label.
 
 **The Features editor** is **Features** in the board's ⋯ menu
-(`board-features-dialog.tsx`): one window, the board's features one
-beneath the other in the page's order, every one edited in place. A
-feature is a line — the type's glyph, which is the type menu (**Text**,
-**Place**, **Link**); its name; **Several values**; and a delete — and,
-beneath, what the model is told it means, left out for a link feature,
-which the model is never told about. **Add feature** at the foot makes a
-text feature named "New feature" with its name selected, ready to be
-typed over. Every change is written as it is made, through the board's
-own writes (`addFeatureOps`, `updateFeatureOps`, `removeFeatureOps`), and
-the page shows it: the inspector's pickers and the Filter menu follow a
-rename at once. A type cannot change between a name and a link while the
-feature has values, since the value blocks it has are of the one kind:
-those entries are greyed. There are no moves: the features' order is the
-page's, so a feature is reordered by moving its block in the outline.
-Deleting a feature deletes its block and its value blocks — the links from
-the values to the pictures go with them, the pictures stay on the board,
-and one left with no parent is back in the basket — so it asks first
-(`ConfirmDialog`, danger), and a plain toast says so, since a delete has
-no inverse (`inverseOps`) for an Undo to apply. A picture pasted straight
-under a feature block is a picture, never a value.
+(`board-features-dialog.tsx`): the app's dialog holding a table, one row
+per feature in the page's order, every cell edited in place — the type's
+glyph, which is the type menu (**Text**, **Place**, **Link**); the
+**Name**, a flush box that commits when it is left or Enter is pressed and
+sets the block's text, so the outline shows the new name at once;
+**Multiple**, a box for whether a picture may carry several of its values;
+**Notes**, what the model is told, a box that wraps and grows with its
+text, there only while a model can be asked (`useAiAvailable`) and empty
+for a link feature, which the model is never told about; and a remove,
+shown as the pointer finds the row. **Add feature** in the last row makes
+a text feature named "New feature", taking several values, with its name
+selected to be typed over. Every change is written as it is made, through
+the board's own writes (`addFeatureOps`, `updateFeatureOps`,
+`removeFeatureOps`), and the page shows it: the inspector's pickers and
+the Filter menu follow a rename at once. A type cannot change between a
+name and a link while the feature has values, since the value blocks it
+has are of the one kind: those entries are greyed. There are no moves:
+the features' order is the page's, so a feature is reordered by moving
+its block in the outline. On a phone the table is a sheet from the foot
+of the screen (`Sheet`, the phone's drawers), the notes beneath each name
+and **Add feature** pinned full-width at the bottom.
 
-**A picture's home is the basket until a value takes it.** A picture added
-from the board is written in the note with no parent, so it sits in the
-note's Unassigned basket — where any block nothing reaches sits
-(docs/graph-schema-v2.md, "Delete"), beneath the outline on the note page.
-Its first value links it under the value block, and the basket no longer
-has it; clearing its last value unlinks it, and the basket has it again.
-Deleting a value in the outline does the same to the pictures only it held.
-None of this is a rule of the board's: it is the editor's own basket,
-written the editor's way, and the board simply lists the basket's pictures
-along with the ones the outline reaches. A picture pasted straight into the
-outline is on the board too, wherever it was pasted, and a value set on it
-is a second parent — it stays where it was pasted as well, as select-mode
-paste would leave it.
+**Removing a feature deletes nothing.** The remove takes the `feature` key
+off the block's props and keeps the rest (a block named as a feature of
+old — Location, Object, Material, Link — is given `feature: false`
+instead, or its name would make it a feature again), so the board stops
+reading it as one while the block, its values and the links from them to
+the pictures stay in the outline as ordinary content, where the block can
+be kept or deleted like any other. A props write has an inverse, so the
+toast that answers it — **Feature removed** — can **Undo** it; nothing
+else offers to make the block a feature again. A picture pasted straight
+under a feature block is a picture, never a value.
 
 ## Reading
 
@@ -341,7 +340,7 @@ rest of the app; uploads need a store, so **Add images** waits for sign-in.
 up (below). A picked picture's window carries **Suggest** in its title bar
 — a sparkles icon and, on a wide screen, the word, beside the close control, busy until the
 answer is in — and that is the one way to tag: a vision model is shown the
-picture and the board's text and place features with their meanings and
+picture and the board's text and place features with their notes and
 the values in use (`tagFeaturesOf`; a link feature is not sent, and nothing
 an answer says of it is applied — where a picture came from cannot be read
 off the picture), and answers with
@@ -502,12 +501,12 @@ it is one toast — **Picture updated** — with one **Undo**. Nothing to add
 is a toast that says so. Only a failure's toast offers **Copy**: a call that
 went through can be read in the gateway log.
 
-The prompt tells the model what each feature means (`meaning` on
-`BoardFeature`, from the block's prop — what the Features editor's "What
-the model is told" box holds — sent with the request as
-`TagFeature.meaning` and rendered as "- Object (several values): the thing
+The prompt tells the model what each feature is (`notes` on
+`BoardFeature`, from the block's prop — what the Features editor's
+**Notes** column holds — sent with the request as `TagFeature.notes`, cut
+to 500 characters, and rendered as "- Object (several values): the thing
 the picture is of, such as … Values in use: cutlery, potted plant"; a
-feature with no meaning is sent without one), and an answer that names the
+feature with no notes is sent without them), and an answer that names the
 features under other labels — "Objects", "Materials" — is still read, by
 position, when it has one entry per feature in order.
 

@@ -206,9 +206,10 @@ export interface BoardWrites {
   setValue: (featureId: string, imageId: string, ref: ValueRef) => void
   clearValue: (value: BoardValue, imageId: string) => void
   /** The Features editor's writes (docs/boards.md, "Features"): a new text
-   * feature, handed back by its block's id so the editor can open it; a
-   * feature's label, type, several-values and meaning; and a feature
-   * removed with its values. */
+   * feature, handed back by its block's id so the editor can focus it; a
+   * feature's label, type, several-values and notes; and a feature
+   * removed — its block left in the note as content, with a toast that
+   * can undo it. */
   addFeature: () => string | null
   updateFeature: (featureId: string, patch: FeaturePatch) => void
   removeFeature: (featureId: string) => void
@@ -325,8 +326,8 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
   )
 
   // The Features editor's writes: each applied at once, the row showing
-  // the result. A removal deletes blocks, which no inverse batch restores,
-  // so it is answered with a plain toast that says what happened.
+  // the result. A removal takes the prop off the block and deletes nothing,
+  // and is answered with a toast whose Undo puts the prop back.
   const addFeature = React.useCallback((): string | null => {
     const id = blockId()
     const ops = addFeatureOps(store.get(graphSnapshotAtom), boardId, id)
@@ -344,12 +345,12 @@ export function useBoardWrites(boardId: NoteId, exists: boolean): BoardWrites {
 
   const removeFeature = React.useCallback(
     (featureId: string) => {
-      const ops = removeFeatureOps(store.get(graphSnapshotAtom), boardId, featureId)
-      if (ops.length === 0) return
-      write(ops)
-      toast("Feature removed")
+      undoable(
+        removeFeatureOps(store.get(graphSnapshotAtom), boardId, featureId),
+        "Feature removed",
+      )
     },
-    [store, boardId, write],
+    [store, boardId, undoable],
   )
 
   const resetImage = React.useCallback(
