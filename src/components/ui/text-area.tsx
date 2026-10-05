@@ -44,7 +44,7 @@ export const TextArea = React.forwardRef<HTMLTextAreaElement, TextAreaProps>(
         value={value}
         className={cx(
           textField({ variant, invalid: Boolean(invalid) }),
-          "resize-none py-1.5 leading-5 [field-sizing:content] coarse:py-2.5",
+          "block resize-none py-1.5 leading-5 [field-sizing:content] coarse:py-2.5",
           className,
         )}
         onInput={(event) => {
