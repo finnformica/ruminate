@@ -6,7 +6,7 @@ import {
   Panel,
   Separator,
   useDefaultLayout,
-  usePanelRef,
+  usePanelCallbackRef,
   type Layout,
   type LayoutChangedMeta,
 } from "react-resizable-panels"
@@ -43,7 +43,16 @@ export function AppLayout({ className, children }: AppLayoutProps) {
   // motion"), so its edge travels with its contents instead of jumping to
   // where they are going. The separator is kept until the contents have
   // gone (src/hooks/presence.ts).
-  const helpPanel = usePanelRef()
+  //
+  // The panel's handle is held as state rather than in a ref, because the
+  // panel comes and goes with the viewport (below), and the group only
+  // learns of a panel that has just mounted on the render after it mounts.
+  // A ref is filled in the mounting commit itself, and a resize or collapse
+  // through it then asks the group about a panel it has not yet registered
+  // — "Panel constraints not found for Panel help" the moment a narrow
+  // window is widened. State is set on that same commit but read on the
+  // next render, by which point the group has the panel.
+  const [helpPanel, helpPanelRef] = usePanelCallbackRef()
   const helpPresent = usePresence(showHelpSidebar)
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "app-layout",
@@ -67,11 +76,10 @@ export function AppLayout({ className, children }: AppLayoutProps) {
     [onLayoutChanged],
   )
   useEffect(() => {
-    const panel = helpPanel.current
-    if (!panel) return
-    if (showHelpSidebar) panel.resize(`${helpWidth}%`)
-    else panel.collapse()
-  }, [showHelpSidebar, isWideViewport, helpWidth, helpPanel])
+    if (!helpPanel) return
+    if (showHelpSidebar) helpPanel.resize(`${helpWidth}%`)
+    else helpPanel.collapse()
+  }, [showHelpSidebar, helpWidth, helpPanel])
   // Nor must that first layout play as motion: the transition is switched on
   // a frame later.
   const [panelMotion, setPanelMotion] = useState(false)
@@ -147,7 +155,7 @@ export function AppLayout({ className, children }: AppLayoutProps) {
               <Panel
                 id="help"
                 className="print:hidden"
-                panelRef={helpPanel}
+                panelRef={helpPanelRef}
                 collapsible
                 defaultSize="30%"
                 minSize="25%"
