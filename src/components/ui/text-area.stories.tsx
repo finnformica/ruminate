@@ -10,7 +10,7 @@ export default {
 
 export const Default = {
   args: {
-    placeholder: "What the model is told",
+    placeholder: "Add notes…",
   },
 }
 

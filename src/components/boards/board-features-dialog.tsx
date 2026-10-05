@@ -260,9 +260,9 @@ function useFeatureCells({ state, focus, writes }: RowProps) {
       variant="flush"
       aria-label={`Notes on ${shown}`}
       value={notes}
-      placeholder="What the model is told"
+      placeholder="Add notes…"
       autoComplete="off"
-      className={cx("text-sm text-text-secondary", className)}
+      className={cx("text-sm text-text-secondary placeholder:text-text-tertiary", className)}
       onChange={(event) => setNotes(event.target.value)}
       onBlur={commitNotes}
       onKeyDown={onEnter(commitNotes)}
