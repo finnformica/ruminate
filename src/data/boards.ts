@@ -22,6 +22,7 @@ import {
   type GraphSnapshot,
 } from "./graph"
 import { unassignedIds } from "./basket"
+import type { NotesFeature, NotesSuggestion } from "./auto-notes"
 import type { TagFeature, TagSuggestion } from "./auto-tag"
 import { applyOps, type Op } from "./ops"
 
@@ -675,6 +676,20 @@ export function linkPreviewOps(
   return ops
 }
 
+/** The board's features as the notes route is told them (docs/boards.md,
+ * "Features"): all text already on the board — each label, type, whether
+ * it takes several values, the values in use and the notes as they stand,
+ * link features included. */
+export function notesFeaturesOf(snapshot: GraphSnapshot, boardId: NoteId): NotesFeature[] {
+  return boardFeatures(snapshot, boardId).map((state) => ({
+    label: state.feature.label,
+    type: state.feature.type,
+    multi: state.feature.multi,
+    values: state.values.map((value) => value.text.trim()).filter((text) => text !== ""),
+    notes: state.feature.notes,
+  }))
+}
+
 /** The board's features as the tagging route is told them (docs/boards.md,
  * "Tagging with Claude"): each label, whether it takes several values,
  * its notes, the values in use, and — for a place feature — that the
@@ -741,6 +756,41 @@ export function suggestionOps(
       if (carriedTexts.has(normalise(text))) continue
       take(setValueOps(current, boardId, feature.id, imageId, { text }))
     }
+  }
+  return ops
+}
+
+/**
+ * Notes a model suggested for the board's features (`NotesSuggestion`,
+ * src/data/auto-notes.ts) as the writes they amount to: one batch,
+ * undoable as one. Each answer is matched to a feature by the label the
+ * model was given (trimmed, whatever its case), and written only where the
+ * feature's notes are empty — a note a person wrote is never overwritten
+ * — through `updateFeatureOps`, the batch built up against the snapshot
+ * as each write would leave it. An empty batch is a suggestion with
+ * nothing to add.
+ */
+export function notesSuggestionOps(
+  snapshot: GraphSnapshot,
+  boardId: NoteId,
+  suggestion: NotesSuggestion,
+  now: number,
+): Op[] {
+  const ops: Op[] = []
+  if (!isBoard(snapshot, boardId)) return ops
+  let current = snapshot
+  const written = new Set<string>()
+  for (const entry of suggestion.notes) {
+    const notes = entry.notes.trim()
+    if (notes === "") continue
+    const state = boardFeatures(current, boardId).find(
+      (each) => each.feature.notes === "" && sameLabel(each.feature.label, entry.label),
+    )
+    if (!state || written.has(state.feature.id)) continue
+    written.add(state.feature.id)
+    const batch = updateFeatureOps(current, boardId, state.feature.id, { notes })
+    ops.push(...batch)
+    current = applyOps(current, batch, now)
   }
   return ops
 }

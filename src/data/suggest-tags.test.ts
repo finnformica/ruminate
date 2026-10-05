@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { SuggestTagsError, suggestTagsDetail } from "./suggest-tags"
+import { SuggestError, suggestDetail } from "./suggest-tags"
 
-describe("suggestTagsDetail", () => {
+describe("suggestDetail", () => {
   it("lines up what a failing call can be found by, and what the provider said", () => {
-    const detail = suggestTagsDetail({
+    const detail = suggestDetail({
       message: "The model’s answer made no sense — try again.",
       code: "bad_answer",
       status: 422,
@@ -32,7 +32,7 @@ describe("suggestTagsDetail", () => {
   })
 
   it("carries the provider's own status and message", () => {
-    const detail = suggestTagsDetail({
+    const detail = suggestDetail({
       message: "The model couldn’t answer — try again in a moment.",
       code: "provider_error",
       status: 502,
@@ -45,7 +45,7 @@ describe("suggestTagsDetail", () => {
   })
 
   it("falls back to the raw body when it was not JSON", () => {
-    const detail = suggestTagsDetail({
+    const detail = suggestDetail({
       message: "Couldn’t suggest tags (503).",
       code: "failed",
       status: 503,
@@ -56,7 +56,7 @@ describe("suggestTagsDetail", () => {
   })
 
   it("is what the error carries, the message alone by default", () => {
-    expect(new SuggestTagsError("x", "Nope").detail).toBe("Nope")
-    expect(new SuggestTagsError("x", "Nope", "Nope\ncode: x").detail).toBe("Nope\ncode: x")
+    expect(new SuggestError("x", "Nope").detail).toBe("Nope")
+    expect(new SuggestError("x", "Nope", "Nope\ncode: x").detail).toBe("Nope\ncode: x")
   })
 })
