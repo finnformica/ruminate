@@ -1,5 +1,5 @@
 import { useRouter } from "@tanstack/react-router"
-import { useAtom } from "jotai"
+import { useAtom, useSetAtom } from "jotai"
 import { useHotkeys } from "react-hotkeys-hook"
 import { sidebarAtom } from "../global-state"
 import { useCreateNewNote } from "../hooks/create-new-note"
@@ -7,8 +7,8 @@ import { APP_SHORTCUTS, GLOBAL_HOTKEY_OPTIONS, formatCombo } from "../shortcuts/
 import { cx } from "../utils/cx"
 import { IconButton } from "./ui/icon-button"
 import { ArrowLeftIcon16, ArrowRightIcon16, SidebarCollapsedIcon16 } from "./icons"
-import { NewBoardButton } from "./new-board-button"
-import { NewNoteButton } from "./new-note-button"
+import { newBoardDialogAtom } from "./new-board-dialog"
+import { NewMenu } from "./new-menu"
 
 export type PageHeaderProps = {
   title: React.ReactNode
@@ -21,6 +21,7 @@ export function PageHeader({ title, icon, className, actions }: PageHeaderProps)
   const router = useRouter()
   const [sidebar, setSidebar] = useAtom(sidebarAtom)
   const createNewNote = useCreateNewNote()
+  const openNewBoard = useSetAtom(newBoardDialogAtom)
 
   // Toggle sidebar with Cmd/Ctrl + B
   useHotkeys(
@@ -32,6 +33,7 @@ export function PageHeader({ title, icon, className, actions }: PageHeaderProps)
   )
 
   useHotkeys(APP_SHORTCUTS.newNote, createNewNote, GLOBAL_HOTKEY_OPTIONS)
+  useHotkeys(APP_SHORTCUTS.newBoard, () => openNewBoard(true), GLOBAL_HOTKEY_OPTIONS)
 
   return (
     <div className={cx("@container/header", className)}>
@@ -67,8 +69,7 @@ export function PageHeader({ title, icon, className, actions }: PageHeaderProps)
             >
               <ArrowRightIcon16 className="transition-transform group-active:translate-x-0.5" />
             </IconButton>
-            <NewNoteButton />
-            <NewBoardButton />
+            <NewMenu />
           </div>
         ) : null}
         {/* The rule between the nav buttons and the title, whether or not

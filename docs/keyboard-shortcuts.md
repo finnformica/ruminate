@@ -12,6 +12,7 @@ reference, complete with a filter box.
 | Command menu                    | <kbd>⌘</kbd> <kbd>K</kbd>              |
 | Search the open note's headings | <kbd>⌘</kbd> <kbd>P</kbd>              |
 | New note                        | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>O</kbd> |
+| New board                       | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>B</kbd> |
 | Save                            | <kbd>⌘</kbd> <kbd>S</kbd>              |
 | Toggle sidebar                  | <kbd>⌘</kbd> <kbd>B</kbd>              |
 | Toggle help panel               | <kbd>⌘</kbd> <kbd>/</kbd>              |

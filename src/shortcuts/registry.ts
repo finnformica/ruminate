@@ -46,6 +46,7 @@ export const APP_SHORTCUTS = {
   commandMenu: "mod+k",
   searchHeadings: "mod+p",
   newNote: "mod+shift+o",
+  newBoard: "mod+shift+b",
   save: "mod+s",
   focusEditor: "i",
   toggleSidebar: "mod+b",
@@ -308,6 +309,12 @@ const GLOBAL_ENTRIES: Shortcut[] = [
     combos: [APP_SHORTCUTS.newNote],
     scope: "global",
     description: "Create a new note",
+    group: "Global",
+  },
+  {
+    combos: [APP_SHORTCUTS.newBoard],
+    scope: "global",
+    description: "Create a new board (asks for its name)",
     group: "Global",
   },
   {
