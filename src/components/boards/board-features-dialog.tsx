@@ -175,7 +175,8 @@ interface RowProps {
  * a keystroke; the type and the checkbox write as they change. A type
  * cannot change between a name and a link while the feature has values,
  * since its value blocks are of the one kind, and those entries are
- * greyed. A link feature has no notes: the model is never asked about it.
+ * greyed. Every feature has notes, a link feature too — kept with it,
+ * though the model is only told about text and place features.
  */
 function useFeatureCells({ state, focus, writes }: RowProps) {
   const { feature, values } = state
@@ -254,20 +255,19 @@ function useFeatureCells({ state, focus, writes }: RowProps) {
       onCheckedChange={(checked) => writes.updateFeature(feature.id, { multi: checked })}
     />
   )
-  const notesField = (className?: string) =>
-    isLinkType(feature.type) ? null : (
-      <TextArea
-        variant="flush"
-        aria-label={`Notes on ${shown}`}
-        value={notes}
-        placeholder="What the model is told"
-        autoComplete="off"
-        className={cx("text-sm text-text-secondary", className)}
-        onChange={(event) => setNotes(event.target.value)}
-        onBlur={commitNotes}
-        onKeyDown={onEnter(commitNotes)}
-      />
-    )
+  const notesField = (className?: string) => (
+    <TextArea
+      variant="flush"
+      aria-label={`Notes on ${shown}`}
+      value={notes}
+      placeholder="What the model is told"
+      autoComplete="off"
+      className={cx("text-sm text-text-secondary", className)}
+      onChange={(event) => setNotes(event.target.value)}
+      onBlur={commitNotes}
+      onKeyDown={onEnter(commitNotes)}
+    />
+  )
   const remove = (size: "small" | "medium", className?: string) => (
     <IconButton
       aria-label={`Remove ${shown}`}
@@ -279,7 +279,7 @@ function useFeatureCells({ state, focus, writes }: RowProps) {
       <TrashIcon16 />
     </IconButton>
   )
-  return { typeMenu, nameField, multiBox, notesField, remove, link: isLinkType(feature.type) }
+  return { typeMenu, nameField, multiBox, notesField, remove }
 }
 
 /** A feature as a table row: its cells top-aligned, a hairline above, the
@@ -316,7 +316,7 @@ function SheetRow(props: RowProps) {
       {cells.nameField("text-[16px]")}
       {cells.multiBox("justify-self-center")}
       {cells.remove("medium")}
-      {props.notes && !cells.link ? (
+      {props.notes ? (
         <div className="col-start-2 mb-2 mt-1">{cells.notesField()}</div>
       ) : (
         <div className="col-start-2 h-1.5" />

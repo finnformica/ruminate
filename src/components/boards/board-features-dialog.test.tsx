@@ -50,8 +50,8 @@ describe("BoardFeaturesDialog", () => {
     ai.available = true
     dialog()
     expect(screen.getByRole("columnheader", { name: "Notes" })).toBeTruthy()
-    // Notes for the place feature, none for the link.
-    expect(screen.getAllByLabelText(/^Notes on/)).toHaveLength(1)
+    // Notes for every feature, the link included.
+    expect(screen.getAllByLabelText(/^Notes on/)).toHaveLength(2)
     expect((screen.getByLabelText("Notes on Location") as HTMLTextAreaElement).value).toBe("where")
   })
 
@@ -63,7 +63,7 @@ describe("BoardFeaturesDialog", () => {
     expect(screen.getAllByTestId("board-feature")).toHaveLength(2)
     expect(screen.getAllByLabelText("Name")).toHaveLength(2)
     expect(screen.getAllByLabelText("Multiple values")).toHaveLength(2)
-    expect(screen.getAllByLabelText(/^Notes on/)).toHaveLength(1)
+    expect(screen.getAllByLabelText(/^Notes on/)).toHaveLength(2)
     pointer.coarse = false
   })
 })

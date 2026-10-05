@@ -117,7 +117,8 @@ props, before whatever the note holds (`defaultFeatureOps`, from
 person would say it"), **Object** (`text`, several: "the thing the picture
 is of, such as furniture, lighting, cutlery, plants or decoration"),
 **Material** (`text`, several: "what that thing is made of") and **Link**
-(`link`, several, no notes — the model is not asked about it). A default
+(`link`, several, no notes to start with — the model is not asked about
+it). A default
 the note already has by label is left as it is. From there the board's
 features are its own to change.
 
@@ -139,8 +140,9 @@ glyph, which is the type menu (**Text**, **Place**, **Link**); the
 sets the block's text, so the outline shows the new name at once;
 **Multiple**, a box for whether a picture may carry several of its values;
 **Notes**, what the model is told, a box that wraps and grows with its
-text, there only while a model can be asked (`useAiAvailable`) and empty
-for a link feature, which the model is never told about; and a remove,
+text, there only while a model can be asked (`useAiAvailable`) — on every
+feature, a link feature too, though the model is only told about text and
+place features; and a remove,
 shown as the pointer finds the row. **Add feature** in the last row makes
 a text feature named "New feature", taking several values, with its name
 selected to be typed over. Every change is written as it is made, through
