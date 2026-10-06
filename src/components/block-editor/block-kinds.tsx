@@ -33,32 +33,26 @@ export interface RowContext {
    * hides an empty line (an image's caption) must keep it while it is being
    * typed into. */
   editing: boolean
-  /** The row draws a marker slot before the content line: every type with a
-   * slot, and a parent of any type (its chevron needs one). A slotless
-   * type's chrome that reaches the row's edge (a code block's panel) must
-   * stop short of the slot when it is there. */
-  slotted: boolean
 }
 
 export interface BlockKind {
   /** The key in the marker slot: a to-do's checkbox, a bullet's dot, a
-   * heading's `#`, a numbered item's number, or a static glyph (none for a
-   * paragraph — the slot keeps its width so text stays in one column).
-   * `none` drops the slot altogether (an image, which has no text column to
-   * keep); a parent still gets the slot back to host its chevron. */
+   * heading's `#`, a numbered item's number, or a static glyph (a quote's
+   * `>`, a paragraph's `¶`). `none` leaves the slot EMPTY — a figure (an
+   * image, a link card, a code block) has a frame of its own for a mark —
+   * but the slot keeps its width, so the content stays in one column. The
+   * collapse chevron is never a key: it has a column of its own before the
+   * slot (`block-item.tsx`). */
   readonly slot: "checkbox" | "dot" | "hash" | "number" | "glyph" | "none"
   /** The glyph for a `glyph` slot, or null for an empty slot. */
   readonly glyph?: string | null
   /** A RENDERED key for a `glyph` slot, where the key depends on the block
    * rather than being one fixed character — a note's favicon, which says
    * whether it is a day, a week or an ordinary note. Takes precedence over
-   * `glyph`; like it, a parent's chevron swaps in for it on hover. */
+   * `glyph`. */
   readonly glyphNode?: (block: Block) => ReactNode
   /** The empty/glyph slot's test id. */
   readonly slotTestId?: string
-  /** A parent's collapse chevron sits beside the marker rather than
-   * replacing it (the checkbox keeps its own click). */
-  readonly toggleBeside?: boolean
   /** Text size and weight, by outline depth — the same on the rendered view
    * and the textarea, so switching never shifts a character. Given the block
    * too, for a type whose text follows its props (an image's caption sits
@@ -107,16 +101,19 @@ const BODY = "text-base leading-relaxed"
  * its `#` slot) is drawn at. */
 export const LISTED_HEADING_DEPTH = 3
 
+// A paragraph's key is the pilcrow: markdown has no mark for a paragraph,
+// so this one is a label, not a marker — it says "a block of prose" where
+// the dot says "a list item", in the same slot and the same faint ink, so
+// every block with a text line of its own has a key.
 const text: BlockKind = {
   slot: "glyph",
-  glyph: null,
+  glyph: "¶",
   slotTestId: "paragraph-slot",
   typography: () => BODY,
 }
 
 const todo: BlockKind = {
   slot: "checkbox",
-  toggleBeside: true,
   typography: () => BODY,
   // Checking a todo mutes its text; the fade marks the state change without
   // delaying it.
@@ -171,12 +168,9 @@ const heading: BlockKind = {
 const note: BlockKind = {
   slot: "glyph",
   slotTestId: "note-favicon-slot",
-  // The favicon is a MARKER, so on a note with blocks in it the collapse
-  // chevron takes its place exactly as it does a bullet's dot or a heading's
-  // `#`: revealed on hover, and pinned over it while the note is closed.
-  // (The beside-placement is for a to-do, whose slot holds a checkbox — a
-  // control, which a swap would leave un-tickable. A favicon is nothing of
-  // the kind.)
+  // The favicon is a MARKER, in the key slot like a bullet's dot or a
+  // heading's `#`; a note with blocks in it folds from the chevron column
+  // beside it, as every parent does.
   glyphNode: (block) => (
     <NoteFavicon note={{ id: block.id, type: noteTypeOf(block.id) }} className="size-[15px]" />
   ),
@@ -218,9 +212,8 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     ),
   },
   code: {
-    // No marker slot: the panel is the ROW SURFACE, as below, so it starts
-    // where the row does, as a picture does. A parent code block still gets
-    // the slot back to host its chevron, and its panel starts after it.
+    // No key: the panel is the block's own mark, as a picture's frame is.
+    // The slot stays, empty, so the panel starts at the text column.
     slot: "none",
     // Body type in the mono face — the same size and leading as a
     // paragraph, so a line of code is exactly as tall as a line of text and
@@ -244,26 +237,22 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     // 2px shorter than its view. Around the line, the chrome adds the same
     // to both states and the text never moves.
     //
-    // Its box IS the row's highlight surface: it pulls over the line's
-    // padding (2px above and below, 6px at the sides) with negative margins
-    // that its border and 1px of padding pay back, so a one-line block is
-    // the 27px every other row is, and turning a paragraph into code moves
-    // nothing — the text keeps its column (the 28px of left padding is the
-    // marker slot and gap it no longer has, less the border) and its right
-    // edge, and the panel simply appears around it. After a parent's slot,
-    // the panel starts where the slot ends and the text sits 4px in.
-    // Selected, its border takes the selection ring's colour (`.block-code-
-    // panel`, block-editor.css), since it sits exactly where the ring
-    // would. The language sits in its top-right corner — chrome, not
-    // content, and a control: click it to change it (`code-language.tsx`).
-    wrap: (content, { block, api, slotted }) => {
+    // Its box is the row's highlight surface, to the right: it pulls over
+    // the line's padding (2px above and below, 6px at the right) with
+    // negative margins that its border and 1px of padding pay back, so a
+    // one-line block is the 27px every other row is and its right edge is
+    // every other row's. It starts at the text column, after the empty key
+    // slot, and the text sits 4px in — turning a paragraph into code moves
+    // the text by that much and no more. Selected, its border takes the
+    // selection ring's colour (`.block-code-panel`, block-editor.css),
+    // since it sits where the ring would. The language sits in its
+    // top-right corner — chrome, not content, and a control: click it to
+    // change it (`code-language.tsx`).
+    wrap: (content, { block, api }) => {
       return (
         <div
           data-testid="code-panel"
-          className={cx(
-            "group block-code-panel prism relative -my-0.5 flex min-w-0 flex-1 rounded border border-border-secondary bg-[var(--color-bg-code-block)] py-px pr-[5px]",
-            slotted ? "-mr-1.5 pl-1" : "-mx-1.5 pl-[28px]",
-          )}
+          className="group block-code-panel prism relative -my-0.5 -mr-1.5 flex min-w-0 flex-1 rounded border border-border-secondary bg-[var(--color-bg-code-block)] py-px pl-1 pr-[5px]"
         >
           {content}
           <CodeLanguage block={block} api={api} />
@@ -272,8 +261,8 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     },
   },
   image: {
-    // No marker slot: the picture starts where the row does, not 15px in
-    // from it as text would.
+    // No key: a figure. The slot stays, empty, so the picture starts at the
+    // text column.
     slot: "none",
     // The text is the caption: small, quiet, beneath the picture, and set to
     // the side the picture keeps to — centred under a centred picture, flush
@@ -302,8 +291,7 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     )),
   },
   link: {
-    // No marker slot, as a picture has none: the card starts at the row's
-    // edge.
+    // No key, as a picture has none: the card starts at the text column.
     slot: "none",
     // The text is the title, set inside the card: body type, a touch heavier
     // than the description beneath it.
