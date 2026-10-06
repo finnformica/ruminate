@@ -6,6 +6,7 @@ import { notePropsOps } from "../data/note-meta"
 import { deleteNoteOps, type Op } from "../data/ops"
 import { emittedNoteTitle } from "../data/note-identity"
 import { useApplyOps } from "../data/store"
+import { LISTED_VIEW } from "../data/views"
 import { dateMentionsAtom, graphSnapshotAtom, notesAtom } from "../global-state"
 import type { NoteId } from "../schema"
 
@@ -96,8 +97,9 @@ export function useRenameNote() {
 }
 
 /**
- * Create a note: one node (its title, its props, `updated_at` stamped). The
- * blocks come with the first edit (`useNoteDoc`).
+ * Create a note: one node (its title, its props, `updated_at` stamped) and
+ * the view row that lists it (`LISTED_VIEW`, src/data/views.ts), in one
+ * write. The blocks come with the first edit (`useNoteDoc`).
  */
 export function useCreateNote() {
   const store = useStore()
@@ -115,7 +117,7 @@ export function useCreateNote() {
         text: title.trim() || id,
         props: propsJson({ ...props, updated_at: new Date().toISOString() }),
       }
-      apply([op])
+      apply([op], { views: [{ rootId: id, patch: LISTED_VIEW }] })
     },
     [store, apply],
   )

@@ -11,14 +11,18 @@ import { sampleViews } from "./sample-graph"
  * **Views** list (`sort_key`) — the one list the sidebar, the Views page and
  * the palette draw.
  *
- * **Every note is a view**, row or no row: a page node is listed whether or
- * not anything was saved about it, and its row, when it has one, only says
- * how it opens and where it sits. **A block is a view exactly when it has a
- * row**: "Add to Views" on a block writes one (`pinned`, the column's name on
- * the wire, is what keeps a row alive that saves no filter and no sort — a
- * note never needs it), and "Remove from Views" tombstones it. Nothing is
- * pinned any more: a place is kept to hand by where it is dragged to, and
- * the list has one order for notes and blocks alike.
+ * **A node is listed exactly when its row says so** — `pinned`, the
+ * column's name on the wire — whatever kind of node it is: a note, a board
+ * or a block. A note is not special here; the row is what makes a node an
+ * entry point into the graph, and the type only says how the node draws.
+ * Every note and board is created with a listed row (`LISTED_VIEW`, written
+ * beside the `create` through `useApplyOps`), and migrations/0021 gave the
+ * existing ones theirs; a block gets one from "Add to Views". "Remove from
+ * Views" clears `pinned` — on a block the whole row goes with it
+ * (`REMOVE_VIEW`), on a note the saved filter and sort stay, since the note
+ * still opens with them (`UNLIST_VIEW`, src/hooks/views.ts). Nothing is
+ * pinned in the old sense any more: a place is kept to hand by where it is
+ * dragged to, and the list has one order for notes and blocks alike.
  *
  * A view is the viewer's own row about a node that need not be theirs — a
  * block in a note someone shared can be a view from this side — which is
@@ -53,9 +57,11 @@ export const viewByRootAtom = atom((get) => {
 
 const NO_ROOTS: ReadonlySet<string> = new Set()
 
-/** The roots that have a view row. For a block that is what makes it a
- * view of its own (see above); a note is one regardless, so this is read for
- * blocks — the sidebar's block rows and the editor's "Add to Views". */
+/** The roots that have a view row at all — the block rows of the Views
+ * list (`blockViewsAtom`) and the editor's "Add to Views", which read a
+ * block's row as its place in the list whether or not it is kept pinned (a
+ * block that saved a filter has a row, and is listed by it). A note's place
+ * is its row's `pinned` (`listedNotesAtom`), never its having a row. */
 export const viewRootIdsAtom = atom((get) => {
   const ids = new Set<string>()
   for (const view of get(viewsAtom).values()) ids.add(view.root_id)
@@ -70,13 +76,25 @@ const viewIdFor = (rootId: string) => rootId
 export interface ViewPatch {
   filter?: string | null
   sort?: string | null
-  /** Kept as a view of its own with nothing saved on it — what "Add to
-   * Views" on a block writes, and what "Remove from Views" clears (with the
-   * rest, so the row goes). Never written for a note. */
+  /** Listed in the Views list — what a note or board is created with
+   * (`LISTED_VIEW`), what "Add to Views" on a block writes, and what "Remove
+   * from Views" clears. On a block it is also what keeps a row alive that
+   * saves no filter and no sort. */
   pinned?: boolean
   /** Where the view sits in the Views list (`orderViews`). */
   sort_key?: string | null
 }
+
+/** A view write that lands with a batch of ops (`useApplyOps`): the root
+ * and what changes on its row. */
+export interface ViewWrite {
+  rootId: string
+  patch: ViewPatch
+}
+
+/** What a note or board is created with, beside its `create`: a row that
+ * lists it and saves nothing else. */
+export const LISTED_VIEW: ViewPatch = { pinned: true }
 
 const textOrNull = (value: string | null | undefined, fallback: string | null) => {
   if (value === undefined) return fallback
@@ -111,6 +129,16 @@ export function patchedView(
     return { ...next, deleted_at: next.updated_at }
   }
   return next
+}
+
+/** The rows a batch of view writes lands as (`patchedView` each), against
+ * the live rows by root. */
+export function patchedViews(
+  viewByRoot: ReadonlyMap<string, ViewRow>,
+  writes: readonly ViewWrite[],
+  now: number,
+): ViewRow[] {
+  return writes.map(({ rootId, patch }) => patchedView(viewByRoot.get(rootId), rootId, patch, now))
 }
 
 /** The live map with `rows` landed on it: an upsert per live row, and a
@@ -191,9 +219,9 @@ export function orderViews<T extends { id: string }>(
  * The rows a drag of the Views list writes: the views in `nextRootIds`
  * order, keyed the way `reconcileSortKeys` keys siblings — every key that
  * still fits the new order is kept, so an ordinary drag rewrites one row,
- * and the first drag ever (no keys yet) keys the whole list. A note with no
- * row yet gets one here, holding nothing but its place: the order is the
- * one thing a note's row is always for.
+ * and the first drag ever (no keys yet) keys the whole list. Every root in
+ * the list has a row (that is what lists it), so a drag only ever rewrites
+ * keys; a root without one would be minted a row holding its place alone.
  */
 export function reorderedViews(
   viewByRoot: ReadonlyMap<string, ViewRow>,

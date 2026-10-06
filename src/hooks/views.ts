@@ -36,6 +36,19 @@ export function useWriteView() {
 export const REMOVE_VIEW: ViewPatch = { pinned: false, filter: null, sort: null, sort_key: null }
 
 /**
+ * What "Remove from Views" on a NOTE writes: `pinned` alone cleared. The
+ * note's saved filter and sort stay, because the note still opens — from
+ * search, Recent, a link, its address — and should open the way it was
+ * left; and its place in the order stays, so adding it back puts it where
+ * it was. A block's row is cleared whole (`REMOVE_VIEW`) because away from
+ * the list a block is just a block in its note; a note away from the list
+ * is still a note. (A note that saved nothing and was never dragged has a
+ * row holding nothing but the listing, and `patchedView` lets that row go
+ * as it would a block's: on the wire the two are the same tombstone.)
+ */
+export const UNLIST_VIEW: ViewPatch = { pinned: false }
+
+/**
  * Put the Views list in a new order (`reorderedViews`): the rows whose key
  * has to change go the same way a saved view does. Handed the whole list as
  * dropped, so a drag and the menu's Move up / Move down are one write path.
@@ -65,8 +78,8 @@ const NO_SAVED_VIEW: SavedView = { filter: "", sort: "", writable: false }
 
 /**
  * The saved view of whatever the page is rooted at — the focused block, else
- * the note: the view row rooted there (docs/metadata.md, "Views"). A note
- * needs no row to be a view, and a block needs no row to save one. On a note
+ * the note: the view row rooted there (docs/metadata.md, "Views"). Neither
+ * a note nor a block needs to be listed to save one. On a note
  * someone shared, the reader's own row wins, and the share's view — the
  * owner's filter and sort, which is what a share IS (docs/sharing.md) — fills
  * in behind it, so the note opens the way the owner meant it to. A note's

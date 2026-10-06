@@ -9,6 +9,7 @@ import { blockView, isNoteType, noteView, type LinkDirections } from "../data/gr
 import { notePropsOps } from "../data/note-meta"
 import { docToOps } from "../data/ops"
 import { useApplyOps } from "../data/store"
+import { LISTED_VIEW } from "../data/views"
 import { blockIndexAtom, graphSnapshotAtom } from "../global-state"
 import { viewNarrowing } from "../utils/view-narrowing"
 import type { NoteId } from "../schema"
@@ -157,7 +158,14 @@ export function useNoteDoc({
         ...next,
         props: { ...(next.props ?? {}), updated_at: new Date().toISOString() },
       }
-      apply(docToOps(noteId, stamped, current, hint?.discard, noteId, shown))
+      // A first edit to a note that is not in the graph yet — a daily note
+      // typed into, a fresh `/views/<id>` — is what creates it, so the row
+      // that lists it (`LISTED_VIEW`, src/data/views.ts) is written beside
+      // the `create`, as `useCreateNote` writes it.
+      apply(
+        docToOps(noteId, stamped, current, hint?.discard, noteId, shown),
+        note === null ? { views: [{ rootId: noteId, patch: LISTED_VIEW }] } : {},
+      )
     },
     [noteId, rootId, store, apply],
   )

@@ -10,6 +10,8 @@ import { developerDebugPreferenceAtom, useIsDeveloper } from "../hooks/is-develo
 import { useNoteShare } from "../hooks/share"
 import { useMakeBoard, useMakeNote } from "../hooks/board"
 import { useRenameNote } from "../hooks/note"
+import { UNLIST_VIEW, useWriteView } from "../hooks/views"
+import { LISTED_VIEW, viewByRootAtom } from "../data/views"
 import { deleteNoteDialogAtom } from "./delete-note-dialog"
 import { shareDialogAtom } from "./share-note-dialog"
 import type { Width } from "../schema"
@@ -26,6 +28,7 @@ import {
   ListIcon16,
   MoreIcon16,
   NoteIcon16,
+  PlusIcon16,
   PrinterIcon16,
   ShareIcon16,
   TrashIcon16,
@@ -108,6 +111,14 @@ interface EditorActions {
  * board (`openBoard`); a daily or weekly note is what its id says it is,
  * so neither is offered one. The board page itself adds **Features**,
  * which opens its Features editor (`openFeatures`).
+ *
+ * **Remove from Views** and **Add to Views** are the note's place in the
+ * Views list (docs/metadata.md): its view row's `pinned`, read as the menu
+ * opens. Own notes only — a shared note is listed under Shared, by the
+ * share, and has no place in the list to give up. A daily or weekly note
+ * is offered the pair like any other: it is reachable from the calendar
+ * whether or not it is listed, which is the ordinary reason to take one
+ * off the list.
  */
 export function useNoteMenuEntries() {
   const isSignedOut = useAtomValue(isSignedOutAtom)
@@ -118,6 +129,10 @@ export function useNoteMenuEntries() {
   const openShare = useSetAtom(shareDialogAtom)
   const makeBoard = useMakeBoard()
   const makeNote = useMakeNote()
+  const writeView = useWriteView()
+  // Subscribed, not read as the menu opens: a sidebar row draws its menu
+  // when it renders, so the entries follow the row's listing as it changes.
+  const viewByRoot = useAtomValue(viewByRootAtom)
   return React.useCallback(
     (
       noteId: string,
@@ -222,6 +237,28 @@ export function useNoteMenuEntries() {
               ]
             : []
 
+      // The note's place in the list: its own row's `pinned`.
+      const listed = viewByRoot.get(noteId)?.pinned === true
+      const viewEntries: MenuEntry[] =
+        verbs !== null
+          ? []
+          : [
+              { kind: "separator" },
+              listed
+                ? {
+                    kind: "item",
+                    label: "Remove from Views",
+                    icon: <TrashIcon16 />,
+                    onSelect: () => writeView(noteId, UNLIST_VIEW),
+                  }
+                : {
+                    kind: "item",
+                    label: "Add to Views",
+                    icon: <PlusIcon16 />,
+                    onSelect: () => writeView(noteId, LISTED_VIEW),
+                  },
+            ]
+
       return [
         { kind: "item", label: "Copy markdown", icon: <CopyIcon16 />, onSelect: copyMarkdown },
         { kind: "item", label: "Copy ID", icon: <CopyIcon16 />, onSelect: () => copy(noteId) },
@@ -240,6 +277,7 @@ export function useNoteMenuEntries() {
           onSelect: rename,
         },
         ...boardEntries,
+        ...viewEntries,
         { kind: "separator" },
         { kind: "item", label: "Print", icon: <PrinterIcon16 />, onSelect: () => window.print() },
         { kind: "separator" },
@@ -253,7 +291,17 @@ export function useNoteMenuEntries() {
         },
       ] satisfies MenuEntry[]
     },
-    [jotaiStore, isSignedOut, renameNote, requestDelete, openShare, makeBoard, makeNote],
+    [
+      jotaiStore,
+      isSignedOut,
+      renameNote,
+      requestDelete,
+      openShare,
+      makeBoard,
+      makeNote,
+      writeView,
+      viewByRoot,
+    ],
   )
 }
 
