@@ -998,8 +998,8 @@ export function BlockItem({
     </>
   ) : (
     // Keyboard for select mode is handled by the editor container (it
-    // holds focus); this element only needs the pointer interactions.
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+    // holds focus), and the pointer is the row's (`linePointer`, below):
+    // this element only draws the text.
     <div
       data-testid="block-body"
       data-block-id={block.id}
@@ -1017,20 +1017,6 @@ export function BlockItem({
         typo,
         kind.bodyClass,
       )}
-      {...(readOnly
-        ? api.activate
-          ? { onClick: () => api.activate?.(occurrence.key) }
-          : api.navigable
-            ? { onClick: () => api.select(occurrence.key) }
-            : {}
-        : api.coarsePointer
-          ? // A finger's tap is handled by the row (`handleRowTap`): the
-            // whole row is the target, not just the text.
-            {}
-          : {
-              onClick: (event: React.MouseEvent) => api.select(occurrence.key, event.shiftKey),
-              onDoubleClick: () => api.edit(occurrence.key),
-            })}
     >
       <LinkActionsContext.Provider value={linkActions}>
         {kind.body ? kind.body(block) : <BlockContent content={body} />}
@@ -1077,6 +1063,50 @@ export function BlockItem({
         }
       : {}
 
+  // The mouse on the row's SURFACE — anywhere on the highlight surface that
+  // is not a control: the chevron column (and its empty space on a leaf),
+  // the key slot (a dot, a `#`, a `¶`), the row's padding, a figure's frame
+  // and the text itself. A click selects the row (Shift+click extends the
+  // selection); a double-click edits it, with the caret at the start of the
+  // line when the click fell left of the text, in the gutter, and at the
+  // end otherwise. Read-only, a click opens the row (a result) or selects
+  // it (a browsed list). Controls keep their own clicks — the chevron, the
+  // checkbox, a link, a card's tools, the textarea being edited — so a
+  // click on one never doubles as a selection. (The handlers once sat on
+  // the text alone, so a click on the dot or beside the chevron did
+  // nothing, which read as a row that would not select.) A finger's tap is
+  // the row wrapper's (`handleRowTap`, above).
+  const isControl = (target: EventTarget | null) =>
+    target instanceof Element &&
+    target.closest("button, input, a, textarea, [role='menu']") !== null
+  const linePointer: Pick<React.HTMLAttributes<HTMLElement>, "onClick" | "onDoubleClick"> = readOnly
+    ? api.activate
+      ? {
+          onClick: (event) => {
+            if (!isControl(event.target)) api.activate?.(occurrence.key)
+          },
+        }
+      : api.navigable
+        ? {
+            onClick: (event) => {
+              if (!isControl(event.target)) api.select(occurrence.key)
+            },
+          }
+        : {}
+    : api.coarsePointer
+      ? {}
+      : {
+          onClick: (event) => {
+            if (!isControl(event.target)) api.select(occurrence.key, event.shiftKey)
+          },
+          onDoubleClick: (event) => {
+            if (isControl(event.target)) return
+            const bodyEl = event.currentTarget.querySelector<HTMLElement>("[data-block-id]")
+            const left = bodyEl?.getBoundingClientRect().left
+            api.edit(occurrence.key, left !== undefined && event.clientX < left)
+          },
+        }
+
   return (
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
     <div
@@ -1105,6 +1135,7 @@ export function BlockItem({
           // (`[data-heading-scale]` in block-editor.css), so its chevron and
           // `#` sit as far from the left edge as from the top and bottom.
           data-heading-scale={kind.slot === "hash" ? HEADING_SCALE_NAMES[scaleDepth] : undefined}
+          {...linePointer}
           className={cx(
             // Negative margin + padding pairs grow the highlight surface
             // while the text (and every marker) stays exactly where it was —

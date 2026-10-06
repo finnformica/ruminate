@@ -46,7 +46,6 @@ export function LinkCard({
   api,
   title,
   editing,
-  pointer,
 }: {
   block: Block
   occurrence: Occurrence
@@ -56,32 +55,22 @@ export function LinkCard({
   title: ReactNode
   /** The title line is a textarea right now. */
   editing: boolean
-  /** The row's click and double-click, for the card's plain surface. */
-  pointer: Pick<React.HTMLAttributes<HTMLElement>, "onClick" | "onDoubleClick">
 }) {
   const props = linkPropsOf(block)
   const { url } = props
   const editable = !api.readOnly
 
-  // The card's own surface takes the row's click; its links, tools and the
-  // title being edited keep theirs.
-  const plain = (event: React.MouseEvent<HTMLElement>) =>
-    !(event.target as Element).closest("a, button, textarea, [data-block-body]")
-  const surface = {
-    onClick: (event: React.MouseEvent<HTMLElement>) => plain(event) && pointer.onClick?.(event),
-    onDoubleClick: (event: React.MouseEvent<HTMLElement>) =>
-      plain(event) && pointer.onDoubleClick?.(event),
-  }
-
+  // The card's plain surface is the row's: a click there selects the row
+  // and a double-click edits it, as anywhere on the row does (the row's
+  // surface takes the pointer, block-item.tsx). Its links and tools stop
+  // their own clicks there, so they never double as a selection.
   const card = (
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
     <div
       data-testid="link-card"
       className={cx(
         "flex w-full overflow-hidden rounded-lg border border-border-secondary bg-bg-card",
         "transition-colors duration-150 hover:bg-bg-hover",
       )}
-      {...surface}
     />
   )
   const inner = <LinkCardBody props={props} text={block.text} title={title} editing={editing} />
