@@ -254,12 +254,16 @@ where you are, and everything below the leading row reads as it does outside foc
 - **Framed blocks:** a picture, a link card and a code panel are things set
   in the text rather than lines of it, and share one frame
   (`block-frame.tsx`) that stands them off the row's surface on every side:
-  10px above and below, and as far from the surface's right edge as from
+  6px above and below, and as far from the surface's right edge as from
   its left. The left is the text column's 54px (the surface's 6px, the
   chevron column, the key slot and their gaps); the right pays the same,
   so the frame is centred in the surface, with its room at the sides the
-  column's and its room above and below a line's. A code block's panel
-  used to be drawn over the row's surface itself, flush to its edges.
+  column's and its room above and below just enough to keep the ring off
+  its edge. The chevron keeps the rule every row has — centred on the
+  row's first line — by moving down to the frame's first line
+  (`BlockKind.firstLineOffset`): the first line of code, a card's title,
+  half a line into a picture. A code block's panel used to be drawn over
+  the row's surface itself, flush to its edges.
 - **Header pull:** the note title, the focus breadcrumb and the focus title
   hang into the page gutter by `--note-header-pull` (`.note-header`,
   block-editor.css): 27px — the key slot and its gap — once the page's

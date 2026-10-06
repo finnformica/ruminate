@@ -9,7 +9,7 @@ import type { Occurrence } from "../../blocks/view"
 import { cx } from "../../utils/cx"
 import { noteTypeOf } from "../../utils/note-type"
 import { NoteFavicon } from "../note-favicon"
-import { BlockFrame } from "./block-frame"
+import { BlockFrame, FRAME_INSET } from "./block-frame"
 import type { BlockEditorApi } from "./block-item"
 import { LinkCard } from "./link-card"
 import { CodeHighlight } from "./code-highlight"
@@ -73,6 +73,14 @@ export interface BlockKind {
   readonly body?: (block: Block) => ReactNode
   /** Extra classes on the rendered body (a checked to-do's strike-through). */
   readonly bodyClass?: string
+  /** How far below the content line's top the row's FIRST LINE sits, in
+   * px, for a framed block: the frame's inset, plus the border and
+   * padding of a panel inside it. The chevron column moves down by it
+   * (block-item.tsx), so the chevron centres on the first line of code, a
+   * card's title, or the top of a picture — the rule every row has, that
+   * the chevron sits on its first line. A text row's first line is the
+   * content line itself, so it needs none. */
+  readonly firstLineOffset?: number
   /** Chrome before the content line (a quote's bar). */
   readonly before?: (context: RowContext) => ReactNode
   /** Wrap the content line (an image's picture above its caption, a code
@@ -100,6 +108,12 @@ export function headingScale(depth: number): string {
 }
 
 const BODY = "text-base leading-relaxed"
+
+/** The code panel's padding above and below its lines (its `py-2`), and
+ * the card's above its title (`px-4 py-3`, link-card.tsx): what the chevron
+ * column counts past the frame to reach each one's first line. */
+const CODE_PANEL_PADDING = 8
+const LINK_CARD_PADDING = 12
 
 /** The depth whose heading scale is the body's: what a listed heading (and
  * its `#` slot) is drawn at. */
@@ -244,6 +258,9 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     body: (block) => (
       <CodeHighlight text={block.text} language={String(block.props?.language ?? "")} />
     ),
+    // The first line of code: past the frame, the panel's border and its
+    // padding (`CODE_PANEL_PADDING`).
+    firstLineOffset: FRAME_INSET + 1 + CODE_PANEL_PADDING,
     // The panel — a tinted, bordered surface — WRAPS the line rather than
     // being classes on it. The row sizes its textarea by its text alone
     // (`1lh` empty, else its scroll height) and draws the view with the
@@ -288,6 +305,9 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     typography: (_depth, block) =>
       cx("text-sm leading-relaxed text-text-secondary", CAPTION_ALIGN[figureAlignOf(block)]),
     placeholder: "Add a caption…",
+    // A picture has no first line: the chevron centres half a line below
+    // its top edge, inside the picture rather than on its corner.
+    firstLineOffset: FRAME_INSET,
     // The picture above its caption, which is the block's text: the caption
     // line is the ordinary body (view or textarea), so every keyboard and
     // paste behaviour is the same as on any block. The figure (`ImageFigure`)
@@ -313,6 +333,8 @@ export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
     // than the description beneath it.
     typography: () => cx(BODY, "font-medium"),
     placeholder: "Add a title…",
+    // The title line: past the frame, the card's border and its padding.
+    firstLineOffset: FRAME_INSET + 1 + LINK_CARD_PADDING,
     // The card (`LinkCard`) holds the title line — the block's text, the
     // ordinary body (view or textarea) — with the page's description and
     // byline beneath. An untitled link block drops the line rather than
