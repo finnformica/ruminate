@@ -1,3 +1,4 @@
+import { sampleViews } from "./sample-graph"
 import { getDefaultStore } from "jotai"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type {
@@ -836,6 +837,6 @@ describe("database mode views", () => {
 
     stopDatabaseMode()
     await flushDatabaseMode()
-    expect(views().map((row) => row.id)).toEqual(["blk_welcome003"])
+    expect(views().map((row) => row.id)).toEqual(sampleViews().map((row) => row.id))
   })
 })
