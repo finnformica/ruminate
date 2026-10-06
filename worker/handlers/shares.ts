@@ -27,7 +27,7 @@
 // Routes (wired in worker/index.ts):
 //   GET    /api/shares            — shares given and received
 //   POST   /api/shares            — create a share
-//   DELETE /api/shares/:id        — revoke one (owner only)
+//   DELETE /api/shares/:id        — end one: the owner revokes, the grantee leaves
 //   GET    /api/shares/:id/notes  — the slice (grantee only)
 //   PUT    /api/shares/:id/notes  — write into the slice (grantee only)
 
@@ -47,6 +47,7 @@ import {
   createShare,
   emailOf,
   findReceivedShare,
+  leaveShare,
   listGivenShares,
   listReceivedShares,
   revokeShare,
@@ -76,6 +77,7 @@ const asGiven = (grant: ShareGrant, view: ShareView): GivenShare => ({
   permissions: PERMISSIONS.filter((permission) => grant.permissions.has(permission)),
   createdAt: grant.createdAt,
   revokedAt: grant.revokedAt,
+  revokedBy: grant.revokedBy,
 })
 
 const asReceived = ({ grant, owner }: ReceivedShare, view: ShareView): ReceivedShareSummary => ({
@@ -181,8 +183,13 @@ export async function shares(
 
   if (segments.length === 1) {
     if (request.method !== "DELETE") return json({ error: "method_not_allowed" }, 405)
-    const revoked = await revokeShare(control, session.id, id)
-    return revoked ? json({ ok: true, id }) : json({ error: "not_found" }, 404)
+    // Either side may end a share: the owner revokes what they gave, the
+    // grantee leaves what they were given. Each statement is scoped to its
+    // own side of the ledger, so a caller who is neither — a stranger, or
+    // anyone naming a share already ended — gets the 404 an unknown id gets.
+    const ended =
+      (await revokeShare(control, session.id, id)) || (await leaveShare(control, session.id, id))
+    return ended ? json({ ok: true, id }) : json({ error: "not_found" }, 404)
   }
 
   if (segments.length === 2 && segments[1] === "notes") {

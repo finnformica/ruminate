@@ -9,16 +9,16 @@ if you said so. **A share is a view shared with someone** (docs/metadata.md,
 the view holds what is shared and how it opens. Save a filter or a sort on
 the note you shared and the person you shared it with opens it that way.
 
-|                |                                                                                                            |
-| -------------- | ---------------------------------------------------------------------------------------------------------- |
-| The unit       | A **scoped grant** on a view: owner, `view_id`, grantee address, verbs                                     |
-| What is shared | The reachability closure beneath the view's root, computed per request                                     |
-| How it opens   | The view's filter and sort — presentation; the slice is the whole subtree                                  |
-| Who            | An email address, matched to the primary verified GitHub email                                             |
-| Verbs          | `read` (always), `write`, `delete`                                                                         |
-| Endpoints      | `/api/shares`, `/api/shares/:id`, `/api/shares/:id/notes`                                                  |
-| Storage        | Control plane: `shares` (0012, 0017), `users.email` (0010, 0011); the view is a corpus row (`views`, 0015) |
-| Where it lives | `worker/shares/`, `worker/handlers/shares.ts`, `src/data/shared-mode.ts`                                   |
+|                |                                                                                                                  |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- |
+| The unit       | A **scoped grant** on a view: owner, `view_id`, grantee address, verbs                                           |
+| What is shared | The reachability closure beneath the view's root, computed per request                                           |
+| How it opens   | The view's filter and sort — presentation; the slice is the whole subtree                                        |
+| Who            | An email address, matched to the primary verified GitHub email                                                   |
+| Verbs          | `read` (always), `write`, `delete`                                                                               |
+| Endpoints      | `/api/shares`, `/api/shares/:id`, `/api/shares/:id/notes`                                                        |
+| Storage        | Control plane: `shares` (0012, 0017, 0020), `users.email` (0010, 0011); the view is a corpus row (`views`, 0015) |
+| Where it lives | `worker/shares/`, `worker/handlers/shares.ts`, `src/data/shared-mode.ts`                                         |
 
 ---
 
@@ -228,11 +228,15 @@ someone else's rows does not belong in it. So shared notes live in memory
 - **Where to share from**: a note's **⋯** menu (**Share…**) shares the note;
   a block's right-click menu (**Share…**) shares that block, as the root.
   One dialog, asking for the address and the verbs. Settings → Sharing is the
-  overview: what this account has shared and with whom (with Revoke), and
-  what has been shared with it. Each row leads with the note or block — a
-  block as `Note › text`, by the note it was written in — and the address,
-  or the person who shared it, is its subtext, with how the share opens
-  ("Todo, sorted by Text") when its view says so.
+  overview: what this account has shared and with whom (with **Revoke**), and
+  what has been shared with it (with **Leave**). Either side may end a share,
+  and it is the same row retired either way: `revoked_by` says which, so the
+  owner's list reads "(revoked)" or "(they left)", and a share that is to
+  come back is a new share. Leaving re-lists the shared runtime at once, so
+  the note is out of the sidebar before the page is left. Each row leads
+  with the note or block — a block as `Note › text`, by the note it was
+  written in — and the address, or the person who shared it, is its subtext,
+  with how the share opens ("Todo, sorted by Text") when its view says so.
 - **How a shared note opens**: the slice comes with the owner's view, and
   the note page reads it behind the reader's own (`sharedViewByRootAtom`,
   `useSavedView`): a filter the reader saves on the shared note is theirs
@@ -262,5 +266,5 @@ someone else's rows does not belong in it. So shared notes live in memory
   per-share cache with a closure-aware cursor, not a change to the model.
 - **Not built**: a since-cursor for slices; showing the owner "this share includes N blocks also used elsewhere"
   (the multi-parent case is handled — such a block is in the slice — but not
-  surfaced at share time); expiry on a share (revoke is the mechanism);
+  surfaced at share time); expiry on a share (revoking, or leaving, is the mechanism);
   per-row attribution of who wrote what.
