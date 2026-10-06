@@ -1518,9 +1518,10 @@ describe("heading hash marker", () => {
     expect(slots[1].className).toContain("text-xl") // depth 1
     for (const slot of slots) {
       expect(slot.className).toContain("font-bold")
-      // Right-aligned in the shared 15px slot so a wide hash overflows left
-      // toward the gutter instead of pushing the text column.
-      expect(slot.className).toContain("justify-end")
+      // Centred in the shared 15px slot, on the same centre line as every
+      // other key; a wide hash outgrows the slot symmetrically, never
+      // pushing the text column.
+      expect(slot.className).toContain("justify-center")
       expect(slot.className).toContain("w-[15px]")
       const glyph = slot.querySelector("span:not([data-testid])")!
       expect(glyph.textContent).toBe("#")

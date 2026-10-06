@@ -118,9 +118,9 @@ export function NoteTitle({
     // is (block-item.tsx): the 17px chevron column starts 4px into the
     // content column (the highlight surface's net reach), then the 8px gap,
     // the 15px key slot, and the gap again. The # sits in that slot exactly
-    // as a heading's does — right-aligned, overflowing left into the gap
-    // when the 3xl glyph outgrows 15px — so a selected title's ring stands
-    // as far from its # as a heading row's does. `note-header` then hangs
+    // as a heading's does — centred, outgrowing the slot into the gaps by a
+    // few pixels a side at 3xl — so a selected title's ring stands as far
+    // from its # as a heading row's does. `note-header` then hangs
     // the whole h1 into the page gutter by as much as the page allows
     // (`--note-header-pull`, block-editor.css): on a wide page that is 27px,
     // the key slot and its gap, so the outline reads as set in beneath the
@@ -128,7 +128,7 @@ export function NoteTitle({
     // chevron column.
     <h1 className="note-header relative font-content text-3xl font-bold leading-tight tracking-[-0.02em] [overflow-wrap:anywhere]">
       {/* The hanging # inherits the h1's full typography — same size as the title. */}
-      <Hash className="pointer-events-none absolute left-[29px] top-0 flex w-[15px] justify-end" />
+      <Hash className="pointer-events-none absolute left-[29px] top-0 flex w-[15px] justify-center" />
       {editing ? (
         <input
           ref={inputRef}

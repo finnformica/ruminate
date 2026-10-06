@@ -142,8 +142,9 @@ asks for it.
    never moves text.
 7. **One marker slot, and a key for every text block.** Every block marker
    — bullet dot, checkbox, ordered number, heading `#`, quote `>`, paragraph
-   `¶` — occupies the same 15px slot (the checkbox's width): dots and the
-   narrow glyphs centre in it; `#` and numbers right-align to its edge. Every
+   `¶` — occupies the same 15px slot (the checkbox's width): dots, the `#`
+   and the narrow glyphs centre in it; numbers right-align to its edge, so
+   a two-digit number grows into the gutter. Every
    block with a text line of its own has a key; markdown has no mark for a
    paragraph, so its pilcrow is a label where the dot is a marker, in the
    same slot and the same faint ink. A figure — a picture, a link card, a
@@ -156,8 +157,8 @@ asks for it.
    focus title, section headings — with no typography of its own: it inherits
    its parent's scale (the titles' 3xl, each heading's depth size and bold),
    so the hash is always the same size as the text beside it, only recolored
-   to tertiary. A large heading's hash outgrows the slot and overflows left,
-   into the gap after the chevron column — the text column never moves. At the three
+   to tertiary. A large heading's hash outgrows the slot by a pixel or two
+   a side, into the gaps — the text column never moves. At the three
    larger heading scales the surface itself reaches further left
    (`[data-heading-scale]`, block-editor.css), by exactly the amount that
    makes the chevron's square as far from the left edge as from the top and

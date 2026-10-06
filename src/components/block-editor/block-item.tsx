@@ -775,8 +775,8 @@ export function BlockItem({
   //
   // Every marker occupies the same 15px slot, so body text starts at one
   // column across every block type and the markers read as one chrome
-  // family: dots and narrow glyphs centre in it; `#` and numbers right-align
-  // to its edge; a figure's slot is simply empty.
+  // family: dots, the `#` and the narrow glyphs centre in it; numbers
+  // right-align to its edge; a figure's slot is simply empty.
   //
   // The bullet's dot: faint, like the chevron — pure chrome; content leads.
   const dotSlot = (
@@ -787,8 +787,8 @@ export function BlockItem({
   // A static text glyph key (the quote's `>`, the paragraph's `¶`) or none
   // at all (a figure — a picture, a link card, a code block — whose frame or
   // panel is its own mark): faint, like the dot and the `#` — chrome, not
-  // content. CENTRED in the slot, like the dot and the checkbox, not
-  // right-aligned like `#` and the numbers: `>` is a narrow glyph, and
+  // content. CENTRED in the slot, like the dot, the `#` and the checkbox,
+  // not right-aligned like the numbers: `>` is a narrow glyph, and
   // right-aligned its ink sat 3px right of the dot's centre. Never a focus
   // button (no marker is; focus stays on F / Cmd+. and the edit bar). An
   // empty slot keeps its width so the text stays in the shared column.
@@ -875,17 +875,19 @@ export function BlockItem({
       // size + weight (headingScale + bold, no underline — that lives in
       // `typo`) and the glyph inherits it, so the hash always matches the text
       // beside it, at every depth. The slot stays the shared 15px column
-      // (heading text aligns with every other marked block); the hash
-      // right-aligns in it and, when a large scale outgrows the slot,
-      // overflows LEFT, into the gap after the chevron column — the text
-      // column never moves. The slot's `h-[1lh]` (resolved at the heading's
-      // scale) centres the glyph on the heading's first line. A static
-      // glyph, like the note title's — never a focus button (no marker is;
-      // focus stays on F / Cmd+. and the edit bar).
+      // (heading text aligns with every other marked block) and the hash is
+      // CENTRED in it, as the dot and a note's favicon are, so a small hash
+      // (a listed heading's, a deep one's) stands on the same centre line
+      // as every other key rather than in the slot's right half; a large
+      // scale outgrows the slot by a pixel or two a side, into the gaps —
+      // the text column never moves. The slot's `h-[1lh]` (resolved at the
+      // heading's scale) centres the glyph on the heading's first line. A
+      // static glyph, like the note title's — never a focus button (no
+      // marker is; focus stays on F / Cmd+. and the edit bar).
       <span
         data-testid="heading-hash"
         className={cx(
-          "flex h-[1lh] w-[15px] shrink-0 items-center justify-end font-bold",
+          "flex h-[1lh] w-[15px] shrink-0 items-center justify-center font-bold",
           headingScale(scaleDepth),
         )}
       >
