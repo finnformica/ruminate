@@ -35,6 +35,7 @@ import {
   type NodeRow,
   type ReplicaPutPayload,
 } from "../handlers/replica-payload"
+import { isNoteType } from "../../src/data/graph"
 import type { TenantDb } from "../tenancy-db"
 import { shareAllows, type Permission, type ShareGrant } from "./grant"
 import type { ShareView } from "./wire"
@@ -223,9 +224,6 @@ const refuse = (refusal: SliceWriteRefusal): SliceWritePlan => ({ ok: false, ref
 const isTombstone = (row: { deleted_at?: number }) =>
   row.deleted_at !== undefined && row.deleted_at !== null
 
-/** The stored note-root type (migrations/0008): a grantee never makes one. */
-const NOTE_TYPE = "note"
-
 /**
  * The props that are the OWNER's to set (docs/metadata.md): how a note is
  * laid out. A push may carry them unchanged — every row carries its props
@@ -358,7 +356,8 @@ export function planSliceWrite(
   for (const node of payload.nodes) {
     const stored = slice.nodes.get(node.id)
     if (stored === undefined) {
-      if (node.type === NOTE_TYPE) {
+      // A note root of either kind (`isNoteType`): a grantee never makes one.
+      if (isNoteType(node.type)) {
         return refuse({
           status: 403,
           error: "permission_denied",

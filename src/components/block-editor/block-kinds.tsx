@@ -178,7 +178,12 @@ const note: BlockKind = {
   // control, which a swap would leave un-tickable. A favicon is nothing of
   // the kind.)
   glyphNode: (block) => (
-    <NoteFavicon note={{ id: block.id, type: noteTypeOf(block.id) }} className="size-[15px]" />
+    <NoteFavicon
+      // A board's kind is its type; a note's is read off its id (a day, a
+      // week, or a note).
+      note={{ id: block.id, type: block.type === "board" ? "board" : noteTypeOf(block.id) }}
+      className="size-[15px]"
+    />
   ),
   // A note's title is a NAME, not content: it is set in the interface font
   // the sidebar and the note header use for it, not the content font the
@@ -192,6 +197,8 @@ const note: BlockKind = {
 export const BLOCK_KINDS: Readonly<Record<BlockType, BlockKind>> = {
   text,
   note,
+  // A board is a note root of the other kind: the same row, its own favicon.
+  board: note,
   ul: { slot: "dot", typography: () => BODY },
   ol: { slot: "number", typography: () => BODY },
   todo,

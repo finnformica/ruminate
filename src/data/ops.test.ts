@@ -4,6 +4,7 @@ import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
 import type { BlockDoc } from "../blocks/types"
 import {
+  BOARD_TYPE,
   blockView,
   buildGraphSnapshot,
   docToGraph,
@@ -50,6 +51,23 @@ const A =
   "- one\n  id:: blk_one0000000\n- two\n  id:: blk_two0000000\n  - deep\n    id:: blk_deep000000\n"
 
 describe("docToOps", () => {
+  it("an edit to a board's outline leaves it a board: the root's kind is not the doc's", () => {
+    const snapshot = applyOps(
+      graphOf({ a: A }),
+      [{ op: "setType", id: "a", type: BOARD_TYPE }],
+      NOW,
+    )
+    const doc = updateText(noteDoc("a", snapshot) as BlockDoc, "blk_one0000000", "one!")
+    const ops = docToOps("a", doc, snapshot)
+    expect(ops).toEqual([{ op: "setText", id: "blk_one0000000", text: "one!" }])
+    expect(applyOps(snapshot, ops, NOW).nodes.get("a")?.type).toBe(BOARD_TYPE)
+    // And a board is a note to every pass that asks: deleted as one, held
+    // as a root, never a block.
+    expect(kinds(deleteNoteOps("a", snapshot))).toContain("delete")
+    expect(deleteBlockOps("a", snapshot)).toEqual([])
+    expect(unassignedIds(snapshot).has("a")).toBe(false)
+  })
+
   it("a note the graph lacks: create the note and every block, link them in order", () => {
     const empty = buildGraphSnapshot([], [])
     const ops = docToOps("a", parse(A), empty)

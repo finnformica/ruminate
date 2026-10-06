@@ -1,4 +1,4 @@
-import { NOTE_TYPE, noteOrderIds, type GraphSnapshot } from "./graph"
+import { isNoteType, noteOrderIds, type GraphSnapshot } from "./graph"
 import type { NoteId } from "../schema"
 
 /**
@@ -20,7 +20,8 @@ import type { NoteId } from "../schema"
  * everything else is the caller's fallback band.
  */
 
-const isNote = (snapshot: GraphSnapshot, id: string) => snapshot.nodes.get(id)?.type === NOTE_TYPE
+const isNote = (snapshot: GraphSnapshot, id: string) =>
+  isNoteType(snapshot.nodes.get(id)?.type ?? "")
 
 /**
  * The manually placed notes, in their order — live notes only.

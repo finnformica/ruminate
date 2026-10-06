@@ -5,9 +5,9 @@ import { linkPropsOf } from "../blocks/link"
 import { imagePropsOf } from "../blocks/image"
 import {
   CHILD_KIND,
-  NOTE_TYPE,
   docToParts,
   isCorpusRoot,
+  isNoteType,
   parseProps,
   reconcileSortKeys,
   sortKeyBetween,
@@ -228,7 +228,7 @@ export function reachableFrom(
 /** Every note node's id. */
 export function noteIds(snapshot: GraphSnapshot): string[] {
   const ids: string[] = []
-  for (const node of snapshot.nodes.values()) if (node.type === NOTE_TYPE) ids.push(node.id)
+  for (const node of snapshot.nodes.values()) if (isNoteType(node.type)) ids.push(node.id)
   return ids
 }
 
@@ -240,7 +240,7 @@ export function noteIds(snapshot: GraphSnapshot): string[] {
  */
 export function deleteNoteOps(noteId: NoteId, snapshot: GraphSnapshot): Op[] {
   const note = snapshot.nodes.get(noteId)
-  if (!note || note.type !== NOTE_TYPE) return []
+  if (!note || !isNoteType(note.type)) return []
   const others = reachableFrom(
     snapshot,
     noteIds(snapshot).filter((id) => id !== noteId),
@@ -265,7 +265,7 @@ function blockIdsOf(ids: string | string[], snapshot: GraphSnapshot): string[] {
   const out: string[] = []
   for (const id of typeof ids === "string" ? [ids] : ids) {
     const node = snapshot.nodes.get(id)
-    if (node && node.type !== NOTE_TYPE && !out.includes(id)) out.push(id)
+    if (node && !isNoteType(node.type) && !out.includes(id)) out.push(id)
   }
   return out
 }
@@ -323,7 +323,7 @@ export function deleteSubtreeOps(blockIds: string | string[], snapshot: GraphSna
   const parentsOf = parentsIndex(snapshot)
   const roots = noteIds(snapshot).filter((id) => !named.has(id))
   for (const other of snapshot.nodes.values()) {
-    if (named.has(other.id) || other.type === NOTE_TYPE) continue
+    if (named.has(other.id) || isNoteType(other.type)) continue
     // The corpus root is parentless by construction (see ROOT_TYPE), so it
     // would walk in here as a rescue root — and since it holds every note,
     // walking from it would rescue the entire corpus and delete nothing.
@@ -546,7 +546,7 @@ function parentLookup(snapshot: GraphSnapshot): (id: string) => Set<string> {
 export function reservedNoteIds(snapshot: GraphSnapshot, noteId: string): Set<string> {
   const reserved = new Set<string>()
   for (const node of snapshot.nodes.values()) {
-    if (node.type === NOTE_TYPE && node.id !== noteId) reserved.add(node.id)
+    if (isNoteType(node.type) && node.id !== noteId) reserved.add(node.id)
   }
   return reserved
 }
@@ -611,12 +611,17 @@ export function partsToOps(
         type: node.type,
         text: node.text,
         props: node.props,
-        ...(node.type === NOTE_TYPE ? {} : { notesId: noteId }),
+        ...(isNoteType(node.type) ? {} : { notesId: noteId }),
       })
       continue
     }
     if (old.text !== node.text) sets.push({ op: "setText", id: node.id, text: node.text })
-    if (old.type !== node.type) sets.push({ op: "setType", id: node.id, type: node.type })
+    // The note's own kind — a note or a board — is not the doc's to say
+    // (`docToParts` writes `note` for a root it has only to make): an edit
+    // to a board's outline leaves it a board.
+    if (old.type !== node.type && node.id !== noteId) {
+      sets.push({ op: "setType", id: node.id, type: node.type })
+    }
     if (old.props !== node.props) sets.push({ op: "setProps", id: node.id, props: node.props })
   }
 
@@ -712,7 +717,7 @@ export function notesTouchedBy(snapshot: GraphSnapshot, ops: readonly Op[]): Set
   }
   const notes = new Set<NoteId>()
   for (const id of [...ids, ...reachableFrom(snapshot, ids, "up")]) {
-    if (snapshot.nodes.get(id)?.type === NOTE_TYPE) notes.add(id)
+    if (isNoteType(snapshot.nodes.get(id)?.type ?? "")) notes.add(id)
   }
   return notes
 }

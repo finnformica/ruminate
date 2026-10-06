@@ -10,10 +10,10 @@ import {
 } from "../blocks/link"
 import type { BlockProps } from "../blocks/types"
 import type { NoteId } from "../schema"
-import { BOARD_PROP, FEATURE_PROP } from "../utils/board-prop"
 import {
-  NOTE_TYPE,
+  BOARD_TYPE,
   childIdsOf,
+  isLegacyBoard,
   noteDoc,
   parentIdsOf,
   parseProps,
@@ -31,9 +31,9 @@ import { applyOps, type Op } from "./ops"
  * few features — a location, an object, a material, a link to where it
  * came from — you can set on each one from a form instead of the outline.
  *
- * A board is a note whose page carries `board: true` (`BOARD_PROP`):
+ * A board is a note whose root node is of type `board` (`BOARD_TYPE`):
  * made by **New board**, drawn with its own icon, opened on its own page.
- * Beneath that one property nothing here is a new kind of thing. Its pictures
+ * Beneath that one type nothing here is a new kind of thing. Its pictures
  * are the image blocks written in the note: the ones its outline reaches,
  * and the ones nothing reaches yet, which sit in the note's Unassigned
  * basket (`basket.ts`) as any such block does. A picture added from the
@@ -152,13 +152,22 @@ export const isLinkType = (type: FeatureType): boolean => type === "link"
 /** Whether a feature is the one a picture's location is offered to. */
 const isPlaceType = (type: FeatureType): boolean => type === "place"
 
-/** Whether the note is a board: a note whose page carries `board: true`
- * (`BOARD_PROP`). The board page refuses any other note, and the writes
- * here write to nothing else. */
+/**
+ * The property on a block that makes it one of a board's features
+ * (docs/boards.md, "Features"): `{ feature: { type, multi, notes } }` in
+ * the props of a direct child of the board's page, whose text is the
+ * feature's label and whose children are its values.
+ */
+const FEATURE_PROP = "feature"
+
+/** Whether the note is a board: a note root of type `board` (`BOARD_TYPE`)
+ * — or, until migrations/0020 has run, a note whose page still carries the
+ * old property (`isLegacyBoard`). The board page refuses any other note,
+ * and the writes here write to nothing else. */
 export function isBoard(snapshot: GraphSnapshot, boardId: NoteId): boolean {
   const node = snapshot.nodes.get(boardId)
-  if (!node || node.type !== NOTE_TYPE) return false
-  return parseProps(node.props)?.[BOARD_PROP] === true
+  if (!node) return false
+  return node.type === BOARD_TYPE || isLegacyBoard(node)
 }
 
 /**

@@ -1,7 +1,7 @@
 import { useAtomValue, useStore } from "jotai"
 import { selectAtom } from "jotai/utils"
 import React from "react"
-import { NOTE_TYPE, propsJson } from "../data/graph"
+import { NOTE_TYPE, isNoteType, propsJson } from "../data/graph"
 import { notePropsOps } from "../data/note-meta"
 import { deleteNoteOps, type Op } from "../data/ops"
 import { emittedNoteTitle } from "../data/note-identity"
@@ -79,7 +79,7 @@ export function useRenameNote() {
       if (!noteId) return false
       const snapshot = store.get(graphSnapshotAtom)
       const note = snapshot.nodes.get(noteId)
-      if (!note || note.type !== NOTE_TYPE) return false
+      if (!note || !isNoteType(note.type)) return false
 
       const title = newTitle.trim()
       const current = emittedNoteTitle(noteId, note.text) ?? ""

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { parse } from "../blocks/parse"
 import { serialize } from "../blocks/serialize"
-import { buildGraphSnapshot, docToGraph, type GraphSnapshot } from "./graph"
+import { BOARD_TYPE, buildGraphSnapshot, docToGraph, type GraphSnapshot } from "./graph"
 import { createNotesBuilder, noteFromNode, notePropsEntries, notePropsOps } from "./note-meta"
 import { applyOps } from "./ops"
 
@@ -56,13 +56,26 @@ describe("noteFromNode", () => {
     expect(n.type).toBe("note")
   })
 
-  it("is a board when the page says so, and only then", () => {
+  it("is a board when its root is typed so, and only then", () => {
+    const boardOf = (id: string, markdown: string) => {
+      const { nodes, links } = docToGraph(id, serialize(parse(markdown)), 1)
+      const retyped = nodes.map((n) => (n.id === id ? { ...n, type: BOARD_TYPE } : n))
+      return noteFromNode(id, buildGraphSnapshot(retyped, links))!
+    }
+    const board = boardOf("blk_b", "- x\n")
+    expect(board.type).toBe("board")
+    expect(board.displayName).toBe("x")
+    expect(boardOf("blk_c", "").displayName).toBe("Empty board")
+    // A `board` prop that is not `true` has never made a board.
+    expect(note("blk_d", "- x\n", { board: "yes" }).type).toBe("note")
+    // A daily note is a daily note whatever its row says.
+    expect(boardOf("2026-03-04", "- x\n").type).toBe("daily")
+  })
+
+  it("reads a board in the shape it had before migrations/0020 (removed with isLegacyBoard)", () => {
     const board = note("blk_b", "- x\n", { board: true })
     expect(board.type).toBe("board")
     expect(board.displayName).toBe("x")
-    expect(note("blk_c", "", { board: true }).displayName).toBe("Empty board")
-    expect(note("blk_d", "- x\n", { board: "yes" }).type).toBe("note")
-    // A daily note is a daily note whatever its props say.
     expect(note("2026-03-04", "- x\n", { board: true }).type).toBe("daily")
   })
 

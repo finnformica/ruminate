@@ -1,7 +1,7 @@
 import { Searcher, type FullOptions } from "fast-fuzzy"
 import { searchTypeValues } from "../blocks/registry"
 import type { BlockType } from "../blocks/types"
-import { isCorpusRoot, noteDoc, NOTE_TYPE, parentIdsOf, type GraphSnapshot } from "../data/graph"
+import { isCorpusRoot, isNoteType, noteDoc, parentIdsOf, type GraphSnapshot } from "../data/graph"
 import type { Note, NoteId } from "../schema"
 import type { Filter, Query, Sort } from "./search"
 import { compareNotes, matchesNoteScope, testNoteFilters } from "./search-notes"
@@ -165,7 +165,7 @@ export function indexNoteBlocks(note: Note, snapshot: GraphSnapshot): NoteBlockI
         const node = snapshot.nodes.get(parentId)
         // The note holding a root block is not a parent block, and the
         // corpus root holds notes only to order them.
-        if (!node || parentId === id || node.type === NOTE_TYPE || isCorpusRoot(node)) continue
+        if (!node || parentId === id || isNoteType(node.type) || isCorpusRoot(node)) continue
         known.push({ id: parentId, text: node.text })
       }
       parents.set(id, known)

@@ -1,5 +1,5 @@
 import { isListItem } from "./markers"
-import { defOf } from "./registry"
+import { defOf, isNoteFamily } from "./registry"
 import { parse } from "./parse"
 import { blockLines } from "./serialize"
 import type { Block, BlockDoc } from "./types"
@@ -31,7 +31,7 @@ export function toDisplayMarkdown(content: string): string {
  * into the paragraph before them, or lazily continue a quote or a list item,
  * unless a blank line keeps them apart. */
 const paragraphLike = (type: Block["type"]): boolean =>
-  type === "text" || type === "note" || type === "image"
+  type === "text" || isNoteFamily(type) || type === "image"
 
 /**
  * Does markdown need a blank line between these two consecutive lines of

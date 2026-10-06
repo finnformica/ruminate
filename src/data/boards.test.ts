@@ -32,6 +32,7 @@ import {
   updateFeatureOps,
 } from "./boards"
 import {
+  BOARD_TYPE,
   buildGraphSnapshot,
   childIdsOf,
   docToGraph,
@@ -58,9 +59,9 @@ function graphOf(notes: Record<string, string>): GraphSnapshot {
   const nodes = []
   const links = []
   for (const [id, markdown] of Object.entries(notes)) {
-    // Every note in a fixture is a board: the page carries the property.
-    const g = docToGraph(id, serialize(parse(markdown)), 1, { board: true })
-    nodes.push(...g.nodes)
+    // Every note in a fixture is a board: its root is retyped.
+    const g = docToGraph(id, serialize(parse(markdown)), 1)
+    nodes.push(...g.nodes.map((n) => (n.id === id ? { ...n, type: BOARD_TYPE } : n)))
     links.push(...g.links)
   }
   return buildGraphSnapshot(nodes, links)
@@ -1025,8 +1026,9 @@ describe("the defaults", () => {
     ])
     // Together at the top, the pictures where they were.
     expect(childIdsOf(next, "b").slice(-2)).toEqual(["blk_pic1000000", "blk_pic2000000"])
+    // Made a note again (**Make this a note**), it is no board to write to.
     const plain = graphOf({ b: "" })
-    const unmade = applyOps(plain, [{ op: "setProps", id: "b", props: null }], NOW)
+    const unmade = applyOps(plain, [{ op: "setType", id: "b", type: "note" }], NOW)
     expect(defaultFeatureOps(unmade, "b")).toEqual([])
   })
 })

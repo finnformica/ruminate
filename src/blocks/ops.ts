@@ -1,4 +1,5 @@
 import { blockId } from "./id"
+import { isNoteFamily } from "./registry"
 import type { Block, BlockDoc, BlockProps, BlockType } from "./types"
 import { hasOccurrence, idOfKey, keyOf, parentKeyOf, directionOfKey, type Direction } from "./view"
 
@@ -138,8 +139,9 @@ export function updateText(doc: BlockDoc, id: string, text: string): BlockDoc {
 export function updateType(doc: BlockDoc, id: string, type: BlockType): BlockDoc {
   const block = doc.blocks[id]
   // A note node is a note for good (docs/graph-schema-v2.md): a note row in
-  // a results view can be retitled, never turned into a bullet.
-  if (!block || block.type === type || block.type === "note") return doc
+  // a results view can be retitled, never turned into a bullet. A board is a
+  // note root too: its kind is the note's menu to change, never a block's.
+  if (!block || block.type === type || isNoteFamily(block.type)) return doc
   const next = clone(doc)
   next.blocks[id] = { ...block, type }
   return next
@@ -160,7 +162,7 @@ export function updateBlock(doc: BlockDoc, id: string, patch: BlockPatch): Block
   if (!block) return doc
   const text = patch.text ?? block.text
   // A note's type is not a block's to change (see `updateType`).
-  const type = block.type === "note" ? block.type : (patch.type ?? block.type)
+  const type = isNoteFamily(block.type) ? block.type : (patch.type ?? block.type)
   const props = patch.props === undefined ? block.props : patch.props
   if (text === block.text && type === block.type && props === block.props) return doc
   const next = clone(doc)
