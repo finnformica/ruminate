@@ -171,7 +171,9 @@ export async function corpusPut(
  * lookup on `(user_id, id)`, so the same answer now costs ~1.8k rows: one pass
  * over the tenant's rows plus two seeks per link.
  */
-export async function corpusStatus(tenant: TenantDb): Promise<ReplicaStatusBody> {
+export async function corpusStatus(
+  tenant: TenantDb,
+): Promise<Omit<ReplicaStatusBody, "replica_id">> {
   const rows = await tenant.exec(
     "SELECT " +
       "(SELECT COUNT(*) FROM nodes WHERE user_id = :tenant AND deleted_at IS NULL) AS nodes, " +

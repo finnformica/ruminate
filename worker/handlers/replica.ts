@@ -185,9 +185,19 @@ export async function replica(
   await readyTenant(tenant)
 
   if (pathname === "/api/replica/notes" && method === "PUT") return replicaPut(request, tenant)
-  if (pathname === "/api/replica/notes") return replicaPull(request, tenant)
-  return jsonResponse(await corpusStatus(tenant))
+  if (pathname === "/api/replica/notes") return replicaPull(request, tenant, env)
+  return jsonResponse({ ...(await corpusStatus(tenant)), replica_id: replicaId(env) })
 }
+
+/**
+ * Which database this Worker answers from. Production has no `REPLICA_ID`;
+ * a preview version carries its clone's D1 id (scripts/preview-deploy.mjs).
+ * Every pull and status response says, so a client whose stored cursor came
+ * from a different database can tell — a cursor is a row sequence, and a
+ * rebuilt clone starts its sequence wherever production was that day, which
+ * is behind any device that had pushed to the previous clone.
+ */
+const replicaId = (env: Env): string => env.REPLICA_ID || "production"
 
 /**
  * Row pull — the read half of the replica API (database-authoritative mode's
@@ -202,7 +212,7 @@ export async function replica(
  *   `deleted_at` — which is why this response carries nothing but rows (see
  *   `replica-corpus.ts`).
  */
-async function replicaPull(request: Request, tenant: TenantDb): Promise<Response> {
+async function replicaPull(request: Request, tenant: TenantDb, env: Env): Promise<Response> {
   const sinceRaw = new URL(request.url).searchParams.get("since")
   const parsed = sinceRaw === null ? null : parseSinceCursor(sinceRaw)
   if (sinceRaw !== null && parsed === null) return jsonResponse({ error: "invalid_since" }, 400)
@@ -212,9 +222,8 @@ async function replicaPull(request: Request, tenant: TenantDb): Promise<Response
   // corpus, and it leaves with a sequence cursor.
   const since = parsed !== null && parsed >= LEGACY_TIMESTAMP_CURSOR_FLOOR ? null : parsed
 
-  return jsonResponse(
-    since === null ? await corpusPullFull(tenant) : await corpusPullSince(tenant, since),
-  )
+  const body = since === null ? await corpusPullFull(tenant) : await corpusPullSince(tenant, since)
+  return jsonResponse({ ...body, replica_id: replicaId(env) })
 }
 
 async function replicaPut(request: Request, tenant: TenantDb): Promise<Response> {
