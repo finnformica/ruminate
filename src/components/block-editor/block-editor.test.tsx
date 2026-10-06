@@ -845,7 +845,7 @@ describe("paste as link (Ruminate payload with ids)", () => {
     expect(loop).not.toBeNull()
     expect(loop.getAttribute("aria-disabled")).toBe("true")
     expect(loop.className).toContain("cursor-not-allowed")
-    expect(loop.className).toContain("block-toggle-pinned")
+    expect(loop.parentElement!.getAttribute("data-testid")).toBe("chevron-column")
     fireEvent.click(loop)
     expect(serializedLines(getByTestId)).toEqual(["- A", "  - B", "    - A"])
     // Ordinary parents are unchanged: a real toggle, no explanation.
@@ -1524,9 +1524,10 @@ describe("heading hash marker", () => {
     expect(slots[1].className).toContain("text-xl") // depth 1
     for (const slot of slots) {
       expect(slot.className).toContain("font-bold")
-      // Right-aligned in the shared 15px slot so a wide hash overflows left
-      // toward the gutter instead of pushing the text column.
-      expect(slot.className).toContain("justify-end")
+      // Centred in the shared 15px slot, on the same centre line as every
+      // other key; a wide hash outgrows the slot symmetrically, never
+      // pushing the text column.
+      expect(slot.className).toContain("justify-center")
       expect(slot.className).toContain("w-[15px]")
       const glyph = slot.querySelector("span:not([data-testid])")!
       expect(glyph.textContent).toBe("#")
@@ -1603,19 +1604,28 @@ describe("collapse toggle", () => {
     expect(container.querySelectorAll('button[aria-label="Collapse"]')).toHaveLength(4)
   })
 
-  it("a bullet parent's toggle shares the marker slot with the dot, which becomes the key", () => {
+  it("a parent's toggle sits in the chevron column, before a key that stays put", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
     const toggle = toggleOf(container, "blk_bp")!
-    const slot = toggle.parentElement!
+    const column = toggle.parentElement!
+    expect(column.getAttribute("data-testid")).toBe("chevron-column")
+    expect(column.className).toContain("w-[17px]")
+    expect(column.className).toContain("relative")
+    // The dot keeps its own slot after the column; it is no focus button.
+    const slot = column.nextElementSibling!
     expect(slot.className).toContain("w-[15px]")
-    expect(slot.className).toContain("relative")
-    // The dot is the fading key; it is no longer a focus button.
-    expect(slot.querySelector(".block-key")).not.toBeNull()
+    expect(slot.querySelector(".block-glyph-fill")).not.toBeNull()
     expect(slot.querySelector('button[aria-label="Focus on block"]')).toBeNull()
     // Same for the heading's hash.
-    const hashSlot = toggleOf(container, "blk_hp")!.parentElement!
+    const hashSlot = toggleOf(container, "blk_hp")!.parentElement!.nextElementSibling!
     expect(hashSlot.getAttribute("data-testid")).toBe("heading-hash")
-    expect(hashSlot.querySelector(".block-key")?.textContent).toBe("#")
+    expect(hashSlot.textContent).toBe("#")
+    // A leaf carries the column too, empty, so its text stays in the column.
+    const leafColumn = lineOf(container, "blk_leaf").querySelector(
+      '[data-testid="chevron-column"]',
+    )!
+    expect(leafColumn).not.toBeNull()
+    expect(leafColumn.children).toHaveLength(0)
   })
 
   it("a leaf's bullet is a static glyph too: no marker focuses on click", () => {
@@ -1630,67 +1640,113 @@ describe("collapse toggle", () => {
     expect(container.querySelector('button[aria-label="Focus on block"]')).toBeNull()
   })
 
-  it("a todo parent keeps its checkbox in the slot and takes the chevron beside it", () => {
+  it("a todo parent keeps its checkbox in the slot and folds from the chevron column", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
     const line = lineOf(container, "blk_tp")
     const checkbox = line.querySelector('input[type="checkbox"]')!
     expect(checkbox).not.toBeNull()
     const slot = checkbox.parentElement!
     expect(slot.className).toContain("w-[15px]")
-    // The checkbox slot never swaps (no key slot) and holds no button, but it
-    // hints at the chevron beside it.
-    expect(slot.className).not.toContain("block-toggle-slot")
-    expect(slot.className).toContain("block-toggle-hint")
     expect(slot.querySelector("button")).toBeNull()
-    // The chevron hugs the surface's edge from outside, with no hover surface,
-    // and follows the slot in the DOM so the hint can reach it.
+    // The chevron is in the column before the slot, like every parent's.
     const toggle = toggleOf(container, "blk_tp")!
-    expect(toggle.parentElement!.className).toContain("-left-[15px]")
-    expect(slot.nextElementSibling).toBe(toggle.parentElement)
-    expect(toggle.className).toContain("enabled:hover:bg-transparent")
-    // It folds on click and pins while collapsed.
+    expect(toggle.parentElement!.getAttribute("data-testid")).toBe("chevron-column")
+    expect(toggle.parentElement!.nextElementSibling).toBe(slot)
+    // It folds on click; the checkbox is untouched by it.
     fireEvent.click(toggle)
     expect(container.querySelector('[data-block-row="blk_tc"]')).toBeNull()
-    expect(toggleOf(container, "blk_tp")!.className).toContain("block-toggle-pinned")
+    expect(lineOf(container, "blk_tp").querySelector('input[type="checkbox"]')).not.toBeNull()
   })
 
-  it("a paragraph parent's slot is empty but keeps the column and hosts the chevron", () => {
+  it("a paragraph keys on the pilcrow, a quote on >, and a leaf has no toggle", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
-    const slot = toggleOf(container, "blk_pp")!.parentElement!
+    const slot = toggleOf(container, "blk_pp")!.parentElement!.nextElementSibling!
     expect(slot.getAttribute("data-testid")).toBe("paragraph-slot")
     expect(slot.className).toContain("w-[15px]")
-    expect(slot.querySelector(".block-key")).toBeNull()
-    // No key to swap with, so the chevron is pinned visible while open too,
-    // and stays so after a fold and an unfold.
-    expect(toggleOf(container, "blk_pp")!.className).toContain("block-toggle-pinned")
-    fireEvent.click(toggleOf(container, "blk_pp")!)
-    fireEvent.click(toggleOf(container, "blk_pp")!)
-    expect(toggleOf(container, "blk_pp")!.className).toContain("block-toggle-pinned")
-    // A quote keys on `>`; a leaf paragraph keeps the empty slot, no toggle.
+    expect(slot.textContent).toBe("¶")
     const { container: c2 } = render(
       <Harness initial={"A paragraph\n  id:: blk_p\n> A quote\n  id:: blk_q\n"} />,
     )
     expect(lineOf(c2, "blk_p").querySelector('[data-testid="paragraph-slot"]')?.textContent).toBe(
-      "",
+      "¶",
     )
     expect(lineOf(c2, "blk_q").querySelector('[data-testid="quote-glyph"]')?.textContent).toBe(">")
     expect(toggleOf(c2, "blk_p")).toBeNull()
   })
 
-  it("clicking the toggle collapses and expands, pinning the chevron while collapsed", () => {
+  it("a note row's key is its favicon: a board's where the page says board", () => {
+    // A board is a plain note whose page carries the board property
+    // (docs/boards.md) — nothing in its id says so, so the row reads the
+    // props, as the metadata layer does.
+    const note = (id: string, props: Record<string, unknown> | null) => ({
+      props: null,
+      rootBlockIds: [id],
+      blocks: { [id]: { id, type: "note" as const, text: "Trips", props, children: [] } },
+    })
+    const { container } = render(<Harness initialDoc={note("blk_board", { board: true })} />)
+    expect(container.querySelector('[data-testid="favicon-board"]')).not.toBeNull()
+    const { container: plain } = render(<Harness initialDoc={note("blk_note", null)} />)
+    expect(plain.querySelector('[data-testid="favicon-board"]')).toBeNull()
+    expect(plain.querySelector('[data-testid="favicon-default"]')).not.toBeNull()
+  })
+
+  it("a click anywhere on the row's surface selects it; a double-click edits it", () => {
+    // The chevron column (empty on a leaf), the key slot and the surface's
+    // padding are the row as much as its text is: a click on any of them
+    // selects, and none of them reads as a dead spot.
     const { container } = render(<Harness initial={OUTLINE} />)
-    fireEvent.click(toggleOf(container, "blk_bp")!)
+    const line = lineOf(container, "blk_leaf")
+    const selected = () => line.className.includes("bg-bg-secondary")
+    expect(selected()).toBe(false)
+    fireEvent.click(line.querySelector('[data-testid="chevron-column"]')!)
+    expect(selected()).toBe(true)
+    // The key slot of another row moves the selection there.
+    const bulletLine = lineOf(container, "blk_bp")
+    fireEvent.click(bulletLine.querySelector(".block-glyph-fill")!)
+    expect(bulletLine.className).toContain("bg-bg-secondary")
+    expect(selected()).toBe(false)
+    // A double-click left of the text edits from the start of the line.
+    fireEvent.doubleClick(bulletLine.querySelector('[data-testid="chevron-column"]')!, {
+      clientX: -5,
+    })
+    const textarea = container.querySelector("textarea")!
+    expect(textarea.value).toBe("Bullet parent")
+    expect(textarea.selectionStart).toBe(0)
+  })
+
+  it("a click on a control is the control's alone, never a selection", () => {
+    const { container } = render(<Harness initial={OUTLINE} />)
+    // Put the selection somewhere known first.
+    fireEvent.click(lineOf(container, "blk_leaf").querySelector('[data-testid="block-body"]')!)
+    expect(lineOf(container, "blk_leaf").className).toContain("bg-bg-secondary")
+    // The chevron folds its row; the selection stays where it was.
+    fireEvent.click(toggleOf(container, "blk_hp")!)
+    expect(container.querySelector('[data-block-row="blk_hc"]')).toBeNull()
+    expect(lineOf(container, "blk_hp").className).not.toContain("bg-bg-secondary")
+    // The checkbox ticks its row; the selection stays where it was.
+    fireEvent.click(lineOf(container, "blk_tp").querySelector('input[type="checkbox"]')!)
+    expect(lineOf(container, "blk_tp").className).not.toContain("bg-bg-secondary")
+    expect(lineOf(container, "blk_leaf").className).toContain("bg-bg-secondary")
+  })
+
+  it("clicking the toggle collapses and expands; the chevron turns, the key stays", () => {
+    const { container } = render(<Harness initial={OUTLINE} />)
+    const open = toggleOf(container, "blk_bp")!
+    expect(open.querySelector("svg")!.getAttribute("class")).toContain("rotate-0")
+    fireEvent.click(open)
     expect(container.querySelector('[data-block-row="blk_bc"]')).toBeNull()
-    const pinned = toggleOf(container, "blk_bp")!
-    expect(pinned.getAttribute("aria-label")).toBe("Expand")
-    expect(pinned.className).toContain("block-toggle-pinned")
-    // The dot yields to the chevron for the duration.
-    expect(pinned.parentElement!.querySelector(".block-key")!.className).toContain(
-      "block-key-hidden",
-    )
-    fireEvent.click(pinned)
+    const closed = toggleOf(container, "blk_bp")!
+    expect(closed.getAttribute("aria-label")).toBe("Expand")
+    expect(closed.querySelector("svg")!.getAttribute("class")).toContain("-rotate-90")
+    // The dot never yields to the chevron: same slot, same glyph, open or shut.
+    expect(
+      closed.parentElement!.nextElementSibling!.querySelector(".block-glyph-fill"),
+    ).not.toBeNull()
+    fireEvent.click(closed)
     expect(container.querySelector('[data-block-row="blk_bc"]')).not.toBeNull()
-    expect(toggleOf(container, "blk_bp")!.className).not.toContain("block-toggle-pinned")
+    expect(toggleOf(container, "blk_bp")!.querySelector("svg")!.getAttribute("class")).toContain(
+      "rotate-0",
+    )
   })
 
   it("a fold keeps the hidden rows for the animation, inert, then lets them go", () => {
@@ -1743,14 +1799,15 @@ describe("collapse toggle", () => {
     }
   })
 
-  it("hangs the guide line from the key of every block type", () => {
+  it("hangs the guide line from the chevron column of every parent", () => {
     const { container } = render(<Harness initial={OUTLINE} />)
-    // Under the 15px slot's centre — every block type has a key there — and
-    // the children start one indent in.
+    // Under the 17px column's centre, whatever the parent's type — and the
+    // children start one indent in: the column's centre-to-centre distance
+    // to the key, so a parent's key stands over its children's chevrons.
     for (const id of ["blk_bp", "blk_hp", "blk_tp", "blk_pp"]) {
       const guide = guideOf(container, id)
       expect(guide, id).not.toBeNull()
-      expect(guide!.style.left, id).toBe("11px")
+      expect(guide!.style.left, id).toBe("12px")
       const child = guide!.closest<HTMLElement>("[data-block-row]")!
       expect(child.style.paddingLeft).toBe("24px")
     }
@@ -1794,7 +1851,7 @@ describe("code blocks", () => {
     "  id:: blk_after",
   ].join("\n")
 
-  it("renders verbatim in a mono panel around the line, with its language, no marker slot", () => {
+  it("renders verbatim in a mono panel around the line, with its language, an empty key slot", () => {
     const { container } = render(<Harness initial={CODE} />)
     const body = container.querySelector<HTMLElement>('[data-block-id="blk_code"]')!
     expect(body.textContent).toBe("const a = 1\n  b()")
@@ -1810,10 +1867,10 @@ describe("code blocks", () => {
     expect(panel.className).toContain("border")
     expect(body.className).not.toContain("border")
     expect(panel.querySelector('[data-testid="code-language"]')?.textContent).toBe("ts")
-    // No marker slot: the panel starts where the row does, as a picture does.
+    // No key: the panel is its own mark. The slot stays, empty, so the panel
+    // starts at the text column as a picture does.
     expect(row.querySelector('[data-testid="paragraph-slot"]')).toBeNull()
-    expect(row.querySelector('[data-testid="code-slot"]')).toBeNull()
-    expect(row.querySelector(".block-key")).toBeNull()
+    expect(row.querySelector('[data-testid="figure-slot"]')!.textContent).toBe("")
   })
 
   it("highlights the view for its language once the grammar has loaded", async () => {
@@ -1834,7 +1891,7 @@ describe("code blocks", () => {
     expect(body.textContent).toBe("nuqneH")
   })
 
-  it("gets the slot back for its chevron when it has rows under it", () => {
+  it("folds from the chevron column when it has rows under it", () => {
     const parent = ["```ts", "x", "```", "  id:: blk_code", "  - child", "    id:: blk_child"]
     const { container } = render(<Harness initial={parent.join("\n")} />)
     const row = container.querySelector('[data-block-row="blk_code"]')!
@@ -3039,6 +3096,7 @@ describe("BlockEditor images", () => {
     const { container } = render(<Harness initialDoc={doc} />)
     expect(container.querySelector('[data-testid="block-image"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="paragraph-slot"]')).toBeNull()
+    expect(container.querySelector('[data-testid="figure-slot"]')!.textContent).toBe("")
   })
 
   it("a click on the empty space around a picture selects its row", () => {

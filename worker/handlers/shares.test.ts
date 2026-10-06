@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import migration0012 from "../../migrations/0012_shares.sql?raw"
 import migration0017 from "../../migrations/0017_share_views.sql?raw"
+import migration0020 from "../../migrations/0020_share_revoked_by.sql?raw"
 import { createMcpTestEnv, type McpTestEnv } from "../mcp/test-support"
 import type { SharesListBody, SliceBody } from "../shares/wire"
 import { buildGraphSnapshot, noteDoc } from "../../src/data/graph"
@@ -149,6 +150,7 @@ beforeEach(async () => {
   harness = await createMcpTestEnv()
   await harness.control.execScript(migration0012)
   await harness.control.execScript(migration0017)
+  await harness.control.execScript(migration0020)
   // `addUser` records `u<id>@example.com` — what the sign-in callback would.
   await harness.addUser(OWNER)
   await harness.addUser(GRANTEE)
@@ -336,9 +338,10 @@ describe("list", () => {
     expect(stranger.received).toEqual([])
   })
 
-  it("revokes for the owner only, and a revoked share is gone for the grantee", async () => {
+  it("revokes for the owner, and a revoked share is gone for the grantee", async () => {
     const id = await share(["read"])
-    expect((await send(apiRequest("DELETE", `/${id}`, undefined, "grantee"))).status).toBe(404)
+    // A stranger ends nothing — the 404 an unknown id gets.
+    expect((await send(apiRequest("DELETE", `/${id}`, undefined, "stranger"))).status).toBe(404)
     expect((await slice(id)).status).toBe(200)
 
     expect((await send(apiRequest("DELETE", `/${id}`))).status).toBe(200)
@@ -346,11 +349,45 @@ describe("list", () => {
 
     const owner: SharesListBody = await bodyOf(await send(apiRequest("GET")))
     expect(owner.given[0].revokedAt).toEqual(expect.any(Number))
+    expect(owner.given[0].revokedBy).toBe("owner")
     const grantee: SharesListBody = await bodyOf(
       await send(apiRequest("GET", "", undefined, "grantee")),
     )
     expect(grantee.received).toEqual([])
     expect((await slice(id)).status).toBe(404)
+  })
+
+  it("lets the grantee leave, and the owner sees who ended it", async () => {
+    const id = await share(["read"])
+    expect((await slice(id)).status).toBe(200)
+
+    expect((await send(apiRequest("DELETE", `/${id}`, undefined, "grantee"))).status).toBe(200)
+    // Ended is ended: neither side can end it again.
+    expect((await send(apiRequest("DELETE", `/${id}`, undefined, "grantee"))).status).toBe(404)
+    expect((await send(apiRequest("DELETE", `/${id}`))).status).toBe(404)
+
+    const grantee: SharesListBody = await bodyOf(
+      await send(apiRequest("GET", "", undefined, "grantee")),
+    )
+    expect(grantee.received).toEqual([])
+    expect((await slice(id)).status).toBe(404)
+
+    // The owner keeps the row, marked as left rather than revoked.
+    const owner: SharesListBody = await bodyOf(await send(apiRequest("GET")))
+    expect(owner.given).toHaveLength(1)
+    expect(owner.given[0].revokedAt).toEqual(expect.any(Number))
+    expect(owner.given[0].revokedBy).toBe("grantee")
+  })
+
+  it("a grantee leaves only the share addressed to them", async () => {
+    const forGrantee = await share(["read"])
+    const forStranger = await share(["read"], NOTE_A, "u9@example.com")
+
+    expect((await send(apiRequest("DELETE", `/${forStranger}`, undefined, "grantee"))).status).toBe(
+      404,
+    )
+    expect((await slice(forStranger, "stranger")).status).toBe(200)
+    expect((await slice(forGrantee)).status).toBe(200)
   })
 
   it("ends with the owner: a blocked owner's shares vanish", async () => {

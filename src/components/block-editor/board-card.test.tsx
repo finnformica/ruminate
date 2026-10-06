@@ -86,7 +86,6 @@ describe("BoardCard", () => {
       </Provider>,
     )
     const card = getByTestId("board-card")
-    expect(card.querySelector('[data-testid="favicon-board"]')).not.toBeNull()
     expect(card.querySelector('[data-testid="block-body"]')?.textContent).toBe("Kitchen")
     expect(getByTestId("board-card-line").textContent).toBe("2 pictures · Location, Object")
     // The card is the row's figure: a frame with the layout controls.
@@ -94,8 +93,13 @@ describe("BoardCard", () => {
     expect(getByTestId("board-toolbar")).not.toBeNull()
     fireEvent.click(getByLabelText("Open board"))
     expect(onOpenBoard).toHaveBeenCalledWith("b")
-    // No marker slot before the card: the card starts at the row's edge.
-    expect(container.querySelector('[data-testid="note-favicon-slot"]')).toBeNull()
+    // The board's icon is the row's key, in the key slot before the card,
+    // as every row's key is — not a second one inside the card.
+    expect(container.querySelector('[data-testid="note-favicon-slot"]')).not.toBeNull()
+    expect(
+      container.querySelector('[data-testid="note-favicon-slot"] [data-testid="favicon-board"]'),
+    ).not.toBeNull()
+    expect(card.querySelector('[data-testid="favicon-board"]')).toBeNull()
   })
 
   it("is a note row with the board's favicon when listed", () => {

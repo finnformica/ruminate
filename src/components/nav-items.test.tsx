@@ -367,23 +367,34 @@ describe("the sidebar's Views list", () => {
     // both lean with the label when the row is current. Nothing reports a
     // state any more.
     for (const icon of icons) expect(icon!.className).not.toContain("nav-item-tint")
-    // The note's favicon is an icon; the block's slot holds its marker.
+    // The note's favicon is an icon; the block's slot holds its KEY — the
+    // editor's own (a bullet's dot), never a markdown dash of the list's.
     expect(icons[0]!.querySelector("svg")).not.toBeNull()
-    expect(icons[1]!.querySelector("[data-glyph]")?.getAttribute("data-glyph")).toBe("-")
+    expect(icons[1]!.querySelector("[data-key]")?.getAttribute("data-key")).toBe("ul")
+    expect(icons[1]!.querySelector(".block-glyph-fill")).not.toBeNull()
   })
 
-  it("leads a block row with the block's own markdown marker, whatever its type", () => {
+  it("leads a block row with the block's key, as the editor draws it, whatever its type", () => {
     const rows: BlockViewRow[] = [
       { ...BLOCK, id: "blk_todo", type: "todo" },
       { ...BLOCK, id: "blk_h2", type: "h2" },
       { ...BLOCK, id: "blk_ol", type: "ol" },
       { ...BLOCK, id: "blk_text", type: "text" },
+      { ...BLOCK, id: "blk_code", type: "code" },
     ]
     renderSidebar({ notes: [], blocks: rows })
-    const glyphs = viewRows().map(
-      (row) => row.querySelector(".nav-item-icon:not(.hidden) [data-glyph]")?.textContent,
+    const keys = viewRows().map((row) =>
+      row.querySelector(".nav-item-icon:not(.hidden) [data-key]")!,
     )
-    expect(glyphs).toEqual(["[ ]", "##", "1.", "¶"])
+    // A to-do's box, a heading's #, a number, a pilcrow — the keys the
+    // block's row in its note carries.
+    expect(keys[0].querySelector(".block-checkbox")).not.toBeNull()
+    expect(keys[1].textContent).toBe("#")
+    expect(keys[2].textContent).toBe("1.")
+    expect(keys[3].textContent).toBe("¶")
+    // A figure has no key (its frame is its mark), so its row says what it
+    // is in markdown.
+    expect(keys[4].textContent).toBe("```")
   })
 
   it("lights the note's row only at the note's root, and the block's only focused on it", () => {

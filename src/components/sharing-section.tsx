@@ -10,7 +10,7 @@ import {
   type GivenShare,
   type ReceivedShareSummary,
 } from "../data/shares"
-import { recordedEmailAtom } from "../data/shared-mode"
+import { recordedEmailAtom, requestSharesRefresh } from "../data/shared-mode"
 import type { ShareView } from "../data/shares"
 import { describeFilter, describeSort } from "../utils/view-filter"
 import { githubUserAtom, graphSnapshotAtom, notesAtom } from "../global-state"
@@ -22,8 +22,10 @@ import { SettingsSection } from "./settings-section"
 /**
  * Sharing, on the settings page (docs/sharing.md): the overview. The shares
  * this account has given (the address as typed, the verbs, what was shared,
- * and a Revoke) and the shares it has received (who, the verbs, and what).
- * Sharing itself
+ * and a Revoke) and the shares it has received (who, the verbs, what, and a
+ * Leave). Either button ends the share for good: the row is kept on the
+ * owner's side, marked with who ended it, and a share that is to come back
+ * is a new share. Sharing itself
  * happens where the note or block is — its menu — because the root is
  * chosen there (`share-note-dialog.tsx`).
  */
@@ -86,7 +88,19 @@ export function SharingSection() {
               }
             }}
           />
-          <ReceivedList shares={received} />
+          <ReceivedList
+            shares={received}
+            onLeave={async (id) => {
+              try {
+                await revokeShare(id)
+                // The note leaves the sidebar now, not on the next ambient pull.
+                await requestSharesRefresh()
+                await refresh()
+              } catch (caught) {
+                setError(caught instanceof Error ? caught.message : "Could not leave that share.")
+              }
+            }}
+          />
         </>
       )}
     </SettingsSection>
@@ -159,7 +173,11 @@ function GivenList({
             <div className="flex w-0 grow flex-col gap-1">
               <span className="truncate leading-4">
                 {names}
-                {!live ? <span className="ml-2 text-sm text-text-secondary">(revoked)</span> : null}
+                {!live ? (
+                  <span className="ml-2 text-sm text-text-secondary">
+                    {share.revokedBy === "grantee" ? "(they left)" : "(revoked)"}
+                  </span>
+                ) : null}
               </span>
               <span className="truncate text-sm leading-5 text-text-secondary">
                 {share.granteeEmail} · {describeSharePermissions(share.permissions)}
@@ -183,7 +201,13 @@ function GivenList({
   )
 }
 
-function ReceivedList({ shares }: { shares: ReceivedShareSummary[] | null }) {
+function ReceivedList({
+  shares,
+  onLeave,
+}: {
+  shares: ReceivedShareSummary[] | null
+  onLeave: (id: string) => void | Promise<void>
+}) {
   const labelOf = useRootLabel()
   if (shares === null || shares.length === 0) return null
   return (
@@ -191,22 +215,32 @@ function ReceivedList({ shares }: { shares: ReceivedShareSummary[] | null }) {
       <span className="text-sm leading-4 text-text-secondary">Shared with you</span>
       <ul className="flex list-none flex-col gap-3 p-0">
         {shares.map((share) => (
-          <li key={share.id} className="flex flex-col gap-1">
-            <span className="flex flex-wrap gap-x-2 leading-4">
-              {/* A shared block opens as a note of its own (shared-mode.ts). */}
-              <Link
-                to="/views/$"
-                params={{ _splat: share.view.rootId }}
-                search={{ query: undefined }}
-                className="link"
-              >
-                {labelOf(share.view.rootId)}
-              </Link>
-            </span>
-            <span className="text-sm leading-5 text-text-secondary">
-              Shared by {shareOwnerName(share)} · {describeSharePermissions(share.permissions)}
-              {describeShareView(share.view) ? ` · ${describeShareView(share.view)}` : ""}
-            </span>
+          <li key={share.id} className="flex items-start justify-between gap-4">
+            <div className="flex w-0 grow flex-col gap-1">
+              <span className="truncate leading-4">
+                {/* A shared block opens as a note of its own (shared-mode.ts). */}
+                <Link
+                  to="/views/$"
+                  params={{ _splat: share.view.rootId }}
+                  search={{ query: undefined }}
+                  className="link"
+                >
+                  {labelOf(share.view.rootId)}
+                </Link>
+              </span>
+              <span className="truncate text-sm leading-5 text-text-secondary">
+                Shared by {shareOwnerName(share)} · {describeSharePermissions(share.permissions)}
+                {describeShareView(share.view) ? ` · ${describeShareView(share.view)}` : ""}
+              </span>
+            </div>
+            <AsyncButton
+              className="shrink-0"
+              aria-label={`Leave the share from ${shareOwnerName(share)}`}
+              icon={<TrashIcon16 />}
+              onClick={() => onLeave(share.id)}
+            >
+              Leave
+            </AsyncButton>
           </li>
         ))}
       </ul>

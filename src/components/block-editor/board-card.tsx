@@ -1,4 +1,3 @@
-import type React from "react"
 import { useAtomValue } from "jotai"
 import { useMemo } from "react"
 import type { ReactNode } from "react"
@@ -9,7 +8,6 @@ import type { GraphSnapshot } from "../../data/graph"
 import { graphSnapshotAtom } from "../../global-state"
 import { cx } from "../../utils/cx"
 import { ExternalLinkIcon16 } from "../icons"
-import { NoteFavicon } from "../note-favicon"
 import type { BlockEditorApi } from "./block-item"
 import { FigureFrame, FigureTool } from "./figure-frame"
 
@@ -38,43 +36,34 @@ export function boardCardLine(snapshot: GraphSnapshot, boardId: string): string 
  * A board's card: how a board drawn as a row in an outline looks
  * (docs/boards.md, "A board in a note"). The row IS the board's own node,
  * linked under the block, so the card is the board as the graph has it:
- * its icon, its name (the node's text — the row's content line, rendered
- * and never a textarea: a board is named on its own page), and beneath it
- * what the board holds, live (`boardCardLine`). **Open board** in the
- * card's corner opens the board's page, as **Open link** opens a link
- * block's page. Click anywhere else and the row is selected, as a link
- * card's surface selects its row; the frame (`figure-frame.tsx`) holds the
- * layout, so the card keeps to a side and takes a width as a link card
- * does. Listed — a search result, the Views page — a board is a note row
- * with the board's favicon, not this card (`block-kinds.tsx`).
+ * its name (the node's text — the row's content line, rendered and never a
+ * textarea: a board is named on its own page), and beneath it what the
+ * board holds, live (`boardCardLine`). The board's icon is the row's key,
+ * in the key slot before the card as every row's key is. **Open board** in
+ * the card's corner opens the board's page, as **Open link** opens a link
+ * block's page. Click anywhere else and the row is selected, and a
+ * double-click selects it too: the row's surface takes the pointer
+ * (`block-item.tsx`), and the editor turns an edit of this row into a
+ * selection. The frame (`figure-frame.tsx`) holds the layout, so the card
+ * keeps to a side and takes a width as a link card does. Listed — a search
+ * result, the Views page — a board is a note row with the board's favicon,
+ * not this card (`block-kinds.tsx`).
  */
 export function BoardCard({
   block,
   occurrence,
   api,
   title,
-  pointer,
 }: {
   block: Block
   occurrence: Occurrence
   api: BlockEditorApi
   /** The title line: the row's content line, rendered. */
   title: ReactNode
-  /** The row's click and double-click, for the card's plain surface. */
-  pointer: Pick<React.HTMLAttributes<HTMLElement>, "onClick" | "onDoubleClick">
 }) {
   const snapshot = useAtomValue(graphSnapshotAtom)
   const line = useMemo(() => boardCardLine(snapshot, block.id), [snapshot, block.id])
   const editable = !api.readOnly
-
-  // The card's own surface takes the row's click; its tools keep theirs.
-  const plain = (event: React.MouseEvent<HTMLElement>) =>
-    !(event.target as Element).closest("a, button")
-  const surface = {
-    onClick: (event: React.MouseEvent<HTMLElement>) => plain(event) && pointer.onClick?.(event),
-    onDoubleClick: (event: React.MouseEvent<HTMLElement>) =>
-      plain(event) && pointer.onDoubleClick?.(event),
-  }
 
   return (
     <FigureFrame
@@ -93,16 +82,13 @@ export function BoardCard({
       }
     >
       {() => (
-        // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
         <div
           data-testid="board-card"
           className={cx(
             "flex w-full items-center gap-3 overflow-hidden rounded-lg border border-border-secondary bg-bg-card px-4 py-3",
             "transition-colors duration-150 hover:bg-bg-hover",
           )}
-          {...surface}
         >
-          <NoteFavicon note={{ id: block.id, type: "board" }} />
           <div className="flex min-w-0 flex-1 flex-col">
             <div data-block-body className="flex min-w-0">
               {title}
